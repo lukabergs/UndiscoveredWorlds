@@ -8848,7 +8848,7 @@ void removesearivers(planet& world, region& region, int dx, int dy)
                         {
                             for (int l = j - 1; l <= j + 1; l++)
                             {
-                                if (k >= 0 && k <= rwidth && l >= 0 and l <= rheight)
+                                if (k >= 0 && k <= rwidth && l >= 0 && l <= rheight)
                                 {
                                     if (region.map(k, l) < lowest)
                                         lowest = region.map(k, l);
