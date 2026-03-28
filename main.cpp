@@ -73,6 +73,24 @@ int fast_rand(void)
 
 int main()
 {
+    if (GetFileAttributesA("version.txt") == INVALID_FILE_ATTRIBUTES)
+    {
+        char exepath[MAX_PATH] = { 0 };
+        GetModuleFileNameA(NULL, exepath, MAX_PATH);
+
+        string executablepath = exepath;
+        size_t lastslash = executablepath.find_last_of("\\/");
+        if (lastslash != string::npos)
+        {
+            executablepath = executablepath.substr(0, lastslash);
+            SetCurrentDirectoryA(executablepath.c_str());
+
+            if (GetFileAttributesA("version.txt") == INVALID_FILE_ATTRIBUTES && GetFileAttributesA("..\\..\\version.txt") != INVALID_FILE_ATTRIBUTES)
+                SetCurrentDirectoryA("..\\..");
+            else if (GetFileAttributesA("version.txt") == INVALID_FILE_ATTRIBUTES && GetFileAttributesA("..\\version.txt") != INVALID_FILE_ATTRIBUTES)
+                SetCurrentDirectoryA("..");
+        }
+    }
     float currentversion = 1.0f;
     float latestversion = getlatestversion();
 
@@ -165,10 +183,17 @@ int main()
     Style.Colors[ImGuiCol_TabUnfocusedActive] = ImVec4(highlight1, highlight2, highlight3, 0.86f);
 
     ImGuiIO& io = ImGui::GetIO();
-    ImFont* font1 = io.Fonts->AddFontFromFileTTF("fonts\\Roboto-Medium.ttf", 18.0f);
+    ImFont* font1 = io.Fonts->AddFontDefault();
     io.Fonts->Build();
-    IM_ASSERT(font != NULL);
+    IM_ASSERT(font1 != NULL);
     ImGui::SFML::UpdateFontTexture();
+
+    auto openFileDialog = [](const char* filter)
+    {
+        IGFD::FileDialogConfig dialogConfig;
+        dialogConfig.path = ".";
+        ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", filter, dialogConfig);
+    };
 
     ImGuiWindowFlags window_flags = 0;
     window_flags |= ImGuiWindowFlags_NoCollapse;
@@ -803,7 +828,7 @@ int main()
 
                 if (ImGui::Button("Go"))
                 {
-                    ShellExecute(0, 0, L"https://undiscoveredworlds.blogspot.com/2019/01/what-is-undiscovered-worlds.html", 0, 0, SW_SHOW);
+                    ShellExecuteW(0, 0, L"https://undiscoveredworlds.blogspot.com/2019/01/what-is-undiscovered-worlds.html", 0, 0, SW_SHOW);
                 }
 
                 ImGui::End();
@@ -829,7 +854,7 @@ int main()
             {
                 if (ImGui::Button("Load")) // This opens the load world dialogue. We check its results later.
                 {
-                    ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".uww", ".");
+                    openFileDialog(".uww");
 
                     loadingworld = 1;
                 }
@@ -1016,14 +1041,14 @@ int main()
 
             if (standardbutton("Load world"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".uww", ".");
+                openFileDialog(".uww");
 
                 loadingworld = 1;
             }
 
             if (standardbutton("Save world"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".uww", ".");
+                openFileDialog(".uww");
 
                 savingworld = 1;
             }
@@ -1043,7 +1068,7 @@ int main()
 
             if (standardbutton("World maps"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".png", ".");
+                openFileDialog(".png");
 
                 exportingworldmaps = 1;
             }
@@ -1607,7 +1632,7 @@ int main()
 
             if (standardbutton("Regional maps"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".png", ".");
+                openFileDialog(".png");
 
                 exportingregionalmaps = 1;
             }
@@ -2365,7 +2390,7 @@ int main()
                 {
                     if (totalregions <= maxtotalregions)
                     {
-                        ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".png", ".");
+                        openFileDialog(".png");
 
                         exportingareamaps = 1;
                     }
@@ -2549,7 +2574,7 @@ int main()
 
             if (standardbutton("Land map"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".png", ".");
+                openFileDialog(".png");
 
                 importinglandmap = 1;
             }
@@ -2559,7 +2584,7 @@ int main()
 
             if (standardbutton("Sea map"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".png", ".");
+                openFileDialog(".png");
 
                 importingseamap = 1;
             }
@@ -2569,7 +2594,7 @@ int main()
 
             if (standardbutton("Mountains"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".png", ".");
+                openFileDialog(".png");
 
                 importingmountainsmap = 1;
             }
@@ -2579,7 +2604,7 @@ int main()
 
             if (standardbutton("Volcanoes"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".png", ".");
+                openFileDialog(".png");
 
                 importingvolcanoesmap = 1;
             }
@@ -4225,7 +4250,7 @@ int main()
 
             if (ImGui::Button("Save", ImVec2(120.0f, 0.0f)))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".uws", ".");
+                openFileDialog(".uws");
 
                 savingsettings = 1;
             }
@@ -4235,7 +4260,7 @@ int main()
             ImGui::SameLine();
             if (ImGui::Button("Load", ImVec2(120.0f, 0.0f)))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".uws", ".");
+                openFileDialog(".uws");
 
                 loadingsettings = 1;
             }
@@ -6314,7 +6339,7 @@ int main()
 
             if (ImGui::Button("OK"))
             {
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", ".png", ".");
+                openFileDialog(".png");
 
                 exportingareamaps = 1;
 
@@ -6363,7 +6388,7 @@ int main()
 
             if (ImGui::Button("Website"))
             {
-                ShellExecute(0, 0, L"https://undiscoveredworlds.blogspot.com/2019/01/what-is-undiscovered-worlds.html", 0, 0, SW_SHOW);
+                ShellExecuteW(0, 0, L"https://undiscoveredworlds.blogspot.com/2019/01/what-is-undiscovered-worlds.html", 0, 0, SW_SHOW);
 
             }
 
@@ -6371,7 +6396,7 @@ int main()
 
             if (ImGui::Button("Source"))
             {
-                ShellExecute(0, 0, L"https://github.com/JonathanCRH/Undiscovered_Worlds", 0, 0, SW_SHOW);
+                ShellExecuteW(0, 0, L"https://github.com/JonathanCRH/Undiscovered_Worlds", 0, 0, SW_SHOW);
 
             }
 
@@ -6384,6 +6409,8 @@ int main()
 
             ImGui::End();
         }
+
+        ImGui::PopFont();
 
         ImGui::SFML::Render(window);
         window.display();
@@ -9484,7 +9511,7 @@ void drawregionalreliefmapimage(planet& world, region& region, sf::Image& region
 
             if (region.rivervalley(i, j) == 1 && region.special(i, j) < 130)
             {
-                if (not((region.riverjan(i, j) + region.riverjul(i, j)) / 2 >= minriverflow || (region.fakejan(i, j) + region.fakejul(i, j)) / 2 >= minriverflow))
+                if (!((region.riverjan(i, j) + region.riverjul(i, j)) / 2 >= minriverflow || (region.fakejan(i, j) + region.fakejul(i, j)) / 2 >= minriverflow))
                 {
                     float colred = 0.0f;
                     float colgreen = 0.0f;
