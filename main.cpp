@@ -6473,7 +6473,7 @@ int main()
         if (world->glacier1() != glaciercolour.x * 255.f || world->glacier2() != glaciercolour.y * 255.f || world->glacier3() != glaciercolour.z * 255.f)
             colourschanged = 1;
 
-        if (world->saltpan1() != saltpancolour.x * 255.f || world->saltpan1() != saltpancolour.y * 255.f || world->saltpan1() != saltpancolour.z * 255.f)
+        if (world->saltpan1() != saltpancolour.x * 255.f || world->saltpan2() != saltpancolour.y * 255.f || world->saltpan3() != saltpancolour.z * 255.f)
             colourschanged = 1;
 
         if (world->erg1() != ergcolour.x * 255.f || world->erg2() != ergcolour.y * 255.f || world->erg3() != ergcolour.z * 255.f)
