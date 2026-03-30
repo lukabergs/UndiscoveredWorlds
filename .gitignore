@@ -5,6 +5,7 @@ build/
 out/
 bin/
 obj/
+extra/
 # Ignore CMake generated files
 CMakeCache.txt
 CMakeFiles/
