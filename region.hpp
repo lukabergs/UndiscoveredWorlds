@@ -219,6 +219,32 @@ public:
     float testfloat(int x, int y) const; // Float test array.
     void settestfloat(int x, int y, float amount);
 
+    const short* rawmap() const;
+    const int* rawlakemap() const;
+    const short* rawjantempmap() const;
+    const short* rawjultempmap() const;
+    const short* rawextrajantempmap() const;
+    const short* rawextrajultempmap() const;
+    const short* rawjanrainmap() const;
+    const short* rawjulrainmap() const;
+    const short* rawclimatemap() const;
+    const short* rawseaicemap() const;
+    const short* rawrivermapdir() const;
+    const int* rawrivermapjan() const;
+    const int* rawrivermapjul() const;
+    const short* rawfakeriversdir() const;
+    const int* rawfakeriversjan() const;
+    const int* rawfakeriversjul() const;
+    const short* rawspecials() const;
+    const short* rawdeltamapdir() const;
+    const int* rawdeltamapjan() const;
+    const int* rawdeltamapjul() const;
+    const bool* rawvolcanomap() const;
+    const bool* rawmudmap() const;
+    const bool* rawsandmap() const;
+    const bool* rawshinglemap() const;
+    const int* rawtestmap() const;
+
     // Other public functions
 
     void clear();   // Clears all of the maps.
@@ -1382,6 +1408,32 @@ inline void region::settestfloat(int x, int y, float amount)
 
     testmapfloat[x][y] = amount;
 }
+
+inline const short* region::rawmap() const { return &rmap[0][0]; }
+inline const int* region::rawlakemap() const { return &rlakemap[0][0]; }
+inline const short* region::rawjantempmap() const { return &rjantempmap[0][0]; }
+inline const short* region::rawjultempmap() const { return &rjultempmap[0][0]; }
+inline const short* region::rawextrajantempmap() const { return &rextrajantempmap[0][0]; }
+inline const short* region::rawextrajultempmap() const { return &rextrajultempmap[0][0]; }
+inline const short* region::rawjanrainmap() const { return &rjanrainmap[0][0]; }
+inline const short* region::rawjulrainmap() const { return &rjulrainmap[0][0]; }
+inline const short* region::rawclimatemap() const { return &rclimatemap[0][0]; }
+inline const short* region::rawseaicemap() const { return &rseaicemap[0][0]; }
+inline const short* region::rawrivermapdir() const { return &rrivermapdir[0][0]; }
+inline const int* region::rawrivermapjan() const { return &rrivermapjan[0][0]; }
+inline const int* region::rawrivermapjul() const { return &rrivermapjul[0][0]; }
+inline const short* region::rawfakeriversdir() const { return &rfakeriversdir[0][0]; }
+inline const int* region::rawfakeriversjan() const { return &rfakeriversjan[0][0]; }
+inline const int* region::rawfakeriversjul() const { return &rfakeriversjul[0][0]; }
+inline const short* region::rawspecials() const { return &rspecials[0][0]; }
+inline const short* region::rawdeltamapdir() const { return &rdeltamapdir[0][0]; }
+inline const int* region::rawdeltamapjan() const { return &rdeltamapjan[0][0]; }
+inline const int* region::rawdeltamapjul() const { return &rdeltamapjul[0][0]; }
+inline const bool* region::rawvolcanomap() const { return &rvolcanomap[0][0]; }
+inline const bool* region::rawmudmap() const { return &rmudmap[0][0]; }
+inline const bool* region::rawsandmap() const { return &rsandmap[0][0]; }
+inline const bool* region::rawshinglemap() const { return &rshinglemap[0][0]; }
+inline const int* region::rawtestmap() const { return &testmap[0][0]; }
 
 
 

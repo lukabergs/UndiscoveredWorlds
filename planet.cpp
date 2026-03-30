@@ -223,57 +223,60 @@ int planet::mountainheightwrap(int x, int y) const
 
 void planet::clear()
 {
-    for (int i = 0; i < ARRAYWIDTH; i++) // Set all the maps to 0.
+    parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
     {
-        for (int j = 0; j < ARRAYHEIGHT; j++)
+        for (int i = startx; i <= endx; i++) // Set all the maps to 0.
         {
-            jantempmap[i][j] = 0;
-            jultempmap[i][j] = 0;
-            climatemap[i][j] = 0;
-            janrainmap[i][j] = 0;
-            julrainmap[i][j] = 0;
-            janmountainrainmap[i][j] = 0;
-            julmountainrainmap[i][j] = 0;
-            janmountainraindirmap[i][j] = 0;
-            julmountainraindirmap[i][j] = 0;
-            seaicemap[i][j] = 0;
-            rivermapdir[i][j] = 0;
-            rivermapjan[i][j] = 0;
-            rivermapjul[i][j] = 0;
-            windmap[i][j] = 0;
-            lakemap[i][j] = 0;
-            roughnessmap[i][j] = 0;
-            mountainridges[i][j] = 0;
-            mountainheights[i][j] = 0;
-            craterrims[i][j] = 0;
-            cratercentres[i][j] = 0;
-            mapnom[i][j] = 0;
-            tidalmap[i][j] = 0;
-            riftlakemapsurface[i][j] = 0;
-            riftlakemapbed[i][j] = 0;
-            specials[i][j] = 0;
-            extraelevmap[i][j] = 0;
-            deltamapdir[i][j] = 0;
-            deltamapjan[i][j] = 0;
-            deltamapjul[i][j] = 0;
-            oceanridgemap[i][j] = 0;
-            oceanridgeheightmap[i][j] = 0;
-            oceanriftmap[i][j] = 0;
-            oceanridgeoffsetmap[i][j] = 0;
-            islandmap[i][j] = 0;
-            noshademap[i][j] = 0;
-            mountainislandmap[i][j] = 0;
-            volcanomap[i][j] = 0;
-            stratomap[i][j] = 0;
-            noisemap[i][j] = 0;
-            testmap[i][j] = 0;
-        }
+            for (int j = 0; j < ARRAYHEIGHT; j++)
+            {
+                jantempmap[i][j] = 0;
+                jultempmap[i][j] = 0;
+                climatemap[i][j] = 0;
+                janrainmap[i][j] = 0;
+                julrainmap[i][j] = 0;
+                janmountainrainmap[i][j] = 0;
+                julmountainrainmap[i][j] = 0;
+                janmountainraindirmap[i][j] = 0;
+                julmountainraindirmap[i][j] = 0;
+                seaicemap[i][j] = 0;
+                rivermapdir[i][j] = 0;
+                rivermapjan[i][j] = 0;
+                rivermapjul[i][j] = 0;
+                windmap[i][j] = 0;
+                lakemap[i][j] = 0;
+                roughnessmap[i][j] = 0;
+                mountainridges[i][j] = 0;
+                mountainheights[i][j] = 0;
+                craterrims[i][j] = 0;
+                cratercentres[i][j] = 0;
+                mapnom[i][j] = 0;
+                tidalmap[i][j] = 0;
+                riftlakemapsurface[i][j] = 0;
+                riftlakemapbed[i][j] = 0;
+                specials[i][j] = 0;
+                extraelevmap[i][j] = 0;
+                deltamapdir[i][j] = 0;
+                deltamapjan[i][j] = 0;
+                deltamapjul[i][j] = 0;
+                oceanridgemap[i][j] = 0;
+                oceanridgeheightmap[i][j] = 0;
+                oceanriftmap[i][j] = 0;
+                oceanridgeoffsetmap[i][j] = 0;
+                islandmap[i][j] = 0;
+                noshademap[i][j] = 0;
+                mountainislandmap[i][j] = 0;
+                volcanomap[i][j] = 0;
+                stratomap[i][j] = 0;
+                noisemap[i][j] = 0;
+                testmap[i][j] = 0;
+            }
 
-        for (int j = 0; j < 6; j++)
-        {
-            horselats[i][j] = 0;
+            for (int j = 0; j < 6; j++)
+            {
+                horselats[i][j] = 0;
+            }
         }
-    }
+    }, 64);
 
     for (int i = 0; i < MAXCRATERS; i++)
     {

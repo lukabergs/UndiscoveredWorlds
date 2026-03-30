@@ -594,6 +594,32 @@ public:
     bool outlinewrap(int x, int y) const;
     int mountainheightwrap(int x, int y) const;
 
+    // Raw grid access for accelerated renderer backends.
+    const short* rawmapnom() const;
+    const int* rawlakemap() const;
+    const short* rawoceanridgeheightmap() const;
+    const short* rawmountainheights() const;
+    const short* rawvolcanomap() const;
+    const short* rawextraelevmap() const;
+    const short* rawcraterrims() const;
+    const short* rawcratercentres() const;
+    const short* rawoceanridgemap() const;
+    const short* rawoceanriftmap() const;
+    const short* rawjantempmap() const;
+    const short* rawjultempmap() const;
+    const short* rawjanrainmap() const;
+    const short* rawjulrainmap() const;
+    const short* rawseaicemap() const;
+    const short* rawclimatemap() const;
+    const int* rawrivermapjan() const;
+    const int* rawrivermapjul() const;
+    const short* rawspecials() const;
+    const short* rawdeltamapdir() const;
+    const int* rawdeltamapjan() const;
+    const int* rawdeltamapjul() const;
+    const int* rawriftlakemapsurface() const;
+    const bool* rawnoshademap() const;
+
     // Other public functions.
 
     void clear();   // Clears all of the maps.
@@ -962,6 +988,31 @@ inline void planet::setminriverflowregional(int amount) { itsminriverflowregiona
 
 inline bool planet::showmangroves() const { return itsmangroves; };
 inline void planet::setshowmangroves(bool amount) { itsmangroves = amount; };
+
+inline const short* planet::rawmapnom() const { return &mapnom[0][0]; }
+inline const int* planet::rawlakemap() const { return &lakemap[0][0]; }
+inline const short* planet::rawoceanridgeheightmap() const { return &oceanridgeheightmap[0][0]; }
+inline const short* planet::rawmountainheights() const { return &mountainheights[0][0]; }
+inline const short* planet::rawvolcanomap() const { return &volcanomap[0][0]; }
+inline const short* planet::rawextraelevmap() const { return &extraelevmap[0][0]; }
+inline const short* planet::rawcraterrims() const { return &craterrims[0][0]; }
+inline const short* planet::rawcratercentres() const { return &cratercentres[0][0]; }
+inline const short* planet::rawoceanridgemap() const { return &oceanridgemap[0][0]; }
+inline const short* planet::rawoceanriftmap() const { return &oceanriftmap[0][0]; }
+inline const short* planet::rawjantempmap() const { return &jantempmap[0][0]; }
+inline const short* planet::rawjultempmap() const { return &jultempmap[0][0]; }
+inline const short* planet::rawjanrainmap() const { return &janrainmap[0][0]; }
+inline const short* planet::rawjulrainmap() const { return &julrainmap[0][0]; }
+inline const short* planet::rawseaicemap() const { return &seaicemap[0][0]; }
+inline const short* planet::rawclimatemap() const { return &climatemap[0][0]; }
+inline const int* planet::rawrivermapjan() const { return &rivermapjan[0][0]; }
+inline const int* planet::rawrivermapjul() const { return &rivermapjul[0][0]; }
+inline const short* planet::rawspecials() const { return &specials[0][0]; }
+inline const short* planet::rawdeltamapdir() const { return &deltamapdir[0][0]; }
+inline const int* planet::rawdeltamapjan() const { return &deltamapjan[0][0]; }
+inline const int* planet::rawdeltamapjul() const { return &deltamapjul[0][0]; }
+inline const int* planet::rawriftlakemapsurface() const { return &riftlakemapsurface[0][0]; }
+inline const bool* planet::rawnoshademap() const { return &noshademap[0][0]; }
 
 inline int planet::landtotal() const { return itslandtotal; };
 inline void planet::setlandtotal(int amount) { itslandtotal = amount; };
