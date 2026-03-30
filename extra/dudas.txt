@@ -1,0 +1,11 @@
+control de parametros tipo temp etc?
+Zoom mas y mas (recursivo)
+Ventana zoom variable
+Reglas de extension de lenguajes, mapa de lenguajes, religiones etc... puede haber una especie de "viento" que los extienda?
+zonas holdridge segun averages anuales
+mejores colores para representar todo mas bonico
+evolucion cambio climatico año a año? que factores entran?
+eventos especiales tipo huracanes, terremotos etc
+nubes on/off
+carpetas por defecto para assets, carga de mundos guardados...
+Posibilidad de crear mapas a través de XML-JSON con sus propiedades?

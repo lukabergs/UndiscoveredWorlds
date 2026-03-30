@@ -43,6 +43,7 @@ struct PanelState
     bool showSetSize = false;
     bool showTectonicChooser = false;
     bool showNonTectonicChooser = false;
+    bool showWorldGenerationOptions = false;
     bool showWorldEditProperties = false;
     bool showAreaWarning = false;
     bool showAbout = false;
@@ -70,4 +71,9 @@ struct ProgressPassState
     short generatingRegion = 0;
     short generatingTectonic = 0;
     short generatingNonTectonic = 0;
+};
+
+struct WorldGenerationDebugState
+{
+    WorldGenerationDebugOptions options;
 };

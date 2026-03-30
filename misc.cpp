@@ -11,6 +11,7 @@
 #include <queue>
 
 #include "classes.hpp"
+#include "generation_tuning.hpp"
 #include "planet.hpp"
 #include "region.hpp"
 #include "functions.hpp"
@@ -194,6 +195,72 @@ void savesettings(planet& world, string filename)
     outfile << world.highlight1() << '\n';
     outfile << world.highlight2() << '\n';
     outfile << world.highlight3() << '\n';
+    outfile << world.showmapoutline() << '\n';
+    outfile << world.outline1() << '\n';
+    outfile << world.outline2() << '\n';
+    outfile << world.outline3() << '\n';
+    outfile << world.elevationlow1() << '\n';
+    outfile << world.elevationlow2() << '\n';
+    outfile << world.elevationlow3() << '\n';
+    outfile << world.elevationhigh1() << '\n';
+    outfile << world.elevationhigh2() << '\n';
+    outfile << world.elevationhigh3() << '\n';
+    outfile << world.temperaturecold1() << '\n';
+    outfile << world.temperaturecold2() << '\n';
+    outfile << world.temperaturecold3() << '\n';
+    outfile << world.temperaturetemperate1() << '\n';
+    outfile << world.temperaturetemperate2() << '\n';
+    outfile << world.temperaturetemperate3() << '\n';
+    outfile << world.temperaturehot1() << '\n';
+    outfile << world.temperaturehot2() << '\n';
+    outfile << world.temperaturehot3() << '\n';
+    outfile << world.precipitationdry1() << '\n';
+    outfile << world.precipitationdry2() << '\n';
+    outfile << world.precipitationdry3() << '\n';
+    outfile << world.precipitationwet1() << '\n';
+    outfile << world.precipitationwet2() << '\n';
+    outfile << world.precipitationwet3() << '\n';
+
+    for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            outfile << world.climatemapseacolour(i, j) << '\n';
+    }
+
+    for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            outfile << world.climatemapcolour(i, j) << '\n';
+    }
+
+    for (int i = 0; i < RIVERMAPCOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            outfile << world.rivermapcolour(i, j) << '\n';
+    }
+
+    for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
+        outfile << world.showrivermapfeature(i) << '\n';
+
+    for (int gradient = 0; gradient < MAPGRADIENTTYPECOUNT; gradient++)
+    {
+        outfile << world.mapgradientstopcount(gradient) << '\n';
+        outfile << world.mapgradientdiscrete(gradient) << '\n';
+
+        for (int stop = 0; stop < MAPGRADIENTMAXSTOPS; stop++)
+        {
+            outfile << world.mapgradientposition(gradient, stop) << '\n';
+
+            for (int channel = 0; channel < 3; channel++)
+                outfile << world.mapgradientcolour(gradient, stop, channel) << '\n';
+        }
+    }
+
+    for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            outfile << world.biomemapcolour(i, j) << '\n';
+    }
 
     outfile.close();
 }
@@ -206,14 +273,15 @@ bool loadsettings(planet& world, string filename)
     infile.open(filename, ios::in);
 
     string line;
+    int fileversion;
     int val;
     float fval;
     bool bval;
 
     getline(infile, line);
-    val = stoi(line);
+    fileversion = stoi(line);
 
-    if (val != world.settingssaveversion()) // Incompatible file format!
+    if (fileversion < 1 || fileversion > world.settingssaveversion()) // Incompatible file format!
         return 0;
 
     getline(infile, line);
@@ -262,11 +330,11 @@ bool loadsettings(planet& world, string filename)
 
     getline(infile, line);
     bval = stob(line);
-    world.setshowmangroves(val);
+    world.setshowmangroves(bval);
 
     getline(infile, line);
     bval = stob(line);
-    world.setcolourcliffs(val);
+    world.setcolourcliffs(bval);
 
     getline(infile, line);
     val = stoi(line);
@@ -555,6 +623,260 @@ bool loadsettings(planet& world, string filename)
     getline(infile, line);
     val = stoi(line);
     world.sethighlight3(val);
+
+    if (fileversion >= 2)
+    {
+        getline(infile, line);
+        bval = stob(line);
+        world.setshowmapoutline(bval);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setoutline1(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setoutline2(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setoutline3(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setelevationlow1(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setelevationlow2(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setelevationlow3(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setelevationhigh1(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setelevationhigh2(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setelevationhigh3(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturecold1(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturecold2(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturecold3(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturetemperate1(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturetemperate2(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturetemperate3(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturehot1(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturehot2(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.settemperaturehot3(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setprecipitationdry1(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setprecipitationdry2(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setprecipitationdry3(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setprecipitationwet1(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setprecipitationwet2(val);
+
+        getline(infile, line);
+        val = stoi(line);
+        world.setprecipitationwet3(val);
+
+        if (fileversion >= 3)
+        {
+            for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    getline(infile, line);
+                    world.setclimatemapseacolour(i, j, stoi(line));
+                }
+            }
+
+            for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    getline(infile, line);
+                    world.setclimatemapcolour(i, j, stoi(line));
+                }
+            }
+
+            for (int i = 0; i < RIVERMAPCOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    getline(infile, line);
+                    world.setrivermapcolour(i, j, stoi(line));
+                }
+            }
+
+            for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
+            {
+                getline(infile, line);
+                world.setshowrivermapfeature(i, stob(line));
+            }
+
+            if (fileversion >= 4)
+            {
+                for (int gradient = 0; gradient < MAPGRADIENTTYPECOUNT; gradient++)
+                {
+                    getline(infile, line);
+                    world.setmapgradientstopcount(gradient, stoi(line));
+                    getline(infile, line);
+                    world.setmapgradientdiscrete(gradient, stob(line));
+
+                    for (int stop = 0; stop < MAPGRADIENTMAXSTOPS; stop++)
+                    {
+                        getline(infile, line);
+                        world.setmapgradientposition(gradient, stop, stoi(line));
+
+                        for (int channel = 0; channel < 3; channel++)
+                        {
+                            getline(infile, line);
+                            world.setmapgradientcolour(gradient, stop, channel, stoi(line));
+                        }
+                    }
+                }
+            }
+            else
+                initialisegradientmapappearance(world);
+
+            if (fileversion >= 5)
+            {
+                for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+                {
+                    for (int j = 0; j < 3; j++)
+                    {
+                        getline(infile, line);
+                        world.setbiomemapcolour(i, j, stoi(line));
+                    }
+                }
+            }
+            else
+            {
+                for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+                {
+                    for (int j = 0; j < 3; j++)
+                        world.setbiomemapcolour(i, j, defaultbiomemapcolours[i][j]);
+                }
+            }
+        }
+        else
+        {
+            static const int defaultclimatecolours[CLIMATEMAPCOLOURCOUNT][3] =
+            {
+                { 0, 0, 0 }, { 0, 0, 254 }, { 1, 119, 255 }, { 70, 169, 250 }, { 70, 169, 250 }, { 249, 15, 0 }, { 251, 150, 149 }, { 245, 163, 1 },
+                { 254, 219, 99 }, { 255, 255, 0 }, { 198, 199, 1 }, { 184, 184, 114 }, { 138, 255, 162 }, { 86, 199, 112 }, { 30, 150, 66 }, { 192, 254, 109 },
+                { 76, 255, 93 }, { 19, 203, 74 }, { 255, 8, 245 }, { 204, 3, 192 }, { 154, 51, 144 }, { 153, 100, 146 }, { 172, 178, 249 }, { 91, 121, 213 },
+                { 78, 83, 175 }, { 54, 3, 130 }, { 0, 255, 245 }, { 32, 200, 250 }, { 0, 126, 125 }, { 0, 69, 92 }, { 178, 178, 178 }, { 104, 104, 104 }
+            };
+            static const int defaultclimateseacolours[CLIMATEMAPSEACOLOURCOUNT][3] =
+            {
+                { 13, 49, 109 }, { 228, 228, 255 }, { 243, 243, 255 }
+            };
+
+            for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    world.setclimatemapseacolour(i, j, defaultclimateseacolours[i][j]);
+            }
+
+            for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    world.setclimatemapcolour(i, j, defaultclimatecolours[i][j]);
+            }
+
+            world.setrivermapcolour(rivermapbackground, 0, 255);
+            world.setrivermapcolour(rivermapbackground, 1, 255);
+            world.setrivermapcolour(rivermapbackground, 2, 255);
+            world.setrivermapcolour(rivermaplowflow, 0, 255);
+            world.setrivermapcolour(rivermaplowflow, 1, 255);
+            world.setrivermapcolour(rivermaplowflow, 2, 255);
+            world.setrivermapcolour(rivermaphighflow, 0, world.river1());
+            world.setrivermapcolour(rivermaphighflow, 1, world.river2());
+            world.setrivermapcolour(rivermaphighflow, 2, world.river3());
+            world.setrivermapcolour(rivermaplake, 0, world.lake1());
+            world.setrivermapcolour(rivermaplake, 1, world.lake2());
+            world.setrivermapcolour(rivermaplake, 2, world.lake3());
+            world.setrivermapcolour(rivermapsaltpan, 0, world.saltpan1());
+            world.setrivermapcolour(rivermapsaltpan, 1, world.saltpan2());
+            world.setrivermapcolour(rivermapsaltpan, 2, world.saltpan3());
+            world.setrivermapcolour(rivermapwetlands, 0, world.wetlands1());
+            world.setrivermapcolour(rivermapwetlands, 1, world.wetlands2());
+            world.setrivermapcolour(rivermapwetlands, 2, world.wetlands3());
+            world.setrivermapcolour(rivermapmud, 0, world.mud1());
+            world.setrivermapcolour(rivermapmud, 1, world.mud2());
+            world.setrivermapcolour(rivermapmud, 2, world.mud3());
+            world.setrivermapcolour(rivermapsand, 0, world.sand1());
+            world.setrivermapcolour(rivermapsand, 1, world.sand2());
+            world.setrivermapcolour(rivermapsand, 2, world.sand3());
+            world.setrivermapcolour(rivermapshingle, 0, world.shingle1());
+            world.setrivermapcolour(rivermapshingle, 1, world.shingle2());
+            world.setrivermapcolour(rivermapshingle, 2, world.shingle3());
+            world.setrivermapcolour(rivermapvolcano, 0, 240);
+            world.setrivermapcolour(rivermapvolcano, 1, 0);
+            world.setrivermapcolour(rivermapvolcano, 2, 0);
+
+            for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
+                world.setshowrivermapfeature(i, 1);
+
+            initialisegradientmapappearance(world);
+
+            for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    world.setbiomemapcolour(i, j, defaultbiomemapcolours[i][j]);
+            }
+        }
+    }
+    else
+        setdefaultnonreliefmapappearance(world);
 
     infile.close();
 
@@ -3385,33 +3707,33 @@ void initialiseworld(planet& world)
 {
     world.clear();
 
-    int saveversion = 1;        // Only save files that start with this number can be loaded
-    int settingssaveversion = 1; // As above, but for settings files.
-    int size = 2;
-    int type = 2;
-    int width = 2047; // 1280; // 2047;
-    int height = 1024; // 640; // 1024;
-    bool rotation = 1;            // 1 to rotate like Earth, 0 for the other way
-    float tilt = 22.5;            // for calculating seasonal change
-    float eccentricity = 0.0167f;  // the greater this is, the more climate difference there will be between hemispheres
-    short perihelion = 0;         // point at which it's closest to the sun (0=Jan, 1=Jul)
-    float gravity = 1.0f;          // affects mountain size and valley depth
-    float lunar = 1.0f;            // affects tides
-    float tempdecrease = 6.5f;     // for reducing temperature with elevation
-    int northpolaradjust = 0; // -36;     // adjustment to temperature at the north pole
-    int southpolaradjust = 0; // -36     // adjustment to temperature at the south pole
-    int averagetemp = 14;              // average global temperature
-    float waterpickup = 1.0f;        // How much water to pick up over oceans
-    float riverfactor = 15.0f;     // for calculating flow in cubic metres/second
-    int riverlandreduce = 20;     // how much rivers lower the land
-    int estuarylimit = 20;        // how big a river must be to have an estuary
-    int glacialtemp = 4;          // maximum temperature for glacial features
-    int glaciertemp = -1;          // maximum temperature for actual glaciers
-    float mountainreduce = 0.75f;  // factor to reduce mountain size by
-    int climatenumber = 31;       // total number of climate types
-    int maxelevation = 24000;     // maximum elevation
-    int sealevel = 12000;         // sea level
-    int craterno = 0;             // number of craters
+int saveversion = 5;        // Only save files that start with this number can be loaded
+int settingssaveversion = 5; // As above, but for settings files.
+    int size = tuning::worlddefaults::size;
+    int type = tuning::worlddefaults::type;
+    int width = tuning::worlddefaults::width;
+    int height = tuning::worlddefaults::height;
+    bool rotation = tuning::worlddefaults::rotation;
+    float tilt = tuning::worlddefaults::tilt;
+    float eccentricity = tuning::worlddefaults::eccentricity;
+    short perihelion = tuning::worlddefaults::perihelion;
+    float gravity = tuning::worlddefaults::gravity;
+    float lunar = tuning::worlddefaults::lunar;
+    float tempdecrease = tuning::worlddefaults::tempDecrease;
+    int northpolaradjust = tuning::worlddefaults::northPolarAdjust;
+    int southpolaradjust = tuning::worlddefaults::southPolarAdjust;
+    int averagetemp = tuning::worlddefaults::averageTemp;
+    float waterpickup = tuning::worlddefaults::waterPickup;
+    float riverfactor = tuning::worlddefaults::riverFactor;
+    int riverlandreduce = tuning::worlddefaults::riverLandReduce;
+    int estuarylimit = tuning::worlddefaults::estuaryLimit;
+    int glacialtemp = tuning::worlddefaults::glacialTemp;
+    int glaciertemp = tuning::worlddefaults::glacierTemp;
+    float mountainreduce = tuning::worlddefaults::mountainReduce;
+    int climatenumber = tuning::worlddefaults::climateCount;
+    int maxelevation = tuning::worlddefaults::maxElevation;
+    int sealevel = tuning::worlddefaults::seaLevel;
+    int craterno = tuning::worlddefaults::craterCount;
 
 
     world.setsaveversion(saveversion);
@@ -3446,6 +3768,213 @@ void initialiseworld(planet& world)
 
     world.setseatotal(0);
     world.setlandtotal(0);
+}
+
+void initialisegradientmapappearance(planet& world)
+{
+    const int elevationmin = 0 - world.sealevel();
+    const int elevationmax = max(1, world.maxelevation() - world.sealevel());
+    const float sealevelfactor = static_cast<float>(world.sealevel()) / static_cast<float>(max(1, world.maxelevation()));
+
+    const int elevationmid1 = static_cast<int>(roundf(static_cast<float>(world.elevationlow1()) + static_cast<float>(world.elevationhigh1() - world.elevationlow1()) * sealevelfactor));
+    const int elevationmid2 = static_cast<int>(roundf(static_cast<float>(world.elevationlow2()) + static_cast<float>(world.elevationhigh2() - world.elevationlow2()) * sealevelfactor));
+    const int elevationmid3 = static_cast<int>(roundf(static_cast<float>(world.elevationlow3()) + static_cast<float>(world.elevationhigh3() - world.elevationlow3()) * sealevelfactor));
+    const int riverflowmax = max(1000, world.maxriverflow());
+
+    world.setmapgradientstopcount(mapgradientelevation, 3);
+    world.setmapgradientdiscrete(mapgradientelevation, false);
+    world.setmapgradientposition(mapgradientelevation, 0, elevationmin);
+    world.setmapgradientposition(mapgradientelevation, 1, 0);
+    world.setmapgradientposition(mapgradientelevation, 2, elevationmax);
+    world.setmapgradientcolour(mapgradientelevation, 0, 0, world.elevationlow1());
+    world.setmapgradientcolour(mapgradientelevation, 0, 1, world.elevationlow2());
+    world.setmapgradientcolour(mapgradientelevation, 0, 2, world.elevationlow3());
+    world.setmapgradientcolour(mapgradientelevation, 1, 0, elevationmid1);
+    world.setmapgradientcolour(mapgradientelevation, 1, 1, elevationmid2);
+    world.setmapgradientcolour(mapgradientelevation, 1, 2, elevationmid3);
+    world.setmapgradientcolour(mapgradientelevation, 2, 0, world.elevationhigh1());
+    world.setmapgradientcolour(mapgradientelevation, 2, 1, world.elevationhigh2());
+    world.setmapgradientcolour(mapgradientelevation, 2, 2, world.elevationhigh3());
+
+    world.setmapgradientstopcount(mapgradienttemperature, 3);
+    world.setmapgradientdiscrete(mapgradienttemperature, false);
+    world.setmapgradientposition(mapgradienttemperature, 0, -25);
+    world.setmapgradientposition(mapgradienttemperature, 1, 0);
+    world.setmapgradientposition(mapgradienttemperature, 2, 25);
+    world.setmapgradientcolour(mapgradienttemperature, 0, 0, world.temperaturecold1());
+    world.setmapgradientcolour(mapgradienttemperature, 0, 1, world.temperaturecold2());
+    world.setmapgradientcolour(mapgradienttemperature, 0, 2, world.temperaturecold3());
+    world.setmapgradientcolour(mapgradienttemperature, 1, 0, world.temperaturetemperate1());
+    world.setmapgradientcolour(mapgradienttemperature, 1, 1, world.temperaturetemperate2());
+    world.setmapgradientcolour(mapgradienttemperature, 1, 2, world.temperaturetemperate3());
+    world.setmapgradientcolour(mapgradienttemperature, 2, 0, world.temperaturehot1());
+    world.setmapgradientcolour(mapgradienttemperature, 2, 1, world.temperaturehot2());
+    world.setmapgradientcolour(mapgradienttemperature, 2, 2, world.temperaturehot3());
+
+    world.setmapgradientstopcount(mapgradientprecipitation, 2);
+    world.setmapgradientdiscrete(mapgradientprecipitation, false);
+    world.setmapgradientposition(mapgradientprecipitation, 0, 0);
+    world.setmapgradientposition(mapgradientprecipitation, 1, 1020);
+    world.setmapgradientcolour(mapgradientprecipitation, 0, 0, world.precipitationdry1());
+    world.setmapgradientcolour(mapgradientprecipitation, 0, 1, world.precipitationdry2());
+    world.setmapgradientcolour(mapgradientprecipitation, 0, 2, world.precipitationdry3());
+    world.setmapgradientcolour(mapgradientprecipitation, 1, 0, world.precipitationwet1());
+    world.setmapgradientcolour(mapgradientprecipitation, 1, 1, world.precipitationwet2());
+    world.setmapgradientcolour(mapgradientprecipitation, 1, 2, world.precipitationwet3());
+
+    world.setmapgradientstopcount(mapgradientriverflow, 2);
+    world.setmapgradientdiscrete(mapgradientriverflow, false);
+    world.setmapgradientposition(mapgradientriverflow, 0, 0);
+    world.setmapgradientposition(mapgradientriverflow, 1, riverflowmax);
+    world.setmapgradientcolour(mapgradientriverflow, 0, 0, world.rivermapcolour(rivermaplowflow, 0));
+    world.setmapgradientcolour(mapgradientriverflow, 0, 1, world.rivermapcolour(rivermaplowflow, 1));
+    world.setmapgradientcolour(mapgradientriverflow, 0, 2, world.rivermapcolour(rivermaplowflow, 2));
+    world.setmapgradientcolour(mapgradientriverflow, 1, 0, world.rivermapcolour(rivermaphighflow, 0));
+    world.setmapgradientcolour(mapgradientriverflow, 1, 1, world.rivermapcolour(rivermaphighflow, 1));
+    world.setmapgradientcolour(mapgradientriverflow, 1, 2, world.rivermapcolour(rivermaphighflow, 2));
+
+    for (int gradient = 0; gradient < MAPGRADIENTTYPECOUNT; gradient++)
+    {
+        const int stopcount = world.mapgradientstopcount(gradient);
+
+        for (int stop = stopcount; stop < MAPGRADIENTMAXSTOPS; stop++)
+        {
+            world.setmapgradientposition(gradient, stop, world.mapgradientposition(gradient, stopcount - 1));
+            world.setmapgradientcolour(gradient, stop, 0, world.mapgradientcolour(gradient, stopcount - 1, 0));
+            world.setmapgradientcolour(gradient, stop, 1, world.mapgradientcolour(gradient, stopcount - 1, 1));
+            world.setmapgradientcolour(gradient, stop, 2, world.mapgradientcolour(gradient, stopcount - 1, 2));
+        }
+    }
+}
+
+void setdefaultnonreliefmapappearance(planet& world)
+{
+    static const int defaultclimatecolours[CLIMATEMAPCOLOURCOUNT][3] =
+    {
+        { 0, 0, 0 },
+        { 0, 0, 254 },
+        { 1, 119, 255 },
+        { 70, 169, 250 },
+        { 70, 169, 250 },
+        { 249, 15, 0 },
+        { 251, 150, 149 },
+        { 245, 163, 1 },
+        { 254, 219, 99 },
+        { 255, 255, 0 },
+        { 198, 199, 1 },
+        { 184, 184, 114 },
+        { 138, 255, 162 },
+        { 86, 199, 112 },
+        { 30, 150, 66 },
+        { 192, 254, 109 },
+        { 76, 255, 93 },
+        { 19, 203, 74 },
+        { 255, 8, 245 },
+        { 204, 3, 192 },
+        { 154, 51, 144 },
+        { 153, 100, 146 },
+        { 172, 178, 249 },
+        { 91, 121, 213 },
+        { 78, 83, 175 },
+        { 54, 3, 130 },
+        { 0, 255, 245 },
+        { 32, 200, 250 },
+        { 0, 126, 125 },
+        { 0, 69, 92 },
+        { 178, 178, 178 },
+        { 104, 104, 104 }
+    };
+
+    static const int defaultclimateseacolours[CLIMATEMAPSEACOLOURCOUNT][3] =
+    {
+        { 13, 49, 109 },
+        { 228, 228, 255 },
+        { 243, 243, 255 }
+    };
+
+    world.setshowmapoutline(1);
+
+    world.setoutline1(0);
+    world.setoutline2(0);
+    world.setoutline3(0);
+
+    world.setelevationlow1(0);
+    world.setelevationlow2(0);
+    world.setelevationlow3(0);
+    world.setelevationhigh1(255);
+    world.setelevationhigh2(255);
+    world.setelevationhigh3(255);
+
+    world.settemperaturecold1(0);
+    world.settemperaturecold2(0);
+    world.settemperaturecold3(250);
+    world.settemperaturetemperate1(250);
+    world.settemperaturetemperate2(250);
+    world.settemperaturetemperate3(250);
+    world.settemperaturehot1(250);
+    world.settemperaturehot2(100);
+    world.settemperaturehot3(0);
+
+    world.setprecipitationdry1(255);
+    world.setprecipitationdry2(255);
+    world.setprecipitationdry3(255);
+    world.setprecipitationwet1(0);
+    world.setprecipitationwet2(64);
+    world.setprecipitationwet3(255);
+
+    for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            world.setclimatemapseacolour(i, j, defaultclimateseacolours[i][j]);
+    }
+
+    for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            world.setclimatemapcolour(i, j, defaultclimatecolours[i][j]);
+    }
+
+    for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            world.setbiomemapcolour(i, j, defaultbiomemapcolours[i][j]);
+    }
+
+    world.setrivermapcolour(rivermapbackground, 0, 255);
+    world.setrivermapcolour(rivermapbackground, 1, 255);
+    world.setrivermapcolour(rivermapbackground, 2, 255);
+    world.setrivermapcolour(rivermaplowflow, 0, 255);
+    world.setrivermapcolour(rivermaplowflow, 1, 255);
+    world.setrivermapcolour(rivermaplowflow, 2, 255);
+    world.setrivermapcolour(rivermaphighflow, 0, world.river1());
+    world.setrivermapcolour(rivermaphighflow, 1, world.river2());
+    world.setrivermapcolour(rivermaphighflow, 2, world.river3());
+    world.setrivermapcolour(rivermaplake, 0, world.lake1());
+    world.setrivermapcolour(rivermaplake, 1, world.lake2());
+    world.setrivermapcolour(rivermaplake, 2, world.lake3());
+    world.setrivermapcolour(rivermapsaltpan, 0, world.saltpan1());
+    world.setrivermapcolour(rivermapsaltpan, 1, world.saltpan2());
+    world.setrivermapcolour(rivermapsaltpan, 2, world.saltpan3());
+    world.setrivermapcolour(rivermapwetlands, 0, world.wetlands1());
+    world.setrivermapcolour(rivermapwetlands, 1, world.wetlands2());
+    world.setrivermapcolour(rivermapwetlands, 2, world.wetlands3());
+    world.setrivermapcolour(rivermapmud, 0, world.mud1());
+    world.setrivermapcolour(rivermapmud, 1, world.mud2());
+    world.setrivermapcolour(rivermapmud, 2, world.mud3());
+    world.setrivermapcolour(rivermapsand, 0, world.sand1());
+    world.setrivermapcolour(rivermapsand, 1, world.sand2());
+    world.setrivermapcolour(rivermapsand, 2, world.sand3());
+    world.setrivermapcolour(rivermapshingle, 0, world.shingle1());
+    world.setrivermapcolour(rivermapshingle, 1, world.shingle2());
+    world.setrivermapcolour(rivermapshingle, 2, world.shingle3());
+    world.setrivermapcolour(rivermapvolcano, 0, 240);
+    world.setrivermapcolour(rivermapvolcano, 1, 0);
+    world.setrivermapcolour(rivermapvolcano, 2, 0);
+
+    initialisegradientmapappearance(world);
+
+    for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
+        world.setshowrivermapfeature(i, 1);
 }
 
 // This function sets up the default colours (and other settings) for drawing relief maps.
@@ -3563,6 +4092,8 @@ void initialisemapcolours(planet& world)
     world.sethighlight1(0);
     world.sethighlight2(255);
     world.sethighlight3(255); // Colours of highlights on the map.
+
+    setdefaultnonreliefmapappearance(world);
 }
 
 // This function sets up the always-used variables in the region.

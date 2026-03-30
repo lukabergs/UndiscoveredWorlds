@@ -1,8 +1,23 @@
 #pragma once
 
+#include <array>
+
 #include "imgui.h"
 
 #include "planet.hpp"
+
+struct GradientStopSettings
+{
+    int position = 0;
+    ImVec4 colour = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+};
+
+struct MapGradientSettings
+{
+    int stopcount = 0;
+    bool discrete = false;
+    std::array<GradientStopSettings, MAPGRADIENTMAXSTOPS> stops{};
+};
 
 struct AppearanceSettings
 {
@@ -30,6 +45,19 @@ struct AppearanceSettings
     ImVec4 shinglecolour;
     ImVec4 mangrovecolour;
     ImVec4 highlightcolour;
+    ImVec4 outlinecolour;
+    ImVec4 elevationlowcolour;
+    ImVec4 elevationhighcolour;
+    ImVec4 temperaturecoldcolour;
+    ImVec4 temperaturetemperatecolour;
+    ImVec4 temperaturehotcolour;
+    ImVec4 precipitationdrycolour;
+    ImVec4 precipitationwetcolour;
+    std::array<ImVec4, CLIMATEMAPSEACOLOURCOUNT> climateseacolours{};
+    std::array<ImVec4, CLIMATEMAPCOLOURCOUNT> climatecolours{};
+    std::array<ImVec4, BIOMEMAPCOLOURCOUNT> biomecolours{};
+    std::array<ImVec4, RIVERMAPCOLOURCOUNT> rivermapcolours{};
+    std::array<MapGradientSettings, MAPGRADIENTTYPECOUNT> mapgradients{};
 
     float shadingland = 0.0f;
     float shadinglake = 0.0f;
@@ -43,8 +71,10 @@ struct AppearanceSettings
     int shadingdir = 0;
     int snowchange = 0;
     int seaiceappearance = 0;
+    bool showmapoutline = false;
     bool colourcliffs = false;
     bool mangroves = false;
+    std::array<bool, RIVERMAPFEATURECOUNT> showrivermapfeatures{};
 };
 
 struct AppearanceChangeFlags
