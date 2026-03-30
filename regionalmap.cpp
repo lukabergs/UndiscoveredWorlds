@@ -13,6 +13,7 @@
 #include <queue>
 
 #include "classes.hpp"
+#include "generation_tuning.hpp"
 #include "planet.hpp"
 #include "region.hpp"
 #include "functions.hpp"
@@ -1390,7 +1391,7 @@ void makeregionalunderseaterrain(planet& world, region& region, peaktemplate& pe
     int rwidth = region.rwidth();
     int rheight = region.rheight();
 
-    float warpfactor = 100.0f;
+    float warpfactor = tuning::regional::submarineWarpFactor;
 
     if (leftx<0 || leftx>width)
     {
@@ -1411,7 +1412,7 @@ void makeregionalunderseaterrain(planet& world, region& region, peaktemplate& pe
 
     // Do submarine elevation.
 
-    int extra = 20; // For these again, we will create a *bigger* map than the actual regional area. This is because the templates that we're going to use to disrupt this terrain are quite big, so we need to have a big margin around the visible area to ensure that every tile looks the same no matter where the regional map is centred.
+    int extra = tuning::regional::submarineExtraMargin;
 
     for (int x = xleft - extra; x <= xright + extra; x++)
     {
@@ -1570,7 +1571,7 @@ void makeregionalunderseaterrain(planet& world, region& region, peaktemplate& pe
 
     // Now we add the spikes radiating away from the rifts.
 
-    extra = 20; // This one has to be done with a wide margin around the visible map, as there could be spikes coming in from outside.
+    extra = tuning::regional::ridgeRadiationExtraMargin;
 
     for (int x = xleft - extra; x <= xright + extra; x++)
     {
@@ -13600,7 +13601,7 @@ void pastesaltpan(region& region, int centrex, int centrey, int surfacelevel, bo
 
 void removewetsaltpans(region& region, int leftx, int lefty, int rightx, int righty)
 {
-    int maxsaltrain = 30; // Salt lakes may form if there is less rain than this.
+    int maxsaltrain = tuning::regional::saltPanMaxRain;
     //int minsalttemp=15; // Salt lakes require more heat than this.
 
     for (int i = leftx; i <= rightx; i++)
@@ -15986,7 +15987,7 @@ void addregionalmountainprecipitation(planet& world, region& region, int dx, int
 
     float extraprep = 0; // This is the amount of extra precipitation to add.
     int dir = 0; // Direction that the wind is blowing.
-    float slopefactor = 400; // If the slope is this steep, total extra precipitation will be added.
+    float slopefactor = tuning::regional::mountainPrecipitationSlopeFactor;
 
     int lowestelev = world.maxelevation(); // Lowest elevation in this tile.
     int highestelev = 0; // Highest elevation in this tile.

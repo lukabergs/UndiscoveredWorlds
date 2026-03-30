@@ -33,10 +33,12 @@
 #include <stdint.h>
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <thread>
 #include <vector>
 #include <SFML/Graphics.hpp>
 
+#include "world_generation_debug.hpp"
 
 #include "classes.hpp"
 #include "planet.hpp"
@@ -48,7 +50,7 @@
 #define NOISEWIDTH 1025
 #define NOISEHEIGHT 513
 
-constexpr int GLOBALMAPTYPES = 6;
+constexpr int GLOBALMAPTYPES = 7;
 constexpr int DISPLAYMAPSIZEX = 1024;
 constexpr int DISPLAYMAPSIZEY = 512;
 
@@ -64,9 +66,164 @@ using namespace std;
 // Define some enums.
 
 enum screenmodeenum { quit, createworldscreen, creatingworldscreen, globalmapscreen, regionalmapscreen, generatingregionscreen, importscreen, completingimportscreen, movingtoglobalmapscreen, exportareascreen, exportingareascreen, loadingworldscreen, savingworldscreen, generatingtectonicscreen, generatingnontectonicscreen, loadfailure, settingsloadfailure };
-enum mapviewenum { elevation, temperature, precipitation, climate, rivers, relief };
+enum mapviewenum { elevation, temperature, precipitation, climate, biomes, rivers, relief };
+enum mapdatakindenum { indexedmapdata, gradientmapdata };
+enum mapindexedstyleenum { noindexedstyle, reliefindexedstyle, climateindexedstyle, biomeindexedstyle };
+enum mapgradientstyleenum { nogradientstyle, standardgradientstyle, riversgradientstyle };
 
-constexpr std::array<mapviewenum, GLOBALMAPTYPES> allmapviews = { elevation, temperature, precipitation, climate, rivers, relief };
+struct AppearanceSettings;
+struct maplayer;
+
+void drawglobalelevationmapimage(planet& world, maplayer& layer);
+void drawglobaltemperaturemapimage(planet& world, maplayer& layer);
+void drawglobalprecipitationmapimage(planet& world, maplayer& layer);
+void drawglobalclimatemapimage(planet& world, maplayer& layer);
+void drawglobalbiomemapimage(planet& world, maplayer& layer);
+void drawglobalriversmapimage(planet& world, maplayer& layer);
+void drawglobalreliefmapimage(planet& world, maplayer& layer);
+void drawregionalelevationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltemperaturemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalprecipitationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalbiomemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalriversmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer);
+void drawgradientmapappearance(const struct mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
+void drawindexedmapappearance(const struct mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
+
+struct mapviewdefinition
+{
+    mapviewenum view;
+    const char* label;
+    const char* exportstem;
+    mapdatakindenum datakind;
+    mapindexedstyleenum indexedstyle;
+    mapgradientstyleenum gradientstyle;
+    int gradientindex;
+    const char* description;
+    void (*drawglobal)(planet& world, maplayer& layer);
+    void (*drawregional)(planet& world, region& region, maplayer& layer);
+    void (*drawappearance)(const mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
+};
+
+constexpr std::array<mapviewenum, GLOBALMAPTYPES> allmapviews = { elevation, temperature, precipitation, climate, biomes, rivers, relief };
+constexpr std::array<mapviewdefinition, GLOBALMAPTYPES> allmapviewdefinitions =
+{ {
+    { relief, "Relief", "Relief", indexedmapdata, reliefindexedstyle, nogradientstyle, -1, "", drawglobalreliefmapimage, drawregionalreliefmapimage, drawindexedmapappearance },
+    { elevation, "Elevation", "Elevation", gradientmapdata, noindexedstyle, standardgradientstyle, mapgradientelevation, "0 m is sea level. Negative values are below sea level.", drawglobalelevationmapimage, drawregionalelevationmapimage, drawgradientmapappearance },
+    { temperature, "Temperature", "Temperature", gradientmapdata, noindexedstyle, standardgradientstyle, mapgradienttemperature, "", drawglobaltemperaturemapimage, drawregionaltemperaturemapimage, drawgradientmapappearance },
+    { precipitation, "Precipitation", "Precipitation", gradientmapdata, noindexedstyle, standardgradientstyle, mapgradientprecipitation, "", drawglobalprecipitationmapimage, drawregionalprecipitationmapimage, drawgradientmapappearance },
+    { climate, "Climate", "Climate", indexedmapdata, climateindexedstyle, nogradientstyle, -1, "", drawglobalclimatemapimage, drawregionalclimatemapimage, drawindexedmapappearance },
+    { biomes, "Biomes", "Biomes", indexedmapdata, biomeindexedstyle, nogradientstyle, -1, "Sea uses the Climate tab sea palette.", drawglobalbiomemapimage, drawregionalbiomemapimage, drawindexedmapappearance },
+    { rivers, "Rivers", "Rivers", gradientmapdata, noindexedstyle, riversgradientstyle, mapgradientriverflow, "", drawglobalriversmapimage, drawregionalriversmapimage, drawgradientmapappearance },
+} };
+
+constexpr const mapviewdefinition& getmapviewdefinition(mapviewenum view)
+{
+    for (const mapviewdefinition& definition : allmapviewdefinitions)
+    {
+        if (definition.view == view)
+            return definition;
+    }
+
+    return allmapviewdefinitions[0];
+}
+
+constexpr std::array<const char*, BIOMEMAPCOLOURCOUNT> biomemapnames =
+{ {
+    "Ice",
+    "Polar desert",
+    "Polar dry tundra",
+    "Polar moist tundra",
+    "Polar wet tundra",
+    "Polar rain tundra",
+    "Subpolar desert",
+    "Subpolar dry tundra",
+    "Subpolar moist tundra",
+    "Subpolar wet tundra",
+    "Subpolar rain tundra",
+    "Boreal desert",
+    "Boreal dry bush",
+    "Boreal moist forest",
+    "Boreal wet forest",
+    "Boreal rain forest",
+    "Cool temperate desert",
+    "Cool temperate desert bush",
+    "Cool temperate steppe",
+    "Cool temperate moist forest",
+    "Cool temperate wet forest",
+    "Cool temperate rain forest",
+    "Warm temperate desert",
+    "Warm temperate desert bush",
+    "Warm temperate thorn steppe",
+    "Warm temperate dry forest",
+    "Warm temperate moist forest",
+    "Warm temperate wet forest",
+    "Warm temperate rain forest",
+    "Subtropical desert",
+    "Subtropical desert bush",
+    "Subtropical thorn steppe",
+    "Subtropical dry forest",
+    "Subtropical moist forest",
+    "Subtropical wet forest",
+    "Subtropical rain forest",
+    "Tropical desert",
+    "Tropical desert bush",
+    "Tropical thorn steppe",
+    "Tropical very dry forest",
+    "Tropical dry forest",
+    "Tropical moist forest",
+    "Tropical wet forest",
+    "Tropical rain forest",
+} };
+
+constexpr std::array<std::array<int, 3>, BIOMEMAPCOLOURCOUNT> defaultbiomemapcolours =
+{ {
+    { 65, 171, 155 },
+    { 173, 68, 83 },
+    { 158, 51, 146 },
+    { 61, 125, 179 },
+    { 42, 199, 102 },
+    { 103, 66, 166 },
+    { 163, 60, 137 },
+    { 165, 121, 109 },
+    { 127, 86, 116 },
+    { 39, 182, 105 },
+    { 71, 111, 175 },
+    { 154, 52, 191 },
+    { 173, 191, 73 },
+    { 194, 47, 54 },
+    { 36, 166, 108 },
+    { 40, 157, 184 },
+    { 55, 80, 153 },
+    { 199, 62, 130 },
+    { 36, 41, 173 },
+    { 176, 122, 56 },
+    { 91, 153, 58 },
+    { 66, 196, 49 },
+    { 171, 36, 88 },
+    { 196, 65, 152 },
+    { 168, 39, 58 },
+    { 59, 50, 161 },
+    { 130, 59, 156 },
+    { 156, 59, 125 },
+    { 120, 153, 44 },
+    { 194, 161, 43 },
+    { 161, 68, 50 },
+    { 60, 199, 155 },
+    { 135, 199, 58 },
+    { 201, 60, 190 },
+    { 66, 197, 201 },
+    { 61, 85, 191 },
+    { 161, 152, 56 },
+    { 56, 161, 37 },
+    { 101, 67, 196 },
+    { 189, 78, 42 },
+    { 176, 96, 42 },
+    { 101, 36, 158 },
+    { 48, 201, 133 },
+    { 54, 143, 162 },
+} };
 
 struct maplayer
 {
@@ -153,6 +310,8 @@ void updateTextureFromImage(sf::Texture& texture, const sf::Image& image);
 void adjustforsize(planet& world, sf::Vector2i& globaltexturesize, mapcache& globalmaps, sf::Image& highlightimage, int highlightsize, sf::Image& minihighlightimage, int& minihighlightsize);
 void drawhighlightobjects(planet& world, sf::Image& highlightimage, int highlightsize, sf::Image& minihighlightimage, int& minihighlightsize);
 void updatereport(string text);
+void begintimedreporting();
+void endtimedreporting();
 bool standardbutton(const char* label);
 void drawglobalmapimage(mapviewenum mapview, planet& world, mapcache& maps);
 void drawallglobalmapimages(planet& world, mapcache& maps);
@@ -161,9 +320,10 @@ void drawglobalelevationmapimage(planet& world, maplayer& layer);
 void drawglobaltemperaturemapimage(planet& world, maplayer& layer);
 void drawglobalprecipitationmapimage(planet& world, maplayer& layer);
 void drawglobalclimatemapimage(planet& world, maplayer& layer);
+void drawglobalbiomemapimage(planet& world, maplayer& layer);
 void drawglobalriversmapimage(planet& world, maplayer& layer);
 void drawglobalreliefmapimage(planet& world, maplayer& layer);
-sf::Color getclimatecolours(short climate);
+sf::Color getclimatecolours(const planet& world, short climate);
 void drawregionalmapimage(mapviewenum mapview, planet& world, region& region, mapcache& maps);
 void drawallregionalmapimages(planet& world, region& region, mapcache& maps);
 void applyregionalmapview(mapviewenum mapview, planet& world, region& region, mapcache& maps, sf::Texture& texture, sf::Sprite& sprite);
@@ -171,6 +331,7 @@ void drawregionalelevationmapimage(planet& world, region& region, maplayer& laye
 void drawregionaltemperaturemapimage(planet& world, region& region, maplayer& layer);
 void drawregionalprecipitationmapimage(planet& world, region& region, maplayer& layer);
 void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalbiomemapimage(planet& world, region& region, maplayer& layer);
 void drawregionalriversmapimage(planet& world, region& region, maplayer& layer);
 void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer);
 
@@ -260,6 +421,8 @@ twointegers findclosestriverquickly(region& region, int x, int y);
 int countinflows(region& region, int x, int y);
 void initialiseworld(planet& world);
 void initialisemapcolours(planet& world);
+void initialisegradientmapappearance(planet& world);
+void setdefaultnonreliefmapappearance(planet& world);
 void initialiseregion(planet& world, region& region);
 void changeworldproperties(planet& world);
 void getlandandseatotals(planet& world);

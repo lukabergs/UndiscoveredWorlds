@@ -474,6 +474,68 @@ void planet::saveworld(string filename)
     writevariable(outfile, itshighlight1);
     writevariable(outfile, itshighlight2);
     writevariable(outfile, itshighlight3);
+    writevariable(outfile, itsshowmapoutline);
+    writevariable(outfile, itsoutline1);
+    writevariable(outfile, itsoutline2);
+    writevariable(outfile, itsoutline3);
+    writevariable(outfile, itselevationlow1);
+    writevariable(outfile, itselevationlow2);
+    writevariable(outfile, itselevationlow3);
+    writevariable(outfile, itselevationhigh1);
+    writevariable(outfile, itselevationhigh2);
+    writevariable(outfile, itselevationhigh3);
+    writevariable(outfile, itstemperaturecold1);
+    writevariable(outfile, itstemperaturecold2);
+    writevariable(outfile, itstemperaturecold3);
+    writevariable(outfile, itstemperaturetemperate1);
+    writevariable(outfile, itstemperaturetemperate2);
+    writevariable(outfile, itstemperaturetemperate3);
+    writevariable(outfile, itstemperaturehot1);
+    writevariable(outfile, itstemperaturehot2);
+    writevariable(outfile, itstemperaturehot3);
+    writevariable(outfile, itsprecipitationdry1);
+    writevariable(outfile, itsprecipitationdry2);
+    writevariable(outfile, itsprecipitationdry3);
+    writevariable(outfile, itsprecipitationwet1);
+    writevariable(outfile, itsprecipitationwet2);
+    writevariable(outfile, itsprecipitationwet3);
+    for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            writevariable(outfile, itsclimatemapseacolours[i][j]);
+    }
+    for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            writevariable(outfile, itsclimatemapcolours[i][j]);
+    }
+    for (int i = 0; i < RIVERMAPCOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            writevariable(outfile, itsrivermapcolours[i][j]);
+    }
+    for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
+        writevariable(outfile, itsshowrivermapfeatures[i]);
+
+    for (int gradient = 0; gradient < MAPGRADIENTTYPECOUNT; gradient++)
+    {
+        writevariable(outfile, itsmapgradientstopcounts[gradient]);
+        writevariable(outfile, itsmapgradientdiscrete[gradient]);
+
+        for (int stop = 0; stop < MAPGRADIENTMAXSTOPS; stop++)
+        {
+            writevariable(outfile, itsmapgradientpositions[gradient][stop]);
+
+            for (int channel = 0; channel < 3; channel++)
+                writevariable(outfile, itsmapgradientcolours[gradient][stop][channel]);
+        }
+    }
+
+    for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            writevariable(outfile, itsbiomemapcolours[i][j]);
+    }
 
     writedata(outfile, jantempmap);
     writedata(outfile, jultempmap);
@@ -549,7 +611,9 @@ bool planet::loadworld(string filename)
     int val;
     readvariable(infile, val);
 
-    if (val != itssaveversion) // Incompatible file format!
+    const int fileversion = val;
+
+    if (fileversion < 1 || fileversion > itssaveversion) // Incompatible file format!
         return 0;
 
     readvariable(infile, itssize);
@@ -669,6 +733,145 @@ bool planet::loadworld(string filename)
     readvariable(infile, itshighlight1);
     readvariable(infile, itshighlight2);
     readvariable(infile, itshighlight3);
+
+    if (fileversion >= 2)
+    {
+        readvariable(infile, itsshowmapoutline);
+        readvariable(infile, itsoutline1);
+        readvariable(infile, itsoutline2);
+        readvariable(infile, itsoutline3);
+        readvariable(infile, itselevationlow1);
+        readvariable(infile, itselevationlow2);
+        readvariable(infile, itselevationlow3);
+        readvariable(infile, itselevationhigh1);
+        readvariable(infile, itselevationhigh2);
+        readvariable(infile, itselevationhigh3);
+        readvariable(infile, itstemperaturecold1);
+        readvariable(infile, itstemperaturecold2);
+        readvariable(infile, itstemperaturecold3);
+        readvariable(infile, itstemperaturetemperate1);
+        readvariable(infile, itstemperaturetemperate2);
+        readvariable(infile, itstemperaturetemperate3);
+        readvariable(infile, itstemperaturehot1);
+        readvariable(infile, itstemperaturehot2);
+        readvariable(infile, itstemperaturehot3);
+        readvariable(infile, itsprecipitationdry1);
+        readvariable(infile, itsprecipitationdry2);
+        readvariable(infile, itsprecipitationdry3);
+        readvariable(infile, itsprecipitationwet1);
+        readvariable(infile, itsprecipitationwet2);
+        readvariable(infile, itsprecipitationwet3);
+
+        if (fileversion >= 3)
+        {
+            for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    readvariable(infile, itsclimatemapseacolours[i][j]);
+            }
+
+            for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    readvariable(infile, itsclimatemapcolours[i][j]);
+            }
+
+            for (int i = 0; i < RIVERMAPCOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    readvariable(infile, itsrivermapcolours[i][j]);
+            }
+
+            for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
+                readvariable(infile, itsshowrivermapfeatures[i]);
+
+            if (fileversion >= 4)
+            {
+                for (int gradient = 0; gradient < MAPGRADIENTTYPECOUNT; gradient++)
+                {
+                    readvariable(infile, itsmapgradientstopcounts[gradient]);
+                    readvariable(infile, itsmapgradientdiscrete[gradient]);
+
+                    for (int stop = 0; stop < MAPGRADIENTMAXSTOPS; stop++)
+                    {
+                        readvariable(infile, itsmapgradientpositions[gradient][stop]);
+
+                        for (int channel = 0; channel < 3; channel++)
+                            readvariable(infile, itsmapgradientcolours[gradient][stop][channel]);
+                    }
+                }
+            }
+            else
+                initialisegradientmapappearance(*this);
+
+            if (fileversion >= 5)
+            {
+                for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+                {
+                    for (int j = 0; j < 3; j++)
+                        readvariable(infile, itsbiomemapcolours[i][j]);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+                {
+                    for (int j = 0; j < 3; j++)
+                        itsbiomemapcolours[i][j] = defaultbiomemapcolours[i][j];
+                }
+            }
+        }
+        else
+        {
+            static const int defaultclimatecolours[CLIMATEMAPCOLOURCOUNT][3] =
+            {
+                { 0, 0, 0 }, { 0, 0, 254 }, { 1, 119, 255 }, { 70, 169, 250 }, { 70, 169, 250 }, { 249, 15, 0 }, { 251, 150, 149 }, { 245, 163, 1 },
+                { 254, 219, 99 }, { 255, 255, 0 }, { 198, 199, 1 }, { 184, 184, 114 }, { 138, 255, 162 }, { 86, 199, 112 }, { 30, 150, 66 }, { 192, 254, 109 },
+                { 76, 255, 93 }, { 19, 203, 74 }, { 255, 8, 245 }, { 204, 3, 192 }, { 154, 51, 144 }, { 153, 100, 146 }, { 172, 178, 249 }, { 91, 121, 213 },
+                { 78, 83, 175 }, { 54, 3, 130 }, { 0, 255, 245 }, { 32, 200, 250 }, { 0, 126, 125 }, { 0, 69, 92 }, { 178, 178, 178 }, { 104, 104, 104 }
+            };
+            static const int defaultclimateseacolours[CLIMATEMAPSEACOLOURCOUNT][3] =
+            {
+                { 13, 49, 109 }, { 228, 228, 255 }, { 243, 243, 255 }
+            };
+
+            for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    itsclimatemapseacolours[i][j] = defaultclimateseacolours[i][j];
+            }
+
+            for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    itsclimatemapcolours[i][j] = defaultclimatecolours[i][j];
+            }
+
+            itsrivermapcolours[rivermapbackground] = { 255, 255, 255 };
+            itsrivermapcolours[rivermaplowflow] = { 255, 255, 255 };
+            itsrivermapcolours[rivermaphighflow] = { itsriver1, itsriver2, itsriver3 };
+            itsrivermapcolours[rivermaplake] = { itslake1, itslake2, itslake3 };
+            itsrivermapcolours[rivermapsaltpan] = { itssaltpan1, itssaltpan2, itssaltpan3 };
+            itsrivermapcolours[rivermapwetlands] = { itswetlands1, itswetlands2, itswetlands3 };
+            itsrivermapcolours[rivermapmud] = { itsmud1, itsmud2, itsmud3 };
+            itsrivermapcolours[rivermapsand] = { itssand1, itssand2, itssand3 };
+            itsrivermapcolours[rivermapshingle] = { itsshingle1, itsshingle2, itsshingle3 };
+            itsrivermapcolours[rivermapvolcano] = { 240, 0, 0 };
+
+            for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
+                itsshowrivermapfeatures[i] = true;
+
+            initialisegradientmapappearance(*this);
+
+            for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    itsbiomemapcolours[i][j] = defaultbiomemapcolours[i][j];
+            }
+        }
+    }
+    else
+        setdefaultnonreliefmapappearance(*this);
 
     readdata(infile, jantempmap);
     readdata(infile, jultempmap);

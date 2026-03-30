@@ -20,10 +20,13 @@ find_package(Threads REQUIRED)
 # 2. Define your source files (based on your directory listing)
 set(SOURCES
     main.cpp
+    app_environment.cpp
     create_world_screen.cpp
     rendering.cpp
+    world_generation_debug.cpp
     cuda_renderers_stub.cpp
     appearance_settings.cpp
+    map_appearance.cpp
     world_property_controls.cpp
     app_windows.cpp
     ui_panels.cpp
@@ -31,6 +34,7 @@ set(SOURCES
     map_imports.cpp
     assetdata.cpp
     classes.cpp
+    fastlem_mountains.cpp
     globalclimate.cpp
     globalterrain.cpp
     misc.cpp

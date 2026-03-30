@@ -53,6 +53,70 @@ bool drawcustomworldsizewindow(const ImGuiViewport* main_viewport, ImGuiWindowFl
     return confirmed;
 }
 
+bool drawworldgenerationoptionswindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, WorldGenerationDebugOptions& options)
+{
+    if (!show)
+        return false;
+
+    bool confirmed = false;
+    const vector<string>& steplabels = getworldgenerationstepoptions();
+
+    if (options.enabledSteps.size() != steplabels.size())
+        options.enabledSteps.assign(steplabels.size(), true);
+
+    ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 355, main_viewport->WorkPos.y + 90), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(520, 540), ImGuiCond_FirstUseEver);
+    ImGui::Begin("World generation options", NULL, window_flags);
+
+    ImGui::Checkbox("Log timings to profiling.xlsx", &options.logToProfilingWorkbook);
+    ImGui::Checkbox("Visualize each completed step", &options.visualizeEachStep);
+    ImGui::Checkbox("Use FastLEM-style mountains", &options.useFastLEMMountains);
+
+    ImGui::Text(" ");
+
+    if (ImGui::Button("Enable all"))
+        fill(options.enabledSteps.begin(), options.enabledSteps.end(), true);
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("Disable all"))
+        fill(options.enabledSteps.begin(), options.enabledSteps.end(), false);
+
+    ImGui::Text(" ");
+    ImGui::Text("Generation steps:");
+
+    ImGui::BeginChild("##worldgenerationsteps", ImVec2(0.0f, 390.0f), true);
+
+    for (size_t index = 0; index < steplabels.size(); index++)
+    {
+        bool enabled = options.enabledSteps[index];
+
+        if (ImGui::Checkbox(steplabels[index].c_str(), &enabled))
+            options.enabledSteps[index] = enabled;
+    }
+
+    ImGui::EndChild();
+
+    ImGui::Text(" ");
+    ImGui::Text(" ");
+
+    ImGui::SameLine(140.0f);
+
+    if (ImGui::Button("Start"))
+    {
+        confirmed = true;
+        show = false;
+    }
+
+    ImGui::SameLine(280.0f);
+
+    if (ImGui::Button("Cancel"))
+        show = false;
+
+    ImGui::End();
+    return confirmed;
+}
+
 bool drawtectonicchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, int& landmass, int& mergefactor)
 {
     if (!show)

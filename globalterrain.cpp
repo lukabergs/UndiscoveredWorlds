@@ -13,9 +13,12 @@
 #include <queue>
 
 #include "classes.hpp"
+#include "fastlem_mountains.hpp"
+#include "generation_tuning.hpp"
 #include "planet.hpp"
 #include "region.hpp"
 #include "functions.hpp"
+#include "world_generation_debug.hpp"
 //#include "profiler.h"
 
 using namespace std;
@@ -608,282 +611,258 @@ void generateglobalterraintype2(planet& world, bool customgenerate, int mergefac
 
     // Now start the generating.
 
-    updatereport("Creating fractal map");
-
-    // First make a fractal for noise (used only at regional map level).
-
     int grain = 8; // Level of detail on this fractal map.
     float valuemod = 0.2f;
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
+    int v = 0;
+    float valuemod2 = 0.0f;
+    int warpfactor = 0;
 
     vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
-    createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    if (beginworldgenstep("Creating fractal map"))
     {
-        for (int j = startrow; j <= endrow; j++)
+        // First make a fractal for noise (used only at regional map level).
+
+        v = random(3, 6);
+        valuemod2 = (float)v;
+
+        createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
+
+        parallelforrows(0, height, [&](int startrow, int endrow)
         {
-            for (int i = 0; i <= width; i++)
-                world.setnoise(i, j, fractal[i][j]);
-        }
-    });
-
-    // Now make a new one that we'll actually use for global terrain creation.
-
-    createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, 12750, 0, 0);
-
-    int warpfactor = random(20, 80);
-    warp(fractal, width, height, maxelev, warpfactor, 1);
-
-    int fractaladd = sealevel - 2500;
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
-    {
-        for (int j = startrow; j <= endrow; j++)
-        {
-            for (int i = 0; i <= width; i++)
-                fractal[i][j] = fractal[i][j] + fractaladd;
-        }
-    });
-
-    updatereport("Creating continental map");
-
-    largecontinents(world, baseheight, conheight, clusterno, clustersize, fractal, plateaumap, shelves, landshape, chainland);
-
-    flip(fractal, width, height, 1, 1);
-
-    // Now merge the maps.
-
-    updatereport("Merging maps");
-
-    fractalmergemodified(world, mergefactor, fractal, plateaumap, removedland);
-
-    updatereport("Shifting fractal");
-
-    shift(fractal, width, height, width / 2); // Shift the fractal to make it different for the mountains - we will use the fractal to adjust peak height.
-
-    updatereport("Smoothing map");
-
-    world.smoothnom(1);
-
-    // We also need to remove the trench down the left-hand side.
-
-    removeseam(world, 0);
-
-    // Now remove inland seas.
-
-    updatereport("Removing inland seas");
-
-    removeinlandseas(world, conheight);
-
-    // Now make sure the southern edge is correct.
-
-    updatereport("Checking poles");
-
-    checkpoles(world);
-
-    // Now add Aegean-style islands
-
-    updatereport("Adding archipelagos");
-
-    makearchipelagos(world, removedland, landshape);
-
-    // Now widen any channels and lower the coasts.
-
-    updatereport("Tidying up oceans");
-
-    widenchannels(world);
-    loweroceans(world);
-
-    // Now try to remove straight coastlines.
-
-    updatereport("Improving coastlines");
-
-    removestraights(world);
-
-    // Now sort out the sea depths.
-
-    updatereport("Adjusting ocean depths");
-
-    grain = 8; // Level of detail on this fractal map.
-    valuemod = 0.2f;
-    v = random(3, 6);
-    valuemod2 = (float)v;
-
-    createfractal(seafractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    warpfactor = random(20, 80);
-    warp(seafractal, width, height, maxelev, warpfactor, 1);
-
-    float coastalvarreduce = (float)maxelev / 500.0f; //3000;
-    float oceanvarreduce = (float)maxelev / 1000.0f;
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.sea(i, j) == 1)
+            for (int j = startrow; j <= endrow; j++)
             {
-                if (shelves[i][j] == 1)
+                for (int i = 0; i <= width; i++)
+                    world.setnoise(i, j, fractal[i][j]);
+            }
+        });
+
+        // Now make a new one that we'll actually use for global terrain creation.
+
+        createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, 12750, 0, 0);
+
+        warpfactor = random(20, 80);
+        warp(fractal, width, height, maxelev, warpfactor, 1);
+
+        int fractaladd = sealevel - 2500;
+
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int j = startrow; j <= endrow; j++)
+            {
+                for (int i = 0; i <= width; i++)
+                    fractal[i][j] = fractal[i][j] + fractaladd;
+            }
+        });
+    }
+
+    if (beginworldgenstep("Creating continental map"))
+    {
+        largecontinents(world, baseheight, conheight, clusterno, clustersize, fractal, plateaumap, shelves, landshape, chainland);
+        flip(fractal, width, height, 1, 1);
+    }
+
+    if (beginworldgenstep("Merging maps"))
+        fractalmergemodified(world, mergefactor, fractal, plateaumap, removedland);
+
+    if (beginworldgenstep("Shifting fractal"))
+        shift(fractal, width, height, width / 2); // Shift the fractal to make it different for the mountains - we will use the fractal to adjust peak height.
+
+    if (beginworldgenstep("Smoothing map"))
+    {
+        world.smoothnom(1);
+        removeseam(world, 0);
+    }
+
+    if (beginworldgenstep("Removing inland seas"))
+        removeinlandseas(world, conheight);
+
+    if (beginworldgenstep("Checking poles"))
+        checkpoles(world);
+
+    if (beginworldgenstep("Adding archipelagos"))
+        makearchipelagos(world, removedland, landshape);
+
+    if (beginworldgenstep("Tidying up oceans"))
+    {
+        widenchannels(world);
+        loweroceans(world);
+    }
+
+    if (beginworldgenstep("Improving coastlines"))
+        removestraights(world);
+
+    if (beginworldgenstep("Adjusting ocean depths"))
+    {
+        grain = 8; // Level of detail on this fractal map.
+        valuemod = 0.2f;
+        v = random(3, 6);
+        valuemod2 = (float)v;
+
+        createfractal(seafractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
+
+        warpfactor = random(20, 80);
+        warp(seafractal, width, height, maxelev, warpfactor, 1);
+
+        float coastalvarreduce = (float)maxelev / 500.0f; //3000;
+        float oceanvarreduce = (float)maxelev / 1000.0f;
+
+        for (int i = 0; i <= width; i++)
+        {
+            for (int j = 0; j <= height; j++)
+            {
+                if (world.sea(i, j) == 1)
                 {
-                    float var = (float)(seafractal[i][j] - maxelev / 2);
-                    var = var / coastalvarreduce;
+                    if (shelves[i][j] == 1)
+                    {
+                        float var = (float)(seafractal[i][j] - maxelev / 2);
+                        var = var / coastalvarreduce;
 
-                    int newval = sealevel - 200 + (int)var;
+                        int newval = sealevel - 200 + (int)var;
 
-                    if (newval > sealevel - 10)
-                        newval = sealevel - 10;
+                        if (newval > sealevel - 10)
+                            newval = sealevel - 10;
 
-                    if (newval < 1)
-                        newval = 1;
+                        if (newval < 1)
+                            newval = 1;
 
-                    world.setnom(i, j, newval);
+                        world.setnom(i, j, newval);
+                    }
+                    else
+                    {
+                        int ii = i + width / 2;
+
+                        if (ii > width)
+                            ii = ii - width;
+
+                        float var = (float)(seafractal[ii][j] - maxelev / 2);
+                        var = var / oceanvarreduce;
+
+                        int newval = sealevel - 5000 + (int)var;
+
+                        if (newval > sealevel - 3000)
+                            newval = sealevel - 3000;
+
+                        if (newval < 1)
+                            newval = 1;
+
+                        world.setnom(i, j, newval);
+                    }
                 }
-                else
-                {
-                    int ii = i + width / 2;
+            }
+        }
+    }
 
+    if (beginworldgenstep("Generating mid-ocean ridges"))
+        createoceanridges(world, shelves);
+
+    if (beginworldgenstep("Generating deep-sea trenches"))
+        createoceantrenches(world, shelves);
+
+    if (beginworldgenstep("Generating volcanoes"))
+    {
+        grain = 8; // Level of detail on this fractal map.
+        valuemod = 0.2f;
+        v = random(3, 6);
+        valuemod2 = (float)v;
+
+        createfractal(volcanodensity, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
+
+        grain = 4; // Level of detail on this fractal map.
+        valuemod = 0.02f;
+        v = 1; //random(3,6);
+        valuemod2 = 0.2f;
+
+        createfractal(volcanodirection, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
+
+        for (int i = 0; i <= width; i++)
+        {
+            for (int j = 0; j <= height; j++)
+            {
+                bool goahead = 0;
+
+                if (world.sea(i, j) == 1)
+                {
+                    int frac = volcanodensity[i][j];
+
+                    int ii = i + width / 2;
                     if (ii > width)
                         ii = ii - width;
 
-                    float var = (float)(seafractal[ii][j] - maxelev / 2);
-                    var = var / oceanvarreduce;
+                    int frac2 = volcanodensity[ii][j];
 
-                    int newval = sealevel - 5000 + (int)var;
+                    if (frac2 < frac)
+                        frac = frac2;
 
-                    if (newval > sealevel - 3000)
-                        newval = sealevel - 3000;
+                    int jj = j + height / 2;
+                    if (jj > height)
+                        jj = jj - height;
 
-                    if (newval < 1)
-                        newval = 1;
+                    int frac3 = volcanodensity[i][jj];
 
-                    world.setnom(i, j, newval);
-                }
-            }
-        }
-    }
+                    if (frac3 < frac)
+                        frac = frac3;
 
-    // Now we create mid-ocean ridges.
+                    int rand = 5000;
 
-    updatereport("Generating mid-ocean ridges");
+                    if (frac > maxelev / 2)
+                        rand = 80;
 
-    createoceanridges(world, shelves);
+                    if (frac > (maxelev / 4) * 3)
+                        rand = 40;
 
-    // Now we create deep-sea trenches.
-
-    updatereport("Generating deep-sea trenches");
-
-    createoceantrenches(world, shelves);
-
-    // Now random volcanoes.
-
-    updatereport("Generating volcanoes");
-
-    grain = 8; // Level of detail on this fractal map.
-    valuemod = 0.2f;
-    v = random(3, 6);
-    valuemod2 = (float)v;
-
-    createfractal(volcanodensity, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    grain = 4; // Level of detail on this fractal map.
-    valuemod = 0.02f;
-    v = 1; //random(3,6);
-    valuemod2 = 0.2f;
-
-    createfractal(volcanodirection, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            bool goahead = 0;
-
-            if (world.sea(i, j) == 1)
-            {
-                int frac = volcanodensity[i][j];
-
-                int ii = i + width / 2;
-                if (ii > width)
-                    ii = ii - width;
-
-                int frac2 = volcanodensity[ii][j];
-
-                if (frac2 < frac)
-                    frac = frac2;
-
-                int jj = j + height / 2;
-                if (jj > height)
-                    jj = jj - height;
-
-                int frac3 = volcanodensity[i][jj];
-
-                if (frac3 < frac)
-                    frac = frac3;
-
-                int rand = 5000;
-
-                if (frac > maxelev / 2)
-                    rand = 80;
-
-                if (frac > (maxelev / 4) * 3)
-                    rand = 40;
-
-                if (random(1, rand) == 1)
-                    goahead = 1;
-            }
-            else
-            {
-                if (random(1, 15000) == 1)
-                    goahead = 1;
-            }
-
-            if (goahead == 1)
-            {
-                bool strato = 1;
-
-                if (random(1, 10) == 1) // Shield volcanoes - much rarer.
-                    strato = 0;
-
-                if (world.sea(i, j) == 1)
-                    strato = 1;
-
-                int peakheight;
-
-                if (world.sea(i, j) == 1)
-                {
-                    if (random(1, 10) == 1) // It could make a chain of volcanic islands.
-                        peakheight = sealevel - world.nom(i, j) + random(500, 3000);
-                    else
-                        peakheight = sealevel - world.nom(i, j) - random(100, 200);
-
-                    if (peakheight < 10)
-                        peakheight = 10;
-
-                    peakheight = random(peakheight / 2, peakheight);
+                    if (random(1, rand) == 1)
+                        goahead = 1;
                 }
                 else
                 {
-                    if (strato == 1)
-                        peakheight = random(2000, 6000);
-                    else
-                        peakheight = random(1000, 2000);
+                    if (random(1, 15000) == 1)
+                        goahead = 1;
                 }
 
-                createisolatedvolcano(world, i, j, shelves, volcanodirection, peakheight, strato);
+                if (goahead == 1)
+                {
+                    bool strato = 1;
+
+                    if (random(1, 10) == 1) // Shield volcanoes - much rarer.
+                        strato = 0;
+
+                    if (world.sea(i, j) == 1)
+                        strato = 1;
+
+                    int peakheight;
+
+                    if (world.sea(i, j) == 1)
+                    {
+                        if (random(1, 10) == 1) // It could make a chain of volcanic islands.
+                            peakheight = sealevel - world.nom(i, j) + random(500, 3000);
+                        else
+                            peakheight = sealevel - world.nom(i, j) - random(100, 200);
+
+                        if (peakheight < 10)
+                            peakheight = 10;
+
+                        peakheight = random(peakheight / 2, peakheight);
+                    }
+                    else
+                    {
+                        if (strato == 1)
+                            peakheight = random(2000, 6000);
+                        else
+                            peakheight = random(1000, 2000);
+                    }
+
+                    createisolatedvolcano(world, i, j, shelves, volcanodirection, peakheight, strato);
+                }
             }
         }
     }
 
-    // Now we add smaller mountain chains that cannot form peninsulas.
-
-    updatereport("Adding smaller mountain ranges");
-
-    twointegers dummy[1];
-
-    createchains(world, baseheight, conheight, fractal, plateaumap, landshape, chainland, dummy, 0, 0, 2);
+    if (beginworldgenstep("Adding smaller mountain ranges"))
+    {
+        twointegers dummy[1];
+        createchains(world, baseheight, conheight, fractal, plateaumap, landshape, chainland, dummy, 0, 0, 2);
+    }
 
     // Now craters, rarely.
 
@@ -934,101 +913,112 @@ void generateglobalterraintype2(planet& world, bool customgenerate, int mergefac
 
     // Now we shift the map so there is sea at the edges, if possible.
 
-    updatereport("Shifting for best position");
-
-    removeseam(world, 0);
-
-    getlandandseatotals(world);
-
-    int landtotal = world.landtotal();
-    int seatotal = world.seatotal();
-
-    if (seatotal > 0 && landtotal > 0)
+    if (beginworldgenstep("Shifting for best position"))
     {
-        if (seatotal > landtotal)
-            adjustforsea(world);
-        else
-            adjustforland(world);
+        removeseam(world, 0);
+
+        getlandandseatotals(world);
+
+        int landtotal = world.landtotal();
+        int seatotal = world.seatotal();
+
+        if (seatotal > 0 && landtotal > 0)
+        {
+            if (seatotal > landtotal)
+                adjustforsea(world);
+            else
+                adjustforland(world);
+        }
     }
 
     // Now we alter the fractal again, and use it to add more height variation.
 
-    updatereport("Merging fractal into land");
+    if (beginworldgenstep("Merging fractal into land"))
+    {
+        flip(fractal, width, height, 1, 1);
+        int offset = random(1, width);
+        shift(fractal, width, height, offset);
 
-    flip(fractal, width, height, 1, 1);
-    int offset = random(1, width);
-    shift(fractal, width, height, offset);
+        fractalmergeland(world, fractal, conheight);
+    }
 
-    fractalmergeland(world, fractal, conheight);
+    if (usefastlemmountains() && beginworldgenstep("Generating mountains (FastLEM)"))
+    {
+        if (generatefastlemmountains(world, fractal) == false)
+            updatereport("FastLEM mountains fell back to the classic terrain result.");
+    }
 
     // Now remove any mountains that are over sea.
 
-    updatereport("Removing floating mountains");
-
-    removefloatingmountains(world);
-    cleanmountainridges(world);
+    if (beginworldgenstep("Removing floating mountains"))
+    {
+        removefloatingmountains(world);
+        cleanmountainridges(world);
+    }
 
     // Now we raise the mountain bases.
 
     if (customgenerate == 0) // Don't do this if this is a custom generation, as that will have the mountain bases raised later. (This is because the user might have changed the gravity after generating the terrain.)
     {
-        updatereport("Raising mountain bases");
+        if (beginworldgenstep("Raising mountain bases"))
+        {
+            vector<vector<bool>> mountainsOK(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0)); // This will track mountains that have been imported by the user and which therefore should not be altered to take account of gravity.
 
-        vector<vector<bool>> mountainsOK(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0)); // This will track mountains that have been imported by the user and which therefore should not be altered to take account of gravity.
-
-        raisemountainbases(world, mountaindrainage, mountainsOK);
+            raisemountainbases(world, mountaindrainage, mountainsOK);
+        }
     }
 
     // Now we smooth again, without changing the coastlines.
 
-    updatereport("Smoothing map, preserving coastlines");
-
-    smoothland(world, 2);
-
     vector<vector<int>> slopes(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
-    getseaslopes(world, slopes); // Note down all the biggest slopes we currently have. This is so that we don't mark any non-shading areas over these slopes later.
+    if (beginworldgenstep("Smoothing map, preserving coastlines"))
+    {
+        smoothland(world, 2);
+        getseaslopes(world, slopes); // Note down all the biggest slopes we currently have. This is so that we don't mark any non-shading areas over these slopes later.
+    }
 
     // Now we create extra elevation over the land to create canyons.
 
-    updatereport("Elevating land near canyons");
-
-    createextraelev(world);
+    if (beginworldgenstep("Elevating land near canyons"))
+        createextraelev(world);
 
     // Now we remove depressions.
 
-    updatereport("Filling depressions");
+    if (beginworldgenstep("Filling depressions"))
+    {
+        depressionfill(world);
 
-    depressionfill(world);
+        addlandnoise(world); // Add a bit of noise, then do remove depressions again. This is to add variety to the river courses.
 
-    addlandnoise(world); // Add a bit of noise, then do remove depressions again. This is to add variety to the river courses.
-
-    depressionfill(world);
+        depressionfill(world);
+    }
 
     // Now we adjust the land around coastlines.
 
-    updatereport("Adjusting coastlines");
-
-    normalisecoasts(world, 13, 11, 4);
-
-    normalisecoasts(world, 13, 11, 4);
+    if (beginworldgenstep("Adjusting coastlines"))
+    {
+        normalisecoasts(world, 13, 11, 4);
+        normalisecoasts(world, 13, 11, 4);
+    }
 
     //clamp(world);
 
     // Now we note down one-tile islands.
 
-    updatereport("Checking islands");
-
-    checkislands(world);
-
-    extendnoshade(world);
-
-    for (int i = 0; i <= width; i++)
+    if (beginworldgenstep("Checking islands"))
     {
-        for (int j = 0; j <= height; j++)
+        checkislands(world);
+
+        extendnoshade(world);
+
+        for (int i = 0; i <= width; i++)
         {
-            if (slopes[i][j] > 30)
-                world.setnoshade(i, j, 0);
+            for (int j = 0; j <= height; j++)
+            {
+                if (slopes[i][j] > 30)
+                    world.setnoshade(i, j, 0);
+            }
         }
     }
 
@@ -1040,20 +1030,21 @@ void generateglobalterraintype2(planet& world, bool customgenerate, int mergefac
 
     // Now we create a roughness map.
 
-    updatereport("Creating roughness map");
-
-    vector<vector<int>> roughness(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    grain = 8; // Level of detail on this fractal map.
-    valuemod = 0.2f;
-    valuemod2 = 0.6f;
-
-    createfractal(roughness, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    for (int i = 0; i <= width; i++)
+    if (beginworldgenstep("Creating roughness map"))
     {
-        for (int j = 0; j <= height; j++)
-            world.setroughness(i, j, (float)roughness[i][j]);
+        vector<vector<int>> roughness(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+
+        grain = 8; // Level of detail on this fractal map.
+        valuemod = 0.2f;
+        valuemod2 = 0.6f;
+
+        createfractal(roughness, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
+
+        for (int i = 0; i <= width; i++)
+        {
+            for (int j = 0; j <= height; j++)
+                world.setroughness(i, j, (float)roughness[i][j]);
+        }
     }
 }
 
@@ -2259,18 +2250,18 @@ void largecontinents(planet& world, int baseheight, int conheight, int clusterno
     int origmountainschance = 1; //2; // The higher this is, the less often central continents will have mountains down one side.
     int mountainschance = 4; // The higher this is, the less often other continents will have mountains down one side.
 
-    updatereport("Preparing Voronoi map");
-
     vector<vector<short>> voronoi(width + 1, vector<short>(height + 1, 0));
     int points = 200; // Number of points in the voronoi map
-
-    makevoronoi(voronoi, width, height, points);
 
     vector<vector<bool>> continent(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
     vector<vector<short>> continentnos(ARRAYWIDTH, vector<short>(ARRAYHEIGHT, 0));
     vector<vector<short>> overlaps(ARRAYWIDTH, vector<short>(ARRAYHEIGHT, 0));
 
-    updatereport("Making continents");
+    if (beginworldgenstep("Preparing Voronoi map"))
+        makevoronoi(voronoi, width, height, points);
+
+    if (beginworldgenstep("Making continents"))
+    {
 
     twointegers focuspoints[4]; // These will be points where continents etc will start close to.
 
@@ -2692,87 +2683,88 @@ void largecontinents(planet& world, int baseheight, int conheight, int clusterno
             }
         }
     }
+    }
 
     // Now remove inland seas.
 
-    updatereport("Removing inland seas");
+    if (beginworldgenstep("Removing inland seas"))
+        removeinlandseas(world, conheight);
 
-    removeinlandseas(world, conheight);
-
-    updatereport("Adding continental mountain ranges");
-
-    // Now we add mountain ranges where continents overlap.
-
-    int doneoverlaps[50]; // This will note down all the ones we've done.
-
-    for (int n = 0; n < 50; n++)
-        doneoverlaps[n] = 0;
-
-    for (int i = 0; i <= width; i++)
+    if (beginworldgenstep("Adding continental mountain ranges"))
     {
-        for (int j = 0; j <= height; j++)
+        // Now we add mountain ranges where continents overlap.
+
+        int doneoverlaps[50]; // This will note down all the ones we've done.
+
+        for (int n = 0; n < 50; n++)
+            doneoverlaps[n] = 0;
+
+        for (int i = 0; i <= width; i++)
         {
-            if (overlaps[i][j] != 0)
+            for (int j = 0; j <= height; j++)
             {
-                int thisoverlap = overlaps[i][j];
-
-                bool donethisone = 0;
-
-                for (int n = 0; n < 50; n++)
+                if (overlaps[i][j] != 0)
                 {
-                    if (doneoverlaps[n] == thisoverlap)
-                    {
-                        donethisone = 1;
-                        n = 50;
-                    }
-                }
+                    int thisoverlap = overlaps[i][j];
 
-                if (donethisone == 0)
-                {
-                    if (world.outline(i, j) == 1)
+                    bool donethisone = 0;
+
+                    for (int n = 0; n < 50; n++)
                     {
-                        for (int n = 0; n < 50; n++)
+                        if (doneoverlaps[n] == thisoverlap)
                         {
-                            if (doneoverlaps[n] == 0)
-                            {
-                                doneoverlaps[n] = thisoverlap;
-                                n = 50;
-                            }
+                            donethisone = 1;
+                            n = 50;
                         }
+                    }
 
-                        int furthestx = -1;
-                        int furthesty = -1;
-                        int dist = 0;
-
-                        for (int k = 0; k <= width; k++) // Find the furthest point that's in the same overlap.
+                    if (donethisone == 0)
+                    {
+                        if (world.outline(i, j) == 1)
                         {
-                            for (int l = 0; l <= height; l++)
+                            for (int n = 0; n < 50; n++)
                             {
-                                if (overlaps[k][l] == thisoverlap)
+                                if (doneoverlaps[n] == 0)
                                 {
-                                    int xdist = i - k;
-                                    int ydist = j - l;
+                                    doneoverlaps[n] = thisoverlap;
+                                    n = 50;
+                                }
+                            }
 
-                                    int thisdist = xdist * xdist + ydist + ydist;
+                            int furthestx = -1;
+                            int furthesty = -1;
+                            int dist = 0;
 
-                                    if (thisdist > dist)
+                            for (int k = 0; k <= width; k++) // Find the furthest point that's in the same overlap.
+                            {
+                                for (int l = 0; l <= height; l++)
+                                {
+                                    if (overlaps[k][l] == thisoverlap)
                                     {
-                                        dist = thisdist;
-                                        furthestx = k;
-                                        furthesty = l;
+                                        int xdist = i - k;
+                                        int ydist = j - l;
+
+                                        int thisdist = xdist * xdist + ydist + ydist;
+
+                                        if (thisdist > dist)
+                                        {
+                                            dist = thisdist;
+                                            furthestx = k;
+                                            furthesty = l;
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        if (dist != 0)
-                        {
-                            vector <twointegers> dummy1(2);
+                            if (dist != 0)
+                            {
+                                vector <twointegers> dummy1(2);
 
-                            vector<vector<bool>> dummy2(2, vector<bool>(2, 0));
+                                vector<vector<bool>> dummy2(2, vector<bool>(2, 0));
 
-                            createdirectedchain(world, baseheight, conheight, 1, continentnos, fractal, landshape, chainland, i, j, furthestx, furthesty, 0, dummy1, dummy2, 200);
+                                createdirectedchain(world, baseheight, conheight, 1, continentnos, fractal, landshape, chainland, i, j, furthestx, furthesty, 0, dummy1, dummy2, 200);
 
+                            }
                         }
                     }
                 }
@@ -2798,9 +2790,8 @@ void largecontinents(planet& world, int baseheight, int conheight, int clusterno
 
     // Now we do the continental shelves.
 
-    updatereport("Making continental shelves");
-
-    makecontinentalshelves(world, shelves, 4);
+    if (beginworldgenstep("Making continental shelves"))
+        makecontinentalshelves(world, shelves, 4);
 
     // Now we add some island chains.
 
@@ -10092,178 +10083,90 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     // We need a grid of edge points - points where the coastal shelves meet ocean.
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            if (shelves[i][j] == 1 && shelfedge(world, shelves, i, j) == 1)
-                edgepoints[i][j] = 1;
+            for (int i = 0; i <= width; i++)
+            {
+                if (shelves[i][j] == 1 && shelfedge(world, shelves, i, j) == 1)
+                    edgepoints[i][j] = 1;
+            }
         }
-    }
+    });
 
     // Now we need to go over all the ocean points and work out their closest edge points.
+
+    vector<twointegers> frontier;
+    frontier.reserve((width + 1) * 4);
+
+    auto addfrontierseed = [&](int x, int y, int sourcex, int sourcey)
+    {
+        if (nearestshelfdist[x][y] != 0)
+            return;
+
+        nearestshelfdist[x][y] = 1;
+        nearestshelfx[x][y] = sourcex;
+        nearestshelfy[x][y] = sourcey;
+
+        twointegers point;
+        point.x = x;
+        point.y = y;
+        frontier.push_back(point);
+    };
 
     for (int i = 0; i <= width; i++) // Every cell that *is* an edge point is closest to itself.
     {
         for (int j = 0; j <= height; j++)
         {
             if (edgepoints[i][j] == 1)
-            {
-                nearestshelfdist[i][j] = 1;
-                nearestshelfx[i][j] = i;
-                nearestshelfy[i][j] = j;
-            }
+                addfrontierseed(i, j, i, j);
         }
     }
 
     for (int i = 0; i <= width; i++) // The northern and southern edges of the map count as shelf edges for this purpose.
     {
-        if (nearestshelfdist[i][0] == 0)
-        {
-            nearestshelfdist[i][0] = 1;
-            nearestshelfx[i][0] = -1;
-            nearestshelfy[i][0] = -1;
-        }
-
-        if (nearestshelfdist[i][1] == 0)
-        {
-            nearestshelfdist[i][1] = 1;
-            nearestshelfx[i][1] = -1;
-            nearestshelfy[i][1] = -1;
-        }
-
-        if (nearestshelfdist[i][height] == 0)
-        {
-            nearestshelfdist[i][height] = 1;
-            nearestshelfx[i][height] = -1;
-            nearestshelfy[i][height] = -1;
-        }
-
-        if (nearestshelfdist[i][height - 1] == 0)
-        {
-            nearestshelfdist[i][height - 1] = 1;
-            nearestshelfx[i][height - 1] = -1;
-            nearestshelfy[i][height - 1] = -1;
-        }
+        addfrontierseed(i, 0, -1, -1);
+        addfrontierseed(i, 1, -1, -1);
+        addfrontierseed(i, height, -1, -1);
+        addfrontierseed(i, height - 1, -1, -1);
     }
 
-    bool done = 0;
     int sweep = 2; // Because the first sweep was just setting up the edge points themselves
 
-    while (done == 0) // Now go over the map, over and over again, filling out the zones
+    while (frontier.empty() == false) // Now fill out the zones using a true frontier expansion.
     {
-        bool found = 0;
+        vector<twointegers> nextfrontier;
+        nextfrontier.reserve(frontier.size() * 2);
 
-        if (random(1, 2) == 1) // This is to make sure that we scan across the map in different directions equally, to avoid weird artefacts
+        for (const twointegers& point : frontier)
         {
-            int a = 0;
-            int b = width;
-            int c = 1;
+            const int i = point.x;
+            const int j = point.y;
 
-            int d = 0;
-            int e = height;
-            int f = 1;
-
-            if (random(1, 2) == 1)
+            for (int k = i - 1; k <= i + 1; k++)
             {
-                a = width;
-                b = 0;
-                c = -1;
-            }
+                int kk = k;
 
-            if (random(1, 2) == 1)
-            {
-                d = height;
-                e = 0;
-                f = -1;
-            }
+                if (kk < 0 || kk > width)
+                    kk = wrap(kk, width);
 
-            for (int i = a; i != b; i = i + c)
-            {
-                for (int j = d; j != e; j = j + f)
+                for (int l = j - 1; l <= j + 1; l++)
                 {
-                    if (nearestshelfdist[i][j] == sweep - 1) // If this is one we did on the *last* sweep
+                    if (l >= 0 && l <= height)
                     {
-                        for (int k = i - 1; k <= i + 1; k++)
+                        if (k == i || l == j || random(1, 2) == 1) // Only sometimes do diagonals, otherwise the end result looks too angular.
                         {
-                            int kk = k;
-
-                            if (kk<0 || kk>width)
-                                kk = wrap(kk, width);
-
-                            for (int l = j - 1; l <= j + 1; l++)
+                            if (shelves[kk][l] == 0 && nearestshelfdist[kk][l] == 0)
                             {
-                                if (l >= 0 && l <= height)
-                                {
-                                    if (k == i || l == j || random(1, 2) == 1) // Only sometimes do diagonals, otherwise the end result looks too angular.
-                                    {
-                                        if (shelves[kk][l] == 0 && nearestshelfdist[kk][l] == 0)
-                                        {
-                                            found = 1;
-                                            nearestshelfdist[kk][l] = sweep;
-                                            nearestshelfx[kk][l] = nearestshelfx[i][j];
-                                            nearestshelfy[kk][l] = nearestshelfy[i][j];
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        else
-        {
-            int a = 0;
-            int b = width;
-            int c = 1;
+                                nearestshelfdist[kk][l] = sweep;
+                                nearestshelfx[kk][l] = nearestshelfx[i][j];
+                                nearestshelfy[kk][l] = nearestshelfy[i][j];
 
-            int d = 0;
-            int e = height;
-            int f = 1;
-
-            if (random(1, 2) == 1)
-            {
-                a = width;
-                b = 0;
-                c = -1;
-            }
-
-            if (random(1, 2) == 1)
-            {
-                d = height;
-                e = 0;
-                f = -1;
-            }
-
-            for (int j = d; j != e; j = j + f)
-            {
-                for (int i = a; i != b; i = i + c)
-                {
-                    if (nearestshelfdist[i][j] == sweep - 1) // If this is one we did on the *last* sweep
-                    {
-                        for (int k = i - 1; k <= i + 1; k++)
-                        {
-                            int kk = k;
-
-                            if (kk<0 || kk>width)
-                                kk = wrap(kk, width);
-
-                            for (int l = j - 1; l <= j + 1; l++)
-                            {
-                                if (l >= 0 && l <= height)
-                                {
-                                    if (k == i || l == j || random(1, 2) == 1) // Only sometimes do diagonals, otherwise the end result looks too angular.
-                                    {
-                                        if (shelves[kk][l] == 0 && nearestshelfdist[kk][l] == 0)
-                                        {
-                                            found = 1;
-                                            nearestshelfdist[kk][l] = sweep;
-                                            nearestshelfx[kk][l] = nearestshelfx[i][j];
-                                            nearestshelfy[kk][l] = nearestshelfy[i][j];
-                                        }
-                                    }
-                                }
+                                twointegers nextpoint;
+                                nextpoint.x = kk;
+                                nextpoint.y = l;
+                                nextfrontier.push_back(nextpoint);
                             }
                         }
                     }
@@ -10271,41 +10174,42 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
             }
         }
 
-        if (found == 0)
-            done = 1;
-
+        frontier.swap(nextfrontier);
         sweep++;
     }
 
     // Now we need to find where the zones meet.
 
-    int maxdiff = 400; //100; // If neighbouring cells have closest edgepoints that are further away than this, it means they are on the boundary between different zones.
+    int maxdiff = tuning::terrain::oceanridges::boundaryMaxSourceDifference;
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            if (nearestshelfdist[i][j] > 0)
+            for (int i = 0; i <= width; i++)
             {
-                bool found = 0;
-
-                for (int k = i - 1; k <= i + 1; k++)
+                if (nearestshelfdist[i][j] > 0)
                 {
-                    int kk = k;
+                    bool found = 0;
 
-                    if (kk<0 || kk>width)
-                        kk = wrap(kk, width);
-
-                    for (int l = j - 1; l <= j + 1; l++)
+                    for (int k = i - 1; k <= i + 1; k++)
                     {
-                        if (l >= 0 && l <= height)
+                        int kk = k;
+
+                        if (kk < 0 || kk > width)
+                            kk = wrap(kk, width);
+
+                        for (int l = j - 1; l <= j + 1; l++)
                         {
-                            if (shelves[i][j] == 0 && shelves[kk][l] == 0)
+                            if (l >= 0 && l <= height)
                             {
-                                if (boundaries[kk][l] == 0 && (nearestshelfx[i][j] - nearestshelfx[kk][l] > maxdiff || nearestshelfx[kk][l] - nearestshelfx[i][j] > maxdiff || nearestshelfy[i][j] - nearestshelfy[kk][l] > maxdiff || nearestshelfy[kk][l] - nearestshelfy[i][j] > maxdiff))
+                                if (shelves[i][j] == 0 && shelves[kk][l] == 0)
                                 {
-                                    boundaries[i][j] = 1;
-                                    found = 1;
+                                    if (boundaries[kk][l] == 0 && (nearestshelfx[i][j] - nearestshelfx[kk][l] > maxdiff || nearestshelfx[kk][l] - nearestshelfx[i][j] > maxdiff || nearestshelfy[i][j] - nearestshelfy[kk][l] > maxdiff || nearestshelfy[kk][l] - nearestshelfy[i][j] > maxdiff))
+                                    {
+                                        boundaries[i][j] = 1;
+                                        found = 1;
+                                    }
                                 }
                             }
                         }
@@ -10313,11 +10217,11 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
                 }
             }
         }
-    }
+    });
 
     // We've got the boundaries marked out. Now we need to make a grid.
 
-    int gridsize = 16; // The bigger this is, the fewer points we'll identify.
+    int gridsize = tuning::terrain::oceanridges::gridSize;
     int halfgrid = gridsize / 2 - 1;
 
     for (int i = 0; i <= width; i = i + gridsize)
@@ -10505,19 +10409,19 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     // First, we want a fractal to offset all points.
 
-    int grain = 8; // Level of detail on this fractal map.
-    float valuemod = 0.2f;
-    int v = random(3, 6);
+    int grain = tuning::terrain::oceanridges::pointShiftFractalGrain;
+    float valuemod = tuning::terrain::oceanridges::pointShiftFractalValueMod;
+    int v = random(tuning::terrain::oceanridges::pointShiftFractalValueMod2Min, tuning::terrain::oceanridges::pointShiftFractalValueMod2Max);
     float valuemod2 = (float)v;
 
     vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
     createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
 
-    int maxshift = 40; //8; // Amount that points can move as a result of the fractal.
+    int maxshift = tuning::terrain::oceanridges::maxShift;
 
-    int maxadditionalshift = 6; //4; // Amount that points can be moved in addition.
-    int minadditionalshift = 1;
+    int maxadditionalshift = tuning::terrain::oceanridges::maxAdditionalShift;
+    int minadditionalshift = tuning::terrain::oceanridges::minAdditionalShift;
 
     float div = (float)maxelev / (float)(maxshift * 2);
 
@@ -10686,11 +10590,81 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     } while (found == 1);
 
+    vector<twointegers> ridgecells;
+    ridgecells.reserve((width + 1) * (height + 1) / 32);
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            if (ridges[i][j] != 0)
+            {
+                twointegers point;
+                point.x = i;
+                point.y = j;
+                ridgecells.push_back(point);
+            }
+        }
+    }
+
+    auto buildcircleoffsets = [](int maxradius)
+    {
+        vector<vector<twointegers>> offsets(maxradius + 1);
+
+        for (int radius = 1; radius <= maxradius; radius++)
+        {
+            vector<twointegers>& current = offsets[radius];
+
+            for (int k = -radius; k <= radius; k++)
+            {
+                for (int l = -radius; l <= radius; l++)
+                {
+                    if (k * k + l * l < radius * radius + radius)
+                    {
+                        twointegers offset;
+                        offset.x = k;
+                        offset.y = l;
+                        current.push_back(offset);
+                    }
+                }
+            }
+        }
+
+        return offsets;
+    };
+
     // Now raise the land around the ridges.
 
-    const int firstmaxradius = 70;//50; // The bigger this is, the wider the ridge areas will be.
-    int heightmult = 6; // The bigger this is, the higher the ridge areas will be.
-    int maxvolcanoradius = 6; // Volcanoes can't be further than this from the central ridge.
+    const int firstmaxradius = tuning::terrain::oceanridges::firstPassMaxRadius;
+    int heightmult = tuning::terrain::oceanridges::firstPassHeightMultiplier;
+    int maxvolcanoradius = tuning::terrain::oceanridges::maxVolcanoRadius;
+    const vector<vector<twointegers>> firstcircleoffsets = buildcircleoffsets(firstmaxradius);
+    const int widthplusone = width + 1;
+    const size_t ridgecellcount = static_cast<size_t>(widthplusone) * static_cast<size_t>(height + 1);
+
+    auto flatridgeindex = [&](int x, int y)
+    {
+        return static_cast<size_t>(y) * static_cast<size_t>(widthplusone) + static_cast<size_t>(x);
+    };
+
+    auto ridgeworkerstouse = [](int totalitems, int minitemsperworker)
+    {
+        unsigned int workerstouse = std::thread::hardware_concurrency();
+
+        if (workerstouse == 0)
+            workerstouse = 4;
+
+        if (workerstouse <= 1 || totalitems <= minitemsperworker)
+            return 1u;
+
+        const int maxworkers = std::max(1, totalitems / minitemsperworker);
+        workerstouse = std::min(workerstouse, static_cast<unsigned int>(maxworkers));
+
+        if (workerstouse == 0)
+            workerstouse = 1;
+
+        return workerstouse;
+    };
 
     float thisheightperthousand[firstmaxradius + 1]; // Create a lookup table for these values, for speed.
 
@@ -10699,12 +10673,34 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
     for (int n = 2; n <= firstmaxradius; n++)
         thisheightperthousand[n] = thisheightperthousand[n - 1] * thisheightperthousand[1];
 
-    for (int i = 0; i <= width; i++) // First, the ridges.
+    const unsigned int firstpaintworkers = ridgeworkerstouse(static_cast<int>(ridgecells.size()), 16);
+    vector<vector<int>> localridgeheights(firstpaintworkers, vector<int>(ridgecellcount, 0));
+    vector<vector<unsigned char>> localridgedists(firstpaintworkers, vector<unsigned char>(ridgecellcount, 0));
+    vector<std::thread> firstworkers;
+    firstworkers.reserve(firstpaintworkers > 0 ? firstpaintworkers - 1 : 0);
+
+    int firstcurrent = 0;
+    const int firstbasechunk = static_cast<int>(ridgecells.size()) / static_cast<int>(firstpaintworkers);
+    const int firstremainder = static_cast<int>(ridgecells.size()) % static_cast<int>(firstpaintworkers);
+
+    for (unsigned int worker = 0; worker < firstpaintworkers; worker++)
     {
-        for (int j = 0; j <= height; j++)
+        const int chunksize = firstbasechunk + (worker < static_cast<unsigned int>(firstremainder) ? 1 : 0);
+        const int chunkstart = firstcurrent;
+        const int chunkend = firstcurrent + chunksize - 1;
+        firstcurrent = chunkend + 1;
+
+        auto paintfirstpass = [&](unsigned int workerindex, int startindex, int endindex)
         {
-            if (ridges[i][j] != 0)
+            vector<int>& workerheights = localridgeheights[workerindex];
+            vector<unsigned char>& workerdists = localridgedists[workerindex];
+
+            for (int ridgeindex = startindex; ridgeindex <= endindex; ridgeindex++)
             {
+                const twointegers& ridgepoint = ridgecells[ridgeindex];
+                const int i = ridgepoint.x;
+                const int j = ridgepoint.y;
+
                 float riftheight = (float)(ridges[i][j] * heightmult);
                 float riftheightdiv = riftheight / 1000.0f;
 
@@ -10713,52 +10709,140 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
                 for (int radius = firstmaxradius; radius >= 1; radius--)
                 {
                     mult++;
+                    const int thisheight = (int)(riftheightdiv * thisheightperthousand[mult]);
 
-                    float thisheight = riftheightdiv * thisheightperthousand[mult];
-
-                    for (int k = -radius; k <= radius; k++)
+                    for (const twointegers& offset : firstcircleoffsets[radius])
                     {
-                        for (int l = -radius; l <= radius; l++)
+                        int kk = i + offset.x;
+
+                        if (kk < 0 || kk > width)
+                            kk = wrap(kk, width);
+
+                        int ll = j + offset.y;
+
+                        if (ll >= 0 && ll <= height)
                         {
-                            if (k * k + l * l < radius * radius + radius)
+                            const size_t flatindex = flatridgeindex(kk, ll);
+
+                            if (workerheights[flatindex] < thisheight)
                             {
-                                int kk = i + k;
-
-                                if (kk<0 || kk>width)
-                                    kk = wrap(kk, width);
-
-                                int ll = j + l;
-
-                                if (ll >= 0 && ll <= height)
-                                {
-                                    if (ridgesmap[kk][ll] < (int)thisheight)
-                                    {
-                                        ridgesmap[kk][ll] = (int)thisheight;
-                                        ridgedistances[kk][ll] = mult;
-                                        world.setoceanridgeheights(kk, ll, (int)thisheight);
-
-                                        if (radius <= maxvolcanoradius && random(1, 4000000) < thisheight / 10)
-                                            world.setvolcano(kk, ll, random((int)(thisheight / 4.0f), (int)((thisheight / 4.0f) * 3.0f)));
-                                    }
-                                }
+                                workerheights[flatindex] = thisheight;
+                                workerdists[flatindex] = static_cast<unsigned char>(mult);
                             }
                         }
                     }
                 }
             }
-        }
+        };
+
+        if (chunkstart > chunkend)
+            continue;
+
+        if (worker + 1 == firstpaintworkers)
+            paintfirstpass(worker, chunkstart, chunkend);
+        else
+            firstworkers.emplace_back(paintfirstpass, worker, chunkstart, chunkend);
     }
 
-    int maxradius = 50; // The bigger this is, the wider the ridge areas will be.
-    heightmult = 6; // The bigger this is, the higher the ridge areas will be.
+    for (std::thread& worker : firstworkers)
+        worker.join();
 
-    for (int i = 0; i <= width; i++) // Now add some more for just the land.
+    vector<int> ridgeheightflat(ridgecellcount, 0);
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            if (ridges[i][j] != 0)
+            for (int i = 0; i <= width; i++)
             {
-                int heightdivs = ((ridges[i][j] * heightmult) / maxradius);
+                const size_t flatindex = flatridgeindex(i, j);
+                int bestheight = 0;
+                unsigned char bestdist = 0;
+
+                for (unsigned int worker = 0; worker < firstpaintworkers; worker++)
+                {
+                    const int candidate = localridgeheights[worker][flatindex];
+
+                    if (candidate > bestheight)
+                    {
+                        bestheight = candidate;
+                        bestdist = localridgedists[worker][flatindex];
+                    }
+                }
+
+                if (bestheight > 0)
+                {
+                    ridgesmap[i][j] = bestheight;
+                    ridgedistances[i][j] = bestdist;
+                    ridgeheightflat[flatindex] = bestheight;
+                    world.setoceanridgeheights(i, j, bestheight);
+                }
+            }
+        }
+    });
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+            {
+                if (ridgedistances[i][j] != 0 && ridgedistances[i][j] <= maxvolcanoradius)
+                {
+                    const int thisheight = ridgeheightflat[flatridgeindex(i, j)];
+
+                    if (thisheight > 0)
+                    {
+                        unsigned int hash = static_cast<unsigned int>(world.seed());
+                        hash ^= static_cast<unsigned int>(i) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+                        hash ^= static_cast<unsigned int>(j) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+                        hash ^= static_cast<unsigned int>(thisheight) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+
+                        if ((hash % 4000000u) < static_cast<unsigned int>(std::max(1, thisheight / 10)))
+                        {
+                            const int minvolcano = std::max(1, thisheight / 4);
+                            const int maxvolcano = std::max(minvolcano, (thisheight / 4) * 3);
+                            const unsigned int span = static_cast<unsigned int>(maxvolcano - minvolcano + 1);
+
+                            hash ^= 0x85ebca6bu + (hash << 6) + (hash >> 2);
+                            world.setvolcano(i, j, minvolcano + static_cast<int>(hash % span));
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    int maxradius = tuning::terrain::oceanridges::secondPassMaxRadius;
+    heightmult = tuning::terrain::oceanridges::secondPassHeightMultiplier;
+    const vector<vector<twointegers>> secondcircleoffsets = buildcircleoffsets(maxradius);
+    const unsigned int secondpaintworkers = ridgeworkerstouse(static_cast<int>(ridgecells.size()), 16);
+    vector<vector<int>> localridgeadds(secondpaintworkers, vector<int>(ridgecellcount, 0));
+    vector<std::thread> secondworkers;
+    secondworkers.reserve(secondpaintworkers > 0 ? secondpaintworkers - 1 : 0);
+
+    int secondcurrent = 0;
+    const int secondbasechunk = static_cast<int>(ridgecells.size()) / static_cast<int>(secondpaintworkers);
+    const int secondremainder = static_cast<int>(ridgecells.size()) % static_cast<int>(secondpaintworkers);
+
+    for (unsigned int worker = 0; worker < secondpaintworkers; worker++)
+    {
+        const int chunksize = secondbasechunk + (worker < static_cast<unsigned int>(secondremainder) ? 1 : 0);
+        const int chunkstart = secondcurrent;
+        const int chunkend = secondcurrent + chunksize - 1;
+        secondcurrent = chunkend + 1;
+
+        auto paintsecondpass = [&](unsigned int workerindex, int startindex, int endindex)
+        {
+            vector<int>& workerheights = localridgeadds[workerindex];
+
+            for (int ridgeindex = startindex; ridgeindex <= endindex; ridgeindex++)
+            {
+                const twointegers& ridgepoint = ridgecells[ridgeindex];
+                const int i = ridgepoint.x;
+                const int j = ridgepoint.y;
+                const int ridgeheight = ridges[i][j] * heightmult;
+                const int heightdivs = ridgeheight / maxradius;
                 int mult = 0;
 
                 for (int radius = maxradius; radius >= 1; radius--)
@@ -10766,47 +10850,77 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
                     mult++;
 
                     int thisheight = heightdivs * mult;
+                    thisheight = (thisheight * 3 + ridgeheight / radius) / 4; // 3, 4
 
-                    thisheight = (thisheight * 3 + (ridges[i][j] * heightmult) / radius) / 4; // 3, 4
-
-                    for (int k = -radius; k <= radius; k++)
+                    for (const twointegers& offset : secondcircleoffsets[radius])
                     {
-                        for (int l = -radius; l <= radius; l++)
+                        int kk = i + offset.x;
+
+                        if (kk < 0 || kk > width)
+                            kk = wrap(kk, width);
+
+                        int ll = j + offset.y;
+
+                        if (ll >= 0 && ll <= height)
                         {
-                            if (k * k + l * l < radius * radius + radius)
-                            {
-                                int kk = i + k;
+                            const size_t flatindex = flatridgeindex(kk, ll);
 
-                                if (kk<0 || kk>width)
-                                    kk = wrap(kk, width);
-
-                                int ll = j + l;
-
-                                if (ll >= 0 && ll <= height)
-                                {
-                                    if (ridgesmap[kk][ll] < thisheight)
-                                        ridgesmap[kk][ll] = thisheight;
-                                }
-                            }
+                            if (workerheights[flatindex] < thisheight)
+                                workerheights[flatindex] = thisheight;
                         }
                     }
                 }
             }
-        }
+        };
+
+        if (chunkstart > chunkend)
+            continue;
+
+        if (worker + 1 == secondpaintworkers)
+            paintsecondpass(worker, chunkstart, chunkend);
+        else
+            secondworkers.emplace_back(paintsecondpass, worker, chunkstart, chunkend);
     }
+
+    for (std::thread& worker : secondworkers)
+        worker.join();
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+            {
+                const size_t flatindex = flatridgeindex(i, j);
+                int bestheight = ridgesmap[i][j];
+
+                for (unsigned int worker = 0; worker < secondpaintworkers; worker++)
+                {
+                    const int candidate = localridgeadds[worker][flatindex];
+
+                    if (candidate > bestheight)
+                        bestheight = candidate;
+                }
+
+                ridgesmap[i][j] = bestheight;
+            }
+        }
+    });
 
     // Add the rift in the middle
 
-    for (int i = 0; i <= width; i++)
+    vector<twointegers> riftcells;
+    riftcells.reserve(ridgecells.size());
+
+    for (const twointegers& ridgepoint : ridgecells)
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (ridges[i][j] != 0)
-            {
-                ridgesmap[i][j] = ridgesmap[i][j] / 2;
-                world.setoceanrifts(i, j, ridgesmap[i][j]);
-            }
-        }
+        const int i = ridgepoint.x;
+        const int j = ridgepoint.y;
+        ridgesmap[i][j] = ridgesmap[i][j] / 2;
+        world.setoceanrifts(i, j, ridgesmap[i][j]);
+
+        if (ridgesmap[i][j] != 0)
+            riftcells.push_back(ridgepoint);
     }
 
     // Now we have to work out the angles of lines crossing the rifts.
@@ -10830,113 +10944,148 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     vector<vector<bool>> checked(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
 
-    short dist = 3; // Go this far away from the point in question in each direction.
+    short dist = tuning::terrain::oceanridges::ridgeAngleSearchDistance;
 
     int x1, y1, x2, y2;
 
-    for (int i = 0; i <= width; i++)
+    for (const twointegers& ridgepoint : riftcells)
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.oceanrifts(i, j) != 0)
-            {
-                // Clear this area in the checked array.
+        const int i = ridgepoint.x;
+        const int j = ridgepoint.y;
 
-                for (int k = i - dist - 1; k <= i + dist + 1; k++)
+        // Clear this area in the checked array.
+
+        for (int k = i - dist - 1; k <= i + dist + 1; k++)
+        {
+            int kk = k;
+
+            if (kk < 0 || kk > width)
+                kk = wrap(kk, width);
+
+            for (int l = j - dist - 1; l <= j + dist + 1; l++)
+            {
+                if (l >= 0 && l <= height)
+                    checked[kk][l] = 0;
+            }
+        }
+
+        // Now go along the line twice - once in each direction.
+
+        for (int dir = 1; dir <= 2; dir++)
+        {
+            int x = i;
+            int y = j;
+
+            for (int n = 1; n <= dist; n++)
+            {
+                checked[x][y] = 1;
+
+                for (int k = x - 1; k <= x + 1; k++)
                 {
                     int kk = k;
-
-                    if (kk<0 || kk>width)
+                    if (kk < 0 || kk > width)
                         kk = wrap(kk, width);
 
-                    for (int l = j - dist - 1; l <= j + dist + 1; l++)
+                    for (int l = y - 1; l <= y + 1; l++)
                     {
                         if (l >= 0 && l <= height)
-                            checked[kk][l] = 0;
-                    }
-                }
-
-                // Now go along the line twice - once in each direction.
-
-                for (int dir = 1; dir <= 2; dir++)
-                {
-                    int x = i;
-                    int y = j;
-
-                    for (int n = 1; n <= dist; n++)
-                    {
-                        checked[x][y] = 1;
-
-                        for (int k = x - 1; k <= x + 1; k++)
                         {
-                            int kk = k;
-                            if (kk<0 || kk>width)
-                                kk = wrap(kk, width);
-
-                            for (int l = y - 1; l <= y + 1; l++)
+                            if (checked[kk][l] == 0 && world.oceanrifts(kk, l) != 0)
                             {
-                                if (l >= 0 && l <= height)
-                                {
-                                    if (checked[kk][l] == 0 && world.oceanrifts(kk, l) != 0)
-                                    {
-                                        x = kk;
-                                        y = l;
+                                x = kk;
+                                y = l;
 
-                                        k = x + 20;
-                                        l = y + 20;
-                                    }
-                                }
+                                k = x + 20;
+                                l = y + 20;
                             }
                         }
                     }
-
-                    if (dir == 1)
-                    {
-                        x1 = x;
-                        y1 = y;
-                    }
-                    else
-                    {
-                        x2 = x;
-                        y2 = y;
-                    }
                 }
+            }
 
-                // Now we have the two nearby points, we just find the angle between them.
-
-                float angle = (float)atan2((float)y2 - (float)y1, (float)x2 - (float)x1) * 180.0f / 3.14159265358979323846f; // This gives us the angle of the ridge
-
-                angle = angle + 180.0f; // Because we want the line that crosses the ridge
-
-                while (angle > 360.0f)
-                    angle = angle - 360.0f;
-
-                // Now we just have to blend that with the fractal angle for this point.
-
-                int angle2 = wrappedaverage((int)angle, fractal[i][j], 360);
-
-                while (angle2 > 180)
-                    angle2 = angle2 - 180;
-
-                world.setoceanridgeangle(i, j, angle2);
+            if (dir == 1)
+            {
+                x1 = x;
+                y1 = y;
+            }
+            else
+            {
+                x2 = x;
+                y2 = y;
             }
         }
+
+        // Now we have the two nearby points, we just find the angle between them.
+
+        float angle = (float)atan2((float)y2 - (float)y1, (float)x2 - (float)x1) * 180.0f / 3.14159265358979323846f; // This gives us the angle of the ridge
+
+        angle = angle + 180.0f; // Because we want the line that crosses the ridge
+
+        while (angle > 360.0f)
+            angle = angle - 360.0f;
+
+        // Now we just have to blend that with the fractal angle for this point.
+
+        int angle2 = wrappedaverage((int)angle, fractal[i][j], 360);
+
+        while (angle2 > 180)
+            angle2 = angle2 - 180;
+
+        world.setoceanridgeangle(i, j, angle2);
     }
 
     // Mark out the ridge mountains, following the contours of the raised land
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            if (ridgedistances[i][j] != 0)
+            for (int i = 0; i <= width; i++)
             {
-                int ii = i; // Looking north
-                int jj = j - 1;
-                int dir = 1;
-
-                if (jj >= 0)
+                if (ridgedistances[i][j] != 0)
                 {
+                    int ii = i; // Looking north
+                    int jj = j - 1;
+                    int dir = 1;
+
+                    if (jj >= 0)
+                    {
+                        if (ridgedistances[ii][jj] == ridgedistances[i][j])
+                        {
+                            if (getoceanridge(world, i, j, dir) == 0)
+                            {
+                                int code = getcode(dir);
+                                world.setoceanridges(i, j, world.oceanridges(i, j) + code);
+                            }
+                        }
+                    }
+
+                    ii = i + 1; // Looking northeast
+                    jj = j - 1;
+                    dir = 2;
+
+                    if (ii > width)
+                        ii = 0;
+
+                    if (jj >= 0)
+                    {
+                        if (ridgedistances[ii][jj] == ridgedistances[i][j])
+                        {
+                            if (getoceanridge(world, i, j, dir) == 0)
+                            {
+                                int code = getcode(dir);
+                                world.setoceanridges(i, j, world.oceanridges(i, j) + code);
+                            }
+                        }
+                    }
+
+                    ii = i + 1; // Looking east
+                    jj = j;
+                    dir = 3;
+
+                    if (ii > width)
+                        ii = 0;
+
                     if (ridgedistances[ii][jj] == ridgedistances[i][j])
                     {
                         if (getoceanridge(world, i, j, dir) == 0)
@@ -10945,17 +11094,68 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
                             world.setoceanridges(i, j, world.oceanridges(i, j) + code);
                         }
                     }
-                }
 
-                ii = i + 1; // Looking northeast
-                jj = j - 1;
-                dir = 2;
+                    ii = i + 1; // Looking southeast
+                    jj = j + 1;
+                    dir = 4;
 
-                if (ii > width)
-                    ii = 0;
+                    if (ii > width)
+                        ii = 0;
 
-                if (jj >= 0)
-                {
+                    if (jj <= height)
+                    {
+                        if (ridgedistances[ii][jj] == ridgedistances[i][j])
+                        {
+                            if (getoceanridge(world, i, j, dir) == 0)
+                            {
+                                int code = getcode(dir);
+                                world.setoceanridges(i, j, world.oceanridges(i, j) + code);
+                            }
+                        }
+                    }
+
+                    ii = i; // Looking south
+                    jj = j + 1;
+                    dir = 5;
+
+                    if (jj <= height)
+                    {
+                        if (ridgedistances[ii][jj] == ridgedistances[i][j])
+                        {
+                            if (getoceanridge(world, i, j, dir) == 0)
+                            {
+                                int code = getcode(dir);
+                                world.setoceanridges(i, j, world.oceanridges(i, j) + code);
+                            }
+                        }
+                    }
+
+                    ii = i - 1; // Looking southwest
+                    jj = j + 1;
+                    dir = 6;
+
+                    if (ii < 0)
+                        ii = width;
+
+                    if (jj <= height)
+                    {
+                        if (ridgedistances[ii][jj] == ridgedistances[i][j])
+                        {
+                            if (getoceanridge(world, i, j, dir) == 0)
+                            {
+                                int code = getcode(dir);
+                                world.setoceanridges(i, j, world.oceanridges(i, j) + code);
+                            }
+                        }
+                    }
+
+                    ii = i - 1; // Looking west
+                    jj = j;
+                    dir = 7;
+
+                    if (ii < 0)
+                        ii = width;
+
                     if (ridgedistances[ii][jj] == ridgedistances[i][j])
                     {
                         if (getoceanridge(world, i, j, dir) == 0)
@@ -10964,115 +11164,29 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
                             world.setoceanridges(i, j, world.oceanridges(i, j) + code);
                         }
                     }
-                }
 
-                ii = i + 1; // Looking east
-                jj = j;
-                dir = 3;
+                    ii = i - 1; // Looking northwest
+                    jj = j - 1;
+                    dir = 8;
 
-                if (ii > width)
-                    ii = 0;
+                    if (ii < 0)
+                        ii = width;
 
-                if (ridgedistances[ii][jj] == ridgedistances[i][j])
-                {
-                    if (getoceanridge(world, i, j, dir) == 0)
+                    if (jj >= 0)
                     {
-                        int code = getcode(dir);
-                        world.setoceanridges(i, j, world.oceanridges(i, j) + code);
-                    }
-                }
-
-                ii = i + 1; // Looking southeast
-                jj = j + 1;
-                dir = 4;
-
-                if (ii > width)
-                    ii = 0;
-
-                if (jj <= height)
-                {
-                    if (ridgedistances[ii][jj] == ridgedistances[i][j])
-                    {
-                        if (getoceanridge(world, i, j, dir) == 0)
+                        if (ridgedistances[ii][jj] == ridgedistances[i][j])
                         {
-                            int code = getcode(dir);
-                            world.setoceanridges(i, j, world.oceanridges(i, j) + code);
-                        }
-                    }
-                }
-
-                ii = i; // Looking south
-                jj = j + 1;
-                dir = 5;
-
-                if (jj <= height)
-                {
-                    if (ridgedistances[ii][jj] == ridgedistances[i][j])
-                    {
-                        if (getoceanridge(world, i, j, dir) == 0)
-                        {
-                            int code = getcode(dir);
-                            world.setoceanridges(i, j, world.oceanridges(i, j) + code);
-                        }
-                    }
-                }
-
-                ii = i - 1; // Looking southwest
-                jj = j + 1;
-                dir = 6;
-
-                if (ii < 0)
-                    ii = width;
-
-                if (jj <= height)
-                {
-                    if (ridgedistances[ii][jj] == ridgedistances[i][j])
-                    {
-                        if (getoceanridge(world, i, j, dir) == 0)
-                        {
-                            int code = getcode(dir);
-                            world.setoceanridges(i, j, world.oceanridges(i, j) + code);
-                        }
-                    }
-                }
-
-                ii = i - 1; // Looking west
-                jj = j;
-                dir = 7;
-
-                if (ii < 0)
-                    ii = width;
-
-                if (ridgedistances[ii][jj] == ridgedistances[i][j])
-                {
-                    if (getoceanridge(world, i, j, dir) == 0)
-                    {
-                        int code = getcode(dir);
-                        world.setoceanridges(i, j, world.oceanridges(i, j) + code);
-                    }
-                }
-
-                ii = i - 1; // Looking northwest
-                jj = j - 1;
-                dir = 8;
-
-                if (ii < 0)
-                    ii = width;
-
-                if (jj >= 0)
-                {
-                    if (ridgedistances[ii][jj] == ridgedistances[i][j])
-                    {
-                        if (getoceanridge(world, i, j, dir) == 0)
-                        {
-                            int code = getcode(dir);
-                            world.setoceanridges(i, j, world.oceanridges(i, j) + code);
+                            if (getoceanridge(world, i, j, dir) == 0)
+                            {
+                                int code = getcode(dir);
+                                world.setoceanridges(i, j, world.oceanridges(i, j) + code);
+                            }
                         }
                     }
                 }
             }
         }
-    }
+    });
 
     // Now remove extraneous ridges
 
@@ -11120,11 +11234,11 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     // Now we'll make a fractal. This will be used to displace the ridges in the regional map.
 
-    int maxdisplace = 16; // Maximum displacement of the ridges in the regional map.
+    int maxdisplace = tuning::terrain::oceanridges::regionalDisplacement;
 
-    grain = 128; // Level of detail on this fractal map.
-    valuemod = 4.0f;
-    valuemod2 = 8.0f;
+    grain = tuning::terrain::oceanridges::regionalDisplacementFractalGrain;
+    valuemod = tuning::terrain::oceanridges::regionalDisplacementValueMod;
+    valuemod2 = tuning::terrain::oceanridges::regionalDisplacementValueMod2;
 
     vector<vector<int>> ridgefractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
@@ -11132,32 +11246,35 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     div = (float)maxelev / ((float)maxdisplace * 2.0f);
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            float amount = (float)ridgefractal[i][j];
+            for (int i = 0; i <= width; i++)
+            {
+                float amount = (float)ridgefractal[i][j];
 
-            amount = amount / div;
-            amount = amount - (float)maxdisplace;
+                amount = amount / div;
+                amount = amount - (float)maxdisplace;
 
-            if (amount < 0.0f - (float)maxdisplace)
-                amount = 0.0f - (float)maxdisplace;
+                if (amount < 0.0f - (float)maxdisplace)
+                    amount = 0.0f - (float)maxdisplace;
 
-            if (amount > (float)maxdisplace)
-                amount = (float)maxdisplace;
+                if (amount > (float)maxdisplace)
+                    amount = (float)maxdisplace;
 
-            world.setoceanridgeoffset(i, j, (int)amount);
+                world.setoceanridgeoffset(i, j, (int)amount);
+            }
         }
-    }
+    });
 
     // Now we need to disrupt the rifts by adding some faults.
 
-    for (int n = 1; n <= 4; n++)
+    for (int n = 1; n <= tuning::terrain::oceanridges::faultPasses; n++)
     {
-        int faultstep = 8; // The higher this is, the fewer faults there will be
-        int faultvar = 3; // The higher this is, the more random the spaces between faults
-        int lookdist = 4; // Distance to look for faults from the focal points
+        int faultstep = tuning::terrain::oceanridges::faultStep;
+        int faultvar = tuning::terrain::oceanridges::faultVariation;
+        int lookdist = tuning::terrain::oceanridges::faultLookDistance;
 
         int faultstotal = 0;
 
@@ -11212,29 +11329,35 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     // Remove any ridge-related stuff that's on continental plates
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            if (shelves[i][j] == 1 || world.sea(i, j) == 0)
+            for (int i = 0; i <= width; i++)
             {
-                ridgesmap[i][j] = 0;
-                world.setoceanrifts(i, j, 0);
-                world.setoceanridges(i, j, 0);
-                world.setoceanridgeheights(i, j, 0);
-                world.setoceanridgeangle(i, j, 0);
-                world.setoceanridgeoffset(i, j, 0);
+                if (shelves[i][j] == 1 || world.sea(i, j) == 0)
+                {
+                    ridgesmap[i][j] = 0;
+                    world.setoceanrifts(i, j, 0);
+                    world.setoceanridges(i, j, 0);
+                    world.setoceanridgeheights(i, j, 0);
+                    world.setoceanridgeangle(i, j, 0);
+                    world.setoceanridgeoffset(i, j, 0);
+                }
             }
         }
-    }
+    });
 
     // Draw the raised land onto the actual sea bed
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
-            world.setnom(i, j, world.nom(i, j) + ridgesmap[i][j]);
-    }
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+                world.setnom(i, j, world.nom(i, j) + ridgesmap[i][j]);
+        }
+    });
 }
 
 // This checks to see whether the given point is on the edge of a continental shelf.
