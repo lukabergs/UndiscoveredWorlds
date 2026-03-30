@@ -31,6 +31,10 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <algorithm>
+#include <array>
+#include <thread>
+#include <vector>
 #include <SFML/Graphics.hpp>
 
 
@@ -44,7 +48,9 @@
 #define NOISEWIDTH 1025
 #define NOISEHEIGHT 513
 
-#define GLOBALMAPTYPES 7
+constexpr int GLOBALMAPTYPES = 6;
+constexpr int DISPLAYMAPSIZEX = 1024;
+constexpr int DISPLAYMAPSIZEY = 512;
 
 #define REGIONALTILEWIDTH 32
 #define REGIONALTILEHEIGHT 32
@@ -60,30 +66,113 @@ using namespace std;
 enum screenmodeenum { quit, createworldscreen, creatingworldscreen, globalmapscreen, regionalmapscreen, generatingregionscreen, importscreen, completingimportscreen, movingtoglobalmapscreen, exportareascreen, exportingareascreen, loadingworldscreen, savingworldscreen, generatingtectonicscreen, generatingnontectonicscreen, loadfailure, settingsloadfailure };
 enum mapviewenum { elevation, temperature, precipitation, climate, rivers, relief };
 
+constexpr std::array<mapviewenum, GLOBALMAPTYPES> allmapviews = { elevation, temperature, precipitation, climate, rivers, relief };
+
+struct maplayer
+{
+    sf::Image image;
+    sf::Image displayimage;
+    bool created = false;
+};
+
+struct mapcache
+{
+    std::array<maplayer, GLOBALMAPTYPES> layers;
+};
+
+template <typename Fn>
+inline void parallelforrows(int startrow, int endrow, Fn&& fn, int minrowsperworker = 32)
+{
+    if (endrow < startrow)
+        return;
+
+    const int totalrows = endrow - startrow + 1;
+    unsigned int workerstouse = std::thread::hardware_concurrency();
+
+    if (workerstouse == 0)
+        workerstouse = 4;
+
+    if (workerstouse <= 1 || totalrows <= minrowsperworker)
+    {
+        fn(startrow, endrow);
+        return;
+    }
+
+    const int maxworkers = std::max(1, totalrows / minrowsperworker);
+    workerstouse = std::min(workerstouse, static_cast<unsigned int>(maxworkers));
+
+    if (workerstouse <= 1)
+    {
+        fn(startrow, endrow);
+        return;
+    }
+
+    std::vector<std::thread> workers;
+    workers.reserve(workerstouse - 1);
+
+    const int basechunk = totalrows / static_cast<int>(workerstouse);
+    const int remainder = totalrows % static_cast<int>(workerstouse);
+
+    int currentrow = startrow;
+
+    for (unsigned int worker = 0; worker < workerstouse; worker++)
+    {
+        const int chunksize = basechunk + (worker < static_cast<unsigned int>(remainder) ? 1 : 0);
+        const int chunkstart = currentrow;
+        const int chunkend = currentrow + chunksize - 1;
+        currentrow = chunkend + 1;
+
+        if (worker + 1 == workerstouse)
+            fn(chunkstart, chunkend);
+        else
+            workers.emplace_back([&fn, chunkstart, chunkend]() { fn(chunkstart, chunkend); });
+    }
+
+    for (std::thread& worker : workers)
+        worker.join();
+}
+
+constexpr int mapviewindex(mapviewenum mapview)
+{
+    return static_cast<int>(mapview);
+}
+
 // Declare functions that are in main.cpp
 
 void fast_srand(long seed);
 int fast_rand(void);
 float getlatestversion();
-void adjustforsize(planet& world, sf::Vector2i& globaltexturesize, sf::Image& globalelevationimage, sf::Image& globaltemperatureimage, sf::Image& globalprecipitationimage, sf::Image& globalclimateimage, sf::Image& globalriversimage, sf::Image& globalreliefimage, sf::Image& highlightimage, int highlightsize, sf::Image& minihighlightimage, int& minihighlightsize);
+void resetmapcache(mapcache& maps);
+maplayer& getmaplayer(mapcache& maps, mapviewenum mapview);
+const maplayer& getmaplayer(const mapcache& maps, mapviewenum mapview);
+sf::Image& getmapimage(mapcache& maps, mapviewenum mapview);
+const sf::Image& getmapimage(const mapcache& maps, mapviewenum mapview);
+sf::Image& getdisplaymapimage(mapcache& maps, mapviewenum mapview);
+const sf::Image& getdisplaymapimage(const mapcache& maps, mapviewenum mapview);
+void updateTextureFromImage(sf::Texture& texture, const sf::Image& image);
+void adjustforsize(planet& world, sf::Vector2i& globaltexturesize, mapcache& globalmaps, sf::Image& highlightimage, int highlightsize, sf::Image& minihighlightimage, int& minihighlightsize);
 void drawhighlightobjects(planet& world, sf::Image& highlightimage, int highlightsize, sf::Image& minihighlightimage, int& minihighlightsize);
 void updatereport(string text);
 bool standardbutton(const char* label);
-void drawglobalmapimage(mapviewenum mapview, planet& world, bool globalmapimagecreated[], sf::Image& globalelevationimage, sf::Image& globaltemperatureimage, sf::Image& globalprecipitationimage, sf::Image& globalclimateimage, sf::Image& globalriversimage, sf::Image& globalreliefimage, sf::Image& displayglobalelevationimage, sf::Image& displayglobaltemperatureimage, sf::Image& displayglobalprecipitationimage, sf::Image& displayglobalclimateimage, sf::Image& displayglobalriversimage, sf::Image& displayglobalreliefimage);
-void drawglobalelevationmapimage(planet& world, sf::Image& globalelevationimage, sf::Image& displayglobalelevationimage);
-void drawglobaltemperaturemapimage(planet& world, sf::Image& globaltemperatureimage, sf::Image& displayglobaltemperatureimage);
-void drawglobalprecipitationmapimage(planet& world, sf::Image& globalprecipitationimage, sf::Image& displayglobalprecipitationimage);
-void drawglobalclimatemapimage(planet& world, sf::Image& globalclimateimage, sf::Image& displayglobalclimateimage);
-void drawglobalriversmapimage(planet& world, sf::Image& globalriversimage, sf::Image& displayglobalriversimage);
-void drawglobalreliefmapimage(planet& world, sf::Image& globalreliefimage, sf::Image& displayglobalreliefimage);
+void drawglobalmapimage(mapviewenum mapview, planet& world, mapcache& maps);
+void drawallglobalmapimages(planet& world, mapcache& maps);
+void applyglobalmapview(mapviewenum mapview, planet& world, mapcache& maps, sf::Texture& texture, sf::Sprite& sprite, sf::Sprite* minimap = nullptr);
+void drawglobalelevationmapimage(planet& world, maplayer& layer);
+void drawglobaltemperaturemapimage(planet& world, maplayer& layer);
+void drawglobalprecipitationmapimage(planet& world, maplayer& layer);
+void drawglobalclimatemapimage(planet& world, maplayer& layer);
+void drawglobalriversmapimage(planet& world, maplayer& layer);
+void drawglobalreliefmapimage(planet& world, maplayer& layer);
 sf::Color getclimatecolours(short climate);
-void drawregionalmapimage(mapviewenum mapview, planet& world, region& region, bool regionalmapimagecreated[], sf::Image& regionalelevationimage, sf::Image& regionaltemperatureimage, sf::Image& regionalprecipitationimage, sf::Image& regionalclimateimage, sf::Image& regionalriversimage, sf::Image& regionalreliefimage);
-void drawregionalelevationmapimage(planet& world, region& region, sf::Image& regionalelevationimage);
-void drawregionaltemperaturemapimage(planet& world, region& region, sf::Image& regionaltemperatureimage);
-void drawregionalprecipitationmapimage(planet& world, region& region, sf::Image& regionalprecipitationimage);
-void drawregionalclimatemapimage(planet& world, region& region, sf::Image& regionalclimateimage);
-void drawregionalriversmapimage(planet& world, region& region, sf::Image& regionalriversimage);
-void drawregionalreliefmapimage(planet& world, region& region, sf::Image& regionalreliefimage);
+void drawregionalmapimage(mapviewenum mapview, planet& world, region& region, mapcache& maps);
+void drawallregionalmapimages(planet& world, region& region, mapcache& maps);
+void applyregionalmapview(mapviewenum mapview, planet& world, region& region, mapcache& maps, sf::Texture& texture, sf::Sprite& sprite);
+void drawregionalelevationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltemperaturemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalprecipitationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalriversmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer);
 
 // Declare functions that are in misc.cpp
 
@@ -120,8 +209,8 @@ void box(vector<vector<int>>& arr, int x1, int y1, int x2, int y2, int col);
 void drawcircle3d(vector<vector<vector<int>>>& arr, int x, int y, int col, int radius, int index);
 void box3d(vector<vector<vector<int>>>& arr, int x1, int y1, int x2, int y2, int col, int index);
 twofloats curvepos(twofloats p0, twofloats p1, twofloats p2, twofloats p3, float t);
-void fill(vector<vector<bool>>& arr, int width, int height, int x, int y, int replacement);
-void fillcontinent(vector<vector<bool>>& arr, vector<vector<short>>& mask, short maskcheck, int width, int height, int startx, int starty, int replacement);
+void fill(vector<vector<bool>>& arr, int width, int height, int x, int y, bool replacement);
+void fillcontinent(vector<vector<bool>>& arr, vector<vector<short>>& mask, short maskcheck, int width, int height, int startx, int starty, bool replacement);
 int tempelevadd(planet& world, int temp, int i, int j);
 int tempelevadd(planet& world, region& region, int temp, int i, int j);
 int tempelevremove(planet& world, int temp, int i, int j);

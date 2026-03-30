@@ -1257,7 +1257,7 @@ twofloats curvepos(twofloats p0, twofloats p1, twofloats p2, twofloats p3, float
 
 // This function does a flood fill on a bool vector.
 
-void fill(vector<vector<bool>>& arr, int width, int height, int startx, int starty, int replacement)
+void fill(vector<vector<bool>>& arr, int width, int height, int startx, int starty, bool replacement)
 {
     if (startx < 0 || startx >= width || starty < 0 || starty >= height)
         return;
@@ -1306,7 +1306,7 @@ void fill(vector<vector<bool>>& arr, int width, int height, int startx, int star
 
 // This function does the same thing, but with a continental mask to avoid going into the sea.
 
-void fillcontinent(vector<vector<bool>>& arr, vector<vector<short>>& mask, short maskcheck, int width, int height, int startx, int starty, int replacement)
+void fillcontinent(vector<vector<bool>>& arr, vector<vector<short>>& mask, short maskcheck, int width, int height, int startx, int starty, bool replacement)
 {
     if (startx < 0 || startx >= width || starty < 0 || starty >= height)
         return;

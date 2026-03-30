@@ -70,20 +70,23 @@ void generateglobalterraintype1(planet& world, bool customgenerate, int mergefac
 
     world.clear(); // Clears all of the maps in this world.
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            world.setnom(i, j, 0);
-            plateaumap[i][j] = 0;
-            mountaindrainage[i][j] = 0;
-            shelves[i][j] = 0;
-            seafractal[i][j] = 0;
-            removedland[i][j] = 0;
-            volcanodensity[i][j] = 0;
-            volcanodirection[i][j] = 0;
+            for (int i = 0; i <= width; i++)
+            {
+                world.setnom(i, j, 0);
+                plateaumap[i][j] = 0;
+                mountaindrainage[i][j] = 0;
+                shelves[i][j] = 0;
+                seafractal[i][j] = 0;
+                removedland[i][j] = 0;
+                volcanodensity[i][j] = 0;
+                volcanodirection[i][j] = 0;
+            }
         }
-    }
+    });
 
     // Now start the generating.
 
@@ -169,11 +172,14 @@ void generateglobalterraintype1(planet& world, bool customgenerate, int mergefac
     }
     */
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
-            world.setnoise(i, j, fractal[i][j]);
-    }
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+                world.setnoise(i, j, fractal[i][j]);
+        }
+    });
 
     for (int i = 0; i <= width; i++)
     {
@@ -615,11 +621,14 @@ void generateglobalterraintype2(planet& world, bool customgenerate, int mergefac
 
     createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
-            world.setnoise(i, j, fractal[i][j]);
-    }
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+                world.setnoise(i, j, fractal[i][j]);
+        }
+    });
 
     // Now make a new one that we'll actually use for global terrain creation.
 
@@ -630,11 +639,14 @@ void generateglobalterraintype2(planet& world, bool customgenerate, int mergefac
 
     int fractaladd = sealevel - 2500;
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
-            fractal[i][j] = fractal[i][j] + fractaladd;
-    }
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+                fractal[i][j] = fractal[i][j] + fractaladd;
+        }
+    });
 
     updatereport("Creating continental map");
 
@@ -1080,20 +1092,23 @@ void generateglobalterraintype3(planet& world, bool customgenerate, int mergefac
 
     world.clear(); // Clears all of the maps in this world.
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            world.setnom(i, j, 0);
-            plateaumap[i][j] = 0;
-            mountaindrainage[i][j] = 0;
-            shelves[i][j] = 0;
-            seafractal[i][j] = 0;
-            removedland[i][j] = 0;
-            volcanodensity[i][j] = 0;
-            volcanodirection[i][j] = 0;
+            for (int i = 0; i <= width; i++)
+            {
+                world.setnom(i, j, 0);
+                plateaumap[i][j] = 0;
+                mountaindrainage[i][j] = 0;
+                shelves[i][j] = 0;
+                seafractal[i][j] = 0;
+                removedland[i][j] = 0;
+                volcanodensity[i][j] = 0;
+                volcanodirection[i][j] = 0;
+            }
         }
-    }
+    });
 
     // Now start the generating.
 
@@ -1110,11 +1125,14 @@ void generateglobalterraintype3(planet& world, bool customgenerate, int mergefac
 
     createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
-            world.setnoise(i, j, fractal[i][j]);
-    }
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+                world.setnoise(i, j, fractal[i][j]);
+        }
+    });
 
     // Now make a new one that we'll actually use for global terrain creation.
 
@@ -1482,20 +1500,23 @@ void generateglobalterraintype4(planet& world, bool customgenerate, int iteratio
 
     world.clear(); // Clears all of the maps in this world.
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            world.setnom(i, j, 0);
-            plateaumap[i][j] = 0;
-            mountaindrainage[i][j] = 0;
-            shelves[i][j] = 0;
-            seafractal[i][j] = 0;
-            removedland[i][j] = 0;
-            volcanodensity[i][j] = 0;
-            volcanodirection[i][j] = 0;
+            for (int i = 0; i <= width; i++)
+            {
+                world.setnom(i, j, 0);
+                plateaumap[i][j] = 0;
+                mountaindrainage[i][j] = 0;
+                shelves[i][j] = 0;
+                seafractal[i][j] = 0;
+                removedland[i][j] = 0;
+                volcanodensity[i][j] = 0;
+                volcanodirection[i][j] = 0;
+            }
         }
-    }
+    });
 
     // Now start the generating.
 
@@ -1512,11 +1533,14 @@ void generateglobalterraintype4(planet& world, bool customgenerate, int iteratio
     
     createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
     
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
-            world.setnoise(i, j, fractal[i][j]);
-    }
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+                world.setnoise(i, j, fractal[i][j]);
+        }
+    });
     
     // Now create the basic terrain.
 
@@ -1535,16 +1559,21 @@ void generateglobalterraintype4(planet& world, bool customgenerate, int iteratio
 
     int offset = random(1, width);
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        int ii = i + offset;
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+            {
+                int ii = i + offset;
 
-        if (ii > width)
-            ii = ii - width;
+                if (ii > width)
+                    ii = ii - width;
 
-        for (int j = 0; j <= height; j++)
-            world.setnom(i, j, terrain[ii][j]);
-    }
+                world.setnom(i, j, terrain[ii][j]);
+            }
+        }
+    });
 
     updatereport("Smoothing map");
 
@@ -7737,14 +7766,17 @@ void addplateaux(planet& world, vector<vector<int>>& plateaumap, int conheight)
     int width = world.width();
     int height = world.height();
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            if (plateaumap[i][j] != 0 && world.sea(i, j) == 0 && conheight + plateaumap[i][j] > world.map(i, j))
-                world.setnom(i, j, conheight + plateaumap[i][j]);
+            for (int i = 0; i <= width; i++)
+            {
+                if (plateaumap[i][j] != 0 && world.sea(i, j) == 0 && conheight + plateaumap[i][j] > world.map(i, j))
+                    world.setnom(i, j, conheight + plateaumap[i][j]);
+            }
         }
-    }
+    });
 }
 
 // This function smoothes, but without turning any land to sea or vice versa.
@@ -8027,14 +8059,17 @@ void createextraelev(planet& world)
     int warpfactor = random(20, 80);
     warp(tempelev, width, height, (int)maxelev, warpfactor, 1);
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            world.setextraelev(i, j, tempelev[i][j]);
-            tempelev[i][j] = 0;
+            for (int i = 0; i <= width; i++)
+            {
+                world.setextraelev(i, j, tempelev[i][j]);
+                tempelev[i][j] = 0;
+            }
         }
-    }
+    });
 
     int v = random(3, 6);
     valuemod2 = (float)v;
@@ -8046,30 +8081,33 @@ void createextraelev(planet& world)
 
     // Now alter it a bit.
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            if (world.sea(i, j) == 1)
-                world.setextraelev(i, j, 0);
-            else
+            for (int i = 0; i <= width; i++)
             {
-                float e = (float)world.extraelev(i, j);
-                e = e / div;
-                e = e - maxextra;
+                if (world.sea(i, j) == 1)
+                    world.setextraelev(i, j, 0);
+                else
+                {
+                    float e = (float)world.extraelev(i, j);
+                    e = e / div;
+                    e = e - maxextra;
 
-                if (e < 0.0f)
-                    e = 0.0f;
+                    if (e < 0.0f)
+                        e = 0.0f;
 
-                if (e > maxextra)
-                    e = maxextra;
+                    if (e > maxextra)
+                        e = maxextra;
 
-                e = e * gravity;
+                    e = e * gravity;
 
-                world.setextraelev(i, j, (int)e);
+                    world.setextraelev(i, j, (int)e);
+                }
             }
         }
-    }
+    });
 
     // That gives us a *lot* of extra elevation across the map. We want to apply it a bit more judiciously.
     // So we use a second fractal to mask the first, so that fewer areas get extra elevation.
@@ -8077,28 +8115,31 @@ void createextraelev(planet& world)
     float multfactor = (float)random(1, 10);
     multfactor = multfactor / 10.0f + 1.0f; // Different worlds will have different amounts of extra elevation.
 
-    for (int i = 0; i <= width; i++)
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int j = 0; j <= height; j++)
+        for (int j = startrow; j <= endrow; j++)
         {
-            if (world.sea(i, j) == 0)
+            for (int i = 0; i <= width; i++)
             {
-                float e = (float)tempelev[i][j];
-                e = e / div;
-                e = e - maxextra;
+                if (world.sea(i, j) == 0)
+                {
+                    float e = (float)tempelev[i][j];
+                    e = e / div;
+                    e = e - maxextra;
 
-                e = e * multfactor; // The higher this is, the more widespread the extra elevation will be.
+                    e = e * multfactor; // The higher this is, the more widespread the extra elevation will be.
 
-                tempelev[i][j] = (int)e;
+                    tempelev[i][j] = (int)e;
 
-                if (tempelev[i][j] < 0)
-                    tempelev[i][j] = 0;
+                    if (tempelev[i][j] < 0)
+                        tempelev[i][j] = 0;
 
-                if (tempelev[i][j] < world.extraelev(i, j))
-                    world.setextraelev(i, j, tempelev[i][j]);
+                    if (tempelev[i][j] < world.extraelev(i, j))
+                        world.setextraelev(i, j, tempelev[i][j]);
+                }
             }
         }
-    }
+    });
 
     // Now smooth it
 
