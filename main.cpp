@@ -12,6 +12,8 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
+#include <array>
 #include <iomanip>
 #include <sstream>
 #include <iostream>
@@ -34,10 +36,12 @@
 #include "planet.hpp"
 #include "region.hpp"
 #include "app_dialogs.hpp"
+#include "app_environment.hpp"
 #include "app_state.hpp"
 #include "app_windows.hpp"
 #include "appearance_settings.hpp"
 #include "functions.hpp"
+#include "map_appearance.hpp"
 #include "map_imports.hpp"
 #include "ui_charts.hpp"
 #include "ui_panels.hpp"
@@ -205,28 +209,6 @@ void resizeglobaldisplayforworld(planet& world, GlobalMapDisplay& globaldisplay,
     refreshminihighlightdisplay(highlightdisplay);
 }
 
-template <typename Callback>
-void drawmapviewbuttons(Callback&& onSelect)
-{
-    if (standardbutton("Relief"))
-        onSelect(relief);
-
-    if (standardbutton("Elevation"))
-        onSelect(elevation);
-
-    if (standardbutton("Temperature"))
-        onSelect(temperature);
-
-    if (standardbutton("Precipitation"))
-        onSelect(precipitation);
-
-    if (standardbutton("Climate"))
-        onSelect(climate);
-
-    if (standardbutton("Rivers"))
-        onSelect(rivers);
-}
-
 void ensureworkingdirectory()
 {
     if (GetFileAttributesA("version.txt") != INVALID_FILE_ATTRIBUTES)
@@ -319,6 +301,7 @@ void configureimguistyle()
 int main()
 {
     ensureworkingdirectory();
+    reloadappenvironment();
     float currentversion = 1.0f;
     float latestversion = getlatestversion();
 
@@ -353,7 +336,18 @@ int main()
     auto openFileDialog = [](const char* filter)
     {
         IGFD::FileDialogConfig dialogConfig;
-        dialogConfig.path = ".";
+        const AppEnvironmentConfig& appenv = getappenvironment();
+        string dialogpath = appenv.defaultWorldDirectory.string();
+
+        if (strcmp(filter, ".uws") == 0)
+            dialogpath = appenv.defaultAppearanceDirectory.string();
+        else if (strcmp(filter, ".png") == 0)
+            dialogpath = appenv.defaultImageDirectory.string();
+
+        if (dialogpath.empty())
+            dialogpath = ".";
+
+        dialogConfig.path = dialogpath;
         ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", filter, dialogConfig);
     };
 
@@ -402,6 +396,7 @@ int main()
     sf::Image& globaltemperatureimage = getmapimage(globalmaps, temperature);
     sf::Image& globalprecipitationimage = getmapimage(globalmaps, precipitation);
     sf::Image& globalclimateimage = getmapimage(globalmaps, climate);
+    sf::Image& globalbiomeimage = getmapimage(globalmaps, biomes);
     sf::Image& globalriversimage = getmapimage(globalmaps, rivers);
     sf::Image& globalreliefimage = getmapimage(globalmaps, relief);
 
@@ -409,6 +404,7 @@ int main()
     sf::Image& displayglobaltemperatureimage = getdisplaymapimage(globalmaps, temperature);
     sf::Image& displayglobalprecipitationimage = getdisplaymapimage(globalmaps, precipitation);
     sf::Image& displayglobalclimateimage = getdisplaymapimage(globalmaps, climate);
+    sf::Image& displayglobalbiomeimage = getdisplaymapimage(globalmaps, biomes);
     sf::Image& displayglobalriversimage = getdisplaymapimage(globalmaps, rivers);
     sf::Image& displayglobalreliefimage = getdisplaymapimage(globalmaps, relief);
 
@@ -438,6 +434,7 @@ int main()
     sf::Image& regionaltemperatureimage = getmapimage(regionalmaps, temperature);
     sf::Image& regionalprecipitationimage = getmapimage(regionalmaps, precipitation);
     sf::Image& regionalclimateimage = getmapimage(regionalmaps, climate);
+    sf::Image& regionalbiomeimage = getmapimage(regionalmaps, biomes);
     sf::Image& regionalriversimage = getmapimage(regionalmaps, rivers);
     sf::Image& regionalreliefimage = getmapimage(regionalmaps, relief);
 
@@ -552,6 +549,7 @@ int main()
     bool& showsetsize = panels.showSetSize; // If this is 1 then a window is show to set the size for the custom world.
     bool& showtectonicchooser = panels.showTectonicChooser; // If this is 1 then we show the panel for creating tectonic-based custom world terrain.
     bool& shownontectonicchooser = panels.showNonTectonicChooser; // If this is 1 then we show the panel for creating non-tectonic-based custom world terrain.
+    bool& showworldgenerationoptions = panels.showWorldGenerationOptions;
     bool& showworldeditproperties = panels.showWorldEditProperties; // If this is 1 then we show the panel for editing custom world properties.
     bool& showareawarning = panels.showAreaWarning; // If this is 1 then we show a warning about too-large areas.
     bool& showabout = panels.showAbout; // If this is 1 then we display information about the program.
@@ -566,6 +564,8 @@ int main()
     short& generatingregionpass = progresspasses.generatingRegion; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
     short& generatingtectonicpass = progresspasses.generatingTectonic; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
     short& generatingnontectonicpass = progresspasses.generatingNonTectonic; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
+
+    WorldGenerationDebugState worldgenerationdebug;
 
     auto invalidateGlobalMaps = [&]()
     {
@@ -661,6 +661,14 @@ int main()
     ImVec4& shinglecolour = appearance.shinglecolour;
     ImVec4& mangrovecolour = appearance.mangrovecolour;
     ImVec4& highlightcolour = appearance.highlightcolour;
+    ImVec4& outlinecolour = appearance.outlinecolour;
+    ImVec4& elevationlowcolour = appearance.elevationlowcolour;
+    ImVec4& elevationhighcolour = appearance.elevationhighcolour;
+    ImVec4& temperaturecoldcolour = appearance.temperaturecoldcolour;
+    ImVec4& temperaturetemperatecolour = appearance.temperaturetemperatecolour;
+    ImVec4& temperaturehotcolour = appearance.temperaturehotcolour;
+    ImVec4& precipitationdrycolour = appearance.precipitationdrycolour;
+    ImVec4& precipitationwetcolour = appearance.precipitationwetcolour;
     float& shadingland = appearance.shadingland;
     float& shadinglake = appearance.shadinglake;
     float& shadingsea = appearance.shadingsea;
@@ -672,8 +680,10 @@ int main()
     int& shadingdir = appearance.shadingdir;
     int& snowchange = appearance.snowchange;
     int& seaiceappearance = appearance.seaiceappearance;
+    bool& showmapoutline = appearance.showmapoutline;
     bool& colourcliffs = appearance.colourcliffs;
     bool& mangroves = appearance.mangroves;
+    array<int, MAPGRADIENTTYPECOUNT> selectedgradientstops = {};
 
     auto showdeferredworkwindow = [&](short& pass, const char* windowTitle, const char* message, ImVec2 position, ImVec2 size) -> bool
     {
@@ -702,6 +712,7 @@ int main()
 
         updatereport("Generating custom world terrain from seed: " + to_string(world->seed()) + ":");
         updatereport("");
+        begintimedreporting();
 
         invalidateGlobalMaps();
         fast_srand(world->seed());
@@ -709,6 +720,7 @@ int main()
 
     auto finishcustomworldgeneration = [&](short& pass)
     {
+        endtimedreporting();
         resetmapcache(globalmaps);
 
         mapview = relief;
@@ -770,6 +782,9 @@ int main()
                 showsetsize = 1;
 
             if (actions.startWorldGeneration)
+                showworldgenerationoptions = 1;
+
+            if (drawworldgenerationoptionswindow(main_viewport, window_flags, showworldgenerationoptions, worldgenerationdebug.options))
             {
                 world->setseed(seedentry);
                 screenmode = creatingworldscreen;
@@ -784,6 +799,23 @@ int main()
             {
                 updatereport("Generating world from seed: " + to_string(world->seed()) + ":");
                 updatereport("");
+                beginworldgendebugrun(world->seed(), &worldgenerationdebug.options);
+
+                if (worldgenerationdebug.options.visualizeEachStep)
+                {
+                    setworldgenvisualizationcallback([&]()
+                    {
+                        invalidateGlobalMaps();
+                        showGlobalMapView(relief);
+                        window.clear();
+                        window.draw(globalmap);
+                        window.display();
+                    });
+                }
+                else
+                    clearworldgenvisualizationcallback();
+
+                begintimedreporting();
 
                 initialiseworld(*world);
                 world->clear();
@@ -831,6 +863,8 @@ int main()
 
                 showGlobalMapView(mapview);
 
+                endtimedreporting();
+                endworldgendebugrun();
                 updatereport("");
                 updatereport("World generation completed.");
                 updatereport("");
@@ -2097,6 +2131,7 @@ int main()
             {
                 updatereport("Generating custom world:");
                 updatereport("");
+                begintimedreporting();
 
                 // Plug in the world settings.
 
@@ -2170,6 +2205,7 @@ int main()
 
                 showGlobalMapView(mapview);
 
+                endtimedreporting();
                 updatereport("");
                 updatereport("World generation completed.");
                 updatereport("");
@@ -2312,14 +2348,27 @@ int main()
                 sf::Image areatemperatureimage;
                 sf::Image areaprecipitationimage;
                 sf::Image areaclimateimage;
+                sf::Image areabiomeimage;
                 sf::Image areariversimage;
 
-                areareliefimage.create(imageareawidth + 1, imageareaheight + 1, sf::Color::Black);
-                areaelevationimage.create(imageareawidth + 1, imageareaheight + 1, sf::Color::Black);
-                areatemperatureimage.create(imageareawidth + 1, imageareaheight + 1, sf::Color::Black);
-                areaprecipitationimage.create(imageareawidth + 1, imageareaheight + 1, sf::Color::Black);
-                areaclimateimage.create(imageareawidth + 1, imageareaheight + 1, sf::Color::Black);
-                areariversimage.create(imageareawidth + 1, imageareaheight + 1, sf::Color::Black);
+                auto getAreaExportImage = [&](mapviewenum view) -> sf::Image&
+                {
+                    switch (view)
+                    {
+                    case relief: return areareliefimage;
+                    case elevation: return areaelevationimage;
+                    case temperature: return areatemperatureimage;
+                    case precipitation: return areaprecipitationimage;
+                    case climate: return areaclimateimage;
+                    case biomes: return areabiomeimage;
+                    case rivers: return areariversimage;
+                    }
+
+                    return areareliefimage;
+                };
+
+                for (const mapviewdefinition& definition : allmapviewdefinitions)
+                    getAreaExportImage(definition.view).create(imageareawidth + 1, imageareaheight + 1, sf::Color::Black);
 
                 // Now it's time to make the regions, one by one, generate their maps, and copy those maps over onto the area images.
 
@@ -2362,12 +2411,8 @@ int main()
                             destination.copy(source, copyx0, copyy0, sf::IntRect(copyx0 - destx, copyy0 - desty, copyx1 - copyx0 + 1, copyy1 - copyy0 + 1), false);
                         };
 
-                        copyRegionalLayer(regionalreliefimage, areareliefimage);
-                        copyRegionalLayer(regionalelevationimage, areaelevationimage);
-                        copyRegionalLayer(regionaltemperatureimage, areatemperatureimage);
-                        copyRegionalLayer(regionalprecipitationimage, areaprecipitationimage);
-                        copyRegionalLayer(regionalclimateimage, areaclimateimage);
-                        copyRegionalLayer(regionalriversimage, areariversimage);
+                        for (const mapviewdefinition& definition : allmapviewdefinitions)
+                            copyRegionalLayer(getmapimage(regionalmaps, definition.view), getAreaExportImage(definition.view));
                     }
                 }
 
@@ -2381,12 +2426,8 @@ int main()
 
                 filepathname.resize(filepathname.size() - 4);
 
-                areareliefimage.saveToFile(filepathname + " Relief.png");
-                areaelevationimage.saveToFile(filepathname + " Elevation.png");
-                areatemperatureimage.saveToFile(filepathname + " Temperature.png");
-                areaprecipitationimage.saveToFile(filepathname + " Precipitation.png");
-                areaclimateimage.saveToFile(filepathname + " Climate.png");
-                areariversimage.saveToFile(filepathname + " Rivers.png");
+                for (const mapviewdefinition& definition : allmapviewdefinitions)
+                    getAreaExportImage(definition.view).saveToFile(filepathname + " " + definition.exportstem + ".png");
 
                 // Clean up.
 
@@ -2466,17 +2507,8 @@ int main()
 
                 ImGui::PushItemWidth(100.0f);
 
-                standardbutton("Relief");
-
-                standardbutton("Elevation");
-
-                standardbutton("Temperature");
-
-                standardbutton("Precipitation");
-
-                standardbutton("Climate");
-
-                standardbutton("Rivers");
+                for (const mapviewdefinition& definition : allmapviewdefinitions)
+                    standardbutton(definition.label);
 
                 ImGui::Dummy(ImVec2(0.0f, linespace));
 
@@ -2607,147 +2639,28 @@ int main()
 
         if (showcolouroptions && screenmode != settingsloadfailure)
         {
-            int colouralign = 360;
-            int otheralign = 330;
+            const int colouralign = 390;
+            const int otheralign = 360;
 
-            ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 316, main_viewport->WorkPos.y + 24), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(655, 440), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 300, main_viewport->WorkPos.y + 20), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(780, 640), ImGuiCond_FirstUseEver);
 
             ImGui::Begin("Map appearance", NULL, window_flags);
 
-            ImGuiTabBarFlags tab_bar_flags = ImGuiTabBarFlags_None;
-            if (ImGui::BeginTabBar("MyTabBar", tab_bar_flags))
+            ImGui::Checkbox("Show landmass outline", &showmapoutline);
+            ImGui::SameLine(260.0f);
+            ImGui::ColorEdit3("Outline", (float*)&outlinecolour);
+            ImGui::SameLine(520.0f);
+            ImGui::TextUnformatted("Applies to every map view.");
+
+            if (ImGui::BeginTabBar("MapAppearanceTabs"))
             {
-                if (ImGui::BeginTabItem("Colours"))
+                for (const mapviewdefinition& definition : allmapviewdefinitions)
                 {
-                    ImGui::Text("  ");
+                    if (!ImGui::BeginTabItem(definition.label))
+                        continue;
 
-                    ImGui::PushItemWidth(200);
-
-                    ImGui::ColorEdit3("Shallow ocean", (float*)&oceancolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Sea ice", (float*)&seaicecolour);
-
-                    ImGui::ColorEdit3("Deep ocean", (float*)&deepoceancolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Glaciers", (float*)&glaciercolour);
-
-                    ImGui::ColorEdit3("Base land", (float*)&basecolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Salt pans", (float*)&saltpancolour);
-
-                    ImGui::ColorEdit3("Grassland", (float*)&grasscolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Dunes", (float*)&ergcolour);
-
-                    ImGui::ColorEdit3("Low temperate", (float*)&basetempcolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Rivers", (float*)&rivercolour);
-
-                    ImGui::ColorEdit3("High temperate", (float*)&highbasecolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Lakes", (float*)&lakecolour);
-
-                    ImGui::ColorEdit3("Low desert", (float*)&desertcolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Wetlands", (float*)&wetlandscolour);
-
-                    ImGui::ColorEdit3("High desert", (float*)&highdesertcolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Mangroves", (float*)&mangrovecolour);
-
-                    ImGui::ColorEdit3("Cold desert", (float*)&colddesertcolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Mud", (float*)&mudcolour);
-
-                    ImGui::ColorEdit3("Mild tundra", (float*)&eqtundracolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Sand", (float*)&sandcolour);
-
-                    ImGui::ColorEdit3("Tundra", (float*)&tundracolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Shingle", (float*)&shinglecolour);
-
-                    ImGui::ColorEdit3("Arctic", (float*)&coldcolour);
-                    ImGui::SameLine((float)colouralign);
-                    ImGui::ColorEdit3("Highlights", (float*)&highlightcolour);
-
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Effects"))
-                {
-                    ImGui::Text("  ");
-
-                    ImGui::PushItemWidth(200);
-
-                    ImGui::Text("Shading");
-
-                    ImGui::SameLine((float)otheralign);
-                    ImGui::Text("Rivers");
-
-                    ImGui::SetCursorPosX(20);
-                    ImGui::SliderFloat("On land", &shadingland, 0.0f, 1.0f, "%.2f");
-
-                    ImGui::SameLine((float)otheralign + 20);
-                    ImGui::InputInt("Global map", &globalriversentry);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Only rivers greater than this size will be displayed on the global relief map.");
-
-                    ImGui::SetCursorPosX(20);
-                    ImGui::SliderFloat("On lakes", &shadinglake, 0.0f, 1.0f, "%.2f");
-
-                    ImGui::SameLine((float)otheralign + 20);
-                    ImGui::InputInt("Regional map", &regionalriversentry);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Only rivers greater than this size will be displayed on the regional relief map.");
-
-                    ImGui::SetCursorPosX(20);
-                    ImGui::SliderFloat("On sea", &shadingsea, 0.0f, 1.0f, "%.2f");
-
-                    ImGui::Text("Marbling");
-
-                    ImGui::SameLine((float)otheralign);
-                    ImGui::Text("Other effects");
-
-                    ImGui::SetCursorPosX(20);
-                    ImGui::SliderFloat("On land ", &marblingland, 0.0f, 1.0f, "%.2f");
-
-                    ImGui::SameLine((float)otheralign + 20);
-                    const char* lightdiritems[] = { "Southeast","Southwest","Northeast","Northwest" };
-                    ImGui::Combo("Light", &shadingdir, lightdiritems, 4);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Controls the light source for the shading effect.");
-
-                    ImGui::SetCursorPosX(20);
-                    ImGui::SliderFloat("On lakes ", &marblinglake, 0.0f, 1.0f, "%.2f");
-
-
-                    ImGui::SameLine((float)otheralign + 20);
-                    const char* snowitems[] = { "Sudden","Speckled","Smooth" };
-                    ImGui::Combo("Snow", &snowchange, snowitems, 3);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Changes the appearance of transitions from snowy regions to non-snowy ones.");
-
-                    ImGui::SetCursorPosX(20);
-                    ImGui::SliderFloat("On sea ", &marblingsea, 0.0f, 1.0f, " % .2f");
-
-                    ImGui::SameLine((float)otheralign + 20);
-                    const char* seaiceitems[] = { "Permanent","None","All" };
-                    ImGui::Combo("Sea ice", &seaiceappearance, seaiceitems, 3);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Determines whether sea ice is shown.");
-
-                    ImGui::Text("    ");
-
-                    ImGui::SetCursorPosX(20);
-                    ImGui::Checkbox("Show mangrove forests", &mangroves);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Shows mangrove forests on tropical mud flats and salt wetlands.");
-
-                    ImGui::SameLine((float)otheralign + 20);
-                    ImGui::Checkbox("Only cliffs use high base colour", &colourcliffs);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Uses high base colour only on steep slopes. May look better on non-tectonic worlds with high plateaux.");
+                    drawmapviewappearancetab(definition, *world, appearance, selectedgradientstops, colouralign, otheralign);
 
                     ImGui::EndTabItem();
                 }
@@ -2755,7 +2668,7 @@ int main()
                 ImGui::EndTabBar();
             }
 
-            ImGui::SetCursorPos(ImVec2(75.0f, 405.0f));
+            ImGui::SetCursorPos(ImVec2(140.0f, 600.0f));
 
             if (ImGui::Button("Save", ImVec2(120.0f, 0.0f)))
             {
@@ -2811,9 +2724,31 @@ int main()
             int bottomrightfigures = 460;
 
             ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 265, main_viewport->WorkPos.y + 60), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(499, 264), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(640, 500), ImGuiCond_FirstUseEver);
 
-            ImGui::Begin("World properties", NULL, window_flags);
+            ImGui::Begin("World properties", NULL, window_flags & ~ImGuiWindowFlags_NoResize);
+
+            std::array<int, 32> climateareas = {};
+            int totallandarea = 0;
+
+            for (int i = 0; i <= world->width(); i++)
+            {
+                for (int j = 0; j <= world->height(); j++)
+                {
+                    short thisclimate = world->climate(i, j);
+
+                    if (thisclimate > 0 && thisclimate < static_cast<short>(climateareas.size()))
+                    {
+                        climateareas[thisclimate]++;
+                        totallandarea++;
+                    }
+                }
+            }
+
+            if (ImGui::BeginTabBar("WorldPropertiesTabs"))
+            {
+                if (ImGui::BeginTabItem("Overview"))
+                {
 
             string sizeinfo = "Size:";
 
@@ -3047,13 +2982,48 @@ int main()
 
             ImGui::SameLine((float)bottomleftfigures);
             ImGui::Text(southpolevalue.c_str());
+                    ImGui::EndTabItem();
+                }
 
-            ImGui::SameLine((float)rightalign);
+                if (ImGui::BeginTabItem("Climate"))
+                {
+                    ImGui::Text("Percent of land area");
+                    ImGui::Text(" ");
+
+                    if (ImGui::BeginTable("ClimateAreas", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY, ImVec2(0.0f, 360.0f)))
+                    {
+                        ImGui::TableSetupColumn("Code", ImGuiTableColumnFlags_WidthFixed, 55.0f);
+                        ImGui::TableSetupColumn("Climate");
+                        ImGui::TableSetupColumn("Area %", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                        ImGui::TableHeadersRow();
+
+                        for (int climate = 1; climate <= world->climatenumber() && climate < static_cast<int>(climateareas.size()); climate++)
+                        {
+                            if (climateareas[climate] == 0)
+                                continue;
+
+                            const float percentage = totallandarea > 0 ? (static_cast<float>(climateareas[climate]) * 100.0f) / static_cast<float>(totallandarea) : 0.0f;
+
+                            ImGui::TableNextRow();
+                            ImGui::TableSetColumnIndex(0);
+                            ImGui::Text("%s", getclimatecode((short)climate).c_str());
+                            ImGui::TableSetColumnIndex(1);
+                            ImGui::Text("%s", getclimatename((short)climate).c_str());
+                            ImGui::TableSetColumnIndex(2);
+                            ImGui::Text("%.2f", percentage);
+                        }
+
+                        ImGui::EndTable();
+                    }
+
+                    ImGui::EndTabItem();
+                }
+
+                ImGui::EndTabBar();
+            }
 
             if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)))
-            {
                 showworldproperties = 0;
-            }
 
             ImGui::End();
         }
@@ -3178,12 +3148,8 @@ int main()
             std::string exportpath = selectedpath;
             exportpath.resize(exportpath.size() - 4);
 
-            globalreliefimage.saveToFile(exportpath + " Relief.png");
-            globalelevationimage.saveToFile(exportpath + " Elevation.png");
-            globaltemperatureimage.saveToFile(exportpath + " Temperature.png");
-            globalprecipitationimage.saveToFile(exportpath + " Precipitation.png");
-            globalclimateimage.saveToFile(exportpath + " Climate.png");
-            globalriversimage.saveToFile(exportpath + " Rivers.png");
+            for (const mapviewdefinition& definition : allmapviewdefinitions)
+                getmapimage(globalmaps, definition.view).saveToFile(exportpath + " " + definition.exportstem + ".png");
         });
 
         handlefiledialog(exportingregionalmaps, filepathname, filepath, [&](const std::string& selectedpath, const std::string&)
@@ -3193,12 +3159,8 @@ int main()
             std::string exportpath = selectedpath;
             exportpath.resize(exportpath.size() - 4);
 
-            regionalreliefimage.saveToFile(exportpath + " Relief.png");
-            regionalelevationimage.saveToFile(exportpath + " Elevation.png");
-            regionaltemperatureimage.saveToFile(exportpath + " Temperature.png");
-            regionalprecipitationimage.saveToFile(exportpath + " Precipitation.png");
-            regionalclimateimage.saveToFile(exportpath + " Climate.png");
-            regionalriversimage.saveToFile(exportpath + " Rivers.png");
+            for (const mapviewdefinition& definition : allmapviewdefinitions)
+                getmapimage(regionalmaps, definition.view).saveToFile(exportpath + " " + definition.exportstem + ".png");
         });
 
         handlefiledialog(exportingareamaps, filepathname, filepath, [&](const std::string&, const std::string&)
@@ -3332,16 +3294,12 @@ int main()
 
             if (shouldRedrawAppearanceMaps)
             {
-                mapview = relief;
-                getmaplayer(globalmaps, relief).created = false;
-
+                invalidateGlobalMaps();
                 showGlobalMapView(mapview, true);
 
                 if (screenmode == regionalmapscreen)
                 {
-                    mapview = relief;
-                    getmaplayer(regionalmaps, relief).created = false;
-
+                    invalidateRegionalMaps();
                     showRegionalMapView(mapview);
                 }
             }

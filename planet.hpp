@@ -10,6 +10,7 @@
 #define planet_hpp
 
 #include <stdio.h>
+#include <array>
 #include <string>
 
 #include "classes.hpp"
@@ -18,6 +19,102 @@
 #define ARRAYHEIGHT 1025
 
 #define MAXCRATERS 100000
+
+constexpr int CLIMATEMAPSEACOLOURCOUNT = 3;
+constexpr int CLIMATEMAPCOLOURCOUNT = 32;
+constexpr int BIOMEMAPCOLOURCOUNT = 44;
+constexpr int RIVERMAPCOLOURCOUNT = 10;
+constexpr int RIVERMAPFEATURECOUNT = 7;
+constexpr int MAPGRADIENTTYPECOUNT = 4;
+constexpr int MAPGRADIENTMAXSTOPS = 12;
+
+enum ClimateMapSeaColourSlot
+{
+    climateopensea = 0,
+    climateseasonalseaice = 1,
+    climatepermanentseaice = 2
+};
+
+enum RiverMapColourSlot
+{
+    rivermapbackground = 0,
+    rivermaplowflow = 1,
+    rivermaphighflow = 2,
+    rivermaplake = 3,
+    rivermapsaltpan = 4,
+    rivermapwetlands = 5,
+    rivermapmud = 6,
+    rivermapsand = 7,
+    rivermapshingle = 8,
+    rivermapvolcano = 9
+};
+
+enum RiverMapFeatureSlot
+{
+    rivermapshowlakes = 0,
+    rivermapshowsaltpans = 1,
+    rivermapshowwetlands = 2,
+    rivermapshowmud = 3,
+    rivermapshowsand = 4,
+    rivermapshowshingle = 5,
+    rivermapshowvolcanoes = 6
+};
+
+enum BiomeMapColourSlot
+{
+    biomeice = 0,
+    biomepolardesert = 1,
+    biomepolardrytundra = 2,
+    biomepolarmoisttundra = 3,
+    biomepolarwettundra = 4,
+    biomepolarraindtundra = 5,
+    biomesubpolardesert = 6,
+    biomesubpolardrytundra = 7,
+    biomesubpolarmoisttundra = 8,
+    biomesubpolarwettundra = 9,
+    biomesubpolarraindtundra = 10,
+    biomeborealdesert = 11,
+    biomeborealdrybush = 12,
+    biomeborealmoistforest = 13,
+    biomeborealwetforest = 14,
+    biomeborealrainforest = 15,
+    biomecooltemperatedesert = 16,
+    biomecooltemperatedesertbush = 17,
+    biomecooltemperatesteppe = 18,
+    biomecooltemperatemoistforest = 19,
+    biomecooltemperatewetforest = 20,
+    biomecooltemperaterainforest = 21,
+    biomewarmtemperatedesert = 22,
+    biomewarmtemperatedesertbush = 23,
+    biomewarmtemperatethornsteppe = 24,
+    biomewarmtemperatedryforest = 25,
+    biomewarmtemperatemoistforest = 26,
+    biomewarmtemperatewetforest = 27,
+    biomewarmtemperaterainforest = 28,
+    biomesubtropicaldesert = 29,
+    biomesubtropicaldesertbush = 30,
+    biomesubtropicalthornsteppe = 31,
+    biomesubtropicaldryforest = 32,
+    biomesubtropicalmoistforest = 33,
+    biomesubtropicalwetforest = 34,
+    biomesubtropicalrainforest = 35,
+    biometropicaldesert = 36,
+    biometropicaldesertbush = 37,
+    biometropicalthornsteppe = 38,
+    biometropicalverydryforest = 39,
+    biometropicaldryforest = 40,
+    biometropicalmoistforest = 41,
+    biometropicalwetforest = 42,
+    biometropicalrainforest = 43
+};
+
+enum MapGradientType
+{
+    mapgradientelevation = 0,
+    mapgradienttemperature = 1,
+    mapgradientprecipitation = 2,
+    mapgradientriverflow = 3
+};
 
 using namespace std;
 
@@ -137,6 +234,8 @@ public:
 
     bool colourcliffs() const;
     void setcolourcliffs(bool amount);
+    bool showmapoutline() const;
+    void setshowmapoutline(bool amount);
 
     int shadingdir() const;
     void setshadingdir(int amount);
@@ -387,6 +486,102 @@ public:
 
     int highlight3() const { return itshighlight3; };
     void sethighlight3(int amount) { itshighlight3 = amount; };
+
+    int outline1() const { return itsoutline1; };
+    void setoutline1(int amount) { itsoutline1 = amount; };
+
+    int outline2() const { return itsoutline2; };
+    void setoutline2(int amount) { itsoutline2 = amount; };
+
+    int outline3() const { return itsoutline3; };
+    void setoutline3(int amount) { itsoutline3 = amount; };
+
+    int elevationlow1() const { return itselevationlow1; };
+    void setelevationlow1(int amount) { itselevationlow1 = amount; };
+
+    int elevationlow2() const { return itselevationlow2; };
+    void setelevationlow2(int amount) { itselevationlow2 = amount; };
+
+    int elevationlow3() const { return itselevationlow3; };
+    void setelevationlow3(int amount) { itselevationlow3 = amount; };
+
+    int elevationhigh1() const { return itselevationhigh1; };
+    void setelevationhigh1(int amount) { itselevationhigh1 = amount; };
+
+    int elevationhigh2() const { return itselevationhigh2; };
+    void setelevationhigh2(int amount) { itselevationhigh2 = amount; };
+
+    int elevationhigh3() const { return itselevationhigh3; };
+    void setelevationhigh3(int amount) { itselevationhigh3 = amount; };
+
+    int temperaturecold1() const { return itstemperaturecold1; };
+    void settemperaturecold1(int amount) { itstemperaturecold1 = amount; };
+
+    int temperaturecold2() const { return itstemperaturecold2; };
+    void settemperaturecold2(int amount) { itstemperaturecold2 = amount; };
+
+    int temperaturecold3() const { return itstemperaturecold3; };
+    void settemperaturecold3(int amount) { itstemperaturecold3 = amount; };
+
+    int temperaturetemperate1() const { return itstemperaturetemperate1; };
+    void settemperaturetemperate1(int amount) { itstemperaturetemperate1 = amount; };
+
+    int temperaturetemperate2() const { return itstemperaturetemperate2; };
+    void settemperaturetemperate2(int amount) { itstemperaturetemperate2 = amount; };
+
+    int temperaturetemperate3() const { return itstemperaturetemperate3; };
+    void settemperaturetemperate3(int amount) { itstemperaturetemperate3 = amount; };
+
+    int temperaturehot1() const { return itstemperaturehot1; };
+    void settemperaturehot1(int amount) { itstemperaturehot1 = amount; };
+
+    int temperaturehot2() const { return itstemperaturehot2; };
+    void settemperaturehot2(int amount) { itstemperaturehot2 = amount; };
+
+    int temperaturehot3() const { return itstemperaturehot3; };
+    void settemperaturehot3(int amount) { itstemperaturehot3 = amount; };
+
+    int precipitationdry1() const { return itsprecipitationdry1; };
+    void setprecipitationdry1(int amount) { itsprecipitationdry1 = amount; };
+
+    int precipitationdry2() const { return itsprecipitationdry2; };
+    void setprecipitationdry2(int amount) { itsprecipitationdry2 = amount; };
+
+    int precipitationdry3() const { return itsprecipitationdry3; };
+    void setprecipitationdry3(int amount) { itsprecipitationdry3 = amount; };
+
+    int precipitationwet1() const { return itsprecipitationwet1; };
+    void setprecipitationwet1(int amount) { itsprecipitationwet1 = amount; };
+
+    int precipitationwet2() const { return itsprecipitationwet2; };
+    void setprecipitationwet2(int amount) { itsprecipitationwet2 = amount; };
+
+    int precipitationwet3() const { return itsprecipitationwet3; };
+    void setprecipitationwet3(int amount) { itsprecipitationwet3 = amount; };
+
+    int climatemapseacolour(int slot, int channel) const;
+    void setclimatemapseacolour(int slot, int channel, int amount);
+
+    int climatemapcolour(int slot, int channel) const;
+    void setclimatemapcolour(int slot, int channel, int amount);
+
+    int biomemapcolour(int slot, int channel) const;
+    void setbiomemapcolour(int slot, int channel, int amount);
+
+    int rivermapcolour(int slot, int channel) const;
+    void setrivermapcolour(int slot, int channel, int amount);
+
+    bool showrivermapfeature(int slot) const;
+    void setshowrivermapfeature(int slot, bool amount);
+
+    int mapgradientstopcount(int gradient) const;
+    void setmapgradientstopcount(int gradient, int count);
+    bool mapgradientdiscrete(int gradient) const;
+    void setmapgradientdiscrete(int gradient, bool amount);
+    int mapgradientposition(int gradient, int stop) const;
+    void setmapgradientposition(int gradient, int stop, int amount);
+    int mapgradientcolour(int gradient, int stop, int channel) const;
+    void setmapgradientcolour(int gradient, int stop, int channel, int amount);
 
     // These accessor functions are for location-specific information.
     // They don't check that x and y are valid coordinates.
@@ -688,6 +883,7 @@ private:
     short itsseaiceappearance = 1; // How much sea ice to display.
 
     bool itscolourcliffs = 1; // If this is 1, high grass colours will only be used on steep slopes.
+    bool itsshowmapoutline = 1;
 
     float itslandmarbling;
     float itslakemarbling;
@@ -793,6 +989,43 @@ private:
     int itshighlight1;
     int itshighlight2;
     int itshighlight3;
+
+    int itsoutline1;
+    int itsoutline2;
+    int itsoutline3;
+
+    int itselevationlow1;
+    int itselevationlow2;
+    int itselevationlow3;
+    int itselevationhigh1;
+    int itselevationhigh2;
+    int itselevationhigh3;
+
+    int itstemperaturecold1;
+    int itstemperaturecold2;
+    int itstemperaturecold3;
+    int itstemperaturetemperate1;
+    int itstemperaturetemperate2;
+    int itstemperaturetemperate3;
+    int itstemperaturehot1;
+    int itstemperaturehot2;
+    int itstemperaturehot3;
+
+    int itsprecipitationdry1;
+    int itsprecipitationdry2;
+    int itsprecipitationdry3;
+    int itsprecipitationwet1;
+    int itsprecipitationwet2;
+    int itsprecipitationwet3;
+    std::array<std::array<int, 3>, CLIMATEMAPSEACOLOURCOUNT> itsclimatemapseacolours;
+    std::array<std::array<int, 3>, CLIMATEMAPCOLOURCOUNT> itsclimatemapcolours;
+    std::array<std::array<int, 3>, BIOMEMAPCOLOURCOUNT> itsbiomemapcolours;
+    std::array<std::array<int, 3>, RIVERMAPCOLOURCOUNT> itsrivermapcolours;
+    std::array<bool, RIVERMAPFEATURECOUNT> itsshowrivermapfeatures;
+    std::array<int, MAPGRADIENTTYPECOUNT> itsmapgradientstopcounts{};
+    std::array<bool, MAPGRADIENTTYPECOUNT> itsmapgradientdiscrete{};
+    std::array<std::array<int, MAPGRADIENTMAXSTOPS>, MAPGRADIENTTYPECOUNT> itsmapgradientpositions{};
+    std::array<std::array<std::array<int, 3>, MAPGRADIENTMAXSTOPS>, MAPGRADIENTTYPECOUNT> itsmapgradientcolours{};
 
     short jantempmap[ARRAYWIDTH][ARRAYHEIGHT];
     short jultempmap[ARRAYWIDTH][ARRAYHEIGHT];
@@ -970,6 +1203,8 @@ inline void planet::setseaiceappearance(int amount) { itsseaiceappearance = (sho
 
 inline bool planet::colourcliffs() const { return itscolourcliffs; };
 inline void planet::setcolourcliffs(bool amount) { itscolourcliffs = amount; };
+inline bool planet::showmapoutline() const { return itsshowmapoutline; };
+inline void planet::setshowmapoutline(bool amount) { itsshowmapoutline = amount; };
 
 inline float planet::landmarbling() const { return itslandmarbling; };
 inline void planet::setlandmarbling(float amount) { itslandmarbling = amount; };
@@ -988,6 +1223,155 @@ inline void planet::setminriverflowregional(int amount) { itsminriverflowregiona
 
 inline bool planet::showmangroves() const { return itsmangroves; };
 inline void planet::setshowmangroves(bool amount) { itsmangroves = amount; };
+
+inline int planet::climatemapseacolour(int slot, int channel) const
+{
+    if (slot < 0 || slot >= CLIMATEMAPSEACOLOURCOUNT || channel < 0 || channel > 2)
+        return 0;
+
+    return itsclimatemapseacolours[slot][channel];
+}
+
+inline void planet::setclimatemapseacolour(int slot, int channel, int amount)
+{
+    if (slot < 0 || slot >= CLIMATEMAPSEACOLOURCOUNT || channel < 0 || channel > 2)
+        return;
+
+    itsclimatemapseacolours[slot][channel] = amount;
+}
+
+inline int planet::climatemapcolour(int slot, int channel) const
+{
+    if (slot < 0 || slot >= CLIMATEMAPCOLOURCOUNT || channel < 0 || channel > 2)
+        return 0;
+
+    return itsclimatemapcolours[slot][channel];
+}
+
+inline void planet::setclimatemapcolour(int slot, int channel, int amount)
+{
+    if (slot < 0 || slot >= CLIMATEMAPCOLOURCOUNT || channel < 0 || channel > 2)
+        return;
+
+    itsclimatemapcolours[slot][channel] = amount;
+}
+
+inline int planet::biomemapcolour(int slot, int channel) const
+{
+    if (slot < 0 || slot >= BIOMEMAPCOLOURCOUNT || channel < 0 || channel > 2)
+        return 0;
+
+    return itsbiomemapcolours[slot][channel];
+}
+
+inline void planet::setbiomemapcolour(int slot, int channel, int amount)
+{
+    if (slot < 0 || slot >= BIOMEMAPCOLOURCOUNT || channel < 0 || channel > 2)
+        return;
+
+    itsbiomemapcolours[slot][channel] = amount;
+}
+
+inline int planet::rivermapcolour(int slot, int channel) const
+{
+    if (slot < 0 || slot >= RIVERMAPCOLOURCOUNT || channel < 0 || channel > 2)
+        return 0;
+
+    return itsrivermapcolours[slot][channel];
+}
+
+inline void planet::setrivermapcolour(int slot, int channel, int amount)
+{
+    if (slot < 0 || slot >= RIVERMAPCOLOURCOUNT || channel < 0 || channel > 2)
+        return;
+
+    itsrivermapcolours[slot][channel] = amount;
+}
+
+inline bool planet::showrivermapfeature(int slot) const
+{
+    if (slot < 0 || slot >= RIVERMAPFEATURECOUNT)
+        return false;
+
+    return itsshowrivermapfeatures[slot];
+}
+
+inline void planet::setshowrivermapfeature(int slot, bool amount)
+{
+    if (slot < 0 || slot >= RIVERMAPFEATURECOUNT)
+        return;
+
+    itsshowrivermapfeatures[slot] = amount;
+}
+
+inline int planet::mapgradientstopcount(int gradient) const
+{
+    if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT)
+        return 0;
+
+    return itsmapgradientstopcounts[gradient];
+}
+
+inline void planet::setmapgradientstopcount(int gradient, int count)
+{
+    if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT)
+        return;
+
+    if (count < 0)
+        count = 0;
+    if (count > MAPGRADIENTMAXSTOPS)
+        count = MAPGRADIENTMAXSTOPS;
+
+    itsmapgradientstopcounts[gradient] = count;
+}
+
+inline bool planet::mapgradientdiscrete(int gradient) const
+{
+    if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT)
+        return false;
+
+    return itsmapgradientdiscrete[gradient];
+}
+
+inline void planet::setmapgradientdiscrete(int gradient, bool amount)
+{
+    if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT)
+        return;
+
+    itsmapgradientdiscrete[gradient] = amount;
+}
+
+inline int planet::mapgradientposition(int gradient, int stop) const
+{
+    if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT || stop < 0 || stop >= MAPGRADIENTMAXSTOPS)
+        return 0;
+
+    return itsmapgradientpositions[gradient][stop];
+}
+
+inline void planet::setmapgradientposition(int gradient, int stop, int amount)
+{
+    if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT || stop < 0 || stop >= MAPGRADIENTMAXSTOPS)
+        return;
+
+    itsmapgradientpositions[gradient][stop] = amount;
+}
+
+inline int planet::mapgradientcolour(int gradient, int stop, int channel) const
+{
+    if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT || stop < 0 || stop >= MAPGRADIENTMAXSTOPS || channel < 0 || channel > 2)
+        return 0;
+
+    return itsmapgradientcolours[gradient][stop][channel];
+}
+
+inline void planet::setmapgradientcolour(int gradient, int stop, int channel, int amount)
+{
+    if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT || stop < 0 || stop >= MAPGRADIENTMAXSTOPS || channel < 0 || channel > 2)
+        return;
+
+    itsmapgradientcolours[gradient][stop][channel] = amount;
+}
 
 inline const short* planet::rawmapnom() const { return &mapnom[0][0]; }
 inline const int* planet::rawlakemap() const { return &lakemap[0][0]; }

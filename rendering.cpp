@@ -1,4 +1,7 @@
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <iomanip>
 #include <iostream>
 
 #include "imgui.h"
@@ -10,6 +13,10 @@ using namespace std;
 namespace
 {
     constexpr int rgbachannels = 4;
+    bool timedreportingenabled = false;
+    bool hastimedreport = false;
+    string timedreporttext;
+    chrono::steady_clock::time_point timedreportstart;
 
     template <typename T>
     void fillgrid(vector<vector<T>>& grid, const T& value)
@@ -26,6 +33,505 @@ namespace
     void resizepixelbuffer(vector<sf::Uint8>& pixels, int width, int height)
     {
         pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * rgbachannels);
+    }
+
+    sf::Uint8 clampchannel(int value)
+    {
+        return static_cast<sf::Uint8>(clamp(value, 0, 255));
+    }
+
+    float clampunit(float value)
+    {
+        return clamp(value, 0.0f, 1.0f);
+    }
+
+    sf::Color makecolour(int r, int g, int b)
+    {
+        return sf::Color(clampchannel(r), clampchannel(g), clampchannel(b));
+    }
+
+    struct RuntimeGradientStop
+    {
+        int position = 0;
+        sf::Color colour = sf::Color::Black;
+    };
+
+    struct MapGradientRuntime
+    {
+        int stopcount = 0;
+        bool discrete = false;
+        std::array<RuntimeGradientStop, MAPGRADIENTMAXSTOPS> stops{};
+    };
+
+    sf::Color lerpcolour(const sf::Color& low, const sf::Color& high, float factor)
+    {
+        factor = clampunit(factor);
+
+        return sf::Color(
+            clampchannel(static_cast<int>(roundf(static_cast<float>(low.r) + (static_cast<float>(high.r) - static_cast<float>(low.r)) * factor))),
+            clampchannel(static_cast<int>(roundf(static_cast<float>(low.g) + (static_cast<float>(high.g) - static_cast<float>(low.g)) * factor))),
+            clampchannel(static_cast<int>(roundf(static_cast<float>(low.b) + (static_cast<float>(high.b) - static_cast<float>(low.b)) * factor))));
+    }
+
+    sf::Color lerpcolour(const sf::Color& low, const sf::Color& mid, const sf::Color& high, float factor)
+    {
+        factor = clampunit(factor);
+
+        if (factor <= 0.5f)
+            return lerpcolour(low, mid, factor * 2.0f);
+
+        return lerpcolour(mid, high, (factor - 0.5f) * 2.0f);
+    }
+
+    sf::Color getoutlinecolour(const planet& world)
+    {
+        return makecolour(world.outline1(), world.outline2(), world.outline3());
+    }
+
+    sf::Color getworldcolour(int r, int g, int b)
+    {
+        return makecolour(r, g, b);
+    }
+
+    MapGradientRuntime buildmapgradient(const planet& world, int gradient)
+    {
+        MapGradientRuntime result;
+        result.stopcount = clamp(world.mapgradientstopcount(gradient), 2, MAPGRADIENTMAXSTOPS);
+        result.discrete = world.mapgradientdiscrete(gradient);
+
+        for (int i = 0; i < result.stopcount; i++)
+        {
+            result.stops[i].position = world.mapgradientposition(gradient, i);
+            result.stops[i].colour = getworldcolour(
+                world.mapgradientcolour(gradient, i, 0),
+                world.mapgradientcolour(gradient, i, 1),
+                world.mapgradientcolour(gradient, i, 2));
+        }
+
+        sort(result.stops.begin(), result.stops.begin() + result.stopcount, [](const RuntimeGradientStop& left, const RuntimeGradientStop& right)
+        {
+            return left.position < right.position;
+        });
+
+        return result;
+    }
+
+    sf::Color samplemapgradient(const MapGradientRuntime& gradient, int value)
+    {
+        if (gradient.stopcount <= 0)
+            return sf::Color::Black;
+
+        if (value <= gradient.stops[0].position)
+            return gradient.stops[0].colour;
+
+        for (int i = 0; i < gradient.stopcount - 1; i++)
+        {
+            const RuntimeGradientStop& low = gradient.stops[i];
+            const RuntimeGradientStop& high = gradient.stops[i + 1];
+
+            if (value <= high.position)
+            {
+                if (gradient.discrete || high.position <= low.position)
+                    return low.colour;
+
+                const float factor = static_cast<float>(value - low.position) / static_cast<float>(high.position - low.position);
+                return lerpcolour(low.colour, high.colour, factor);
+            }
+        }
+
+        return gradient.stops[gradient.stopcount - 1].colour;
+    }
+
+    sf::Color getelevationmapcolour(const MapGradientRuntime& gradient, int altitude)
+    {
+        return samplemapgradient(gradient, altitude);
+    }
+
+    sf::Color gettemperaturemapcolour(const MapGradientRuntime& gradient, int temperature)
+    {
+        return samplemapgradient(gradient, temperature);
+    }
+
+    sf::Color getprecipitationmapcolour(const MapGradientRuntime& gradient, int rainfall)
+    {
+        return samplemapgradient(gradient, rainfall);
+    }
+
+    sf::Color getclimateseacolour(const planet& world, int seaice)
+    {
+        int slot = climateopensea;
+
+        if (seaice == 2)
+            slot = climatepermanentseaice;
+        else if (seaice == 1)
+            slot = climateseasonalseaice;
+
+        return getworldcolour(
+            world.climatemapseacolour(slot, 0),
+            world.climatemapseacolour(slot, 1),
+            world.climatemapseacolour(slot, 2));
+    }
+
+    sf::Color getclimatecoloursforworld(const planet& world, short climate)
+    {
+        return getworldcolour(
+            world.climatemapcolour(climate, 0),
+            world.climatemapcolour(climate, 1),
+            world.climatemapcolour(climate, 2));
+    }
+
+    sf::Color averagecolour(const sf::Color& left, const sf::Color& right)
+    {
+        return sf::Color(
+            clampchannel((static_cast<int>(left.r) + static_cast<int>(right.r)) / 2),
+            clampchannel((static_cast<int>(left.g) + static_cast<int>(right.g)) / 2),
+            clampchannel((static_cast<int>(left.b) + static_cast<int>(right.b)) / 2));
+    }
+
+    enum class holdridgethermalband
+    {
+        ice,
+        polar,
+        subpolar,
+        boreal,
+        cooltemperate,
+        warmtemperate,
+        subtropical,
+        tropical
+    };
+
+    enum class holdridgehumidityband
+    {
+        superarid,
+        perarid,
+        arid,
+        semiarid,
+        subhumid,
+        humid,
+        perhumid,
+        superhumid
+    };
+
+    float clampbiotemperature(float temperature)
+    {
+        return clamp(temperature, 0.0f, 30.0f);
+    }
+
+    float calculateholdridgebiotemperature(float jan, float apr, float jul, float oct)
+    {
+        return (clampbiotemperature(jan) + clampbiotemperature(apr) + clampbiotemperature(jul) + clampbiotemperature(oct)) / 4.0f;
+    }
+
+    float calculateholdridgeannualprecipitation(float jan, float apr, float jul, float oct)
+    {
+        return max(1.0f, (jan + apr + jul + oct) * 3.0f);
+    }
+
+    holdridgethermalband classifyholdridgethermalband(float biotemperature)
+    {
+        if (biotemperature <= 0.0f)
+            return holdridgethermalband::ice;
+        if (biotemperature < 1.5f)
+            return holdridgethermalband::polar;
+        if (biotemperature < 3.0f)
+            return holdridgethermalband::subpolar;
+        if (biotemperature < 6.0f)
+            return holdridgethermalband::boreal;
+        if (biotemperature < 12.0f)
+            return holdridgethermalband::cooltemperate;
+        if (biotemperature < 18.0f)
+            return holdridgethermalband::warmtemperate;
+        if (biotemperature < 24.0f)
+            return holdridgethermalband::subtropical;
+
+        return holdridgethermalband::tropical;
+    }
+
+    holdridgehumidityband classifyholdridgehumidityband(float petratio)
+    {
+        if (petratio > 16.0f)
+            return holdridgehumidityband::superarid;
+        if (petratio > 8.0f)
+            return holdridgehumidityband::perarid;
+        if (petratio > 4.0f)
+            return holdridgehumidityband::arid;
+        if (petratio > 2.0f)
+            return holdridgehumidityband::semiarid;
+        if (petratio > 1.0f)
+            return holdridgehumidityband::subhumid;
+        if (petratio > 0.5f)
+            return holdridgehumidityband::humid;
+        if (petratio > 0.25f)
+            return holdridgehumidityband::perhumid;
+
+        return holdridgehumidityband::superhumid;
+    }
+
+    sf::Color getbiomemapcolour(const planet& world, int slot)
+    {
+        return makecolour(
+            world.biomemapcolour(slot, 0),
+            world.biomemapcolour(slot, 1),
+            world.biomemapcolour(slot, 2));
+    }
+
+    int getholdridgebiomeslot(holdridgethermalband thermalband, holdridgehumidityband humidityband)
+    {
+        switch (thermalband)
+        {
+        case holdridgethermalband::ice:
+            return biomeice;
+
+        case holdridgethermalband::polar:
+            switch (humidityband)
+            {
+            case holdridgehumidityband::superarid:
+                return biomepolardesert;
+            case holdridgehumidityband::perarid:
+            case holdridgehumidityband::arid:
+                return biomepolardrytundra;
+            case holdridgehumidityband::semiarid:
+                return biomepolarmoisttundra;
+            case holdridgehumidityband::subhumid:
+            case holdridgehumidityband::humid:
+                return biomepolarwettundra;
+            case holdridgehumidityband::perhumid:
+            case holdridgehumidityband::superhumid:
+                return biomepolarraindtundra;
+            }
+            break;
+
+        case holdridgethermalband::subpolar:
+            switch (humidityband)
+            {
+            case holdridgehumidityband::superarid:
+                return biomesubpolardesert;
+            case holdridgehumidityband::perarid:
+            case holdridgehumidityband::arid:
+                return biomesubpolardrytundra;
+            case holdridgehumidityband::semiarid:
+                return biomesubpolarmoisttundra;
+            case holdridgehumidityband::subhumid:
+            case holdridgehumidityband::humid:
+                return biomesubpolarwettundra;
+            case holdridgehumidityband::perhumid:
+            case holdridgehumidityband::superhumid:
+                return biomesubpolarraindtundra;
+            }
+            break;
+
+        case holdridgethermalband::boreal:
+            switch (humidityband)
+            {
+            case holdridgehumidityband::superarid:
+                return biomeborealdesert;
+            case holdridgehumidityband::perarid:
+            case holdridgehumidityband::arid:
+                return biomeborealdrybush;
+            case holdridgehumidityband::semiarid:
+            case holdridgehumidityband::subhumid:
+                return biomeborealmoistforest;
+            case holdridgehumidityband::humid:
+            case holdridgehumidityband::perhumid:
+                return biomeborealwetforest;
+            case holdridgehumidityband::superhumid:
+                return biomeborealrainforest;
+            }
+            break;
+
+        case holdridgethermalband::cooltemperate:
+            switch (humidityband)
+            {
+            case holdridgehumidityband::superarid:
+                return biomecooltemperatedesert;
+            case holdridgehumidityband::perarid:
+                return biomecooltemperatedesertbush;
+            case holdridgehumidityband::arid:
+            case holdridgehumidityband::semiarid:
+                return biomecooltemperatesteppe;
+            case holdridgehumidityband::subhumid:
+                return biomecooltemperatemoistforest;
+            case holdridgehumidityband::humid:
+            case holdridgehumidityband::perhumid:
+                return biomecooltemperatewetforest;
+            case holdridgehumidityband::superhumid:
+                return biomecooltemperaterainforest;
+            }
+            break;
+
+        case holdridgethermalband::warmtemperate:
+            switch (humidityband)
+            {
+            case holdridgehumidityband::superarid:
+                return biomewarmtemperatedesert;
+            case holdridgehumidityband::perarid:
+                return biomewarmtemperatedesertbush;
+            case holdridgehumidityband::arid:
+                return biomewarmtemperatethornsteppe;
+            case holdridgehumidityband::semiarid:
+                return biomewarmtemperatedryforest;
+            case holdridgehumidityband::subhumid:
+                return biomewarmtemperatemoistforest;
+            case holdridgehumidityband::humid:
+            case holdridgehumidityband::perhumid:
+                return biomewarmtemperatewetforest;
+            case holdridgehumidityband::superhumid:
+                return biomewarmtemperaterainforest;
+            }
+            break;
+
+        case holdridgethermalband::subtropical:
+            switch (humidityband)
+            {
+            case holdridgehumidityband::superarid:
+                return biomesubtropicaldesert;
+            case holdridgehumidityband::perarid:
+                return biomesubtropicaldesertbush;
+            case holdridgehumidityband::arid:
+                return biomesubtropicalthornsteppe;
+            case holdridgehumidityband::semiarid:
+                return biomesubtropicaldryforest;
+            case holdridgehumidityband::subhumid:
+                return biomesubtropicalmoistforest;
+            case holdridgehumidityband::humid:
+            case holdridgehumidityband::perhumid:
+                return biomesubtropicalwetforest;
+            case holdridgehumidityband::superhumid:
+                return biomesubtropicalrainforest;
+            }
+            break;
+
+        case holdridgethermalband::tropical:
+            switch (humidityband)
+            {
+            case holdridgehumidityband::superarid:
+                return biometropicaldesert;
+            case holdridgehumidityband::perarid:
+                return biometropicaldesertbush;
+            case holdridgehumidityband::arid:
+                return biometropicalthornsteppe;
+            case holdridgehumidityband::semiarid:
+                return biometropicalverydryforest;
+            case holdridgehumidityband::subhumid:
+                return biometropicaldryforest;
+            case holdridgehumidityband::humid:
+                return biometropicalmoistforest;
+            case holdridgehumidityband::perhumid:
+                return biometropicalwetforest;
+            case holdridgehumidityband::superhumid:
+                return biometropicalrainforest;
+            }
+            break;
+        }
+
+        return biomeice;
+    }
+
+    int getholdridgebiomeslot(float janTemp, float aprTemp, float julTemp, float octTemp, float janRain, float aprRain, float julRain, float octRain)
+    {
+        const float biotemperature = calculateholdridgebiotemperature(janTemp, aprTemp, julTemp, octTemp);
+        const float annualprecipitation = calculateholdridgeannualprecipitation(janRain, aprRain, julRain, octRain);
+        const float petratio = biotemperature <= 0.0f ? 1000.0f : (biotemperature * 58.93f) / annualprecipitation;
+
+        return getholdridgebiomeslot(classifyholdridgethermalband(biotemperature), classifyholdridgehumidityband(petratio));
+    }
+
+    void applyglobaloutlineoverlay(planet& world, sf::Image& image)
+    {
+        if (world.showmapoutline() == false)
+            return;
+
+        const sf::Color outlinecolour = getoutlinecolour(world);
+
+        for (int i = 0; i <= world.width(); i++)
+        {
+            for (int j = 0; j <= world.height(); j++)
+            {
+                if (world.outline(i, j))
+                    image.setPixel(i, j, outlinecolour);
+            }
+        }
+    }
+
+    void applyglobaldisplayoutlineoverlay(planet& world, sf::Image& displayimage)
+    {
+        if (world.showmapoutline() == false)
+            return;
+
+        const sf::Color outlinecolour = getoutlinecolour(world);
+        const int displaywidth = static_cast<int>(displayimage.getSize().x);
+        const int displayheight = static_cast<int>(displayimage.getSize().y);
+        const float mapdiv = (static_cast<float>(world.width()) + 1.0f) / static_cast<float>(displaywidth);
+
+        for (int i = 0; i < displaywidth; i++)
+        {
+            const int sourcei = static_cast<int>(static_cast<float>(i) * mapdiv);
+
+            for (int j = 0; j < displayheight; j++)
+            {
+                const int sourcej = static_cast<int>(static_cast<float>(j) * mapdiv);
+                bool outlined = false;
+
+                for (int k = max(0, sourcei - 1); k <= min(world.width(), sourcei); k++)
+                {
+                    for (int l = max(0, sourcej - 1); l <= min(world.height(), sourcej); l++)
+                    {
+                        if (world.outline(k, l))
+                        {
+                            outlined = true;
+                            break;
+                        }
+                    }
+
+                    if (outlined)
+                        break;
+                }
+
+                if (outlined)
+                    displayimage.setPixel(i, j, outlinecolour);
+            }
+        }
+    }
+
+    void applyregionaloutlineoverlay(planet& world, region& region, sf::Image& image)
+    {
+        if (world.showmapoutline() == false)
+            return;
+
+        const sf::Color outlinecolour = getoutlinecolour(world);
+
+        for (int i = region.regwidthbegin(); i <= region.regwidthend(); i++)
+        {
+            for (int j = region.regheightbegin(); j <= region.regheightend(); j++)
+            {
+                if (region.outline(i, j))
+                    image.setPixel(i - region.regwidthbegin(), j - region.regheightbegin(), outlinecolour);
+            }
+        }
+    }
+
+    sf::Color getriverflowcolour(const MapGradientRuntime& gradient, int flow)
+    {
+        return samplemapgradient(gradient, flow);
+    }
+
+    void flushtimedreport()
+    {
+        if (hastimedreport == false)
+            return;
+
+        const double elapsedms = chrono::duration<double, milli>(chrono::steady_clock::now() - timedreportstart).count();
+        const streamsize oldprecision = cout.precision();
+        const ios::fmtflags oldflags = cout.flags();
+
+        cout << '\r' << left << setw(48) << timedreporttext << " [" << fixed << setprecision(2) << elapsedms << "ms]" << endl;
+        cout.flags(oldflags);
+        cout.precision(oldprecision);
+
+        onworldgenstepcompleted(timedreporttext, elapsedms);
+
+        hastimedreport = false;
+        timedreporttext.clear();
     }
 
     void setpixel(vector<sf::Uint8>& pixels, int width, int x, int y, sf::Uint8 r, sf::Uint8 g, sf::Uint8 b, sf::Uint8 a = 255)
@@ -615,7 +1121,38 @@ void drawhighlightobjects(planet& world, sf::Image& highlightimage, int highligh
 
 void updatereport(string text)
 {
-    cout << text << endl;
+    if (timedreportingenabled == false)
+    {
+        cout << text << endl;
+        return;
+    }
+
+    flushtimedreport();
+
+    if (text.empty())
+    {
+        cout << endl;
+        return;
+    }
+
+    timedreporttext = text;
+    timedreportstart = chrono::steady_clock::now();
+    hastimedreport = true;
+
+    cout << text << "..." << flush;
+}
+
+void begintimedreporting()
+{
+    timedreportingenabled = true;
+    hastimedreport = false;
+    timedreporttext.clear();
+}
+
+void endtimedreporting()
+{
+    flushtimedreport();
+    timedreportingenabled = false;
 }
 
 // This makes a button in a standard size and indentation.
@@ -636,35 +1173,7 @@ void drawglobalmapimage(mapviewenum mapview, planet& world, mapcache& maps)
     if (layer.created)
         return;
 
-    if (isglobalnonreliefmapview(mapview) && cudaglobalrenderersavailable() && drawglobalnonreliefmapimagescuda(world, maps))
-        return;
-
-    switch (mapview)
-    {
-    case elevation:
-        drawglobalelevationmapimage(world, layer);
-        break;
-
-    case temperature:
-        drawglobaltemperaturemapimage(world, layer);
-        break;
-
-    case precipitation:
-        drawglobalprecipitationmapimage(world, layer);
-        break;
-
-    case climate:
-        drawglobalclimatemapimage(world, layer);
-        break;
-
-    case rivers:
-        drawglobalriversmapimage(world, layer);
-        break;
-
-    case relief:
-        drawglobalreliefmapimage(world, layer);
-        break;
-    }
+    getmapviewdefinition(mapview).drawglobal(world, layer);
 
     layer.created = true;
 }
@@ -692,32 +1201,20 @@ void drawglobalelevationmapimage(planet& world, maplayer& layer)
 
     int width = world.width();
     int height = world.height();
-    int sealevel = world.sealevel();
-
-    int colour1, colour2, colour3;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
+    const MapGradientRuntime gradient = buildmapgradient(world, mapgradientelevation);
 
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
         {
-            int heightpoint = world.map(i, j);
-
-            colour1 = heightpoint / div;
-
-            if (colour1 > 255)
-                colour1 = 255;
-
-            colour2 = colour1;
-            colour3 = colour2;
-
-            globalelevationimage.setPixel(i, j, sf::Color(colour1, colour2, colour3));
+            const int altitude = world.map(i, j) - world.sealevel();
+            globalelevationimage.setPixel(i, j, getelevationmapcolour(gradient, altitude));
         }
     }
 
     createnearestdisplayimage(globalelevationimage.getPixelsPtr(), static_cast<int>(globalelevationimage.getSize().x), width, displayglobalelevationimage);
+    applyglobaloutlineoverlay(world, globalelevationimage);
+    applyglobaldisplayoutlineoverlay(world, displayglobalelevationimage);
 }
 
 void drawglobaltemperaturemapimage(planet& world, maplayer& layer)
@@ -727,66 +1224,24 @@ void drawglobaltemperaturemapimage(planet& world, maplayer& layer)
 
     int width = world.width();
     int height = world.height();
-    int sealevel = world.sealevel();
-
-    int colour1, colour2, colour3;
-
-    int landdiv = ((world.maxelevation() - sealevel) / 2) / 255;
-    int seadiv = sealevel / 255;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
+    const MapGradientRuntime gradient = buildmapgradient(world, mapgradienttemperature);
 
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.outline(i, j))
-            {
-                colour1 = 0;
-                colour2 = 0;
-                colour3 = 0;
-            }
-            else
-            {
-                int jantemp = world.jantemp(i, j);
-                int jultemp = world.jultemp(i, j);
-                int aprtemp = world.aprtemp(i, j);
-                
-                int temperature = (jantemp + aprtemp + jultemp + aprtemp) / 4; // April appears twice, as it's the same as October
+            const int jantemp = world.jantemp(i, j);
+            const int jultemp = world.jultemp(i, j);
+            const int aprtemp = world.aprtemp(i, j);
+            const int temperature = ((jantemp + aprtemp + jultemp + aprtemp) / 4) + 10;
 
-                temperature = temperature + 10;
-
-                if (temperature > 0)
-                {
-                    colour1 = 250;
-                    colour2 = 250 - (temperature * 3);
-                    colour3 = 250 - (temperature * 7);
-                }
-                else
-                {
-                    temperature = abs(temperature);
-
-                    colour1 = 250 - (temperature * 7);
-                    colour2 = 250 - (temperature * 7);
-                    colour3 = 250;
-                }
-            }
-
-            if (colour1 < 0)
-                colour1 = 0;
-
-            if (colour2 < 0)
-                colour2 = 0;
-
-            if (colour3 < 0)
-                colour3 = 0;
-
-            globaltemperatureimage.setPixel(i, j, sf::Color(colour1, colour2, colour3));
+            globaltemperatureimage.setPixel(i, j, gettemperaturemapcolour(gradient, temperature));
         }
     }
 
-    createoutlineddisplayimage(globaltemperatureimage.getPixelsPtr(), static_cast<int>(globaltemperatureimage.getSize().x), width, displayglobaltemperatureimage);
+    createnearestdisplayimage(globaltemperatureimage.getPixelsPtr(), static_cast<int>(globaltemperatureimage.getSize().x), width, displayglobaltemperatureimage);
+    applyglobaloutlineoverlay(world, globaltemperatureimage);
+    applyglobaldisplayoutlineoverlay(world, displayglobaltemperatureimage);
 }
 
 void drawglobalprecipitationmapimage(planet& world, maplayer& layer)
@@ -796,51 +1251,20 @@ void drawglobalprecipitationmapimage(planet& world, maplayer& layer)
 
     int width = world.width();
     int height = world.height();
-    int sealevel = world.sealevel();
-
-    int colour1, colour2, colour3;
-
-    int landdiv = ((world.maxelevation() - sealevel) / 2) / 255;
-    int seadiv = sealevel / 255;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
+    const MapGradientRuntime gradient = buildmapgradient(world, mapgradientprecipitation);
 
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.outline(i, j))
-            {
-                colour1 = 0;
-                colour2 = 0;
-                colour3 = 0;
-            }
-            else
-            {
-                int rainfall = (world.summerrain(i, j) + world.winterrain(i, j)) / 2;
-
-                rainfall = rainfall / 4;
-
-                colour1 = 255 - rainfall;
-                colour2 = 255 - rainfall;
-                colour3 = 255;
-            }
-
-            if (colour1 < 0)
-                colour1 = 0;
-
-            if (colour2 < 0)
-                colour2 = 0;
-
-            if (colour3 < 0)
-                colour3 = 0;
-
-            globalprecipitationimage.setPixel(i, j, sf::Color(colour1, colour2, colour3));
+            const int rainfall = (world.summerrain(i, j) + world.winterrain(i, j)) / 2;
+            globalprecipitationimage.setPixel(i, j, getprecipitationmapcolour(gradient, rainfall));
         }
     }
 
-    createoutlineddisplayimage(globalprecipitationimage.getPixelsPtr(), static_cast<int>(globalprecipitationimage.getSize().x), width, displayglobalprecipitationimage);
+    createnearestdisplayimage(globalprecipitationimage.getPixelsPtr(), static_cast<int>(globalprecipitationimage.getSize().x), width, displayglobalprecipitationimage);
+    applyglobaloutlineoverlay(world, globalprecipitationimage);
+    applyglobaldisplayoutlineoverlay(world, displayglobalprecipitationimage);
 }
 
 void drawglobalclimatemapimage(planet& world, maplayer& layer)
@@ -850,57 +1274,59 @@ void drawglobalclimatemapimage(planet& world, maplayer& layer)
 
     int width = world.width();
     int height = world.height();
-    int sealevel = world.sealevel();
-
-    int colour1, colour2, colour3;
-
-    int landdiv = ((world.maxelevation() - sealevel) / 2) / 255;
-    int seadiv = sealevel / 255;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
 
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
         {
             if (world.sea(i, j))
-            {
-                if (world.seaice(i, j) == 2) // Permanent sea ice
-                {
-                    colour1 = 243;
-                    colour2 = 243;
-                    colour3 = 255;
-                }
-                else
-                {
-                    if (world.seaice(i, j) == 1) // Seasonal sea ice
-                    {
-                        colour1 = 228;
-                        colour2 = 228;
-                        colour3 = 255;
-                    }
-                    else // Open sea
-                    {
-                        colour1 = 13;
-                        colour2 = 49;
-                        colour3 = 109;
-                    }
-                }
-
-                globalclimateimage.setPixel(i, j, sf::Color(colour1, colour2, colour3));
-            }
+                globalclimateimage.setPixel(i, j, getclimateseacolour(world, world.seaice(i, j)));
             else
-            {
-                sf::Color landcolour;
-
-                landcolour = getclimatecolours(world.climate(i, j));
-                globalclimateimage.setPixel(i, j, landcolour);
-            }
+                globalclimateimage.setPixel(i, j, getclimatecolours(world, world.climate(i, j)));
         }
     }
 
-    createoutlineddisplayimage(globalclimateimage.getPixelsPtr(), static_cast<int>(globalclimateimage.getSize().x), width, displayglobalclimateimage);
+    createnearestdisplayimage(globalclimateimage.getPixelsPtr(), static_cast<int>(globalclimateimage.getSize().x), width, displayglobalclimateimage);
+    applyglobaloutlineoverlay(world, globalclimateimage);
+    applyglobaldisplayoutlineoverlay(world, displayglobalclimateimage);
+}
+
+void drawglobalbiomemapimage(planet& world, maplayer& layer)
+{
+    sf::Image& globalbiomeimage = layer.image;
+    sf::Image& displayglobalbiomeimage = layer.displayimage;
+
+    int width = world.width();
+    int height = world.height();
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            const bool water = world.sea(i, j) || world.truelake(i, j) != 0;
+
+            if (water)
+            {
+                const int seaice = world.sea(i, j) ? world.seaice(i, j) : 0;
+                globalbiomeimage.setPixel(i, j, getclimateseacolour(world, seaice));
+                continue;
+            }
+
+            globalbiomeimage.setPixel(i, j, getbiomemapcolour(world, getholdridgebiomeslot(
+                static_cast<float>(world.jantemp(i, j)),
+                static_cast<float>(world.aprtemp(i, j)),
+                static_cast<float>(world.jultemp(i, j)),
+                static_cast<float>(world.octtemp(i, j)),
+                static_cast<float>(world.janrain(i, j)),
+                static_cast<float>(world.aprrain(i, j)),
+                static_cast<float>(world.julrain(i, j)),
+                static_cast<float>(world.octrain(i, j)))));
+        }
+    }
+
+    createnearestdisplayimage(globalbiomeimage.getPixelsPtr(), static_cast<int>(globalbiomeimage.getSize().x), width, displayglobalbiomeimage);
+    applyglobaloutlineoverlay(world, globalbiomeimage);
+    applyglobaldisplayoutlineoverlay(world, displayglobalbiomeimage);
 }
 
 void drawglobalriversmapimage(planet& world, maplayer& layer)
@@ -910,122 +1336,92 @@ void drawglobalriversmapimage(planet& world, maplayer& layer)
 
     int width = world.width();
     int height = world.height();
-    int sealevel = world.sealevel();
-
-    int colour1, colour2, colour3;
-
-    int landdiv = ((world.maxelevation() - sealevel) / 2) / 255;
-    int seadiv = sealevel / 255;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
-
-    int mult = world.maxriverflow() / 255;
-
-    if (mult < 1)
-        mult = 1;
+    const MapGradientRuntime gradient = buildmapgradient(world, mapgradientriverflow);
 
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.outline(i, j))
+            const bool hasriver = world.riveraveflow(i, j) > 0 && world.sea(i, j) == 0;
+            const bool hasdelta = world.deltadir(i, j) != 0 && world.sea(i, j) == 0;
+            const bool haslake = world.truelake(i, j) != 0;
+            const bool hasvolcano = world.volcano(i, j) > 0;
+            sf::Color colour = getworldcolour(
+                world.rivermapcolour(rivermapbackground, 0),
+                world.rivermapcolour(rivermapbackground, 1),
+                world.rivermapcolour(rivermapbackground, 2));
+
+            if (hasriver)
             {
-                colour1 = 0;
-                colour2 = 0;
-                colour3 = 0;
+                colour = getriverflowcolour(gradient, world.riveraveflow(i, j));
+            }
+            else if (hasdelta)
+            {
+                const int flow = (world.deltajan(i, j) + world.deltajul(i, j)) / 2;
+                colour = getriverflowcolour(gradient, flow);
+            }
+            else if (haslake)
+            {
+                if (world.showrivermapfeature(rivermapshowlakes))
+                {
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermaplake, 0),
+                        world.rivermapcolour(rivermaplake, 1),
+                        world.rivermapcolour(rivermaplake, 2));
+                }
             }
             else
             {
-                int flow = world.riveraveflow(i, j);
+                const int special = world.special(i, j);
 
-                if (flow > 0 && world.sea(i, j) == 0)
+                if (special == 110 && world.showrivermapfeature(rivermapshowsaltpans))
                 {
-                    flow = flow * 10;
-
-                    colour1 = 255 - (flow / mult);
-                    if (colour1 < 0)
-                        colour1 = 0;
-                    colour2 = colour1;
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermapsaltpan, 0),
+                        world.rivermapcolour(rivermapsaltpan, 1),
+                        world.rivermapcolour(rivermapsaltpan, 2));
                 }
-                else
+                else if (special == 120 && world.showrivermapfeature(rivermapshowsand))
                 {
-                    if (world.deltadir(i, j) != 0 && world.sea(i, j) == 0)
-                    {
-                        flow = (world.deltajan(i, j) + world.deltajul(i, j)) / 2;
-                        flow = flow * 10;
-
-                        colour1 = 255 - (flow / mult);
-                        if (colour1 < 0)
-                            colour1 = 0;
-                        colour2 = colour1;
-                    }
-                    else
-                    {
-                        colour1 = 255;
-                        colour2 = 255;
-                    }
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermapsand, 0),
+                        world.rivermapcolour(rivermapsand, 1),
+                        world.rivermapcolour(rivermapsand, 2));
                 }
-
-                colour3 = 255;
-
-                if (world.truelake(i, j) != 0)
+                else if (special >= 130 && world.showrivermapfeature(rivermapshowwetlands))
                 {
-                    colour1 = 150;
-                    colour2 = 150;
-                    colour3 = 250;
-                }
-
-                if (world.special(i, j) > 100 && world.sea(i, j) == 0 && world.riverjan(i, j) + world.riverjul(i, j) < 600)
-                {
-                    if (world.special(i, j) == 110)
-                    {
-                        colour1 = 150;
-                        colour2 = 150;
-                        colour3 = 150;
-                    }
-
-                    if (world.special(i, j) == 120)
-                    {
-                        colour1 = 250;
-                        colour2 = 250;
-                        colour3 = 50;
-                    }
-
-                    if (world.special(i, j) >= 130)
-                    {
-                        colour1 = 50;
-                        colour2 = 250;
-                        colour3 = 100;
-                    }
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermapwetlands, 0),
+                        world.rivermapcolour(rivermapwetlands, 1),
+                        world.rivermapcolour(rivermapwetlands, 2));
                 }
             }
 
-            if (world.outline(i, j))
+            if (hasvolcano && world.showrivermapfeature(rivermapshowvolcanoes))
             {
-                colour1 = 0;
-                colour2 = 0;
-                colour3 = 0;
+                colour = getworldcolour(
+                    world.rivermapcolour(rivermapvolcano, 0),
+                    world.rivermapcolour(rivermapvolcano, 1),
+                    world.rivermapcolour(rivermapvolcano, 2));
             }
 
-            if (world.volcano(i, j) > 0)
-            {
-                colour1 = 240;
-                colour2 = 0;
-                colour3 = 0;
-            }
-
-            globalriversimage.setPixel(i, j, sf::Color(colour1, colour2, colour3));
+            globalriversimage.setPixel(i, j, colour);
         }
     }
 
     createriversdisplayimage(globalriversimage.getPixelsPtr(), static_cast<int>(globalriversimage.getSize().x), width, world.size(), displayglobalriversimage);
+    applyglobaloutlineoverlay(world, globalriversimage);
+    applyglobaldisplayoutlineoverlay(world, displayglobalriversimage);
 }
 
 void drawglobalreliefmapimage(planet& world, maplayer& layer)
 {
     if (cudaglobalrenderersavailable() && drawglobalreliefmapimagecuda(world, layer))
+    {
+        applyglobaloutlineoverlay(world, layer.image);
+        applyglobaldisplayoutlineoverlay(world, layer.displayimage);
         return;
+    }
 
     sf::Image& globalreliefimage = layer.image;
     sf::Image& displayglobalreliefimage = layer.displayimage;
@@ -1695,51 +2091,15 @@ void drawglobalreliefmapimage(planet& world, maplayer& layer)
 
     globalreliefimage.create(reliefimagewidth, reliefimageheight, reliefpixels.data());
     createnearestdisplayimage(reliefpixels.data(), reliefimagewidth, width, displayglobalreliefimage);
+    applyglobaloutlineoverlay(world, globalreliefimage);
+    applyglobaldisplayoutlineoverlay(world, displayglobalreliefimage);
 }
 
 // This function gets colours for drawing climate maps.
 
-sf::Color getclimatecolours(short climate)
+sf::Color getclimatecolours(const planet& world, short climate)
 {
-    static const std::array<sf::Color, 32> climatecolours = {
-        sf::Color(0, 0, 0),
-        sf::Color(0, 0, 254),
-        sf::Color(1, 119, 255),
-        sf::Color(70, 169, 250),
-        sf::Color(70, 169, 250),
-        sf::Color(249, 15, 0),
-        sf::Color(251, 150, 149),
-        sf::Color(245, 163, 1),
-        sf::Color(254, 219, 99),
-        sf::Color(255, 255, 0),
-        sf::Color(198, 199, 1),
-        sf::Color(184, 184, 114),
-        sf::Color(138, 255, 162),
-        sf::Color(86, 199, 112),
-        sf::Color(30, 150, 66),
-        sf::Color(192, 254, 109),
-        sf::Color(76, 255, 93),
-        sf::Color(19, 203, 74),
-        sf::Color(255, 8, 245),
-        sf::Color(204, 3, 192),
-        sf::Color(154, 51, 144),
-        sf::Color(153, 100, 146),
-        sf::Color(172, 178, 249),
-        sf::Color(91, 121, 213),
-        sf::Color(78, 83, 175),
-        sf::Color(54, 3, 130),
-        sf::Color(0, 255, 245),
-        sf::Color(32, 200, 250),
-        sf::Color(0, 126, 125),
-        sf::Color(0, 69, 92),
-        sf::Color(178, 178, 178),
-        sf::Color(104, 104, 104)
-    };
-
-    if (climate < 0 || climate >= static_cast<short>(climatecolours.size()))
-        return sf::Color::Black;
-
-    return climatecolours[climate];
+    return getclimatecoloursforworld(world, climate);
 }
 
 // These functions draw a regional map image (ready to be applied to a texture).
@@ -1751,35 +2111,7 @@ void drawregionalmapimage(mapviewenum mapview, planet& world, region& region, ma
     if (layer.created)
         return;
 
-    if (isglobalnonreliefmapview(mapview) && cudaglobalrenderersavailable() && drawregionalnonreliefmapimagescuda(world, region, maps))
-        return;
-
-    switch (mapview)
-    {
-    case elevation:
-        drawregionalelevationmapimage(world, region, layer);
-        break;
-
-    case temperature:
-        drawregionaltemperaturemapimage(world, region, layer);
-        break;
-
-    case precipitation:
-        drawregionalprecipitationmapimage(world, region, layer);
-        break;
-
-    case climate:
-        drawregionalclimatemapimage(world, region, layer);
-        break;
-
-    case rivers:
-        drawregionalriversmapimage(world, region, layer);
-        break;
-
-    case relief:
-        drawregionalreliefmapimage(world, region, layer);
-        break;
-    }
+    getmapviewdefinition(mapview).drawregional(world, region, layer);
 
     layer.created = true;
 }
@@ -1810,11 +2142,7 @@ void drawregionalelevationmapimage(planet& world, region& region, maplayer& laye
     int regwidthend = origregwidthend;
     int regheightbegin = origregheightbegin;
     int regheightend = origregheightend;
-
-    int colour1, colour2, colour3;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
+    const MapGradientRuntime gradient = buildmapgradient(world, mapgradientelevation);
 
     for (int i = regwidthbegin; i <= regwidthend; i++)
     {
@@ -1825,17 +2153,11 @@ void drawregionalelevationmapimage(planet& world, region& region, maplayer& laye
             if (region.special(i, j) > 100 && region.special(i, j) < 130)
                 heightpoint = region.lakesurface(i, j);
 
-            colour1 = heightpoint / div;
-
-            if (colour1 > 255)
-                colour1 = 255;
-
-            colour2 = colour1;
-            colour3 = colour2;
-
-            regionalelevationimage.setPixel(i - origregwidthbegin, j - origregheightbegin, sf::Color(colour1, colour2, colour3));
+            regionalelevationimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getelevationmapcolour(gradient, heightpoint - world.sealevel()));
         }
     }
+
+    applyregionaloutlineoverlay(world, region, regionalelevationimage);
 }
 
 void drawregionaltemperaturemapimage(planet& world, region& region, maplayer& layer)
@@ -1851,56 +2173,19 @@ void drawregionaltemperaturemapimage(planet& world, region& region, maplayer& la
     int regwidthend = origregwidthend;
     int regheightbegin = origregheightbegin;
     int regheightend = origregheightend;
-
-    int colour1, colour2, colour3;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
+    const MapGradientRuntime gradient = buildmapgradient(world, mapgradienttemperature);
 
     for (int i = regwidthbegin; i <= regwidthend; i++)
     {
         for (int j = regheightbegin; j <= regheightend; j++)
         {
-            if (region.outline(i, j))
-            {
-                colour1 = 0;
-                colour2 = 0;
-                colour3 = 0;
-            }
-            else
-            {
-                int temperature = (region.mintemp(i, j) + region.maxtemp(i, j)) / 2;
-
-                temperature = temperature + 10;
-
-                if (temperature > 0)
-                {
-                    colour1 = 250;
-                    colour2 = 250 - (temperature * 3);
-                    colour3 = 250 - (temperature * 7);
-                }
-                else
-                {
-                    temperature = abs(temperature);
-
-                    colour1 = 250 - (temperature * 7);
-                    colour2 = 250 - (temperature * 7);
-                    colour3 = 250;
-                }
-
-                if (colour1 < 0)
-                    colour1 = 0;
-
-                if (colour2 < 0)
-                    colour2 = 0;
-
-                if (colour3 < 0)
-                    colour3 = 0;
-            }
-
-            regionaltemperatureimage.setPixel(i - origregwidthbegin, j - origregheightbegin, sf::Color(colour1, colour2, colour3));
+            int temperature = (region.mintemp(i, j) + region.maxtemp(i, j)) / 2;
+            temperature = temperature + 10;
+            regionaltemperatureimage.setPixel(i - origregwidthbegin, j - origregheightbegin, gettemperaturemapcolour(gradient, temperature));
         }
     }
+
+    applyregionaloutlineoverlay(world, region, regionaltemperatureimage);
 }
 
 void drawregionalprecipitationmapimage(planet& world, region& region, maplayer& layer)
@@ -1916,49 +2201,24 @@ void drawregionalprecipitationmapimage(planet& world, region& region, maplayer& 
     int regwidthend = origregwidthend;
     int regheightbegin = origregheightbegin;
     int regheightend = origregheightend;
-
-    int colour1, colour2, colour3;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
+    const MapGradientRuntime gradient = buildmapgradient(world, mapgradientprecipitation);
 
     for (int i = regwidthbegin; i <= regwidthend; i++)
     {
         for (int j = regheightbegin; j <= regheightend; j++)
         {
-            if (region.outline(i, j))
-            {
-                colour1 = 0;
-                colour2 = 0;
-                colour3 = 0;
-            }
-            else
-            {
-                int rainfall = (region.summerrain(i, j) + region.winterrain(i, j)) / 2;
+            int rainfall = (region.summerrain(i, j) + region.winterrain(i, j)) / 2;
 
-                rainfall = rainfall / 4;
-
-                colour1 = 255 - rainfall;
-                colour2 = 255 - rainfall;
-                colour3 = 255;
-
-                if (colour1 < 0)
-                    colour1 = 0;
-
-                if (colour2 < 0)
-                    colour2 = 0;
-            }
+            sf::Color colour = getprecipitationmapcolour(gradient, rainfall);
 
             if (region.test(i, j) != 0)
-            {
-                colour1 = 255;
-                colour2 = 0;
-                colour3 = 255;
-            }
+                colour = sf::Color(255, 0, 255);
 
-            regionalprecipitationimage.setPixel(i - origregwidthbegin, j - origregheightbegin, sf::Color(colour1, colour2, colour3));
+            regionalprecipitationimage.setPixel(i - origregwidthbegin, j - origregheightbegin, colour);
         }
     }
+
+    applyregionaloutlineoverlay(world, region, regionalprecipitationimage);
 }
 
 void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer)
@@ -1975,49 +2235,62 @@ void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer)
     int regheightbegin = origregheightbegin;
     int regheightend = origregheightend;
 
-    int colour1, colour2, colour3;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
-
     for (int i = regwidthbegin; i <= regwidthend; i++)
     {
         for (int j = regheightbegin; j <= regheightend; j++)
         {
             if (region.sea(i, j))
-            {
-                if (region.seaice(i, j) == 2) // Permanent sea ice
-                {
-                    colour1 = 243;
-                    colour2 = 243;
-                    colour3 = 255;
-                }
-                else
-                {
-                    if (region.seaice(i, j) == 1) // Seasonal sea ice
-                    {
-                        colour1 = 228;
-                        colour2 = 228;
-                        colour3 = 255;
-                    }
-                    else // Open sea
-                    {
-                        colour1 = 13;
-                        colour2 = 49;
-                        colour3 = 109;
-                    }
-                }
-
-                regionalclimateimage.setPixel(i - origregwidthbegin, j - origregheightbegin, sf::Color(colour1, colour2, colour3));
-            }
+                regionalclimateimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getclimateseacolour(world, region.seaice(i, j)));
             else
-            {
-                sf::Color landcolour = getclimatecolours(region.climate(i, j));
-
-                regionalclimateimage.setPixel(i - origregwidthbegin, j - origregheightbegin, landcolour);
-            }
+                regionalclimateimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getclimatecolours(world, region.climate(i, j)));
         }
     }
+
+    applyregionaloutlineoverlay(world, region, regionalclimateimage);
+}
+
+void drawregionalbiomemapimage(planet& world, region& region, maplayer& layer)
+{
+    sf::Image& regionalbiomeimage = layer.image;
+
+    int origregwidthbegin = region.regwidthbegin();
+    int origregwidthend = region.regwidthend();
+    int origregheightbegin = region.regheightbegin();
+    int origregheightend = region.regheightend();
+
+    int regwidthbegin = origregwidthbegin;
+    int regwidthend = origregwidthend;
+    int regheightbegin = origregheightbegin;
+    int regheightend = origregheightend;
+
+    for (int i = regwidthbegin; i <= regwidthend; i++)
+    {
+        for (int j = regheightbegin; j <= regheightend; j++)
+        {
+            const bool water = region.sea(i, j) || region.truelake(i, j) != 0;
+
+            if (water)
+            {
+                const int seaice = region.sea(i, j) ? region.seaice(i, j) : 0;
+                regionalbiomeimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getclimateseacolour(world, seaice));
+                continue;
+            }
+
+            const int globaly = clamp(region.lefty() + j / 16, 0, world.height());
+
+            regionalbiomeimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getbiomemapcolour(world, getholdridgebiomeslot(
+                static_cast<float>(region.jantemp(i, j)),
+                static_cast<float>(region.aprtemp(i, j, globaly, world.height(), world.tilt(), world.eccentricity(), world.perihelion())),
+                static_cast<float>(region.jultemp(i, j)),
+                static_cast<float>(region.octtemp(i, j, globaly, world.height(), world.tilt(), world.eccentricity(), world.perihelion())),
+                static_cast<float>(region.janrain(i, j)),
+                static_cast<float>(region.aprrain(i, j)),
+                static_cast<float>(region.julrain(i, j)),
+                static_cast<float>(region.octrain(i, j)))));
+        }
+    }
+
+    applyregionaloutlineoverlay(world, region, regionalbiomeimage);
 }
 
 void drawregionalriversmapimage(planet& world, region& region, maplayer& layer)
@@ -2033,99 +2306,96 @@ void drawregionalriversmapimage(planet& world, region& region, maplayer& layer)
     int regwidthend = origregwidthend;
     int regheightbegin = origregheightbegin;
     int regheightend = origregheightend;
-
-    int colour1, colour2, colour3;
-
-    int div = world.maxelevation() / 255;
-    int base = world.maxelevation() / 4;
-
-    int mult = world.maxriverflow() / 400;
-
-    if (mult < 1)
-        mult = 1;
+    const MapGradientRuntime gradient = buildmapgradient(world, mapgradientriverflow);
 
     for (int i = regwidthbegin; i <= regwidthend; i++)
     {
         for (int j = regheightbegin; j <= regheightend; j++)
         {
-            if (region.outline(i, j))
+            const int flow = region.riveraveflow(i, j);
+            const bool hasriver = flow > 0;
+            const bool haslake = region.truelake(i, j) != 0;
+            const bool hasvolcano = region.volcano(i, j) == 1;
+            sf::Color colour = getworldcolour(
+                world.rivermapcolour(rivermapbackground, 0),
+                world.rivermapcolour(rivermapbackground, 1),
+                world.rivermapcolour(rivermapbackground, 2));
+
+            if (hasriver)
             {
-                colour1 = 0;
-                colour2 = 0;
-                colour3 = 0;
+                colour = getriverflowcolour(gradient, flow);
+            }
+            else if (haslake)
+            {
+                if (world.showrivermapfeature(rivermapshowlakes))
+                {
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermaplake, 0),
+                        world.rivermapcolour(rivermaplake, 1),
+                        world.rivermapcolour(rivermaplake, 2));
+                }
             }
             else
             {
-                int flow = region.riveraveflow(i, j);
+                const int special = region.special(i, j);
 
-                if (flow > 0) // && region.sea(i, j) == 0)
+                if (special == 110 && world.showrivermapfeature(rivermapshowsaltpans))
                 {
-                    flow = flow * 100;
-
-                    colour1 = 255 - (flow / mult);
-                    if (colour1 < 0)
-                        colour1 = 0;
-                    colour2 = colour1;
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermapsaltpan, 0),
+                        world.rivermapcolour(rivermapsaltpan, 1),
+                        world.rivermapcolour(rivermapsaltpan, 2));
                 }
-                else
+                else if (special >= 130 && special < 140 && world.showrivermapfeature(rivermapshowwetlands))
                 {
-                    colour1 = 255;
-                    colour2 = 255;
-                }
-
-                colour3 = 255;
-
-                if (region.truelake(i, j) != 0)
-                {
-                    colour1 = 150;
-                    colour2 = 150;
-                    colour3 = 250;
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermapwetlands, 0),
+                        world.rivermapcolour(rivermapwetlands, 1),
+                        world.rivermapcolour(rivermapwetlands, 2));
                 }
 
-                if (region.volcano(i, j) == 1)
+                if (region.mud(i, j) && world.showrivermapfeature(rivermapshowmud))
                 {
-                    colour1 = 240;
-                    colour2 = 0;
-                    colour3 = 0;
-                    colour3 = 0;
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermapmud, 0),
+                        world.rivermapcolour(rivermapmud, 1),
+                        world.rivermapcolour(rivermapmud, 2));
                 }
 
-                if (colour1 == 255 && colour2 == 255 && colour3 == 255)
+                if (region.sand(i, j) && world.showrivermapfeature(rivermapshowsand))
                 {
-                    int special = region.special(i, j);
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermapsand, 0),
+                        world.rivermapcolour(rivermapsand, 1),
+                        world.rivermapcolour(rivermapsand, 2));
+                }
 
-                    if (special >= 130 && special < 140)
-                    {
-                        colour1 = 30;
-                        colour2 = 250;
-                        colour3 = 150;
-                    }
-
-                    if (region.mud(i, j))
-                    {
-                        colour1 = 131;
-                        colour2 = 98;
-                        colour3 = 75;
-                    }
-
-                    if (region.sand(i, j) || region.shingle(i, j))
-                    {
-                        colour1 = 255;
-                        colour2 = 255;
-                        colour3 = 50;
-                    }
+                if (region.shingle(i, j) && world.showrivermapfeature(rivermapshowshingle))
+                {
+                    colour = getworldcolour(
+                        world.rivermapcolour(rivermapshingle, 0),
+                        world.rivermapcolour(rivermapshingle, 1),
+                        world.rivermapcolour(rivermapshingle, 2));
                 }
             }
-            regionalriversimage.setPixel(i - origregwidthbegin, j - origregheightbegin, sf::Color(colour1, colour2, colour3));
+
+            if (hasvolcano && world.showrivermapfeature(rivermapshowvolcanoes))
+            {
+                colour = getworldcolour(
+                    world.rivermapcolour(rivermapvolcano, 0),
+                    world.rivermapcolour(rivermapvolcano, 1),
+                    world.rivermapcolour(rivermapvolcano, 2));
+            }
+
+            regionalriversimage.setPixel(i - origregwidthbegin, j - origregheightbegin, colour);
         }
     }
+
+    applyregionaloutlineoverlay(world, region, regionalriversimage);
 }
 
 void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
 {
-    if (cudaglobalrenderersavailable() && drawregionalreliefmapimagecuda(world, region, layer))
-        return;
-
     sf::Image& regionalreliefimage = layer.image;
 
     int origregwidthbegin = region.regwidthbegin();
@@ -2187,6 +2457,13 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
     const int regionalreliefimageheight = static_cast<int>(regionalreliefimage.getSize().y);
     const int seaiceappearance = world.seaiceappearance();
     const int snowchange = world.snowchange();
+    const auto hasvisibleflow = [&](int x, int y)
+    {
+        return (region.riverjan(x, y) + region.riverjul(x, y)) / 2 >= minriverflow
+            || (region.fakejan(x, y) + region.fakejul(x, y)) / 2 >= minriverflow
+            || region.deltajan(x, y) != 0
+            || region.deltajul(x, y) != 0;
+    };
 
     fillgrid(reliefmap1, static_cast<short>(0));
     fillgrid(reliefmap2, static_cast<short>(0));
@@ -2797,7 +3074,7 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
 
                 colour1 = colour1 + randomsign(random(0, (int)stripevar));
                 colour2 = colour2 + randomsign(random(0, (int)stripevar));
-                colour2 = colour2 + randomsign(random(0, (int)stripevar));
+                colour3 = colour3 + randomsign(random(0, (int)stripevar));
             }
 
             if (colour1 > 255)
@@ -2828,25 +3105,50 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
 
             if ((special == 130 || special == 131 || special == 132 || region.mud(i, j)) && (region.mangrove(i, j) == 0 || world.showmangroves() == 0))
             {
-                if ((region.riverjan(i, j) + region.riverjul(i, j)) / 2 < minriverflow || (region.fakejan(i, j) + region.fakejul(i, j)) / 2 < minriverflow) // Don't do it to the rivers themselves.
+                if (hasvisibleflow(i, j) == false) // Don't do it to the rivers themselves.
                 {
+                    bool touchesvisibleflow = false;
+
+                    for (int k = i - 1; k <= i + 1 && touchesvisibleflow == false; k++)
+                    {
+                        for (int l = j - 1; l <= j + 1; l++)
+                        {
+                            if ((k != i || l != j) && hasvisibleflow(k, l))
+                            {
+                                touchesvisibleflow = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (touchesvisibleflow)
+                        continue;
+
                     float colred = 0.0f;
                     float colgreen = 0.0f;
                     float colblue = 0.0f;
+                    float crount = 0.0f;
 
                     for (int k = i - 1; k <= i + 1; k++)
                     {
                         for (int l = j - 1; l <= j + 1; l++)
                         {
+                            if (hasvisibleflow(k, l))
+                                continue;
+
                             colred = colred + (float)reliefmap1[k][l];
                             colgreen = colgreen + (float)reliefmap2[k][l];
                             colblue = colblue + (float)reliefmap3[k][l];
+                            crount++;
                         }
                     }
 
-                    colred = colred / 9.0f;
-                    colgreen = colgreen / 9.0f;
-                    colblue = colblue / 9.0f;
+                    if (crount <= 0.0f)
+                        continue;
+
+                    colred = colred / crount;
+                    colgreen = colgreen / crount;
+                    colblue = colblue / crount;
 
                     reliefmap1[i][j] = (short)colred;
                     reliefmap2[i][j] = (short)colgreen;
@@ -2856,7 +3158,7 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
 
             if (region.rivervalley(i, j) == 1 && region.special(i, j) < 130)
             {
-                if (!((region.riverjan(i, j) + region.riverjul(i, j)) / 2 >= minriverflow || (region.fakejan(i, j) + region.fakejul(i, j)) / 2 >= minriverflow))
+                if (hasvisibleflow(i, j) == false)
                 {
                     float colred = 0.0f;
                     float colgreen = 0.0f;
@@ -2868,7 +3170,7 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
                     {
                         for (int l = j - 1; l <= j + 1; l++)
                         {
-                            if (region.riverjan(k, l) == 0 && region.riverjul(k, l) == 0 && region.fakejan(k, l) == 0 && region.fakejul(k, l) == 0 && region.deltajan(k, l) == 0 && region.deltajul(k, l) == 0)
+                            if (hasvisibleflow(k, l) == false)
                             {
                                 colred = colred + (float)reliefmap1[k][l];
                                 colgreen = colgreen + (float)reliefmap2[k][l];
@@ -2878,6 +3180,9 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
                             }
                         }
                     }
+
+                    if (crount <= 0.0f)
+                        continue;
 
                     colred = colred / crount;
                     colgreen = colgreen / crount;
@@ -2897,7 +3202,7 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
     {
         for (int j = regheightbegin; j <= regheightend; j++)
         {
-            if (region.sea(i, j) == 0 && region.special(i, j) < 130 && region.truelake(i, j) == 0)
+            if (region.sea(i, j) == 0 && region.truelake(i, j) == 0)
             {
                 if ((region.riverjan(i, j) + region.riverjul(i, j)) / 2 >= minriverflow || (region.fakejan(i, j) + region.fakejul(i, j)) / 2 >= minriverflow)
                 {
@@ -2911,7 +3216,11 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
 
                     colour1 = colour1 + randomsign(random(0, stripevar));
                     colour2 = colour2 + randomsign(random(0, stripevar));
-                    colour2 = colour2 + randomsign(random(0, stripevar));
+                    colour3 = colour3 + randomsign(random(0, stripevar));
+
+                    colour1 = clamp(colour1, 0, 255);
+                    colour2 = clamp(colour2, 0, 255);
+                    colour3 = clamp(colour3, 0, 255);
 
                     reliefmap1[i][j] = colour1;
                     reliefmap2[i][j] = colour2;
@@ -3029,4 +3338,5 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
     }
 
     regionalreliefimage.create(regionalreliefimagewidth, regionalreliefimageheight, reliefpixels.data());
+    applyregionaloutlineoverlay(world, region, regionalreliefimage);
 }
