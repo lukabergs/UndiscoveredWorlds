@@ -23,6 +23,64 @@
 
 using namespace std;
 
+namespace
+{
+void rebuildcontinentalshelves(planet& world, vector<vector<bool>>& shelves, int pointdist)
+{
+    parallelforrows(0, world.height(), [&](int startrow, int endrow)
+    {
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= world.width(); i++)
+                shelves[i][j] = false;
+        }
+    });
+
+    makecontinentalshelves(world, shelves, pointdist);
+}
+
+void carveedgeseas(planet& world)
+{
+    const int width = world.width();
+    const int height = world.height();
+    const int sealevel = world.sealevel();
+    const int maxelev = std::max(1, world.maxelevation());
+    const float bandbase = static_cast<float>(tuning::terrain::edgeseams::bandSize);
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+            {
+                const int edgedistance = std::min(std::min(i, width - i), std::min(j, height - j));
+                const int noisey1 = std::min(height, j + height / 5);
+                const int noisey2 = std::max(0, j - height / 6);
+                const float noisea = std::clamp(static_cast<float>(world.noise(i, j)) / static_cast<float>(maxelev), 0.0f, 1.0f);
+                const float noiseb = std::clamp(static_cast<float>(world.noise(wrap(i + width / 3, width), noisey1)) / static_cast<float>(maxelev), 0.0f, 1.0f);
+                const float noisec = std::clamp(static_cast<float>(world.noise(wrap(i + width / 2, width), noisey2)) / static_cast<float>(maxelev), 0.0f, 1.0f);
+                const float irregularity = std::clamp(noisea * 0.5f + std::fabs(noiseb - 0.5f) * 0.7f + std::fabs(noisec - 0.5f) * 0.5f, 0.0f, 1.0f);
+                const float band = bandbase * (tuning::terrain::edgeseams::bandNoiseMinScale + irregularity * tuning::terrain::edgeseams::bandNoiseRange);
+                const float effectivedistance = static_cast<float>(edgedistance) + (noiseb - 0.5f) * bandbase * tuning::terrain::edgeseams::distanceJitter;
+
+                if (effectivedistance >= band)
+                    continue;
+
+                const float strength = std::pow(1.0f - std::clamp(effectivedistance / std::max(1.0f, band), 0.0f, 1.0f), tuning::terrain::edgeseams::edgeExponent);
+                const int target = std::max(1, sealevel - (tuning::terrain::edgeseams::seaDepthBase + static_cast<int>(std::round(irregularity * static_cast<float>(tuning::terrain::edgeseams::seaDepthVariation)))));
+                const int current = world.nom(i, j);
+
+                if (current <= target)
+                    continue;
+
+                const int lowered = static_cast<int>(std::round(static_cast<float>(current) * (1.0f - strength) + static_cast<float>(target) * strength));
+                world.setnom(i, j, std::max(1, std::min(current, lowered)));
+            }
+        }
+    });
+}
+}
+
 void generateglobalterrain(planet& world, bool customgenerate, int iterations, int mergefactor, int clusterno, int clustersize, boolshapetemplate landshape[], boolshapetemplate chainland[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, vector<int>& squareroot)
 {
     //highres_timer_t timer("Generate Global Terrain"); // 22.1s => 17.6s
@@ -331,6 +389,17 @@ void generateglobalterraintype1(planet& world, bool customgenerate, int mergefac
             }
         }
     }
+
+    updatereport("Carving edge seas");
+    carveedgeseas(world);
+
+    if (useplatetectonicssimulation())
+    {
+        updatereport("Simulating plate tectonics");
+        applyplatetectonicssimulation(world, shelves);
+    }
+
+    rebuildcontinentalshelves(world, shelves, 20);
 
     // Now we create mid-ocean ridges.
 
@@ -753,6 +822,23 @@ void generateglobalterraintype2(planet& world, bool customgenerate, int mergefac
         }
     }
 
+    bool rebuildshelves = false;
+
+    if (beginworldgenstep("Carving edge seas"))
+    {
+        carveedgeseas(world);
+        rebuildshelves = true;
+    }
+
+    if (useplatetectonicssimulation() && beginworldgenstep("Simulating plate tectonics"))
+    {
+        applyplatetectonicssimulation(world, shelves);
+        rebuildshelves = true;
+    }
+
+    if (rebuildshelves)
+        rebuildcontinentalshelves(world, shelves, 4);
+
     if (beginworldgenstep("Generating mid-ocean ridges"))
         createoceanridges(world, shelves);
 
@@ -858,7 +944,7 @@ void generateglobalterraintype2(planet& world, bool customgenerate, int mergefac
         }
     }
 
-    if (beginworldgenstep("Adding smaller mountain ranges"))
+    if (usefastlemmountains() == false && beginworldgenstep("Adding smaller mountain ranges"))
     {
         twointegers dummy[1];
         createchains(world, baseheight, conheight, fractal, plateaumap, landshape, chainland, dummy, 0, 0, 2);
@@ -2690,7 +2776,7 @@ void largecontinents(planet& world, int baseheight, int conheight, int clusterno
     if (beginworldgenstep("Removing inland seas"))
         removeinlandseas(world, conheight);
 
-    if (beginworldgenstep("Adding continental mountain ranges"))
+    if (usefastlemmountains() == false && beginworldgenstep("Adding continental mountain ranges"))
     {
         // Now we add mountain ranges where continents overlap.
 

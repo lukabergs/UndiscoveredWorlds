@@ -10,6 +10,7 @@
 
 #include "app_environment.hpp"
 #include "functions.hpp"
+#include "generation_tuning.hpp"
 #include "world_generation_debug.hpp"
 
 using namespace std;
@@ -26,6 +27,7 @@ const vector<string> worldgenerationstepoptions =
     "Making continental shelves",
     "Shifting fractal",
     "Smoothing map",
+    "Carving edge seas",
     "Removing inland seas",
     "Adding archipelagos",
     "Tidying up oceans",
@@ -34,6 +36,7 @@ const vector<string> worldgenerationstepoptions =
     "Adjusting ocean depths",
     "Generating mid-ocean ridges",
     "Generating deep-sea trenches",
+    "Simulating plate tectonics",
     "Generating volcanoes",
     "Shifting for best position",
     "Adding smaller mountain ranges",
@@ -79,6 +82,7 @@ const vector<string> worldgenerationstepoptions =
     "Generating rivers",
     "Checking mountain river valleys",
     "Generating lakes",
+    "Broadening FastLEM terrain from rivers",
     "Calculating climates",
     "Generating sand dunes",
     "Generating salt pans",
@@ -299,4 +303,20 @@ void clearworldgenvisualizationcallback()
 bool usefastlemmountains()
 {
     return activeworldgenerationoptions != nullptr && activeworldgenerationoptions->useFastLEMMountains;
+}
+
+bool useplatetectonicssimulation()
+{
+    return activeworldgenerationoptions != nullptr && activeworldgenerationoptions->usePlateTectonicsSimulation;
+}
+
+int platetectonicscyclecount()
+{
+    if (activeworldgenerationoptions == nullptr)
+        return static_cast<int>(tuning::terrain::platetectonics::cycleCount);
+
+    if (activeworldgenerationoptions->plateTectonicsCycleCount < 1)
+        return 1;
+
+    return activeworldgenerationoptions->plateTectonicsCycleCount;
 }

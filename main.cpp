@@ -2142,7 +2142,7 @@ int main()
                 vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
                 vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
 
-                world->setmaxelevation(100000);
+                world->setmaxelevation(200000);
 
                 updatereport("Raising mountain bases");
 

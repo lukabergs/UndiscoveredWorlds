@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <queue>
 #include <vector>
@@ -18,6 +19,21 @@ struct FastLEMEdge
 {
     int to = -1;
     float distance = 1.0f;
+    bool boundary = false;
+};
+
+struct FastLEMBlock
+{
+    bool land = false;
+    bool coastal = false;
+    int x = 0;
+    int y = 0;
+    int gx = 0;
+    int gy = 0;
+    int landTiles = 0;
+    float meanNomNormalised = 0.0f;
+    float meanFractalNormalised = 0.0f;
+    int owner = -1;
 };
 
 struct FastLEMSite
@@ -26,16 +42,41 @@ struct FastLEMSite
     int y = 0;
     int gx = 0;
     int gy = 0;
-    int landTiles = 0;
-    int coastDistance = 0;
+    float weight = 1.0f;
+    int area = 0;
+    bool coastalRegion = false;
     bool outlet = false;
+    int coastDistance = 0;
     float baseElevation = 0.0f;
     float uplift = 0.0f;
     float erodibility = 1.0f;
     float solvedElevation = 0.0f;
     int peakHeight = 0;
+    int divideCount = 0;
+    float candidateScore = 0.0f;
     vector<FastLEMEdge> edges;
 };
+
+int blockindex(int gx, int gy, int gridwidth)
+{
+    return gy * gridwidth + gx;
+}
+
+uint64_t mixbits(uint64_t value)
+{
+    value ^= value >> 33;
+    value *= 0xff51afd7ed558ccdULL;
+    value ^= value >> 33;
+    value *= 0xc4ceb9fe1a85ec53ULL;
+    value ^= value >> 33;
+    return value;
+}
+
+float hash01(long seed, int x, int y, int salt)
+{
+    const uint64_t bits = mixbits(static_cast<uint64_t>(seed) ^ (static_cast<uint64_t>(x) << 21) ^ (static_cast<uint64_t>(y) << 42) ^ static_cast<uint64_t>(salt) * 0x9e3779b97f4a7c15ULL);
+    return static_cast<float>(bits & 0xFFFFFF) / static_cast<float>(0x1000000);
+}
 
 float wrappedxdistance(int x1, int x2, int width)
 {
@@ -45,10 +86,25 @@ float wrappedxdistance(int x1, int x2, int width)
     return static_cast<float>(delta);
 }
 
-float graphdistance(int x1, int y1, int x2, int y2, int width)
+float wrappedblockdistance(int gx1, int gx2, int gridwidth)
+{
+    const int span = gridwidth;
+    int delta = abs(gx1 - gx2);
+    delta = min(delta, span - delta);
+    return static_cast<float>(delta);
+}
+
+float worlddistance(int x1, int y1, int x2, int y2, int width)
 {
     const float dx = wrappedxdistance(x1, x2, width);
     const float dy = static_cast<float>(y1 - y2);
+    return sqrtf(dx * dx + dy * dy);
+}
+
+float blockdistance(int gx1, int gy1, int gx2, int gy2, int gridwidth)
+{
+    const float dx = wrappedblockdistance(gx1, gx2, gridwidth);
+    const float dy = static_cast<float>(gy1 - gy2);
     return sqrtf(dx * dx + dy * dy);
 }
 
@@ -79,19 +135,40 @@ bool iscoastaltile(planet& world, int x, int y)
     return false;
 }
 
-void addedge(vector<FastLEMSite>& sites, int from, int to, float distance)
+void addedge(vector<FastLEMSite>& sites, int from, int to, float distance, bool boundary)
 {
     if (from == to || from < 0 || to < 0)
         return;
 
-    for (const FastLEMEdge& edge : sites[from].edges)
+    bool foundforward = false;
+
+    for (FastLEMEdge& edge : sites[from].edges)
     {
         if (edge.to == to)
-            return;
+        {
+            edge.boundary = edge.boundary || boundary;
+            foundforward = true;
+            break;
+        }
     }
 
-    sites[from].edges.push_back({ to, distance });
-    sites[to].edges.push_back({ from, distance });
+    bool foundreverse = false;
+
+    for (FastLEMEdge& edge : sites[to].edges)
+    {
+        if (edge.to == from)
+        {
+            edge.boundary = edge.boundary || boundary;
+            foundreverse = true;
+            break;
+        }
+    }
+
+    if (foundforward == false)
+        sites[from].edges.push_back({ to, distance, boundary });
+
+    if (foundreverse == false)
+        sites[to].edges.push_back({ from, distance, boundary });
 }
 
 void drawrawline(vector<vector<int>>& rawmountains, int width, int height, int x1, int y1, int x2, int y2, int value)
@@ -128,10 +205,140 @@ void drawrawline(vector<vector<int>>& rawmountains, int width, int height, int x
     }
 }
 
-int findedgepeak(const FastLEMSite& first, const FastLEMSite& second)
+int findnearestlandblock(const vector<FastLEMBlock>& blocks, int gridwidth, int gridheight, int gx, int gy, int maxradius)
 {
-    return max(first.peakHeight, second.peakHeight);
+    gx = wrap(gx, gridwidth - 1);
+    gy = clamp(gy, 0, gridheight - 1);
+
+    for (int radius = 0; radius <= maxradius; radius++)
+    {
+        int bestindex = -1;
+        float bestdistance = numeric_limits<float>::max();
+
+        for (int dy = -radius; dy <= radius; dy++)
+        {
+            for (int dx = -radius; dx <= radius; dx++)
+            {
+                if (max(abs(dx), abs(dy)) != radius)
+                    continue;
+
+                const int ngx = wrap(gx + dx, gridwidth - 1);
+                const int ngy = gy + dy;
+
+                if (ngy < 0 || ngy >= gridheight)
+                    continue;
+
+                const int index = blockindex(ngx, ngy, gridwidth);
+
+                if (blocks[index].land == false)
+                    continue;
+
+                const float distance = blockdistance(gx, gy, ngx, ngy, gridwidth);
+
+                if (distance < bestdistance)
+                {
+                    bestdistance = distance;
+                    bestindex = index;
+                }
+            }
+        }
+
+        if (bestindex != -1)
+            return bestindex;
+    }
+
+    return -1;
 }
+
+bool hassitenear(const vector<FastLEMSite>& sites, int gx, int gy, int gridwidth, float minimumdistance)
+{
+    for (const FastLEMSite& site : sites)
+    {
+        if (blockdistance(gx, gy, site.gx, site.gy, gridwidth) < minimumdistance)
+            return true;
+    }
+
+    return false;
+}
+
+void addsitefromblock(vector<FastLEMSite>& sites, const FastLEMBlock& block, long seed)
+{
+    FastLEMSite site;
+    site.x = block.x;
+    site.y = block.y;
+    site.gx = block.gx;
+    site.gy = block.gy;
+    site.baseElevation = block.meanNomNormalised;
+    site.solvedElevation = block.meanNomNormalised * 0.25f + block.meanFractalNormalised * 0.02f + hash01(seed, block.gx, block.gy, 31) * 0.0001f;
+
+    const float weightnoise = block.meanFractalNormalised * 0.55f + hash01(seed, block.gx, block.gy, 29) * 0.45f;
+    site.weight = tuning::terrain::fastlem::siteWeightMin +
+        (tuning::terrain::fastlem::siteWeightMax - tuning::terrain::fastlem::siteWeightMin) * clamp(weightnoise, 0.0f, 1.0f);
+
+    sites.push_back(site);
+}
+
+int ensureminimumoutlets(vector<FastLEMSite>& sites, vector<int>& coastalids, int width)
+{
+    sort(coastalids.begin(), coastalids.end(), [&](int left, int right)
+    {
+        if (sites[left].x != sites[right].x)
+            return sites[left].x < sites[right].x;
+
+        return sites[left].y < sites[right].y;
+    });
+
+    const float minimumdistance = static_cast<float>(tuning::terrain::fastlem::outletMinimumDistanceBlocks * tuning::terrain::fastlem::cellSize);
+    int outletcount = 0;
+
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        const float targetdistance = attempt == 0 ? minimumdistance : minimumdistance * 0.5f;
+
+        for (int siteid : coastalids)
+        {
+            if (sites[siteid].outlet)
+                continue;
+
+            bool fartarget = true;
+
+            for (const FastLEMSite& site : sites)
+            {
+                if (site.outlet == false)
+                    continue;
+
+                if (worlddistance(site.x, site.y, sites[siteid].x, sites[siteid].y, width) < targetdistance)
+                {
+                    fartarget = false;
+                    break;
+                }
+            }
+
+            if (fartarget)
+            {
+                sites[siteid].outlet = true;
+                outletcount++;
+            }
+        }
+
+        if (outletcount >= max(3, static_cast<int>(coastalids.size() / 20)))
+            break;
+    }
+
+    if (outletcount == 0 && coastalids.empty() == false)
+    {
+        const int step = max(1, static_cast<int>(coastalids.size() / 6));
+
+        for (size_t index = 0; index < coastalids.size(); index += step)
+        {
+            sites[coastalids[index]].outlet = true;
+            outletcount++;
+        }
+    }
+
+    return outletcount;
+}
+
 }
 
 bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
@@ -140,14 +347,14 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
     const int height = world.height();
     const int maxelev = world.maxelevation();
     const int sealevel = world.sealevel();
+    const long seed = world.seed();
 
     const int cellsize = tuning::terrain::fastlem::cellSize;
     const int gridwidth = width / cellsize + 1;
     const int gridheight = height / cellsize + 1;
+    const int basestep = tuning::terrain::fastlem::baseLatticeStep;
 
-    vector<int> blocktosite(gridwidth * gridheight, -1);
-    vector<FastLEMSite> sites;
-    sites.reserve(gridwidth * gridheight / 2);
+    vector<FastLEMBlock> blocks(gridwidth * gridheight);
 
     for (int gy = 0; gy < gridheight; gy++)
     {
@@ -158,14 +365,15 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
         {
             const int xstart = gx * cellsize;
             const int xend = min(width, xstart + cellsize - 1);
+            FastLEMBlock& block = blocks[blockindex(gx, gy, gridwidth)];
+            block.gx = gx;
+            block.gy = gy;
+            block.x = xstart;
+            block.y = ystart;
 
-            int landtiles = 0;
-            int bestx = xstart;
-            int besty = ystart;
-            int bestnom = numeric_limits<int>::min();
             int nomsum = 0;
             int fractalsum = 0;
-            bool coastal = false;
+            int bestnom = numeric_limits<int>::min();
 
             for (int y = ystart; y <= yend; y++)
             {
@@ -174,109 +382,213 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
                     if (world.sea(x, y) == 1)
                         continue;
 
-                    landtiles++;
+                    block.land = true;
+                    block.landTiles++;
                     nomsum += world.nom(x, y);
                     fractalsum += fractal[x][y];
 
                     if (world.nom(x, y) > bestnom)
                     {
                         bestnom = world.nom(x, y);
-                        bestx = x;
-                        besty = y;
+                        block.x = x;
+                        block.y = y;
                     }
 
-                    if (coastal == false && iscoastaltile(world, x, y))
-                        coastal = true;
+                    if (block.coastal == false && iscoastaltile(world, x, y))
+                        block.coastal = true;
                 }
             }
 
-            if (landtiles == 0)
-                continue;
-
-            if (landtiles < tuning::terrain::fastlem::minimumLandTilesPerSite && coastal == false)
-                continue;
-
-            FastLEMSite site;
-            site.x = bestx;
-            site.y = besty;
-            site.gx = gx;
-            site.gy = gy;
-            site.landTiles = landtiles;
-            site.outlet = coastal;
-            site.baseElevation = static_cast<float>(max(0, nomsum / landtiles - sealevel)) / static_cast<float>(max(1, maxelev - sealevel));
-
-            const float fractalnormalised = static_cast<float>(fractalsum / landtiles) / static_cast<float>(max(1, maxelev));
-            site.solvedElevation = site.baseElevation * 0.1f + fractalnormalised * 0.001f + static_cast<float>(sites.size()) * 0.000001f;
-
-            blocktosite[gy * gridwidth + gx] = static_cast<int>(sites.size());
-            sites.push_back(site);
+            if (block.land)
+            {
+                block.meanNomNormalised = static_cast<float>(max(0, nomsum / max(1, block.landTiles) - sealevel)) / static_cast<float>(max(1, maxelev - sealevel));
+                block.meanFractalNormalised = static_cast<float>(fractalsum / max(1, block.landTiles)) / static_cast<float>(max(1, maxelev));
+            }
         }
+    }
+
+    vector<FastLEMSite> sites;
+    sites.reserve((gridwidth / max(1, basestep) + 1) * (gridheight / max(1, basestep) + 1));
+
+    for (int basegy = 0; basegy < gridheight; basegy += basestep)
+    {
+        for (int basegx = 0; basegx < gridwidth; basegx += basestep)
+        {
+            int gx = basegx + static_cast<int>(hash01(seed, basegx, basegy, 1) * 3.0f) - 1;
+            int gy = basegy + static_cast<int>(hash01(seed, basegx, basegy, 2) * 3.0f) - 1;
+
+            gx = wrap(gx, gridwidth - 1);
+            gy = clamp(gy, 0, gridheight - 1);
+
+            const int nearestblock = findnearestlandblock(blocks, gridwidth, gridheight, gx, gy, tuning::terrain::fastlem::fallbackNeighbourRadius);
+
+            if (nearestblock == -1)
+                continue;
+
+            const FastLEMBlock& block = blocks[nearestblock];
+
+            if (block.landTiles < tuning::terrain::fastlem::minimumLandTilesPerSite)
+                continue;
+
+            if (hassitenear(sites, block.gx, block.gy, gridwidth, static_cast<float>(basestep) * 0.75f))
+                continue;
+
+            addsitefromblock(sites, block, seed);
+        }
+    }
+
+    for (const FastLEMBlock& block : blocks)
+    {
+        if (block.land == false || block.coastal)
+            continue;
+
+        const float clusterstrength = block.meanFractalNormalised * 0.5f + hash01(seed, block.gx, block.gy, 11) * 0.5f;
+
+        if (clusterstrength < tuning::terrain::fastlem::clusterNoiseThreshold)
+            continue;
+
+        if (hash01(seed, block.gx, block.gy, 13) > 0.28f)
+            continue;
+
+        if (hassitenear(sites, block.gx, block.gy, gridwidth, static_cast<float>(basestep) * 0.55f))
+            continue;
+
+        addsitefromblock(sites, block, seed);
     }
 
     if (sites.size() < static_cast<size_t>(tuning::terrain::fastlem::minimumCandidateSites))
         return false;
 
-    for (int index = 0; index < static_cast<int>(sites.size()); index++)
+    for (FastLEMBlock& block : blocks)
     {
-        const int gx = sites[index].gx;
-        const int gy = sites[index].gy;
+        if (block.land == false)
+            continue;
 
-        for (int radius = 1; radius <= tuning::terrain::fastlem::fallbackNeighbourRadius; radius++)
+        int bestowner = -1;
+        float bestscore = numeric_limits<float>::max();
+
+        for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
         {
-            for (int dy = -radius; dy <= radius; dy++)
+            const FastLEMSite& site = sites[siteindex];
+            const float dx = wrappedxdistance(block.x, site.x, width);
+            const float dy = static_cast<float>(block.y - site.y);
+            const float distance = sqrtf(dx * dx + dy * dy);
+            const float weighted = distance / max(0.1f, site.weight);
+
+            if (weighted < bestscore)
             {
-                for (int dx = -radius; dx <= radius; dx++)
+                bestscore = weighted;
+                bestowner = siteindex;
+            }
+        }
+
+        block.owner = bestowner;
+
+        if (bestowner != -1)
+        {
+            sites[bestowner].area += max(1, block.landTiles);
+
+            if (block.coastal)
+                sites[bestowner].coastalRegion = true;
+        }
+    }
+
+    const int neighbourdirs[8][2] =
+    {
+        { 1, 0 }, { 0, 1 }, { 1, 1 }, { -1, 1 },
+        { -1, 0 }, { 0, -1 }, { -1, -1 }, { 1, -1 }
+    };
+
+    for (const FastLEMBlock& block : blocks)
+    {
+        if (block.land == false || block.owner == -1)
+            continue;
+
+        for (int n = 0; n < 4; n++)
+        {
+            const int ngx = wrap(block.gx + neighbourdirs[n][0], gridwidth - 1);
+            const int ngy = block.gy + neighbourdirs[n][1];
+
+            if (ngy < 0 || ngy >= gridheight)
+                continue;
+
+            const FastLEMBlock& other = blocks[blockindex(ngx, ngy, gridwidth)];
+
+            if (other.land == false || other.owner == -1 || other.owner == block.owner)
+                continue;
+
+            const float distance = worlddistance(block.x, block.y, other.x, other.y, width);
+            addedge(sites, block.owner, other.owner, max(1.0f, distance), true);
+        }
+    }
+
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
+    {
+        while (static_cast<int>(sites[siteindex].edges.size()) < tuning::terrain::fastlem::minimumConnections)
+        {
+            int nearest = -1;
+            float nearestdistance = numeric_limits<float>::max();
+
+            for (int otherindex = 0; otherindex < static_cast<int>(sites.size()); otherindex++)
+            {
+                if (otherindex == siteindex)
+                    continue;
+
+                bool connected = false;
+
+                for (const FastLEMEdge& edge : sites[siteindex].edges)
                 {
-                    if (dx == 0 && dy == 0)
-                        continue;
+                    if (edge.to == otherindex)
+                    {
+                        connected = true;
+                        break;
+                    }
+                }
 
-                    if (max(abs(dx), abs(dy)) != radius)
-                        continue;
+                if (connected)
+                    continue;
 
-                    const int ngx = wrap(gx + dx, gridwidth - 1);
-                    const int ngy = gy + dy;
+                const float distance = worlddistance(sites[siteindex].x, sites[siteindex].y, sites[otherindex].x, sites[otherindex].y, width);
 
-                    if (ngy < 0 || ngy >= gridheight)
-                        continue;
-
-                    const int other = blocktosite[ngy * gridwidth + ngx];
-
-                    if (other == -1)
-                        continue;
-
-                    const float distance = graphdistance(sites[index].x, sites[index].y, sites[other].x, sites[other].y, width);
-                    addedge(sites, index, other, max(1.0f, distance));
+                if (distance < nearestdistance)
+                {
+                    nearestdistance = distance;
+                    nearest = otherindex;
                 }
             }
 
-            if (static_cast<int>(sites[index].edges.size()) >= tuning::terrain::fastlem::minimumConnections)
+            if (nearest == -1)
                 break;
-        }
 
-        if (sites[index].edges.empty())
-            sites[index].outlet = true;
+            addedge(sites, siteindex, nearest, nearestdistance, false);
+        }
     }
+
+    vector<int> coastalids;
+    coastalids.reserve(sites.size());
+
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
+    {
+        if (sites[siteindex].coastalRegion)
+            coastalids.push_back(siteindex);
+    }
+
+    if (ensureminimumoutlets(sites, coastalids, width) == 0)
+        return false;
 
     const int infdistance = numeric_limits<int>::max() / 4;
     queue<int> bfsqueue;
     int maxcoastdistance = 0;
 
-    for (int index = 0; index < static_cast<int>(sites.size()); index++)
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
     {
-        sites[index].coastDistance = infdistance;
+        sites[siteindex].coastDistance = infdistance;
 
-        if (sites[index].outlet)
+        if (sites[siteindex].outlet)
         {
-            sites[index].coastDistance = 0;
-            bfsqueue.push(index);
+            sites[siteindex].coastDistance = 0;
+            bfsqueue.push(siteindex);
         }
-    }
-
-    if (bfsqueue.empty())
-    {
-        sites.front().outlet = true;
-        sites.front().coastDistance = 0;
-        bfsqueue.push(0);
     }
 
     while (!bfsqueue.empty())
@@ -307,16 +619,20 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
         const float reliefnormalised = site.baseElevation;
         const float fractalnormalised = static_cast<float>(fractal[site.x][site.y]) / static_cast<float>(max(1, maxelev));
         const float signednoise = (fractalnormalised - 0.5f) * 2.0f;
+        const float latitude = fabsf(((static_cast<float>(site.y) / static_cast<float>(max(1, height))) * 2.0f) - 1.0f);
+        const float equatorialhumidity = 1.0f - latitude;
+        const float midlatitudehumidity = 1.0f - min(1.0f, fabsf(latitude - 0.45f) / 0.35f);
+        const float precipitationpotential = clamp((1.0f - inlandnormalised) * 0.55f + max(equatorialhumidity, midlatitudehumidity * 0.65f) * 0.35f + max(0.0f, signednoise) * 0.10f, 0.0f, 1.0f);
 
         site.uplift =
             tuning::terrain::fastlem::baseUplift +
-            powf(inlandnormalised, 1.15f) * tuning::terrain::fastlem::inlandUplift +
+            powf(inlandnormalised, 1.10f) * tuning::terrain::fastlem::inlandUplift +
             reliefnormalised * tuning::terrain::fastlem::reliefUplift +
             max(0.0f, signednoise) * tuning::terrain::fastlem::noiseUplift;
 
         site.erodibility =
             tuning::terrain::fastlem::baseErodibility +
-            (1.0f - inlandnormalised) * tuning::terrain::fastlem::coastalErodibility +
+            precipitationpotential * tuning::terrain::fastlem::coastalErodibility +
             (1.0f - reliefnormalised) * tuning::terrain::fastlem::noiseErodibility;
 
         site.erodibility = clamp(site.erodibility, tuning::terrain::fastlem::minimumErodibility, tuning::terrain::fastlem::maximumErodibility);
@@ -327,23 +643,23 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
     vector<float> nextdistance(sites.size(), 1.0f);
     const float maxslopetan = tanf(tuning::terrain::fastlem::maxSlopeRadians);
 
-    for (int index = 0; index < static_cast<int>(sites.size()); index++)
-        elevations[index] = sites[index].solvedElevation;
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
+        elevations[siteindex] = sites[siteindex].solvedElevation;
 
     for (int iteration = 0; iteration < tuning::terrain::fastlem::iterations; iteration++)
     {
-        for (int index = 0; index < static_cast<int>(sites.size()); index++)
+        for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
         {
-            FastLEMSite& site = sites[index];
+            FastLEMSite& site = sites[siteindex];
 
             if (site.outlet || site.edges.empty())
             {
-                nextsite[index] = index;
-                nextdistance[index] = 1.0f;
+                nextsite[siteindex] = siteindex;
+                nextdistance[siteindex] = 1.0f;
                 continue;
             }
 
-            int bestdownhill = index;
+            int bestdownhill = siteindex;
             float bestdownhillslope = 0.0f;
             float bestdownhilldistance = 1.0f;
 
@@ -361,9 +677,9 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
                 const int other = edge.to;
                 const float otherheight = elevations[other];
 
-                if (elevations[index] > otherheight + 0.000001f)
+                if (elevations[siteindex] > otherheight + 0.000001f)
                 {
-                    const float slope = (elevations[index] - otherheight) / edge.distance;
+                    const float slope = (elevations[siteindex] - otherheight) / edge.distance;
 
                     if (slope > bestdownhillslope)
                     {
@@ -393,34 +709,34 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
                 }
             }
 
-            if (bestdownhill != index)
+            if (bestdownhill != siteindex)
             {
-                nextsite[index] = bestdownhill;
-                nextdistance[index] = bestdownhilldistance;
+                nextsite[siteindex] = bestdownhill;
+                nextdistance[siteindex] = bestdownhilldistance;
             }
             else if (bestescape != -1)
             {
-                nextsite[index] = bestescape;
-                nextdistance[index] = bestescapedistance;
+                nextsite[siteindex] = bestescape;
+                nextdistance[siteindex] = bestescapedistance;
             }
             else if (fallback != -1)
             {
-                nextsite[index] = fallback;
-                nextdistance[index] = fallbackdistance;
+                nextsite[siteindex] = fallback;
+                nextdistance[siteindex] = fallbackdistance;
             }
             else
             {
-                nextsite[index] = index;
-                nextdistance[index] = 1.0f;
+                nextsite[siteindex] = siteindex;
+                nextdistance[siteindex] = 1.0f;
             }
         }
 
         vector<vector<int>> children(sites.size());
 
-        for (int index = 0; index < static_cast<int>(sites.size()); index++)
+        for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
         {
-            if (nextsite[index] != index)
-                children[nextsite[index]].push_back(index);
+            if (nextsite[siteindex] != siteindex)
+                children[nextsite[siteindex]].push_back(siteindex);
         }
 
         vector<int> order;
@@ -428,12 +744,12 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
         vector<bool> visited(sites.size(), false);
         vector<int> stack;
 
-        for (int index = 0; index < static_cast<int>(sites.size()); index++)
+        for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
         {
-            if (nextsite[index] != index)
+            if (nextsite[siteindex] != siteindex)
                 continue;
 
-            stack.push_back(index);
+            stack.push_back(siteindex);
 
             while (!stack.empty())
             {
@@ -451,12 +767,12 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
             }
         }
 
-        for (int index = 0; index < static_cast<int>(sites.size()); index++)
+        for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
         {
-            if (visited[index])
+            if (visited[siteindex])
                 continue;
 
-            stack.push_back(index);
+            stack.push_back(siteindex);
 
             while (!stack.empty())
             {
@@ -477,8 +793,8 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
         vector<float> drainageareas(sites.size(), 1.0f);
         vector<float> responsetimes(sites.size(), 0.0f);
 
-        for (int index = 0; index < static_cast<int>(sites.size()); index++)
-            drainageareas[index] = static_cast<float>(max(1, sites[index].landTiles));
+        for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
+            drainageareas[siteindex] = static_cast<float>(max(1, sites[siteindex].area));
 
         for (int orderindex = static_cast<int>(order.size()) - 1; orderindex >= 0; orderindex--)
         {
@@ -524,14 +840,14 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
             break;
     }
 
-    for (int index = 0; index < static_cast<int>(sites.size()); index++)
-        sites[index].solvedElevation = elevations[index];
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
+        sites[siteindex].solvedElevation = elevations[siteindex];
 
     vector<int> basinroots(sites.size(), -1);
 
-    for (int index = 0; index < static_cast<int>(sites.size()); index++)
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
     {
-        int current = index;
+        int current = siteindex;
         vector<int> trail;
 
         while (nextsite[current] != current && basinroots[current] == -1)
@@ -546,8 +862,8 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
         if (basinroots[current] == -1)
             basinroots[current] = current;
 
-        for (int trailindex : trail)
-            basinroots[trailindex] = basinroots[current];
+        for (int trailsite : trail)
+            basinroots[trailsite] = basinroots[current];
     }
 
     float maxsolvedelevation = 0.0f;
@@ -558,110 +874,191 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
     if (maxsolvedelevation <= 0.0f)
         return false;
 
-    vector<bool> candidate(sites.size(), false);
-    int candidatecount = 0;
-    int boundarycandidatecount = 0;
+    vector<bool> preliminarycandidate(sites.size(), false);
 
-    for (int index = 0; index < static_cast<int>(sites.size()); index++)
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
     {
-        FastLEMSite& site = sites[index];
+        FastLEMSite& site = sites[siteindex];
         const float elevationnormalised = site.solvedElevation / maxsolvedelevation;
         const float coastnormalised = maxcoastdistance > 0 ? static_cast<float>(site.coastDistance) / static_cast<float>(maxcoastdistance) : 0.0f;
-        const float score = elevationnormalised * tuning::terrain::fastlem::elevationScoreWeight + coastnormalised * tuning::terrain::fastlem::coastScoreWeight;
 
         bool localmaximum = true;
-        int uniqueroots[8] = {};
-        int uniquerootcount = 0;
+        int dividecount = 0;
 
         for (const FastLEMEdge& edge : site.edges)
         {
             const FastLEMSite& other = sites[edge.to];
-            const float otherscore =
-                (other.solvedElevation / maxsolvedelevation) * tuning::terrain::fastlem::elevationScoreWeight +
-                (maxcoastdistance > 0 ? static_cast<float>(other.coastDistance) / static_cast<float>(maxcoastdistance) : 0.0f) * tuning::terrain::fastlem::coastScoreWeight;
 
-            if (otherscore > score + 0.02f)
+            if (other.solvedElevation > site.solvedElevation + maxsolvedelevation * 0.02f)
                 localmaximum = false;
 
-            const int root = basinroots[edge.to];
-            bool seenroot = false;
-
-            for (int rootindex = 0; rootindex < uniquerootcount; rootindex++)
-            {
-                if (uniqueroots[rootindex] == root)
-                {
-                    seenroot = true;
-                    break;
-                }
-            }
-
-            if (seenroot == false && uniquerootcount < 8)
-                uniqueroots[uniquerootcount++] = root;
+            if (basinroots[edge.to] != basinroots[siteindex])
+                dividecount++;
         }
 
-        const bool boundarycandidate = uniquerootcount >= 2;
+        site.divideCount = dividecount;
+        const float dividestrength = clamp(static_cast<float>(dividecount) / 3.0f, 0.0f, 1.0f);
+        const float score =
+            elevationnormalised * tuning::terrain::fastlem::elevationScoreWeight +
+            coastnormalised * tuning::terrain::fastlem::coastScoreWeight +
+            dividestrength * 0.20f;
 
-        if (site.coastDistance >= tuning::terrain::fastlem::minimumPeakCoastDistance &&
-            elevationnormalised >= tuning::terrain::fastlem::minimumPeakElevationNormalised &&
-            localmaximum)
-        {
-            candidate[index] = true;
-        }
+        site.candidateScore = score + dividestrength * 0.25f + elevationnormalised * 0.15f;
 
-        if (site.coastDistance >= tuning::terrain::fastlem::minimumRidgeCoastDistance &&
+        if ((dividecount > 0 &&
+            site.coastDistance >= tuning::terrain::fastlem::minimumRidgeCoastDistance &&
             elevationnormalised >= tuning::terrain::fastlem::minimumRidgeElevationNormalised &&
-            score >= tuning::terrain::fastlem::minimumRidgeScore &&
-            (boundarycandidate || localmaximum))
+            score >= tuning::terrain::fastlem::minimumRidgeScore) ||
+            (localmaximum &&
+                site.coastDistance >= tuning::terrain::fastlem::minimumPeakCoastDistance &&
+                elevationnormalised >= tuning::terrain::fastlem::minimumPeakElevationNormalised))
         {
-            candidate[index] = true;
+            preliminarycandidate[siteindex] = true;
         }
 
-        if (candidate[index])
+        if (preliminarycandidate[siteindex])
         {
-            const float heightnormalised = clamp(elevationnormalised * 0.75f + coastnormalised * 0.25f, 0.0f, 1.0f);
+            const float heightnormalised = clamp(elevationnormalised * 0.65f + coastnormalised * 0.20f + dividestrength * 0.15f, 0.0f, 1.0f);
             site.peakHeight = tuning::terrain::fastlem::minimumPeakHeight +
                 static_cast<int>(powf(heightnormalised, tuning::terrain::fastlem::peakHeightExponent) *
                     static_cast<float>(tuning::terrain::fastlem::maximumPeakHeight - tuning::terrain::fastlem::minimumPeakHeight));
-
-            candidatecount++;
-
-            if (boundarycandidate)
-                boundarycandidatecount++;
         }
     }
 
-    const int minimumcandidatecount = min(tuning::terrain::fastlem::minimumCandidateSites, max(6, static_cast<int>(sites.size() / 40)));
-    const int minimumboundarycount = min(tuning::terrain::fastlem::minimumBoundaryCandidates, max(3, static_cast<int>(sites.size() / 80)));
+    vector<int> candidateorder;
+    candidateorder.reserve(sites.size());
+
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
+    {
+        if (preliminarycandidate[siteindex])
+            candidateorder.push_back(siteindex);
+    }
+
+    sort(candidateorder.begin(), candidateorder.end(), [&](int left, int right)
+    {
+        if (sites[left].candidateScore != sites[right].candidateScore)
+            return sites[left].candidateScore > sites[right].candidateScore;
+
+        if (sites[left].peakHeight != sites[right].peakHeight)
+            return sites[left].peakHeight > sites[right].peakHeight;
+
+        return left < right;
+    });
+
+    vector<bool> candidate(sites.size(), false);
+    vector<int> keptcandidates;
+    keptcandidates.reserve(candidateorder.size());
+    const float minimumcandidatespacing = tuning::terrain::fastlem::minimumCandidateSpacingBlocks;
+
+    for (int siteindex : candidateorder)
+    {
+        bool tooclose = false;
+
+        for (int keptindex : keptcandidates)
+        {
+            if (blockdistance(sites[siteindex].gx, sites[siteindex].gy, sites[keptindex].gx, sites[keptindex].gy, gridwidth) < minimumcandidatespacing)
+            {
+                tooclose = true;
+                break;
+            }
+        }
+
+        if (tooclose)
+            continue;
+
+        candidate[siteindex] = true;
+        keptcandidates.push_back(siteindex);
+    }
+
+    int candidatecount = 0;
+    int boundarycandidatecount = 0;
+
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
+    {
+        if (candidate[siteindex] == false)
+            continue;
+
+        candidatecount++;
+
+        if (sites[siteindex].divideCount > 0)
+            boundarycandidatecount++;
+    }
+
+    const int minimumcandidatecount = min(tuning::terrain::fastlem::minimumCandidateSites, max(6, static_cast<int>(sites.size() / 30)));
+    const int minimumboundarycount = min(tuning::terrain::fastlem::minimumBoundaryCandidates, max(3, static_cast<int>(sites.size() / 60)));
 
     if (candidatecount < minimumcandidatecount || boundarycandidatecount < minimumboundarycount)
         return false;
 
     vector<vector<int>> rawmountains(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
-    for (int index = 0; index < static_cast<int>(sites.size()); index++)
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
     {
-        if (candidate[index] == false)
+        if (candidate[siteindex] == false)
             continue;
 
-        rawmountains[sites[index].x][sites[index].y] = max(rawmountains[sites[index].x][sites[index].y], sites[index].peakHeight);
+        rawmountains[sites[siteindex].x][sites[siteindex].y] = max(rawmountains[sites[siteindex].x][sites[siteindex].y], sites[siteindex].peakHeight);
     }
 
-    for (int index = 0; index < static_cast<int>(sites.size()); index++)
+    const int boundaryneighbours[4][2] =
     {
-        if (candidate[index] == false)
+        { 1, 0 }, { 0, 1 }, { 1, 1 }, { -1, 1 }
+    };
+
+    for (const FastLEMBlock& block : blocks)
+    {
+        if (block.land == false || block.owner == -1)
             continue;
 
-        for (const FastLEMEdge& edge : sites[index].edges)
+        const FastLEMSite& source = sites[block.owner];
+        const float sourcenormalised = source.solvedElevation / maxsolvedelevation;
+
+        for (int n = 0; n < 4; n++)
         {
-            if (edge.to <= index || candidate[edge.to] == false)
+            const int ngx = wrap(block.gx + boundaryneighbours[n][0], gridwidth - 1);
+            const int ngy = block.gy + boundaryneighbours[n][1];
+
+            if (ngy < 0 || ngy >= gridheight)
                 continue;
 
-            const bool samebasin = basinroots[index] == basinroots[edge.to];
-            const bool closeband = abs(sites[index].coastDistance - sites[edge.to].coastDistance) <= 1;
+            const FastLEMBlock& otherblock = blocks[blockindex(ngx, ngy, gridwidth)];
 
-            if (samebasin == false || closeband)
+            if (otherblock.land == false || otherblock.owner == -1 || otherblock.owner == block.owner)
+                continue;
+
+            const FastLEMSite& target = sites[otherblock.owner];
+            const float targetnormalised = target.solvedElevation / maxsolvedelevation;
+            const bool differentbasin = basinroots[block.owner] != basinroots[otherblock.owner];
+            const bool similarelevation = fabsf(source.solvedElevation - target.solvedElevation) <= maxsolvedelevation * 0.15f;
+            const bool strongboundary = max(sourcenormalised, targetnormalised) >= tuning::terrain::fastlem::minimumRidgeElevationNormalised;
+
+            if (strongboundary == false)
+                continue;
+
+            if (differentbasin || similarelevation)
             {
-                drawrawline(rawmountains, width, height, sites[index].x, sites[index].y, sites[edge.to].x, sites[edge.to].y, findedgepeak(sites[index], sites[edge.to]));
+                const int peak = max(source.peakHeight, target.peakHeight);
+                drawrawline(rawmountains, width, height, block.x, block.y, otherblock.x, otherblock.y, max(peak, tuning::terrain::fastlem::minimumPeakHeight));
+            }
+        }
+    }
+
+    for (int siteindex = 0; siteindex < static_cast<int>(sites.size()); siteindex++)
+    {
+        if (candidate[siteindex] == false)
+            continue;
+
+        for (const FastLEMEdge& edge : sites[siteindex].edges)
+        {
+            if (edge.to <= siteindex)
+                continue;
+
+            if (candidate[edge.to] == false)
+                continue;
+
+            if (edge.boundary && basinroots[siteindex] != basinroots[edge.to])
+            {
+                drawrawline(rawmountains, width, height, sites[siteindex].x, sites[siteindex].y, sites[edge.to].x, sites[edge.to].y, max(sites[siteindex].peakHeight, sites[edge.to].peakHeight));
             }
         }
     }

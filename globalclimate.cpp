@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <fstream>
+#include <queue>
 #include <mutex>
 #include <stdio.h>
 #include <unordered_set>
@@ -20,6 +21,7 @@
 #include "region.hpp"
 #include "functions.hpp"
 #include "profiler.h"
+#include "world_generation_debug.hpp"
 
 using namespace std;
 
@@ -199,6 +201,67 @@ void tracedropparallel(planet& world, int x, int y, int minimum, vector<mutex>& 
         lock_guard<mutex> lock(rowlocks[loopy]);
         world.setlakesurface(loopx, loopy, maxelevation * 2);
     }
+}
+
+template<typename SourcePredicate>
+bool buildlanddistancefield(planet& world, vector<vector<short>>& distances, int maximumdistance, SourcePredicate issource)
+{
+    const int width = world.width();
+    const int height = world.height();
+    queue<pair<int, int>> frontier;
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            distances[i][j] = static_cast<short>(maximumdistance + 1);
+
+            if (world.sea(i, j) == 0 && issource(i, j))
+            {
+                distances[i][j] = 0;
+                frontier.emplace(i, j);
+            }
+        }
+    }
+
+    if (frontier.empty())
+        return false;
+
+    const int directions[8][2] =
+    {
+        { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
+        { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }
+    };
+
+    while (frontier.empty() == false)
+    {
+        const pair<int, int> current = frontier.front();
+        frontier.pop();
+
+        const short currentdistance = distances[current.first][current.second];
+
+        if (currentdistance >= maximumdistance)
+            continue;
+
+        for (const auto& direction : directions)
+        {
+            const int nx = wrap(current.first + direction[0], width);
+            const int ny = current.second + direction[1];
+
+            if (ny < 0 || ny > height || world.sea(nx, ny) == 1)
+                continue;
+
+            const short nextdistance = static_cast<short>(currentdistance + 1);
+
+            if (distances[nx][ny] <= nextdistance)
+                continue;
+
+            distances[nx][ny] = nextdistance;
+            frontier.emplace(nx, ny);
+        }
+    }
+
+    return true;
 }
 }
 
@@ -524,6 +587,9 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
         }      
     }
 
+    if (usefastlemmountains() && beginworldgenstep("Broadening FastLEM terrain from rivers"))
+        broadenfastlemterrainfromrivers(world);
+
     world.setmaxriverflow();
 
     // Now create the climate map.
@@ -620,6 +686,75 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
             }
         }
     }
+}
+
+void broadenfastlemterrainfromrivers(planet& world)
+{
+    const int width = world.width();
+    const int height = world.height();
+    const int sealevel = world.sealevel();
+    const int maxelev = world.maxelevation();
+    const int maxriverdistance = tuning::terrain::fastlem::postRiverMaximumDistance;
+    const int maxmountaindistance = tuning::terrain::fastlem::postRiverMountainDistance;
+
+    vector<vector<short>> riverdistance(ARRAYWIDTH, vector<short>(ARRAYHEIGHT, static_cast<short>(maxriverdistance + 1)));
+    vector<vector<short>> mountaindistance(ARRAYWIDTH, vector<short>(ARRAYHEIGHT, static_cast<short>(maxmountaindistance + 1)));
+
+    const bool hasrivers = buildlanddistancefield(world, riverdistance, maxriverdistance, [&](int x, int y)
+    {
+        return world.riverdir(x, y) != 0 || world.riverjan(x, y) != 0 || world.riverjul(x, y) != 0 || world.lakesurface(x, y) != 0 || world.riftlakesurface(x, y) != 0;
+    });
+
+    const bool hasmountains = buildlanddistancefield(world, mountaindistance, maxmountaindistance, [&](int x, int y)
+    {
+        return world.mountainheight(x, y) >= tuning::terrain::fastlem::postRiverMinimumMountainHeight;
+    });
+
+    if (hasrivers == false || hasmountains == false)
+        return;
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int j = startrow; j <= endrow; j++)
+        {
+            for (int i = 0; i <= width; i++)
+            {
+                if (world.sea(i, j) == 1 || world.outline(i, j) == 1)
+                    continue;
+
+                if (world.lakesurface(i, j) != 0 || world.riftlakesurface(i, j) != 0)
+                    continue;
+
+                const int thisriverdistance = riverdistance[i][j];
+                const int thismountaindistance = mountaindistance[i][j];
+
+                if (thisriverdistance <= 0 || thisriverdistance > maxriverdistance || thismountaindistance > maxmountaindistance)
+                    continue;
+
+                float riverfactor = static_cast<float>(thisriverdistance) / static_cast<float>(maxriverdistance);
+                riverfactor = powf(clamp(riverfactor, 0.0f, 1.0f), tuning::terrain::fastlem::postRiverDistanceExponent);
+
+                float mountainfactor = 1.0f - static_cast<float>(thismountaindistance) / static_cast<float>(maxmountaindistance);
+                mountainfactor = powf(clamp(mountainfactor, 0.0f, 1.0f), tuning::terrain::fastlem::postRiverMountainExponent);
+
+                float elevationfactor = static_cast<float>(world.nom(i, j) - sealevel) / static_cast<float>(max(1, tuning::terrain::fastlem::postRiverElevationRange));
+                elevationfactor = clamp(elevationfactor, 0.0f, 1.0f);
+
+                const float upliftstrength = riverfactor * mountainfactor * (0.35f + elevationfactor * 0.65f);
+                const int uplift = static_cast<int>(roundf(static_cast<float>(tuning::terrain::fastlem::postRiverMaximumUplift) * upliftstrength));
+
+                if (uplift < tuning::terrain::fastlem::postRiverMinimumUplift)
+                    continue;
+
+                int newheight = world.nom(i, j) + uplift;
+
+                if (newheight > maxelev - 1)
+                    newheight = maxelev - 1;
+
+                world.setnom(i, j, newheight);
+            }
+        }
+    });
 }
 
 // Rain map creator.
