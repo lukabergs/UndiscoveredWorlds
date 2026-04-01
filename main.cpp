@@ -822,6 +822,8 @@ int main()
 
                 changeworldproperties(*world);
 
+                fast_srand(world->seed());
+
                 resizeglobaldisplayforworld(*world, globaldisplay, highlightdisplay);
 
                 invalidateGlobalMaps();

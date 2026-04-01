@@ -3457,6 +3457,10 @@ void smallcontinents(planet& world, int baseheight, int conheight, vector<vector
 
 void makecontinentedgemountains(planet& world, short thiscontinent, vector<vector<short>>& continentnos, vector<vector<short>>& overlaps, int baseheight, int conheight, vector<vector<int>>& fractal, boolshapetemplate landshape[], boolshapetemplate chainland[], int contstartpointx, int contstartpointy, int contwidth, int contheight, int startnearx, int startneary, short contdir, int& startpointx, int& startpointy)
 {
+    std::uint64_t mountainseed = deterministiccontextseed(world.seed(), 0x4101);
+    mountainseed = deterministiccombine(mountainseed, thiscontinent, baseheight, conheight, contstartpointx, contstartpointy, contwidth, contheight, startnearx, startneary, contdir);
+    fast_srand(deterministicfastseed(mountainseed));
+
     int width = world.width();
     int height = world.height();
 
@@ -4849,6 +4853,14 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
         fewer = 1;
     }
 
+    std::uint64_t chainseed = deterministiccontextseed(world.seed(), 0x4102);
+    chainseed = deterministiccombine(chainseed, baseheight, conheight, focustotal, focaldistance, mode, lower ? 1 : 0, fewer ? 1 : 0);
+
+    for (int n = 0; n < focustotal; n++)
+        chainseed = deterministiccombine(chainseed, focuspoints[n].x, focuspoints[n].y);
+
+    fast_srand(deterministicfastseed(chainseed));
+
     //int temptotal=24; // Total number of mountain range templates available.
 
     int rangestartvar = 2; //6; // Possible distance between previous range and next one in a chain
@@ -5498,6 +5510,9 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
 void createdirectedchain(planet& world, int baseheight, int conheight, short thiscontinent, vector<vector<short>>& continentnos, vector<vector<int>>& fractal, boolshapetemplate landshape[], boolshapetemplate chainland[], int chainstartx, int chainstarty, int chainendx, int chainendy, int mode, vector<twointegers>& rangepoints, vector<vector<bool>>& currentland, int volcanochance)
 {
+    std::uint64_t directedseed = deterministiccontextseed(world.seed(), 0x4103);
+    directedseed = deterministiccombine(directedseed, baseheight, conheight, thiscontinent, chainstartx, chainstarty, chainendx, chainendy, mode, volcanochance);
+    fast_srand(deterministicfastseed(directedseed));
 
     // mode=0: overlapping continents (over land, no associated land is created).
     // mode=1: along the edge of a continent (creates land if necessary, removes land to one side).
@@ -10155,6 +10170,8 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
     int width = world.width();
     int height = world.height();
     int maxelev = world.maxelevation();
+    const std::uint64_t ridgeseed = deterministiccontextseed(world.seed(), 0x0cea6e51);
+    fast_srand(deterministicfastseed(ridgeseed));
 
     vector<vector<int>> nearestshelfdist(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
     vector<vector<int>> nearestshelfx(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, -1));
@@ -10241,7 +10258,7 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
                 {
                     if (l >= 0 && l <= height)
                     {
-                        if (k == i || l == j || random(1, 2) == 1) // Only sometimes do diagonals, otherwise the end result looks too angular.
+                        if (k == i || l == j || deterministicrandom(ridgeseed ^ 0x1001ull, 1, 2, i, j, kk, l, sweep) == 1) // Only sometimes do diagonals, otherwise the end result looks too angular.
                         {
                             if (shelves[kk][l] == 0 && nearestshelfdist[kk][l] == 0)
                             {
@@ -10497,7 +10514,7 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     int grain = tuning::terrain::oceanridges::pointShiftFractalGrain;
     float valuemod = tuning::terrain::oceanridges::pointShiftFractalValueMod;
-    int v = random(tuning::terrain::oceanridges::pointShiftFractalValueMod2Min, tuning::terrain::oceanridges::pointShiftFractalValueMod2Max);
+    int v = deterministicrandom(ridgeseed ^ 0x1002ull, tuning::terrain::oceanridges::pointShiftFractalValueMod2Min, tuning::terrain::oceanridges::pointShiftFractalValueMod2Max, width, height);
     float valuemod2 = (float)v;
 
     vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
@@ -10540,8 +10557,8 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
         if (yshift > (float)maxshift)
             yshift = (float)maxshift;
 
-        int xextrashift = randomsign(random(minadditionalshift, maxadditionalshift));
-        int yextrashift = randomsign(random(minadditionalshift, maxadditionalshift));
+        int xextrashift = deterministicsignedrandom(ridgeseed ^ 0x1003ull, minadditionalshift, maxadditionalshift, thispoint, pointx[thispoint], pointy[thispoint], 0);
+        int yextrashift = deterministicsignedrandom(ridgeseed ^ 0x1004ull, minadditionalshift, maxadditionalshift, thispoint, pointx[thispoint], pointy[thispoint], 1);
 
         int newx = pointx[thispoint] + (int)xshift + xextrashift;
 
@@ -11300,7 +11317,7 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
                         int b = 8;
                         int c = 1;
 
-                        if (random(1, 2) == 1)
+                        if (deterministicrandom(ridgeseed ^ 0x1005ull, 1, 2, i, j, n, extra) == 1)
                         {
                             a = 8;
                             b = 1;
@@ -11368,8 +11385,8 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
         {
             for (int j = 0; j < ARRAYHEIGHT; j = j + faultstep)
             {
-                int ii = i + randomsign(random(1, faultvar));
-                int jj = j + randomsign(random(1, faultvar));
+                int ii = i + deterministicsignedrandom(ridgeseed ^ 0x1006ull, 1, faultvar, n, i, j, 0);
+                int jj = j + deterministicsignedrandom(ridgeseed ^ 0x1007ull, 1, faultvar, n, i, j, 1);
 
                 if (ii<0 || ii>width)
                     ii = wrap(ii, width);
@@ -11484,6 +11501,7 @@ void drawoceanridgeline(planet& world, int fromx, int fromy, int tox, int toy, v
 {
     int width = world.width();
     int height = world.height();
+    const std::uint64_t lineseed = deterministiccontextseed(world.seed(), 0x51a9e245);
 
     if (tox < fromx - width / 2)
         tox = tox + width;
@@ -11504,8 +11522,8 @@ void drawoceanridgeline(planet& world, int fromx, int fromy, int tox, int toy, v
     mm1.x = (float) fromx;
     mm1.y = (float) fromy;
 
-    mm2.x = (float) (fromx + tox) / 2 + randomsign(random(minvar, maxvar));
-    mm2.y = (float) (fromy + toy) / 2 + randomsign(random(minvar, maxvar));
+    mm2.x = (float)(fromx + tox) / 2 + deterministicsignedrandom(lineseed ^ 0x1008ull, minvar, maxvar, fromx, fromy, tox, toy, value, 0);
+    mm2.y = (float)(fromy + toy) / 2 + deterministicsignedrandom(lineseed ^ 0x1009ull, minvar, maxvar, fromx, fromy, tox, toy, value, 1);
 
     mm3.x = (float) tox;
     mm3.y = (float) toy;
@@ -11544,11 +11562,12 @@ void createoceanfault(planet& world, int midx, int midy, int mindist, int maxdis
     int width = world.width();
     int height = world.height();
     int maxelev = world.maxelevation();
+    const std::uint64_t faultseed = deterministiccontextseed(world.seed(), 0x7f4a7c15);
 
     int minshiftdist = 2;
     int maxshiftdist = 6;
 
-    int dist = random(mindist, maxdist); // Distance from the midpoint that the edge points should be.
+    int dist = deterministicrandom(faultseed ^ 0x100aull, mindist, maxdist, midx, midy, masksize); // Distance from the midpoint that the edge points should be.
 
     int x1 = 0, y1 = 0, x2 = 0, y2 = 0; // Coordinates of the rift points at the ends of the area to be moved.
 
@@ -11979,7 +11998,7 @@ void createoceanfault(planet& world, int midx, int midy, int mindist, int maxdis
     while (angle < 0.0f)
         angle = angle + 360.0f;
 
-    if (random(1, 2) == 1)
+    if (deterministicrandom(faultseed ^ 0x100bull, 1, 2, midx, midy, x1, y1, x2, y2) == 1)
     {
         angle = angle + 180.0f;
 
@@ -11989,7 +12008,7 @@ void createoceanfault(planet& world, int midx, int midy, int mindist, int maxdis
 
     float fangle = angle * 0.01745329f;
 
-    float shiftdist = (float)random(minshiftdist, maxshiftdist);
+    float shiftdist = (float)deterministicrandom(faultseed ^ 0x100cull, minshiftdist, maxshiftdist, midx, midy, x1, y1, x2, y2);
 
     int xshift = (int)(shiftdist * (float)sin(fangle));
     int yshift = (int)(shiftdist * (float)cos(fangle));

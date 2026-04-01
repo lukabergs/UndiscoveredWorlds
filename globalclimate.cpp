@@ -27,6 +27,11 @@ using namespace std;
 
 namespace
 {
+void reseedglobalclimatepass(planet& world, int salt)
+{
+    fast_srand(deterministicfastseed(deterministiccontextseed(world.seed(), salt)));
+}
+
 int seaflowdir(int x, int y, int newx, int newy)
 {
     if (newx == x && newy < y)
@@ -453,7 +458,10 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
     // Now, do the wind map.
 
     if (beginworldgenstep("Generating wind map"))
+    {
+        reseedglobalclimatepass(world, 0x5001);
         createwindmap(world);
+    }
 
     int grain = 8; // Level of detail on this fractal map.
     float valuemod = 0.2f;
@@ -465,6 +473,8 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
     if (beginworldgenstep("Generating global temperature map"))
     {
+        reseedglobalclimatepass(world, 0x5002);
+
         // Start by generating a new fractal map.
 
         v = random(1, 4);
@@ -484,6 +494,8 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
     {
         if (beginworldgenstep("Generating sea ice map"))
         {
+            reseedglobalclimatepass(world, 0x5003);
+
             for (int i = 0; i <= width; i++)
             {
                 for (int j = 0; j <= height; j++)
@@ -506,6 +518,8 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
     if (seatotal > 0 || desertworldrain)
     {
+        reseedglobalclimatepass(world, 0x5004);
+
         for (int i = 0; i <= width; i++)
         {
             for (int j = 0; j <= height; j++)
@@ -526,7 +540,10 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
     if (seatotal > 0)
     {
         if (beginworldgenstep("Carving fjords"))
+        {
+            reseedglobalclimatepass(world, 0x5005);
             addfjordmountains(world);
+        }
     }
 
     if (dorivers && (seatotal > 0 || desertworldrain))
@@ -542,6 +559,8 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
             if (beginworldgenstep("Placing hydrological basins"))
             {
+                reseedglobalclimatepass(world, 0x5006);
+
                 createsaltlakes(world, saltlakesplaced, saltlakemap, nolake, basins, smalllake);
 
                 addlandnoise(world);
@@ -565,7 +584,10 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
         // Now check river valleys in mountains.
 
         if (beginworldgenstep("Checking mountain river valleys"))
+        {
+            reseedglobalclimatepass(world, 0x5007);
             removerivermountains(world);
+        }
 
         if (dolakes)
         {
@@ -573,6 +595,8 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
             if (beginworldgenstep("Generating lakes"))
             {
+                reseedglobalclimatepass(world, 0x5008);
+
                 convertsaltlakes(world, saltlakemap);
 
                 createlakemap(world, nolake, smalllake, largelake);
@@ -595,15 +619,24 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
     // Now create the climate map.
 
     if (beginworldgenstep("Calculating climates"))
+    {
+        reseedglobalclimatepass(world, 0x5009);
         createclimatemap(world);
+    }
 
     // Now specials.
 
     if (beginworldgenstep("Generating sand dunes"))
+    {
+        reseedglobalclimatepass(world, 0x500a);
         createergs(world, smalllake, largelake, landshape);
+    }
 
     if (beginworldgenstep("Generating salt pans"))
+    {
+        reseedglobalclimatepass(world, 0x500b);
         createsaltpans(world, smalllake, largelake);
+    }
 
     // Add river deltas.
 
@@ -611,6 +644,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
     {
         if (beginworldgenstep("Generating river deltas"))
         {
+            reseedglobalclimatepass(world, 0x500c);
             createriverdeltas(world);
             checkrivers(world);
         }
@@ -620,6 +654,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
     if (beginworldgenstep("Generating wetlands"))
     {
+        reseedglobalclimatepass(world, 0x500d);
         createwetlands(world, smalllake);
         removeexcesswetlands(world);
     }
@@ -627,7 +662,10 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
     // Now it's time to finesse the roughness map.
 
     if (beginworldgenstep("Refining roughness map"))
+    {
+        reseedglobalclimatepass(world, 0x500e);
         refineroughnessmap(world);
+    }
 
     // Check the rift lake map too.
 
@@ -5344,6 +5382,8 @@ void drawmonsoonblob(planet& world, vector<vector<int>>& monsoonmap, int centrex
 
 void createsaltlakes(planet& world, int& lakesplaced, vector<vector<vector<int>>>& saltlakemap, vector<vector<int>>& nolake, vector<vector<int>>& basins, boolshapetemplate smalllake[])
 {
+    fast_srand(static_cast<long>(deterministiccontextseed(world.seed(), 0x3001) & 0x7fffffffull));
+
     int width = world.width();
     int height = world.height();
 
@@ -5676,6 +5716,8 @@ void createrivermap(planet& world, vector<vector<int>>& mountaindrainage)
     int width = world.width();
     int height = world.height();
     float tilt = world.tilt();
+    const std::uint64_t riverseed = deterministiccontextseed(world.seed(), 0x25b3f2a1);
+    fast_srand(deterministicfastseed(riverseed));
 
     int mountainheightlimit = tuning::climate::rivers::mountainHeightLimit;
     int minimum = tuning::climate::rivers::minimumFlow;
@@ -5726,7 +5768,7 @@ void createrivermap(planet& world, vector<vector<int>>& mountaindrainage)
                     int dir = findlowestdirriver(world, neighbours, i, j, mountaindrainage);
 
                     if (dir == -1)
-                        dir = random(1, 8);
+                        dir = deterministicrandom(riverseed ^ 0x2001ull, 1, 8, i, j);
 
                     world.setriverdir(i, j, dir);
                 }
@@ -6989,6 +7031,8 @@ void convertsaltlakes(planet& world, vector<vector<vector<int>>>& saltlakemap)
 
 void createlakemap(planet& world, vector<vector<int>>& nolake, boolshapetemplate smalllake[], boolshapetemplate largelake[])
 {
+    fast_srand(static_cast<long>(deterministiccontextseed(world.seed(), 0x3002) & 0x7fffffffull));
+
     int width = world.width();
     int height = world.height();
     int glacialtemp = world.glacialtemp();
@@ -8733,14 +8777,13 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
 
     // Now cap excessive rainfall.
 
-    float rain[2];
-
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
         for (int j = startrow; j <= endrow; j++)
         {
             for (int i = 0; i <= width; i++)
             {
+                float rain[2];
                 rain[0] = (float)lakewinterrainmap[i][j];
                 rain[1] = (float)lakesummerrainmap[i][j];
 
@@ -9114,14 +9157,13 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
 
     // Now cap excessive rainfall.
 
-    float rain[2];
-
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
         for (int j = startrow; j <= endrow; j++)
         {
             for (int i = 0; i <= width; i++)
             {
+                float rain[2];
                 rain[0] = (float)lakewinterrainmap[i][j];
                 rain[1] = (float)lakesummerrainmap[i][j];
 
@@ -9679,6 +9721,8 @@ int checkthisflow(planet& world, int x, int y, int found)
 
 void createriftlakemap(planet& world, vector<vector<int>>& nolake)
 {
+    fast_srand(static_cast<long>(deterministiccontextseed(world.seed(), 0x3003) & 0x7fffffffull));
+
     int width = world.width();
     int height = world.height();
     int sealevel = world.sealevel();
