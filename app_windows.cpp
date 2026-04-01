@@ -71,6 +71,11 @@ bool drawworldgenerationoptionswindow(const ImGuiViewport* main_viewport, ImGuiW
     ImGui::Checkbox("Log timings to profiling.xlsx", &options.logToProfilingWorkbook);
     ImGui::Checkbox("Visualize each completed step", &options.visualizeEachStep);
     ImGui::Checkbox("Use FastLEM-style mountains", &options.useFastLEMMountains);
+    ImGui::Checkbox("Use plate tectonics simulation", &options.usePlateTectonicsSimulation);
+
+    ImGui::BeginDisabled(!options.usePlateTectonicsSimulation);
+    ImGui::SliderInt("Plate tectonics cycles", &options.plateTectonicsCycleCount, 1, 12);
+    ImGui::EndDisabled();
 
     ImGui::Text(" ");
 

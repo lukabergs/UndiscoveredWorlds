@@ -9,6 +9,8 @@ struct WorldGenerationDebugOptions
     bool logToProfilingWorkbook = true;
     bool visualizeEachStep = false;
     bool useFastLEMMountains = false;
+    bool usePlateTectonicsSimulation = false;
+    int plateTectonicsCycleCount = 4;
     std::vector<bool> enabledSteps;
 
     WorldGenerationDebugOptions();
@@ -22,3 +24,5 @@ void onworldgenstepcompleted(const std::string& label, double elapsedms);
 void setworldgenvisualizationcallback(std::function<void()> callback);
 void clearworldgenvisualizationcallback();
 bool usefastlemmountains();
+bool useplatetectonicssimulation();
+int platetectonicscyclecount();

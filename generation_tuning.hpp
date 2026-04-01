@@ -28,8 +28,8 @@ inline constexpr int glacialTemp = 4;
 inline constexpr int glacierTemp = -1;
 inline constexpr float mountainReduce = 0.75f;
 inline constexpr int climateCount = 31;
-inline constexpr int maxElevation = 24000;
-inline constexpr int seaLevel = 12000;
+inline constexpr int maxElevation = 48000;
+inline constexpr int seaLevel = 24000;
 inline constexpr int craterCount = 0;
 }
 
@@ -272,36 +272,84 @@ inline constexpr int faultVariation = 3;
 inline constexpr int faultLookDistance = 4;
 }
 
+namespace platetectonics
+{
+inline constexpr float seaLevelBias = 0.0f;
+inline constexpr uint32_t erosionPeriod = 0;
+inline constexpr float foldingRatio = 0.02f;
+inline constexpr uint32_t aggregationOverlapAbsolute = 1000000;
+inline constexpr float aggregationOverlapRelative = 0.33f;
+inline constexpr uint32_t cycleCount = 4;
+inline constexpr uint32_t plateCount = 4;
+inline constexpr uint32_t maximumSimulationSteps = 20000;
+inline constexpr int minimumOceanDepth = 1;
+inline constexpr int coastalOceanOffset = 10;
+inline constexpr int landStartOffset = 50;
+inline constexpr float oceanExponent = 1.15f;
+inline constexpr float landExponent = 0.85f;
+inline constexpr float outputBlend = 1.0f;
+inline constexpr float landRetentionSeaBias = 0.08f;
+inline constexpr float convergentBoundaryThreshold = 0.18f;
+inline constexpr int collisionUplift = 1800;
+inline constexpr int collisionMinimumPeak = 4500;
+inline constexpr int collisionMaximumPeak = 18000;
+}
+
+namespace edgeseams
+{
+inline constexpr int bandSize = 36;
+inline constexpr int seaDepthBase = 500;
+inline constexpr int seaDepthVariation = 900;
+inline constexpr float edgeExponent = 1.8f;
+inline constexpr float bandNoiseMinScale = 0.6f;
+inline constexpr float bandNoiseRange = 0.8f;
+inline constexpr float distanceJitter = 0.9f;
+}
+
 namespace fastlem
 {
-inline constexpr int cellSize = 8;
-inline constexpr int minimumLandTilesPerSite = 3;
-inline constexpr int fallbackNeighbourRadius = 2;
-inline constexpr int minimumConnections = 2;
-inline constexpr int iterations = 18;
+inline constexpr int cellSize = 6;
+inline constexpr int baseLatticeStep = 5;
+inline constexpr int outletMinimumDistanceBlocks = 18;
+inline constexpr float minimumCandidateSpacingBlocks = 3.0f;
+inline constexpr float siteWeightMin = 0.80f;
+inline constexpr float siteWeightMax = 1.40f;
+inline constexpr float clusterNoiseThreshold = 0.62f;
+inline constexpr int minimumLandTilesPerSite = 2;
+inline constexpr int fallbackNeighbourRadius = 3;
+inline constexpr int minimumConnections = 3;
+inline constexpr int iterations = 24;
 inline constexpr float mExponent = 0.5f;
-inline constexpr float baseUplift = 0.35f;
-inline constexpr float inlandUplift = 4.0f;
-inline constexpr float reliefUplift = 0.9f;
-inline constexpr float noiseUplift = 1.0f;
-inline constexpr float baseErodibility = 0.55f;
-inline constexpr float coastalErodibility = 0.55f;
-inline constexpr float noiseErodibility = 0.2f;
-inline constexpr float minimumErodibility = 0.15f;
+inline constexpr float baseUplift = 0.60f;
+inline constexpr float inlandUplift = 6.20f;
+inline constexpr float reliefUplift = 1.80f;
+inline constexpr float noiseUplift = 1.60f;
+inline constexpr float baseErodibility = 0.32f;
+inline constexpr float coastalErodibility = 0.22f;
+inline constexpr float noiseErodibility = 0.10f;
+inline constexpr float minimumErodibility = 0.08f;
 inline constexpr float maximumErodibility = 2.5f;
-inline constexpr float maxSlopeRadians = 0.30f;
-inline constexpr int minimumRidgeCoastDistance = 4;
-inline constexpr int minimumPeakCoastDistance = 7;
-inline constexpr float minimumRidgeElevationNormalised = 0.24f;
-inline constexpr float minimumPeakElevationNormalised = 0.52f;
-inline constexpr float minimumRidgeScore = 0.42f;
-inline constexpr float elevationScoreWeight = 0.67f;
-inline constexpr float coastScoreWeight = 0.33f;
-inline constexpr float peakHeightExponent = 1.08f;
-inline constexpr int minimumPeakHeight = 900;
-inline constexpr int maximumPeakHeight = 7200;
-inline constexpr int minimumCandidateSites = 24;
-inline constexpr int minimumBoundaryCandidates = 12;
+inline constexpr float maxSlopeRadians = 0.38f;
+inline constexpr int minimumRidgeCoastDistance = 2;
+inline constexpr int minimumPeakCoastDistance = 4;
+inline constexpr float minimumRidgeElevationNormalised = 0.14f;
+inline constexpr float minimumPeakElevationNormalised = 0.32f;
+inline constexpr float minimumRidgeScore = 0.22f;
+inline constexpr float elevationScoreWeight = 0.60f;
+inline constexpr float coastScoreWeight = 0.40f;
+inline constexpr float peakHeightExponent = 0.95f;
+inline constexpr int minimumPeakHeight = 1400;
+inline constexpr int maximumPeakHeight = 10500;
+inline constexpr int minimumCandidateSites = 18;
+inline constexpr int minimumBoundaryCandidates = 8;
+inline constexpr int postRiverMaximumDistance = 18;
+inline constexpr int postRiverMountainDistance = 16;
+inline constexpr int postRiverMaximumUplift = 650;
+inline constexpr int postRiverMinimumUplift = 24;
+inline constexpr int postRiverMinimumMountainHeight = 500;
+inline constexpr float postRiverDistanceExponent = 1.25f;
+inline constexpr float postRiverMountainExponent = 0.90f;
+inline constexpr int postRiverElevationRange = 5000;
 }
 }
 
