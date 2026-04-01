@@ -1855,11 +1855,12 @@ int findlowestdir(planet& world, int neighbours[8][2], int x, int y)
 {
     int width = world.width();
     int height = world.height();
+    const std::uint64_t directionseed = deterministiccontextseed(world.seed(), 0x6101);
 
     int lowest = world.maxelevation() * 2;
     int nnn = -1;
 
-    int start = random(0, 7);
+    int start = deterministicrandom(directionseed, 0, 7, x, y);
 
     for (int n = start; n <= start + 7; n++)
     {
@@ -1895,13 +1896,14 @@ int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, vector
 {
     int width = world.width();
     int height = world.height();
+    const std::uint64_t directionseed = deterministiccontextseed(world.seed(), 0x6102);
 
     int lowest = world.maxelevation() * 2;
     int nnn = -1;
 
     bool found = 0;
 
-    int start = random(0, 7);
+    int start = deterministicrandom(directionseed, 0, 7, x, y, 0);
 
     if (1 == 0)//random(1,3)!=1)
     {
@@ -1935,7 +1937,7 @@ int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, vector
         lowest = world.maxelevation() * 2;
         nnn = -1;
 
-        start = random(0, 7);
+        start = deterministicrandom(directionseed, 0, 7, x, y, 1);
 
         for (int n = start; n <= start + 7; n++)
         {
