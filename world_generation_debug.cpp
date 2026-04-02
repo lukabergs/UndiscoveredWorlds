@@ -60,21 +60,27 @@ const vector<string> worldgenerationstepoptions =
     "Removing small seas",
     "Inscribing channels",
     "Adding hills",
-    "Generating wind map",
     "Generating global temperature map",
+    "Generating ocean current map",
+    "Generating sea surface temperatures",
+    "Generating pressure map",
+    "Generating vector wind map",
     "Generating sea ice map",
     "Calculating tides",
-    "Calculating ocean rainfall",
-    "Calculating rainfall from prevailing winds",
-    "Calculating monsoons",
+    "Advecting moisture and rainfall",
     "Calculating rainfall",
     "Calculating seasonal rainfall",
     "Smoothing rainfall",
     "Capping rainfall",
+    "Calculating coastal climate influence",
+    "Applying coastal climate influence",
     "Adjusting temperatures",
     "Adjusting continental temperatures",
     "Smoothing temperatures",
     "Checking subpolar regions",
+    "Applying mountain temperature lapse",
+    "Calculating Koppen climates",
+    "Calculating Holdridge biomes",
     "Calculating mountain rainfall",
     "Carving fjords",
     "Planning river courses",
@@ -83,7 +89,6 @@ const vector<string> worldgenerationstepoptions =
     "Checking mountain river valleys",
     "Generating lakes",
     "Broadening FastLEM terrain from rivers",
-    "Calculating climates",
     "Generating sand dunes",
     "Generating salt pans",
     "Generating river deltas",
@@ -300,6 +305,16 @@ void clearworldgenvisualizationcallback()
     worldgenerationvisualizationcallback = nullptr;
 }
 
+bool isworldgendebugrunactive()
+{
+    return activeworldgenerationoptions != nullptr;
+}
+
+long worldgenerationdebugseed()
+{
+    return activeworldgenerationseed;
+}
+
 bool usefastlemmountains()
 {
     return activeworldgenerationoptions != nullptr && activeworldgenerationoptions->useFastLEMMountains;
@@ -320,3 +335,5 @@ int platetectonicscyclecount()
 
     return activeworldgenerationoptions->plateTectonicsCycleCount;
 }
+
+#include "climate_validation.cpp"

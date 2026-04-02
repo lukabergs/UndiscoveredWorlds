@@ -17,6 +17,7 @@
 #include <iomanip>
 #include <sstream>
 #include <iostream>
+#include <filesystem>
 #include <cmath>
 #include <fstream>
 #include <memory>
@@ -56,7 +57,7 @@
 
 #define GLOBALTERRAINCREATIONSTEPS1 26
 #define GLOBALTERRAINCREATIONSTEPS2 31
-#define GLOBALCLIMATECREATIONSTEPS 28
+#define GLOBALCLIMATECREATIONSTEPS 29
 
 #define REGIONALTILEWIDTH 32
 #define REGIONALTILEHEIGHT 32
@@ -67,6 +68,408 @@ using namespace std;
 // It uses a global variable. But this is the only one in the program, honest!
 
 static long g_seed = 1;
+
+namespace
+{
+struct CommandLineGenerationOptions
+{
+    bool run = false;
+    bool showHelp = false;
+    bool earthClimateBenchmark = false;
+    bool printClimateRelativeError = false;
+    bool useFastLEMMountains = false;
+    bool usePlateTectonicsSimulation = false;
+    bool rivers = true;
+    bool lakes = true;
+    bool deltas = true;
+    bool logToProfilingWorkbook = true;
+    bool appendClimateWorkbook = false;
+    bool hasSeed = false;
+    bool hasSavePath = false;
+    bool hasReferencePath = false;
+    bool hasImportLandPath = false;
+    bool hasImportSeaPath = false;
+    long seed = 0;
+    int plateTectonicsCycleCount = 4;
+    string savePath;
+    string referencePath;
+    string importLandPath;
+    string importSeaPath;
+};
+
+string narrowargument(const wchar_t* value)
+{
+    return filesystem::path(value).string();
+}
+
+long defaultcommandlineseed()
+{
+    const long long ticks = chrono::high_resolution_clock::now().time_since_epoch().count();
+    const long long normalized = llabs(ticks % 90000000ll) + 10000000ll;
+    return static_cast<long>(0 - normalized);
+}
+
+void printcommandlineusage()
+{
+    cout << "Undiscovered Worlds command line usage:\n";
+    cout << "  --generate-world [options]\n";
+    cout << "Options:\n";
+    cout << "  --seed <number>         Use a fixed world seed.\n";
+    cout << "  --save <path>           Save the generated world as a .uww file.\n";
+    cout << "  --fastlem               Enable FastLEM mountains.\n";
+    cout << "  --tectonics             Enable plate tectonics simulation.\n";
+    cout << "  --plate-cycles <count>  Set tectonic cycle count.\n";
+    cout << "  --reference-precip <csv> Compare against a precipitation reference grid.\n";
+    cout << "  --import-land <png>     Import a land height map instead of generating terrain.\n";
+    cout << "  --import-sea <png>      Import a sea depth map instead of generating terrain.\n";
+    cout << "  --earth-climate-benchmark Run the imported Earth benchmark workflow.\n";
+    cout << "  --print-climate-relative-error Print per-climate relative error against the Earth benchmark counts.\n";
+    cout << "  --no-climate-workbook   Skip appending benchmark counts to climate.xlsx.\n";
+    cout << "  --no-rivers             Disable river generation.\n";
+    cout << "  --no-lakes              Disable lake generation.\n";
+    cout << "  --no-deltas             Disable delta generation.\n";
+    cout << "  --no-profile-log        Skip profiling workbook logging.\n";
+    cout << "  --help                  Show this message.\n";
+}
+
+bool parsecommandlineoptions(CommandLineGenerationOptions& options)
+{
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+
+    if (argv == nullptr)
+        return true;
+
+    const auto cleanup = [&]()
+    {
+        LocalFree(argv);
+    };
+
+    for (int index = 1; index < argc; index++)
+    {
+        const string argument = narrowargument(argv[index]);
+
+        if (argument == "--help" || argument == "-h" || argument == "/?")
+        {
+            options.showHelp = true;
+            continue;
+        }
+
+        if (argument == "--generate-world")
+        {
+            options.run = true;
+            continue;
+        }
+
+        if (argument == "--earth-climate-benchmark")
+        {
+            options.run = true;
+            options.earthClimateBenchmark = true;
+            options.appendClimateWorkbook = true;
+            options.logToProfilingWorkbook = false;
+            continue;
+        }
+
+        if (argument == "--print-climate-relative-error")
+        {
+            options.printClimateRelativeError = true;
+            continue;
+        }
+
+        if (argument == "--fastlem")
+        {
+            options.useFastLEMMountains = true;
+            continue;
+        }
+
+        if (argument == "--tectonics")
+        {
+            options.usePlateTectonicsSimulation = true;
+            continue;
+        }
+
+        if (argument == "--no-rivers")
+        {
+            options.rivers = false;
+            continue;
+        }
+
+        if (argument == "--no-lakes")
+        {
+            options.lakes = false;
+            continue;
+        }
+
+        if (argument == "--no-deltas")
+        {
+            options.deltas = false;
+            continue;
+        }
+
+        if (argument == "--no-profile-log")
+        {
+            options.logToProfilingWorkbook = false;
+            continue;
+        }
+
+        if (argument == "--no-climate-workbook")
+        {
+            options.appendClimateWorkbook = false;
+            continue;
+        }
+
+        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea")
+        {
+            if (index + 1 >= argc)
+            {
+                cerr << "Missing value for " << argument << '\n';
+                cleanup();
+                return false;
+            }
+
+            const string value = narrowargument(argv[++index]);
+
+            try
+            {
+                if (argument == "--seed")
+                {
+                    options.seed = stol(value);
+                    options.hasSeed = true;
+                }
+                else if (argument == "--plate-cycles")
+                {
+                    options.plateTectonicsCycleCount = max(1, stoi(value));
+                }
+                else if (argument == "--reference-precip")
+                {
+                    options.referencePath = value;
+                    options.hasReferencePath = true;
+                }
+                else if (argument == "--import-land")
+                {
+                    options.importLandPath = value;
+                    options.hasImportLandPath = true;
+                }
+                else if (argument == "--import-sea")
+                {
+                    options.importSeaPath = value;
+                    options.hasImportSeaPath = true;
+                }
+                else
+                {
+                    options.savePath = value;
+                    options.hasSavePath = true;
+                }
+            }
+            catch (const exception&)
+            {
+                cerr << "Invalid value for " << argument << ": " << value << '\n';
+                cleanup();
+                return false;
+            }
+
+            continue;
+        }
+
+        cerr << "Unknown argument: " << argument << '\n';
+        cleanup();
+        return false;
+    }
+
+    cleanup();
+    return true;
+}
+
+filesystem::path commandlinevalidationdirectory(long seed)
+{
+    filesystem::path outputroot = getappenvironment().profilingWorkbookPath.parent_path();
+
+    if (outputroot.empty())
+        outputroot = filesystem::current_path();
+
+    return outputroot / "validation" / ("seed_" + to_string(seed));
+}
+
+void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
+
+    world.setmaxelevation(200000);
+
+    updatereport("Raising mountain bases");
+
+    raisemountainbases(world, mountaindrainage, okmountains);
+
+    getlandandseatotals(world);
+
+    if (world.seatotal() > 10)
+    {
+        updatereport("Filling depressions");
+
+        depressionfill(world);
+        addlandnoise(world);
+        depressionfill(world);
+
+        updatereport("Adjusting coastlines");
+
+        for (int n = 1; n <= 2; n++)
+            normalisecoasts(world, 13, 11, 4);
+
+        clamp(world);
+
+        updatereport("Checking islands");
+
+        checkislands(world);
+    }
+
+    updatereport("Creating roughness map");
+
+    vector<vector<int>> roughness(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+
+    createfractal(roughness, width, height, 8, 0.2f, 0.6f, 1, world.maxelevation(), 0, 0);
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+            world.setroughness(i, j, static_cast<float>(roughness[i][j]));
+    }
+
+    generateglobalclimate(world, dorivers, dolakes, dodeltas, smalllake, largelake, landshape, mountaindrainage, shelves);
+
+    if (appendclimateworkbook && appendclimatebenchmarkworkbook(world) == false)
+        updatereport("Climate workbook benchmark update failed");
+}
+
+int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
+{
+    auto world = std::make_unique<planet>();
+    initialiseworld(*world);
+    initialisemapcolours(*world);
+    world->clear();
+
+    const bool importedworld = options.earthClimateBenchmark || options.hasImportLandPath || options.hasImportSeaPath;
+    const long seed = options.hasSeed ? options.seed : (importedworld ? 1 : defaultcommandlineseed());
+    world->setseed(seed);
+
+    fast_srand(world->seed());
+
+    if (options.hasReferencePath)
+        setreferenceprecipitationgridpath(options.referencePath);
+
+    if (options.earthClimateBenchmark == false && (options.hasImportLandPath != options.hasImportSeaPath))
+    {
+        cerr << "Imported runs require both --import-land and --import-sea unless --earth-climate-benchmark is used.\n";
+        return 1;
+    }
+
+    boolshapetemplate landshape[12];
+    createlandshapetemplates(landshape);
+    boolshapetemplate chainland[2];
+    createchainlandtemplates(chainland);
+    boolshapetemplate smalllake[12];
+    createsmalllaketemplates(smalllake);
+    boolshapetemplate largelake[10];
+    createlargelaketemplates(largelake);
+
+    vector<int> squareroot((MAXCRATERRADIUS * MAXCRATERRADIUS + MAXCRATERRADIUS + 1) * 24);
+
+    for (int n = 1; n < squareroot.size(); n++)
+        squareroot[n] = (int)sqrt(n);
+
+    WorldGenerationDebugOptions debugoptions;
+    debugoptions.visualizeEachStep = false;
+    debugoptions.logToProfilingWorkbook = options.logToProfilingWorkbook;
+    debugoptions.useFastLEMMountains = options.useFastLEMMountains;
+    debugoptions.usePlateTectonicsSimulation = options.usePlateTectonicsSimulation;
+    debugoptions.plateTectonicsCycleCount = options.plateTectonicsCycleCount;
+
+    if (importedworld == false)
+        changeworldproperties(*world);
+
+    updatereport((importedworld ? "Generating imported world from seed: " : "Generating world from seed: ") + to_string(world->seed()) + ":");
+    updatereport("");
+
+    beginworldgendebugrun(world->seed(), &debugoptions);
+    begintimedreporting();
+
+    if (importedworld)
+    {
+        const AppEnvironmentConfig& appenv = getappenvironment();
+        const string landpath = options.hasImportLandPath ? options.importLandPath : appenv.earthBenchmarkLandPath.string();
+        const string seapath = options.hasImportSeaPath ? options.importSeaPath : appenv.earthBenchmarkSeaPath.string();
+        vector<vector<bool>> okmountains(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, false));
+
+        if (importlandheightmap(*world, landpath) == false)
+        {
+            endtimedreporting();
+            endworldgendebugrun();
+            cerr << "Failed to import land map: " << landpath << '\n';
+            return 1;
+        }
+
+        if (importseadepthmap(*world, seapath) == false)
+        {
+            endtimedreporting();
+            endworldgendebugrun();
+            cerr << "Failed to import sea map: " << seapath << '\n';
+            return 1;
+        }
+
+        completeimportedworldgeneration(*world, options.rivers, options.lakes, options.deltas, options.appendClimateWorkbook, smalllake, largelake, landshape, okmountains);
+    }
+    else
+    {
+        int iterations = 4;
+
+        for (int n = 0; n < 3; n++)
+        {
+            if (random(1, 2) == 1)
+                iterations++;
+            else
+                iterations--;
+        }
+
+        if (iterations < 1)
+            iterations = 1;
+
+        if (iterations > 7)
+            iterations = 7;
+
+        int mergefactor = random(1, 15);
+
+        if (random(1, 12) == 1)
+            mergefactor = random(1, 25);
+
+        vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+        vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
+
+        generateglobalterrain(*world, 0, iterations, mergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves, squareroot);
+        generateglobalclimate(*world, options.rivers, options.lakes, options.deltas, smalllake, largelake, landshape, mountaindrainage, shelves);
+    }
+
+    endtimedreporting();
+    endworldgendebugrun();
+
+    if (options.printClimateRelativeError)
+        printclimaterelativeerrorreport(*world);
+
+    updatereport("");
+    updatereport("World generation completed.");
+    updatereport("Validation output: " + commandlinevalidationdirectory(world->seed()).string());
+
+    if (options.hasSavePath)
+    {
+        world->saveworld(options.savePath);
+        updatereport("Saved world: " + options.savePath);
+    }
+
+    return 0;
+}
+}
 
 // Used to seed the generator.
 void fast_srand(long seed)
@@ -302,6 +705,26 @@ int main()
 {
     ensureworkingdirectory();
     reloadappenvironment();
+
+    CommandLineGenerationOptions commandlineoptions;
+
+    if (parsecommandlineoptions(commandlineoptions) == false)
+    {
+        printcommandlineusage();
+        return 1;
+    }
+
+    if (commandlineoptions.showHelp)
+    {
+        printcommandlineusage();
+
+        if (commandlineoptions.run == false)
+            return 0;
+    }
+
+    if (commandlineoptions.run)
+        return runcommandlineworldgeneration(commandlineoptions);
+
     float currentversion = 1.0f;
     float latestversion = getlatestversion();
 
@@ -533,6 +956,7 @@ int main()
     int& mergefactor = customworldui.mergefactor; // Amount continents will be removed by merging with the fractal map, for custom worlds.-----------------
     int& iterations = customworldui.iterations; // Number of terrain iterations for worlds of terrain type 4.
     int& sealeveleditable = customworldui.sealeveleditable; // Sea level (0-10) for worlds of terrain type 4.
+    bool& compareclimateworkbook = customworldui.compareClimateWorkbook;
 
     short regionmargin = 17; // The centre of the regional map can't be closer than this to the northern/southern edges of the global map.
 
@@ -1995,6 +2419,11 @@ int main()
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Calculate climates, lakes, and rivers, and finish the world.");
 
+            ImGui::Checkbox("Append climate.xlsx benchmark row", &compareclimateworkbook);
+
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Appends this world's land-climate counts to the RAW_PIXELS sheet in climate.xlsx.");
+
             if (standardbutton("Cancel"))
             {
                 brandnew = 1;
@@ -2138,66 +2567,7 @@ int main()
                 // Plug in the world settings.
 
                 applyworldpropertycontrols(*world, worldpropertycontrols);
-
-                // First, finish off the terrain generation.
-
-                vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-                vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
-
-                world->setmaxelevation(200000);
-
-                updatereport("Raising mountain bases");
-
-                raisemountainbases(*world, mountaindrainage, OKmountains);
-
-                getlandandseatotals(*world);
-
-                bool seapresent = 0;
-
-                if (world->seatotal() > 10)
-                    seapresent = 1;
-
-                if (seapresent)
-                {
-                    updatereport("Filling depressions");
-
-                    depressionfill(*world);
-
-                    addlandnoise(*world); // Add a bit of noise, then do remove depressions again. This is to add variety to the river courses.
-
-                    depressionfill(*world);
-
-                    updatereport("Adjusting coastlines");
-
-                    for (int n = 1; n <= 2; n++)
-                        normalisecoasts(*world, 13, 11, 4);
-
-                    clamp(*world);
-
-                    updatereport("Checking islands");
-
-                    checkislands(*world);
-                }
-
-                updatereport("Creating roughness map");
-
-                vector<vector<int>> roughness(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-                int grain = 8; // Level of detail on this fractal map.
-                float valuemod = 0.2f;
-                float valuemod2 = 0.6f;
-
-                createfractal(roughness, width, height, grain, valuemod, valuemod2, 1, world->maxelevation(), 0, 0);
-
-                for (int i = 0; i <= width; i++)
-                {
-                    for (int j = 0; j <= height; j++)
-                        world->setroughness(i, j, (float)roughness[i][j]);
-                }
-
-                // Now do the climates.
-
-                generateglobalclimate(*world, currentrivers, currentlakes, currentdeltas, smalllake, largelake, landshape, mountaindrainage, shelves);
+                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, compareclimateworkbook, smalllake, largelake, landshape, OKmountains);
 
                 // Now draw a new map
 
