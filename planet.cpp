@@ -23,10 +23,159 @@ planet::planet() //constructor
 {
     itswidth = 1024;
     itsheight = 512;
+    resizeseasonalclimatefields();
 }
 
 planet::~planet()
 {
+}
+
+void planet::resizeseasonalclimatefields()
+{
+    const int cellcount = (itswidth + 1) * (itsheight + 1);
+
+    auto resizefield = [cellcount](std::array<std::vector<short>, CLIMATESEASONCOUNT>& field)
+    {
+        for (std::vector<short>& season : field)
+            season.assign(cellcount, 0);
+    };
+
+    resizefield(seasonaltempmaps);
+    resizefield(seasonalrainmaps);
+    resizefield(seasonalpressuremaps);
+    resizefield(seasonaluwindmaps);
+    resizefield(seasonalvwindmaps);
+    resizefield(seasonalcurrentumaps);
+    resizefield(seasonalcurrentvmaps);
+    resizefield(seasonalsstmaps);
+    resizefield(seasonalevaporationmaps);
+    resizefield(seasonalmaritimeinfluencemaps);
+    resizefield(seasonalmaritimethermalanomalymaps);
+    resizefield(seasonalmaritimefetchmaps);
+    resizefield(seasonalmoisturemaps);
+    resizefield(seasonalconvergencemaps);
+    resizefield(seasonalupliftmaps);
+    resizefield(seasonalsubsidencemaps);
+}
+
+void planet::writeshortvectordata(ofstream& outfile, const std::vector<short>& arr)
+{
+    outfile.write(reinterpret_cast<const char*>(arr.data()), arr.size() * sizeof(short));
+}
+
+void planet::readshortvectordata(ifstream& infile, std::vector<short>& arr)
+{
+    infile.read(reinterpret_cast<char*>(arr.data()), arr.size() * sizeof(short));
+}
+
+void planet::syncseasonalclimatefromlegacy()
+{
+    bool hasexplicittransitionrain = false;
+
+    for (const short value : seasonalrainmaps[seasonapril])
+    {
+        if (value != 0)
+        {
+            hasexplicittransitionrain = true;
+            break;
+        }
+    }
+
+    if (hasexplicittransitionrain == false)
+    {
+        for (const short value : seasonalrainmaps[seasonoctober])
+        {
+            if (value != 0)
+            {
+                hasexplicittransitionrain = true;
+                break;
+            }
+        }
+    }
+
+    for (int y = 0; y <= itsheight; y++)
+    {
+        for (int x = 0; x <= itswidth; x++)
+        {
+            const int index = seasonalclimateindex(x, y);
+
+            const float januarytemp = static_cast<float>(jantempmap[x][y]);
+            const float julytemp = static_cast<float>(jultempmap[x][y]);
+            const float januaryrain = static_cast<float>(janrainmap[x][y]);
+            const float julyrain = static_cast<float>(julrainmap[x][y]);
+
+            seasonaltempmaps[seasonjanuary][index] = static_cast<short>(jantempmap[x][y]);
+            seasonaltempmaps[seasonjuly][index] = static_cast<short>(jultempmap[x][y]);
+            seasonalrainmaps[seasonjanuary][index] = static_cast<short>(janrainmap[x][y]);
+            seasonalrainmaps[seasonjuly][index] = static_cast<short>(julrainmap[x][y]);
+
+            float summertemp = julytemp;
+            float wintertemp = januarytemp;
+
+            if (itsperihelion == 1)
+            {
+                summertemp = januarytemp;
+                wintertemp = julytemp;
+            }
+
+            const float winterstrength = 0.5f + itseccentricity * 0.5f;
+            const float summerstrength = 1.0f - winterstrength;
+            float transitiontemp = summertemp * summerstrength + wintertemp * winterstrength;
+
+            float fourseason = itstilt * 0.294592f - 2.45428f;
+            float lat = static_cast<float>(y);
+
+            if (y > itsheight / 2.0f)
+                lat = static_cast<float>(itsheight - y);
+
+            const float fourseasonstrength = lat / (static_cast<float>(itsheight) / 2.0f);
+            const float transitiontempdiff = (fourseason * fourseasonstrength) / 2.0f;
+
+            seasonaltempmaps[seasonapril][index] = static_cast<short>(transitiontemp + transitiontempdiff);
+            seasonaltempmaps[seasonoctober][index] = static_cast<short>(transitiontemp + transitiontempdiff);
+
+            if (hasexplicittransitionrain == false)
+            {
+                float apriljanfactor = 0.5f;
+                float apriljulfactor = 0.5f;
+
+                if (jultempmap[x][y] > jantempmap[x][y] && julrainmap[x][y] > janrainmap[x][y] && julyrain > 0.0f)
+                {
+                    const float monsoonfactor = 1.0f - januaryrain / julyrain;
+                    apriljanfactor = monsoonfactor * 0.9f;
+                    apriljulfactor = 1.0f - apriljanfactor;
+                }
+
+                if (jultempmap[x][y] < jantempmap[x][y] && julrainmap[x][y] < janrainmap[x][y] && januaryrain > 0.0f)
+                {
+                    const float monsoonfactor = 1.0f - julyrain / januaryrain;
+                    apriljanfactor = monsoonfactor * 0.7f;
+                    apriljulfactor = 1.0f - apriljanfactor;
+                }
+
+                seasonalrainmaps[seasonapril][index] = static_cast<short>(januaryrain * apriljanfactor + julyrain * apriljulfactor);
+
+                float octoberjanfactor = 0.5f;
+                float octoberjulfactor = 0.5f;
+
+                if (jultempmap[x][y] > jantempmap[x][y] && julrainmap[x][y] > janrainmap[x][y] && julyrain > 0.0f)
+                {
+                    const float monsoonfactor = 1.0f - januaryrain / julyrain;
+                    octoberjulfactor = monsoonfactor * 0.7f;
+                    octoberjanfactor = 1.0f - octoberjulfactor;
+                }
+
+                if (jultempmap[x][y] < jantempmap[x][y] && julrainmap[x][y] < janrainmap[x][y] && januaryrain > 0.0f)
+                {
+                    const float monsoonfactor = 1.0f - julyrain / januaryrain;
+                    octoberjulfactor = monsoonfactor * 0.9f;
+                    octoberjanfactor = 1.0f - octoberjulfactor;
+                }
+
+                seasonalrainmaps[seasonoctober][index] = static_cast<short>(januaryrain * octoberjanfactor + julyrain * octoberjulfactor);
+            }
+        }
+    }
 }
 
 bool planet::outline(int x, int y) const
@@ -223,6 +372,8 @@ int planet::mountainheightwrap(int x, int y) const
 
 void planet::clear()
 {
+    resizeseasonalclimatefields();
+
     parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
     {
         for (int i = startx; i <= endx; i++) // Set all the maps to 0.
@@ -232,6 +383,7 @@ void planet::clear()
                 jantempmap[i][j] = 0;
                 jultempmap[i][j] = 0;
                 climatemap[i][j] = 0;
+                biomemap[i][j] = 0;
                 janrainmap[i][j] = 0;
                 julrainmap[i][j] = 0;
                 janmountainrainmap[i][j] = 0;
@@ -540,6 +692,7 @@ void planet::saveworld(string filename)
     writedata(outfile, jantempmap);
     writedata(outfile, jultempmap);
     writedata(outfile, climatemap);
+    writedata(outfile, biomemap);
     writedata(outfile, janrainmap);
     writedata(outfile, julrainmap);
     writedata(outfile, janmountainrainmap);
@@ -580,6 +733,26 @@ void planet::saveworld(string filename)
     writedata(outfile, noisemap);
     writedata(outfile, testmap);
 
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        writeshortvectordata(outfile, seasonaltempmaps[season]);
+        writeshortvectordata(outfile, seasonalrainmaps[season]);
+        writeshortvectordata(outfile, seasonalpressuremaps[season]);
+        writeshortvectordata(outfile, seasonaluwindmaps[season]);
+        writeshortvectordata(outfile, seasonalvwindmaps[season]);
+        writeshortvectordata(outfile, seasonalcurrentumaps[season]);
+        writeshortvectordata(outfile, seasonalcurrentvmaps[season]);
+        writeshortvectordata(outfile, seasonalsstmaps[season]);
+        writeshortvectordata(outfile, seasonalevaporationmaps[season]);
+        writeshortvectordata(outfile, seasonalmaritimeinfluencemaps[season]);
+        writeshortvectordata(outfile, seasonalmaritimethermalanomalymaps[season]);
+        writeshortvectordata(outfile, seasonalmaritimefetchmaps[season]);
+        writeshortvectordata(outfile, seasonalmoisturemaps[season]);
+        writeshortvectordata(outfile, seasonalconvergencemaps[season]);
+        writeshortvectordata(outfile, seasonalupliftmaps[season]);
+        writeshortvectordata(outfile, seasonalsubsidencemaps[season]);
+    }
+
     for (int i = 0; i < ARRAYWIDTH; i++)
     {
         for (int j = 0; j < 6; j++)
@@ -613,7 +786,7 @@ bool planet::loadworld(string filename)
 
     const int fileversion = val;
 
-    if (fileversion < 1 || fileversion > itssaveversion) // Incompatible file format!
+    if (fileversion != itssaveversion) // Incompatible file format!
         return 0;
 
     readvariable(infile, itssize);
@@ -621,6 +794,7 @@ bool planet::loadworld(string filename)
     readvariable(infile, itsheight);
     readvariable(infile, itstype);
     readvariable(infile, itsseed);
+    resizeseasonalclimatefields();
     readvariable(infile, itsrotation);
     readvariable(infile, itstilt);
     readvariable(infile, itseccentricity);
@@ -876,6 +1050,7 @@ bool planet::loadworld(string filename)
     readdata(infile, jantempmap);
     readdata(infile, jultempmap);
     readdata(infile, climatemap);
+    readdata(infile, biomemap);
     readdata(infile, janrainmap);
     readdata(infile, julrainmap);
     readdata(infile, janmountainrainmap);
@@ -915,6 +1090,26 @@ bool planet::loadworld(string filename)
     readdata(infile, noshademap);
     readdata(infile, noisemap);
     readdata(infile, testmap);
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        readshortvectordata(infile, seasonaltempmaps[season]);
+        readshortvectordata(infile, seasonalrainmaps[season]);
+        readshortvectordata(infile, seasonalpressuremaps[season]);
+        readshortvectordata(infile, seasonaluwindmaps[season]);
+        readshortvectordata(infile, seasonalvwindmaps[season]);
+        readshortvectordata(infile, seasonalcurrentumaps[season]);
+        readshortvectordata(infile, seasonalcurrentvmaps[season]);
+        readshortvectordata(infile, seasonalsstmaps[season]);
+        readshortvectordata(infile, seasonalevaporationmaps[season]);
+        readshortvectordata(infile, seasonalmaritimeinfluencemaps[season]);
+        readshortvectordata(infile, seasonalmaritimethermalanomalymaps[season]);
+        readshortvectordata(infile, seasonalmaritimefetchmaps[season]);
+        readshortvectordata(infile, seasonalmoisturemaps[season]);
+        readshortvectordata(infile, seasonalconvergencemaps[season]);
+        readshortvectordata(infile, seasonalupliftmaps[season]);
+        readshortvectordata(infile, seasonalsubsidencemaps[season]);
+    }
 
     for (int i = 0; i < ARRAYWIDTH; i++)
     {

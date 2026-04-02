@@ -35,6 +35,7 @@ set(SOURCES
     map_imports.cpp
     assetdata.cpp
     classes.cpp
+    climate_ocean.cpp
     fastlem_mountains.cpp
     globalclimate.cpp
     globalterrain.cpp

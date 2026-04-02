@@ -7,6 +7,7 @@
 //  Please see functions.hpp for notes.
 
 #include <iostream>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <fstream>
@@ -31,6 +32,8 @@ void reseedglobalclimatepass(planet& world, int salt)
 {
     fast_srand(deterministicfastseed(deterministiccontextseed(world.seed(), salt)));
 }
+
+short calculatelegacyderivedplanetclimate(planet& world, int x, int y);
 
 int seaflowdir(int x, int y, int newx, int newy)
 {
@@ -59,6 +62,181 @@ int seaflowdir(int x, int y, int newx, int newy)
         return 8;
 
     return 0;
+}
+
+int coldseasonindex(planet& world, int x, int y)
+{
+    return (world.jantemp(x, y) <= world.jultemp(x, y)) ? seasonjanuary : seasonjuly;
+}
+
+int warmseasonindex(planet& world, int x, int y)
+{
+    return (world.jantemp(x, y) >= world.jultemp(x, y)) ? seasonjanuary : seasonjuly;
+}
+
+int coldoceansst(planet& world, int x, int y)
+{
+    return world.seasonalsst(coldseasonindex(world, x, y), x, y);
+}
+
+int warmoceansst(planet& world, int x, int y)
+{
+    return world.seasonalsst(warmseasonindex(world, x, y), x, y);
+}
+
+float meanoceansst(planet& world, int x, int y)
+{
+    return static_cast<float>(coldoceansst(world, x, y) + warmoceansst(world, x, y)) / 2.0f;
+}
+
+float meanoceanevaporation(planet& world, int x, int y)
+{
+    const int coldseason = coldseasonindex(world, x, y);
+    const int warmseason = warmseasonindex(world, x, y);
+    return static_cast<float>(world.seasonalevaporation(coldseason, x, y) + world.seasonalevaporation(warmseason, x, y)) / 2.0f;
+}
+
+struct maritimesample
+{
+    float influence = 0.0f;
+    float thermalanomaly = 0.0f;
+    int fetchdistance = 0;
+};
+
+maritimesample sampleupwindmaritimeinfluence(planet& world, int season, int x, int y)
+{
+    maritimesample result;
+
+    if (world.sea(x, y) == 1)
+        return result;
+
+    const int width = world.width();
+    const int height = world.height();
+    const int maxsearchdistance = tuning::climate::maritime::maxSearchDistance;
+    const int oceansamplecount = tuning::climate::maritime::oceanSampleCount;
+
+    const float u = static_cast<float>(world.seasonaluwind(season, x, y));
+    const float v = static_cast<float>(world.seasonalvwind(season, x, y));
+    const float magnitude = std::sqrt(u * u + v * v);
+
+    if (magnitude < tuning::climate::maritime::minimumWindStrength)
+    {
+        result.fetchdistance = maxsearchdistance;
+        return result;
+    }
+
+    const float dirx = -u / magnitude;
+    const float diry = -v / magnitude;
+
+    float posx = static_cast<float>(x);
+    float posy = static_cast<float>(y);
+    int landsteps = 0;
+    int seacells = 0;
+    float ssttotal = 0.0f;
+    float evaporationtotal = 0.0f;
+    bool foundsea = false;
+
+    for (int step = 1; step <= maxsearchdistance + oceansamplecount; step++)
+    {
+        posx = posx + dirx;
+        posy = posy + diry;
+
+        int xx = static_cast<int>(std::round(posx));
+        int yy = static_cast<int>(std::round(posy));
+
+        if (xx < 0 || xx > width)
+            xx = wrap(xx, width);
+
+        yy = std::clamp(yy, 0, height);
+
+        if (foundsea == false)
+        {
+            if (world.sea(xx, yy) == 1 && world.seaice(xx, yy) != 2)
+            {
+                foundsea = true;
+                result.fetchdistance = landsteps;
+            }
+            else
+            {
+                landsteps++;
+                continue;
+            }
+        }
+
+        if (world.sea(xx, yy) == 0)
+            break;
+
+        ssttotal = ssttotal + static_cast<float>(world.seasonalsst(season, xx, yy));
+        evaporationtotal = evaporationtotal + static_cast<float>(world.seasonalevaporation(season, xx, yy));
+        seacells++;
+
+        if (seacells >= oceansamplecount)
+            break;
+    }
+
+    if (foundsea == false || seacells == 0)
+    {
+        result.fetchdistance = maxsearchdistance;
+        return result;
+    }
+
+    const float averagedsstonsea = ssttotal / static_cast<float>(seacells);
+    const float averageevaporation = evaporationtotal / static_cast<float>(seacells);
+    const float fetchfactor = 1.0f - std::clamp(static_cast<float>(result.fetchdistance) / static_cast<float>(maxsearchdistance), 0.0f, 1.0f);
+    const float windfactor = std::clamp(magnitude / tuning::climate::maritime::windScale, 0.0f, 1.0f);
+    const float continuityfactor = std::clamp(static_cast<float>(seacells) / static_cast<float>(oceansamplecount), 0.0f, 1.0f);
+    const float moisturefactor = 0.5f + std::clamp(averageevaporation / tuning::climate::maritime::evaporationScale, 0.0f, 0.5f);
+
+    result.influence = fetchfactor * windfactor * continuityfactor * moisturefactor;
+    result.thermalanomaly = averagedsstonsea - static_cast<float>(world.seasonaltemp(season, x, y));
+    result.thermalanomaly = std::clamp(result.thermalanomaly, -tuning::climate::maritime::maxThermalAnomaly, tuning::climate::maritime::maxThermalAnomaly);
+
+    return result;
+}
+
+maritimesample storedmaritimeinfluence(planet& world, int season, int x, int y)
+{
+    maritimesample result;
+    result.influence = static_cast<float>(world.seasonalmaritimeinfluence(season, x, y)) / tuning::climate::maritime::influenceStorageScale;
+    result.thermalanomaly = static_cast<float>(world.seasonalmaritimethermalanomaly(season, x, y)) / tuning::climate::maritime::thermalAnomalyStorageScale;
+    result.fetchdistance = world.seasonalmaritimefetch(season, x, y);
+    return result;
+}
+
+void storescaledmaritimeinfluence(planet& world, int season, int x, int y, const maritimesample& sample)
+{
+    world.setseasonalmaritimeinfluence(season, x, y, static_cast<int>(roundf(sample.influence * tuning::climate::maritime::influenceStorageScale)));
+    world.setseasonalmaritimethermalanomaly(season, x, y, static_cast<int>(roundf(sample.thermalanomaly * tuning::climate::maritime::thermalAnomalyStorageScale)));
+    world.setseasonalmaritimefetch(season, x, y, sample.fetchdistance);
+}
+
+void createcoastalclimateinfluence(planet& world)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int x = 0; x <= width; x++)
+                {
+                    if (world.sea(x, y) == 1)
+                    {
+                        world.setseasonalmaritimeinfluence(season, x, y, 0);
+                        world.setseasonalmaritimethermalanomaly(season, x, y, 0);
+                        world.setseasonalmaritimefetch(season, x, y, 0);
+                    }
+                    else
+                    {
+                        storescaledmaritimeinfluence(world, season, x, y, sampleupwindmaritimeinfluence(world, season, x, y));
+                    }
+                }
+            }
+        });
+    }
 }
 
 void addriverflowlocked(planet& world, int x, int y, int janadd, int juladd, vector<mutex>& rowlocks)
@@ -268,6 +446,36 @@ bool buildlanddistancefield(planet& world, vector<vector<short>>& distances, int
 
     return true;
 }
+
+void populateinlanddistances(planet& world, vector<vector<int>>& inland)
+{
+    const int width = world.width();
+    const int height = world.height();
+    const int maximumdistance = min(30000, width + height);
+    vector<vector<short>> inlanddistances(ARRAYWIDTH, vector<short>(ARRAYHEIGHT, static_cast<short>(maximumdistance + 1)));
+
+    const bool hascoast = buildlanddistancefield(world, inlanddistances, maximumdistance, [&](int x, int y)
+    {
+        return world.outline(x, y);
+    });
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            if (world.sea(i, j) == 1)
+            {
+                inland[i][j] = 0;
+                continue;
+            }
+
+            if (hascoast == false)
+                inland[i][j] = maximumdistance;
+            else
+                inland[i][j] = inlanddistances[i][j];
+        }
+    }
+}
 }
 
 // This function creates the global climate.
@@ -455,14 +663,6 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
     float riverlandreduce = 20.0f * world.gravity() * world.gravity();
     world.setriverlandreduce((int)riverlandreduce);
 
-    // Now, do the wind map.
-
-    if (beginworldgenstep("Generating wind map"))
-    {
-        reseedglobalclimatepass(world, 0x5001);
-        createwindmap(world);
-    }
-
     int grain = 8; // Level of detail on this fractal map.
     float valuemod = 0.2f;
     int v = 0;
@@ -486,6 +686,35 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
         warp(fractal, width, height, maxelev, warpfactor, 0);
 
         createtemperaturemap(world, fractal);
+        world.syncseasonalclimatefromlegacy();
+    }
+
+    if (seatotal > 0)
+    {
+        if (beginworldgenstep("Generating ocean current map"))
+        {
+            reseedglobalclimatepass(world, 0x50021);
+            createoceancurrentmap(world);
+        }
+
+        if (beginworldgenstep("Generating sea surface temperatures"))
+        {
+            reseedglobalclimatepass(world, 0x50022);
+            createsurfacetemperaturemap(world);
+        }
+
+        if (beginworldgenstep("Generating pressure map"))
+        {
+            reseedglobalclimatepass(world, 0x50023);
+            createpressuremap(world);
+            updatehorsebeltsfrompressure(world);
+        }
+
+        if (beginworldgenstep("Generating vector wind map"))
+        {
+            reseedglobalclimatepass(world, 0x50024);
+            createvectorwindmap(world);
+        }
     }
 
     // Now do the sea ice.
@@ -512,6 +741,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
         if (beginworldgenstep("Calculating tides"))
             createtidalmap(world);
+
     }
 
     // Now do rainfall.
@@ -616,13 +846,19 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
     world.setmaxriverflow();
 
-    // Now create the climate map.
-
-    if (beginworldgenstep("Calculating climates"))
+    if (beginworldgenstep("Applying mountain temperature lapse"))
     {
         reseedglobalclimatepass(world, 0x5009);
-        createclimatemap(world);
+        checkpoleclimates(world);
+        world.syncseasonalclimatefromlegacy();
+        applyseasonaltemperaturelapse(world);
     }
+
+    if (beginworldgenstep("Calculating Koppen climates"))
+        createclimatemap(world);
+
+    if (beginworldgenstep("Calculating Holdridge biomes"))
+        createbiomemap(world);
 
     // Now specials.
 
@@ -682,6 +918,12 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
     if (beginworldgenstep("Checking poles"))
         checkpoleclimates(world);
+
+    world.syncseasonalclimatefromlegacy();
+    applyseasonaltemperaturelapse(world);
+    createclimatemap(world);
+    createbiomemap(world);
+    exportclimatevalidationreport(world);
 
     if (dolakes == 0)
     {
@@ -807,37 +1049,23 @@ void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, 
 
     vector<vector<int>> inland(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
-    // First, do rainfall over the oceans.
-
     if (seatotal > 0)
     {
-        if (beginworldgenstep("Calculating ocean rainfall"))
-            createoceanrain(world, fractal);
+        populateinlanddistances(world, inland);
+
+        if (beginworldgenstep("Advecting moisture and rainfall"))
+            createadvectedrainfall(world, inland, fractal);
     }
-
-    if (landtotal > 0)
+    else if (landtotal > 0)
     {
-        // Now we do the rainfall over land.
-
-        if (seatotal > 0)
+        if (beginworldgenstep("Calculating rainfall"))
         {
-            if (beginworldgenstep("Calculating rainfall from prevailing winds"))
-                createprevailinglandrain(world, inland, maxmountainheight, slopewaterreduce);
+            createdesertworldrain(world);
 
-            if (beginworldgenstep("Calculating monsoons"))
-                createmonsoons(world, maxmountainheight, slopewaterreduce);
-        }
-        else
-        {
-            if (beginworldgenstep("Calculating rainfall"))
+            for (int i = 0; i <= width; i++)
             {
-                createdesertworldrain(world);
-
-                for (int i = 0; i <= width; i++)
-                {
-                    for (int j = 0; j <= height; j++)
-                        inland[i][j] = 10000;
-                }
+                for (int j = 0; j <= height; j++)
+                    inland[i][j] = 10000;
             }
         }
     }
@@ -857,15 +1085,21 @@ void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, 
     if (beginworldgenstep("Capping rainfall"))
         caprainfall(world);
 
+    if (beginworldgenstep("Calculating coastal climate influence"))
+        createcoastalclimateinfluence(world);
+
+    if (beginworldgenstep("Applying coastal climate influence"))
+        applycoastalclimates(world);
+
     // Now we adjust temperatures in light of rainfall.
 
     if (beginworldgenstep("Adjusting temperatures"))
-        adjusttemperatures(world, inland);
+        adjusttemperatures(world);
 
     // Now make temperatures a little more extreme when further from the sea.
 
     if (beginworldgenstep("Adjusting continental temperatures"))
-        adjustcontinentaltemperatures(world, inland);
+        adjustcontinentaltemperatures(world);
 
     // Now just smooth the temperatures a bit. Any temperatures that are lower than their neighbours to north and south get bumped up, to avoid the appearance of streaks.
 
@@ -1602,76 +1836,36 @@ void createseaicemap(planet& world, vector<vector<int>>& fractal)
     int sealevel = world.sealevel();
     int maxelev = world.maxelevation();
 
-    int permice = -5; // If it's this temperature or lower all year, permanent sea ice.
-    int seasice = -16; // If it's this temperature or lower for part of the year, seasonal sea ice.
-
-    int maxadjust = 12; // Maximum amount temperatures can be adjusted by
+    int permice = -3;
+    int seasice = -1;
+    int maxadjust = 4;
     int adjustfactor = maxelev / maxadjust;
-
-    int tempdist = 12; // Distance from the current point where we'll check temperatures
-    float landfactor = 20.0f; // The higher this is, the less effect land will have on sea ice
-
-    // First, check that the whole world isn't frozen
-
-    bool foundnoperm = 0;
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.jantemp(i, j) <= permice || world.jultemp(i, j) <= permice)
-            {
-                foundnoperm = 1;
-                i = width;
-                j = height;
-            }
-        }
-    }
-
-    if (foundnoperm == 0)
-    {
-        for (int i = 0; i <= width; i++)
-        {
-            for (int j = 0; j <= height; j++)
-                world.setseaice(i, j, 2);
-        }
-
-        return;
-    }
-
-    // Now work out temperature reductions
-
-    vector<vector<int>> landreduce(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0)); // How much to reduce temperatures by, from nearby land
+    int tempdist = 10;
+    bool foundcoldwater = 0;
 
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
         for (int j = startrow; j <= endrow; j++)
         {
             for (int i = 0; i <= width; i++)
-            {
-                int thislanddist = landdistance(world, i, j);
-
-                if (thislanddist > 0)
-                {
-                    float flanddist = (float)thislanddist;
-
-                    flanddist = 200.0f - flanddist;
-
-                    if (flanddist < 0.0)
-                        flanddist = 0.0f;
-
-                    if (flanddist > 200.0)
-                        flanddist = 200.0f;
-
-                    flanddist = flanddist / landfactor;
-
-                    landreduce[i][j] = (int)flanddist;
-                }
-            }
+                world.setseaice(i, j, 0);
         }
     });
 
-    // Now assign the ice
+    for (int i = 0; i <= width && foundcoldwater == 0; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            if (world.nom(i, j) <= sealevel && coldoceansst(world, i, j) <= seasice)
+            {
+                foundcoldwater = 1;
+                break;
+            }
+        }
+    }
+
+    if (foundcoldwater == 0)
+        return;
 
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
@@ -1679,8 +1873,11 @@ void createseaicemap(planet& world, vector<vector<int>>& fractal)
         {
             for (int i = 0; i <= width; i++)
             {
-                int maxtotal = 0;
-                int mintotal = 0;
+                if (world.nom(i, j) > sealevel)
+                    continue;
+
+                int warmtotal = 0;
+                int coldtotal = 0;
                 int crount = 0;
 
                 for (int k = -tempdist; k <= tempdist; k++)
@@ -1696,25 +1893,25 @@ void createseaicemap(planet& world, vector<vector<int>>& fractal)
                         {
                             int ll = j + l;
 
-                            if (ll >= 0 && ll <= height)
+                            if (ll >= 0 && ll <= height && world.nom(kk, ll) <= sealevel)
                             {
-                                int thismaxtemp = world.maxtemp(kk, ll) - landreduce[kk][ll];
-                                int thismintemp = world.mintemp(kk, ll) - landreduce[kk][ll];
-
-                                maxtotal = maxtotal + thismaxtemp;
-                                mintotal = mintotal + thismintemp;
+                                warmtotal = warmtotal + warmoceansst(world, kk, ll);
+                                coldtotal = coldtotal + coldoceansst(world, kk, ll);
                                 crount++;
                             }
                         }
                     }
                 }
 
-                int maxtemp = maxtotal / crount + (fractal[i][j] / adjustfactor) - maxadjust / 2;
-                int mintemp = mintotal / crount + (fractal[i][j] / adjustfactor) - maxadjust / 2;
+                if (crount == 0)
+                    continue;
 
-                if (maxtemp <= permice && mintemp <= permice)
+                int warmsst = warmtotal / crount + (fractal[i][j] / adjustfactor) - maxadjust / 2;
+                int coldsst = coldtotal / crount + (fractal[i][j] / adjustfactor) - maxadjust / 2;
+
+                if (warmsst <= permice)
                     world.setseaice(i, j, 2);
-                else if (mintemp <= seasice)
+                else if (coldsst <= seasice)
                     world.setseaice(i, j, 1);
             }
         }
@@ -1769,8 +1966,8 @@ void createoceanrain(planet& world, vector<vector<int>>& fractal)
             {
                 if (world.nom(i, j) < sealevel)
                 {
-                    int winterrain = world.mintemp(i, j) + 15;
-                    int summerrain = world.maxtemp(i, j) + 15;
+                    int winterrain = coldoceansst(world, i, j) + 15;
+                    int summerrain = warmoceansst(world, i, j) + 15;
 
                     if (winterrain < 0)
                         winterrain = 0;
@@ -2030,16 +2227,17 @@ void createprevailinglandrain(planet& world, vector<vector<int>>& inland, int ma
                                 if (world.seaice(ii, j) == 1)
                                     seaice = 1;
 
-                                float temp = (float)((world.maxtemp(ii, j) + world.mintemp(ii, j)) / 2);
+                                float temp = meanoceansst(world, ii, j);
                                 temp = temp / tempfactor; // Less water is picked up from colder oceans.
 
                                 if (temp < mintemp)
                                     temp = mintemp;
 
                                 temp = (temp / 100.0f) + 1.0f;
+                                float evaporationfactor = 1.0f + meanoceanevaporation(world, ii, j) / 600.0f;
 
-                                waterlog = waterlog + (int)((float)pickuprate * temp);
-                                waterheat = waterheat + heatpickuprate;
+                                waterlog = waterlog + (int)((float)pickuprate * temp * evaporationfactor);
+                                waterheat = waterheat + heatpickuprate * temp;
 
                                 if (seaice == 1)
                                     waterlog = waterlog / 2;
@@ -2097,16 +2295,17 @@ void createprevailinglandrain(planet& world, vector<vector<int>>& inland, int ma
                                 if (world.seaice(ii, j) == 1)
                                     seaice = 1;
 
-                                float temp = (float)((world.maxtemp(ii, j) + world.mintemp(ii, j)) / 2);
+                                float temp = meanoceansst(world, ii, j);
                                 temp = temp / tempfactor; // Less water is picked up from colder oceans.
 
                                 if (temp < mintemp)
                                     temp = mintemp;
 
                                 temp = (temp / 100.0f) + 1.0f;
+                                float evaporationfactor = 1.0f + meanoceanevaporation(world, ii, j) / 600.0f;
 
-                                waterlog = waterlog + (int)((float)pickuprate * temp);
-                                waterheat = waterheat + heatpickuprate;
+                                waterlog = waterlog + (int)((float)pickuprate * temp * evaporationfactor);
+                                waterheat = waterheat + heatpickuprate * temp;
 
                                 if (seaice == 1)
                                     waterlog = waterlog / 2;
@@ -3816,6 +4015,12 @@ void createmonsoons(planet& world, int maxmountainheight, int slopewaterreduce)
 
 void adjustseasonalrainfall(planet& world, vector<vector<int>>& inland)
 {
+    (void)world;
+    (void)inland;
+
+    // Seasonal rainfall is now expected to emerge from the pressure, wind, and moisture-advection passes.
+    return;
+
     int width = world.width();
     int height = world.height();
     int sealevel = world.sealevel();
@@ -3945,7 +4150,7 @@ void adjustseasonalrainfall(planet& world, vector<vector<int>>& inland)
 
     // Now some tinkering to encourage rainforest near the equator.
 
-    float rainstrength = 2.0f - (abs(tuning::climate::equatorialrain::strengthCenterTilt - tilt) / tuning::climate::equatorialrain::strengthTiltDivisor);
+    float rainstrength = 0.0f; // Seasonal equatorial enhancement now comes from the moisture-advection solver.
 
     if (rainstrength > 0.0f)
     {
@@ -4421,9 +4626,66 @@ void caprainfall(planet& world)
     }
 }
 
+void applycoastalclimates(planet& world)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    auto moderateseason = [](float temperature, float meantemperature, const maritimesample& sample, float thermalfactor)
+    {
+        const float influence = std::clamp(sample.influence, 0.0f, 1.0f);
+
+        if (influence < tuning::climate::coastalclimate::minimumInfluence)
+            return temperature;
+
+        const float fetchfactor = 1.0f - std::clamp(
+            static_cast<float>(sample.fetchdistance) / static_cast<float>(tuning::climate::maritime::maxSearchDistance), 0.0f, 1.0f);
+        const float moderation = std::clamp(
+            influence * (tuning::climate::coastalclimate::rangeModerationFactor +
+                fetchfactor * tuning::climate::coastalclimate::fetchModerationFactor),
+            0.0f, 0.95f);
+        float adjusted = meantemperature + (temperature - meantemperature) * (1.0f - moderation);
+        adjusted = adjusted + sample.thermalanomaly * influence * thermalfactor;
+
+        const float maxshift = tuning::climate::coastalclimate::maximumSeasonalShift;
+        return temperature + std::clamp(adjusted - temperature, -maxshift, maxshift);
+    };
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                if (world.sea(x, y) == 1)
+                    continue;
+
+                const float januarytemp = static_cast<float>(world.jantemp(x, y));
+                const float julytemp = static_cast<float>(world.jultemp(x, y));
+                const float meantemperature = (januarytemp + julytemp) / 2.0f;
+                const bool januaryiscold = januarytemp <= julytemp;
+                const maritimesample januarymaritime = storedmaritimeinfluence(world, seasonjanuary, x, y);
+                const maritimesample julymaritime = storedmaritimeinfluence(world, seasonjuly, x, y);
+
+                const float januaryfactor = januaryiscold ?
+                    tuning::climate::coastalclimate::coldSeasonThermalFactor :
+                    tuning::climate::coastalclimate::warmSeasonThermalFactor;
+                const float julyfactor = januaryiscold ?
+                    tuning::climate::coastalclimate::warmSeasonThermalFactor :
+                    tuning::climate::coastalclimate::coldSeasonThermalFactor;
+
+                world.setjantemp(x, y, static_cast<int>(roundf(moderateseason(januarytemp, meantemperature, januarymaritime, januaryfactor))));
+                world.setjultemp(x, y, static_cast<int>(roundf(moderateseason(julytemp, meantemperature, julymaritime, julyfactor))));
+            }
+        }
+    });
+
+    world.syncseasonalclimatefromlegacy();
+}
+
 // This adjusts temperatures in the light of rainfall.
 
-void adjusttemperatures(planet& world, vector<vector<int>>& inland)
+void adjusttemperatures(planet& world)
 {
     int width = world.width();
     int height = world.height();
@@ -4474,6 +4736,8 @@ void adjusttemperatures(planet& world, vector<vector<int>>& inland)
                     {
                         float mintemp = (float)world.mintemp(i, j);
                         float maxtemp = (float)world.maxtemp(i, j);
+                        const int coldseason = coldseasonindex(world, i, j);
+                        const maritimesample coldmaritime = storedmaritimeinfluence(world, coldseason, i, j);
 
                         float minchangemult = abs(mintemp - midvar) * varstep;
                         float maxchangemult = abs(maxtemp - midvar) * varstep;
@@ -4483,22 +4747,17 @@ void adjusttemperatures(planet& world, vector<vector<int>>& inland)
 
                         float winterrain = (float)world.winterrain(i, j);
                         float summerrain = (float)world.summerrain(i, j);
+                        const float coldmaritimeinfluence = std::clamp(coldmaritime.influence, 0.0f, 1.0f);
 
                         float wintervar = winterrain * winterrainwarmth;
                         float summervar = summerrain * summerraincold;
+                        float wintermoderation = tuning::climate::maritime::minimumRainfallModeration +
+                            coldmaritimeinfluence * tuning::climate::maritime::rainfallModerationFactor;
 
-                        float continental = (float)inland[i][j];
-                        continental = continental - tuning::climate::temperaturerainfall::inlandOffset;
+                        if (wintermoderation > 1.0f)
+                            wintermoderation = 1.0f;
 
-                        if (continental > 0.0f)
-                        {
-                            continental = tuning::climate::temperaturerainfall::inlandFactorNumerator / continental;
-
-                            if (continental > 1.0f)
-                                continental = 1.0f;
-
-                            wintervar = wintervar * continental;
-                        }
+                        wintervar = wintervar * wintermoderation;
 
                         if (wintervar > maxwintervar)
                             wintervar = maxwintervar;
@@ -4552,7 +4811,7 @@ void adjusttemperatures(planet& world, vector<vector<int>>& inland)
 
 // This makes temperatures a bit more extreme further from the sea.
 
-void adjustcontinentaltemperatures(planet& world, vector<vector<int>>& inland)
+void adjustcontinentaltemperatures(planet& world)
 {
     float tilt = world.tilt();
     
@@ -4584,9 +4843,16 @@ void adjustcontinentaltemperatures(planet& world, vector<vector<int>>& inland)
             {
                 if (world.sea(i, j) == 0)
                 {
-                    float thisstrength = (float) inland[i][j];
-
-                    thisstrength = thisstrength / 100.0f;
+                    const int coldseason = coldseasonindex(world, i, j);
+                    const int warmseason = warmseasonindex(world, i, j);
+                    const maritimesample coldmaritime = storedmaritimeinfluence(world, coldseason, i, j);
+                    const maritimesample warmmaritime = storedmaritimeinfluence(world, warmseason, i, j);
+                    const float coldfetch = static_cast<float>(coldmaritime.fetchdistance);
+                    const float warmfetch = static_cast<float>(warmmaritime.fetchdistance);
+                    const float annualfetch = (coldfetch + warmfetch) / 2.0f;
+                    const float annualmaritime = std::max(coldmaritime.influence, warmmaritime.influence);
+                    float thisstrength = annualfetch / tuning::climate::maritime::continentalFetchScale;
+                    thisstrength = thisstrength * (1.0f - annualmaritime * tuning::climate::maritime::continentalMaritimeReduction);
 
                     if (thisstrength > tuning::climate::continentality::maxStrength)
                         thisstrength = tuning::climate::continentality::maxStrength;
@@ -4768,7 +5034,7 @@ void removesubpolarstreaks(planet& world)
                 {
                     if (world.sea(i, j) == 0)
                     {
-                        int climate = calculateclimate(world.map(i, j), world.sealevel(), (float)world.winterrain(i, j), (float)world.summerrain(i, j), (float)world.mintemp(i, j), (float)world.maxtemp(i, j));
+                        const int climate = calculatelegacyderivedplanetclimate(world, i, j);
 
                         if (world.mountainheight(i, j) < 200 && ((climate > 4 && climate < 9) || (climate > 17 && climate < 30))) //  climate=="D" || climate=="BW" || climate=="BS"))
                         {
@@ -4804,7 +5070,7 @@ void removesubpolarstreaks(planet& world)
         {
             if (world.sea(i, j) == 0)
             {
-                int climate = calculateclimate(world.map(i, j), world.sealevel(), (float)world.winterrain(i, j), (float)world.summerrain(i, j), (float)world.mintemp(i, j), (float)world.maxtemp(i, j));
+                const int climate = calculatelegacyderivedplanetclimate(world, i, j);
 
                 if (world.mountainheight(i, j) < 200 && ((climate > 4 && climate < 9) || (climate > 17 && climate < 30))) // (climate=="D" || climate=="BW" || climate=="BS"))
                 {
@@ -4829,6 +5095,132 @@ void removesubpolarstreaks(planet& world)
 
         }
     }
+}
+
+namespace
+{
+float calculatestandardlapsecooling(planet& world, int x, int y)
+{
+    const int elevation = std::max(0, world.map(x, y) - world.sealevel());
+    const float elevationkm = static_cast<float>(elevation) / 1000.0f;
+    return elevationkm * world.tempdecrease();
+}
+
+int calculatelocalrelief(planet& world, int x, int y)
+{
+    const int width = world.width();
+    const int height = world.height();
+    const int radius = tuning::climate::lapse::reliefRadius;
+    int low = world.map(x, y);
+    int high = low;
+
+    for (int dx = -radius; dx <= radius; dx++)
+    {
+        int xx = x + dx;
+
+        if (xx < 0 || xx > width)
+            xx = wrap(xx, width);
+
+        for (int dy = -radius; dy <= radius; dy++)
+        {
+            const int yy = std::clamp(y + dy, 0, height);
+            const int elevation = world.map(xx, yy);
+            low = std::min(low, elevation);
+            high = std::max(high, elevation);
+        }
+    }
+
+    return high - low;
+}
+
+float calculateseasonallapsecooling(planet& world, int season, int x, int y, int localrelief)
+{
+    const float standardcooling = calculatestandardlapsecooling(world, x, y);
+    const float rainhumidity = std::clamp(
+        static_cast<float>(world.seasonalrain(season, x, y)) / tuning::climate::lapse::rainfallHumidityScale, 0.0f, 1.0f);
+    const float moisturehumidity = std::clamp(
+        static_cast<float>(world.seasonalmoisture(season, x, y)) / tuning::climate::lapse::moistureHumidityScale, 0.0f, 1.0f);
+    const float humidity = std::clamp((rainhumidity + moisturehumidity) * 0.5f, 0.0f, 1.0f);
+    const float lapserate = tuning::climate::lapse::dryLapseRate +
+        (tuning::climate::lapse::moistLapseRate - tuning::climate::lapse::dryLapseRate) * humidity;
+    const float elevation = static_cast<float>(std::max(0, world.map(x, y) - world.sealevel())) / 1000.0f;
+    float cooling = elevation * lapserate;
+
+    const float reliefcooling = std::clamp(
+        static_cast<float>(localrelief) / tuning::climate::lapse::reliefScale, 0.0f, 1.0f) *
+        tuning::climate::lapse::reliefCoolingFactor;
+    const float upliftcooling = std::clamp(
+        static_cast<float>(world.seasonaluplift(season, x, y)) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale,
+        0.0f, tuning::climate::lapse::maximumAdditionalCooling) * tuning::climate::lapse::upliftCoolingFactor;
+    float leesubsidencewarming = std::clamp(
+        static_cast<float>(world.seasonalsubsidence(season, x, y)) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale,
+        0.0f, tuning::climate::lapse::maximumLeeWarming) * tuning::climate::lapse::subsidenceWarmingFactor;
+
+    leesubsidencewarming = std::min(leesubsidencewarming, standardcooling * 0.45f);
+    cooling = cooling + reliefcooling + upliftcooling - leesubsidencewarming;
+    return std::max(0.0f, cooling);
+}
+
+void synclegacytemperaturesfromseasonal(planet& world)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                world.setjantemp(x, y, world.seasonaltemp(seasonjanuary, x, y));
+                world.setjultemp(x, y, world.seasonaltemp(seasonjuly, x, y));
+            }
+        }
+    });
+}
+}
+
+void applyseasonaltemperaturelapse(planet& world)
+{
+    const int width = world.width();
+    const int height = world.height();
+    vector<vector<short>> localrelief(ARRAYWIDTH, vector<short>(ARRAYHEIGHT, 0));
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                if (world.sea(x, y) == 1)
+                    continue;
+
+                localrelief[x][y] = static_cast<short>(calculatelocalrelief(world, x, y));
+            }
+        }
+    });
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int x = 0; x <= width; x++)
+                {
+                    if (world.sea(x, y) == 1)
+                        continue;
+
+                    const float standardcooling = calculatestandardlapsecooling(world, x, y);
+                    const float sealeveltemperature = static_cast<float>(world.seasonaltemp(season, x, y)) + standardcooling;
+                    const float revisedcooling = calculateseasonallapsecooling(world, season, x, y, localrelief[x][y]);
+                    world.setseasonaltemp(season, x, y, static_cast<int>(roundf(sealeveltemperature - revisedcooling)));
+                }
+            }
+        });
+    }
+
+    synclegacytemperaturesfromseasonal(world);
 }
 
 // This function extends subpolar regions to the east and west. (Not currently used - it was used in an earlier version of the climate model.)
@@ -9603,6 +9995,11 @@ bool swervecheck(planet& world, int x, int y, int origx, int origy, int lowered,
     return (1);
 }
 
+bool isclassificationwater(planet& world, int x, int y)
+{
+    return world.sea(x, y) == 1 || world.truelake(x, y) != 0 || world.riftlakesurface(x, y) != 0;
+}
+
 // This function checks to make sure that river flows don't decrease.
 
 void checkglobalflows(planet& world)
@@ -10190,6 +10587,12 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
     return (nextpoint);
 }
 
+namespace
+{
+short calculateplanetclimate(planet& world, int x, int y);
+int calculateplanetbiome(planet& world, int x, int y);
+}
+
 // This creates the climate map.
 
 void createclimatemap(planet& world)
@@ -10210,32 +10613,38 @@ void createclimatemap(planet& world)
     }
 }
 
+void createbiomemap(planet& world)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            if (isclassificationwater(world, i, j))
+                world.setbiome(i, j, 0);
+            else
+                world.setbiome(i, j, calculateplanetbiome(world, i, j));
+        }
+    }
+}
+
 // This returns the climate type of the given point.
 
 short getclimate(planet& world, int x, int y)
 {
-    if (world.sea(x, y) == 1)
+    if (isclassificationwater(world, x, y))
         return (0);
 
-    int elev = world.map(x, y);
-    int sealevel = world.sealevel();
-
-
-    float wrain = (float)world.winterrain(x, y);
-    float srain = (float)world.summerrain(x, y);
-    float mintemp = (float)world.mintemp(x, y);
-    float maxtemp = (float)world.maxtemp(x, y);
-
-    short climate = calculateclimate(elev, sealevel, wrain, srain, mintemp, maxtemp);
-
-    return climate;
+    return calculateplanetclimate(world, x, y);
 }
 
 // The same thing, but for the regional map.
 
 short getclimate(region& region, int x, int y)
 {
-    if (region.sea(x, y) == 1)
+    if (region.sea(x, y) == 1 || region.truelake(x, y) != 0)
         return (0);
 
     int elev = region.map(x, y);
@@ -10249,6 +10658,337 @@ short getclimate(region& region, int x, int y)
     short climate = calculateclimate(elev, sealevel, wrain, srain, mintemp, maxtemp);
 
     return climate;
+}
+
+namespace
+{
+struct seasonalclimatesummary
+{
+    std::array<float, CLIMATESEASONCOUNT> temps{};
+    std::array<float, CLIMATESEASONCOUNT> rains{};
+    float mintemp = 0.0f;
+    float maxtemp = 0.0f;
+    float meanannualtemp = 0.0f;
+    float annualrain = 0.0f;
+    float warmhalffraction = 0.0f;
+    float minrain = 0.0f;
+    float driestwarmrain = 0.0f;
+    float wettestwarmrain = 0.0f;
+    float driestcoldrain = 0.0f;
+    float wettestcoldrain = 0.0f;
+    float secondwarmesttemp = 0.0f;
+    bool driestseasoniswarm = false;
+};
+
+short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimatesummary& summary);
+int calculateholdridgebiomefromseasonal(const seasonalclimatesummary& summary);
+int calculateholdridgebiomeinternal(float janTemp, float aprTemp, float julTemp, float octTemp, float janRain, float aprRain, float julRain, float octRain);
+
+seasonalclimatesummary summariseseasonalclimate(planet& world, int x, int y)
+{
+    seasonalclimatesummary summary;
+    std::array<int, CLIMATESEASONCOUNT> order = { 0, 1, 2, 3 };
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        summary.temps[season] = static_cast<float>(world.seasonaltemp(season, x, y));
+        summary.rains[season] = static_cast<float>(world.seasonalrain(season, x, y));
+        summary.meanannualtemp += summary.temps[season];
+        summary.annualrain += summary.rains[season];
+    }
+
+    summary.meanannualtemp = summary.meanannualtemp / static_cast<float>(CLIMATESEASONCOUNT);
+    summary.annualrain = summary.annualrain * 3.0f;
+    summary.mintemp = summary.temps[0];
+    summary.maxtemp = summary.temps[0];
+    summary.minrain = summary.rains[0];
+    int driestseason = 0;
+
+    for (int season = 1; season < CLIMATESEASONCOUNT; season++)
+    {
+        if (summary.temps[season] < summary.mintemp)
+            summary.mintemp = summary.temps[season];
+
+        if (summary.temps[season] > summary.maxtemp)
+            summary.maxtemp = summary.temps[season];
+
+        if (summary.rains[season] < summary.minrain)
+        {
+            summary.minrain = summary.rains[season];
+            driestseason = season;
+        }
+    }
+
+    for (int left = 0; left < CLIMATESEASONCOUNT - 1; left++)
+    {
+        for (int right = left + 1; right < CLIMATESEASONCOUNT; right++)
+        {
+            if (summary.temps[order[left]] > summary.temps[order[right]])
+                std::swap(order[left], order[right]);
+        }
+    }
+
+    const int cold0 = order[0];
+    const int cold1 = order[1];
+    const int warm0 = order[2];
+    const int warm1 = order[3];
+    const float coldrain0 = summary.rains[cold0];
+    const float coldrain1 = summary.rains[cold1];
+    const float warmrain0 = summary.rains[warm0];
+    const float warmrain1 = summary.rains[warm1];
+    const float totalseasonalrain = summary.rains[0] + summary.rains[1] + summary.rains[2] + summary.rains[3];
+
+    summary.secondwarmesttemp = summary.temps[warm0];
+    summary.driestcoldrain = std::min(coldrain0, coldrain1);
+    summary.wettestcoldrain = std::max(coldrain0, coldrain1);
+    summary.driestwarmrain = std::min(warmrain0, warmrain1);
+    summary.wettestwarmrain = std::max(warmrain0, warmrain1);
+    summary.driestseasoniswarm = (driestseason == warm0 || driestseason == warm1);
+
+    if (totalseasonalrain > 0.0f)
+        summary.warmhalffraction = (warmrain0 + warmrain1) / totalseasonalrain;
+
+    return summary;
+}
+
+seasonalclimatesummary summariselegacytemperatureseasonalrainclimate(planet& world, int x, int y)
+{
+    seasonalclimatesummary summary;
+    const float januarytemp = static_cast<float>(world.jantemp(x, y));
+    const float julytemp = static_cast<float>(world.jultemp(x, y));
+    float summertemp = julytemp;
+    float wintertemp = januarytemp;
+
+    if (world.perihelion() == 1)
+    {
+        summertemp = januarytemp;
+        wintertemp = julytemp;
+    }
+
+    const float winterstrength = 0.5f + world.eccentricity() * 0.5f;
+    const float summerstrength = 1.0f - winterstrength;
+    const float transitiontemp = summertemp * summerstrength + wintertemp * winterstrength;
+    const float fourseason = world.tilt() * 0.294592f - 2.45428f;
+    float lat = static_cast<float>(y);
+
+    if (y > world.height() / 2.0f)
+        lat = static_cast<float>(world.height() - y);
+
+    const float fourseasonstrength = lat / (static_cast<float>(world.height()) / 2.0f);
+    const float transitiontempdiff = (fourseason * fourseasonstrength) / 2.0f;
+
+    summary.temps[seasonjanuary] = januarytemp;
+    summary.temps[seasonapril] = transitiontemp + transitiontempdiff;
+    summary.temps[seasonjuly] = julytemp;
+    summary.temps[seasonoctober] = transitiontemp + transitiontempdiff;
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        summary.rains[season] = static_cast<float>(world.seasonalrain(season, x, y));
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        summary.meanannualtemp += summary.temps[season];
+        summary.annualrain += summary.rains[season];
+    }
+
+    summary.meanannualtemp = summary.meanannualtemp / static_cast<float>(CLIMATESEASONCOUNT);
+    summary.annualrain = summary.annualrain * 3.0f;
+    summary.mintemp = summary.temps[0];
+    summary.maxtemp = summary.temps[0];
+    summary.minrain = summary.rains[0];
+    int driestseason = 0;
+    std::array<int, CLIMATESEASONCOUNT> order = { 0, 1, 2, 3 };
+
+    for (int season = 1; season < CLIMATESEASONCOUNT; season++)
+    {
+        if (summary.temps[season] < summary.mintemp)
+            summary.mintemp = summary.temps[season];
+
+        if (summary.temps[season] > summary.maxtemp)
+            summary.maxtemp = summary.temps[season];
+
+        if (summary.rains[season] < summary.minrain)
+        {
+            summary.minrain = summary.rains[season];
+            driestseason = season;
+        }
+    }
+
+    for (int left = 0; left < CLIMATESEASONCOUNT - 1; left++)
+    {
+        for (int right = left + 1; right < CLIMATESEASONCOUNT; right++)
+        {
+            if (summary.temps[order[left]] > summary.temps[order[right]])
+                std::swap(order[left], order[right]);
+        }
+    }
+
+    const int cold0 = order[0];
+    const int cold1 = order[1];
+    const int warm0 = order[2];
+    const int warm1 = order[3];
+    const float coldrain0 = summary.rains[cold0];
+    const float coldrain1 = summary.rains[cold1];
+    const float warmrain0 = summary.rains[warm0];
+    const float warmrain1 = summary.rains[warm1];
+    const float totalseasonalrain = summary.rains[0] + summary.rains[1] + summary.rains[2] + summary.rains[3];
+
+    summary.secondwarmesttemp = summary.temps[warm0];
+    summary.driestcoldrain = std::min(coldrain0, coldrain1);
+    summary.wettestcoldrain = std::max(coldrain0, coldrain1);
+    summary.driestwarmrain = std::min(warmrain0, warmrain1);
+    summary.wettestwarmrain = std::max(warmrain0, warmrain1);
+    summary.driestseasoniswarm = (driestseason == warm0 || driestseason == warm1);
+
+    if (totalseasonalrain > 0.0f)
+        summary.warmhalffraction = (warmrain0 + warmrain1) / totalseasonalrain;
+
+    return summary;
+}
+
+short calculateplanetclimate(planet& world, int x, int y)
+{
+    const int elev = world.map(x, y);
+    const int sealevel = world.sealevel();
+    const seasonalclimatesummary summary = summariseseasonalclimate(world, x, y);
+    return calculateclimatefromseasonal(elev, sealevel, summary);
+}
+
+short calculatelegacyderivedplanetclimate(planet& world, int x, int y)
+{
+    const int elev = world.map(x, y);
+    const int sealevel = world.sealevel();
+    const seasonalclimatesummary summary = summariselegacytemperatureseasonalrainclimate(world, x, y);
+    return calculateclimatefromseasonal(elev, sealevel, summary);
+}
+
+int calculateplanetbiome(planet& world, int x, int y)
+{
+    const seasonalclimatesummary summary = summariseseasonalclimate(world, x, y);
+    return calculateholdridgebiomefromseasonal(summary);
+}
+
+float clampholdridgebiotemperature(float temperature)
+{
+    return clamp(temperature, 0.0f, 30.0f);
+}
+
+float calculateholdridgebiotemperature(const seasonalclimatesummary& summary)
+{
+    float total = 0.0f;
+
+    for (float temp : summary.temps)
+        total = total + clampholdridgebiotemperature(temp);
+
+    return total / static_cast<float>(CLIMATESEASONCOUNT);
+}
+
+int calculateholdridgebiomeinternal(float janTemp, float aprTemp, float julTemp, float octTemp, float janRain, float aprRain, float julRain, float octRain)
+{
+    seasonalclimatesummary summary;
+    summary.temps[seasonjanuary] = janTemp;
+    summary.temps[seasonapril] = aprTemp;
+    summary.temps[seasonjuly] = julTemp;
+    summary.temps[seasonoctober] = octTemp;
+    summary.rains[seasonjanuary] = janRain;
+    summary.rains[seasonapril] = aprRain;
+    summary.rains[seasonjuly] = julRain;
+    summary.rains[seasonoctober] = octRain;
+    summary.annualrain = std::max(1.0f, (janRain + aprRain + julRain + octRain) * 3.0f);
+
+    const float biotemperature = calculateholdridgebiotemperature(summary);
+    const float annualprecipitation = summary.annualrain;
+    const float petratio = biotemperature <= 0.0f ? 1000.0f : (biotemperature * 58.93f) / annualprecipitation;
+
+    if (biotemperature <= 0.0f)
+        return biomeice;
+
+    if (biotemperature < 1.5f)
+    {
+        if (petratio > 16.0f) return biomepolardesert;
+        if (petratio > 4.0f) return biomepolardrytundra;
+        if (petratio > 2.0f) return biomepolarmoisttundra;
+        if (petratio > 0.5f) return biomepolarwettundra;
+        return biomepolarraindtundra;
+    }
+
+    if (biotemperature < 3.0f)
+    {
+        if (petratio > 16.0f) return biomesubpolardesert;
+        if (petratio > 4.0f) return biomesubpolardrytundra;
+        if (petratio > 2.0f) return biomesubpolarmoisttundra;
+        if (petratio > 0.5f) return biomesubpolarwettundra;
+        return biomesubpolarraindtundra;
+    }
+
+    if (biotemperature < 6.0f)
+    {
+        if (petratio > 16.0f) return biomeborealdesert;
+        if (petratio > 4.0f) return biomeborealdrybush;
+        if (petratio > 1.0f) return biomeborealmoistforest;
+        if (petratio > 0.25f) return biomeborealwetforest;
+        return biomeborealrainforest;
+    }
+
+    if (biotemperature < 12.0f)
+    {
+        if (petratio > 16.0f) return biomecooltemperatedesert;
+        if (petratio > 8.0f) return biomecooltemperatedesertbush;
+        if (petratio > 2.0f) return biomecooltemperatesteppe;
+        if (petratio > 1.0f) return biomecooltemperatemoistforest;
+        if (petratio > 0.25f) return biomecooltemperatewetforest;
+        return biomecooltemperaterainforest;
+    }
+
+    if (biotemperature < 18.0f)
+    {
+        if (petratio > 16.0f) return biomewarmtemperatedesert;
+        if (petratio > 8.0f) return biomewarmtemperatedesertbush;
+        if (petratio > 4.0f) return biomewarmtemperatethornsteppe;
+        if (petratio > 2.0f) return biomewarmtemperatedryforest;
+        if (petratio > 1.0f) return biomewarmtemperatemoistforest;
+        if (petratio > 0.25f) return biomewarmtemperatewetforest;
+        return biomewarmtemperaterainforest;
+    }
+
+    if (biotemperature < 24.0f)
+    {
+        if (petratio > 16.0f) return biomesubtropicaldesert;
+        if (petratio > 8.0f) return biomesubtropicaldesertbush;
+        if (petratio > 4.0f) return biomesubtropicalthornsteppe;
+        if (petratio > 2.0f) return biomesubtropicaldryforest;
+        if (petratio > 1.0f) return biomesubtropicalmoistforest;
+        if (petratio > 0.25f) return biomesubtropicalwetforest;
+        return biomesubtropicalrainforest;
+    }
+
+    if (petratio > 16.0f) return biometropicaldesert;
+    if (petratio > 8.0f) return biometropicaldesertbush;
+    if (petratio > 4.0f) return biometropicalthornsteppe;
+    if (petratio > 2.0f) return biometropicalverydryforest;
+    if (petratio > 1.0f) return biometropicaldryforest;
+    if (petratio > 0.5f) return biometropicalmoistforest;
+    if (petratio > 0.25f) return biometropicalwetforest;
+    return biometropicalrainforest;
+}
+
+int calculateholdridgebiomefromseasonal(const seasonalclimatesummary& summary)
+{
+    return calculateholdridgebiomeinternal(
+        summary.temps[seasonjanuary],
+        summary.temps[seasonapril],
+        summary.temps[seasonjuly],
+        summary.temps[seasonoctober],
+        summary.rains[seasonjanuary],
+        summary.rains[seasonapril],
+        summary.rains[seasonjuly],
+        summary.rains[seasonoctober]);
+}
+}
+
+int calculateholdridgebiome(float janTemp, float aprTemp, float julTemp, float octTemp, float janRain, float aprRain, float julRain, float octRain)
+{
+    return calculateholdridgebiomeinternal(janTemp, aprTemp, julTemp, octTemp, janRain, aprRain, julRain, octRain);
 }
 
 // This does the actual climate calculations for the above two functions.
@@ -10479,6 +11219,129 @@ short calculateclimate(int elev, int sealevel, float wrain, float srain, float m
         return 31;
 
     return 0;
+}
+
+namespace
+{
+short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimatesummary& summary)
+{
+    string group, preptype, heattype;
+
+    if (summary.maxtemp <= 10.0f)
+    {
+        if (summary.maxtemp >= 0.0f)
+            group = "ET";
+
+        if (summary.maxtemp < 0.0f)
+            group = "EF";
+    }
+
+    if (group == "")
+    {
+        float precthreshold = summary.meanannualtemp * 20.0f;
+
+        if (summary.warmhalffraction >= 0.7f)
+            precthreshold = precthreshold + 280.0f;
+        else if (summary.warmhalffraction >= 0.3f)
+            precthreshold = precthreshold + 140.0f;
+
+        if (summary.annualrain < precthreshold * 0.5f)
+            group = "BW";
+
+        if (group == "" && summary.annualrain <= precthreshold)
+            group = "BS";
+    }
+
+    if (group == "" && summary.mintemp >= 18.0f)
+        group = "A";
+
+    if (group == "" && summary.mintemp > -3.0f && summary.mintemp < 18.0f)
+        group = "C";
+
+    if (group == "" && summary.mintemp <= -3.0f)
+        group = "D";
+
+    if (group == "A")
+    {
+        if (summary.minrain >= 60.0f)
+            preptype = "f";
+
+        if (preptype == "" && summary.minrain >= (100.0f - (summary.annualrain / 25.0f)))
+            preptype = "m";
+
+        if (preptype == "")
+            preptype = summary.driestseasoniswarm ? "s" : "w";
+    }
+
+    if (group == "C" || group == "D")
+    {
+        if (summary.driestwarmrain < summary.wettestcoldrain / 2.5f && summary.driestwarmrain < 35.0f)
+            preptype = "s";
+
+        if (preptype == "" && summary.driestcoldrain < summary.wettestwarmrain / 4.0f)
+            preptype = "w";
+
+        if (preptype == "")
+            preptype = "f";
+    }
+
+    if (group == "BW" || group == "BS")
+    {
+        if (summary.meanannualtemp >= 18.0f)
+            heattype = "h";
+
+        if (summary.meanannualtemp < 18.0f)
+            heattype = "k";
+    }
+
+    if (group != "A" && group != "BW" && group != "BS" && group != "ET" && group != "EF")
+    {
+        if (summary.maxtemp >= 22.0f)
+            heattype = "a";
+        else if (summary.secondwarmesttemp >= 8.0f)
+            heattype = "b";
+        else if (summary.mintemp <= -38.0f)
+            heattype = "d";
+        else
+            heattype = "c";
+    }
+
+    const string climate = group + preptype + heattype;
+
+    if (climate == "Af") return 1;
+    if (climate == "Am") return 2;
+    if (climate == "Aw") return 3;
+    if (climate == "As") return 4;
+    if (climate == "BWh") return 5;
+    if (climate == "BWk") return 6;
+    if (climate == "BSh") return 7;
+    if (climate == "BSk") return 8;
+    if (climate == "Csa") return 9;
+    if (climate == "Csb") return 10;
+    if (climate == "Csc") return 11;
+    if (climate == "Cwa") return 12;
+    if (climate == "Cwb") return 13;
+    if (climate == "Cwc") return 14;
+    if (climate == "Cfa") return 15;
+    if (climate == "Cfb") return 16;
+    if (climate == "Cfc") return 17;
+    if (climate == "Dsa") return 18;
+    if (climate == "Dsb") return 19;
+    if (climate == "Dsc") return 20;
+    if (climate == "Dsd") return 21;
+    if (climate == "Dwa") return 22;
+    if (climate == "Dwb") return 23;
+    if (climate == "Dwc") return 24;
+    if (climate == "Dwd") return 25;
+    if (climate == "Dfa") return 26;
+    if (climate == "Dfb") return 27;
+    if (climate == "Dfc") return 28;
+    if (climate == "Dfd") return 29;
+    if (climate == "ET") return 30;
+    if (climate == "EF") return 31;
+
+    return 0;
+}
 }
 
 // This function gives the names of the climate types.
@@ -13381,6 +14244,10 @@ void checkpoleclimates(planet& world)
 
     for (int i = 0; i <= width; i++)
     {
+        world.setwinterrain(i, 0, world.winterrain(i, 1));
+        world.setsummerrain(i, 0, world.summerrain(i, 1));
+        world.setmaxtemp(i, 0, world.maxtemp(i, 1));
+        world.setmintemp(i, 0, world.mintemp(i, 1));
         world.setwinterrain(i, height, world.winterrain(i, height - 1));
         world.setsummerrain(i, height, world.summerrain(i, height - 1));
         world.setmaxtemp(i, height, world.maxtemp(i, height - 1));

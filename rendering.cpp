@@ -1279,8 +1279,8 @@ void drawglobalclimatemapimage(planet& world, maplayer& layer)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.sea(i, j))
-                globalclimateimage.setPixel(i, j, getclimateseacolour(world, world.seaice(i, j)));
+            if (world.sea(i, j) || world.truelake(i, j) != 0 || world.riftlakesurface(i, j) != 0)
+                globalclimateimage.setPixel(i, j, getclimateseacolour(world, world.sea(i, j) ? world.seaice(i, j) : 0));
             else
                 globalclimateimage.setPixel(i, j, getclimatecolours(world, world.climate(i, j)));
         }
@@ -1303,7 +1303,7 @@ void drawglobalbiomemapimage(planet& world, maplayer& layer)
     {
         for (int j = 0; j <= height; j++)
         {
-            const bool water = world.sea(i, j) || world.truelake(i, j) != 0;
+            const bool water = world.sea(i, j) || world.truelake(i, j) != 0 || world.riftlakesurface(i, j) != 0;
 
             if (water)
             {
@@ -1312,15 +1312,7 @@ void drawglobalbiomemapimage(planet& world, maplayer& layer)
                 continue;
             }
 
-            globalbiomeimage.setPixel(i, j, getbiomemapcolour(world, getholdridgebiomeslot(
-                static_cast<float>(world.jantemp(i, j)),
-                static_cast<float>(world.aprtemp(i, j)),
-                static_cast<float>(world.jultemp(i, j)),
-                static_cast<float>(world.octtemp(i, j)),
-                static_cast<float>(world.janrain(i, j)),
-                static_cast<float>(world.aprrain(i, j)),
-                static_cast<float>(world.julrain(i, j)),
-                static_cast<float>(world.octrain(i, j)))));
+            globalbiomeimage.setPixel(i, j, getbiomemapcolour(world, world.biome(i, j)));
         }
     }
 
@@ -2239,8 +2231,8 @@ void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer)
     {
         for (int j = regheightbegin; j <= regheightend; j++)
         {
-            if (region.sea(i, j))
-                regionalclimateimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getclimateseacolour(world, region.seaice(i, j)));
+            if (region.sea(i, j) || region.truelake(i, j) != 0)
+                regionalclimateimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getclimateseacolour(world, region.sea(i, j) ? region.seaice(i, j) : 0));
             else
                 regionalclimateimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getclimatecolours(world, region.climate(i, j)));
         }
@@ -2278,7 +2270,7 @@ void drawregionalbiomemapimage(planet& world, region& region, maplayer& layer)
 
             const int globaly = clamp(region.lefty() + j / 16, 0, world.height());
 
-            regionalbiomeimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getbiomemapcolour(world, getholdridgebiomeslot(
+            regionalbiomeimage.setPixel(i - origregwidthbegin, j - origregheightbegin, getbiomemapcolour(world, calculateholdridgebiome(
                 static_cast<float>(region.jantemp(i, j)),
                 static_cast<float>(region.aprtemp(i, j, globaly, world.height(), world.tilt(), world.eccentricity(), world.perihelion())),
                 static_cast<float>(region.jultemp(i, j)),

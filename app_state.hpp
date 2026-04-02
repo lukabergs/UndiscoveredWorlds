@@ -59,6 +59,7 @@ struct CustomWorldUiState
     int mergefactor = 15;
     int iterations = 4;
     int sealeveleditable = 5;
+    bool compareClimateWorkbook = true;
 };
 
 struct ProgressPassState

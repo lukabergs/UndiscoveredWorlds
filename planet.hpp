@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <array>
 #include <string>
+#include <vector>
 
 #include "classes.hpp"
 
@@ -27,6 +28,15 @@ constexpr int RIVERMAPCOLOURCOUNT = 10;
 constexpr int RIVERMAPFEATURECOUNT = 7;
 constexpr int MAPGRADIENTTYPECOUNT = 4;
 constexpr int MAPGRADIENTMAXSTOPS = 12;
+constexpr int CLIMATESEASONCOUNT = 4;
+
+enum ClimateSeason
+{
+    seasonjanuary = 0,
+    seasonapril = 1,
+    seasonjuly = 2,
+    seasonoctober = 3
+};
 
 enum ClimateMapSeaColourSlot
 {
@@ -646,6 +656,9 @@ public:
 
     int avetemp(int x, int y) const; // average temperature
 
+    int seasonaltemp(int season, int x, int y) const;
+    void setseasonaltemp(int season, int x, int y, int amount);
+
     int summerrain(int x, int y) const;  // summer precipitation
     void setsummerrain(int x, int y, int amount);
 
@@ -662,6 +675,51 @@ public:
     int octrain(int x, int y) const; // October precipitation
 
     int averain(int x, int y) const; // average precipitation
+
+    int seasonalrain(int season, int x, int y) const;
+    void setseasonalrain(int season, int x, int y, int amount);
+
+    int seasonalpressure(int season, int x, int y) const;
+    void setseasonalpressure(int season, int x, int y, int amount);
+
+    int seasonaluwind(int season, int x, int y) const;
+    void setseasonaluwind(int season, int x, int y, int amount);
+
+    int seasonalvwind(int season, int x, int y) const;
+    void setseasonalvwind(int season, int x, int y, int amount);
+
+    int seasonalcurrentu(int season, int x, int y) const;
+    void setseasonalcurrentu(int season, int x, int y, int amount);
+
+    int seasonalcurrentv(int season, int x, int y) const;
+    void setseasonalcurrentv(int season, int x, int y, int amount);
+
+    int seasonalsst(int season, int x, int y) const;
+    void setseasonalsst(int season, int x, int y, int amount);
+
+    int seasonalevaporation(int season, int x, int y) const;
+    void setseasonalevaporation(int season, int x, int y, int amount);
+
+    int seasonalmaritimeinfluence(int season, int x, int y) const;
+    void setseasonalmaritimeinfluence(int season, int x, int y, int amount);
+
+    int seasonalmaritimethermalanomaly(int season, int x, int y) const;
+    void setseasonalmaritimethermalanomaly(int season, int x, int y, int amount);
+
+    int seasonalmaritimefetch(int season, int x, int y) const;
+    void setseasonalmaritimefetch(int season, int x, int y, int amount);
+
+    int seasonalmoisture(int season, int x, int y) const;
+    void setseasonalmoisture(int season, int x, int y, int amount);
+
+    int seasonalconvergence(int season, int x, int y) const;
+    void setseasonalconvergence(int season, int x, int y, int amount);
+
+    int seasonaluplift(int season, int x, int y) const;
+    void setseasonaluplift(int season, int x, int y, int amount);
+
+    int seasonalsubsidence(int season, int x, int y) const;
+    void setseasonalsubsidence(int season, int x, int y, int amount);
 
     int janmountainrain(int x, int y) const;  // jan precipitation on mountains
     void setjanmountainrain(int x, int y, int amount);
@@ -689,6 +747,9 @@ public:
 
     int climate(int x, int y) const; // climate type
     void setclimate(int x, int y, int amount);
+
+    int biome(int x, int y) const; // Holdridge biome slot
+    void setbiome(int x, int y, int amount);
 
     int seaice(int x, int y) const;  // sea ice
     void setseaice(int x, int y, int amount);
@@ -806,6 +867,7 @@ public:
     const short* rawjulrainmap() const;
     const short* rawseaicemap() const;
     const short* rawclimatemap() const;
+    const short* rawbiomemap() const;
     const int* rawrivermapjan() const;
     const int* rawrivermapjul() const;
     const short* rawspecials() const;
@@ -823,6 +885,7 @@ public:
     void shiftterrain(int offset); // Shifts the physical terrain by a given amount.
     void smoothrainmaps(int amount); // Smoothes the rain maps by a given amount.
     void setmaxriverflow(); // Calculates the largest river flow on the map.
+    void syncseasonalclimatefromlegacy(); // Populates explicit seasonal fields from the legacy Jan/Jul model.
 
     void saveworld(string filename); // Saves the world.
     bool loadworld(string filename); // Loads the world.
@@ -1026,10 +1089,27 @@ private:
     std::array<bool, MAPGRADIENTTYPECOUNT> itsmapgradientdiscrete{};
     std::array<std::array<int, MAPGRADIENTMAXSTOPS>, MAPGRADIENTTYPECOUNT> itsmapgradientpositions{};
     std::array<std::array<std::array<int, 3>, MAPGRADIENTMAXSTOPS>, MAPGRADIENTTYPECOUNT> itsmapgradientcolours{};
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaltempmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalrainmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalpressuremaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaluwindmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalvwindmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalcurrentumaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalcurrentvmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalsstmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalevaporationmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimeinfluencemaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimethermalanomalymaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimefetchmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmoisturemaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalconvergencemaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupliftmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalsubsidencemaps;
 
     short jantempmap[ARRAYWIDTH][ARRAYHEIGHT];
     short jultempmap[ARRAYWIDTH][ARRAYHEIGHT];
     short climatemap[ARRAYWIDTH][ARRAYHEIGHT];
+    short biomemap[ARRAYWIDTH][ARRAYHEIGHT];
     short janrainmap[ARRAYWIDTH][ARRAYHEIGHT];
     short julrainmap[ARRAYWIDTH][ARRAYHEIGHT];
     short janmountainrainmap[ARRAYWIDTH][ARRAYHEIGHT];
@@ -1091,6 +1171,11 @@ private:
     template<typename T> void writedata(ofstream& outfile, T const arr[ARRAYWIDTH][ARRAYHEIGHT]);
     template<typename T> void readvariable(ifstream& infile, T& val);
     template<typename T> void readdata(ifstream& infile, T arr[ARRAYWIDTH][ARRAYHEIGHT]);
+    void writeshortvectordata(ofstream& outfile, const std::vector<short>& arr);
+    void readshortvectordata(ifstream& infile, std::vector<short>& arr);
+    int seasonalclimateindex(int x, int y) const;
+    bool validseasonindex(int season) const;
+    void resizeseasonalclimatefields();
 };
 
 inline int planet::saveversion() const { return itssaveversion; }
@@ -1106,10 +1191,10 @@ inline int planet::size() const { return itssize; }
 inline void planet::setsize(int amount) { itssize = amount; }
 
 inline int planet::width() const { return itswidth; }
-inline void planet::setwidth(int amount) { itswidth = amount; }
+inline void planet::setwidth(int amount) { itswidth = amount; resizeseasonalclimatefields(); }
 
 inline int planet::height() const { return itsheight; }
-inline void planet::setheight(int amount) { itsheight = amount; }
+inline void planet::setheight(int amount) { itsheight = amount; resizeseasonalclimatefields(); }
 
 inline int planet::type() const { return itstype; }
 inline void planet::settype(int amount) { itstype = amount; }
@@ -1389,6 +1474,7 @@ inline const short* planet::rawjanrainmap() const { return &janrainmap[0][0]; }
 inline const short* planet::rawjulrainmap() const { return &julrainmap[0][0]; }
 inline const short* planet::rawseaicemap() const { return &seaicemap[0][0]; }
 inline const short* planet::rawclimatemap() const { return &climatemap[0][0]; }
+inline const short* planet::rawbiomemap() const { return &biomemap[0][0]; }
 inline const int* planet::rawrivermapjan() const { return &rivermapjan[0][0]; }
 inline const int* planet::rawrivermapjul() const { return &rivermapjul[0][0]; }
 inline const short* planet::rawspecials() const { return &specials[0][0]; }
@@ -1397,6 +1483,16 @@ inline const int* planet::rawdeltamapjan() const { return &deltamapjan[0][0]; }
 inline const int* planet::rawdeltamapjul() const { return &deltamapjul[0][0]; }
 inline const int* planet::rawriftlakemapsurface() const { return &riftlakemapsurface[0][0]; }
 inline const bool* planet::rawnoshademap() const { return &noshademap[0][0]; }
+
+inline int planet::seasonalclimateindex(int x, int y) const
+{
+    return y * (itswidth + 1) + x;
+}
+
+inline bool planet::validseasonindex(int season) const
+{
+    return season >= 0 && season < CLIMATESEASONCOUNT;
+}
 
 inline int planet::landtotal() const { return itslandtotal; };
 inline void planet::setlandtotal(int amount) { itslandtotal = amount; };
@@ -1603,78 +1699,30 @@ inline void planet::setjultemp(int x, int y, int amount)
     jultempmap[x][y] = (short)amount;
 }
 
-inline int planet::aprtemp(int x, int y) const
+inline int planet::seasonaltemp(int season, int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
         return 0;
 
-    float summertemp = (float)jultempmap[x][y];
-    float wintertemp = (float)jantempmap[x][y];
+    return static_cast<int>(seasonaltempmaps[season][seasonalclimateindex(x, y)]);
+}
 
-    if (itsperihelion == 1)
-    {
-        summertemp = (float)jantempmap[x][y];
-        wintertemp = (float)jultempmap[x][y];
-    }
+inline void planet::setseasonaltemp(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
 
-    float winterstrength = 0.5f + itseccentricity * 0.5f; // The higher the eccentricity, the shorter the "summer".
-    float summerstrength = 1.0f - winterstrength;
+    seasonaltempmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
 
-    float thistemp = summertemp * summerstrength + wintertemp * winterstrength;
-
-    // Now adjust for four-seasonality (if the obliquity is high)
-
-    float fourseason = itstilt * 0.294592f - 2.45428f;
-
-    float lat = (float)y;
-
-    if (y > itsheight/2.0f)
-        lat = (float)(itsheight - y);
-
-    float fourseasonstrength = (float)lat / ((float)itsheight / 2.0f); // This measures the strength of the four-season cycle as determined by proximity to the equator.
-
-    float thistempdiff = (fourseason * fourseasonstrength) / 2.0f;
-
-    thistemp = thistemp + thistempdiff;
-
-    return (int)thistemp;
+inline int planet::aprtemp(int x, int y) const
+{
+    return seasonaltemp(seasonapril, x, y);
 }
 
 inline int planet::octtemp(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    float summertemp = (float)jultempmap[x][y];
-    float wintertemp = (float)jantempmap[x][y];
-
-    if (itsperihelion == (int)1)
-    {
-        summertemp = (float)jantempmap[x][y];
-        wintertemp = (float)jultempmap[x][y];
-    }
-
-    float winterstrength = 0.5f + itseccentricity * 0.5f; // The higher the eccentricity, the shorter the "summer".
-    float summerstrength = 1.0f - winterstrength;
-
-    float thistemp = summertemp * summerstrength + wintertemp * winterstrength;
-
-    // Now adjust for four-seasonality (if the obliquity is high)
-
-    float fourseason = itstilt * 0.294592f - 2.45428f;
-
-    float lat = (float)y;
-
-    if (y > itsheight / 2)
-        lat = (float)(itsheight - y);
-
-    float fourseasonstrength = (float)lat / ((float)itsheight / 2.0f); // This measures the strength of the four-season cycle as determined by proximity to the equator.
-
-    float thistempdiff = (fourseason * fourseasonstrength) / 2.0f;
-
-    thistemp = thistemp + thistempdiff;
-
-    return (int)thistemp;
+    return seasonaltemp(seasonoctober, x, y);
 }
 
 
@@ -1683,7 +1731,12 @@ inline int planet::avetemp(int x, int y) const
     if (y<0 || y>itsheight || x<0 || x>itswidth)
         return 0;
 
-    return (int)((jantempmap[x][y] + jultempmap[x][y]) / 2);
+    int total = 0;
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        total = total + seasonaltemp(season, x, y);
+
+    return total / CLIMATESEASONCOUNT;
 }
 
 inline int planet::janrain(int x, int y) const
@@ -1718,68 +1771,30 @@ inline void planet::setjulrain(int x, int y, int amount)
     julrainmap[x][y] = (short)amount;
 }
 
-inline int planet::aprrain(int x, int y) const
+inline int planet::seasonalrain(int season, int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
         return 0;
 
-    float janfactor = 0.5f;
-    float julfactor = 0.5f;
+    return static_cast<int>(seasonalrainmaps[season][seasonalclimateindex(x, y)]);
+}
 
-    float janrain = (float)janrainmap[x][y];
-    float julrain = (float)julrainmap[x][y];
+inline void planet::setseasonalrain(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
 
-    if (jultempmap[x][y] > jantempmap[x][y] && julrainmap[x][y] > janrainmap[x][y]) // Monsoon in July
-    {
-        float monsoonfactor = 1.0f - janrain / julrain;
+    seasonalrainmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
 
-        janfactor = monsoonfactor * 0.9f; // The stronger the July monsoon, the more the April rain should be like January (low).
-        julfactor = 1.0f - janfactor;
-    }
-
-    if (jultempmap[x][y] < jantempmap[x][y] && julrainmap[x][y] < janrainmap[x][y]) // Monsoon in January
-    {
-        float monsoonfactor = 1.0f - julrain / janrain;
-
-        janfactor = monsoonfactor * 0.7f; // The stronger the January monsoon, the more the April rain should be like January (high) (though not *too* close too it!).
-        julfactor = 1.0f - janfactor;
-    }
-
-    float total = janrain * janfactor + julrain * julfactor;
-
-    return (int)total;
+inline int planet::aprrain(int x, int y) const
+{
+    return seasonalrain(seasonapril, x, y);
 }
 
 inline int planet::octrain(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    float janfactor = 0.5f;
-    float julfactor = 0.5f;
-
-    float janrain = (float)janrainmap[x][y];
-    float julrain = (float)julrainmap[x][y];
-
-    if (jultempmap[x][y] > jantempmap[x][y] && julrainmap[x][y] > janrainmap[x][y]) // Monsoon in July
-    {
-        float monsoonfactor = 1.0f - janrain / julrain;
-
-        julfactor = monsoonfactor * 0.7f; // The stronger the July monsoon, the more the October rain should be like July (high) (though not *too* close too it!).
-        janfactor = 1.0f - julfactor;
-    }
-
-    if (jultempmap[x][y] < jantempmap[x][y] && julrainmap[x][y] < janrainmap[x][y]) // Monsoon in January
-    {
-        float monsoonfactor = 1.0f - julrain / janrain;
-
-        julfactor = monsoonfactor * 0.9f; // The stronger the January monsoon, the more the April rain should be like July (low).
-        janfactor = 1.0f - julfactor;
-    }
-        
-    float total = janrain * janfactor + julrain * julfactor;
-
-    return (int)total;
+    return seasonalrain(seasonoctober, x, y);
 }
 
 inline int planet::averain(int x, int y) const
@@ -1787,7 +1802,236 @@ inline int planet::averain(int x, int y) const
     if (y<0 || y>itsheight || x<0 || x>itswidth)
         return 0;
 
-    return (int)((janrainmap[x][y] + julrainmap[x][y]) / 2);
+    int total = 0;
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        total = total + seasonalrain(season, x, y);
+
+    return total / CLIMATESEASONCOUNT;
+}
+
+inline int planet::seasonalpressure(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalpressuremaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalpressure(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalpressuremaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonaluwind(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonaluwindmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonaluwind(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonaluwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalvwind(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalvwindmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalvwind(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalvwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalcurrentu(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalcurrentumaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalcurrentu(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalcurrentumaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalcurrentv(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalcurrentvmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalcurrentv(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalcurrentvmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalsst(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalsstmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalsst(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalsstmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalevaporation(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalevaporationmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalevaporation(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalevaporationmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalmaritimeinfluence(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalmaritimeinfluence(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalmaritimethermalanomaly(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalmaritimethermalanomaly(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalmaritimefetch(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalmaritimefetchmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalmaritimefetch(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalmaritimefetchmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalmoisture(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalmoisturemaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalmoisture(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalmoisturemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalconvergence(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalconvergencemaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalconvergence(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalconvergencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonaluplift(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalupliftmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonaluplift(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalupliftmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalsubsidence(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalsubsidencemaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalsubsidence(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalsubsidencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
 }
 
 inline int planet::janmountainrain(int x, int y) const
@@ -1956,6 +2200,22 @@ inline void planet::setclimate(int x, int y, int amount)
         return;
 
     climatemap[x][y] = (short)amount;
+}
+
+inline int planet::biome(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return (int)biomemap[x][y];
+}
+
+inline void planet::setbiome(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    biomemap[x][y] = (short)amount;
 }
 
 inline int planet::seaice(int x, int y) const

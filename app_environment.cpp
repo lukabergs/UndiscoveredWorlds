@@ -80,6 +80,11 @@ void loadappenvironmentinternal()
     applypathoverride(environmentconfig.defaultAppearanceDirectory, getenvoverride("UW_DEFAULT_UWS_DIR", filevalues));
     applypathoverride(environmentconfig.defaultImageDirectory, getenvoverride("UW_DEFAULT_IMAGE_DIR", filevalues));
     applypathoverride(environmentconfig.profilingWorkbookPath, getenvoverride("UW_PROFILING_WORKBOOK", filevalues));
+    applypathoverride(environmentconfig.referencePrecipitationGridPath, getenvoverride("UW_REFERENCE_PRECIP_GRID", filevalues));
+    applypathoverride(environmentconfig.climateWorkbookPath, getenvoverride("UW_CLIMATE_WORKBOOK", filevalues));
+    applypathoverride(environmentconfig.earthKoppenImagePath, getenvoverride("UW_EARTH_KOPPEN_IMAGE", filevalues));
+    applypathoverride(environmentconfig.earthBenchmarkLandPath, getenvoverride("UW_EARTH_BENCHMARK_LAND", filevalues));
+    applypathoverride(environmentconfig.earthBenchmarkSeaPath, getenvoverride("UW_EARTH_BENCHMARK_SEA", filevalues));
 
     if (!environmentconfig.defaultAppearanceDirectory.empty() && environmentconfig.defaultAppearanceDirectory != ".")
         filesystem::create_directories(environmentconfig.defaultAppearanceDirectory);
@@ -87,6 +92,10 @@ void loadappenvironmentinternal()
         filesystem::create_directories(environmentconfig.defaultImageDirectory);
     if (!environmentconfig.profilingWorkbookPath.empty() && environmentconfig.profilingWorkbookPath.has_parent_path())
         filesystem::create_directories(environmentconfig.profilingWorkbookPath.parent_path());
+    if (!environmentconfig.referencePrecipitationGridPath.empty() && environmentconfig.referencePrecipitationGridPath.has_parent_path())
+        filesystem::create_directories(environmentconfig.referencePrecipitationGridPath.parent_path());
+    if (!environmentconfig.climateWorkbookPath.empty() && environmentconfig.climateWorkbookPath.has_parent_path())
+        filesystem::create_directories(environmentconfig.climateWorkbookPath.parent_path());
 
     environmentloaded = true;
 }
@@ -103,4 +112,15 @@ const AppEnvironmentConfig& getappenvironment()
 void reloadappenvironment()
 {
     loadappenvironmentinternal();
+}
+
+void setreferenceprecipitationgridpath(const filesystem::path& path)
+{
+    if (environmentloaded == false)
+        loadappenvironmentinternal();
+
+    environmentconfig.referencePrecipitationGridPath = path;
+
+    if (!environmentconfig.referencePrecipitationGridPath.empty() && environmentconfig.referencePrecipitationGridPath.has_parent_path())
+        filesystem::create_directories(environmentconfig.referencePrecipitationGridPath.parent_path());
 }

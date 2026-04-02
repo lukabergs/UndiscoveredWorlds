@@ -23,6 +23,8 @@ void endworldgendebugrun();
 void onworldgenstepcompleted(const std::string& label, double elapsedms);
 void setworldgenvisualizationcallback(std::function<void()> callback);
 void clearworldgenvisualizationcallback();
+bool isworldgendebugrunactive();
+long worldgenerationdebugseed();
 bool usefastlemmountains();
 bool useplatetectonicssimulation();
 int platetectonicscyclecount();
