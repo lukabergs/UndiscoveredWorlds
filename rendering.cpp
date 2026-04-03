@@ -515,6 +515,157 @@ namespace
         return samplemapgradient(gradient, flow);
     }
 
+    sf::Color getphysicaloceanbackground()
+    {
+        return makecolour(24, 52, 82);
+    }
+
+    sf::Color getphysicallandbackground()
+    {
+        return makecolour(104, 96, 84);
+    }
+
+    sf::Color getscoremapcolour(int score, const sf::Color& low, const sf::Color& mid, const sf::Color& high)
+    {
+        return lerpcolour(low, mid, high, static_cast<float>(score) / 100.0f);
+    }
+
+    sf::Color getgeologymapcolour(const planet& world, int x, int y)
+    {
+        switch (world.geologicregime(x, y))
+        {
+        case GeologicRegime::convergent_arc:
+            return makecolour(184, 85, 64);
+        case GeologicRegime::continent_collision:
+            return makecolour(140, 78, 72);
+        case GeologicRegime::divergent_rift:
+            return makecolour(201, 141, 63);
+        case GeologicRegime::transform:
+            return makecolour(51, 128, 137);
+        case GeologicRegime::passive_margin:
+            return makecolour(187, 170, 117);
+        case GeologicRegime::mid_ocean_ridge:
+            return makecolour(79, 173, 181);
+        case GeologicRegime::trench_adjacent:
+            return makecolour(20, 45, 91);
+        case GeologicRegime::stable:
+        default:
+            return world.sea(x, y) ? makecolour(33, 53, 78) : makecolour(120, 118, 110);
+        }
+    }
+
+    sf::Color getbasinmapcolour(const planet& world, int x, int y)
+    {
+        switch (world.basinclass(x, y))
+        {
+        case BasinClass::exorheic:
+            return makecolour(75, 161, 92);
+        case BasinClass::endorheic:
+            return makecolour(201, 137, 56);
+        case BasinClass::coastal:
+            return makecolour(72, 169, 176);
+        case BasinClass::none:
+        default:
+            return world.sea(x, y) ? makecolour(30, 63, 110) : getphysicallandbackground();
+        }
+    }
+
+    sf::Color geterosionmapcolour(const planet& world, int x, int y)
+    {
+        if (world.sea(x, y))
+            return getphysicaloceanbackground();
+
+        return getscoremapcolour(world.erosionpotential(x, y), makecolour(232, 223, 200), makecolour(188, 134, 84), makecolour(92, 46, 20));
+    }
+
+    sf::Color getdepositionmapcolour(const planet& world, int x, int y)
+    {
+        if (world.sea(x, y))
+            return getphysicaloceanbackground();
+
+        return getscoremapcolour(world.depositionpotential(x, y), makecolour(219, 226, 210), makecolour(175, 176, 112), makecolour(115, 96, 46));
+    }
+
+    sf::Color getfertilitymapcolour(const planet& world, int x, int y)
+    {
+        if (world.sea(x, y))
+            return getphysicaloceanbackground();
+
+        return getscoremapcolour(world.floodplainfertility(x, y), makecolour(188, 170, 121), makecolour(132, 166, 82), makecolour(48, 112, 52));
+    }
+
+    sf::Color getresourcesmapcolour(const planet& world, int x, int y)
+    {
+        const sf::Color landbackground = makecolour(89, 80, 68);
+        const sf::Color seabackground = makecolour(23, 46, 73);
+        const bool water = world.sea(x, y) != 0;
+        const int metal = world.metalorereserve(x, y);
+        const int placer = world.placerreserve(x, y);
+        const int evaporite = world.evaporitereserve(x, y);
+        const int volcanic = world.volcanicreserve(x, y);
+        const int fishery = world.fisheryreserve(x, y);
+        const int dominant = std::max({ metal, placer, evaporite, volcanic, fishery });
+        sf::Color resourcecolour = water ? seabackground : landbackground;
+
+        if (dominant == metal)
+            resourcecolour = makecolour(116, 126, 140);
+        else if (dominant == placer)
+            resourcecolour = makecolour(215, 184, 74);
+        else if (dominant == evaporite)
+            resourcecolour = makecolour(224, 214, 176);
+        else if (dominant == volcanic)
+            resourcecolour = makecolour(192, 78, 44);
+        else if (dominant == fishery)
+            resourcecolour = makecolour(56, 170, 185);
+
+        if (dominant < 8)
+            return water ? seabackground : landbackground;
+
+        const float blend = 0.25f + (static_cast<float>(dominant) / 100.0f) * 0.75f;
+        return lerpcolour(water ? seabackground : landbackground, resourcecolour, blend);
+    }
+
+    template <typename ColourFn>
+    void drawglobalphysicalmapimage(planet& world, maplayer& layer, ColourFn&& colourfn)
+    {
+        sf::Image& image = layer.image;
+        sf::Image& displayimage = layer.displayimage;
+
+        for (int x = 0; x <= world.width(); x++)
+        {
+            for (int y = 0; y <= world.height(); y++)
+                image.setPixel(x, y, colourfn(x, y));
+        }
+
+        createnearestdisplayimage(image.getPixelsPtr(), static_cast<int>(image.getSize().x), world.width(), displayimage);
+        applyglobaloutlineoverlay(world, image);
+        applyglobaldisplayoutlineoverlay(world, displayimage);
+    }
+
+    template <typename ColourFn>
+    void drawregionalsampledphysicalmapimage(planet& world, region& region, maplayer& layer, ColourFn&& colourfn)
+    {
+        sf::Image& image = layer.image;
+        const int regwidthbegin = region.regwidthbegin();
+        const int regwidthend = region.regwidthend();
+        const int regheightbegin = region.regheightbegin();
+        const int regheightend = region.regheightend();
+        const int leftx = region.leftx();
+        const int lefty = region.lefty();
+
+        for (int i = regwidthbegin; i <= regwidthend; i++)
+        {
+            for (int j = regheightbegin; j <= regheightend; j++)
+            {
+                const int globalx = wrap(leftx + (i / 16), world.width());
+                const int globaly = clamp(lefty + (j / 16), 0, world.height());
+                image.setPixel(i - regwidthbegin, j - regheightbegin, colourfn(globalx, globaly));
+            }
+        }
+
+        applyregionaloutlineoverlay(world, region, image);
+    }
+
     void flushtimedreport()
     {
         if (hastimedreport == false)
@@ -1404,6 +1555,54 @@ void drawglobalriversmapimage(planet& world, maplayer& layer)
     createriversdisplayimage(globalriversimage.getPixelsPtr(), static_cast<int>(globalriversimage.getSize().x), width, world.size(), displayglobalriversimage);
     applyglobaloutlineoverlay(world, globalriversimage);
     applyglobaldisplayoutlineoverlay(world, displayglobalriversimage);
+}
+
+void drawglobalgeologymapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        return getgeologymapcolour(world, x, y);
+    });
+}
+
+void drawglobalbasinsmapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        return getbasinmapcolour(world, x, y);
+    });
+}
+
+void drawglobalerosionmapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        return geterosionmapcolour(world, x, y);
+    });
+}
+
+void drawglobaldepositionmapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        return getdepositionmapcolour(world, x, y);
+    });
+}
+
+void drawglobalfertilitymapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        return getfertilitymapcolour(world, x, y);
+    });
+}
+
+void drawglobalresourcesmapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        return getresourcesmapcolour(world, x, y);
+    });
 }
 
 void drawglobalreliefmapimage(planet& world, maplayer& layer)
@@ -2384,6 +2583,54 @@ void drawregionalriversmapimage(planet& world, region& region, maplayer& layer)
     }
 
     applyregionaloutlineoverlay(world, region, regionalriversimage);
+}
+
+void drawregionalgeologymapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        return getgeologymapcolour(world, x, y);
+    });
+}
+
+void drawregionalbasinsmapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        return getbasinmapcolour(world, x, y);
+    });
+}
+
+void drawregionalerosionmapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        return geterosionmapcolour(world, x, y);
+    });
+}
+
+void drawregionaldepositionmapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        return getdepositionmapcolour(world, x, y);
+    });
+}
+
+void drawregionalfertilitymapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        return getfertilitymapcolour(world, x, y);
+    });
+}
+
+void drawregionalresourcesmapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        return getresourcesmapcolour(world, x, y);
+    });
 }
 
 void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)

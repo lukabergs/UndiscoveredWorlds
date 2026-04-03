@@ -28,6 +28,7 @@ set(SOURCES
     appearance_settings.cpp
     map_appearance.cpp
     plate_tectonics_adapter.cpp
+    physical_layers.cpp
     world_property_controls.cpp
     app_windows.cpp
     ui_panels.cpp

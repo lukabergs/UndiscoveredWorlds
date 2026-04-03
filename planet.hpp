@@ -10,7 +10,9 @@
 #define planet_hpp
 
 #include <stdio.h>
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -124,6 +126,26 @@ enum MapGradientType
     mapgradienttemperature = 1,
     mapgradientprecipitation = 2,
     mapgradientriverflow = 3
+};
+
+enum class GeologicRegime : std::uint8_t
+{
+    stable = 0,
+    convergent_arc = 1,
+    continent_collision = 2,
+    divergent_rift = 3,
+    transform = 4,
+    passive_margin = 5,
+    mid_ocean_ridge = 6,
+    trench_adjacent = 7
+};
+
+enum class BasinClass : std::uint8_t
+{
+    none = 0,
+    exorheic = 1,
+    endorheic = 2,
+    coastal = 3
 };
 
 using namespace std;
@@ -812,6 +834,45 @@ public:
     int special(int x, int y) const; // special features. 100: salt lake. 110: salt pan. 120: dunes. 130: fresh wetlands. 131: brackish wetlands. 132: salt wetlands.
     void setspecial(int x, int y, int amount);
 
+    GeologicRegime geologicregime(int x, int y) const;
+    void setgeologicregime(int x, int y, GeologicRegime amount);
+
+    int tectonicconvergence(int x, int y) const;
+    void settectonicconvergence(int x, int y, int amount);
+
+    int tectonicdivergence(int x, int y) const;
+    void settectonicdivergence(int x, int y, int amount);
+
+    int tectonicshear(int x, int y) const;
+    void settectonicshear(int x, int y, int amount);
+
+    BasinClass basinclass(int x, int y) const;
+    void setbasinclass(int x, int y, BasinClass amount);
+
+    int erosionpotential(int x, int y) const;
+    void seterosionpotential(int x, int y, int amount);
+
+    int depositionpotential(int x, int y) const;
+    void setdepositionpotential(int x, int y, int amount);
+
+    int floodplainfertility(int x, int y) const;
+    void setfloodplainfertility(int x, int y, int amount);
+
+    int metalorereserve(int x, int y) const;
+    void setmetalorereserve(int x, int y, int amount);
+
+    int placerreserve(int x, int y) const;
+    void setplacerreserve(int x, int y, int amount);
+
+    int evaporitereserve(int x, int y) const;
+    void setevaporitereserve(int x, int y, int amount);
+
+    int volcanicreserve(int x, int y) const;
+    void setvolcanicreserve(int x, int y, int amount);
+
+    int fisheryreserve(int x, int y) const;
+    void setfisheryreserve(int x, int y, int amount);
+
     int deltadir(int x, int y) const;    // delta branch flow direction (reversed)
     int deltadir_no_bounds_check(int x, int y) const { return deltamapdir[x][y]; }
     void setdeltadir(int x, int y, int amount);
@@ -886,6 +947,7 @@ public:
     void smoothrainmaps(int amount); // Smoothes the rain maps by a given amount.
     void setmaxriverflow(); // Calculates the largest river flow on the map.
     void syncseasonalclimatefromlegacy(); // Populates explicit seasonal fields from the legacy Jan/Jul model.
+    void cleartectonicprovenance();
 
     void saveworld(string filename); // Saves the world.
     bool loadworld(string filename); // Loads the world.
@@ -1133,6 +1195,19 @@ private:
     int riftlakemapbed[ARRAYWIDTH][ARRAYHEIGHT];
     bool lakestartmap[ARRAYWIDTH][ARRAYHEIGHT];
     short specials[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t geologicregimemap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t tectonicconvergencemap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t tectonicdivergencemap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t tectonicshearmap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t basinclassmap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t erosionpotentialmap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t depositionpotentialmap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t floodplainfertilitymap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t metalorereservemap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t placerreservemap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t evaporitereservemap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t volcanicreservemap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t fisheryreservemap[ARRAYWIDTH][ARRAYHEIGHT];
     short extraelevmap[ARRAYWIDTH][ARRAYHEIGHT];
     short deltamapdir[ARRAYWIDTH][ARRAYHEIGHT];
     int deltamapjan[ARRAYWIDTH][ARRAYHEIGHT];
@@ -1176,6 +1251,7 @@ private:
     int seasonalclimateindex(int x, int y) const;
     bool validseasonindex(int season) const;
     void resizeseasonalclimatefields();
+    void cleartectonicprovenanceinternal();
 };
 
 inline int planet::saveversion() const { return itssaveversion; }
@@ -2528,6 +2604,225 @@ inline void planet::setspecial(int x, int y, int amount)
         return;
 
     specials[x][y] = (short)amount;
+}
+
+inline GeologicRegime planet::geologicregime(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return GeologicRegime::stable;
+
+    return static_cast<GeologicRegime>(geologicregimemap[x][y]);
+}
+
+inline void planet::setgeologicregime(int x, int y, GeologicRegime amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    geologicregimemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::tectonicconvergence(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(tectonicconvergencemap[x][y]);
+}
+
+inline void planet::settectonicconvergence(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    tectonicconvergencemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::tectonicdivergence(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(tectonicdivergencemap[x][y]);
+}
+
+inline void planet::settectonicdivergence(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    tectonicdivergencemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::tectonicshear(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(tectonicshearmap[x][y]);
+}
+
+inline void planet::settectonicshear(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    tectonicshearmap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline BasinClass planet::basinclass(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return BasinClass::none;
+
+    return static_cast<BasinClass>(basinclassmap[x][y]);
+}
+
+inline void planet::setbasinclass(int x, int y, BasinClass amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    basinclassmap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::erosionpotential(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(erosionpotentialmap[x][y]);
+}
+
+inline void planet::seterosionpotential(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    erosionpotentialmap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::depositionpotential(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(depositionpotentialmap[x][y]);
+}
+
+inline void planet::setdepositionpotential(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    depositionpotentialmap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::floodplainfertility(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(floodplainfertilitymap[x][y]);
+}
+
+inline void planet::setfloodplainfertility(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    floodplainfertilitymap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::metalorereserve(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(metalorereservemap[x][y]);
+}
+
+inline void planet::setmetalorereserve(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    metalorereservemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::placerreserve(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(placerreservemap[x][y]);
+}
+
+inline void planet::setplacerreserve(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    placerreservemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::evaporitereserve(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(evaporitereservemap[x][y]);
+}
+
+inline void planet::setevaporitereserve(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    evaporitereservemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::volcanicreserve(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(volcanicreservemap[x][y]);
+}
+
+inline void planet::setvolcanicreserve(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    volcanicreservemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::fisheryreserve(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(fisheryreservemap[x][y]);
+}
+
+inline void planet::setfisheryreserve(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    amount = std::clamp(amount, 0, 100);
+    fisheryreservemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::deltadir(int x, int y) const
