@@ -51,7 +51,7 @@
 #define NOISEWIDTH 1025
 #define NOISEHEIGHT 513
 
-constexpr int GLOBALMAPTYPES = 7;
+constexpr int GLOBALMAPTYPES = 13;
 constexpr int DISPLAYMAPSIZEX = 1024;
 constexpr int DISPLAYMAPSIZEY = 512;
 
@@ -67,7 +67,7 @@ using namespace std;
 // Define some enums.
 
 enum screenmodeenum { quit, createworldscreen, creatingworldscreen, globalmapscreen, regionalmapscreen, generatingregionscreen, importscreen, completingimportscreen, movingtoglobalmapscreen, exportareascreen, exportingareascreen, loadingworldscreen, savingworldscreen, generatingtectonicscreen, generatingnontectonicscreen, loadfailure, settingsloadfailure };
-enum mapviewenum { elevation, temperature, precipitation, climate, biomes, rivers, relief };
+enum mapviewenum { elevation, temperature, precipitation, climate, biomes, rivers, relief, geology, basins, erosion, deposition, fertility, resources };
 enum mapdatakindenum { indexedmapdata, gradientmapdata };
 enum mapindexedstyleenum { noindexedstyle, reliefindexedstyle, climateindexedstyle, biomeindexedstyle };
 enum mapgradientstyleenum { nogradientstyle, standardgradientstyle, riversgradientstyle };
@@ -82,6 +82,12 @@ void drawglobalclimatemapimage(planet& world, maplayer& layer);
 void drawglobalbiomemapimage(planet& world, maplayer& layer);
 void drawglobalriversmapimage(planet& world, maplayer& layer);
 void drawglobalreliefmapimage(planet& world, maplayer& layer);
+void drawglobalgeologymapimage(planet& world, maplayer& layer);
+void drawglobalbasinsmapimage(planet& world, maplayer& layer);
+void drawglobalerosionmapimage(planet& world, maplayer& layer);
+void drawglobaldepositionmapimage(planet& world, maplayer& layer);
+void drawglobalfertilitymapimage(planet& world, maplayer& layer);
+void drawglobalresourcesmapimage(planet& world, maplayer& layer);
 void drawregionalelevationmapimage(planet& world, region& region, maplayer& layer);
 void drawregionaltemperaturemapimage(planet& world, region& region, maplayer& layer);
 void drawregionalprecipitationmapimage(planet& world, region& region, maplayer& layer);
@@ -89,8 +95,15 @@ void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer)
 void drawregionalbiomemapimage(planet& world, region& region, maplayer& layer);
 void drawregionalriversmapimage(planet& world, region& region, maplayer& layer);
 void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalgeologymapimage(planet& world, region& region, maplayer& layer);
+void drawregionalbasinsmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalerosionmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaldepositionmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalfertilitymapimage(planet& world, region& region, maplayer& layer);
+void drawregionalresourcesmapimage(planet& world, region& region, maplayer& layer);
 void drawgradientmapappearance(const struct mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
 void drawindexedmapappearance(const struct mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
+void drawstaticmapappearance(const struct mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
 
 struct mapviewdefinition
 {
@@ -107,7 +120,7 @@ struct mapviewdefinition
     void (*drawappearance)(const mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
 };
 
-constexpr std::array<mapviewenum, GLOBALMAPTYPES> allmapviews = { elevation, temperature, precipitation, climate, biomes, rivers, relief };
+constexpr std::array<mapviewenum, GLOBALMAPTYPES> allmapviews = { elevation, temperature, precipitation, climate, biomes, rivers, relief, geology, basins, erosion, deposition, fertility, resources };
 constexpr std::array<mapviewdefinition, GLOBALMAPTYPES> allmapviewdefinitions =
 { {
     { relief, "Relief", "Relief", indexedmapdata, reliefindexedstyle, nogradientstyle, -1, "", drawglobalreliefmapimage, drawregionalreliefmapimage, drawindexedmapappearance },
@@ -117,6 +130,12 @@ constexpr std::array<mapviewdefinition, GLOBALMAPTYPES> allmapviewdefinitions =
     { climate, "Climate", "Climate", indexedmapdata, climateindexedstyle, nogradientstyle, -1, "", drawglobalclimatemapimage, drawregionalclimatemapimage, drawindexedmapappearance },
     { biomes, "Biomes", "Biomes", indexedmapdata, biomeindexedstyle, nogradientstyle, -1, "Sea uses the Climate tab sea palette.", drawglobalbiomemapimage, drawregionalbiomemapimage, drawindexedmapappearance },
     { rivers, "Rivers", "Rivers", gradientmapdata, noindexedstyle, riversgradientstyle, mapgradientriverflow, "", drawglobalriversmapimage, drawregionalriversmapimage, drawgradientmapappearance },
+    { geology, "Geology", "Geology", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Derived geologic regimes from retained tectonic signals.", drawglobalgeologymapimage, drawregionalgeologymapimage, drawstaticmapappearance },
+    { basins, "Basins", "Basins", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Drainage basin classes derived from final hydrology.", drawglobalbasinsmapimage, drawregionalbasinsmapimage, drawstaticmapappearance },
+    { erosion, "Erosion", "Erosion", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Relative erosion potential, normalized to 0..100.", drawglobalerosionmapimage, drawregionalerosionmapimage, drawstaticmapappearance },
+    { deposition, "Deposition", "Deposition", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Relative deposition potential, normalized to 0..100.", drawglobaldepositionmapimage, drawregionaldepositionmapimage, drawstaticmapappearance },
+    { fertility, "Fertility", "Fertility", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Floodplain and lowland fertility proxy, normalized to 0..100.", drawglobalfertilitymapimage, drawregionalfertilitymapimage, drawstaticmapappearance },
+    { resources, "Resources", "Resources", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Dominant reserve-style physical resource potential.", drawglobalresourcesmapimage, drawregionalresourcesmapimage, drawstaticmapappearance },
 } };
 
 constexpr const mapviewdefinition& getmapviewdefinition(mapviewenum view)
@@ -369,6 +388,12 @@ void drawglobalclimatemapimage(planet& world, maplayer& layer);
 void drawglobalbiomemapimage(planet& world, maplayer& layer);
 void drawglobalriversmapimage(planet& world, maplayer& layer);
 void drawglobalreliefmapimage(planet& world, maplayer& layer);
+void drawglobalgeologymapimage(planet& world, maplayer& layer);
+void drawglobalbasinsmapimage(planet& world, maplayer& layer);
+void drawglobalerosionmapimage(planet& world, maplayer& layer);
+void drawglobaldepositionmapimage(planet& world, maplayer& layer);
+void drawglobalfertilitymapimage(planet& world, maplayer& layer);
+void drawglobalresourcesmapimage(planet& world, maplayer& layer);
 sf::Color getclimatecolours(const planet& world, short climate);
 void drawregionalmapimage(mapviewenum mapview, planet& world, region& region, mapcache& maps);
 void drawallregionalmapimages(planet& world, region& region, mapcache& maps);
@@ -380,6 +405,12 @@ void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer)
 void drawregionalbiomemapimage(planet& world, region& region, maplayer& layer);
 void drawregionalriversmapimage(planet& world, region& region, maplayer& layer);
 void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalgeologymapimage(planet& world, region& region, maplayer& layer);
+void drawregionalbasinsmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalerosionmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaldepositionmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalfertilitymapimage(planet& world, region& region, maplayer& layer);
+void drawregionalresourcesmapimage(planet& world, region& region, maplayer& layer);
 
 // Declare functions that are in misc.cpp
 

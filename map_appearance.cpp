@@ -585,6 +585,21 @@ void drawindexedmapappearance(const mapviewdefinition& definition, planet& world
     }
 }
 
+void drawstaticmapappearance(const mapviewdefinition& definition, planet&, AppearanceSettings&, array<int, MAPGRADIENTTYPECOUNT>&, int, int)
+{
+    ImGui::BeginChild((string(definition.label) + "StaticAppearanceTab").c_str(), ImVec2(0.0f, 500.0f), false);
+
+    if (definition.description != nullptr && definition.description[0] != '\0')
+        ImGui::TextWrapped("%s", definition.description);
+    else
+        ImGui::TextUnformatted("This diagnostic map uses a fixed palette.");
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Appearance settings are fixed for this view.");
+
+    ImGui::EndChild();
+}
+
 void drawmapviewappearancetab(const mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign)
 {
     definition.drawappearance(definition, world, appearance, selectedgradientstops, colouralign, otheralign);

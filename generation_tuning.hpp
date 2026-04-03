@@ -92,6 +92,10 @@ inline constexpr float landThermalResponse = 1.08f;
 inline constexpr float oceanThermalResponse = 0.7f;
 inline constexpr float elevationResponse = 0.0011f;
 inline constexpr float seasonalShiftFactor = 0.35f;
+inline constexpr float landSeaContrastResponse = 0.58f;
+inline constexpr float seasonalLandContrastResponse = 0.46f;
+inline constexpr int continentalitySmoothingIterations = 12;
+inline constexpr float continentalityExponent = 1.55f;
 inline constexpr int smoothingIterations = 2;
 }
 
@@ -106,6 +110,11 @@ inline constexpr float scalarWindDivisor = 4.0f;
 inline constexpr float minimumScalarZonalWind = 0.75f;
 inline constexpr int smoothingIterations = 2;
 inline constexpr int topographySmoothingIterations = 6;
+inline constexpr int landmaskSmoothingIterations = 8;
+inline constexpr float landFriction = 0.28f;
+inline constexpr float continentalFriction = 0.22f;
+inline constexpr float reliefFriction = 0.12f;
+inline constexpr float tropicalCrossIsobaricBoost = 0.20f;
 inline constexpr int topographyIterations = 2;
 inline constexpr float topographyMinimumWindSpeed = 1.5f;
 inline constexpr float topographyMinimumRelief = 250.0f;
@@ -126,12 +135,13 @@ namespace moistureadvection
 inline constexpr int iterations = 30;
 inline constexpr float sourceScale = 0.16f;
 inline constexpr float landEvaporationFactor = 0.07f;
-inline constexpr float carryRetention = 0.992f;
-inline constexpr float advectionDistanceScale = 1.32f;
+inline constexpr float maritimeLandSourceScale = 0.16f;
+inline constexpr float carryRetention = 0.996f;
+inline constexpr float advectionDistanceScale = 10.5f;
 inline constexpr int maxAdvectionDistance = 38;
 inline constexpr float transportMaxFraction = 0.94f;
-inline constexpr float oceanCondensation = 0.014f;
-inline constexpr float landCondensation = 0.024f;
+inline constexpr float oceanCondensation = 0.010f;
+inline constexpr float landCondensation = 0.016f;
 inline constexpr float calmOceanBoost = 0.004f;
 inline constexpr float convergenceFactor = 0.053f;
 inline constexpr float lowPressureFactor = 0.028f;
@@ -144,9 +154,9 @@ inline constexpr float moistureCapacityBase = 24.0f;
 inline constexpr float moistureCapacityTemperatureFactor = 1.6f;
 inline constexpr float rainfallScale = 2.05f;
 inline constexpr float seaIceFactor = 0.3f;
-inline constexpr float saturationThreshold = 0.55f;
-inline constexpr float humidityCondensationFactor = 0.20f;
-inline constexpr float minimumForcedHumidity = 0.22f;
+inline constexpr float saturationThreshold = 0.65f;
+inline constexpr float humidityCondensationFactor = 0.12f;
+inline constexpr float minimumForcedHumidity = 0.16f;
 inline constexpr float convergenceStorageScale = 100.0f;
 }
 

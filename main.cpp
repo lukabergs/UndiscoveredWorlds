@@ -35,6 +35,7 @@
 
 #include "classes.hpp"
 #include "planet.hpp"
+#include "physical_layers.hpp"
 #include "region.hpp"
 #include "app_dialogs.hpp"
 #include "app_environment.hpp"
@@ -298,6 +299,8 @@ void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes,
     vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
     vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
 
+    world.cleartectonicprovenance();
+
     world.setmaxelevation(200000);
 
     updatereport("Raising mountain bases");
@@ -339,6 +342,7 @@ void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes,
     }
 
     generateglobalclimate(world, dorivers, dolakes, dodeltas, smalllake, largelake, landshape, mountaindrainage, shelves);
+    generatephysicalworldlayers(world, shelves);
 
     if (appendclimateworkbook && appendclimatebenchmarkworkbook(world) == false)
         updatereport("Climate workbook benchmark update failed");
@@ -449,6 +453,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
         generateglobalterrain(*world, 0, iterations, mergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves, squareroot);
         generateglobalclimate(*world, options.rivers, options.lakes, options.deltas, smalllake, largelake, landshape, mountaindrainage, shelves);
+        generatephysicalworldlayers(*world, shelves);
     }
 
     endtimedreporting();
@@ -1282,6 +1287,7 @@ int main()
 
                 generateglobalterrain(*world, 0, iterations, thismergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves,squareroot);
                 generateglobalclimate(*world, 1, 1, 1, smalllake, largelake, landshape, mountaindrainage, shelves);
+                generatephysicalworldlayers(*world, shelves);
 
                 // Now draw a new map
 
@@ -2722,6 +2728,12 @@ int main()
                 sf::Image areaclimateimage;
                 sf::Image areabiomeimage;
                 sf::Image areariversimage;
+                sf::Image areageologyimage;
+                sf::Image areabasinsimage;
+                sf::Image areaerosionimage;
+                sf::Image areadepositionimage;
+                sf::Image areafertilityimage;
+                sf::Image arearesourcesimage;
 
                 auto getAreaExportImage = [&](mapviewenum view) -> sf::Image&
                 {
@@ -2734,6 +2746,12 @@ int main()
                     case climate: return areaclimateimage;
                     case biomes: return areabiomeimage;
                     case rivers: return areariversimage;
+                    case geology: return areageologyimage;
+                    case basins: return areabasinsimage;
+                    case erosion: return areaerosionimage;
+                    case deposition: return areadepositionimage;
+                    case fertility: return areafertilityimage;
+                    case resources: return arearesourcesimage;
                     }
 
                     return areareliefimage;

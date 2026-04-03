@@ -58,6 +58,28 @@ void planet::resizeseasonalclimatefields()
     resizefield(seasonalsubsidencemaps);
 }
 
+void planet::cleartectonicprovenanceinternal()
+{
+    parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+    {
+        for (int i = startx; i <= endx; i++)
+        {
+            for (int j = 0; j < ARRAYHEIGHT; j++)
+            {
+                geologicregimemap[i][j] = static_cast<std::uint8_t>(GeologicRegime::stable);
+                tectonicconvergencemap[i][j] = 0;
+                tectonicdivergencemap[i][j] = 0;
+                tectonicshearmap[i][j] = 0;
+            }
+        }
+    }, 64);
+}
+
+void planet::cleartectonicprovenance()
+{
+    cleartectonicprovenanceinternal();
+}
+
 void planet::writeshortvectordata(ofstream& outfile, const std::vector<short>& arr)
 {
     outfile.write(reinterpret_cast<const char*>(arr.data()), arr.size() * sizeof(short));
@@ -406,6 +428,19 @@ void planet::clear()
                 riftlakemapsurface[i][j] = 0;
                 riftlakemapbed[i][j] = 0;
                 specials[i][j] = 0;
+                geologicregimemap[i][j] = static_cast<std::uint8_t>(GeologicRegime::stable);
+                tectonicconvergencemap[i][j] = 0;
+                tectonicdivergencemap[i][j] = 0;
+                tectonicshearmap[i][j] = 0;
+                basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
+                erosionpotentialmap[i][j] = 0;
+                depositionpotentialmap[i][j] = 0;
+                floodplainfertilitymap[i][j] = 0;
+                metalorereservemap[i][j] = 0;
+                placerreservemap[i][j] = 0;
+                evaporitereservemap[i][j] = 0;
+                volcanicreservemap[i][j] = 0;
+                fisheryreservemap[i][j] = 0;
                 extraelevmap[i][j] = 0;
                 deltamapdir[i][j] = 0;
                 deltamapjan[i][j] = 0;
@@ -452,6 +487,19 @@ void planet::smoothextraelev(int amount)
 void planet::shiftterrain(int offset)
 {
     shift(mapnom, offset);
+    shift(geologicregimemap, offset);
+    shift(tectonicconvergencemap, offset);
+    shift(tectonicdivergencemap, offset);
+    shift(tectonicshearmap, offset);
+    shift(basinclassmap, offset);
+    shift(erosionpotentialmap, offset);
+    shift(depositionpotentialmap, offset);
+    shift(floodplainfertilitymap, offset);
+    shift(metalorereservemap, offset);
+    shift(placerreservemap, offset);
+    shift(evaporitereservemap, offset);
+    shift(volcanicreservemap, offset);
+    shift(fisheryreservemap, offset);
     shift(mountainheights, offset);
     shift(mountainridges, offset);
     shift(craterrims, offset);
@@ -716,6 +764,19 @@ void planet::saveworld(string filename)
     writedata(outfile, riftlakemapbed);
     writedata(outfile, lakestartmap);
     writedata(outfile, specials);
+    writedata(outfile, geologicregimemap);
+    writedata(outfile, tectonicconvergencemap);
+    writedata(outfile, tectonicdivergencemap);
+    writedata(outfile, tectonicshearmap);
+    writedata(outfile, basinclassmap);
+    writedata(outfile, erosionpotentialmap);
+    writedata(outfile, depositionpotentialmap);
+    writedata(outfile, floodplainfertilitymap);
+    writedata(outfile, metalorereservemap);
+    writedata(outfile, placerreservemap);
+    writedata(outfile, evaporitereservemap);
+    writedata(outfile, volcanicreservemap);
+    writedata(outfile, fisheryreservemap);
     writedata(outfile, extraelevmap);
     writedata(outfile, deltamapdir);
     writedata(outfile, deltamapjan);
@@ -786,7 +847,7 @@ bool planet::loadworld(string filename)
 
     const int fileversion = val;
 
-    if (fileversion != itssaveversion) // Incompatible file format!
+    if (fileversion < 11 || fileversion > itssaveversion) // Incompatible file format!
         return 0;
 
     readvariable(infile, itssize);
@@ -1074,6 +1135,45 @@ bool planet::loadworld(string filename)
     readdata(infile, riftlakemapbed);
     readdata(infile, lakestartmap);
     readdata(infile, specials);
+    if (fileversion >= 12)
+    {
+        readdata(infile, geologicregimemap);
+        readdata(infile, tectonicconvergencemap);
+        readdata(infile, tectonicdivergencemap);
+        readdata(infile, tectonicshearmap);
+        readdata(infile, basinclassmap);
+        readdata(infile, erosionpotentialmap);
+        readdata(infile, depositionpotentialmap);
+        readdata(infile, floodplainfertilitymap);
+        readdata(infile, metalorereservemap);
+        readdata(infile, placerreservemap);
+        readdata(infile, evaporitereservemap);
+        readdata(infile, volcanicreservemap);
+        readdata(infile, fisheryreservemap);
+    }
+    else
+    {
+        cleartectonicprovenanceinternal();
+
+        parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+        {
+            for (int i = startx; i <= endx; i++)
+            {
+                for (int j = 0; j < ARRAYHEIGHT; j++)
+                {
+                    basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
+                    erosionpotentialmap[i][j] = 0;
+                    depositionpotentialmap[i][j] = 0;
+                    floodplainfertilitymap[i][j] = 0;
+                    metalorereservemap[i][j] = 0;
+                    placerreservemap[i][j] = 0;
+                    evaporitereservemap[i][j] = 0;
+                    volcanicreservemap[i][j] = 0;
+                    fisheryreservemap[i][j] = 0;
+                }
+            }
+        }, 64);
+    }
     readdata(infile, extraelevmap);
     readdata(infile, deltamapdir);
     readdata(infile, deltamapjan);

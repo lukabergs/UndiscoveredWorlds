@@ -1055,6 +1055,7 @@ void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, 
 
         if (beginworldgenstep("Advecting moisture and rainfall"))
             createadvectedrainfall(world, inland, fractal);
+
     }
     else if (landtotal > 0)
     {

@@ -134,7 +134,98 @@ void captureplatetectonicssnapshot(void* simulation, int width, int height, Plat
     snapshot.valid = true;
 }
 
-void recordboundarymotion(const PlateTectonicsSnapshot& snapshot, int x, int y, int nx, int ny, std::vector<float>& convergence)
+int normalizetectonicsignal(float signal)
+{
+    const float threshold = tuning::terrain::platetectonics::convergentBoundaryThreshold;
+    const float normalized = clamp01((signal - threshold) / (2.0f - threshold));
+    return static_cast<int>(std::round(normalized * 100.0f));
+}
+
+bool hasadjacentland(const planet& world, int x, int y)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            if (dx == 0 && dy == 0)
+                continue;
+
+            const int ny = y + dy;
+
+            if (ny < 0 || ny > height)
+                continue;
+
+            const int nx = wrap(x + dx, width);
+
+            if (world.sea(nx, ny) == 0)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+bool hasadjacentsea(const planet& world, int x, int y)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            if (dx == 0 && dy == 0)
+                continue;
+
+            const int ny = y + dy;
+
+            if (ny < 0 || ny > height)
+                continue;
+
+            const int nx = wrap(x + dx, width);
+
+            if (world.sea(nx, ny) != 0)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+GeologicRegime classifygeologicregime(const planet& world, int x, int y, int convergence, int divergence, int shear)
+{
+    const bool sea = world.sea(x, y) != 0;
+    const bool adjacentland = hasadjacentland(world, x, y);
+    const bool adjacentsea = hasadjacentsea(world, x, y);
+    const int maxsignal = std::max({ convergence, divergence, shear });
+
+    if (convergence >= 65)
+    {
+        if (sea && adjacentland)
+            return GeologicRegime::trench_adjacent;
+
+        if (!sea && adjacentsea)
+            return GeologicRegime::convergent_arc;
+
+        return GeologicRegime::continent_collision;
+    }
+
+    if (divergence >= 55)
+        return sea ? GeologicRegime::mid_ocean_ridge : GeologicRegime::divergent_rift;
+
+    if (shear >= 50 && shear >= convergence + 10 && shear >= divergence + 10)
+        return GeologicRegime::transform;
+
+    if ((world.outline(x, y) || world.coast(x, y)) && maxsignal <= 20)
+        return GeologicRegime::passive_margin;
+
+    return GeologicRegime::stable;
+}
+
+void recordboundarymotion(const PlateTectonicsSnapshot& snapshot, int x, int y, int nx, int ny, std::vector<float>& convergence, std::vector<float>& divergence, std::vector<float>& shear)
 {
     if (nx < 0 || nx >= snapshot.width || ny < 0 || ny >= snapshot.height)
         return;
@@ -160,12 +251,22 @@ void recordboundarymotion(const PlateTectonicsSnapshot& snapshot, int x, int y, 
     const float relativex = snapshot.velocities[plate][0] - snapshot.velocities[neighbourplate][0];
     const float relativey = snapshot.velocities[plate][1] - snapshot.velocities[neighbourplate][1];
     const float boundarymotion = relativex * normalx + relativey * normaly;
+    const float tangentialmotion = std::abs(relativex * (-normaly) + relativey * normalx);
 
-    if (boundarymotion <= 0.0f)
-        return;
+    if (boundarymotion > 0.0f)
+    {
+        convergence[index] = std::max(convergence[index], boundarymotion);
+        convergence[neighbourindex] = std::max(convergence[neighbourindex], boundarymotion);
+    }
+    else if (boundarymotion < 0.0f)
+    {
+        const float divergencesignal = -boundarymotion;
+        divergence[index] = std::max(divergence[index], divergencesignal);
+        divergence[neighbourindex] = std::max(divergence[neighbourindex], divergencesignal);
+    }
 
-    convergence[index] = std::max(convergence[index], boundarymotion);
-    convergence[neighbourindex] = std::max(convergence[neighbourindex], boundarymotion);
+    shear[index] = std::max(shear[index], tangentialmotion);
+    shear[neighbourindex] = std::max(shear[neighbourindex], tangentialmotion);
 }
 }
 
@@ -179,6 +280,8 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
     const int sealevel = world.sealevel();
     const int maxelev = world.maxelevation();
     const float searatio = std::clamp(currentsearatio(world) + tuning::terrain::platetectonics::seaLevelBias, 0.05f, 0.95f);
+
+    world.cleartectonicprovenance();
 
     std::vector<float> inputheightmap(cellcount, 0.0f);
     std::vector<bool> originalsea(cellcount, false);
@@ -295,16 +398,18 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
     if (snapshot.valid)
     {
         std::vector<float> convergence(cellcount, 0.0f);
+        std::vector<float> divergence(cellcount, 0.0f);
+        std::vector<float> shear(cellcount, 0.0f);
 
         for (int y = 0; y < simheight; y++)
         {
             for (int x = 0; x < simwidth; x++)
             {
                 if (x + 1 < simwidth)
-                    recordboundarymotion(snapshot, x, y, x + 1, y, convergence);
+                    recordboundarymotion(snapshot, x, y, x + 1, y, convergence, divergence, shear);
 
                 if (y + 1 < simheight)
-                    recordboundarymotion(snapshot, x, y, x, y + 1, convergence);
+                    recordboundarymotion(snapshot, x, y, x, y + 1, convergence, divergence, shear);
             }
         }
 
@@ -316,6 +421,14 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
             for (int x = 0; x <= width; x++)
             {
                 const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(simwidth) + static_cast<std::size_t>(x);
+                const int convergencescore = normalizetectonicsignal(convergence[index]);
+                const int divergencescore = normalizetectonicsignal(divergence[index]);
+                const int shearscore = normalizetectonicsignal(shear[index]);
+
+                world.settectonicconvergence(x, y, convergencescore);
+                world.settectonicdivergence(x, y, divergencescore);
+                world.settectonicshear(x, y, shearscore);
+                world.setgeologicregime(x, y, classifygeologicregime(world, x, y, convergencescore, divergencescore, shearscore));
 
                 if (originalsea[index] || world.nom(x, y) <= sealevel + 25)
                     continue;
