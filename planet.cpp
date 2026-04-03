@@ -45,6 +45,10 @@ void planet::resizeseasonalclimatefields()
     resizefield(seasonalpressuremaps);
     resizefield(seasonaluwindmaps);
     resizefield(seasonalvwindmaps);
+    resizefield(seasonalupperheightmaps);
+    resizefield(seasonalupperuwindmaps);
+    resizefield(seasonaluppervwindmaps);
+    resizefield(seasonalverticalvelocitymaps);
     resizefield(seasonalcurrentumaps);
     resizefield(seasonalcurrentvmaps);
     resizefield(seasonalsstmaps);
@@ -801,6 +805,10 @@ void planet::saveworld(string filename)
         writeshortvectordata(outfile, seasonalpressuremaps[season]);
         writeshortvectordata(outfile, seasonaluwindmaps[season]);
         writeshortvectordata(outfile, seasonalvwindmaps[season]);
+        writeshortvectordata(outfile, seasonalupperheightmaps[season]);
+        writeshortvectordata(outfile, seasonalupperuwindmaps[season]);
+        writeshortvectordata(outfile, seasonaluppervwindmaps[season]);
+        writeshortvectordata(outfile, seasonalverticalvelocitymaps[season]);
         writeshortvectordata(outfile, seasonalcurrentumaps[season]);
         writeshortvectordata(outfile, seasonalcurrentvmaps[season]);
         writeshortvectordata(outfile, seasonalsstmaps[season]);
@@ -1198,6 +1206,20 @@ bool planet::loadworld(string filename)
         readshortvectordata(infile, seasonalpressuremaps[season]);
         readshortvectordata(infile, seasonaluwindmaps[season]);
         readshortvectordata(infile, seasonalvwindmaps[season]);
+        if (fileversion >= 13)
+        {
+            readshortvectordata(infile, seasonalupperheightmaps[season]);
+            readshortvectordata(infile, seasonalupperuwindmaps[season]);
+            readshortvectordata(infile, seasonaluppervwindmaps[season]);
+            readshortvectordata(infile, seasonalverticalvelocitymaps[season]);
+        }
+        else
+        {
+            std::fill(seasonalupperheightmaps[season].begin(), seasonalupperheightmaps[season].end(), 0);
+            std::fill(seasonalupperuwindmaps[season].begin(), seasonalupperuwindmaps[season].end(), 0);
+            std::fill(seasonaluppervwindmaps[season].begin(), seasonaluppervwindmaps[season].end(), 0);
+            std::fill(seasonalverticalvelocitymaps[season].begin(), seasonalverticalvelocitymaps[season].end(), 0);
+        }
         readshortvectordata(infile, seasonalcurrentumaps[season]);
         readshortvectordata(infile, seasonalcurrentvmaps[season]);
         readshortvectordata(infile, seasonalsstmaps[season]);
