@@ -707,13 +707,13 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
         {
             reseedglobalclimatepass(world, 0x50023);
             createpressuremap(world);
-            updatehorsebeltsfrompressure(world);
         }
 
         if (beginworldgenstep("Generating vector wind map"))
         {
             reseedglobalclimatepass(world, 0x50024);
             createvectorwindmap(world);
+            updatehorsebeltsfrompressure(world);
         }
     }
 

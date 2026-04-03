@@ -1020,6 +1020,7 @@ void createpressuremap(planet& world)
         const float southpolaramplitude = tuning::climate::pressure::polarHigh * std::clamp(southpolarcontrast / 24.0f, 0.35f, 1.5f);
 
         floatgrid pressure(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid upperheight(width + 1, vector<float>(height + 1, 0.0f));
 
         parallelforrows(0, height, [&](int startrow, int endrow)
         {
@@ -1032,6 +1033,9 @@ void createpressuremap(planet& world)
                     const float thermalresponse = land ? tuning::climate::pressure::landThermalResponse : tuning::climate::pressure::oceanThermalResponse;
                     const float temperatureanomaly = surface[x][y] - smoothedzonal[y];
                     const float elevation = static_cast<float>(std::max(0, world.nom(x, y) - sealevel));
+                    const float continental = continentality[x][y];
+                    const float landseacontrast = surface[x][y] - smoothedocean[y];
+                    const float seasonalcontrast = surface[x][y] - annualsurface[x][y];
                     const float zonalpressure =
                         -tropicalamplitude * gaussianpressurebell(latitude, tropicallat, tropicalwidth) +
                         northhorseamplitude * gaussianpressurebell(latitude, northhorselat, northhorsewidth) -
@@ -1044,27 +1048,32 @@ void createpressuremap(planet& world)
 
                     if (land)
                     {
-                        const float continental = continentality[x][y];
-                        const float landseacontrast = surface[x][y] - smoothedocean[y];
-                        const float seasonalcontrast = surface[x][y] - annualsurface[x][y];
-
                         cellpressure -= landseacontrast * continental * tuning::climate::pressure::landSeaContrastResponse;
                         cellpressure -= seasonalcontrast * continental * tuning::climate::pressure::seasonalLandContrastResponse;
                     }
 
                     pressure[x][y] = cellpressure;
+                    upperheight[x][y] =
+                        (surface[x][y] - globalmean) * tuning::climate::circulation::upperHeightThermalResponse +
+                        temperatureanomaly * tuning::climate::circulation::upperHeightAnomalyResponse +
+                        landseacontrast * continental * tuning::climate::circulation::upperHeightLandSeaResponse -
+                        baroclinicity[y] * tuning::climate::circulation::upperHeightBaroclinicResponse;
                 }
             }
         });
 
         smoothallfield(world, pressure, tuning::climate::pressure::smoothingIterations);
+        smoothallfield(world, upperheight, tuning::climate::pressure::smoothingIterations + 1);
 
         parallelforrows(0, height, [&](int startrow, int endrow)
         {
             for (int y = startrow; y <= endrow; y++)
             {
                 for (int x = 0; x <= width; x++)
+                {
                     world.setseasonalpressure(season, x, y, static_cast<int>(std::round(pressure[x][y])));
+                    world.setseasonalupperheight(season, x, y, static_cast<int>(std::round(upperheight[x][y])));
+                }
             }
         });
     }
@@ -1238,15 +1247,27 @@ void createvectorwindmap(planet& world)
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
         floatgrid pressure(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid baseupperheight(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid upperheight(width + 1, vector<float>(height + 1, 0.0f));
 
         for (int y = 0; y <= height; y++)
         {
             for (int x = 0; x <= width; x++)
+            {
                 pressure[x][y] = static_cast<float>(world.seasonalpressure(season, x, y));
+                baseupperheight[x][y] = static_cast<float>(world.seasonalupperheight(season, x, y));
+                upperheight[x][y] = baseupperheight[x][y];
+            }
         }
 
         floatgrid windu(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid windv(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid upperu(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid upperv(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid vertical(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid nextupperheight = upperheight;
+        floatgrid nextvertical = vertical;
+        floatgrid surfacedivergence(width + 1, vector<float>(height + 1, 0.0f));
 
         parallelforrows(0, height, [&](int startrow, int endrow)
         {
@@ -1295,11 +1316,8 @@ void createvectorwindmap(planet& world)
                     const float geoblend = std::clamp(coriolis * (1.0f - friction), 0.0f, 1.0f);
                     const float directblend = 1.0f - geoblend;
                     const float directboost = 1.0f + friction * 0.35f;
-                    float u = directu * directblend * directboost + geou * geoblend;
-                    float v = directv * directblend * (1.0f + friction * 0.25f) + geov * geoblend;
-
-                    windu[x][y] = std::clamp(u, -maxvectorwind, maxvectorwind);
-                    windv[x][y] = std::clamp(v, -maxvectorwind, maxvectorwind);
+                    windu[x][y] = std::clamp(directu * directblend * directboost + geou * geoblend, -maxvectorwind, maxvectorwind);
+                    windv[x][y] = std::clamp(directv * directblend * (1.0f + friction * 0.25f) + geov * geoblend, -maxvectorwind, maxvectorwind);
                 }
             }
         });
@@ -1313,10 +1331,128 @@ void createvectorwindmap(planet& world)
         {
             for (int y = startrow; y <= endrow; y++)
             {
+                const int ynorth = (y > 0) ? y - 1 : y;
+                const int ysouth = (y < height) ? y + 1 : y;
+
                 for (int x = 0; x <= width; x++)
                 {
+                    const int xwest = wrapx(x - 1, width);
+                    const int xeast = wrapx(x + 1, width);
+                    surfacedivergence[x][y] = ((windu[xeast][y] - windu[xwest][y]) + (windv[x][ysouth] - windv[x][ynorth])) / 2.0f;
+                }
+            }
+        });
+
+        for (int iteration = 0; iteration < tuning::climate::circulation::iterations; iteration++)
+        {
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    const int ynorth = (y > 0) ? y - 1 : y;
+                    const int ysouth = (y < height) ? y + 1 : y;
+
+                    for (int x = 0; x <= width; x++)
+                    {
+                        const int xwest = wrapx(x - 1, width);
+                        const int xeast = wrapx(x + 1, width);
+                        const float dhdx = (upperheight[xeast][y] - upperheight[xwest][y]) / 2.0f;
+                        const float dhdy = (upperheight[x][ysouth] - upperheight[x][ynorth]) / 2.0f;
+                        const float latitude = latitudeforrow(y, height);
+                        const float coriolis = std::clamp(std::fabs(latitude) / tuning::climate::atmosphere::coriolisLatitude, 0.0f, 1.0f);
+                        const float reliefdrag = std::clamp(macroterrain[x][y] / 4500.0f, 0.0f, 1.0f)
+                            * tuning::climate::atmosphere::reliefFriction;
+                        const float upperdirectu = -dhdx * tuning::climate::circulation::upperDirectFlowFactor;
+                        const float upperdirectv = -dhdy * tuning::climate::circulation::upperDirectFlowFactor;
+
+                        float uppergeou = 0.0f;
+                        float uppergeov = 0.0f;
+
+                        if (latitude >= 0.0f)
+                        {
+                            uppergeou = dhdy * tuning::climate::circulation::upperGeostrophicFactor;
+                            uppergeov = -dhdx * tuning::climate::circulation::upperGeostrophicFactor;
+                        }
+                        else
+                        {
+                            uppergeou = -dhdy * tuning::climate::circulation::upperGeostrophicFactor;
+                            uppergeov = dhdx * tuning::climate::circulation::upperGeostrophicFactor;
+                        }
+
+                        const float upperfriction = std::clamp(
+                            tuning::climate::circulation::upperFriction + reliefdrag * 0.25f,
+                            0.0f, 0.35f);
+                        const float uppergeoblend = std::clamp(coriolis * (1.0f - upperfriction), 0.0f, 1.0f);
+                        const float upperdirectblend = 1.0f - uppergeoblend;
+                        upperu[x][y] = std::clamp(upperdirectu * upperdirectblend + uppergeou * uppergeoblend, -maxvectorwind, maxvectorwind);
+                        upperv[x][y] = std::clamp(upperdirectv * upperdirectblend + uppergeov * uppergeoblend, -maxvectorwind, maxvectorwind);
+                    }
+                }
+            });
+
+            smoothallfield(world, upperu, tuning::climate::circulation::windSmoothingIterations);
+            smoothallfield(world, upperv, tuning::climate::circulation::windSmoothingIterations);
+
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    const int ynorth = (y > 0) ? y - 1 : y;
+                    const int ysouth = (y < height) ? y + 1 : y;
+
+                    for (int x = 0; x <= width; x++)
+                    {
+                        const int xwest = wrapx(x - 1, width);
+                        const int xeast = wrapx(x + 1, width);
+                        const float upperdivergence = ((upperu[xeast][y] - upperu[xwest][y]) + (upperv[x][ysouth] - upperv[x][ynorth])) / 2.0f;
+                        const float thermalforcing = baseupperheight[x][y] * tuning::climate::circulation::verticalHeatingResponse;
+                        const float targetvertical =
+                            thermalforcing -
+                            pressure[x][y] * tuning::climate::circulation::verticalPressureResponse -
+                            surfacedivergence[x][y] * tuning::climate::circulation::verticalSurfaceConvergenceResponse +
+                            upperdivergence * tuning::climate::circulation::verticalUpperDivergenceResponse;
+                        const float clampedvertical = std::clamp(
+                            targetvertical,
+                            -tuning::climate::circulation::maximumVerticalVelocity,
+                            tuning::climate::circulation::maximumVerticalVelocity);
+                        const float updatedvertical = vertical[x][y] +
+                            (clampedvertical - vertical[x][y]) * tuning::climate::circulation::verticalRelaxation;
+                        const float upperlaplacian =
+                            (upperheight[xwest][y] + upperheight[xeast][y] + upperheight[x][ynorth] + upperheight[x][ysouth]) * 0.25f - upperheight[x][y];
+
+                        nextvertical[x][y] = updatedvertical;
+                        nextupperheight[x][y] = upperheight[x][y] + tuning::climate::circulation::upperHeightRelaxation *
+                            ((baseupperheight[x][y] - upperheight[x][y]) +
+                                upperlaplacian * tuning::climate::circulation::upperHeightDiffusion);
+                    }
+                }
+            });
+
+            upperheight.swap(nextupperheight);
+            vertical.swap(nextvertical);
+        }
+
+        smoothallfield(world, upperheight, tuning::climate::circulation::windSmoothingIterations);
+
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int x = 0; x <= width; x++)
+                {
+                    const float dynamicvertical = std::clamp(
+                        vertical[x][y],
+                        -tuning::climate::circulation::maximumVerticalVelocity,
+                        tuning::climate::circulation::maximumVerticalVelocity);
+
+                    world.setseasonalpressure(season, x, y, static_cast<int>(std::round(pressure[x][y])));
+                    world.setseasonalupperheight(season, x, y, static_cast<int>(std::round(upperheight[x][y])));
                     world.setseasonaluwind(season, x, y, static_cast<int>(std::round(std::clamp(windu[x][y], -maxvectorwind, maxvectorwind))));
                     world.setseasonalvwind(season, x, y, static_cast<int>(std::round(std::clamp(windv[x][y], -maxvectorwind, maxvectorwind))));
+                    world.setseasonalupperuwind(season, x, y, static_cast<int>(std::round(std::clamp(upperu[x][y], -maxvectorwind, maxvectorwind))));
+                    world.setseasonaluppervwind(season, x, y, static_cast<int>(std::round(std::clamp(upperv[x][y], -maxvectorwind, maxvectorwind))));
+                    world.setseasonalverticalvelocity(season, x, y, static_cast<int>(std::round(
+                        dynamicvertical * tuning::climate::circulation::verticalVelocityStorageScale)));
                 }
             }
         });

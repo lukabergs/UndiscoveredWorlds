@@ -130,6 +130,31 @@ inline constexpr float topographyVerticalMotionWindScale = 18.0f;
 inline constexpr float topographyVerticalMotionStorageScale = 100.0f;
 }
 
+namespace circulation
+{
+inline constexpr int iterations = 10;
+inline constexpr float upperHeightThermalResponse = 0.95f;
+inline constexpr float upperHeightAnomalyResponse = 0.45f;
+inline constexpr float upperHeightLandSeaResponse = 0.32f;
+inline constexpr float upperHeightBaroclinicResponse = 0.42f;
+inline constexpr float upperHeightRelaxation = 0.22f;
+inline constexpr float upperHeightDiffusion = 0.16f;
+inline constexpr float upperDirectFlowFactor = 0.14f;
+inline constexpr float upperGeostrophicFactor = 2.9f;
+inline constexpr float upperFriction = 0.08f;
+inline constexpr int windSmoothingIterations = 0;
+inline constexpr float verticalHeatingResponse = 0.035f;
+inline constexpr float verticalSurfaceConvergenceResponse = 11.0f;
+inline constexpr float verticalUpperDivergenceResponse = 11.0f;
+inline constexpr float verticalPressureResponse = 0.08f;
+inline constexpr float verticalRelaxation = 0.24f;
+inline constexpr float surfacePressureVerticalResponse = 0.62f;
+inline constexpr float surfacePressureDiffusion = 0.10f;
+inline constexpr float surfacePressureRelaxation = 0.14f;
+inline constexpr float maximumVerticalVelocity = 120.0f;
+inline constexpr float verticalVelocityStorageScale = 100.0f;
+}
+
 namespace moistureadvection
 {
 inline constexpr int iterations = 30;

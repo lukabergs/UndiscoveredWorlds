@@ -710,6 +710,18 @@ public:
     int seasonalvwind(int season, int x, int y) const;
     void setseasonalvwind(int season, int x, int y, int amount);
 
+    int seasonalupperheight(int season, int x, int y) const;
+    void setseasonalupperheight(int season, int x, int y, int amount);
+
+    int seasonalupperuwind(int season, int x, int y) const;
+    void setseasonalupperuwind(int season, int x, int y, int amount);
+
+    int seasonaluppervwind(int season, int x, int y) const;
+    void setseasonaluppervwind(int season, int x, int y, int amount);
+
+    int seasonalverticalvelocity(int season, int x, int y) const;
+    void setseasonalverticalvelocity(int season, int x, int y, int amount);
+
     int seasonalcurrentu(int season, int x, int y) const;
     void setseasonalcurrentu(int season, int x, int y, int amount);
 
@@ -1156,6 +1168,10 @@ private:
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalpressuremaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaluwindmaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalvwindmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupperheightmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupperuwindmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaluppervwindmaps;
+    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalverticalvelocitymaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalcurrentumaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalcurrentvmaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalsstmaps;
@@ -1932,6 +1948,70 @@ inline void planet::setseasonalvwind(int season, int x, int y, int amount)
         return;
 
     seasonalvwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalupperheight(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalupperheightmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalupperheight(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalupperheightmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalupperuwind(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalupperuwindmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalupperuwind(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalupperuwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonaluppervwind(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonaluppervwindmaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonaluppervwind(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonaluppervwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+}
+
+inline int planet::seasonalverticalvelocity(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)]);
+}
+
+inline void planet::setseasonalverticalvelocity(int season, int x, int y, int amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
 }
 
 inline int planet::seasonalcurrentu(int season, int x, int y) const
