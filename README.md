@@ -108,6 +108,12 @@ mountains map - only the red value is used. It shows the peak elevation above th
 
 volanoes map - the red value shows the peak elevation above the surrounding land, in increments of 50. A blue value of 0 indicates a shield volcano, or a higher value indicates a stratovolcano. A green value of 0 indicates an extinct volcano, or a higher value indicates an active volcano.
 
+temperature map - only the red value is used. 0 maps to -60 C mean annual temperature, and 255 maps to +60 C mean annual temperature.
+
+precipitation map - only the red value is used. 0 maps to 0 mean precipitation, and 255 maps to 1020 mean precipitation.
+
+You can also switch imports to "strip" mode. In that mode, you first load a 1-pixel-tall PNG gradient strip. The leftmost strip colour maps to a minimum value that you enter, and each pixel to the right adds the chosen floating-point increment. Imported map colours are then matched against that strip to recover their values.
+
 In theory you only need a land map - the others are optional. It's important to note that the land map shouldn't show mountain ranges. Undiscovered Worlds does not treat mountain ranges as normal elevation. If you want to define your own mountain ranges, you must import a mountains map, on which you have drawn the lines of the main mountain ranges as indicated above.
 
 Also, the land map doesn't have to be very detailed. If you want, you could simply use the values of 0 to show sea and 1 to show land, without bothering about specifying elevation beyond that. You can use the "land elevation" button in the "generate" section to add random elevation to your map.

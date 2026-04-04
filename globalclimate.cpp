@@ -18,6 +18,7 @@
 
 #include "classes.hpp"
 #include "generation_tuning.hpp"
+#include "map_imports.hpp"
 #include "planet.hpp"
 #include "region.hpp"
 #include "functions.hpp"
@@ -34,6 +35,125 @@ void reseedglobalclimatepass(planet& world, int salt)
 }
 
 short calculatelegacyderivedplanetclimate(planet& world, int x, int y);
+void synclegacytemperaturesfromseasonal(planet& world);
+
+bool hasmatchingimportedclimatemapdimensions(const ImportedClimateMaps& importedclimate, const planet& world)
+{
+    const int cellcount = (world.width() + 1) * (world.height() + 1);
+    return importedclimate.width == world.width()
+        && importedclimate.height == world.height()
+        && static_cast<int>(importedclimate.annualTemperature.size()) == cellcount
+        && static_cast<int>(importedclimate.annualPrecipitation.size()) == cellcount;
+}
+
+bool hasimportedtemperaturemap(const ImportedClimateMaps* importedclimate, const planet& world)
+{
+    return importedclimate != nullptr
+        && importedclimate->hasTemperature
+        && hasmatchingimportedclimatemapdimensions(*importedclimate, world);
+}
+
+bool hasimportedprecipitationmap(const ImportedClimateMaps* importedclimate, const planet& world)
+{
+    return importedclimate != nullptr
+        && importedclimate->hasPrecipitation
+        && hasmatchingimportedclimatemapdimensions(*importedclimate, world);
+}
+
+void synclegacyrainfallfromseasonal(planet& world)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                world.setjanrain(x, y, world.seasonalrain(seasonjanuary, x, y));
+                world.setjulrain(x, y, world.seasonalrain(seasonjuly, x, y));
+            }
+        }
+    });
+}
+
+void applyimportedtemperaturemap(planet& world, const ImportedClimateMaps& importedclimate)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                const int index = y * (width + 1) + x;
+                const float targetmean = static_cast<float>(importedclimate.annualTemperature[index]);
+                float currentmean = 0.0f;
+
+                for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                    currentmean += static_cast<float>(world.seasonaltemp(season, x, y));
+
+                currentmean = currentmean / static_cast<float>(CLIMATESEASONCOUNT);
+                const float delta = targetmean - currentmean;
+
+                for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                {
+                    const float adjusted = static_cast<float>(world.seasonaltemp(season, x, y)) + delta;
+                    world.setseasonaltemp(season, x, y, static_cast<int>(roundf(adjusted)));
+                }
+            }
+        }
+    });
+
+    synclegacytemperaturesfromseasonal(world);
+}
+
+void applyimportedprecipitationmap(planet& world, const ImportedClimateMaps& importedclimate)
+{
+    const int width = world.width();
+    const int height = world.height();
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                const int index = y * (width + 1) + x;
+                const float targetmean = static_cast<float>(importedclimate.annualPrecipitation[index]);
+                float currentmean = 0.0f;
+
+                for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                    currentmean += static_cast<float>(world.seasonalrain(season, x, y));
+
+                currentmean = currentmean / static_cast<float>(CLIMATESEASONCOUNT);
+
+                if (currentmean > 0.0f)
+                {
+                    const float factor = targetmean / currentmean;
+
+                    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                    {
+                        const float adjusted = max(0.0f, static_cast<float>(world.seasonalrain(season, x, y)) * factor);
+                        world.setseasonalrain(season, x, y, static_cast<int>(roundf(adjusted)));
+                    }
+                }
+                else
+                {
+                    const int fallbackrain = static_cast<int>(roundf(targetmean));
+
+                    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                        world.setseasonalrain(season, x, y, fallbackrain);
+                }
+            }
+        }
+    });
+
+    synclegacyrainfallfromseasonal(world);
+}
 
 int seaflowdir(int x, int y, int newx, int newy)
 {
@@ -480,7 +600,7 @@ void populateinlanddistances(planet& world, vector<vector<int>>& inland)
 
 // This function creates the global climate.
 
-void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodeltas, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves)
+void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dodeltas, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, const ImportedClimateMaps* importedClimate)
 {
     //highres_timer_t timer("Generate Global Climate"); // 9.4s => 8.2s
     long seed = world.seed();
@@ -492,6 +612,8 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
     int sealevel = world.sealevel();
     int seatotal = world.seatotal();
     int landtotal = world.landtotal();
+    const bool importedtemperature = hasimportedtemperaturemap(importedClimate, world);
+    const bool importedprecipitation = hasimportedprecipitationmap(importedClimate, world);
 
     // If there is no sea on a world, it may still have rain, provided we can find somewhere to put some salt lakes for the rivers to run into.
 
@@ -589,7 +711,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
     bool desertworldrain = 0; // If this is 1, then this is a world with no sea but which will have rain.
 
-    if (dorivers && seatotal == 0 && random(1, desertrainchance) == 1)
+    if (dorivers && seatotal == 0 && (importedprecipitation || random(1, desertrainchance) == 1))
     {
         int highestelev = 0;
         int lowestelev = maxelev;
@@ -687,6 +809,9 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
         createtemperaturemap(world, fractal);
         world.syncseasonalclimatefromlegacy();
+
+        if (importedtemperature)
+            applyimportedtemperaturemap(world, *importedClimate);
     }
 
     if (seatotal > 0)
@@ -746,7 +871,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
     // Now do rainfall.
 
-    if (seatotal > 0 || desertworldrain)
+    if (seatotal > 0 || desertworldrain || importedprecipitation)
     {
         reseedglobalclimatepass(world, 0x5004);
 
@@ -765,6 +890,9 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
         createrainmap(world, fractal, landtotal, seatotal, smalllake, landshape);
     }
 
+    if (importedprecipitation)
+        applyimportedprecipitationmap(world, *importedClimate);
+
     // Now add fjord mountains.
 
     if (seatotal > 0)
@@ -776,7 +904,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
         }
     }
 
-    if (dorivers && (seatotal > 0 || desertworldrain))
+    if (dorivers && (seatotal > 0 || desertworldrain || importedprecipitation))
     {
         // Now work out the rivers initially. We do this the first time so that after the first time we can place the salt lakes in appropriate places, and then we work out the rivers again.
 
@@ -852,6 +980,9 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
         checkpoleclimates(world);
         world.syncseasonalclimatefromlegacy();
         applyseasonaltemperaturelapse(world);
+
+        if (importedtemperature)
+            applyimportedtemperaturemap(world, *importedClimate);
     }
 
     if (beginworldgenstep("Calculating Koppen climates"))
@@ -921,6 +1052,16 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes,bool dodel
 
     world.syncseasonalclimatefromlegacy();
     applyseasonaltemperaturelapse(world);
+
+    if (importedtemperature)
+        applyimportedtemperaturemap(world, *importedClimate);
+
+    if (importedprecipitation)
+        applyimportedprecipitationmap(world, *importedClimate);
+
+    if (importedprecipitation)
+        createmountainprecipitation(world);
+
     createclimatemap(world);
     createbiomemap(world);
     exportclimatevalidationreport(world);

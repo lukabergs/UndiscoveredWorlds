@@ -17,6 +17,9 @@ struct FileDialogState
     bool importingSeaMap = false;
     bool importingMountainsMap = false;
     bool importingVolcanoesMap = false;
+    bool importingTemperatureMap = false;
+    bool importingPrecipitationMap = false;
+    bool importingGradientStrip = false;
     std::string filepathname;
     std::string filepath;
 };
