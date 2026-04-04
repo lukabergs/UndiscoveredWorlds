@@ -74,6 +74,7 @@ enum mapgradientstyleenum { nogradientstyle, standardgradientstyle, riversgradie
 
 struct AppearanceSettings;
 struct maplayer;
+struct ImportedClimateMaps;
 
 void drawglobalelevationmapimage(planet& world, maplayer& layer);
 void drawglobaltemperaturemapimage(planet& world, maplayer& layer);
@@ -607,7 +608,7 @@ void makecrater(planet& world, vector <int>& squareroot, int thiscraterno, int c
 
 // Declare functions that are in globalclimate.cpp
 
-void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dodeltas, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves);
+void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dodeltas, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, const ImportedClimateMaps* importedClimate = nullptr);
 void createrainmap(planet& world, vector<vector<int>>& fractal, int landtotal,int seatotal, boolshapetemplate smalllake[], boolshapetemplate shape[]);
 void createwindmap(planet& world);
 void createpressuremap(planet& world);

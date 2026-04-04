@@ -291,7 +291,7 @@ filesystem::path commandlinevalidationdirectory(long seed)
     return outputroot / "validation" / ("seed_" + to_string(seed));
 }
 
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains)
+void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate = nullptr)
 {
     const int width = world.width();
     const int height = world.height();
@@ -341,7 +341,7 @@ void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes,
             world.setroughness(i, j, static_cast<float>(roughness[i][j]));
     }
 
-    generateglobalclimate(world, dorivers, dolakes, dodeltas, smalllake, largelake, landshape, mountaindrainage, shelves);
+    generateglobalclimate(world, dorivers, dolakes, dodeltas, smalllake, largelake, landshape, mountaindrainage, shelves, importedclimate);
     generatephysicalworldlayers(world, shelves);
 
     if (appendclimateworkbook && appendclimatebenchmarkworkbook(world) == false)
@@ -930,6 +930,9 @@ int main()
     bool& importingseamap = filedialogs.importingSeaMap;
     bool& importingmountainsmap = filedialogs.importingMountainsMap;
     bool& importingvolcanoesmap = filedialogs.importingVolcanoesMap;
+    bool& importingtemperaturemap = filedialogs.importingTemperatureMap;
+    bool& importingprecipitationmap = filedialogs.importingPrecipitationMap;
+    bool& importinggradientstrip = filedialogs.importingGradientStrip;
 
     vector<int> squareroot((MAXCRATERRADIUS* MAXCRATERRADIUS + MAXCRATERRADIUS + 1) * 24);
 
@@ -954,6 +957,8 @@ int main()
     bool& areafromregional = areaselection.fromRegional; // If this is 1 then the area screen was opened from the regional map, not the global map.
 
     CustomWorldUiState customworldui;
+    ImportedClimateMaps importedclimatemaps;
+    MapImportSettings mapimportsettings;
     int& seedentry = customworldui.seedentry; // The value currently entered into the seed box in the create world screen.
     int& newx = customworldui.newx;
     int& newy = customworldui.newy; // These are used to locate the new region.
@@ -1952,15 +1957,55 @@ int main()
             // Main controls.
 
             ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 10, main_viewport->WorkPos.y + 20), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(161, 604), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(161, 735), ImGuiCond_FirstUseEver);
 
             ImGui::Begin("Custom##custom", NULL, window_flags);
 
             ImGui::SetNextItemWidth(0);
+            ImGui::Text("Value mode:");
 
-            ImGui::Text("Import:");
+            int importvaluemode = static_cast<int>(mapimportsettings.valueMode);
+            const char* importmodeitems[] = { "Red", "Strip" };
 
             ImGui::PushItemWidth(100.0f);
+
+            if (ImGui::Combo("##importvaluemode", &importvaluemode, importmodeitems, IM_ARRAYSIZE(importmodeitems)))
+                mapimportsettings.valueMode = static_cast<MapImportValueMode>(importvaluemode);
+
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Choose whether imports read the red channel directly or decode colours through a 1-pixel-tall gradient strip.");
+
+            if (mapimportsettings.valueMode == MapImportValueMode::gradientStrip)
+            {
+                if (standardbutton("Scale strip"))
+                {
+                    openFileDialog(".png");
+                    importinggradientstrip = 1;
+                }
+
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Load a 1-pixel-tall PNG strip. The leftmost colour maps to the minimum value, and each pixel to the right adds the chosen increment.");
+
+                ImGui::InputFloat("Minimum", &mapimportsettings.gradientMinimum, 1.0f, 10.0f, "%.3f");
+
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Value assigned to the leftmost colour in the gradient strip.");
+
+                ImGui::InputFloat("Step", &mapimportsettings.gradientIncrement, 0.1f, 1.0f, "%.3f");
+
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Amount added for each colour step to the right in the gradient strip.");
+
+                const char* stripstatus = mapimportsettings.gradientStripPath.empty() ? "Strip: none" : "Strip: loaded";
+                ImGui::TextUnformatted(stripstatus);
+
+                if (!mapimportsettings.gradientStripPath.empty() && ImGui::IsItemHovered())
+                    ImGui::SetTooltip(mapimportsettings.gradientStripPath.c_str());
+            }
+
+            ImGui::Dummy(ImVec2(0.0f, linespace));
+
+            ImGui::Text("Import:");
 
             if (standardbutton("Land map"))
             {
@@ -1970,7 +2015,7 @@ int main()
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red value of 0 is sea. Higher values are elevation above sea level, in multiples of 10 metres. Blue and green values are ignored.");
+                ImGui::SetTooltip("Red mode: red 0 is sea and higher values are elevation above sea level in 10-metre steps. Strip mode: decoded values are treated as elevation above sea level.");
 
             if (standardbutton("Sea map"))
             {
@@ -1980,7 +2025,7 @@ int main()
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red value of 0 is land. Higher values are depths below sea level, in multiples of 50 metres. Blue and green values are ignored.");
+                ImGui::SetTooltip("Red mode: red 0 is land and higher values are depth below sea level in 50-metre steps. Strip mode: decoded values are treated as depth below sea level.");
 
             if (standardbutton("Mountains"))
             {
@@ -1990,7 +2035,7 @@ int main()
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red value is peak elevation above surrounding land, in multiples of 50 metres. Blue and green values are ignored.");
+                ImGui::SetTooltip("Red mode: red values scale the imported mountain height. Strip mode: decoded values are used directly as imported mountain height.");
 
             if (standardbutton("Volcanoes"))
             {
@@ -2000,7 +2045,27 @@ int main()
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("As for mountains. Green=0 for shield volcano, or higher for stratovolcano. Blue=0 for extinct, or higher for active.");
+                ImGui::SetTooltip("Red or strip decoding sets volcano height. Green=0 for shield volcano, or higher for stratovolcano. Blue=0 for extinct, or higher for active.");
+
+            if (standardbutton("Temperature"))
+            {
+                openFileDialog(".png");
+
+                importingtemperaturemap = 1;
+            }
+
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Red mode maps 0..255 linearly to -60 C..+60 C mean annual temperature. Strip mode uses the decoded strip value directly.");
+
+            if (standardbutton("Precipitation"))
+            {
+                openFileDialog(".png");
+
+                importingprecipitationmap = 1;
+            }
+
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Red mode maps 0..255 linearly to 0..1020 mean precipitation. Strip mode uses the decoded strip value directly.");
 
             ImGui::Dummy(ImVec2(0.0f, linespace));
 
@@ -2450,7 +2515,7 @@ int main()
 
             string title = "            ";
 
-            string importtext = "You can use the 'import' buttons to load in your own maps. These must be " + formatnumber(world->width() + 1) + " x " + formatnumber(world->height() + 1) + " pixels, in .png format.\nAlternatively, you can use the 'World terrain' button to generate a map from scratch.\nAfter you have imported or generated the map, you can use the other 'generate' buttons to tweak it or to add extra features.\nYou can use the 'Properties' panel to change settings such as global temperatures or rainfall.\nWhen you are done, click 'Finish' to finish the world.";
+            string importtext = "You can use the 'import' buttons to load in your own maps. These must be " + formatnumber(world->width() + 1) + " x " + formatnumber(world->height() + 1) + " pixels, in .png format.\nTerrain maps define land, sea, mountains, and volcanoes. Temperature and precipitation imports set the finished climate targets. Imports use the current value mode shown on the left.\nAlternatively, you can use the 'World terrain' button to generate a map from scratch.\nAfter you have imported or generated the map, you can use the other 'generate' buttons to tweak it or to add extra features.\nYou can use the 'Properties' panel to change settings such as global temperatures or rainfall.\nWhen you are done, click 'Finish' to finish the world.";
 
             ImGui::Begin(title.c_str(), NULL, window_flags);
             ImGui::PushItemWidth((float)(world->width() / 2));
@@ -2573,7 +2638,7 @@ int main()
                 // Plug in the world settings.
 
                 applyworldpropertycontrols(*world, worldpropertycontrols);
-                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, compareclimateworkbook, smalllake, largelake, landshape, OKmountains);
+                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, compareclimateworkbook, smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
 
                 // Now draw a new map
 
@@ -3562,7 +3627,7 @@ int main()
 
         handlefiledialog(importinglandmap, filepathname, filepath, [&](const std::string& selectedpath, const std::string&)
         {
-            if (importlandheightmap(*world, selectedpath))
+            if (importlandheightmap(*world, selectedpath, &mapimportsettings))
             {
                 invalidateGlobalMaps();
                 showGlobalMapView(relief);
@@ -3571,7 +3636,7 @@ int main()
 
         handlefiledialog(importingseamap, filepathname, filepath, [&](const std::string& selectedpath, const std::string&)
         {
-            if (importseadepthmap(*world, selectedpath))
+            if (importseadepthmap(*world, selectedpath, &mapimportsettings))
             {
                 invalidateGlobalMaps();
                 showGlobalMapView(relief);
@@ -3580,7 +3645,7 @@ int main()
 
         handlefiledialog(importingmountainsmap, filepathname, filepath, [&](const std::string& selectedpath, const std::string&)
         {
-            if (importmountainmap(*world, selectedpath, OKmountains))
+            if (importmountainmap(*world, selectedpath, OKmountains, &mapimportsettings))
             {
                 invalidateGlobalMaps();
                 showGlobalMapView(relief);
@@ -3589,11 +3654,34 @@ int main()
 
         handlefiledialog(importingvolcanoesmap, filepathname, filepath, [&](const std::string& selectedpath, const std::string&)
         {
-            if (importvolcanomap(*world, selectedpath))
+            if (importvolcanomap(*world, selectedpath, &mapimportsettings))
             {
                 invalidateGlobalMaps();
                 showGlobalMapView(relief);
             }
+        });
+
+        handlefiledialog(importingtemperaturemap, filepathname, filepath, [&](const std::string& selectedpath, const std::string&)
+        {
+            if (importtemperaturemap(*world, selectedpath, importedclimatemaps, &mapimportsettings))
+            {
+                invalidateGlobalMaps();
+                showGlobalMapView(temperature);
+            }
+        });
+
+        handlefiledialog(importingprecipitationmap, filepathname, filepath, [&](const std::string& selectedpath, const std::string&)
+        {
+            if (importprecipitationmap(*world, selectedpath, importedclimatemaps, &mapimportsettings))
+            {
+                invalidateGlobalMaps();
+                showGlobalMapView(precipitation);
+            }
+        });
+
+        handlefiledialog(importinggradientstrip, filepathname, filepath, [&](const std::string& selectedpath, const std::string&)
+        {
+            mapimportsettings.gradientStripPath = selectedpath;
         });
 
         // Set size window, for custom worlds.
@@ -3602,6 +3690,8 @@ int main()
         {
             initialiseworld(*world);
             world->clear();
+            clearimportedclimatemaps(importedclimatemaps);
+            mapimportsettings = MapImportSettings{};
 
             world->setsize(currentsize);
 

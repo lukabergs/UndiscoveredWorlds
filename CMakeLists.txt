@@ -17,6 +17,17 @@ find_package(ImGuiFileDialog CONFIG REQUIRED)
 find_package(imgui-sfml CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
+foreach(dep_target
+    imgui::imgui
+    ImGui-SFML::ImGui-SFML
+    ImGuiFileDialog::ImGuiFileDialog
+    fmt::fmt
+    fmt::fmt-header-only)
+    if(TARGET ${dep_target})
+        set_property(TARGET ${dep_target} PROPERTY INTERFACE_COMPILE_FEATURES "")
+    endif()
+endforeach()
+
 # 2. Define your source files (based on your directory listing)
 set(SOURCES
     main.cpp
@@ -71,7 +82,7 @@ set(PLATE_TECTONICS_SOURCES
 
 add_library(plate_tectonics_vendor STATIC ${PLATE_TECTONICS_SOURCES})
 target_include_directories(plate_tectonics_vendor PUBLIC third_party/plate_tectonics/src)
-target_compile_features(plate_tectonics_vendor PUBLIC cxx_std_17)
+set_target_properties(plate_tectonics_vendor PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
 
 # 3. Create the executable
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -98,4 +109,4 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 # 5. Set C++ Standard
-target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
