@@ -40,13 +40,21 @@ static uint32_t last_id = 1;
 
 void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_level,
                         uint32_t erosion_period, float folding_ratio, uint32_t aggr_overlap_abs,
-                        float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates) {
+                        float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates,
+                        float erosion_strength, float crust_rotation_strength,
+                        float rotation_strength, float subduction_strength,
+                        int32_t sea_level_m, uint16_t initial_min_height_m,
+                        uint16_t initial_max_height_m, uint32_t cycle_step_limit,
+                        float divergent_carve_strength) {
     /* Miten nykyisen opengl-mainin koodit refaktoroidaan tänne?
      *    parametrien tarkistus, kommentit eli dokumentointi, muuta? */
 
     lithosphere* litho =
         new lithosphere(seed, width, height, sea_level, erosion_period, folding_ratio,
-                        aggr_overlap_abs, aggr_overlap_rel, cycle_count, num_plates);
+                        aggr_overlap_abs, aggr_overlap_rel, cycle_count, num_plates,
+                        erosion_strength, crust_rotation_strength, rotation_strength,
+                        subduction_strength, sea_level_m, initial_min_height_m,
+                        initial_max_height_m, cycle_step_limit, divergent_carve_strength);
 
     platec_api_list_elem elem(++last_id, litho);
     lithospheres.push_back(elem);
@@ -58,25 +66,47 @@ void* platec_api_create_from_heightmap(long seed, uint32_t width, uint32_t heigh
                                        const float* heightmap, float sea_level,
                                        uint32_t erosion_period, float folding_ratio,
                                        uint32_t aggr_overlap_abs, float aggr_overlap_rel,
-                                       uint32_t cycle_count, uint32_t num_plates) {
+                                       uint32_t cycle_count, uint32_t num_plates,
+                                       float erosion_strength, float crust_rotation_strength,
+                                       float rotation_strength, float subduction_strength,
+                                       int32_t sea_level_m, uint16_t initial_min_height_m,
+                                       uint16_t initial_max_height_m, uint32_t cycle_step_limit,
+                                       float divergent_carve_strength) {
     lithosphere* litho =
-        new lithosphere(seed, width, height, heightmap, sea_level, erosion_period, folding_ratio,
-                        aggr_overlap_abs, aggr_overlap_rel, cycle_count, num_plates);
+        static_cast<lithosphere*>(platec_api_create(seed, width, height, sea_level,
+                                                    erosion_period, folding_ratio,
+                                                    aggr_overlap_abs, aggr_overlap_rel,
+                                                    cycle_count, num_plates, erosion_strength,
+                                                    crust_rotation_strength, rotation_strength,
+                                                    subduction_strength, sea_level_m,
+                                                    initial_min_height_m, initial_max_height_m,
+                                                    cycle_step_limit, divergent_carve_strength));
+    if (litho == nullptr) {
+        return nullptr;
+    }
 
+    litho->importNormalizedHeightMap(heightmap, sea_level);
+    return litho;
+}
+
+void* platec_api_create_from_scenario(const platec::scenario::Scenario* scenario) {
+    if (scenario == nullptr) {
+        return nullptr;
+    }
+
+    lithosphere* litho = new lithosphere(*scenario);
     platec_api_list_elem elem(++last_id, litho);
     lithospheres.push_back(elem);
-
     return litho;
 }
 
 void platec_api_destroy(void* litho) {
     for (uint32_t i = 0; i < lithospheres.size(); ++i)
         if (lithospheres[i].data == litho) {
+            delete lithospheres[i].data;
             lithospheres.erase(lithospheres.begin() + i);
             break;
         }
-
-    delete static_cast<lithosphere*>(litho);
 }
 
 const uint32_t* platec_api_get_agemap(uint32_t id) {
@@ -85,6 +115,101 @@ const uint32_t* platec_api_get_agemap(uint32_t id) {
         return nullptr;
 
     return litho->getAgeMap();
+}
+
+const float* platec_api_get_crust_age_myr_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getCrustAgeMyrMap();
+}
+
+const float* platec_api_get_crust_thickness_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getCrustThicknessMap();
+}
+
+const uint8_t* platec_api_get_crust_class_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getCrustClassMap();
+}
+
+const float* platec_api_get_uplift_tendency_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getUpliftTendencyMap();
+}
+
+const float* platec_api_get_subsidence_tendency_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getSubsidenceTendencyMap();
+}
+
+const float* platec_api_get_accumulated_strain_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getAccumulatedStrainMap();
+}
+
+const uint8_t* platec_api_get_boundary_type_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getBoundaryTypeMap();
+}
+
+const uint16_t* platec_api_get_boundary_distance_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getBoundaryDistanceMap();
+}
+
+const uint32_t* platec_api_get_boundary_segment_id_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getBoundarySegmentIdMap();
+}
+
+const uint32_t* platec_api_get_nearest_boundary_id_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getNearestBoundaryIdMap();
+}
+
+uint32_t platec_api_get_boundary_segment_count(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getBoundarySegmentCount();
+}
+
+const platec::contract::BoundarySegment* platec_api_get_boundary_segments(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getBoundarySegments();
+}
+
+const uint32_t* platec_api_get_deforming_region_id_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDeformingRegionIdMap();
+}
+
+const uint8_t* platec_api_get_deforming_region_type_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDeformingRegionTypeMap();
+}
+
+const float* platec_api_get_deformation_rate_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDeformationRateMap();
+}
+
+const float* platec_api_get_deformation_velocity_x_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDeformationVelocityXMap();
+}
+
+const float* platec_api_get_deformation_velocity_y_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDeformationVelocityYMap();
+}
+
+uint32_t platec_api_get_deforming_region_count(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDeformingRegionCount();
+}
+
+const platec::contract::DeformingRegion* platec_api_get_deforming_regions(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDeformingRegions();
 }
 
 float* platec_api_get_heightmap(void* pointer) {
@@ -99,9 +224,24 @@ uint32_t* platec_api_get_platesmap(void* pointer) {
     return res;
 }
 
-uint32_t platec_api_get_plate_count(void* pointer) {
+const uint8_t* platec_api_get_convergence_map(void* pointer) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlateCount();
+    return litho->getConvergenceMap();
+}
+
+const uint8_t* platec_api_get_divergence_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDivergenceMap();
+}
+
+const uint8_t* platec_api_get_shear_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getShearMap();
+}
+
+const uint8_t* platec_api_get_geologic_regime_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getGeologicRegimeMap();
 }
 
 uint32_t platec_api_get_cycle_count(void* pointer) {
@@ -112,6 +252,21 @@ uint32_t platec_api_get_cycle_count(void* pointer) {
 uint32_t platec_api_get_iteration_count(void* pointer) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
     return litho->getIterationCount();
+}
+
+uint32_t platec_api_get_time_origin_step(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getTimeOriginStep();
+}
+
+double platec_api_get_time_myr(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getTimeMyr();
+}
+
+double platec_api_get_delta_time_myr(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getDeltaTimeMyr();
 }
 
 lithosphere* platec_api_get_lithosphere(uint32_t id) {
@@ -136,6 +291,31 @@ void platec_api_step(void* pointer) {
     litho->update();
 }
 
+void platec_api_load_heightmap(void* pointer, const float* normalized_heightmap, float sea_level) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    litho->importNormalizedHeightMap(normalized_heightmap, sea_level);
+}
+
+void platec_api_load_heightmap_raw(void* pointer, const float* normalized_heightmap) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    litho->importRawHeightMap(normalized_heightmap);
+}
+
+void platec_api_load_heightmap_u16(void* pointer, const uint16_t* heightmap_m, uint16_t sea_level_m) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    litho->importMetricHeightMap(heightmap_m, sea_level_m);
+}
+
+uint16_t platec_api_get_sea_level_m(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getSeaLevelMeters();
+}
+
+uint32_t platec_api_get_plate_count(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlateCount();
+}
+
 uint32_t lithosphere_getMapWidth(void* object) {
     return static_cast<lithosphere*>(object)->getWidth();
 }
@@ -152,4 +332,29 @@ float platec_api_velocity_unity_vector_x(void* pointer, uint32_t plate_index) {
 float platec_api_velocity_unity_vector_y(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
     return litho->getPlate(plate_index)->velocityUnitVector().y();
+}
+
+float platec_api_velocity_vector_x(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->linearVelocityVector().x();
+}
+
+float platec_api_velocity_vector_y(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->linearVelocityVector().y();
+}
+
+float platec_api_angular_velocity(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->getAngularVelocity();
+}
+
+float platec_api_mass_center_x(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->worldMassCenter().getX();
+}
+
+float platec_api_mass_center_y(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->worldMassCenter().getY();
 }

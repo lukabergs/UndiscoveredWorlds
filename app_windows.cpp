@@ -78,6 +78,23 @@ bool drawworldgenerationoptionswindow(const ImGuiViewport* main_viewport, ImGuiW
     ImGui::EndDisabled();
 
     ImGui::Text(" ");
+    ImGui::Checkbox("Generate social world", &options.socialEnabled);
+
+    const char* socialmodes[] = { "Static ex nihilo", "Historical" };
+    int socialmode = options.socialMode == SocialGenerationOptions::Mode::historical ? 1 : 0;
+    ImGui::BeginDisabled(!options.socialEnabled);
+    ImGui::Combo("Social mode", &socialmode, socialmodes, IM_ARRAYSIZE(socialmodes));
+    options.socialMode = socialmode == 1 ? SocialGenerationOptions::Mode::historical : SocialGenerationOptions::Mode::static_ex_nihilo;
+
+    ImGui::BeginDisabled(options.socialMode != SocialGenerationOptions::Mode::historical);
+    ImGui::Checkbox("Use prehistory", &options.usePrehistory);
+    ImGui::InputInt("History years", &options.historyYears);
+    if (options.historyYears < 10)
+        options.historyYears = 10;
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+
+    ImGui::Text(" ");
 
     if (ImGui::Button("Enable all"))
         fill(options.enabledSteps.begin(), options.enabledSteps.end(), true);
@@ -395,6 +412,22 @@ void drawworldeditpropertieswindow(const ImGuiViewport* main_viewport, ImGuiWind
 
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Untick this if you don't want river deltas to be generated.");
+
+    ImGui::Text("   ");
+    ImGui::Checkbox("Generate social world", &controls.socialEnabled);
+
+    const char* socialmodeitems[] = { "Static ex nihilo", "Historical" };
+    int socialmode = controls.socialMode == SocialGenerationOptions::Mode::historical ? 1 : 0;
+
+    ImGui::BeginDisabled(!controls.socialEnabled);
+    ImGui::Combo("Social mode", &socialmode, socialmodeitems, IM_ARRAYSIZE(socialmodeitems));
+    controls.socialMode = socialmode == 1 ? SocialGenerationOptions::Mode::historical : SocialGenerationOptions::Mode::static_ex_nihilo;
+
+    ImGui::BeginDisabled(controls.socialMode != SocialGenerationOptions::Mode::historical);
+    ImGui::Checkbox("Use prehistory", &controls.usePrehistory);
+    ImGui::InputInt("History years", &controls.historyYears);
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
 
     ImGui::SameLine((float)rightalign);
 

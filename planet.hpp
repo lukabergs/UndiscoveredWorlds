@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "classes.hpp"
+#include "social_generation.hpp"
 
 #define ARRAYWIDTH 2049
 #define ARRAYHEIGHT 1025
@@ -140,6 +141,30 @@ enum class GeologicRegime : std::uint8_t
     trench_adjacent = 7
 };
 
+enum class CrustClass : std::uint8_t
+{
+    none = 0,
+    oceanic = 1,
+    transitional = 2,
+    continental = 3
+};
+
+enum class BoundaryType : std::uint8_t
+{
+    none = 0,
+    convergent = 1,
+    divergent = 2,
+    transform = 3,
+    passive_margin = 4
+};
+
+enum class DeformingRegionType : std::uint8_t
+{
+    none = 0,
+    continental_rift = 1,
+    diffuse_collision = 2
+};
+
 enum class BasinClass : std::uint8_t
 {
     none = 0,
@@ -164,6 +189,15 @@ public:
 
     int settingssaveversion() const; // save format for settings
     void setsettingssaveversion(int amount);
+
+    int tectonictimeoriginstep() const;
+    void settectonictimeoriginstep(int amount);
+
+    float tectonictimemyr() const;
+    void settectonictimemyr(float amount);
+
+    float tectonicdeltatimemyr() const;
+    void settectonicdeltatimemyr(float amount);
 
     long seed() const;   // seed
     void setseed(long amount);
@@ -858,6 +892,54 @@ public:
     int tectonicshear(int x, int y) const;
     void settectonicshear(int x, int y, int amount);
 
+    float tectoniccrustagemyr(int x, int y) const;
+    void settectoniccrustagemyr(int x, int y, float amount);
+
+    float tectoniccrustthickness(int x, int y) const;
+    void settectoniccrustthickness(int x, int y, float amount);
+
+    CrustClass tectoniccrustclass(int x, int y) const;
+    void settectoniccrustclass(int x, int y, CrustClass amount);
+
+    float tectonicuplifttendency(int x, int y) const;
+    void settectonicuplifttendency(int x, int y, float amount);
+
+    float tectonicsubsidencetendency(int x, int y) const;
+    void settectonicsubsidencetendency(int x, int y, float amount);
+
+    float tectonicaccumulatedstrain(int x, int y) const;
+    void settectonicaccumulatedstrain(int x, int y, float amount);
+
+    BoundaryType tectonicboundarytype(int x, int y) const;
+    void settectonicboundarytype(int x, int y, BoundaryType amount);
+
+    int tectonicboundarydistance(int x, int y) const;
+    void settectonicboundarydistance(int x, int y, int amount);
+
+    int tectonicboundarysegmentid(int x, int y) const;
+    void settectonicboundarysegmentid(int x, int y, int amount);
+
+    int tectonicnearestboundaryid(int x, int y) const;
+    void settectonicnearestboundaryid(int x, int y, int amount);
+
+    float tectonicboundaryhistory(int x, int y) const;
+    void settectonicboundaryhistory(int x, int y, float amount);
+
+    int tectonicdeformingregionid(int x, int y) const;
+    void settectonicdeformingregionid(int x, int y, int amount);
+
+    DeformingRegionType tectonicdeformingregiontype(int x, int y) const;
+    void settectonicdeformingregiontype(int x, int y, DeformingRegionType amount);
+
+    float tectonicdeformationrate(int x, int y) const;
+    void settectonicdeformationrate(int x, int y, float amount);
+
+    float tectonicdeformationvelocityx(int x, int y) const;
+    void settectonicdeformationvelocityx(int x, int y, float amount);
+
+    float tectonicdeformationvelocityy(int x, int y) const;
+    void settectonicdeformationvelocityy(int x, int y, float amount);
+
     BasinClass basinclass(int x, int y) const;
     void setbasinclass(int x, int y, BasinClass amount);
 
@@ -884,6 +966,44 @@ public:
 
     int fisheryreserve(int x, int y) const;
     void setfisheryreserve(int x, int y, int amount);
+
+    int settlementsuitability(int x, int y) const;
+    void setsettlementsuitability(int x, int y, int amount);
+
+    int infrastructure(int x, int y) const;
+    void setinfrastructure(int x, int y, int amount);
+
+    int agriculturalcapacity(int x, int y) const;
+    void setagriculturalcapacity(int x, int y, int amount);
+
+    int routetraffic(int x, int y) const;
+    void setroutetraffic(int x, int y, int amount);
+
+    int riveraccess(int x, int y) const;
+    void setriveraccess(int x, int y, int amount);
+
+    int harborscore(int x, int y) const;
+    void setharborscore(int x, int y, int amount);
+
+    int ownersettlementid(int x, int y) const;
+    void setownersettlementid(int x, int y, int amount);
+
+    int ownerpolityid(int x, int y) const;
+    void setownerpolityid(int x, int y, int amount);
+
+    const std::vector<Settlement>& settlements() const;
+    std::vector<Settlement>& settlements();
+
+    const std::vector<Polity>& polities() const;
+    std::vector<Polity>& polities();
+
+    const std::vector<RouteEdge>& routeedges() const;
+    std::vector<RouteEdge>& routeedges();
+
+    const std::vector<HistoryEvent>& historyevents() const;
+    std::vector<HistoryEvent>& historyevents();
+
+    void clearsocialstate();
 
     int deltadir(int x, int y) const;    // delta branch flow direction (reversed)
     int deltadir_no_bounds_check(int x, int y) const { return deltamapdir[x][y]; }
@@ -979,6 +1099,9 @@ private:
 
     int itstype; // Type of world
     long itsseed;    // seed number of this world
+    int itstectonictimeoriginstep;
+    float itstectonictimemyr;
+    float itstectonicdeltatimemyr;
     bool itsrotation;    // 1 (true) like the Earth, 0 (false) the other way
     float itstilt; // Axial tilt (affects seasonal differences). Earthlike = 22.5
     float itseccentricity; // How elliptical the orbit is. Earthlike = 0.0167.
@@ -1215,6 +1338,22 @@ private:
     std::uint8_t tectonicconvergencemap[ARRAYWIDTH][ARRAYHEIGHT];
     std::uint8_t tectonicdivergencemap[ARRAYWIDTH][ARRAYHEIGHT];
     std::uint8_t tectonicshearmap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectoniccrustagemyrmap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectoniccrustthicknessmap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t tectoniccrustclassmap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectonicuplifttendencymap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectonicsubsidencetendencymap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectonicaccumulatedstrainmap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t tectonicboundarytypemap[ARRAYWIDTH][ARRAYHEIGHT];
+    unsigned short tectonicboundarydistancemap[ARRAYWIDTH][ARRAYHEIGHT];
+    int tectonicboundarysegmentidmap[ARRAYWIDTH][ARRAYHEIGHT];
+    int tectonicnearestboundaryidmap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectonicboundaryhistorymap[ARRAYWIDTH][ARRAYHEIGHT];
+    int tectonicdeformingregionidmap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t tectonicdeformingregiontypemap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectonicdeformationratemap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectonicdeformationvelocityxmap[ARRAYWIDTH][ARRAYHEIGHT];
+    float tectonicdeformationvelocityymap[ARRAYWIDTH][ARRAYHEIGHT];
     std::uint8_t basinclassmap[ARRAYWIDTH][ARRAYHEIGHT];
     std::uint8_t erosionpotentialmap[ARRAYWIDTH][ARRAYHEIGHT];
     std::uint8_t depositionpotentialmap[ARRAYWIDTH][ARRAYHEIGHT];
@@ -1224,6 +1363,14 @@ private:
     std::uint8_t evaporitereservemap[ARRAYWIDTH][ARRAYHEIGHT];
     std::uint8_t volcanicreservemap[ARRAYWIDTH][ARRAYHEIGHT];
     std::uint8_t fisheryreservemap[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t settlement_suitability[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t social_infrastructure[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t agricultural_capacity[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t route_traffic[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t river_access[ARRAYWIDTH][ARRAYHEIGHT];
+    std::uint8_t harbor_score[ARRAYWIDTH][ARRAYHEIGHT];
+    int owner_settlement_id[ARRAYWIDTH][ARRAYHEIGHT];
+    int owner_polity_id[ARRAYWIDTH][ARRAYHEIGHT];
     short extraelevmap[ARRAYWIDTH][ARRAYHEIGHT];
     short deltamapdir[ARRAYWIDTH][ARRAYHEIGHT];
     int deltamapjan[ARRAYWIDTH][ARRAYHEIGHT];
@@ -1244,6 +1391,10 @@ private:
     int horselats[ARRAYWIDTH][6];
 
     fourshorts cratercentreslist[MAXCRATERS]; // This duplicates the information in the cratercentres array, but it tells us the order in which to draw the craters, and their radius, which is also important.
+    std::vector<Settlement> settlementlist;
+    std::vector<Polity> politylist;
+    std::vector<RouteEdge> routeedgelist;
+    std::vector<HistoryEvent> historyeventlist;
 
     // reused temporary state
     string line_for_file_read;
@@ -1275,6 +1426,15 @@ inline void planet::setsaveversion(int amount) { itssaveversion = amount; }
 
 inline int planet::settingssaveversion() const { return itssettingssaveversion; }
 inline void planet::setsettingssaveversion(int amount) { itssettingssaveversion = amount; }
+
+inline int planet::tectonictimeoriginstep() const { return itstectonictimeoriginstep; }
+inline void planet::settectonictimeoriginstep(int amount) { itstectonictimeoriginstep = (std::max)(0, amount); }
+
+inline float planet::tectonictimemyr() const { return itstectonictimemyr; }
+inline void planet::settectonictimemyr(float amount) { itstectonictimemyr = (std::max)(0.0f, amount); }
+
+inline float planet::tectonicdeltatimemyr() const { return itstectonicdeltatimemyr; }
+inline void planet::settectonicdeltatimemyr(float amount) { itstectonicdeltatimemyr = (std::max)(0.0f, amount); }
 
 inline long planet::seed() const { return itsseed; }
 inline void planet::setseed(long amount) { itsseed = amount; }
@@ -2753,6 +2913,262 @@ inline void planet::settectonicshear(int x, int y, int amount)
     tectonicshearmap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
+inline float planet::tectoniccrustagemyr(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectoniccrustagemyrmap[x][y];
+}
+
+inline void planet::settectoniccrustagemyr(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectoniccrustagemyrmap[x][y] = (std::max)(0.0f, amount);
+}
+
+inline float planet::tectoniccrustthickness(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectoniccrustthicknessmap[x][y];
+}
+
+inline void planet::settectoniccrustthickness(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectoniccrustthicknessmap[x][y] = (std::max)(0.0f, amount);
+}
+
+inline CrustClass planet::tectoniccrustclass(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return CrustClass::none;
+
+    return static_cast<CrustClass>(tectoniccrustclassmap[x][y]);
+}
+
+inline void planet::settectoniccrustclass(int x, int y, CrustClass amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectoniccrustclassmap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline float planet::tectonicuplifttendency(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectonicuplifttendencymap[x][y];
+}
+
+inline void planet::settectonicuplifttendency(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicuplifttendencymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+}
+
+inline float planet::tectonicsubsidencetendency(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectonicsubsidencetendencymap[x][y];
+}
+
+inline void planet::settectonicsubsidencetendency(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicsubsidencetendencymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+}
+
+inline float planet::tectonicaccumulatedstrain(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectonicaccumulatedstrainmap[x][y];
+}
+
+inline void planet::settectonicaccumulatedstrain(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicaccumulatedstrainmap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+}
+
+inline BoundaryType planet::tectonicboundarytype(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return BoundaryType::none;
+
+    return static_cast<BoundaryType>(tectonicboundarytypemap[x][y]);
+}
+
+inline void planet::settectonicboundarytype(int x, int y, BoundaryType amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicboundarytypemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::tectonicboundarydistance(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return static_cast<int>(tectonicboundarydistancemap[x][y]);
+}
+
+inline void planet::settectonicboundarydistance(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicboundarydistancemap[x][y] = static_cast<unsigned short>(std::clamp(amount, 0, 65535));
+}
+
+inline int planet::tectonicboundarysegmentid(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return tectonicboundarysegmentidmap[x][y];
+}
+
+inline void planet::settectonicboundarysegmentid(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicboundarysegmentidmap[x][y] = (std::max)(0, amount);
+}
+
+inline int planet::tectonicnearestboundaryid(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return tectonicnearestboundaryidmap[x][y];
+}
+
+inline void planet::settectonicnearestboundaryid(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicnearestboundaryidmap[x][y] = (std::max)(0, amount);
+}
+
+inline float planet::tectonicboundaryhistory(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectonicboundaryhistorymap[x][y];
+}
+
+inline void planet::settectonicboundaryhistory(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicboundaryhistorymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+}
+
+inline int planet::tectonicdeformingregionid(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0;
+
+    return tectonicdeformingregionidmap[x][y];
+}
+
+inline void planet::settectonicdeformingregionid(int x, int y, int amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicdeformingregionidmap[x][y] = (std::max)(0, amount);
+}
+
+inline DeformingRegionType planet::tectonicdeformingregiontype(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return DeformingRegionType::none;
+
+    return static_cast<DeformingRegionType>(tectonicdeformingregiontypemap[x][y]);
+}
+
+inline void planet::settectonicdeformingregiontype(int x, int y, DeformingRegionType amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicdeformingregiontypemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline float planet::tectonicdeformationrate(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectonicdeformationratemap[x][y];
+}
+
+inline void planet::settectonicdeformationrate(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicdeformationratemap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+}
+
+inline float planet::tectonicdeformationvelocityx(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectonicdeformationvelocityxmap[x][y];
+}
+
+inline void planet::settectonicdeformationvelocityx(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicdeformationvelocityxmap[x][y] = amount;
+}
+
+inline float planet::tectonicdeformationvelocityy(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return tectonicdeformationvelocityymap[x][y];
+}
+
+inline void planet::settectonicdeformationvelocityy(int x, int y, float amount)
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    tectonicdeformationvelocityymap[x][y] = amount;
+}
+
 inline BasinClass planet::basinclass(int x, int y) const
 {
     if (y<0 || y>itsheight || x<0 || x>itswidth)
@@ -2903,6 +3319,134 @@ inline void planet::setfisheryreserve(int x, int y, int amount)
 
     amount = std::clamp(amount, 0, 100);
     fisheryreservemap[x][y] = static_cast<std::uint8_t>(amount);
+}
+
+inline int planet::settlementsuitability(int x, int y) const
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return 0;
+
+    return static_cast<int>(settlement_suitability[x][y]);
+}
+
+inline void planet::setsettlementsuitability(int x, int y, int amount)
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return;
+
+    settlement_suitability[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+}
+
+inline int planet::infrastructure(int x, int y) const
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return 0;
+
+    return static_cast<int>(social_infrastructure[x][y]);
+}
+
+inline void planet::setinfrastructure(int x, int y, int amount)
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return;
+
+    social_infrastructure[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+}
+
+inline int planet::agriculturalcapacity(int x, int y) const
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return 0;
+
+    return static_cast<int>(agricultural_capacity[x][y]);
+}
+
+inline void planet::setagriculturalcapacity(int x, int y, int amount)
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return;
+
+    agricultural_capacity[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+}
+
+inline int planet::routetraffic(int x, int y) const
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return 0;
+
+    return static_cast<int>(route_traffic[x][y]);
+}
+
+inline void planet::setroutetraffic(int x, int y, int amount)
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return;
+
+    route_traffic[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+}
+
+inline int planet::riveraccess(int x, int y) const
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return 0;
+
+    return static_cast<int>(river_access[x][y]);
+}
+
+inline void planet::setriveraccess(int x, int y, int amount)
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return;
+
+    river_access[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+}
+
+inline int planet::harborscore(int x, int y) const
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return 0;
+
+    return static_cast<int>(harbor_score[x][y]);
+}
+
+inline void planet::setharborscore(int x, int y, int amount)
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return;
+
+    harbor_score[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+}
+
+inline int planet::ownersettlementid(int x, int y) const
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return -1;
+
+    return owner_settlement_id[x][y];
+}
+
+inline void planet::setownersettlementid(int x, int y, int amount)
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return;
+
+    owner_settlement_id[x][y] = amount;
+}
+
+inline int planet::ownerpolityid(int x, int y) const
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return -1;
+
+    return owner_polity_id[x][y];
+}
+
+inline void planet::setownerpolityid(int x, int y, int amount)
+{
+    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+        return;
+
+    owner_polity_id[x][y] = amount;
 }
 
 inline int planet::deltadir(int x, int y) const
@@ -3060,6 +3604,23 @@ inline void planet::settest(int x, int y, int amount)
         return;
 
     testmap[x][y] = amount;
+}
+
+inline const std::vector<Settlement>& planet::settlements() const { return settlementlist; }
+inline std::vector<Settlement>& planet::settlements() { return settlementlist; }
+inline const std::vector<Polity>& planet::polities() const { return politylist; }
+inline std::vector<Polity>& planet::polities() { return politylist; }
+inline const std::vector<RouteEdge>& planet::routeedges() const { return routeedgelist; }
+inline std::vector<RouteEdge>& planet::routeedges() { return routeedgelist; }
+inline const std::vector<HistoryEvent>& planet::historyevents() const { return historyeventlist; }
+inline std::vector<HistoryEvent>& planet::historyevents() { return historyeventlist; }
+
+inline void planet::clearsocialstate()
+{
+    settlementlist.clear();
+    politylist.clear();
+    routeedgelist.clear();
+    historyeventlist.clear();
 }
 
 inline bool planet::sea(int x, int y) const

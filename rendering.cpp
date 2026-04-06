@@ -554,6 +554,67 @@ namespace
         }
     }
 
+    sf::Color gettectonicupliftmapcolour(const planet& world, int x, int y)
+    {
+        const bool water = world.sea(x, y) != 0;
+        const sf::Color background = water ? getphysicaloceanbackground() : getphysicallandbackground();
+        const float uplift = std::clamp(world.tectonicuplifttendency(x, y), 0.0f, 1.0f);
+        const float subsidence = std::clamp(world.tectonicsubsidencetendency(x, y), 0.0f, 1.0f);
+        const float strain = std::clamp(world.tectonicaccumulatedstrain(x, y), 0.0f, 1.0f);
+
+        if (uplift < 0.03f && subsidence < 0.03f && strain < 0.03f)
+            return background;
+
+        const sf::Color low = water ? makecolour(22, 64, 112) : makecolour(88, 100, 116);
+        const sf::Color mid = water ? makecolour(43, 82, 108) : makecolour(122, 116, 104);
+        const sf::Color high = water ? makecolour(178, 124, 76) : makecolour(198, 110, 70);
+        const float balance = std::clamp(0.5f + (uplift - subsidence) * 0.45f + strain * 0.10f, 0.0f, 1.0f);
+        const float intensity = std::clamp((std::max)(uplift, subsidence) * 0.85f + strain * 0.35f, 0.18f, 1.0f);
+        const sf::Color target = lerpcolour(low, mid, high, balance);
+        return lerpcolour(background, target, intensity);
+    }
+
+    sf::Color gettectonicboundariesmapcolour(const planet& world, int x, int y)
+    {
+        const bool water = world.sea(x, y) != 0;
+        const sf::Color background = water ? getphysicaloceanbackground() : getphysicallandbackground();
+        const BoundaryType boundarytype = world.tectonicboundarytype(x, y);
+        const DeformingRegionType regiontype = world.tectonicdeformingregiontype(x, y);
+        const float proximity = 1.0f - std::clamp(static_cast<float>(world.tectonicboundarydistance(x, y)) / 12.0f, 0.0f, 1.0f);
+        const float history = std::clamp(world.tectonicboundaryhistory(x, y), 0.0f, 1.0f);
+
+        sf::Color target = background;
+        switch (boundarytype)
+        {
+        case BoundaryType::convergent:
+            target = makecolour(186, 86, 66);
+            break;
+        case BoundaryType::divergent:
+            target = makecolour(216, 166, 78);
+            break;
+        case BoundaryType::transform:
+            target = makecolour(57, 133, 142);
+            break;
+        case BoundaryType::passive_margin:
+            target = makecolour(194, 177, 127);
+            break;
+        case BoundaryType::none:
+        default:
+            break;
+        }
+
+        if (regiontype == DeformingRegionType::continental_rift)
+            target = lerpcolour(target, makecolour(235, 193, 88), 0.45f);
+        else if (regiontype == DeformingRegionType::diffuse_collision)
+            target = lerpcolour(target, makecolour(160, 92, 72), 0.55f);
+
+        if (boundarytype == BoundaryType::none && regiontype == DeformingRegionType::none)
+            return background;
+
+        const float intensity = std::clamp(0.25f + 0.55f * proximity + 0.20f * history, 0.0f, 1.0f);
+        return lerpcolour(background, target, intensity);
+    }
+
     sf::Color getbasinmapcolour(const planet& world, int x, int y)
     {
         switch (world.basinclass(x, y))
@@ -623,6 +684,18 @@ namespace
 
         const float blend = 0.25f + (static_cast<float>(dominant) / 100.0f) * 0.75f;
         return lerpcolour(water ? seabackground : landbackground, resourcecolour, blend);
+    }
+
+    sf::Color getpolitycolour(int polityid)
+    {
+        if (polityid < 0)
+            return makecolour(98, 92, 84);
+
+        const std::uint64_t mixed = deterministicmix64(static_cast<std::uint64_t>(static_cast<std::uint32_t>(polityid)) * 0x9e3779b97f4a7c15ull);
+        const int r = 70 + static_cast<int>(mixed & 0x7f);
+        const int g = 70 + static_cast<int>((mixed >> 8) & 0x7f);
+        const int b = 70 + static_cast<int>((mixed >> 16) & 0x7f);
+        return makecolour(r, g, b);
     }
 
     template <typename ColourFn>
@@ -1565,6 +1638,22 @@ void drawglobalgeologymapimage(planet& world, maplayer& layer)
     });
 }
 
+void drawglobaltectonicupliftmapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        return gettectonicupliftmapcolour(world, x, y);
+    });
+}
+
+void drawglobaltectonicboundariesmapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        return gettectonicboundariesmapcolour(world, x, y);
+    });
+}
+
 void drawglobalbasinsmapimage(planet& world, maplayer& layer)
 {
     drawglobalphysicalmapimage(world, layer, [&](int x, int y)
@@ -1602,6 +1691,139 @@ void drawglobalresourcesmapimage(planet& world, maplayer& layer)
     drawglobalphysicalmapimage(world, layer, [&](int x, int y)
     {
         return getresourcesmapcolour(world, x, y);
+    });
+}
+
+void drawglobalsuitabilitymapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return getphysicaloceanbackground();
+
+        return getscoremapcolour(world.settlementsuitability(x, y), makecolour(124, 80, 58), makecolour(188, 164, 98), makecolour(56, 146, 72));
+    });
+}
+
+void drawglobalsettlementsmapimage(planet& world, maplayer& layer)
+{
+    sf::Image& image = layer.image;
+    sf::Image& displayimage = layer.displayimage;
+
+    for (int x = 0; x <= world.width(); x++)
+    {
+        for (int y = 0; y <= world.height(); y++)
+        {
+            if (world.sea(x, y))
+                image.setPixel(x, y, makecolour(28, 56, 86));
+            else
+                image.setPixel(x, y, makecolour(108, 98, 81));
+        }
+    }
+
+    for (const Settlement& settlement : world.settlements())
+    {
+        const int marker = std::clamp(static_cast<int>(std::round(std::sqrt(static_cast<float>(std::max(1, settlement.urbanPopulation))) / 22.0f)), 1, 4);
+
+        for (int dx = -marker; dx <= marker; dx++)
+        {
+            for (int dy = -marker; dy <= marker; dy++)
+            {
+                if (dx * dx + dy * dy > marker * marker)
+                    continue;
+
+                const int nx = wrap(settlement.x + dx, world.width());
+                const int ny = std::clamp(settlement.y + dy, 0, world.height());
+                image.setPixel(nx, ny, makecolour(248, 226, 128));
+            }
+        }
+
+        image.setPixel(settlement.x, settlement.y, makecolour(242, 77, 44));
+    }
+
+    createnearestdisplayimage(image.getPixelsPtr(), static_cast<int>(image.getSize().x), world.width(), displayimage);
+    applyglobaloutlineoverlay(world, image);
+    applyglobaldisplayoutlineoverlay(world, displayimage);
+}
+
+void drawglobalpopulationmapimage(planet& world, maplayer& layer)
+{
+    vector<int> settlementscore(world.settlements().size(), 0);
+
+    for (const Settlement& settlement : world.settlements())
+    {
+        const float population = static_cast<float>(settlement.urbanPopulation + settlement.ruralPopulation);
+        const int score = std::clamp(static_cast<int>(std::round(std::log1p(population) * 12.0f)), 0, 100);
+
+        if (settlement.id >= 0 && settlement.id < static_cast<int>(settlementscore.size()))
+            settlementscore[settlement.id] = score;
+    }
+
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return makecolour(22, 46, 74);
+
+        const int owner = world.ownersettlementid(x, y);
+
+        if (owner < 0 || owner >= static_cast<int>(settlementscore.size()))
+            return makecolour(101, 96, 84);
+
+        return getscoremapcolour(settlementscore[owner], makecolour(136, 124, 94), makecolour(214, 167, 94), makecolour(224, 66, 42));
+    });
+}
+
+void drawglobalinfrastructuremapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return makecolour(27, 54, 84);
+
+        return getscoremapcolour(world.infrastructure(x, y), makecolour(89, 92, 83), makecolour(118, 146, 103), makecolour(203, 219, 133));
+    });
+}
+
+void drawglobalpolitiesmapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return makecolour(20, 44, 72);
+
+        return getpolitycolour(world.ownerpolityid(x, y));
+    });
+}
+
+void drawglobaltrademapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        const int traffic = world.routetraffic(x, y);
+
+        if (world.sea(x, y) && traffic == 0)
+            return makecolour(17, 39, 65);
+
+        if (!world.sea(x, y) && traffic == 0)
+            return makecolour(89, 87, 80);
+
+        return getscoremapcolour(traffic, makecolour(81, 104, 137), makecolour(164, 189, 120), makecolour(240, 214, 86));
+    });
+}
+
+void drawglobalrecentconflictmapimage(planet& world, maplayer& layer)
+{
+    drawglobalphysicalmapimage(world, layer, [&](int x, int y)
+    {
+        const int conflict = std::clamp(world.test(x, y), 0, 100);
+
+        if (world.sea(x, y))
+            return makecolour(20, 41, 68);
+
+        if (conflict == 0)
+            return makecolour(92, 89, 83);
+
+        return getscoremapcolour(conflict, makecolour(149, 121, 86), makecolour(188, 116, 72), makecolour(201, 45, 40));
     });
 }
 
@@ -2593,6 +2815,22 @@ void drawregionalgeologymapimage(planet& world, region& region, maplayer& layer)
     });
 }
 
+void drawregionaltectonicupliftmapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        return gettectonicupliftmapcolour(world, x, y);
+    });
+}
+
+void drawregionaltectonicboundariesmapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        return gettectonicboundariesmapcolour(world, x, y);
+    });
+}
+
 void drawregionalbasinsmapimage(planet& world, region& region, maplayer& layer)
 {
     drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
@@ -2630,6 +2868,118 @@ void drawregionalresourcesmapimage(planet& world, region& region, maplayer& laye
     drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
     {
         return getresourcesmapcolour(world, x, y);
+    });
+}
+
+void drawregionalsuitabilitymapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return getphysicaloceanbackground();
+
+        return getscoremapcolour(world.settlementsuitability(x, y), makecolour(124, 80, 58), makecolour(188, 164, 98), makecolour(56, 146, 72));
+    });
+}
+
+void drawregionalsettlementsmapimage(planet& world, region& region, maplayer& layer)
+{
+    const int cellheight = world.height() + 1;
+    vector<bool> hassettlement(static_cast<size_t>(world.width() + 1) * static_cast<size_t>(cellheight), false);
+
+    for (const Settlement& settlement : world.settlements())
+    {
+        const int index = settlement.x * cellheight + settlement.y;
+        hassettlement[index] = true;
+    }
+
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return makecolour(28, 56, 86);
+
+        const int index = x * cellheight + y;
+        return hassettlement[index] ? makecolour(245, 87, 50) : makecolour(108, 98, 81);
+    });
+}
+
+void drawregionalpopulationmapimage(planet& world, region& region, maplayer& layer)
+{
+    vector<int> settlementscore(world.settlements().size(), 0);
+
+    for (const Settlement& settlement : world.settlements())
+    {
+        const float population = static_cast<float>(settlement.urbanPopulation + settlement.ruralPopulation);
+
+        if (settlement.id >= 0 && settlement.id < static_cast<int>(settlementscore.size()))
+            settlementscore[settlement.id] = std::clamp(static_cast<int>(std::round(std::log1p(population) * 12.0f)), 0, 100);
+    }
+
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return makecolour(22, 46, 74);
+
+        const int owner = world.ownersettlementid(x, y);
+
+        if (owner < 0 || owner >= static_cast<int>(settlementscore.size()))
+            return makecolour(101, 96, 84);
+
+        return getscoremapcolour(settlementscore[owner], makecolour(136, 124, 94), makecolour(214, 167, 94), makecolour(224, 66, 42));
+    });
+}
+
+void drawregionalinfrastructuremapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return makecolour(27, 54, 84);
+
+        return getscoremapcolour(world.infrastructure(x, y), makecolour(89, 92, 83), makecolour(118, 146, 103), makecolour(203, 219, 133));
+    });
+}
+
+void drawregionalpolitiesmapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        if (world.sea(x, y))
+            return makecolour(20, 44, 72);
+
+        return getpolitycolour(world.ownerpolityid(x, y));
+    });
+}
+
+void drawregionaltrademapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        const int traffic = world.routetraffic(x, y);
+
+        if (world.sea(x, y) && traffic == 0)
+            return makecolour(17, 39, 65);
+
+        if (!world.sea(x, y) && traffic == 0)
+            return makecolour(89, 87, 80);
+
+        return getscoremapcolour(traffic, makecolour(81, 104, 137), makecolour(164, 189, 120), makecolour(240, 214, 86));
+    });
+}
+
+void drawregionalrecentconflictmapimage(planet& world, region& region, maplayer& layer)
+{
+    drawregionalsampledphysicalmapimage(world, region, layer, [&](int x, int y)
+    {
+        const int conflict = std::clamp(world.test(x, y), 0, 100);
+
+        if (world.sea(x, y))
+            return makecolour(20, 41, 68);
+
+        if (conflict == 0)
+            return makecolour(92, 89, 83);
+
+        return getscoremapcolour(conflict, makecolour(149, 121, 86), makecolour(188, 116, 72), makecolour(201, 45, 40));
     });
 }
 

@@ -22,9 +22,26 @@
 #include "plate.hpp"
 #include "utils.hpp"
 
-Movement::Movement(SimpleRandom randsource, const WorldDimension& worldDimension)
-    : _randsource(randsource), _worldDimension(worldDimension), velocity(1),
-      rot_dir(static_cast<float>(randsource.next() % 2 ? 1 : -1)), dx(0), dy(0) {
+namespace {
+
+float wrapped_delta(float value, float reference, float period) {
+    float delta = value - reference;
+    if (delta > period * 0.5f) {
+        delta -= period;
+    } else if (delta < -period * 0.5f) {
+        delta += period;
+    }
+    return delta;
+}
+
+} // namespace
+
+Movement::Movement(SimpleRandom randsource, const WorldDimension& worldDimension,
+                   float rotation_strength)
+    : _randsource(randsource), _worldDimension(worldDimension),
+      _rotation_strength(rotation_strength), velocity(1),
+      rot_dir(static_cast<float>(randsource.next() % 2 ? 1 : -1)), last_rotation_angle(0), dx(0),
+      dy(0) {
     const float angle = 2.0f * PI * _randsource.next_float();
     vx = cosf(angle) * INITIAL_SPEED_X;
     vy = sinf(angle) * INITIAL_SPEED_X;
@@ -67,8 +84,9 @@ void Movement::move() {
     // Force the radius of the circle to remain fixed by adjusting
     // angular velocity (which depends on plate's velocity).
     uint32_t world_avg_side = (_worldDimension.getWidth() + _worldDimension.getHeight()) / 2;
-    float alpha = rot_dir * velocity / (world_avg_side * 0.33f);
+    float alpha = rot_dir * velocity * _rotation_strength / (world_avg_side * 0.33f);
     float alpha_vel = alpha * velocity;
+    last_rotation_angle = alpha_vel * BODY_ROTATION_FACTOR;
     float _cos = cosf(alpha_vel);
     float _sin = sinf(alpha_vel);
     float _vx = vx * _cos - vy * _sin;
@@ -103,12 +121,22 @@ float Movement::momentum(const Mass& mass) const throw() {
     return mass.getMass() * velocity;
 }
 
-void Movement::collide(const IMass& thisMass, IPlate& otherPlate, float coll_mass) {
+void Movement::collide(const IPlate& thisPlate, IPlate& otherPlate, float coll_mass) {
     const float coeff_rest = 0.0; // Coefficient of restitution.
     // 1 = fully elastic, 0 = stick together.
-    Platec::IntVector massCentersDistance =
-        otherPlate.massCenter().toInt() - thisMass.massCenter().toInt();
-    float distance = massCentersDistance.length();
+    if (thisPlate.getMass() <= 0.0f || otherPlate.getMass() <= 0.0f || coll_mass <= 0.0f) {
+        return;
+    }
+
+    const FloatPoint this_center = thisPlate.worldMassCenter();
+    const FloatPoint other_center = otherPlate.worldMassCenter();
+    const float delta_x =
+        wrapped_delta(other_center.getX(), this_center.getX(),
+                      static_cast<float>(_worldDimension.getWidth()));
+    const float delta_y =
+        wrapped_delta(other_center.getY(), this_center.getY(),
+                      static_cast<float>(_worldDimension.getHeight()));
+    const float distance = std::sqrt(delta_x * delta_x + delta_y * delta_y);
     if (distance <= 0) {
         return; // Avoid division by zero!
     }
@@ -116,8 +144,7 @@ void Movement::collide(const IMass& thisMass, IPlate& otherPlate, float coll_mas
     // Scaling is required at last when impulses are added to plates!
     // Compute relative velocity between plates at the collision point.
     // Because torque is not included, calc simplifies to v_ab = v_a - v_b.
-    Platec::FloatVector collisionDirection =
-        Platec::FloatVector(massCentersDistance.x() / distance, massCentersDistance.y() / distance);
+    Platec::FloatVector collisionDirection(delta_x / distance, delta_y / distance);
     Platec::FloatVector relativeVelocity = velocityUnitVector() - otherPlate.velocityUnitVector();
 
     // Get the dot product of relative velocity vector and collision vector.
@@ -141,7 +168,7 @@ void Movement::collide(const IMass& thisMass, IPlate& otherPlate, float coll_mas
     // Compute final change of trajectory.
     // The plate that is the "giver" of the impulse should receive a
     // force according to its pre-collision mass, not the current mass!
-    addImpulse(collisionDirection * (J / thisMass.getMass()));
+    addImpulse(collisionDirection * (J / thisPlate.getMass()));
     otherPlate.decImpulse(collisionDirection * (J / (coll_mass + otherPlate.getMass())));
 
     // In order to prove that the code above works correctly, here is an

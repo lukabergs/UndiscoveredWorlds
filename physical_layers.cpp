@@ -364,6 +364,110 @@ float regimeorebias(GeologicRegime regime)
     }
 }
 
+float boundaryvolcanicbias(BoundaryType boundarytype)
+{
+    switch (boundarytype)
+    {
+    case BoundaryType::convergent:
+        return 1.0f;
+    case BoundaryType::divergent:
+        return 0.95f;
+    case BoundaryType::transform:
+        return 0.25f;
+    case BoundaryType::passive_margin:
+        return 0.12f;
+    case BoundaryType::none:
+    default:
+        return 0.0f;
+    }
+}
+
+float deformingvolcanicbias(DeformingRegionType regiontype)
+{
+    switch (regiontype)
+    {
+    case DeformingRegionType::continental_rift:
+        return 0.85f;
+    case DeformingRegionType::diffuse_collision:
+        return 0.30f;
+    case DeformingRegionType::none:
+    default:
+        return 0.0f;
+    }
+}
+
+float crustvolcanicbias(CrustClass crustclass)
+{
+    switch (crustclass)
+    {
+    case CrustClass::transitional:
+        return 1.0f;
+    case CrustClass::oceanic:
+        return 0.85f;
+    case CrustClass::continental:
+        return 0.75f;
+    case CrustClass::none:
+    default:
+        return 0.0f;
+    }
+}
+
+float boundaryorebias(BoundaryType boundarytype)
+{
+    switch (boundarytype)
+    {
+    case BoundaryType::convergent:
+        return 1.0f;
+    case BoundaryType::transform:
+        return 0.80f;
+    case BoundaryType::divergent:
+        return 0.45f;
+    case BoundaryType::passive_margin:
+        return 0.25f;
+    case BoundaryType::none:
+    default:
+        return 0.0f;
+    }
+}
+
+float deformingorebias(DeformingRegionType regiontype)
+{
+    switch (regiontype)
+    {
+    case DeformingRegionType::diffuse_collision:
+        return 1.0f;
+    case DeformingRegionType::continental_rift:
+        return 0.55f;
+    case DeformingRegionType::none:
+    default:
+        return 0.0f;
+    }
+}
+
+float crustorebias(CrustClass crustclass)
+{
+    switch (crustclass)
+    {
+    case CrustClass::continental:
+        return 1.0f;
+    case CrustClass::transitional:
+        return 0.75f;
+    case CrustClass::oceanic:
+        return 0.35f;
+    case CrustClass::none:
+    default:
+        return 0.0f;
+    }
+}
+
+float boundaryproximityfactor(const planet& world, int x, int y, float maxdistance)
+{
+    if (maxdistance <= 0.0f)
+        return 0.0f;
+
+    return 1.0f - clampunit(static_cast<float>(world.tectonicboundarydistance(x, y)) / maxdistance);
+}
+
 bool isshelfproxy(const planet& world, const std::vector<std::vector<bool>>& shelves, int x, int y)
 {
     if (world.sea(x, y) == 0)
@@ -653,9 +757,21 @@ void generatephysicalworldlayers(planet& world, const std::vector<std::vector<bo
             for (int x = 0; x <= width; x++)
             {
                 const GeologicRegime regime = world.geologicregime(x, y);
+                const BoundaryType boundarytype = world.tectonicboundarytype(x, y);
+                const DeformingRegionType regiontype = world.tectonicdeformingregiontype(x, y);
+                const CrustClass crustclass = world.tectoniccrustclass(x, y);
                 const float regimemult = regimevolcanicbias(regime);
                 const float divergencenorm = static_cast<float>(world.tectonicdivergence(x, y)) / 100.0f;
                 const float convergencenorm = static_cast<float>(world.tectonicconvergence(x, y)) / 100.0f;
+                const float uplift = clampunit(world.tectonicuplifttendency(x, y));
+                const float subsidence = clampunit(world.tectonicsubsidencetendency(x, y));
+                const float strain = clampunit(world.tectonicaccumulatedstrain(x, y));
+                const float deformation = clampunit(world.tectonicdeformationrate(x, y));
+                const float boundaryhistory = clampunit(world.tectonicboundaryhistory(x, y));
+                const float boundaryproximity = boundaryproximityfactor(world, x, y, 10.0f);
+                const float boundaryfocus = boundaryvolcanicbias(boundarytype) * boundaryproximity * (0.45f + 0.55f * boundaryhistory);
+                const float regionbias = deformingvolcanicbias(regiontype);
+                const float crustbias = crustvolcanicbias(crustclass);
                 const float ridgebias = (world.oceanridges(x, y) != 0 || world.oceanrifts(x, y) != 0) ? 1.0f : 0.0f;
                 const float volcanobias = (world.volcano(x, y) != 0 || world.strato(x, y)) ? 1.0f : 0.0f;
                 const float nearbyvolcano = maxscoreinradius(world, x, y, 2, [&](int nx, int ny)
@@ -663,12 +779,16 @@ void generatephysicalworldlayers(planet& world, const std::vector<std::vector<bo
                     return world.volcano(nx, ny) != 0 || world.strato(nx, ny) ? 100 : 0;
                 }) / 100.0f;
 
-                float score = 100.0f * (0.34f * regimemult + 0.20f * volcanobias + 0.16f * nearbyvolcano
-                    + 0.16f * divergencenorm + 0.14f * convergencenorm);
+                float score = 100.0f * (0.20f * regimemult + 0.18f * boundaryfocus + 0.12f * divergencenorm
+                    + 0.08f * convergencenorm + 0.10f * uplift + 0.08f * strain + 0.06f * deformation
+                    + 0.06f * regionbias + 0.06f * crustbias + 0.16f * volcanobias + 0.10f * nearbyvolcano);
                 score += 12.0f * ridgebias;
 
-                if (world.sea(x, y) != 0 && ridgebias == 0.0f && regimemult < 0.6f)
-                    score *= 0.5f;
+                if (world.sea(x, y) != 0 && ridgebias == 0.0f && boundaryfocus < 0.35f && regimemult < 0.6f)
+                    score *= 0.45f;
+
+                if (subsidence > uplift && boundarytype == BoundaryType::passive_margin)
+                    score *= 0.7f;
 
                 world.setvolcanicreserve(x, y, clampscore(score));
             }
@@ -682,20 +802,38 @@ void generatephysicalworldlayers(planet& world, const std::vector<std::vector<bo
             for (int x = 0; x <= width; x++)
             {
                 const GeologicRegime regime = world.geologicregime(x, y);
+                const BoundaryType boundarytype = world.tectonicboundarytype(x, y);
+                const DeformingRegionType regiontype = world.tectonicdeformingregiontype(x, y);
+                const CrustClass crustclass = world.tectoniccrustclass(x, y);
                 const float regimebias = regimeorebias(regime);
                 const float convergencenorm = static_cast<float>(world.tectonicconvergence(x, y)) / 100.0f;
                 const float shearnorm = static_cast<float>(world.tectonicshear(x, y)) / 100.0f;
+                const float uplift = clampunit(world.tectonicuplifttendency(x, y));
+                const float strain = clampunit(world.tectonicaccumulatedstrain(x, y));
+                const float deformation = clampunit(world.tectonicdeformationrate(x, y));
+                const float boundaryhistory = clampunit(world.tectonicboundaryhistory(x, y));
+                const float boundaryproximity = boundaryproximityfactor(world, x, y, 12.0f);
+                const float boundaryfocus = boundaryorebias(boundarytype) * boundaryproximity * (0.40f + 0.60f * boundaryhistory);
+                const float regionbias = deformingorebias(regiontype);
+                const float crustbias = crustorebias(crustclass);
                 const float volcanismnear = static_cast<float>(maxscoreinradius(world, x, y, 2, [&](int nx, int ny)
                 {
                     return world.volcanicreserve(nx, ny);
                 })) / 100.0f;
                 const float mountainbias = clampunit(static_cast<float>(world.mountainheight(x, y)) / 5000.0f);
 
-                float score = 100.0f * (0.30f * regimebias + 0.22f * convergencenorm + 0.16f * shearnorm
-                    + 0.16f * mountainbias + 0.16f * volcanismnear);
+                float score = 100.0f * (0.18f * regimebias + 0.18f * boundaryfocus + 0.15f * convergencenorm
+                    + 0.12f * shearnorm + 0.12f * strain + 0.08f * uplift + 0.05f * deformation
+                    + 0.05f * regionbias + 0.05f * crustbias + 0.10f * mountainbias + 0.10f * volcanismnear);
 
-                if (world.sea(x, y) != 0 && world.coast(x, y) == 0)
-                    score *= 0.35f;
+                if (boundarytype == BoundaryType::transform)
+                    score += 8.0f * boundaryhistory;
+
+                if (regiontype == DeformingRegionType::diffuse_collision)
+                    score += 12.0f * (0.5f + 0.5f * boundaryhistory);
+
+                if (world.sea(x, y) != 0 && world.coast(x, y) == 0 && boundaryfocus < 0.4f)
+                    score *= 0.30f;
 
                 world.setmetalorereserve(x, y, clampscore(score));
             }
