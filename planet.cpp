@@ -23,6 +23,9 @@ planet::planet() //constructor
 {
     itswidth = 1024;
     itsheight = 512;
+    itstectonictimeoriginstep = 0;
+    itstectonictimemyr = 0.0f;
+    itstectonicdeltatimemyr = 0.0f;
     resizeseasonalclimatefields();
 }
 
@@ -64,6 +67,10 @@ void planet::resizeseasonalclimatefields()
 
 void planet::cleartectonicprovenanceinternal()
 {
+    itstectonictimeoriginstep = 0;
+    itstectonictimemyr = 0.0f;
+    itstectonicdeltatimemyr = 0.0f;
+
     parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
     {
         for (int i = startx; i <= endx; i++)
@@ -74,6 +81,22 @@ void planet::cleartectonicprovenanceinternal()
                 tectonicconvergencemap[i][j] = 0;
                 tectonicdivergencemap[i][j] = 0;
                 tectonicshearmap[i][j] = 0;
+                tectoniccrustagemyrmap[i][j] = 0.0f;
+                tectoniccrustthicknessmap[i][j] = 0.0f;
+                tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
+                tectonicuplifttendencymap[i][j] = 0.0f;
+                tectonicsubsidencetendencymap[i][j] = 0.0f;
+                tectonicaccumulatedstrainmap[i][j] = 0.0f;
+                tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
+                tectonicboundarydistancemap[i][j] = 0;
+                tectonicboundarysegmentidmap[i][j] = 0;
+                tectonicnearestboundaryidmap[i][j] = 0;
+                tectonicboundaryhistorymap[i][j] = 0.0f;
+                tectonicdeformingregionidmap[i][j] = 0;
+                tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
+                tectonicdeformationratemap[i][j] = 0.0f;
+                tectonicdeformationvelocityxmap[i][j] = 0.0f;
+                tectonicdeformationvelocityymap[i][j] = 0.0f;
             }
         }
     }, 64);
@@ -399,6 +422,9 @@ int planet::mountainheightwrap(int x, int y) const
 void planet::clear()
 {
     resizeseasonalclimatefields();
+    itstectonictimeoriginstep = 0;
+    itstectonictimemyr = 0.0f;
+    itstectonicdeltatimemyr = 0.0f;
 
     parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
     {
@@ -436,6 +462,22 @@ void planet::clear()
                 tectonicconvergencemap[i][j] = 0;
                 tectonicdivergencemap[i][j] = 0;
                 tectonicshearmap[i][j] = 0;
+                tectoniccrustagemyrmap[i][j] = 0.0f;
+                tectoniccrustthicknessmap[i][j] = 0.0f;
+                tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
+                tectonicuplifttendencymap[i][j] = 0.0f;
+                tectonicsubsidencetendencymap[i][j] = 0.0f;
+                tectonicaccumulatedstrainmap[i][j] = 0.0f;
+                tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
+                tectonicboundarydistancemap[i][j] = 0;
+                tectonicboundarysegmentidmap[i][j] = 0;
+                tectonicnearestboundaryidmap[i][j] = 0;
+                tectonicboundaryhistorymap[i][j] = 0.0f;
+                tectonicdeformingregionidmap[i][j] = 0;
+                tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
+                tectonicdeformationratemap[i][j] = 0.0f;
+                tectonicdeformationvelocityxmap[i][j] = 0.0f;
+                tectonicdeformationvelocityymap[i][j] = 0.0f;
                 basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
                 erosionpotentialmap[i][j] = 0;
                 depositionpotentialmap[i][j] = 0;
@@ -445,6 +487,14 @@ void planet::clear()
                 evaporitereservemap[i][j] = 0;
                 volcanicreservemap[i][j] = 0;
                 fisheryreservemap[i][j] = 0;
+                settlement_suitability[i][j] = 0;
+                social_infrastructure[i][j] = 0;
+                agricultural_capacity[i][j] = 0;
+                route_traffic[i][j] = 0;
+                river_access[i][j] = 0;
+                harbor_score[i][j] = 0;
+                owner_settlement_id[i][j] = -1;
+                owner_polity_id[i][j] = -1;
                 extraelevmap[i][j] = 0;
                 deltamapdir[i][j] = 0;
                 deltamapjan[i][j] = 0;
@@ -476,6 +526,8 @@ void planet::clear()
         cratercentreslist[i].y = 0;
         cratercentreslist[i].z = 0;
     }
+
+    clearsocialstate();
 }
 
 void planet::smoothnom(int amount)
@@ -495,6 +547,22 @@ void planet::shiftterrain(int offset)
     shift(tectonicconvergencemap, offset);
     shift(tectonicdivergencemap, offset);
     shift(tectonicshearmap, offset);
+    shift(tectoniccrustagemyrmap, offset);
+    shift(tectoniccrustthicknessmap, offset);
+    shift(tectoniccrustclassmap, offset);
+    shift(tectonicuplifttendencymap, offset);
+    shift(tectonicsubsidencetendencymap, offset);
+    shift(tectonicaccumulatedstrainmap, offset);
+    shift(tectonicboundarytypemap, offset);
+    shift(tectonicboundarydistancemap, offset);
+    shift(tectonicboundarysegmentidmap, offset);
+    shift(tectonicnearestboundaryidmap, offset);
+    shift(tectonicboundaryhistorymap, offset);
+    shift(tectonicdeformingregionidmap, offset);
+    shift(tectonicdeformingregiontypemap, offset);
+    shift(tectonicdeformationratemap, offset);
+    shift(tectonicdeformationvelocityxmap, offset);
+    shift(tectonicdeformationvelocityymap, offset);
     shift(basinclassmap, offset);
     shift(erosionpotentialmap, offset);
     shift(depositionpotentialmap, offset);
@@ -504,6 +572,14 @@ void planet::shiftterrain(int offset)
     shift(evaporitereservemap, offset);
     shift(volcanicreservemap, offset);
     shift(fisheryreservemap, offset);
+    shift(settlement_suitability, offset);
+    shift(social_infrastructure, offset);
+    shift(agricultural_capacity, offset);
+    shift(route_traffic, offset);
+    shift(river_access, offset);
+    shift(harbor_score, offset);
+    shift(owner_settlement_id, offset);
+    shift(owner_polity_id, offset);
     shift(mountainheights, offset);
     shift(mountainridges, offset);
     shift(craterrims, offset);
@@ -525,6 +601,17 @@ void planet::shiftterrain(int offset)
 
         if (cratercentreslist[i].x < 0)
             cratercentreslist[i].x = cratercentreslist[i].x + itswidth;
+    }
+
+    for (Settlement& settlement : settlementlist)
+    {
+        settlement.x -= offset;
+
+        while (settlement.x < 0)
+            settlement.x += itswidth;
+
+        while (settlement.x > itswidth)
+            settlement.x -= itswidth;
     }
 }
 
@@ -797,6 +884,85 @@ void planet::saveworld(string filename)
     writedata(outfile, noshademap);
     writedata(outfile, noisemap);
     writedata(outfile, testmap);
+    writedata(outfile, settlement_suitability);
+    writedata(outfile, social_infrastructure);
+    writedata(outfile, agricultural_capacity);
+    writedata(outfile, route_traffic);
+    writedata(outfile, river_access);
+    writedata(outfile, harbor_score);
+    writedata(outfile, owner_settlement_id);
+    writedata(outfile, owner_polity_id);
+
+    const auto writestring = [&](const std::string& value)
+    {
+        const int length = static_cast<int>(value.size());
+        writevariable(outfile, length);
+
+        if (length > 0)
+            outfile.write(value.data(), static_cast<std::streamsize>(length));
+    };
+
+    const int settlementcount = static_cast<int>(settlementlist.size());
+    writevariable(outfile, settlementcount);
+
+    for (const Settlement& settlement : settlementlist)
+    {
+        writevariable(outfile, settlement.id);
+        writevariable(outfile, settlement.x);
+        writevariable(outfile, settlement.y);
+        writestring(settlement.name);
+        writevariable(outfile, settlement.urbanPopulation);
+        writevariable(outfile, settlement.ruralPopulation);
+        writevariable(outfile, settlement.carryingCapacity);
+        writevariable(outfile, settlement.infrastructure);
+        writevariable(outfile, settlement.marketStrength);
+        writevariable(outfile, settlement.harbor);
+        writevariable(outfile, settlement.riverAccess);
+        writevariable(outfile, settlement.polityId);
+    }
+
+    const int politycount = static_cast<int>(politylist.size());
+    writevariable(outfile, politycount);
+
+    for (const Polity& polity : politylist)
+    {
+        writevariable(outfile, polity.id);
+        writestring(polity.name);
+        writevariable(outfile, polity.capitalSettlementId);
+        writevariable(outfile, polity.cohesion);
+        writevariable(outfile, polity.population);
+        writevariable(outfile, polity.infrastructure);
+        writevariable(outfile, polity.wealth);
+        writevariable(outfile, polity.militaryPressure);
+    }
+
+    const int routecount = static_cast<int>(routeedgelist.size());
+    writevariable(outfile, routecount);
+
+    for (const RouteEdge& route : routeedgelist)
+    {
+        writevariable(outfile, route.fromSettlementId);
+        writevariable(outfile, route.toSettlementId);
+        const std::uint8_t mode = static_cast<std::uint8_t>(route.mode);
+        writevariable(outfile, mode);
+        writevariable(outfile, route.cost);
+        writevariable(outfile, route.capacity);
+        writevariable(outfile, route.traffic);
+    }
+
+    const int eventcount = static_cast<int>(historyeventlist.size());
+    writevariable(outfile, eventcount);
+
+    for (const HistoryEvent& event : historyeventlist)
+    {
+        writevariable(outfile, event.year);
+        writestring(event.type);
+        writevariable(outfile, event.primarySettlementId);
+        writevariable(outfile, event.primaryPolityId);
+        writevariable(outfile, event.secondarySettlementId);
+        writevariable(outfile, event.secondaryPolityId);
+        writestring(event.summary);
+    }
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
@@ -835,6 +1001,26 @@ void planet::saveworld(string filename)
         writevariable(outfile, cratercentreslist[i].y);
         writevariable(outfile, cratercentreslist[i].z);
     }
+
+    writevariable(outfile, itstectonictimeoriginstep);
+    writevariable(outfile, itstectonictimemyr);
+    writevariable(outfile, itstectonicdeltatimemyr);
+    writedata(outfile, tectoniccrustagemyrmap);
+    writedata(outfile, tectoniccrustthicknessmap);
+    writedata(outfile, tectoniccrustclassmap);
+    writedata(outfile, tectonicuplifttendencymap);
+    writedata(outfile, tectonicsubsidencetendencymap);
+    writedata(outfile, tectonicaccumulatedstrainmap);
+    writedata(outfile, tectonicboundarytypemap);
+    writedata(outfile, tectonicboundarydistancemap);
+    writedata(outfile, tectonicboundarysegmentidmap);
+    writedata(outfile, tectonicnearestboundaryidmap);
+    writedata(outfile, tectonicboundaryhistorymap);
+    writedata(outfile, tectonicdeformingregionidmap);
+    writedata(outfile, tectonicdeformingregiontypemap);
+    writedata(outfile, tectonicdeformationratemap);
+    writedata(outfile, tectonicdeformationvelocityxmap);
+    writedata(outfile, tectonicdeformationvelocityymap);
 
     if (!outfile.good())
     {
@@ -1199,6 +1385,130 @@ bool planet::loadworld(string filename)
     readdata(infile, noisemap);
     readdata(infile, testmap);
 
+    auto readstring = [&](std::string& value)
+    {
+        int length = 0;
+        readvariable(infile, length);
+
+        if (length <= 0)
+        {
+            value.clear();
+            return;
+        }
+
+        value.assign(static_cast<size_t>(length), '\0');
+        infile.read(value.data(), static_cast<std::streamsize>(length));
+    };
+
+    if (fileversion >= 14)
+    {
+        readdata(infile, settlement_suitability);
+        readdata(infile, social_infrastructure);
+        readdata(infile, agricultural_capacity);
+        readdata(infile, route_traffic);
+        readdata(infile, river_access);
+        readdata(infile, harbor_score);
+        readdata(infile, owner_settlement_id);
+        readdata(infile, owner_polity_id);
+
+        clearsocialstate();
+
+        int settlementcount = 0;
+        readvariable(infile, settlementcount);
+        settlementcount = std::max(0, settlementcount);
+        settlementlist.resize(static_cast<size_t>(settlementcount));
+
+        for (Settlement& settlement : settlementlist)
+        {
+            readvariable(infile, settlement.id);
+            readvariable(infile, settlement.x);
+            readvariable(infile, settlement.y);
+            readstring(settlement.name);
+            readvariable(infile, settlement.urbanPopulation);
+            readvariable(infile, settlement.ruralPopulation);
+            readvariable(infile, settlement.carryingCapacity);
+            readvariable(infile, settlement.infrastructure);
+            readvariable(infile, settlement.marketStrength);
+            readvariable(infile, settlement.harbor);
+            readvariable(infile, settlement.riverAccess);
+            readvariable(infile, settlement.polityId);
+        }
+
+        int politycount = 0;
+        readvariable(infile, politycount);
+        politycount = std::max(0, politycount);
+        politylist.resize(static_cast<size_t>(politycount));
+
+        for (Polity& polity : politylist)
+        {
+            readvariable(infile, polity.id);
+            readstring(polity.name);
+            readvariable(infile, polity.capitalSettlementId);
+            readvariable(infile, polity.cohesion);
+            readvariable(infile, polity.population);
+            readvariable(infile, polity.infrastructure);
+            readvariable(infile, polity.wealth);
+            readvariable(infile, polity.militaryPressure);
+        }
+
+        int routecount = 0;
+        readvariable(infile, routecount);
+        routecount = std::max(0, routecount);
+        routeedgelist.resize(static_cast<size_t>(routecount));
+
+        for (RouteEdge& route : routeedgelist)
+        {
+            readvariable(infile, route.fromSettlementId);
+            readvariable(infile, route.toSettlementId);
+            std::uint8_t mode = 0;
+            readvariable(infile, mode);
+            if (mode > static_cast<std::uint8_t>(RouteMode::sea))
+                mode = static_cast<std::uint8_t>(RouteMode::land);
+            route.mode = static_cast<RouteMode>(mode);
+            readvariable(infile, route.cost);
+            readvariable(infile, route.capacity);
+            readvariable(infile, route.traffic);
+        }
+
+        int eventcount = 0;
+        readvariable(infile, eventcount);
+        eventcount = std::max(0, eventcount);
+        historyeventlist.resize(static_cast<size_t>(eventcount));
+
+        for (HistoryEvent& event : historyeventlist)
+        {
+            readvariable(infile, event.year);
+            readstring(event.type);
+            readvariable(infile, event.primarySettlementId);
+            readvariable(infile, event.primaryPolityId);
+            readvariable(infile, event.secondarySettlementId);
+            readvariable(infile, event.secondaryPolityId);
+            readstring(event.summary);
+        }
+    }
+    else
+    {
+        parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+        {
+            for (int i = startx; i <= endx; i++)
+            {
+                for (int j = 0; j < ARRAYHEIGHT; j++)
+                {
+                    settlement_suitability[i][j] = 0;
+                    social_infrastructure[i][j] = 0;
+                    agricultural_capacity[i][j] = 0;
+                    route_traffic[i][j] = 0;
+                    river_access[i][j] = 0;
+                    harbor_score[i][j] = 0;
+                    owner_settlement_id[i][j] = -1;
+                    owner_polity_id[i][j] = -1;
+                }
+            }
+        }, 64);
+
+        clearsocialstate();
+    }
+
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
         readshortvectordata(infile, seasonaltempmaps[season]);
@@ -1245,6 +1555,61 @@ bool planet::loadworld(string filename)
         readvariable(infile, cratercentreslist[i].x);
         readvariable(infile, cratercentreslist[i].y);
         readvariable(infile, cratercentreslist[i].z);
+    }
+
+    if (fileversion >= 15)
+    {
+        readvariable(infile, itstectonictimeoriginstep);
+        readvariable(infile, itstectonictimemyr);
+        readvariable(infile, itstectonicdeltatimemyr);
+        readdata(infile, tectoniccrustagemyrmap);
+        readdata(infile, tectoniccrustthicknessmap);
+        readdata(infile, tectoniccrustclassmap);
+        readdata(infile, tectonicuplifttendencymap);
+        readdata(infile, tectonicsubsidencetendencymap);
+        readdata(infile, tectonicaccumulatedstrainmap);
+        readdata(infile, tectonicboundarytypemap);
+        readdata(infile, tectonicboundarydistancemap);
+        readdata(infile, tectonicboundarysegmentidmap);
+        readdata(infile, tectonicnearestboundaryidmap);
+        readdata(infile, tectonicboundaryhistorymap);
+        readdata(infile, tectonicdeformingregionidmap);
+        readdata(infile, tectonicdeformingregiontypemap);
+        readdata(infile, tectonicdeformationratemap);
+        readdata(infile, tectonicdeformationvelocityxmap);
+        readdata(infile, tectonicdeformationvelocityymap);
+    }
+    else
+    {
+        itstectonictimeoriginstep = 0;
+        itstectonictimemyr = 0.0f;
+        itstectonicdeltatimemyr = 0.0f;
+
+        parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+        {
+            for (int i = startx; i <= endx; i++)
+            {
+                for (int j = 0; j < ARRAYHEIGHT; j++)
+                {
+                    tectoniccrustagemyrmap[i][j] = 0.0f;
+                    tectoniccrustthicknessmap[i][j] = 0.0f;
+                    tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
+                    tectonicuplifttendencymap[i][j] = 0.0f;
+                    tectonicsubsidencetendencymap[i][j] = 0.0f;
+                    tectonicaccumulatedstrainmap[i][j] = 0.0f;
+                    tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
+                    tectonicboundarydistancemap[i][j] = 0;
+                    tectonicboundarysegmentidmap[i][j] = 0;
+                    tectonicnearestboundaryidmap[i][j] = 0;
+                    tectonicboundaryhistorymap[i][j] = 0.0f;
+                    tectonicdeformingregionidmap[i][j] = 0;
+                    tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
+                    tectonicdeformationratemap[i][j] = 0.0f;
+                    tectonicdeformationvelocityxmap[i][j] = 0.0f;
+                    tectonicdeformationvelocityymap[i][j] = 0.0f;
+                }
+            }
+        }, 64);
     }
 
     setmaxriverflow();

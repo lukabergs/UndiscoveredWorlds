@@ -20,6 +20,10 @@ struct WorldPropertyControls
     bool rivers = true;
     bool lakes = true;
     bool deltas = true;
+    bool socialEnabled = false;
+    SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
+    bool usePrehistory = true;
+    int historyYears = 1200;
 };
 
 WorldPropertyControls makeworldpropertycontrols(const planet& world);

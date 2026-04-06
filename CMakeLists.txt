@@ -40,6 +40,11 @@ set(SOURCES
     map_appearance.cpp
     plate_tectonics_adapter.cpp
     physical_layers.cpp
+    social_generation.cpp
+    social_sites.cpp
+    social_routes.cpp
+    social_polities.cpp
+    social_trade.cpp
     world_property_controls.cpp
     app_windows.cpp
     ui_panels.cpp
@@ -76,12 +81,17 @@ set(PLATE_TECTONICS_SOURCES
     third_party/plate_tectonics/src/simplerandom.cpp
     third_party/plate_tectonics/src/simplexnoise.cpp
     third_party/plate_tectonics/src/sqrdmd.cpp
+    third_party/plate_tectonics/src/tectonic_boundary_graph.cpp
+    third_party/plate_tectonics/src/tectonic_deforming_regions.cpp
+    third_party/plate_tectonics/src/tectonic_provenance.cpp
+    third_party/plate_tectonics/src/topography_codec.cpp
     third_party/plate_tectonics/src/utils.cpp
     third_party/plate_tectonics/src/world_point.cpp
 )
 
 add_library(plate_tectonics_vendor STATIC ${PLATE_TECTONICS_SOURCES})
 target_include_directories(plate_tectonics_vendor PUBLIC third_party/plate_tectonics/src)
+target_compile_definitions(plate_tectonics_vendor PRIVATE NOMINMAX)
 set_target_properties(plate_tectonics_vendor PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
 
 # 3. Create the executable

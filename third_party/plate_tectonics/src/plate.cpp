@@ -37,12 +37,98 @@
 
 using namespace std;
 
+namespace {
+
+static const float kRiverErosionStrength = 0.055f;
+static const float kRainfallRedistributionStrength = 0.14f;
+static const float kWindRedistributionStrength = 0.08f;
+static const float kSlopeNormalization = 0.35f;
+static const float kWindRandomVariation = 0.45f;
+static const float kUpliftCompensationStrength = 1.35f;
+static const float kUpliftDecaySteps = 18.0f;
+static const float kMinRasterRotationAngle = 0.015f;
+static const float kContinentalBase = 1.0f;
+static const float kContinentalAreaThreshold = 0.25f;
+static const float kContinentalMassThreshold = 0.55f;
+
+float clamp_unit(float value) {
+    return std::max(0.0f, std::min(1.0f, value));
+}
+
+float wrapped_delta(float point, float center, uint32_t world_size) {
+    float delta = point - center;
+    const float period = static_cast<float>(world_size);
+    const float half_period = period * 0.5f;
+    if (delta > half_period) {
+        delta -= period;
+    } else if (delta < -half_period) {
+        delta += period;
+    }
+    return delta;
+}
+
+float wrap_coordinate(float value, uint32_t world_size) {
+    const float period = static_cast<float>(world_size);
+    while (value < 0.0f) {
+        value += period;
+    }
+    while (value >= period) {
+        value -= period;
+    }
+    return value;
+}
+
+float rainfall_from_latitude(uint32_t world_y, uint32_t world_height) {
+    if (world_height == 0) {
+        return 0.5f;
+    }
+    const float latitude =
+        (static_cast<float>(world_y) + 0.5f) / static_cast<float>(world_height);
+    return std::sin(latitude * PI);
+}
+
+float normalized_slope(float center, float west, float east, float north, float south) {
+    const float west_height = west > 0.0f ? west : center;
+    const float east_height = east > 0.0f ? east : center;
+    const float north_height = north > 0.0f ? north : center;
+    const float south_height = south > 0.0f ? south : center;
+    const float dx = 0.5f * (east_height - west_height);
+    const float dy = 0.5f * (south_height - north_height);
+    const float slope = std::sqrt(dx * dx + dy * dy);
+    return slope / (slope + kSlopeNormalization);
+}
+
+float uplift_compensation(float crust, float lower_bound, uint32_t current_iteration,
+                          uint32_t timestamp) {
+    if (crust <= lower_bound) {
+        return 0.0f;
+    }
+    const float relief = crust - lower_bound;
+    const float relief_factor = relief / (relief + kSlopeNormalization);
+    const uint32_t crust_age =
+        current_iteration > timestamp ? current_iteration - timestamp : 0U;
+    const float youth = std::exp(-static_cast<float>(crust_age) / kUpliftDecaySteps);
+    return 1.0f + kUpliftCompensationStrength * relief_factor * youth;
+}
+
+} // namespace
+
 plate::plate(long seed, float* m, uint32_t w, uint32_t h, uint32_t _x, uint32_t _y,
-             uint32_t plate_age, WorldDimension worldDimension)
+             uint32_t plate_age, WorldDimension worldDimension, float erosion_strength,
+             float crust_rotation_strength, float rotation_strength)
     : _worldDimension(worldDimension), _randsource(seed), map(m, w, h), age_map(w, h),
       _bounds(nullptr), _mass(MassBuilder(m, Dimension(w, h)).build()),
-      _movement(_randsource, worldDimension), _segments(nullptr), _mySegmentCreator(nullptr) {
+      _movement(_randsource, worldDimension, rotation_strength), _plate_type(PlateType::Oceanic),
+      _buoyancy(0.0f),
+      _erosion_strength(erosion_strength < 0.0f ? 0.0f : erosion_strength),
+      _crust_rotation_strength(crust_rotation_strength < 0.0f ? 0.0f : crust_rotation_strength),
+      _pending_crust_rotation(0.0f),
+      _segments(nullptr), _mySegmentCreator(nullptr) {
     const uint32_t plate_area = w * h;
+    uint32_t occupied_area = 0;
+    uint32_t continental_area = 0;
+    float occupied_mass = 0.0f;
+    float continental_mass = 0.0f;
 
     _bounds = new Bounds(worldDimension, FloatPoint(static_cast<float>(_x), static_cast<float>(_y)),
                          Dimension(w, h));
@@ -50,6 +136,15 @@ plate::plate(long seed, float* m, uint32_t w, uint32_t h, uint32_t _x, uint32_t 
     uint32_t k;
     for (uint32_t y = k = 0; y < _bounds->height(); ++y) {
         for (uint32_t x = 0; x < _bounds->width(); ++x, ++k) {
+            if (m[k] > 0.0f) {
+                ++occupied_area;
+                occupied_mass += m[k];
+                if (m[k] >= kContinentalBase) {
+                    ++continental_area;
+                    continental_mass += m[k];
+                }
+            }
+
             // Set the age of ALL points in this plate to same
             // value. The right thing to do would be to simulate
             // the generation of new oceanic crust as if the plate
@@ -58,6 +153,24 @@ plate::plate(long seed, float* m, uint32_t w, uint32_t h, uint32_t _x, uint32_t 
             age_map.set(x, y, plate_age & -(m[k] > 0));
         }
     }
+
+    const float continental_area_ratio =
+        occupied_area > 0 ? static_cast<float>(continental_area) / static_cast<float>(occupied_area)
+                          : 0.0f;
+    const float continental_mass_ratio =
+        occupied_mass > FLT_EPSILON ? continental_mass / occupied_mass : 0.0f;
+    _plate_type = (continental_area_ratio >= kContinentalAreaThreshold ||
+                   continental_mass_ratio >= kContinentalMassThreshold)
+        ? PlateType::Continental
+        : PlateType::Oceanic;
+
+    const float mean_crust =
+        occupied_area > 0 ? occupied_mass / static_cast<float>(occupied_area) : 0.0f;
+    _buoyancy = _plate_type == PlateType::Continental
+        ? 1.10f + 0.85f * continental_area_ratio + 0.35f * continental_mass_ratio +
+              0.10f * mean_crust
+        : 0.25f + 0.20f * continental_area_ratio + 0.55f * mean_crust;
+
     Segments* segments = new Segments(plate_area);
     _segments = segments;
     _mySegmentCreator = new MySegmentCreator(*_bounds, _segments, map, _worldDimension);
@@ -105,6 +218,8 @@ void plate::addCrustBySubduction(uint32_t x, uint32_t y, float z, uint32_t t, fl
     //       Drawbacks:
     //           Additional logic required
     //           Might place crust on other continent on same plate!
+    const uint32_t world_x = x;
+    const uint32_t world_y = y;
     _bounds->getValidMapIndex(&x, &y);
 
     // Take vector difference only between plates that move more or less
@@ -112,9 +227,12 @@ void plate::addCrustBySubduction(uint32_t x, uint32_t y, float z, uint32_t t, fl
     //
     // Use of "this" pointer is not necessary, but it make code clearer.
     // Cursed be those who use "m_" prefix in member names! >(
-    float dot = _movement.dot(dx, dy);
-    dx -= _movement.velocityOnX(dot > 0);
-    dy -= _movement.velocityOnY(dot > 0);
+    Platec::FloatVector local_velocity = surfaceVelocityAt(world_x, world_y);
+    const float dot = local_velocity.dotProduct(Platec::FloatVector(dx, dy));
+    if (dot > 0.0f && local_velocity.normalize() > 0.0f) {
+        dx -= local_velocity.x();
+        dy -= local_velocity.y();
+    }
 
     float offset = _randsource.next_float();
     float offset_sign = static_cast<float>(2 * static_cast<int>(_randsource.next() % 2) - 1);
@@ -209,7 +327,7 @@ void plate::applyFriction(float deformed_mass) {
 
 void plate::collide(plate& p, float coll_mass) {
     if (!_mass.null() && coll_mass > 0) {
-        _movement.collide(_mass, p, coll_mass);
+        _movement.collide(*this, p, coll_mass);
     }
 }
 
@@ -249,7 +367,8 @@ void plate::findRiverSources(float lower_bound, vector<uint32_t>* sources) {
     }
 }
 
-void plate::flowRivers(float lower_bound, vector<uint32_t>* sources, HeightMap& tmp) {
+void plate::flowRivers(float lower_bound, const std::vector<float>& river_strength,
+                       vector<uint32_t>* sources, HeightMap& tmp) {
     const uint32_t bounds_area = _bounds->area();
     vector<uint32_t> sinks_data;
     vector<uint32_t>* sinks = &sinks_data;
@@ -313,7 +432,9 @@ void plate::flowRivers(float lower_bound, vector<uint32_t>* sources, HeightMap& 
             }
 
             // Erode this location with the water flow.
-            tmp[index] -= (tmp[index] - lower_bound) * 0.2f;
+            const float strength =
+                index < river_strength.size() ? river_strength[index] : _erosion_strength;
+            tmp[index] -= (tmp[index] - lower_bound) * kRiverErosionStrength * strength;
         }
 
         vector<uint32_t>* v_tmp = sources;
@@ -323,20 +444,55 @@ void plate::flowRivers(float lower_bound, vector<uint32_t>* sources, HeightMap& 
     }
 }
 
-void plate::erode(float lower_bound) {
+void plate::erode(float lower_bound, uint32_t current_iteration) {
+    if (_erosion_strength <= 0.0f) {
+        return;
+    }
+
+    const uint32_t bounds_width = _bounds->width();
+    const uint32_t bounds_height = _bounds->height();
+    std::vector<float> river_strength(_bounds->area(), 0.0f);
+    std::vector<float> redistribution_strength(_bounds->area(), 0.0f);
+
+    for (uint32_t y = 0; y < bounds_height; ++y) {
+        const uint32_t world_y = _worldDimension.yMod(_bounds->topAsUint() + y);
+        const float rainfall = rainfall_from_latitude(world_y, _worldDimension.getHeight());
+        for (uint32_t x = 0; x < bounds_width; ++x) {
+            const uint32_t index = y * bounds_width + x;
+            if (map[index] < lower_bound) {
+                continue;
+            }
+
+            float w_crust, e_crust, n_crust, s_crust;
+            uint32_t w, e, n, s;
+            calculateCrust(x, y, index, w_crust, e_crust, n_crust, s_crust, w, e, n, s);
+
+            const float slope = normalized_slope(map[index], w_crust, e_crust, n_crust, s_crust);
+            const float wind_variation =
+                1.0f + (_randsource.next_float() * 2.0f - 1.0f) * kWindRandomVariation;
+            const float wind = clamp_unit(slope * wind_variation);
+            const float uplift =
+                uplift_compensation(map[index], lower_bound, current_iteration, age_map[index]);
+
+            river_strength[index] = std::min(
+                2.5f, _erosion_strength * (0.30f + 0.70f * rainfall) * uplift);
+            redistribution_strength[index] = std::min(
+                0.45f,
+                _erosion_strength *
+                    (kRainfallRedistributionStrength * rainfall +
+                     kWindRedistributionStrength * wind) *
+                    uplift);
+        }
+    }
+
     vector<uint32_t> sources_data;
     vector<uint32_t>* sources = &sources_data;
+    const float erosion_floor = lower_bound;
 
     HeightMap tmpHm(map);
-    findRiverSources(lower_bound, sources);
-    flowRivers(lower_bound, sources, tmpHm);
-
-    // Add random noise (10 %) to heightmap.
+    findRiverSources(erosion_floor, sources);
+    flowRivers(erosion_floor, river_strength, sources, tmpHm);
     for (uint32_t i = 0; i < _bounds->area(); ++i) {
-        float alpha = 0.2f * _randsource.next_float();
-        tmpHm[i] += 0.1f * tmpHm[i] - alpha * tmpHm[i];
-        // Clamp to zero to prevent floating point errors from accumulating
-        // and causing negative mass values (Issue #30)
         if (tmpHm[i] < 0.0f) {
             tmpHm[i] = 0.0f;
         }
@@ -344,16 +500,18 @@ void plate::erode(float lower_bound) {
 
     map = tmpHm;
     tmpHm.set_all(0.0f);
-    MassBuilder massBuilder;
-
     for (uint32_t y = 0; y < _bounds->height(); ++y) {
         for (uint32_t x = 0; x < _bounds->width(); ++x) {
             const uint32_t index = y * _bounds->width() + x;
-            massBuilder.addPoint(x, y, map[index]);
             tmpHm[index] += map[index]; // Careful not to overwrite earlier amounts.
 
-            if (map[index] < lower_bound)
+            if (map[index] < erosion_floor)
                 continue;
+
+            const float local_strength = redistribution_strength[index];
+            if (local_strength <= FLT_EPSILON) {
+                continue;
+            }
 
             float w_crust, e_crust, n_crust, s_crust;
             uint32_t w, e, n, s;
@@ -406,13 +564,13 @@ void plate::erode(float lower_bound) {
                 // crust from this peak so that it would be as tall as its
                 // tallest lower neighbour. Thus first step is make ALL
                 // lower neighbours and this point equally tall.
-                tmpHm[w] += (w_diff - min_diff) * (w_crust > 0);
-                tmpHm[e] += (e_diff - min_diff) * (e_crust > 0);
-                tmpHm[n] += (n_diff - min_diff) * (n_crust > 0);
-                tmpHm[s] += (s_diff - min_diff) * (s_crust > 0);
-                tmpHm[index] -= min_diff;
+                tmpHm[w] += (w_diff - min_diff) * (w_crust > 0) * local_strength;
+                tmpHm[e] += (e_diff - min_diff) * (e_crust > 0) * local_strength;
+                tmpHm[n] += (n_diff - min_diff) * (n_crust > 0) * local_strength;
+                tmpHm[s] += (s_diff - min_diff) * (s_crust > 0) * local_strength;
+                tmpHm[index] -= min_diff * local_strength;
 
-                min_diff -= diff_sum;
+                min_diff = (min_diff - diff_sum) * local_strength;
 
                 // Spread the remaining crust equally among all lower nbours.
                 min_diff /= 1 + (w_crust > 0) + (e_crust > 0) + (n_crust > 0) + (s_crust > 0);
@@ -423,11 +581,11 @@ void plate::erode(float lower_bound) {
                 tmpHm[s] += min_diff * (s_crust > 0);
                 tmpHm[index] += min_diff;
             } else {
-                float unit = min_diff / diff_sum;
+                float unit = (min_diff * local_strength) / diff_sum;
 
                 // Remove all crust from this location making it as tall as
                 // its tallest lower neighbour.
-                tmpHm[index] -= min_diff;
+                tmpHm[index] -= min_diff * local_strength;
 
                 // Spread all removed crust among all other lower neighbours.
                 tmpHm[w] += unit * (w_diff - min_diff) * (w_crust > 0);
@@ -447,7 +605,7 @@ void plate::erode(float lower_bound) {
     }
 
     map = tmpHm;
-    _mass = massBuilder.build();
+    _mass = MassBuilder(map.raw_data(), Dimension(_bounds->width(), _bounds->height())).build();
 }
 
 void plate::getCollisionInfo(uint32_t wx, uint32_t wy, uint32_t* count, float* ratio) const {
@@ -473,6 +631,38 @@ uint32_t plate::getCrustTimestamp(uint32_t x, uint32_t y) const {
     return index != BAD_INDEX ? age_map[index] : 0;
 }
 
+FloatPoint plate::worldMassCenter() const {
+    if (_mass.null()) {
+        return FloatPoint(static_cast<float>(_bounds->leftAsUint()),
+                          static_cast<float>(_bounds->topAsUint()));
+    }
+
+    const float world_x =
+        wrap_coordinate(static_cast<float>(_bounds->leftAsUint()) + _mass.getCx(),
+                        _worldDimension.getWidth());
+    const float world_y =
+        wrap_coordinate(static_cast<float>(_bounds->topAsUint()) + _mass.getCy(),
+                        _worldDimension.getHeight());
+    return FloatPoint(world_x, world_y);
+}
+
+Platec::FloatVector plate::surfaceVelocityAt(uint32_t x, uint32_t y) const {
+    const Platec::FloatVector linear_velocity = _movement.velocityVector();
+    if (_mass.null()) {
+        return linear_velocity;
+    }
+
+    const FloatPoint center = worldMassCenter();
+    const float dx =
+        wrapped_delta(static_cast<float>(x), center.getX(), _worldDimension.getWidth());
+    const float dy =
+        wrapped_delta(static_cast<float>(y), center.getY(), _worldDimension.getHeight());
+    const float angular_velocity = _movement.rotationAngle();
+
+    return Platec::FloatVector(linear_velocity.x() - dy * angular_velocity,
+                               linear_velocity.y() + dx * angular_velocity);
+}
+
 void plate::getMap(const float** c, const uint32_t** t) const {
     if (c) {
         *c = map.raw_data();
@@ -482,8 +672,166 @@ void plate::getMap(const float** c, const uint32_t** t) const {
     }
 }
 
+void plate::ensureRotationPadding(uint32_t margin) {
+    if (margin == 0) {
+        return;
+    }
+
+    const uint32_t width = _bounds->width();
+    const uint32_t height = _bounds->height();
+    if (width >= _worldDimension.getWidth() && height >= _worldDimension.getHeight()) {
+        return;
+    }
+
+    bool need_left = false;
+    bool need_right = false;
+    bool need_top = false;
+    bool need_bottom = false;
+
+    for (uint32_t y = 0; y < height && !(need_left && need_right); ++y) {
+        for (uint32_t x = 0; x < margin && x < width; ++x) {
+            if (map[y * width + x] > 0.0f) {
+                need_left = true;
+                break;
+            }
+        }
+        for (uint32_t x = 0; x < margin && x < width; ++x) {
+            if (map[y * width + (width - 1 - x)] > 0.0f) {
+                need_right = true;
+                break;
+            }
+        }
+    }
+
+    for (uint32_t x = 0; x < width && !(need_top && need_bottom); ++x) {
+        for (uint32_t y = 0; y < margin && y < height; ++y) {
+            if (map[y * width + x] > 0.0f) {
+                need_top = true;
+                break;
+            }
+        }
+        for (uint32_t y = 0; y < margin && y < height; ++y) {
+            if (map[(height - 1 - y) * width + x] > 0.0f) {
+                need_bottom = true;
+                break;
+            }
+        }
+    }
+
+    uint32_t available_x = _worldDimension.getWidth() - width;
+    uint32_t available_y = _worldDimension.getHeight() - height;
+    uint32_t pad_left = need_left && available_x > 0 ? 1U : 0U;
+    uint32_t pad_right = need_right && available_x > pad_left ? 1U : 0U;
+    uint32_t pad_top = need_top && available_y > 0 ? 1U : 0U;
+    uint32_t pad_bottom = need_bottom && available_y > pad_top ? 1U : 0U;
+
+    if (pad_left == 0 && pad_right == 0 && pad_top == 0 && pad_bottom == 0) {
+        return;
+    }
+
+    _bounds->shift(-1.0f * static_cast<float>(pad_left), -1.0f * static_cast<float>(pad_top));
+    _bounds->grow(static_cast<int>(pad_left + pad_right), static_cast<int>(pad_top + pad_bottom));
+
+    HeightMap padded_map(_bounds->width(), _bounds->height());
+    AgeMap padded_age(_bounds->width(), _bounds->height());
+    uint32_t* padded_segments = new uint32_t[_bounds->area()];
+    padded_map.set_all(0.0f);
+    padded_age.set_all(0);
+    memset(padded_segments, 255, _bounds->area() * sizeof(uint32_t));
+
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint32_t dest_index = (pad_top + y) * _bounds->width() + pad_left;
+        const uint32_t src_index = y * width;
+        memcpy(&padded_map[dest_index], &map[src_index], width * sizeof(float));
+        memcpy(&padded_age[dest_index], &age_map[src_index], width * sizeof(uint32_t));
+    }
+
+    map = padded_map;
+    age_map = padded_age;
+    _segments->reassign(_bounds->area(), padded_segments);
+    _segments->shift(pad_left, pad_top);
+}
+
+void plate::rotateCrust(float angle) {
+    if (fabsf(angle) < 0.0001f || _mass.null()) {
+        return;
+    }
+
+    ensureRotationPadding(1);
+
+    const uint32_t width = _bounds->width();
+    const uint32_t height = _bounds->height();
+    const uint32_t area = _bounds->area();
+    HeightMap rotated(width, height);
+    AgeMap rotated_age(width, height);
+    std::vector<float> age_accumulator(area, 0.0f);
+    rotated.set_all(0.0f);
+    rotated_age.set_all(0);
+
+    float center_x = _mass.getCx();
+    float center_y = _mass.getCy();
+    if (!_bounds->isInLimits(center_x, center_y)) {
+        center_x = (static_cast<float>(width) - 1.0f) * 0.5f;
+        center_y = (static_cast<float>(height) - 1.0f) * 0.5f;
+    }
+
+    const float c = cosf(angle);
+    const float s = sinf(angle);
+
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint32_t index = y * width + x;
+            const float crust = map[index];
+            if (crust <= 0.0f) {
+                continue;
+            }
+
+            const float dx = static_cast<float>(x) - center_x;
+            const float dy = static_cast<float>(y) - center_y;
+            const float rotated_x = dx * c - dy * s + center_x;
+            const float rotated_y = dx * s + dy * c + center_y;
+            const int tx = static_cast<int>(std::lround(rotated_x));
+            const int ty = static_cast<int>(std::lround(rotated_y));
+            if (tx < 0 || ty < 0 || tx >= static_cast<int>(width) ||
+                ty >= static_cast<int>(height)) {
+                continue;
+            }
+
+            const uint32_t dest_index =
+                static_cast<uint32_t>(ty) * width + static_cast<uint32_t>(tx);
+            rotated[dest_index] += crust;
+            age_accumulator[dest_index] += crust * static_cast<float>(age_map[index]);
+        }
+    }
+
+    MassBuilder mass_builder;
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint32_t index = y * width + x;
+            if (rotated[index] <= 0.00001f) {
+                rotated[index] = 0.0f;
+                rotated_age[index] = 0;
+                continue;
+            }
+
+            rotated_age[index] =
+                static_cast<uint32_t>(age_accumulator[index] / rotated[index]);
+            mass_builder.addPoint(x, y, rotated[index]);
+        }
+    }
+
+    map = rotated;
+    age_map = rotated_age;
+    _mass = mass_builder.build();
+}
+
 void plate::move() {
     _movement.move();
+    _pending_crust_rotation += _movement.rotationAngle() * _crust_rotation_strength;
+    if (fabsf(_pending_crust_rotation) >= kMinRasterRotationAngle) {
+        rotateCrust(_pending_crust_rotation);
+        _pending_crust_rotation = 0.0f;
+    }
 
     // Location modulations into range [0..world width/height[ are a have to!
     // If left undone SOMETHING WILL BREAK DOWN SOMEWHERE in the code!

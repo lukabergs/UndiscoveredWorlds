@@ -36,6 +36,7 @@
 #include "classes.hpp"
 #include "planet.hpp"
 #include "physical_layers.hpp"
+#include "social_generation.hpp"
 #include "region.hpp"
 #include "app_dialogs.hpp"
 #include "app_environment.hpp"
@@ -83,6 +84,10 @@ struct CommandLineGenerationOptions
     bool rivers = true;
     bool lakes = true;
     bool deltas = true;
+    bool socialEnabled = false;
+    SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
+    bool usePrehistory = true;
+    int historyYears = 1200;
     bool logToProfilingWorkbook = true;
     bool appendClimateWorkbook = false;
     bool hasSeed = false;
@@ -129,6 +134,10 @@ void printcommandlineusage()
     cout << "  --no-rivers             Disable river generation.\n";
     cout << "  --no-lakes              Disable lake generation.\n";
     cout << "  --no-deltas             Disable delta generation.\n";
+    cout << "  --social                Enable social generation.\n";
+    cout << "  --social-mode <mode>    static or historical.\n";
+    cout << "  --no-prehistory         Disable prehistory pass in historical mode.\n";
+    cout << "  --history-years <years> Historical simulation span.\n";
     cout << "  --no-profile-log        Skip profiling workbook logging.\n";
     cout << "  --help                  Show this message.\n";
 }
@@ -207,6 +216,18 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
             continue;
         }
 
+        if (argument == "--social")
+        {
+            options.socialEnabled = true;
+            continue;
+        }
+
+        if (argument == "--no-prehistory")
+        {
+            options.usePrehistory = false;
+            continue;
+        }
+
         if (argument == "--no-profile-log")
         {
             options.logToProfilingWorkbook = false;
@@ -219,7 +240,7 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
             continue;
         }
 
-        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea")
+        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -256,6 +277,23 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
                     options.importSeaPath = value;
                     options.hasImportSeaPath = true;
                 }
+                else if (argument == "--social-mode")
+                {
+                    if (value == "static")
+                        options.socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
+                    else if (value == "historical")
+                        options.socialMode = SocialGenerationOptions::Mode::historical;
+                    else
+                    {
+                        cerr << "Invalid value for --social-mode: " << value << '\n';
+                        cleanup();
+                        return false;
+                    }
+                }
+                else if (argument == "--history-years")
+                {
+                    options.historyYears = std::max(10, stoi(value));
+                }
                 else
                 {
                     options.savePath = value;
@@ -291,7 +329,17 @@ filesystem::path commandlinevalidationdirectory(long seed)
     return outputroot / "validation" / ("seed_" + to_string(seed));
 }
 
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate = nullptr)
+SocialGenerationOptions makesocialoptions(bool enabled, SocialGenerationOptions::Mode mode, bool useprehistory, int historyyears)
+{
+    SocialGenerationOptions options;
+    options.enabled = enabled;
+    options.mode = mode;
+    options.usePrehistory = mode == SocialGenerationOptions::Mode::historical ? useprehistory : false;
+    options.historyYears = std::max(10, historyyears);
+    return options;
+}
+
+void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate = nullptr)
 {
     const int width = world.width();
     const int height = world.height();
@@ -343,6 +391,7 @@ void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes,
 
     generateglobalclimate(world, dorivers, dolakes, dodeltas, smalllake, largelake, landshape, mountaindrainage, shelves, importedclimate);
     generatephysicalworldlayers(world, shelves);
+    generatesocialworld(world, socialoptions);
 
     if (appendclimateworkbook && appendclimatebenchmarkworkbook(world) == false)
         updatereport("Climate workbook benchmark update failed");
@@ -394,6 +443,8 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     if (importedworld == false)
         changeworldproperties(*world);
 
+    const SocialGenerationOptions socialoptions = makesocialoptions(options.socialEnabled, options.socialMode, options.usePrehistory, options.historyYears);
+
     updatereport((importedworld ? "Generating imported world from seed: " : "Generating world from seed: ") + to_string(world->seed()) + ":");
     updatereport("");
 
@@ -423,7 +474,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             return 1;
         }
 
-        completeimportedworldgeneration(*world, options.rivers, options.lakes, options.deltas, options.appendClimateWorkbook, smalllake, largelake, landshape, okmountains);
+        completeimportedworldgeneration(*world, options.rivers, options.lakes, options.deltas, options.appendClimateWorkbook, socialoptions, smalllake, largelake, landshape, okmountains);
     }
     else
     {
@@ -454,6 +505,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         generateglobalterrain(*world, 0, iterations, mergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves, squareroot);
         generateglobalclimate(*world, options.rivers, options.lakes, options.deltas, smalllake, largelake, landshape, mountaindrainage, shelves);
         generatephysicalworldlayers(*world, shelves);
+        generatesocialworld(*world, socialoptions);
     }
 
     endtimedreporting();
@@ -1043,6 +1095,15 @@ int main()
         drawallregionalmapimages(*world, *region, regionalmaps);
     };
 
+    auto socialoptionsfromdebug = [&]() -> SocialGenerationOptions
+    {
+        return makesocialoptions(
+            worldgenerationdebug.options.socialEnabled,
+            worldgenerationdebug.options.socialMode,
+            worldgenerationdebug.options.usePrehistory,
+            worldgenerationdebug.options.historyYears);
+    };
+
     float linespace = 8.0f; // Gap between groups of buttons.
 
     string& filepathname = filedialogs.filepathname;
@@ -1069,6 +1130,19 @@ int main()
     bool& currentrivers = worldpropertycontrols.rivers; // This one controls whether or not rivers will be calculated for the custom world.
     bool& currentlakes = worldpropertycontrols.lakes; // This one controls whether or not lakes will be calculated for the custom world.
     bool& currentdeltas = worldpropertycontrols.deltas; // This one controls whether or not river deltas will be calculated for the custom world.
+    bool& currentsocialenabled = worldpropertycontrols.socialEnabled;
+    SocialGenerationOptions::Mode& currentsocialmode = worldpropertycontrols.socialMode;
+    bool& currentuseprehistory = worldpropertycontrols.usePrehistory;
+    int& currenthistoryyears = worldpropertycontrols.historyYears;
+
+    auto socialoptionsfromworldcontrols = [&]() -> SocialGenerationOptions
+    {
+        return makesocialoptions(
+            currentsocialenabled,
+            currentsocialmode,
+            currentuseprehistory,
+            currenthistoryyears);
+    };
 
     AppearanceSettings appearance = makeappearancesettings(*world);
     ImVec4& oceancolour = appearance.oceancolour;
@@ -1293,6 +1367,7 @@ int main()
                 generateglobalterrain(*world, 0, iterations, thismergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves,squareroot);
                 generateglobalclimate(*world, 1, 1, 1, smalllake, largelake, landshape, mountaindrainage, shelves);
                 generatephysicalworldlayers(*world, shelves);
+                generatesocialworld(*world, socialoptionsfromdebug());
 
                 // Now draw a new map
 
@@ -2638,7 +2713,7 @@ int main()
                 // Plug in the world settings.
 
                 applyworldpropertycontrols(*world, worldpropertycontrols);
-                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, compareclimateworkbook, smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
+                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, compareclimateworkbook, socialoptionsfromworldcontrols(), smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
 
                 // Now draw a new map
 
@@ -2799,6 +2874,13 @@ int main()
                 sf::Image areadepositionimage;
                 sf::Image areafertilityimage;
                 sf::Image arearesourcesimage;
+                sf::Image areasuitabilityimage;
+                sf::Image areasettlementsimage;
+                sf::Image areapopulationimage;
+                sf::Image areainfrastructureimage;
+                sf::Image areapolitiesimage;
+                sf::Image areatradeimage;
+                sf::Image arearecentconflictimage;
 
                 auto getAreaExportImage = [&](mapviewenum view) -> sf::Image&
                 {
@@ -2817,6 +2899,13 @@ int main()
                     case deposition: return areadepositionimage;
                     case fertility: return areafertilityimage;
                     case resources: return arearesourcesimage;
+                    case suitability: return areasuitabilityimage;
+                    case settlements_map: return areasettlementsimage;
+                    case population: return areapopulationimage;
+                    case infrastructure_map: return areainfrastructureimage;
+                    case polities_map: return areapolitiesimage;
+                    case trade_map: return areatradeimage;
+                    case recent_conflict_map: return arearecentconflictimage;
                     }
 
                     return areareliefimage;

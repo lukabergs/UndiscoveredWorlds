@@ -30,6 +30,9 @@
 #include "heightmap.hpp"
 #include "rectangle.hpp"
 #include "simplerandom.hpp"
+#include "tectonic_contract.hpp"
+#include "tectonic_scenario.hpp"
+#include "topography_codec.hpp"
 #include <cmath>
 
 using namespace std;
@@ -72,21 +75,24 @@ class lithosphere {
      *
      * @param map_side_length Square height map's side's length in pixels.
      * @param sea_level Amount of surface area that becomes oceanic crust.
-     * @param _erosion_period # of iterations between global erosion.
-     * @param _folding_ratio Percent of overlapping crust that's folded.
+     * @param _erosion_period # of simulation updates between global erosion passes.
+     * @param _folding_ratio Fraction [0, 1] of overlapping crust that's folded.
      * @param aggr_ratio_abs # of overlapping points causing aggregation.
-     * @param aggr_ratio_rel % of overlapping area causing aggregation.
+     * @param aggr_ratio_rel Collision coverage ratio [0, 1] causing aggregation.
      * @param num_cycles Number of times system will be restarted.
      * @exception	invalid_argument Exception is thrown if map side length
      *           	is not a power of two and greater than three.
      */
     lithosphere(long seed, uint32_t width, uint32_t height, float sea_level,
                 uint32_t _erosion_period, float _folding_ratio, uint32_t aggr_ratio_abs,
-                float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates) noexcept(false);
-    lithosphere(long seed, uint32_t width, uint32_t height, const float* heightmap,
-                float sea_level, uint32_t _erosion_period, float _folding_ratio,
-                uint32_t aggr_ratio_abs, float aggr_ratio_rel, uint32_t num_cycles,
-                uint32_t _max_plates) noexcept(false);
+                float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates,
+                float erosion_strength = 1.0f, float crust_rotation_strength = 0.20f,
+                float rotation_strength = 1.0f, float subduction_strength = 1.0f,
+                int32_t sea_level_m_override = TopographyCodec::kNoSeaLevelOverride,
+                uint16_t initial_min_height_m = TopographyCodec::kDefaultInitialMinHeightMeters,
+                uint16_t initial_max_height_m = TopographyCodec::kDefaultInitialMaxHeightMeters,
+                uint32_t cycle_step_limit = 600, float divergent_carve_strength = 0.015f) noexcept(false);
+    explicit lithosphere(const platec::scenario::Scenario& scenario) noexcept(false);
 
     ~lithosphere() noexcept; ///< Standard destructor.
 
@@ -105,13 +111,54 @@ class lithosphere {
     uint32_t getIterationCount() const noexcept {
         return iter_count;
     }
+    uint32_t getTimeOriginStep() const noexcept {
+        return time_origin_step;
+    }
+    double getTimeMyr() const noexcept;
+    double getDeltaTimeMyr() const noexcept {
+        return scenario.delta_time_myr;
+    }
+    const platec::scenario::Scenario& getScenario() const noexcept {
+        return scenario;
+    }
     const WorldDimension& getWorldDimension() const noexcept {
         return _worldDimension;
     }
     uint32_t getPlateCount() const noexcept;    ///< Return number of plates.
+    uint32_t getProvenancePlateCount() const noexcept;
     const uint32_t* getAgeMap() const noexcept; ///< Return surface age map.
+    const float* getCrustAgeMyrMap() const noexcept;
+    const float* getCrustThicknessMap() const noexcept;
+    const uint8_t* getCrustClassMap() const noexcept;
+    const float* getUpliftTendencyMap() const noexcept;
+    const float* getSubsidenceTendencyMap() const noexcept;
+    const float* getAccumulatedStrainMap() const noexcept;
+    const uint8_t* getBoundaryTypeMap() const noexcept;
+    const uint16_t* getBoundaryDistanceMap() const noexcept;
+    const uint32_t* getBoundarySegmentIdMap() const noexcept;
+    const uint32_t* getNearestBoundaryIdMap() const noexcept;
+    const platec::contract::BoundarySegment* getBoundarySegments() const noexcept;
+    uint32_t getBoundarySegmentCount() const noexcept;
+    const uint32_t* getDeformingRegionIdMap() const noexcept;
+    const uint8_t* getDeformingRegionTypeMap() const noexcept;
+    const float* getDeformationRateMap() const noexcept;
+    const float* getDeformationVelocityXMap() const noexcept;
+    const float* getDeformationVelocityYMap() const noexcept;
+    const platec::contract::DeformingRegion* getDeformingRegions() const noexcept;
+    uint32_t getDeformingRegionCount() const noexcept;
     float* getTopography() const noexcept;      ///< Return height map.
     uint32_t* getPlatesMap() const noexcept;    ///< Return a map of the plates owning eaach point
+    const uint8_t* getConvergenceMap() const noexcept;
+    const uint8_t* getDivergenceMap() const noexcept;
+    const uint8_t* getShearMap() const noexcept;
+    const uint8_t* getGeologicRegimeMap() const noexcept;
+    const platec::contract::PlateKinematics* getPlateKinematics() const noexcept;
+    uint16_t getSeaLevelMeters() const noexcept {
+        return sea_level_m;
+    }
+    void importNormalizedHeightMap(const float* normalized_map, float sea_level);
+    void importRawHeightMap(const float* normalized_map);
+    void importMetricHeightMap(const uint16_t* heightmap_m, uint16_t sea_level_m);
     void update();                              ///< Simulate one step of plate tectonics.
     uint32_t getWidth() const;
     uint32_t getHeight() const;
@@ -120,13 +167,26 @@ class lithosphere {
 
   protected:
   private:
-    void initializePlates();
-    void initializeTopography(const float* height_samples, const WorldDimension& source_dimension,
-                              float sea_level, bool preserve_relief);
     void createNoise(float* tmp, const WorldDimension& tmpDim, bool useSimplex = false);
     void createSlowNoise(float* tmp, const WorldDimension& tmpDim);
     void updateHeightAndPlateIndexMaps(uint32_t& oceanic_collisions,
                                        uint32_t& continental_collisions);
+    uint32_t chooseDivergentOwner(uint32_t x, uint32_t y, uint32_t index) const;
+    bool hasAssignedOwnerNeighbor(uint32_t x, uint32_t y) const;
+    bool isOceanic(float value) const noexcept;
+    void resetSimulationState();
+    void initializeHeightMapFromMetric(const uint16_t* heightmap_m, uint16_t sea_level_m);
+    void updateCrustAgeMyrMap();
+    void updateDerivedMaps();
+    void updateFieldStackMaps();
+    void updateBoundaryGraphMaps();
+    void updateDeformingRegionMaps();
+    void updateBoundaryDistanceMap();
+    void updateTectonicProvenance();
+    void seedInitialTopography(float ocean_coverage, int32_t sea_level_m_override);
+    void jaggedizePlateBoundaries();
+    void rebuildPlateAreasFromOwnership();
+    void regenerateCrust();
     void updateCollisions();
     void clearPlates();
     void growPlates();
@@ -164,23 +224,61 @@ class lithosphere {
     void restart(); //< Replace plates with a new population.
     WorldPoint randomPosition();
 
-    HeightMap hmap;     ///< Height map representing the topography of system.
-    IndexMap imap;      ///< Plate index map of the "owner" of each map point.
-    IndexMap prev_imap; ///< Plate index map from the last update
-    AgeMap amap;        ///< Age map of the system's surface (topography).
+    platec::scenario::Scenario scenario;
+    HeightMap hmap;              ///< Physical topography used by the simulation.
+    HeightMap prev_hmap;         ///< Previous step's physical topography.
+    HeightMap display_hmap;      ///< Visual/export topography exposed via the public API.
+    HeightMap prev_display_hmap; ///< Previous frame's visual/export topography.
+    HeightMap initial_hmap;      ///< Initial topography before plates begin moving.
+    IndexMap imap;          ///< Plate index map of the "owner" of each map point.
+    IndexMap prev_imap;     ///< Plate index map from the last update
+    AgeMap amap;            ///< Age map of the system's surface (topography).
     plate** plates;     ///< Array of plates that constitute the system.
     vector<plateArea> plate_areas;
     vector<uint32_t> plate_indices_found; ///< Used in update loop to remove plates
 
     uint32_t aggr_overlap_abs; ///< # of overlapping pixels -> aggregation.
-    float aggr_overlap_rel;    ///< % of overlapping area -> aggregation.
+    float aggr_overlap_rel;    ///< Collision coverage ratio [0, 1] -> aggregation.
     uint32_t cycle_count;      ///< Number of times the system's been restarted.
-    uint32_t erosion_period;   ///< # of iterations between global erosion.
-    float folding_ratio;       ///< Percent of overlapping crust that's folded.
+    uint32_t erosion_period;   ///< # of simulation updates between erosion passes.
+    float folding_ratio;       ///< Fraction [0, 1] of overlapping crust that's folded.
     uint32_t iter_count;       ///< Iteration count. Used to timestamp new crust.
+    uint32_t time_origin_step; ///< Internal timestamp corresponding to elapsed time 0.
     uint32_t max_cycles;       ///< Max n:o of times the system'll be restarted.
+    uint32_t cycle_step_limit; ///< Max number of updates before forcing a restart. 0 disables it.
     uint32_t max_plates;       ///< Number of plates in the initial setting.
     uint32_t num_plates;       ///< Number of plates in the current setting.
+    float erosion_strength;    ///< Scales terrain erosion.
+    float crust_rotation_strength; ///< Scales visible raster rotation.
+    float rotation_strength;   ///< Scales angular plate motion.
+    float subduction_strength; ///< Fraction [0, 1] of oceanic crust removed during subduction.
+    float divergent_carve_strength; ///< Downward step applied when regenerating divergent crust.
+    uint16_t sea_level_m;      ///< Coastline threshold in metric export space.
+    uint16_t initial_min_height_m; ///< Lower bound for procedurally seeded metric topography.
+    uint16_t initial_max_height_m; ///< Upper bound for procedurally seeded metric topography.
+    std::vector<uint8_t> convergence_map;
+    std::vector<uint8_t> divergence_map;
+    std::vector<uint8_t> shear_map;
+    std::vector<uint8_t> geologic_regime_map;
+    std::vector<float> crust_age_myr_map;
+    std::vector<float> crust_thickness_map;
+    std::vector<uint8_t> crust_class_map;
+    std::vector<float> uplift_tendency_map;
+    std::vector<float> subsidence_tendency_map;
+    std::vector<float> accumulated_strain_map;
+    std::vector<uint8_t> boundary_type_map;
+    std::vector<uint16_t> boundary_distance_map;
+    std::vector<uint32_t> boundary_segment_id_map;
+    std::vector<uint32_t> nearest_boundary_id_map;
+    std::vector<uint32_t> deforming_region_id_map;
+    std::vector<uint8_t> deforming_region_type_map;
+    std::vector<float> deformation_rate_map;
+    std::vector<float> deformation_velocity_x_map;
+    std::vector<float> deformation_velocity_y_map;
+    std::vector<platec::contract::PlateKinematics> plate_kinematics;
+    std::vector<platec::contract::BoundarySegment> boundary_segments;
+    std::vector<platec::contract::DeformingRegion> deforming_regions;
+    uint32_t next_boundary_segment_id = platec::contract::kNoBoundaryId + 1U;
 
     vector<vector<plateCollision>> collisions;
     vector<vector<plateCollision>> subductions;

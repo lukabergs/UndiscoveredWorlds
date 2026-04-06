@@ -24,6 +24,10 @@ void syncworldpropertycontrols(const planet& world, WorldPropertyControls& contr
     controls.averagetemp = world.averagetemp();
     controls.waterpickup = world.waterpickup();
     controls.glacialtemp = world.glacialtemp();
+    controls.socialEnabled = false;
+    controls.socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
+    controls.usePrehistory = true;
+    controls.historyYears = 1200;
 }
 
 void applyworldpropertycontrols(planet& world, const WorldPropertyControls& controls)
@@ -54,6 +58,16 @@ void clampworldpropertycontrols(WorldPropertyControls& controls)
     {
         controls.lakes = false;
         controls.deltas = false;
+    }
+
+    controls.historyYears = std::max(10, controls.historyYears);
+
+    if (!controls.socialEnabled)
+        controls.socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
+
+    if (controls.socialEnabled && controls.socialMode == SocialGenerationOptions::Mode::static_ex_nihilo)
+    {
+        controls.usePrehistory = false;
     }
 }
 

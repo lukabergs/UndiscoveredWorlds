@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "social_generation.hpp"
+
 struct WorldGenerationDebugOptions
 {
     bool logToProfilingWorkbook = true;
@@ -11,6 +13,10 @@ struct WorldGenerationDebugOptions
     bool useFastLEMMountains = false;
     bool usePlateTectonicsSimulation = false;
     int plateTectonicsCycleCount = 4;
+    bool socialEnabled = false;
+    SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
+    bool usePrehistory = true;
+    int historyYears = 1200;
     std::vector<bool> enabledSteps;
 
     WorldGenerationDebugOptions();

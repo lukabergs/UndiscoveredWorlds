@@ -1,10 +1,10 @@
-#include <array>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
 
 #include "third_party/plate_tectonics/src/platecapi.hpp"
+#include "third_party/plate_tectonics/src/tectonic_contract.hpp"
 #ifdef max
 #undef max
 #endif
@@ -27,20 +27,6 @@ struct PlateTectonicsHandle
             platec_api_destroy(pointer);
     }
 };
-
-struct PlateTectonicsSnapshot
-{
-    int width = 0;
-    int height = 0;
-    std::vector<uint32_t> platesmap;
-    std::vector<std::array<float, 2>> velocities;
-    bool valid = false;
-};
-
-int snapshotindex(int x, int y, int width)
-{
-    return y * width + x;
-}
 
 float clamp01(float value)
 {
@@ -108,165 +94,127 @@ float findseathreshold(const std::vector<float>& heightmap, float searatio)
     return clamp01(threshold);
 }
 
-void captureplatetectonicssnapshot(void* simulation, int width, int height, PlateTectonicsSnapshot& snapshot)
+GeologicRegime translategeologicregime(std::uint8_t regime)
 {
-    const uint32_t platecount = platec_api_get_plate_count(simulation);
-    const uint32_t* platesmap = platec_api_get_platesmap(simulation);
+    using NativeRegime = platec::contract::GeologicRegime;
 
-    if (platecount == 0 || platesmap == nullptr)
+    switch (static_cast<NativeRegime>(regime))
     {
-        snapshot.valid = false;
-        return;
-    }
-
-    const std::size_t cellcount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-    snapshot.width = width;
-    snapshot.height = height;
-    snapshot.platesmap.assign(platesmap, platesmap + cellcount);
-    snapshot.velocities.assign(platecount, { 0.0f, 0.0f });
-
-    for (uint32_t plateindex = 0; plateindex < platecount; plateindex++)
-    {
-        snapshot.velocities[plateindex][0] = platec_api_velocity_unity_vector_x(simulation, plateindex);
-        snapshot.velocities[plateindex][1] = platec_api_velocity_unity_vector_y(simulation, plateindex);
-    }
-
-    snapshot.valid = true;
-}
-
-int normalizetectonicsignal(float signal)
-{
-    const float threshold = tuning::terrain::platetectonics::convergentBoundaryThreshold;
-    const float normalized = clamp01((signal - threshold) / (2.0f - threshold));
-    return static_cast<int>(std::round(normalized * 100.0f));
-}
-
-bool hasadjacentland(const planet& world, int x, int y)
-{
-    const int width = world.width();
-    const int height = world.height();
-
-    for (int dy = -1; dy <= 1; dy++)
-    {
-        for (int dx = -1; dx <= 1; dx++)
-        {
-            if (dx == 0 && dy == 0)
-                continue;
-
-            const int ny = y + dy;
-
-            if (ny < 0 || ny > height)
-                continue;
-
-            const int nx = wrap(x + dx, width);
-
-            if (world.sea(nx, ny) == 0)
-                return true;
-        }
-    }
-
-    return false;
-}
-
-bool hasadjacentsea(const planet& world, int x, int y)
-{
-    const int width = world.width();
-    const int height = world.height();
-
-    for (int dy = -1; dy <= 1; dy++)
-    {
-        for (int dx = -1; dx <= 1; dx++)
-        {
-            if (dx == 0 && dy == 0)
-                continue;
-
-            const int ny = y + dy;
-
-            if (ny < 0 || ny > height)
-                continue;
-
-            const int nx = wrap(x + dx, width);
-
-            if (world.sea(nx, ny) != 0)
-                return true;
-        }
-    }
-
-    return false;
-}
-
-GeologicRegime classifygeologicregime(const planet& world, int x, int y, int convergence, int divergence, int shear)
-{
-    const bool sea = world.sea(x, y) != 0;
-    const bool adjacentland = hasadjacentland(world, x, y);
-    const bool adjacentsea = hasadjacentsea(world, x, y);
-    const int maxsignal = std::max({ convergence, divergence, shear });
-
-    if (convergence >= 65)
-    {
-        if (sea && adjacentland)
-            return GeologicRegime::trench_adjacent;
-
-        if (!sea && adjacentsea)
-            return GeologicRegime::convergent_arc;
-
+    case NativeRegime::Stable:
+        return GeologicRegime::stable;
+    case NativeRegime::ConvergentArc:
+        return GeologicRegime::convergent_arc;
+    case NativeRegime::ContinentCollision:
         return GeologicRegime::continent_collision;
-    }
-
-    if (divergence >= 55)
-        return sea ? GeologicRegime::mid_ocean_ridge : GeologicRegime::divergent_rift;
-
-    if (shear >= 50 && shear >= convergence + 10 && shear >= divergence + 10)
+    case NativeRegime::DivergentRift:
+        return GeologicRegime::divergent_rift;
+    case NativeRegime::Transform:
         return GeologicRegime::transform;
-
-    if ((world.outline(x, y) || world.coast(x, y)) && maxsignal <= 20)
+    case NativeRegime::PassiveMargin:
         return GeologicRegime::passive_margin;
-
-    return GeologicRegime::stable;
+    case NativeRegime::MidOceanRidge:
+        return GeologicRegime::mid_ocean_ridge;
+    case NativeRegime::TrenchAdjacent:
+        return GeologicRegime::trench_adjacent;
+    default:
+        return GeologicRegime::stable;
+    }
 }
 
-void recordboundarymotion(const PlateTectonicsSnapshot& snapshot, int x, int y, int nx, int ny, std::vector<float>& convergence, std::vector<float>& divergence, std::vector<float>& shear)
+CrustClass translatecrustclass(std::uint8_t crustclass)
 {
-    if (nx < 0 || nx >= snapshot.width || ny < 0 || ny >= snapshot.height)
-        return;
+    using NativeCrustClass = platec::contract::CrustClass;
 
-    const int index = snapshotindex(x, y, snapshot.width);
-    const int neighbourindex = snapshotindex(nx, ny, snapshot.width);
-    const uint32_t plate = snapshot.platesmap[index];
-    const uint32_t neighbourplate = snapshot.platesmap[neighbourindex];
-
-    if (plate == neighbourplate || plate >= snapshot.velocities.size() || neighbourplate >= snapshot.velocities.size())
-        return;
-
-    float normalx = static_cast<float>(nx - x);
-    float normaly = static_cast<float>(ny - y);
-    const float length = std::sqrt(normalx * normalx + normaly * normaly);
-
-    if (length <= 0.0f)
-        return;
-
-    normalx /= length;
-    normaly /= length;
-
-    const float relativex = snapshot.velocities[plate][0] - snapshot.velocities[neighbourplate][0];
-    const float relativey = snapshot.velocities[plate][1] - snapshot.velocities[neighbourplate][1];
-    const float boundarymotion = relativex * normalx + relativey * normaly;
-    const float tangentialmotion = std::abs(relativex * (-normaly) + relativey * normalx);
-
-    if (boundarymotion > 0.0f)
+    switch (static_cast<NativeCrustClass>(crustclass))
     {
-        convergence[index] = std::max(convergence[index], boundarymotion);
-        convergence[neighbourindex] = std::max(convergence[neighbourindex], boundarymotion);
+    case NativeCrustClass::Oceanic:
+        return CrustClass::oceanic;
+    case NativeCrustClass::Transitional:
+        return CrustClass::transitional;
+    case NativeCrustClass::Continental:
+        return CrustClass::continental;
+    case NativeCrustClass::None:
+    default:
+        return CrustClass::none;
     }
-    else if (boundarymotion < 0.0f)
-    {
-        const float divergencesignal = -boundarymotion;
-        divergence[index] = std::max(divergence[index], divergencesignal);
-        divergence[neighbourindex] = std::max(divergence[neighbourindex], divergencesignal);
-    }
+}
 
-    shear[index] = std::max(shear[index], tangentialmotion);
-    shear[neighbourindex] = std::max(shear[neighbourindex], tangentialmotion);
+BoundaryType translateboundarytype(std::uint8_t boundarytype)
+{
+    using NativeBoundaryType = platec::contract::BoundaryType;
+
+    switch (static_cast<NativeBoundaryType>(boundarytype))
+    {
+    case NativeBoundaryType::Convergent:
+        return BoundaryType::convergent;
+    case NativeBoundaryType::Divergent:
+        return BoundaryType::divergent;
+    case NativeBoundaryType::Transform:
+        return BoundaryType::transform;
+    case NativeBoundaryType::PassiveMargin:
+        return BoundaryType::passive_margin;
+    case NativeBoundaryType::None:
+    default:
+        return BoundaryType::none;
+    }
+}
+
+DeformingRegionType translatedeformingregiontype(std::uint8_t regiontype)
+{
+    using NativeRegionType = platec::contract::DeformingRegionType;
+
+    switch (static_cast<NativeRegionType>(regiontype))
+    {
+    case NativeRegionType::ContinentalRift:
+        return DeformingRegionType::continental_rift;
+    case NativeRegionType::DiffuseCollision:
+        return DeformingRegionType::diffuse_collision;
+    case NativeRegionType::None:
+    default:
+        return DeformingRegionType::none;
+    }
+}
+
+float normalizeboundaryhistory(const platec::contract::BoundarySegment* segment)
+{
+    if (segment == nullptr)
+        return 0.0f;
+
+    const float agesignal = clamp01(static_cast<float>(segment->age_myr) / 40.0f);
+    const float persistencesignal = clamp01(static_cast<float>(segment->persistence_steps) / 24.0f);
+    return clamp01(0.55f * agesignal + 0.45f * persistencesignal);
+}
+
+float boundaryupliftbias(BoundaryType boundarytype)
+{
+    switch (boundarytype)
+    {
+    case BoundaryType::convergent:
+        return 1.0f;
+    case BoundaryType::transform:
+        return 0.45f;
+    case BoundaryType::divergent:
+        return 0.28f;
+    case BoundaryType::passive_margin:
+        return 0.10f;
+    case BoundaryType::none:
+    default:
+        return 0.0f;
+    }
+}
+
+float deformingupliftbias(DeformingRegionType regiontype)
+{
+    switch (regiontype)
+    {
+    case DeformingRegionType::diffuse_collision:
+        return 1.0f;
+    case DeformingRegionType::continental_rift:
+        return 0.45f;
+    case DeformingRegionType::none:
+    default:
+        return 0.0f;
+    }
 }
 }
 
@@ -324,12 +272,8 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
     if (simulation.pointer == nullptr)
         return;
 
-    PlateTectonicsSnapshot snapshot;
-
     for (uint32_t step = 0; step < tuning::terrain::platetectonics::maximumSimulationSteps; step++)
     {
-        captureplatetectonicssnapshot(simulation.pointer, simwidth, simheight, snapshot);
-
         if (platec_api_is_finished(simulation.pointer) != 0)
             break;
 
@@ -395,67 +339,153 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
         }
     });
 
-    if (snapshot.valid)
+    const std::uint8_t* convergencemap = platec_api_get_convergence_map(simulation.pointer);
+    const std::uint8_t* divergencemap = platec_api_get_divergence_map(simulation.pointer);
+    const std::uint8_t* shearmap = platec_api_get_shear_map(simulation.pointer);
+    const std::uint8_t* regimemap = platec_api_get_geologic_regime_map(simulation.pointer);
+    const float* crustagemyrmap = platec_api_get_crust_age_myr_map(simulation.pointer);
+    const float* crustthicknessmap = platec_api_get_crust_thickness_map(simulation.pointer);
+    const std::uint8_t* crustclassmap = platec_api_get_crust_class_map(simulation.pointer);
+    const float* uplifttendencymap = platec_api_get_uplift_tendency_map(simulation.pointer);
+    const float* subsidencetendencymap = platec_api_get_subsidence_tendency_map(simulation.pointer);
+    const float* accumulatedstrainmap = platec_api_get_accumulated_strain_map(simulation.pointer);
+    const std::uint8_t* boundarytypemap = platec_api_get_boundary_type_map(simulation.pointer);
+    const std::uint16_t* boundarydistancemap = platec_api_get_boundary_distance_map(simulation.pointer);
+    const std::uint32_t* boundarysegmentidmap = platec_api_get_boundary_segment_id_map(simulation.pointer);
+    const std::uint32_t* nearestboundaryidmap = platec_api_get_nearest_boundary_id_map(simulation.pointer);
+    const std::uint32_t* deformingregionidmap = platec_api_get_deforming_region_id_map(simulation.pointer);
+    const std::uint8_t* deformingregiontypemap = platec_api_get_deforming_region_type_map(simulation.pointer);
+    const float* deformationratemap = platec_api_get_deformation_rate_map(simulation.pointer);
+    const float* deformationvelocityxmap = platec_api_get_deformation_velocity_x_map(simulation.pointer);
+    const float* deformationvelocityymap = platec_api_get_deformation_velocity_y_map(simulation.pointer);
+
+    if (convergencemap == nullptr || divergencemap == nullptr || shearmap == nullptr || regimemap == nullptr
+        || crustagemyrmap == nullptr || crustthicknessmap == nullptr || crustclassmap == nullptr
+        || uplifttendencymap == nullptr || subsidencetendencymap == nullptr || accumulatedstrainmap == nullptr
+        || boundarytypemap == nullptr || boundarydistancemap == nullptr || boundarysegmentidmap == nullptr
+        || nearestboundaryidmap == nullptr || deformingregionidmap == nullptr || deformingregiontypemap == nullptr
+        || deformationratemap == nullptr || deformationvelocityxmap == nullptr || deformationvelocityymap == nullptr)
+        return;
+
+    world.settectonictimeoriginstep(static_cast<int>(platec_api_get_time_origin_step(simulation.pointer)));
+    world.settectonictimemyr(static_cast<float>(platec_api_get_time_myr(simulation.pointer)));
+    world.settectonicdeltatimemyr(static_cast<float>(platec_api_get_delta_time_myr(simulation.pointer)));
+
+    const std::uint32_t boundarysegmentcount = platec_api_get_boundary_segment_count(simulation.pointer);
+    const platec::contract::BoundarySegment* boundarysegments = platec_api_get_boundary_segments(simulation.pointer);
+    std::vector<const platec::contract::BoundarySegment*> boundarysegmentlookup;
+    if (boundarysegments != nullptr && boundarysegmentcount > 0)
     {
-        std::vector<float> convergence(cellcount, 0.0f);
-        std::vector<float> divergence(cellcount, 0.0f);
-        std::vector<float> shear(cellcount, 0.0f);
+        std::size_t maxid = 0;
+        for (std::uint32_t i = 0; i < boundarysegmentcount; i++)
+            maxid = std::max(maxid, static_cast<std::size_t>(boundarysegments[i].id));
 
-        for (int y = 0; y < simheight; y++)
+        boundarysegmentlookup.assign(maxid + 1, nullptr);
+        for (std::uint32_t i = 0; i < boundarysegmentcount; i++)
+            boundarysegmentlookup[boundarysegments[i].id] = &boundarysegments[i];
+    }
+
+    std::vector<std::vector<int>> rawmountains(ARRAYWIDTH, std::vector<int>(ARRAYHEIGHT, 0));
+    bool havemountains = false;
+
+    for (int y = 0; y <= height; y++)
+    {
+        for (int x = 0; x <= width; x++)
         {
-            for (int x = 0; x < simwidth; x++)
+            const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(simwidth) + static_cast<std::size_t>(x);
+            const int convergencescore = static_cast<int>(convergencemap[index]);
+            const int divergencescore = static_cast<int>(divergencemap[index]);
+            const int shearscore = static_cast<int>(shearmap[index]);
+            const CrustClass crustclass = translatecrustclass(crustclassmap[index]);
+            const BoundaryType boundarytype = translateboundarytype(boundarytypemap[index]);
+            const DeformingRegionType regiontype = translatedeformingregiontype(deformingregiontypemap[index]);
+            const std::uint32_t nearestboundaryid = nearestboundaryidmap[index];
+            const platec::contract::BoundarySegment* boundarysegment =
+                nearestboundaryid < boundarysegmentlookup.size() ? boundarysegmentlookup[nearestboundaryid] : nullptr;
+            const float boundaryhistory = normalizeboundaryhistory(boundarysegment);
+
+            world.settectonicconvergence(x, y, convergencescore);
+            world.settectonicdivergence(x, y, divergencescore);
+            world.settectonicshear(x, y, shearscore);
+            world.setgeologicregime(x, y, translategeologicregime(regimemap[index]));
+            world.settectoniccrustagemyr(x, y, crustagemyrmap[index]);
+            world.settectoniccrustthickness(x, y, crustthicknessmap[index]);
+            world.settectoniccrustclass(x, y, crustclass);
+            world.settectonicuplifttendency(x, y, uplifttendencymap[index]);
+            world.settectonicsubsidencetendency(x, y, subsidencetendencymap[index]);
+            world.settectonicaccumulatedstrain(x, y, accumulatedstrainmap[index]);
+            world.settectonicboundarytype(x, y, boundarytype);
+            world.settectonicboundarydistance(x, y, static_cast<int>(boundarydistancemap[index]));
+            world.settectonicboundarysegmentid(x, y, static_cast<int>(boundarysegmentidmap[index]));
+            world.settectonicnearestboundaryid(x, y, static_cast<int>(nearestboundaryid));
+            world.settectonicboundaryhistory(x, y, boundaryhistory);
+            world.settectonicdeformingregionid(x, y, static_cast<int>(deformingregionidmap[index]));
+            world.settectonicdeformingregiontype(x, y, regiontype);
+            world.settectonicdeformationrate(x, y, deformationratemap[index]);
+            world.settectonicdeformationvelocityx(x, y, deformationvelocityxmap[index]);
+            world.settectonicdeformationvelocityy(x, y, deformationvelocityymap[index]);
+
+            if (originalsea[index] || world.nom(x, y) <= sealevel + 25)
+                continue;
+
+            const float convergencesignal = clamp01(static_cast<float>(convergencescore) / 100.0f);
+            const float upliftsignal = clamp01(uplifttendencymap[index]);
+            const float subsidencesignal = clamp01(subsidencetendencymap[index]);
+            const float strainsignal = clamp01(accumulatedstrainmap[index]);
+            const float deformationsignal = clamp01(deformationratemap[index]);
+            const float boundaryproximity = 1.0f - clamp01(static_cast<float>(boundarydistancemap[index]) / 8.0f);
+            const float crustbias = crustclass == CrustClass::continental ? 1.0f
+                : crustclass == CrustClass::transitional ? 0.72f
+                : crustclass == CrustClass::oceanic ? 0.28f
+                : 0.0f;
+            const float structuresignal = clamp01(boundaryproximity * boundaryupliftbias(boundarytype)
+                + 0.55f * deformingupliftbias(regiontype));
+            float mountainsource = clamp01(
+                (0.44f * upliftsignal + 0.20f * strainsignal + 0.16f * convergencesignal
+                    + 0.10f * boundaryhistory + 0.10f * deformationsignal) * (0.45f + 0.55f * crustbias)
+                + 0.25f * structuresignal
+                - 0.20f * subsidencesignal);
+
+            if (regiontype == DeformingRegionType::continental_rift)
             {
-                if (x + 1 < simwidth)
-                    recordboundarymotion(snapshot, x, y, x + 1, y, convergence, divergence, shear);
-
-                if (y + 1 < simheight)
-                    recordboundarymotion(snapshot, x, y, x, y + 1, convergence, divergence, shear);
+                const float shouldersignal = clamp01(0.45f * upliftsignal + 0.30f * boundaryproximity
+                    + 0.25f * deformationsignal - 0.10f * subsidencesignal);
+                mountainsource = std::max(mountainsource, shouldersignal * 0.55f);
             }
+
+            if (boundarytype == BoundaryType::transform)
+                mountainsource *= 0.60f;
+            else if (boundarytype == BoundaryType::passive_margin)
+                mountainsource *= 0.25f;
+
+            if (mountainsource <= 0.08f)
+                continue;
+
+            const bool riftshoulder = regiontype == DeformingRegionType::continental_rift;
+            const float mountainsignal = std::pow(clamp01(mountainsource), riftshoulder ? 1.05f : 0.78f);
+            const float upliftfactor = riftshoulder ? 0.55f : 1.0f;
+            const int uplift = static_cast<int>(std::round(static_cast<float>(tuning::terrain::platetectonics::collisionUplift)
+                * std::sqrt(clamp01(mountainsource)) * upliftfactor));
+            const int minimumpeak = riftshoulder
+                ? std::max(0, tuning::terrain::platetectonics::collisionMinimumPeak / 2)
+                : tuning::terrain::platetectonics::collisionMinimumPeak;
+            const int maximumpeak = riftshoulder
+                ? std::max(minimumpeak + 1, (tuning::terrain::platetectonics::collisionMaximumPeak * 3) / 4)
+                : tuning::terrain::platetectonics::collisionMaximumPeak;
+            const int peakheight = minimumpeak +
+                static_cast<int>(std::round(static_cast<float>(maximumpeak - minimumpeak) * mountainsignal));
+
+            if (uplift > 0)
+                world.setnom(x, y, std::min(maxelev - 1, world.nom(x, y) + uplift));
+
+            rawmountains[x][y] = peakheight;
+            havemountains = true;
         }
+    }
 
-        std::vector<std::vector<int>> rawmountains(ARRAYWIDTH, std::vector<int>(ARRAYHEIGHT, 0));
-        bool havemountains = false;
-
-        for (int y = 0; y <= height; y++)
-        {
-            for (int x = 0; x <= width; x++)
-            {
-                const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(simwidth) + static_cast<std::size_t>(x);
-                const int convergencescore = normalizetectonicsignal(convergence[index]);
-                const int divergencescore = normalizetectonicsignal(divergence[index]);
-                const int shearscore = normalizetectonicsignal(shear[index]);
-
-                world.settectonicconvergence(x, y, convergencescore);
-                world.settectonicdivergence(x, y, divergencescore);
-                world.settectonicshear(x, y, shearscore);
-                world.setgeologicregime(x, y, classifygeologicregime(world, x, y, convergencescore, divergencescore, shearscore));
-
-                if (originalsea[index] || world.nom(x, y) <= sealevel + 25)
-                    continue;
-
-                const float convergencesignal = clamp01((convergence[index] - tuning::terrain::platetectonics::convergentBoundaryThreshold) /
-                    (2.0f - tuning::terrain::platetectonics::convergentBoundaryThreshold));
-
-                if (convergencesignal <= 0.0f)
-                    continue;
-
-                const float mountainsignal = std::pow(convergencesignal, 0.8f);
-                const int uplift = static_cast<int>(std::round(static_cast<float>(tuning::terrain::platetectonics::collisionUplift) * std::sqrt(convergencesignal)));
-                const int peakheight = tuning::terrain::platetectonics::collisionMinimumPeak +
-                    static_cast<int>(std::round(static_cast<float>(tuning::terrain::platetectonics::collisionMaximumPeak - tuning::terrain::platetectonics::collisionMinimumPeak) * mountainsignal));
-
-                if (uplift > 0)
-                    world.setnom(x, y, std::min(maxelev - 1, world.nom(x, y) + uplift));
-
-                rawmountains[x][y] = peakheight;
-                havemountains = true;
-            }
-        }
-
-        if (havemountains)
-        {
-            std::vector<std::vector<bool>> dummyok(ARRAYWIDTH, std::vector<bool>(ARRAYHEIGHT, false));
-            createmountainsfromraw(world, rawmountains, dummyok);
-        }
+    if (havemountains)
+    {
+        std::vector<std::vector<bool>> dummyok(ARRAYWIDTH, std::vector<bool>(ARRAYHEIGHT, false));
+        createmountainsfromraw(world, rawmountains, dummyok);
     }
 }
