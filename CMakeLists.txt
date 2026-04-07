@@ -63,39 +63,27 @@ set(SOURCES
     regionalmap.cpp
 )
 
-set(PLATE_TECTONICS_SOURCES
-    third_party/plate_tectonics/src/bounds.cpp
-    third_party/plate_tectonics/src/geometry.cpp
-    third_party/plate_tectonics/src/heightmap.cpp
-    third_party/plate_tectonics/src/lithosphere.cpp
-    third_party/plate_tectonics/src/mass.cpp
-    third_party/plate_tectonics/src/movement.cpp
-    third_party/plate_tectonics/src/noise.cpp
-    third_party/plate_tectonics/src/plate.cpp
-    third_party/plate_tectonics/src/platecapi.cpp
-    third_party/plate_tectonics/src/plate_functions.cpp
-    third_party/plate_tectonics/src/rectangle.cpp
-    third_party/plate_tectonics/src/segment_creator.cpp
-    third_party/plate_tectonics/src/segment_data.cpp
-    third_party/plate_tectonics/src/segments.cpp
-    third_party/plate_tectonics/src/simplerandom.cpp
-    third_party/plate_tectonics/src/simplexnoise.cpp
-    third_party/plate_tectonics/src/sqrdmd.cpp
-    third_party/plate_tectonics/src/tectonic_boundary_graph.cpp
-    third_party/plate_tectonics/src/tectonic_deforming_regions.cpp
-    third_party/plate_tectonics/src/tectonic_provenance.cpp
-    third_party/plate_tectonics/src/topography_codec.cpp
-    third_party/plate_tectonics/src/utils.cpp
-    third_party/plate_tectonics/src/world_point.cpp
-)
+set(PLATE_TECTONICS_ROOT "C:/dev/plate-tectonics" CACHE PATH "Path to the upstream plate-tectonics repository")
+set(PLATE_TECTONICS_SRC_DIR "${PLATE_TECTONICS_ROOT}/src")
+
+if(NOT EXISTS "${PLATE_TECTONICS_SRC_DIR}/platecapi.cpp")
+    message(FATAL_ERROR "PLATE_TECTONICS_ROOT must point to the upstream plate-tectonics repo. Missing: ${PLATE_TECTONICS_SRC_DIR}/platecapi.cpp")
+endif()
+
+file(GLOB PLATE_TECTONICS_SOURCES CONFIGURE_DEPENDS "${PLATE_TECTONICS_SRC_DIR}/*.cpp")
 
 add_library(plate_tectonics_vendor STATIC ${PLATE_TECTONICS_SOURCES})
-target_include_directories(plate_tectonics_vendor PUBLIC third_party/plate_tectonics/src)
+target_include_directories(plate_tectonics_vendor PUBLIC "${PLATE_TECTONICS_SRC_DIR}")
 target_compile_definitions(plate_tectonics_vendor PRIVATE NOMINMAX)
-set_target_properties(plate_tectonics_vendor PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+set_target_properties(plate_tectonics_vendor PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED YES)
 
 # 3. Create the executable
 add_executable(${PROJECT_NAME} ${SOURCES})
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+)
 
 if(CMAKE_CUDA_COMPILER)
     target_sources(${PROJECT_NAME} PRIVATE cuda_renderers.cu)

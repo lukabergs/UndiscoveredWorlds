@@ -66,7 +66,7 @@ using namespace std;
 
 // Define some enums.
 
-enum screenmodeenum { quit, createworldscreen, creatingworldscreen, globalmapscreen, regionalmapscreen, generatingregionscreen, importscreen, completingimportscreen, movingtoglobalmapscreen, exportareascreen, exportingareascreen, loadingworldscreen, savingworldscreen, generatingtectonicscreen, generatingnontectonicscreen, loadfailure, settingsloadfailure };
+enum screenmodeenum { quit, createworldscreen, creatingworldscreen, globalmapscreen, regionalmapscreen, generatingregionscreen, importscreen, completingimportscreen, movingtoglobalmapscreen, exportareascreen, exportingareascreen, loadingworldscreen, savingworldscreen, generatingterrainscreen, loadfailure, settingsloadfailure };
 enum mapviewenum
 {
     elevation,
@@ -578,13 +578,7 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
 
 // Declare functions that are in globalterrain.cpp
 
-void generateglobalterrain(planet& world, bool customgenerate, int iterations, int mergefactor, int clusterno, int clustersize, boolshapetemplate landshape[], boolshapetemplate chainland[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, vector<int>& squareroot);
-void generateglobalterraintype1(planet& world, bool customgenerate, int mergefactor, boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, boolshapetemplate chainland[]);
-void generateglobalterraintype2(planet& world, bool customgenerate, int mergefactor, int clusterno, int clustersize, boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, boolshapetemplate chainland[], vector<int>& squareroot);
-void generateglobalterraintype3(planet& world, bool customgenerate, int mergefactor, boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, boolshapetemplate chainland[]);
-void generateglobalterraintype4(planet& world, bool customgenerate, int iterations, boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, boolshapetemplate chainland[], vector<int>& squareroot);
-void makebasicterrain(planet& world, float landscale, vector<vector<int>>& terrain);
-void scaledownland(float scaleelev, float maxelev, float landscale, int width, int height, vector<vector<int>>& terrain);
+void generateglobalterrain(planet& world, bool customgenerate, int mergefactor, int clusterno, int clustersize, boolshapetemplate landshape[], boolshapetemplate chainland[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, vector<int>& squareroot);
 void largecontinents(planet& world, int baseheight, int conheight, int clusterno, int clustersize, vector<vector<int>>& fractal, vector<vector<int>>& plateaumap, vector<vector<bool>>& shelves, boolshapetemplate landshape[], boolshapetemplate chainland[]);
 void createfractal(vector<vector<int>>& arr, int awidth, int aheight, int grain, float valuemod, float valuemod2, int min, int max, bool extreme, bool wrapped);
 void newfractalinit(vector<vector<int>>& arr, int awidth, int aheight, int grain, int min, int max, bool extreme);
@@ -593,7 +587,6 @@ int square(vector<vector<int>>& arr, int awidth, int aheight, int s, int x, int 
 int diamond(vector<vector<int>>& arr, int awidth, int aheight, int s, int x, int y, int value, int min, int max, bool wrapped);
 void createfractalformodifiedmerging(vector<vector<int>>& arr, int awidth, int aheight, int grain, float valuemod, float valuemod2, int min, int max, bool extreme);
 void newfractalinitformodifiedmerging(vector<vector<int>>& arr, int awidth, int aheight, int grain, int min, int max, bool extreme);
-void smallcontinents(planet& world, int baseheight, int conheight, vector<vector<int>>& fractal, vector<vector<int>>& plateaumap, boolshapetemplate landshape[], boolshapetemplate chainland[]);
 void makecontinentedgemountains(planet& world, short thiscontinent, vector<vector<short>>& continentnos, vector<vector<short>>& overlaps, int baseheight, int conheight, vector<vector<int>>& fractal, boolshapetemplate landshape[], boolshapetemplate chainland[], int contstartpointx, int contstartpointy, int contwidth, int contheight, int startnearx, int startneary, short contdir, int& startpointx, int& startpointy);
 void makecontinent(planet& world, vector<vector<bool>>& continent, vector<vector<short>>& voronoi, int points, int width, int height, int& leftx, int& rightx, int& lefty, int& righty);
 void makecontinentcircles(vector<vector<bool>>& circlemap, int width, int height, int circleno, int circlesize, int& circleleftx, int& circlerightx, int& circlelefty, int& circlerighty);
@@ -671,7 +664,6 @@ void createisolatedvolcano(planet& world, int x, int y, vector<vector<bool>>& sh
 void getseaslopes(planet& world, vector<vector<int>>& slopes);
 void removeunderseabumps(planet& world);
 void checkpoles(planet& world);
-void createchannels(planet& world);
 void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bool  custom);
 void makecrater(planet& world, vector <int>& squareroot, int thiscraterno, int centrex, int centrey, int size);
 

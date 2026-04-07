@@ -7,6 +7,20 @@ For more information, and to complain about bugs, please visit the blog: https:/
 
 ----
 
+* Current architecture status (2026-04)
+
+The active terrain architecture is tectonic-first and intentionally simplified:
+
+- There is exactly one supported global terrain pipeline.
+- Plate tectonics and FastLEM mountains are always enabled.
+- `C:\dev\plate-tectonics` is the only tectonics source of truth.
+- The old vendored `third_party\plate_tectonics` path is removed and must not be reintroduced.
+- World save compatibility was intentionally broken; current saves require the new format baseline (version 16).
+
+For upstream dependency contract details and the fixed-seed validation workflow, see `tectonic-contract-validation.md`.
+
+----
+
 * Credits
 
 Undiscovered Worlds is written by Jonathan Hill, with additional contributions and corrections by Frank Gennari. Sections of code that are taken or adapted from other sources are noted in the comments.
@@ -34,7 +48,7 @@ The code is offered under the GNU General Public Licence - https://choosealicens
 
 When you start the program, you are prompted to enter a seed number for the new world. You can choose a random number or enter your own, before clicking "OK" to begin the generation process.
 
-Alternatively, you can load a previously created world, or import your own maps (see below).
+Alternatively, you can load a previously created world (using the current save format baseline), or import your own maps (see below).
 
 When the world is ready, you will see the global map screen.
 

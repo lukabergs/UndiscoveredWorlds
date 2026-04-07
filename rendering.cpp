@@ -1842,8 +1842,6 @@ void drawglobalreliefmapimage(planet& world, maplayer& layer)
     int width = world.width();
     int height = world.height();
     int sealevel = world.sealevel();
-    int type = world.type();
-
     int colour1, colour2, colour3;
 
     int landdiv = ((world.maxelevation() - sealevel) / 2) / 255;
@@ -3010,7 +3008,6 @@ void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer)
     int rwidth = region.rwidth();
     int rheight = region.rheight();
 
-    int type = world.type();
     int sealevel = world.sealevel();
     int minriverflow = world.minriverflowregional(); // Rivers of this size or larger will be shown on the map.
     int shadingdir = world.shadingdir();

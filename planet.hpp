@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "classes.hpp"
@@ -173,6 +174,45 @@ enum class BasinClass : std::uint8_t
     coastal = 3
 };
 
+struct TectonicBoundarySegment
+{
+    int id = 0;
+    int leftPlateId = 0;
+    int rightPlateId = 0;
+    int cellCount = 0;
+    int persistenceSteps = 0;
+    float centroidX = 0.0f;
+    float centroidY = 0.0f;
+    float lengthCells = 0.0f;
+    float averageNormalMotion = 0.0f;
+    float averageShearMotion = 0.0f;
+    int averageConvergenceScore = 0;
+    int averageDivergenceScore = 0;
+    int averageShearScore = 0;
+    BoundaryType boundaryType = BoundaryType::none;
+    GeologicRegime geologicRegime = GeologicRegime::stable;
+    double ageMyr = 0.0;
+};
+
+struct TectonicDeformingRegion
+{
+    int id = 0;
+    int boundarySegmentId = 0;
+    int primaryPlateId = 0;
+    int secondaryPlateId = 0;
+    int cellCount = 0;
+    int persistenceSteps = 0;
+    float centroidX = 0.0f;
+    float centroidY = 0.0f;
+    float averageDeformationRate = 0.0f;
+    float averageInterpolatedVelocityX = 0.0f;
+    float averageInterpolatedVelocityY = 0.0f;
+    float averageNormalMotion = 0.0f;
+    float averageShearMotion = 0.0f;
+    DeformingRegionType type = DeformingRegionType::none;
+    double ageMyr = 0.0;
+};
+
 using namespace std;
 
 class planet
@@ -199,6 +239,15 @@ public:
     float tectonicdeltatimemyr() const;
     void settectonicdeltatimemyr(float amount);
 
+    int tectoniccyclecount() const;
+    void settectoniccyclecount(int amount);
+
+    int tectonicplatecount() const;
+    void settectonicplatecount(int amount);
+
+    int tectonicsealevelm() const;
+    void settectonicsealevelm(int amount);
+
     long seed() const;   // seed
     void setseed(long amount);
 
@@ -210,9 +259,6 @@ public:
 
     int height() const;  // global height
     void setheight(int amount);
-
-    int type() const;  // planetary type
-    void settype(int amount);
 
     bool rotation() const;   // global rotation
     void setrotation(bool amount);
@@ -940,6 +986,21 @@ public:
     float tectonicdeformationvelocityy(int x, int y) const;
     void settectonicdeformationvelocityy(int x, int y, float amount);
 
+    const std::vector<TectonicBoundarySegment>& tectonicboundarysegments() const;
+    std::vector<TectonicBoundarySegment>& tectonicboundarysegments();
+    int tectonicboundarysegmentcount() const;
+    void settectonicboundarysegments(std::vector<TectonicBoundarySegment> segments);
+    template<typename SegmentT> void settectonicboundarysegments(const std::vector<SegmentT>& segments);
+
+    const std::vector<TectonicDeformingRegion>& tectonicdeformingregions() const;
+    std::vector<TectonicDeformingRegion>& tectonicdeformingregions();
+    int tectonicdeformingregioncount() const;
+    void settectonicdeformingregions(std::vector<TectonicDeformingRegion> regions);
+    template<typename RegionT> void settectonicdeformingregions(const std::vector<RegionT>& regions);
+
+    const TectonicBoundarySegment* findtectonicboundarysegment(int id) const;
+    const TectonicDeformingRegion* findtectonicdeformingregion(int id) const;
+
     BasinClass basinclass(int x, int y) const;
     void setbasinclass(int x, int y, BasinClass amount);
 
@@ -1096,12 +1157,13 @@ private:
     
     int itswidth;   // width of global map
     int itsheight;  // height of global map
-
-    int itstype; // Type of world
     long itsseed;    // seed number of this world
     int itstectonictimeoriginstep;
     float itstectonictimemyr;
     float itstectonicdeltatimemyr;
+    int itstectoniccyclecount;
+    int itstectonicplatecount;
+    int itstectonicsealevelm;
     bool itsrotation;    // 1 (true) like the Earth, 0 (false) the other way
     float itstilt; // Axial tilt (affects seasonal differences). Earthlike = 22.5
     float itseccentricity; // How elliptical the orbit is. Earthlike = 0.0167.
@@ -1395,6 +1457,8 @@ private:
     std::vector<Polity> politylist;
     std::vector<RouteEdge> routeedgelist;
     std::vector<HistoryEvent> historyeventlist;
+    std::vector<TectonicBoundarySegment> tectonicboundarysegmentlist;
+    std::vector<TectonicDeformingRegion> tectonicdeformingregionlist;
 
     // reused temporary state
     string line_for_file_read;
@@ -1436,6 +1500,15 @@ inline void planet::settectonictimemyr(float amount) { itstectonictimemyr = (std
 inline float planet::tectonicdeltatimemyr() const { return itstectonicdeltatimemyr; }
 inline void planet::settectonicdeltatimemyr(float amount) { itstectonicdeltatimemyr = (std::max)(0.0f, amount); }
 
+inline int planet::tectoniccyclecount() const { return itstectoniccyclecount; }
+inline void planet::settectoniccyclecount(int amount) { itstectoniccyclecount = (std::max)(0, amount); }
+
+inline int planet::tectonicplatecount() const { return itstectonicplatecount; }
+inline void planet::settectonicplatecount(int amount) { itstectonicplatecount = (std::max)(0, amount); }
+
+inline int planet::tectonicsealevelm() const { return itstectonicsealevelm; }
+inline void planet::settectonicsealevelm(int amount) { itstectonicsealevelm = (std::max)(0, amount); }
+
 inline long planet::seed() const { return itsseed; }
 inline void planet::setseed(long amount) { itsseed = amount; }
 
@@ -1447,9 +1520,6 @@ inline void planet::setwidth(int amount) { itswidth = amount; resizeseasonalclim
 
 inline int planet::height() const { return itsheight; }
 inline void planet::setheight(int amount) { itsheight = amount; resizeseasonalclimatefields(); }
-
-inline int planet::type() const { return itstype; }
-inline void planet::settype(int amount) { itstype = amount; }
 
 inline bool planet::rotation() const { return itsrotation; }
 inline void planet::setrotation(bool amount) { itsrotation = amount; }
@@ -3614,6 +3684,99 @@ inline const std::vector<RouteEdge>& planet::routeedges() const { return routeed
 inline std::vector<RouteEdge>& planet::routeedges() { return routeedgelist; }
 inline const std::vector<HistoryEvent>& planet::historyevents() const { return historyeventlist; }
 inline std::vector<HistoryEvent>& planet::historyevents() { return historyeventlist; }
+
+inline const std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() const { return tectonicboundarysegmentlist; }
+inline std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() { return tectonicboundarysegmentlist; }
+inline int planet::tectonicboundarysegmentcount() const { return static_cast<int>(tectonicboundarysegmentlist.size()); }
+inline void planet::settectonicboundarysegments(std::vector<TectonicBoundarySegment> segments) { tectonicboundarysegmentlist = std::move(segments); }
+
+template<typename SegmentT>
+inline void planet::settectonicboundarysegments(const std::vector<SegmentT>& segments)
+{
+    tectonicboundarysegmentlist.resize(segments.size());
+
+    for (size_t i = 0; i < segments.size(); i++)
+    {
+        const SegmentT& src = segments[i];
+        TectonicBoundarySegment& dst = tectonicboundarysegmentlist[i];
+        dst.id = static_cast<int>(src.id);
+        dst.leftPlateId = static_cast<int>(src.left_plate_id);
+        dst.rightPlateId = static_cast<int>(src.right_plate_id);
+        dst.cellCount = static_cast<int>(src.cell_count);
+        dst.persistenceSteps = static_cast<int>(src.persistence_steps);
+        dst.centroidX = src.centroid_x;
+        dst.centroidY = src.centroid_y;
+        dst.lengthCells = src.length_cells;
+        dst.averageNormalMotion = src.average_normal_motion;
+        dst.averageShearMotion = src.average_shear_motion;
+        dst.averageConvergenceScore = static_cast<int>(src.average_convergence_score);
+        dst.averageDivergenceScore = static_cast<int>(src.average_divergence_score);
+        dst.averageShearScore = static_cast<int>(src.average_shear_score);
+        dst.boundaryType = static_cast<BoundaryType>(static_cast<std::uint8_t>(src.boundary_type));
+        dst.geologicRegime = static_cast<GeologicRegime>(static_cast<std::uint8_t>(src.geologic_regime));
+        dst.ageMyr = static_cast<double>(src.age_myr);
+    }
+}
+
+inline const std::vector<TectonicDeformingRegion>& planet::tectonicdeformingregions() const { return tectonicdeformingregionlist; }
+inline std::vector<TectonicDeformingRegion>& planet::tectonicdeformingregions() { return tectonicdeformingregionlist; }
+inline int planet::tectonicdeformingregioncount() const { return static_cast<int>(tectonicdeformingregionlist.size()); }
+inline void planet::settectonicdeformingregions(std::vector<TectonicDeformingRegion> regions) { tectonicdeformingregionlist = std::move(regions); }
+
+template<typename RegionT>
+inline void planet::settectonicdeformingregions(const std::vector<RegionT>& regions)
+{
+    tectonicdeformingregionlist.resize(regions.size());
+
+    for (size_t i = 0; i < regions.size(); i++)
+    {
+        const RegionT& src = regions[i];
+        TectonicDeformingRegion& dst = tectonicdeformingregionlist[i];
+        dst.id = static_cast<int>(src.id);
+        dst.boundarySegmentId = static_cast<int>(src.boundary_segment_id);
+        dst.primaryPlateId = static_cast<int>(src.primary_plate_id);
+        dst.secondaryPlateId = static_cast<int>(src.secondary_plate_id);
+        dst.cellCount = static_cast<int>(src.cell_count);
+        dst.persistenceSteps = static_cast<int>(src.persistence_steps);
+        dst.centroidX = src.centroid_x;
+        dst.centroidY = src.centroid_y;
+        dst.averageDeformationRate = src.average_deformation_rate;
+        dst.averageInterpolatedVelocityX = src.average_interpolated_velocity_x;
+        dst.averageInterpolatedVelocityY = src.average_interpolated_velocity_y;
+        dst.averageNormalMotion = src.average_normal_motion;
+        dst.averageShearMotion = src.average_shear_motion;
+        dst.type = static_cast<DeformingRegionType>(static_cast<std::uint8_t>(src.type));
+        dst.ageMyr = static_cast<double>(src.age_myr);
+    }
+}
+
+inline const TectonicBoundarySegment* planet::findtectonicboundarysegment(int id) const
+{
+    if (id <= 0)
+        return nullptr;
+
+    for (const TectonicBoundarySegment& segment : tectonicboundarysegmentlist)
+    {
+        if (segment.id == id)
+            return &segment;
+    }
+
+    return nullptr;
+}
+
+inline const TectonicDeformingRegion* planet::findtectonicdeformingregion(int id) const
+{
+    if (id <= 0)
+        return nullptr;
+
+    for (const TectonicDeformingRegion& region : tectonicdeformingregionlist)
+    {
+        if (region.id == id)
+            return &region;
+    }
+
+    return nullptr;
+}
 
 inline void planet::clearsocialstate()
 {

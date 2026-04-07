@@ -14,6 +14,65 @@
 #include "planet.hpp"
 #include "functions.hpp"
 
+namespace
+{
+BoundaryType decodeboundarytype(std::uint8_t value)
+{
+    switch (value)
+    {
+    case static_cast<std::uint8_t>(BoundaryType::convergent):
+        return BoundaryType::convergent;
+    case static_cast<std::uint8_t>(BoundaryType::divergent):
+        return BoundaryType::divergent;
+    case static_cast<std::uint8_t>(BoundaryType::transform):
+        return BoundaryType::transform;
+    case static_cast<std::uint8_t>(BoundaryType::passive_margin):
+        return BoundaryType::passive_margin;
+    case static_cast<std::uint8_t>(BoundaryType::none):
+    default:
+        return BoundaryType::none;
+    }
+}
+
+GeologicRegime decodegeologicregime(std::uint8_t value)
+{
+    switch (value)
+    {
+    case static_cast<std::uint8_t>(GeologicRegime::convergent_arc):
+        return GeologicRegime::convergent_arc;
+    case static_cast<std::uint8_t>(GeologicRegime::continent_collision):
+        return GeologicRegime::continent_collision;
+    case static_cast<std::uint8_t>(GeologicRegime::divergent_rift):
+        return GeologicRegime::divergent_rift;
+    case static_cast<std::uint8_t>(GeologicRegime::transform):
+        return GeologicRegime::transform;
+    case static_cast<std::uint8_t>(GeologicRegime::passive_margin):
+        return GeologicRegime::passive_margin;
+    case static_cast<std::uint8_t>(GeologicRegime::mid_ocean_ridge):
+        return GeologicRegime::mid_ocean_ridge;
+    case static_cast<std::uint8_t>(GeologicRegime::trench_adjacent):
+        return GeologicRegime::trench_adjacent;
+    case static_cast<std::uint8_t>(GeologicRegime::stable):
+    default:
+        return GeologicRegime::stable;
+    }
+}
+
+DeformingRegionType decodedeformingregiontype(std::uint8_t value)
+{
+    switch (value)
+    {
+    case static_cast<std::uint8_t>(DeformingRegionType::continental_rift):
+        return DeformingRegionType::continental_rift;
+    case static_cast<std::uint8_t>(DeformingRegionType::diffuse_collision):
+        return DeformingRegionType::diffuse_collision;
+    case static_cast<std::uint8_t>(DeformingRegionType::none):
+    default:
+        return DeformingRegionType::none;
+    }
+}
+}
+
 //#define ENABLE_PROFILER
 #ifdef ENABLE_PROFILER
 #include "profiler.h"
@@ -26,6 +85,9 @@ planet::planet() //constructor
     itstectonictimeoriginstep = 0;
     itstectonictimemyr = 0.0f;
     itstectonicdeltatimemyr = 0.0f;
+    itstectoniccyclecount = 0;
+    itstectonicplatecount = 0;
+    itstectonicsealevelm = 0;
     resizeseasonalclimatefields();
 }
 
@@ -70,6 +132,11 @@ void planet::cleartectonicprovenanceinternal()
     itstectonictimeoriginstep = 0;
     itstectonictimemyr = 0.0f;
     itstectonicdeltatimemyr = 0.0f;
+    itstectoniccyclecount = 0;
+    itstectonicplatecount = 0;
+    itstectonicsealevelm = 0;
+    tectonicboundarysegmentlist.clear();
+    tectonicdeformingregionlist.clear();
 
     parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
     {
@@ -425,6 +492,11 @@ void planet::clear()
     itstectonictimeoriginstep = 0;
     itstectonictimemyr = 0.0f;
     itstectonicdeltatimemyr = 0.0f;
+    itstectoniccyclecount = 0;
+    itstectonicplatecount = 0;
+    itstectonicsealevelm = 0;
+    tectonicboundarysegmentlist.clear();
+    tectonicdeformingregionlist.clear();
 
     parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
     {
@@ -613,6 +685,24 @@ void planet::shiftterrain(int offset)
         while (settlement.x > itswidth)
             settlement.x -= itswidth;
     }
+
+    const float worldspan = static_cast<float>(itswidth + 1);
+    const float offsetf = static_cast<float>(offset);
+    const auto shiftcentroidx = [worldspan, offsetf](float x) -> float
+    {
+        float shifted = fmodf(x - offsetf, worldspan);
+
+        if (shifted < 0.0f)
+            shifted += worldspan;
+
+        return shifted;
+    };
+
+    for (TectonicBoundarySegment& segment : tectonicboundarysegmentlist)
+        segment.centroidX = shiftcentroidx(segment.centroidX);
+
+    for (TectonicDeformingRegion& region : tectonicdeformingregionlist)
+        region.centroidX = shiftcentroidx(region.centroidX);
 }
 
 void planet::smoothrainmaps(int amount)
@@ -651,7 +741,6 @@ void planet::saveworld(string filename)
     writevariable(outfile, itssize);
     writevariable(outfile, itswidth);
     writevariable(outfile, itsheight);
-    writevariable(outfile, itstype);
     writevariable(outfile, itsseed);
     writevariable(outfile, itsrotation);
     writevariable(outfile, itstilt);
@@ -1021,6 +1110,55 @@ void planet::saveworld(string filename)
     writedata(outfile, tectonicdeformationratemap);
     writedata(outfile, tectonicdeformationvelocityxmap);
     writedata(outfile, tectonicdeformationvelocityymap);
+    writevariable(outfile, itstectoniccyclecount);
+    writevariable(outfile, itstectonicplatecount);
+    writevariable(outfile, itstectonicsealevelm);
+
+    int boundarysegmentcount = static_cast<int>(tectonicboundarysegmentlist.size());
+    writevariable(outfile, boundarysegmentcount);
+    for (const TectonicBoundarySegment& segment : tectonicboundarysegmentlist)
+    {
+        writevariable(outfile, segment.id);
+        writevariable(outfile, segment.leftPlateId);
+        writevariable(outfile, segment.rightPlateId);
+        writevariable(outfile, segment.cellCount);
+        writevariable(outfile, segment.persistenceSteps);
+        writevariable(outfile, segment.centroidX);
+        writevariable(outfile, segment.centroidY);
+        writevariable(outfile, segment.lengthCells);
+        writevariable(outfile, segment.averageNormalMotion);
+        writevariable(outfile, segment.averageShearMotion);
+        writevariable(outfile, segment.averageConvergenceScore);
+        writevariable(outfile, segment.averageDivergenceScore);
+        writevariable(outfile, segment.averageShearScore);
+        std::uint8_t boundarytype = static_cast<std::uint8_t>(segment.boundaryType);
+        std::uint8_t geologicregime = static_cast<std::uint8_t>(segment.geologicRegime);
+        writevariable(outfile, boundarytype);
+        writevariable(outfile, geologicregime);
+        writevariable(outfile, segment.ageMyr);
+    }
+
+    int deformingregioncount = static_cast<int>(tectonicdeformingregionlist.size());
+    writevariable(outfile, deformingregioncount);
+    for (const TectonicDeformingRegion& region : tectonicdeformingregionlist)
+    {
+        writevariable(outfile, region.id);
+        writevariable(outfile, region.boundarySegmentId);
+        writevariable(outfile, region.primaryPlateId);
+        writevariable(outfile, region.secondaryPlateId);
+        writevariable(outfile, region.cellCount);
+        writevariable(outfile, region.persistenceSteps);
+        writevariable(outfile, region.centroidX);
+        writevariable(outfile, region.centroidY);
+        writevariable(outfile, region.averageDeformationRate);
+        writevariable(outfile, region.averageInterpolatedVelocityX);
+        writevariable(outfile, region.averageInterpolatedVelocityY);
+        writevariable(outfile, region.averageNormalMotion);
+        writevariable(outfile, region.averageShearMotion);
+        std::uint8_t regiontype = static_cast<std::uint8_t>(region.type);
+        writevariable(outfile, regiontype);
+        writevariable(outfile, region.ageMyr);
+    }
 
     if (!outfile.good())
     {
@@ -1041,13 +1179,12 @@ bool planet::loadworld(string filename)
 
     const int fileversion = val;
 
-    if (fileversion < 11 || fileversion > itssaveversion) // Incompatible file format!
+    if (fileversion != itssaveversion) // Incompatible file format!
         return 0;
 
     readvariable(infile, itssize);
     readvariable(infile, itswidth);
     readvariable(infile, itsheight);
-    readvariable(infile, itstype);
     readvariable(infile, itsseed);
     resizeseasonalclimatefields();
     readvariable(infile, itsrotation);
@@ -1578,12 +1715,101 @@ bool planet::loadworld(string filename)
         readdata(infile, tectonicdeformationratemap);
         readdata(infile, tectonicdeformationvelocityxmap);
         readdata(infile, tectonicdeformationvelocityymap);
+
+        if (fileversion >= 16)
+        {
+            readvariable(infile, itstectoniccyclecount);
+            readvariable(infile, itstectonicplatecount);
+            readvariable(infile, itstectonicsealevelm);
+
+            int boundarysegmentcount = 0;
+            readvariable(infile, boundarysegmentcount);
+            boundarysegmentcount = std::max(0, boundarysegmentcount);
+            tectonicboundarysegmentlist.resize(static_cast<size_t>(boundarysegmentcount));
+            for (TectonicBoundarySegment& segment : tectonicboundarysegmentlist)
+            {
+                readvariable(infile, segment.id);
+                readvariable(infile, segment.leftPlateId);
+                readvariable(infile, segment.rightPlateId);
+                readvariable(infile, segment.cellCount);
+                readvariable(infile, segment.persistenceSteps);
+                readvariable(infile, segment.centroidX);
+                readvariable(infile, segment.centroidY);
+                readvariable(infile, segment.lengthCells);
+                readvariable(infile, segment.averageNormalMotion);
+                readvariable(infile, segment.averageShearMotion);
+                readvariable(infile, segment.averageConvergenceScore);
+                readvariable(infile, segment.averageDivergenceScore);
+                readvariable(infile, segment.averageShearScore);
+                std::uint8_t boundarytype = 0;
+                std::uint8_t geologicregime = 0;
+                readvariable(infile, boundarytype);
+                readvariable(infile, geologicregime);
+                segment.boundaryType = decodeboundarytype(boundarytype);
+                segment.geologicRegime = decodegeologicregime(geologicregime);
+                readvariable(infile, segment.ageMyr);
+                segment.id = std::max(0, segment.id);
+                segment.leftPlateId = std::max(0, segment.leftPlateId);
+                segment.rightPlateId = std::max(0, segment.rightPlateId);
+                segment.cellCount = std::max(0, segment.cellCount);
+                segment.persistenceSteps = std::max(0, segment.persistenceSteps);
+                segment.averageConvergenceScore = std::clamp(segment.averageConvergenceScore, 0, 255);
+                segment.averageDivergenceScore = std::clamp(segment.averageDivergenceScore, 0, 255);
+                segment.averageShearScore = std::clamp(segment.averageShearScore, 0, 255);
+                segment.ageMyr = std::max(0.0, segment.ageMyr);
+            }
+
+            int deformingregioncount = 0;
+            readvariable(infile, deformingregioncount);
+            deformingregioncount = std::max(0, deformingregioncount);
+            tectonicdeformingregionlist.resize(static_cast<size_t>(deformingregioncount));
+            for (TectonicDeformingRegion& region : tectonicdeformingregionlist)
+            {
+                readvariable(infile, region.id);
+                readvariable(infile, region.boundarySegmentId);
+                readvariable(infile, region.primaryPlateId);
+                readvariable(infile, region.secondaryPlateId);
+                readvariable(infile, region.cellCount);
+                readvariable(infile, region.persistenceSteps);
+                readvariable(infile, region.centroidX);
+                readvariable(infile, region.centroidY);
+                readvariable(infile, region.averageDeformationRate);
+                readvariable(infile, region.averageInterpolatedVelocityX);
+                readvariable(infile, region.averageInterpolatedVelocityY);
+                readvariable(infile, region.averageNormalMotion);
+                readvariable(infile, region.averageShearMotion);
+                std::uint8_t regiontype = 0;
+                readvariable(infile, regiontype);
+                region.type = decodedeformingregiontype(regiontype);
+                readvariable(infile, region.ageMyr);
+                region.id = std::max(0, region.id);
+                region.boundarySegmentId = std::max(0, region.boundarySegmentId);
+                region.primaryPlateId = std::max(0, region.primaryPlateId);
+                region.secondaryPlateId = std::max(0, region.secondaryPlateId);
+                region.cellCount = std::max(0, region.cellCount);
+                region.persistenceSteps = std::max(0, region.persistenceSteps);
+                region.ageMyr = std::max(0.0, region.ageMyr);
+            }
+        }
+        else
+        {
+            itstectoniccyclecount = 0;
+            itstectonicplatecount = 0;
+            itstectonicsealevelm = 0;
+            tectonicboundarysegmentlist.clear();
+            tectonicdeformingregionlist.clear();
+        }
     }
     else
     {
         itstectonictimeoriginstep = 0;
         itstectonictimemyr = 0.0f;
         itstectonicdeltatimemyr = 0.0f;
+        itstectoniccyclecount = 0;
+        itstectonicplatecount = 0;
+        itstectonicsealevelm = 0;
+        tectonicboundarysegmentlist.clear();
+        tectonicdeformingregionlist.clear();
 
         parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
         {
@@ -1906,6 +2132,10 @@ void read_val(string const& line, unsigned short& val)
 void read_val(string const& line, float& val)
 {
     val = stof(line);
+}
+void read_val(string const& line, double& val)
+{
+    val = stod(line);
 }
 void read_val(string const& line, long& val)
 {

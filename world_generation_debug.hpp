@@ -10,8 +10,6 @@ struct WorldGenerationDebugOptions
 {
     bool logToProfilingWorkbook = true;
     bool visualizeEachStep = false;
-    bool useFastLEMMountains = false;
-    bool usePlateTectonicsSimulation = false;
     int plateTectonicsCycleCount = 4;
     bool socialEnabled = false;
     SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
@@ -31,6 +29,4 @@ void setworldgenvisualizationcallback(std::function<void()> callback);
 void clearworldgenvisualizationcallback();
 bool isworldgendebugrunactive();
 long worldgenerationdebugseed();
-bool usefastlemmountains();
-bool useplatetectonicssimulation();
 int platetectonicscyclecount();

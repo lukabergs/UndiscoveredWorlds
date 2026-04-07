@@ -1,10 +1,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
-#include "third_party/plate_tectonics/src/platecapi.hpp"
-#include "third_party/plate_tectonics/src/tectonic_contract.hpp"
+#include "platecapi.hpp"
+#include "tectonic_contract.hpp"
 #ifdef max
 #undef max
 #endif
@@ -17,6 +18,16 @@
 
 namespace
 {
+template <int N>
+struct prioritytag : prioritytag<N - 1>
+{
+};
+
+template <>
+struct prioritytag<0>
+{
+};
+
 struct PlateTectonicsHandle
 {
     void* pointer = nullptr;
@@ -216,6 +227,61 @@ float deformingupliftbias(DeformingRegionType regiontype)
         return 0.0f;
     }
 }
+
+template <typename World>
+auto settectoniccyclecount(World& world, int value, prioritytag<1>) -> decltype(world.settectoniccyclecount(value), void())
+{
+    world.settectoniccyclecount(value);
+}
+
+template <typename World>
+void settectoniccyclecount(World&, int, prioritytag<0>)
+{
+}
+
+template <typename World>
+auto settectonicplatecount(World& world, int value, prioritytag<1>) -> decltype(world.settectonicplatecount(value), void())
+{
+    world.settectonicplatecount(value);
+}
+
+template <typename World>
+void settectonicplatecount(World&, int, prioritytag<0>)
+{
+}
+
+template <typename World>
+auto settectonicsealevelm(World& world, int value, prioritytag<1>) -> decltype(world.settectonicsealevelm(value), void())
+{
+    world.settectonicsealevelm(value);
+}
+
+template <typename World>
+void settectonicsealevelm(World&, int, prioritytag<0>)
+{
+}
+
+template <typename World, typename Segments>
+auto settectonicboundarysegments(World& world, Segments&& segments, prioritytag<1>) -> decltype(world.settectonicboundarysegments(std::forward<Segments>(segments)), void())
+{
+    world.settectonicboundarysegments(std::forward<Segments>(segments));
+}
+
+template <typename World, typename Segments>
+void settectonicboundarysegments(World&, Segments&&, prioritytag<0>)
+{
+}
+
+template <typename World, typename Regions>
+auto settectonicdeformingregions(World& world, Regions&& regions, prioritytag<1>) -> decltype(world.settectonicdeformingregions(std::forward<Regions>(regions)), void())
+{
+    world.settectonicdeformingregions(std::forward<Regions>(regions));
+}
+
+template <typename World, typename Regions>
+void settectonicdeformingregions(World&, Regions&&, prioritytag<0>)
+{
+}
 }
 
 void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>& shelves)
@@ -260,8 +326,8 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
     }
 
     PlateTectonicsHandle simulation;
-    simulation.pointer = platec_api_create_from_heightmap(world.seed(), static_cast<uint32_t>(simwidth), static_cast<uint32_t>(simheight),
-        inputheightmap.data(), searatio,
+    simulation.pointer = platec_api_create(world.seed(), static_cast<uint32_t>(simwidth), static_cast<uint32_t>(simheight),
+        searatio,
         tuning::terrain::platetectonics::erosionPeriod,
         tuning::terrain::platetectonics::foldingRatio,
         tuning::terrain::platetectonics::aggregationOverlapAbsolute,
@@ -271,6 +337,8 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
 
     if (simulation.pointer == nullptr)
         return;
+
+    platec_api_load_heightmap(simulation.pointer, inputheightmap.data(), searatio);
 
     for (uint32_t step = 0; step < tuning::terrain::platetectonics::maximumSimulationSteps; step++)
     {
@@ -370,9 +438,24 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
     world.settectonictimeoriginstep(static_cast<int>(platec_api_get_time_origin_step(simulation.pointer)));
     world.settectonictimemyr(static_cast<float>(platec_api_get_time_myr(simulation.pointer)));
     world.settectonicdeltatimemyr(static_cast<float>(platec_api_get_delta_time_myr(simulation.pointer)));
+    settectoniccyclecount(world, static_cast<int>(platec_api_get_cycle_count(simulation.pointer)), prioritytag<1>{});
+    settectonicplatecount(world, static_cast<int>(platec_api_get_plate_count(simulation.pointer)), prioritytag<1>{});
+    settectonicsealevelm(world, static_cast<int>(platec_api_get_sea_level_m(simulation.pointer)), prioritytag<1>{});
 
     const std::uint32_t boundarysegmentcount = platec_api_get_boundary_segment_count(simulation.pointer);
     const platec::contract::BoundarySegment* boundarysegments = platec_api_get_boundary_segments(simulation.pointer);
+    std::vector<platec::contract::BoundarySegment> boundarysegmentobjects;
+    if (boundarysegments != nullptr && boundarysegmentcount > 0)
+        boundarysegmentobjects.assign(boundarysegments, boundarysegments + boundarysegmentcount);
+    settectonicboundarysegments(world, std::move(boundarysegmentobjects), prioritytag<1>{});
+
+    const std::uint32_t deformingregioncount = platec_api_get_deforming_region_count(simulation.pointer);
+    const platec::contract::DeformingRegion* deformingregions = platec_api_get_deforming_regions(simulation.pointer);
+    std::vector<platec::contract::DeformingRegion> deformingregionobjects;
+    if (deformingregions != nullptr && deformingregioncount > 0)
+        deformingregionobjects.assign(deformingregions, deformingregions + deformingregioncount);
+    settectonicdeformingregions(world, std::move(deformingregionobjects), prioritytag<1>{});
+
     std::vector<const platec::contract::BoundarySegment*> boundarysegmentlookup;
     if (boundarysegments != nullptr && boundarysegmentcount > 0)
     {
@@ -402,6 +485,7 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
             const std::uint32_t nearestboundaryid = nearestboundaryidmap[index];
             const platec::contract::BoundarySegment* boundarysegment =
                 nearestboundaryid < boundarysegmentlookup.size() ? boundarysegmentlookup[nearestboundaryid] : nullptr;
+            // This history score is app-derived for presentation/stylization, not native contract data.
             const float boundaryhistory = normalizeboundaryhistory(boundarysegment);
 
             world.settectonicconvergence(x, y, convergencescore);
