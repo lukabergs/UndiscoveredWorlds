@@ -70,12 +70,8 @@ bool drawworldgenerationoptionswindow(const ImGuiViewport* main_viewport, ImGuiW
 
     ImGui::Checkbox("Log timings to profiling.xlsx", &options.logToProfilingWorkbook);
     ImGui::Checkbox("Visualize each completed step", &options.visualizeEachStep);
-    ImGui::Checkbox("Use FastLEM-style mountains", &options.useFastLEMMountains);
-    ImGui::Checkbox("Use plate tectonics simulation", &options.usePlateTectonicsSimulation);
-
-    ImGui::BeginDisabled(!options.usePlateTectonicsSimulation);
+    ImGui::TextUnformatted("Plate tectonics and FastLEM mountains are always enabled.");
     ImGui::SliderInt("Plate tectonics cycles", &options.plateTectonicsCycleCount, 1, 12);
-    ImGui::EndDisabled();
 
     ImGui::Text(" ");
     ImGui::Checkbox("Generate social world", &options.socialEnabled);
@@ -139,7 +135,7 @@ bool drawworldgenerationoptionswindow(const ImGuiViewport* main_viewport, ImGuiW
     return confirmed;
 }
 
-bool drawtectonicchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, int& landmass, int& mergefactor)
+bool drawterrainchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, int& landmass, int& mergefactor)
 {
     if (!show)
         return false;
@@ -148,7 +144,7 @@ bool drawtectonicchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFl
 
     ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 428, main_viewport->WorkPos.y + 167), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(405, 200), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Generate world terrain", NULL, window_flags);
+    ImGui::Begin("Generate terrain", NULL, window_flags);
 
     ImGui::Text("This will overwrite any existing terrain.");
     ImGui::Text(" ");
@@ -162,50 +158,6 @@ bool drawtectonicchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFl
     ImGui::SliderInt("Marine flooding", &mergefactor, 1, 30);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("The degree to which sea covers the continents. The higher this is, the more inland seas and fragmented coastlines there will be.");
-
-    ImGui::Text(" ");
-    ImGui::Text(" ");
-
-    ImGui::SameLine(100.0f);
-
-    if (ImGui::Button("OK"))
-    {
-        confirmed = true;
-        show = false;
-    }
-
-    ImGui::SameLine(270.0f);
-
-    if (ImGui::Button("Cancel"))
-        show = false;
-
-    ImGui::End();
-    return confirmed;
-}
-
-bool drawnontectonicchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, int& sealeveleditable, int& iterations)
-{
-    if (!show)
-        return false;
-
-    bool confirmed = false;
-
-    ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 428, main_viewport->WorkPos.y + 167), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(405, 200), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Generate world terrain##nontectonic", NULL, window_flags);
-
-    ImGui::Text("This will overwrite any existing terrain.");
-    ImGui::Text(" ");
-
-    ImGui::SliderInt("Sea level", &sealeveleditable, 0, 10);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("The approximate sea level. The higher it is, the more sea (very roughly) there is likely to be.");
-
-    ImGui::Text(" ");
-
-    ImGui::SliderInt("Variation", &iterations, 1, 10);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("The amount of variation in terrain type. The higher this is, the more chaotic the terrain may become.");
 
     ImGui::Text(" ");
     ImGui::Text(" ");

@@ -3709,10 +3709,9 @@ void initialiseworld(planet& world)
 {
     world.clear();
 
-int saveversion = 15;        // Only save files that start with this number can be loaded
-int settingssaveversion = 5; // As above, but for settings files.
+    int saveversion = 16;        // Only saves of this exact version can be loaded.
+    int settingssaveversion = 5; // As above, but for settings files.
     int size = tuning::worlddefaults::size;
-    int type = tuning::worlddefaults::type;
     int width = tuning::worlddefaults::width;
     int height = tuning::worlddefaults::height;
     bool rotation = tuning::worlddefaults::rotation;
@@ -3743,7 +3742,6 @@ int settingssaveversion = 5; // As above, but for settings files.
     world.setsize(size);
     world.setwidth(width);
     world.setheight(height);
-    world.settype(type);
     world.setrotation(rotation);
     world.settilt(tilt);
     world.seteccentricity(eccentricity);
@@ -3764,6 +3762,9 @@ int settingssaveversion = 5; // As above, but for settings files.
     world.setclimatenumber(climatenumber);
     world.setmaxelevation(maxelevation);
     world.setsealevel(sealevel);
+    world.settectoniccyclecount(0);
+    world.settectonicplatecount(0);
+    world.settectonicsealevelm(0);
     world.setlandtotal(0);
     world.setseatotal(0);
     world.setcraterno(craterno);
@@ -4122,39 +4123,22 @@ void changeworldproperties(planet& world)
     long seed = world.seed();
     fast_srand(seed);
 
-    // Size and type
+    // Size
 
     world.setsize(2); // Large world
     world.setgravity(1.0f);
-
-    world.settype(2);
-
-    if (random(1, 30) == 1)
-        world.settype(4);
-
-    if (random(1, 12) == 1) // Fairly rarely, have more fragmented continents
-        world.settype(1);
 
     if (random(1, 16) == 1) // Medium-sized world
     {
         world.setsize(1);
         world.setgravity(0.4f);
-
-        if (random(1,4)!=1)
-            world.settype(4);
     }
 
     if (random(1, 25) == 1) // Small world
     {
         world.setsize(0);
         world.setgravity(0.15f);
-
-        if (random(1, 8) != 1)
-            world.settype(4);
     }
-
-    if (random(1, 30) == 1) // Occasionally, have ocean worlds
-        world.settype(3);
 
     // Rotation
 
@@ -4239,25 +4223,6 @@ void changeworldproperties(planet& world)
 
     world.setglacialtemp(newglacial);
 
-    // Sea level
-
-    if (world.type() == 4)
-    {
-        int sealevel = world.sealevel();
-        
-        float sealevelmult = (float)random(15, 100);
-        sealevelmult = sealevelmult / 100.0f;
-
-        if (random(1, 5) == 1)
-            sealevelmult = sealevelmult * sealevelmult;
-        else
-            sealevelmult = ((sealevelmult * sealevelmult) + sealevelmult) / 2.0f; // Make lower values more likely.
-
-        float newsealevel = (float)sealevel * sealevelmult;
-        sealevel = (int)newsealevel;
-
-        world.setsealevel(sealevel);
-    }
 }
 
 // This works out the total areas of land and sea in the world.

@@ -23,6 +23,8 @@
 #include <memory>
 #include <stdio.h>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <chrono>
 #include <thread>
 #include <queue>
@@ -57,10 +59,6 @@
 
 #define REGIONALCREATIONSTEPS 84
 
-#define GLOBALTERRAINCREATIONSTEPS1 26
-#define GLOBALTERRAINCREATIONSTEPS2 31
-#define GLOBALCLIMATECREATIONSTEPS 29
-
 #define REGIONALTILEWIDTH 32
 #define REGIONALTILEHEIGHT 32
 
@@ -79,8 +77,6 @@ struct CommandLineGenerationOptions
     bool showHelp = false;
     bool earthClimateBenchmark = false;
     bool printClimateRelativeError = false;
-    bool useFastLEMMountains = false;
-    bool usePlateTectonicsSimulation = false;
     bool rivers = true;
     bool lakes = true;
     bool deltas = true;
@@ -103,6 +99,209 @@ struct CommandLineGenerationOptions
     string importSeaPath;
 };
 
+template<typename T, typename = void>
+struct hastectoniccyclecount : std::false_type {};
+
+template<typename T>
+struct hastectoniccyclecount<T, std::void_t<decltype(std::declval<const T&>().tectoniccyclecount())>> : std::true_type {};
+
+template<typename T, typename = void>
+struct hastectonicplatecount : std::false_type {};
+
+template<typename T>
+struct hastectonicplatecount<T, std::void_t<decltype(std::declval<const T&>().tectonicplatecount())>> : std::true_type {};
+
+template<typename T, typename = void>
+struct hastectonicsealevelm : std::false_type {};
+
+template<typename T>
+struct hastectonicsealevelm<T, std::void_t<decltype(std::declval<const T&>().tectonicsealevelm())>> : std::true_type {};
+
+template<typename T, typename = void>
+struct hastectonicboundarysegmentcount : std::false_type {};
+
+template<typename T>
+struct hastectonicboundarysegmentcount<T, std::void_t<decltype(std::declval<const T&>().tectonicboundarysegmentcount())>> : std::true_type {};
+
+template<typename T, typename = void>
+struct hastectonicdeformingregioncount : std::false_type {};
+
+template<typename T>
+struct hastectonicdeformingregioncount<T, std::void_t<decltype(std::declval<const T&>().tectonicdeformingregioncount())>> : std::true_type {};
+
+int gettectoniccyclecount(const planet& world)
+{
+    if constexpr (hastectoniccyclecount<planet>::value)
+        return (std::max)(0, static_cast<int>(world.tectoniccyclecount()));
+
+    return -1;
+}
+
+int gettectonicplatecount(const planet& world)
+{
+    if constexpr (hastectonicplatecount<planet>::value)
+        return (std::max)(0, static_cast<int>(world.tectonicplatecount()));
+
+    return -1;
+}
+
+int gettectonicsealevelm(const planet& world)
+{
+    if constexpr (hastectonicsealevelm<planet>::value)
+        return (std::max)(0, static_cast<int>(world.tectonicsealevelm()));
+
+    return -1;
+}
+
+int gettectonicboundarysegmentcount(const planet& world)
+{
+    if constexpr (hastectonicboundarysegmentcount<planet>::value)
+        return (std::max)(0, static_cast<int>(world.tectonicboundarysegmentcount()));
+
+    return -1;
+}
+
+int gettectonicdeformingregioncount(const planet& world)
+{
+    if constexpr (hastectonicdeformingregioncount<planet>::value)
+        return (std::max)(0, static_cast<int>(world.tectonicdeformingregioncount()));
+
+    return -1;
+}
+
+const char* crustclasslabel(CrustClass crustclass)
+{
+    switch (crustclass)
+    {
+    case CrustClass::oceanic:
+        return "oceanic";
+    case CrustClass::transitional:
+        return "transitional";
+    case CrustClass::continental:
+        return "continental";
+    case CrustClass::none:
+    default:
+        return "none";
+    }
+}
+
+const char* boundarytypelabel(BoundaryType boundarytype)
+{
+    switch (boundarytype)
+    {
+    case BoundaryType::convergent:
+        return "convergent";
+    case BoundaryType::divergent:
+        return "divergent";
+    case BoundaryType::transform:
+        return "transform";
+    case BoundaryType::passive_margin:
+        return "passive_margin";
+    case BoundaryType::none:
+    default:
+        return "none";
+    }
+}
+
+const char* deformingregiontypelabel(DeformingRegionType regiontype)
+{
+    switch (regiontype)
+    {
+    case DeformingRegionType::continental_rift:
+        return "continental_rift";
+    case DeformingRegionType::diffuse_collision:
+        return "diffuse_collision";
+    case DeformingRegionType::none:
+    default:
+        return "none";
+    }
+}
+
+const char* geologicregimelabel(GeologicRegime regime)
+{
+    switch (regime)
+    {
+    case GeologicRegime::convergent_arc:
+        return "convergent_arc";
+    case GeologicRegime::continent_collision:
+        return "continent_collision";
+    case GeologicRegime::divergent_rift:
+        return "divergent_rift";
+    case GeologicRegime::transform:
+        return "transform";
+    case GeologicRegime::passive_margin:
+        return "passive_margin";
+    case GeologicRegime::mid_ocean_ridge:
+        return "mid_ocean_ridge";
+    case GeologicRegime::trench_adjacent:
+        return "trench_adjacent";
+    case GeologicRegime::stable:
+    default:
+        return "stable";
+    }
+}
+
+void drawboundarysegmentsummary(const char* label, int requestedid, const TectonicBoundarySegment* segment)
+{
+    if (requestedid <= 0)
+        return;
+
+    if (segment == nullptr)
+    {
+        ImGui::Text("%s: id %d (not found)", label, requestedid);
+        return;
+    }
+
+    ImGui::Text("%s: id %d | type %s | plates %d/%d | cells %d | age %.2f Myr",
+        label, segment->id, boundarytypelabel(segment->boundaryType), segment->leftPlateId, segment->rightPlateId,
+        segment->cellCount, static_cast<float>(segment->ageMyr));
+    ImGui::Text("  centroid(%.1f, %.1f) | normal %.3f | shear %.3f | len %.1f | regime %s",
+        segment->centroidX, segment->centroidY, segment->averageNormalMotion, segment->averageShearMotion,
+        segment->lengthCells, geologicregimelabel(segment->geologicRegime));
+}
+
+void drawdeformingregionsummary(const char* label, int requestedid, const TectonicDeformingRegion* region)
+{
+    if (requestedid <= 0)
+        return;
+
+    if (region == nullptr)
+    {
+        ImGui::Text("%s: id %d (not found)", label, requestedid);
+        return;
+    }
+
+    ImGui::Text("%s: id %d | type %s | plates %d/%d | cells %d | age %.2f Myr",
+        label, region->id, deformingregiontypelabel(region->type), region->primaryPlateId, region->secondaryPlateId,
+        region->cellCount, static_cast<float>(region->ageMyr));
+    ImGui::Text("  centroid(%.1f, %.1f) | rate %.3f | vel(%.3f, %.3f) | normal %.3f | shear %.3f",
+        region->centroidX, region->centroidY, region->averageDeformationRate,
+        region->averageInterpolatedVelocityX, region->averageInterpolatedVelocityY,
+        region->averageNormalMotion, region->averageShearMotion);
+}
+
+bool gettectonicinspectionpoint(const planet& world, const region& region, screenmodeenum screenmode, bool focused, int poix, int poiy, int& x, int& y)
+{
+    if (focused == false)
+        return false;
+
+    if (screenmode == globalmapscreen || screenmode == exportareascreen || screenmode == importscreen)
+    {
+        x = wrap(poix, world.width());
+        y = std::clamp(poiy, 0, world.height());
+        return true;
+    }
+
+    if (screenmode == regionalmapscreen || screenmode == generatingregionscreen)
+    {
+        x = wrap(region.leftx() + poix / 16, world.width());
+        y = std::clamp(region.lefty() + poiy / 16, 0, world.height());
+        return true;
+    }
+
+    return false;
+}
+
 string narrowargument(const wchar_t* value)
 {
     return filesystem::path(value).string();
@@ -122,8 +321,6 @@ void printcommandlineusage()
     cout << "Options:\n";
     cout << "  --seed <number>         Use a fixed world seed.\n";
     cout << "  --save <path>           Save the generated world as a .uww file.\n";
-    cout << "  --fastlem               Enable FastLEM mountains.\n";
-    cout << "  --tectonics             Enable plate tectonics simulation.\n";
     cout << "  --plate-cycles <count>  Set tectonic cycle count.\n";
     cout << "  --reference-precip <csv> Compare against a precipitation reference grid.\n";
     cout << "  --import-land <png>     Import a land height map instead of generating terrain.\n";
@@ -186,15 +383,8 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
             continue;
         }
 
-        if (argument == "--fastlem")
+        if (argument == "--fastlem" || argument == "--tectonics")
         {
-            options.useFastLEMMountains = true;
-            continue;
-        }
-
-        if (argument == "--tectonics")
-        {
-            options.usePlateTectonicsSimulation = true;
             continue;
         }
 
@@ -436,8 +626,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     WorldGenerationDebugOptions debugoptions;
     debugoptions.visualizeEachStep = false;
     debugoptions.logToProfilingWorkbook = options.logToProfilingWorkbook;
-    debugoptions.useFastLEMMountains = options.useFastLEMMountains;
-    debugoptions.usePlateTectonicsSimulation = options.usePlateTectonicsSimulation;
     debugoptions.plateTectonicsCycleCount = options.plateTectonicsCycleCount;
 
     if (importedworld == false)
@@ -478,22 +666,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     }
     else
     {
-        int iterations = 4;
-
-        for (int n = 0; n < 3; n++)
-        {
-            if (random(1, 2) == 1)
-                iterations++;
-            else
-                iterations--;
-        }
-
-        if (iterations < 1)
-            iterations = 1;
-
-        if (iterations > 7)
-            iterations = 7;
-
         int mergefactor = random(1, 15);
 
         if (random(1, 12) == 1)
@@ -502,7 +674,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
         vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
 
-        generateglobalterrain(*world, 0, iterations, mergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves, squareroot);
+        generateglobalterrain(*world, 0, mergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves, squareroot);
         generateglobalclimate(*world, options.rivers, options.lakes, options.deltas, smalllake, largelake, landshape, mountaindrainage, shelves);
         generatephysicalworldlayers(*world, shelves);
         generatesocialworld(*world, socialoptions);
@@ -1016,8 +1188,6 @@ int main()
     int& newy = customworldui.newy; // These are used to locate the new region.
     int& landmass = customworldui.landmass; // Rough amount of land coverage, for custom worlds.
     int& mergefactor = customworldui.mergefactor; // Amount continents will be removed by merging with the fractal map, for custom worlds.-----------------
-    int& iterations = customworldui.iterations; // Number of terrain iterations for worlds of terrain type 4.
-    int& sealeveleditable = customworldui.sealeveleditable; // Sea level (0-10) for worlds of terrain type 4.
     bool& compareclimateworkbook = customworldui.compareClimateWorkbook;
 
     short regionmargin = 17; // The centre of the regional map can't be closer than this to the northern/southern edges of the global map.
@@ -1033,8 +1203,7 @@ int main()
     bool& showregionaltemperaturechart = panels.showRegionalTemperatureChart; // If thjis is 1 then we show monthly temperatures for the selected point.
     bool& showregionalrainfallchart = panels.showRegionalRainfallChart; // If thjis is 1 then we show monthly rainfall for the selected point.
     bool& showsetsize = panels.showSetSize; // If this is 1 then a window is show to set the size for the custom world.
-    bool& showtectonicchooser = panels.showTectonicChooser; // If this is 1 then we show the panel for creating tectonic-based custom world terrain.
-    bool& shownontectonicchooser = panels.showNonTectonicChooser; // If this is 1 then we show the panel for creating non-tectonic-based custom world terrain.
+    bool& showterrainchooser = panels.showTerrainChooser; // If this is 1 then we show the panel for creating custom world terrain.
     bool& showworldgenerationoptions = panels.showWorldGenerationOptions;
     bool& showworldeditproperties = panels.showWorldEditProperties; // If this is 1 then we show the panel for editing custom world properties.
     bool& showareawarning = panels.showAreaWarning; // If this is 1 then we show a warning about too-large areas.
@@ -1048,8 +1217,7 @@ int main()
     short& savingworldpass = progresspasses.savingWorld; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
     short& exportingareapass = progresspasses.exportingArea; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
     short& generatingregionpass = progresspasses.generatingRegion; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
-    short& generatingtectonicpass = progresspasses.generatingTectonic; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
-    short& generatingnontectonicpass = progresspasses.generatingNonTectonic; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
+    short& generatingterrainpass = progresspasses.generatingTerrain; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
 
     WorldGenerationDebugState worldgenerationdebug;
 
@@ -1343,28 +1511,12 @@ int main()
                 if (random(1, 12) == 1) // Fairly rarely, have more fragmented continents
                     thismergefactor = random(1, 25);
 
-                iterations = 4; // This is for worlds of terrain type 4.
-
-                for (int n = 0; n < 3; n++)
-                {
-                    if (random(1, 2) == 1)
-                        iterations++;
-                    else
-                        iterations--;
-                }
-
-                if (iterations < 1)
-                    iterations = 1;
-
-                if (iterations > 7)
-                    iterations = 7;
-
                 vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
                 vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
 
                 // Actually generate the world
 
-                generateglobalterrain(*world, 0, iterations, thismergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves,squareroot);
+                generateglobalterrain(*world, 0, thismergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves, squareroot);
                 generateglobalclimate(*world, 1, 1, 1, smalllake, largelake, landshape, mountaindrainage, shelves);
                 generatephysicalworldlayers(*world, shelves);
                 generatesocialworld(*world, socialoptionsfromdebug());
@@ -2150,17 +2302,11 @@ int main()
 
             ImGui::PushItemWidth(100.0f);
 
-            if (standardbutton("Tectonic"))
-                toggle(showtectonicchooser);
+            if (standardbutton("Terrain"))
+                toggle(showterrainchooser);
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Create tectonic-based global terrain, with continents, mountains, coastal shelves, and oceanic ridges.");
-
-            if (standardbutton("Non-tectonic"))
-                toggle(shownontectonicchooser);
-
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Create non-tectonic-based global terrain.");
+                ImGui::SetTooltip("Create global terrain with the tectonic pipeline, continental shelves, and FastLEM mountain generation.");
 
             ImGui::Dummy(ImVec2(0.0f, linespace));
 
@@ -2600,29 +2746,27 @@ int main()
 
         // These screens all display a "Please wait" message ten times (for some reason doing it once or twice doesn't actually display it) and then do something time-consuming.
 
-        if (screenmode == generatingtectonicscreen)
+        if (screenmode == generatingterrainscreen)
         {
-            if (showdeferredworkwindow(generatingtectonicpass, "Please wait...##generatetectonic ", "Generating terrain...", ImVec2(main_viewport->WorkPos.x + 507, main_viewport->WorkPos.y + 173), ImVec2(173, 68)))
+            if (showdeferredworkwindow(generatingterrainpass, "Please wait...##generateterrain ", "Generating terrain...", ImVec2(main_viewport->WorkPos.x + 507, main_viewport->WorkPos.y + 173), ImVec2(173, 68)))
             {
                 preparecustomworldgeneration();
-                world->settype(2); // This terrain type gives large continents.
 
-                int clusterno = -1;
-                int clustersize = -1;
+                int clusterno = 1;
+                int clustersize = 1;
+                int mergebias = 0;
 
                 switch (landmass)
                 {
                 case 0:
-                    world->settype(3);
+                    mergebias = 10;
                     break;
 
                 case 1:
-                    world->settype(1);
+                    mergebias = 5;
                     break;
 
                 case 2:
-                    clusterno = 1;
-                    clustersize = 1;
                     break;
 
                 case 3:
@@ -2666,39 +2810,15 @@ int main()
                     break;
                 }
 
-                vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-                vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
-
-                // Now generate the terrain.
-
-                generateglobalterrain(*world, 1, iterations, mergefactor - 5, clusterno, clustersize, landshape, chainland, mountaindrainage, shelves, squareroot);
-                finishcustomworldgeneration(generatingtectonicpass);
-            }
-        }
-
-        if (screenmode == generatingnontectonicscreen)
-        {
-            if (showdeferredworkwindow(generatingnontectonicpass, "Please wait...##generatenontectonic ", "Generating terrain...", ImVec2(main_viewport->WorkPos.x + 507, main_viewport->WorkPos.y + 173), ImVec2(173, 68)))
-            {
-                preparecustomworldgeneration();
-                world->settype(4); // This terrain type gives alien-type terrain.
-
-                float sealevel = (float)sealeveleditable / 10.0f;
-
-                sealevel = (float)world->maxelevation() * sealevel;
-
-                if (sealevel < 1.0f)
-                    sealevel = 1.0f;
-
-                world->setsealevel((int)sealevel);
+                const int effectivemergefactor = std::clamp(mergefactor - 5 + mergebias, -4, 30);
 
                 vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
                 vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
 
                 // Now generate the terrain.
 
-                generateglobalterrain(*world, 1, iterations, mergefactor - 5, 1, 1, landshape, chainland, mountaindrainage, shelves, squareroot);
-                finishcustomworldgeneration(generatingnontectonicpass);
+                generateglobalterrain(*world, 1, effectivemergefactor, clusterno, clustersize, landshape, chainland, mountaindrainage, shelves, squareroot);
+                finishcustomworldgeneration(generatingterrainpass);
             }
         }
 
@@ -3335,19 +3455,7 @@ int main()
             string lunarvalue = ss5.str();
 
             string typeinfo = "Category: ";
-            string typevalue = to_string(world->type());
-
-            if (typevalue == "1")
-                typevalue = "tectonic (small)";
-
-            if (typevalue == "2")
-                typevalue = "tectonic (large)";
-
-            if (typevalue == "3")
-                typevalue = "oceanic";
-
-            if (typevalue == "4")
-                typevalue = "non-tectonic";
+            string typevalue = "tectonic";
 
             string rotationinfo = "Rotation:";
             string rotationvalue = "";
@@ -3408,7 +3516,7 @@ int main()
             ImGui::Text(typeinfo.c_str());
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Terrain category. (Earth: large tectonic)");
+                ImGui::SetTooltip("Unified terrain generator in use.");
 
             ImGui::SameLine((float)topleftfigures);
             ImGui::Text(typevalue.c_str());
@@ -3558,6 +3666,113 @@ int main()
                         }
 
                         ImGui::EndTable();
+                    }
+
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Tectonics"))
+                {
+                    const int tectoniccyclecount = gettectoniccyclecount(*world);
+                    const int tectonicplatecount = gettectonicplatecount(*world);
+                    const int tectonicsealevelm = gettectonicsealevelm(*world);
+                    const int boundarysegmentcount = gettectonicboundarysegmentcount(*world);
+                    const int deformingregioncount = gettectonicdeformingregioncount(*world);
+
+                    ImGui::Text("World metadata");
+                    ImGui::Separator();
+                    ImGui::Text("time_myr: %.3f", world->tectonictimemyr());
+                    ImGui::Text("delta_time_myr: %.6f", world->tectonicdeltatimemyr());
+
+                    if (tectoniccyclecount >= 0)
+                        ImGui::Text("cycle_count: %d", tectoniccyclecount);
+                    else
+                        ImGui::Text("cycle_count: unavailable");
+
+                    if (tectonicplatecount >= 0)
+                        ImGui::Text("plate_count: %d", tectonicplatecount);
+
+                    if (tectonicsealevelm >= 0)
+                        ImGui::Text("sea_level_m: %d", tectonicsealevelm);
+
+                    if (boundarysegmentcount >= 0)
+                        ImGui::Text("boundary_segments: %d", boundarysegmentcount);
+
+                    if (deformingregioncount >= 0)
+                        ImGui::Text("deforming_regions: %d", deformingregioncount);
+
+                    ImGui::Spacing();
+                    ImGui::Text("Point inspector");
+                    ImGui::Separator();
+
+                    int inspectx = 0;
+                    int inspecty = 0;
+                    const bool hasinspectionpoint = gettectonicinspectionpoint(*world, *region, screenmode, focused == 1, poix, poiy, inspectx, inspecty);
+
+                    if (hasinspectionpoint == false)
+                    {
+                        ImGui::TextUnformatted("Select a point on the global or regional map to inspect tectonics.");
+                    }
+                    else
+                    {
+                        const float crustagemyr = world->tectoniccrustagemyr(inspectx, inspecty);
+                        const float crustthickness = world->tectoniccrustthickness(inspectx, inspecty);
+                        const CrustClass crustclass = world->tectoniccrustclass(inspectx, inspecty);
+                        const float uplift = world->tectonicuplifttendency(inspectx, inspecty);
+                        const float subsidence = world->tectonicsubsidencetendency(inspectx, inspecty);
+                        const float strain = world->tectonicaccumulatedstrain(inspectx, inspecty);
+                        const BoundaryType boundarytype = world->tectonicboundarytype(inspectx, inspecty);
+                        const int boundarydistance = world->tectonicboundarydistance(inspectx, inspecty);
+                        const int boundarysegmentid = world->tectonicboundarysegmentid(inspectx, inspecty);
+                        const int nearestboundaryid = world->tectonicnearestboundaryid(inspectx, inspecty);
+                        const float boundaryhistory = world->tectonicboundaryhistory(inspectx, inspecty);
+                        const int deformingregionid = world->tectonicdeformingregionid(inspectx, inspecty);
+                        const DeformingRegionType deformingregiontype = world->tectonicdeformingregiontype(inspectx, inspecty);
+                        const float deformationrate = world->tectonicdeformationrate(inspectx, inspecty);
+                        const float deformationvelocityx = world->tectonicdeformationvelocityx(inspectx, inspecty);
+                        const float deformationvelocityy = world->tectonicdeformationvelocityy(inspectx, inspecty);
+
+                        ImGui::Text("global_x: %d", inspectx);
+                        ImGui::Text("global_y: %d", inspecty);
+                        ImGui::Text("crust_age_myr: %.3f", crustagemyr);
+                        ImGui::Text("crust_thickness: %.3f", crustthickness);
+                        ImGui::Text("crust_class: %s", crustclasslabel(crustclass));
+                        ImGui::Text("uplift_tendency: %.4f", uplift);
+                        ImGui::Text("subsidence_tendency: %.4f", subsidence);
+                        ImGui::Text("accumulated_strain: %.4f", strain);
+                        ImGui::Text("boundary_type: %s", boundarytypelabel(boundarytype));
+                        ImGui::Text("boundary_distance: %d", boundarydistance);
+                        ImGui::Text("boundary_segment_id: %d", boundarysegmentid);
+                        ImGui::Text("nearest_boundary_id: %d", nearestboundaryid);
+                        ImGui::Text("boundary_history (app-derived): %.4f", boundaryhistory);
+                        ImGui::Text("deforming_region_id: %d", deformingregionid);
+                        ImGui::Text("deforming_region_type: %s", deformingregiontypelabel(deformingregiontype));
+                        ImGui::Text("deformation_rate: %.4f", deformationrate);
+                        ImGui::Text("deformation_velocity_x: %.4f", deformationvelocityx);
+                        ImGui::Text("deformation_velocity_y: %.4f", deformationvelocityy);
+
+                        if (boundarysegmentid > 0 || nearestboundaryid > 0 || deformingregionid > 0)
+                        {
+                            const TectonicBoundarySegment* boundarysegment = world->findtectonicboundarysegment(boundarysegmentid);
+                            const TectonicBoundarySegment* nearestboundary = world->findtectonicboundarysegment(nearestboundaryid);
+                            const TectonicDeformingRegion* deformingregion = world->findtectonicdeformingregion(deformingregionid);
+
+                            ImGui::Spacing();
+                            ImGui::Text("Linked summaries");
+                            ImGui::Separator();
+
+                            drawboundarysegmentsummary("Boundary segment", boundarysegmentid, boundarysegment);
+
+                            if (nearestboundaryid > 0)
+                            {
+                                if (nearestboundaryid == boundarysegmentid)
+                                    ImGui::Text("Nearest boundary: id %d (same as boundary segment)", nearestboundaryid);
+                                else
+                                    drawboundarysegmentsummary("Nearest boundary", nearestboundaryid, nearestboundary);
+                            }
+
+                            drawdeformingregionsummary("Deforming region", deformingregionid, deformingregion);
+                        }
                     }
 
                     ImGui::EndTabItem();
@@ -3815,20 +4030,12 @@ int main()
             screenmode = importscreen;
         }
 
-        // Window for creating custom tectonic-based worlds.
+        // Window for creating custom worlds.
 
-        if (drawtectonicchooserwindow(main_viewport, window_flags, showtectonicchooser, landmass, mergefactor))
+        if (drawterrainchooserwindow(main_viewport, window_flags, showterrainchooser, landmass, mergefactor))
         {
-            screenmode = generatingtectonicscreen;
-            generatingtectonicpass = 0;
-        }
-
-        // Window for creating custom non-tectonic-based worlds.
-
-        if (drawnontectonicchooserwindow(main_viewport, window_flags, shownontectonicchooser, sealeveleditable, iterations))
-        {
-            screenmode = generatingnontectonicscreen;
-            generatingnontectonicpass = 0;
+            screenmode = generatingterrainscreen;
+            generatingterrainpass = 0;
         }
 
         // Warning window for over-large area maps.

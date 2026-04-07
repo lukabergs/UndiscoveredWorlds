@@ -969,7 +969,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         }      
     }
 
-    if (usefastlemmountains() && beginworldgenstep("Broadening FastLEM terrain from rivers"))
+    if (beginworldgenstep("Broadening FastLEM terrain from rivers"))
         broadenfastlemterrainfromrivers(world);
 
     world.setmaxriverflow();

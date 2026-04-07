@@ -39,27 +39,16 @@ const vector<string> worldgenerationstepoptions =
     "Simulating plate tectonics",
     "Generating volcanoes",
     "Shifting for best position",
-    "Adding smaller mountain ranges",
-    "Adding continental mountain ranges",
     "Merging fractal into land",
     "Generating mountains (FastLEM)",
     "Removing floating mountains",
     "Raising mountain bases",
-    "Adding plateaux",
     "Smoothing map, preserving coastlines",
     "Elevating land near canyons",
     "Filling depressions",
     "Adjusting coastlines",
     "Checking islands",
     "Creating roughness map",
-    "Creating basic terrain",
-    "Complicating terrain",
-    "Smoothing terrain",
-    "Flattening sea beds",
-    "Bombarding world",
-    "Removing small seas",
-    "Inscribing channels",
-    "Adding hills",
     "Generating global temperature map",
     "Generating ocean current map",
     "Generating sea surface temperatures",
@@ -313,16 +302,6 @@ bool isworldgendebugrunactive()
 long worldgenerationdebugseed()
 {
     return activeworldgenerationseed;
-}
-
-bool usefastlemmountains()
-{
-    return activeworldgenerationoptions != nullptr && activeworldgenerationoptions->useFastLEMMountains;
-}
-
-bool useplatetectonicssimulation()
-{
-    return activeworldgenerationoptions != nullptr && activeworldgenerationoptions->usePlateTectonicsSimulation;
 }
 
 int platetectonicscyclecount()

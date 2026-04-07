@@ -7,7 +7,6 @@ namespace tuning
 namespace worlddefaults
 {
 inline constexpr int size = 2;
-inline constexpr int type = 2;
 inline constexpr int width = 2047;
 inline constexpr int height = 1024;
 inline constexpr bool rotation = true;

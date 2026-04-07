@@ -41,8 +41,7 @@ struct PanelState
     bool showRegionalTemperatureChart = false;
     bool showRegionalRainfallChart = false;
     bool showSetSize = false;
-    bool showTectonicChooser = false;
-    bool showNonTectonicChooser = false;
+    bool showTerrainChooser = false;
     bool showWorldGenerationOptions = false;
     bool showWorldEditProperties = false;
     bool showAreaWarning = false;
@@ -57,8 +56,6 @@ struct CustomWorldUiState
     int newy = -1;
     int landmass = 5;
     int mergefactor = 15;
-    int iterations = 4;
-    int sealeveleditable = 5;
     bool compareClimateWorkbook = true;
 };
 
@@ -70,8 +67,7 @@ struct ProgressPassState
     short savingWorld = 0;
     short exportingArea = 0;
     short generatingRegion = 0;
-    short generatingTectonic = 0;
-    short generatingNonTectonic = 0;
+    short generatingTerrain = 0;
 };
 
 struct WorldGenerationDebugState
