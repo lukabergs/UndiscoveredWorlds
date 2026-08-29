@@ -110,6 +110,7 @@ struct CommandLineGenerationOptions
     string referencePath;
     string importLandPath;
     string importSeaPath;
+    string benchmarkInformation;
 };
 
 template<typename T, typename = void>
@@ -343,6 +344,7 @@ void printcommandlineusage()
     cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
     cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
     cout << "  --earth-climate-benchmark Run the imported Earth benchmark workflow.\n";
+    cout << "  --benchmark-info <text> Store a change summary in the benchmark run log.\n";
     cout << "  --print-climate-relative-error Print per-climate relative error against the Earth benchmark counts.\n";
     cout << "  --no-climate-workbook   Skip appending benchmark counts to climate.xlsx.\n";
     cout << "  --no-rivers             Disable river generation.\n";
@@ -447,7 +449,7 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
             continue;
         }
 
-        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--cycle-steps" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--social-mode" || argument == "--history-years")
+        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--cycle-steps" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -501,6 +503,10 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
                 {
                     options.importSeaPath = value;
                     options.hasImportSeaPath = true;
+                }
+                else if (argument == "--benchmark-info")
+                {
+                    options.benchmarkInformation = value;
                 }
                 else if (argument == "--social-mode")
                 {
@@ -681,7 +687,8 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             return 1;
         }
 
-        completeimportedworldgeneration(*world, options.rivers, options.lakes, options.deltas, options.appendClimateWorkbook, socialoptions, smalllake, largelake, landshape, okmountains);
+        const bool appendduringgeneration = options.appendClimateWorkbook && options.earthClimateBenchmark == false;
+        completeimportedworldgeneration(*world, options.rivers, options.lakes, options.deltas, appendduringgeneration, socialoptions, smalllake, largelake, landshape, okmountains);
     }
     else
     {
@@ -714,6 +721,22 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     endtimedreporting();
     endworldgendebugrun();
+
+    if (options.earthClimateBenchmark)
+    {
+        int benchmarkrunid = 0;
+
+        if (recordclimatebenchmarkrun(*world, options.benchmarkInformation, options.appendClimateWorkbook, &benchmarkrunid) == false)
+        {
+            cerr << "Failed to record climate benchmark artifacts.\n";
+            return 1;
+        }
+
+        const AppEnvironmentConfig& appenv = getappenvironment();
+        updatereport("Climate benchmark run ID: " + to_string(benchmarkrunid));
+        updatereport("Climate benchmark log: " + appenv.climateBenchmarkRunLogPath.string());
+        updatereport("Climate benchmark image: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + ".png")).string());
+    }
 
     if (options.printClimateRelativeError)
         printclimaterelativeerrorreport(*world);

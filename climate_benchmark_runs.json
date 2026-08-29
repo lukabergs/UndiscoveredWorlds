@@ -1,0 +1,9 @@
+{
+  "runs": [
+    {
+      "id": 2,
+      "datetime": "20260829231120",
+      "information": "Added benchmark run metadata, workbook ID writes, and automatic Koppen image export; climate simulation parameters and generation logic unchanged."
+    }
+  ]
+}

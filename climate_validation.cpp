@@ -3,12 +3,16 @@
 
 #include <windows.h>
 
+#include <chrono>
 #include <cmath>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <map>
 #include <memory>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -164,6 +168,139 @@ vector<long long> referenceclimatecounts()
     };
 }
 
+string jsonescape(const string& value)
+{
+    ostringstream escaped;
+    escaped << hex << setfill('0');
+
+    for (const unsigned char ch : value)
+    {
+        switch (ch)
+        {
+        case '"': escaped << "\\\""; break;
+        case '\\': escaped << "\\\\"; break;
+        case '\b': escaped << "\\b"; break;
+        case '\f': escaped << "\\f"; break;
+        case '\n': escaped << "\\n"; break;
+        case '\r': escaped << "\\r"; break;
+        case '\t': escaped << "\\t"; break;
+        default:
+            if (ch < 0x20)
+                escaped << "\\u" << setw(4) << static_cast<int>(ch);
+            else
+                escaped << static_cast<char>(ch);
+            break;
+        }
+    }
+
+    return escaped.str();
+}
+
+string climatebenchmarktimestamp()
+{
+    const time_t now = chrono::system_clock::to_time_t(chrono::system_clock::now());
+    tm localtime{};
+    localtime_s(&localtime, &now);
+
+    ostringstream timestamp;
+    timestamp << put_time(&localtime, "%Y%m%d%H%M%S");
+    return timestamp.str();
+}
+
+int nextclimatebenchmarkrunid()
+{
+    const filesystem::path logpath = getappenvironment().climateBenchmarkRunLogPath;
+    ifstream logfile(logpath);
+    int maximumid = 1;
+
+    if (!logfile.is_open())
+        return maximumid + 1;
+
+    const regex idpattern(R"(^\s*"id"\s*:\s*([0-9]+)\s*,?\s*$)");
+    string line;
+
+    while (getline(logfile, line))
+    {
+        smatch found;
+
+        if (!regex_match(line, found, idpattern))
+            continue;
+
+        try
+        {
+            maximumid = max(maximumid, stoi(found[1].str()));
+        }
+        catch (const exception&)
+        {
+            return -1;
+        }
+    }
+
+    return maximumid + 1;
+}
+
+bool appendclimatebenchmarkrunlog(int runid, const string& timestamp, const string& information)
+{
+    const filesystem::path logpath = getappenvironment().climateBenchmarkRunLogPath;
+    string content;
+
+    {
+        ifstream logfile(logpath);
+
+        if (logfile.is_open())
+            content.assign(istreambuf_iterator<char>(logfile), istreambuf_iterator<char>());
+    }
+
+    if (content.find_first_not_of(" \t\r\n") == string::npos)
+        content = "{\n  \"runs\": []\n}\n";
+
+    const size_t runskey = content.find("\"runs\"");
+    const size_t arraybegin = runskey == string::npos ? string::npos : content.find('[', runskey);
+    const size_t arrayend = arraybegin == string::npos ? string::npos : content.rfind(']');
+
+    if (arraybegin == string::npos || arrayend == string::npos || arrayend < arraybegin)
+        return false;
+
+    const bool hasentries = content.find_first_not_of(" \t\r\n", arraybegin + 1) < arrayend;
+    ostringstream entry;
+
+    if (hasentries)
+        entry << ',';
+
+    entry
+        << "\n    {\n"
+        << "      \"id\": " << runid << ",\n"
+        << "      \"datetime\": \"" << timestamp << "\",\n"
+        << "      \"information\": \"" << jsonescape(information) << "\"\n"
+        << "    }\n  ";
+
+    content.insert(arrayend, entry.str());
+
+    if (logpath.has_parent_path())
+        filesystem::create_directories(logpath.parent_path());
+
+    filesystem::path temppath = logpath;
+    temppath += ".tmp";
+
+    {
+        ofstream tempfile(temppath, ios::trunc);
+
+        if (!tempfile.is_open())
+            return false;
+
+        tempfile << content;
+    }
+
+    if (MoveFileExW(temppath.wstring().c_str(), logpath.wstring().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE)
+    {
+        error_code ignored;
+        filesystem::remove(temppath, ignored);
+        return false;
+    }
+
+    return true;
+}
+
 double saferelativeerror(long long simulated, long long reference)
 {
     if (reference == 0)
@@ -197,9 +334,9 @@ bool runhiddenprocessandwait(const wstring& commandline)
     return exitcode == 0;
 }
 
-bool updateclimatebenchmarkworkbook(const vector<string>& codes, const vector<long long>& simulationcounts)
+bool updateclimatebenchmarkworkbook(int runid, const vector<string>& codes, const vector<long long>& simulationcounts)
 {
-    const filesystem::path workbookpath = getappenvironment().climateWorkbookPath;
+    const filesystem::path workbookpath = filesystem::absolute(getappenvironment().climateWorkbookPath).lexically_normal();
 
     if (filesystem::exists(workbookpath) == false || simulationcounts.size() != codes.size())
         return false;
@@ -207,6 +344,7 @@ bool updateclimatebenchmarkworkbook(const vector<string>& codes, const vector<lo
     const filesystem::path temproot = filesystem::temp_directory_path();
     const filesystem::path datapath = temproot / "uw_climate_benchmark_input.txt";
     const filesystem::path scriptpath = temproot / "uw_climate_benchmark_excel.ps1";
+    const filesystem::path errorpath = temproot / "uw_climate_benchmark_excel_error.txt";
 
     {
         ofstream datafile(datapath);
@@ -214,23 +352,16 @@ bool updateclimatebenchmarkworkbook(const vector<string>& codes, const vector<lo
         if (!datafile.is_open())
             return false;
 
-        for (size_t index = 0; index < codes.size(); index++)
-        {
-            if (index > 0)
-                datafile << ',';
+        datafile << "ID";
 
-            datafile << codes[index];
-        }
+        for (const string& code : codes)
+            datafile << ',' << code;
 
         datafile << '\n';
+        datafile << runid;
 
-        for (size_t index = 0; index < simulationcounts.size(); index++)
-        {
-            if (index > 0)
-                datafile << ',';
-
-            datafile << simulationcounts[index];
-        }
+        for (const long long count : simulationcounts)
+            datafile << ',' << count;
 
         datafile << '\n';
     }
@@ -241,52 +372,51 @@ bool updateclimatebenchmarkworkbook(const vector<string>& codes, const vector<lo
         if (!scriptfile.is_open())
             return false;
 
-        scriptfile << "param([string]$WorkbookPath, [string]$DataPath)\n";
+        scriptfile << "param([string]$WorkbookPath, [string]$DataPath, [string]$ErrorPath)\n";
         scriptfile << "$ErrorActionPreference = 'Stop'\n";
+        scriptfile << "Remove-Item -LiteralPath $ErrorPath -ErrorAction SilentlyContinue\n";
+        scriptfile << "$excel = $null\n";
+        scriptfile << "$workbook = $null\n";
+        scriptfile << "$sheet = $null\n";
+        scriptfile << "try {\n";
         scriptfile << "$lines = Get-Content -Path $DataPath\n";
-        scriptfile << "if ($lines.Count -lt 2) { exit 1 }\n";
+        scriptfile << "if ($lines.Count -lt 2) { throw 'Benchmark input is incomplete' }\n";
         scriptfile << "$headers = $lines[0].Split(',')\n";
         scriptfile << "$simulation = $lines[1].Split(',')\n";
         scriptfile << "$excel = New-Object -ComObject Excel.Application\n";
         scriptfile << "$excel.Visible = $false\n";
         scriptfile << "$excel.DisplayAlerts = $false\n";
         scriptfile << "$workbook = $excel.Workbooks.Open($WorkbookPath)\n";
+        scriptfile << "if ($workbook.ReadOnly) { throw 'Climate benchmark workbook is open read-only; close it in Excel and retry' }\n";
         scriptfile << "$sheet = $workbook.Worksheets.Item('RAW_PIXELS')\n";
         scriptfile << "for ($index = 0; $index -lt $headers.Count; $index++) {\n";
         scriptfile << "    $actual = [string]$sheet.Cells.Item(1, $index + 1).Text\n";
         scriptfile << "    if ($actual -ne $headers[$index]) { throw \"Workbook header mismatch at column $($index + 1): expected '$($headers[$index])', found '$actual'\" }\n";
         scriptfile << "}\n";
-        scriptfile << "$row = 3\n";
-        scriptfile << "while ($true) {\n";
-        scriptfile << "    $value = $sheet.Cells.Item($row, 1).Value2\n";
-        scriptfile << "    if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) { break }\n";
-        scriptfile << "    $row++\n";
+        scriptfile << "$runId = [int]$simulation[0]\n";
+        scriptfile << "if ($runId -lt 2) { throw 'Benchmark run ID must be at least 2' }\n";
+        scriptfile << "$row = $runId + 2\n";
+        scriptfile << "$existingId = $sheet.Cells.Item($row, 1).Value2\n";
+        scriptfile << "if ($null -ne $existingId -and -not [string]::IsNullOrWhiteSpace([string]$existingId) -and [int]$existingId -ne $runId) { throw \"Workbook row $row already belongs to run $existingId\" }\n";
+        scriptfile << "for ($column = $simulation.Count + 1; $column -le 34; $column++) {\n";
+        scriptfile << "    if (-not $sheet.Cells.Item($row, $column).HasFormula) { throw \"RAW_PIXELS formula missing at row $row, column $column\" }\n";
         scriptfile << "}\n";
         scriptfile << "for ($index = 0; $index -lt $simulation.Count; $index++) {\n";
         scriptfile << "    $sheet.Cells.Item($row, $index + 1).Value2 = [double]$simulation[$index]\n";
         scriptfile << "}\n";
-        scriptfile << "$formulaRow = $row - 1\n";
-        scriptfile << "while ($formulaRow -ge 2 -and -not $sheet.Cells.Item($formulaRow, 32).HasFormula) { $formulaRow-- }\n";
-        scriptfile << "if ($formulaRow -lt 2) { throw 'RAW_PIXELS total formula template not found' }\n";
-        scriptfile << "$rawFormulaRange = $sheet.Range($sheet.Cells.Item($formulaRow, 32), $sheet.Cells.Item($row, 34))\n";
-        scriptfile << "$rawFormulaRange.FillDown()\n";
-        scriptfile << "foreach ($analysisName in @('PERCENTAGES', 'DIFFERENCE')) {\n";
-        scriptfile << "    $analysis = $workbook.Worksheets.Item($analysisName)\n";
-        scriptfile << "    $analysisFormulaRow = $row - 1\n";
-        scriptfile << "    while ($analysisFormulaRow -ge 2 -and -not $analysis.Cells.Item($analysisFormulaRow, 1).HasFormula) { $analysisFormulaRow-- }\n";
-        scriptfile << "    if ($analysisFormulaRow -lt 2) { throw \"$analysisName formula template not found\" }\n";
-        scriptfile << "    $analysisFillRange = $analysis.Range($analysis.Cells.Item($analysisFormulaRow, 1), $analysis.Cells.Item($row, 32))\n";
-        scriptfile << "    $analysisFillRange.FillDown()\n";
-        scriptfile << "    [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($analysisFillRange)\n";
-        scriptfile << "    [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($analysis)\n";
-        scriptfile << "}\n";
         scriptfile << "$workbook.Save()\n";
-        scriptfile << "$workbook.Close($true)\n";
-        scriptfile << "$excel.Quit()\n";
-        scriptfile << "[void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($rawFormulaRange)\n";
-        scriptfile << "[void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($sheet)\n";
-        scriptfile << "[void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($workbook)\n";
-        scriptfile << "[void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel)\n";
+        scriptfile << "}\n";
+        scriptfile << "catch {\n";
+        scriptfile << "    Set-Content -LiteralPath $ErrorPath -Value $_.Exception.Message\n";
+        scriptfile << "    exit 1\n";
+        scriptfile << "}\n";
+        scriptfile << "finally {\n";
+        scriptfile << "    if ($null -ne $sheet) { [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($sheet) }\n";
+        scriptfile << "    if ($null -ne $workbook) { try { $workbook.Close($false) } catch {}; [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($workbook) }\n";
+        scriptfile << "    if ($null -ne $excel) { try { $excel.Quit() } catch {}; [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) }\n";
+        scriptfile << "    [GC]::Collect()\n";
+        scriptfile << "    [GC]::WaitForPendingFinalizers()\n";
+        scriptfile << "}\n";
     }
 
     wstring commandline = L"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"";
@@ -295,9 +425,73 @@ bool updateclimatebenchmarkworkbook(const vector<string>& codes, const vector<lo
     commandline += workbookpath.wstring();
     commandline += L"\" -DataPath \"";
     commandline += datapath.wstring();
+    commandline += L"\" -ErrorPath \"";
+    commandline += errorpath.wstring();
     commandline += L"\"";
 
-    return runhiddenprocessandwait(commandline);
+    const bool succeeded = runhiddenprocessandwait(commandline);
+
+    if (!succeeded)
+    {
+        ifstream errorfile(errorpath);
+        string errormessage;
+
+        if (getline(errorfile, errormessage) && !errormessage.empty())
+            cerr << "Climate benchmark workbook error: " << errormessage << '\n';
+    }
+
+    return succeeded;
+}
+
+bool exportclimatebenchmarkimages(planet& world, int runid)
+{
+    const AppEnvironmentConfig& appenv = getappenvironment();
+    const filesystem::path outputdir = appenv.climateBenchmarkImageDirectory;
+    const filesystem::path referencepath = appenv.earthKoppenImagePath;
+
+    if (outputdir.empty())
+    {
+        cerr << "Climate benchmark image directory is not configured.\n";
+        return false;
+    }
+
+    if (filesystem::exists(referencepath) == false)
+    {
+        cerr << "Climate benchmark reference image not found: " << referencepath.string() << '\n';
+        return false;
+    }
+
+    error_code filesystemerror;
+    filesystem::create_directories(outputdir, filesystemerror);
+
+    if (filesystemerror)
+    {
+        cerr << "Failed to create climate benchmark image directory: " << filesystemerror.message() << '\n';
+        return false;
+    }
+
+    filesystem::copy_file(referencepath, outputdir / "0.png", filesystem::copy_options::overwrite_existing, filesystemerror);
+
+    if (filesystemerror)
+    {
+        cerr << "Failed to copy climate benchmark reference image: " << filesystemerror.message() << '\n';
+        return false;
+    }
+
+    maplayer layer;
+    layer.image.create(world.width() + 1, world.height() + 1, sf::Color::Black);
+    layer.displayimage.create(DISPLAYMAPSIZEX, DISPLAYMAPSIZEY, sf::Color::Black);
+    drawglobalclimatemapimage(world, layer);
+
+    const filesystem::path simulatedpath = outputdir / (to_string(runid) + ".png");
+
+    if (layer.image.saveToFile(simulatedpath.string()) == false)
+    {
+        cerr << "Failed to save simulated climate image: " << simulatedpath.string() << '\n';
+        return false;
+    }
+
+    return true;
 }
 
 bool loadprecipitationgrid(const filesystem::path& filepath, vector<vector<double>>& grid)
@@ -547,12 +741,35 @@ void writeprecipitationgrid(const filesystem::path& filepath, planet& world, int
 }
 }
 
-bool appendclimatebenchmarkworkbook(planet& world)
+bool recordclimatebenchmarkrun(planet& world, const string& information, bool updateworkbook, int* runid)
 {
+    const int nextrunid = nextclimatebenchmarkrunid();
+    const string timestamp = climatebenchmarktimestamp();
     const vector<string> codes = orderedclimatecodes();
     const vector<long long> simulationcounts = collectsimulatedclimatecounts(world);
 
-    return updateclimatebenchmarkworkbook(codes, simulationcounts);
+    if (nextrunid < 2)
+        return false;
+
+    if (updateworkbook && updateclimatebenchmarkworkbook(nextrunid, codes, simulationcounts) == false)
+    {
+        cerr << "Failed to update climate benchmark workbook.\n";
+        return false;
+    }
+
+    if (exportclimatebenchmarkimages(world, nextrunid) == false)
+        return false;
+
+    if (appendclimatebenchmarkrunlog(nextrunid, timestamp, information) == false)
+    {
+        cerr << "Failed to update climate benchmark run log.\n";
+        return false;
+    }
+
+    if (runid != nullptr)
+        *runid = nextrunid;
+
+    return true;
 }
 
 void printclimaterelativeerrorreport(planet& world)
