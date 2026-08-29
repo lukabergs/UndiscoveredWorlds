@@ -43,5 +43,44 @@
         "spatial_kappa": 0.3103
       }
     }
+  ,
+    {
+      "id": 7,
+      "datetime": "20260830004559",
+      "information": "Added reference-Dfc spatial confusion and seasonal temperature/rainfall driver diagnostics; climate simulation parameters, physical generation, Koppen rules, and benchmark rendering unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.7529255613,
+        "spatial_compared_cells": 694584,
+        "spatial_exact_accuracy": 0.3830422238,
+        "spatial_group_accuracy": 0.6017501123,
+        "spatial_kappa": 0.3102734092
+      }
+    }
+  ,
+    {
+      "id": 8,
+      "datetime": "20260830004722",
+      "information": "Repeated the unchanged diagnostic baseline with detailed climate-error reporting enabled to capture reference-Dfc driver summaries and measure run-to-run stability; simulation parameters and logic unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.7529255613,
+        "spatial_compared_cells": 694584,
+        "spatial_exact_accuracy": 0.3830422238,
+        "spatial_group_accuracy": 0.6017501123,
+        "spatial_kappa": 0.3102734092
+      }
+    }
+  ,
+    {
+      "id": 9,
+      "datetime": "20260830004852",
+      "information": "Allowed existing upwind-ocean maritime moisture to enter the advection source over subfreezing land while retaining zero local frozen-land evaporation; diagnostics, Koppen rules, all tuning strengths, and temperature logic unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.7322917351,
+        "spatial_compared_cells": 693991,
+        "spatial_exact_accuracy": 0.3844228527,
+        "spatial_group_accuracy": 0.6058652057,
+        "spatial_kappa": 0.3116220410
+      }
+    }
   ]
 }

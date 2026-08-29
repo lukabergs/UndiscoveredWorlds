@@ -1,8 +1,10 @@
 #include "app_environment.hpp"
 #include "functions.hpp"
+#include "generation_tuning.hpp"
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -74,6 +76,25 @@ struct climatespatialmetrics
     double exactaccuracy = 0.0;
     double groupaccuracy = 0.0;
     double kappa = 0.0;
+};
+
+struct climatedriverstats
+{
+    long long cells = 0;
+    long long bwcells = 0;
+    long long aridcells = 0;
+    long long dthermalcells = 0;
+    long long polarcells = 0;
+    long long winterdrycells = 0;
+    double meanannualtemp = 0.0;
+    double mintemp = 0.0;
+    double maxtemp = 0.0;
+    double annualrain = 0.0;
+    double drythreshold = 0.0;
+    double raintothreshold = 0.0;
+    double warmhalffraction = 0.0;
+    double driestcoldrain = 0.0;
+    double wettestwarmrain = 0.0;
 };
 
 constexpr int benchmarkcolourdistancelimit = 65;
@@ -311,6 +332,146 @@ vector<long long> collectsimulatedclimatecounts(planet& world)
     }
 
     return counts;
+}
+
+void printreferencedfcdriverreport(planet& world)
+{
+    sf::Image reference;
+    const filesystem::path referencepath = getappenvironment().earthKoppenImagePath;
+
+    if (reference.loadFromFile(referencepath.string()) == false)
+        return;
+
+    const int width = world.width();
+    const int height = world.height();
+    const sf::Vector2u referencesize = reference.getSize();
+
+    if (referencesize.x != static_cast<unsigned int>(width + 1) || referencesize.y != static_cast<unsigned int>(height + 1))
+        return;
+
+    array<climatedriverstats, 31> bysimulated{};
+
+    for (int y = 0; y <= height; y++)
+    {
+        for (int x = 0; x <= width; x++)
+        {
+            if (world.sea(x, y) == 1)
+                continue;
+
+            int distancesquared = 0;
+            const short expected = nearestbenchmarkclimate(reference.getPixel(x, y), distancesquared);
+
+            if (distancesquared > benchmarkcolourdistancelimitsquared || expected != 28)
+                continue;
+
+            const short simulated = comparableclimate(static_cast<short>(world.climate(x, y)));
+
+            if (simulated < 1 || simulated > 31)
+                continue;
+
+            array<float, CLIMATESEASONCOUNT> temps{};
+            array<float, CLIMATESEASONCOUNT> rains{};
+            array<int, CLIMATESEASONCOUNT> order = { 0, 1, 2, 3 };
+            float meanannualtemp = 0.0f;
+            float annualrain = 0.0f;
+
+            for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            {
+                temps[season] = static_cast<float>(world.seasonaltemp(season, x, y));
+                rains[season] = static_cast<float>(world.seasonalrain(season, x, y));
+                meanannualtemp += temps[season];
+                annualrain += rains[season];
+            }
+
+            meanannualtemp /= static_cast<float>(CLIMATESEASONCOUNT);
+            annualrain *= 3.0f;
+            sort(order.begin(), order.end(), [&](int left, int right) { return temps[left] < temps[right]; });
+
+            const float mintemp = temps[order[0]];
+            const float maxtemp = temps[order[3]];
+            const float driestcoldrain = min(rains[order[0]], rains[order[1]]);
+            const float wettestwarmrain = max(rains[order[2]], rains[order[3]]);
+            const float totalseasonalrain = annualrain / 3.0f;
+            const float warmhalffraction = totalseasonalrain > 0.0f
+                ? (rains[order[2]] + rains[order[3]]) / totalseasonalrain
+                : 0.0f;
+            float drythreshold = meanannualtemp * 20.0f;
+
+            if (warmhalffraction >= 0.7f)
+                drythreshold += 280.0f;
+            else if (warmhalffraction >= 0.3f)
+                drythreshold += 140.0f;
+
+            climatedriverstats& stats = bysimulated[simulated - 1];
+            stats.cells++;
+            stats.meanannualtemp += meanannualtemp;
+            stats.mintemp += mintemp;
+            stats.maxtemp += maxtemp;
+            stats.annualrain += annualrain;
+            stats.drythreshold += drythreshold;
+            stats.warmhalffraction += warmhalffraction;
+            stats.driestcoldrain += driestcoldrain;
+            stats.wettestwarmrain += wettestwarmrain;
+
+            if (drythreshold > 0.0f)
+                stats.raintothreshold += annualrain / drythreshold;
+
+            if (annualrain < drythreshold * 0.5f)
+                stats.bwcells++;
+
+            if (annualrain <= drythreshold)
+                stats.aridcells++;
+
+            if (maxtemp > 10.0f && mintemp <= -3.0f)
+                stats.dthermalcells++;
+
+            if (maxtemp <= 10.0f)
+                stats.polarcells++;
+
+            if (driestcoldrain < wettestwarmrain / tuning::climate::koppen::continentalWinterDrynessDivisor)
+                stats.winterdrycells++;
+        }
+    }
+
+    vector<int> order(31);
+
+    for (int climate = 0; climate < 31; climate++)
+        order[climate] = climate;
+
+    sort(order.begin(), order.end(), [&](int left, int right)
+    {
+        return bysimulated[left].cells > bysimulated[right].cells;
+    });
+
+    cout << "Reference Dfc climate-driver summary by simulated class:" << '\n';
+
+    for (int climate : order)
+    {
+        const climatedriverstats& stats = bysimulated[climate];
+
+        if (stats.cells == 0)
+            continue;
+
+        const double cells = static_cast<double>(stats.cells);
+        cout
+            << "reference_Dfc simulated=" << getclimatecode(static_cast<short>(climate + 1))
+            << " cells=" << stats.cells
+            << " mean_annual_temp=" << stats.meanannualtemp / cells
+            << " mean_min_temp=" << stats.mintemp / cells
+            << " mean_max_temp=" << stats.maxtemp / cells
+            << " mean_annual_rain=" << stats.annualrain / cells
+            << " mean_dry_threshold=" << stats.drythreshold / cells
+            << " mean_rain_to_threshold=" << stats.raintothreshold / cells
+            << " mean_warm_half_fraction=" << stats.warmhalffraction / cells
+            << " mean_driest_cold_rain=" << stats.driestcoldrain / cells
+            << " mean_wettest_warm_rain=" << stats.wettestwarmrain / cells
+            << " bw_fraction=" << static_cast<double>(stats.bwcells) / cells
+            << " arid_fraction=" << static_cast<double>(stats.aridcells) / cells
+            << " d_thermal_fraction=" << static_cast<double>(stats.dthermalcells) / cells
+            << " polar_fraction=" << static_cast<double>(stats.polarcells) / cells
+            << " winter_dry_fraction=" << static_cast<double>(stats.winterdrycells) / cells
+            << '\n';
+    }
 }
 
 vector<long long> referenceclimatecounts()
@@ -1103,6 +1264,7 @@ void printclimaterelativeerrorreport(planet& world)
     cout << "spatial_exact_accuracy=" << spatial.exactaccuracy << '\n';
     cout << "spatial_group_accuracy=" << spatial.groupaccuracy << '\n';
     cout << "spatial_kappa=" << spatial.kappa << '\n';
+    printreferencedfcdriverreport(world);
 }
 
 void exportclimatevalidationreport(planet& world)
