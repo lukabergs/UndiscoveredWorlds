@@ -82,5 +82,109 @@
         "spatial_kappa": 0.3116220410
       }
     }
+  ,
+    {
+      "id": 10,
+      "datetime": "20260830010618",
+      "information": "Added reference-class confusion summaries for simulated BWk and Af pixels to identify which real climate regions drive both excesses; climate simulation parameters and logic unchanged from run 9.",
+      "metrics": {
+        "weighted_relative_error": 0.7322917351,
+        "spatial_compared_cells": 693991,
+        "spatial_exact_accuracy": 0.3844228527,
+        "spatial_group_accuracy": 0.6058652057,
+        "spatial_kappa": 0.3116220410
+      }
+    }
+  ,
+    {
+      "id": 11,
+      "datetime": "20260830010918",
+      "information": "Replaced non-conserving per-land-cell upwind ocean moisture injection with conservative wind advection; doubled transport substeps from 30 to 60 baseline cells while keeping total evaporation, retention, and condensation duration normalized to 30 physical iterations; land evaporation and Koppen rules unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.7240356872,
+        "spatial_compared_cells": 693730,
+        "spatial_exact_accuracy": 0.3870886368,
+        "spatial_group_accuracy": 0.5851210125,
+        "spatial_kappa": 0.3134928628
+      }
+    }
+  ,
+    {
+      "id": 12,
+      "datetime": "20260830011330",
+      "information": "Conserved non-precipitated atmospheric moisture by removing the generic 0.996 per-physical-iteration carry decay (11.3% loss over the 30-iteration duration); retained run 11 conservative 60-cell transport, ocean and land source strengths, condensation physics, and Koppen rules.",
+      "metrics": {
+        "weighted_relative_error": 0.7290133722,
+        "spatial_compared_cells": 694598,
+        "spatial_exact_accuracy": 0.3854531686,
+        "spatial_group_accuracy": 0.5854695810,
+        "spatial_kappa": 0.3120241530
+      }
+    }
+  ,
+    {
+      "id": 13,
+      "datetime": "20260830011622",
+      "information": "Restored the run 10 moisture transport baseline and gated its unresolved upwind maritime land source by resolved seasonal surface pressure: full strength at neutral or low pressure, tapering to zero at a +24 pressure anomaly; all other moisture and Koppen parameters unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.7290609252,
+        "spatial_compared_cells": 694443,
+        "spatial_exact_accuracy": 0.3869475249,
+        "spatial_group_accuracy": 0.6048156580,
+        "spatial_kappa": 0.3140037476
+      }
+    }
+  ,
+    {
+      "id": 14,
+      "datetime": "20260830011833",
+      "information": "Ablation experiment: restored run 10 transport and maritime-source behavior, but disabled the temperature-only land evaporation source to test whether unlimited warm-land water creation causes excessive Af; no other climate parameters or Koppen rules changed.",
+      "metrics": {
+        "weighted_relative_error": 0.7026368164,
+        "spatial_compared_cells": 693882,
+        "spatial_exact_accuracy": 0.4119951231,
+        "spatial_group_accuracy": 0.6127453948,
+        "spatial_kappa": 0.3336302849
+      }
+    }
+  ,
+    {
+      "id": 15,
+      "datetime": "20260830012032",
+      "information": "Kept the run 14 removal of unlimited temperature-only land evaporation and increased unresolved upwind maritime moisture from 0.16 to 0.24 to test ocean-derived recovery of continental humidity; all resolved ocean evaporation, transport, condensation, and Koppen settings unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.6913821293,
+        "spatial_compared_cells": 694500,
+        "spatial_exact_accuracy": 0.4079856012,
+        "spatial_group_accuracy": 0.6209388049,
+        "spatial_kappa": 0.3304091040
+      }
+    }
+  ,
+    {
+      "id": 16,
+      "datetime": "20260830012308",
+      "information": "Replaced unlimited temperature-only land evaporation with water-limited evapotranspiration: rainfall infiltrates a finite 80-unit soil store at 65%, and temperature sets potential evaporation but actual evaporation cannot exceed stored water; retained run 15 maritime transport and all other settings.",
+      "metrics": {
+        "weighted_relative_error": 0.6878198467,
+        "spatial_compared_cells": 693878,
+        "spatial_exact_accuracy": 0.4079492360,
+        "spatial_group_accuracy": 0.6226454795,
+        "spatial_kappa": 0.3304727111
+      }
+    }
+  ,
+    {
+      "id": 17,
+      "datetime": "20260830012512",
+      "information": "Retained run 16 finite soil-water evapotranspiration and increased unresolved upwind maritime moisture from 0.24 to 0.32 as a controlled transport calibration for cold continental interiors; all other climate and Koppen settings unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.6815176695,
+        "spatial_compared_cells": 693687,
+        "spatial_exact_accuracy": 0.4038146888,
+        "spatial_group_accuracy": 0.6280455018,
+        "spatial_kappa": 0.3268689500
+      }
+    }
   ]
 }
