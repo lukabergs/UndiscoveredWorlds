@@ -3,7 +3,6 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include <windows.h>
@@ -17,87 +16,6 @@ using namespace std;
 
 namespace
 {
-const vector<string> worldgenerationstepoptions =
-{
-    "Creating fractal map",
-    "Creating continental map",
-    "Preparing Voronoi map",
-    "Making continents",
-    "Merging maps",
-    "Making continental shelves",
-    "Shifting fractal",
-    "Smoothing map",
-    "Carving edge seas",
-    "Removing inland seas",
-    "Adding archipelagos",
-    "Tidying up oceans",
-    "Improving coastlines",
-    "Checking poles",
-    "Adjusting ocean depths",
-    "Generating mid-ocean ridges",
-    "Generating deep-sea trenches",
-    "Simulating plate tectonics",
-    "Generating volcanoes",
-    "Shifting for best position",
-    "Merging fractal into land",
-    "Generating mountains (FastLEM)",
-    "Removing floating mountains",
-    "Raising mountain bases",
-    "Smoothing map, preserving coastlines",
-    "Elevating land near canyons",
-    "Filling depressions",
-    "Adjusting coastlines",
-    "Checking islands",
-    "Creating roughness map",
-    "Generating global temperature map",
-    "Generating ocean current map",
-    "Generating sea surface temperatures",
-    "Generating pressure map",
-    "Generating vector wind map",
-    "Generating sea ice map",
-    "Calculating tides",
-    "Advecting moisture and rainfall",
-    "Calculating rainfall",
-    "Calculating seasonal rainfall",
-    "Smoothing rainfall",
-    "Capping rainfall",
-    "Calculating coastal climate influence",
-    "Applying coastal climate influence",
-    "Adjusting temperatures",
-    "Adjusting continental temperatures",
-    "Smoothing temperatures",
-    "Checking subpolar regions",
-    "Applying mountain temperature lapse",
-    "Calculating Koppen climates",
-    "Calculating Holdridge biomes",
-    "Calculating mountain rainfall",
-    "Carving fjords",
-    "Planning river courses",
-    "Placing hydrological basins",
-    "Generating rivers",
-    "Checking mountain river valleys",
-    "Generating lakes",
-    "Broadening FastLEM terrain from rivers",
-    "Generating sand dunes",
-    "Generating salt pans",
-    "Generating river deltas",
-    "Generating wetlands",
-    "Refining roughness map"
-};
-
-unordered_map<string, size_t> buildworldgenerationstepmap()
-{
-    unordered_map<string, size_t> stepmap;
-    stepmap.reserve(worldgenerationstepoptions.size());
-
-    for (size_t index = 0; index < worldgenerationstepoptions.size(); index++)
-        stepmap.emplace(worldgenerationstepoptions[index], index);
-
-    return stepmap;
-}
-
-const unordered_map<string, size_t> worldgenerationstepmap = buildworldgenerationstepmap();
-
 const WorldGenerationDebugOptions* activeworldgenerationoptions = nullptr;
 long activeworldgenerationseed = 0;
 vector<pair<string, double>> activeworldgenerationtimings;
@@ -228,29 +146,8 @@ void appendprofilingrow(long seed, const vector<pair<string, double>>& timings)
 }
 }
 
-WorldGenerationDebugOptions::WorldGenerationDebugOptions() :
-    enabledSteps(worldgenerationstepoptions.size(), true)
-{
-}
-
-const vector<string>& getworldgenerationstepoptions()
-{
-    return worldgenerationstepoptions;
-}
-
 bool beginworldgenstep(const char* label)
 {
-    if (activeworldgenerationoptions != nullptr)
-    {
-        const auto found = worldgenerationstepmap.find(label);
-
-        if (found != worldgenerationstepmap.end())
-        {
-            if (found->second < activeworldgenerationoptions->enabledSteps.size() && activeworldgenerationoptions->enabledSteps[found->second] == false)
-                return false;
-        }
-    }
-
     updatereport(label);
     return true;
 }
@@ -279,9 +176,6 @@ void onworldgenstepcompleted(const string& label, double elapsedms)
         return;
 
     activeworldgenerationtimings.emplace_back(label, elapsedms);
-
-    if (activeworldgenerationoptions->visualizeEachStep && worldgenerationvisualizationcallback)
-        worldgenerationvisualizationcallback();
 }
 
 void setworldgenvisualizationcallback(function<void()> callback)
@@ -292,6 +186,17 @@ void setworldgenvisualizationcallback(function<void()> callback)
 void clearworldgenvisualizationcallback()
 {
     worldgenerationvisualizationcallback = nullptr;
+}
+
+bool hasworldgenvisualizationcallback()
+{
+    return static_cast<bool>(worldgenerationvisualizationcallback);
+}
+
+void requestworldgenvisualization()
+{
+    if (worldgenerationvisualizationcallback)
+        worldgenerationvisualizationcallback();
 }
 
 bool isworldgendebugrunactive()
@@ -313,6 +218,17 @@ int platetectonicscyclecount()
         return 1;
 
     return activeworldgenerationoptions->plateTectonicsCycleCount;
+}
+
+int platetectonicsplatecount()
+{
+    if (activeworldgenerationoptions == nullptr)
+        return static_cast<int>(tuning::terrain::platetectonics::plateCount);
+
+    if (activeworldgenerationoptions->plateTectonicsPlateCount < 1)
+        return 1;
+
+    return activeworldgenerationoptions->plateTectonicsPlateCount;
 }
 
 #include "climate_validation.cpp"

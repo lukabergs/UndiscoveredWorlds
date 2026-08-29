@@ -6,8 +6,7 @@ struct CreateWorldScreenActions
 {
     bool openLoadDialog = false;
     bool openCustomWorld = false;
-    bool startWorldGeneration = false;
-    bool returnToGlobalMap = false;
+    bool openPlateTectonicsMenu = false;
 };
 
-CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, float currentversion, float latestversion, bool brandnew, int& seedentry, int (*randomseedfactory)());
+CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, float currentversion, float latestversion);

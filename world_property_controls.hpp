@@ -5,6 +5,8 @@
 struct WorldPropertyControls
 {
     int size = 0;
+    int mapWidth = 0;
+    int mapHeight = 0;
     float gravity = 0.0f;
     float lunar = 0.0f;
     float eccentricity = 0.0f;
@@ -29,5 +31,8 @@ struct WorldPropertyControls
 WorldPropertyControls makeworldpropertycontrols(const planet& world);
 void syncworldpropertycontrols(const planet& world, WorldPropertyControls& controls);
 void applyworldpropertycontrols(planet& world, const WorldPropertyControls& controls);
+void applyworlddimensions(planet& world, const WorldPropertyControls& controls);
 void clampworldpropertycontrols(WorldPropertyControls& controls);
 float getdefaultgravityforsize(int size);
+int getdefaultmapwidthforsize(int size);
+int getdefaultmapheightforsize(int size);

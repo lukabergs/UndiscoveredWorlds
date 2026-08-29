@@ -112,21 +112,21 @@ This screen allows you to import your own maps - created with an image editor - 
 
 The buttons to the left are in two main groups:
 
-"Import" - these buttons are for importing your own maps. They must be 2048x1025 pixels, in .png format. The program will interpret them in the following way:
+"Import" - these buttons are for importing your own maps. They must be 2048x1025 pixels. Land, sea, mountains, temperature, and precipitation imports now accept grayscale uint16 `.tif`/`.tiff` files directly, and they also still support the older PNG import modes. Volcanoes and gradient strips still use PNG because they depend on colour channels. The program interprets them in the following way:
 
-land map - only the red value is used. 0 indicates sea, and any higher value is elevation above sea level, in increments of 10.
+land map - TIFF: uint16 metres above sea level, with 0 indicating sea. PNG: only the red value is used. 0 indicates sea, and any higher value is elevation above sea level, in increments of 10.
 
-sea map - only the red value is used. 0 indicates land, and any higher value is depth below sea level, in increnements of 50.
+sea map - TIFF: uint16 metres below sea level, with 0 indicating land. PNG: only the red value is used. 0 indicates land, and any higher value is depth below sea level, in increments of 50.
 
-mountains map - only the red value is used. It shows the peak elevation above the surrounding land, in increments of 50.
+mountains map - TIFF: uint16 peak elevation above the surrounding land. PNG: only the red value is used, in increments of 50.
 
 volanoes map - the red value shows the peak elevation above the surrounding land, in increments of 50. A blue value of 0 indicates a shield volcano, or a higher value indicates a stratovolcano. A green value of 0 indicates an extinct volcano, or a higher value indicates an active volcano.
 
-temperature map - only the red value is used. 0 maps to -60 C mean annual temperature, and 255 maps to +60 C mean annual temperature.
+temperature map - TIFF: uint16 values are imported directly as mean annual temperature. PNG: only the red value is used. 0 maps to -60 C mean annual temperature, and 255 maps to +60 C mean annual temperature.
 
-precipitation map - only the red value is used. 0 maps to 0 mean precipitation, and 255 maps to 1020 mean precipitation.
+precipitation map - TIFF: uint16 values are imported directly as mean precipitation. PNG: only the red value is used. 0 maps to 0 mean precipitation, and 255 maps to 1020 mean precipitation.
 
-You can also switch imports to "strip" mode. In that mode, you first load a 1-pixel-tall PNG gradient strip. The leftmost strip colour maps to a minimum value that you enter, and each pixel to the right adds the chosen floating-point increment. Imported map colours are then matched against that strip to recover their values.
+You can also switch PNG imports to "strip" mode. In that mode, you first load a 1-pixel-tall PNG gradient strip. The leftmost strip colour maps to a minimum value that you enter, and each pixel to the right adds the chosen floating-point increment. Imported map colours are then matched against that strip to recover their values. TIFF imports bypass strip decoding and use the stored uint16 values directly.
 
 In theory you only need a land map - the others are optional. It's important to note that the land map shouldn't show mountain ranges. Undiscovered Worlds does not treat mountain ranges as normal elevation. If you want to define your own mountain ranges, you must import a mountains map, on which you have drawn the lines of the main mountain ranges as indicated above.
 

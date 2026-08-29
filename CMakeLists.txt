@@ -33,6 +33,8 @@ set(SOURCES
     main.cpp
     app_environment.cpp
     create_world_screen.cpp
+    generation_stage_registry.cpp
+    generation_workbench.cpp
     rendering.cpp
     world_generation_debug.cpp
     cuda_renderers_stub.cpp

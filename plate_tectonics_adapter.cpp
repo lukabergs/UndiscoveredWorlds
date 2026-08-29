@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -6,6 +7,7 @@
 
 #include "platecapi.hpp"
 #include "tectonic_contract.hpp"
+#include "topography_codec.hpp"
 #ifdef max
 #undef max
 #endif
@@ -13,11 +15,15 @@
 #undef min
 #endif
 #include "functions.hpp"
-#include "generation_tuning.hpp"
 #include "planet.hpp"
 
 namespace
 {
+constexpr int kMinAggregationOverlapAbsolute = 64;
+constexpr int kAggregationOverlapAreaDivisor = 1000;
+constexpr auto kVisualizationInterval = std::chrono::milliseconds(50);
+constexpr double kNativeHeightScale = 10000.0;
+
 template <int N>
 struct prioritytag : prioritytag<N - 1>
 {
@@ -44,65 +50,54 @@ float clamp01(float value)
     return std::clamp(value, 0.0f, 1.0f);
 }
 
-float currentsearatio(planet& world)
+float maxnativeheight(const float* heightmap, std::size_t cellcount)
 {
+    if (heightmap == nullptr || cellcount == 0)
+        return 0.0f;
+
+    float maximum = heightmap[0];
+
+    for (std::size_t index = 1; index < cellcount; index++)
+        maximum = std::max(maximum, heightmap[index]);
+
+    return maximum;
+}
+
+int encodenativeheight(float value)
+{
+    return static_cast<int>(std::llround(static_cast<double>(value) * kNativeHeightScale));
+}
+
+void applynativeheightmap(planet& world, std::vector<std::vector<bool>>& shelves, const float* outputheightmap, std::size_t cellcount)
+{
+    if (outputheightmap == nullptr)
+        return;
+
     const int width = world.width();
     const int height = world.height();
-    int seacells = 0;
-    const int totalcells = (width + 1) * (height + 1);
+    const int simwidth = width + 1;
+    const float nativeheightmaximum = maxnativeheight(outputheightmap, cellcount);
+    const int sealevel = encodenativeheight(TopographyCodec::kContinentalBase);
+    const int maxelevation = std::max(encodenativeheight(TopographyCodec::kContinentalBase + 1.0f) + 1,
+        encodenativeheight(nativeheightmaximum) + 1);
 
-    for (int y = 0; y <= height; y++)
+    world.setsealevel(sealevel);
+    world.setmaxelevation(maxelevation);
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
     {
-        for (int x = 0; x <= width; x++)
-            seacells += world.sea(x, y) ? 1 : 0;
-    }
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(simwidth) + static_cast<std::size_t>(x);
+                world.setnom(x, y, encodenativeheight(outputheightmap[index]));
+                shelves[x][y] = false;
+            }
+        }
+    });
 
-    return static_cast<float>(seacells) / static_cast<float>(std::max(1, totalcells));
-}
-
-void normalizeheightmap(std::vector<float>& heightmap)
-{
-    if (heightmap.empty())
-        return;
-
-    const auto bounds = std::minmax_element(heightmap.begin(), heightmap.end());
-    const float lowest = *bounds.first;
-    const float highest = *bounds.second;
-
-    if (highest <= lowest)
-    {
-        std::fill(heightmap.begin(), heightmap.end(), 0.0f);
-        return;
-    }
-
-    const float inverserange = 1.0f / (highest - lowest);
-
-    for (float& value : heightmap)
-        value = (value - lowest) * inverserange;
-}
-
-float findseathreshold(const std::vector<float>& heightmap, float searatio)
-{
-    float threshold = 0.5f;
-    float step = 0.5f;
-    const std::size_t cellcount = heightmap.size();
-
-    while (step > 0.0005f)
-    {
-        std::size_t seacells = 0;
-
-        for (float value : heightmap)
-            seacells += value < threshold ? 1U : 0U;
-
-        step *= 0.5f;
-
-        if (static_cast<float>(seacells) / static_cast<float>(cellcount) < searatio)
-            threshold += step;
-        else
-            threshold -= step;
-    }
-
-    return clamp01(threshold);
+    getlandandseatotals(world);
 }
 
 GeologicRegime translategeologicregime(std::uint8_t regime)
@@ -196,38 +191,6 @@ float normalizeboundaryhistory(const platec::contract::BoundarySegment* segment)
     return clamp01(0.55f * agesignal + 0.45f * persistencesignal);
 }
 
-float boundaryupliftbias(BoundaryType boundarytype)
-{
-    switch (boundarytype)
-    {
-    case BoundaryType::convergent:
-        return 1.0f;
-    case BoundaryType::transform:
-        return 0.45f;
-    case BoundaryType::divergent:
-        return 0.28f;
-    case BoundaryType::passive_margin:
-        return 0.10f;
-    case BoundaryType::none:
-    default:
-        return 0.0f;
-    }
-}
-
-float deformingupliftbias(DeformingRegionType regiontype)
-{
-    switch (regiontype)
-    {
-    case DeformingRegionType::diffuse_collision:
-        return 1.0f;
-    case DeformingRegionType::continental_rift:
-        return 0.45f;
-    case DeformingRegionType::none:
-    default:
-        return 0.0f;
-    }
-}
-
 template <typename World>
 auto settectoniccyclecount(World& world, int value, prioritytag<1>) -> decltype(world.settectoniccyclecount(value), void())
 {
@@ -284,68 +247,90 @@ void settectonicdeformingregions(World&, Regions&&, prioritytag<0>)
 }
 }
 
-void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>& shelves)
+int defaultplatetectonicsaggregationoverlapabs(int width, int height)
+{
+    const std::uint64_t area = static_cast<std::uint64_t>(std::max(1, width)) * static_cast<std::uint64_t>(std::max(1, height));
+    return std::max(kMinAggregationOverlapAbsolute, static_cast<int>(area / kAggregationOverlapAreaDivisor));
+}
+
+void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>& shelves, int cyclecount, int platecount)
+{
+    PlateTectonicsSimulationOptions options;
+    options.cycleCount = std::max(1, cyclecount);
+    options.plateCount = std::max(1, platecount);
+    applyplatetectonicssimulation(world, shelves, options);
+}
+
+void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>& shelves, const PlateTectonicsSimulationOptions& options)
 {
     const int width = world.width();
     const int height = world.height();
     const int simwidth = width + 1;
     const int simheight = height + 1;
     const std::size_t cellcount = static_cast<std::size_t>(simwidth) * static_cast<std::size_t>(simheight);
-    const int sealevel = world.sealevel();
-    const int maxelev = world.maxelevation();
-    const float searatio = std::clamp(currentsearatio(world) + tuning::terrain::platetectonics::seaLevelBias, 0.05f, 0.95f);
+    const uint32_t normalizedcyclecount = static_cast<uint32_t>(std::max(1, options.cycleCount));
+    const uint32_t normalizedcyclesteplimit = static_cast<uint32_t>(std::max(0, options.cycleStepLimit));
+    const uint32_t normalizedplatecount = static_cast<uint32_t>(std::max(1, options.plateCount));
+    const uint32_t normalizederosionperiod = static_cast<uint32_t>(std::max(1, options.erosionPeriod));
+    const uint32_t aggregationoverlapabsolute = static_cast<uint32_t>(options.aggregationOverlapAbsolute >= 0
+        ? options.aggregationOverlapAbsolute
+        : defaultplatetectonicsaggregationoverlapabs(simwidth, simheight));
+    const float aggregationoverlaprelative = clamp01(options.aggregationOverlapRelative);
+    const float foldingratio = clamp01(options.foldingRatio);
+    const float erosionstrength = std::max(0.0f, options.erosionStrength);
+    const float landmassrotation = std::max(0.0f, options.landmassRotation);
+    const float rotationstrength = std::max(0.0f, options.rotationStrength);
+    const float subductionstrength = clamp01(options.subductionStrength);
+    const float divergentcarvestrength = std::max(0.0f, options.divergentCarveStrength);
+    const double deltatimemyr = std::max(0.001, static_cast<double>(options.deltaTimeMyr));
+    const int32_t sealevelmeters = options.useSeaLevelMeters ? std::clamp(options.seaLevelMeters, 0, 65535) : TopographyCodec::kNoSeaLevelOverride;
 
     world.cleartectonicprovenance();
 
-    std::vector<float> inputheightmap(cellcount, 0.0f);
-    std::vector<bool> originalsea(cellcount, false);
-    int lowest = world.nom(0, 0);
-    int highest = world.nom(0, 0);
-
-    for (int y = 0; y <= height; y++)
-    {
-        for (int x = 0; x <= width; x++)
-        {
-            const int value = world.nom(x, y);
-            lowest = std::min(lowest, value);
-            highest = std::max(highest, value);
-        }
-    }
-
-    const float inverserange = highest > lowest ? 1.0f / static_cast<float>(highest - lowest) : 0.0f;
-
-    for (int y = 0; y <= height; y++)
-    {
-        for (int x = 0; x <= width; x++)
-        {
-            const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(simwidth) + static_cast<std::size_t>(x);
-            const int current = world.nom(x, y);
-            inputheightmap[index] = inverserange > 0.0f ? static_cast<float>(current - lowest) * inverserange : 0.0f;
-            originalsea[index] = world.sea(x, y) != 0;
-        }
-    }
+    platec::scenario::Scenario scenario;
+    scenario.seed = world.seed();
+    scenario.width = static_cast<uint32_t>(simwidth);
+    scenario.height = static_cast<uint32_t>(simheight);
+    scenario.erosion_period = normalizederosionperiod;
+    scenario.folding_ratio = foldingratio;
+    scenario.aggregation_overlap_abs = aggregationoverlapabsolute;
+    scenario.aggregation_overlap_rel = aggregationoverlaprelative;
+    scenario.cycle_count = normalizedcyclecount;
+    scenario.cycle_step_limit = normalizedcyclesteplimit;
+    scenario.plate_count = normalizedplatecount;
+    scenario.erosion_strength = erosionstrength;
+    scenario.crust_rotation_strength = landmassrotation;
+    scenario.rotation_strength = rotationstrength;
+    scenario.subduction_strength = subductionstrength;
+    scenario.divergent_carve_strength = divergentcarvestrength;
+    scenario.sea_level_m = sealevelmeters;
+    scenario.delta_time_myr = deltatimemyr;
 
     PlateTectonicsHandle simulation;
-    simulation.pointer = platec_api_create(world.seed(), static_cast<uint32_t>(simwidth), static_cast<uint32_t>(simheight),
-        searatio,
-        tuning::terrain::platetectonics::erosionPeriod,
-        tuning::terrain::platetectonics::foldingRatio,
-        tuning::terrain::platetectonics::aggregationOverlapAbsolute,
-        tuning::terrain::platetectonics::aggregationOverlapRelative,
-        static_cast<uint32_t>(platetectonicscyclecount()),
-        tuning::terrain::platetectonics::plateCount);
+    simulation.pointer = platec_api_create_from_scenario(&scenario);
 
     if (simulation.pointer == nullptr)
         return;
 
-    platec_api_load_heightmap(simulation.pointer, inputheightmap.data(), searatio);
+    const bool visualizeprogress = hasworldgenvisualizationcallback();
+    auto nextvisualization = std::chrono::steady_clock::now();
 
-    for (uint32_t step = 0; step < tuning::terrain::platetectonics::maximumSimulationSteps; step++)
+    while (platec_api_is_finished(simulation.pointer) == 0)
     {
-        if (platec_api_is_finished(simulation.pointer) != 0)
-            break;
-
         platec_api_step(simulation.pointer);
+
+        if (visualizeprogress == false || std::chrono::steady_clock::now() < nextvisualization)
+            continue;
+
+        float* previewheightmap = platec_api_get_heightmap(simulation.pointer);
+
+        if (previewheightmap != nullptr)
+        {
+            applynativeheightmap(world, shelves, previewheightmap, cellcount);
+            requestworldgenvisualization();
+        }
+
+        nextvisualization = std::chrono::steady_clock::now() + kVisualizationInterval;
     }
 
     float* outputheightmap = platec_api_get_heightmap(simulation.pointer);
@@ -353,59 +338,10 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
     if (outputheightmap == nullptr)
         return;
 
-    std::vector<float> transformed(outputheightmap, outputheightmap + cellcount);
-    normalizeheightmap(transformed);
+    applynativeheightmap(world, shelves, outputheightmap, cellcount);
 
-    if (tuning::terrain::platetectonics::outputBlend < 1.0f)
-    {
-        const float blend = clamp01(tuning::terrain::platetectonics::outputBlend);
-
-        for (std::size_t index = 0; index < cellcount; index++)
-            transformed[index] = inputheightmap[index] * (1.0f - blend) + transformed[index] * blend;
-    }
-
-    const float landbiasedsearatio = clamp01(searatio - tuning::terrain::platetectonics::landRetentionSeaBias);
-    const float seathreshold = findseathreshold(transformed, landbiasedsearatio);
-    const float searange = std::max(0.0001f, seathreshold);
-    const float landrange = std::max(0.0001f, 1.0f - seathreshold);
-    const int oceanceiling = std::max(tuning::terrain::platetectonics::minimumOceanDepth, sealevel - tuning::terrain::platetectonics::coastalOceanOffset);
-    const int landfloor = std::min(maxelev - 1, sealevel + tuning::terrain::platetectonics::landStartOffset);
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
-    {
-        for (int y = startrow; y <= endrow; y++)
-        {
-            for (int x = 0; x <= width; x++)
-            {
-                const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(simwidth) + static_cast<std::size_t>(x);
-                const float value = transformed[index];
-
-                if (originalsea[index])
-                {
-                    const float oceanrelative = std::pow(clamp01(value / searange), tuning::terrain::platetectonics::oceanExponent);
-                    const int newvalue = tuning::terrain::platetectonics::minimumOceanDepth +
-                        static_cast<int>(std::round(static_cast<float>(oceanceiling - tuning::terrain::platetectonics::minimumOceanDepth) * oceanrelative));
-                    world.setnom(x, y, std::max(tuning::terrain::platetectonics::minimumOceanDepth, std::min(oceanceiling, newvalue)));
-                }
-                else if (value <= seathreshold)
-                {
-                    const float oceanrelative = std::pow(clamp01(value / searange), tuning::terrain::platetectonics::oceanExponent);
-                    const int newvalue = tuning::terrain::platetectonics::minimumOceanDepth +
-                        static_cast<int>(std::round(static_cast<float>(oceanceiling - tuning::terrain::platetectonics::minimumOceanDepth) * oceanrelative));
-                    world.setnom(x, y, std::max(tuning::terrain::platetectonics::minimumOceanDepth, std::min(oceanceiling, newvalue)));
-                }
-                else
-                {
-                    const float landrelative = std::pow(clamp01((value - seathreshold) / landrange), tuning::terrain::platetectonics::landExponent);
-                    const int newvalue = landfloor +
-                        static_cast<int>(std::round(static_cast<float>((maxelev - 1) - landfloor) * landrelative));
-                    world.setnom(x, y, std::max(landfloor, std::min(maxelev - 1, newvalue)));
-                }
-
-                shelves[x][y] = false;
-            }
-        }
-    });
+    if (visualizeprogress)
+        requestworldgenvisualization();
 
     const std::uint8_t* convergencemap = platec_api_get_convergence_map(simulation.pointer);
     const std::uint8_t* divergencemap = platec_api_get_divergence_map(simulation.pointer);
@@ -468,9 +404,6 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
             boundarysegmentlookup[boundarysegments[i].id] = &boundarysegments[i];
     }
 
-    std::vector<std::vector<int>> rawmountains(ARRAYWIDTH, std::vector<int>(ARRAYHEIGHT, 0));
-    bool havemountains = false;
-
     for (int y = 0; y <= height; y++)
     {
         for (int x = 0; x <= width; x++)
@@ -508,68 +441,6 @@ void applyplatetectonicssimulation(planet& world, std::vector<std::vector<bool>>
             world.settectonicdeformationrate(x, y, deformationratemap[index]);
             world.settectonicdeformationvelocityx(x, y, deformationvelocityxmap[index]);
             world.settectonicdeformationvelocityy(x, y, deformationvelocityymap[index]);
-
-            if (originalsea[index] || world.nom(x, y) <= sealevel + 25)
-                continue;
-
-            const float convergencesignal = clamp01(static_cast<float>(convergencescore) / 100.0f);
-            const float upliftsignal = clamp01(uplifttendencymap[index]);
-            const float subsidencesignal = clamp01(subsidencetendencymap[index]);
-            const float strainsignal = clamp01(accumulatedstrainmap[index]);
-            const float deformationsignal = clamp01(deformationratemap[index]);
-            const float boundaryproximity = 1.0f - clamp01(static_cast<float>(boundarydistancemap[index]) / 8.0f);
-            const float crustbias = crustclass == CrustClass::continental ? 1.0f
-                : crustclass == CrustClass::transitional ? 0.72f
-                : crustclass == CrustClass::oceanic ? 0.28f
-                : 0.0f;
-            const float structuresignal = clamp01(boundaryproximity * boundaryupliftbias(boundarytype)
-                + 0.55f * deformingupliftbias(regiontype));
-            float mountainsource = clamp01(
-                (0.44f * upliftsignal + 0.20f * strainsignal + 0.16f * convergencesignal
-                    + 0.10f * boundaryhistory + 0.10f * deformationsignal) * (0.45f + 0.55f * crustbias)
-                + 0.25f * structuresignal
-                - 0.20f * subsidencesignal);
-
-            if (regiontype == DeformingRegionType::continental_rift)
-            {
-                const float shouldersignal = clamp01(0.45f * upliftsignal + 0.30f * boundaryproximity
-                    + 0.25f * deformationsignal - 0.10f * subsidencesignal);
-                mountainsource = std::max(mountainsource, shouldersignal * 0.55f);
-            }
-
-            if (boundarytype == BoundaryType::transform)
-                mountainsource *= 0.60f;
-            else if (boundarytype == BoundaryType::passive_margin)
-                mountainsource *= 0.25f;
-
-            if (mountainsource <= 0.08f)
-                continue;
-
-            const bool riftshoulder = regiontype == DeformingRegionType::continental_rift;
-            const float mountainsignal = std::pow(clamp01(mountainsource), riftshoulder ? 1.05f : 0.78f);
-            const float upliftfactor = riftshoulder ? 0.55f : 1.0f;
-            const int uplift = static_cast<int>(std::round(static_cast<float>(tuning::terrain::platetectonics::collisionUplift)
-                * std::sqrt(clamp01(mountainsource)) * upliftfactor));
-            const int minimumpeak = riftshoulder
-                ? std::max(0, tuning::terrain::platetectonics::collisionMinimumPeak / 2)
-                : tuning::terrain::platetectonics::collisionMinimumPeak;
-            const int maximumpeak = riftshoulder
-                ? std::max(minimumpeak + 1, (tuning::terrain::platetectonics::collisionMaximumPeak * 3) / 4)
-                : tuning::terrain::platetectonics::collisionMaximumPeak;
-            const int peakheight = minimumpeak +
-                static_cast<int>(std::round(static_cast<float>(maximumpeak - minimumpeak) * mountainsignal));
-
-            if (uplift > 0)
-                world.setnom(x, y, std::min(maxelev - 1, world.nom(x, y) + uplift));
-
-            rawmountains[x][y] = peakheight;
-            havemountains = true;
         }
-    }
-
-    if (havemountains)
-    {
-        std::vector<std::vector<bool>> dummyok(ARRAYWIDTH, std::vector<bool>(ARRAYHEIGHT, false));
-        createmountainsfromraw(world, rawmountains, dummyok);
     }
 }

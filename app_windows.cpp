@@ -8,7 +8,16 @@
 
 using namespace std;
 
-bool drawcustomworldsizewindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, bool brandnew, int& currentsize)
+namespace
+{
+void settooltipifhovered(const char* text)
+{
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", text);
+}
+}
+
+bool drawcustomworldsizewindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, bool brandnew, WorldPropertyControls& controls)
 {
     if (!show)
         return false;
@@ -16,7 +25,7 @@ bool drawcustomworldsizewindow(const ImGuiViewport* main_viewport, ImGuiWindowFl
     bool confirmed = false;
 
     ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 427, main_viewport->WorkPos.y + 174), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(323, 152), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(360, 220), ImGuiCond_FirstUseEver);
     ImGui::Begin("Create custom world?", NULL, window_flags);
 
     string introtext = "This will delete the current world.";
@@ -28,10 +37,24 @@ bool drawcustomworldsizewindow(const ImGuiViewport* main_viewport, ImGuiWindowFl
     ImGui::Text(" ");
 
     const char* sizeitems[] = { "Small", "Medium", "Large" };
-    ImGui::Combo("World size", &currentsize, sizeitems, IM_ARRAYSIZE(sizeitems));
+    if (ImGui::Combo("World size", &controls.size, sizeitems, IM_ARRAYSIZE(sizeitems)))
+    {
+        controls.mapWidth = getdefaultmapwidthforsize(controls.size);
+        controls.mapHeight = getdefaultmapheightforsize(controls.size);
+    }
 
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Earth: large; Mars: medium; Moon: small.");
+
+    ImGui::InputInt("Map width", &controls.mapWidth);
+
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Actual world width in pixels for imports and generation.");
+
+    ImGui::InputInt("Map height", &controls.mapHeight);
+
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Actual world height in pixels for imports and generation.");
 
     ImGui::Text(" ");
     ImGui::Text(" ");
@@ -50,92 +73,103 @@ bool drawcustomworldsizewindow(const ImGuiViewport* main_viewport, ImGuiWindowFl
         show = false;
 
     ImGui::End();
+    clampworldpropertycontrols(controls);
     return confirmed;
 }
 
-bool drawworldgenerationoptionswindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, WorldGenerationDebugOptions& options)
+bool drawworldgenerationoptionswindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, WorldPropertyControls& controls)
 {
     if (!show)
         return false;
 
     bool confirmed = false;
-    const vector<string>& steplabels = getworldgenerationstepoptions();
 
-    if (options.enabledSteps.size() != steplabels.size())
-        options.enabledSteps.assign(steplabels.size(), true);
+    ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 398, main_viewport->WorkPos.y + 142), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(434, 208), ImGuiCond_FirstUseEver);
+    ImGui::Begin("New world", NULL, window_flags);
 
-    ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 355, main_viewport->WorkPos.y + 90), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(520, 540), ImGuiCond_FirstUseEver);
-    ImGui::Begin("World generation options", NULL, window_flags);
-
-    ImGui::Checkbox("Log timings to profiling.xlsx", &options.logToProfilingWorkbook);
-    ImGui::Checkbox("Visualize each completed step", &options.visualizeEachStep);
-    ImGui::TextUnformatted("Plate tectonics and FastLEM mountains are always enabled.");
-    ImGui::SliderInt("Plate tectonics cycles", &options.plateTectonicsCycleCount, 1, 12);
-
-    ImGui::Text(" ");
-    ImGui::Checkbox("Generate social world", &options.socialEnabled);
-
-    const char* socialmodes[] = { "Static ex nihilo", "Historical" };
-    int socialmode = options.socialMode == SocialGenerationOptions::Mode::historical ? 1 : 0;
-    ImGui::BeginDisabled(!options.socialEnabled);
-    ImGui::Combo("Social mode", &socialmode, socialmodes, IM_ARRAYSIZE(socialmodes));
-    options.socialMode = socialmode == 1 ? SocialGenerationOptions::Mode::historical : SocialGenerationOptions::Mode::static_ex_nihilo;
-
-    ImGui::BeginDisabled(options.socialMode != SocialGenerationOptions::Mode::historical);
-    ImGui::Checkbox("Use prehistory", &options.usePrehistory);
-    ImGui::InputInt("History years", &options.historyYears);
-    if (options.historyYears < 10)
-        options.historyYears = 10;
-    ImGui::EndDisabled();
-    ImGui::EndDisabled();
-
-    ImGui::Text(" ");
-
-    if (ImGui::Button("Enable all"))
-        fill(options.enabledSteps.begin(), options.enabledSteps.end(), true);
-
-    ImGui::SameLine();
-
-    if (ImGui::Button("Disable all"))
-        fill(options.enabledSteps.begin(), options.enabledSteps.end(), false);
-
-    ImGui::Text(" ");
-    ImGui::Text("Generation steps:");
-
-    ImGui::BeginChild("##worldgenerationsteps", ImVec2(0.0f, 390.0f), true);
-
-    for (size_t index = 0; index < steplabels.size(); index++)
+    constexpr int presetcount = 7;
+    const int presetwidths[presetcount] = { 32, 64, 128, 256, 512, 1024, 2048 };
+    const int presetheights[presetcount] = { 16, 32, 64, 128, 256, 512, 1024 };
+    const char* presetlabels[presetcount] =
     {
-        bool enabled = options.enabledSteps[index];
-
-        if (ImGui::Checkbox(steplabels[index].c_str(), &enabled))
-            options.enabledSteps[index] = enabled;
+        "32 x 16",
+        "64 x 32",
+        "128 x 64",
+        "256 x 128",
+        "512 x 256",
+        "1024 x 512",
+        "2048 x 1024"
+    };
+    int selectedpreset = -1;
+    for (int index = 0; index < presetcount; index++)
+    {
+        if (controls.mapWidth == presetwidths[index] && controls.mapHeight == presetheights[index])
+        {
+            selectedpreset = index;
+            break;
+        }
     }
 
-    ImGui::EndChild();
+    const char* previewlabel = selectedpreset >= 0 ? presetlabels[selectedpreset] : "Custom";
+    if (ImGui::BeginCombo("World size", previewlabel))
+    {
+        for (int index = 0; index < presetcount; index++)
+        {
+            const bool selected = index == selectedpreset;
+            if (ImGui::Selectable(presetlabels[index], selected))
+            {
+                controls.mapWidth = presetwidths[index];
+                controls.mapHeight = presetheights[index];
+
+                if (controls.mapWidth <= 128)
+                    controls.size = 0;
+                else if (controls.mapWidth <= 512)
+                    controls.size = 1;
+                else
+                    controls.size = 2;
+            }
+
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+
+        ImGui::EndCombo();
+    }
+    settooltipifhovered("Choose a default world size, or override the dimensions below.");
+
+    ImGui::InputInt("Map width", &controls.mapWidth);
+    settooltipifhovered("World width in pixels for terrain generation and simulation.");
+
+    ImGui::InputInt("Map height", &controls.mapHeight);
+    settooltipifhovered("World height in pixels for terrain generation and simulation.");
 
     ImGui::Text(" ");
     ImGui::Text(" ");
 
-    ImGui::SameLine(140.0f);
+    ImGui::SameLine(110.0f);
 
-    if (ImGui::Button("Start"))
+    if (ImGui::Button("OK"))
     {
         confirmed = true;
         show = false;
     }
 
-    ImGui::SameLine(280.0f);
+    settooltipifhovered("Open the workbench with these world dimensions.");
+
+    ImGui::SameLine(220.0f);
 
     if (ImGui::Button("Cancel"))
         show = false;
 
+    settooltipifhovered("Return to the previous menu.");
+
     ImGui::End();
+    clampworldpropertycontrols(controls);
     return confirmed;
 }
 
-bool drawterrainchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, int& landmass, int& mergefactor)
+bool drawterrainchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show)
 {
     if (!show)
         return false;
@@ -143,23 +177,12 @@ bool drawterrainchooserwindow(const ImGuiViewport* main_viewport, ImGuiWindowFla
     bool confirmed = false;
 
     ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 428, main_viewport->WorkPos.y + 167), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(405, 200), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(405, 150), ImGuiCond_FirstUseEver);
     ImGui::Begin("Generate terrain", NULL, window_flags);
 
     ImGui::Text("This will overwrite any existing terrain.");
     ImGui::Text(" ");
-
-    ImGui::SliderInt("Continental mass", &landmass, 0, 10);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("The (very approximate) amount of land mass, compared to sea.");
-
-    ImGui::Text(" ");
-
-    ImGui::SliderInt("Marine flooding", &mergefactor, 1, 30);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("The degree to which sea covers the continents. The higher this is, the more inland seas and fragmented coastlines there will be.");
-
-    ImGui::Text(" ");
+    ImGui::TextWrapped("Initial plate tectonics now comes directly from the upstream plate-tectonics simulation seed and parameters.");
     ImGui::Text(" ");
 
     ImGui::SameLine(100.0f);

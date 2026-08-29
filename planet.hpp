@@ -1105,7 +1105,7 @@ public:
     int mountainheightwrap(int x, int y) const;
 
     // Raw grid access for accelerated renderer backends.
-    const short* rawmapnom() const;
+    const int* rawmapnom() const;
     const int* rawlakemap() const;
     const short* rawoceanridgeheightmap() const;
     const short* rawmountainheights() const;
@@ -1390,7 +1390,7 @@ private:
     short mountainheights[ARRAYWIDTH][ARRAYHEIGHT];
     short craterrims[ARRAYWIDTH][ARRAYHEIGHT];
     short cratercentres[ARRAYWIDTH][ARRAYHEIGHT];
-    short mapnom[ARRAYWIDTH][ARRAYHEIGHT];
+    int mapnom[ARRAYWIDTH][ARRAYHEIGHT];
     short tidalmap[ARRAYWIDTH][ARRAYHEIGHT];
     int riftlakemapsurface[ARRAYWIDTH][ARRAYHEIGHT];
     int riftlakemapbed[ARRAYWIDTH][ARRAYHEIGHT];
@@ -1780,7 +1780,7 @@ inline void planet::setmapgradientcolour(int gradient, int stop, int channel, in
     itsmapgradientcolours[gradient][stop][channel] = amount;
 }
 
-inline const short* planet::rawmapnom() const { return &mapnom[0][0]; }
+inline const int* planet::rawmapnom() const { return &mapnom[0][0]; }
 inline const int* planet::rawlakemap() const { return &lakemap[0][0]; }
 inline const short* planet::rawoceanridgeheightmap() const { return &oceanridgeheightmap[0][0]; }
 inline const short* planet::rawmountainheights() const { return &mountainheights[0][0]; }
@@ -1850,7 +1850,7 @@ inline int planet::nom(int x, int y) const
     if (y<0 || y>itsheight || x<0 || x>itswidth)
         return 0;
 
-    return (int)mapnom[x][y];
+    return mapnom[x][y];
 }
 
 inline void planet::setnom(int x, int y, int amount)
@@ -1858,7 +1858,7 @@ inline void planet::setnom(int x, int y, int amount)
     if (y<0 || y>itsheight || x<0 || x>itswidth)
         return;
 
-    mapnom[x][y] = (short)amount;
+    mapnom[x][y] = amount;
 }
 
 inline int planet::oceanridges(int x, int y) const

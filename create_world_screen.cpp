@@ -3,7 +3,7 @@
 
 #include "create_world_screen.hpp"
 
-CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, float currentversion, float latestversion, bool brandnew, int& seedentry, int (*randomseedfactory)())
+CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, float currentversion, float latestversion)
 {
     CreateWorldScreenActions actions;
 
@@ -24,35 +24,18 @@ CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewpor
     }
 
     ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 483, main_viewport->WorkPos.y + 206), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(249, 90), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(266, 78), ImGuiCond_FirstUseEver);
     ImGui::Begin("Create world", NULL, window_flags);
 
-    ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputInt(" ", &seedentry);
+    if (ImGui::Button("New", ImVec2(74.0f, 0.0f)))
+        actions.openPlateTectonicsMenu = true;
 
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Please enter a seed number, which will be used to calculate the new world. The same number will always yield the same world.");
-
-    if (seedentry < 0)
-        seedentry = 0;
-
-    const char* loadlabel = brandnew ? "Load" : "Cancel";
-    const char* loadtooltip = brandnew ? "Load a world." : "Return to the world map.";
-
-    if (ImGui::Button(loadlabel))
-    {
-        if (brandnew)
-            actions.openLoadDialog = true;
-        else
-            actions.returnToGlobalMap = true;
-    }
-
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip(loadtooltip);
+        ImGui::SetTooltip("Open the plate tectonics generation menu.");
 
     ImGui::SameLine();
 
-    if (ImGui::Button("Custom"))
+    if (ImGui::Button("Custom", ImVec2(74.0f, 0.0f)))
         actions.openCustomWorld = true;
 
     if (ImGui::IsItemHovered())
@@ -60,19 +43,11 @@ CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewpor
 
     ImGui::SameLine();
 
-    if (ImGui::Button("Random"))
-        seedentry = randomseedfactory();
+    if (ImGui::Button("Load", ImVec2(74.0f, 0.0f)))
+        actions.openLoadDialog = true;
 
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Roll a random seed number.");
-
-    ImGui::SameLine();
-
-    if (ImGui::Button("OK"))
-        actions.startWorldGeneration = true;
-
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Create a world from this seed number.");
+        ImGui::SetTooltip("Load a world.");
 
     ImGui::End();
     return actions;

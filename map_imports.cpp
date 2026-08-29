@@ -1,4 +1,6 @@
 #include <cmath>
+#include <cctype>
+#include <filesystem>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -8,11 +10,14 @@
 
 #include "map_imports.hpp"
 #include "functions.hpp"
+#include "topography_tiff.hpp"
 
 using namespace std;
 
 namespace
 {
+    namespace fs = std::filesystem;
+
     constexpr float importedtemperatureminimum = -60.0f;
     constexpr float importedtemperaturemaximum = 60.0f;
     constexpr float importedprecipitationmaximum = 1020.0f;
@@ -26,6 +31,27 @@ namespace
         std::unordered_map<unsigned int, int> exactmatches;
     };
 
+    struct ImportedRaster
+    {
+        bool isTiff16 = false;
+        sf::Image image;
+        std::vector<uint16_t> grayscale16;
+    };
+
+    std::string lowercasestring(std::string value)
+    {
+        for (char& ch : value)
+            ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
+
+        return value;
+    }
+
+    bool hastiffextension(const string& filepathname)
+    {
+        const std::string extension = lowercasestring(fs::path(filepathname).extension().string());
+        return extension == ".tif" || extension == ".tiff";
+    }
+
     bool loadworldsizedimage(planet& world, const string& filepathname, sf::Image& importimage)
     {
         if (!importimage.loadFromFile(filepathname))
@@ -34,6 +60,36 @@ namespace
         const sf::Vector2u imagesize = importimage.getSize();
 
         return imagesize.x == world.width() + 1 && imagesize.y == world.height() + 1;
+    }
+
+    bool loadworldsizedtiff16(planet& world, const string& filepathname, std::vector<uint16_t>& importvalues)
+    {
+        uint32_t width = 0;
+        uint32_t height = 0;
+
+        if (!platec::io::readGrayscaleTiff16(filepathname.c_str(), importvalues, width, height))
+            return false;
+
+        return width == static_cast<uint32_t>(world.width() + 1)
+            && height == static_cast<uint32_t>(world.height() + 1);
+    }
+
+    bool loadworldsizedraster(planet& world, const string& filepathname, ImportedRaster& raster)
+    {
+        raster = {};
+
+        if (hastiffextension(filepathname))
+        {
+            raster.isTiff16 = true;
+            return loadworldsizedtiff16(world, filepathname, raster.grayscale16);
+        }
+
+        return loadworldsizedimage(world, filepathname, raster.image);
+    }
+
+    uint16_t rastervalueat(const ImportedRaster& raster, int width, int x, int y)
+    {
+        return raster.grayscale16[static_cast<size_t>(y) * static_cast<size_t>(width + 1) + static_cast<size_t>(x)];
     }
 
     void ensureimportedclimatemapsize(planet& world, ImportedClimateMaps& maps)
@@ -163,9 +219,9 @@ void clearimportedclimatemaps(ImportedClimateMaps& maps)
 
 bool importlandheightmap(planet& world, const string& filepathname, const MapImportSettings* settings)
 {
-    sf::Image importimage;
+    ImportedRaster raster;
 
-    if (!loadworldsizedimage(world, filepathname, importimage))
+    if (!loadworldsizedraster(world, filepathname, raster))
         return false;
 
     GradientStripDecoder decoder;
@@ -181,8 +237,15 @@ bool importlandheightmap(planet& world, const string& filepathname, const MapImp
     {
         for (int j = 0; j <= height; j++)
         {
-            const sf::Color colour = importimage.getPixel(i, j);
-            const float elevation = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(colour.r * 10);
+            float elevation = 0.0f;
+
+            if (raster.isTiff16)
+                elevation = static_cast<float>(rastervalueat(raster, width, i, j));
+            else
+            {
+                const sf::Color colour = raster.image.getPixel(i, j);
+                elevation = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(colour.r * 10);
+            }
 
             if (elevation > 0.0f)
                 world.setnom(i, j, sealevel + roundimportvalue(elevation));
@@ -196,9 +259,9 @@ bool importlandheightmap(planet& world, const string& filepathname, const MapImp
 
 bool importseadepthmap(planet& world, const string& filepathname, const MapImportSettings* settings)
 {
-    sf::Image importimage;
+    ImportedRaster raster;
 
-    if (!loadworldsizedimage(world, filepathname, importimage))
+    if (!loadworldsizedraster(world, filepathname, raster))
         return false;
 
     GradientStripDecoder decoder;
@@ -214,8 +277,15 @@ bool importseadepthmap(planet& world, const string& filepathname, const MapImpor
     {
         for (int j = 0; j <= height; j++)
         {
-            const sf::Color colour = importimage.getPixel(i, j);
-            const float depth = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(colour.r * 50);
+            float depth = 0.0f;
+
+            if (raster.isTiff16)
+                depth = static_cast<float>(rastervalueat(raster, width, i, j));
+            else
+            {
+                const sf::Color colour = raster.image.getPixel(i, j);
+                depth = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(colour.r * 50);
+            }
 
             if (depth > 0.0f)
             {
@@ -234,14 +304,14 @@ bool importseadepthmap(planet& world, const string& filepathname, const MapImpor
 
 bool importmountainmap(planet& world, const string& filepathname, vector<vector<bool>>& okmountains, const MapImportSettings* settings)
 {
-    sf::Image importimage;
+    ImportedRaster raster;
 
-    if (!loadworldsizedimage(world, filepathname, importimage))
+    if (!loadworldsizedraster(world, filepathname, raster))
         return false;
 
     GradientStripDecoder decoder;
 
-    if (!loadgradientstripdecoder(settings, decoder))
+    if (!raster.isTiff16 && !loadgradientstripdecoder(settings, decoder))
         return false;
 
     const int width = world.width();
@@ -252,8 +322,16 @@ bool importmountainmap(planet& world, const string& filepathname, vector<vector<
     {
         for (int j = 0; j <= height; j++)
         {
-            const sf::Color colour = importimage.getPixel(i, j);
-            const float mountainheight = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(colour.r * 65);
+            float mountainheight = 0.0f;
+
+            if (raster.isTiff16)
+                mountainheight = static_cast<float>(rastervalueat(raster, width, i, j));
+            else
+            {
+                const sf::Color colour = raster.image.getPixel(i, j);
+                mountainheight = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(colour.r * 65);
+            }
+
             rawmountains[i][j] = mountainheight > 0.0f ? roundimportvalue(mountainheight) : 0;
         }
     }
@@ -264,6 +342,9 @@ bool importmountainmap(planet& world, const string& filepathname, vector<vector<
 
 bool importvolcanomap(planet& world, const string& filepathname, const MapImportSettings* settings)
 {
+    if (hastiffextension(filepathname))
+        return false;
+
     sf::Image importimage;
 
     if (!loadworldsizedimage(world, filepathname, importimage))
@@ -306,14 +387,14 @@ bool importvolcanomap(planet& world, const string& filepathname, const MapImport
 
 bool importtemperaturemap(planet& world, const string& filepathname, ImportedClimateMaps& maps, const MapImportSettings* settings)
 {
-    sf::Image importimage;
+    ImportedRaster raster;
 
-    if (!loadworldsizedimage(world, filepathname, importimage))
+    if (!loadworldsizedraster(world, filepathname, raster))
         return false;
 
     GradientStripDecoder decoder;
 
-    if (!loadgradientstripdecoder(settings, decoder))
+    if (!raster.isTiff16 && !loadgradientstripdecoder(settings, decoder))
         return false;
 
     ensureimportedclimatemapsize(world, maps);
@@ -325,8 +406,16 @@ bool importtemperaturemap(planet& world, const string& filepathname, ImportedCli
     {
         for (int j = 0; j <= height; j++)
         {
-            const sf::Color colour = importimage.getPixel(i, j);
-            const float temperature = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(importtemperaturevalue(colour.r));
+            float temperature = 0.0f;
+
+            if (raster.isTiff16)
+                temperature = static_cast<float>(rastervalueat(raster, width, i, j));
+            else
+            {
+                const sf::Color colour = raster.image.getPixel(i, j);
+                temperature = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(importtemperaturevalue(colour.r));
+            }
+
             const int index = j * (width + 1) + i;
 
             maps.annualTemperature[index] = temperature;
@@ -346,9 +435,9 @@ bool importtemperaturemap(planet& world, const string& filepathname, ImportedCli
 
 bool importprecipitationmap(planet& world, const string& filepathname, ImportedClimateMaps& maps, const MapImportSettings* settings)
 {
-    sf::Image importimage;
+    ImportedRaster raster;
 
-    if (!loadworldsizedimage(world, filepathname, importimage))
+    if (!loadworldsizedraster(world, filepathname, raster))
         return false;
 
     GradientStripDecoder decoder;
@@ -365,8 +454,16 @@ bool importprecipitationmap(planet& world, const string& filepathname, ImportedC
     {
         for (int j = 0; j <= height; j++)
         {
-            const sf::Color colour = importimage.getPixel(i, j);
-            const float precipitation = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(importprecipitationvalue(colour.r));
+            float precipitation = 0.0f;
+
+            if (raster.isTiff16)
+                precipitation = static_cast<float>(rastervalueat(raster, width, i, j));
+            else
+            {
+                const sf::Color colour = raster.image.getPixel(i, j);
+                precipitation = decoder.enabled ? decodegradientvalue(colour, decoder) : static_cast<float>(importprecipitationvalue(colour.r));
+            }
+
             const int index = j * (width + 1) + i;
 
             maps.annualPrecipitation[index] = precipitation;
