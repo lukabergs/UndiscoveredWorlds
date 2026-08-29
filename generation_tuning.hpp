@@ -32,6 +32,30 @@ inline constexpr int seaLevel = 24000;
 inline constexpr int craterCount = 0;
 }
 
+namespace climateresolution
+{
+inline constexpr float gridScale(int width, int height)
+{
+    const float widthscale = static_cast<float>(width + 1) / static_cast<float>(worlddefaults::width + 1);
+    const float heightscale = static_cast<float>(height + 1) / static_cast<float>(worlddefaults::height + 1);
+    return (widthscale + heightscale) / 2.0f;
+}
+
+inline constexpr int scaleDistance(int distance, int width, int height)
+{
+    const int scaled = static_cast<int>(static_cast<float>(distance) * gridScale(width, height) + 0.5f);
+    return scaled > 0 ? scaled : 1;
+}
+
+inline constexpr float scaleDistance(float distance, int width, int height)
+{
+    return distance * gridScale(width, height);
+}
+
+static_assert(scaleDistance(30, worlddefaults::width, worlddefaults::height) == 30);
+static_assert(scaleDistance(30, 2047, 1024) == 90);
+}
+
 namespace climate
 {
 inline constexpr std::array<int, 10> windZoneBorders = { 28, 32, 58, 64, 86, 94, 116, 122, 148, 152 };
