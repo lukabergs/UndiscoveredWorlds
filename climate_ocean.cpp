@@ -1565,9 +1565,11 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         if (world.seaice(x, y) == 2)
                             evaporation = 0.0f;
                     }
-                    else if (temperature > 0.0f)
+                    else
                     {
-                        evaporation = temperature * tuning::climate::moistureadvection::landEvaporationFactor;
+                        if (temperature > 0.0f)
+                            evaporation = temperature * tuning::climate::moistureadvection::landEvaporationFactor;
+
                         evaporation += sampleupwindmaritimemoisturesource(world, season, x, y);
                     }
 
