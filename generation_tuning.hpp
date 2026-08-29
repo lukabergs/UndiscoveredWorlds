@@ -420,6 +420,11 @@ inline constexpr float tundraElevationDivisor = 400.0f;
 inline constexpr int tundraClampedMaxTemperature = 13;
 }
 
+namespace koppen
+{
+inline constexpr float continentalWinterDrynessDivisor = 10.0f;
+}
+
 namespace saltlakes
 {
 inline constexpr int maxRain = 30;

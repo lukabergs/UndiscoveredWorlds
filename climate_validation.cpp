@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -62,6 +63,161 @@ struct comparisonmetrics
     double correlation = 0.0;
     double tropicalmeanbias = 0.0;
 };
+
+struct climatespatialmetrics
+{
+    bool referencefound = false;
+    bool dimensionsmatch = false;
+    long long comparedcells = 0;
+    long long exactmatches = 0;
+    long long groupmatches = 0;
+    double exactaccuracy = 0.0;
+    double groupaccuracy = 0.0;
+    double kappa = 0.0;
+};
+
+constexpr int benchmarkcolourdistancelimit = 65;
+constexpr int benchmarkcolourdistancelimitsquared = benchmarkcolourdistancelimit * benchmarkcolourdistancelimit;
+
+constexpr array<array<int, 3>, 31> benchmarkclimatecolours =
+{
+    array<int, 3>{ 0, 0, 254 }, { 1, 119, 255 }, { 70, 169, 250 }, { 70, 169, 250 },
+    { 249, 15, 0 }, { 251, 150, 149 }, { 245, 163, 1 }, { 254, 219, 99 },
+    { 255, 255, 0 }, { 198, 199, 1 }, { 184, 184, 114 }, { 138, 255, 162 },
+    { 86, 199, 112 }, { 30, 150, 66 }, { 192, 254, 109 }, { 76, 255, 93 },
+    { 19, 203, 74 }, { 255, 8, 245 }, { 204, 3, 192 }, { 154, 51, 144 },
+    { 153, 100, 146 }, { 172, 178, 249 }, { 91, 121, 213 }, { 78, 83, 175 },
+    { 54, 3, 130 }, { 0, 255, 245 }, { 32, 200, 250 }, { 0, 126, 125 },
+    { 0, 69, 92 }, { 178, 178, 178 }, { 104, 104, 104 }
+};
+
+sf::Color benchmarkclimatecolour(short climate)
+{
+    if (climate < 1 || climate > static_cast<short>(benchmarkclimatecolours.size()))
+        return sf::Color::Black;
+
+    const auto& colour = benchmarkclimatecolours[climate - 1];
+    return sf::Color(colour[0], colour[1], colour[2]);
+}
+
+short nearestbenchmarkclimate(const sf::Color& pixel, int& distancesquared)
+{
+    short nearest = 0;
+    distancesquared = 3 * 255 * 255;
+
+    for (short climate = 1; climate <= static_cast<short>(benchmarkclimatecolours.size()); climate++)
+    {
+        const auto& colour = benchmarkclimatecolours[climate - 1];
+        const int red = static_cast<int>(pixel.r) - colour[0];
+        const int green = static_cast<int>(pixel.g) - colour[1];
+        const int blue = static_cast<int>(pixel.b) - colour[2];
+        const int candidate = red * red + green * green + blue * blue;
+
+        if (candidate < distancesquared)
+        {
+            nearest = climate;
+            distancesquared = candidate;
+        }
+    }
+
+    return nearest;
+}
+
+short comparableclimate(short climate)
+{
+    // Aw and As share a reference-map colour, so the image cannot distinguish them.
+    return climate == 4 ? 3 : climate;
+}
+
+int climatemajorgroup(short climate)
+{
+    if (climate >= 1 && climate <= 4) return 0;
+    if (climate >= 5 && climate <= 8) return 1;
+    if (climate >= 9 && climate <= 17) return 2;
+    if (climate >= 18 && climate <= 29) return 3;
+    if (climate >= 30 && climate <= 31) return 4;
+    return -1;
+}
+
+climatespatialmetrics compareclimatespatially(planet& world)
+{
+    climatespatialmetrics metrics;
+    sf::Image reference;
+    const filesystem::path referencepath = getappenvironment().earthKoppenImagePath;
+
+    if (reference.loadFromFile(referencepath.string()) == false)
+        return metrics;
+
+    metrics.referencefound = true;
+    const int width = world.width();
+    const int height = world.height();
+    const sf::Vector2u referencesize = reference.getSize();
+
+    if (referencesize.x != static_cast<unsigned int>(width + 1) || referencesize.y != static_cast<unsigned int>(height + 1))
+        return metrics;
+
+    metrics.dimensionsmatch = true;
+    array<array<long long, 31>, 31> confusion{};
+
+    for (int y = 0; y <= height; y++)
+    {
+        for (int x = 0; x <= width; x++)
+        {
+            if (world.sea(x, y) == 1)
+                continue;
+
+            short simulated = comparableclimate(static_cast<short>(world.climate(x, y)));
+
+            if (simulated < 1 || simulated > 31)
+                continue;
+
+            int distancesquared = 0;
+            short expected = nearestbenchmarkclimate(reference.getPixel(x, y), distancesquared);
+
+            if (distancesquared > benchmarkcolourdistancelimitsquared)
+                continue;
+
+            expected = comparableclimate(expected);
+            metrics.comparedcells++;
+            confusion[simulated - 1][expected - 1]++;
+
+            if (simulated == expected)
+                metrics.exactmatches++;
+
+            if (climatemajorgroup(simulated) == climatemajorgroup(expected))
+                metrics.groupmatches++;
+        }
+    }
+
+    if (metrics.comparedcells <= 0)
+        return metrics;
+
+    metrics.exactaccuracy = static_cast<double>(metrics.exactmatches) / static_cast<double>(metrics.comparedcells);
+    metrics.groupaccuracy = static_cast<double>(metrics.groupmatches) / static_cast<double>(metrics.comparedcells);
+
+    array<long long, 31> simulatedtotals{};
+    array<long long, 31> referencetotals{};
+
+    for (int simulated = 0; simulated < 31; simulated++)
+    {
+        for (int expected = 0; expected < 31; expected++)
+        {
+            simulatedtotals[simulated] += confusion[simulated][expected];
+            referencetotals[expected] += confusion[simulated][expected];
+        }
+    }
+
+    double chanceagreement = 0.0;
+    const double comparedsquared = static_cast<double>(metrics.comparedcells) * static_cast<double>(metrics.comparedcells);
+
+    for (int climate = 0; climate < 31; climate++)
+        chanceagreement += static_cast<double>(simulatedtotals[climate]) * static_cast<double>(referencetotals[climate]) / comparedsquared;
+
+    if (chanceagreement < 1.0)
+        metrics.kappa = (metrics.exactaccuracy - chanceagreement) / (1.0 - chanceagreement);
+
+    return metrics;
+}
 
 double safeaverage(double total, int count)
 {
@@ -239,7 +395,12 @@ int nextclimatebenchmarkrunid()
     return maximumid + 1;
 }
 
-bool appendclimatebenchmarkrunlog(int runid, const string& timestamp, const string& information)
+bool appendclimatebenchmarkrunlog(
+    int runid,
+    const string& timestamp,
+    const string& information,
+    double weightedrelativeerror,
+    const climatespatialmetrics& spatial)
 {
     const filesystem::path logpath = getappenvironment().climateBenchmarkRunLogPath;
     string content;
@@ -271,7 +432,15 @@ bool appendclimatebenchmarkrunlog(int runid, const string& timestamp, const stri
         << "\n    {\n"
         << "      \"id\": " << runid << ",\n"
         << "      \"datetime\": \"" << timestamp << "\",\n"
-        << "      \"information\": \"" << jsonescape(information) << "\"\n"
+        << "      \"information\": \"" << jsonescape(information) << "\",\n"
+        << "      \"metrics\": {\n"
+        << fixed << setprecision(10)
+        << "        \"weighted_relative_error\": " << weightedrelativeerror << ",\n"
+        << "        \"spatial_compared_cells\": " << spatial.comparedcells << ",\n"
+        << "        \"spatial_exact_accuracy\": " << spatial.exactaccuracy << ",\n"
+        << "        \"spatial_group_accuracy\": " << spatial.groupaccuracy << ",\n"
+        << "        \"spatial_kappa\": " << spatial.kappa << "\n"
+        << "      }\n"
         << "    }\n  ";
 
     content.insert(arrayend, entry.str());
@@ -470,22 +639,58 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
         return false;
     }
 
-    filesystem::copy_file(referencepath, outputdir / "0.png", filesystem::copy_options::overwrite_existing, filesystemerror);
+    sf::Image referenceimage;
 
-    if (filesystemerror)
+    if (referenceimage.loadFromFile(referencepath.string()) == false)
     {
-        cerr << "Failed to copy climate benchmark reference image: " << filesystemerror.message() << '\n';
+        cerr << "Failed to load climate benchmark reference image: " << referencepath.string() << '\n';
         return false;
     }
 
-    maplayer layer;
-    layer.image.create(world.width() + 1, world.height() + 1, sf::Color::Black);
-    layer.displayimage.create(DISPLAYMAPSIZEX, DISPLAYMAPSIZEY, sf::Color::Black);
-    drawglobalclimatemapimage(world, layer);
+    const sf::Vector2u referencesize = referenceimage.getSize();
+
+    for (unsigned int y = 0; y < referencesize.y; y++)
+    {
+        for (unsigned int x = 0; x < referencesize.x; x++)
+        {
+            int distancesquared = 0;
+            const short climate = nearestbenchmarkclimate(referenceimage.getPixel(x, y), distancesquared);
+
+            if (distancesquared <= benchmarkcolourdistancelimitsquared && climate != 31)
+                referenceimage.setPixel(x, y, benchmarkclimatecolour(climate));
+            else
+                referenceimage.setPixel(x, y, sf::Color::Black);
+        }
+    }
+
+    const filesystem::path benchmarkreferencepath = outputdir / "0.png";
+
+    if (referenceimage.saveToFile(benchmarkreferencepath.string()) == false)
+    {
+        cerr << "Failed to save climate benchmark reference image: " << benchmarkreferencepath.string() << '\n';
+        return false;
+    }
+
+    sf::Image simulatedimage;
+    const int width = world.width();
+    const int height = world.height();
+    simulatedimage.create(width + 1, height + 1, sf::Color::Black);
+
+    for (int y = 0; y <= height; y++)
+    {
+        for (int x = 0; x <= width; x++)
+        {
+            const short climate = static_cast<short>(world.climate(x, y));
+            const bool water = world.sea(x, y) == 1 || world.truelake(x, y) != 0 || world.riftlakesurface(x, y) != 0;
+
+            if (water == false && climate >= 1 && climate <= 30)
+                simulatedimage.setPixel(x, y, benchmarkclimatecolour(climate));
+        }
+    }
 
     const filesystem::path simulatedpath = outputdir / (to_string(runid) + ".png");
 
-    if (layer.image.saveToFile(simulatedpath.string()) == false)
+    if (simulatedimage.saveToFile(simulatedpath.string()) == false)
     {
         cerr << "Failed to save simulated climate image: " << simulatedpath.string() << '\n';
         return false;
@@ -747,6 +952,20 @@ bool recordclimatebenchmarkrun(planet& world, const string& information, bool up
     const string timestamp = climatebenchmarktimestamp();
     const vector<string> codes = orderedclimatecodes();
     const vector<long long> simulationcounts = collectsimulatedclimatecounts(world);
+    const vector<long long> referencecounts = referenceclimatecounts();
+    const climatespatialmetrics spatial = compareclimatespatially(world);
+    long long totalabsoluteerror = 0;
+    long long totalreference = 0;
+
+    for (size_t index = 0; index < simulationcounts.size() && index < referencecounts.size(); index++)
+    {
+        totalabsoluteerror += llabs(simulationcounts[index] - referencecounts[index]);
+        totalreference += referencecounts[index];
+    }
+
+    const double weightedrelativeerror = totalreference > 0
+        ? static_cast<double>(totalabsoluteerror) / static_cast<double>(totalreference)
+        : 0.0;
 
     if (nextrunid < 2)
         return false;
@@ -760,7 +979,7 @@ bool recordclimatebenchmarkrun(planet& world, const string& information, bool up
     if (exportclimatebenchmarkimages(world, nextrunid) == false)
         return false;
 
-    if (appendclimatebenchmarkrunlog(nextrunid, timestamp, information) == false)
+    if (appendclimatebenchmarkrunlog(nextrunid, timestamp, information, weightedrelativeerror, spatial) == false)
     {
         cerr << "Failed to update climate benchmark run log.\n";
         return false;
@@ -862,6 +1081,28 @@ void printclimaterelativeerrorreport(planet& world)
     cout << "max_relative_error_adjusted=" << adjustedmaxrelativeerror << " (" << adjustedmaxcode << ")" << '\n';
     cout << "simulated_land_total=" << totalsimulated << '\n';
     cout << "reference_land_total=" << totalreference << '\n';
+
+    const climatespatialmetrics spatial = compareclimatespatially(world);
+
+    cout << "Climate spatial agreement:" << '\n';
+
+    if (spatial.referencefound == false)
+    {
+        cout << "spatial_status=reference_not_found" << '\n';
+        return;
+    }
+
+    if (spatial.dimensionsmatch == false)
+    {
+        cout << "spatial_status=dimension_mismatch" << '\n';
+        return;
+    }
+
+    cout << "spatial_status=ok" << '\n';
+    cout << "spatial_compared_cells=" << spatial.comparedcells << '\n';
+    cout << "spatial_exact_accuracy=" << spatial.exactaccuracy << '\n';
+    cout << "spatial_group_accuracy=" << spatial.groupaccuracy << '\n';
+    cout << "spatial_kappa=" << spatial.kappa << '\n';
 }
 
 void exportclimatevalidationreport(planet& world)

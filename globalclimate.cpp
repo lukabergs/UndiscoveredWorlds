@@ -11426,7 +11426,11 @@ short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimate
         if (summary.driestwarmrain < summary.wettestcoldrain / 2.5f && summary.driestwarmrain < 35.0f)
             preptype = "s";
 
-        if (preptype == "" && summary.driestcoldrain < summary.wettestwarmrain / 4.0f)
+        const float winterdrynessdivisor = group == "D"
+            ? tuning::climate::koppen::continentalWinterDrynessDivisor
+            : 4.0f;
+
+        if (preptype == "" && summary.driestcoldrain < summary.wettestwarmrain / winterdrynessdivisor)
             preptype = "w";
 
         if (preptype == "")
