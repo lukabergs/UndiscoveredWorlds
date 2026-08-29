@@ -80,8 +80,8 @@ DeformingRegionType decodedeformingregiontype(std::uint8_t value)
 
 planet::planet() //constructor
 {
-    itswidth = 1024;
-    itsheight = 512;
+    itswidth = 599;
+    itsheight = 399;
     itstectonictimeoriginstep = 0;
     itstectonictimemyr = 0.0f;
     itstectonicdeltatimemyr = 0.0f;
@@ -1899,14 +1899,14 @@ void planet::smooth(int arr[][ARRAYHEIGHT], int amount, bool vary, bool avoidmou
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + (int)mapnom[kk][l];
+                        ave = ave + mapnom[kk][l];
                         crount++;
                     }
                 }
                 ave = ave / crount;
 
                 if (ave > 0 && ave < itsmaxheight)
-                    mapnom[i][j] = (short)ave;
+                    mapnom[i][j] = ave;
             }
         }
     }
@@ -1935,14 +1935,14 @@ void planet::smooth(short arr[][ARRAYHEIGHT], int amount, bool vary, bool avoidm
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + (int)mapnom[kk][l];
+                        ave = ave + mapnom[kk][l];
                         crount++;
                     }
                 }
                 ave = ave / crount;
 
                 if (ave > 0 && ave < itsmaxheight)
-                    mapnom[i][j] = (short)ave;
+                    mapnom[i][j] = ave;
             }
         }
     }

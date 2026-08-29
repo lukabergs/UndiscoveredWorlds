@@ -54,8 +54,6 @@ struct CustomWorldUiState
     int seedentry = 0;
     int newx = -1;
     int newy = -1;
-    int landmass = 5;
-    int mergefactor = 15;
     bool compareClimateWorkbook = true;
 };
 

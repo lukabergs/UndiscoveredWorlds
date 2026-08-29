@@ -465,29 +465,13 @@ namespace
 
         for (int i = 0; i < displaywidth; i++)
         {
-            const int sourcei = static_cast<int>(static_cast<float>(i) * mapdiv);
+            const int sourcei = clamp(static_cast<int>((static_cast<float>(i) + 0.5f) * mapdiv), 0, world.width());
 
             for (int j = 0; j < displayheight; j++)
             {
-                const int sourcej = static_cast<int>(static_cast<float>(j) * mapdiv);
-                bool outlined = false;
+                const int sourcej = clamp(static_cast<int>((static_cast<float>(j) + 0.5f) * mapdiv), 0, world.height());
 
-                for (int k = max(0, sourcei - 1); k <= min(world.width(), sourcei); k++)
-                {
-                    for (int l = max(0, sourcej - 1); l <= min(world.height(), sourcej); l++)
-                    {
-                        if (world.outline(k, l))
-                        {
-                            outlined = true;
-                            break;
-                        }
-                    }
-
-                    if (outlined)
-                        break;
-                }
-
-                if (outlined)
+                if (world.outline(sourcei, sourcej))
                     displayimage.setPixel(i, j, outlinecolour);
             }
         }
@@ -1150,7 +1134,7 @@ namespace
             return false;
 
         const int imagewidth = world.width() + 1;
-        const int imageheight = world.height() + 2;
+        const int imageheight = world.height() + 1;
 
         assignglobalcudamaplayer(getmaplayer(maps, elevation), outputs.elevation, outputs.elevationDisplay, imagewidth, imageheight);
         assignglobalcudamaplayer(getmaplayer(maps, temperature), outputs.temperature, outputs.temperatureDisplay, imagewidth, imageheight);
@@ -1168,7 +1152,7 @@ namespace
         if (!renderglobalreliefmapcuda(makeglobalcudarendererinputs(world), reliefpixels, displaypixels))
             return false;
 
-        assignglobalcudamaplayer(layer, reliefpixels, displaypixels, world.width() + 1, world.height() + 2);
+        assignglobalcudamaplayer(layer, reliefpixels, displaypixels, world.width() + 1, world.height() + 1);
         return true;
     }
 
@@ -1259,33 +1243,8 @@ void updateTextureFromImage(sf::Texture& texture, const sf::Image& image)
 
 void adjustforsize(planet& world, sf::Vector2i& globaltexturesize, mapcache& globalmaps, sf::Image& highlightimage, int highlightsize, sf::Image& minihighlightimage, int& minihighlightsize)
 {
-    int size = world.size();
-    int width = 0;
-    int height = 0;
-
-    if (size == 0) // Small
-    {
-        width = 511;
-        height = 256;
-    }
-
-    if (size == 1) // Medium
-    {
-        width = 1023;
-        height = 512;
-    }
-
-    if (size == 2) // Large
-    {
-        width = 2047;
-        height = 1024;
-    }
-
-    world.setwidth(width);
-    world.setheight(height);
-
     globaltexturesize.x = world.width() + 1;
-    globaltexturesize.y = world.height() + 2;
+    globaltexturesize.y = world.height() + 1;
 
     for (mapviewenum mapview : allmapviews)
         getmapimage(globalmaps, mapview).create(globaltexturesize.x, globaltexturesize.y, sf::Color::Black);

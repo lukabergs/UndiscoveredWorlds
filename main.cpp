@@ -46,6 +46,7 @@
 #include "app_windows.hpp"
 #include "appearance_settings.hpp"
 #include "functions.hpp"
+#include "generation_workbench.hpp"
 #include "map_appearance.hpp"
 #include "map_imports.hpp"
 #include "ui_charts.hpp"
@@ -71,6 +72,12 @@ static long g_seed = 1;
 
 namespace
 {
+constexpr const char* kRasterImportFilter = ".png,.tif,.tiff";
+constexpr const char* kGradientStripFilter = ".png";
+constexpr const char* kVolcanoImportFilter = ".png";
+constexpr int kEarthBenchmarkWidth = 2048;
+constexpr int kEarthBenchmarkHeight = 1025;
+
 struct CommandLineGenerationOptions
 {
     bool run = false;
@@ -91,8 +98,14 @@ struct CommandLineGenerationOptions
     bool hasReferencePath = false;
     bool hasImportLandPath = false;
     bool hasImportSeaPath = false;
+    bool hasWorldWidth = false;
+    bool hasWorldHeight = false;
     long seed = 0;
-    int plateTectonicsCycleCount = 4;
+    int plateTectonicsCycleCount = 2;
+    int plateTectonicsCycleStepLimit = 600;
+    int plateTectonicsPlateCount = 10;
+    int worldWidth = 0;
+    int worldHeight = 0;
     string savePath;
     string referencePath;
     string importLandPath;
@@ -322,9 +335,13 @@ void printcommandlineusage()
     cout << "  --seed <number>         Use a fixed world seed.\n";
     cout << "  --save <path>           Save the generated world as a .uww file.\n";
     cout << "  --plate-cycles <count>  Set tectonic cycle count.\n";
+    cout << "  --cycle-steps <count>   Set tectonic cycle step limit (0 disables).\n";
+    cout << "  --plates <count>        Set tectonic plate count.\n";
+    cout << "  --world-width <pixels>  Set generated world width in pixels.\n";
+    cout << "  --world-height <pixels> Set generated world height in pixels.\n";
     cout << "  --reference-precip <csv> Compare against a precipitation reference grid.\n";
-    cout << "  --import-land <png>     Import a land height map instead of generating terrain.\n";
-    cout << "  --import-sea <png>      Import a sea depth map instead of generating terrain.\n";
+    cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
+    cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
     cout << "  --earth-climate-benchmark Run the imported Earth benchmark workflow.\n";
     cout << "  --print-climate-relative-error Print per-climate relative error against the Earth benchmark counts.\n";
     cout << "  --no-climate-workbook   Skip appending benchmark counts to climate.xlsx.\n";
@@ -430,7 +447,7 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
             continue;
         }
 
-        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--social-mode" || argument == "--history-years")
+        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--cycle-steps" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -451,6 +468,24 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
                 else if (argument == "--plate-cycles")
                 {
                     options.plateTectonicsCycleCount = max(1, stoi(value));
+                }
+                else if (argument == "--cycle-steps")
+                {
+                    options.plateTectonicsCycleStepLimit = max(0, stoi(value));
+                }
+                else if (argument == "--plates")
+                {
+                    options.plateTectonicsPlateCount = max(1, stoi(value));
+                }
+                else if (argument == "--world-width")
+                {
+                    options.worldWidth = stoi(value);
+                    options.hasWorldWidth = true;
+                }
+                else if (argument == "--world-height")
+                {
+                    options.worldHeight = stoi(value);
+                    options.hasWorldHeight = true;
                 }
                 else if (argument == "--reference-precip")
                 {
@@ -531,60 +566,33 @@ SocialGenerationOptions makesocialoptions(bool enabled, SocialGenerationOptions:
 
 void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate = nullptr)
 {
-    const int width = world.width();
-    const int height = world.height();
-
-    vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-    vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
-
-    world.cleartectonicprovenance();
-
     world.setmaxelevation(200000);
 
-    updatereport("Raising mountain bases");
+    GenerationScratch scratch;
+    initializegenerationscratch(scratch);
+    makecontinentalshelves(world, scratch.shelves, 4);
 
-    raisemountainbases(world, mountaindrainage, okmountains);
+    GenerationWorkbenchUiState ui;
+    ui.tectonicCycleCount = platetectonicscyclecount();
+    ui.seaLevel = world.sealevel();
 
-    getlandandseatotals(world);
+    GenerationExecutionContext context;
+    context.dorivers = dorivers;
+    context.dolakes = dolakes;
+    context.dodeltas = dodeltas;
+    context.appendclimateworkbook = appendclimateworkbook;
+    context.socialoptions = socialoptions;
+    context.landshape = landshape;
+    context.smalllake = smalllake;
+    context.largelake = largelake;
+    context.okmountains = &okmountains;
+    context.importedClimate = importedclimate;
 
-    if (world.seatotal() > 10)
-    {
-        updatereport("Filling depressions");
+    string errormessage;
+    runremaininggenerationstages(world, scratch, ui, context, getgenerationstageindex(GenerationStageId::mountain_bases), &errormessage);
 
-        depressionfill(world);
-        addlandnoise(world);
-        depressionfill(world);
-
-        updatereport("Adjusting coastlines");
-
-        for (int n = 1; n <= 2; n++)
-            normalisecoasts(world, 13, 11, 4);
-
-        clamp(world);
-
-        updatereport("Checking islands");
-
-        checkislands(world);
-    }
-
-    updatereport("Creating roughness map");
-
-    vector<vector<int>> roughness(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    createfractal(roughness, width, height, 8, 0.2f, 0.6f, 1, world.maxelevation(), 0, 0);
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-            world.setroughness(i, j, static_cast<float>(roughness[i][j]));
-    }
-
-    generateglobalclimate(world, dorivers, dolakes, dodeltas, smalllake, largelake, landshape, mountaindrainage, shelves, importedclimate);
-    generatephysicalworldlayers(world, shelves);
-    generatesocialworld(world, socialoptions);
-
-    if (appendclimateworkbook && appendclimatebenchmarkworkbook(world) == false)
-        updatereport("Climate workbook benchmark update failed");
+    if (errormessage.empty() == false)
+        updatereport(errormessage);
 }
 
 int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
@@ -624,12 +632,23 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         squareroot[n] = (int)sqrt(n);
 
     WorldGenerationDebugOptions debugoptions;
-    debugoptions.visualizeEachStep = false;
+    debugoptions.visualizePlateTectonicsRealtime = false;
     debugoptions.logToProfilingWorkbook = options.logToProfilingWorkbook;
     debugoptions.plateTectonicsCycleCount = options.plateTectonicsCycleCount;
+    debugoptions.plateTectonicsCycleStepLimit = options.plateTectonicsCycleStepLimit;
+    debugoptions.plateTectonicsPlateCount = options.plateTectonicsPlateCount;
 
-    if (importedworld == false)
+    if (options.earthClimateBenchmark)
+    {
+        world->setwidth(kEarthBenchmarkWidth - 1);
+        world->setheight(kEarthBenchmarkHeight - 1);
+    }
+    else if (importedworld == false)
+    {
         changeworldproperties(*world);
+        world->setwidth(std::clamp(options.hasWorldWidth ? options.worldWidth : world->width() + 1, 2, ARRAYWIDTH) - 1);
+        world->setheight(std::clamp(options.hasWorldHeight ? options.worldHeight : world->height() + 1, 2, ARRAYHEIGHT) - 1);
+    }
 
     const SocialGenerationOptions socialoptions = makesocialoptions(options.socialEnabled, options.socialMode, options.usePrehistory, options.historyYears);
 
@@ -666,18 +685,31 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     }
     else
     {
-        int mergefactor = random(1, 15);
+        GenerationScratch scratch;
+        initializegenerationscratch(scratch);
 
-        if (random(1, 12) == 1)
-            mergefactor = random(1, 25);
+        GenerationWorkbenchUiState ui;
+        ui.tectonicCycleCount = options.plateTectonicsCycleCount;
+        ui.tectonicCycleStepLimit = options.plateTectonicsCycleStepLimit;
+        ui.tectonicPlateCount = options.plateTectonicsPlateCount;
+        ui.seaLevel = world->sealevel();
 
-        vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-        vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
+        GenerationExecutionContext context;
+        context.dorivers = options.rivers;
+        context.dolakes = options.lakes;
+        context.dodeltas = options.deltas;
+        context.appendclimateworkbook = options.appendClimateWorkbook;
+        context.socialoptions = socialoptions;
+        context.landshape = landshape;
+        context.chainland = chainland;
+        context.smalllake = smalllake;
+        context.largelake = largelake;
 
-        generateglobalterrain(*world, 0, mergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves, squareroot);
-        generateglobalclimate(*world, options.rivers, options.lakes, options.deltas, smalllake, largelake, landshape, mountaindrainage, shelves);
-        generatephysicalworldlayers(*world, shelves);
-        generatesocialworld(*world, socialoptions);
+        string errormessage;
+        runremaininggenerationstages(*world, scratch, ui, context, getgenerationstageindex(GenerationStageId::plate_tectonics), &errormessage);
+
+        if (errormessage.empty() == false)
+            updatereport(errormessage);
     }
 
     endtimedreporting();
@@ -770,7 +802,7 @@ struct RegionalMapDisplay
 void initglobalmapdisplay(planet& world, GlobalMapDisplay& display)
 {
     display.textureSize.x = world.width() + 1;
-    display.textureSize.y = world.height() + 2;
+    display.textureSize.y = world.height() + 1;
 
     for (mapviewenum thismapview : allmapviews)
         getmapimage(display.maps, thismapview).create(display.textureSize.x, display.textureSize.y, sf::Color::Black);
@@ -993,7 +1025,7 @@ int main()
 
         if (strcmp(filter, ".uws") == 0)
             dialogpath = appenv.defaultAppearanceDirectory.string();
-        else if (strcmp(filter, ".png") == 0)
+        else if (strstr(filter, ".png") != nullptr || strstr(filter, ".tif") != nullptr)
             dialogpath = appenv.defaultImageDirectory.string();
 
         if (dialogpath.empty())
@@ -1186,8 +1218,6 @@ int main()
     int& seedentry = customworldui.seedentry; // The value currently entered into the seed box in the create world screen.
     int& newx = customworldui.newx;
     int& newy = customworldui.newy; // These are used to locate the new region.
-    int& landmass = customworldui.landmass; // Rough amount of land coverage, for custom worlds.
-    int& mergefactor = customworldui.mergefactor; // Amount continents will be removed by merging with the fractal map, for custom worlds.-----------------
     bool& compareclimateworkbook = customworldui.compareClimateWorkbook;
 
     short regionmargin = 17; // The centre of the regional map can't be closer than this to the northern/southern edges of the global map.
@@ -1220,6 +1250,8 @@ int main()
     short& generatingterrainpass = progresspasses.generatingTerrain; // Tracks which pass we're on for this section, to ensure that widgets are correctly displayed.
 
     WorldGenerationDebugState worldgenerationdebug;
+    auto generationworkbenchstate = std::make_unique<GenerationSessionState>();
+    GenerationSessionState& generationworkbench = *generationworkbenchstate;
 
     auto invalidateGlobalMaps = [&]()
     {
@@ -1231,10 +1263,260 @@ int main()
         resetmapcache(regionalmaps);
     };
 
+    auto currentglobalworld = [&]() -> planet&
+    {
+        if (screenmode == importscreen && generationworkbench.active && generationworkbench.ui.previewEnabled && generationworkbench.previewAvailable)
+            return generationworkbench.previewWorld;
+
+        return *world;
+    };
+
+    auto blendcolour = [](const sf::Color& low, const sf::Color& high, float factor) -> sf::Color
+    {
+        factor = std::clamp(factor, 0.0f, 1.0f);
+
+        auto lerpchannel = [&](sf::Uint8 left, sf::Uint8 right)
+        {
+            return static_cast<sf::Uint8>(std::clamp(static_cast<int>(std::round(static_cast<float>(left) + (static_cast<float>(right) - static_cast<float>(left)) * factor)), 0, 255));
+        };
+
+        return sf::Color(lerpchannel(low.r, high.r), lerpchannel(low.g, high.g), lerpchannel(low.b, high.b));
+    };
+
+    auto tosfcolour = [](const ImVec4& colour, float alpha = 1.0f) -> sf::Color
+    {
+        return sf::Color(
+            static_cast<sf::Uint8>(std::clamp(static_cast<int>(std::round(colour.x * 255.0f)), 0, 255)),
+            static_cast<sf::Uint8>(std::clamp(static_cast<int>(std::round(colour.y * 255.0f)), 0, 255)),
+            static_cast<sf::Uint8>(std::clamp(static_cast<int>(std::round(colour.z * 255.0f)), 0, 255)),
+            static_cast<sf::Uint8>(std::clamp(static_cast<int>(std::round(alpha * 255.0f)), 0, 255)));
+    };
+
+    auto terrainrendercolour = [&](const planet& renderworld, int worldx, int worldy) -> sf::Color
+    {
+        const int altitude = renderworld.map(worldx, worldy) - renderworld.sealevel();
+        return tosfcolour(samplegradientcolour(generationworkbench.ui.terrainMapGradient, altitude));
+    };
+
+    auto tectonicboundaryoverlaycolour = [&](const planet& renderworld, int worldx, int worldy, bool& visible) -> sf::Color
+    {
+        visible = false;
+        const BoundaryType boundarytype = renderworld.tectonicboundarytype(worldx, worldy);
+        const DeformingRegionType regiontype = renderworld.tectonicdeformingregiontype(worldx, worldy);
+
+        if (boundarytype == BoundaryType::none && regiontype == DeformingRegionType::none)
+            return sf::Color::Transparent;
+
+        visible = true;
+        sf::Color target(194, 177, 127);
+
+        switch (boundarytype)
+        {
+        case BoundaryType::convergent:
+            target = sf::Color(186, 86, 66);
+            break;
+        case BoundaryType::divergent:
+            target = sf::Color(216, 166, 78);
+            break;
+        case BoundaryType::transform:
+            target = sf::Color(57, 133, 142);
+            break;
+        case BoundaryType::passive_margin:
+            target = sf::Color(194, 177, 127);
+            break;
+        case BoundaryType::none:
+        default:
+            break;
+        }
+
+        if (regiontype == DeformingRegionType::continental_rift)
+            target = blendcolour(target, sf::Color(235, 193, 88), 0.45f);
+        else if (regiontype == DeformingRegionType::diffuse_collision)
+            target = blendcolour(target, sf::Color(160, 92, 72), 0.55f);
+
+        return target;
+    };
+
+    auto styleworkbenchgloballayer = [&](mapviewenum view, planet& renderworld)
+    {
+        if (screenmode != importscreen || generationworkbench.active == false || workbenchfinished(generationworkbench))
+            return;
+
+        const GenerationStageId stageid = getcurrentgenerationstage(generationworkbench).id;
+        const GenerationScratch& visiblescratch = (generationworkbench.previewAvailable && generationworkbench.ui.previewEnabled)
+            ? generationworkbench.previewScratch
+            : generationworkbench.committedScratch;
+        const bool terrainrenderactive = isterraingenerationstage(stageid);
+        const bool showplateboundaries = generationworkbench.ui.showPlateBoundaries;
+        const bool showfeatureoverlay = generationworkbench.ui.showFeatureOverlay && visiblescratch.stageFeatureCellCount > 0;
+        const bool inlandseaselection = stageid == GenerationStageId::inland_seas;
+
+        if (!terrainrenderactive && !showplateboundaries && !showfeatureoverlay && !inlandseaselection)
+            return;
+
+        auto applystyle = [&](sf::Image& image)
+        {
+            const int imagewidth = static_cast<int>(image.getSize().x);
+            const int imageheight = static_cast<int>(image.getSize().y);
+            const int worldwidth = renderworld.width() + 1;
+            const int worldheight = renderworld.height() + 1;
+
+            for (int imagey = 0; imagey < imageheight; imagey++)
+            {
+                const int starty = (imagey * worldheight) / imageheight;
+                const int endy = std::max(starty, ((imagey + 1) * worldheight - 1) / imageheight);
+
+                for (int imagex = 0; imagex < imagewidth; imagex++)
+                {
+                    const int startx = (imagex * worldwidth) / imagewidth;
+                    const int endx = std::max(startx, ((imagex + 1) * worldwidth - 1) / imagewidth);
+                    const int samplex = std::clamp((startx + endx) / 2, 0, renderworld.width());
+                    const int sampley = std::clamp((starty + endy) / 2, 0, renderworld.height());
+
+                    if (terrainrenderactive)
+                        image.setPixel(imagex, imagey, terrainrendercolour(renderworld, samplex, sampley));
+
+                    if (inlandseaselection)
+                    {
+                        bool overlayvisible = false;
+                        sf::Color overlaycolour = sf::Color::Transparent;
+
+                        for (int worldy = starty; worldy <= endy && !overlayvisible; worldy++)
+                        {
+                            for (int worldx = startx; worldx <= endx && !overlayvisible; worldx++)
+                            {
+                                const int wrappedx = wrap(worldx, renderworld.width());
+                                const int clampedy = std::clamp(worldy, 0, renderworld.height());
+                                const int componentid = visiblescratch.inlandSeaComponentIds.empty() ? 0 : visiblescratch.inlandSeaComponentIds[wrappedx][clampedy];
+                                if (componentid <= 0)
+                                    continue;
+
+                                for (const GenerationWaterComponent& component : visiblescratch.inlandSeaComponents)
+                                {
+                                    if (component.id != componentid)
+                                        continue;
+
+                                    overlayvisible = true;
+                                    switch (component.policy)
+                                    {
+                                    case GenerationComponentPolicy::keep:
+                                        overlaycolour = sf::Color(255, 0, 0);
+                                        break;
+                                    case GenerationComponentPolicy::drain:
+                                        overlaycolour = sf::Color(0, 255, 0);
+                                        break;
+                                    case GenerationComponentPolicy::fill:
+                                        overlaycolour = sf::Color(0, 0, 255);
+                                        break;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (overlayvisible)
+                            image.setPixel(imagex, imagey, overlaycolour);
+                    }
+
+                    if (showfeatureoverlay)
+                    {
+                        bool overlayvisible = false;
+
+                        for (int worldy = starty; worldy <= endy && !overlayvisible; worldy++)
+                        {
+                            for (int worldx = startx; worldx <= endx && !overlayvisible; worldx++)
+                            {
+                                const int wrappedx = wrap(worldx, renderworld.width());
+                                const int clampedy = std::clamp(worldy, 0, renderworld.height());
+                                if (!visiblescratch.stageFeatureMask.empty() && visiblescratch.stageFeatureMask[wrappedx][clampedy] != 0)
+                                {
+                                    overlayvisible = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (overlayvisible)
+                            image.setPixel(imagex, imagey, blendcolour(image.getPixel(imagex, imagey), sf::Color(255, 0, 0), generationworkbench.ui.featureOverlayOpacity));
+                    }
+
+                    if (showplateboundaries)
+                    {
+                        bool overlayvisible = false;
+                        sf::Color overlaycolour = sf::Color::Transparent;
+
+                        for (int worldy = starty; worldy <= endy && overlayvisible == false; worldy++)
+                        {
+                            for (int worldx = startx; worldx <= endx; worldx++)
+                            {
+                                overlaycolour = tectonicboundaryoverlaycolour(renderworld, wrap(worldx, renderworld.width()), std::clamp(worldy, 0, renderworld.height()), overlayvisible);
+                                if (overlayvisible)
+                                    break;
+                            }
+                        }
+
+                        if (overlayvisible)
+                            image.setPixel(imagex, imagey, blendcolour(image.getPixel(imagex, imagey), overlaycolour, 0.72f));
+                    }
+                }
+            }
+        };
+
+        maplayer& layer = getmaplayer(globalmaps, view);
+        applystyle(layer.image);
+        applystyle(layer.displayimage);
+    };
+
+    auto withworkbenchglobalrenderoverrides = [&](planet& renderworld, auto&& action)
+    {
+        const bool useworkbenchoverrides = screenmode == importscreen && generationworkbench.active;
+        const bool originalshowmapoutline = renderworld.showmapoutline();
+        const float originallandshading = renderworld.landshading();
+        const float originallakeshading = renderworld.lakeshading();
+        const float originalseashading = renderworld.seashading();
+        const float originallandmarbling = renderworld.landmarbling();
+        const float originallakemarbling = renderworld.lakemarbling();
+        const float originalseamarbling = renderworld.seamarbling();
+
+        if (useworkbenchoverrides)
+        {
+            renderworld.setshowmapoutline(generationworkbench.ui.showOceanLandContour);
+            renderworld.setlandshading(0.0f);
+            renderworld.setlakeshading(0.0f);
+            renderworld.setseashading(0.0f);
+            renderworld.setlandmarbling(0.0f);
+            renderworld.setlakemarbling(0.0f);
+            renderworld.setseamarbling(0.0f);
+        }
+
+        action();
+
+        if (useworkbenchoverrides)
+        {
+            renderworld.setshowmapoutline(originalshowmapoutline);
+            renderworld.setlandshading(originallandshading);
+            renderworld.setlakeshading(originallakeshading);
+            renderworld.setseashading(originalseashading);
+            renderworld.setlandmarbling(originallandmarbling);
+            renderworld.setlakemarbling(originallakemarbling);
+            renderworld.setseamarbling(originalseamarbling);
+        }
+    };
+
     auto showGlobalMapView = [&](mapviewenum view, bool updateMiniMap = false)
     {
         mapview = view;
-        applyglobalmapview(view, *world, globalmaps, globalmaptexture, globalmap, updateMiniMap ? &minimap : nullptr);
+        planet& renderworld = currentglobalworld();
+        withworkbenchglobalrenderoverrides(renderworld, [&]()
+        {
+            drawglobalmapimage(view, renderworld, globalmaps);
+            styleworkbenchgloballayer(view, renderworld);
+            updateTextureFromImage(globalmaptexture, getdisplaymapimage(globalmaps, view));
+            globalmap.setTexture(globalmaptexture);
+
+            if (updateMiniMap)
+                minimap.setTexture(globalmaptexture);
+        });
     };
 
     auto redrawGlobalRelief = [&](bool updateMiniMap = false)
@@ -1255,7 +1537,11 @@ int main()
 
     auto rebuildAllGlobalMaps = [&]()
     {
-        drawallglobalmapimages(*world, globalmaps);
+        planet& renderworld = currentglobalworld();
+        withworkbenchglobalrenderoverrides(renderworld, [&]()
+        {
+            drawallglobalmapimages(renderworld, globalmaps);
+        });
     };
 
     auto rebuildAllRegionalMaps = [&]()
@@ -1270,6 +1556,30 @@ int main()
             worldgenerationdebug.options.socialMode,
             worldgenerationdebug.options.usePrehistory,
             worldgenerationdebug.options.historyYears);
+    };
+
+    auto applytectonicsoptionsfromdebug = [&](GenerationWorkbenchUiState& ui)
+    {
+        ui.tectonicCycleCount = worldgenerationdebug.options.plateTectonicsCycleCount;
+        ui.tectonicCycleStepLimit = worldgenerationdebug.options.plateTectonicsCycleStepLimit;
+        ui.tectonicPlateCount = worldgenerationdebug.options.plateTectonicsPlateCount;
+        ui.tectonicUseSeaLevelMeters = worldgenerationdebug.options.plateTectonicsUseSeaLevelMeters;
+        ui.tectonicSeaLevelMeters = worldgenerationdebug.options.plateTectonicsSeaLevelMeters;
+        ui.tectonicAggregationOverlapAbsolute = worldgenerationdebug.options.plateTectonicsAggregationOverlapAbsolute;
+        ui.tectonicAggregationOverlapRelative = worldgenerationdebug.options.plateTectonicsAggregationOverlapRelative;
+        ui.tectonicFoldingRatio = worldgenerationdebug.options.plateTectonicsFoldingRatio;
+        ui.tectonicErosionPeriod = worldgenerationdebug.options.plateTectonicsErosionPeriod;
+        ui.tectonicErosionStrength = worldgenerationdebug.options.plateTectonicsErosionStrength;
+        ui.tectonicLandmassRotation = worldgenerationdebug.options.plateTectonicsLandmassRotation;
+        ui.tectonicRotationStrength = worldgenerationdebug.options.plateTectonicsRotationStrength;
+        ui.tectonicSubductionStrength = worldgenerationdebug.options.plateTectonicsSubductionStrength;
+        ui.tectonicDivergentCarveStrength = worldgenerationdebug.options.plateTectonicsDivergentCarveStrength;
+        ui.tectonicDeltaTimeMyr = worldgenerationdebug.options.plateTectonicsDeltaTimeMyr;
+    };
+
+    auto runworkbenchaction = [&](auto&& action)
+    {
+        action();
     };
 
     float linespace = 8.0f; // Gap between groups of buttons.
@@ -1310,6 +1620,52 @@ int main()
             currentsocialmode,
             currentuseprehistory,
             currenthistoryyears);
+    };
+
+    auto startproceduralworkbenchsession = [&]()
+    {
+        initialiseworld(*world);
+        world->clear();
+        resetworkbenchsession(generationworkbench);
+        clearimportedclimatemaps(importedclimatemaps);
+        mapimportsettings = MapImportSettings{};
+
+        changeworldproperties(*world);
+        applyworlddimensions(*world, worldpropertycontrols);
+        world->setseed(seedentry);
+        syncworldpropertycontrols(*world, worldpropertycontrols);
+        currentrivers = true;
+        currentlakes = true;
+        currentdeltas = true;
+
+        resizeglobaldisplayforworld(*world, globaldisplay, highlightdisplay);
+        fast_srand(world->seed());
+
+        initializeproceduralworkbenchsession(generationworkbench, *world, worldgenerationdebug.options.plateTectonicsCycleCount, worldgenerationdebug.options.plateTectonicsPlateCount);
+        applytectonicsoptionsfromdebug(generationworkbench.ui);
+
+        screenmode = importscreen;
+        brandnew = 0;
+
+        GenerationExecutionContext context;
+        context.dorivers = currentrivers;
+        context.dolakes = currentlakes;
+        context.dodeltas = currentdeltas;
+        context.appendclimateworkbook = compareclimateworkbook;
+        context.socialoptions = socialoptionsfromworldcontrols();
+        context.landshape = landshape;
+        context.chainland = chainland;
+        context.smalllake = smalllake;
+        context.largelake = largelake;
+        context.okmountains = &OKmountains;
+
+        runworkbenchaction([&]()
+        {
+            previewcurrentgenerationstage(generationworkbench, *world, context, nullptr);
+        });
+
+        invalidateGlobalMaps();
+        showGlobalMapView(preferredworkbenchmapview(getcurrentgenerationstage(generationworkbench).id));
     };
 
     AppearanceSettings appearance = makeappearancesettings(*world);
@@ -1381,6 +1737,7 @@ int main()
         initialiseworld(*world);
         world->clear();
         world->setsize(currentsize);
+        applyworlddimensions(*world, worldpropertycontrols);
 
         resizeglobaldisplayforworld(*world, globaldisplay, highlightdisplay);
 
@@ -1443,27 +1800,32 @@ int main()
             showworldeditproperties = 0;
             newworld = 0;
 
-            const CreateWorldScreenActions actions = drawcreateworldscreen(main_viewport, window_flags, currentversion, latestversion, brandnew == 1, seedentry, createrandomseednumber);
+            bool openedplatetectonicsmenu = false;
 
-            if (actions.openLoadDialog)
+            if (!showworldgenerationoptions)
             {
-                openFileDialog(".uww");
-                loadingworld = 1;
+                const CreateWorldScreenActions actions = drawcreateworldscreen(main_viewport, window_flags, currentversion, latestversion);
+
+                if (actions.openLoadDialog)
+                {
+                    openFileDialog(".uww");
+                    loadingworld = 1;
+                }
+
+                if (actions.openCustomWorld)
+                    showsetsize = 1;
+
+                if (actions.openPlateTectonicsMenu)
+                {
+                    showworldgenerationoptions = 1;
+                    openedplatetectonicsmenu = true;
+                }
             }
 
-            if (actions.returnToGlobalMap)
-                screenmode = globalmapscreen;
-
-            if (actions.openCustomWorld)
-                showsetsize = 1;
-
-            if (actions.startWorldGeneration)
-                showworldgenerationoptions = 1;
-
-            if (drawworldgenerationoptionswindow(main_viewport, window_flags, showworldgenerationoptions, worldgenerationdebug.options))
+            if (showworldgenerationoptions && openedplatetectonicsmenu == false &&
+                drawworldgenerationoptionswindow(main_viewport, window_flags, showworldgenerationoptions, worldpropertycontrols))
             {
-                world->setseed(seedentry);
-                screenmode = creatingworldscreen;
+                startproceduralworkbenchsession();
             }
         }
 
@@ -1477,7 +1839,7 @@ int main()
                 updatereport("");
                 beginworldgendebugrun(world->seed(), &worldgenerationdebug.options);
 
-                if (worldgenerationdebug.options.visualizeEachStep)
+                if (worldgenerationdebug.options.visualizePlateTectonicsRealtime)
                 {
                     setworldgenvisualizationcallback([&]()
                     {
@@ -1497,6 +1859,7 @@ int main()
                 world->clear();
 
                 changeworldproperties(*world);
+                applyworlddimensions(*world, worldpropertycontrols);
 
                 fast_srand(world->seed());
 
@@ -1504,22 +1867,28 @@ int main()
 
                 invalidateGlobalMaps();
 
-                int contno = random(1, 9);
+                GenerationScratch scratch;
+                initializegenerationscratch(scratch);
 
-                int thismergefactor = random(1, 15);
+                GenerationWorkbenchUiState ui;
+                applytectonicsoptionsfromdebug(ui);
+                ui.seaLevel = world->sealevel();
 
-                if (random(1, 12) == 1) // Fairly rarely, have more fragmented continents
-                    thismergefactor = random(1, 25);
+                GenerationExecutionContext context;
+                context.dorivers = true;
+                context.dolakes = true;
+                context.dodeltas = true;
+                context.socialoptions = socialoptionsfromdebug();
+                context.landshape = landshape;
+                context.chainland = chainland;
+                context.smalllake = smalllake;
+                context.largelake = largelake;
 
-                vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-                vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
+                string errormessage;
+                runremaininggenerationstages(*world, scratch, ui, context, getgenerationstageindex(GenerationStageId::plate_tectonics), &errormessage);
 
-                // Actually generate the world
-
-                generateglobalterrain(*world, 0, thismergefactor, -1, -1, landshape, chainland, mountaindrainage, shelves, squareroot);
-                generateglobalclimate(*world, 1, 1, 1, smalllake, largelake, landshape, mountaindrainage, shelves);
-                generatephysicalworldlayers(*world, shelves);
-                generatesocialworld(*world, socialoptionsfromdebug());
+                if (errormessage.empty() == false)
+                    updatereport(errormessage);
 
                 // Now draw a new map
 
@@ -2180,7 +2549,174 @@ int main()
             
             showcolouroptions = 0;
             showworldproperties = 0;
-            
+
+            if (generationworkbench.active)
+            {
+                const ImportedClimateMaps* workbenchclimate = (importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation) ? &importedclimatemaps : nullptr;
+                const planet& displayedworkbenchworld = getworkbenchdisplayworld(generationworkbench, *world);
+                const GenerationWorkbenchPanelResult workbenchpanel = drawgenerationworkbenchpanel(main_viewport, window_flags, displayedworkbenchworld, generationworkbench);
+
+                GenerationExecutionContext workbenchcontext;
+                workbenchcontext.dorivers = currentrivers;
+                workbenchcontext.dolakes = currentlakes;
+                workbenchcontext.dodeltas = currentdeltas;
+                workbenchcontext.appendclimateworkbook = compareclimateworkbook;
+                workbenchcontext.socialoptions = socialoptionsfromworldcontrols();
+                workbenchcontext.landshape = landshape;
+                workbenchcontext.chainland = chainland;
+                workbenchcontext.smalllake = smalllake;
+                workbenchcontext.largelake = largelake;
+                workbenchcontext.okmountains = &OKmountains;
+                workbenchcontext.importedClimate = workbenchclimate;
+
+                auto refreshworkbenchdisplay = [&]()
+                {
+                    invalidateGlobalMaps();
+
+                    if (workbenchfinished(generationworkbench))
+                        showGlobalMapView(relief);
+                    else
+                        showGlobalMapView(preferredworkbenchmapview(getcurrentgenerationstage(generationworkbench).id));
+                };
+
+                auto previewworkbenchstage = [&](std::string& errormessage)
+                {
+                    if (generationworkbench.active == false || workbenchfinished(generationworkbench))
+                        return;
+
+                    runworkbenchaction([&]()
+                    {
+                        previewcurrentgenerationstage(generationworkbench, *world, workbenchcontext, &errormessage);
+                    });
+                };
+
+                if (getcurrentgenerationstage(generationworkbench).id == GenerationStageId::inland_seas
+                    && window.hasFocus()
+                    && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+                    && io.WantCaptureMouse == 0)
+                {
+                    sf::Vector2i mousepos = sf::Mouse::getPosition(window);
+                    const float mult = static_cast<float>(displayedworkbenchworld.width() + 1) / static_cast<float>(DISPLAYMAPSIZEX);
+                    const int clickedx = static_cast<int>((static_cast<float>(mousepos.x) - globalmapxpos) * mult);
+                    const int clickedy = static_cast<int>((static_cast<float>(mousepos.y) - globalmapypos) * mult);
+
+                    if (clickedx >= 0 && clickedx <= displayedworkbenchworld.width() && clickedy >= 0 && clickedy <= displayedworkbenchworld.height())
+                    {
+                        if (cycleinlandseacomponentpolicyat(generationworkbench, clickedx, clickedy))
+                            refreshworkbenchdisplay();
+                    }
+                }
+
+                string workbencherror;
+
+                if (workbenchpanel.displayChanged)
+                {
+                    refreshworkbenchdisplay();
+                }
+
+                if (workbenchpanel.discardPreviewRequested)
+                {
+                    clearworkbenchpreview(generationworkbench);
+                    refreshworkbenchdisplay();
+                }
+
+                if (workbenchpanel.controlsChanged)
+                {
+                    clearworkbenchpreview(generationworkbench);
+                    previewworkbenchstage(workbencherror);
+                    refreshworkbenchdisplay();
+                }
+                else if (workbenchpanel.recomputeRequested)
+                {
+                    clearworkbenchpreview(generationworkbench);
+                    previewworkbenchstage(workbencherror);
+                    refreshworkbenchdisplay();
+                }
+                else if (workbenchpanel.previewModeChanged)
+                {
+                    if (generationworkbench.ui.previewEnabled
+                        && generationworkbench.previewAvailable == false
+                        && getcurrentgenerationstage(generationworkbench).id != GenerationStageId::plate_tectonics)
+                    {
+                        previewworkbenchstage(workbencherror);
+                    }
+
+                    refreshworkbenchdisplay();
+                }
+
+                if (workbenchpanel.applyRequested)
+                {
+                    runworkbenchaction([&]()
+                    {
+                        applycurrentgenerationstage(generationworkbench, *world, workbenchcontext, &workbencherror);
+                    });
+
+                    if (generationworkbench.active && workbenchfinished(generationworkbench) == false)
+                        previewworkbenchstage(workbencherror);
+
+                    refreshworkbenchdisplay();
+                }
+
+                if (workbenchpanel.skipRequested)
+                {
+                    skipcurrentgenerationstage(generationworkbench, *world);
+
+                    if (generationworkbench.active && workbenchfinished(generationworkbench) == false)
+                        previewworkbenchstage(workbencherror);
+
+                    refreshworkbenchdisplay();
+                }
+
+                if (workbenchpanel.resetPreviewRequested)
+                {
+                    clearworkbenchpreview(generationworkbench);
+                    refreshworkbenchdisplay();
+                }
+
+                if (workbenchpanel.backRequested)
+                {
+                    if (stepbackworkbenchsession(generationworkbench, *world))
+                    {
+                        if (generationworkbench.ui.previewEnabled)
+                            previewworkbenchstage(workbencherror);
+
+                        refreshworkbenchdisplay();
+                    }
+                }
+
+                if (workbenchpanel.abortRequested)
+                {
+                    seedentry = generationworkbench.ui.tectonicSeed;
+                    const bool proceduralsession = generationworkbench.procedural;
+                    resetworkbenchsession(generationworkbench);
+
+                    if (proceduralsession)
+                    {
+                        showworldgenerationoptions = 0;
+                        screenmode = createworldscreen;
+                    }
+                    else
+                        refreshworkbenchdisplay();
+                }
+
+                if (workbencherror.empty() == false)
+                    updatereport(workbencherror);
+
+                if (workbenchfinished(generationworkbench))
+                {
+                    const bool proceduralsession = generationworkbench.procedural;
+                    resetworkbenchsession(generationworkbench);
+
+                    if (proceduralsession)
+                    {
+                        invalidateGlobalMaps();
+                        showGlobalMapView(relief);
+                        screenmode = movingtoglobalmapscreen;
+                    }
+                }
+            }
+            else
+            {
             // Main controls.
 
             ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 10, main_viewport->WorkPos.y + 20), ImGuiCond_FirstUseEver);
@@ -2200,13 +2736,13 @@ int main()
                 mapimportsettings.valueMode = static_cast<MapImportValueMode>(importvaluemode);
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Choose whether imports read the red channel directly or decode colours through a 1-pixel-tall gradient strip.");
+                ImGui::SetTooltip("PNG imports can read the red channel directly or decode colours through a 1-pixel-tall gradient strip. TIFF imports always use the stored uint16 sample values.");
 
             if (mapimportsettings.valueMode == MapImportValueMode::gradientStrip)
             {
                 if (standardbutton("Scale strip"))
                 {
-                    openFileDialog(".png");
+                    openFileDialog(kGradientStripFilter);
                     importinggradientstrip = 1;
                 }
 
@@ -2236,63 +2772,63 @@ int main()
 
             if (standardbutton("Land map"))
             {
-                openFileDialog(".png");
+                openFileDialog(kRasterImportFilter);
 
                 importinglandmap = 1;
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red mode: red 0 is sea and higher values are elevation above sea level in 10-metre steps. Strip mode: decoded values are treated as elevation above sea level.");
+                ImGui::SetTooltip("TIFF mode: uint16 values are metres above sea level, with 0 for sea. PNG red mode: red 0 is sea and higher values are elevation above sea level in 10-metre steps. PNG strip mode: decoded values are treated as elevation above sea level.");
 
             if (standardbutton("Sea map"))
             {
-                openFileDialog(".png");
+                openFileDialog(kRasterImportFilter);
 
                 importingseamap = 1;
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red mode: red 0 is land and higher values are depth below sea level in 50-metre steps. Strip mode: decoded values are treated as depth below sea level.");
+                ImGui::SetTooltip("TIFF mode: uint16 values are metres below sea level, with 0 for land. PNG red mode: red 0 is land and higher values are depth below sea level in 50-metre steps. PNG strip mode: decoded values are treated as depth below sea level.");
 
             if (standardbutton("Mountains"))
             {
-                openFileDialog(".png");
+                openFileDialog(kRasterImportFilter);
 
                 importingmountainsmap = 1;
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red mode: red values scale the imported mountain height. Strip mode: decoded values are used directly as imported mountain height.");
+                ImGui::SetTooltip("TIFF mode: uint16 values are imported mountain height directly. PNG red mode: red values scale the imported mountain height. PNG strip mode: decoded values are used directly.");
 
             if (standardbutton("Volcanoes"))
             {
-                openFileDialog(".png");
+                openFileDialog(kVolcanoImportFilter);
 
                 importingvolcanoesmap = 1;
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red or strip decoding sets volcano height. Green=0 for shield volcano, or higher for stratovolcano. Blue=0 for extinct, or higher for active.");
+                ImGui::SetTooltip("PNG only. Red or strip decoding sets volcano height. Green=0 for shield volcano, or higher for stratovolcano. Blue=0 for extinct, or higher for active.");
 
             if (standardbutton("Temperature"))
             {
-                openFileDialog(".png");
+                openFileDialog(kRasterImportFilter);
 
                 importingtemperaturemap = 1;
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red mode maps 0..255 linearly to -60 C..+60 C mean annual temperature. Strip mode uses the decoded strip value directly.");
+                ImGui::SetTooltip("TIFF mode: uint16 values are imported directly as mean annual temperature. PNG red mode maps 0..255 linearly to -60 C..+60 C. PNG strip mode uses the decoded value directly.");
 
             if (standardbutton("Precipitation"))
             {
-                openFileDialog(".png");
+                openFileDialog(kRasterImportFilter);
 
                 importingprecipitationmap = 1;
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Red mode maps 0..255 linearly to 0..1020 mean precipitation. Strip mode uses the decoded strip value directly.");
+                ImGui::SetTooltip("TIFF mode: uint16 values are imported directly as mean precipitation. PNG red mode maps 0..255 linearly to 0..1020. PNG strip mode uses the decoded value directly.");
 
             ImGui::Dummy(ImVec2(0.0f, linespace));
 
@@ -2703,6 +3239,17 @@ int main()
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Adjust the world's properties.");
 
+            if (standardbutton("Workbench"))
+            {
+                initializeimportedworkbenchsession(generationworkbench, *world, importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation);
+                previewcurrentgenerationstage(generationworkbench, *world, GenerationExecutionContext{ currentrivers, currentlakes, currentdeltas, compareclimateworkbook, socialoptionsfromworldcontrols(), landshape, chainland, smalllake, largelake, &OKmountains, (importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation) ? &importedclimatemaps : nullptr }, nullptr);
+                invalidateGlobalMaps();
+                showGlobalMapView(preferredworkbenchmapview(getcurrentgenerationstage(generationworkbench).id));
+            }
+
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Open the staged generation workbench for imported or hand-edited terrain.");
+
             if (standardbutton("Finish"))
             {
                 screenmode = completingimportscreen;
@@ -2736,92 +3283,16 @@ int main()
 
             string title = "            ";
 
-            string importtext = "You can use the 'import' buttons to load in your own maps. These must be " + formatnumber(world->width() + 1) + " x " + formatnumber(world->height() + 1) + " pixels, in .png format.\nTerrain maps define land, sea, mountains, and volcanoes. Temperature and precipitation imports set the finished climate targets. Imports use the current value mode shown on the left.\nAlternatively, you can use the 'World terrain' button to generate a map from scratch.\nAfter you have imported or generated the map, you can use the other 'generate' buttons to tweak it or to add extra features.\nYou can use the 'Properties' panel to change settings such as global temperatures or rainfall.\nWhen you are done, click 'Finish' to finish the world.";
+            string importtext = "You can use the 'import' buttons to load in your own maps. These must be " + formatnumber(world->width() + 1) + " x " + formatnumber(world->height() + 1) + " pixels.\nLand, sea, mountains, temperature, and precipitation imports accept grayscale uint16 .tif/.tiff files and also support the older PNG modes. Volcanoes and gradient strips still use PNG because they rely on colour channels.\nUse 'Terrain' to open the procedural terrain workbench, or 'Workbench' to step through terrain and climate stages on imported or hand-edited maps.\nYou can use the other buttons to tweak imported maps directly, and the 'Properties' panel to change world settings such as temperatures or rainfall.\nWhen you are done, click 'Finish' to run the default completion flow.";
 
             ImGui::Begin(title.c_str(), NULL, window_flags);
             ImGui::PushItemWidth((float)(world->width() / 2));
             ImGui::Text(importtext.c_str(), world->width() / 2);
             ImGui::End();
-        }
-
-        // These screens all display a "Please wait" message ten times (for some reason doing it once or twice doesn't actually display it) and then do something time-consuming.
-
-        if (screenmode == generatingterrainscreen)
-        {
-            if (showdeferredworkwindow(generatingterrainpass, "Please wait...##generateterrain ", "Generating terrain...", ImVec2(main_viewport->WorkPos.x + 507, main_viewport->WorkPos.y + 173), ImVec2(173, 68)))
-            {
-                preparecustomworldgeneration();
-
-                int clusterno = 1;
-                int clustersize = 1;
-                int mergebias = 0;
-
-                switch (landmass)
-                {
-                case 0:
-                    mergebias = 10;
-                    break;
-
-                case 1:
-                    mergebias = 5;
-                    break;
-
-                case 2:
-                    break;
-
-                case 3:
-                    clusterno = 1;
-                    clustersize = 6;
-                    break;
-
-                case 4:
-                    clusterno = 2;
-                    clustersize = 3;
-                    break;
-
-                case 5:
-                    clusterno = 2;
-                    clustersize = 7;
-                    break;
-
-                case 6:
-                    clusterno = 3;
-                    clustersize = 3;
-                    break;
-
-                case 7:
-                    clusterno = 3;
-                    clustersize = 8;
-                    break;
-
-                case 8:
-                    clusterno = 3;
-                    clustersize = 9;
-                    break;
-
-                case 9:
-                    clusterno = 4;
-                    clustersize = 5;
-                    break;
-
-                case 10:
-                    clusterno = 4;
-                    clustersize = 9;
-                    break;
-                }
-
-                const int effectivemergefactor = std::clamp(mergefactor - 5 + mergebias, -4, 30);
-
-                vector<vector<int>> mountaindrainage(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-                vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
-
-                // Now generate the terrain.
-
-                generateglobalterrain(*world, 1, effectivemergefactor, clusterno, clustersize, landshape, chainland, mountaindrainage, shelves, squareroot);
-                finishcustomworldgeneration(generatingterrainpass);
             }
         }
 
+        // These screens all display a "Please wait" message ten times (for some reason doing it once or twice doesn't actually display it) and then do something time-consuming.
         if (screenmode == completingimportscreen)
         {
             if (showdeferredworkwindow(completingimportpass, "Please wait...##completeimport ", "Finishing world...", ImVec2(main_viewport->WorkPos.x + 507, main_viewport->WorkPos.y + 173), ImVec2(173, 68)))
@@ -3673,16 +4144,17 @@ int main()
 
                 if (ImGui::BeginTabItem("Tectonics"))
                 {
-                    const int tectoniccyclecount = gettectoniccyclecount(*world);
-                    const int tectonicplatecount = gettectonicplatecount(*world);
-                    const int tectonicsealevelm = gettectonicsealevelm(*world);
-                    const int boundarysegmentcount = gettectonicboundarysegmentcount(*world);
-                    const int deformingregioncount = gettectonicdeformingregioncount(*world);
+                    const planet& inspectworld = currentglobalworld();
+                    const int tectoniccyclecount = gettectoniccyclecount(inspectworld);
+                    const int tectonicplatecount = gettectonicplatecount(inspectworld);
+                    const int tectonicsealevelm = gettectonicsealevelm(inspectworld);
+                    const int boundarysegmentcount = gettectonicboundarysegmentcount(inspectworld);
+                    const int deformingregioncount = gettectonicdeformingregioncount(inspectworld);
 
                     ImGui::Text("World metadata");
                     ImGui::Separator();
-                    ImGui::Text("time_myr: %.3f", world->tectonictimemyr());
-                    ImGui::Text("delta_time_myr: %.6f", world->tectonicdeltatimemyr());
+                    ImGui::Text("time_myr: %.3f", inspectworld.tectonictimemyr());
+                    ImGui::Text("delta_time_myr: %.6f", inspectworld.tectonicdeltatimemyr());
 
                     if (tectoniccyclecount >= 0)
                         ImGui::Text("cycle_count: %d", tectoniccyclecount);
@@ -3707,7 +4179,7 @@ int main()
 
                     int inspectx = 0;
                     int inspecty = 0;
-                    const bool hasinspectionpoint = gettectonicinspectionpoint(*world, *region, screenmode, focused == 1, poix, poiy, inspectx, inspecty);
+                    const bool hasinspectionpoint = gettectonicinspectionpoint(currentglobalworld(), *region, screenmode, focused == 1, poix, poiy, inspectx, inspecty);
 
                     if (hasinspectionpoint == false)
                     {
@@ -3715,22 +4187,23 @@ int main()
                     }
                     else
                     {
-                        const float crustagemyr = world->tectoniccrustagemyr(inspectx, inspecty);
-                        const float crustthickness = world->tectoniccrustthickness(inspectx, inspecty);
-                        const CrustClass crustclass = world->tectoniccrustclass(inspectx, inspecty);
-                        const float uplift = world->tectonicuplifttendency(inspectx, inspecty);
-                        const float subsidence = world->tectonicsubsidencetendency(inspectx, inspecty);
-                        const float strain = world->tectonicaccumulatedstrain(inspectx, inspecty);
-                        const BoundaryType boundarytype = world->tectonicboundarytype(inspectx, inspecty);
-                        const int boundarydistance = world->tectonicboundarydistance(inspectx, inspecty);
-                        const int boundarysegmentid = world->tectonicboundarysegmentid(inspectx, inspecty);
-                        const int nearestboundaryid = world->tectonicnearestboundaryid(inspectx, inspecty);
-                        const float boundaryhistory = world->tectonicboundaryhistory(inspectx, inspecty);
-                        const int deformingregionid = world->tectonicdeformingregionid(inspectx, inspecty);
-                        const DeformingRegionType deformingregiontype = world->tectonicdeformingregiontype(inspectx, inspecty);
-                        const float deformationrate = world->tectonicdeformationrate(inspectx, inspecty);
-                        const float deformationvelocityx = world->tectonicdeformationvelocityx(inspectx, inspecty);
-                        const float deformationvelocityy = world->tectonicdeformationvelocityy(inspectx, inspecty);
+                        const planet& inspectworld = currentglobalworld();
+                        const float crustagemyr = inspectworld.tectoniccrustagemyr(inspectx, inspecty);
+                        const float crustthickness = inspectworld.tectoniccrustthickness(inspectx, inspecty);
+                        const CrustClass crustclass = inspectworld.tectoniccrustclass(inspectx, inspecty);
+                        const float uplift = inspectworld.tectonicuplifttendency(inspectx, inspecty);
+                        const float subsidence = inspectworld.tectonicsubsidencetendency(inspectx, inspecty);
+                        const float strain = inspectworld.tectonicaccumulatedstrain(inspectx, inspecty);
+                        const BoundaryType boundarytype = inspectworld.tectonicboundarytype(inspectx, inspecty);
+                        const int boundarydistance = inspectworld.tectonicboundarydistance(inspectx, inspecty);
+                        const int boundarysegmentid = inspectworld.tectonicboundarysegmentid(inspectx, inspecty);
+                        const int nearestboundaryid = inspectworld.tectonicnearestboundaryid(inspectx, inspecty);
+                        const float boundaryhistory = inspectworld.tectonicboundaryhistory(inspectx, inspecty);
+                        const int deformingregionid = inspectworld.tectonicdeformingregionid(inspectx, inspecty);
+                        const DeformingRegionType deformingregiontype = inspectworld.tectonicdeformingregiontype(inspectx, inspecty);
+                        const float deformationrate = inspectworld.tectonicdeformationrate(inspectx, inspecty);
+                        const float deformationvelocityx = inspectworld.tectonicdeformationvelocityx(inspectx, inspecty);
+                        const float deformationvelocityy = inspectworld.tectonicdeformationvelocityy(inspectx, inspecty);
 
                         ImGui::Text("global_x: %d", inspectx);
                         ImGui::Text("global_y: %d", inspecty);
@@ -3753,9 +4226,9 @@ int main()
 
                         if (boundarysegmentid > 0 || nearestboundaryid > 0 || deformingregionid > 0)
                         {
-                            const TectonicBoundarySegment* boundarysegment = world->findtectonicboundarysegment(boundarysegmentid);
-                            const TectonicBoundarySegment* nearestboundary = world->findtectonicboundarysegment(nearestboundaryid);
-                            const TectonicDeformingRegion* deformingregion = world->findtectonicdeformingregion(deformingregionid);
+                            const TectonicBoundarySegment* boundarysegment = inspectworld.findtectonicboundarysegment(boundarysegmentid);
+                            const TectonicBoundarySegment* nearestboundary = inspectworld.findtectonicboundarysegment(nearestboundaryid);
+                            const TectonicDeformingRegion* deformingregion = inspectworld.findtectonicdeformingregion(deformingregionid);
 
                             ImGui::Spacing();
                             ImGui::Text("Linked summaries");
@@ -3869,6 +4342,7 @@ int main()
 
         handlefiledialog(loadingworld, filepathname, filepath, [&](const std::string&, const std::string&)
         {
+            resetworkbenchsession(generationworkbench);
             screenmode = loadingworldscreen;
         });
 
@@ -3933,6 +4407,7 @@ int main()
         {
             if (importlandheightmap(*world, selectedpath, &mapimportsettings))
             {
+                resetworkbenchsession(generationworkbench);
                 invalidateGlobalMaps();
                 showGlobalMapView(relief);
             }
@@ -3942,6 +4417,7 @@ int main()
         {
             if (importseadepthmap(*world, selectedpath, &mapimportsettings))
             {
+                resetworkbenchsession(generationworkbench);
                 invalidateGlobalMaps();
                 showGlobalMapView(relief);
             }
@@ -3951,6 +4427,7 @@ int main()
         {
             if (importmountainmap(*world, selectedpath, OKmountains, &mapimportsettings))
             {
+                resetworkbenchsession(generationworkbench);
                 invalidateGlobalMaps();
                 showGlobalMapView(relief);
             }
@@ -3960,6 +4437,7 @@ int main()
         {
             if (importvolcanomap(*world, selectedpath, &mapimportsettings))
             {
+                resetworkbenchsession(generationworkbench);
                 invalidateGlobalMaps();
                 showGlobalMapView(relief);
             }
@@ -3969,6 +4447,7 @@ int main()
         {
             if (importtemperaturemap(*world, selectedpath, importedclimatemaps, &mapimportsettings))
             {
+                resetworkbenchsession(generationworkbench);
                 invalidateGlobalMaps();
                 showGlobalMapView(temperature);
             }
@@ -3978,6 +4457,7 @@ int main()
         {
             if (importprecipitationmap(*world, selectedpath, importedclimatemaps, &mapimportsettings))
             {
+                resetworkbenchsession(generationworkbench);
                 invalidateGlobalMaps();
                 showGlobalMapView(precipitation);
             }
@@ -3990,20 +4470,20 @@ int main()
 
         // Set size window, for custom worlds.
 
-        if (drawcustomworldsizewindow(main_viewport, window_flags, showsetsize, brandnew, currentsize))
+        if (drawcustomworldsizewindow(main_viewport, window_flags, showsetsize, brandnew, worldpropertycontrols))
         {
             initialiseworld(*world);
             world->clear();
+            resetworkbenchsession(generationworkbench);
             clearimportedclimatemaps(importedclimatemaps);
             mapimportsettings = MapImportSettings{};
 
             world->setsize(currentsize);
+            applyworlddimensions(*world, worldpropertycontrols);
 
             resizeglobaldisplayforworld(*world, globaldisplay, highlightdisplay);
             world->setgravity(getdefaultgravityforsize(currentsize));
 
-            landmass = 5;
-            mergefactor = 15;
             syncworldpropertycontrols(*world, worldpropertycontrols);
             currentrivers = true;
             currentlakes = true;
@@ -4032,10 +4512,14 @@ int main()
 
         // Window for creating custom worlds.
 
-        if (drawterrainchooserwindow(main_viewport, window_flags, showterrainchooser, landmass, mergefactor))
+        if (drawterrainchooserwindow(main_viewport, window_flags, showterrainchooser))
         {
-            screenmode = generatingterrainscreen;
-            generatingterrainpass = 0;
+            resetworkbenchsession(generationworkbench);
+            initializeproceduralworkbenchsession(generationworkbench, *world, worldgenerationdebug.options.plateTectonicsCycleCount, worldgenerationdebug.options.plateTectonicsPlateCount);
+            applytectonicsoptionsfromdebug(generationworkbench.ui);
+            previewcurrentgenerationstage(generationworkbench, *world, GenerationExecutionContext{}, nullptr);
+            invalidateGlobalMaps();
+            showGlobalMapView(preferredworkbenchmapview(getcurrentgenerationstage(generationworkbench).id));
         }
 
         // Warning window for over-large area maps.

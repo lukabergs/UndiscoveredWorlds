@@ -1,5 +1,6 @@
 #include <algorithm>
 
+#include "generation_tuning.hpp"
 #include "world_property_controls.hpp"
 
 WorldPropertyControls makeworldpropertycontrols(const planet& world)
@@ -12,6 +13,8 @@ WorldPropertyControls makeworldpropertycontrols(const planet& world)
 void syncworldpropertycontrols(const planet& world, WorldPropertyControls& controls)
 {
     controls.size = world.size();
+    controls.mapWidth = world.width() + 1;
+    controls.mapHeight = world.height() + 1;
     controls.gravity = world.gravity();
     controls.lunar = world.lunar();
     controls.eccentricity = world.eccentricity();
@@ -46,8 +49,17 @@ void applyworldpropertycontrols(planet& world, const WorldPropertyControls& cont
     world.setglacialtemp(controls.glacialtemp);
 }
 
+void applyworlddimensions(planet& world, const WorldPropertyControls& controls)
+{
+    world.setwidth(std::clamp(controls.mapWidth, 2, ARRAYWIDTH) - 1);
+    world.setheight(std::clamp(controls.mapHeight, 2, ARRAYHEIGHT) - 1);
+}
+
 void clampworldpropertycontrols(WorldPropertyControls& controls)
 {
+    controls.size = std::clamp(controls.size, 0, 2);
+    controls.mapWidth = std::clamp(controls.mapWidth, 2, ARRAYWIDTH);
+    controls.mapHeight = std::clamp(controls.mapHeight, 2, ARRAYHEIGHT);
     controls.gravity = std::clamp(controls.gravity, 0.05f, 10.0f);
     controls.waterpickup = std::max(0.0f, controls.waterpickup);
     controls.tilt = std::clamp(controls.tilt, -90.0f, 90.0f);
@@ -80,4 +92,26 @@ float getdefaultgravityforsize(int size)
         return 0.15f;
 
     return 1.0f;
+}
+
+int getdefaultmapwidthforsize(int size)
+{
+    if (size == 0)
+        return tuning::worlddefaults::width / 4 + 1;
+
+    if (size == 1)
+        return tuning::worlddefaults::width / 2 + 1;
+
+    return tuning::worlddefaults::width + 1;
+}
+
+int getdefaultmapheightforsize(int size)
+{
+    if (size == 0)
+        return tuning::worlddefaults::height / 4 + 1;
+
+    if (size == 1)
+        return tuning::worlddefaults::height / 2 + 1;
+
+    return tuning::worlddefaults::height + 1;
 }

@@ -62,7 +62,7 @@ struct GlobalCudaRendererInputs
     float eccentricity = 0.0f;
     float tilt = 0.0f;
 
-    const short* mapnom = nullptr;
+    const int* mapnom = nullptr;
     const int* lakemap = nullptr;
     const short* oceanridgeheightmap = nullptr;
     const short* mountainheights = nullptr;

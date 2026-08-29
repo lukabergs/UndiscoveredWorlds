@@ -261,7 +261,7 @@ void generateglobalterrain(planet& world, bool customgenerate, int mergefactor, 
 
     if (beginworldgenstep("Simulating plate tectonics"))
     {
-        applyplatetectonicssimulation(world, shelves);
+        applyplatetectonicssimulation(world, shelves, platetectonicscyclecount(), platetectonicsplatecount());
         rebuildshelves = true;
     }
 
@@ -10621,7 +10621,7 @@ void createmountainsfromraw(planet& world, vector<vector<int>>& rawmountains, ve
 
                     // Now, diagonals from NW to SE.
 
-                    if (rawmountains[i - 1][j - 1] != 0 && rawmountains[i + 1][j + 1] != 0)
+                    if (rawmountains[lefti][j - 1] != 0 && rawmountains[righti][j + 1] != 0)
                     {
                         bool left = 0;
 

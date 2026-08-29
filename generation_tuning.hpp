@@ -7,8 +7,8 @@ namespace tuning
 namespace worlddefaults
 {
 inline constexpr int size = 2;
-inline constexpr int width = 2047;
-inline constexpr int height = 1024;
+inline constexpr int width = 599;
+inline constexpr int height = 399;
 inline constexpr bool rotation = true;
 inline constexpr float tilt = 22.5f;
 inline constexpr float eccentricity = 0.0167f;
@@ -459,12 +459,12 @@ inline constexpr int faultLookDistance = 4;
 namespace platetectonics
 {
 inline constexpr float seaLevelBias = 0.0f;
-inline constexpr uint32_t erosionPeriod = 0;
-inline constexpr float foldingRatio = 0.02f;
-inline constexpr uint32_t aggregationOverlapAbsolute = 1000000;
-inline constexpr float aggregationOverlapRelative = 0.33f;
-inline constexpr uint32_t cycleCount = 4;
-inline constexpr uint32_t plateCount = 4;
+inline constexpr uint32_t erosionPeriod = 60;
+inline constexpr float foldingRatio = 0.08f;
+inline constexpr uint32_t aggregationOverlapAbsolute = 64;
+inline constexpr float aggregationOverlapRelative = 0.20f;
+inline constexpr uint32_t cycleCount = 2;
+inline constexpr uint32_t plateCount = 10;
 inline constexpr uint32_t maximumSimulationSteps = 20000;
 inline constexpr int minimumOceanDepth = 1;
 inline constexpr int coastalOceanOffset = 10;

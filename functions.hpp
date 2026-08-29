@@ -656,7 +656,28 @@ bool shelfedge(planet& world, vector<vector<bool>>& shelves, int x, int y);
 void drawoceanridgeline(planet& world, int fromx, int fromy, int tox, int toy, vector<vector<int>>& array, int value);
 void createoceanfault(planet& world, int midx, int midy, int mindist, int maxdist, vector<vector<int>>& ridgesmap, vector<vector<bool>>& checked, int masksize);
 void createoceantrenches(planet& world, vector<vector<bool>>& shelves);
-void applyplatetectonicssimulation(planet& world, vector<vector<bool>>& shelves);
+struct PlateTectonicsSimulationOptions
+{
+    int cycleCount = 2;
+    int cycleStepLimit = 600;
+    int plateCount = 10;
+    bool useSeaLevelMeters = false;
+    int seaLevelMeters = 31043;
+    int aggregationOverlapAbsolute = -1;
+    float aggregationOverlapRelative = 0.20f;
+    float foldingRatio = 0.08f;
+    int erosionPeriod = 60;
+    float erosionStrength = 1.0f;
+    float landmassRotation = 0.20f;
+    float rotationStrength = 1.0f;
+    float subductionStrength = 1.0f;
+    float divergentCarveStrength = 0.015f;
+    float deltaTimeMyr = 1.0f;
+};
+
+int defaultplatetectonicsaggregationoverlapabs(int width, int height);
+void applyplatetectonicssimulation(planet& world, vector<vector<bool>>& shelves, int cyclecount, int platecount);
+void applyplatetectonicssimulation(planet& world, vector<vector<bool>>& shelves, const PlateTectonicsSimulationOptions& options);
 void createmountainsfromraw(planet& world, vector<vector<int>>& rawmountains, vector<vector<bool>>& OKmountains);
 void makearchipelagos(planet& world, vector<vector<bool>>& removedland, boolshapetemplate landshape[]);
 void makemountainisland(planet& world, int x, int y, int peakheight);

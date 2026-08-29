@@ -27,7 +27,7 @@ namespace
         float eccentricity;
         float tilt;
 
-        const short* mapnom;
+        const int* mapnom;
         const int* lakemap;
         const short* oceanridgeheightmap;
         const short* mountainheights;
@@ -2401,7 +2401,7 @@ namespace
 
     struct GlobalCudaDeviceBuffers
     {
-        DeviceBuffer<short> mapnom;
+        DeviceBuffer<int> mapnom;
         DeviceBuffer<int> lakemap;
         DeviceBuffer<short> oceanridgeheightmap;
         DeviceBuffer<short> mountainheights;

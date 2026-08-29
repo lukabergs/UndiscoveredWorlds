@@ -62,7 +62,7 @@ namespace
         });
     }
 
-    ImVec4 samplegradientcolour(const MapGradientSettings& gradient, int value)
+    ImVec4 samplegradientcolourimpl(const MapGradientSettings& gradient, int value)
     {
         if (gradient.stopcount <= 0)
             return ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -88,7 +88,7 @@ namespace
         return gradient.stops[gradient.stopcount - 1].colour;
     }
 
-    bool drawgradienteditor(const char* id, MapGradientSettings& gradient, int minimum, int maximum, const char* unittext, int& selectedstop)
+    bool drawgradienteditorimpl(const char* id, MapGradientSettings& gradient, int minimum, int maximum, const char* unittext, int& selectedstop)
     {
         bool changed = false;
 
@@ -145,7 +145,7 @@ namespace
             else if (gradient.stopcount < MAPGRADIENTMAXSTOPS)
             {
                 const int newposition = valuefrommouse(mouse.x);
-                const ImVec4 newcolour = samplegradientcolour(gradient, newposition);
+                const ImVec4 newcolour = samplegradientcolourimpl(gradient, newposition);
                 gradient.stops[gradient.stopcount].position = newposition;
                 gradient.stops[gradient.stopcount].colour = newcolour;
                 gradient.stopcount++;
@@ -465,7 +465,7 @@ namespace
             ImGui::Text(" ");
         }
 
-        drawgradienteditor(editorid, appearance.mapgradients[gradientindex], minimum, maximum, unittext, selectedstop);
+        drawgradienteditorimpl(editorid, appearance.mapgradients[gradientindex], minimum, maximum, unittext, selectedstop);
 
         ImGui::EndChild();
     }
@@ -479,7 +479,7 @@ namespace
         ImGui::PushItemWidth(220);
         ImGui::ColorEdit3("Background", (float*)&appearance.rivermapcolours[rivermapbackground]);
         ImGui::Text(" ");
-        drawgradienteditor(
+        drawgradienteditorimpl(
             "RiverGradientEditor",
             appearance.mapgradients[mapgradientriverflow],
             0,
@@ -603,4 +603,19 @@ void drawstaticmapappearance(const mapviewdefinition& definition, planet&, Appea
 void drawmapviewappearancetab(const mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign)
 {
     definition.drawappearance(definition, world, appearance, selectedgradientstops, colouralign, otheralign);
+}
+
+void normalizegradientstops(MapGradientSettings& gradient)
+{
+    sortgradientstops(gradient);
+}
+
+ImVec4 samplegradientcolour(const MapGradientSettings& gradient, int value)
+{
+    return samplegradientcolourimpl(gradient, value);
+}
+
+bool drawgradienteditor(const char* id, MapGradientSettings& gradient, int minimum, int maximum, const char* unittext, int& selectedstop)
+{
+    return drawgradienteditorimpl(id, gradient, minimum, maximum, unittext, selectedstop);
 }
