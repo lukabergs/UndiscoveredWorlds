@@ -100,8 +100,8 @@ float sampleupwindmaritimemoisturesource(const planet& world, int season, int x,
     const float fetchfactor = 1.0f - std::clamp(static_cast<float>(landsteps) / static_cast<float>(maxsearchdistance), 0.0f, 1.0f);
     const float windfactor = std::clamp(magnitude / 6.0f, 0.0f, 1.0f);
     const float continuityfactor = std::clamp(static_cast<float>(seacells) / static_cast<float>(oceansamplecount), 0.0f, 1.0f);
-
-    return averageevaporation * fetchfactor * windfactor * continuityfactor * tuning::climate::moistureadvection::maritimeLandSourceScale;
+    return averageevaporation * fetchfactor * windfactor * continuityfactor *
+        tuning::climate::moistureadvection::maritimeLandSourceScale;
 }
 
 float coastalweight(int distance, int maxdistance)
@@ -1524,6 +1524,8 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     auto runsolver = [&](int season)
     {
         floatgrid source(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid landpotentialevaporation(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid soilmoisture(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid moisture(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totalrain(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid uplift(width + 1, vector<float>(height + 1, 0.0f));
@@ -1568,7 +1570,11 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     else
                     {
                         if (temperature > 0.0f)
-                            evaporation = temperature * tuning::climate::moistureadvection::landEvaporationFactor;
+                        {
+                            landpotentialevaporation[x][y] = temperature *
+                                tuning::climate::moistureadvection::landPotentialEvaporationFactor *
+                                periterationfactor;
+                        }
 
                         evaporation += sampleupwindmaritimemoisturesource(world, season, x, y);
                     }
@@ -1603,7 +1609,21 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         const float u = static_cast<float>(world.seasonaluwind(season, x, y));
                         const float v = static_cast<float>(world.seasonalvwind(season, x, y));
                         const float retained = std::max(0.0f, moisture[x][y] * carryretention);
-                        const float localavailable = retained + source[x][y];
+                        float landevaporation = 0.0f;
+
+                        if (world.sea(x, y) == 0 && soilmoisture[x][y] > 0.0f)
+                        {
+                            const float wateravailability = std::clamp(
+                                soilmoisture[x][y] / tuning::climate::moistureadvection::landSoilMoistureCapacity,
+                                0.0f,
+                                1.0f);
+                            landevaporation = std::min(
+                                soilmoisture[x][y],
+                                landpotentialevaporation[x][y] * wateravailability);
+                            soilmoisture[x][y] -= landevaporation;
+                        }
+
+                        const float localavailable = retained + source[x][y] + landevaporation;
                         const float zonalshare = std::clamp(std::fabs(u) * tuning::climate::moistureadvection::advectionDistanceScale / static_cast<float>(maxadvectiondistance), 0.0f, 1.0f);
                         const float meridionalshare = std::clamp(std::fabs(v) * tuning::climate::moistureadvection::advectionDistanceScale / static_cast<float>(maxadvectiondistance), 0.0f, 1.0f);
                         float east = (u > 0.0f) ? zonalshare : 0.0f;
@@ -1705,6 +1725,14 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         precipitation = std::clamp(precipitation, 0.0f, availablemoisture);
                         totalrain[x][y] += precipitation;
                         moisture[x][y] = std::max(0.0f, availablemoisture - precipitation);
+
+                        if (sea == false)
+                        {
+                            soilmoisture[x][y] = std::min(
+                                tuning::climate::moistureadvection::landSoilMoistureCapacity,
+                                soilmoisture[x][y] + precipitation *
+                                    tuning::climate::moistureadvection::landInfiltrationFraction);
+                        }
                     }
                 }
             });

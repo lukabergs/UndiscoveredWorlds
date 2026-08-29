@@ -474,6 +474,73 @@ void printreferencedfcdriverreport(planet& world)
     }
 }
 
+void printsimulatedclassconfusionreport(planet& world, short targetclimate)
+{
+    sf::Image reference;
+    const filesystem::path referencepath = getappenvironment().earthKoppenImagePath;
+
+    if (reference.loadFromFile(referencepath.string()) == false)
+        return;
+
+    const int width = world.width();
+    const int height = world.height();
+    const sf::Vector2u referencesize = reference.getSize();
+
+    if (referencesize.x != static_cast<unsigned int>(width + 1) || referencesize.y != static_cast<unsigned int>(height + 1))
+        return;
+
+    array<long long, 31> expectedcounts{};
+    long long total = 0;
+
+    for (int y = 0; y <= height; y++)
+    {
+        for (int x = 0; x <= width; x++)
+        {
+            if (world.sea(x, y) == 1)
+                continue;
+
+            const short simulated = comparableclimate(static_cast<short>(world.climate(x, y)));
+
+            if (simulated != targetclimate)
+                continue;
+
+            int distancesquared = 0;
+            const short expected = comparableclimate(nearestbenchmarkclimate(reference.getPixel(x, y), distancesquared));
+
+            if (distancesquared > benchmarkcolourdistancelimitsquared || expected < 1 || expected > 31)
+                continue;
+
+            expectedcounts[expected - 1]++;
+            total++;
+        }
+    }
+
+    vector<int> order(31);
+
+    for (int climate = 0; climate < 31; climate++)
+        order[climate] = climate;
+
+    sort(order.begin(), order.end(), [&](int left, int right)
+    {
+        return expectedcounts[left] > expectedcounts[right];
+    });
+
+    cout << "Simulated " << getclimatecode(targetclimate) << " reference-class summary:" << '\n';
+
+    for (int climate : order)
+    {
+        if (expectedcounts[climate] == 0)
+            continue;
+
+        cout
+            << "simulated_" << getclimatecode(targetclimate)
+            << " expected=" << getclimatecode(static_cast<short>(climate + 1))
+            << " cells=" << expectedcounts[climate]
+            << " fraction=" << static_cast<double>(expectedcounts[climate]) / static_cast<double>(total)
+            << '\n';
+    }
+}
+
 vector<long long> referenceclimatecounts()
 {
     return
@@ -1265,6 +1332,8 @@ void printclimaterelativeerrorreport(planet& world)
     cout << "spatial_group_accuracy=" << spatial.groupaccuracy << '\n';
     cout << "spatial_kappa=" << spatial.kappa << '\n';
     printreferencedfcdriverreport(world);
+    printsimulatedclassconfusionreport(world, 6);
+    printsimulatedclassconfusionreport(world, 1);
 }
 
 void exportclimatevalidationreport(planet& world)

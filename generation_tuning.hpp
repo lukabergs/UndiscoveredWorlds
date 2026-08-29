@@ -182,8 +182,10 @@ namespace moistureadvection
 {
 inline constexpr int iterations = 30;
 inline constexpr float sourceScale = 0.16f;
-inline constexpr float landEvaporationFactor = 0.07f;
-inline constexpr float maritimeLandSourceScale = 0.16f;
+inline constexpr float landPotentialEvaporationFactor = 0.07f;
+inline constexpr float landSoilMoistureCapacity = 80.0f;
+inline constexpr float landInfiltrationFraction = 0.65f;
+inline constexpr float maritimeLandSourceScale = 0.32f;
 inline constexpr float carryRetention = 0.996f;
 inline constexpr float advectionDistanceScale = 10.5f;
 inline constexpr int maxAdvectionDistance = 38;
