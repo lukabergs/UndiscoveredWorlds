@@ -700,7 +700,7 @@ void createoceancurrentmap(planet& world);
 void createsurfacetemperaturemap(planet& world);
 void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<vector<int>>& fractal);
 void exportclimatevalidationreport(planet& world);
-bool appendclimatebenchmarkworkbook(planet& world);
+bool recordclimatebenchmarkrun(planet& world, const string& information, bool updateworkbook = true, int* runid = nullptr);
 void printclimaterelativeerrorreport(planet& world);
 void createtemperaturemap(planet& world, vector<vector<int>>& fractal);
 void createseaicemap(planet& world, vector<vector<int>>& fractal);

@@ -2148,8 +2148,8 @@ void finalizegeneratedworld(planet& world, GenerationScratch& scratch, const Gen
     generatephysicalworldlayers(world, scratch.shelves);
     generatesocialworld(world, context.socialoptions);
 
-    if (context.appendclimateworkbook && appendclimatebenchmarkworkbook(world) == false)
-        updatereport("Climate workbook benchmark update failed");
+    if (context.appendclimateworkbook && recordclimatebenchmarkrun(world, "", true) == false)
+        updatereport("Climate benchmark artifact update failed");
 }
 
 GenerationWorkbenchPanelResult drawgenerationworkbenchpanel(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, const planet& displayedworld, GenerationSessionState& session)
