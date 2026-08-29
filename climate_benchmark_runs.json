@@ -5,5 +5,17 @@
       "datetime": "20260829231120",
       "information": "Added benchmark run metadata, workbook ID writes, and automatic Koppen image export; climate simulation parameters and generation logic unchanged."
     }
+  ,
+    {
+      "id": 3,
+      "datetime": "20260830000739",
+      "information": "Scaled moisture-advection iterations, maritime fetch distance, ocean sampling, and continental fetch normalization with map resolution; all climate strengths, circulation, temperature heuristics, and Koppen thresholds unchanged."
+    }
+  ,
+    {
+      "id": 4,
+      "datetime": "20260830000953",
+      "information": "Normalized per-iteration moisture source, retention, condensation, and overflow after run 3 exposed iteration-count coupling; retained resolution-scaled 90 iterations, 143-cell maritime fetch, 24-cell ocean sampling, and 239-cell continental fetch normalization; other climate logic unchanged."
+    }
   ]
 }

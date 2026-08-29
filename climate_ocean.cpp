@@ -45,8 +45,10 @@ float sampleupwindmaritimemoisturesource(const planet& world, int season, int x,
 
     const int width = world.width();
     const int height = world.height();
-    const int maxsearchdistance = tuning::climate::maritime::maxSearchDistance;
-    const int oceansamplecount = tuning::climate::maritime::oceanSampleCount;
+    const int maxsearchdistance = tuning::climateresolution::scaleDistance(
+        tuning::climate::maritime::maxSearchDistance, width, height);
+    const int oceansamplecount = tuning::climateresolution::scaleDistance(
+        tuning::climate::maritime::oceanSampleCount, width, height);
     const float dirx = -u / magnitude;
     const float diry = -v / magnitude;
 
@@ -1510,7 +1512,14 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     const int width = world.width();
     const int height = world.height();
     const int maxadvectiondistance = tuning::climate::moistureadvection::maxAdvectionDistance;
-    const int iterations = tuning::climate::moistureadvection::iterations;
+    const int baselineiterations = tuning::climate::moistureadvection::iterations;
+    const int iterations = tuning::climateresolution::scaleDistance(
+        baselineiterations, width, height);
+    const float periterationfactor = static_cast<float>(baselineiterations) / static_cast<float>(iterations);
+    const float carryretention = std::pow(
+        tuning::climate::moistureadvection::carryRetention, periterationfactor);
+    const float overflowfactor = 1.0f - std::pow(
+        1.0f - tuning::climate::moistureadvection::overflowFactor, periterationfactor);
 
     auto runsolver = [&](int season)
     {
@@ -1562,7 +1571,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         evaporation += sampleupwindmaritimemoisturesource(world, season, x, y);
                     }
 
-                    source[x][y] = evaporation;
+                    source[x][y] = evaporation * periterationfactor;
 
                     const int xwest = wrapx(x - 1, width);
                     const int xeast = wrapx(x + 1, width);
@@ -1591,7 +1600,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     {
                         const float u = static_cast<float>(world.seasonaluwind(season, x, y));
                         const float v = static_cast<float>(world.seasonalvwind(season, x, y));
-                        const float retained = std::max(0.0f, moisture[x][y] * tuning::climate::moistureadvection::carryRetention);
+                        const float retained = std::max(0.0f, moisture[x][y] * carryretention);
                         const float localavailable = retained + source[x][y];
                         const float zonalshare = std::clamp(std::fabs(u) * tuning::climate::moistureadvection::advectionDistanceScale / static_cast<float>(maxadvectiondistance), 0.0f, 1.0f);
                         const float meridionalshare = std::clamp(std::fabs(v) * tuning::climate::moistureadvection::advectionDistanceScale / static_cast<float>(maxadvectiondistance), 0.0f, 1.0f);
@@ -1684,11 +1693,12 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         condensationrate -= descent[x][y] * tuning::climate::moistureadvection::descentFactor;
                         condensationrate = condensationrate * std::max(tuning::climate::moistureadvection::minimumForcedHumidity, std::min(1.0f, humidityratio));
                         condensationrate = std::clamp(condensationrate, 0.0f, 0.92f);
+                        condensationrate = 1.0f - std::pow(1.0f - condensationrate, periterationfactor);
 
                         float precipitation = availablemoisture * condensationrate;
 
                         if (availablemoisture > safecapacity)
-                            precipitation += (availablemoisture - safecapacity) * tuning::climate::moistureadvection::overflowFactor;
+                            precipitation += (availablemoisture - safecapacity) * overflowfactor;
 
                         precipitation = std::clamp(precipitation, 0.0f, availablemoisture);
                         totalrain[x][y] += precipitation;

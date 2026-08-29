@@ -232,8 +232,10 @@ maritimesample sampleupwindmaritimeinfluence(planet& world, int season, int x, i
 
     const int width = world.width();
     const int height = world.height();
-    const int maxsearchdistance = tuning::climate::maritime::maxSearchDistance;
-    const int oceansamplecount = tuning::climate::maritime::oceanSampleCount;
+    const int maxsearchdistance = tuning::climateresolution::scaleDistance(
+        tuning::climate::maritime::maxSearchDistance, width, height);
+    const int oceansamplecount = tuning::climateresolution::scaleDistance(
+        tuning::climate::maritime::oceanSampleCount, width, height);
 
     const float u = static_cast<float>(world.seasonaluwind(season, x, y));
     const float v = static_cast<float>(world.seasonalvwind(season, x, y));
@@ -4772,8 +4774,10 @@ void applycoastalclimates(planet& world)
 {
     const int width = world.width();
     const int height = world.height();
+    const float maxsearchdistance = tuning::climateresolution::scaleDistance(
+        static_cast<float>(tuning::climate::maritime::maxSearchDistance), width, height);
 
-    auto moderateseason = [](float temperature, float meantemperature, const maritimesample& sample, float thermalfactor)
+    auto moderateseason = [maxsearchdistance](float temperature, float meantemperature, const maritimesample& sample, float thermalfactor)
     {
         const float influence = std::clamp(sample.influence, 0.0f, 1.0f);
 
@@ -4781,7 +4785,7 @@ void applycoastalclimates(planet& world)
             return temperature;
 
         const float fetchfactor = 1.0f - std::clamp(
-            static_cast<float>(sample.fetchdistance) / static_cast<float>(tuning::climate::maritime::maxSearchDistance), 0.0f, 1.0f);
+            static_cast<float>(sample.fetchdistance) / maxsearchdistance, 0.0f, 1.0f);
         const float moderation = std::clamp(
             influence * (tuning::climate::coastalclimate::rangeModerationFactor +
                 fetchfactor * tuning::climate::coastalclimate::fetchModerationFactor),
@@ -4963,6 +4967,8 @@ void adjustcontinentaltemperatures(planet& world)
     int width = world.width();
     int height = world.height();
     int sealevel = world.sealevel();
+    const float continentalfetchscale = tuning::climateresolution::scaleDistance(
+        tuning::climate::maritime::continentalFetchScale, width, height);
     float maxvar = tuning::climate::continentality::maxAffectedTemperature;
     float minvar = tuning::climate::continentality::minAffectedTemperature;
 
@@ -4993,7 +4999,7 @@ void adjustcontinentaltemperatures(planet& world)
                     const float warmfetch = static_cast<float>(warmmaritime.fetchdistance);
                     const float annualfetch = (coldfetch + warmfetch) / 2.0f;
                     const float annualmaritime = std::max(coldmaritime.influence, warmmaritime.influence);
-                    float thisstrength = annualfetch / tuning::climate::maritime::continentalFetchScale;
+                    float thisstrength = annualfetch / continentalfetchscale;
                     thisstrength = thisstrength * (1.0f - annualmaritime * tuning::climate::maritime::continentalMaritimeReduction);
 
                     if (thisstrength > tuning::climate::continentality::maxStrength)
