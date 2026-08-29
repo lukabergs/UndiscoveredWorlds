@@ -17,5 +17,31 @@
       "datetime": "20260830000953",
       "information": "Normalized per-iteration moisture source, retention, condensation, and overflow after run 3 exposed iteration-count coupling; retained resolution-scaled 90 iterations, 143-cell maritime fetch, 24-cell ocean sampling, and 239-cell continental fetch normalization; other climate logic unchanged."
     }
+  ,
+    {
+      "id": 5,
+      "datetime": "20260830002843",
+      "information": "Tightened the D-climate dry-winter classification from a 1:4 to 1:10 driest-cold/wettest-warm precipitation ratio; added pixelwise spatial accuracy and kappa reporting plus benchmark-only black sea/lake/EF rendering; moisture transport and all temperature/rainfall generation unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.7529233926,
+        "spatial_compared_cells": 694584,
+        "spatial_exact_accuracy": 0.3830,
+        "spatial_group_accuracy": 0.6018,
+        "spatial_kappa": 0.3103
+      }
+    }
+  ,
+    {
+      "id": 6,
+      "datetime": "20260830003248",
+      "information": "Applied existing continental winter-cooling and summer-warming strengths and caps to the seasonal temperature fields used by final Koppen classification; retained the run 5 1:10 D winter-dry rule, resolution-scaled moisture transport, spatial metrics, and black benchmark backgrounds; no new climate strengths or thresholds.",
+      "metrics": {
+        "weighted_relative_error": 0.7529233926,
+        "spatial_compared_cells": 694584,
+        "spatial_exact_accuracy": 0.3830,
+        "spatial_group_accuracy": 0.6018,
+        "spatial_kappa": 0.3103
+      }
+    }
   ]
 }
