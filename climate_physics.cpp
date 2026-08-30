@@ -14,16 +14,19 @@ constexpr float dryAirGasConstantJoulesPerKilogramKelvin = 287.05f;
 constexpr float activeMoistureColumnFraction = 0.28f;
 
 std::array<WaterBudget, CLIMATESEASONCOUNT> waterBudgets{};
+HydrologySpinupDiagnostics hydrologySpinupDiagnostics{};
 }
 
 double WaterBudget::residual() const
 {
-    return oceanEvaporation - oceanPrecipitation - runoff - atmosphericStorage - soilStorage;
+    return initialAtmosphericStorage + initialSoilStorage + oceanEvaporation -
+        oceanPrecipitation - runoff - atmosphericStorage - soilStorage;
 }
 
 double WaterBudget::relativeResidual() const
 {
-    return residual() / std::max(1.0, std::abs(oceanEvaporation));
+    const double totalInput = initialAtmosphericStorage + initialSoilStorage + oceanEvaporation;
+    return residual() / std::max(1.0, std::abs(totalInput));
 }
 
 float saturationVapourPressureHpa(float temperatureC)
@@ -95,5 +98,15 @@ void setLastWaterBudget(int season, const WaterBudget& budget)
 const std::array<WaterBudget, CLIMATESEASONCOUNT>& lastWaterBudgets()
 {
     return waterBudgets;
+}
+
+void setLastHydrologySpinupDiagnostics(const HydrologySpinupDiagnostics& diagnostics)
+{
+    hydrologySpinupDiagnostics = diagnostics;
+}
+
+const HydrologySpinupDiagnostics& lastHydrologySpinupDiagnostics()
+{
+    return hydrologySpinupDiagnostics;
 }
 }

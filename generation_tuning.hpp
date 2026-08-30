@@ -172,6 +172,9 @@ inline constexpr float verticalVelocityStorageScale = 100.0f;
 namespace moistureadvection
 {
 inline constexpr int iterations = 30;
+inline constexpr int minimumSpinupCycles = 2;
+inline constexpr int maximumSpinupCycles = 4;
+inline constexpr float spinupRelativeStorageTolerance = 0.005f;
 inline constexpr float landSoilMoistureCapacity = 80.0f;
 inline constexpr float landInfiltrationFraction = 0.65f;
 inline constexpr float advectionTimeStepSeconds = 86400.0f;

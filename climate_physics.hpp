@@ -8,6 +8,8 @@ namespace climatephysics
 {
 struct WaterBudget
 {
+    double initialAtmosphericStorage = 0.0;
+    double initialSoilStorage = 0.0;
     double oceanEvaporation = 0.0;
     double landEvaporation = 0.0;
     double oceanPrecipitation = 0.0;
@@ -18,6 +20,15 @@ struct WaterBudget
 
     double residual() const;
     double relativeResidual() const;
+};
+
+struct HydrologySpinupDiagnostics
+{
+    int cyclesCompleted = 0;
+    bool converged = false;
+    double relativeStorageChange = 0.0;
+    double atmosphericStorage = 0.0;
+    double soilStorage = 0.0;
 };
 
 float saturationVapourPressureHpa(float temperatureC);
@@ -34,4 +45,6 @@ float bulkAerodynamicEvaporationMm(
 
 void setLastWaterBudget(int season, const WaterBudget& budget);
 const std::array<WaterBudget, CLIMATESEASONCOUNT>& lastWaterBudgets();
+void setLastHydrologySpinupDiagnostics(const HydrologySpinupDiagnostics& diagnostics);
+const HydrologySpinupDiagnostics& lastHydrologySpinupDiagnostics();
 }

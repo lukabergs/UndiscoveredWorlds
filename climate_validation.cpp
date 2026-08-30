@@ -1220,16 +1220,12 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
     const AppEnvironmentConfig& appenv = getappenvironment();
     const filesystem::path outputdir = appenv.climateBenchmarkImageDirectory;
     const filesystem::path referencepath = appenv.earthKoppenImagePath;
+    const int width = world.width();
+    const int height = world.height();
 
     if (outputdir.empty())
     {
         cerr << "Climate benchmark image directory is not configured.\n";
-        return false;
-    }
-
-    if (filesystem::exists(referencepath) == false)
-    {
-        cerr << "Climate benchmark reference image not found: " << referencepath.string() << '\n';
         return false;
     }
 
@@ -1242,41 +1238,77 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
         return false;
     }
 
-    sf::Image referenceimage;
+    const filesystem::path benchmarkreferencepath = outputdir / "0.png";
+    bool writereference = filesystem::exists(benchmarkreferencepath) == false;
 
-    if (referenceimage.loadFromFile(referencepath.string()) == false)
+    if (!writereference)
     {
-        cerr << "Failed to load climate benchmark reference image: " << referencepath.string() << '\n';
-        return false;
-    }
+        sf::Image existingreference;
+        writereference = existingreference.loadFromFile(benchmarkreferencepath.string()) == false ||
+            existingreference.getSize().x != static_cast<unsigned int>(width + 1) ||
+            existingreference.getSize().y != static_cast<unsigned int>(height + 1);
 
-    const sf::Vector2u referencesize = referenceimage.getSize();
-
-    for (unsigned int y = 0; y < referencesize.y; y++)
-    {
-        for (unsigned int x = 0; x < referencesize.x; x++)
+        if (!writereference)
         {
-            int distancesquared = 0;
-            const short climate = nearestbenchmarkclimate(referenceimage.getPixel(x, y), distancesquared);
+            const sf::Color efcolour = benchmarkclimatecolour(31);
+            bool containsEf = false;
 
-            if (distancesquared <= benchmarkcolourdistancelimitsquared && climate != 31)
-                referenceimage.setPixel(x, y, benchmarkclimatecolour(climate));
-            else
-                referenceimage.setPixel(x, y, sf::Color::Black);
+            for (unsigned int y = 0; y < existingreference.getSize().y && !containsEf; y++)
+            {
+                for (unsigned int x = 0; x < existingreference.getSize().x; x++)
+                {
+                    if (existingreference.getPixel(x, y) == efcolour)
+                    {
+                        containsEf = true;
+                        break;
+                    }
+                }
+            }
+
+            writereference = !containsEf;
         }
     }
 
-    const filesystem::path benchmarkreferencepath = outputdir / "0.png";
-
-    if (referenceimage.saveToFile(benchmarkreferencepath.string()) == false)
+    if (writereference)
     {
-        cerr << "Failed to save climate benchmark reference image: " << benchmarkreferencepath.string() << '\n';
-        return false;
+        if (filesystem::exists(referencepath) == false)
+        {
+            cerr << "Climate benchmark reference image not found: " << referencepath.string() << '\n';
+            return false;
+        }
+
+        sf::Image referenceimage;
+
+        if (referenceimage.loadFromFile(referencepath.string()) == false)
+        {
+            cerr << "Failed to load climate benchmark reference image: " << referencepath.string() << '\n';
+            return false;
+        }
+
+        const sf::Vector2u referencesize = referenceimage.getSize();
+
+        for (unsigned int y = 0; y < referencesize.y; y++)
+        {
+            for (unsigned int x = 0; x < referencesize.x; x++)
+            {
+                int distancesquared = 0;
+                const short climate = nearestbenchmarkclimate(referenceimage.getPixel(x, y), distancesquared);
+
+                if (distancesquared <= benchmarkcolourdistancelimitsquared)
+                    referenceimage.setPixel(x, y, benchmarkclimatecolour(climate));
+                else
+                    referenceimage.setPixel(x, y, sf::Color::Black);
+            }
+        }
+
+        if (referenceimage.saveToFile(benchmarkreferencepath.string()) == false)
+        {
+            cerr << "Failed to save climate benchmark reference image: " << benchmarkreferencepath.string() << '\n';
+            return false;
+        }
     }
 
     sf::Image simulatedimage;
-    const int width = world.width();
-    const int height = world.height();
     simulatedimage.create(width + 1, height + 1, sf::Color::Black);
 
     for (int y = 0; y <= height; y++)
@@ -1286,7 +1318,7 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
             const short climate = static_cast<short>(world.climate(x, y));
             const bool water = world.sea(x, y) == 1 || world.truelake(x, y) != 0 || world.riftlakesurface(x, y) != 0;
 
-            if (water == false && climate >= 1 && climate <= 30)
+            if (water == false && climate >= 1 && climate <= 31)
                 simulatedimage.setPixel(x, y, benchmarkclimatecolour(climate));
         }
     }
@@ -1920,7 +1952,7 @@ void exportclimatevalidationreport(planet& world)
 
     if (waterbudgetfile.is_open())
     {
-        waterbudgetfile << "season,ocean_evaporation,land_evaporation,ocean_precipitation,land_precipitation,runoff,atmospheric_storage,soil_storage,residual,relative_residual\n";
+        waterbudgetfile << "season,initial_atmospheric_storage,initial_soil_storage,ocean_evaporation,land_evaporation,ocean_precipitation,land_precipitation,runoff,atmospheric_storage,soil_storage,residual,relative_residual\n";
         waterbudgetfile << fixed << setprecision(9);
 
         const auto& budgets = climatephysics::lastWaterBudgets();
@@ -1930,6 +1962,8 @@ void exportclimatevalidationreport(planet& world)
             const climatephysics::WaterBudget& budget = budgets[season];
             waterbudgetfile
                 << season << ','
+                << budget.initialAtmosphericStorage << ','
+                << budget.initialSoilStorage << ','
                 << budget.oceanEvaporation << ','
                 << budget.landEvaporation << ','
                 << budget.oceanPrecipitation << ','
@@ -1940,6 +1974,21 @@ void exportclimatevalidationreport(planet& world)
                 << budget.residual() << ','
                 << budget.relativeResidual() << '\n';
         }
+    }
+
+    ofstream spinupfile(outputdir / "climate_hydrology_spinup.csv");
+
+    if (spinupfile.is_open())
+    {
+        const climatephysics::HydrologySpinupDiagnostics& diagnostics =
+            climatephysics::lastHydrologySpinupDiagnostics();
+        spinupfile << "cycles_completed,converged,relative_storage_change,atmospheric_storage,soil_storage\n";
+        spinupfile << fixed << setprecision(9)
+            << diagnostics.cyclesCompleted << ','
+            << (diagnostics.converged ? 1 : 0) << ','
+            << diagnostics.relativeStorageChange << ','
+            << diagnostics.atmosphericStorage << ','
+            << diagnostics.soilStorage << '\n';
     }
 
     writemonthlyreferencecomparison(outputdir, world);
@@ -2147,7 +2196,7 @@ void exportclimatevalidationreport(planet& world)
         summaryfile << "north_subtropical_dry_zonal_precip=" << northdryrain << '\n';
         summaryfile << "south_subtropical_dry_zonal_precip=" << southdryrain << '\n';
         summaryfile << "grid_files=annual_precipitation_grid.csv,january_precipitation_grid.csv,july_precipitation_grid.csv,land_mask_grid.csv\n";
-        summaryfile << "physics_diagnostics=climate_energy_budget.csv,climate_water_budget.csv,climate_atmosphere_budget.csv,monthly_climate_reference_comparison.csv,annual_imerg_precipitation_comparison.csv\n";
+        summaryfile << "physics_diagnostics=climate_energy_budget.csv,climate_water_budget.csv,climate_hydrology_spinup.csv,climate_atmosphere_budget.csv,monthly_climate_reference_comparison.csv,annual_imerg_precipitation_comparison.csv\n";
         summaryfile << "reference_grid_path=" << getappenvironment().referencePrecipitationGridPath.string() << '\n';
         summaryfile << "reference_found=" << (comparison.referencefound ? 1 : 0) << '\n';
         summaryfile << "reference_dimensions_match=" << (comparison.dimensionsmatch ? 1 : 0) << '\n';

@@ -1349,11 +1349,11 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     const float timestepseconds = tuning::climate::moistureadvection::advectionTimeStepSeconds * periterationfactor;
     const float condensationefficiency = 1.0f - std::pow(
         1.0f - tuning::climate::moistureadvection::condensationEfficiency, periterationfactor);
+    floatgrid soilmoisture(width + 1, vector<float>(height + 1, 0.0f));
+    floatgrid moisture(width + 1, vector<float>(height + 1, 0.0f));
 
     auto runsolver = [&](int season)
     {
-        floatgrid soilmoisture(width + 1, vector<float>(height + 1, 0.0f));
-        floatgrid moisture(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totalrain(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totalseaevaporation(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totallandevaporation(width + 1, vector<float>(height + 1, 0.0f));
@@ -1370,6 +1370,18 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         floatgrid nextmoisture(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid fluxconvergence(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totalconvergence(width + 1, vector<float>(height + 1, 0.0f));
+        climatephysics::WaterBudget budget;
+
+        for (int y = 0; y <= height; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                budget.initialAtmosphericStorage += moisture[x][y];
+
+                if (world.sea(x, y) == 0)
+                    budget.initialSoilStorage += soilmoisture[x][y];
+            }
+        }
 
         parallelforrows(0, height, [&](int startrow, int endrow)
         {
@@ -1634,8 +1646,6 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             }
         });
 
-        climatephysics::WaterBudget budget;
-
         for (int y = 0; y <= height; y++)
         {
             for (int x = 0; x <= width; x++)
@@ -1657,9 +1667,73 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             }
         }
 
+        return budget;
+    };
+
+    std::array<climatephysics::WaterBudget, CLIMATESEASONCOUNT> finalbudgets{};
+    climatephysics::HydrologySpinupDiagnostics diagnostics;
+
+    for (int cycle = 0; cycle < tuning::climate::moistureadvection::maximumSpinupCycles; cycle++)
+    {
+        const floatgrid initialmoisture = moisture;
+        const floatgrid initialsoilmoisture = soilmoisture;
+
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            finalbudgets[season] = runsolver(season);
+
+        double absolutechange = 0.0;
+        double referencestorage = 0.0;
+        double atmosphericstorage = 0.0;
+        double soilstorage = 0.0;
+
+        for (int y = 0; y <= height; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                absolutechange += std::abs(static_cast<double>(moisture[x][y] - initialmoisture[x][y]));
+                referencestorage += 0.5 * static_cast<double>(moisture[x][y] + initialmoisture[x][y]);
+                atmosphericstorage += moisture[x][y];
+
+                if (world.sea(x, y) == 0)
+                {
+                    absolutechange += std::abs(static_cast<double>(soilmoisture[x][y] - initialsoilmoisture[x][y]));
+                    referencestorage += 0.5 * static_cast<double>(soilmoisture[x][y] + initialsoilmoisture[x][y]);
+                    soilstorage += soilmoisture[x][y];
+                }
+            }
+        }
+
+        diagnostics.cyclesCompleted = cycle + 1;
+        diagnostics.relativeStorageChange = absolutechange / std::max(1.0, referencestorage);
+        diagnostics.atmosphericStorage = atmosphericstorage;
+        diagnostics.soilStorage = soilstorage;
+        diagnostics.converged = diagnostics.cyclesCompleted >=
+                tuning::climate::moistureadvection::minimumSpinupCycles &&
+            diagnostics.relativeStorageChange <=
+                tuning::climate::moistureadvection::spinupRelativeStorageTolerance;
+
+        std::cout
+            << "Climate hydrology spinup cycle=" << diagnostics.cyclesCompleted
+            << " relative_storage_change=" << diagnostics.relativeStorageChange
+            << " atmospheric_storage=" << diagnostics.atmosphericStorage
+            << " soil_storage=" << diagnostics.soilStorage
+            << " converged=" << (diagnostics.converged ? 1 : 0)
+            << '\n';
+
+        if (diagnostics.converged)
+            break;
+    }
+
+    climatephysics::setLastHydrologySpinupDiagnostics(diagnostics);
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        const climatephysics::WaterBudget& budget = finalbudgets[season];
         climatephysics::setLastWaterBudget(season, budget);
         std::cout
             << "Climate water budget season=" << season
+            << " initial_atmospheric_storage=" << budget.initialAtmosphericStorage
+            << " initial_soil_storage=" << budget.initialSoilStorage
             << " ocean_evaporation=" << budget.oceanEvaporation
             << " land_evaporation=" << budget.landEvaporation
             << " ocean_precipitation=" << budget.oceanPrecipitation
@@ -1670,8 +1744,5 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             << " residual=" << budget.residual()
             << " relative_residual=" << budget.relativeResidual()
             << '\n';
-    };
-
-    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-        runsolver(season);
+    }
 }

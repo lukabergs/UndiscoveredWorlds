@@ -58,5 +58,16 @@ int main()
     closed.soilStorage = 20.0;
     expect(std::abs(closed.relativeResidual() - 0.05) < 1e-9, "water-budget loss must be detectable");
 
+    climatephysics::WaterBudget persistent;
+    persistent.initialAtmosphericStorage = 40.0;
+    persistent.initialSoilStorage = 60.0;
+    persistent.oceanEvaporation = 25.0;
+    persistent.oceanPrecipitation = 45.0;
+    persistent.runoff = 20.0;
+    persistent.atmosphericStorage = 35.0;
+    persistent.soilStorage = 25.0;
+    expect(std::abs(persistent.residual()) < 1e-9,
+        "persistent water budget must include initial atmospheric and soil storage");
+
     return failures == 0 ? 0 : 1;
 }
