@@ -254,5 +254,133 @@
         "area_weighted_spatial_kappa": 0.2159682051
       }
     }
+  ,
+    {
+      "id": 23,
+      "datetime": "20260830022222",
+      "information": "Replaced empirical latitude-band temperatures with daily orbital insolation, temperature-dependent snow and sea-ice albedo, calibrated linear outgoing longwave radiation, globally conservative atmospheric heat redistribution, and distinct land/ocean heat capacities; preserved four physical seasonal states and removed rainfall-temperature, distance-to-coast seasonal-amplification, and subpolar-class cleanup heuristics.",
+      "metrics": {
+        "weighted_relative_error": 1.2469094017,
+        "spatial_compared_cells": 694829,
+        "spatial_exact_accuracy": 0.1587887092,
+        "spatial_group_accuracy": 0.6230914369,
+        "spatial_kappa": 0.0934937388,
+        "area_weighted_spatial_exact_accuracy": 0.1268808297,
+        "area_weighted_spatial_group_accuracy": 0.5094081081,
+        "area_weighted_spatial_kappa": 0.0674739466
+      }
+    }
+  ,
+    {
+      "id": 24,
+      "datetime": "20260830022624",
+      "information": "Refined the energy model after run 23: separated conservative meridional heat transport from same-latitude land-ocean air exchange so surface air couples locally to the ocean mixed layer without flattening the planetary latitude gradient; added land, ocean, and elevation temperature diagnostics.",
+      "metrics": {
+        "weighted_relative_error": 1.0696638140,
+        "spatial_compared_cells": 694740,
+        "spatial_exact_accuracy": 0.2165140916,
+        "spatial_group_accuracy": 0.5673949967,
+        "spatial_kappa": 0.1354202920,
+        "area_weighted_spatial_exact_accuracy": 0.1475553158,
+        "area_weighted_spatial_group_accuracy": 0.4562969638,
+        "area_weighted_spatial_kappa": 0.0888426431
+      }
+    }
+  ,
+    {
+      "id": 25,
+      "datetime": "20260830022841",
+      "information": "Increased conservative same-latitude land-ocean air exchange after run 24 showed a 4.84 C pre-elevation land-ocean split, and used the same cloud-effective open-surface albedo for land and ocean while retaining snow and sea-ice feedbacks.",
+      "metrics": {
+        "weighted_relative_error": 0.9753912986,
+        "spatial_compared_cells": 694795,
+        "spatial_exact_accuracy": 0.1792586302,
+        "spatial_group_accuracy": 0.5216675422,
+        "spatial_kappa": 0.0706115728,
+        "area_weighted_spatial_exact_accuracy": 0.1321972660,
+        "area_weighted_spatial_group_accuracy": 0.4084842970,
+        "area_weighted_spatial_kappa": 0.0687566077
+      }
+    }
+  ,
+    {
+      "id": 26,
+      "datetime": "20260830023101",
+      "information": "Rebalanced run 25's overdamped surface exchange: used moderate same-latitude land-ocean coupling, stronger globally conservative poleward heat transport, reduced cloud-effective snow albedo, and converged the longwave calibration to the configured mean temperature.",
+      "metrics": {
+        "weighted_relative_error": 1.3235467300,
+        "spatial_compared_cells": 694742,
+        "spatial_exact_accuracy": 0.1444377913,
+        "spatial_group_accuracy": 0.5196734903,
+        "spatial_kappa": 0.0895381979,
+        "area_weighted_spatial_exact_accuracy": 0.1273064314,
+        "area_weighted_spatial_group_accuracy": 0.4562463436,
+        "area_weighted_spatial_kappa": 0.0785933575
+      }
+    }
+  ,
+    {
+      "id": 27,
+      "datetime": "20260830023350",
+      "information": "Selected modest meridional transport after run 26 over-warmed polar rows, used vegetation-like clear-sky land albedo with cloud-effective snow feedback, and removed the later relief/uplift surface-cooling pass because elevation lapse is already applied by the energy model and uplift cooling belongs in condensation physics.",
+      "metrics": {
+        "weighted_relative_error": 1.1077817763,
+        "spatial_compared_cells": 694708,
+        "spatial_exact_accuracy": 0.2238667181,
+        "spatial_group_accuracy": 0.4784657727,
+        "spatial_kappa": 0.1653162614,
+        "area_weighted_spatial_exact_accuracy": 0.2262054131,
+        "area_weighted_spatial_group_accuracy": 0.5000018946,
+        "area_weighted_spatial_kappa": 0.1578533777
+      }
+    }
+  ,
+    {
+      "id": 28,
+      "datetime": "20260830023557",
+      "information": "Doubled the effective land-column heat capacity after run 27 revealed 112,832 Dfd cells from excessive high-latitude seasonal range; all orbital, radiative, albedo, transport, and water-cycle physics otherwise unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.8730221779,
+        "spatial_compared_cells": 694738,
+        "spatial_exact_accuracy": 0.3991044106,
+        "spatial_group_accuracy": 0.5770491898,
+        "spatial_kappa": 0.2866622300,
+        "area_weighted_spatial_exact_accuracy": 0.2441362441,
+        "area_weighted_spatial_group_accuracy": 0.4658141285,
+        "area_weighted_spatial_kappa": 0.1733811434
+      }
+    }
+  ,
+    {
+      "id": 29,
+      "datetime": "20260830023809",
+      "information": "Raised conservative meridional heat transport from 3 to 4 W m-2 K-1 to reduce run 28's excess ET/EF while retaining the successful 4e7 J m-2 K-1 land thermal inertia; increased longwave-calibration iterations so the configured global mean converges.",
+      "metrics": {
+        "weighted_relative_error": 1.0825660743,
+        "spatial_compared_cells": 694737,
+        "spatial_exact_accuracy": 0.2847984201,
+        "spatial_group_accuracy": 0.5843275945,
+        "spatial_kappa": 0.2055151668,
+        "area_weighted_spatial_exact_accuracy": 0.1906083690,
+        "area_weighted_spatial_group_accuracy": 0.4721028182,
+        "area_weighted_spatial_kappa": 0.1301690144
+      }
+    }
+  ,
+    {
+      "id": 30,
+      "datetime": "20260830024019",
+      "information": "Selected the run 28 energy architecture after the run 29 transport increase worsened spatial and monthly metrics: retained 3 W m-2 K-1 conservative meridional transport, 4e7 J m-2 K-1 land thermal inertia, physical elevation lapse, explicit four-season temperatures, and converged longwave calibration.",
+      "metrics": {
+        "weighted_relative_error": 0.8754949363,
+        "spatial_compared_cells": 694709,
+        "spatial_exact_accuracy": 0.3975909338,
+        "spatial_group_accuracy": 0.5767997824,
+        "spatial_kappa": 0.2826268568,
+        "area_weighted_spatial_exact_accuracy": 0.2395077333,
+        "area_weighted_spatial_group_accuracy": 0.4656260879,
+        "area_weighted_spatial_kappa": 0.1692064395
+      }
+    }
   ]
 }
