@@ -186,5 +186,73 @@
         "spatial_kappa": 0.3268689500
       }
     }
+  ,
+    {
+      "id": 18,
+      "datetime": "20260830020001",
+      "information": "Replaced inland maritime moisture creation and generic atmospheric loss with a conservative ocean-atmosphere-soil-runoff budget; replaced linear moisture capacity and forced condensation rates with Buck saturation vapour pressure, hydrostatic surface pressure, and uplift/subsidence parcel cooling; added WorldClim monthly temperature and precipitation validation.",
+      "metrics": {
+        "weighted_relative_error": 0.7701915129,
+        "spatial_compared_cells": 694645,
+        "spatial_exact_accuracy": 0.4277220739,
+        "spatial_group_accuracy": 0.6108242340,
+        "spatial_kappa": 0.3472486224
+      }
+    }
+  ,
+    {
+      "id": 19,
+      "datetime": "20260830020417",
+      "information": "Kept the run 18 closed thermodynamic water cycle and replaced one-cell moisture transport with conservative operator-split advection using model wind speed, latitude-dependent Earth grid-cell dimensions, and a three-hour timestep; corrected WorldClim precipitation NoData handling.",
+      "metrics": {
+        "weighted_relative_error": 0.7387547536,
+        "spatial_compared_cells": 693997,
+        "spatial_exact_accuracy": 0.4221243031,
+        "spatial_group_accuracy": 0.6132101436,
+        "spatial_kappa": 0.3417073933
+      }
+    }
+  ,
+    {
+      "id": 20,
+      "datetime": "20260830020624",
+      "information": "Retained run 19 conservative wind-speed advection and increased the physical transport timestep from three to six hours to test realistic continental moisture penetration; fixed the legacy annual precipitation CSV representation of reference NoData cells.",
+      "metrics": {
+        "weighted_relative_error": 0.7307798280,
+        "spatial_compared_cells": 694691,
+        "spatial_exact_accuracy": 0.4195879895,
+        "spatial_group_accuracy": 0.6147596557,
+        "spatial_kappa": 0.3394021830
+      }
+    }
+  ,
+    {
+      "id": 21,
+      "datetime": "20260830020914",
+      "information": "Selected the run 19 three-hour conservative advection timestep after the six-hour experiment reduced monthly precipitation correlation and Koppen spatial agreement; retained corrected WorldClim NoData handling and all closed-budget thermodynamics.",
+      "metrics": {
+        "weighted_relative_error": 0.7387547536,
+        "spatial_compared_cells": 693997,
+        "spatial_exact_accuracy": 0.4221243031,
+        "spatial_group_accuracy": 0.6132101436,
+        "spatial_kappa": 0.3417073933
+      }
+    }
+  ,
+    {
+      "id": 22,
+      "datetime": "20260830021416",
+      "information": "Finalized phase-1 validation without changing simulation output: added cosine-latitude area-weighted Koppen, temperature, and precipitation metrics; restricted the legacy annual precipitation comparison to cells that are land in both the simulation and WorldClim; retained the selected three-hour conservative water transport.",
+      "metrics": {
+        "weighted_relative_error": 0.7387547536,
+        "spatial_compared_cells": 693997,
+        "spatial_exact_accuracy": 0.4221243031,
+        "spatial_group_accuracy": 0.6132101436,
+        "spatial_kappa": 0.3417073933,
+        "area_weighted_spatial_exact_accuracy": 0.2871592226,
+        "area_weighted_spatial_group_accuracy": 0.4950647588,
+        "area_weighted_spatial_kappa": 0.2159682051
+      }
+    }
   ]
 }
