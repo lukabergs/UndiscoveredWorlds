@@ -10,6 +10,7 @@ namespace
 constexpr float standardSeaLevelPressureHpa = 1013.25f;
 constexpr float pressureScaleHeightMetres = 8434.5f;
 constexpr float gravityMetresPerSecondSquared = 9.80665f;
+constexpr float dryAirGasConstantJoulesPerKilogramKelvin = 287.05f;
 constexpr float activeMoistureColumnFraction = 0.28f;
 
 std::array<WaterBudget, CLIMATESEASONCOUNT> waterBudgets{};
@@ -45,19 +46,44 @@ float surfacePressureHpa(float elevationAboveSeaLevelMetres)
     return standardSeaLevelPressureHpa * std::exp(-elevation / pressureScaleHeightMetres);
 }
 
+float saturationSpecificHumidity(float temperatureC, float pressureHpa)
+{
+    const float saturationPressureHpa = std::min(
+        saturationVapourPressureHpa(temperatureC), pressureHpa * 0.95f);
+    return 0.622f * saturationPressureHpa /
+        std::max(1.0f, pressureHpa - 0.378f * saturationPressureHpa);
+}
+
 float saturationColumnWater(float temperatureC, float elevationAboveSeaLevelMetres)
 {
     const float pressureHpa = surfacePressureHpa(elevationAboveSeaLevelMetres);
-    const float saturationPressureHpa = std::min(
-        saturationVapourPressureHpa(temperatureC), pressureHpa * 0.95f);
-    const float saturationSpecificHumidity =
-        0.622f * saturationPressureHpa /
-        std::max(1.0f, pressureHpa - 0.378f * saturationPressureHpa);
+    const float specificHumidity = saturationSpecificHumidity(temperatureC, pressureHpa);
     const float columnAirMass = pressureHpa * 100.0f / gravityMetresPerSecondSquared;
 
     return std::max(
         0.05f,
-        saturationSpecificHumidity * columnAirMass * activeMoistureColumnFraction);
+        specificHumidity * columnAirMass * activeMoistureColumnFraction);
+}
+
+float bulkAerodynamicEvaporationMm(
+    float temperatureC,
+    float elevationAboveSeaLevelMetres,
+    float windSpeedMetresPerSecond,
+    float relativeHumidity,
+    float timeStepSeconds,
+    float transferCoefficient)
+{
+    const float pressureHpa = surfacePressureHpa(elevationAboveSeaLevelMetres);
+    const float absoluteTemperatureKelvin = std::max(150.0f, temperatureC + 273.15f);
+    const float airDensity = pressureHpa * 100.0f /
+        (dryAirGasConstantJoulesPerKilogramKelvin * absoluteTemperatureKelvin);
+    const float humidityDeficit = saturationSpecificHumidity(temperatureC, pressureHpa) *
+        (1.0f - std::clamp(relativeHumidity, 0.0f, 1.0f));
+
+    return std::max(0.0f,
+        airDensity * std::max(0.0f, transferCoefficient) *
+        std::max(0.0f, windSpeedMetresPerSecond) * humidityDeficit *
+        std::max(0.0f, timeStepSeconds));
 }
 
 void setLastWaterBudget(int season, const WaterBudget& budget)

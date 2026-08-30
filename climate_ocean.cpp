@@ -2,8 +2,10 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <vector>
 
+#include "climate_atmosphere.hpp"
 #include "climate_physics.hpp"
 #include "generation_tuning.hpp"
 #include "planet.hpp"
@@ -651,96 +653,6 @@ void createsurfacetemperaturemap(planet& world)
 
 namespace
 {
-float gaussianpressurebell(float x, float centre, float width)
-{
-    const float diff = (x - centre) / width;
-    return std::exp(-(diff * diff));
-}
-
-int rowfromlatitude(float latitude, int height)
-{
-    return std::clamp(static_cast<int>(std::round((90.0f - latitude) * static_cast<float>(height) / 180.0f)), 0, height);
-}
-
-void smoothzonalprofile(vector<float>& profile, int iterations)
-{
-    if (profile.empty() || iterations <= 0)
-        return;
-
-    const int height = static_cast<int>(profile.size()) - 1;
-    vector<float> scratch = profile;
-
-    for (int iteration = 0; iteration < iterations; iteration++)
-    {
-        for (int y = 0; y <= height; y++)
-        {
-            float total = 0.0f;
-            float weighttotal = 0.0f;
-
-            for (int dy = -2; dy <= 2; dy++)
-            {
-                const int yy = std::clamp(y + dy, 0, height);
-                const float weight = (dy == 0) ? 3.0f : (std::abs(dy) == 1 ? 2.0f : 1.0f);
-                total += profile[yy] * weight;
-                weighttotal += weight;
-            }
-
-            scratch[y] = (weighttotal > 0.0f) ? total / weighttotal : profile[y];
-        }
-
-        profile.swap(scratch);
-    }
-}
-
-int findmaxrowrange(const vector<float>& values, int rowa, int rowb)
-{
-    if (values.empty())
-        return 0;
-
-    const int start = std::clamp(std::min(rowa, rowb), 0, static_cast<int>(values.size()) - 1);
-    const int end = std::clamp(std::max(rowa, rowb), 0, static_cast<int>(values.size()) - 1);
-    int bestrow = start;
-    float bestvalue = values[start];
-
-    for (int y = start + 1; y <= end; y++)
-    {
-        if (values[y] > bestvalue)
-        {
-            bestvalue = values[y];
-            bestrow = y;
-        }
-    }
-
-    return bestrow;
-}
-
-int findminrowrange(const vector<float>& values, int rowa, int rowb)
-{
-    if (values.empty())
-        return 0;
-
-    const int start = std::clamp(std::min(rowa, rowb), 0, static_cast<int>(values.size()) - 1);
-    const int end = std::clamp(std::max(rowa, rowb), 0, static_cast<int>(values.size()) - 1);
-    int bestrow = start;
-    float bestvalue = values[start];
-
-    for (int y = start + 1; y <= end; y++)
-    {
-        if (values[y] < bestvalue)
-        {
-            bestvalue = values[y];
-            bestrow = y;
-        }
-    }
-
-    return bestrow;
-}
-
-float pressurebandwidth(float latitudea, float latitudeb, float minimumwidth, float scale)
-{
-    return std::max(minimumwidth, std::fabs(latitudea - latitudeb) * scale);
-}
-
 float pressuresurfacetemperature(planet& world, int season, int x, int y)
 {
     if (world.sea(x, y) == 1 && world.seasonalsst(season, x, y) != 0)
@@ -828,34 +740,13 @@ void createpressuremap(planet& world)
 {
     const int width = world.width();
     const int height = world.height();
-    const int sealevel = world.sealevel();
-    const floatgrid continentality = buildcontinentalityfield(
-        world,
-        tuning::climate::pressure::continentalitySmoothingIterations,
-        tuning::climate::pressure::continentalityExponent);
-    floatgrid annualsurface(width + 1, vector<float>(height + 1, 0.0f));
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
-    {
-        for (int y = startrow; y <= endrow; y++)
-        {
-            for (int x = 0; x <= width; x++)
-            {
-                float total = 0.0f;
-
-                for (int annualseason = 0; annualseason < CLIMATESEASONCOUNT; annualseason++)
-                    total += pressuresurfacetemperature(world, annualseason, x, y);
-
-                annualsurface[x][y] = total / static_cast<float>(CLIMATESEASONCOUNT);
-            }
-        }
-    });
+    const float thicknessresponse = climateatmosphere::hypsometricHeightResponseMetresPerKelvin(
+        tuning::climate::circulation::surfaceReferencePressurePa,
+        tuning::climate::circulation::upperReferencePressurePa);
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
         floatgrid surface(width + 1, vector<float>(height + 1, 0.0f));
-        vector<float> zonalmean(height + 1, 0.0f);
-        vector<float> oceanmean(height + 1, 0.0f);
 
         parallelforrows(0, height, [&](int startrow, int endrow)
         {
@@ -866,90 +757,25 @@ void createpressuremap(planet& world)
             }
         });
 
+        double temperaturesum = 0.0;
+        double weighttotal = 0.0;
+
         for (int y = 0; y <= height; y++)
         {
-            float total = 0.0f;
-            float oceantotal = 0.0f;
-            int oceancount = 0;
+            constexpr double pi = 3.14159265358979323846;
+            const double weight = std::max(
+                0.0,
+                std::cos(static_cast<double>(latitudeforrow(y, height)) * pi / 180.0));
 
             for (int x = 0; x <= width; x++)
             {
-                total += surface[x][y];
-
-                if (world.sea(x, y) == 1)
-                {
-                    oceantotal += surface[x][y];
-                    oceancount++;
-                }
+                temperaturesum += weight * static_cast<double>(surface[x][y]);
+                weighttotal += weight;
             }
-
-            zonalmean[y] = total / static_cast<float>(width + 1);
-            oceanmean[y] = oceancount > 0 ? oceantotal / static_cast<float>(oceancount) : zonalmean[y];
         }
 
-        vector<float> smoothedzonal = zonalmean;
-        vector<float> smoothedocean = oceanmean;
-        smoothzonalprofile(smoothedzonal, tuning::climate::pressure::smoothingIterations + 2);
-        smoothzonalprofile(smoothedocean, tuning::climate::pressure::smoothingIterations + 1);
-
-        vector<float> baroclinicity(height + 1, 0.0f);
-
-        for (int y = 0; y <= height; y++)
-        {
-            const int ynorth = (y > 0) ? y - 1 : y;
-            const int ysouth = (y < height) ? y + 1 : y;
-            baroclinicity[y] = std::fabs(smoothedzonal[ysouth] - smoothedzonal[ynorth]) * 0.5f;
-        }
-
-        smoothzonalprofile(baroclinicity, 1);
-
-        float globalmean = 0.0f;
-
-        for (float value : smoothedzonal)
-            globalmean += value;
-
-        globalmean = globalmean / static_cast<float>(height + 1);
-        const int equatorrow = rowfromlatitude(0.0f, height);
-        const int tropicalrow = findmaxrowrange(smoothedzonal, rowfromlatitude(35.0f, height), rowfromlatitude(-35.0f, height));
-        const int northheatingrow = findmaxrowrange(smoothedzonal, rowfromlatitude(35.0f, height), equatorrow);
-        const int southheatingrow = findmaxrowrange(smoothedzonal, equatorrow, rowfromlatitude(-35.0f, height));
-        const int northstormrow = findmaxrowrange(baroclinicity, rowfromlatitude(75.0f, height), rowfromlatitude(22.0f, height));
-        const int southstormrow = findmaxrowrange(baroclinicity, rowfromlatitude(-22.0f, height), rowfromlatitude(-75.0f, height));
-        const int northpolarrow = findminrowrange(smoothedzonal, 0, rowfromlatitude(55.0f, height));
-        const int southpolarrow = findminrowrange(smoothedzonal, rowfromlatitude(-55.0f, height), height);
-
-        const float tropicallat = latitudeforrow(tropicalrow, height);
-        const float northheatinglat = latitudeforrow(northheatingrow, height);
-        const float southheatinglat = latitudeforrow(southheatingrow, height);
-        const float northstormlat = latitudeforrow(northstormrow, height);
-        const float southstormlat = latitudeforrow(southstormrow, height);
-        const float northpolarlat = latitudeforrow(northpolarrow, height);
-        const float southpolarlat = latitudeforrow(southpolarrow, height);
-        const float northhorselat = std::clamp(northheatinglat + (northstormlat - northheatinglat) * 0.35f, 18.0f, 40.0f);
-        const float southhorselat = std::clamp(southheatinglat + (southstormlat - southheatinglat) * 0.35f, -40.0f, -18.0f);
-
-        const float tropicalcontrast = std::max(0.0f, smoothedzonal[tropicalrow] - globalmean);
-        const float northcellcontrast = std::max(0.0f, smoothedzonal[northheatingrow] - smoothedzonal[northstormrow]);
-        const float southcellcontrast = std::max(0.0f, smoothedzonal[southheatingrow] - smoothedzonal[southstormrow]);
-        const float northpolarcontrast = std::max(0.0f, globalmean - smoothedzonal[northpolarrow]);
-        const float southpolarcontrast = std::max(0.0f, globalmean - smoothedzonal[southpolarrow]);
-
-        const float tropicalwidth = pressurebandwidth(northhorselat, southhorselat, 7.0f, 0.18f);
-        const float northhorsewidth = pressurebandwidth(northheatinglat, northstormlat, 6.0f, 0.28f);
-        const float southhorsewidth = pressurebandwidth(southheatinglat, southstormlat, 6.0f, 0.28f);
-        const float northstormwidth = pressurebandwidth(northstormlat, northpolarlat, 7.0f, 0.45f);
-        const float southstormwidth = pressurebandwidth(southstormlat, southpolarlat, 7.0f, 0.45f);
-        const float northpolarwidth = pressurebandwidth(northstormlat, northpolarlat, 7.0f, 0.35f);
-        const float southpolarwidth = pressurebandwidth(southstormlat, southpolarlat, 7.0f, 0.35f);
-
-        const float tropicalamplitude = tuning::climate::pressure::equatorialLow * std::clamp(tropicalcontrast / 18.0f, 0.35f, 1.45f);
-        const float northhorseamplitude = tuning::climate::pressure::subtropicalHigh * std::clamp(northcellcontrast / 18.0f, 0.35f, 1.6f);
-        const float southhorseamplitude = tuning::climate::pressure::subtropicalHigh * std::clamp(southcellcontrast / 18.0f, 0.35f, 1.6f);
-        const float northstormamplitude = tuning::climate::pressure::subpolarLow * std::clamp(northcellcontrast / 16.0f, 0.35f, 1.6f);
-        const float southstormamplitude = tuning::climate::pressure::subpolarLow * std::clamp(southcellcontrast / 16.0f, 0.35f, 1.6f);
-        const float northpolaramplitude = tuning::climate::pressure::polarHigh * std::clamp(northpolarcontrast / 24.0f, 0.35f, 1.5f);
-        const float southpolaramplitude = tuning::climate::pressure::polarHigh * std::clamp(southpolarcontrast / 24.0f, 0.35f, 1.5f);
-
+        const float globalmean = weighttotal > 0.0 ?
+            static_cast<float>(temperaturesum / weighttotal) : 0.0f;
         floatgrid pressure(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid upperheight(width + 1, vector<float>(height + 1, 0.0f));
 
@@ -959,42 +785,13 @@ void createpressuremap(planet& world)
             {
                 for (int x = 0; x <= width; x++)
                 {
-                    const float latitude = latitudeforrow(y, height);
-                    const bool land = world.nom(x, y) > sealevel;
-                    const float thermalresponse = land ? tuning::climate::pressure::landThermalResponse : tuning::climate::pressure::oceanThermalResponse;
-                    const float temperatureanomaly = surface[x][y] - smoothedzonal[y];
-                    const float elevation = static_cast<float>(std::max(0, world.nom(x, y) - sealevel));
-                    const float continental = continentality[x][y];
-                    const float landseacontrast = surface[x][y] - smoothedocean[y];
-                    const float seasonalcontrast = surface[x][y] - annualsurface[x][y];
-                    const float zonalpressure =
-                        -tropicalamplitude * gaussianpressurebell(latitude, tropicallat, tropicalwidth) +
-                        northhorseamplitude * gaussianpressurebell(latitude, northhorselat, northhorsewidth) -
-                        northstormamplitude * gaussianpressurebell(latitude, northstormlat, northstormwidth) +
-                        northpolaramplitude * gaussianpressurebell(latitude, northpolarlat, northpolarwidth) -
-                        southhorseamplitude * gaussianpressurebell(latitude, southhorselat, southhorsewidth) -
-                        southstormamplitude * gaussianpressurebell(latitude, southstormlat, southstormwidth) +
-                        southpolaramplitude * gaussianpressurebell(latitude, southpolarlat, southpolarwidth);
-                    float cellpressure = zonalpressure - temperatureanomaly * thermalresponse - elevation * tuning::climate::pressure::elevationResponse;
-
-                    if (land)
-                    {
-                        cellpressure -= landseacontrast * continental * tuning::climate::pressure::landSeaContrastResponse;
-                        cellpressure -= seasonalcontrast * continental * tuning::climate::pressure::seasonalLandContrastResponse;
-                    }
-
-                    pressure[x][y] = cellpressure;
-                    upperheight[x][y] =
-                        (surface[x][y] - globalmean) * tuning::climate::circulation::upperHeightThermalResponse +
-                        temperatureanomaly * tuning::climate::circulation::upperHeightAnomalyResponse +
-                        landseacontrast * continental * tuning::climate::circulation::upperHeightLandSeaResponse -
-                        baroclinicity[y] * tuning::climate::circulation::upperHeightBaroclinicResponse;
+                    pressure[x][y] = 0.0f;
+                    upperheight[x][y] = (surface[x][y] - globalmean) * thicknessresponse;
                 }
             }
         });
 
-        smoothallfield(world, pressure, tuning::climate::pressure::smoothingIterations);
-        smoothallfield(world, upperheight, tuning::climate::pressure::smoothingIterations + 1);
+        smoothallfield(world, upperheight, tuning::climate::circulation::thermalHeightSmoothingIterations);
 
         parallelforrows(0, height, [&](int startrow, int endrow)
         {
@@ -1178,6 +975,8 @@ void createvectorwindmap(planet& world)
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
         floatgrid pressure(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid basepressure(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid nextpressure(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid baseupperheight(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid upperheight(width + 1, vector<float>(height + 1, 0.0f));
 
@@ -1186,6 +985,8 @@ void createvectorwindmap(planet& world)
             for (int x = 0; x <= width; x++)
             {
                 pressure[x][y] = static_cast<float>(world.seasonalpressure(season, x, y));
+                basepressure[x][y] = pressure[x][y];
+                nextpressure[x][y] = pressure[x][y];
                 baseupperheight[x][y] = static_cast<float>(world.seasonalupperheight(season, x, y));
                 upperheight[x][y] = baseupperheight[x][y];
             }
@@ -1199,80 +1000,91 @@ void createvectorwindmap(planet& world)
         floatgrid nextupperheight = upperheight;
         floatgrid nextvertical = vertical;
         floatgrid surfacedivergence(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid upperdivergence(width + 1, vector<float>(height + 1, 0.0f));
 
-        parallelforrows(0, height, [&](int startrow, int endrow)
+        auto updatesurfaceflow = [&]()
         {
-            for (int y = startrow; y <= endrow; y++)
+            parallelforrows(0, height, [&](int startrow, int endrow)
             {
-                const int ynorth = (y > 0) ? y - 1 : y;
-                const int ysouth = (y < height) ? y + 1 : y;
-
-                for (int x = 0; x <= width; x++)
+                for (int y = startrow; y <= endrow; y++)
                 {
-                    const int xwest = wrapx(x - 1, width);
-                    const int xeast = wrapx(x + 1, width);
-                    const float dpdx = (pressure[xeast][y] - pressure[xwest][y]) / 2.0f;
-                    const float dpdy = (pressure[x][ysouth] - pressure[x][ynorth]) / 2.0f;
                     const float latitude = latitudeforrow(y, height);
-                    const float coriolis = std::clamp(std::fabs(latitude) / tuning::climate::atmosphere::coriolisLatitude, 0.0f, 1.0f);
-                    const bool land = world.nom(x, y) > sealevel;
-                    const float tropicalboost = std::clamp((25.0f - std::fabs(latitude)) / 25.0f, 0.0f, 1.0f)
-                        * tuning::climate::atmosphere::tropicalCrossIsobaricBoost;
-                    const float reliefdrag = std::clamp(macroterrain[x][y] / 4500.0f, 0.0f, 1.0f)
-                        * tuning::climate::atmosphere::reliefFriction;
-                    const float friction = std::clamp(
-                        (land ? tuning::climate::atmosphere::landFriction : 0.0f) +
-                        continentality[x][y] * tuning::climate::atmosphere::continentalFriction +
-                        reliefdrag +
-                        tropicalboost,
-                        0.0f, 0.8f);
+                    const auto spacing = climateatmosphere::cellSpacingMetres(
+                        latitude,
+                        width + 1,
+                        height + 1,
+                        tuning::climate::atmosphere::referencePlanetRadiusMetres);
 
-                    const float directu = -dpdx * tuning::climate::atmosphere::directFlowFactor;
-                    const float directv = -dpdy * tuning::climate::atmosphere::directFlowFactor;
-
-                    float geou = 0.0f;
-                    float geov = 0.0f;
-
-                    if (latitude >= 0.0f)
+                    for (int x = 0; x <= width; x++)
                     {
-                        geou = dpdy * tuning::climate::atmosphere::geostrophicFactor;
-                        geov = -dpdx * tuning::climate::atmosphere::geostrophicFactor;
-                    }
-                    else
-                    {
-                        geou = -dpdy * tuning::climate::atmosphere::geostrophicFactor;
-                        geov = dpdx * tuning::climate::atmosphere::geostrophicFactor;
-                    }
+                        const int ynorth = (y > 0) ? y - 1 : y;
+                        const int ysouth = (y < height) ? y + 1 : y;
+                        const int xwest = wrapx(x - 1, width);
+                        const int xeast = wrapx(x + 1, width);
+                        const float pressuregradienteast =
+                            (pressure[xeast][y] - pressure[xwest][y]) *
+                            tuning::climate::atmosphere::pressurePascalsPerHectopascal /
+                            (2.0f * spacing.zonalMetres);
+                        const float pressuregradientnorth =
+                            (pressure[x][ynorth] - pressure[x][ysouth]) *
+                            tuning::climate::atmosphere::pressurePascalsPerHectopascal /
+                            (2.0f * spacing.meridionalMetres);
+                        const float continental = std::clamp(continentality[x][y], 0.0f, 1.0f);
+                        const float relief = std::clamp(macroterrain[x][y] / 4500.0f, 0.0f, 1.0f);
+                        const float baseDragTime =
+                            tuning::climate::atmosphere::oceanBoundaryLayerDragTimeSeconds +
+                            continental * (tuning::climate::atmosphere::landBoundaryLayerDragTimeSeconds -
+                                tuning::climate::atmosphere::oceanBoundaryLayerDragTimeSeconds);
+                        const float dragTime = baseDragTime + relief *
+                            (tuning::climate::atmosphere::highReliefDragTimeSeconds - baseDragTime);
+                        const auto wind = climateatmosphere::steadyRayleighCoriolisWind(
+                            -pressuregradienteast / tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                            -pressuregradientnorth / tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                            latitude,
+                            dragTime,
+                            tuning::climate::atmosphere::rotationRatePerSecond,
+                            world.rotation() ? 1.0f : -1.0f);
 
-                    const float geoblend = std::clamp(coriolis * (1.0f - friction), 0.0f, 1.0f);
-                    const float directblend = 1.0f - geoblend;
-                    const float directboost = 1.0f + friction * 0.35f;
-                    windu[x][y] = std::clamp(directu * directblend * directboost + geou * geoblend, -maxvectorwind, maxvectorwind);
-                    windv[x][y] = std::clamp(directv * directblend * (1.0f + friction * 0.25f) + geov * geoblend, -maxvectorwind, maxvectorwind);
+                        windu[x][y] = std::clamp(wind.eastMetresPerSecond, -maxvectorwind, maxvectorwind);
+                        windv[x][y] = std::clamp(wind.southMetresPerSecond, -maxvectorwind, maxvectorwind);
+                    }
                 }
-            }
-        });
+            });
 
-        smoothallfield(world, windu, tuning::climate::atmosphere::smoothingIterations);
-        smoothallfield(world, windv, tuning::climate::atmosphere::smoothingIterations);
-        applytopographicwindeffects(world, macroterrain, windu, windv);
-        storeterrainverticalmotion(world, season, macroterrain, windu, windv);
+            smoothallfield(world, windu, tuning::climate::atmosphere::smoothingIterations);
+            smoothallfield(world, windv, tuning::climate::atmosphere::smoothingIterations);
 
-        parallelforrows(0, height, [&](int startrow, int endrow)
-        {
-            for (int y = startrow; y <= endrow; y++)
+            parallelforrows(0, height, [&](int startrow, int endrow)
             {
-                const int ynorth = (y > 0) ? y - 1 : y;
-                const int ysouth = (y < height) ? y + 1 : y;
-
-                for (int x = 0; x <= width; x++)
+                for (int y = startrow; y <= endrow; y++)
                 {
-                    const int xwest = wrapx(x - 1, width);
-                    const int xeast = wrapx(x + 1, width);
-                    surfacedivergence[x][y] = ((windu[xeast][y] - windu[xwest][y]) + (windv[x][ysouth] - windv[x][ynorth])) / 2.0f;
+                    const int ynorth = (y > 0) ? y - 1 : y;
+                    const int ysouth = (y < height) ? y + 1 : y;
+                    const auto spacing = climateatmosphere::cellSpacingMetres(
+                        latitudeforrow(y, height),
+                        width + 1,
+                        height + 1,
+                        tuning::climate::atmosphere::referencePlanetRadiusMetres);
+
+                    for (int x = 0; x <= width; x++)
+                    {
+                        const int xwest = wrapx(x - 1, width);
+                        const int xeast = wrapx(x + 1, width);
+                        surfacedivergence[x][y] =
+                            ((windu[xeast][y] - windu[xwest][y]) / (2.0f * spacing.zonalMetres) +
+                                (windv[x][ysouth] - windv[x][ynorth]) / (2.0f * spacing.meridionalMetres)) *
+                            tuning::climate::circulation::secondsPerDay;
+                    }
                 }
-            }
-        });
+            });
+
+            smoothallfield(
+                world,
+                surfacedivergence,
+                tuning::climate::circulation::divergenceSmoothingIterations);
+        };
+
+        updatesurfaceflow();
 
         for (int iteration = 0; iteration < tuning::climate::circulation::iterations; iteration++)
         {
@@ -1282,41 +1094,33 @@ void createvectorwindmap(planet& world)
                 {
                     const int ynorth = (y > 0) ? y - 1 : y;
                     const int ysouth = (y < height) ? y + 1 : y;
+                    const float latitude = latitudeforrow(y, height);
+                    const auto spacing = climateatmosphere::cellSpacingMetres(
+                        latitude,
+                        width + 1,
+                        height + 1,
+                        tuning::climate::atmosphere::referencePlanetRadiusMetres);
 
                     for (int x = 0; x <= width; x++)
                     {
                         const int xwest = wrapx(x - 1, width);
                         const int xeast = wrapx(x + 1, width);
-                        const float dhdx = (upperheight[xeast][y] - upperheight[xwest][y]) / 2.0f;
-                        const float dhdy = (upperheight[x][ysouth] - upperheight[x][ynorth]) / 2.0f;
-                        const float latitude = latitudeforrow(y, height);
-                        const float coriolis = std::clamp(std::fabs(latitude) / tuning::climate::atmosphere::coriolisLatitude, 0.0f, 1.0f);
-                        const float reliefdrag = std::clamp(macroterrain[x][y] / 4500.0f, 0.0f, 1.0f)
-                            * tuning::climate::atmosphere::reliefFriction;
-                        const float upperdirectu = -dhdx * tuning::climate::circulation::upperDirectFlowFactor;
-                        const float upperdirectv = -dhdy * tuning::climate::circulation::upperDirectFlowFactor;
+                        const float heightgradienteast =
+                            (upperheight[xeast][y] - upperheight[xwest][y]) /
+                            (2.0f * spacing.zonalMetres);
+                        const float heightgradientnorth =
+                            (upperheight[x][ynorth] - upperheight[x][ysouth]) /
+                            (2.0f * spacing.meridionalMetres);
+                        const auto wind = climateatmosphere::steadyRayleighCoriolisWind(
+                            -tuning::climate::atmosphere::gravityMetresPerSecondSquared * heightgradienteast,
+                            -tuning::climate::atmosphere::gravityMetresPerSecondSquared * heightgradientnorth,
+                            latitude,
+                            tuning::climate::circulation::upperLayerDragTimeSeconds,
+                            tuning::climate::atmosphere::rotationRatePerSecond,
+                            world.rotation() ? 1.0f : -1.0f);
 
-                        float uppergeou = 0.0f;
-                        float uppergeov = 0.0f;
-
-                        if (latitude >= 0.0f)
-                        {
-                            uppergeou = dhdy * tuning::climate::circulation::upperGeostrophicFactor;
-                            uppergeov = -dhdx * tuning::climate::circulation::upperGeostrophicFactor;
-                        }
-                        else
-                        {
-                            uppergeou = -dhdy * tuning::climate::circulation::upperGeostrophicFactor;
-                            uppergeov = dhdx * tuning::climate::circulation::upperGeostrophicFactor;
-                        }
-
-                        const float upperfriction = std::clamp(
-                            tuning::climate::circulation::upperFriction + reliefdrag * 0.25f,
-                            0.0f, 0.35f);
-                        const float uppergeoblend = std::clamp(coriolis * (1.0f - upperfriction), 0.0f, 1.0f);
-                        const float upperdirectblend = 1.0f - uppergeoblend;
-                        upperu[x][y] = std::clamp(upperdirectu * upperdirectblend + uppergeou * uppergeoblend, -maxvectorwind, maxvectorwind);
-                        upperv[x][y] = std::clamp(upperdirectv * upperdirectblend + uppergeov * uppergeoblend, -maxvectorwind, maxvectorwind);
+                        upperu[x][y] = std::clamp(wind.eastMetresPerSecond, -maxvectorwind, maxvectorwind);
+                        upperv[x][y] = std::clamp(wind.southMetresPerSecond, -maxvectorwind, maxvectorwind);
                     }
                 }
             });
@@ -1330,18 +1134,43 @@ void createvectorwindmap(planet& world)
                 {
                     const int ynorth = (y > 0) ? y - 1 : y;
                     const int ysouth = (y < height) ? y + 1 : y;
+                    const auto spacing = climateatmosphere::cellSpacingMetres(
+                        latitudeforrow(y, height),
+                        width + 1,
+                        height + 1,
+                        tuning::climate::atmosphere::referencePlanetRadiusMetres);
 
                     for (int x = 0; x <= width; x++)
                     {
                         const int xwest = wrapx(x - 1, width);
                         const int xeast = wrapx(x + 1, width);
-                        const float upperdivergence = ((upperu[xeast][y] - upperu[xwest][y]) + (upperv[x][ysouth] - upperv[x][ynorth])) / 2.0f;
-                        const float thermalforcing = baseupperheight[x][y] * tuning::climate::circulation::verticalHeatingResponse;
+                        upperdivergence[x][y] =
+                            ((upperu[xeast][y] - upperu[xwest][y]) / (2.0f * spacing.zonalMetres) +
+                                (upperv[x][ysouth] - upperv[x][ynorth]) / (2.0f * spacing.meridionalMetres)) *
+                            tuning::climate::circulation::secondsPerDay;
+                    }
+                }
+            });
+
+            smoothallfield(
+                world,
+                upperdivergence,
+                tuning::climate::circulation::divergenceSmoothingIterations);
+
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    const int ynorth = (y > 0) ? y - 1 : y;
+                    const int ysouth = (y < height) ? y + 1 : y;
+
+                    for (int x = 0; x <= width; x++)
+                    {
+                        const int xwest = wrapx(x - 1, width);
+                        const int xeast = wrapx(x + 1, width);
                         const float targetvertical =
-                            thermalforcing -
-                            pressure[x][y] * tuning::climate::circulation::verticalPressureResponse -
-                            surfacedivergence[x][y] * tuning::climate::circulation::verticalSurfaceConvergenceResponse +
-                            upperdivergence * tuning::climate::circulation::verticalUpperDivergenceResponse;
+                            (upperdivergence[x][y] - surfacedivergence[x][y]) *
+                            tuning::climate::circulation::layerPressureDepthHpa * 0.5f;
                         const float clampedvertical = std::clamp(
                             targetvertical,
                             -tuning::climate::circulation::maximumVerticalVelocity,
@@ -1361,8 +1190,75 @@ void createvectorwindmap(planet& world)
 
             upperheight.swap(nextupperheight);
             vertical.swap(nextvertical);
+
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    const int ynorth = (y > 0) ? y - 1 : y;
+                    const int ysouth = (y < height) ? y + 1 : y;
+
+                    for (int x = 0; x <= width; x++)
+                    {
+                        const int xwest = wrapx(x - 1, width);
+                        const int xeast = wrapx(x + 1, width);
+                        const float pressurelaplacian =
+                            (pressure[xwest][y] + pressure[xeast][y] +
+                                pressure[x][ynorth] + pressure[x][ysouth]) * 0.25f -
+                            pressure[x][y];
+                        const float columndivergence =
+                            (surfacedivergence[x][y] + upperdivergence[x][y]) * 0.5f;
+                        const float pressuretendency = std::clamp(
+                            -tuning::climate::circulation::surfacePressureReferenceHpa * columndivergence,
+                            -tuning::climate::circulation::maximumSurfacePressureTendencyHpaPerDay,
+                            tuning::climate::circulation::maximumSurfacePressureTendencyHpaPerDay);
+                        const float restoringtendency =
+                            (basepressure[x][y] - pressure[x][y]) /
+                            tuning::climate::circulation::surfacePressureRestoringTimeDays;
+                        nextpressure[x][y] = std::clamp(
+                            pressure[x][y] + tuning::climate::circulation::timeStepDays *
+                                (pressuretendency + restoringtendency) +
+                                pressurelaplacian * tuning::climate::circulation::surfacePressureDiffusion,
+                            -tuning::climate::circulation::maximumSurfacePressureAnomalyHpa,
+                            tuning::climate::circulation::maximumSurfacePressureAnomalyHpa);
+                    }
+                }
+            });
+
+            double pressuretotal = 0.0;
+            double pressureweight = 0.0;
+
+            for (int y = 0; y <= height; y++)
+            {
+                constexpr double pi = 3.14159265358979323846;
+                const double areaweight = std::max(
+                    0.0,
+                    std::cos(static_cast<double>(latitudeforrow(y, height)) * pi / 180.0));
+
+                for (int x = 0; x <= width; x++)
+                {
+                    pressuretotal += areaweight * static_cast<double>(nextpressure[x][y]);
+                    pressureweight += areaweight;
+                }
+            }
+
+            const float meanpressureanomaly = pressureweight > 0.0 ?
+                static_cast<float>(pressuretotal / pressureweight) : 0.0f;
+
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    for (int x = 0; x <= width; x++)
+                        pressure[x][y] = nextpressure[x][y] - meanpressureanomaly;
+                }
+            });
+
+            updatesurfaceflow();
         }
 
+        applytopographicwindeffects(world, macroterrain, windu, windv);
+        storeterrainverticalmotion(world, season, macroterrain, windu, windv);
         smoothallfield(world, upperheight, tuning::climate::circulation::windSmoothingIterations);
 
         parallelforrows(0, height, [&](int startrow, int endrow)
@@ -1393,29 +1289,34 @@ void createvectorwindmap(planet& world)
     {
         for (int y = startrow; y <= endrow; y++)
         {
-            const float latitude = latitudeforrow(y, height);
-            bool eastfallback = std::fabs(latitude) >= 22.0f && std::fabs(latitude) <= 60.0f;
-
             for (int x = 0; x <= width; x++)
             {
                 float averageu = 0.0f;
+                float averageupperu = 0.0f;
 
                 for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                {
                     averageu += static_cast<float>(world.seasonaluwind(season, x, y));
+                    averageupperu += static_cast<float>(world.seasonalupperuwind(season, x, y));
+                }
 
                 averageu = averageu / static_cast<float>(CLIMATESEASONCOUNT);
+                averageupperu = averageupperu / static_cast<float>(CLIMATESEASONCOUNT);
 
                 int scalarwind = static_cast<int>(std::round(averageu / tuning::climate::atmosphere::scalarWindDivisor));
                 scalarwind = std::clamp(scalarwind, -10, 10);
 
                 if (std::fabs(averageu) < tuning::climate::atmosphere::minimumScalarZonalWind || scalarwind == 0)
                 {
-                    if (averageu > 0.25f)
-                        eastfallback = true;
-                    else if (averageu < -0.25f)
-                        eastfallback = false;
+                    const float transportu = averageu + (averageupperu - averageu) *
+                        tuning::climate::moistureadvection::upperWindTransportFraction;
 
-                    world.setwind(x, y, eastfallback ? 101 : 99);
+                    if (transportu > 0.25f)
+                        world.setwind(x, y, 101);
+                    else if (transportu < -0.25f)
+                        world.setwind(x, y, 99);
+                    else
+                        world.setwind(x, y, 0);
                 }
                 else
                 {
@@ -1445,25 +1346,28 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     const int iterations = tuning::climateresolution::scaleDistance(
         baselineiterations, width, height);
     const float periterationfactor = static_cast<float>(baselineiterations) / static_cast<float>(iterations);
+    const float timestepseconds = tuning::climate::moistureadvection::advectionTimeStepSeconds * periterationfactor;
     const float condensationefficiency = 1.0f - std::pow(
         1.0f - tuning::climate::moistureadvection::condensationEfficiency, periterationfactor);
 
     auto runsolver = [&](int season)
     {
-        floatgrid source(width + 1, vector<float>(height + 1, 0.0f));
-        floatgrid landpotentialevaporation(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid soilmoisture(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid moisture(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totalrain(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid totalseaevaporation(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totallandevaporation(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid runoff(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid uplift(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid descent(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid dynamicvertical(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid saturationcapacity(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid surfacewindspeed(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid transportwindu(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid transportwindv(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid available(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid zonalmoisture(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid nextmoisture(width + 1, vector<float>(height + 1, 0.0f));
-        floatgrid windconvergence(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid fluxconvergence(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totalconvergence(width + 1, vector<float>(height + 1, 0.0f));
 
@@ -1471,48 +1375,23 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         {
             for (int y = startrow; y <= endrow; y++)
             {
-                const int ynorth = (y > 0) ? y - 1 : y;
-                const int ysouth = (y < height) ? y + 1 : y;
-
                 for (int x = 0; x <= width; x++)
                 {
                     const float u = static_cast<float>(world.seasonaluwind(season, x, y));
                     const float v = static_cast<float>(world.seasonalvwind(season, x, y));
+                    const float upperu = static_cast<float>(world.seasonalupperuwind(season, x, y));
+                    const float upperv = static_cast<float>(world.seasonaluppervwind(season, x, y));
                     const float temperature = (world.sea(x, y) == 1) ? static_cast<float>(world.seasonalsst(season, x, y)) : static_cast<float>(world.seasonaltemp(season, x, y));
+                    const float elevation = static_cast<float>(std::max(0, world.map(x, y) - sealevel));
 
-                    float evaporation = 0.0f;
-
-                    if (world.sea(x, y) == 1)
-                    {
-                        evaporation = static_cast<float>(world.seasonalevaporation(season, x, y)) * tuning::climate::moistureadvection::sourceScale;
-
-                        if (world.seaice(x, y) == 1)
-                            evaporation = evaporation * tuning::climate::moistureadvection::seaIceFactor;
-
-                        if (world.seaice(x, y) == 2)
-                            evaporation = 0.0f;
-                    }
-                    else
-                    {
-                        if (temperature > 0.0f)
-                        {
-                            landpotentialevaporation[x][y] = temperature *
-                                tuning::climate::moistureadvection::landPotentialEvaporationFactor *
-                                periterationfactor;
-                        }
-                    }
-
-                    source[x][y] = evaporation * periterationfactor;
-
-                    const int xwest = wrapx(x - 1, width);
-                    const int xeast = wrapx(x + 1, width);
-                    const float uwest = static_cast<float>(world.seasonaluwind(season, xwest, y));
-                    const float ueast = static_cast<float>(world.seasonaluwind(season, xeast, y));
-                    const float vnorth = static_cast<float>(world.seasonalvwind(season, x, ynorth));
-                    const float vsouth = static_cast<float>(world.seasonalvwind(season, x, ysouth));
-                    const float divergence = ((ueast - uwest) + (vsouth - vnorth)) / 8.0f;
-
-                    windconvergence[x][y] = std::max(0.0f, -divergence);
+                    saturationcapacity[x][y] = climatephysics::saturationColumnWater(temperature, elevation);
+                    surfacewindspeed[x][y] = std::max(
+                        tuning::climate::moistureadvection::minimumSurfaceWind,
+                        std::sqrt(u * u + v * v));
+                    transportwindu[x][y] = u + (upperu - u) *
+                        tuning::climate::moistureadvection::upperWindTransportFraction;
+                    transportwindv[x][y] = v + (upperv - v) *
+                        tuning::climate::moistureadvection::upperWindTransportFraction;
                     uplift[x][y] = static_cast<float>(world.seasonaluplift(season, x, y)) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
                     descent[x][y] = static_cast<float>(world.seasonalsubsidence(season, x, y)) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
                     dynamicvertical[x][y] = static_cast<float>(world.seasonalverticalvelocity(season, x, y)) /
@@ -1530,9 +1409,36 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     for (int x = 0; x <= width; x++)
                     {
                         const float retained = std::max(0.0f, moisture[x][y]);
+                        const bool sea = world.sea(x, y) == 1;
+                        const float temperature = sea ?
+                            static_cast<float>(world.seasonalsst(season, x, y)) :
+                            static_cast<float>(world.seasonaltemp(season, x, y));
+                        const float elevation = static_cast<float>(std::max(0, world.map(x, y) - sealevel));
+                        const float relativehumidity = std::clamp(
+                            retained / saturationcapacity[x][y], 0.0f, 1.0f);
+                        const float potentialevaporation = climatephysics::bulkAerodynamicEvaporationMm(
+                            temperature,
+                            elevation,
+                            surfacewindspeed[x][y],
+                            relativehumidity,
+                            timestepseconds,
+                            tuning::climate::moistureadvection::surfaceExchangeCoefficient);
+                        float seaevaporation = 0.0f;
                         float landevaporation = 0.0f;
 
-                        if (world.sea(x, y) == 0 && soilmoisture[x][y] > 0.0f)
+                        if (sea)
+                        {
+                            seaevaporation = potentialevaporation;
+
+                            if (world.seaice(x, y) == 1)
+                                seaevaporation *= tuning::climate::moistureadvection::seaIceFactor;
+
+                            if (world.seaice(x, y) == 2)
+                                seaevaporation = 0.0f;
+
+                            totalseaevaporation[x][y] += seaevaporation;
+                        }
+                        else if (soilmoisture[x][y] > 0.0f)
                         {
                             const float wateravailability = std::clamp(
                                 soilmoisture[x][y] / tuning::climate::moistureadvection::landSoilMoistureCapacity,
@@ -1540,12 +1446,13 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                                 1.0f);
                             landevaporation = std::min(
                                 soilmoisture[x][y],
-                                landpotentialevaporation[x][y] * wateravailability);
+                                potentialevaporation * wateravailability *
+                                    tuning::climate::moistureadvection::landSurfaceResistance);
                             soilmoisture[x][y] -= landevaporation;
                             totallandevaporation[x][y] += landevaporation;
                         }
 
-                        const float localavailable = retained + source[x][y] + landevaporation;
+                        const float localavailable = retained + seaevaporation + landevaporation;
                         available[x][y] = localavailable;
                     }
                 }
@@ -1566,9 +1473,9 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
 
                     for (int x = 0; x <= width; x++)
                     {
-                        const float u = static_cast<float>(world.seasonaluwind(season, x, y));
+                        const float u = transportwindu[x][y];
                         const float displacement = std::clamp(
-                            u * tuning::climate::moistureadvection::advectionTimeStepSeconds / cellwidthmetres,
+                            u * timestepseconds / cellwidthmetres,
                             -tuning::climate::moistureadvection::maximumAdvectionCellsPerStep,
                             tuning::climate::moistureadvection::maximumAdvectionCellsPerStep);
                         const float transportfraction = std::min(
@@ -1604,9 +1511,9 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
 
                     for (int y = 0; y <= height; y++)
                     {
-                        const float v = static_cast<float>(world.seasonalvwind(season, x, y));
+                        const float v = transportwindv[x][y];
                         const float displacement = std::clamp(
-                            v * tuning::climate::moistureadvection::advectionTimeStepSeconds / meridionalcellheight,
+                            v * timestepseconds / meridionalcellheight,
                             -tuning::climate::moistureadvection::maximumAdvectionCellsPerStep,
                             tuning::climate::moistureadvection::maximumAdvectionCellsPerStep);
                         const float transportfraction = std::min(
@@ -1665,7 +1572,6 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         const float elevation = static_cast<float>(std::max(0, world.map(x, y) - sealevel));
                         const float liftingcooling = std::clamp(
                             std::max(0.0f, dynamicvertical[x][y]) * tuning::climate::moistureadvection::dynamicVerticalCooling +
-                                windconvergence[x][y] * tuning::climate::moistureadvection::windConvergenceCooling +
                                 uplift[x][y] * tuning::climate::moistureadvection::topographicUpliftCooling,
                             0.0f,
                             tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
@@ -1708,7 +1614,11 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             {
                 for (int x = 0; x <= width; x++)
                 {
-                    const int rain = static_cast<int>(std::round(totalrain[x][y] * tuning::climate::moistureadvection::rainfallScale));
+                    const int rain = std::clamp(
+                        static_cast<int>(std::round(
+                            totalrain[x][y] * tuning::climate::moistureadvection::rainfallScale)),
+                        0,
+                        static_cast<int>(std::numeric_limits<short>::max()));
                     world.setseasonalrain(season, x, y, rain);
 
                     if (season == seasonjanuary)
@@ -1732,7 +1642,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             {
                 if (world.sea(x, y) == 1)
                 {
-                    budget.oceanEvaporation += static_cast<double>(source[x][y]) * static_cast<double>(iterations);
+                    budget.oceanEvaporation += totalseaevaporation[x][y];
                     budget.oceanPrecipitation += totalrain[x][y];
                 }
                 else

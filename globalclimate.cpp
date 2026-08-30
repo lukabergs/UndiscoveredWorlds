@@ -1212,15 +1212,14 @@ void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, 
         }
     }
 
-    // Now increase the seasonal variation in rainfall in certain areas, to encourage various climates.
+    if (seatotal == 0)
+    {
+        if (beginworldgenstep("Calculating seasonal rainfall"))
+            adjustseasonalrainfall(world, inland);
 
-    if (beginworldgenstep("Calculating seasonal rainfall"))
-        adjustseasonalrainfall(world, inland);
-
-    // Now smooth the rainfall.
-
-    if (beginworldgenstep("Smoothing rainfall"))
-        smoothrainfall(world, maxmountainheight);
+        if (beginworldgenstep("Smoothing rainfall"))
+            smoothrainfall(world, maxmountainheight);
+    }
 
     // Now cap excessive rainfall.
 
@@ -4697,6 +4696,16 @@ void caprainfall(planet& world)
         {
             for (int i = 0; i <= width; i++)
             {
+                for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                {
+                    float seasonalrain = static_cast<float>(world.seasonalrain(season, i, j));
+
+                    if (seasonalrain > maxrain)
+                        seasonalrain = (seasonalrain - maxrain) * capfactor + maxrain;
+
+                    world.setseasonalrain(season, i, j, static_cast<int>(std::max(0.0f, seasonalrain)));
+                }
+
                 float janrain = (float)world.janrain(i, j);
                 float julrain = (float)world.julrain(i, j);
 
@@ -4722,6 +4731,8 @@ void caprainfall(planet& world)
 
                 world.setjanrain(i, j, (int)janrain);
                 world.setjulrain(i, j, (int)julrain);
+                world.setseasonalrain(seasonjanuary, i, j, (int)janrain);
+                world.setseasonalrain(seasonjuly, i, j, (int)julrain);
             }
         }
     });
