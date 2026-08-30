@@ -10,6 +10,7 @@ struct AppEnvironmentConfig
     std::filesystem::path defaultImageDirectory = LR"(extra\img)";
     std::filesystem::path profilingWorkbookPath = LR"(extra\profiling.xlsx)";
     std::filesystem::path referencePrecipitationGridPath = LR"(extra\reference\earth_precipitation_grid.csv)";
+    std::filesystem::path referenceClimateDirectory = LR"(extra\reference)";
     std::filesystem::path climateWorkbookPath = LR"(extra\climate.xlsx)";
     std::filesystem::path climateBenchmarkRunLogPath = "climate_benchmark_runs.json";
     std::filesystem::path climateBenchmarkImageDirectory = LR"(extra\img\earth\benchmark)";

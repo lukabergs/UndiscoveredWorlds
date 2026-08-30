@@ -81,6 +81,7 @@ void loadappenvironmentinternal()
     applypathoverride(environmentconfig.defaultImageDirectory, getenvoverride("UW_DEFAULT_IMAGE_DIR", filevalues));
     applypathoverride(environmentconfig.profilingWorkbookPath, getenvoverride("UW_PROFILING_WORKBOOK", filevalues));
     applypathoverride(environmentconfig.referencePrecipitationGridPath, getenvoverride("UW_REFERENCE_PRECIP_GRID", filevalues));
+    applypathoverride(environmentconfig.referenceClimateDirectory, getenvoverride("UW_REFERENCE_CLIMATE_DIR", filevalues));
     applypathoverride(environmentconfig.climateWorkbookPath, getenvoverride("UW_CLIMATE_WORKBOOK", filevalues));
     applypathoverride(environmentconfig.climateBenchmarkRunLogPath, getenvoverride("UW_CLIMATE_BENCHMARK_RUN_LOG", filevalues));
     applypathoverride(environmentconfig.climateBenchmarkImageDirectory, getenvoverride("UW_CLIMATE_BENCHMARK_IMAGE_DIR", filevalues));
@@ -96,6 +97,8 @@ void loadappenvironmentinternal()
         filesystem::create_directories(environmentconfig.profilingWorkbookPath.parent_path());
     if (!environmentconfig.referencePrecipitationGridPath.empty() && environmentconfig.referencePrecipitationGridPath.has_parent_path())
         filesystem::create_directories(environmentconfig.referencePrecipitationGridPath.parent_path());
+    if (!environmentconfig.referenceClimateDirectory.empty())
+        filesystem::create_directories(environmentconfig.referenceClimateDirectory);
     if (!environmentconfig.climateWorkbookPath.empty() && environmentconfig.climateWorkbookPath.has_parent_path())
         filesystem::create_directories(environmentconfig.climateWorkbookPath.parent_path());
     if (!environmentconfig.climateBenchmarkRunLogPath.empty() && environmentconfig.climateBenchmarkRunLogPath.has_parent_path())

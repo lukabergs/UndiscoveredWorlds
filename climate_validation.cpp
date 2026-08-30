@@ -1,4 +1,6 @@
 #include "app_environment.hpp"
+#include "climate_physics.hpp"
+#include "climate_reference.hpp"
 #include "functions.hpp"
 #include "generation_tuning.hpp"
 
@@ -13,6 +15,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <regex>
@@ -64,6 +67,13 @@ struct comparisonmetrics
     double rmse = 0.0;
     double correlation = 0.0;
     double tropicalmeanbias = 0.0;
+    double areaweight = 0.0;
+    double areaweightedsimulatedmean = 0.0;
+    double areaweightedreferencemean = 0.0;
+    double areaweightedmeanbias = 0.0;
+    double areaweightedmeanabsoluteerror = 0.0;
+    double areaweightedrmse = 0.0;
+    double areaweightedcorrelation = 0.0;
 };
 
 struct climatespatialmetrics
@@ -76,6 +86,10 @@ struct climatespatialmetrics
     double exactaccuracy = 0.0;
     double groupaccuracy = 0.0;
     double kappa = 0.0;
+    double areaweight = 0.0;
+    double areaweightedexactaccuracy = 0.0;
+    double areaweightedgroupaccuracy = 0.0;
+    double areaweightedkappa = 0.0;
 };
 
 struct climatedriverstats
@@ -160,6 +174,16 @@ int climatemajorgroup(short climate)
     return -1;
 }
 
+double gridcellareaweight(int row, int height)
+{
+    if (height <= 0)
+        return 0.0;
+
+    constexpr double pi = 3.14159265358979323846;
+    const double latitude = 90.0 - 180.0 * static_cast<double>(row) / static_cast<double>(height);
+    return max(0.0, cos(latitude * pi / 180.0));
+}
+
 climatespatialmetrics compareclimatespatially(planet& world)
 {
     climatespatialmetrics metrics;
@@ -179,9 +203,14 @@ climatespatialmetrics compareclimatespatially(planet& world)
 
     metrics.dimensionsmatch = true;
     array<array<long long, 31>, 31> confusion{};
+    array<array<double, 31>, 31> areaweightedconfusion{};
+    double areaweightedexactmatches = 0.0;
+    double areaweightedgroupmatches = 0.0;
 
     for (int y = 0; y <= height; y++)
     {
+        const double areaweight = gridcellareaweight(y, height);
+
         for (int x = 0; x <= width; x++)
         {
             if (world.sea(x, y) == 1)
@@ -201,12 +230,20 @@ climatespatialmetrics compareclimatespatially(planet& world)
             expected = comparableclimate(expected);
             metrics.comparedcells++;
             confusion[simulated - 1][expected - 1]++;
+            metrics.areaweight += areaweight;
+            areaweightedconfusion[simulated - 1][expected - 1] += areaweight;
 
             if (simulated == expected)
+            {
                 metrics.exactmatches++;
+                areaweightedexactmatches += areaweight;
+            }
 
             if (climatemajorgroup(simulated) == climatemajorgroup(expected))
+            {
                 metrics.groupmatches++;
+                areaweightedgroupmatches += areaweight;
+            }
         }
     }
 
@@ -215,6 +252,8 @@ climatespatialmetrics compareclimatespatially(planet& world)
 
     metrics.exactaccuracy = static_cast<double>(metrics.exactmatches) / static_cast<double>(metrics.comparedcells);
     metrics.groupaccuracy = static_cast<double>(metrics.groupmatches) / static_cast<double>(metrics.comparedcells);
+    metrics.areaweightedexactaccuracy = areaweightedexactmatches / metrics.areaweight;
+    metrics.areaweightedgroupaccuracy = areaweightedgroupmatches / metrics.areaweight;
 
     array<long long, 31> simulatedtotals{};
     array<long long, 31> referencetotals{};
@@ -237,6 +276,34 @@ climatespatialmetrics compareclimatespatially(planet& world)
     if (chanceagreement < 1.0)
         metrics.kappa = (metrics.exactaccuracy - chanceagreement) / (1.0 - chanceagreement);
 
+    array<double, 31> areaweightedsimulatedtotals{};
+    array<double, 31> areaweightedreferencetotals{};
+
+    for (int simulated = 0; simulated < 31; simulated++)
+    {
+        for (int expected = 0; expected < 31; expected++)
+        {
+            areaweightedsimulatedtotals[simulated] += areaweightedconfusion[simulated][expected];
+            areaweightedreferencetotals[expected] += areaweightedconfusion[simulated][expected];
+        }
+    }
+
+    double areaweightedchanceagreement = 0.0;
+
+    for (int climate = 0; climate < 31; climate++)
+    {
+        areaweightedchanceagreement +=
+            areaweightedsimulatedtotals[climate] * areaweightedreferencetotals[climate] /
+            (metrics.areaweight * metrics.areaweight);
+    }
+
+    if (areaweightedchanceagreement < 1.0)
+    {
+        metrics.areaweightedkappa =
+            (metrics.areaweightedexactaccuracy - areaweightedchanceagreement) /
+            (1.0 - areaweightedchanceagreement);
+    }
+
     return metrics;
 }
 
@@ -246,6 +313,212 @@ double safeaverage(double total, int count)
         return 0.0;
 
     return total / static_cast<double>(count);
+}
+
+string csvescape(const string& value);
+
+comparisonmetrics comparemonthlyfield(
+    planet& world,
+    const climatereference::MonthlyGrid& reference,
+    int season,
+    bool temperature)
+{
+    comparisonmetrics metrics;
+    metrics.referencefound = true;
+    metrics.dimensionsmatch = reference.width == world.width() + 1 && reference.height == world.height() + 1;
+
+    if (!metrics.dimensionsmatch)
+        return metrics;
+
+    constexpr array<int, CLIMATESEASONCOUNT> referenceMonths = { 0, 3, 6, 9 };
+    double simulatedsum = 0.0;
+    double referencesum = 0.0;
+    double biassum = 0.0;
+    double absoluteerrorsum = 0.0;
+    double squarederrorsum = 0.0;
+    double sumsimulatedsquared = 0.0;
+    double sumreferencesquared = 0.0;
+    double sumcross = 0.0;
+    double areaweightedsimulatedsum = 0.0;
+    double areaweightedreferencesum = 0.0;
+    double areaweightedbiassum = 0.0;
+    double areaweightedabsoluteerrorsum = 0.0;
+    double areaweightedsquarederrorsum = 0.0;
+    double areaweightedsumsimulatedsquared = 0.0;
+    double areaweightedsumreferencesquared = 0.0;
+    double areaweightedsumcross = 0.0;
+
+    for (int y = 0; y <= world.height(); y++)
+    {
+        const double areaweight = gridcellareaweight(y, world.height());
+
+        for (int x = 0; x <= world.width(); x++)
+        {
+            if (world.sea(x, y) == 1)
+                continue;
+
+            double simulated = 0.0;
+            double observed = 0.0;
+
+            if (season >= 0)
+            {
+                simulated = temperature ? world.seasonaltemp(season, x, y) : world.seasonalrain(season, x, y);
+                observed = reference.value(referenceMonths[season], x, y);
+            }
+            else
+            {
+                for (int modelseason = 0; modelseason < CLIMATESEASONCOUNT; modelseason++)
+                {
+                    simulated += temperature ?
+                        world.seasonaltemp(modelseason, x, y) :
+                        world.seasonalrain(modelseason, x, y);
+                }
+
+                simulated /= static_cast<double>(CLIMATESEASONCOUNT);
+
+                int validmonths = 0;
+
+                for (int month = 0; month < reference.monthCount; month++)
+                {
+                    const float value = reference.value(month, x, y);
+
+                    if (std::isfinite(value))
+                    {
+                        observed += value;
+                        validmonths++;
+                    }
+                }
+
+                if (validmonths != reference.monthCount)
+                    continue;
+
+                observed /= static_cast<double>(validmonths);
+            }
+
+            if (!std::isfinite(observed))
+                continue;
+
+            const double difference = simulated - observed;
+            metrics.comparedcells++;
+            simulatedsum += simulated;
+            referencesum += observed;
+            biassum += difference;
+            absoluteerrorsum += std::abs(difference);
+            squarederrorsum += difference * difference;
+            sumsimulatedsquared += simulated * simulated;
+            sumreferencesquared += observed * observed;
+            sumcross += simulated * observed;
+            metrics.areaweight += areaweight;
+            areaweightedsimulatedsum += areaweight * simulated;
+            areaweightedreferencesum += areaweight * observed;
+            areaweightedbiassum += areaweight * difference;
+            areaweightedabsoluteerrorsum += areaweight * std::abs(difference);
+            areaweightedsquarederrorsum += areaweight * difference * difference;
+            areaweightedsumsimulatedsquared += areaweight * simulated * simulated;
+            areaweightedsumreferencesquared += areaweight * observed * observed;
+            areaweightedsumcross += areaweight * simulated * observed;
+        }
+    }
+
+    metrics.simulatedmean = safeaverage(simulatedsum, metrics.comparedcells);
+    metrics.referencemean = safeaverage(referencesum, metrics.comparedcells);
+    metrics.meanbias = safeaverage(biassum, metrics.comparedcells);
+    metrics.meanabsoluteerror = safeaverage(absoluteerrorsum, metrics.comparedcells);
+    metrics.rmse = std::sqrt(safeaverage(squarederrorsum, metrics.comparedcells));
+
+    if (metrics.comparedcells > 0)
+    {
+        const double count = static_cast<double>(metrics.comparedcells);
+        const double numerator = sumcross - simulatedsum * referencesum / count;
+        const double simulatedvariance = sumsimulatedsquared - simulatedsum * simulatedsum / count;
+        const double referencevariance = sumreferencesquared - referencesum * referencesum / count;
+        const double denominator = std::sqrt(max(0.0, simulatedvariance) * max(0.0, referencevariance));
+
+        if (denominator > 0.0)
+            metrics.correlation = numerator / denominator;
+    }
+
+    if (metrics.areaweight > 0.0)
+    {
+        metrics.areaweightedsimulatedmean = areaweightedsimulatedsum / metrics.areaweight;
+        metrics.areaweightedreferencemean = areaweightedreferencesum / metrics.areaweight;
+        metrics.areaweightedmeanbias = areaweightedbiassum / metrics.areaweight;
+        metrics.areaweightedmeanabsoluteerror = areaweightedabsoluteerrorsum / metrics.areaweight;
+        metrics.areaweightedrmse = std::sqrt(areaweightedsquarederrorsum / metrics.areaweight);
+        const double numerator = areaweightedsumcross -
+            areaweightedsimulatedsum * areaweightedreferencesum / metrics.areaweight;
+        const double simulatedvariance = areaweightedsumsimulatedsquared -
+            areaweightedsimulatedsum * areaweightedsimulatedsum / metrics.areaweight;
+        const double referencevariance = areaweightedsumreferencesquared -
+            areaweightedreferencesum * areaweightedreferencesum / metrics.areaweight;
+        const double denominator = std::sqrt(max(0.0, simulatedvariance) * max(0.0, referencevariance));
+
+        if (denominator > 0.0)
+            metrics.areaweightedcorrelation = numerator / denominator;
+    }
+
+    return metrics;
+}
+
+void writemonthlyreferencecomparison(const filesystem::path& outputdir, planet& world)
+{
+    const filesystem::path referencedirectory = getappenvironment().referenceClimateDirectory;
+    climatereference::MonthlyGrid temperature;
+    climatereference::MonthlyGrid precipitation;
+    string temperatureerror;
+    string precipitationerror;
+    const bool hastemperature = climatereference::loadMonthlyGrid(
+        referencedirectory / "worldclim_tavg_monthly.uwclim", "tavg", temperature, &temperatureerror);
+    const bool hasprecipitation = climatereference::loadMonthlyGrid(
+        referencedirectory / "worldclim_prec_monthly.uwclim", "prec", precipitation, &precipitationerror);
+    ofstream output(outputdir / "monthly_climate_reference_comparison.csv");
+
+    if (!output.is_open())
+        return;
+
+    output << "variable,period,reference_month,compared_cells,simulated_mean,reference_mean,mean_bias,mae,rmse,correlation,area_weight,area_weighted_simulated_mean,area_weighted_reference_mean,area_weighted_mean_bias,area_weighted_mae,area_weighted_rmse,area_weighted_correlation\n";
+    output << fixed << setprecision(6);
+
+    if (!hastemperature)
+        output << "temperature,error," << csvescape(temperatureerror) << "\n";
+
+    if (!hasprecipitation)
+        output << "precipitation,error," << csvescape(precipitationerror) << "\n";
+
+    constexpr array<const char*, CLIMATESEASONCOUNT> periodNames = { "january", "april", "july", "october" };
+    constexpr array<int, CLIMATESEASONCOUNT> referenceMonths = { 1, 4, 7, 10 };
+
+    auto writecomparisons = [&](const char* variable, const climatereference::MonthlyGrid& grid, bool temperaturefield)
+    {
+        for (int season = -1; season < CLIMATESEASONCOUNT; season++)
+        {
+            const comparisonmetrics metrics = comparemonthlyfield(world, grid, season, temperaturefield);
+            output
+                << variable << ','
+                << (season < 0 ? "annual_mean" : periodNames[season]) << ','
+                << (season < 0 ? 0 : referenceMonths[season]) << ','
+                << metrics.comparedcells << ','
+                << metrics.simulatedmean << ','
+                << metrics.referencemean << ','
+                << metrics.meanbias << ','
+                << metrics.meanabsoluteerror << ','
+                << metrics.rmse << ','
+                << metrics.correlation << ','
+                << metrics.areaweight << ','
+                << metrics.areaweightedsimulatedmean << ','
+                << metrics.areaweightedreferencemean << ','
+                << metrics.areaweightedmeanbias << ','
+                << metrics.areaweightedmeanabsoluteerror << ','
+                << metrics.areaweightedrmse << ','
+                << metrics.areaweightedcorrelation << '\n';
+        }
+    };
+
+    if (hastemperature)
+        writecomparisons("temperature_c", temperature, true);
+
+    if (hasprecipitation)
+        writecomparisons("precipitation_mm_month", precipitation, false);
 }
 
 short climatefromcode(const string& code)
@@ -667,7 +940,10 @@ bool appendclimatebenchmarkrunlog(
         << "        \"spatial_compared_cells\": " << spatial.comparedcells << ",\n"
         << "        \"spatial_exact_accuracy\": " << spatial.exactaccuracy << ",\n"
         << "        \"spatial_group_accuracy\": " << spatial.groupaccuracy << ",\n"
-        << "        \"spatial_kappa\": " << spatial.kappa << "\n"
+        << "        \"spatial_kappa\": " << spatial.kappa << ",\n"
+        << "        \"area_weighted_spatial_exact_accuracy\": " << spatial.areaweightedexactaccuracy << ",\n"
+        << "        \"area_weighted_spatial_group_accuracy\": " << spatial.areaweightedgroupaccuracy << ",\n"
+        << "        \"area_weighted_spatial_kappa\": " << spatial.areaweightedkappa << "\n"
         << "      }\n"
         << "    }\n  ";
 
@@ -952,7 +1228,11 @@ bool loadprecipitationgrid(const filesystem::path& filepath, vector<vector<doubl
         while (getline(linestream, token, ','))
         {
             if (column >= 2)
-                rowvalues.push_back(stod(token));
+            {
+                rowvalues.push_back(token.empty() ?
+                    numeric_limits<double>::quiet_NaN() :
+                    stod(token));
+            }
 
             column++;
         }
@@ -1042,6 +1322,14 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
     double sumcross = 0.0;
     double tropicalbiassum = 0.0;
     int tropicalcells = 0;
+    double areaweightedsimulatedsum = 0.0;
+    double areaweightedreferencesum = 0.0;
+    double areaweightedbiassum = 0.0;
+    double areaweightedabsoluteerrorsum = 0.0;
+    double areaweightedsquarederrorsum = 0.0;
+    double areaweightedsumsimulatedsquared = 0.0;
+    double areaweightedsumreferencesquared = 0.0;
+    double areaweightedsumcross = 0.0;
 
     ofstream zonalcomparisonfile(outputdir / "annual_precipitation_zonal_comparison.csv");
 
@@ -1053,12 +1341,22 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
 
     for (int y = 0; y <= height; y++)
     {
+        const double areaweight = gridcellareaweight(y, height);
+        double simulatedsumrow = 0.0;
         double referencesumrow = 0.0;
+        int referencecellsrow = 0;
 
         for (int x = 0; x <= width; x++)
         {
+            if (world.sea(x, y) == 1)
+                continue;
+
             const double simulated = static_cast<double>(world.averain(x, y));
             const double reference = referencegrid[y][x];
+
+            if (!std::isfinite(reference))
+                continue;
+
             const double diff = simulated - reference;
 
             metrics.comparedcells++;
@@ -1070,7 +1368,18 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
             sumsim2 = sumsim2 + simulated * simulated;
             sumref2 = sumref2 + reference * reference;
             sumcross = sumcross + simulated * reference;
+            simulatedsumrow = simulatedsumrow + simulated;
             referencesumrow = referencesumrow + reference;
+            referencecellsrow++;
+            metrics.areaweight += areaweight;
+            areaweightedsimulatedsum += areaweight * simulated;
+            areaweightedreferencesum += areaweight * reference;
+            areaweightedbiassum += areaweight * diff;
+            areaweightedabsoluteerrorsum += areaweight * fabs(diff);
+            areaweightedsquarederrorsum += areaweight * diff * diff;
+            areaweightedsumsimulatedsquared += areaweight * simulated * simulated;
+            areaweightedsumreferencesquared += areaweight * reference * reference;
+            areaweightedsumcross += areaweight * simulated * reference;
 
             if (fabs(latitudeforrow(y, height)) <= 30.0f)
             {
@@ -1081,8 +1390,8 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
 
         if (zonalcomparisonfile.is_open())
         {
-            const double simulatedmeanrow = safeaverage(rows[y].annualrain, rows[y].cells);
-            const double referencemeanrow = safeaverage(referencesumrow, width + 1);
+            const double simulatedmeanrow = safeaverage(simulatedsumrow, referencecellsrow);
+            const double referencemeanrow = safeaverage(referencesumrow, referencecellsrow);
 
             zonalcomparisonfile
                 << y << ','
@@ -1108,6 +1417,26 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
     if (denominator > 0.0)
         metrics.correlation = numerator / denominator;
 
+    if (metrics.areaweight > 0.0)
+    {
+        metrics.areaweightedsimulatedmean = areaweightedsimulatedsum / metrics.areaweight;
+        metrics.areaweightedreferencemean = areaweightedreferencesum / metrics.areaweight;
+        metrics.areaweightedmeanbias = areaweightedbiassum / metrics.areaweight;
+        metrics.areaweightedmeanabsoluteerror = areaweightedabsoluteerrorsum / metrics.areaweight;
+        metrics.areaweightedrmse = sqrt(areaweightedsquarederrorsum / metrics.areaweight);
+        const double areaweightednumerator = areaweightedsumcross -
+            areaweightedsimulatedsum * areaweightedreferencesum / metrics.areaweight;
+        const double areaweightedsimulatedvariance = areaweightedsumsimulatedsquared -
+            areaweightedsimulatedsum * areaweightedsimulatedsum / metrics.areaweight;
+        const double areaweightedreferencevariance = areaweightedsumreferencesquared -
+            areaweightedreferencesum * areaweightedreferencesum / metrics.areaweight;
+        const double areaweighteddenominator = sqrt(
+            max(0.0, areaweightedsimulatedvariance) * max(0.0, areaweightedreferencevariance));
+
+        if (areaweighteddenominator > 0.0)
+            metrics.areaweightedcorrelation = areaweightednumerator / areaweighteddenominator;
+    }
+
     ofstream comparisonfile(comparisonpath);
 
     if (comparisonfile.is_open())
@@ -1123,6 +1452,13 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
         comparisonfile << "rmse=" << metrics.rmse << '\n';
         comparisonfile << "correlation=" << metrics.correlation << '\n';
         comparisonfile << "tropical_mean_bias=" << metrics.tropicalmeanbias << '\n';
+        comparisonfile << "area_weight=" << metrics.areaweight << '\n';
+        comparisonfile << "area_weighted_simulated_mean=" << metrics.areaweightedsimulatedmean << '\n';
+        comparisonfile << "area_weighted_reference_mean=" << metrics.areaweightedreferencemean << '\n';
+        comparisonfile << "area_weighted_mean_bias=" << metrics.areaweightedmeanbias << '\n';
+        comparisonfile << "area_weighted_mae=" << metrics.areaweightedmeanabsoluteerror << '\n';
+        comparisonfile << "area_weighted_rmse=" << metrics.areaweightedrmse << '\n';
+        comparisonfile << "area_weighted_correlation=" << metrics.areaweightedcorrelation << '\n';
     }
 
     return metrics;
@@ -1331,6 +1667,9 @@ void printclimaterelativeerrorreport(planet& world)
     cout << "spatial_exact_accuracy=" << spatial.exactaccuracy << '\n';
     cout << "spatial_group_accuracy=" << spatial.groupaccuracy << '\n';
     cout << "spatial_kappa=" << spatial.kappa << '\n';
+    cout << "area_weighted_spatial_exact_accuracy=" << spatial.areaweightedexactaccuracy << '\n';
+    cout << "area_weighted_spatial_group_accuracy=" << spatial.areaweightedgroupaccuracy << '\n';
+    cout << "area_weighted_spatial_kappa=" << spatial.areaweightedkappa << '\n';
     printreferencedfcdriverreport(world);
     printsimulatedclassconfusionreport(world, 6);
     printsimulatedclassconfusionreport(world, 1);
@@ -1344,6 +1683,34 @@ void exportclimatevalidationreport(planet& world)
     const int width = world.width();
     const int height = world.height();
     const filesystem::path outputdir = climatevalidationoutputdirectory();
+
+    ofstream waterbudgetfile(outputdir / "climate_water_budget.csv");
+
+    if (waterbudgetfile.is_open())
+    {
+        waterbudgetfile << "season,ocean_evaporation,land_evaporation,ocean_precipitation,land_precipitation,runoff,atmospheric_storage,soil_storage,residual,relative_residual\n";
+        waterbudgetfile << fixed << setprecision(9);
+
+        const auto& budgets = climatephysics::lastWaterBudgets();
+
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        {
+            const climatephysics::WaterBudget& budget = budgets[season];
+            waterbudgetfile
+                << season << ','
+                << budget.oceanEvaporation << ','
+                << budget.landEvaporation << ','
+                << budget.oceanPrecipitation << ','
+                << budget.landPrecipitation << ','
+                << budget.runoff << ','
+                << budget.atmosphericStorage << ','
+                << budget.soilStorage << ','
+                << budget.residual() << ','
+                << budget.relativeResidual() << '\n';
+        }
+    }
+
+    writemonthlyreferencecomparison(outputdir, world);
 
     vector<zonalstats> rows(height + 1);
     map<string, int> climatecounts;
@@ -1546,6 +1913,7 @@ void exportclimatevalidationreport(planet& world)
         summaryfile << "north_subtropical_dry_zonal_precip=" << northdryrain << '\n';
         summaryfile << "south_subtropical_dry_zonal_precip=" << southdryrain << '\n';
         summaryfile << "grid_files=annual_precipitation_grid.csv,january_precipitation_grid.csv,july_precipitation_grid.csv,land_mask_grid.csv\n";
+        summaryfile << "physics_diagnostics=climate_water_budget.csv,monthly_climate_reference_comparison.csv\n";
         summaryfile << "reference_grid_path=" << getappenvironment().referencePrecipitationGridPath.string() << '\n';
         summaryfile << "reference_found=" << (comparison.referencefound ? 1 : 0) << '\n';
         summaryfile << "reference_dimensions_match=" << (comparison.dimensionsmatch ? 1 : 0) << '\n';
