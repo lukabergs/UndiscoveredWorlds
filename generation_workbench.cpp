@@ -1656,7 +1656,6 @@ void applytemperaturestage(planet& world)
     createfractal(fractal, world.width(), world.height(), 8, 0.2f, static_cast<float>(random(1, 4)), 1, maxelev, 0, 0);
     warp(fractal, world.width(), world.height(), maxelev, random(40, 80), 0);
     createtemperaturemap(world, fractal);
-    world.syncseasonalclimatefromlegacy();
 }
 
 void applyrainfallstage(planet& world, const GenerationExecutionContext& context)
@@ -1745,7 +1744,6 @@ void applydeltawetlandstage(planet& world, const GenerationExecutionContext& con
     connectlakes(world);
     checkpoleclimates(world);
     world.syncseasonalclimatefromlegacy();
-    applyseasonaltemperaturelapse(world);
     createclimatemap(world);
     createbiomemap(world);
     exportclimatevalidationreport(world);
@@ -1919,7 +1917,6 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
     case GenerationStageId::mountain_temperature_lapse:
         checkpoleclimates(world);
         world.syncseasonalclimatefromlegacy();
-        applyseasonaltemperaturelapse(world);
         return true;
 
     case GenerationStageId::climates_and_biomes:

@@ -17,6 +17,7 @@
 #include <unordered_set>
 
 #include "classes.hpp"
+#include "climate_energy.hpp"
 #include "generation_tuning.hpp"
 #include "map_imports.hpp"
 #include "planet.hpp"
@@ -810,7 +811,6 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         warp(fractal, width, height, maxelev, warpfactor, 0);
 
         createtemperaturemap(world, fractal);
-        world.syncseasonalclimatefromlegacy();
 
         if (importedtemperature)
             applyimportedtemperaturemap(world, *importedClimate);
@@ -981,7 +981,6 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         reseedglobalclimatepass(world, 0x5009);
         checkpoleclimates(world);
         world.syncseasonalclimatefromlegacy();
-        applyseasonaltemperaturelapse(world);
 
         if (importedtemperature)
             applyimportedtemperaturemap(world, *importedClimate);
@@ -1053,7 +1052,6 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         checkpoleclimates(world);
 
     world.syncseasonalclimatefromlegacy();
-    applyseasonaltemperaturelapse(world);
 
     if (importedtemperature)
         applyimportedtemperaturemap(world, *importedClimate);
@@ -1235,27 +1233,11 @@ void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, 
     if (beginworldgenstep("Applying coastal climate influence"))
         applycoastalclimates(world);
 
-    // Now we adjust temperatures in light of rainfall.
-
-    if (beginworldgenstep("Adjusting temperatures"))
-        adjusttemperatures(world);
-
-    // Now make temperatures a little more extreme when further from the sea.
-
-    if (beginworldgenstep("Adjusting continental temperatures"))
-        adjustcontinentaltemperatures(world);
-
-    // Now just smooth the temperatures a bit. Any temperatures that are lower than their neighbours to north and south get bumped up, to avoid the appearance of streaks.
+    // Land/ocean heat capacity and air-sea coupling now establish seasonal range.
+    // Rainfall-derived warming/cooling and distance-to-coast amplification are no longer applied.
 
     if (beginworldgenstep("Smoothing temperatures"))
         smoothtemperatures(world);
-
-    // Now just prevent subpolar climates from turning into other continental types when further from the sea.
-
-    if (beginworldgenstep("Checking subpolar regions"))
-        removesubpolarstreaks(world);
-    //extendsubpolar(world);
-    //removesubpolarstreaks(world);
 
     // Now we just sort out the mountain precipitation arrays, which will be used at the regional level for ensuring that higher mountain precipitation isn't splashed too far.
 
@@ -1685,6 +1667,11 @@ void createwindmap(planet& world)
 // Temperature map creator.
 
 void createtemperaturemap(planet& world, vector<vector<int>>& fractal)
+{
+    climateenergy::createSurfaceEnergyBalanceTemperatureMap(world, fractal);
+}
+
+[[maybe_unused]] void createlegacytemperaturemap(planet& world, vector<vector<int>>& fractal)
 {
     int width = world.width();
     int height = world.height();
