@@ -54,6 +54,8 @@ set(SOURCES
     map_imports.cpp
     assetdata.cpp
     classes.cpp
+    climate_physics.cpp
+    climate_reference.cpp
     climate_ocean.cpp
     fastlem_mountains.cpp
     globalclimate.cpp
@@ -110,3 +112,23 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 # 5. Set C++ Standard
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(climate_physics_tests
+        tests/climate_physics_tests.cpp
+        climate_physics.cpp
+    )
+    target_include_directories(climate_physics_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_physics_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_physics_tests COMMAND climate_physics_tests)
+
+    add_executable(climate_reference_tests
+        tests/climate_reference_tests.cpp
+        climate_reference.cpp
+    )
+    target_include_directories(climate_reference_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_reference_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_reference_tests COMMAND climate_reference_tests)
+endif()
