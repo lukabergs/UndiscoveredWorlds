@@ -1,4 +1,5 @@
 #include "app_environment.hpp"
+#include "climate_energy.hpp"
 #include "climate_physics.hpp"
 #include "climate_reference.hpp"
 #include "functions.hpp"
@@ -1684,6 +1685,26 @@ void exportclimatevalidationreport(planet& world)
     const int height = world.height();
     const filesystem::path outputdir = climatevalidationoutputdirectory();
 
+    ofstream energybudgetfile(outputdir / "climate_energy_budget.csv");
+
+    if (energybudgetfile.is_open())
+    {
+        const climateenergy::AnnualEnergyBudget& budget = climateenergy::lastAnnualEnergyBudget();
+        energybudgetfile << "incoming_solar_wm2,absorbed_solar_wm2,outgoing_longwave_wm2,atmospheric_transport_wm2,storage_tendency_wm2,residual_wm2,calibrated_longwave_intercept_wm2,area_weighted_mean_temperature_c,area_weighted_land_temperature_c,area_weighted_ocean_temperature_c,area_weighted_land_elevation_cooling_c\n";
+        energybudgetfile << fixed << setprecision(9)
+            << budget.incomingSolarWm2 << ','
+            << budget.absorbedSolarWm2 << ','
+            << budget.outgoingLongwaveWm2 << ','
+            << budget.atmosphericTransportWm2 << ','
+            << budget.storageTendencyWm2 << ','
+            << budget.residualWm2 << ','
+            << budget.calibratedLongwaveInterceptWm2 << ','
+            << budget.areaWeightedMeanTemperatureC << ','
+            << budget.areaWeightedLandTemperatureC << ','
+            << budget.areaWeightedOceanTemperatureC << ','
+            << budget.areaWeightedLandElevationCoolingC << '\n';
+    }
+
     ofstream waterbudgetfile(outputdir / "climate_water_budget.csv");
 
     if (waterbudgetfile.is_open())
@@ -1913,7 +1934,7 @@ void exportclimatevalidationreport(planet& world)
         summaryfile << "north_subtropical_dry_zonal_precip=" << northdryrain << '\n';
         summaryfile << "south_subtropical_dry_zonal_precip=" << southdryrain << '\n';
         summaryfile << "grid_files=annual_precipitation_grid.csv,january_precipitation_grid.csv,july_precipitation_grid.csv,land_mask_grid.csv\n";
-        summaryfile << "physics_diagnostics=climate_water_budget.csv,monthly_climate_reference_comparison.csv\n";
+        summaryfile << "physics_diagnostics=climate_energy_budget.csv,climate_water_budget.csv,monthly_climate_reference_comparison.csv\n";
         summaryfile << "reference_grid_path=" << getappenvironment().referencePrecipitationGridPath.string() << '\n';
         summaryfile << "reference_found=" << (comparison.referencefound ? 1 : 0) << '\n';
         summaryfile << "reference_dimensions_match=" << (comparison.dimensionsmatch ? 1 : 0) << '\n';
