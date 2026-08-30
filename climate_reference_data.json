@@ -17,6 +17,17 @@
       }
     },
     {
+      "id": "imerg-final-v07b-grand-average-2000-2023",
+      "role": "validation_only",
+      "homepage": "https://gpm.nasa.gov/data/imerg/precipitation-climatology",
+      "period": "2000-06/2023-05",
+      "resolution_degrees": 0.1,
+      "citation": "NASA Global Precipitation Measurement Mission, IMERG V07B Final Run Grand Average Precipitation Climatology.",
+      "variables": {
+        "prec_annual": "https://gpm.nasa.gov/sites/default/files/data/climatologies/2024/IMERG-Final.CLIM.200006-202305.V07B.tif.zip"
+      }
+    },
+    {
       "id": "era5-monthly-single-levels",
       "role": "future_validation_only",
       "homepage": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels-monthly-means",

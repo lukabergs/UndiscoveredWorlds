@@ -28,14 +28,17 @@ void writeValue(std::ofstream& output, const T& value)
     output.write(reinterpret_cast<const char*>(&value), sizeof(value));
 }
 
-void writeFixture(const std::filesystem::path& path, const std::string& variable, bool truncateValues)
+void writeFixture(
+    const std::filesystem::path& path,
+    const std::string& variable,
+    bool truncateValues,
+    uint32_t monthCount = 12)
 {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     const std::array<char, 8> magic = { 'U', 'W', 'C', 'L', 'I', 'M', '1', '\0' };
     const uint32_t version = 1;
     const uint32_t width = 2;
     const uint32_t height = 1;
-    const uint32_t monthCount = 12;
     std::array<char, 16> variableField{};
     std::copy_n(variable.c_str(), std::min(variable.size(), variableField.size() - 1), variableField.data());
 
@@ -46,7 +49,7 @@ void writeFixture(const std::filesystem::path& path, const std::string& variable
     writeValue(output, monthCount);
     output.write(variableField.data(), static_cast<std::streamsize>(variableField.size()));
 
-    const int valueCount = truncateValues ? 4 : 24;
+    const int valueCount = truncateValues ? 4 : 2 * static_cast<int>(monthCount);
 
     for (int index = 0; index < valueCount; index++)
     {
@@ -67,6 +70,10 @@ int main()
     expect(grid.width == 2 && grid.height == 1 && grid.monthCount == 12, "monthly grid dimensions must match its header");
     expect(grid.value(11, 1, 0) == 23.25f, "monthly grid values must preserve month-major ordering");
     expect(!climatereference::loadMonthlyGrid(fixture, "prec", grid, &error), "variable mismatch must be rejected");
+
+    writeFixture(fixture, "prec_annual", false, 1);
+    expect(climatereference::loadMonthlyGrid(fixture, "prec_annual", grid, &error), "annual grid must load");
+    expect(grid.monthCount == 1 && grid.value(0, 1, 0) == 1.25f, "annual grid values must be readable");
 
     writeFixture(fixture, "tavg", true);
     expect(!climatereference::loadMonthlyGrid(fixture, "tavg", grid, &error), "truncated grid data must be rejected");

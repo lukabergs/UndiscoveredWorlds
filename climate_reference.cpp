@@ -72,7 +72,8 @@ bool loadMonthlyGrid(
 
     input.read(variable.data(), static_cast<std::streamsize>(variable.size()));
 
-    if (!input.good() || version != 1 || width == 0 || height == 0 || monthCount != 12)
+    if (!input.good() || version != 1 || width == 0 || height == 0 ||
+        (monthCount != 1 && monthCount != 12))
     {
         setError(errorMessage, "unsupported climate reference header: " + path.string());
         return false;

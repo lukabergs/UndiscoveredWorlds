@@ -382,5 +382,197 @@
         "area_weighted_spatial_kappa": 0.1692064395
       }
     }
+  ,
+    {
+      "id": 31,
+      "datetime": "20260830024641",
+      "information": "Activated coupled lower-layer mass continuity: surface pressure now responds to ascent and subsidence with diffusion and area-weighted atmospheric mass correction; surface winds and divergence are recomputed during each two-layer circulation iteration; the thermally positioned Gaussian pressure-belt seed is retained for isolation.",
+      "metrics": {
+        "weighted_relative_error": 0.8725200737,
+        "spatial_compared_cells": 694656,
+        "spatial_exact_accuracy": 0.3970324880,
+        "spatial_group_accuracy": 0.5770726806,
+        "spatial_kappa": 0.2820468491,
+        "area_weighted_spatial_exact_accuracy": 0.2386418382,
+        "area_weighted_spatial_group_accuracy": 0.4659879318,
+        "area_weighted_spatial_kappa": 0.1685121337
+      }
+    }
+  ,
+    {
+      "id": 32,
+      "datetime": "20260830024917",
+      "information": "Removed all prescribed Gaussian equatorial-low, subtropical-high, subpolar-low, and polar-high pressure belts. Surface pressure is initialized only from resolved thermal anomalies, land-ocean contrast, seasonality, and elevation, then coupled to vertical mass redistribution and diffusion; all coupling coefficients remain unchanged from run 31.",
+      "metrics": {
+        "weighted_relative_error": 0.8731732288,
+        "spatial_compared_cells": 694617,
+        "spatial_exact_accuracy": 0.3961060556,
+        "spatial_group_accuracy": 0.5746648873,
+        "spatial_kappa": 0.2808305292,
+        "area_weighted_spatial_exact_accuracy": 0.2373128704,
+        "area_weighted_spatial_group_accuracy": 0.4622438406,
+        "area_weighted_spatial_kappa": 0.1668119182
+      }
+    }
+  ,
+    {
+      "id": 33,
+      "datetime": "20260830025855",
+      "information": "Replaced empirical wind scaling with a unit-aware two-layer atmosphere: 1000-to-500 hPa geopotential thickness follows the hypsometric equation; winds solve steady pressure-gradient, Coriolis, and Rayleigh-drag momentum balance on physical grid spacing; vertical motion follows lower/upper mass continuity in hPa per day; surface pressure follows column divergence with bounded physical tendencies. Added aligned WorldClim monthly 10 m wind-speed validation.",
+      "metrics": {
+        "weighted_relative_error": 0.8321727127,
+        "spatial_compared_cells": 694203,
+        "spatial_exact_accuracy": 0.3933085855,
+        "spatial_group_accuracy": 0.5781939865,
+        "spatial_kappa": 0.2792262681,
+        "area_weighted_spatial_exact_accuracy": 0.2336696924,
+        "area_weighted_spatial_group_accuracy": 0.4684343931,
+        "area_weighted_spatial_kappa": 0.1695816701
+      }
+    }
+  ,
+    {
+      "id": 34,
+      "datetime": "20260830030157",
+      "information": "Calibrated the unit-aware atmosphere after run 33 exceeded observed monthly wind speeds: smoothed 500 hPa thermal thickness over roughly 200 km, shortened land/ocean Rayleigh drag times, limited climatological surface-pressure anomalies to 35 hPa and tendencies to 12 hPa per day, and increased horizontal mass diffusion. Equations and observed-data targets are unchanged.",
+      "metrics": {
+        "weighted_relative_error": 0.8467519172,
+        "spatial_compared_cells": 693752,
+        "spatial_exact_accuracy": 0.3943239083,
+        "spatial_group_accuracy": 0.5828812025,
+        "spatial_kappa": 0.2805211206,
+        "area_weighted_spatial_exact_accuracy": 0.2353468776,
+        "area_weighted_spatial_group_accuracy": 0.4768158833,
+        "area_weighted_spatial_kappa": 0.1715932409
+      }
+    }
+  ,
+    {
+      "id": 35,
+      "datetime": "20260830030451",
+      "information": "Separated synoptic mass continuity from terrain-scale flow after run 34: lower and upper divergence are smoothed at the circulation scale before vertical motion and pressure tendency; topographic wind deflection and uplift are applied only after the large-scale two-layer solve converges. Strengthened physically interpretable boundary-layer drag while retaining the run 34 pressure calibration.",
+      "metrics": {
+        "weighted_relative_error": 0.8412651348,
+        "spatial_compared_cells": 694539,
+        "spatial_exact_accuracy": 0.3947020974,
+        "spatial_group_accuracy": 0.5837152413,
+        "spatial_kappa": 0.2812640553,
+        "area_weighted_spatial_exact_accuracy": 0.2358137248,
+        "area_weighted_spatial_group_accuracy": 0.4783952944,
+        "area_weighted_spatial_kappa": 0.1720940288
+      }
+    }
+  ,
+    {
+      "id": 36,
+      "datetime": "20260830030754",
+      "information": "Fixed four-season precipitation integrity discovered after run 35: conservative moisture output is clamped before signed 16-bit storage, and the established nonlinear high-rainfall cap now applies consistently to January, April, July, and October instead of leaving transition seasons able to overflow or retain unbounded extremes. Atmospheric physics is unchanged from run 35.",
+      "metrics": {
+        "weighted_relative_error": 0.8428637563,
+        "spatial_compared_cells": 694410,
+        "spatial_exact_accuracy": 0.3943995622,
+        "spatial_group_accuracy": 0.5840656097,
+        "spatial_kappa": 0.2809460315,
+        "area_weighted_spatial_exact_accuracy": 0.2352747423,
+        "area_weighted_spatial_group_accuracy": 0.4789533938,
+        "area_weighted_spatial_kappa": 0.1717936622
+      }
+    }
+  ,
+    {
+      "id": 37,
+      "datetime": "20260830031647",
+      "information": "Added calibrated NASA IMERG V07B annual precipitation validation at the benchmark grid resolution, with separate global, land, and ocean area-weighted diagnostics. Simulation physics is unchanged from run 36.",
+      "metrics": {
+        "weighted_relative_error": 0.8428637563,
+        "spatial_compared_cells": 694410,
+        "spatial_exact_accuracy": 0.3943995622,
+        "spatial_group_accuracy": 0.5840656097,
+        "spatial_kappa": 0.2809460315,
+        "area_weighted_spatial_exact_accuracy": 0.2352747423,
+        "area_weighted_spatial_group_accuracy": 0.4789533938,
+        "area_weighted_spatial_kappa": 0.1717936622
+      }
+    }
+  ,
+    {
+      "id": 38,
+      "datetime": "20260830031946",
+      "information": "Removed the landform-aware rainfall blur from ocean-bearing worlds. The conservative four-season moisture solver now feeds climate classification directly and all seasons receive identical post-processing; the legacy blur remains only for airless all-land fallback worlds.",
+      "metrics": {
+        "weighted_relative_error": 0.9364453539,
+        "spatial_compared_cells": 694126,
+        "spatial_exact_accuracy": 0.3965778547,
+        "spatial_group_accuracy": 0.5717809159,
+        "spatial_kappa": 0.2802214981,
+        "area_weighted_spatial_exact_accuracy": 0.2378442007,
+        "area_weighted_spatial_group_accuracy": 0.4583072742,
+        "area_weighted_spatial_kappa": 0.1660127431
+      }
+    }
+  ,
+    {
+      "id": 39,
+      "datetime": "20260830032408",
+      "information": "Replaced arbitrary SST-scaled moisture injection with a bulk-aerodynamic evaporation flux driven by saturation specific humidity, surface pressure, resolved wind, relative humidity, and sea ice. Each seasonal solve now represents 30 daily transport steps; land evapotranspiration is soil-water-limited, and redundant grid-space wind-convergence cooling was removed in favor of resolved vertical motion.",
+      "metrics": {
+        "weighted_relative_error": 0.8813047996,
+        "spatial_compared_cells": 693451,
+        "spatial_exact_accuracy": 0.3943551888,
+        "spatial_group_accuracy": 0.5722999895,
+        "spatial_kappa": 0.2795324802,
+        "area_weighted_spatial_exact_accuracy": 0.2345591571,
+        "area_weighted_spatial_group_accuracy": 0.4595580189,
+        "area_weighted_spatial_kappa": 0.1682245797
+      }
+    }
+  ,
+    {
+      "id": 40,
+      "datetime": "20260830032723",
+      "information": "Calibrated the physical surface momentum balance against WorldClim 10 m wind magnitude by shortening ocean, land, and high-relief Rayleigh drag times. This reduces excessive near-surface winds without changing upper-level thermal forcing or moisture equations.",
+      "metrics": {
+        "weighted_relative_error": 0.8971609433,
+        "spatial_compared_cells": 693504,
+        "spatial_exact_accuracy": 0.3961217239,
+        "spatial_group_accuracy": 0.5709527270,
+        "spatial_kappa": 0.2809300116,
+        "area_weighted_spatial_exact_accuracy": 0.2370151485,
+        "area_weighted_spatial_group_accuracy": 0.4571034945,
+        "area_weighted_spatial_kappa": 0.1682031098
+      }
+    }
+  ,
+    {
+      "id": 41,
+      "datetime": "20260830033045",
+      "information": "Separated evaporation wind from column moisture transport: bulk evaporation remains driven by resolved 10 m wind, while moisture advection now follows an 80/20 blend of surface and upper-layer flow as a reduced 850 hPa transport approximation. No rainfall smoothing or inland source was added.",
+      "metrics": {
+        "weighted_relative_error": 0.8935511076,
+        "spatial_compared_cells": 693280,
+        "spatial_exact_accuracy": 0.3942635010,
+        "spatial_group_accuracy": 0.5661334526,
+        "spatial_kappa": 0.2790080511,
+        "area_weighted_spatial_exact_accuracy": 0.2339478326,
+        "area_weighted_spatial_group_accuracy": 0.4500840737,
+        "area_weighted_spatial_kappa": 0.1657820771
+      }
+    }
+  ,
+    {
+      "id": 42,
+      "datetime": "20260830033447",
+      "information": "Removed the final hard-coded latitude fallback from the legacy scalar wind layer and deleted obsolete prescribed pressure-belt tuning. Calm legacy wind directions now come from the resolved surface/lower-tropospheric transport flow, or remain calm when neither layer provides a direction; core atmosphere and moisture physics are unchanged from run 41.",
+      "metrics": {
+        "weighted_relative_error": 0.8935469118,
+        "spatial_compared_cells": 693308,
+        "spatial_exact_accuracy": 0.3942735408,
+        "spatial_group_accuracy": 0.5661697254,
+        "spatial_kappa": 0.2790214883,
+        "area_weighted_spatial_exact_accuracy": 0.2339709084,
+        "area_weighted_spatial_group_accuracy": 0.4501505641,
+        "area_weighted_spatial_kappa": 0.1657902040
+      }
+    }
   ]
 }

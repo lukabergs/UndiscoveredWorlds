@@ -1,6 +1,6 @@
 param(
     [string]$Destination = "extra/reference/worldclim-2.1-10m",
-    [ValidateSet("core", "all")]
+    [ValidateSet("core", "wind", "imerg", "all")]
     [string]$VariableSet = "core"
 )
 
@@ -8,6 +8,10 @@ $ErrorActionPreference = "Stop"
 
 $variables = if ($VariableSet -eq "all") {
     @("tavg", "prec", "srad", "wind", "vapr")
+} elseif ($VariableSet -eq "wind") {
+    @("wind")
+} elseif ($VariableSet -eq "imerg") {
+    @()
 } else {
     @("tavg", "prec")
 }
@@ -51,3 +55,33 @@ $receipt = [ordered]@{
 
 $receipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $destinationPath "download-receipt.json") -Encoding utf8
 Write-Host "WorldClim reference data is ready at $destinationPath"
+
+if ($VariableSet -eq "imerg" -or $VariableSet -eq "all") {
+    $imergPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\extra\reference\imerg-v07b-annual"))
+    $imergGridPath = Join-Path $imergPath "grids"
+    $imergArchive = Join-Path $imergPath "IMERG-Final.CLIM.200006-202305.V07B.tif.zip"
+    $imergUrl = "https://gpm.nasa.gov/sites/default/files/data/climatologies/2024/IMERG-Final.CLIM.200006-202305.V07B.tif.zip"
+
+    [System.IO.Directory]::CreateDirectory($imergGridPath) | Out-Null
+
+    if (-not (Test-Path -LiteralPath $imergArchive)) {
+        Write-Host "Downloading IMERG annual precipitation climatology"
+        Invoke-WebRequest -Uri $imergUrl -OutFile $imergArchive
+    }
+
+    Expand-Archive -LiteralPath $imergArchive -DestinationPath $imergGridPath -Force
+    $imergHash = Get-FileHash -LiteralPath $imergArchive -Algorithm SHA256
+    $imergReceipt = [ordered]@{
+        dataset = "imerg-final-v07b-grand-average-2000-2023"
+        downloaded_utc = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        source = "https://gpm.nasa.gov/data/imerg/precipitation-climatology"
+        archive = [ordered]@{
+            file = [System.IO.Path]::GetFileName($imergArchive)
+            bytes = (Get-Item -LiteralPath $imergArchive).Length
+            sha256 = $imergHash.Hash.ToLowerInvariant()
+        }
+    }
+
+    $imergReceipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $imergPath "download-receipt.json") -Encoding utf8
+    Write-Host "IMERG reference data is ready at $imergPath"
+}

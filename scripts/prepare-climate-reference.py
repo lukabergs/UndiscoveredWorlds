@@ -118,9 +118,17 @@ def main() -> int:
     )
     parser.add_argument("--width", type=int, default=2048)
     parser.add_argument("--height", type=int, default=1025)
+    parser.add_argument(
+        "--variables",
+        nargs="+",
+        choices=("tavg", "prec", "wind", "srad", "vapr"),
+        default=("tavg", "prec"),
+        help="WorldClim variables to align; defaults to temperature and precipitation.",
+    )
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
+    metadata_path = args.output / "worldclim-preparation.json"
     all_stats: dict[str, object] = {
         "dataset": "worldclim-2.1-1970-2000-10m",
         "target_width": args.width,
@@ -129,7 +137,16 @@ def main() -> int:
         "variables": {},
     }
 
-    for variable in ("tavg", "prec"):
+    if metadata_path.exists():
+        existing = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if (
+            existing.get("dataset") == all_stats["dataset"]
+            and existing.get("target_width") == args.width
+            and existing.get("target_height") == args.height
+        ):
+            all_stats["variables"].update(existing.get("variables", {}))
+
+    for variable in args.variables:
         bundle_path, climatology, stats = write_bundle(
             args.input, args.output, variable, args.width, args.height
         )
@@ -143,7 +160,7 @@ def main() -> int:
                 args.output / "earth_precipitation_grid.csv", climatology
             )
 
-    with (args.output / "worldclim-preparation.json").open("w", encoding="utf-8") as output:
+    with metadata_path.open("w", encoding="utf-8") as output:
         json.dump(all_stats, output, indent=2, allow_nan=False)
         output.write("\n")
 
