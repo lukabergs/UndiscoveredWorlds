@@ -37,6 +37,16 @@ int main()
     expect(tropicalColumn > 60.0f && tropicalColumn < 90.0f, "tropical column water is outside its physical sanity range");
     expect(freezingColumn > 8.0f && freezingColumn < 14.0f, "freezing column water is outside its physical sanity range");
 
+    const float dryEvaporation = climatephysics::bulkAerodynamicEvaporationMm(
+        20.0f, 0.0f, 5.0f, 0.0f, 86400.0f, 0.0013f);
+    const float humidEvaporation = climatephysics::bulkAerodynamicEvaporationMm(
+        20.0f, 0.0f, 5.0f, 0.8f, 86400.0f, 0.0013f);
+    expect(dryEvaporation > humidEvaporation, "bulk evaporation must fall as relative humidity rises");
+    expect(humidEvaporation > 1.0f && humidEvaporation < 5.0f, "humid daily ocean evaporation is outside its physical sanity range");
+    expect(
+        climatephysics::bulkAerodynamicEvaporationMm(20.0f, 0.0f, 5.0f, 1.0f, 86400.0f, 0.0013f) == 0.0f,
+        "saturated air must suppress evaporation");
+
     climatephysics::WaterBudget closed;
     closed.oceanEvaporation = 100.0;
     closed.oceanPrecipitation = 40.0;

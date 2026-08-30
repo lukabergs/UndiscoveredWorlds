@@ -54,6 +54,7 @@ set(SOURCES
     map_imports.cpp
     assetdata.cpp
     classes.cpp
+    climate_atmosphere.cpp
     climate_energy.cpp
     climate_physics.cpp
     climate_reference.cpp
@@ -140,4 +141,12 @@ if(BUILD_TESTING)
     target_include_directories(climate_energy_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     set_target_properties(climate_energy_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
     add_test(NAME climate_energy_tests COMMAND climate_energy_tests)
+
+    add_executable(climate_atmosphere_tests
+        tests/climate_atmosphere_tests.cpp
+        climate_atmosphere.cpp
+    )
+    target_include_directories(climate_atmosphere_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_atmosphere_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_atmosphere_tests COMMAND climate_atmosphere_tests)
 endif()

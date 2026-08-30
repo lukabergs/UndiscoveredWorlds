@@ -113,35 +113,16 @@ inline constexpr float advectionSampleDistance = 24.0f;
 inline constexpr int smoothingIterations = 2;
 }
 
-namespace pressure
-{
-inline constexpr float equatorialLow = 32.0f;
-inline constexpr float equatorialWidth = 15.5f;
-inline constexpr float subtropicalLatitude = 27.0f;
-inline constexpr float subtropicalHigh = 20.0f;
-inline constexpr float subtropicalWidth = 9.0f;
-inline constexpr float subpolarLatitude = 57.0f;
-inline constexpr float subpolarLow = 20.0f;
-inline constexpr float subpolarWidth = 10.0f;
-inline constexpr float polarLatitude = 82.0f;
-inline constexpr float polarHigh = 16.0f;
-inline constexpr float polarWidth = 8.0f;
-inline constexpr float landThermalResponse = 1.08f;
-inline constexpr float oceanThermalResponse = 0.7f;
-inline constexpr float elevationResponse = 0.0011f;
-inline constexpr float seasonalShiftFactor = 0.35f;
-inline constexpr float landSeaContrastResponse = 0.58f;
-inline constexpr float seasonalLandContrastResponse = 0.46f;
-inline constexpr int continentalitySmoothingIterations = 12;
-inline constexpr float continentalityExponent = 1.55f;
-inline constexpr int smoothingIterations = 2;
-}
-
 namespace atmosphere
 {
-inline constexpr float directFlowFactor = 0.75f;
-inline constexpr float geostrophicFactor = 2.3f;
-inline constexpr float coriolisLatitude = 35.0f;
+inline constexpr float referencePlanetRadiusMetres = 6371000.0f;
+inline constexpr float rotationRatePerSecond = 7.2921159e-5f;
+inline constexpr float gravityMetresPerSecondSquared = 9.80665f;
+inline constexpr float surfaceAirDensityKgM3 = 1.225f;
+inline constexpr float pressurePascalsPerHectopascal = 100.0f;
+inline constexpr float oceanBoundaryLayerDragTimeSeconds = 5400.0f;
+inline constexpr float landBoundaryLayerDragTimeSeconds = 1500.0f;
+inline constexpr float highReliefDragTimeSeconds = 900.0f;
 inline constexpr float maxVectorWind = 42.0f;
 inline constexpr float blockedComponentFactor = 0.35f;
 inline constexpr float scalarWindDivisor = 4.0f;
@@ -149,10 +130,6 @@ inline constexpr float minimumScalarZonalWind = 0.75f;
 inline constexpr int smoothingIterations = 2;
 inline constexpr int topographySmoothingIterations = 6;
 inline constexpr int landmaskSmoothingIterations = 8;
-inline constexpr float landFriction = 0.28f;
-inline constexpr float continentalFriction = 0.22f;
-inline constexpr float reliefFriction = 0.12f;
-inline constexpr float tropicalCrossIsobaricBoost = 0.20f;
 inline constexpr int topographyIterations = 2;
 inline constexpr float topographyMinimumWindSpeed = 1.5f;
 inline constexpr float topographyMinimumRelief = 250.0f;
@@ -170,25 +147,24 @@ inline constexpr float topographyVerticalMotionStorageScale = 100.0f;
 
 namespace circulation
 {
-inline constexpr int iterations = 10;
-inline constexpr float upperHeightThermalResponse = 0.95f;
-inline constexpr float upperHeightAnomalyResponse = 0.45f;
-inline constexpr float upperHeightLandSeaResponse = 0.32f;
-inline constexpr float upperHeightBaroclinicResponse = 0.42f;
+inline constexpr int iterations = 24;
+inline constexpr float surfaceReferencePressurePa = 100000.0f;
+inline constexpr float upperReferencePressurePa = 50000.0f;
+inline constexpr float upperLayerDragTimeSeconds = 86400.0f;
+inline constexpr int thermalHeightSmoothingIterations = 10;
+inline constexpr int divergenceSmoothingIterations = 6;
+inline constexpr float secondsPerDay = 86400.0f;
+inline constexpr float timeStepDays = 0.125f;
+inline constexpr float layerPressureDepthHpa = 500.0f;
+inline constexpr float surfacePressureReferenceHpa = 1000.0f;
+inline constexpr float surfacePressureRestoringTimeDays = 6.0f;
+inline constexpr float maximumSurfacePressureTendencyHpaPerDay = 12.0f;
+inline constexpr float maximumSurfacePressureAnomalyHpa = 35.0f;
 inline constexpr float upperHeightRelaxation = 0.22f;
 inline constexpr float upperHeightDiffusion = 0.16f;
-inline constexpr float upperDirectFlowFactor = 0.14f;
-inline constexpr float upperGeostrophicFactor = 2.9f;
-inline constexpr float upperFriction = 0.08f;
-inline constexpr int windSmoothingIterations = 0;
-inline constexpr float verticalHeatingResponse = 0.035f;
-inline constexpr float verticalSurfaceConvergenceResponse = 11.0f;
-inline constexpr float verticalUpperDivergenceResponse = 11.0f;
-inline constexpr float verticalPressureResponse = 0.08f;
+inline constexpr int windSmoothingIterations = 2;
 inline constexpr float verticalRelaxation = 0.24f;
-inline constexpr float surfacePressureVerticalResponse = 0.62f;
-inline constexpr float surfacePressureDiffusion = 0.10f;
-inline constexpr float surfacePressureRelaxation = 0.14f;
+inline constexpr float surfacePressureDiffusion = 0.30f;
 inline constexpr float maximumVerticalVelocity = 120.0f;
 inline constexpr float verticalVelocityStorageScale = 100.0f;
 }
@@ -196,22 +172,23 @@ inline constexpr float verticalVelocityStorageScale = 100.0f;
 namespace moistureadvection
 {
 inline constexpr int iterations = 30;
-inline constexpr float sourceScale = 0.16f;
-inline constexpr float landPotentialEvaporationFactor = 0.07f;
 inline constexpr float landSoilMoistureCapacity = 80.0f;
 inline constexpr float landInfiltrationFraction = 0.65f;
-inline constexpr float advectionTimeStepSeconds = 10800.0f;
+inline constexpr float advectionTimeStepSeconds = 86400.0f;
+inline constexpr float surfaceExchangeCoefficient = 0.0013f;
+inline constexpr float minimumSurfaceWind = 1.0f;
+inline constexpr float landSurfaceResistance = 0.45f;
+inline constexpr float upperWindTransportFraction = 0.20f;
 inline constexpr float referencePlanetRadiusMetres = 6371000.0f;
-inline constexpr float maximumAdvectionCellsPerStep = 24.0f;
+inline constexpr float maximumAdvectionCellsPerStep = 48.0f;
 inline constexpr float transportMaxFraction = 0.94f;
 inline constexpr float condensationEfficiency = 0.82f;
 inline constexpr float dynamicVerticalCooling = 0.025f;
-inline constexpr float windConvergenceCooling = 0.45f;
 inline constexpr float topographicUpliftCooling = 0.80f;
 inline constexpr float dynamicSubsidenceWarming = 0.018f;
 inline constexpr float topographicDescentWarming = 0.45f;
 inline constexpr float maximumParcelTemperatureAdjustment = 8.0f;
-inline constexpr float rainfallScale = 2.05f;
+inline constexpr float rainfallScale = 1.0f;
 inline constexpr float seaIceFactor = 0.3f;
 inline constexpr float convergenceStorageScale = 100.0f;
 }

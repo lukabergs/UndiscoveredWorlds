@@ -22,7 +22,15 @@ struct WaterBudget
 
 float saturationVapourPressureHpa(float temperatureC);
 float surfacePressureHpa(float elevationAboveSeaLevelMetres);
+float saturationSpecificHumidity(float temperatureC, float pressureHpa);
 float saturationColumnWater(float temperatureC, float elevationAboveSeaLevelMetres);
+float bulkAerodynamicEvaporationMm(
+    float temperatureC,
+    float elevationAboveSeaLevelMetres,
+    float windSpeedMetresPerSecond,
+    float relativeHumidity,
+    float timeStepSeconds,
+    float transferCoefficient);
 
 void setLastWaterBudget(int season, const WaterBudget& budget);
 const std::array<WaterBudget, CLIMATESEASONCOUNT>& lastWaterBudgets();
