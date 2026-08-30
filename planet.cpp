@@ -186,7 +186,29 @@ void planet::readshortvectordata(ifstream& infile, std::vector<short>& arr)
 
 void planet::syncseasonalclimatefromlegacy()
 {
+    bool hasexplicittransitiontemp = false;
     bool hasexplicittransitionrain = false;
+
+    for (const short value : seasonaltempmaps[seasonapril])
+    {
+        if (value != 0)
+        {
+            hasexplicittransitiontemp = true;
+            break;
+        }
+    }
+
+    if (hasexplicittransitiontemp == false)
+    {
+        for (const short value : seasonaltempmaps[seasonoctober])
+        {
+            if (value != 0)
+            {
+                hasexplicittransitiontemp = true;
+                break;
+            }
+        }
+    }
 
     for (const short value : seasonalrainmaps[seasonapril])
     {
@@ -247,8 +269,11 @@ void planet::syncseasonalclimatefromlegacy()
             const float fourseasonstrength = lat / (static_cast<float>(itsheight) / 2.0f);
             const float transitiontempdiff = (fourseason * fourseasonstrength) / 2.0f;
 
-            seasonaltempmaps[seasonapril][index] = static_cast<short>(transitiontemp + transitiontempdiff);
-            seasonaltempmaps[seasonoctober][index] = static_cast<short>(transitiontemp + transitiontempdiff);
+            if (hasexplicittransitiontemp == false)
+            {
+                seasonaltempmaps[seasonapril][index] = static_cast<short>(transitiontemp + transitiontempdiff);
+                seasonaltempmaps[seasonoctober][index] = static_cast<short>(transitiontemp + transitiontempdiff);
+            }
 
             if (hasexplicittransitionrain == false)
             {

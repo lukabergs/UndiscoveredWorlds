@@ -64,6 +64,21 @@ inline constexpr int windVariationMax = 30;
 inline constexpr int windNodeStep = 20;
 inline constexpr int windLineColour = 1000000;
 
+namespace energybalance
+{
+inline constexpr double earthLongwaveInterceptWm2 = 210.0;
+inline constexpr double longwaveSlopeWm2K = 2.0;
+inline constexpr double meridionalTransportWm2K = 3.0;
+inline constexpr double zonalLandOceanExchangeWm2K = 12.0;
+inline constexpr double landHeatCapacityJm2K = 4.0e7;
+inline constexpr double oceanMixedLayerHeatCapacityJm2K = 1.25e8;
+inline constexpr double landAlbedo = 0.20;
+inline constexpr double oceanAlbedo = 0.27;
+inline constexpr double snowAlbedo = 0.55;
+inline constexpr double seaIceAlbedo = 0.58;
+inline constexpr double fractalTemperatureRangeC = 4.0;
+}
+
 namespace oceancurrents
 {
 inline constexpr float equatorialBand = 18.0f;
