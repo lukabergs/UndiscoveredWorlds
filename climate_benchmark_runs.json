@@ -4,8 +4,7 @@
       "id": 2,
       "datetime": "20260829231120",
       "information": "Added benchmark run metadata, workbook ID writes, and automatic Koppen image export; climate simulation parameters and generation logic unchanged."
-    }
-  ,
+    },
     {
       "id": 3,
       "datetime": "20260830000739",
@@ -572,6 +571,22 @@
         "area_weighted_spatial_exact_accuracy": 0.2339709084,
         "area_weighted_spatial_group_accuracy": 0.4501505641,
         "area_weighted_spatial_kappa": 0.1657902040
+      }
+    }
+  ,
+    {
+      "id": 43,
+      "datetime": "20260830044113",
+      "information": "Persisted atmospheric and soil moisture across the four representative seasons and iterated up to four deterministic climate cycles toward periodic storage convergence; water budgets now include initial storage. Restored EF in benchmark images and changed 0.png to write only when missing or outdated. Koppen thresholds, atmosphere, and evaporation coefficients are unchanged from run 42.",
+      "metrics": {
+        "weighted_relative_error": 0.8926699777,
+        "spatial_compared_cells": 693194,
+        "spatial_exact_accuracy": 0.3934987897,
+        "spatial_group_accuracy": 0.5664532584,
+        "spatial_kappa": 0.2783740298,
+        "area_weighted_spatial_exact_accuracy": 0.2328829156,
+        "area_weighted_spatial_group_accuracy": 0.4505159824,
+        "area_weighted_spatial_kappa": 0.1652640835
       }
     }
   ]
