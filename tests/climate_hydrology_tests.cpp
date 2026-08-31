@@ -45,6 +45,61 @@ int main()
     expect(annualDays == 365, "hydrology calendar must span 365 days");
     expect(near(climatehydrology::interpolateSeasonal(10.0f, 16.0f, 1.0f / 3.0f), 12.0f),
         "seasonal interpolation is wrong");
+    const auto climategrid = climatehydrology::climateGridDimensions(512, 257, 128);
+    expect(climategrid.columns == 128 && climategrid.rows == 65,
+        "the reduced climate grid must preserve the output aspect ratio and poles");
+    expect(climatehydrology::climateCellLatitudeDegrees(0, 65) < 90.0f &&
+            climatehydrology::climateCellLatitudeDegrees(64, 65) > -90.0f,
+        "the reduced climate grid must use finite-area cap cells instead of point poles");
+    expect(near(climatehydrology::climateCellLatitudeDegrees(32, 65), 0.0f) &&
+            climatehydrology::climateCellAreaWeight(0, 65) > 0.0f,
+        "the reduced climate grid must remain equator-symmetric with positive cap area");
+    expect(near(climatehydrology::polarTaperFactor(50.0f, 72.0f, 88.0f), 1.0f) &&
+            near(climatehydrology::polarTaperFactor(90.0f, 72.0f, 88.0f), 0.0f) &&
+            near(
+                climatehydrology::polarTaperFactor(-80.0f, 72.0f, 88.0f),
+                climatehydrology::polarTaperFactor(80.0f, 72.0f, 88.0f)),
+        "polar transport tapering must be hemispherically symmetric and vanish at the poles");
+    expect(climatehydrology::adjacentMeridionalTransportTargetRow(7, -8.0f, 64) == 6 &&
+            climatehydrology::adjacentMeridionalTransportTargetRow(57, 8.0f, 64) == 58,
+        "a meridional flux step must not leap across intervening latitude rows");
+    expect(climatehydrology::adjacentMeridionalTransportTargetRow(0, -2.0f, 64) == 0 &&
+            climatehydrology::adjacentMeridionalTransportTargetRow(64, 2.0f, 64) == 64,
+        "meridional flux must remain inside the polar boundaries");
+
+    const auto daytime = climatehydrology::deterministicWeatherPhase(
+        0, 3, 7.0f, 2.0f, -2.0f, 0.35f, -0.35f);
+    const auto neutral = climatehydrology::deterministicWeatherPhase(
+        1, 3, 7.0f, 2.0f, -2.0f, 0.35f, -0.35f);
+    const auto nighttime = climatehydrology::deterministicWeatherPhase(
+        2, 3, 7.0f, 2.0f, -2.0f, 0.35f, -0.35f);
+    expect(daytime.coastalDirection > 0.0f && nighttime.coastalDirection < 0.0f &&
+            near(neutral.coastalDirection, 0.0f),
+        "weather phases must include deterministic onshore, neutral, and offshore flow");
+    expect(near(
+            daytime.landTemperatureAnomalyC + neutral.landTemperatureAnomalyC +
+                nighttime.landTemperatureAnomalyC,
+            0.0f),
+        "weather-phase land temperature anomalies must not bias the monthly mean");
+
+    expect(near(climatehydrology::kuoPrecipitationEfficiency(0.0f, 0.0f, 3.0f), 0.0f),
+        "a dry column must have zero Kuo precipitation efficiency");
+    expect(climatehydrology::kuoPrecipitationEfficiency(0.8f, 0.0f, 3.0f) >
+            climatehydrology::kuoPrecipitationEfficiency(0.4f, 0.0f, 3.0f),
+        "Kuo precipitation efficiency must increase continuously with humidity");
+    expect(near(climatehydrology::convectiveBuoyancyEfficiency(0.0f, 0.0f, 6.0f), 0.0f) &&
+            near(climatehydrology::convectiveBuoyancyEfficiency(6.0f, 0.0f, 6.0f), 1.0f),
+        "convective buoyancy closure must span its configured activation range");
+    const float shallowexchange = climatehydrology::shallowConvectionExchangeFraction(
+        0.8f, 0.6f, 4.0f, 10.0f, 86400.0f, 2.0f, 0.55f, 0.85f, 20.0f, 0.30f);
+    expect(shallowexchange > 0.0f && shallowexchange <= 0.30f,
+        "humid unstable columns must undergo bounded shallow-convective mixing");
+    expect(near(climatehydrology::dryConvectionExchangeFraction(
+            8.0f, 86400.0f, 1.0f, 10.0f, 18.0f, 0.25f), 0.0f),
+        "stable or weakly unstable columns must not undergo dry-convective mixing");
+    expect(climatehydrology::dryConvectionExchangeFraction(
+            18.0f, 86400.0f, 1.0f, 10.0f, 18.0f, 0.25f) > 0.0f,
+        "strongly unstable columns must undergo dry-convective mixing");
     expect(near(climatehydrology::soilMoistureStress(0.0f, 80.0f, 0.5f, 0.5f), 0.0f),
         "empty soil must suppress evapotranspiration");
     expect(near(climatehydrology::soilMoistureStress(40.0f, 80.0f, 0.5f, 0.5f), 1.0f),
@@ -142,6 +197,13 @@ int main()
     expect(layered.stratiformMm + layered.orographicMm <= 18.0f + 1.0e-5f &&
             layered.convectiveMm <= 24.0f + 1.0e-5f,
         "two-layer precipitation must conserve each source reservoir");
+
+    const auto elevatedFed = climatehydrology::partitionTwoLayerPrecipitation(
+        24.0f, 10.0f, 30.0f, 15.0f, 15.0f, -1.0f, 0.0f,
+        28.0f, 16.0f, 86400.0f, 172800.0f, 0.0f, 0.75f,
+        0.0f, 6.0f, 2, 0.35f, 0.065f, 6.0f, 0.5f, 3.0f);
+    expect(elevatedFed.convectiveMm > 0.0f,
+        "elevated free-tropospheric moisture accession must be able to feed convection");
 
     for (int water = 0; water <= 100; water += 5)
     {

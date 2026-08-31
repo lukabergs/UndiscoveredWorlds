@@ -1,26 +1,25 @@
-# Goal
-
-Add a deterministic, conservative two-layer rainfall model using the low-cost physics that transfer well from ExoPlaSim.
-
 # Final state
 
-- Recorded Earth benchmarks accept explicit imported dimensions; iterations now use 512×257 inputs.
-- Tropical background moisture mixing and a two-pass, area-conservative convergence footprint reduce grid-scale filaments.
-- Stratiform conversion begins at 88% relative humidity for broader, softer rainfall tails.
-- Free-tropospheric vapor uses 65% of the resolved upper-wind departure, retaining more broad-scale structure than run 101.
-- Boundary-layer transport slows by 15% over land, providing a low-cost coast-crossing convergence proxy without reducing ocean evaporation.
-- Seasonal forcing still migrates the ITCZ; run 106 places it at 5.625°S in January and 9.141°N in July.
+The ExoPlaSim-inspired rainfall checkpoint is complete and represented by deterministic benchmark runs 117 and 118 at 512 px.
+
+# Included
+
+- 128x65 internal moisture grid with sub-grid land fraction and relief retained during aggregation.
+- Two-layer vapor transport, Kuo-style convection, buoyancy closure, elevated moisture accession, shallow/dry mixing, falling-rain re-evaporation, snow storage, and soil-moisture-limited evapotranspiration.
+- Deterministic synoptic and coastal day/night phases, seasonal migration, transient eddy mixing, cloud/latent-heating memory, and conservative scale-selective damping.
+- Conservative adjacent-row meridional fluxes; multi-row jumps can no longer bypass a zero-transport polar edge.
+- Benchmark runs 107-118 recorded in `extra/climate.xlsx` with `HRES=512`; generated images and GeoTIFFs remain under `extra/img/earth/benchmark/`.
 
 # Verification
 
-- `cmake --build --preset build-x64-release`
-- `ctest --test-dir out/build/x64-Release --output-on-failure -C Release` — 7/7 passed.
-- Runs 102–106, seed 1, 512×257 — recorded with images and diagnostics.
-- Run 106 — hydrology 11.37 s over four converged cycles; maximum absolute relative seasonal area-weighted water residual below 2×10⁻⁹.
-- `extra/climate.xlsx` — IDs 102–106 present with `HRES=512`; run 106 total 44,872 and cached WRE 0.5707906; formula-error search returned no matches; all four sheets rendered and inspected.
+- `cmake --build out/build/x64-Debug --config Debug`
+- `ctest --test-dir out/build/x64-Debug -C Debug --output-on-failure` (7/7 passed)
+- `cmake-vs --build --preset build-x64-release`
+- Run 118: 16.3 s total, 1.46 s hydrology, maximum seasonal relative water-budget residual `2.49e-9`.
+- Runs 117 and 118 produced identical climate counts and `WRE=0.3679873165`.
+- Polar diagnostic: cap precipitation fell from 1958/1760 to 0.58/0.23 mm/month north/south after the flux correction.
+- Workbook rendered on all four sheets; no formula error values remain.
 
 # Remaining uncertainty
 
-- The model does not resolve a diurnal land-breeze/cold-pool cycle or offshore MCS propagation.
-- Upper winds transport vapor, not a post-condensation cloud/ice reservoir, so offshore anvil blowback is only represented indirectly.
-- Run 106 is a measured compromise: better land coverage and concentration than run 101, but some flow-aligned patchiness remains and the 512px reference correlation is only 0.1188.
+The reference workbook measures class-frequency agreement, not spatial rainfall-field agreement. Further tuning should preserve this checkpoint and evaluate georeferenced precipitation structure directly.

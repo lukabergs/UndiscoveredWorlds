@@ -64,10 +64,171 @@ CalendarMonth calendarMonth(int month)
     };
 }
 
+ClimateGridDimensions climateGridDimensions(
+    int outputColumns,
+    int outputRows,
+    int targetHorizontalCells)
+{
+    const int columns = std::max(1, std::min(outputColumns, targetHorizontalCells));
+    const int latitudeIntervals = std::max(1, outputRows - 1);
+    const int targetLatitudeIntervals = std::max(
+        1,
+        static_cast<int>(std::round(
+            static_cast<float>(latitudeIntervals * columns) /
+            static_cast<float>(std::max(1, outputColumns)))));
+    return { columns, std::min(outputRows, targetLatitudeIntervals + 1) };
+}
+
+float climateCellLatitudeDegrees(int row, int rowCount)
+{
+    const int count = std::max(1, rowCount);
+    const int boundedRow = std::clamp(row, 0, count - 1);
+    return 90.0f - 180.0f *
+        (static_cast<float>(boundedRow) + 0.5f) / static_cast<float>(count);
+}
+
+float climateCellAreaWeight(int row, int rowCount)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    return std::max(
+        1.0e-5f,
+        std::cos(climateCellLatitudeDegrees(row, rowCount) * pi / 180.0f));
+}
+
+float polarTaperFactor(
+    float latitudeDegrees,
+    float taperStartDegrees,
+    float taperEndDegrees)
+{
+    return 1.0f - smoothStep(
+        std::abs(taperStartDegrees),
+        std::abs(taperEndDegrees),
+        std::abs(latitudeDegrees));
+}
+
+int adjacentMeridionalTransportTargetRow(
+    int sourceRow,
+    float displacementRows,
+    int maximumRow)
+{
+    const int boundedMaximum = std::max(0, maximumRow);
+    const int boundedSource = std::clamp(sourceRow, 0, boundedMaximum);
+    const int direction = (displacementRows > 0.0f) - (displacementRows < 0.0f);
+    return std::clamp(boundedSource + direction, 0, boundedMaximum);
+}
+
+WeatherPhase deterministicWeatherPhase(
+    int phase,
+    int phaseCount,
+    float windRotationDegrees,
+    float daytimeLandTemperatureAnomalyC,
+    float nighttimeLandTemperatureAnomalyC,
+    float daytimeSeaTemperatureAnomalyC,
+    float nighttimeSeaTemperatureAnomalyC)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    const int count = std::max(1, phaseCount);
+    const int wrapped = ((phase % count) + count) % count;
+    const float centred = count > 1
+        ? 2.0f * static_cast<float>(wrapped) / static_cast<float>(count - 1) - 1.0f
+        : 0.0f;
+    const float coastalDirection = count > 1
+        ? (wrapped == 0 ? 1.0f : (wrapped == count - 1 ? -1.0f : 0.0f))
+        : 0.0f;
+
+    return {
+        centred * windRotationDegrees * pi / 180.0f,
+        2.0f * pi * static_cast<float>(wrapped) / static_cast<float>(count),
+        coastalDirection,
+        coastalDirection > 0.0f
+            ? daytimeLandTemperatureAnomalyC
+            : (coastalDirection < 0.0f ? nighttimeLandTemperatureAnomalyC : 0.0f),
+        coastalDirection > 0.0f
+            ? daytimeSeaTemperatureAnomalyC
+            : (coastalDirection < 0.0f ? nighttimeSeaTemperatureAnomalyC : 0.0f)
+    };
+}
+
 float interpolateSeasonal(float first, float second, float interpolation)
 {
     const float phase = std::clamp(interpolation, 0.0f, 1.0f);
     return first + (second - first) * phase;
+}
+
+float kuoPrecipitationEfficiency(
+    float relativeHumidity,
+    float criticalRelativeHumidity,
+    float humidityExponent)
+{
+    const float critical = std::clamp(criticalRelativeHumidity, 0.0f, 0.999f);
+    const float humidity = std::clamp(relativeHumidity, 0.0f, 1.0f);
+
+    if (humidity <= critical)
+        return 0.0f;
+
+    const float dryFraction = std::clamp(
+        (1.0f - humidity) / (1.0f - critical),
+        0.0f,
+        1.0f);
+    return 1.0f - std::pow(dryFraction, std::max(0.0f, humidityExponent));
+}
+
+float convectiveBuoyancyEfficiency(
+    float parcelBuoyancyC,
+    float activationBuoyancyC,
+    float fullStrengthBuoyancyC)
+{
+    return smoothStep(activationBuoyancyC, fullStrengthBuoyancyC, parcelBuoyancyC);
+}
+
+float shallowConvectionExchangeFraction(
+    float boundaryRelativeHumidity,
+    float freeTroposphereRelativeHumidity,
+    float parcelBuoyancyC,
+    float verticalWindShearMps,
+    float timeStepSeconds,
+    float mixingTimeDays,
+    float humidityOnset,
+    float fullHumidity,
+    float fullShearMps,
+    float maximumExchangeFraction)
+{
+    constexpr float secondsPerDay = 86400.0f;
+    const float humidity = std::max(boundaryRelativeHumidity, freeTroposphereRelativeHumidity);
+    const float humidityFactor = smoothStep(humidityOnset, fullHumidity, humidity);
+    const float instability = smoothStep(0.0f, 4.0f, parcelBuoyancyC);
+    const float shearFactor = std::clamp(
+        verticalWindShearMps / std::max(0.1f, fullShearMps),
+        0.0f,
+        1.0f);
+    const float timeFraction = -std::expm1(
+        -std::max(0.0f, timeStepSeconds) /
+        (std::max(0.01f, mixingTimeDays) * secondsPerDay));
+    return std::clamp(
+        timeFraction * humidityFactor * instability * (0.5f + 0.5f * shearFactor),
+        0.0f,
+        std::max(0.0f, maximumExchangeFraction));
+}
+
+float dryConvectionExchangeFraction(
+    float parcelBuoyancyC,
+    float timeStepSeconds,
+    float mixingTimeDays,
+    float activationBuoyancyC,
+    float fullStrengthBuoyancyC,
+    float maximumExchangeFraction)
+{
+    constexpr float secondsPerDay = 86400.0f;
+    const float timeFraction = -std::expm1(
+        -std::max(0.0f, timeStepSeconds) /
+        (std::max(0.01f, mixingTimeDays) * secondsPerDay));
+    return std::clamp(
+        timeFraction * convectiveBuoyancyEfficiency(
+            parcelBuoyancyC,
+            activationBuoyancyC,
+            fullStrengthBuoyancyC),
+        0.0f,
+        std::max(0.0f, maximumExchangeFraction));
 }
 
 float soilMoistureStress(
@@ -297,13 +458,16 @@ PrecipitationPartition partitionTwoLayerPrecipitation(
     float freeTroposphereTemperatureC,
     float timeStepSeconds,
     float stratiformConversionTimeSeconds,
-    float convectiveResidualRelativeHumidity,
+    float kuoCriticalRelativeHumidity,
     float convectiveConversionEfficiency,
-    float convectiveActivationTemperatureC,
-    float convectiveFullStrengthTemperatureC,
+    float convectiveActivationBuoyancyC,
+    float convectiveFullStrengthBuoyancyC,
     int moistAdjustmentIterations,
     float latentHeatingCPerMillimetre,
-    float capacityTemperatureSensitivityPerC)
+    float capacityTemperatureSensitivityPerC,
+    float signedFreeTroposphereConvergenceMm,
+    float elevatedMoistureAccessionFraction,
+    float kuoHumidityExponent)
 {
     const float boundaryWater = std::max(0.0f, boundaryLayerWaterMm);
     const float freeWater = std::max(0.0f, freeTroposphereWaterMm);
@@ -334,22 +498,32 @@ PrecipitationPartition partitionTwoLayerPrecipitation(
         0.0f,
         terrainAdjustment.condensedMm - result.orographicMm);
 
-    const float convectiveFloor = std::max(
+    const float columnCapacity = std::max(
+        0.05f,
+        boundaryLayerSaturationCapacityMm + nonOrographicFreeTroposphereCapacityMm);
+    const float columnRelativeHumidity = std::clamp(
+        (boundaryWater + freeWater) / columnCapacity,
         0.0f,
-        boundaryLayerSaturationCapacityMm *
-            std::clamp(convectiveResidualRelativeHumidity, 0.0f, 1.0f));
-    const float convectivelyAvailable = std::max(0.0f, boundaryWater - convectiveFloor);
-    const float instability = smoothStep(
-        convectiveActivationTemperatureC,
-        convectiveFullStrengthTemperatureC,
-        surfaceTemperatureC);
-    const float convergentSupply = std::max(
+        1.0f);
+    const float precipitationEfficiency = kuoPrecipitationEfficiency(
+        columnRelativeHumidity,
+        kuoCriticalRelativeHumidity,
+        kuoHumidityExponent);
+    const float buoyancyEfficiency = convectiveBuoyancyEfficiency(
+        surfaceTemperatureC - freeTroposphereTemperatureC,
+        convectiveActivationBuoyancyC,
+        convectiveFullStrengthBuoyancyC);
+    const float moistureAccession = std::max(
         0.0f,
-        signedBoundaryLayerConvergenceMm + std::max(0.0f, surfaceEvaporationMm));
+        signedBoundaryLayerConvergenceMm + std::max(0.0f, surfaceEvaporationMm) +
+            std::max(0.0f, signedFreeTroposphereConvergenceMm) *
+                std::clamp(elevatedMoistureAccessionFraction, 0.0f, 1.0f));
+    const float convectivelyAvailable = boundaryWater;
     result.convectiveMm = std::min(
         convectivelyAvailable,
-        convergentSupply * instability *
+        moistureAccession * precipitationEfficiency * buoyancyEfficiency *
             std::clamp(convectiveConversionEfficiency, 0.0f, 1.0f));
+
     return result;
 }
 }

@@ -23,6 +23,21 @@ struct PrecipitationPartition
     float totalMm() const;
 };
 
+struct ClimateGridDimensions
+{
+    int columns = 1;
+    int rows = 1;
+};
+
+struct WeatherPhase
+{
+    float windRotationRadians = 0.0f;
+    float synopticPhaseRadians = 0.0f;
+    float coastalDirection = 0.0f;
+    float landTemperatureAnomalyC = 0.0f;
+    float seaTemperatureAnomalyC = 0.0f;
+};
+
 struct MoistAdjustment
 {
     float condensedMm = 0.0f;
@@ -54,7 +69,55 @@ struct SnowAccumulation
 };
 
 CalendarMonth calendarMonth(int month);
+ClimateGridDimensions climateGridDimensions(
+    int outputColumns,
+    int outputRows,
+    int targetHorizontalCells);
+float climateCellLatitudeDegrees(int row, int rowCount);
+float climateCellAreaWeight(int row, int rowCount);
+float polarTaperFactor(
+    float latitudeDegrees,
+    float taperStartDegrees,
+    float taperEndDegrees);
+int adjacentMeridionalTransportTargetRow(
+    int sourceRow,
+    float displacementRows,
+    int maximumRow);
+WeatherPhase deterministicWeatherPhase(
+    int phase,
+    int phaseCount,
+    float windRotationDegrees,
+    float daytimeLandTemperatureAnomalyC,
+    float nighttimeLandTemperatureAnomalyC,
+    float daytimeSeaTemperatureAnomalyC,
+    float nighttimeSeaTemperatureAnomalyC);
 float interpolateSeasonal(float first, float second, float interpolation);
+float kuoPrecipitationEfficiency(
+    float relativeHumidity,
+    float criticalRelativeHumidity,
+    float humidityExponent);
+float convectiveBuoyancyEfficiency(
+    float parcelBuoyancyC,
+    float activationBuoyancyC,
+    float fullStrengthBuoyancyC);
+float shallowConvectionExchangeFraction(
+    float boundaryRelativeHumidity,
+    float freeTroposphereRelativeHumidity,
+    float parcelBuoyancyC,
+    float verticalWindShearMps,
+    float timeStepSeconds,
+    float mixingTimeDays,
+    float humidityOnset,
+    float fullHumidity,
+    float fullShearMps,
+    float maximumExchangeFraction);
+float dryConvectionExchangeFraction(
+    float parcelBuoyancyC,
+    float timeStepSeconds,
+    float mixingTimeDays,
+    float activationBuoyancyC,
+    float fullStrengthBuoyancyC,
+    float maximumExchangeFraction);
 float soilMoistureStress(
     float soilMoistureMm,
     float soilMoistureCapacityMm,
@@ -119,11 +182,14 @@ PrecipitationPartition partitionTwoLayerPrecipitation(
     float freeTroposphereTemperatureC,
     float timeStepSeconds,
     float stratiformConversionTimeSeconds,
-    float convectiveResidualRelativeHumidity,
+    float kuoCriticalRelativeHumidity,
     float convectiveConversionEfficiency,
-    float convectiveActivationTemperatureC,
-    float convectiveFullStrengthTemperatureC,
+    float convectiveActivationBuoyancyC,
+    float convectiveFullStrengthBuoyancyC,
     int moistAdjustmentIterations,
     float latentHeatingCPerMillimetre,
-    float capacityTemperatureSensitivityPerC);
+    float capacityTemperatureSensitivityPerC,
+    float signedFreeTroposphereConvergenceMm = 0.0f,
+    float elevatedMoistureAccessionFraction = 0.0f,
+    float kuoHumidityExponent = 3.0f);
 }
