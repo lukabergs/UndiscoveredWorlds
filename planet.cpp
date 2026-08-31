@@ -104,9 +104,16 @@ void planet::resizeseasonalclimatefields()
         for (std::vector<short>& season : field)
             season.assign(cellcount, 0);
     };
+    auto resizefloatfield = [cellcount](
+        std::array<std::vector<float>, CLIMATESEASONCOUNT>& field)
+    {
+        for (std::vector<float>& season : field)
+            season.assign(cellcount, 0.0f);
+    };
 
     resizefield(seasonaltempmaps);
     resizefield(seasonalrainmaps);
+    resizefloatfield(seasonalrainfloatmaps);
     resizefield(seasonalpressuremaps);
     resizefield(seasonaluwindmaps);
     resizefield(seasonalvwindmaps);
@@ -1675,6 +1682,11 @@ bool planet::loadworld(string filename)
     {
         readshortvectordata(infile, seasonaltempmaps[season]);
         readshortvectordata(infile, seasonalrainmaps[season]);
+        std::transform(
+            seasonalrainmaps[season].begin(),
+            seasonalrainmaps[season].end(),
+            seasonalrainfloatmaps[season].begin(),
+            [](short value) { return static_cast<float>(value); });
         readshortvectordata(infile, seasonalpressuremaps[season]);
         readshortvectordata(infile, seasonaluwindmaps[season]);
         readshortvectordata(infile, seasonalvwindmaps[season]);

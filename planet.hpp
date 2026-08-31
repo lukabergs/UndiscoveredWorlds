@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -777,9 +778,12 @@ public:
     int octrain(int x, int y) const; // October precipitation
 
     int averain(int x, int y) const; // average precipitation
+    float averainfloat(int x, int y) const;
 
     int seasonalrain(int season, int x, int y) const;
     void setseasonalrain(int season, int x, int y, int amount);
+    float seasonalrainfloat(int season, int x, int y) const;
+    void setseasonalrainfloat(int season, int x, int y, float amount);
 
     int seasonalpressure(int season, int x, int y) const;
     void setseasonalpressure(int season, int x, int y, int amount);
@@ -1350,6 +1354,7 @@ private:
     std::array<std::array<std::array<int, 3>, MAPGRADIENTMAXSTOPS>, MAPGRADIENTTYPECOUNT> itsmapgradientcolours{};
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaltempmaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalrainmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalrainfloatmaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalpressuremaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaluwindmaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalvwindmaps;
@@ -2106,7 +2111,29 @@ inline void planet::setseasonalrain(int season, int x, int y, int amount)
     if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
         return;
 
-    seasonalrainmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    const int index = seasonalclimateindex(x, y);
+    seasonalrainmaps[season][index] = static_cast<short>(amount);
+    seasonalrainfloatmaps[season][index] = static_cast<float>(amount);
+}
+
+inline float planet::seasonalrainfloat(int season, int x, int y) const
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    return seasonalrainfloatmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void planet::setseasonalrainfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
+        return;
+
+    const int index = seasonalclimateindex(x, y);
+    const float physicalamount = (std::max)(0.0f, amount);
+    seasonalrainfloatmaps[season][index] = physicalamount;
+    seasonalrainmaps[season][index] = static_cast<short>(std::round(
+        (std::min)(physicalamount, 32767.0f)));
 }
 
 inline int planet::aprrain(int x, int y) const
@@ -2130,6 +2157,19 @@ inline int planet::averain(int x, int y) const
         total = total + seasonalrain(season, x, y);
 
     return total / CLIMATESEASONCOUNT;
+}
+
+inline float planet::averainfloat(int x, int y) const
+{
+    if (y<0 || y>itsheight || x<0 || x>itswidth)
+        return 0.0f;
+
+    float total = 0.0f;
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        total += seasonalrainfloat(season, x, y);
+
+    return total / static_cast<float>(CLIMATESEASONCOUNT);
 }
 
 inline int planet::seasonalpressure(int season, int x, int y) const

@@ -25,13 +25,15 @@ std::array<PrecipitationProcessDiagnostics, CLIMATESEASONCOUNT>
 
 double WaterBudget::residual() const
 {
-    return initialAtmosphericStorage + initialSoilStorage + oceanEvaporation -
-        oceanPrecipitation - runoff - atmosphericStorage - soilStorage;
+    return initialAtmosphericStorage + initialSoilStorage + initialSnowStorage +
+        oceanEvaporation - oceanPrecipitation - runoff - atmosphericStorage -
+        soilStorage - snowStorage;
 }
 
 double WaterBudget::relativeResidual() const
 {
-    const double totalInput = initialAtmosphericStorage + initialSoilStorage + oceanEvaporation;
+    const double totalInput = initialAtmosphericStorage + initialSoilStorage +
+        initialSnowStorage + oceanEvaporation;
     return residual() / std::max(1.0, std::abs(totalInput));
 }
 
@@ -51,8 +53,15 @@ float saturationVapourPressureHpa(float temperatureC)
 
 float surfacePressureHpa(float elevationAboveSeaLevelMetres)
 {
+    return surfacePressureHpa(elevationAboveSeaLevelMetres, 1.0f);
+}
+
+float surfacePressureHpa(float elevationAboveSeaLevelMetres, float gravityMultiplier)
+{
     const float elevation = std::max(0.0f, elevationAboveSeaLevelMetres);
-    return standardSeaLevelPressureHpa * std::exp(-elevation / pressureScaleHeightMetres);
+    const float gravityScale = std::max(0.05f, gravityMultiplier);
+    return standardSeaLevelPressureHpa *
+        std::exp(-elevation * gravityScale / pressureScaleHeightMetres);
 }
 
 float saturationSpecificHumidity(float temperatureC, float pressureHpa)
@@ -65,9 +74,18 @@ float saturationSpecificHumidity(float temperatureC, float pressureHpa)
 
 float saturationColumnWaterAtPressure(float temperatureC, float surfacePressureHpa)
 {
+    return saturationColumnWaterAtPressure(temperatureC, surfacePressureHpa, 1.0f);
+}
+
+float saturationColumnWaterAtPressure(
+    float temperatureC,
+    float surfacePressureHpa,
+    float gravityMultiplier)
+{
     const float pressureHpa = std::max(1.0f, surfacePressureHpa);
     const float specificHumidity = saturationSpecificHumidity(temperatureC, pressureHpa);
-    const float columnAirMass = pressureHpa * 100.0f / gravityMetresPerSecondSquared;
+    const float gravity = gravityMetresPerSecondSquared * std::max(0.05f, gravityMultiplier);
+    const float columnAirMass = pressureHpa * 100.0f / gravity;
 
     return std::max(
         0.05f,
@@ -79,6 +97,46 @@ float saturationColumnWater(float temperatureC, float elevationAboveSeaLevelMetr
     return saturationColumnWaterAtPressure(
         temperatureC,
         surfacePressureHpa(elevationAboveSeaLevelMetres));
+}
+
+float neutralDragCoefficient(float roughnessLengthMetres, float referenceHeightMetres)
+{
+    constexpr float vonKarmanConstant = 0.4f;
+    const float roughness = std::max(1.0e-6f, roughnessLengthMetres);
+    const float referenceHeight = std::max(roughness * 1.01f, referenceHeightMetres);
+    const float logarithmicProfile = std::log(referenceHeight / roughness);
+    return std::clamp(
+        vonKarmanConstant * vonKarmanConstant /
+            std::max(0.01f, logarithmicProfile * logarithmicProfile),
+        0.0002f,
+        0.02f);
+}
+
+float bulkRichardsonExchangeMultiplier(
+    float surfaceTemperatureC,
+    float airTemperatureC,
+    float windSpeedMetresPerSecond,
+    float gravityMultiplier,
+    float referenceHeightMetres,
+    float minimumMultiplier,
+    float maximumMultiplier)
+{
+    const float absoluteTemperature = std::max(150.0f, surfaceTemperatureC + 273.15f);
+    const float windSpeedSquared = std::max(
+        0.25f,
+        windSpeedMetresPerSecond * windSpeedMetresPerSecond);
+    const float richardsonNumber =
+        gravityMetresPerSecondSquared * std::max(0.05f, gravityMultiplier) *
+        std::max(0.1f, referenceHeightMetres) *
+        (airTemperatureC - surfaceTemperatureC) /
+        (absoluteTemperature * windSpeedSquared);
+    const float multiplier = richardsonNumber >= 0.0f
+        ? 1.0f / (1.0f + 10.0f * richardsonNumber)
+        : std::sqrt(std::max(0.0f, 1.0f - 16.0f * richardsonNumber));
+    return std::clamp(
+        multiplier,
+        std::max(0.0f, minimumMultiplier),
+        std::max(minimumMultiplier, maximumMultiplier));
 }
 
 float bulkAerodynamicEvaporationMmAtPressure(

@@ -538,7 +538,7 @@ double fivedegreelandprecipitationcorrelation(
             double simulated = 0.0;
 
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-                simulated += world.seasonalrain(season, x, y);
+                simulated += world.seasonalrainfloat(season, x, y);
 
             simulated = simulated * 12.0 / static_cast<double>(CLIMATESEASONCOUNT);
             const int binx = min(longitudebins - 1, x * longitudebins / (world.width() + 1));
@@ -664,7 +664,7 @@ double simulatedmonthlyvalue(planet& world, monthlyreferencefield field, int sea
         return world.seasonaltemp(season, x, y);
 
     if (field == monthlyreferencefield::precipitation)
-        return world.seasonalrain(season, x, y);
+        return world.seasonalrainfloat(season, x, y);
 
     if (field == monthlyreferencefield::surfacewindspeed)
     {
@@ -1254,7 +1254,7 @@ void writeipccregioncomparison(const filesystem::path& outputdir, planet& world)
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             {
                 const double temperature = world.seasonaltemp(season, x, y);
-                const double precipitation = world.seasonalrain(season, x, y);
+                const double precipitation = world.seasonalrainfloat(season, x, y);
                 simulatedtemperature += temperature;
                 simulatedwarmest = max(simulatedwarmest, temperature);
                 simulatedprecipitation += precipitation;
@@ -1533,7 +1533,7 @@ void printreferencedfcdriverreport(planet& world)
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             {
                 temps[season] = static_cast<float>(world.seasonaltemp(season, x, y));
-                rains[season] = static_cast<float>(world.seasonalrain(season, x, y));
+                rains[season] = world.seasonalrainfloat(season, x, y);
                 meanannualtemp += temps[season];
                 annualrain += rains[season];
             }
@@ -2052,7 +2052,7 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(planet& world)
                 griddedatmosphericstorage +=
                     areaweight * world.seasonalmoisture(season, x, y);
                 griddedprecipitation +=
-                    areaweight * world.seasonalrain(season, x, y);
+                    areaweight * world.seasonalrainfloat(season, x, y);
             }
         }
     }
@@ -2141,7 +2141,7 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(planet& world)
                 double simulated = 0.0;
 
                 for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-                    simulated += world.seasonalrain(season, x, y);
+                    simulated += world.seasonalrainfloat(season, x, y);
 
                 simulated *= 12.0 / static_cast<double>(CLIMATESEASONCOUNT);
                 simulatednorthernprecipitation += areaweight * simulated;
@@ -2683,7 +2683,7 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
             }
 
             const float annualprecipitation =
-                static_cast<float>(world.averain(x, y)) * 12.0f;
+                world.averainfloat(x, y) * 12.0f;
             annualprecipitationvalues[
                 static_cast<size_t>(y) * static_cast<size_t>(width + 1) +
                 static_cast<size_t>(x)] = annualprecipitation;
@@ -2899,7 +2899,7 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
             if (!isvalidationland(world, x, y))
                 continue;
 
-            const double simulated = static_cast<double>(world.averain(x, y));
+            const double simulated = static_cast<double>(world.averainfloat(x, y));
             const double reference = referencegrid[y][x];
 
             if (!std::isfinite(reference))
@@ -3496,16 +3496,16 @@ void writeprecipitationgrid(const filesystem::path& filepath, planet& world, int
 
         for (int x = 0; x <= width; x++)
         {
-            int value = 0;
+            double value = 0.0;
 
             if (mode == 0)
-                value = world.averain(x, y);
+                value = world.averainfloat(x, y);
 
             if (mode == 1)
-                value = world.janrain(x, y);
+                value = world.seasonalrainfloat(seasonjanuary, x, y);
 
             if (mode == 2)
-                value = world.julrain(x, y);
+                value = world.seasonalrainfloat(seasonjuly, x, y);
 
             if (mode == 3)
                 value = isvalidationland(world, x, y) ? 1 : 0;
@@ -3842,7 +3842,7 @@ void exportclimatevalidationreport(planet& world)
 
     if (waterbudgetfile.is_open())
     {
-        waterbudgetfile << "quarter,initial_atmospheric_storage,initial_soil_storage,ocean_evaporation,land_evaporation,ocean_precipitation,land_precipitation,runoff,atmospheric_storage,soil_storage,residual,relative_residual\n";
+        waterbudgetfile << "quarter,initial_atmospheric_storage,initial_soil_storage,initial_snow_storage,ocean_evaporation,land_evaporation,ocean_precipitation,land_precipitation,runoff,atmospheric_storage,soil_storage,snow_storage,residual,relative_residual\n";
         waterbudgetfile << fixed << setprecision(9);
 
         const auto& budgets = climatephysics::lastWaterBudgets();
@@ -3854,6 +3854,7 @@ void exportclimatevalidationreport(planet& world)
                 << season << ','
                 << budget.initialAtmosphericStorage << ','
                 << budget.initialSoilStorage << ','
+                << budget.initialSnowStorage << ','
                 << budget.oceanEvaporation << ','
                 << budget.landEvaporation << ','
                 << budget.oceanPrecipitation << ','
@@ -3861,6 +3862,7 @@ void exportclimatevalidationreport(planet& world)
                 << budget.runoff << ','
                 << budget.atmosphericStorage << ','
                 << budget.soilStorage << ','
+                << budget.snowStorage << ','
                 << budget.residual() << ','
                 << budget.relativeResidual() << '\n';
         }
@@ -3870,7 +3872,7 @@ void exportclimatevalidationreport(planet& world)
 
     if (areaweightedwaterbudgetfile.is_open())
     {
-        areaweightedwaterbudgetfile << "quarter,initial_atmospheric_storage,initial_soil_storage,ocean_evaporation,land_evaporation,ocean_precipitation,land_precipitation,runoff,atmospheric_storage,soil_storage,residual,relative_residual\n";
+        areaweightedwaterbudgetfile << "quarter,initial_atmospheric_storage,initial_soil_storage,initial_snow_storage,ocean_evaporation,land_evaporation,ocean_precipitation,land_precipitation,runoff,atmospheric_storage,soil_storage,snow_storage,residual,relative_residual\n";
         areaweightedwaterbudgetfile << fixed << setprecision(9);
 
         const auto& budgets = climatephysics::lastAreaWeightedWaterBudgets();
@@ -3882,6 +3884,7 @@ void exportclimatevalidationreport(planet& world)
                 << season << ','
                 << budget.initialAtmosphericStorage << ','
                 << budget.initialSoilStorage << ','
+                << budget.initialSnowStorage << ','
                 << budget.oceanEvaporation << ','
                 << budget.landEvaporation << ','
                 << budget.oceanPrecipitation << ','
@@ -3889,6 +3892,7 @@ void exportclimatevalidationreport(planet& world)
                 << budget.runoff << ','
                 << budget.atmosphericStorage << ','
                 << budget.soilStorage << ','
+                << budget.snowStorage << ','
                 << budget.residual() << ','
                 << budget.relativeResidual() << '\n';
         }
@@ -3934,15 +3938,18 @@ void exportclimatevalidationreport(planet& world)
     {
         const climatephysics::HydrologySpinupDiagnostics& diagnostics =
             climatephysics::lastHydrologySpinupDiagnostics();
-        spinupfile << "cycles_completed,converged,relative_storage_change,relative_atmospheric_storage_change,relative_soil_storage_change,atmospheric_storage,soil_storage\n";
+        spinupfile << "cycles_completed,converged,relative_storage_change,relative_atmospheric_storage_change,relative_soil_storage_change,relative_snow_storage_change,relative_snow_cover_change,atmospheric_storage,soil_storage,snow_storage\n";
         spinupfile << fixed << setprecision(9)
             << diagnostics.cyclesCompleted << ','
             << (diagnostics.converged ? 1 : 0) << ','
             << diagnostics.relativeStorageChange << ','
             << diagnostics.relativeAtmosphericStorageChange << ','
             << diagnostics.relativeSoilStorageChange << ','
+            << diagnostics.relativeSnowStorageChange << ','
+            << diagnostics.relativeSnowCoverChange << ','
             << diagnostics.atmosphericStorage << ','
-            << diagnostics.soilStorage << '\n';
+            << diagnostics.soilStorage << ','
+            << diagnostics.snowStorage << '\n';
     }
 
     ofstream condensationfile(outputdir / "climate_condensation_activity.csv");
@@ -3993,7 +4000,7 @@ void exportclimatevalidationreport(planet& world)
         const auto& processes = climatephysics::lastPrecipitationProcessDiagnostics();
         const auto& budgets = climatephysics::lastAreaWeightedWaterBudgets();
         precipitationprocessfile
-            << "quarter,stratiform_precipitation_mm_area_weighted,orographic_precipitation_mm_area_weighted,convective_precipitation_mm_area_weighted,total_precipitation_mm_area_weighted,water_budget_precipitation_mm_area_weighted,component_budget_difference_mm_area_weighted,positive_moisture_flux_convergence_mm_area_weighted,negative_moisture_flux_convergence_mm_area_weighted,net_moisture_flux_convergence_mm_area_weighted\n";
+            << "quarter,stratiform_precipitation_mm_area_weighted,orographic_precipitation_mm_area_weighted,convective_precipitation_mm_area_weighted,total_precipitation_mm_area_weighted,water_budget_precipitation_mm_area_weighted,component_budget_difference_mm_area_weighted,reevaporated_precipitation_mm_area_weighted,snowfall_mm_area_weighted,upward_moisture_transfer_mm_area_weighted,downward_moisture_transfer_mm_area_weighted,cloud_fraction_area_weighted,positive_moisture_flux_convergence_mm_area_weighted,negative_moisture_flux_convergence_mm_area_weighted,net_moisture_flux_convergence_mm_area_weighted\n";
         precipitationprocessfile << fixed << setprecision(9);
 
         for (int season = 0; season < CLIMATESEASONCOUNT; season++)
@@ -4011,6 +4018,11 @@ void exportclimatevalidationreport(planet& world)
                 << processtotal << ','
                 << budgettotal << ','
                 << processtotal - budgettotal << ','
+                << process.reevaporatedPrecipitation << ','
+                << process.snowfall << ','
+                << process.upwardMoistureTransfer << ','
+                << process.downwardMoistureTransfer << ','
+                << process.cloudFractionAreaWeighted << ','
                 << process.positiveMoistureFluxConvergence << ','
                 << process.negativeMoistureFluxConvergence << ','
                 << process.positiveMoistureFluxConvergence +
@@ -4048,9 +4060,11 @@ void exportclimatevalidationreport(planet& world)
         for (int x = 0; x <= width; x++)
         {
             const bool sea = world.sea(x, y) == 1;
-            const int annualrain = world.averain(x, y);
-            const int januaryrain = world.janrain(x, y);
-            const int julyrain = world.julrain(x, y);
+            const double annualrain = world.averainfloat(x, y);
+            const double januaryrain =
+                world.seasonalrainfloat(seasonjanuary, x, y);
+            const double julyrain =
+                world.seasonalrainfloat(seasonjuly, x, y);
 
             row.cells++;
             row.annualrain = row.annualrain + annualrain;
