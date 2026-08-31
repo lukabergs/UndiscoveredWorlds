@@ -70,11 +70,24 @@ inline constexpr double earthLongwaveInterceptWm2 = 210.0;
 inline constexpr double longwaveSlopeWm2K = 2.0;
 inline constexpr double meridionalTransportWm2K = 3.0;
 inline constexpr double zonalLandOceanExchangeWm2K = 12.0;
-inline constexpr double landHeatCapacityJm2K = 4.0e7;
+inline constexpr double landHeatCapacityJm2K = 7.5e6;
+inline constexpr double landDeepLayerHeatCapacityJm2K = 3.0e7;
+inline constexpr double landDeepLayerCouplingWm2K = 1.5;
 inline constexpr double oceanMixedLayerHeatCapacityJm2K = 1.25e8;
 inline constexpr double landAlbedo = 0.20;
 inline constexpr double oceanAlbedo = 0.27;
 inline constexpr double snowAlbedo = 0.55;
+inline constexpr double permanentIceAlbedo = 0.80;
+inline constexpr double permanentIceWarmTransitionC = -4.0;
+inline constexpr double permanentIceColdTransitionC = -14.0;
+inline constexpr double iceSheetSeedMinimumElevationKm = 0.75;
+inline constexpr double iceSheetSeedFullElevationKm = 1.75;
+inline constexpr int localIceCouplingMaximumIterations = 80;
+inline constexpr double localIceCouplingRelaxation = 0.25;
+inline constexpr double localIceCouplingTolerance = 0.005;
+inline constexpr int localIceCouplingStableIterations = 5;
+inline constexpr double temperatureCalibrationRelaxation = 0.60;
+inline constexpr double temperatureCalibrationToleranceC = 0.002;
 inline constexpr double seaIceAlbedo = 0.58;
 inline constexpr double fractalTemperatureRangeC = 4.0;
 }
@@ -141,8 +154,8 @@ inline constexpr float topographyDeflectionFactor = 0.85f;
 inline constexpr float topographyChannelFactor = 0.45f;
 inline constexpr float topographyDownslopeAcceleration = 0.15f;
 inline constexpr float topographySpeedReduction = 0.18f;
-inline constexpr float topographyVerticalMotionWindScale = 18.0f;
-inline constexpr float topographyVerticalMotionStorageScale = 100.0f;
+inline constexpr float maximumOrographicParcelDisplacementMetres = 7000.0f;
+inline constexpr float topographyVerticalMotionStorageScale = 4.0f;
 }
 
 namespace circulation
@@ -150,6 +163,16 @@ namespace circulation
 inline constexpr int iterations = 24;
 inline constexpr float surfaceReferencePressurePa = 100000.0f;
 inline constexpr float upperReferencePressurePa = 50000.0f;
+inline constexpr float referenceTemperatureK = 288.0f;
+inline constexpr float troposphereHeightMetres = 10000.0f;
+inline constexpr float overturningMassRedistributionEfficiency = 0.060f;
+inline constexpr float stationaryThermalMassRedistributionEfficiency = 0.12f;
+inline constexpr float minimumOverturningPressureAmplitudeHpa = 4.0f;
+inline constexpr float maximumOverturningPressureAmplitudeHpa = 18.0f;
+inline constexpr float minimumHadleyHalfWidthDegrees = 10.0f;
+inline constexpr float maximumHadleyHalfWidthDegrees = 60.0f;
+inline constexpr float maximumThermalEquatorShiftHadleyFraction = 0.65f;
+inline constexpr int zonalTemperatureSmoothingIterations = 4;
 inline constexpr float upperLayerDragTimeSeconds = 86400.0f;
 inline constexpr int thermalHeightSmoothingIterations = 10;
 inline constexpr int divergenceSmoothingIterations = 6;
@@ -158,14 +181,19 @@ inline constexpr float timeStepDays = 0.125f;
 inline constexpr float layerPressureDepthHpa = 500.0f;
 inline constexpr float surfacePressureReferenceHpa = 1000.0f;
 inline constexpr float surfacePressureRestoringTimeDays = 6.0f;
+inline constexpr float divergentSurfacePressureTendencyResponse = 0.0f;
 inline constexpr float maximumSurfacePressureTendencyHpaPerDay = 12.0f;
 inline constexpr float maximumSurfacePressureAnomalyHpa = 35.0f;
+inline constexpr int maximumResolvedStationaryZonalWavenumber = 8;
+inline constexpr int maximumResolvedStationaryMeridionalWavenumber = 24;
+inline constexpr float unresolvedCirculationGradientRetention = 0.25f;
 inline constexpr float upperHeightRelaxation = 0.22f;
 inline constexpr float upperHeightDiffusion = 0.16f;
 inline constexpr int windSmoothingIterations = 2;
 inline constexpr float verticalRelaxation = 0.24f;
+inline constexpr float verticalDivergenceResponse = 0.32f;
 inline constexpr float surfacePressureDiffusion = 0.30f;
-inline constexpr float maximumVerticalVelocity = 120.0f;
+inline constexpr float maximumVerticalVelocity = 100.0f;
 inline constexpr float verticalVelocityStorageScale = 100.0f;
 }
 
@@ -173,23 +201,36 @@ namespace moistureadvection
 {
 inline constexpr int iterations = 30;
 inline constexpr int minimumSpinupCycles = 2;
-inline constexpr int maximumSpinupCycles = 4;
+inline constexpr int maximumSpinupCycles = 8;
 inline constexpr float spinupRelativeStorageTolerance = 0.005f;
 inline constexpr float landSoilMoistureCapacity = 80.0f;
-inline constexpr float landInfiltrationFraction = 0.65f;
+inline constexpr float initialSoilMoistureFraction = 0.5f;
+inline constexpr float landInfiltrationFraction = 1.0f;
 inline constexpr float advectionTimeStepSeconds = 86400.0f;
 inline constexpr float surfaceExchangeCoefficient = 0.0013f;
 inline constexpr float minimumSurfaceWind = 1.0f;
-inline constexpr float landSurfaceResistance = 0.45f;
-inline constexpr float upperWindTransportFraction = 0.20f;
+inline constexpr float landSurfaceResistance = 1.0f;
+inline constexpr float soilMoistureCriticalFraction = 0.5f;
+inline constexpr float soilMoistureStressExponent = 0.5f;
+inline constexpr float upperWindTransportFraction = 0.0f;
+inline constexpr float transientEddyMixingLengthMetres = 25000.0f;
+inline constexpr float maximumTransientEddyDiffusivityM2S = 250000.0f;
+inline constexpr float transientEddyMinimumLatitudeDegrees = 0.0f;
+inline constexpr float transientEddyFullStrengthLatitudeDegrees = 0.0f;
 inline constexpr float referencePlanetRadiusMetres = 6371000.0f;
 inline constexpr float maximumAdvectionCellsPerStep = 48.0f;
 inline constexpr float transportMaxFraction = 0.94f;
-inline constexpr float condensationEfficiency = 0.82f;
+inline constexpr float convectiveConvergenceCentreWeight = 0.50f;
+inline constexpr float stratiformCriticalRelativeHumidity = 0.80f;
+inline constexpr float condensationConversionTimeDays = 2.0f;
+inline constexpr float convectiveResidualRelativeHumidity = 0.60f;
+inline constexpr float convectiveConversionEfficiency = 0.75f;
+inline constexpr float convectiveActivationTemperatureC = 8.0f;
+inline constexpr float convectiveFullStrengthTemperatureC = 24.0f;
 inline constexpr float dynamicVerticalCooling = 0.025f;
-inline constexpr float topographicUpliftCooling = 0.80f;
+inline constexpr float topographicUpliftCoolingCPerMetre = 0.0040f;
 inline constexpr float dynamicSubsidenceWarming = 0.018f;
-inline constexpr float topographicDescentWarming = 0.45f;
+inline constexpr float topographicDescentWarmingCPerMetre = 0.0049f;
 inline constexpr float maximumParcelTemperatureAdjustment = 8.0f;
 inline constexpr float rainfallScale = 1.0f;
 inline constexpr float seaIceFactor = 0.3f;
@@ -406,11 +447,6 @@ inline constexpr int tundraMaxTemperature = 12;
 inline constexpr float tundraWarmFactor = 10.0f;
 inline constexpr float tundraElevationDivisor = 400.0f;
 inline constexpr int tundraClampedMaxTemperature = 13;
-}
-
-namespace koppen
-{
-inline constexpr float continentalWinterDrynessDivisor = 10.0f;
 }
 
 namespace saltlakes

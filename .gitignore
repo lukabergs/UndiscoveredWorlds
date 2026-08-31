@@ -50,6 +50,8 @@ vcpkg-manifest-install.log
 *.so
 *.a
 *.dylib
+__pycache__/
+*.py[cod]
 
 # ==========================================
 # OS Specific
@@ -66,3 +68,4 @@ saved_worlds/
 # Local notes or scratchpad files
 notes.txt
 temp/extra/
+.codex_tmp/
