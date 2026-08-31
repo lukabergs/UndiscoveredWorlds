@@ -56,8 +56,10 @@ set(SOURCES
     classes.cpp
     climate_atmosphere.cpp
     climate_energy.cpp
+    climate_hydrology.cpp
     climate_physics.cpp
     climate_reference.cpp
+    climate_tiff.cpp
     climate_ocean.cpp
     fastlem_mountains.cpp
     globalclimate.cpp
@@ -126,6 +128,14 @@ if(BUILD_TESTING)
     set_target_properties(climate_physics_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
     add_test(NAME climate_physics_tests COMMAND climate_physics_tests)
 
+    add_executable(climate_hydrology_tests
+        tests/climate_hydrology_tests.cpp
+        climate_hydrology.cpp
+    )
+    target_include_directories(climate_hydrology_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_hydrology_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_hydrology_tests COMMAND climate_hydrology_tests)
+
     add_executable(climate_reference_tests
         tests/climate_reference_tests.cpp
         climate_reference.cpp
@@ -149,4 +159,19 @@ if(BUILD_TESTING)
     target_include_directories(climate_atmosphere_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     set_target_properties(climate_atmosphere_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
     add_test(NAME climate_atmosphere_tests COMMAND climate_atmosphere_tests)
+
+    add_executable(climate_koppen_tests
+        tests/climate_koppen_tests.cpp
+    )
+    target_include_directories(climate_koppen_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_koppen_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_koppen_tests COMMAND climate_koppen_tests)
+
+    add_executable(climate_tiff_tests
+        tests/climate_tiff_tests.cpp
+        climate_tiff.cpp
+    )
+    target_include_directories(climate_tiff_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_tiff_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_tiff_tests COMMAND climate_tiff_tests)
 endif()

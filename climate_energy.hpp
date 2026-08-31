@@ -19,6 +19,14 @@ struct AnnualEnergyBudget
     double areaWeightedLandTemperatureC = 0.0;
     double areaWeightedOceanTemperatureC = 0.0;
     double areaWeightedLandElevationCoolingC = 0.0;
+    double areaWeightedPermanentLandIceFraction = 0.0;
+    double localIceCouplingMaximumRowResidual = 0.0;
+    double localIceCouplingTemperatureErrorC = 0.0;
+    double northern5070WarmestTemperatureC = 0.0;
+    double southern6090WarmestTemperatureC = 0.0;
+    double southern6090IcecapThermalFraction = 0.0;
+    int localIceCouplingIterations = 0;
+    bool localIceCouplingConverged = false;
 };
 
 float solarDeclinationRadians(float dayOfYear, float obliquityDegrees);
@@ -37,6 +45,7 @@ float implicitSlabTemperatureStep(
     float transportMeanTemperatureC,
     float heatCapacityJm2K,
     float timeStepSeconds);
+float permanentLandIceFraction(float warmestSeasonTemperatureC);
 
 void createSurfaceEnergyBalanceTemperatureMap(
     planet& world,

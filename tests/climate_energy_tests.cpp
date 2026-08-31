@@ -56,5 +56,15 @@ int main()
     const float netFlux = absorbed - intercept - slope * land + transport * (14.0f - land);
     expect(std::abs(storage - netFlux) < 0.001f, "implicit slab step must close its energy equation");
 
+    expect(
+        climateenergy::permanentLandIceFraction(-14.0f) == 1.0f,
+        "land whose warmest season reaches the cold transition must retain full ice cover");
+    expect(
+        std::abs(climateenergy::permanentLandIceFraction(-9.0f) - 0.5f) < 1.0e-6f,
+        "the warm-season permanent-ice transition midpoint must have half coverage");
+    expect(
+        climateenergy::permanentLandIceFraction(-4.0f) == 0.0f,
+        "land whose warmest season reaches the warm transition must lose permanent ice");
+
     return failures == 0 ? 0 : 1;
 }

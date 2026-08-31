@@ -14,7 +14,13 @@ constexpr float dryAirGasConstantJoulesPerKilogramKelvin = 287.05f;
 constexpr float activeMoistureColumnFraction = 0.28f;
 
 std::array<WaterBudget, CLIMATESEASONCOUNT> waterBudgets{};
+std::array<WaterBudget, CLIMATESEASONCOUNT> areaWeightedWaterBudgets{};
 HydrologySpinupDiagnostics hydrologySpinupDiagnostics{};
+PrecipitationDistributionDiagnostics precipitationDistributionDiagnostics{};
+std::array<CondensationActivityDiagnostics, CLIMATESEASONCOUNT>
+    condensationActivityDiagnostics{};
+std::array<PrecipitationProcessDiagnostics, CLIMATESEASONCOUNT>
+    precipitationProcessDiagnostics{};
 }
 
 double WaterBudget::residual() const
@@ -57,9 +63,9 @@ float saturationSpecificHumidity(float temperatureC, float pressureHpa)
         std::max(1.0f, pressureHpa - 0.378f * saturationPressureHpa);
 }
 
-float saturationColumnWater(float temperatureC, float elevationAboveSeaLevelMetres)
+float saturationColumnWaterAtPressure(float temperatureC, float surfacePressureHpa)
 {
-    const float pressureHpa = surfacePressureHpa(elevationAboveSeaLevelMetres);
+    const float pressureHpa = std::max(1.0f, surfacePressureHpa);
     const float specificHumidity = saturationSpecificHumidity(temperatureC, pressureHpa);
     const float columnAirMass = pressureHpa * 100.0f / gravityMetresPerSecondSquared;
 
@@ -68,15 +74,22 @@ float saturationColumnWater(float temperatureC, float elevationAboveSeaLevelMetr
         specificHumidity * columnAirMass * activeMoistureColumnFraction);
 }
 
-float bulkAerodynamicEvaporationMm(
+float saturationColumnWater(float temperatureC, float elevationAboveSeaLevelMetres)
+{
+    return saturationColumnWaterAtPressure(
+        temperatureC,
+        surfacePressureHpa(elevationAboveSeaLevelMetres));
+}
+
+float bulkAerodynamicEvaporationMmAtPressure(
     float temperatureC,
-    float elevationAboveSeaLevelMetres,
+    float surfacePressureHpa,
     float windSpeedMetresPerSecond,
     float relativeHumidity,
     float timeStepSeconds,
     float transferCoefficient)
 {
-    const float pressureHpa = surfacePressureHpa(elevationAboveSeaLevelMetres);
+    const float pressureHpa = std::max(1.0f, surfacePressureHpa);
     const float absoluteTemperatureKelvin = std::max(150.0f, temperatureC + 273.15f);
     const float airDensity = pressureHpa * 100.0f /
         (dryAirGasConstantJoulesPerKilogramKelvin * absoluteTemperatureKelvin);
@@ -87,6 +100,68 @@ float bulkAerodynamicEvaporationMm(
         airDensity * std::max(0.0f, transferCoefficient) *
         std::max(0.0f, windSpeedMetresPerSecond) * humidityDeficit *
         std::max(0.0f, timeStepSeconds));
+}
+
+float bulkAerodynamicEvaporationMm(
+    float temperatureC,
+    float elevationAboveSeaLevelMetres,
+    float windSpeedMetresPerSecond,
+    float relativeHumidity,
+    float timeStepSeconds,
+    float transferCoefficient)
+{
+    return bulkAerodynamicEvaporationMmAtPressure(
+        temperatureC,
+        surfacePressureHpa(elevationAboveSeaLevelMetres),
+        windSpeedMetresPerSecond,
+        relativeHumidity,
+        timeStepSeconds,
+        transferCoefficient);
+}
+
+float transientEddyDiffusivityM2S(
+    float surfaceUWindMetresPerSecond,
+    float surfaceVWindMetresPerSecond,
+    float upperUWindMetresPerSecond,
+    float upperVWindMetresPerSecond,
+    float latitudeDegrees,
+    float mixingLengthMetres,
+    float maximumDiffusivityM2S,
+    float minimumLatitudeDegrees,
+    float fullStrengthLatitudeDegrees)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    const float ushear = upperUWindMetresPerSecond - surfaceUWindMetresPerSecond;
+    const float vshear = upperVWindMetresPerSecond - surfaceVWindMetresPerSecond;
+    const float shearspeed = std::sqrt(ushear * ushear + vshear * vshear);
+    const float absolutelatitude = std::abs(latitudeDegrees);
+    const float latituderange = std::max(0.001f, fullStrengthLatitudeDegrees - minimumLatitudeDegrees);
+    const float latitudephase = std::clamp(
+        (absolutelatitude - minimumLatitudeDegrees) / latituderange,
+        0.0f,
+        1.0f);
+    const float baroclinicweight = latitudephase * latitudephase * (3.0f - 2.0f * latitudephase);
+    const float rotationweight = std::abs(std::sin(latitudeDegrees * pi / 180.0f)) * baroclinicweight;
+    return std::clamp(
+        std::max(0.0f, mixingLengthMetres) * shearspeed * rotationweight,
+        0.0f,
+        std::max(0.0f, maximumDiffusivityM2S));
+}
+
+float relaxedExcessCondensationAmount(
+    float availableColumnWater,
+    float criticalColumnWater,
+    float timeStepSeconds,
+    float conversionTimeSeconds)
+{
+    if (timeStepSeconds <= 0.0f || conversionTimeSeconds <= 0.0f)
+        return 0.0f;
+
+    const float excessWater = std::max(
+        0.0f,
+        availableColumnWater - std::max(0.0f, criticalColumnWater));
+    const float convertedfraction = -std::expm1(-timeStepSeconds / conversionTimeSeconds);
+    return std::clamp(excessWater * convertedfraction, 0.0f, std::max(0.0f, availableColumnWater));
 }
 
 void setLastWaterBudget(int season, const WaterBudget& budget)
@@ -100,6 +175,17 @@ const std::array<WaterBudget, CLIMATESEASONCOUNT>& lastWaterBudgets()
     return waterBudgets;
 }
 
+void setLastAreaWeightedWaterBudget(int season, const WaterBudget& budget)
+{
+    if (season >= 0 && season < CLIMATESEASONCOUNT)
+        areaWeightedWaterBudgets[season] = budget;
+}
+
+const std::array<WaterBudget, CLIMATESEASONCOUNT>& lastAreaWeightedWaterBudgets()
+{
+    return areaWeightedWaterBudgets;
+}
+
 void setLastHydrologySpinupDiagnostics(const HydrologySpinupDiagnostics& diagnostics)
 {
     hydrologySpinupDiagnostics = diagnostics;
@@ -108,5 +194,43 @@ void setLastHydrologySpinupDiagnostics(const HydrologySpinupDiagnostics& diagnos
 const HydrologySpinupDiagnostics& lastHydrologySpinupDiagnostics()
 {
     return hydrologySpinupDiagnostics;
+}
+
+void setLastPrecipitationDistributionDiagnostics(const PrecipitationDistributionDiagnostics& diagnostics)
+{
+    precipitationDistributionDiagnostics = diagnostics;
+}
+
+const PrecipitationDistributionDiagnostics& lastPrecipitationDistributionDiagnostics()
+{
+    return precipitationDistributionDiagnostics;
+}
+
+void setLastCondensationActivityDiagnostics(
+    int season,
+    const CondensationActivityDiagnostics& diagnostics)
+{
+    if (season >= 0 && season < CLIMATESEASONCOUNT)
+        condensationActivityDiagnostics[season] = diagnostics;
+}
+
+const std::array<CondensationActivityDiagnostics, CLIMATESEASONCOUNT>&
+lastCondensationActivityDiagnostics()
+{
+    return condensationActivityDiagnostics;
+}
+
+void setLastPrecipitationProcessDiagnostics(
+    int season,
+    const PrecipitationProcessDiagnostics& diagnostics)
+{
+    if (season >= 0 && season < CLIMATESEASONCOUNT)
+        precipitationProcessDiagnostics[season] = diagnostics;
+}
+
+const std::array<PrecipitationProcessDiagnostics, CLIMATESEASONCOUNT>&
+lastPrecipitationProcessDiagnostics()
+{
+    return precipitationProcessDiagnostics;
 }
 }

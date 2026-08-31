@@ -36,6 +36,10 @@ int main()
     const float freezingColumn = climatephysics::saturationColumnWater(0.0f, 0.0f);
     expect(tropicalColumn > 60.0f && tropicalColumn < 90.0f, "tropical column water is outside its physical sanity range");
     expect(freezingColumn > 8.0f && freezingColumn < 14.0f, "freezing column water is outside its physical sanity range");
+    expect(
+        climatephysics::saturationColumnWaterAtPressure(20.0f, 980.0f) >
+            climatephysics::saturationColumnWaterAtPressure(20.0f, 1030.0f),
+        "column saturation capacity must respond to surface pressure");
 
     const float dryEvaporation = climatephysics::bulkAerodynamicEvaporationMm(
         20.0f, 0.0f, 5.0f, 0.0f, 86400.0f, 0.0013f);
@@ -46,6 +50,32 @@ int main()
     expect(
         climatephysics::bulkAerodynamicEvaporationMm(20.0f, 0.0f, 5.0f, 1.0f, 86400.0f, 0.0013f) == 0.0f,
         "saturated air must suppress evaporation");
+
+    const float equatorialDiffusivity = climatephysics::transientEddyDiffusivityM2S(
+        0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 25000.0f, 250000.0f, 20.0f, 45.0f);
+    const float midlatitudeDiffusivity = climatephysics::transientEddyDiffusivityM2S(
+        0.0f, 0.0f, 20.0f, 0.0f, 45.0f, 25000.0f, 250000.0f, 20.0f, 45.0f);
+    const float subtropicalDiffusivity = climatephysics::transientEddyDiffusivityM2S(
+        0.0f, 0.0f, 20.0f, 0.0f, 15.0f, 25000.0f, 250000.0f, 20.0f, 45.0f);
+    expect(equatorialDiffusivity == 0.0f, "rotational eddy closure must vanish at the equator");
+    expect(midlatitudeDiffusivity > 0.0f, "vertical shear must generate midlatitude eddy mixing");
+    expect(subtropicalDiffusivity == 0.0f, "baroclinic eddy mixing must stay outside the tropical belt");
+    expect(midlatitudeDiffusivity <= 250000.0f, "eddy diffusivity must respect its physical cap");
+    expect(
+        climatephysics::transientEddyDiffusivityM2S(
+            5.0f, -2.0f, 5.0f, -2.0f, 45.0f, 25000.0f, 250000.0f, 20.0f, 45.0f) == 0.0f,
+        "eddy mixing must vanish without vertical wind shear");
+
+    const float belowCriticalCondensation = climatephysics::relaxedExcessCondensationAmount(
+        10.0f, 12.0f, 86400.0f, 172800.0f);
+    const float excessCondensation = climatephysics::relaxedExcessCondensationAmount(
+        20.0f, 10.0f, 86400.0f, 172800.0f);
+    expect(
+        belowCriticalCondensation == 0.0f,
+        "sub-critical atmospheric water must not produce unconditional desert drizzle");
+    expect(
+        std::abs(excessCondensation - 3.93469f) < 0.0001f,
+        "excess atmospheric water must relax on the configured two-day e-folding timescale");
 
     climatephysics::WaterBudget closed;
     closed.oceanEvaporation = 100.0;

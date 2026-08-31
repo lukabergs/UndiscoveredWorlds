@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "climate_atmosphere.hpp"
+#include "climate_hydrology.hpp"
 #include "climate_physics.hpp"
 #include "generation_tuning.hpp"
 #include "planet.hpp"
@@ -18,6 +19,239 @@ namespace
 using floatgrid = vector<vector<float>>;
 
 constexpr std::array<float, CLIMATESEASONCOUNT> seasonlatitudephase = { -1.0f, 0.0f, 1.0f, 0.0f };
+
+struct circulationfloatcache
+{
+    planet* source = nullptr;
+    int width = -1;
+    int height = -1;
+    std::array<floatgrid, CLIMATESEASONCOUNT> pressure;
+    std::array<floatgrid, CLIMATESEASONCOUNT> upperheight;
+    std::array<bool, CLIMATESEASONCOUNT> populated{};
+
+    void reset(planet& world)
+    {
+        source = &world;
+        width = world.width();
+        height = world.height();
+        populated.fill(false);
+
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        {
+            pressure[season].clear();
+            upperheight[season].clear();
+        }
+    }
+
+    bool completeFor(const planet& world) const
+    {
+        return source == &world && width == world.width() && height == world.height() &&
+            std::all_of(populated.begin(), populated.end(), [](bool value) { return value; });
+    }
+
+    void clear()
+    {
+        source = nullptr;
+        width = -1;
+        height = -1;
+        populated.fill(false);
+
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        {
+            pressure[season].clear();
+            upperheight[season].clear();
+        }
+    }
+};
+
+circulationfloatcache circulationcache;
+
+class stationaryspectralprojector
+{
+public:
+    stationaryspectralprojector(
+        int longitudecellcount,
+        int latitudecellcount,
+        int maximumzonalwavenumber,
+        int maximummeridionalwavenumber)
+        : longitudecellcount_(longitudecellcount),
+          latitudecellcount_(latitudecellcount),
+          maximumzonalwavenumber_(std::clamp(
+              maximumzonalwavenumber,
+              0,
+              std::max(0, longitudecellcount / 2 - 1))),
+          maximummeridionalwavenumber_(std::clamp(
+              maximummeridionalwavenumber,
+              0,
+              std::max(0, latitudecellcount - 1))),
+          zonalcosine_(
+              maximumzonalwavenumber_ + 1,
+              vector<float>(longitudecellcount_, 0.0f)),
+          zonalsine_(
+              maximumzonalwavenumber_ + 1,
+              vector<float>(longitudecellcount_, 0.0f)),
+          meridionalcosine_(
+              maximummeridionalwavenumber_ + 1,
+              vector<float>(latitudecellcount_, 0.0f))
+    {
+        constexpr float pi = 3.14159265358979323846f;
+
+        for (int wavenumber = 1; wavenumber <= maximumzonalwavenumber_; wavenumber++)
+        {
+            for (int x = 0; x < longitudecellcount_; x++)
+            {
+                const float phase = 2.0f * pi * static_cast<float>(wavenumber * x) /
+                    static_cast<float>(longitudecellcount_);
+                zonalcosine_[wavenumber][x] = std::cos(phase);
+                zonalsine_[wavenumber][x] = std::sin(phase);
+            }
+        }
+
+        for (int wavenumber = 1; wavenumber <= maximummeridionalwavenumber_; wavenumber++)
+        {
+            for (int y = 0; y < latitudecellcount_; y++)
+            {
+                const float phase = pi * static_cast<float>(wavenumber) *
+                    (static_cast<float>(y) + 0.5f) /
+                    static_cast<float>(latitudecellcount_);
+                meridionalcosine_[wavenumber][y] = std::cos(phase);
+            }
+        }
+    }
+
+    void project(floatgrid& field) const
+    {
+        if (longitudecellcount_ <= 0 || latitudecellcount_ <= 0 ||
+            field.size() != static_cast<size_t>(longitudecellcount_) ||
+            field.front().size() != static_cast<size_t>(latitudecellcount_))
+        {
+            return;
+        }
+
+        const float inverselongitudecellcount =
+            1.0f / static_cast<float>(longitudecellcount_);
+        vector<float> zonalmean(latitudecellcount_, 0.0f);
+        vector<vector<float>> cosinecoefficient(
+            maximumzonalwavenumber_ + 1,
+            vector<float>(latitudecellcount_, 0.0f));
+        vector<vector<float>> sinecoefficient(
+            maximumzonalwavenumber_ + 1,
+            vector<float>(latitudecellcount_, 0.0f));
+
+        parallelforrows(0, latitudecellcount_ - 1, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                double mean = 0.0;
+
+                for (int x = 0; x < longitudecellcount_; x++)
+                    mean += field[x][y];
+
+                zonalmean[y] = static_cast<float>(mean * inverselongitudecellcount);
+
+                for (int wavenumber = 1; wavenumber <= maximumzonalwavenumber_; wavenumber++)
+                {
+                    double cosinesum = 0.0;
+                    double sinesum = 0.0;
+
+                    for (int x = 0; x < longitudecellcount_; x++)
+                    {
+                        cosinesum += static_cast<double>(field[x][y]) *
+                            zonalcosine_[wavenumber][x];
+                        sinesum += static_cast<double>(field[x][y]) *
+                            zonalsine_[wavenumber][x];
+                    }
+
+                    cosinecoefficient[wavenumber][y] = static_cast<float>(
+                        2.0 * cosinesum * inverselongitudecellcount);
+                    sinecoefficient[wavenumber][y] = static_cast<float>(
+                        2.0 * sinesum * inverselongitudecellcount);
+                }
+            }
+        });
+
+        projectmeridionally(zonalmean);
+
+        for (int wavenumber = 1; wavenumber <= maximumzonalwavenumber_; wavenumber++)
+        {
+            projectmeridionally(cosinecoefficient[wavenumber]);
+            projectmeridionally(sinecoefficient[wavenumber]);
+        }
+
+        parallelforrows(0, latitudecellcount_ - 1, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int x = 0; x < longitudecellcount_; x++)
+                {
+                    float projected = zonalmean[y];
+
+                    for (int wavenumber = 1;
+                        wavenumber <= maximumzonalwavenumber_;
+                        wavenumber++)
+                    {
+                        projected += cosinecoefficient[wavenumber][y] *
+                                zonalcosine_[wavenumber][x] +
+                            sinecoefficient[wavenumber][y] *
+                                zonalsine_[wavenumber][x];
+                    }
+
+                    field[x][y] = projected;
+                }
+            }
+        });
+    }
+
+private:
+    void projectmeridionally(vector<float>& values) const
+    {
+        if (values.size() != static_cast<size_t>(latitudecellcount_))
+            return;
+
+        const double inversecellcount = 1.0 / static_cast<double>(latitudecellcount_);
+        vector<float> coefficient(maximummeridionalwavenumber_ + 1, 0.0f);
+        double mean = 0.0;
+
+        for (float value : values)
+            mean += value;
+
+        coefficient[0] = static_cast<float>(mean * inversecellcount);
+
+        for (int wavenumber = 1;
+            wavenumber <= maximummeridionalwavenumber_;
+            wavenumber++)
+        {
+            double sum = 0.0;
+
+            for (int y = 0; y < latitudecellcount_; y++)
+                sum += static_cast<double>(values[y]) * meridionalcosine_[wavenumber][y];
+
+            coefficient[wavenumber] = static_cast<float>(2.0 * sum * inversecellcount);
+        }
+
+        for (int y = 0; y < latitudecellcount_; y++)
+        {
+            float projected = coefficient[0];
+
+            for (int wavenumber = 1;
+                wavenumber <= maximummeridionalwavenumber_;
+                wavenumber++)
+            {
+                projected += coefficient[wavenumber] * meridionalcosine_[wavenumber][y];
+            }
+
+            values[y] = projected;
+        }
+    }
+
+    int longitudecellcount_ = 0;
+    int latitudecellcount_ = 0;
+    int maximumzonalwavenumber_ = 0;
+    int maximummeridionalwavenumber_ = 0;
+    vector<vector<float>> zonalcosine_;
+    vector<vector<float>> zonalsine_;
+    vector<vector<float>> meridionalcosine_;
+};
 
 int wrapx(int x, int width)
 {
@@ -33,6 +267,227 @@ float latitudeforrow(int y, int height)
         return 0.0f;
 
     return 90.0f - (180.0f * static_cast<float>(y) / static_cast<float>(height));
+}
+
+double rowareaweight(int y, int height)
+{
+    if (height <= 0)
+        return 0.0;
+
+    constexpr double pi = 3.14159265358979323846;
+    const double latitude = static_cast<double>(latitudeforrow(y, height)) * pi / 180.0;
+    const double halfstep = 0.5 * pi / static_cast<double>(height);
+    const double north = std::min(0.5 * pi, latitude + halfstep);
+    const double south = std::max(-0.5 * pi, latitude - halfstep);
+
+    return (std::sin(north) - std::sin(south)) / (2.0 * std::sin(halfstep));
+}
+
+float eddyexchangefraction(
+    float diffusivitym2s,
+    double edgelengthmetres,
+    double celldistancemetres,
+    double firstcellareametres2,
+    double secondcellareametres2,
+    float timestepseconds)
+{
+    if (diffusivitym2s <= 0.0f || edgelengthmetres <= 0.0 || celldistancemetres <= 0.0 ||
+        firstcellareametres2 <= 0.0 || secondcellareametres2 <= 0.0 || timestepseconds <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const double coupling = static_cast<double>(diffusivitym2s) *
+        edgelengthmetres / celldistancemetres;
+    const double decayrate = coupling *
+        (1.0 / firstcellareametres2 + 1.0 / secondcellareametres2);
+    return static_cast<float>(std::clamp(
+        1.0 - std::exp(-decayrate * static_cast<double>(timestepseconds)),
+        0.0,
+        1.0));
+}
+
+void exchangeeddymoisture(
+    float& first,
+    float& second,
+    double firstarea,
+    double secondarea,
+    float exchangefraction)
+{
+    if (exchangefraction <= 0.0f || firstarea <= 0.0 || secondarea <= 0.0)
+        return;
+
+    const double equilibrium =
+        (static_cast<double>(first) * firstarea + static_cast<double>(second) * secondarea) /
+        (firstarea + secondarea);
+    first = static_cast<float>(first + (equilibrium - first) * exchangefraction);
+    second = static_cast<float>(second + (equilibrium - second) * exchangefraction);
+}
+
+void createeddyexchangefractions(
+    planet& world,
+    const floatgrid& surfacewindu,
+    const floatgrid& surfacewindv,
+    const floatgrid& upperwindu,
+    const floatgrid& upperwindv,
+    float timestepseconds,
+    floatgrid& zonalfractions,
+    floatgrid& meridionalfractions)
+{
+    constexpr double pi = 3.14159265358979323846;
+    const int width = world.width();
+    const int height = world.height();
+    const double radius = tuning::climate::moistureadvection::referencePlanetRadiusMetres;
+    const double equatorialcellwidth = 2.0 * pi * radius / static_cast<double>(width + 1);
+    const double meridionalcellheight = pi * radius / static_cast<double>(height + 1);
+    const double equatorialcellarea = equatorialcellwidth * meridionalcellheight;
+    floatgrid diffusivity(width + 1, vector<float>(height + 1, 0.0f));
+    vector<double> rowareas(height + 1, 0.0);
+    vector<double> zonalcelldistances(height + 1, 0.0);
+
+    for (int y = 0; y <= height; y++)
+    {
+        constexpr double degreestoradians = pi / 180.0;
+        const float latitude = latitudeforrow(y, height);
+        rowareas[y] = equatorialcellarea * rowareaweight(y, height);
+        zonalcelldistances[y] = equatorialcellwidth *
+            std::max(0.05, std::abs(std::cos(static_cast<double>(latitude) * degreestoradians)));
+
+        for (int x = 0; x <= width; x++)
+        {
+            diffusivity[x][y] = climatephysics::transientEddyDiffusivityM2S(
+                surfacewindu[x][y],
+                surfacewindv[x][y],
+                upperwindu[x][y],
+                upperwindv[x][y],
+                latitude,
+                tuning::climate::moistureadvection::transientEddyMixingLengthMetres,
+                tuning::climate::moistureadvection::maximumTransientEddyDiffusivityM2S,
+                tuning::climate::moistureadvection::transientEddyMinimumLatitudeDegrees,
+                tuning::climate::moistureadvection::transientEddyFullStrengthLatitudeDegrees);
+        }
+    }
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                const int east = x < width ? x + 1 : 0;
+                const float edgediffusivity = 0.5f * (diffusivity[x][y] + diffusivity[east][y]);
+                zonalfractions[x][y] = eddyexchangefraction(
+                    edgediffusivity,
+                    meridionalcellheight,
+                    zonalcelldistances[y],
+                    rowareas[y],
+                    rowareas[y],
+                    timestepseconds);
+            }
+        }
+    });
+
+    parallelforrows(0, width, [&](int startcolumn, int endcolumn)
+    {
+        for (int x = startcolumn; x <= endcolumn; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                if (y == 0 || y == height - 1)
+                {
+                    meridionalfractions[x][y] = 0.0f;
+                    continue;
+                }
+
+                const float edgediffusivity = 0.5f * (diffusivity[x][y] + diffusivity[x][y + 1]);
+                const double edgelength = equatorialcellwidth *
+                    0.5 * (rowareaweight(y, height) + rowareaweight(y + 1, height));
+                meridionalfractions[x][y] = eddyexchangefraction(
+                    edgediffusivity,
+                    edgelength,
+                    meridionalcellheight,
+                    rowareas[y],
+                    rowareas[y + 1],
+                    timestepseconds);
+            }
+        }
+    });
+}
+
+void applyeddyexchange(
+    planet& world,
+    floatgrid& moisture,
+    const floatgrid& zonalfractions,
+    const floatgrid& meridionalfractions)
+{
+    const int width = world.width();
+    const int height = world.height();
+    vector<double> rowareas(height + 1, 0.0);
+
+    for (int y = 0; y <= height; y++)
+        rowareas[y] = rowareaweight(y, height);
+
+    auto applyzonal = [&](bool halfstep)
+    {
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int parity = 0; parity < 2; parity++)
+                {
+                    for (int x = parity; x < width; x += 2)
+                    {
+                        float fraction = zonalfractions[x][y];
+
+                        if (halfstep)
+                            fraction = 1.0f - std::sqrt(std::max(0.0f, 1.0f - fraction));
+
+                        exchangeeddymoisture(
+                            moisture[x][y],
+                            moisture[x + 1][y],
+                            rowareas[y],
+                            rowareas[y],
+                            fraction);
+                    }
+                }
+
+                float wrapfraction = zonalfractions[width][y];
+
+                if (halfstep)
+                    wrapfraction = 1.0f - std::sqrt(std::max(0.0f, 1.0f - wrapfraction));
+
+                exchangeeddymoisture(
+                    moisture[width][y],
+                    moisture[0][y],
+                    rowareas[y],
+                    rowareas[y],
+                    wrapfraction);
+            }
+        });
+    };
+
+    applyzonal(true);
+
+    parallelforrows(0, width, [&](int startcolumn, int endcolumn)
+    {
+        for (int x = startcolumn; x <= endcolumn; x++)
+        {
+            for (int parity = 0; parity < 2; parity++)
+            {
+                for (int y = 1 + parity; y < height - 1; y += 2)
+                {
+                    exchangeeddymoisture(
+                        moisture[x][y],
+                        moisture[x][y + 1],
+                        rowareas[y],
+                        rowareas[y + 1],
+                        meridionalfractions[x][y]);
+                }
+            }
+        }
+    });
+
+    applyzonal(true);
 }
 
 float coastalweight(int distance, int maxdistance)
@@ -338,9 +793,19 @@ void storeterrainverticalmotion(planet& world, int season, const floatgrid& macr
 
                 const int xwest = wrapx(x - 1, width);
                 const int xeast = wrapx(x + 1, width);
-                const float gradx = (macroterrain[xeast][y] - macroterrain[xwest][y]) / 2.0f;
-                const float grady = (macroterrain[x][ysouth] - macroterrain[x][ynorth]) / 2.0f;
-                const float gradmag = std::sqrt(gradx * gradx + grady * grady);
+                const float latitude = latitudeforrow(y, height);
+                const auto spacing = climateatmosphere::cellSpacingMetres(
+                    latitude,
+                    width + 1,
+                    height + 1,
+                    tuning::climate::atmosphere::referencePlanetRadiusMetres);
+                const float elevationchangeeast =
+                    (macroterrain[xeast][y] - macroterrain[xwest][y]) / 2.0f;
+                const float elevationchangesouth =
+                    (macroterrain[x][ysouth] - macroterrain[x][ynorth]) / 2.0f;
+                const float gradmag = std::sqrt(
+                    elevationchangeeast * elevationchangeeast +
+                    elevationchangesouth * elevationchangesouth);
                 const float terrainhere = macroterrain[x][y];
 
                 if (gradmag < tuning::climate::atmosphere::topographyMinimumRelief && terrainhere < tuning::climate::atmosphere::topographyMinimumRelief)
@@ -350,33 +815,46 @@ void storeterrainverticalmotion(planet& world, int season, const floatgrid& macr
                     continue;
                 }
 
-                const float dirx = u / speed;
-                const float diry = v / speed;
-                float lookaheadrise = 0.0f;
-                float lookaheaddrop = 0.0f;
+                const float slopeeast = elevationchangeeast / spacing.zonalMetres;
+                const float slopesouth = elevationchangesouth / spacing.meridionalMetres;
+                const float verticalvelocity = u * slopeeast + v * slopesouth;
+                const float directioneast = u / speed;
+                const float directionsouth = v / speed;
+                float windwardrise = 0.0f;
+                float leewarddrop = 0.0f;
 
-                for (int step = 1; step <= tuning::climate::atmosphere::topographyLookaheadDistance; step++)
+                for (int step = 1;
+                    step <= tuning::climate::atmosphere::topographyLookaheadDistance;
+                    step++)
                 {
-                    const float samplex = static_cast<float>(x) + dirx * static_cast<float>(step);
-                    const float sampley = static_cast<float>(y) + diry * static_cast<float>(step);
-                    const float change = samplewrappedfield(macroterrain, world, samplex, sampley) - terrainhere;
-
-                    if (change > lookaheadrise)
-                        lookaheadrise = change;
-
-                    if (-change > lookaheaddrop)
-                        lookaheaddrop = -change;
+                    const float samplex = static_cast<float>(x) +
+                        directioneast * static_cast<float>(step);
+                    const float sampley = static_cast<float>(y) +
+                        directionsouth * static_cast<float>(step);
+                    const float elevationchange =
+                        samplewrappedfield(macroterrain, world, samplex, sampley) - terrainhere;
+                    windwardrise = std::max(windwardrise, elevationchange);
+                    leewarddrop = std::max(leewarddrop, -elevationchange);
                 }
 
-                const float nx = gradx / std::max(gradmag, 0.0001f);
-                const float ny = grady / std::max(gradmag, 0.0001f);
-                const float crossridge = u * nx + v * ny;
-                const float gradientbarrier = std::clamp(gradmag / tuning::climate::atmosphere::topographyGradientScale, 0.0f, 1.0f);
-                const float lookaheadbarrier = std::clamp(lookaheadrise / tuning::climate::atmosphere::topographyLookaheadRiseScale, 0.0f, 1.0f);
-                const float leefactor = std::clamp(lookaheaddrop / tuning::climate::atmosphere::topographyLookaheadRiseScale, 0.0f, 1.0f);
-                const float barrier = std::max(gradientbarrier, lookaheadbarrier);
-                const float uplift = std::max(0.0f, crossridge) * barrier / tuning::climate::atmosphere::topographyVerticalMotionWindScale;
-                const float subsidence = std::max(0.0f, -crossridge) * std::max(gradientbarrier, leefactor) / tuning::climate::atmosphere::topographyVerticalMotionWindScale;
+                const float inversecellcrossingtime = std::sqrt(
+                    (u / spacing.zonalMetres) * (u / spacing.zonalMetres) +
+                    (v / spacing.meridionalMetres) * (v / spacing.meridionalMetres));
+                const float cellcrossingtime = inversecellcrossingtime > 0.0f ?
+                    1.0f / inversecellcrossingtime : 0.0f;
+                float parceldisplacement = verticalvelocity * cellcrossingtime;
+
+                if (parceldisplacement > 0.0f)
+                    parceldisplacement = std::max(parceldisplacement, windwardrise);
+                else if (parceldisplacement < 0.0f)
+                    parceldisplacement = std::min(parceldisplacement, -leewarddrop);
+
+                parceldisplacement = std::clamp(
+                    parceldisplacement,
+                    -tuning::climate::atmosphere::maximumOrographicParcelDisplacementMetres,
+                    tuning::climate::atmosphere::maximumOrographicParcelDisplacementMetres);
+                const float uplift = std::max(0.0f, parceldisplacement);
+                const float subsidence = std::max(0.0f, -parceldisplacement);
 
                 world.setseasonaluplift(season, x, y, static_cast<int>(std::round(uplift * tuning::climate::atmosphere::topographyVerticalMotionStorageScale)));
                 world.setseasonalsubsidence(season, x, y, static_cast<int>(std::round(subsidence * tuning::climate::atmosphere::topographyVerticalMotionStorageScale)));
@@ -734,12 +1212,187 @@ floatgrid buildcontinentalityfield(planet& world, int smoothingiterations, float
 
     return continentality;
 }
+
+climateatmosphere::CirculationPrecisionStageDiagnostics measurecirculationprecision(
+    planet& world,
+    const floatgrid& pressure,
+    const floatgrid& upperheight,
+    const floatgrid& continentality,
+    const floatgrid& macroterrain)
+{
+    const int width = world.width();
+    const int height = world.height();
+    double weighttotal = 0.0;
+    double floatpressuregradientsquared = 0.0;
+    double roundedpressuregradientsquared = 0.0;
+    double pressuregradientdifferencesquared = 0.0;
+    double floatwindsquared = 0.0;
+    double roundedwindsquared = 0.0;
+    double winddifferencesquared = 0.0;
+    double floatheightgradientsquared = 0.0;
+    double roundedheightgradientsquared = 0.0;
+    double heightgradientdifferencesquared = 0.0;
+    double floatupperwindsquared = 0.0;
+    double roundedupperwindsquared = 0.0;
+    double upperwinddifferencesquared = 0.0;
+
+    for (int y = 0; y <= height; y++)
+    {
+        const int ynorth = y > 0 ? y - 1 : y;
+        const int ysouth = y < height ? y + 1 : y;
+        const float latitude = latitudeforrow(y, height);
+        const double weight = rowareaweight(y, height);
+        const auto spacing = climateatmosphere::cellSpacingMetres(
+            latitude,
+            width + 1,
+            height + 1,
+            tuning::climate::atmosphere::referencePlanetRadiusMetres);
+
+        for (int x = 0; x <= width; x++)
+        {
+            const int xwest = wrapx(x - 1, width);
+            const int xeast = wrapx(x + 1, width);
+            const float floatpressureeast =
+                (pressure[xeast][y] - pressure[xwest][y]) *
+                tuning::climate::atmosphere::pressurePascalsPerHectopascal /
+                (2.0f * spacing.zonalMetres);
+            const float floatpressurenorth =
+                (pressure[x][ynorth] - pressure[x][ysouth]) *
+                tuning::climate::atmosphere::pressurePascalsPerHectopascal /
+                (2.0f * spacing.meridionalMetres);
+            const float roundedpressureeast =
+                (std::round(pressure[xeast][y]) - std::round(pressure[xwest][y])) *
+                tuning::climate::atmosphere::pressurePascalsPerHectopascal /
+                (2.0f * spacing.zonalMetres);
+            const float roundedpressurenorth =
+                (std::round(pressure[x][ynorth]) - std::round(pressure[x][ysouth])) *
+                tuning::climate::atmosphere::pressurePascalsPerHectopascal /
+                (2.0f * spacing.meridionalMetres);
+            const float continental = std::clamp(continentality[x][y], 0.0f, 1.0f);
+            const float relief = std::clamp(macroterrain[x][y] / 4500.0f, 0.0f, 1.0f);
+            const float basedragtime =
+                tuning::climate::atmosphere::oceanBoundaryLayerDragTimeSeconds +
+                continental * (tuning::climate::atmosphere::landBoundaryLayerDragTimeSeconds -
+                    tuning::climate::atmosphere::oceanBoundaryLayerDragTimeSeconds);
+            const float dragtime = basedragtime + relief *
+                (tuning::climate::atmosphere::highReliefDragTimeSeconds - basedragtime);
+            const auto floatwind = climateatmosphere::steadyRayleighCoriolisWind(
+                -floatpressureeast / tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                -floatpressurenorth / tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                latitude,
+                dragtime,
+                tuning::climate::atmosphere::rotationRatePerSecond,
+                world.rotation() ? 1.0f : -1.0f);
+            const auto roundedwind = climateatmosphere::steadyRayleighCoriolisWind(
+                -roundedpressureeast / tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                -roundedpressurenorth / tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                latitude,
+                dragtime,
+                tuning::climate::atmosphere::rotationRatePerSecond,
+                world.rotation() ? 1.0f : -1.0f);
+            const float floatheighteast =
+                (upperheight[xeast][y] - upperheight[xwest][y]) /
+                (2.0f * spacing.zonalMetres);
+            const float floatheightnorth =
+                (upperheight[x][ynorth] - upperheight[x][ysouth]) /
+                (2.0f * spacing.meridionalMetres);
+            const float roundedheighteast =
+                (std::round(upperheight[xeast][y]) - std::round(upperheight[xwest][y])) /
+                (2.0f * spacing.zonalMetres);
+            const float roundedheightnorth =
+                (std::round(upperheight[x][ynorth]) - std::round(upperheight[x][ysouth])) /
+                (2.0f * spacing.meridionalMetres);
+            const auto floatupperwind = climateatmosphere::steadyRayleighCoriolisWind(
+                -tuning::climate::atmosphere::gravityMetresPerSecondSquared * floatheighteast,
+                -tuning::climate::atmosphere::gravityMetresPerSecondSquared * floatheightnorth,
+                latitude,
+                tuning::climate::circulation::upperLayerDragTimeSeconds,
+                tuning::climate::atmosphere::rotationRatePerSecond,
+                world.rotation() ? 1.0f : -1.0f);
+            const auto roundedupperwind = climateatmosphere::steadyRayleighCoriolisWind(
+                -tuning::climate::atmosphere::gravityMetresPerSecondSquared * roundedheighteast,
+                -tuning::climate::atmosphere::gravityMetresPerSecondSquared * roundedheightnorth,
+                latitude,
+                tuning::climate::circulation::upperLayerDragTimeSeconds,
+                tuning::climate::atmosphere::rotationRatePerSecond,
+                world.rotation() ? 1.0f : -1.0f);
+            const double pressureeastdifference = roundedpressureeast - floatpressureeast;
+            const double pressurenorthdifference = roundedpressurenorth - floatpressurenorth;
+            const double windeastdifference = roundedwind.eastMetresPerSecond - floatwind.eastMetresPerSecond;
+            const double windsouthdifference = roundedwind.southMetresPerSecond - floatwind.southMetresPerSecond;
+            const double heighteastdifference = roundedheighteast - floatheighteast;
+            const double heightnorthdifference = roundedheightnorth - floatheightnorth;
+            const double upperwindeastdifference = roundedupperwind.eastMetresPerSecond - floatupperwind.eastMetresPerSecond;
+            const double upperwindsouthdifference = roundedupperwind.southMetresPerSecond - floatupperwind.southMetresPerSecond;
+
+            weighttotal += weight;
+            floatpressuregradientsquared += weight *
+                (floatpressureeast * floatpressureeast + floatpressurenorth * floatpressurenorth);
+            roundedpressuregradientsquared += weight *
+                (roundedpressureeast * roundedpressureeast + roundedpressurenorth * roundedpressurenorth);
+            pressuregradientdifferencesquared += weight *
+                (pressureeastdifference * pressureeastdifference + pressurenorthdifference * pressurenorthdifference);
+            floatwindsquared += weight *
+                (floatwind.eastMetresPerSecond * floatwind.eastMetresPerSecond +
+                    floatwind.southMetresPerSecond * floatwind.southMetresPerSecond);
+            roundedwindsquared += weight *
+                (roundedwind.eastMetresPerSecond * roundedwind.eastMetresPerSecond +
+                    roundedwind.southMetresPerSecond * roundedwind.southMetresPerSecond);
+            winddifferencesquared += weight *
+                (windeastdifference * windeastdifference + windsouthdifference * windsouthdifference);
+            floatheightgradientsquared += weight *
+                (floatheighteast * floatheighteast + floatheightnorth * floatheightnorth);
+            roundedheightgradientsquared += weight *
+                (roundedheighteast * roundedheighteast + roundedheightnorth * roundedheightnorth);
+            heightgradientdifferencesquared += weight *
+                (heighteastdifference * heighteastdifference + heightnorthdifference * heightnorthdifference);
+            floatupperwindsquared += weight *
+                (floatupperwind.eastMetresPerSecond * floatupperwind.eastMetresPerSecond +
+                    floatupperwind.southMetresPerSecond * floatupperwind.southMetresPerSecond);
+            roundedupperwindsquared += weight *
+                (roundedupperwind.eastMetresPerSecond * roundedupperwind.eastMetresPerSecond +
+                    roundedupperwind.southMetresPerSecond * roundedupperwind.southMetresPerSecond);
+            upperwinddifferencesquared += weight *
+                (upperwindeastdifference * upperwindeastdifference +
+                    upperwindsouthdifference * upperwindsouthdifference);
+        }
+    }
+
+    const double inverseweight = weighttotal > 0.0 ? 1.0 / weighttotal : 0.0;
+    climateatmosphere::CirculationPrecisionStageDiagnostics diagnostics;
+    diagnostics.areaWeightedFloatPressureGradientRmsPaPerMetre =
+        std::sqrt(floatpressuregradientsquared * inverseweight);
+    diagnostics.areaWeightedRoundedPressureGradientRmsPaPerMetre =
+        std::sqrt(roundedpressuregradientsquared * inverseweight);
+    diagnostics.areaWeightedPressureGradientDifferenceRmsPaPerMetre =
+        std::sqrt(pressuregradientdifferencesquared * inverseweight);
+    diagnostics.areaWeightedFloatSurfaceWindRmsMetresPerSecond =
+        std::sqrt(floatwindsquared * inverseweight);
+    diagnostics.areaWeightedRoundedSurfaceWindRmsMetresPerSecond =
+        std::sqrt(roundedwindsquared * inverseweight);
+    diagnostics.areaWeightedSurfaceWindDifferenceRmsMetresPerSecond =
+        std::sqrt(winddifferencesquared * inverseweight);
+    diagnostics.areaWeightedFloatUpperHeightGradientRms =
+        std::sqrt(floatheightgradientsquared * inverseweight);
+    diagnostics.areaWeightedRoundedUpperHeightGradientRms =
+        std::sqrt(roundedheightgradientsquared * inverseweight);
+    diagnostics.areaWeightedUpperHeightGradientDifferenceRms =
+        std::sqrt(heightgradientdifferencesquared * inverseweight);
+    diagnostics.areaWeightedFloatUpperWindRmsMetresPerSecond =
+        std::sqrt(floatupperwindsquared * inverseweight);
+    diagnostics.areaWeightedRoundedUpperWindRmsMetresPerSecond =
+        std::sqrt(roundedupperwindsquared * inverseweight);
+    diagnostics.areaWeightedUpperWindDifferenceRmsMetresPerSecond =
+        std::sqrt(upperwinddifferencesquared * inverseweight);
+    return diagnostics;
+}
 }
 
 void createpressuremap(planet& world)
 {
     const int width = world.width();
     const int height = world.height();
+    circulationcache.reset(world);
     const float thicknessresponse = climateatmosphere::hypsometricHeightResponseMetresPerKelvin(
         tuning::climate::circulation::surfaceReferencePressurePa,
         tuning::climate::circulation::upperReferencePressurePa);
@@ -776,8 +1429,136 @@ void createpressuremap(planet& world)
 
         const float globalmean = weighttotal > 0.0 ?
             static_cast<float>(temperaturesum / weighttotal) : 0.0f;
+        floatgrid stationarytemperature = surface;
+        smoothallfield(
+            world,
+            stationarytemperature,
+            tuning::climate::circulation::thermalHeightSmoothingIterations);
         floatgrid pressure(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid upperheight(width + 1, vector<float>(height + 1, 0.0f));
+        vector<float> zonaltemperature(height + 1, 0.0f);
+        vector<float> stationaryzonaltemperature(height + 1, 0.0f);
+
+        for (int y = 0; y <= height; y++)
+        {
+            double rowsum = 0.0;
+            double stationaryrowsum = 0.0;
+
+            for (int x = 0; x <= width; x++)
+            {
+                rowsum += static_cast<double>(surface[x][y]);
+                stationaryrowsum += static_cast<double>(stationarytemperature[x][y]);
+            }
+
+            zonaltemperature[y] = static_cast<float>(rowsum / static_cast<double>(width + 1));
+            stationaryzonaltemperature[y] = static_cast<float>(
+                stationaryrowsum / static_cast<double>(width + 1));
+        }
+
+        for (int iteration = 0;
+             iteration < tuning::climate::circulation::zonalTemperatureSmoothingIterations;
+             iteration++)
+        {
+            vector<float> smoothed = zonaltemperature;
+
+            for (int y = 0; y <= height; y++)
+            {
+                float total = 2.0f * zonaltemperature[y];
+                float weights = 2.0f;
+
+                if (y > 0)
+                {
+                    total += zonaltemperature[y - 1];
+                    weights += 1.0f;
+                }
+
+                if (y < height)
+                {
+                    total += zonaltemperature[y + 1];
+                    weights += 1.0f;
+                }
+
+                smoothed[y] = total / weights;
+            }
+
+            zonaltemperature.swap(smoothed);
+        }
+
+        const int thermalrow = static_cast<int>(std::distance(
+            zonaltemperature.begin(),
+            std::max_element(zonaltemperature.begin(), zonaltemperature.end())));
+        const int polarcaprows = std::max(1, height / 12);
+        double polartemperaturetotal = 0.0;
+        int polartemperaturecount = 0;
+
+        for (int y = 0; y <= polarcaprows; y++)
+        {
+            polartemperaturetotal += zonaltemperature[y];
+            polartemperaturetotal += zonaltemperature[height - y];
+            polartemperaturecount += 2;
+        }
+
+        const float polartemperature = polartemperaturecount > 0 ?
+            static_cast<float>(polartemperaturetotal / polartemperaturecount) : globalmean;
+        const float temperaturecontrast = std::max(
+            1.0f,
+            zonaltemperature[thermalrow] - polartemperature);
+        const float gravity = tuning::climate::atmosphere::gravityMetresPerSecondSquared *
+            std::max(0.05f, world.gravity());
+        const float hadleyhalfwidth = std::clamp(
+            climateatmosphere::heldHouHadleyEdgeLatitudeDegrees(
+                temperaturecontrast,
+                tuning::climate::circulation::troposphereHeightMetres,
+                tuning::climate::circulation::referenceTemperatureK,
+                gravity,
+                tuning::climate::atmosphere::rotationRatePerSecond,
+                tuning::climate::moistureadvection::referencePlanetRadiusMetres),
+            tuning::climate::circulation::minimumHadleyHalfWidthDegrees,
+            tuning::climate::circulation::maximumHadleyHalfWidthDegrees);
+        const float maximumthermalequatorshift = hadleyhalfwidth *
+            tuning::climate::circulation::maximumThermalEquatorShiftHadleyFraction;
+        const float thermalequator = std::clamp(
+            latitudeforrow(thermalrow, height),
+            -maximumthermalequatorshift,
+            maximumthermalequatorshift);
+        const float pressureamplitude = std::clamp(
+            tuning::climate::circulation::surfaceReferencePressurePa / 100.0f *
+                temperaturecontrast / tuning::climate::circulation::referenceTemperatureK *
+                tuning::climate::circulation::overturningMassRedistributionEfficiency,
+            tuning::climate::circulation::minimumOverturningPressureAmplitudeHpa,
+            tuning::climate::circulation::maximumOverturningPressureAmplitudeHpa);
+        vector<float> zonalpressure(height + 1, 0.0f);
+        double pressuretotal = 0.0;
+        double pressureweighttotal = 0.0;
+
+        for (int y = 0; y <= height; y++)
+        {
+            constexpr double pi = 3.14159265358979323846;
+            const float latitude = latitudeforrow(y, height);
+            const double areaweight = std::max(
+                0.0,
+                std::cos(static_cast<double>(latitude) * pi / 180.0));
+            zonalpressure[y] = climateatmosphere::axisymmetricOverturningPressureAnomalyHpa(
+                latitude,
+                thermalequator,
+                hadleyhalfwidth,
+                pressureamplitude);
+            pressuretotal += areaweight * zonalpressure[y];
+            pressureweighttotal += areaweight;
+        }
+
+        const float meanpressure = pressureweighttotal > 0.0 ?
+            static_cast<float>(pressuretotal / pressureweighttotal) : 0.0f;
+
+        for (float& rowpressure : zonalpressure)
+            rowpressure -= meanpressure;
+
+        cout
+            << "Overturning pressure season " << season
+            << ": thermal_equator=" << thermalequator
+            << " C_contrast=" << temperaturecontrast
+            << " hadley_half_width=" << hadleyhalfwidth
+            << " pressure_amplitude_hpa=" << pressureamplitude << '\n';
 
         parallelforrows(0, height, [&](int startrow, int endrow)
         {
@@ -785,7 +1566,14 @@ void createpressuremap(planet& world)
             {
                 for (int x = 0; x <= width; x++)
                 {
-                    pressure[x][y] = 0.0f;
+                    const float stationarytemperatureanomaly =
+                        stationarytemperature[x][y] - stationaryzonaltemperature[y];
+                    pressure[x][y] = zonalpressure[y] +
+                        climateatmosphere::thermalSurfacePressureAnomalyHpa(
+                            stationarytemperatureanomaly,
+                            tuning::climate::circulation::surfacePressureReferenceHpa,
+                            tuning::climate::circulation::referenceTemperatureK,
+                            tuning::climate::circulation::stationaryThermalMassRedistributionEfficiency);
                     upperheight[x][y] = (surface[x][y] - globalmean) * thicknessresponse;
                 }
             }
@@ -804,6 +1592,10 @@ void createpressuremap(planet& world)
                 }
             }
         });
+
+        circulationcache.pressure[season] = std::move(pressure);
+        circulationcache.upperheight[season] = std::move(upperheight);
+        circulationcache.populated[season] = true;
     }
 }
 
@@ -971,39 +1763,135 @@ void createvectorwindmap(planet& world)
     });
 
     smoothallfield(world, macroterrain, tuning::climate::atmosphere::topographySmoothingIterations);
+    const bool hasfloatbase = circulationcache.completeFor(world);
+    const stationaryspectralprojector circulationprojector(
+        width + 1,
+        height + 1,
+        tuning::climate::circulation::maximumResolvedStationaryZonalWavenumber,
+        tuning::climate::circulation::maximumResolvedStationaryMeridionalWavenumber);
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
-        floatgrid pressure(width + 1, vector<float>(height + 1, 0.0f));
-        floatgrid basepressure(width + 1, vector<float>(height + 1, 0.0f));
-        floatgrid nextpressure(width + 1, vector<float>(height + 1, 0.0f));
-        floatgrid baseupperheight(width + 1, vector<float>(height + 1, 0.0f));
-        floatgrid upperheight(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid pressure;
+        floatgrid upperheight;
 
-        for (int y = 0; y <= height; y++)
+        if (hasfloatbase)
         {
-            for (int x = 0; x <= width; x++)
+            pressure = std::move(circulationcache.pressure[season]);
+            upperheight = std::move(circulationcache.upperheight[season]);
+        }
+        else
+        {
+            pressure.assign(width + 1, vector<float>(height + 1, 0.0f));
+            upperheight.assign(width + 1, vector<float>(height + 1, 0.0f));
+
+            for (int y = 0; y <= height; y++)
             {
-                pressure[x][y] = static_cast<float>(world.seasonalpressure(season, x, y));
-                basepressure[x][y] = pressure[x][y];
-                nextpressure[x][y] = pressure[x][y];
-                baseupperheight[x][y] = static_cast<float>(world.seasonalupperheight(season, x, y));
-                upperheight[x][y] = baseupperheight[x][y];
+                for (int x = 0; x <= width; x++)
+                {
+                    pressure[x][y] = static_cast<float>(world.seasonalpressure(season, x, y));
+                    upperheight[x][y] = static_cast<float>(world.seasonalupperheight(season, x, y));
+                }
             }
         }
 
+        floatgrid basepressure = pressure;
+        floatgrid nextpressure = pressure;
+        floatgrid baseupperheight = upperheight;
+        floatgrid resolvedpressure = pressure;
+        floatgrid resolvedupperheight = upperheight;
+        floatgrid largescalepressure = pressure;
+        floatgrid largescaleupperheight = upperheight;
+
         floatgrid windu(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid windv(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid largescalewindu(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid largescalewindv(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid upperu(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid upperv(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid largescaleupperu(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid largescaleupperv(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid vertical(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid nextupperheight = upperheight;
         floatgrid nextvertical = vertical;
         floatgrid surfacedivergence(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid upperdivergence(width + 1, vector<float>(height + 1, 0.0f));
+        auto resolveregularizedfield = [&](
+            const floatgrid& source,
+            floatgrid& resolved,
+            float unresolvedretention)
+        {
+            resolved = source;
+            circulationprojector.project(resolved);
+            unresolvedretention = std::clamp(unresolvedretention, 0.0f, 1.0f);
+
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    for (int x = 0; x <= width; x++)
+                    {
+                        resolved[x][y] += unresolvedretention *
+                            (source[x][y] - resolved[x][y]);
+                    }
+                }
+            });
+        };
+
+        resolveregularizedfield(
+            pressure,
+            resolvedpressure,
+            tuning::climate::circulation::unresolvedCirculationGradientRetention);
+        resolveregularizedfield(
+            upperheight,
+            resolvedupperheight,
+            tuning::climate::circulation::unresolvedCirculationGradientRetention);
+        climateatmosphere::CirculationPrecisionDiagnostics precisiondiagnostics;
+        precisiondiagnostics.base = measurecirculationprecision(
+            world,
+            resolvedpressure,
+            resolvedupperheight,
+            continentality,
+            macroterrain);
+
+        auto horizontaldivergence = [&](const floatgrid& u, const floatgrid& v, int x, int y)
+        {
+            const int ynorth = (y > 0) ? y - 1 : y;
+            const int ysouth = (y < height) ? y + 1 : y;
+            const int xwest = wrapx(x - 1, width);
+            const int xeast = wrapx(x + 1, width);
+            const float latitude = latitudeforrow(y, height);
+            const auto spacing = climateatmosphere::cellSpacingMetres(
+                latitude,
+                width + 1,
+                height + 1,
+                tuning::climate::atmosphere::referencePlanetRadiusMetres);
+            const float centreCosine = std::max(
+                0.02f,
+                std::fabs(std::cos(latitude * 3.14159265358979323846f / 180.0f)));
+            const float northCosine = std::max(
+                0.0f,
+                std::cos(latitudeforrow(ynorth, height) * 3.14159265358979323846f / 180.0f));
+            const float southCosine = std::max(
+                0.0f,
+                std::cos(latitudeforrow(ysouth, height) * 3.14159265358979323846f / 180.0f));
+            const float zonal = (u[xeast][y] - u[xwest][y]) /
+                (2.0f * spacing.zonalMetres);
+            const float meridional =
+                (v[x][ysouth] * southCosine - v[x][ynorth] * northCosine) /
+                (2.0f * spacing.meridionalMetres * centreCosine);
+
+            return (zonal + meridional) * tuning::climate::circulation::secondsPerDay;
+        };
 
         auto updatesurfaceflow = [&]()
         {
+            resolveregularizedfield(
+                pressure,
+                resolvedpressure,
+                tuning::climate::circulation::unresolvedCirculationGradientRetention);
+            resolveregularizedfield(pressure, largescalepressure, 0.0f);
+
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
                 for (int y = startrow; y <= endrow; y++)
@@ -1022,11 +1910,19 @@ void createvectorwindmap(planet& world)
                         const int xwest = wrapx(x - 1, width);
                         const int xeast = wrapx(x + 1, width);
                         const float pressuregradienteast =
-                            (pressure[xeast][y] - pressure[xwest][y]) *
+                            (resolvedpressure[xeast][y] - resolvedpressure[xwest][y]) *
                             tuning::climate::atmosphere::pressurePascalsPerHectopascal /
                             (2.0f * spacing.zonalMetres);
                         const float pressuregradientnorth =
-                            (pressure[x][ynorth] - pressure[x][ysouth]) *
+                            (resolvedpressure[x][ynorth] - resolvedpressure[x][ysouth]) *
+                            tuning::climate::atmosphere::pressurePascalsPerHectopascal /
+                            (2.0f * spacing.meridionalMetres);
+                        const float largescalepressuregradienteast =
+                            (largescalepressure[xeast][y] - largescalepressure[xwest][y]) *
+                            tuning::climate::atmosphere::pressurePascalsPerHectopascal /
+                            (2.0f * spacing.zonalMetres);
+                        const float largescalepressuregradientnorth =
+                            (largescalepressure[x][ynorth] - largescalepressure[x][ysouth]) *
                             tuning::climate::atmosphere::pressurePascalsPerHectopascal /
                             (2.0f * spacing.meridionalMetres);
                         const float continental = std::clamp(continentality[x][y], 0.0f, 1.0f);
@@ -1044,37 +1940,51 @@ void createvectorwindmap(planet& world)
                             dragTime,
                             tuning::climate::atmosphere::rotationRatePerSecond,
                             world.rotation() ? 1.0f : -1.0f);
+                        const auto largescalewind = climateatmosphere::steadyRayleighCoriolisWind(
+                            -largescalepressuregradienteast /
+                                tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                            -largescalepressuregradientnorth /
+                                tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                            latitude,
+                            dragTime,
+                            tuning::climate::atmosphere::rotationRatePerSecond,
+                            world.rotation() ? 1.0f : -1.0f);
 
                         windu[x][y] = std::clamp(wind.eastMetresPerSecond, -maxvectorwind, maxvectorwind);
                         windv[x][y] = std::clamp(wind.southMetresPerSecond, -maxvectorwind, maxvectorwind);
+                        largescalewindu[x][y] = std::clamp(
+                            largescalewind.eastMetresPerSecond,
+                            -maxvectorwind,
+                            maxvectorwind);
+                        largescalewindv[x][y] = std::clamp(
+                            largescalewind.southMetresPerSecond,
+                            -maxvectorwind,
+                            maxvectorwind);
                     }
                 }
             });
 
             smoothallfield(world, windu, tuning::climate::atmosphere::smoothingIterations);
             smoothallfield(world, windv, tuning::climate::atmosphere::smoothingIterations);
+            smoothallfield(
+                world,
+                largescalewindu,
+                tuning::climate::atmosphere::smoothingIterations);
+            smoothallfield(
+                world,
+                largescalewindv,
+                tuning::climate::atmosphere::smoothingIterations);
 
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
                 for (int y = startrow; y <= endrow; y++)
                 {
-                    const int ynorth = (y > 0) ? y - 1 : y;
-                    const int ysouth = (y < height) ? y + 1 : y;
-                    const auto spacing = climateatmosphere::cellSpacingMetres(
-                        latitudeforrow(y, height),
-                        width + 1,
-                        height + 1,
-                        tuning::climate::atmosphere::referencePlanetRadiusMetres);
-
                     for (int x = 0; x <= width; x++)
-                    {
-                        const int xwest = wrapx(x - 1, width);
-                        const int xeast = wrapx(x + 1, width);
-                        surfacedivergence[x][y] =
-                            ((windu[xeast][y] - windu[xwest][y]) / (2.0f * spacing.zonalMetres) +
-                                (windv[x][ysouth] - windv[x][ynorth]) / (2.0f * spacing.meridionalMetres)) *
-                            tuning::climate::circulation::secondsPerDay;
-                    }
+                        surfacedivergence[x][y] = horizontaldivergence(
+                            largescalewindu,
+                            largescalewindv,
+                            x,
+                            y);
                 }
             });
 
@@ -1088,6 +1998,12 @@ void createvectorwindmap(planet& world)
 
         for (int iteration = 0; iteration < tuning::climate::circulation::iterations; iteration++)
         {
+            resolveregularizedfield(
+                upperheight,
+                resolvedupperheight,
+                tuning::climate::circulation::unresolvedCirculationGradientRetention);
+            resolveregularizedfield(upperheight, largescaleupperheight, 0.0f);
+
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
                 for (int y = startrow; y <= endrow; y++)
@@ -1106,10 +2022,18 @@ void createvectorwindmap(planet& world)
                         const int xwest = wrapx(x - 1, width);
                         const int xeast = wrapx(x + 1, width);
                         const float heightgradienteast =
-                            (upperheight[xeast][y] - upperheight[xwest][y]) /
+                            (resolvedupperheight[xeast][y] - resolvedupperheight[xwest][y]) /
                             (2.0f * spacing.zonalMetres);
                         const float heightgradientnorth =
-                            (upperheight[x][ynorth] - upperheight[x][ysouth]) /
+                            (resolvedupperheight[x][ynorth] - resolvedupperheight[x][ysouth]) /
+                            (2.0f * spacing.meridionalMetres);
+                        const float largescaleheightgradienteast =
+                            (largescaleupperheight[xeast][y] -
+                                largescaleupperheight[xwest][y]) /
+                            (2.0f * spacing.zonalMetres);
+                        const float largescaleheightgradientnorth =
+                            (largescaleupperheight[x][ynorth] -
+                                largescaleupperheight[x][ysouth]) /
                             (2.0f * spacing.meridionalMetres);
                         const auto wind = climateatmosphere::steadyRayleighCoriolisWind(
                             -tuning::climate::atmosphere::gravityMetresPerSecondSquared * heightgradienteast,
@@ -1118,37 +2042,51 @@ void createvectorwindmap(planet& world)
                             tuning::climate::circulation::upperLayerDragTimeSeconds,
                             tuning::climate::atmosphere::rotationRatePerSecond,
                             world.rotation() ? 1.0f : -1.0f);
+                        const auto largescalewind = climateatmosphere::steadyRayleighCoriolisWind(
+                            -tuning::climate::atmosphere::gravityMetresPerSecondSquared *
+                                largescaleheightgradienteast,
+                            -tuning::climate::atmosphere::gravityMetresPerSecondSquared *
+                                largescaleheightgradientnorth,
+                            latitude,
+                            tuning::climate::circulation::upperLayerDragTimeSeconds,
+                            tuning::climate::atmosphere::rotationRatePerSecond,
+                            world.rotation() ? 1.0f : -1.0f);
 
                         upperu[x][y] = std::clamp(wind.eastMetresPerSecond, -maxvectorwind, maxvectorwind);
                         upperv[x][y] = std::clamp(wind.southMetresPerSecond, -maxvectorwind, maxvectorwind);
+                        largescaleupperu[x][y] = std::clamp(
+                            largescalewind.eastMetresPerSecond,
+                            -maxvectorwind,
+                            maxvectorwind);
+                        largescaleupperv[x][y] = std::clamp(
+                            largescalewind.southMetresPerSecond,
+                            -maxvectorwind,
+                            maxvectorwind);
                     }
                 }
             });
 
             smoothallfield(world, upperu, tuning::climate::circulation::windSmoothingIterations);
             smoothallfield(world, upperv, tuning::climate::circulation::windSmoothingIterations);
+            smoothallfield(
+                world,
+                largescaleupperu,
+                tuning::climate::circulation::windSmoothingIterations);
+            smoothallfield(
+                world,
+                largescaleupperv,
+                tuning::climate::circulation::windSmoothingIterations);
 
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
                 for (int y = startrow; y <= endrow; y++)
                 {
-                    const int ynorth = (y > 0) ? y - 1 : y;
-                    const int ysouth = (y < height) ? y + 1 : y;
-                    const auto spacing = climateatmosphere::cellSpacingMetres(
-                        latitudeforrow(y, height),
-                        width + 1,
-                        height + 1,
-                        tuning::climate::atmosphere::referencePlanetRadiusMetres);
-
                     for (int x = 0; x <= width; x++)
-                    {
-                        const int xwest = wrapx(x - 1, width);
-                        const int xeast = wrapx(x + 1, width);
-                        upperdivergence[x][y] =
-                            ((upperu[xeast][y] - upperu[xwest][y]) / (2.0f * spacing.zonalMetres) +
-                                (upperv[x][ysouth] - upperv[x][ynorth]) / (2.0f * spacing.meridionalMetres)) *
-                            tuning::climate::circulation::secondsPerDay;
-                    }
+                        upperdivergence[x][y] = horizontaldivergence(
+                            largescaleupperu,
+                            largescaleupperv,
+                            x,
+                            y);
                 }
             });
 
@@ -1170,7 +2108,8 @@ void createvectorwindmap(planet& world)
                         const int xeast = wrapx(x + 1, width);
                         const float targetvertical =
                             (upperdivergence[x][y] - surfacedivergence[x][y]) *
-                            tuning::climate::circulation::layerPressureDepthHpa * 0.5f;
+                            tuning::climate::circulation::layerPressureDepthHpa * 0.5f *
+                            tuning::climate::circulation::verticalDivergenceResponse;
                         const float clampedvertical = std::clamp(
                             targetvertical,
                             -tuning::climate::circulation::maximumVerticalVelocity,
@@ -1184,6 +2123,40 @@ void createvectorwindmap(planet& world)
                         nextupperheight[x][y] = upperheight[x][y] + tuning::climate::circulation::upperHeightRelaxation *
                             ((baseupperheight[x][y] - upperheight[x][y]) +
                                 upperlaplacian * tuning::climate::circulation::upperHeightDiffusion);
+                    }
+                }
+            });
+
+            double verticaltotal = 0.0;
+            double verticalweight = 0.0;
+
+            for (int y = 0; y <= height; y++)
+            {
+                constexpr double pi = 3.14159265358979323846;
+                const double areaweight = std::max(
+                    0.0,
+                    std::cos(static_cast<double>(latitudeforrow(y, height)) * pi / 180.0));
+
+                for (int x = 0; x <= width; x++)
+                {
+                    verticaltotal += areaweight * static_cast<double>(nextvertical[x][y]);
+                    verticalweight += areaweight;
+                }
+            }
+
+            const float meanvertical = verticalweight > 0.0 ?
+                static_cast<float>(verticaltotal / verticalweight) : 0.0f;
+
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    for (int x = 0; x <= width; x++)
+                    {
+                        nextvertical[x][y] = std::clamp(
+                            nextvertical[x][y] - meanvertical,
+                            -tuning::climate::circulation::maximumVerticalVelocity,
+                            tuning::climate::circulation::maximumVerticalVelocity);
                     }
                 }
             });
@@ -1209,7 +2182,9 @@ void createvectorwindmap(planet& world)
                         const float columndivergence =
                             (surfacedivergence[x][y] + upperdivergence[x][y]) * 0.5f;
                         const float pressuretendency = std::clamp(
-                            -tuning::climate::circulation::surfacePressureReferenceHpa * columndivergence,
+                            -tuning::climate::circulation::surfacePressureReferenceHpa *
+                                columndivergence *
+                                tuning::climate::circulation::divergentSurfacePressureTendencyResponse,
                             -tuning::climate::circulation::maximumSurfacePressureTendencyHpaPerDay,
                             tuning::climate::circulation::maximumSurfacePressureTendencyHpaPerDay);
                         const float restoringtendency =
@@ -1257,6 +2232,19 @@ void createvectorwindmap(planet& world)
             updatesurfaceflow();
         }
 
+        resolveregularizedfield(
+            upperheight,
+            resolvedupperheight,
+            tuning::climate::circulation::unresolvedCirculationGradientRetention);
+        precisiondiagnostics.final = measurecirculationprecision(
+            world,
+            resolvedpressure,
+            resolvedupperheight,
+            continentality,
+            macroterrain);
+        climateatmosphere::setLastCirculationPrecisionDiagnostics(
+            season,
+            precisiondiagnostics);
         applytopographicwindeffects(world, macroterrain, windu, windv);
         storeterrainverticalmotion(world, season, macroterrain, windu, windv);
         smoothallfield(world, upperheight, tuning::climate::circulation::windSmoothingIterations);
@@ -1272,8 +2260,8 @@ void createvectorwindmap(planet& world)
                         -tuning::climate::circulation::maximumVerticalVelocity,
                         tuning::climate::circulation::maximumVerticalVelocity);
 
-                    world.setseasonalpressure(season, x, y, static_cast<int>(std::round(pressure[x][y])));
-                    world.setseasonalupperheight(season, x, y, static_cast<int>(std::round(upperheight[x][y])));
+                    world.setseasonalpressure(season, x, y, static_cast<int>(std::round(resolvedpressure[x][y])));
+                    world.setseasonalupperheight(season, x, y, static_cast<int>(std::round(resolvedupperheight[x][y])));
                     world.setseasonaluwind(season, x, y, static_cast<int>(std::round(std::clamp(windu[x][y], -maxvectorwind, maxvectorwind))));
                     world.setseasonalvwind(season, x, y, static_cast<int>(std::round(std::clamp(windv[x][y], -maxvectorwind, maxvectorwind))));
                     world.setseasonalupperuwind(season, x, y, static_cast<int>(std::round(std::clamp(upperu[x][y], -maxvectorwind, maxvectorwind))));
@@ -1284,6 +2272,8 @@ void createvectorwindmap(planet& world)
             }
         });
     }
+
+    circulationcache.clear();
 
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
@@ -1343,17 +2333,59 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     const int height = world.height();
     const int sealevel = world.sealevel();
     const int baselineiterations = tuning::climate::moistureadvection::iterations;
-    const int iterations = tuning::climateresolution::scaleDistance(
+    const int referenceiterations = tuning::climateresolution::scaleDistance(
         baselineiterations, width, height);
-    const float periterationfactor = static_cast<float>(baselineiterations) / static_cast<float>(iterations);
-    const float timestepseconds = tuning::climate::moistureadvection::advectionTimeStepSeconds * periterationfactor;
-    const float condensationefficiency = 1.0f - std::pow(
-        1.0f - tuning::climate::moistureadvection::condensationEfficiency, periterationfactor);
-    floatgrid soilmoisture(width + 1, vector<float>(height + 1, 0.0f));
-    floatgrid moisture(width + 1, vector<float>(height + 1, 0.0f));
+    const float condensationconversiontimeseconds =
+        tuning::climate::moistureadvection::condensationConversionTimeDays *
+        tuning::climate::circulation::secondsPerDay;
+    vector<float> rowareaweights(height + 1, 0.0f);
 
-    auto runsolver = [&](int season)
+    for (int y = 0; y <= height; y++)
+        rowareaweights[y] = static_cast<float>(rowareaweight(y, height));
+
+    floatgrid soilmoisture(
+        width + 1,
+        vector<float>(
+            height + 1,
+            tuning::climate::moistureadvection::landSoilMoistureCapacity *
+                tuning::climate::moistureadvection::initialSoilMoistureFraction));
+    floatgrid moisture(width + 1, vector<float>(height + 1, 0.0f));
+    floatgrid rawannualrain(width + 1, vector<float>(height + 1, 0.0f));
+    floatgrid rawmaximummonthlyrain(width + 1, vector<float>(height + 1, 0.0f));
+    floatgrid quarterrain(width + 1, vector<float>(height + 1, 0.0f));
+    floatgrid quarterconvergence(width + 1, vector<float>(height + 1, 0.0f));
+    vector<vector<signed char>> rawmaximumrainmonth(
+        width + 1,
+        vector<signed char>(height + 1, static_cast<signed char>(-1)));
+    std::array<climatephysics::WaterBudget, CLIMATESEASONCOUNT> finalareaweightedbudgets{};
+    std::array<climatephysics::WaterBudget, CLIMATESEASONCOUNT> finalbudgets{};
+    std::array<climatephysics::CondensationActivityDiagnostics, CLIMATESEASONCOUNT>
+        finalcondensationactivity{};
+    std::array<climatephysics::PrecipitationProcessDiagnostics, CLIMATESEASONCOUNT>
+        finalprocessdiagnostics{};
+
+    struct monthlysolverresult
     {
+        climatephysics::WaterBudget budget;
+        climatephysics::WaterBudget areaweightedbudget;
+        climatephysics::CondensationActivityDiagnostics condensation;
+        climatephysics::PrecipitationProcessDiagnostics processes;
+    };
+
+    auto runsolver = [&](int month)
+    {
+        const climatehydrology::CalendarMonth calendar =
+            climatehydrology::calendarMonth(month);
+        const int quarter = month / 3;
+        const int iterations = std::max(
+            1,
+            static_cast<int>(std::round(
+                static_cast<float>(referenceiterations * calendar.days) /
+                static_cast<float>(baselineiterations))));
+        const float timestepseconds =
+            static_cast<float>(calendar.days) *
+            tuning::climate::moistureadvection::advectionTimeStepSeconds /
+            static_cast<float>(iterations);
         floatgrid totalrain(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totalseaevaporation(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totallandevaporation(width + 1, vector<float>(height + 1, 0.0f));
@@ -1362,24 +2394,55 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         floatgrid descent(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid dynamicvertical(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid saturationcapacity(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid surfacepressure(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid temperature(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid surfacewindu(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid surfacewindv(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid upperwindu(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid upperwindv(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid surfacewindspeed(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid transportwindu(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid transportwindv(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid available(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid surfaceevaporation(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid zonalmoisture(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid nextmoisture(width + 1, vector<float>(height + 1, 0.0f));
-        floatgrid fluxconvergence(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid moisturefluxtendency(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid convectiveconvergence(width + 1, vector<float>(height + 1, 0.0f));
         floatgrid totalconvergence(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid zonaleddyexchange(width + 1, vector<float>(height + 1, 0.0f));
+        floatgrid meridionaleddyexchange(width + 1, vector<float>(height + 1, 0.0f));
         climatephysics::WaterBudget budget;
+        climatephysics::WaterBudget areaweightedbudget;
+        vector<climatephysics::CondensationActivityDiagnostics> rowcondensation(height + 1);
+        vector<climatephysics::PrecipitationProcessDiagnostics> rowprocesses(height + 1);
 
-        for (int y = 0; y <= height; y++)
+        if (month % 3 == 0)
         {
             for (int x = 0; x <= width; x++)
             {
+                std::fill(quarterrain[x].begin(), quarterrain[x].end(), 0.0f);
+                std::fill(
+                    quarterconvergence[x].begin(),
+                    quarterconvergence[x].end(),
+                    0.0f);
+            }
+        }
+
+        for (int y = 0; y <= height; y++)
+        {
+            const double areaweight = rowareaweights[y];
+
+            for (int x = 0; x <= width; x++)
+            {
                 budget.initialAtmosphericStorage += moisture[x][y];
+                areaweightedbudget.initialAtmosphericStorage += areaweight * moisture[x][y];
 
                 if (world.sea(x, y) == 0)
+                {
                     budget.initialSoilStorage += soilmoisture[x][y];
+                    areaweightedbudget.initialSoilStorage += areaweight * soilmoisture[x][y];
+                }
             }
         }
 
@@ -1389,14 +2452,42 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             {
                 for (int x = 0; x <= width; x++)
                 {
-                    const float u = static_cast<float>(world.seasonaluwind(season, x, y));
-                    const float v = static_cast<float>(world.seasonalvwind(season, x, y));
-                    const float upperu = static_cast<float>(world.seasonalupperuwind(season, x, y));
-                    const float upperv = static_cast<float>(world.seasonaluppervwind(season, x, y));
-                    const float temperature = (world.sea(x, y) == 1) ? static_cast<float>(world.seasonalsst(season, x, y)) : static_cast<float>(world.seasonaltemp(season, x, y));
+                    auto interpolatefield = [&](auto accessor)
+                    {
+                        return climatehydrology::interpolateSeasonal(
+                            static_cast<float>(accessor(calendar.firstSeason)),
+                            static_cast<float>(accessor(calendar.secondSeason)),
+                            calendar.interpolation);
+                    };
+                    const float u = interpolatefield(
+                        [&](int season) { return world.seasonaluwind(season, x, y); });
+                    const float v = interpolatefield(
+                        [&](int season) { return world.seasonalvwind(season, x, y); });
+                    const float upperu = interpolatefield(
+                        [&](int season) { return world.seasonalupperuwind(season, x, y); });
+                    const float upperv = interpolatefield(
+                        [&](int season) { return world.seasonaluppervwind(season, x, y); });
+                    const float localtemperature = world.sea(x, y) == 1
+                        ? interpolatefield(
+                            [&](int season) { return world.seasonalsst(season, x, y); })
+                        : interpolatefield(
+                            [&](int season) { return world.seasonaltemp(season, x, y); });
                     const float elevation = static_cast<float>(std::max(0, world.map(x, y) - sealevel));
+                    const float pressureanomaly = interpolatefield(
+                        [&](int season) { return world.seasonalpressure(season, x, y); });
 
-                    saturationcapacity[x][y] = climatephysics::saturationColumnWater(temperature, elevation);
+                    temperature[x][y] = localtemperature;
+                    surfacepressure[x][y] = std::max(
+                        100.0f,
+                        climatephysics::surfacePressureHpa(elevation) + pressureanomaly);
+                    surfacewindu[x][y] = u;
+                    surfacewindv[x][y] = v;
+                    upperwindu[x][y] = upperu;
+                    upperwindv[x][y] = upperv;
+                    saturationcapacity[x][y] =
+                        climatephysics::saturationColumnWaterAtPressure(
+                            localtemperature,
+                            surfacepressure[x][y]);
                     surfacewindspeed[x][y] = std::max(
                         tuning::climate::moistureadvection::minimumSurfaceWind,
                         std::sqrt(u * u + v * v));
@@ -1404,13 +2495,28 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         tuning::climate::moistureadvection::upperWindTransportFraction;
                     transportwindv[x][y] = v + (upperv - v) *
                         tuning::climate::moistureadvection::upperWindTransportFraction;
-                    uplift[x][y] = static_cast<float>(world.seasonaluplift(season, x, y)) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
-                    descent[x][y] = static_cast<float>(world.seasonalsubsidence(season, x, y)) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
-                    dynamicvertical[x][y] = static_cast<float>(world.seasonalverticalvelocity(season, x, y)) /
+                    uplift[x][y] = interpolatefield(
+                        [&](int season) { return world.seasonaluplift(season, x, y); }) /
+                        tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
+                    descent[x][y] = interpolatefield(
+                        [&](int season) { return world.seasonalsubsidence(season, x, y); }) /
+                        tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
+                    dynamicvertical[x][y] = interpolatefield(
+                        [&](int season) { return world.seasonalverticalvelocity(season, x, y); }) /
                         tuning::climate::circulation::verticalVelocityStorageScale;
                 }
             }
         });
+
+        createeddyexchangefractions(
+            world,
+            surfacewindu,
+            surfacewindv,
+            upperwindu,
+            upperwindv,
+            timestepseconds,
+            zonaleddyexchange,
+            meridionaleddyexchange);
 
         for (int iteration = 0; iteration < iterations; iteration++)
         {
@@ -1422,15 +2528,13 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     {
                         const float retained = std::max(0.0f, moisture[x][y]);
                         const bool sea = world.sea(x, y) == 1;
-                        const float temperature = sea ?
-                            static_cast<float>(world.seasonalsst(season, x, y)) :
-                            static_cast<float>(world.seasonaltemp(season, x, y));
-                        const float elevation = static_cast<float>(std::max(0, world.map(x, y) - sealevel));
+                        const float localtemperature = temperature[x][y];
                         const float relativehumidity = std::clamp(
                             retained / saturationcapacity[x][y], 0.0f, 1.0f);
-                        const float potentialevaporation = climatephysics::bulkAerodynamicEvaporationMm(
-                            temperature,
-                            elevation,
+                        const float potentialevaporation =
+                            climatephysics::bulkAerodynamicEvaporationMmAtPressure(
+                            localtemperature,
+                            surfacepressure[x][y],
                             surfacewindspeed[x][y],
                             relativehumidity,
                             timestepseconds,
@@ -1452,10 +2556,12 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         }
                         else if (soilmoisture[x][y] > 0.0f)
                         {
-                            const float wateravailability = std::clamp(
-                                soilmoisture[x][y] / tuning::climate::moistureadvection::landSoilMoistureCapacity,
-                                0.0f,
-                                1.0f);
+                            const float wateravailability =
+                                climatehydrology::soilMoistureStress(
+                                soilmoisture[x][y],
+                                tuning::climate::moistureadvection::landSoilMoistureCapacity,
+                                tuning::climate::moistureadvection::soilMoistureCriticalFraction,
+                                tuning::climate::moistureadvection::soilMoistureStressExponent);
                             landevaporation = std::min(
                                 soilmoisture[x][y],
                                 potentialevaporation * wateravailability *
@@ -1465,6 +2571,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         }
 
                         const float localavailable = retained + seaevaporation + landevaporation;
+                        surfaceevaporation[x][y] = seaevaporation + landevaporation;
                         available[x][y] = localavailable;
                     }
                 }
@@ -1523,6 +2630,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
 
                     for (int y = 0; y <= height; y++)
                     {
+                        const float sourceareaweight = rowareaweights[y];
                         const float v = transportwindv[x][y];
                         const float displacement = std::clamp(
                             v * timestepseconds / meridionalcellheight,
@@ -1536,19 +2644,27 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                                 (std::fabs(displacement) < 1.0f ?
                                     static_cast<float>((displacement > 0.0f) - (displacement < 0.0f)) :
                                     displacement),
-                            0.0f,
-                            static_cast<float>(height));
+                            height > 1 ? 1.0f : 0.0f,
+                            height > 1 ? static_cast<float>(height - 1) : static_cast<float>(height));
                         const int targety0 = static_cast<int>(std::floor(targetposition));
                         const int targety1 = std::min(targety0 + 1, height);
                         const float targetfraction = targetposition - static_cast<float>(targety0);
-                        const float transported = zonalmoisture[x][y] * transportfraction;
+                        const float transported = zonalmoisture[x][y] * transportfraction *
+                            sourceareaweight;
 
-                        nextmoisture[x][y] += zonalmoisture[x][y] - transported;
+                        nextmoisture[x][y] += zonalmoisture[x][y] * sourceareaweight - transported;
                         nextmoisture[x][targety0] += transported * (1.0f - targetfraction);
                         nextmoisture[x][targety1] += transported * targetfraction;
                     }
+
+                    for (int y = 0; y <= height; y++)
+                    {
+                        nextmoisture[x][y] /= rowareaweights[y];
+                    }
                 }
             });
+
+            applyeddyexchange(world, nextmoisture, zonaleddyexchange, meridionaleddyexchange);
 
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
@@ -1557,18 +2673,37 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     for (int x = 0; x <= width; x++)
                     {
 
-                        const float temperature = static_cast<float>(
-                            (world.sea(x, y) == 1) ?
-                                world.seasonalsst(season, x, y) :
-                                world.seasonaltemp(season, x, y));
-                        const float elevation = static_cast<float>(
-                            std::max(0, world.map(x, y) - sealevel));
-                        const float moisturecapacity = climatephysics::saturationColumnWater(
-                            temperature, elevation);
-                        const float convergenceamount = std::max(0.0f, nextmoisture[x][y] - available[x][y]);
+                        const float signedconvergence =
+                            nextmoisture[x][y] - available[x][y];
+                        moisturefluxtendency[x][y] = signedconvergence;
+                        totalconvergence[x][y] += signedconvergence /
+                            std::max(0.05f, saturationcapacity[x][y]);
+                    }
+                }
+            });
 
-                        fluxconvergence[x][y] = convergenceamount / moisturecapacity;
-                        totalconvergence[x][y] += fluxconvergence[x][y];
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                const float centreweight = std::clamp(
+                    tuning::climate::moistureadvection::convectiveConvergenceCentreWeight,
+                    0.0f,
+                    1.0f);
+                const float neighbourweight = (1.0f - centreweight) * 0.25f;
+
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    const int north = std::max(0, y - 1);
+                    const int south = std::min(height, y + 1);
+
+                    for (int x = 0; x <= width; x++)
+                    {
+                        convectiveconvergence[x][y] =
+                            centreweight * moisturefluxtendency[x][y] +
+                            neighbourweight *
+                                (moisturefluxtendency[wrapx(x - 1, width)][y] +
+                                    moisturefluxtendency[wrapx(x + 1, width)][y] +
+                                    moisturefluxtendency[x][north] +
+                                    moisturefluxtendency[x][south]);
                     }
                 }
             });
@@ -1580,26 +2715,98 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     for (int x = 0; x <= width; x++)
                     {
                         const bool sea = world.sea(x, y) == 1;
-                        const float temperature = sea ? static_cast<float>(world.seasonalsst(season, x, y)) : static_cast<float>(world.seasonaltemp(season, x, y));
-                        const float elevation = static_cast<float>(std::max(0, world.map(x, y) - sealevel));
-                        const float liftingcooling = std::clamp(
-                            std::max(0.0f, dynamicvertical[x][y]) * tuning::climate::moistureadvection::dynamicVerticalCooling +
-                                uplift[x][y] * tuning::climate::moistureadvection::topographicUpliftCooling,
+                        const float localtemperature = temperature[x][y];
+                        const float dynamiccooling = std::clamp(
+                            std::max(0.0f, dynamicvertical[x][y]) *
+                                tuning::climate::moistureadvection::dynamicVerticalCooling,
                             0.0f,
                             tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
-                        const float subsidencewarming = std::clamp(
-                            std::max(0.0f, -dynamicvertical[x][y]) * tuning::climate::moistureadvection::dynamicSubsidenceWarming +
-                                descent[x][y] * tuning::climate::moistureadvection::topographicDescentWarming,
+                        const float dynamicwarming = std::clamp(
+                            std::max(0.0f, -dynamicvertical[x][y]) *
+                                tuning::climate::moistureadvection::dynamicSubsidenceWarming,
                             0.0f,
                             tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
-                        const float parceltemperature = temperature - liftingcooling + subsidencewarming;
-                        const float moisturecapacity = climatephysics::saturationColumnWater(
-                            parceltemperature, elevation);
+                        const float nonorographicparceltemperature =
+                            localtemperature - dynamiccooling + dynamicwarming;
+                        const float terraincooling = std::clamp(
+                            uplift[x][y] *
+                                tuning::climate::moistureadvection::topographicUpliftCoolingCPerMetre,
+                            0.0f,
+                            tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
+                        const float terrainwarming = std::clamp(
+                            descent[x][y] *
+                                tuning::climate::moistureadvection::topographicDescentWarmingCPerMetre,
+                            0.0f,
+                            tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
+                        const float terrainadjustedparceltemperature =
+                            nonorographicparceltemperature - terraincooling + terrainwarming;
+                        const float nonorographiccapacity =
+                            climatephysics::saturationColumnWaterAtPressure(
+                                nonorographicparceltemperature,
+                                surfacepressure[x][y]);
+                        const float terrainadjustedcapacity =
+                            climatephysics::saturationColumnWaterAtPressure(
+                                terrainadjustedparceltemperature,
+                                surfacepressure[x][y]);
                         const float availablemoisture = std::max(0.0f, nextmoisture[x][y]);
-                        const float condensablewater = std::max(0.0f, availablemoisture - moisturecapacity);
-                        float precipitation = condensablewater * condensationefficiency;
+                        const float precipitationthreshold = terrainadjustedcapacity *
+                            tuning::climate::moistureadvection::stratiformCriticalRelativeHumidity;
+                        const float condensablewater = std::max(
+                            0.0f, availablemoisture - precipitationthreshold);
+                        const climatehydrology::PrecipitationPartition partition =
+                            climatehydrology::partitionPrecipitation(
+                            availablemoisture,
+                            nonorographiccapacity,
+                            terrainadjustedcapacity,
+                            convectiveconvergence[x][y],
+                            surfaceevaporation[x][y],
+                            localtemperature,
+                            timestepseconds,
+                            tuning::climate::moistureadvection::stratiformCriticalRelativeHumidity,
+                            condensationconversiontimeseconds,
+                            tuning::climate::moistureadvection::convectiveResidualRelativeHumidity,
+                            tuning::climate::moistureadvection::convectiveConversionEfficiency,
+                            tuning::climate::moistureadvection::convectiveActivationTemperatureC,
+                            tuning::climate::moistureadvection::convectiveFullStrengthTemperatureC);
+                        const float precipitation = partition.totalMm();
+                        const double areaweight = rowareaweights[y];
+                        climatephysics::CondensationActivityDiagnostics& activity =
+                            rowcondensation[y];
+                        climatephysics::PrecipitationProcessDiagnostics& processes =
+                            rowprocesses[y];
+                        activity.cellStepAreaWeight += areaweight;
+                        activity.atmosphericWaterAreaWeighted +=
+                            areaweight * static_cast<double>(availablemoisture);
 
-                        precipitation = std::clamp(precipitation, 0.0f, availablemoisture);
+                        if (precipitation > 0.0f)
+                        {
+                            activity.activeCellStepAreaWeight += areaweight;
+                            activity.activeAtmosphericWaterAreaWeighted +=
+                                areaweight * static_cast<double>(availablemoisture);
+                            activity.excessWaterAreaWeighted +=
+                                areaweight * static_cast<double>(
+                                    std::max(condensablewater, precipitation));
+                        }
+
+                        activity.precipitationAreaWeighted +=
+                            areaweight * static_cast<double>(precipitation);
+                        processes.stratiformPrecipitation +=
+                            areaweight * static_cast<double>(partition.stratiformMm);
+                        processes.orographicPrecipitation +=
+                            areaweight * static_cast<double>(partition.orographicMm);
+                        processes.convectivePrecipitation +=
+                            areaweight * static_cast<double>(partition.convectiveMm);
+
+                        if (moisturefluxtendency[x][y] >= 0.0f)
+                        {
+                            processes.positiveMoistureFluxConvergence +=
+                                areaweight * static_cast<double>(moisturefluxtendency[x][y]);
+                        }
+                        else
+                        {
+                            processes.negativeMoistureFluxConvergence +=
+                                areaweight * static_cast<double>(moisturefluxtendency[x][y]);
+                        }
                         totalrain[x][y] += precipitation;
                         moisture[x][y] = std::max(0.0f, availablemoisture - precipitation);
 
@@ -1620,40 +2827,98 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             });
         }
 
+        climatephysics::CondensationActivityDiagnostics condensationactivity;
+        climatephysics::PrecipitationProcessDiagnostics processdiagnostics;
+
+        for (const climatephysics::CondensationActivityDiagnostics& row : rowcondensation)
+        {
+            condensationactivity.cellStepAreaWeight += row.cellStepAreaWeight;
+            condensationactivity.activeCellStepAreaWeight += row.activeCellStepAreaWeight;
+            condensationactivity.atmosphericWaterAreaWeighted +=
+                row.atmosphericWaterAreaWeighted;
+            condensationactivity.activeAtmosphericWaterAreaWeighted +=
+                row.activeAtmosphericWaterAreaWeighted;
+            condensationactivity.excessWaterAreaWeighted += row.excessWaterAreaWeighted;
+            condensationactivity.precipitationAreaWeighted +=
+                row.precipitationAreaWeighted;
+        }
+
+        for (const climatephysics::PrecipitationProcessDiagnostics& row : rowprocesses)
+        {
+            processdiagnostics.stratiformPrecipitation +=
+                row.stratiformPrecipitation;
+            processdiagnostics.orographicPrecipitation +=
+                row.orographicPrecipitation;
+            processdiagnostics.convectivePrecipitation +=
+                row.convectivePrecipitation;
+            processdiagnostics.positiveMoistureFluxConvergence +=
+                row.positiveMoistureFluxConvergence;
+            processdiagnostics.negativeMoistureFluxConvergence +=
+                row.negativeMoistureFluxConvergence;
+        }
+
         parallelforrows(0, height, [&](int startrow, int endrow)
         {
             for (int y = startrow; y <= endrow; y++)
             {
                 for (int x = 0; x <= width; x++)
                 {
-                    const int rain = std::clamp(
-                        static_cast<int>(std::round(
-                            totalrain[x][y] * tuning::climate::moistureadvection::rainfallScale)),
-                        0,
-                        static_cast<int>(std::numeric_limits<short>::max()));
-                    world.setseasonalrain(season, x, y, rain);
+                    const float rawrain = totalrain[x][y] *
+                        tuning::climate::moistureadvection::rainfallScale;
+                    rawannualrain[x][y] += rawrain;
+                    quarterrain[x][y] += rawrain;
+                    quarterconvergence[x][y] +=
+                        totalconvergence[x][y] / static_cast<float>(iterations);
 
-                    if (season == seasonjanuary)
-                        world.setjanrain(x, y, rain);
+                    if (rawrain > rawmaximummonthlyrain[x][y])
+                    {
+                        rawmaximummonthlyrain[x][y] = rawrain;
+                        rawmaximumrainmonth[x][y] = static_cast<signed char>(month);
+                    }
 
-                    if (season == seasonjuly)
-                        world.setjulrain(x, y, rain);
+                    if (month % 3 == 2)
+                    {
+                        const int rain = std::clamp(
+                            static_cast<int>(std::round(quarterrain[x][y] / 3.0f)),
+                            0,
+                            static_cast<int>(std::numeric_limits<short>::max()));
+                        world.setseasonalrain(quarter, x, y, rain);
 
-                    world.setseasonalmoisture(season, x, y, static_cast<int>(std::round(moisture[x][y])));
-                    world.setseasonalconvergence(season, x, y, static_cast<int>(std::round(
-                        (totalconvergence[x][y] / static_cast<float>(iterations)) * tuning::climate::moistureadvection::convergenceStorageScale)));
+                        if (quarter == seasonjanuary)
+                            world.setjanrain(x, y, rain);
+
+                        if (quarter == seasonjuly)
+                            world.setjulrain(x, y, rain);
+
+                        world.setseasonalmoisture(
+                            quarter,
+                            x,
+                            y,
+                            static_cast<int>(std::round(moisture[x][y])));
+                        world.setseasonalconvergence(
+                            quarter,
+                            x,
+                            y,
+                            static_cast<int>(std::round(
+                                quarterconvergence[x][y] / 3.0f *
+                                tuning::climate::moistureadvection::convergenceStorageScale)));
+                    }
                 }
             }
         });
 
         for (int y = 0; y <= height; y++)
         {
+            const double areaweight = rowareaweights[y];
+
             for (int x = 0; x <= width; x++)
             {
                 if (world.sea(x, y) == 1)
                 {
                     budget.oceanEvaporation += totalseaevaporation[x][y];
                     budget.oceanPrecipitation += totalrain[x][y];
+                    areaweightedbudget.oceanEvaporation += areaweight * totalseaevaporation[x][y];
+                    areaweightedbudget.oceanPrecipitation += areaweight * totalrain[x][y];
                 }
                 else
                 {
@@ -1661,16 +2926,25 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     budget.landPrecipitation += totalrain[x][y];
                     budget.runoff += runoff[x][y];
                     budget.soilStorage += soilmoisture[x][y];
+                    areaweightedbudget.landEvaporation += areaweight * totallandevaporation[x][y];
+                    areaweightedbudget.landPrecipitation += areaweight * totalrain[x][y];
+                    areaweightedbudget.runoff += areaweight * runoff[x][y];
+                    areaweightedbudget.soilStorage += areaweight * soilmoisture[x][y];
                 }
 
                 budget.atmosphericStorage += moisture[x][y];
+                areaweightedbudget.atmosphericStorage += areaweight * moisture[x][y];
             }
         }
 
-        return budget;
+        return monthlysolverresult{
+            budget,
+            areaweightedbudget,
+            condensationactivity,
+            processdiagnostics
+        };
     };
 
-    std::array<climatephysics::WaterBudget, CLIMATESEASONCOUNT> finalbudgets{};
     climatephysics::HydrologySpinupDiagnostics diagnostics;
 
     for (int cycle = 0; cycle < tuning::climate::moistureadvection::maximumSpinupCycles; cycle++)
@@ -1678,11 +2952,82 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         const floatgrid initialmoisture = moisture;
         const floatgrid initialsoilmoisture = soilmoisture;
 
-        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-            finalbudgets[season] = runsolver(season);
+        for (int x = 0; x <= width; x++)
+        {
+            std::fill(rawannualrain[x].begin(), rawannualrain[x].end(), 0.0f);
+            std::fill(rawmaximummonthlyrain[x].begin(), rawmaximummonthlyrain[x].end(), 0.0f);
+            std::fill(
+                rawmaximumrainmonth[x].begin(),
+                rawmaximumrainmonth[x].end(),
+                static_cast<signed char>(-1));
+        }
 
-        double absolutechange = 0.0;
-        double referencestorage = 0.0;
+        finalbudgets = {};
+        finalareaweightedbudgets = {};
+        finalcondensationactivity = {};
+        finalprocessdiagnostics = {};
+
+        auto appendbudget = [](
+            climatephysics::WaterBudget& quarterbudget,
+            const climatephysics::WaterBudget& monthbudget,
+            bool firstmonth)
+        {
+            if (firstmonth)
+            {
+                quarterbudget.initialAtmosphericStorage =
+                    monthbudget.initialAtmosphericStorage;
+                quarterbudget.initialSoilStorage = monthbudget.initialSoilStorage;
+            }
+
+            quarterbudget.oceanEvaporation += monthbudget.oceanEvaporation;
+            quarterbudget.landEvaporation += monthbudget.landEvaporation;
+            quarterbudget.oceanPrecipitation += monthbudget.oceanPrecipitation;
+            quarterbudget.landPrecipitation += monthbudget.landPrecipitation;
+            quarterbudget.runoff += monthbudget.runoff;
+            quarterbudget.atmosphericStorage = monthbudget.atmosphericStorage;
+            quarterbudget.soilStorage = monthbudget.soilStorage;
+        };
+
+        for (int month = 0; month < climatehydrology::monthCount; month++)
+        {
+            const monthlysolverresult result = runsolver(month);
+            const int quarter = month / 3;
+            appendbudget(finalbudgets[quarter], result.budget, month % 3 == 0);
+            appendbudget(
+                finalareaweightedbudgets[quarter],
+                result.areaweightedbudget,
+                month % 3 == 0);
+
+            auto& activity = finalcondensationactivity[quarter];
+            activity.cellStepAreaWeight += result.condensation.cellStepAreaWeight;
+            activity.activeCellStepAreaWeight +=
+                result.condensation.activeCellStepAreaWeight;
+            activity.atmosphericWaterAreaWeighted +=
+                result.condensation.atmosphericWaterAreaWeighted;
+            activity.activeAtmosphericWaterAreaWeighted +=
+                result.condensation.activeAtmosphericWaterAreaWeighted;
+            activity.excessWaterAreaWeighted +=
+                result.condensation.excessWaterAreaWeighted;
+            activity.precipitationAreaWeighted +=
+                result.condensation.precipitationAreaWeighted;
+
+            auto& processes = finalprocessdiagnostics[quarter];
+            processes.stratiformPrecipitation +=
+                result.processes.stratiformPrecipitation;
+            processes.orographicPrecipitation +=
+                result.processes.orographicPrecipitation;
+            processes.convectivePrecipitation +=
+                result.processes.convectivePrecipitation;
+            processes.positiveMoistureFluxConvergence +=
+                result.processes.positiveMoistureFluxConvergence;
+            processes.negativeMoistureFluxConvergence +=
+                result.processes.negativeMoistureFluxConvergence;
+        }
+
+        double atmosphericabsolutechange = 0.0;
+        double atmosphericreferencestorage = 0.0;
+        double soilabsolutechange = 0.0;
+        double soilreferencestorage = 0.0;
         double atmosphericstorage = 0.0;
         double soilstorage = 0.0;
 
@@ -1690,21 +3035,31 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         {
             for (int x = 0; x <= width; x++)
             {
-                absolutechange += std::abs(static_cast<double>(moisture[x][y] - initialmoisture[x][y]));
-                referencestorage += 0.5 * static_cast<double>(moisture[x][y] + initialmoisture[x][y]);
+                atmosphericabsolutechange += std::abs(
+                    static_cast<double>(moisture[x][y] - initialmoisture[x][y]));
+                atmosphericreferencestorage += 0.5 * static_cast<double>(
+                    moisture[x][y] + initialmoisture[x][y]);
                 atmosphericstorage += moisture[x][y];
 
                 if (world.sea(x, y) == 0)
                 {
-                    absolutechange += std::abs(static_cast<double>(soilmoisture[x][y] - initialsoilmoisture[x][y]));
-                    referencestorage += 0.5 * static_cast<double>(soilmoisture[x][y] + initialsoilmoisture[x][y]);
+                    soilabsolutechange += std::abs(static_cast<double>(
+                        soilmoisture[x][y] - initialsoilmoisture[x][y]));
+                    soilreferencestorage += 0.5 * static_cast<double>(
+                        soilmoisture[x][y] + initialsoilmoisture[x][y]);
                     soilstorage += soilmoisture[x][y];
                 }
             }
         }
 
         diagnostics.cyclesCompleted = cycle + 1;
-        diagnostics.relativeStorageChange = absolutechange / std::max(1.0, referencestorage);
+        diagnostics.relativeAtmosphericStorageChange = atmosphericabsolutechange /
+            std::max(1.0, atmosphericreferencestorage);
+        diagnostics.relativeSoilStorageChange = soilabsolutechange /
+            std::max(1.0, soilreferencestorage);
+        diagnostics.relativeStorageChange = std::max(
+            diagnostics.relativeAtmosphericStorageChange,
+            diagnostics.relativeSoilStorageChange);
         diagnostics.atmosphericStorage = atmosphericstorage;
         diagnostics.soilStorage = soilstorage;
         diagnostics.converged = diagnostics.cyclesCompleted >=
@@ -1715,6 +3070,9 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         std::cout
             << "Climate hydrology spinup cycle=" << diagnostics.cyclesCompleted
             << " relative_storage_change=" << diagnostics.relativeStorageChange
+            << " relative_atmospheric_change="
+            << diagnostics.relativeAtmosphericStorageChange
+            << " relative_soil_change=" << diagnostics.relativeSoilStorageChange
             << " atmospheric_storage=" << diagnostics.atmosphericStorage
             << " soil_storage=" << diagnostics.soilStorage
             << " converged=" << (diagnostics.converged ? 1 : 0)
@@ -1724,12 +3082,146 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             break;
     }
 
+    struct distributionaccumulator
+    {
+        climatephysics::PrecipitationDistributionScope metrics;
+        long long rawzeros = 0;
+        long long storedzeros = 0;
+        long long belowone = 0;
+        double areaweightedrawzeros = 0.0;
+        double areaweightedstoredzeros = 0.0;
+        double areaweightedbelowone = 0.0;
+        double precipitationtotal = 0.0;
+        double areaweightedprecipitationtotal = 0.0;
+        vector<float> precipitation;
+    };
+
+    distributionaccumulator landdistribution;
+    distributionaccumulator oceandistribution;
+
+    for (int y = 0; y <= height; y++)
+    {
+        const double areaweight = rowareaweights[y];
+
+        for (int x = 0; x <= width; x++)
+        {
+            distributionaccumulator& distribution = world.sea(x, y) == 1
+                ? oceandistribution
+                : landdistribution;
+            const float meanmonthlyrain = rawannualrain[x][y] /
+                static_cast<float>(climatehydrology::monthCount);
+            int storedseasonalrain = 0;
+
+            for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                storedseasonalrain += world.seasonalrain(season, x, y);
+
+            distribution.metrics.cells++;
+            distribution.metrics.areaWeight += areaweight;
+            distribution.precipitationtotal += meanmonthlyrain;
+            distribution.areaweightedprecipitationtotal += areaweight * meanmonthlyrain;
+            if (rawmaximummonthlyrain[x][y] >
+                distribution.metrics.maximumMonthlyPrecipitationMm)
+            {
+                const int maximummonth = static_cast<int>(rawmaximumrainmonth[x][y]);
+                distribution.metrics.maximumMonthlyPrecipitationMm =
+                    static_cast<double>(rawmaximummonthlyrain[x][y]);
+                distribution.metrics.maximumMonthlyPrecipitationX = x;
+                distribution.metrics.maximumMonthlyPrecipitationY = y;
+                distribution.metrics.maximumMonthlyPrecipitationMonth = maximummonth;
+                distribution.metrics.roundedPrecipitationAtMaximumMm =
+                    maximummonth >= 0
+                        ? static_cast<int>(std::round(rawmaximummonthlyrain[x][y]))
+                        : 0;
+            }
+            distribution.precipitation.push_back(meanmonthlyrain);
+
+            if (rawannualrain[x][y] <= 1.0e-6f)
+            {
+                distribution.rawzeros++;
+                distribution.areaweightedrawzeros += areaweight;
+            }
+
+            if (storedseasonalrain == 0)
+            {
+                distribution.storedzeros++;
+                distribution.areaweightedstoredzeros += areaweight;
+            }
+
+            if (meanmonthlyrain < 1.0f)
+            {
+                distribution.belowone++;
+                distribution.areaweightedbelowone += areaweight;
+            }
+        }
+    }
+
+    auto finalisedistribution = [](distributionaccumulator& distribution)
+    {
+        auto& metrics = distribution.metrics;
+        const double inversecellcount = metrics.cells > 0
+            ? 1.0 / static_cast<double>(metrics.cells)
+            : 0.0;
+        const double inverseareaweight = metrics.areaWeight > 0.0
+            ? 1.0 / metrics.areaWeight
+            : 0.0;
+
+        metrics.rawZeroFraction = distribution.rawzeros * inversecellcount;
+        metrics.storedZeroFraction = distribution.storedzeros * inversecellcount;
+        metrics.belowOneMillimetreFraction = distribution.belowone * inversecellcount;
+        metrics.areaWeightedRawZeroFraction = distribution.areaweightedrawzeros * inverseareaweight;
+        metrics.areaWeightedStoredZeroFraction = distribution.areaweightedstoredzeros * inverseareaweight;
+        metrics.areaWeightedBelowOneMillimetreFraction = distribution.areaweightedbelowone * inverseareaweight;
+        metrics.meanMonthlyPrecipitationMm = distribution.precipitationtotal * inversecellcount;
+        metrics.areaWeightedMeanMonthlyPrecipitationMm =
+            distribution.areaweightedprecipitationtotal * inverseareaweight;
+
+        std::sort(distribution.precipitation.begin(), distribution.precipitation.end());
+        const size_t wettestcount = static_cast<size_t>(std::ceil(
+            static_cast<double>(distribution.precipitation.size()) * 0.10));
+        double wettesttotal = 0.0;
+
+        for (size_t index = distribution.precipitation.size() - wettestcount;
+            index < distribution.precipitation.size(); index++)
+        {
+            wettesttotal += distribution.precipitation[index];
+        }
+
+        if (distribution.precipitationtotal > 0.0)
+            metrics.wettestTenPercentShare = wettesttotal / distribution.precipitationtotal;
+    };
+
+    finalisedistribution(landdistribution);
+    finalisedistribution(oceandistribution);
+
+    climatephysics::PrecipitationDistributionDiagnostics precipitationdiagnostics;
+    precipitationdiagnostics.land = landdistribution.metrics;
+    precipitationdiagnostics.ocean = oceandistribution.metrics;
+    climatephysics::setLastPrecipitationDistributionDiagnostics(precipitationdiagnostics);
     climatephysics::setLastHydrologySpinupDiagnostics(diagnostics);
+
+    std::cout
+        << "Climate precipitation distribution land_raw_zero="
+        << precipitationdiagnostics.land.areaWeightedRawZeroFraction
+        << " land_stored_zero="
+        << precipitationdiagnostics.land.areaWeightedStoredZeroFraction
+        << " land_below_1mm="
+        << precipitationdiagnostics.land.areaWeightedBelowOneMillimetreFraction
+        << " land_wettest_10_percent_share="
+        << precipitationdiagnostics.land.wettestTenPercentShare
+        << '\n';
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
         const climatephysics::WaterBudget& budget = finalbudgets[season];
+        const climatephysics::WaterBudget& areaweightedbudget = finalareaweightedbudgets[season];
         climatephysics::setLastWaterBudget(season, budget);
+        climatephysics::setLastAreaWeightedWaterBudget(season, areaweightedbudget);
+        climatephysics::setLastCondensationActivityDiagnostics(
+            season,
+            finalcondensationactivity[season]);
+        climatephysics::setLastPrecipitationProcessDiagnostics(
+            season,
+            finalprocessdiagnostics[season]);
         std::cout
             << "Climate water budget season=" << season
             << " initial_atmospheric_storage=" << budget.initialAtmosphericStorage

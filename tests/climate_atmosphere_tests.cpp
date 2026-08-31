@@ -34,6 +34,38 @@ int main()
         std::abs(heightResponse - 20.27f) < 0.05f,
         "1000-to-500 hPa thickness must change by about 20.27 metres per kelvin");
 
+    const float earthHadleyEdge = climateatmosphere::heldHouHadleyEdgeLatitudeDegrees(
+        60.0f, 10000.0f, 288.0f, 9.80665f, earthRotation, 6371000.0f);
+    expect(
+        earthHadleyEdge > 20.0f && earthHadleyEdge < 26.0f,
+        "Held-Hou scaling must place the Earth-like Hadley edge in the subtropics");
+    expect(
+        climateatmosphere::heldHouHadleyEdgeLatitudeDegrees(
+            60.0f, 10000.0f, 288.0f, 9.80665f, 0.0f, 6371000.0f) == 90.0f,
+        "a non-rotating atmosphere must permit pole-to-pole overturning");
+
+    const float warmSurfacePressure = climateatmosphere::thermalSurfacePressureAnomalyHpa(
+        10.0f, 1000.0f, 288.0f, 0.12f);
+    const float coldSurfacePressure = climateatmosphere::thermalSurfacePressureAnomalyHpa(
+        -10.0f, 1000.0f, 288.0f, 0.12f);
+    expect(
+        warmSurfacePressure < 0.0f && coldSurfacePressure > 0.0f &&
+            std::abs(warmSurfacePressure + coldSurfacePressure) < 0.0001f,
+        "warm columns must form thermal lows and cold columns thermal highs");
+
+    const float equatorialPressure =
+        climateatmosphere::axisymmetricOverturningPressureAnomalyHpa(0.0f, 0.0f, 25.0f, 10.0f);
+    const float subtropicalPressure =
+        climateatmosphere::axisymmetricOverturningPressureAnomalyHpa(25.0f, 0.0f, 25.0f, 10.0f);
+    const float subpolarPressure =
+        climateatmosphere::axisymmetricOverturningPressureAnomalyHpa(57.5f, 0.0f, 25.0f, 10.0f);
+    const float polarPressure =
+        climateatmosphere::axisymmetricOverturningPressureAnomalyHpa(90.0f, 0.0f, 25.0f, 10.0f);
+    expect(
+        equatorialPressure < 0.0f && subtropicalPressure > 0.0f &&
+            subpolarPressure < 0.0f && polarPressure > 0.0f,
+        "axisymmetric overturning must produce equatorial and subpolar lows with subtropical and polar highs");
+
     const auto spacing = climateatmosphere::cellSpacingMetres(0.0f, 2048, 1025, 6371000.0f);
     expect(
         spacing.zonalMetres > 19000.0f && spacing.zonalMetres < 20000.0f &&

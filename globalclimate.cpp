@@ -18,6 +18,7 @@
 
 #include "classes.hpp"
 #include "climate_energy.hpp"
+#include "climate_koppen.hpp"
 #include "generation_tuning.hpp"
 #include "map_imports.hpp"
 #include "planet.hpp"
@@ -5296,10 +5297,14 @@ float calculateseasonallapsecooling(planet& world, int season, int x, int y, int
         static_cast<float>(localrelief) / tuning::climate::lapse::reliefScale, 0.0f, 1.0f) *
         tuning::climate::lapse::reliefCoolingFactor;
     const float upliftcooling = std::clamp(
-        static_cast<float>(world.seasonaluplift(season, x, y)) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale,
+        static_cast<float>(world.seasonaluplift(season, x, y)) /
+            tuning::climate::atmosphere::topographyVerticalMotionStorageScale *
+            tuning::climate::lapse::moistLapseRate / 1000.0f,
         0.0f, tuning::climate::lapse::maximumAdditionalCooling) * tuning::climate::lapse::upliftCoolingFactor;
     float leesubsidencewarming = std::clamp(
-        static_cast<float>(world.seasonalsubsidence(season, x, y)) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale,
+        static_cast<float>(world.seasonalsubsidence(season, x, y)) /
+            tuning::climate::atmosphere::topographyVerticalMotionStorageScale *
+            tuning::climate::lapse::dryLapseRate / 1000.0f,
         0.0f, tuning::climate::lapse::maximumLeeWarming) * tuning::climate::lapse::subsidenceWarmingFactor;
 
     leesubsidencewarming = std::min(leesubsidencewarming, standardcooling * 0.45f);
@@ -11424,11 +11429,8 @@ short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimate
         if (summary.driestwarmrain < summary.wettestcoldrain / 2.5f && summary.driestwarmrain < 35.0f)
             preptype = "s";
 
-        const float winterdrynessdivisor = group == "D"
-            ? tuning::climate::koppen::continentalWinterDrynessDivisor
-            : 4.0f;
-
-        if (preptype == "" && summary.driestcoldrain < summary.wettestwarmrain / winterdrynessdivisor)
+        if (preptype == "" && climatekoppen::isWinterDry(
+                summary.driestcoldrain, summary.wettestwarmrain))
             preptype = "w";
 
         if (preptype == "")
