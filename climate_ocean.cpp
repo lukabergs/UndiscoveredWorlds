@@ -395,6 +395,69 @@ double rowareaweight(int y, int height)
     return (std::sin(north) - std::sin(south)) / (2.0 * std::sin(halfstep));
 }
 
+void smoothconvergencefootprint(
+    const hydrologyfloatgrid& source,
+    hydrologyfloatgrid& destination,
+    hydrologyfloatgrid& scratch,
+    const vector<float>& rowareas,
+    int width,
+    int height,
+    float mixingfraction,
+    int passes)
+{
+    const float mixing = std::clamp(mixingfraction, 0.0f, 1.0f);
+
+    for (int pass = 0; pass < std::max(1, passes); pass++)
+    {
+        const hydrologyfloatgrid& current = pass == 0 ? source : destination;
+
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int x = 0; x <= width; x++)
+                {
+                    scratch[x][y] =
+                        (1.0f - mixing) * current[x][y] +
+                        0.5f * mixing *
+                            (current[wrapx(x - 1, width)][y] +
+                                current[wrapx(x + 1, width)][y]);
+                }
+            }
+        });
+
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                const float centrearea = rowareas[y];
+
+                for (int x = 0; x <= width; x++)
+                {
+                    const float centre = scratch[x][y];
+                    float smoothed = centre;
+
+                    if (y > 0)
+                    {
+                        smoothed += mixing * rowareas[y - 1] /
+                            std::max(1.0e-6f, centrearea + rowareas[y - 1]) *
+                            (scratch[x][y - 1] - centre);
+                    }
+
+                    if (y < height)
+                    {
+                        smoothed += mixing * rowareas[y + 1] /
+                            std::max(1.0e-6f, centrearea + rowareas[y + 1]) *
+                            (scratch[x][y + 1] - centre);
+                    }
+
+                    destination[x][y] = smoothed;
+                }
+            }
+        });
+    }
+}
+
 float eddyexchangefraction(
     float diffusivitym2s,
     double edgelengthmetres,
@@ -467,16 +530,19 @@ void createeddyexchangefractions(
 
         for (int x = 0; x <= width; x++)
         {
-            diffusivity[x][y] = climatephysics::transientEddyDiffusivityM2S(
-                surfacewindu[x][y],
-                surfacewindv[x][y],
-                upperwindu[x][y],
-                upperwindv[x][y],
-                latitude,
-                tuning::climate::moistureadvection::transientEddyMixingLengthMetres,
+            diffusivity[x][y] = std::min(
                 tuning::climate::moistureadvection::maximumTransientEddyDiffusivityM2S,
-                tuning::climate::moistureadvection::transientEddyMinimumLatitudeDegrees,
-                tuning::climate::moistureadvection::transientEddyFullStrengthLatitudeDegrees);
+                tuning::climate::moistureadvection::backgroundMoistureDiffusivityM2S +
+                    climatephysics::transientEddyDiffusivityM2S(
+                        surfacewindu[x][y],
+                        surfacewindv[x][y],
+                        upperwindu[x][y],
+                        upperwindv[x][y],
+                        latitude,
+                        tuning::climate::moistureadvection::transientEddyMixingLengthMetres,
+                        tuning::climate::moistureadvection::maximumTransientEddyDiffusivityM2S,
+                        tuning::climate::moistureadvection::transientEddyMinimumLatitudeDegrees,
+                        tuning::climate::moistureadvection::transientEddyFullStrengthLatitudeDegrees));
         }
     }
 
@@ -2517,6 +2583,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     hydrologyfloatgrid boundaryfluxtendency(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid freefluxtendency(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid convectiveconvergence(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid convergencescratch(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid totalconvergence(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid zonaleddyexchange(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid meridionaleddyexchange(width + 1, height + 1, 0.0f);
@@ -2621,8 +2688,11 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                                 tuning::climate::moistureadvection::
                                     polarUpperWindBlendTaperStartDegrees),
                         0.0f,
-                        1.0f);
-                    const float localtemperature = world.sea(x, y) == 1
+                        1.0f) *
+                        tuning::climate::moistureadvection::
+                            freeTroposphereUpperWindDepartureFraction;
+                    const bool sea = world.sea(x, y) == 1;
+                    const float localtemperature = sea
                         ? interpolatefield(
                             [&](int season) { return world.seasonalsst(season, x, y); })
                         : interpolatefield(
@@ -2637,8 +2707,12 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         climatephysics::surfacePressureHpa(
                             elevation,
                             gravitymultiplier) + pressureanomaly);
-                    surfacewindu[x][y] = u;
-                    surfacewindv[x][y] = v;
+                    const float boundarytransportwindfraction = sea
+                        ? 1.0f
+                        : tuning::climate::moistureadvection::
+                            landBoundaryLayerTransportWindFraction;
+                    surfacewindu[x][y] = u * boundarytransportwindfraction;
+                    surfacewindv[x][y] = v * boundarytransportwindfraction;
                     upperwindu[x][y] = u +
                         (upperu - u) * upperwinddeparturemultiplier;
                     upperwindv[x][y] = v +
@@ -2958,31 +3032,15 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                 }
             });
 
-            parallelforrows(0, height, [&](int startrow, int endrow)
-            {
-                const float centreweight = std::clamp(
-                    tuning::climate::moistureadvection::convectiveConvergenceCentreWeight,
-                    0.0f,
-                    1.0f);
-                const float neighbourweight = (1.0f - centreweight) * 0.25f;
-
-                for (int y = startrow; y <= endrow; y++)
-                {
-                    const int north = std::max(0, y - 1);
-                    const int south = std::min(height, y + 1);
-
-                    for (int x = 0; x <= width; x++)
-                    {
-                        convectiveconvergence[x][y] =
-                            centreweight * boundaryfluxtendency[x][y] +
-                            neighbourweight *
-                                (boundaryfluxtendency[wrapx(x - 1, width)][y] +
-                                    boundaryfluxtendency[wrapx(x + 1, width)][y] +
-                                    boundaryfluxtendency[x][north] +
-                                    boundaryfluxtendency[x][south]);
-                    }
-                }
-            });
+            smoothconvergencefootprint(
+                boundaryfluxtendency,
+                convectiveconvergence,
+                convergencescratch,
+                rowareaweights,
+                width,
+                height,
+                tuning::climate::moistureadvection::convectiveConvergenceMixingFraction,
+                tuning::climate::moistureadvection::convectiveConvergenceSmoothingPasses);
 
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
@@ -3028,6 +3086,14 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                                 surfacepressure[x][y],
                                 gravitymultiplier) *
                             tuning::climate::moistureadvection::freeTroposphereCapacityFraction;
+                        const float stratiformrelativehumidity = std::clamp(
+                            tuning::climate::moistureadvection::stratiformCriticalRelativeHumidity,
+                            0.0f,
+                            1.0f);
+                        const float stratiformnonorographiccapacity =
+                            nonorographiccapacity * stratiformrelativehumidity;
+                        const float stratiformterrainadjustedcapacity =
+                            terrainadjustedcapacity * stratiformrelativehumidity;
                         const float boundaryrelativehumidity = std::clamp(
                             nextboundarymoisture[x][y] /
                                 std::max(0.05f, boundarycapacity[x][y]),
@@ -3086,14 +3152,15 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                             layerexchange.boundaryLayerMm + layerexchange.freeTroposphereMm;
                         const float condensablewater = std::max(
                             0.0f,
-                            layerexchange.freeTroposphereMm - terrainadjustedcapacity);
+                            layerexchange.freeTroposphereMm -
+                                stratiformterrainadjustedcapacity);
                         const climatehydrology::PrecipitationPartition partition =
                             climatehydrology::partitionTwoLayerPrecipitation(
                             layerexchange.boundaryLayerMm,
                             layerexchange.freeTroposphereMm,
                             boundarycapacity[x][y],
-                            nonorographiccapacity,
-                            terrainadjustedcapacity,
+                            stratiformnonorographiccapacity,
+                            stratiformterrainadjustedcapacity,
                             convectiveconvergence[x][y],
                             surfaceevaporation[x][y],
                             localtemperature,
