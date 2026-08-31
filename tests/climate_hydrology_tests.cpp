@@ -53,6 +53,43 @@ int main()
         climatehydrology::soilMoistureStress(20.0f, 80.0f, 0.5f, 0.5f) >
             climatehydrology::soilMoistureStress(10.0f, 80.0f, 0.5f, 0.5f),
         "evapotranspiration stress must increase monotonically with soil water");
+    expect(near(climatehydrology::diagnosticCloudFraction(0.70f, 0.75f), 0.0f),
+        "sub-cloud humidity must not create cloud cover");
+    expect(climatehydrology::diagnosticCloudFraction(0.90f, 0.75f) > 0.0f,
+        "humid sub-saturated air must be able to form cloud without raining");
+
+    const auto adjustment = climatehydrology::moistSaturationAdjustment(
+        30.0f, 20.0f, 10.0f, 86400.0f, 172800.0f, 2, 0.35f, 0.065f);
+    expect(adjustment.condensedMm > 0.0f && adjustment.condensedMm < 10.0f,
+        "moist adjustment must condense only part of a supersaturated column");
+    expect(adjustment.adjustedTemperatureC > 10.0f,
+        "condensation must warm the adjusted parcel");
+    expect(near(adjustment.condensedMm + adjustment.remainingVapourMm, 30.0f),
+        "moist adjustment must conserve column water");
+
+    const auto exchange = climatehydrology::exchangeMoistureLayers(
+        20.0f, 10.0f, 0.25f, 0.10f);
+    expect(near(exchange.boundaryLayerMm, 16.0f) &&
+            near(exchange.freeTroposphereMm, 14.0f),
+        "vertical exchange must apply simultaneous up- and downward transfers");
+    expect(near(exchange.boundaryLayerMm + exchange.freeTroposphereMm, 30.0f),
+        "vertical exchange must conserve atmospheric water");
+
+    const auto falling = climatehydrology::processFallingPrecipitation(
+        10.0f, -5.0f, 0.25f, 0.4f, 8.0f, -1.0f, 2.0f);
+    expect(falling.reevaporatedMm > 0.0f && near(falling.rainMm, 0.0f),
+        "cold precipitation must sublimate and reach the surface as snow");
+    expect(near(falling.surfaceTotalMm() + falling.reevaporatedMm, 10.0f),
+        "falling precipitation processing must conserve water");
+    expect(near(climatehydrology::snowMeltAmount(20.0f, 5.0f, 86400.0f, 3.0f), 15.0f),
+        "degree-day snowmelt must respect temperature and duration");
+    const auto snowaccumulation = climatehydrology::accumulateSnowfall(
+        4995.0f, 12.0f, 5000.0f);
+    expect(near(snowaccumulation.storageMm, 5000.0f) &&
+            near(snowaccumulation.overflowMm, 7.0f),
+        "snow above the finite glacier store must become runoff");
+    expect(near(snowaccumulation.storageMm + snowaccumulation.overflowMm, 5007.0f),
+        "snow accumulation and overflow must conserve water");
 
     const auto dry = climatehydrology::partitionPrecipitation(
         20.0f, 50.0f, 50.0f, -2.0f, 0.0f, 25.0f, 86400.0f,
@@ -93,6 +130,18 @@ int main()
         0.8f, 172800.0f, 0.6f, 0.75f, 8.0f, 24.0f);
     expect(evaporationFed.convectiveMm > 0.0f,
         "surface evaporation plus net moisture supply must feed warm convection");
+
+    const auto layered = climatehydrology::partitionTwoLayerPrecipitation(
+        24.0f, 18.0f, 30.0f, 15.0f, 12.0f, 4.0f, 1.0f,
+        28.0f, 12.0f, 86400.0f, 172800.0f, 0.6f, 0.75f,
+        8.0f, 24.0f, 2, 0.35f, 0.065f);
+    expect(layered.stratiformMm > 0.0f && layered.orographicMm > 0.0f,
+        "a supersaturated lifted free troposphere must rain stratiformly and orographically");
+    expect(layered.convectiveMm > 0.0f,
+        "warm convergent boundary-layer moisture must rain convectively");
+    expect(layered.stratiformMm + layered.orographicMm <= 18.0f + 1.0e-5f &&
+            layered.convectiveMm <= 24.0f + 1.0e-5f,
+        "two-layer precipitation must conserve each source reservoir");
 
     for (int water = 0; water <= 100; water += 5)
     {

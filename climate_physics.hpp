@@ -10,6 +10,7 @@ struct WaterBudget
 {
     double initialAtmosphericStorage = 0.0;
     double initialSoilStorage = 0.0;
+    double initialSnowStorage = 0.0;
     double oceanEvaporation = 0.0;
     double landEvaporation = 0.0;
     double oceanPrecipitation = 0.0;
@@ -17,6 +18,7 @@ struct WaterBudget
     double runoff = 0.0;
     double atmosphericStorage = 0.0;
     double soilStorage = 0.0;
+    double snowStorage = 0.0;
 
     double residual() const;
     double relativeResidual() const;
@@ -29,8 +31,11 @@ struct HydrologySpinupDiagnostics
     double relativeStorageChange = 0.0;
     double relativeAtmosphericStorageChange = 0.0;
     double relativeSoilStorageChange = 0.0;
+    double relativeSnowStorageChange = 0.0;
+    double relativeSnowCoverChange = 0.0;
     double atmosphericStorage = 0.0;
     double soilStorage = 0.0;
+    double snowStorage = 0.0;
 };
 
 struct PrecipitationDistributionScope
@@ -74,15 +79,34 @@ struct PrecipitationProcessDiagnostics
     double stratiformPrecipitation = 0.0;
     double orographicPrecipitation = 0.0;
     double convectivePrecipitation = 0.0;
+    double reevaporatedPrecipitation = 0.0;
+    double snowfall = 0.0;
+    double upwardMoistureTransfer = 0.0;
+    double downwardMoistureTransfer = 0.0;
+    double cloudFractionAreaWeighted = 0.0;
     double positiveMoistureFluxConvergence = 0.0;
     double negativeMoistureFluxConvergence = 0.0;
 };
 
 float saturationVapourPressureHpa(float temperatureC);
 float surfacePressureHpa(float elevationAboveSeaLevelMetres);
+float surfacePressureHpa(float elevationAboveSeaLevelMetres, float gravityMultiplier);
 float saturationSpecificHumidity(float temperatureC, float pressureHpa);
 float saturationColumnWaterAtPressure(float temperatureC, float surfacePressureHpa);
+float saturationColumnWaterAtPressure(
+    float temperatureC,
+    float surfacePressureHpa,
+    float gravityMultiplier);
 float saturationColumnWater(float temperatureC, float elevationAboveSeaLevelMetres);
+float neutralDragCoefficient(float roughnessLengthMetres, float referenceHeightMetres);
+float bulkRichardsonExchangeMultiplier(
+    float surfaceTemperatureC,
+    float airTemperatureC,
+    float windSpeedMetresPerSecond,
+    float gravityMultiplier,
+    float referenceHeightMetres,
+    float minimumMultiplier,
+    float maximumMultiplier);
 float bulkAerodynamicEvaporationMmAtPressure(
     float temperatureC,
     float surfacePressureHpa,

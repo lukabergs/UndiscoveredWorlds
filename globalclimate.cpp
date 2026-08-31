@@ -379,8 +379,8 @@ void tracedropparallel(planet& world, int x, int y, int minimum, vector<mutex>& 
     const int maxelevation = world.maxelevation();
     const float riverfactor = world.riverfactor();
 
-    float janload = static_cast<float>(world.janrain(startx, starty));
-    float julload = static_cast<float>(world.julrain(startx, starty));
+    float janload = world.seasonalrainfloat(seasonjanuary, startx, starty);
+    float julload = world.seasonalrainfloat(seasonjuly, startx, starty);
 
     if ((janload + julload) / 2.0f < static_cast<float>(minimum))
         return;
@@ -1222,9 +1222,9 @@ void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, 
             smoothrainfall(world, maxmountainheight);
     }
 
-    // Now cap excessive rainfall.
-
-    if (beginworldgenstep("Capping rainfall"))
+    // The conservative hydrology already bounds water physically. Retain the
+    // legacy presentation cap only for the fallback all-land rainfall path.
+    if (seatotal == 0 && beginworldgenstep("Capping rainfall"))
         caprainfall(world);
 
     if (beginworldgenstep("Calculating coastal climate influence"))
@@ -4193,7 +4193,7 @@ void adjustseasonalrainfall(planet& world, vector<vector<int>>& inland)
                     if (diff > 0.0f)
                         med = med - diff * medmintempdifffactor;
 
-                    diff = (float)(world.averain(i, j) - maxmedrain);
+                    diff = world.averainfloat(i, j) - static_cast<float>(maxmedrain);
 
                     if (diff > 0.0f)
                         med = med - diff * medmaxraindifffactor;
@@ -5284,7 +5284,8 @@ float calculateseasonallapsecooling(planet& world, int season, int x, int y, int
 {
     const float standardcooling = calculatestandardlapsecooling(world, x, y);
     const float rainhumidity = std::clamp(
-        static_cast<float>(world.seasonalrain(season, x, y)) / tuning::climate::lapse::rainfallHumidityScale, 0.0f, 1.0f);
+        world.seasonalrainfloat(season, x, y) /
+            tuning::climate::lapse::rainfallHumidityScale, 0.0f, 1.0f);
     const float moisturehumidity = std::clamp(
         static_cast<float>(world.seasonalmoisture(season, x, y)) / tuning::climate::lapse::moistureHumidityScale, 0.0f, 1.0f);
     const float humidity = std::clamp((rainhumidity + moisturehumidity) * 0.5f, 0.0f, 1.0f);
@@ -7414,8 +7415,8 @@ void tracedrop(planet& world, int x, int y, int minimum, int dropno, vector<vect
     int height = world.height();
     float riverfactor = world.riverfactor();
 
-    float janload = (float)world.janrain(x, y);
-    float julload = (float)world.julrain(x, y);
+    float janload = world.seasonalrainfloat(seasonjanuary, x, y);
+    float julload = world.seasonalrainfloat(seasonjuly, x, y);
 
     if ((janload + julload) / 2.0f < (float)minimum)
         return;
@@ -7650,7 +7651,8 @@ void createlakemap(planet& world, vector<vector<int>>& nolake, boolshapetemplate
         {
             int flow = world.riveraveflow(i, j);
 
-            if (world.averain(i, j) >= minrain || world.avetemp(i, j) <= maxtemp)
+            if (world.averainfloat(i, j) >= static_cast<float>(minrain) ||
+                world.avetemp(i, j) <= maxtemp)
             {
                 if (flow >= minlake && flow <= maxlake && lakeprobability[i][j] == 1 && random(1, lakechance) == 1)
                 {
@@ -10843,7 +10845,7 @@ seasonalclimatesummary summariseseasonalclimate(planet& world, int x, int y)
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
         summary.temps[season] = static_cast<float>(world.seasonaltemp(season, x, y));
-        summary.rains[season] = static_cast<float>(world.seasonalrain(season, x, y));
+        summary.rains[season] = world.seasonalrainfloat(season, x, y);
         summary.meanannualtemp += summary.temps[season];
         summary.annualrain += summary.rains[season];
     }
@@ -10934,7 +10936,7 @@ seasonalclimatesummary summariselegacytemperatureseasonalrainclimate(planet& wor
     summary.temps[seasonoctober] = transitiontemp + transitiontempdiff;
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-        summary.rains[season] = static_cast<float>(world.seasonalrain(season, x, y));
+        summary.rains[season] = world.seasonalrainfloat(season, x, y);
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
@@ -13816,7 +13818,8 @@ void createwetlands(planet& world, boolshapetemplate smalllake[])
                             }
 
                             //prob=prob+(7-(world.averain(i,j)/60));
-                            prob = prob + (40 - (world.averain(i, j) / 10));
+                            prob = prob + static_cast<int>(
+                                40.0f - world.averainfloat(i, j) / 10.0f);
 
                             if (world.climate(i, j) == 30 && world.maxtemp(i, j) >= 5) // Much likelier in tundra with warmish summers
                                 prob = prob / 4;

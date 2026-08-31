@@ -623,6 +623,12 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         return 1;
     }
 
+    if (importedworld && options.earthClimateBenchmark == false && (options.hasWorldWidth != options.hasWorldHeight))
+    {
+        cerr << "Reduced imported runs require both --world-width and --world-height.\n";
+        return 1;
+    }
+
     boolshapetemplate landshape[12];
     createlandshapetemplates(landshape);
     boolshapetemplate chainland[2];
@@ -648,6 +654,14 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     {
         world->setwidth(kEarthBenchmarkWidth - 1);
         world->setheight(kEarthBenchmarkHeight - 1);
+    }
+    else if (importedworld)
+    {
+        if (options.hasWorldWidth && options.hasWorldHeight)
+        {
+            world->setwidth(std::clamp(options.worldWidth, 2, ARRAYWIDTH) - 1);
+            world->setheight(std::clamp(options.worldHeight, 2, ARRAYHEIGHT) - 1);
+        }
     }
     else if (importedworld == false)
     {

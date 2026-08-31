@@ -31,6 +31,10 @@ int main()
         climatephysics::surfacePressureHpa(3000.0f) <
             climatephysics::surfacePressureHpa(0.0f),
         "surface pressure must decrease with elevation");
+    expect(
+        climatephysics::surfacePressureHpa(3000.0f, 2.0f) <
+            climatephysics::surfacePressureHpa(3000.0f, 1.0f),
+        "stronger gravity must reduce pressure more rapidly with elevation");
 
     const float tropicalColumn = climatephysics::saturationColumnWater(30.0f, 0.0f);
     const float freezingColumn = climatephysics::saturationColumnWater(0.0f, 0.0f);
@@ -40,6 +44,23 @@ int main()
         climatephysics::saturationColumnWaterAtPressure(20.0f, 980.0f) >
             climatephysics::saturationColumnWaterAtPressure(20.0f, 1030.0f),
         "column saturation capacity must respond to surface pressure");
+    expect(
+        climatephysics::saturationColumnWaterAtPressure(20.0f, 1013.25f, 2.0f) <
+            climatephysics::saturationColumnWaterAtPressure(20.0f, 1013.25f, 1.0f),
+        "stronger gravity must reduce column water capacity");
+
+    const float oceanDrag = climatephysics::neutralDragCoefficient(0.0002f, 10.0f);
+    const float landDrag = climatephysics::neutralDragCoefficient(0.05f, 10.0f);
+    expect(landDrag > oceanDrag,
+        "rough land must exchange more strongly than a smooth ocean surface");
+    expect(
+        climatephysics::bulkRichardsonExchangeMultiplier(
+            10.0f, 14.0f, 3.0f, 1.0f, 10.0f, 0.25f, 2.0f) < 1.0f,
+        "stable surface layers must suppress turbulent exchange");
+    expect(
+        climatephysics::bulkRichardsonExchangeMultiplier(
+            18.0f, 14.0f, 3.0f, 1.0f, 10.0f, 0.25f, 2.0f) > 1.0f,
+        "unstable surface layers must enhance turbulent exchange");
 
     const float dryEvaporation = climatephysics::bulkAerodynamicEvaporationMm(
         20.0f, 0.0f, 5.0f, 0.0f, 86400.0f, 0.0013f);
@@ -91,11 +112,13 @@ int main()
     climatephysics::WaterBudget persistent;
     persistent.initialAtmosphericStorage = 40.0;
     persistent.initialSoilStorage = 60.0;
+    persistent.initialSnowStorage = 10.0;
     persistent.oceanEvaporation = 25.0;
     persistent.oceanPrecipitation = 45.0;
     persistent.runoff = 20.0;
     persistent.atmosphericStorage = 35.0;
     persistent.soilStorage = 25.0;
+    persistent.snowStorage = 10.0;
     expect(std::abs(persistent.residual()) < 1e-9,
         "persistent water budget must include initial atmospheric and soil storage");
 

@@ -46,6 +46,11 @@ float PrecipitationPartition::totalMm() const
     return stratiformMm + orographicMm + convectiveMm;
 }
 
+float FallingPrecipitation::surfaceTotalMm() const
+{
+    return rainMm + snowMm;
+}
+
 CalendarMonth calendarMonth(int month)
 {
     const int wrappedMonth = ((month % monthCount) + monthCount) % monthCount;
@@ -80,6 +85,131 @@ float soilMoistureStress(
         0.0f,
         1.0f);
     return std::pow(availableFraction, std::max(0.0f, exponent));
+}
+
+float diagnosticCloudFraction(float relativeHumidity, float cloudOnsetRelativeHumidity)
+{
+    return smoothStep(
+        std::clamp(cloudOnsetRelativeHumidity, 0.0f, 1.0f),
+        1.0f,
+        std::clamp(relativeHumidity, 0.0f, 1.0f));
+}
+
+MoistAdjustment moistSaturationAdjustment(
+    float availableColumnWaterMm,
+    float saturationCapacityMm,
+    float temperatureC,
+    float timeStepSeconds,
+    float conversionTimeSeconds,
+    int iterations,
+    float latentHeatingCPerMillimetre,
+    float capacityTemperatureSensitivityPerC)
+{
+    MoistAdjustment result;
+    result.remainingVapourMm = std::max(0.0f, availableColumnWaterMm);
+    result.adjustedTemperatureC = temperatureC;
+    const float initialCapacity = std::max(0.0f, saturationCapacityMm);
+
+    const int iterationCount = std::max(1, iterations);
+
+    for (int iteration = 0; iteration < iterationCount; iteration++)
+    {
+        const float warming = result.adjustedTemperatureC - temperatureC;
+        const float adjustedCapacity = initialCapacity * std::exp(
+            std::clamp(capacityTemperatureSensitivityPerC * warming, -20.0f, 20.0f));
+        const float condensed = relaxedExcess(
+            result.remainingVapourMm,
+            adjustedCapacity,
+            timeStepSeconds / static_cast<float>(iterationCount),
+            conversionTimeSeconds);
+
+        result.condensedMm += condensed;
+        result.remainingVapourMm -= condensed;
+        result.adjustedTemperatureC += condensed *
+            std::max(0.0f, latentHeatingCPerMillimetre);
+    }
+
+    result.condensedMm = std::clamp(
+        result.condensedMm,
+        0.0f,
+        std::max(0.0f, availableColumnWaterMm));
+    result.remainingVapourMm = std::max(
+        0.0f,
+        std::max(0.0f, availableColumnWaterMm) - result.condensedMm);
+    return result;
+}
+
+MoistureLayerExchange exchangeMoistureLayers(
+    float boundaryLayerMm,
+    float freeTroposphereMm,
+    float upwardFraction,
+    float downwardFraction)
+{
+    const float boundary = std::max(0.0f, boundaryLayerMm);
+    const float free = std::max(0.0f, freeTroposphereMm);
+    const float upward = boundary * std::clamp(upwardFraction, 0.0f, 1.0f);
+    const float downward = free * std::clamp(downwardFraction, 0.0f, 1.0f);
+
+    return {
+        boundary - upward + downward,
+        free + upward - downward,
+        upward,
+        downward
+    };
+}
+
+FallingPrecipitation processFallingPrecipitation(
+    float condensateMm,
+    float surfaceTemperatureC,
+    float boundaryRelativeHumidity,
+    float maximumReevaporationFraction,
+    float maximumVapourUptakeMm,
+    float allSnowTemperatureC,
+    float allRainTemperatureC)
+{
+    const float condensate = std::max(0.0f, condensateMm);
+    const float humidityDeficit = 1.0f - std::clamp(boundaryRelativeHumidity, 0.0f, 1.0f);
+    const float reevaporation = std::min({
+        condensate,
+        std::max(0.0f, maximumVapourUptakeMm),
+        condensate * std::clamp(maximumReevaporationFraction, 0.0f, 1.0f) *
+            humidityDeficit * humidityDeficit
+    });
+    const float reachingSurface = condensate - reevaporation;
+    const float rainFraction = smoothStep(
+        allSnowTemperatureC,
+        allRainTemperatureC,
+        surfaceTemperatureC);
+
+    return {
+        reachingSurface * rainFraction,
+        reachingSurface * (1.0f - rainFraction),
+        reevaporation
+    };
+}
+
+float snowMeltAmount(
+    float snowWaterEquivalentMm,
+    float surfaceTemperatureC,
+    float timeStepSeconds,
+    float degreeDayMeltMmPerDegreeC)
+{
+    constexpr float secondsPerDay = 86400.0f;
+    const float potentialMelt = std::max(0.0f, surfaceTemperatureC) *
+        std::max(0.0f, degreeDayMeltMmPerDegreeC) *
+        std::max(0.0f, timeStepSeconds) / secondsPerDay;
+    return std::min(std::max(0.0f, snowWaterEquivalentMm), potentialMelt);
+}
+
+SnowAccumulation accumulateSnowfall(
+    float snowWaterEquivalentMm,
+    float snowfallMm,
+    float maximumSnowStorageMm)
+{
+    const float combined = std::max(0.0f, snowWaterEquivalentMm) +
+        std::max(0.0f, snowfallMm);
+    const float storage = std::min(combined, std::max(0.0f, maximumSnowStorageMm));
+    return { storage, combined - storage };
 }
 
 PrecipitationPartition partitionPrecipitation(
@@ -152,6 +282,74 @@ PrecipitationPartition partitionPrecipitation(
         result.convectiveMm *= scale;
     }
 
+    return result;
+}
+
+PrecipitationPartition partitionTwoLayerPrecipitation(
+    float boundaryLayerWaterMm,
+    float freeTroposphereWaterMm,
+    float boundaryLayerSaturationCapacityMm,
+    float nonOrographicFreeTroposphereCapacityMm,
+    float terrainAdjustedFreeTroposphereCapacityMm,
+    float signedBoundaryLayerConvergenceMm,
+    float surfaceEvaporationMm,
+    float surfaceTemperatureC,
+    float freeTroposphereTemperatureC,
+    float timeStepSeconds,
+    float stratiformConversionTimeSeconds,
+    float convectiveResidualRelativeHumidity,
+    float convectiveConversionEfficiency,
+    float convectiveActivationTemperatureC,
+    float convectiveFullStrengthTemperatureC,
+    int moistAdjustmentIterations,
+    float latentHeatingCPerMillimetre,
+    float capacityTemperatureSensitivityPerC)
+{
+    const float boundaryWater = std::max(0.0f, boundaryLayerWaterMm);
+    const float freeWater = std::max(0.0f, freeTroposphereWaterMm);
+    const MoistAdjustment nonOrographicAdjustment = moistSaturationAdjustment(
+        freeWater,
+        nonOrographicFreeTroposphereCapacityMm,
+        freeTroposphereTemperatureC,
+        timeStepSeconds,
+        stratiformConversionTimeSeconds,
+        moistAdjustmentIterations,
+        latentHeatingCPerMillimetre,
+        capacityTemperatureSensitivityPerC);
+    const MoistAdjustment terrainAdjustment = moistSaturationAdjustment(
+        freeWater,
+        terrainAdjustedFreeTroposphereCapacityMm,
+        freeTroposphereTemperatureC,
+        timeStepSeconds,
+        stratiformConversionTimeSeconds,
+        moistAdjustmentIterations,
+        latentHeatingCPerMillimetre,
+        capacityTemperatureSensitivityPerC);
+
+    PrecipitationPartition result;
+    result.orographicMm = std::max(
+        0.0f,
+        terrainAdjustment.condensedMm - nonOrographicAdjustment.condensedMm);
+    result.stratiformMm = std::max(
+        0.0f,
+        terrainAdjustment.condensedMm - result.orographicMm);
+
+    const float convectiveFloor = std::max(
+        0.0f,
+        boundaryLayerSaturationCapacityMm *
+            std::clamp(convectiveResidualRelativeHumidity, 0.0f, 1.0f));
+    const float convectivelyAvailable = std::max(0.0f, boundaryWater - convectiveFloor);
+    const float instability = smoothStep(
+        convectiveActivationTemperatureC,
+        convectiveFullStrengthTemperatureC,
+        surfaceTemperatureC);
+    const float convergentSupply = std::max(
+        0.0f,
+        signedBoundaryLayerConvergenceMm + std::max(0.0f, surfaceEvaporationMm));
+    result.convectiveMm = std::min(
+        convectivelyAvailable,
+        convergentSupply * instability *
+            std::clamp(convectiveConversionEfficiency, 0.0f, 1.0f));
     return result;
 }
 }
