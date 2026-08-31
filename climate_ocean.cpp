@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "climate_atmosphere.hpp"
+#include "climate_circulation_diagnostics.hpp"
 #include "climate_hydrology.hpp"
 #include "climate_physics.hpp"
 #include "generation_tuning.hpp"
@@ -2540,6 +2541,16 @@ void createvectorwindmap(planet& world)
         hydrologyforcingcache.upperwindu[season] = upperu;
         hydrologyforcingcache.upperwindv[season] = upperv;
         hydrologyforcingcache.populated[season] = true;
+        if (isworldgendebugrunactive())
+        {
+            climatevalidation::capturecirculationwindfields(
+                world,
+                season,
+                windu,
+                windv,
+                upperu,
+                upperv);
+        }
 
         parallelforrows(0, height, [&](int startrow, int endrow)
         {

@@ -13,7 +13,18 @@ import icechunk as ic
 import xarray as xr
 
 
-DEFAULT_VARIABLES = ("slp", "tcwv", "u10m", "v10m", "u850", "v850", "w500", "pr")
+DEFAULT_VARIABLES = (
+    "slp",
+    "tcwv",
+    "u10m",
+    "v10m",
+    "u500",
+    "v500",
+    "u850",
+    "v850",
+    "w500",
+    "pr",
+)
 BUCKET = "planette-era5"
 REGION = "us-east-2"
 
