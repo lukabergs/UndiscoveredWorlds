@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 namespace climatehydrology
 {
 inline constexpr int monthCount = 12;
@@ -68,6 +70,14 @@ struct SnowAccumulation
     float overflowMm = 0.0f;
 };
 
+struct SphericalTracerTransportDiagnostics
+{
+    int substeps = 1;
+    float maximumMeridionalCourant = 0.0f;
+    double initialAreaWeightedMass = 0.0;
+    double finalAreaWeightedMass = 0.0;
+};
+
 CalendarMonth calendarMonth(int month);
 ClimateGridDimensions climateGridDimensions(
     int outputColumns,
@@ -83,6 +93,17 @@ int adjacentMeridionalTransportTargetRow(
     int sourceRow,
     float displacementRows,
     int maximumRow);
+SphericalTracerTransportDiagnostics advectSphericalTracer(
+    int columns,
+    int rows,
+    const std::vector<float>& source,
+    const std::vector<float>& zonalWindMps,
+    const std::vector<float>& meridionalWindMps,
+    float timeStepSeconds,
+    float planetRadiusMetres,
+    float maximumMeridionalCourantPerSubstep,
+    float maximumDisplacementCells,
+    std::vector<float>& destination);
 WeatherPhase deterministicWeatherPhase(
     int phase,
     int phaseCount,

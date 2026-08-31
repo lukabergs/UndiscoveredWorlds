@@ -67,6 +67,146 @@ int main()
             climatehydrology::adjacentMeridionalTransportTargetRow(64, 2.0f, 64) == 64,
         "meridional flux must remain inside the polar boundaries");
 
+    constexpr int tracerColumns = 16;
+    constexpr int tracerRows = 9;
+    constexpr float tracerRadius = 1000.0f;
+    constexpr float tracerTimeStep = 1.0f;
+    constexpr float pi = 3.14159265358979323846f;
+    const size_t tracerCellCount = static_cast<size_t>(tracerColumns * tracerRows);
+    const auto tracerIndex = [=](int x, int y)
+    {
+        return static_cast<size_t>(y * tracerColumns + x);
+    };
+    const auto tracerMass = [&](const std::vector<float>& field)
+    {
+        double mass = 0.0;
+        for (int y = 0; y < tracerRows; y++)
+        {
+            const double area = climatehydrology::climateCellAreaWeight(y, tracerRows);
+            for (int x = 0; x < tracerColumns; x++)
+                mass += area * field[tracerIndex(x, y)];
+        }
+        return mass;
+    };
+
+    std::vector<float> tracer(tracerCellCount, 1.0f);
+    std::vector<float> zonalWind(tracerCellCount, 8.0f);
+    std::vector<float> meridionalWind(tracerCellCount, 0.0f);
+    std::vector<float> transportedTracer;
+    auto transportDiagnostics = climatehydrology::advectSphericalTracer(
+        tracerColumns,
+        tracerRows,
+        tracer,
+        zonalWind,
+        meridionalWind,
+        tracerTimeStep,
+        tracerRadius,
+        0.5f,
+        48.0f,
+        transportedTracer);
+    bool uniformZonalTracer = transportedTracer.size() == tracerCellCount;
+    for (float value : transportedTracer)
+        uniformZonalTracer = uniformZonalTracer && near(value, 1.0f, 2.0e-5f);
+    expect(uniformZonalTracer,
+        "periodic zonal transport must preserve a uniform tracer");
+    expect(std::abs(
+            transportDiagnostics.finalAreaWeightedMass -
+                transportDiagnostics.initialAreaWeightedMass) < 1.0e-4,
+        "zonal tracer transport must conserve area-weighted mass");
+
+    tracer.assign(tracerCellCount, 0.0f);
+    zonalWind.assign(tracerCellCount, 0.0f);
+    const int zonalSourceX = 4;
+    const int equatorRow = tracerRows / 2;
+    tracer[tracerIndex(zonalSourceX, equatorRow)] = 1.0f;
+    const float equatorialCellWidth = 2.0f * pi * tracerRadius /
+        static_cast<float>(tracerColumns);
+    zonalWind[tracerIndex(zonalSourceX, equatorRow)] = 2.25f * equatorialCellWidth;
+    climatehydrology::advectSphericalTracer(
+        tracerColumns,
+        tracerRows,
+        tracer,
+        zonalWind,
+        meridionalWind,
+        tracerTimeStep,
+        tracerRadius,
+        0.5f,
+        48.0f,
+        transportedTracer);
+    expect(near(transportedTracer[tracerIndex(6, equatorRow)], 0.75f) &&
+            near(transportedTracer[tracerIndex(7, equatorRow)], 0.25f),
+        "zonal remapping must resolve a Courant number above one without under-advection");
+    expect(near(static_cast<float>(tracerMass(transportedTracer)), 1.0f),
+        "multi-cell zonal remapping must conserve tracer mass");
+
+    tracer.assign(tracerCellCount, 0.0f);
+    zonalWind.assign(tracerCellCount, 0.0f);
+    meridionalWind.assign(tracerCellCount, 2.2f * pi * tracerRadius /
+        static_cast<float>(tracerRows));
+    const int meridionalSourceRow = 2;
+    tracer[tracerIndex(5, meridionalSourceRow)] = 1.0f /
+        climatehydrology::climateCellAreaWeight(meridionalSourceRow, tracerRows);
+    transportDiagnostics = climatehydrology::advectSphericalTracer(
+        tracerColumns,
+        tracerRows,
+        tracer,
+        zonalWind,
+        meridionalWind,
+        tracerTimeStep,
+        tracerRadius,
+        0.5f,
+        48.0f,
+        transportedTracer);
+    double meridionalCentroid = 0.0;
+    double meridionalVariance = 0.0;
+    const double transportedMass = tracerMass(transportedTracer);
+    for (int y = 0; y < tracerRows; y++)
+    {
+        const double cellMass = climatehydrology::climateCellAreaWeight(y, tracerRows) *
+            transportedTracer[tracerIndex(5, y)];
+        meridionalCentroid += static_cast<double>(y) * cellMass;
+    }
+    meridionalCentroid /= transportedMass;
+    for (int y = 0; y < tracerRows; y++)
+    {
+        const double cellMass = climatehydrology::climateCellAreaWeight(y, tracerRows) *
+            transportedTracer[tracerIndex(5, y)];
+        const double offset = static_cast<double>(y) - meridionalCentroid;
+        meridionalVariance += offset * offset * cellMass / transportedMass;
+    }
+    expect(transportDiagnostics.substeps == 5 &&
+            near(transportDiagnostics.maximumMeridionalCourant, 2.2f, 1.0e-4f),
+        "super-CFL meridional transport must select deterministic stable substeps");
+    expect(std::abs(meridionalCentroid - 4.2) < 1.0e-4,
+        "super-CFL meridional transport must move the tracer through every intervening row");
+    expect(std::abs(meridionalVariance - 1.232) < 1.0e-3,
+        "meridional tracer spreading must match the subcycled donor-cell solution");
+    expect(std::abs(transportedMass - 1.0) < 1.0e-5,
+        "meridional transport must conserve area-weighted tracer mass");
+    bool positiveTracer = true;
+    for (float value : transportedTracer)
+        positiveTracer = positiveTracer && value >= 0.0f;
+    expect(positiveTracer, "tracer transport must remain positive");
+
+    tracer.assign(tracerCellCount, 0.0f);
+    meridionalWind.assign(tracerCellCount, -4.0f * pi * tracerRadius /
+        static_cast<float>(tracerRows));
+    tracer[tracerIndex(3, 0)] = 1.0f;
+    climatehydrology::advectSphericalTracer(
+        tracerColumns,
+        tracerRows,
+        tracer,
+        zonalWind,
+        meridionalWind,
+        tracerTimeStep,
+        tracerRadius,
+        0.5f,
+        48.0f,
+        transportedTracer);
+    expect(near(transportedTracer[tracerIndex(3, 0)], 1.0f) &&
+            std::abs(tracerMass(transportedTracer) - tracerMass(tracer)) < 1.0e-6,
+        "outward polar transport must neither leak nor jump across the cap");
+
     const auto daytime = climatehydrology::deterministicWeatherPhase(
         0, 3, 7.0f, 2.0f, -2.0f, 0.35f, -0.35f);
     const auto neutral = climatehydrology::deterministicWeatherPhase(

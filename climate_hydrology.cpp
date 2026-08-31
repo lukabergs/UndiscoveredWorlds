@@ -117,6 +117,160 @@ int adjacentMeridionalTransportTargetRow(
     return std::clamp(boundedSource + direction, 0, boundedMaximum);
 }
 
+SphericalTracerTransportDiagnostics advectSphericalTracer(
+    int columns,
+    int rows,
+    const std::vector<float>& source,
+    const std::vector<float>& zonalWindMps,
+    const std::vector<float>& meridionalWindMps,
+    float timeStepSeconds,
+    float planetRadiusMetres,
+    float maximumMeridionalCourantPerSubstep,
+    float maximumDisplacementCells,
+    std::vector<float>& destination)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    SphericalTracerTransportDiagnostics diagnostics;
+    const size_t cellCount = static_cast<size_t>(std::max(0, columns)) *
+        static_cast<size_t>(std::max(0, rows));
+    if (columns <= 0 || rows <= 0 || source.size() != cellCount ||
+        zonalWindMps.size() != cellCount || meridionalWindMps.size() != cellCount ||
+        timeStepSeconds <= 0.0f || planetRadiusMetres <= 0.0f)
+    {
+        destination = source;
+        return diagnostics;
+    }
+
+    const float meridionalCellHeight = pi * planetRadiusMetres /
+        static_cast<float>(rows);
+    const float displacementLimit = std::max(0.0f, maximumDisplacementCells);
+    for (float wind : meridionalWindMps)
+    {
+        diagnostics.maximumMeridionalCourant = std::max(
+            diagnostics.maximumMeridionalCourant,
+            std::min(
+                displacementLimit,
+                std::fabs(wind) * timeStepSeconds / meridionalCellHeight));
+    }
+
+    const float courantLimit = std::clamp(
+        maximumMeridionalCourantPerSubstep,
+        0.05f,
+        1.0f);
+    diagnostics.substeps = std::max(
+        1,
+        static_cast<int>(std::ceil(
+            diagnostics.maximumMeridionalCourant / courantLimit)));
+    const float substepSeconds = timeStepSeconds /
+        static_cast<float>(diagnostics.substeps);
+
+    std::vector<float> rowAreaWeights(static_cast<size_t>(rows), 1.0f);
+    for (int y = 0; y < rows; y++)
+        rowAreaWeights[static_cast<size_t>(y)] = climateCellAreaWeight(y, rows);
+
+    const auto areaWeightedMass = [&](const std::vector<float>& field)
+    {
+        double total = 0.0;
+        for (int y = 0; y < rows; y++)
+        {
+            const double weight = rowAreaWeights[static_cast<size_t>(y)];
+            for (int x = 0; x < columns; x++)
+                total += weight * field[static_cast<size_t>(y) * columns + x];
+        }
+        return total;
+    };
+
+    diagnostics.initialAreaWeightedMass = areaWeightedMass(source);
+    std::vector<float> current = source;
+    std::vector<float> zonal(cellCount, 0.0f);
+    std::vector<float> next(cellCount, 0.0f);
+
+    const auto wrappedColumn = [columns](int x)
+    {
+        const int remainder = x % columns;
+        return remainder < 0 ? remainder + columns : remainder;
+    };
+
+    for (int step = 0; step < diagnostics.substeps; step++)
+    {
+        std::fill(zonal.begin(), zonal.end(), 0.0f);
+        for (int y = 0; y < rows; y++)
+        {
+            const float latitudeRadians = climateCellLatitudeDegrees(y, rows) * pi / 180.0f;
+            const float circumference = 2.0f * pi * planetRadiusMetres *
+                std::max(0.05f, std::cos(latitudeRadians));
+            const float cellWidth = circumference / static_cast<float>(columns);
+
+            for (int x = 0; x < columns; x++)
+            {
+                const size_t sourceIndex = static_cast<size_t>(y) * columns + x;
+                const float fullDisplacement = std::clamp(
+                    zonalWindMps[sourceIndex] * timeStepSeconds / cellWidth,
+                    -displacementLimit,
+                    displacementLimit);
+                const float displacement = fullDisplacement /
+                    static_cast<float>(diagnostics.substeps);
+                const float magnitude = std::fabs(displacement);
+                const float transportedFraction = std::min(1.0f, magnitude);
+                const float targetPosition = static_cast<float>(x) +
+                    (magnitude < 1.0f
+                        ? static_cast<float>((displacement > 0.0f) - (displacement < 0.0f))
+                        : displacement);
+                const int targetBase = static_cast<int>(std::floor(targetPosition));
+                const float targetFraction = targetPosition - std::floor(targetPosition);
+                const int target0 = wrappedColumn(targetBase);
+                const int target1 = wrappedColumn(targetBase + 1);
+                const float transported = current[sourceIndex] * transportedFraction;
+
+                zonal[sourceIndex] += current[sourceIndex] - transported;
+                zonal[static_cast<size_t>(y) * columns + target0] +=
+                    transported * (1.0f - targetFraction);
+                zonal[static_cast<size_t>(y) * columns + target1] +=
+                    transported * targetFraction;
+            }
+        }
+
+        std::fill(next.begin(), next.end(), 0.0f);
+        for (int y = 0; y < rows; y++)
+        {
+            const float areaWeight = rowAreaWeights[static_cast<size_t>(y)];
+            for (int x = 0; x < columns; x++)
+            {
+                const size_t sourceIndex = static_cast<size_t>(y) * columns + x;
+                const float fullDisplacement = std::clamp(
+                    meridionalWindMps[sourceIndex] * timeStepSeconds /
+                        meridionalCellHeight,
+                    -displacementLimit,
+                    displacementLimit);
+                const float displacement = fullDisplacement /
+                    static_cast<float>(diagnostics.substeps);
+                const float transportedFraction = std::min(1.0f, std::fabs(displacement));
+                const int targetRow = adjacentMeridionalTransportTargetRow(
+                    y,
+                    displacement,
+                    rows - 1);
+                const float sourceMass = zonal[sourceIndex] * areaWeight;
+                const float transportedMass = sourceMass * transportedFraction;
+
+                next[sourceIndex] += sourceMass - transportedMass;
+                next[static_cast<size_t>(targetRow) * columns + x] += transportedMass;
+            }
+        }
+
+        for (int y = 0; y < rows; y++)
+        {
+            const float inverseArea = 1.0f / rowAreaWeights[static_cast<size_t>(y)];
+            for (int x = 0; x < columns; x++)
+                next[static_cast<size_t>(y) * columns + x] *= inverseArea;
+        }
+        current.swap(next);
+    }
+
+    destination = std::move(current);
+    diagnostics.finalAreaWeightedMass = areaWeightedMass(destination);
+    return diagnostics;
+}
+
 WeatherPhase deterministicWeatherPhase(
     int phase,
     int phaseCount,
