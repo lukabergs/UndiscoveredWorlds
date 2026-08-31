@@ -22,6 +22,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -2228,6 +2229,7 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(planet& world)
 
 bool appendclimatebenchmarkrunlog(
     int runid,
+    int horizontalresolution,
     const string& timestamp,
     const string& information,
     double weightedrelativeerror,
@@ -2263,6 +2265,7 @@ bool appendclimatebenchmarkrunlog(
     entry
         << "\n    {\n"
         << "      \"id\": " << runid << ",\n"
+        << "      \"horizontal_resolution\": " << horizontalresolution << ",\n"
         << "      \"datetime\": \"" << timestamp << "\",\n"
         << "      \"information\": \"" << jsonescape(information) << "\",\n"
         << "      \"diagnostics_directory\": \""
@@ -2421,13 +2424,14 @@ bool runhiddenprocessandwait(const wstring& commandline)
 
 bool updateclimatebenchmarkworkbook(
     int runid,
+    int horizontalresolution,
     const vector<string>& codes,
     const vector<long long>& simulationcounts,
     string* failuremessage)
 {
     const filesystem::path workbookpath = filesystem::absolute(getappenvironment().climateWorkbookPath).lexically_normal();
 
-    if (filesystem::exists(workbookpath) == false || simulationcounts.size() != codes.size())
+    if (filesystem::exists(workbookpath) == false || simulationcounts.size() != codes.size() || horizontalresolution <= 0)
     {
         if (failuremessage != nullptr)
             *failuremessage = "Climate benchmark workbook is missing or the climate columns do not match";
@@ -2450,12 +2454,15 @@ bool updateclimatebenchmarkworkbook(
         for (const string& code : codes)
             datafile << ',' << code;
 
+        datafile << ",TOTAL,HRES";
         datafile << '\n';
         datafile << runid;
 
         for (const long long count : simulationcounts)
             datafile << ',' << count;
 
+        datafile << ',' << accumulate(simulationcounts.begin(), simulationcounts.end(), 0LL);
+        datafile << ',' << horizontalresolution;
         datafile << '\n';
     }
 
@@ -2488,10 +2495,10 @@ bool updateclimatebenchmarkworkbook(
         scriptfile << "}\n";
         scriptfile << "$runId = [int]$simulation[0]\n";
         scriptfile << "if ($runId -lt 2) { throw 'Benchmark run ID must be at least 2' }\n";
-        scriptfile << "$row = $runId + 2\n";
+        scriptfile << "$row = $runId + 1\n";
         scriptfile << "$existingId = $sheet.Cells.Item($row, 1).Value2\n";
         scriptfile << "if ($null -ne $existingId -and -not [string]::IsNullOrWhiteSpace([string]$existingId) -and [int]$existingId -ne $runId) { throw \"Workbook row $row already belongs to run $existingId\" }\n";
-        scriptfile << "for ($column = $simulation.Count + 1; $column -le 34; $column++) {\n";
+        scriptfile << "for ($column = $simulation.Count + 1; $column -le 35; $column++) {\n";
         scriptfile << "    if (-not $sheet.Cells.Item($row, $column).HasFormula) { throw \"RAW_PIXELS formula missing at row $row, column $column\" }\n";
         scriptfile << "}\n";
         scriptfile << "for ($index = 0; $index -lt $simulation.Count; $index++) {\n";
@@ -3520,6 +3527,7 @@ void writeprecipitationgrid(const filesystem::path& filepath, planet& world, int
 bool persistclimatebenchmarkdiagnostics(
     long seed,
     int runid,
+    int horizontalresolution,
     const string& timestamp,
     const string& information,
     const vector<string>& codes,
@@ -3581,9 +3589,12 @@ bool persistclimatebenchmarkdiagnostics(
     rawpixels << "ID,DATETIME,INFORMATION";
     for (const string& code : codes)
         rawpixels << ',' << code;
+    rawpixels << ",TOTAL,HRES";
     rawpixels << '\n' << runid << ',' << timestamp << ',' << csvescape(information);
     for (const long long count : simulationcounts)
         rawpixels << ',' << count;
+    rawpixels << ',' << accumulate(simulationcounts.begin(), simulationcounts.end(), 0LL);
+    rawpixels << ',' << horizontalresolution;
     rawpixels << '\n';
     rawpixels.close();
     copiedfiles.push_back(rawpixelspath.filename().string());
@@ -3595,6 +3606,7 @@ bool persistclimatebenchmarkdiagnostics(
 
     manifest << "run_id=" << runid << '\n';
     manifest << "seed=" << seed << '\n';
+    manifest << "horizontal_resolution=" << horizontalresolution << '\n';
     manifest << "datetime=" << timestamp << '\n';
     manifest << "information=" << information << '\n';
     manifest << "source_directory=" << sourcedirectory.generic_string() << '\n';
@@ -3615,6 +3627,7 @@ bool persistclimatebenchmarkdiagnostics(
 bool recordclimatebenchmarkrun(planet& world, const string& information, bool updateworkbook, int* runid)
 {
     const int nextrunid = nextclimatebenchmarkrunid();
+    const int horizontalresolution = world.width() + 1;
     const string timestamp = climatebenchmarktimestamp();
     const vector<string> codes = orderedclimatecodes();
     const vector<long long> simulationcounts = collectsimulatedclimatecounts(world);
@@ -3641,14 +3654,14 @@ bool recordclimatebenchmarkrun(planet& world, const string& information, bool up
         return false;
 
     if (persistclimatebenchmarkdiagnostics(
-        world.seed(), nextrunid, timestamp, information, codes, simulationcounts) == false)
+        world.seed(), nextrunid, horizontalresolution, timestamp, information, codes, simulationcounts) == false)
     {
         cerr << "Failed to persist climate benchmark diagnostics.\n";
         return false;
     }
 
     if (appendclimatebenchmarkrunlog(
-        nextrunid, timestamp, information, weightedrelativeerror, spatial, physics) == false)
+        nextrunid, horizontalresolution, timestamp, information, weightedrelativeerror, spatial, physics) == false)
     {
         cerr << "Failed to update climate benchmark run log.\n";
         return false;
@@ -3659,7 +3672,7 @@ bool recordclimatebenchmarkrun(planet& world, const string& information, bool up
         string workbookfailure;
 
         if (updateclimatebenchmarkworkbook(
-            nextrunid, codes, simulationcounts, &workbookfailure) == false)
+            nextrunid, horizontalresolution, codes, simulationcounts, &workbookfailure) == false)
         {
             const filesystem::path statuspath =
                 climatevalidationoutputdirectory(world.seed()).parent_path() /
