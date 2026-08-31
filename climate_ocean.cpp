@@ -458,6 +458,106 @@ void smoothconvergencefootprint(
     }
 }
 
+void exchangeeddymoisture(
+    float& first,
+    float& second,
+    double firstarea,
+    double secondarea,
+    float exchangefraction);
+
+void damphighwavenumbers(
+    hydrologyfloatgrid& field,
+    hydrologyfloatgrid& laplacian,
+    hydrologyfloatgrid& next,
+    const vector<float>& rowareas,
+    const vector<float>& meridionalfactors,
+    int width,
+    int height,
+    float strength,
+    int passes,
+    bool nonnegative)
+{
+    (void)laplacian;
+    (void)nonnegative;
+    const float damping = std::clamp(strength, 0.0f, 0.20f);
+
+    for (int pass = 0; pass < std::max(0, passes); pass++)
+    {
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int x = 0; x <= width; x++)
+                {
+                    const float zonalmean = 0.5f * (
+                        field[wrapx(x - 1, width)][y] +
+                        field[wrapx(x + 1, width)][y]);
+                    next[x][y] = field[x][y] +
+                        damping * (zonalmean - field[x][y]);
+                }
+            }
+        });
+
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int x = 0; x <= width; x++)
+                    field[x][y] = next[x][y];
+            }
+        });
+
+        parallelforrows(0, width, [&](int startcolumn, int endcolumn)
+        {
+            for (int x = startcolumn; x <= endcolumn; x++)
+            {
+                for (int parity = 0; parity < 2; parity++)
+                {
+                    for (int y = parity; y < height; y += 2)
+                    {
+                        const float edgefactor = std::min(
+                            meridionalfactors[y],
+                            meridionalfactors[y + 1]);
+                        exchangeeddymoisture(
+                            field[x][y],
+                            field[x][y + 1],
+                            rowareas[y],
+                            rowareas[y + 1],
+                            0.5f * damping * edgefactor);
+                    }
+                }
+            }
+        });
+    }
+}
+
+float samplehydrologygrid(
+    const hydrologyfloatgrid& field,
+    int sourceWidth,
+    int sourceHeight,
+    int targetX,
+    int targetY,
+    int targetWidth,
+    int targetHeight)
+{
+    const float sourceX = (static_cast<float>(targetX) + 0.5f) *
+        static_cast<float>(sourceWidth + 1) /
+        static_cast<float>(targetWidth + 1) - 0.5f;
+    const int baseX = static_cast<int>(std::floor(sourceX));
+    const float fractionX = sourceX - std::floor(sourceX);
+    const int x0 = wrapx(baseX, sourceWidth);
+    const int x1 = wrapx(baseX + 1, sourceWidth);
+    const float sourceY = targetHeight > 0
+        ? static_cast<float>(targetY * sourceHeight) / static_cast<float>(targetHeight)
+        : 0.0f;
+    const int y0 = std::clamp(static_cast<int>(std::floor(sourceY)), 0, sourceHeight);
+    const int y1 = std::min(sourceHeight, y0 + 1);
+    const float fractionY = sourceY - std::floor(sourceY);
+    const float north = field[x0][y0] * (1.0f - fractionX) + field[x1][y0] * fractionX;
+    const float south = field[x0][y1] * (1.0f - fractionX) + field[x1][y1] * fractionX;
+    return north * (1.0f - fractionY) + south * fractionY;
+}
+
 float eddyexchangefraction(
     float diffusivitym2s,
     double edgelengthmetres,
@@ -500,7 +600,11 @@ void exchangeeddymoisture(
 }
 
 void createeddyexchangefractions(
-    planet& world,
+    int width,
+    int height,
+    const vector<float>& latitudes,
+    const vector<float>& areaweights,
+    const vector<float>& meridionaltransportfactors,
     const hydrologyfloatgrid& surfacewindu,
     const hydrologyfloatgrid& surfacewindv,
     const hydrologyfloatgrid& upperwindu,
@@ -510,8 +614,6 @@ void createeddyexchangefractions(
     hydrologyfloatgrid& meridionalfractions)
 {
     constexpr double pi = 3.14159265358979323846;
-    const int width = world.width();
-    const int height = world.height();
     const double radius = tuning::climate::moistureadvection::referencePlanetRadiusMetres;
     const double equatorialcellwidth = 2.0 * pi * radius / static_cast<double>(width + 1);
     const double meridionalcellheight = pi * radius / static_cast<double>(height + 1);
@@ -523,8 +625,8 @@ void createeddyexchangefractions(
     for (int y = 0; y <= height; y++)
     {
         constexpr double degreestoradians = pi / 180.0;
-        const float latitude = latitudeforrow(y, height);
-        rowareas[y] = equatorialcellarea * rowareaweight(y, height);
+        const float latitude = latitudes[y];
+        rowareas[y] = equatorialcellarea * areaweights[y];
         zonalcelldistances[y] = equatorialcellwidth *
             std::max(0.05, std::abs(std::cos(static_cast<double>(latitude) * degreestoradians)));
 
@@ -571,39 +673,36 @@ void createeddyexchangefractions(
         {
             for (int y = 0; y < height; y++)
             {
-                if (y == 0 || y == height - 1)
-                {
-                    meridionalfractions[x][y] = 0.0f;
-                    continue;
-                }
-
                 const float edgediffusivity = 0.5f * (diffusivity[x][y] + diffusivity[x][y + 1]);
                 const double edgelength = equatorialcellwidth *
-                    0.5 * (rowareaweight(y, height) + rowareaweight(y + 1, height));
+                    0.5 * (areaweights[y] + areaweights[y + 1]);
                 meridionalfractions[x][y] = eddyexchangefraction(
                     edgediffusivity,
                     edgelength,
                     meridionalcellheight,
                     rowareas[y],
                     rowareas[y + 1],
-                    timestepseconds);
+                    timestepseconds) *
+                    std::min(
+                        meridionaltransportfactors[y],
+                        meridionaltransportfactors[y + 1]);
             }
         }
     });
 }
 
 void applyeddyexchange(
-    planet& world,
+    int width,
+    int height,
+    const vector<float>& areaweights,
     hydrologyfloatgrid& moisture,
     const hydrologyfloatgrid& zonalfractions,
     const hydrologyfloatgrid& meridionalfractions)
 {
-    const int width = world.width();
-    const int height = world.height();
     vector<double> rowareas(height + 1, 0.0);
 
     for (int y = 0; y <= height; y++)
-        rowareas[y] = rowareaweight(y, height);
+        rowareas[y] = areaweights[y];
 
     auto applyzonal = [&](bool halfstep)
     {
@@ -1940,7 +2039,16 @@ void createvectorwindmap(planet& world)
         }
     });
 
-    smoothallfield(world, macroterrain, tuning::climate::atmosphere::topographySmoothingIterations);
+    const float topographyscale = static_cast<float>(width + 1) /
+        static_cast<float>(
+            tuning::climate::atmosphere::topographySmoothingReferenceHorizontalCells);
+    const int topographysmoothingpasses = std::clamp(
+        static_cast<int>(std::round(
+            tuning::climate::atmosphere::topographySmoothingIterations *
+            topographyscale * topographyscale)),
+        1,
+        tuning::climate::atmosphere::maximumTopographySmoothingIterations);
+    smoothallfield(world, macroterrain, topographysmoothingpasses);
     const bool hasfloatbase = circulationcache.completeFor(world);
     const stationaryspectralprojector circulationprojector(
         width + 1,
@@ -2513,8 +2621,15 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
 {
     (void)inland;
     (void)fractal;
-    const int width = world.width();
-    const int height = world.height();
+    const int outputwidth = world.width();
+    const int outputheight = world.height();
+    const climatehydrology::ClimateGridDimensions climatedimensions =
+        climatehydrology::climateGridDimensions(
+            outputwidth + 1,
+            outputheight + 1,
+            tuning::climate::moistureadvection::internalClimateHorizontalCells);
+    const int width = climatedimensions.columns - 1;
+    const int height = climatedimensions.rows - 1;
     const int sealevel = world.sealevel();
     const float gravitymultiplier = std::max(0.05f, world.gravity());
     const bool hasfloatingwinds = hydrologyforcingcache.completeFor(world);
@@ -2525,9 +2640,152 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         tuning::climate::moistureadvection::condensationConversionTimeDays *
         tuning::climate::circulation::secondsPerDay;
     vector<float> rowareaweights(height + 1, 0.0f);
+    vector<float> climatelatitudes(height + 1, 0.0f);
+    vector<float> polartransportfactors(height + 1, 1.0f);
+    vector<float> polarconvectionfactors(height + 1, 1.0f);
 
     for (int y = 0; y <= height; y++)
-        rowareaweights[y] = static_cast<float>(rowareaweight(y, height));
+    {
+        climatelatitudes[y] = climatehydrology::climateCellLatitudeDegrees(
+            y,
+            height + 1);
+        rowareaweights[y] = climatehydrology::climateCellAreaWeight(
+            y,
+            height + 1);
+        polartransportfactors[y] = climatehydrology::polarTaperFactor(
+            climatelatitudes[y],
+            tuning::climate::moistureadvection::polarMeridionalTransportTaperStartDegrees,
+            tuning::climate::moistureadvection::polarMeridionalTransportTaperEndDegrees);
+        polarconvectionfactors[y] = climatehydrology::polarTaperFactor(
+            climatelatitudes[y],
+            tuning::climate::moistureadvection::polarConvectionTaperStartDegrees,
+            tuning::climate::moistureadvection::polarConvectionTaperEndDegrees);
+    }
+
+    auto sourcebounds = [](
+        int climateindex,
+        int climatecount,
+        int outputcount)
+    {
+        const int first = climateindex * outputcount / climatecount;
+        const int last = std::max(
+            first,
+            (climateindex + 1) * outputcount / climatecount - 1);
+        return std::pair<int, int>{ first, last };
+    };
+    auto aggregateworldfield = [&](int x, int y, auto accessor)
+    {
+        const auto [firstx, lastx] = sourcebounds(x, width + 1, outputwidth + 1);
+        const auto [firsty, lasty] = sourcebounds(y, height + 1, outputheight + 1);
+        double total = 0.0;
+        int count = 0;
+
+        for (int yy = firsty; yy <= lasty; yy++)
+        {
+            for (int xx = firstx; xx <= lastx; xx++)
+            {
+                total += static_cast<double>(accessor(xx, yy));
+                count++;
+            }
+        }
+
+        return count > 0 ? static_cast<float>(total / static_cast<double>(count)) : 0.0f;
+    };
+    auto aggregateworldmaximum = [&](int x, int y, auto accessor)
+    {
+        const auto [firstx, lastx] = sourcebounds(x, width + 1, outputwidth + 1);
+        const auto [firsty, lasty] = sourcebounds(y, height + 1, outputheight + 1);
+        float maximum = 0.0f;
+
+        for (int yy = firsty; yy <= lasty; yy++)
+        {
+            for (int xx = firstx; xx <= lastx; xx++)
+                maximum = std::max(maximum, static_cast<float>(accessor(xx, yy)));
+        }
+
+        return maximum;
+    };
+
+    hydrologyfloatgrid landfraction(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid meanelevation(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid peakelevation(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid icefraction(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid coastnormalu(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid coastnormalv(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid coastalstrength(width + 1, height + 1, 0.0f);
+    hydrologybytegrid seacell(width + 1, height + 1, 0);
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                landfraction[x][y] = aggregateworldfield(
+                    x,
+                    y,
+                    [&](int xx, int yy) { return world.sea(xx, yy) == 0 ? 1.0f : 0.0f; });
+                meanelevation[x][y] = aggregateworldfield(
+                    x,
+                    y,
+                    [&](int xx, int yy)
+                    {
+                        return static_cast<float>(std::max(0, world.map(xx, yy) - sealevel));
+                    });
+                peakelevation[x][y] = aggregateworldmaximum(
+                    x,
+                    y,
+                    [&](int xx, int yy)
+                    {
+                        return static_cast<float>(std::max(0, world.map(xx, yy) - sealevel));
+                    });
+                icefraction[x][y] = aggregateworldfield(
+                    x,
+                    y,
+                    [&](int xx, int yy) { return world.seaice(xx, yy) != 0 ? 1.0f : 0.0f; });
+                seacell[x][y] = landfraction[x][y] < 0.5f ? 1 : 0;
+            }
+        }
+    });
+
+    parallelforrows(0, height, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            const int north = std::max(0, y - 1);
+            const int south = std::min(height, y + 1);
+
+            for (int x = 0; x <= width; x++)
+            {
+                const float gradienteast = 0.5f *
+                    (landfraction[wrapx(x + 1, width)][y] -
+                        landfraction[wrapx(x - 1, width)][y]);
+                const float gradientsouth = 0.5f *
+                    (landfraction[x][south] - landfraction[x][north]);
+                const float magnitude = std::sqrt(
+                    gradienteast * gradienteast + gradientsouth * gradientsouth);
+
+                if (magnitude > 1.0e-5f)
+                {
+                    coastnormalu[x][y] = gradienteast / magnitude;
+                    coastnormalv[x][y] = gradientsouth / magnitude;
+                }
+
+                coastalstrength[x][y] = std::clamp(
+                    magnitude * 2.0f + 4.0f * landfraction[x][y] *
+                        (1.0f - landfraction[x][y]),
+                    0.0f,
+                    1.0f);
+            }
+        }
+    });
+
+    std::cout
+        << "Climate hydrology grid output=" << outputwidth + 1 << 'x' << outputheight + 1
+        << " internal=" << width + 1 << 'x' << height + 1
+        << " weather_phases="
+        << tuning::climate::moistureadvection::weatherPhaseCount
+        << '\n';
 
     hydrologyfloatgrid soilmoisture(
         width + 1,
@@ -2545,6 +2803,16 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         width + 1,
         height + 1,
         static_cast<signed char>(-1));
+    std::array<hydrologyfloatgrid, CLIMATESEASONCOUNT> storedseasonalrain;
+    std::array<hydrologyfloatgrid, CLIMATESEASONCOUNT> storedseasonalmoisture;
+    std::array<hydrologyfloatgrid, CLIMATESEASONCOUNT> storedseasonalconvergence;
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        storedseasonalrain[season] = hydrologyfloatgrid(width + 1, height + 1, 0.0f);
+        storedseasonalmoisture[season] = hydrologyfloatgrid(width + 1, height + 1, 0.0f);
+        storedseasonalconvergence[season] = hydrologyfloatgrid(width + 1, height + 1, 0.0f);
+    }
     std::array<climatephysics::WaterBudget, CLIMATESEASONCOUNT> finalareaweightedbudgets{};
     std::array<climatephysics::WaterBudget, CLIMATESEASONCOUNT> finalbudgets{};
     std::array<climatephysics::CondensationActivityDiagnostics, CLIMATESEASONCOUNT>
@@ -2576,6 +2844,16 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     hydrologyfloatgrid upperwindu(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid upperwindv(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid surfacewindspeed(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid phasewindu(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid phasewindv(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid phaseupperwindu(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid phaseupperwindv(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid phasetemperature(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid phasedynamicvertical(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid phasesaturationcapacity(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid phaseboundarycapacity(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid persistentheating(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid cloudmemory(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid surfaceevaporation(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid zonalmoisture(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid nextboundarymoisture(width + 1, height + 1, 0.0f);
@@ -2584,6 +2862,8 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     hydrologyfloatgrid freefluxtendency(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid convectiveconvergence(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid convergencescratch(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid highpasslaplacian(width + 1, height + 1, 0.0f);
+    hydrologyfloatgrid highpassscratch(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid totalconvergence(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid zonaleddyexchange(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid meridionaleddyexchange(width + 1, height + 1, 0.0f);
@@ -2630,7 +2910,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                 areaweightedbudget.initialAtmosphericStorage +=
                     areaweight * atmosphericwater;
 
-                if (world.sea(x, y) == 0)
+                if (seacell[x][y] == 0)
                 {
                     budget.initialSoilStorage += soilmoisture[x][y];
                     areaweightedbudget.initialSoilStorage += areaweight * soilmoisture[x][y];
@@ -2646,41 +2926,72 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             {
                 for (int x = 0; x <= width; x++)
                 {
+                    auto aggregatefield = [&](int season, auto accessor)
+                    {
+                        return aggregateworldfield(
+                            x,
+                            y,
+                            [&](int xx, int yy) { return accessor(season, xx, yy); });
+                    };
                     auto interpolatefield = [&](auto accessor)
                     {
                         return climatehydrology::interpolateSeasonal(
-                            static_cast<float>(accessor(calendar.firstSeason)),
-                            static_cast<float>(accessor(calendar.secondSeason)),
+                            aggregatefield(calendar.firstSeason, accessor),
+                            aggregatefield(calendar.secondSeason, accessor),
                             calendar.interpolation);
                     };
                     auto interpolatecachedwind = [&](
                         const std::array<floatgrid, CLIMATESEASONCOUNT>& field)
                     {
                         return climatehydrology::interpolateSeasonal(
-                            field[calendar.firstSeason][x][y],
-                            field[calendar.secondSeason][x][y],
+                            aggregateworldfield(
+                                x,
+                                y,
+                                [&](int xx, int yy)
+                                {
+                                    return field[calendar.firstSeason][xx][yy];
+                                }),
+                            aggregateworldfield(
+                                x,
+                                y,
+                                [&](int xx, int yy)
+                                {
+                                    return field[calendar.secondSeason][xx][yy];
+                                }),
                             calendar.interpolation);
                     };
                     const float u = hasfloatingwinds
                         ? interpolatecachedwind(hydrologyforcingcache.surfacewindu)
                         : interpolatefield(
-                            [&](int season) { return world.seasonaluwind(season, x, y); });
+                            [&](int season, int xx, int yy)
+                            {
+                                return world.seasonaluwind(season, xx, yy);
+                            });
                     const float v = hasfloatingwinds
                         ? interpolatecachedwind(hydrologyforcingcache.surfacewindv)
                         : interpolatefield(
-                            [&](int season) { return world.seasonalvwind(season, x, y); });
+                            [&](int season, int xx, int yy)
+                            {
+                                return world.seasonalvwind(season, xx, yy);
+                            });
                     const float upperu = hasfloatingwinds
                         ? interpolatecachedwind(hydrologyforcingcache.upperwindu)
                         : interpolatefield(
-                            [&](int season) { return world.seasonalupperuwind(season, x, y); });
+                            [&](int season, int xx, int yy)
+                            {
+                                return world.seasonalupperuwind(season, xx, yy);
+                            });
                     const float upperv = hasfloatingwinds
                         ? interpolatecachedwind(hydrologyforcingcache.upperwindv)
                         : interpolatefield(
-                            [&](int season) { return world.seasonaluppervwind(season, x, y); });
+                            [&](int season, int xx, int yy)
+                            {
+                                return world.seasonaluppervwind(season, xx, yy);
+                            });
                     const float upperwinddeparturemultiplier = std::clamp(
                         (tuning::climate::moistureadvection::
                             polarUpperWindBlendTaperEndDegrees -
-                            std::fabs(latitudeforrow(y, height))) /
+                            std::fabs(climatelatitudes[y])) /
                             std::max(
                                 0.1f,
                                 tuning::climate::moistureadvection::
@@ -2691,15 +3002,20 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         1.0f) *
                         tuning::climate::moistureadvection::
                             freeTroposphereUpperWindDepartureFraction;
-                    const bool sea = world.sea(x, y) == 1;
-                    const float localtemperature = sea
-                        ? interpolatefield(
-                            [&](int season) { return world.seasonalsst(season, x, y); })
-                        : interpolatefield(
-                            [&](int season) { return world.seasonaltemp(season, x, y); });
-                    const float elevation = static_cast<float>(std::max(0, world.map(x, y) - sealevel));
+                    const bool sea = seacell[x][y] != 0;
+                    const float localtemperature = interpolatefield(
+                        [&](int season, int xx, int yy)
+                        {
+                            return world.sea(xx, yy) == 1
+                                ? world.seasonalsst(season, xx, yy)
+                                : world.seasonaltemp(season, xx, yy);
+                        });
+                    const float elevation = meanelevation[x][y];
                     const float pressureanomaly = interpolatefield(
-                        [&](int season) { return world.seasonalpressure(season, x, y); });
+                        [&](int season, int xx, int yy)
+                        {
+                            return world.seasonalpressure(season, xx, yy);
+                        });
 
                     temperature[x][y] = localtemperature;
                     surfacepressure[x][y] = std::max(
@@ -2707,10 +3023,10 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         climatephysics::surfacePressureHpa(
                             elevation,
                             gravitymultiplier) + pressureanomaly);
-                    const float boundarytransportwindfraction = sea
-                        ? 1.0f
-                        : tuning::climate::moistureadvection::
-                            landBoundaryLayerTransportWindFraction;
+                    const float boundarytransportwindfraction = 1.0f -
+                        landfraction[x][y] *
+                            (1.0f - tuning::climate::moistureadvection::
+                                landBoundaryLayerTransportWindFraction);
                     surfacewindu[x][y] = u * boundarytransportwindfraction;
                     surfacewindv[x][y] = v * boundarytransportwindfraction;
                     upperwindu[x][y] = u +
@@ -2727,21 +3043,50 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     surfacewindspeed[x][y] = std::max(
                         tuning::climate::moistureadvection::minimumSurfaceWind,
                         std::sqrt(u * u + v * v));
-                    uplift[x][y] = interpolatefield(
-                        [&](int season) { return world.seasonaluplift(season, x, y); }) /
-                        tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
-                    descent[x][y] = interpolatefield(
-                        [&](int season) { return world.seasonalsubsidence(season, x, y); }) /
-                        tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
+                    auto interpolateorographicextreme = [&](auto accessor)
+                    {
+                        auto retainextreme = [&](int season)
+                        {
+                            const float mean = aggregatefield(season, accessor);
+                            const float maximum = aggregateworldmaximum(
+                                x,
+                                y,
+                                [&](int xx, int yy) { return accessor(season, xx, yy); });
+                            return mean + (maximum - mean) *
+                                tuning::climate::moistureadvection::
+                                    subgridOrographicExtremeRetention;
+                        };
+                        return climatehydrology::interpolateSeasonal(
+                            retainextreme(calendar.firstSeason),
+                            retainextreme(calendar.secondSeason),
+                            calendar.interpolation);
+                    };
+                    uplift[x][y] = interpolateorographicextreme(
+                        [&](int season, int xx, int yy)
+                        {
+                            return world.seasonaluplift(season, xx, yy);
+                        }) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
+                    descent[x][y] = interpolateorographicextreme(
+                        [&](int season, int xx, int yy)
+                        {
+                            return world.seasonalsubsidence(season, xx, yy);
+                        }) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
                     dynamicvertical[x][y] = interpolatefield(
-                        [&](int season) { return world.seasonalverticalvelocity(season, x, y); }) /
+                        [&](int season, int xx, int yy)
+                        {
+                            return world.seasonalverticalvelocity(season, xx, yy);
+                        }) /
                         tuning::climate::circulation::verticalVelocityStorageScale;
                 }
             }
         });
 
         createeddyexchangefractions(
-            world,
+            width,
+            height,
+            climatelatitudes,
+            rowareaweights,
+            polartransportfactors,
             surfacewindu,
             surfacewindv,
             upperwindu,
@@ -2765,7 +3110,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             {
                 for (int y = startrow; y <= endrow; y++)
                 {
-                    const float latitudeRadians = latitudeforrow(y, height) *
+                    const float latitudeRadians = climatelatitudes[y] *
                         3.14159265358979323846f / 180.0f;
                     const float zonalcircumference = 2.0f * 3.14159265358979323846f *
                         tuning::climate::moistureadvection::referencePlanetRadiusMetres *
@@ -2828,27 +3173,17 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         const float transportfraction = std::min(
                             tuning::climate::moistureadvection::transportMaxFraction,
                             std::fabs(displacement));
-                        const float targetposition = std::clamp(
-                            static_cast<float>(y) +
-                                (std::fabs(displacement) < 1.0f
-                                    ? static_cast<float>((displacement > 0.0f) -
-                                        (displacement < 0.0f))
-                                    : displacement),
-                            height > 1 ? 1.0f : 0.0f,
-                            height > 1
-                                ? static_cast<float>(height - 1)
-                                : static_cast<float>(height));
-                        const int targety0 = static_cast<int>(std::floor(targetposition));
-                        const int targety1 = std::min(targety0 + 1, height);
-                        const float targetfraction = targetposition -
-                            static_cast<float>(targety0);
+                        const int targety =
+                            climatehydrology::adjacentMeridionalTransportTargetRow(
+                                y,
+                                displacement,
+                                height);
                         const float transported = zonalmoisture[x][y] *
                             transportfraction * sourceareaweight;
 
                         destination[x][y] += zonalmoisture[x][y] *
                             sourceareaweight - transported;
-                        destination[x][targety0] += transported * (1.0f - targetfraction);
-                        destination[x][targety1] += transported * targetfraction;
+                        destination[x][targety] += transported;
                     }
                 }
 
@@ -2862,25 +3197,105 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
 
         for (int iteration = 0; iteration < iterations; iteration++)
         {
+            const climatehydrology::WeatherPhase weatherphase =
+                climatehydrology::deterministicWeatherPhase(
+                    iteration,
+                    tuning::climate::moistureadvection::weatherPhaseCount,
+                    tuning::climate::moistureadvection::synopticWindRotationDegrees,
+                    tuning::climate::moistureadvection::daytimeLandTemperatureAnomalyC,
+                    tuning::climate::moistureadvection::nighttimeLandTemperatureAnomalyC,
+                    tuning::climate::moistureadvection::daytimeSeaTemperatureAnomalyC,
+                    tuning::climate::moistureadvection::nighttimeSeaTemperatureAnomalyC);
+            const float rotationcos = std::cos(weatherphase.windRotationRadians);
+            const float rotationsin = std::sin(weatherphase.windRotationRadians);
+
+            parallelforrows(0, height, [&](int startrow, int endrow)
+            {
+                for (int y = startrow; y <= endrow; y++)
+                {
+                    constexpr float pi = 3.14159265358979323846f;
+                    const float latitude = climatelatitudes[y] * pi / 180.0f;
+                    const float latitudetaper = std::max(0.0f, std::cos(latitude));
+
+                    for (int x = 0; x <= width; x++)
+                    {
+                        const float longitude = 2.0f * pi * static_cast<float>(x) /
+                            static_cast<float>(width + 1);
+                        const float synopticu =
+                            tuning::climate::moistureadvection::synopticWindPerturbationMps *
+                            std::sin(2.0f * longitude + weatherphase.synopticPhaseRadians) *
+                            latitudetaper;
+                        const float synopticv =
+                            tuning::climate::moistureadvection::synopticWindPerturbationMps *
+                            std::cos(3.0f * longitude - weatherphase.synopticPhaseRadians) *
+                            latitudetaper;
+                        const float coastalmagnitude = weatherphase.coastalDirection >= 0.0f
+                            ? tuning::climate::moistureadvection::daytimeOnshoreCoastalWindMps
+                            : tuning::climate::moistureadvection::nighttimeOffshoreCoastalWindMps;
+                        const float coastalwind = weatherphase.coastalDirection *
+                            coastalmagnitude * coastalstrength[x][y];
+                        const float rotatedu =
+                            surfacewindu[x][y] * rotationcos - surfacewindv[x][y] * rotationsin;
+                        const float rotatedv =
+                            surfacewindu[x][y] * rotationsin + surfacewindv[x][y] * rotationcos;
+                        phasewindu[x][y] = rotatedu + synopticu +
+                            coastalwind * coastnormalu[x][y];
+                        phasewindv[x][y] = (
+                            rotatedv + synopticv + coastalwind * coastnormalv[x][y]) *
+                            polartransportfactors[y];
+                        phaseupperwindu[x][y] =
+                            upperwindu[x][y] * rotationcos - upperwindv[x][y] * rotationsin +
+                            0.5f * synopticu;
+                        phaseupperwindv[x][y] = (
+                            upperwindu[x][y] * rotationsin + upperwindv[x][y] * rotationcos +
+                            0.5f * synopticv) * polartransportfactors[y];
+                        const float diurnalanomaly =
+                            weatherphase.seaTemperatureAnomalyC * (1.0f - landfraction[x][y]) +
+                            weatherphase.landTemperatureAnomalyC * landfraction[x][y];
+                        phasetemperature[x][y] = temperature[x][y] + diurnalanomaly +
+                            persistentheating[x][y] -
+                            cloudmemory[x][y] *
+                                tuning::climate::moistureadvection::maximumCloudRadiativeCoolingC;
+                        phasedynamicvertical[x][y] =
+                            dynamicvertical[x][y] * polartransportfactors[y] +
+                            persistentheating[x][y] *
+                                tuning::climate::moistureadvection::heatingVerticalVelocityResponse *
+                                polarconvectionfactors[y];
+                        phasesaturationcapacity[x][y] =
+                            climatephysics::saturationColumnWaterAtPressure(
+                                phasetemperature[x][y],
+                                surfacepressure[x][y],
+                                gravitymultiplier);
+                        phaseboundarycapacity[x][y] = phasesaturationcapacity[x][y] *
+                            tuning::climate::moistureadvection::boundaryLayerCapacityFraction;
+                        surfacewindspeed[x][y] = std::max(
+                            tuning::climate::moistureadvection::minimumSurfaceWind,
+                            std::sqrt(
+                                phasewindu[x][y] * phasewindu[x][y] +
+                                phasewindv[x][y] * phasewindv[x][y]));
+                    }
+                }
+            });
+
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
                 for (int y = startrow; y <= endrow; y++)
                 {
                     for (int x = 0; x <= width; x++)
                     {
-                        const bool sea = world.sea(x, y) == 1;
-                        const float localtemperature = temperature[x][y];
+                        const bool sea = seacell[x][y] != 0;
+                        const float localtemperature = phasetemperature[x][y];
                         const float retained = std::max(
                             0.0f,
                             boundarymoisture[x][y] + freemoisture[x][y]);
                         const float relativehumidity = std::clamp(
-                            retained / saturationcapacity[x][y], 0.0f, 1.0f);
+                            retained / phasesaturationcapacity[x][y], 0.0f, 1.0f);
                         const float airtemperature = localtemperature - std::clamp(
-                            dynamicvertical[x][y] *
+                            phasedynamicvertical[x][y] *
                                 tuning::climate::moistureadvection::dynamicVerticalCooling,
                             -tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment,
                             tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
-                        const bool icecovered = world.seaice(x, y) != 0 ||
+                        const bool icecovered = icefraction[x][y] >= 0.5f ||
                             (!sea && snowwater[x][y] > 0.0f);
                         const float roughnesslength = icecovered
                             ? tuning::climate::moistureadvection::iceRoughnessLengthMetres
@@ -2923,11 +3338,8 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         {
                             seaevaporation = potentialevaporation;
 
-                            if (world.seaice(x, y) == 1)
-                                seaevaporation *= tuning::climate::moistureadvection::seaIceFactor;
-
-                            if (world.seaice(x, y) == 2)
-                                seaevaporation = 0.0f;
+                            seaevaporation *= 1.0f - icefraction[x][y] *
+                                (1.0f - tuning::climate::moistureadvection::seaIceFactor);
 
                             totalseaevaporation[x][y] += seaevaporation;
                         }
@@ -2985,8 +3397,8 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
 
             advectlayer(
                 boundarymoisture,
-                surfacewindu,
-                surfacewindv,
+                phasewindu,
+                phasewindv,
                 nextboundarymoisture,
                 timestepseconds);
             const int uppertimestepcount = iteration %
@@ -2999,12 +3411,14 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             {
                 advectlayer(
                     freemoisture,
-                    upperwindu,
-                    upperwindv,
+                    phaseupperwindu,
+                    phaseupperwindv,
                     nextfreemoisture,
                     timestepseconds * static_cast<float>(uppertimestepcount));
                 applyeddyexchange(
-                    world,
+                    width,
+                    height,
+                    rowareaweights,
                     nextfreemoisture,
                     zonaleddyexchange,
                     meridionaleddyexchange);
@@ -3013,6 +3427,29 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             {
                 nextfreemoisture = freemoisture;
             }
+
+            damphighwavenumbers(
+                nextboundarymoisture,
+                highpasslaplacian,
+                highpassscratch,
+                rowareaweights,
+                polartransportfactors,
+                width,
+                height,
+                tuning::climate::moistureadvection::vapourHighWavenumberDamping,
+                tuning::climate::moistureadvection::highWavenumberDampingPasses,
+                true);
+            damphighwavenumbers(
+                nextfreemoisture,
+                highpasslaplacian,
+                highpassscratch,
+                rowareaweights,
+                polartransportfactors,
+                width,
+                height,
+                tuning::climate::moistureadvection::vapourHighWavenumberDamping,
+                tuning::climate::moistureadvection::highWavenumberDampingPasses,
+                true);
 
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
@@ -3027,7 +3464,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                             nextfreemoisture[x][y] - freemoisture[x][y];
                         totalconvergence[x][y] +=
                             (boundaryfluxtendency[x][y] + freefluxtendency[x][y]) /
-                            std::max(0.05f, saturationcapacity[x][y]);
+                            std::max(0.05f, phasesaturationcapacity[x][y]);
                     }
                 }
             });
@@ -3041,6 +3478,17 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                 height,
                 tuning::climate::moistureadvection::convectiveConvergenceMixingFraction,
                 tuning::climate::moistureadvection::convectiveConvergenceSmoothingPasses);
+            damphighwavenumbers(
+                convectiveconvergence,
+                highpasslaplacian,
+                highpassscratch,
+                rowareaweights,
+                polartransportfactors,
+                width,
+                height,
+                tuning::climate::moistureadvection::convergenceHighWavenumberDamping,
+                tuning::climate::moistureadvection::highWavenumberDampingPasses,
+                false);
 
             parallelforrows(0, height, [&](int startrow, int endrow)
             {
@@ -3048,22 +3496,28 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                 {
                     for (int x = 0; x <= width; x++)
                     {
-                        const bool sea = world.sea(x, y) == 1;
-                        const float localtemperature = temperature[x][y];
+                        const bool sea = seacell[x][y] != 0;
+                        const float localtemperature = phasetemperature[x][y];
                         const float dynamiccooling = std::clamp(
-                            std::max(0.0f, dynamicvertical[x][y]) *
+                            std::max(0.0f, phasedynamicvertical[x][y]) *
                                 tuning::climate::moistureadvection::dynamicVerticalCooling,
                             0.0f,
                             tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
                         const float dynamicwarming = std::clamp(
-                            std::max(0.0f, -dynamicvertical[x][y]) *
+                            std::max(0.0f, -phasedynamicvertical[x][y]) *
                                 tuning::climate::moistureadvection::dynamicSubsidenceWarming,
                             0.0f,
                             tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
                         const float nonorographicparceltemperature =
                             localtemperature - dynamiccooling + dynamicwarming;
+                        const float subgridrelief = std::max(
+                            0.0f,
+                            peakelevation[x][y] - meanelevation[x][y]);
                         const float terraincooling = std::clamp(
-                            uplift[x][y] *
+                            (uplift[x][y] * polarconvectionfactors[y] +
+                                subgridrelief *
+                                    tuning::climate::moistureadvection::subgridOrographicExtremeRetention *
+                                    polarconvectionfactors[y]) *
                                 tuning::climate::moistureadvection::topographicUpliftCoolingCPerMetre,
                             0.0f,
                             tuning::climate::moistureadvection::maximumParcelTemperatureAdjustment);
@@ -3096,7 +3550,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                             terrainadjustedcapacity * stratiformrelativehumidity;
                         const float boundaryrelativehumidity = std::clamp(
                             nextboundarymoisture[x][y] /
-                                std::max(0.05f, boundarycapacity[x][y]),
+                                std::max(0.05f, phaseboundarycapacity[x][y]),
                             0.0f,
                             1.0f);
                         const float freerelativehumidity = std::clamp(
@@ -3117,29 +3571,63 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                             -dayfraction /
                             tuning::climate::moistureadvection::backgroundVerticalExchangeTimeDays);
                         const float normalizedvertical = std::clamp(
-                            dynamicvertical[x][y] /
+                            phasedynamicvertical[x][y] /
                                 tuning::climate::circulation::maximumVerticalVelocity,
                             -1.0f,
                             1.0f);
                         const float convectivesupplyfraction = std::clamp(
                             std::max(
                                 0.0f,
-                                convectiveconvergence[x][y] + surfaceevaporation[x][y]) /
-                                std::max(0.05f, boundarycapacity[x][y]),
+                                convectiveconvergence[x][y] + surfaceevaporation[x][y] +
+                                    std::max(0.0f, freefluxtendency[x][y]) *
+                                        tuning::climate::moistureadvection::elevatedMoistureAccessionFraction) /
+                                std::max(0.05f, phaseboundarycapacity[x][y]),
                             0.0f,
                             1.0f);
+                        const float environmentalfreetemperature =
+                            temperature[x][y] -
+                            tuning::climate::moistureadvection::freeTroposphereEnvironmentalLapseC *
+                                polarconvectionfactors[y] +
+                            dynamicwarming;
+                        const float parcelbuoyancy =
+                            localtemperature - environmentalfreetemperature;
+                        const float verticalwindshear = std::sqrt(
+                            std::pow(phaseupperwindu[x][y] - phasewindu[x][y], 2.0f) +
+                            std::pow(phaseupperwindv[x][y] - phasewindv[x][y], 2.0f));
+                        const float shallowexchange =
+                            climatehydrology::shallowConvectionExchangeFraction(
+                                boundaryrelativehumidity,
+                                freerelativehumidity,
+                                parcelbuoyancy,
+                                verticalwindshear,
+                                timestepseconds,
+                                tuning::climate::moistureadvection::shallowConvectionMixingTimeDays,
+                                tuning::climate::moistureadvection::shallowConvectionHumidityOnset,
+                                tuning::climate::moistureadvection::shallowConvectionFullHumidity,
+                                tuning::climate::moistureadvection::shallowConvectionFullShearMps,
+                                tuning::climate::moistureadvection::maximumShallowExchangeFraction);
+                        const float dryexchange =
+                            climatehydrology::dryConvectionExchangeFraction(
+                                parcelbuoyancy,
+                                timestepseconds,
+                                tuning::climate::moistureadvection::dryConvectionMixingTimeDays,
+                                tuning::climate::moistureadvection::dryConvectionActivationBuoyancyC,
+                                tuning::climate::moistureadvection::dryConvectionFullStrengthBuoyancyC,
+                                tuning::climate::moistureadvection::maximumDryExchangeFraction);
                         const float upwardfraction = std::clamp(
                             backgroundexchange +
                                 std::max(0.0f, normalizedvertical) *
                                     tuning::climate::moistureadvection::ascentVerticalExchangeFraction +
                                 cloudfraction * convectivesupplyfraction *
-                                    tuning::climate::moistureadvection::convectiveVerticalExchangeFraction,
+                                    tuning::climate::moistureadvection::convectiveVerticalExchangeFraction +
+                                shallowexchange + dryexchange,
                             0.0f,
                             tuning::climate::moistureadvection::maximumVerticalExchangeFraction);
                         const float downwardfraction = std::clamp(
                             backgroundexchange +
                                 std::max(0.0f, -normalizedvertical) *
-                                    tuning::climate::moistureadvection::subsidenceVerticalExchangeFraction,
+                                    tuning::climate::moistureadvection::subsidenceVerticalExchangeFraction +
+                                0.5f * shallowexchange + dryexchange,
                             0.0f,
                             tuning::climate::moistureadvection::maximumVerticalExchangeFraction);
                         const climatehydrology::MoistureLayerExchange layerexchange =
@@ -3158,24 +3646,27 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                             climatehydrology::partitionTwoLayerPrecipitation(
                             layerexchange.boundaryLayerMm,
                             layerexchange.freeTroposphereMm,
-                            boundarycapacity[x][y],
+                            phaseboundarycapacity[x][y],
                             stratiformnonorographiccapacity,
                             stratiformterrainadjustedcapacity,
                             convectiveconvergence[x][y],
                             surfaceevaporation[x][y],
                             localtemperature,
-                            terrainadjustedparceltemperature,
+                            environmentalfreetemperature,
                             updateuppertransport
                                 ? timestepseconds * static_cast<float>(uppertimestepcount)
                                 : 0.0f,
                             condensationconversiontimeseconds,
-                            tuning::climate::moistureadvection::convectiveResidualRelativeHumidity,
+                            tuning::climate::moistureadvection::kuoCriticalRelativeHumidity,
                             tuning::climate::moistureadvection::convectiveConversionEfficiency,
-                            tuning::climate::moistureadvection::convectiveActivationTemperatureC,
-                            tuning::climate::moistureadvection::convectiveFullStrengthTemperatureC,
+                            tuning::climate::moistureadvection::convectiveActivationBuoyancyC,
+                            tuning::climate::moistureadvection::convectiveFullStrengthBuoyancyC,
                             tuning::climate::moistureadvection::moistAdjustmentIterations,
                             tuning::climate::moistureadvection::latentHeatingCPerMillimetre,
-                            tuning::climate::moistureadvection::saturationCapacityTemperatureSensitivityPerC);
+                            tuning::climate::moistureadvection::saturationCapacityTemperatureSensitivityPerC,
+                            freefluxtendency[x][y],
+                            tuning::climate::moistureadvection::elevatedMoistureAccessionFraction,
+                            tuning::climate::moistureadvection::kuoHumidityExponent);
                         const float condensate = partition.totalMm();
                         const float boundaryaftercondensation = std::max(
                             0.0f,
@@ -3186,7 +3677,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                                 partition.stratiformMm - partition.orographicMm);
                         const float falloutrelativehumidity = std::clamp(
                             boundaryaftercondensation /
-                                std::max(0.05f, boundarycapacity[x][y]),
+                                std::max(0.05f, phaseboundarycapacity[x][y]),
                             0.0f,
                             1.0f);
                         const climatehydrology::FallingPrecipitation falling =
@@ -3197,13 +3688,32 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                                 tuning::climate::moistureadvection::maximumFallingPrecipitationReevaporationFraction,
                                 std::max(
                                     0.0f,
-                                    boundarycapacity[x][y] - boundaryaftercondensation),
+                                    phaseboundarycapacity[x][y] - boundaryaftercondensation),
                                 tuning::climate::moistureadvection::allSnowTemperatureC,
                                 tuning::climate::moistureadvection::allRainTemperatureC);
                         const float precipitation = falling.surfaceTotalMm();
                         boundarymoisture[x][y] =
                             boundaryaftercondensation + falling.reevaporatedMm;
                         freemoisture[x][y] = freeaftercondensation;
+                        const float heatingdecay = std::exp(
+                            -timestepseconds /
+                            (tuning::climate::moistureadvection::persistentHeatingDecayTimeDays *
+                                tuning::climate::circulation::secondsPerDay));
+                        persistentheating[x][y] = std::clamp(
+                            persistentheating[x][y] * heatingdecay +
+                                precipitation *
+                                    tuning::climate::moistureadvection::persistentHeatingRetentionPerMillimetreC,
+                            0.0f,
+                            tuning::climate::moistureadvection::maximumPersistentHeatingC);
+                        const float clouddecay = std::exp(
+                            -timestepseconds /
+                            (tuning::climate::moistureadvection::cloudMemoryTimeDays *
+                                tuning::climate::circulation::secondsPerDay));
+                        cloudmemory[x][y] = std::clamp(
+                            cloudmemory[x][y] * clouddecay +
+                                cloudfraction * (1.0f - clouddecay),
+                            0.0f,
+                            1.0f);
                         const double areaweight = rowareaweights[y];
                         climatephysics::CondensationActivityDiagnostics& activity =
                             rowcondensation[y];
@@ -3353,31 +3863,12 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                         const float physicalrain = std::max(
                             0.0f,
                             quarterrain[x][y] / 3.0f);
-                        world.setseasonalrainfloat(quarter, x, y, physicalrain);
-                        const int rain = std::clamp(
-                            static_cast<int>(std::round(physicalrain)),
-                            0,
-                            static_cast<int>(std::numeric_limits<short>::max()));
-
-                        if (quarter == seasonjanuary)
-                            world.setjanrain(x, y, rain);
-
-                        if (quarter == seasonjuly)
-                            world.setjulrain(x, y, rain);
-
-                        world.setseasonalmoisture(
-                            quarter,
-                            x,
-                            y,
-                            static_cast<int>(std::round(
-                                boundarymoisture[x][y] + freemoisture[x][y])));
-                        world.setseasonalconvergence(
-                            quarter,
-                            x,
-                            y,
-                            static_cast<int>(std::round(
-                                quarterconvergence[x][y] / 3.0f *
-                                tuning::climate::moistureadvection::convergenceStorageScale)));
+                        storedseasonalrain[quarter][x][y] = physicalrain;
+                        storedseasonalmoisture[quarter][x][y] =
+                            boundarymoisture[x][y] + freemoisture[x][y];
+                        storedseasonalconvergence[quarter][x][y] =
+                            quarterconvergence[x][y] / 3.0f *
+                            tuning::climate::moistureadvection::convergenceStorageScale;
                     }
                 }
             }
@@ -3389,7 +3880,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
 
             for (int x = 0; x <= width; x++)
             {
-                if (world.sea(x, y) == 1)
+                if (seacell[x][y] != 0)
                 {
                     budget.oceanEvaporation += totalseaevaporation[x][y];
                     budget.oceanPrecipitation += totalrain[x][y];
@@ -3540,7 +4031,7 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
                     (atmosphericwater + initialatmosphericwater);
                 atmosphericstorage += areaweight * atmosphericwater;
 
-                if (world.sea(x, y) == 0)
+                if (seacell[x][y] == 0)
                 {
                     landarea += areaweight;
                     soilabsolutechange += areaweight * std::abs(static_cast<double>(
@@ -3607,6 +4098,122 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             break;
     }
 
+    hydrologyfloatgrid outputrawannualrain(
+        outputwidth + 1,
+        outputheight + 1,
+        0.0f);
+    hydrologyfloatgrid outputrawmaximummonthlyrain(
+        outputwidth + 1,
+        outputheight + 1,
+        0.0f);
+    hydrologybytegrid outputrawmaximumrainmonth(
+        outputwidth + 1,
+        outputheight + 1,
+        static_cast<signed char>(-1));
+    vector<float> outputrowareaweights(outputheight + 1, 0.0f);
+
+    for (int y = 0; y <= outputheight; y++)
+        outputrowareaweights[y] = static_cast<float>(rowareaweight(y, outputheight));
+
+    parallelforrows(0, outputheight, [&](int startrow, int endrow)
+    {
+        for (int y = startrow; y <= endrow; y++)
+        {
+            const int nearestsourcey = outputheight > 0
+                ? std::clamp(
+                    static_cast<int>(std::round(
+                        static_cast<float>(y * height) /
+                        static_cast<float>(outputheight))),
+                    0,
+                    height)
+                : 0;
+
+            for (int x = 0; x <= outputwidth; x++)
+            {
+                outputrawannualrain[x][y] = samplehydrologygrid(
+                    rawannualrain,
+                    width,
+                    height,
+                    x,
+                    y,
+                    outputwidth,
+                    outputheight);
+                outputrawmaximummonthlyrain[x][y] = samplehydrologygrid(
+                    rawmaximummonthlyrain,
+                    width,
+                    height,
+                    x,
+                    y,
+                    outputwidth,
+                    outputheight);
+                const float sourcex = (static_cast<float>(x) + 0.5f) *
+                    static_cast<float>(width + 1) /
+                    static_cast<float>(outputwidth + 1) - 0.5f;
+                const int nearestsourcex = wrapx(
+                    static_cast<int>(std::round(sourcex)),
+                    width);
+                outputrawmaximumrainmonth[x][y] =
+                    rawmaximumrainmonth[nearestsourcex][nearestsourcey];
+
+                for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                {
+                    const float seasonalrain = std::max(
+                        0.0f,
+                        samplehydrologygrid(
+                            storedseasonalrain[season],
+                            width,
+                            height,
+                            x,
+                            y,
+                            outputwidth,
+                            outputheight));
+                    const float seasonalmoisture = samplehydrologygrid(
+                        storedseasonalmoisture[season],
+                        width,
+                        height,
+                        x,
+                        y,
+                        outputwidth,
+                        outputheight);
+                    const float seasonalconvergence = samplehydrologygrid(
+                        storedseasonalconvergence[season],
+                        width,
+                        height,
+                        x,
+                        y,
+                        outputwidth,
+                        outputheight);
+                    world.setseasonalrainfloat(season, x, y, seasonalrain);
+                    world.setseasonalmoisture(
+                        season,
+                        x,
+                        y,
+                        std::clamp(
+                            static_cast<int>(std::round(seasonalmoisture)),
+                            static_cast<int>(std::numeric_limits<short>::min()),
+                            static_cast<int>(std::numeric_limits<short>::max())));
+                    world.setseasonalconvergence(
+                        season,
+                        x,
+                        y,
+                        std::clamp(
+                            static_cast<int>(std::round(seasonalconvergence)),
+                            static_cast<int>(std::numeric_limits<short>::min()),
+                            static_cast<int>(std::numeric_limits<short>::max())));
+
+                    const int roundedrain = std::clamp(
+                        static_cast<int>(std::round(seasonalrain)),
+                        0,
+                        static_cast<int>(std::numeric_limits<short>::max()));
+                    if (season == seasonjanuary)
+                        world.setjanrain(x, y, roundedrain);
+                    else if (season == seasonjuly)
+                        world.setjulrain(x, y, roundedrain);
+                }
+            }
+        }
+    });
+
     struct distributionaccumulator
     {
         climatephysics::PrecipitationDistributionScope metrics;
@@ -3624,16 +4231,16 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
     distributionaccumulator landdistribution;
     distributionaccumulator oceandistribution;
 
-    for (int y = 0; y <= height; y++)
+    for (int y = 0; y <= outputheight; y++)
     {
-        const double areaweight = rowareaweights[y];
+        const double areaweight = outputrowareaweights[y];
 
-        for (int x = 0; x <= width; x++)
+        for (int x = 0; x <= outputwidth; x++)
         {
             distributionaccumulator& distribution = world.sea(x, y) == 1
                 ? oceandistribution
                 : landdistribution;
-            const float meanmonthlyrain = rawannualrain[x][y] /
+            const float meanmonthlyrain = outputrawannualrain[x][y] /
                 static_cast<float>(climatehydrology::monthCount);
             int storedseasonalrain = 0;
 
@@ -3644,23 +4251,23 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
             distribution.metrics.areaWeight += areaweight;
             distribution.precipitationtotal += meanmonthlyrain;
             distribution.areaweightedprecipitationtotal += areaweight * meanmonthlyrain;
-            if (rawmaximummonthlyrain[x][y] >
+            if (outputrawmaximummonthlyrain[x][y] >
                 distribution.metrics.maximumMonthlyPrecipitationMm)
             {
-                const int maximummonth = static_cast<int>(rawmaximumrainmonth[x][y]);
+                const int maximummonth = static_cast<int>(outputrawmaximumrainmonth[x][y]);
                 distribution.metrics.maximumMonthlyPrecipitationMm =
-                    static_cast<double>(rawmaximummonthlyrain[x][y]);
+                    static_cast<double>(outputrawmaximummonthlyrain[x][y]);
                 distribution.metrics.maximumMonthlyPrecipitationX = x;
                 distribution.metrics.maximumMonthlyPrecipitationY = y;
                 distribution.metrics.maximumMonthlyPrecipitationMonth = maximummonth;
                 distribution.metrics.roundedPrecipitationAtMaximumMm =
                     maximummonth >= 0
-                        ? static_cast<int>(std::round(rawmaximummonthlyrain[x][y]))
+                        ? static_cast<int>(std::round(outputrawmaximummonthlyrain[x][y]))
                         : 0;
             }
             distribution.precipitation.push_back(meanmonthlyrain);
 
-            if (rawannualrain[x][y] <= 1.0e-6f)
+            if (outputrawannualrain[x][y] <= 1.0e-6f)
             {
                 distribution.rawzeros++;
                 distribution.areaweightedrawzeros += areaweight;
