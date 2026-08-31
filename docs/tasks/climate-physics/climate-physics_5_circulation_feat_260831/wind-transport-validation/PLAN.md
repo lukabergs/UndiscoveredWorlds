@@ -6,6 +6,8 @@ Validate and improve the circulation and moisture transport that control run 118
 
 Climate physics phase 5: calibration, regression hardening, and cleanup.
 
+Paused after the first final Earth verification run; repeat-run hashing and benchmark recording remain.
+
 # Scope
 
 - Export seasonal circulation and moisture-flux diagnostics.
@@ -34,10 +36,10 @@ Climate physics phase 5: calibration, regression hardening, and cleanup.
 
 1. Completed: semantic circulation exports and particle-trail rendering.
 2. Completed: resampled, like-for-like wind-reference comparisons and the run 118 diagnostic baseline.
-3. In progress: deterministic tracer tests and transport-error measurement.
-4. Implement CFL-controlled conservative transport if the tests justify it.
-5. Evaluate nonlocal thermal-pressure and mechanical topographic forcing against the baseline.
-6. Run the relevant unit, integration, benchmark, determinism, and budget checks.
+3. Completed: deterministic tracer tests cover conservation, positivity, centroid motion, spreading, poles, and Courant numbers above one.
+4. Completed: rejected production CFL-controlled transport because it reduced area-weighted column-water correlation from 0.733 to 0.461 and precipitation correlation from 0.392 to 0.313.
+5. Completed: retained the nonlocal thermal-pressure response and surface mechanical topographic forcing; rejected the ineffective upper-height extension.
+6. In progress: Debug/Release tests and one final Earth run pass; repeat-run hashing and benchmark recording remain.
 
 # Done when
 
@@ -55,5 +57,5 @@ Climate physics phase 5: calibration, regression hardening, and cleanup.
 
 # Open questions
 
-- Whether transport error or circulation forcing dominates the remaining rainfall error.
-- Whether an Earth-calibrated nonlocal pressure response generalizes across supported planet parameters.
+- Generalization of the retained dimensionless circulation response beyond the Earth fixture remains unmeasured.
+- Upper-level wind agreement remains poor and was not improved by the tested mechanical-height forcing.
