@@ -55,6 +55,7 @@ set(SOURCES
     assetdata.cpp
     classes.cpp
     climate_atmosphere.cpp
+    climate_circulation_diagnostics.cpp
     climate_energy.cpp
     climate_hydrology.cpp
     climate_physics.cpp

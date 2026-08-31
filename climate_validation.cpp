@@ -1,5 +1,6 @@
 #include "app_environment.hpp"
 #include "climate_atmosphere.hpp"
+#include "climate_circulation_diagnostics.hpp"
 #include "climate_energy.hpp"
 #include "climate_koppen.hpp"
 #include "climate_physics.hpp"
@@ -445,6 +446,71 @@ double safeaverage(double total, int count)
 
 string csvescape(const string& value);
 
+float samplemonthlyreference(
+    const climatereference::MonthlyGrid& reference,
+    int month,
+    int x,
+    int y,
+    int targetcolumns,
+    int targetrows)
+{
+    if (reference.width <= 0 || reference.height <= 0 ||
+        targetcolumns <= 0 || targetrows <= 0)
+    {
+        return numeric_limits<float>::quiet_NaN();
+    }
+
+    if (reference.width == targetcolumns && reference.height == targetrows)
+        return reference.value(month, x, y);
+
+    const double sourcex = (static_cast<double>(x) + 0.5) *
+        static_cast<double>(reference.width) / static_cast<double>(targetcolumns) - 0.5;
+    const double sourcey = targetrows > 1
+        ? static_cast<double>(y) * static_cast<double>(reference.height - 1) /
+            static_cast<double>(targetrows - 1)
+        : 0.5 * static_cast<double>(reference.height - 1);
+    const int x0unwrapped = static_cast<int>(floor(sourcex));
+    const int x1unwrapped = x0unwrapped + 1;
+    auto wrapreferencex = [&](int sourcecolumn)
+    {
+        sourcecolumn %= reference.width;
+        return sourcecolumn < 0 ? sourcecolumn + reference.width : sourcecolumn;
+    };
+    const int x0 = wrapreferencex(x0unwrapped);
+    const int x1 = wrapreferencex(x1unwrapped);
+    const int y0 = clamp(static_cast<int>(floor(sourcey)), 0, reference.height - 1);
+    const int y1 = min(reference.height - 1, y0 + 1);
+    const double xfraction = sourcex - floor(sourcex);
+    const double yfraction = sourcey - floor(sourcey);
+    const array<float, 4> values = {
+        reference.value(month, x0, y0),
+        reference.value(month, x1, y0),
+        reference.value(month, x0, y1),
+        reference.value(month, x1, y1)
+    };
+    const array<double, 4> weights = {
+        (1.0 - xfraction) * (1.0 - yfraction),
+        xfraction * (1.0 - yfraction),
+        (1.0 - xfraction) * yfraction,
+        xfraction * yfraction
+    };
+    double total = 0.0;
+    double weight = 0.0;
+
+    for (size_t index = 0; index < values.size(); index++)
+    {
+        if (!isfinite(values[index]))
+            continue;
+
+        total += weights[index] * static_cast<double>(values[index]);
+        weight += weights[index];
+    }
+
+    return weight > 0.0
+        ? static_cast<float>(total / weight)
+        : numeric_limits<float>::quiet_NaN();
+}
+
 enum class monthlyreferencefield
 {
     temperature,
@@ -453,8 +519,8 @@ enum class monthlyreferencefield
     surfacepressure,
     surfaceuwind,
     surfacevwind,
-    transportuwind,
-    transportvwind,
+    upperuwind,
+    uppervwind,
     columnwater,
     verticalascent
 };
@@ -531,7 +597,13 @@ double fivedegreelandprecipitationcorrelation(
             if (!isvalidationland(world, x, y))
                 continue;
 
-            const double observed = reference.value(0, x, y);
+            const double observed = samplemonthlyreference(
+                reference,
+                0,
+                x,
+                y,
+                world.width() + 1,
+                world.height() + 1);
 
             if (!std::isfinite(observed))
                 continue;
@@ -669,8 +741,12 @@ double simulatedmonthlyvalue(planet& world, monthlyreferencefield field, int sea
 
     if (field == monthlyreferencefield::surfacewindspeed)
     {
-        const double u = world.seasonaluwind(season, x, y);
-        const double v = world.seasonalvwind(season, x, y);
+        float capturedu = 0.0f;
+        float capturedv = 0.0f;
+        const bool captured = climatevalidation::capturedcirculationwind(
+            world, season, x, y, false, capturedu, capturedv);
+        const double u = captured ? capturedu : world.seasonaluwind(season, x, y);
+        const double v = captured ? capturedv : world.seasonalvwind(season, x, y);
         return std::sqrt(u * u + v * v);
     }
 
@@ -678,23 +754,43 @@ double simulatedmonthlyvalue(planet& world, monthlyreferencefield field, int sea
         return world.seasonalpressure(season, x, y);
 
     if (field == monthlyreferencefield::surfaceuwind)
-        return world.seasonaluwind(season, x, y);
-
-    if (field == monthlyreferencefield::surfacevwind)
-        return -world.seasonalvwind(season, x, y);
-
-    if (field == monthlyreferencefield::transportuwind)
     {
-        const double surface = world.seasonaluwind(season, x, y);
-        const double upper = world.seasonalupperuwind(season, x, y);
-        return surface + (upper - surface) * tuning::climate::moistureadvection::upperWindTransportFraction;
+        float capturedu = 0.0f;
+        float capturedv = 0.0f;
+        return climatevalidation::capturedcirculationwind(
+            world, season, x, y, false, capturedu, capturedv)
+            ? capturedu
+            : world.seasonaluwind(season, x, y);
     }
 
-    if (field == monthlyreferencefield::transportvwind)
+    if (field == monthlyreferencefield::surfacevwind)
     {
-        const double surface = -world.seasonalvwind(season, x, y);
-        const double upper = -world.seasonaluppervwind(season, x, y);
-        return surface + (upper - surface) * tuning::climate::moistureadvection::upperWindTransportFraction;
+        float capturedu = 0.0f;
+        float capturedv = 0.0f;
+        return climatevalidation::capturedcirculationwind(
+            world, season, x, y, false, capturedu, capturedv)
+            ? -capturedv
+            : -world.seasonalvwind(season, x, y);
+    }
+
+    if (field == monthlyreferencefield::upperuwind)
+    {
+        float capturedu = 0.0f;
+        float capturedv = 0.0f;
+        return climatevalidation::capturedcirculationwind(
+            world, season, x, y, true, capturedu, capturedv)
+            ? capturedu
+            : world.seasonalupperuwind(season, x, y);
+    }
+
+    if (field == monthlyreferencefield::uppervwind)
+    {
+        float capturedu = 0.0f;
+        float capturedv = 0.0f;
+        return climatevalidation::capturedcirculationwind(
+            world, season, x, y, true, capturedu, capturedv)
+            ? -capturedv
+            : -world.seasonaluppervwind(season, x, y);
     }
 
     if (field == monthlyreferencefield::columnwater)
@@ -714,7 +810,7 @@ comparisonmetrics comparemonthlyfield(
 {
     comparisonmetrics metrics;
     metrics.referencefound = true;
-    metrics.dimensionsmatch = reference.width == world.width() + 1 && reference.height == world.height() + 1;
+    metrics.dimensionsmatch = reference.width > 0 && reference.height > 0;
 
     if (!metrics.dimensionsmatch)
         return metrics;
@@ -762,13 +858,27 @@ comparisonmetrics comparemonthlyfield(
                     observed = 0.0;
 
                     for (int month = season * 3; month < season * 3 + 3; month++)
-                        observed += reference.value(month, x, y);
+                    {
+                        observed += samplemonthlyreference(
+                            reference,
+                            month,
+                            x,
+                            y,
+                            world.width() + 1,
+                            world.height() + 1);
+                    }
 
                     observed /= 3.0;
                 }
                 else
                 {
-                    observed = reference.value(referenceMonths[season], x, y);
+                    observed = samplemonthlyreference(
+                        reference,
+                        referenceMonths[season],
+                        x,
+                        y,
+                        world.width() + 1,
+                        world.height() + 1);
                 }
             }
             else
@@ -782,7 +892,13 @@ comparisonmetrics comparemonthlyfield(
 
                 for (int month = 0; month < reference.monthCount; month++)
                 {
-                    const float value = reference.value(month, x, y);
+                    const float value = samplemonthlyreference(
+                        reference,
+                        month,
+                        x,
+                        y,
+                        world.width() + 1,
+                        world.height() + 1);
 
                     if (std::isfinite(value))
                     {
@@ -1015,8 +1131,8 @@ void writephysicalreferencecomparison(const filesystem::path& outputdir, planet&
         physicalreferencespecification{ "era5_slp_anom_monthly.uwclim", "slp_anom", "sea_level_pressure_anomaly_hpa", monthlyreferencefield::surfacepressure },
         { "era5_u10m_monthly.uwclim", "u10m", "surface_eastward_wind_m_s", monthlyreferencefield::surfaceuwind },
         { "era5_v10m_monthly.uwclim", "v10m", "surface_northward_wind_m_s", monthlyreferencefield::surfacevwind },
-        { "era5_u850_monthly.uwclim", "u850", "transport_eastward_wind_m_s", monthlyreferencefield::transportuwind },
-        { "era5_v850_monthly.uwclim", "v850", "transport_northward_wind_m_s", monthlyreferencefield::transportvwind },
+        { "era5_u500_monthly.uwclim", "u500", "upper_500hpa_eastward_wind_m_s", monthlyreferencefield::upperuwind },
+        { "era5_v500_monthly.uwclim", "v500", "upper_500hpa_northward_wind_m_s", monthlyreferencefield::uppervwind },
         { "era5_tcwv_monthly.uwclim", "tcwv", "column_water_kg_m2", monthlyreferencefield::columnwater },
         { "era5_w500_ascent_monthly.uwclim", "w500_ascent", "midlevel_ascent_hpa_day", monthlyreferencefield::verticalascent },
         { "era5_pr_monthly.uwclim", "pr", "precipitation_mm_month", monthlyreferencefield::precipitation }
@@ -1217,10 +1333,8 @@ void writeipccregioncomparison(const filesystem::path& outputdir, planet& world)
         regionsize.x == static_cast<unsigned int>(world.width() + 1) &&
         regionsize.y == static_cast<unsigned int>(world.height() + 1) &&
         koppensize == regionsize &&
-        temperaturereference.width == world.width() + 1 &&
-        temperaturereference.height == world.height() + 1 &&
-        precipitationreference.width == world.width() + 1 &&
-        precipitationreference.height == world.height() + 1;
+        temperaturereference.width > 0 && temperaturereference.height > 0 &&
+        precipitationreference.width > 0 && precipitationreference.height > 0;
 
     if (!dimensionsmatch)
     {
@@ -1276,8 +1390,20 @@ void writeipccregioncomparison(const filesystem::path& outputdir, planet& world)
 
             for (int month = 0; month < 12; month++)
             {
-                const double temperature = temperaturereference.value(month, x, y);
-                const double precipitation = precipitationreference.value(month, x, y);
+                const double temperature = samplemonthlyreference(
+                    temperaturereference,
+                    month,
+                    x,
+                    y,
+                    world.width() + 1,
+                    world.height() + 1);
+                const double precipitation = samplemonthlyreference(
+                    precipitationreference,
+                    month,
+                    x,
+                    y,
+                    world.width() + 1,
+                    world.height() + 1);
                 validtemperature = validtemperature && std::isfinite(temperature);
                 validprecipitation = validprecipitation && std::isfinite(precipitation);
 
@@ -1917,7 +2043,13 @@ void collectbenchmarktemperaturemetrics(planet& world, benchmarkphysicsmetrics& 
 
             for (int month = 0; month < temperaturereference.monthCount; month++)
             {
-                const double observed = temperaturereference.value(month, x, y);
+                const double observed = samplemonthlyreference(
+                    temperaturereference,
+                    month,
+                    x,
+                    y,
+                    world.width() + 1,
+                    world.height() + 1);
 
                 if (!std::isfinite(observed))
                 {
@@ -2195,14 +2327,14 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(planet& world)
         monthlyreferencefield::surfacevwind,
         referencescope::global).areaweightedcorrelation;
     metrics.era5transporteastwardwindcorrelation = compareera5(
-        "era5_u850_monthly.uwclim",
-        "u850",
-        monthlyreferencefield::transportuwind,
+        "era5_u500_monthly.uwclim",
+        "u500",
+        monthlyreferencefield::upperuwind,
         referencescope::global).areaweightedcorrelation;
     metrics.era5transportnorthwardwindcorrelation = compareera5(
-        "era5_v850_monthly.uwclim",
-        "v850",
-        monthlyreferencefield::transportvwind,
+        "era5_v500_monthly.uwclim",
+        "v500",
+        monthlyreferencefield::uppervwind,
         referencescope::global).areaweightedcorrelation;
     const comparisonmetrics columnwatercomparison = compareera5(
         "era5_tcwv_monthly.uwclim",
@@ -3244,8 +3376,7 @@ void writepressuredecompositioncomparison(
     if (!output.is_open())
         return;
 
-    if (!loaded || reference.width != world.width() + 1 ||
-        reference.height != world.height() + 1)
+    if (!loaded || reference.width <= 0 || reference.height <= 0)
     {
         output << "status,error\nerror," << csvescape(error) << '\n';
         return;
@@ -3272,8 +3403,13 @@ void writepressuredecompositioncomparison(
             for (int x = 0; x <= width; x++)
             {
                 simulatedzonal[y] += world.seasonalpressure(season, x, y);
-                const double referencevalue =
-                    reference.value(referencemonths[season], x, y);
+                const double referencevalue = samplemonthlyreference(
+                    reference,
+                    referencemonths[season],
+                    x,
+                    y,
+                    width + 1,
+                    height + 1);
 
                 if (std::isfinite(referencevalue))
                 {
@@ -3310,8 +3446,13 @@ void writepressuredecompositioncomparison(
 
             for (int x = 0; x <= width; x++)
             {
-                const double referencevalue =
-                    reference.value(referencemonths[season], x, y);
+                const double referencevalue = samplemonthlyreference(
+                    reference,
+                    referencemonths[season],
+                    x,
+                    y,
+                    width + 1,
+                    height + 1);
 
                 if (!std::isfinite(referencevalue))
                     continue;
@@ -3362,8 +3503,7 @@ void writetemperaturethresholdcomparison(
     if (!output.is_open())
         return;
 
-    if (!loaded || reference.width != world.width() + 1 ||
-        reference.height != world.height() + 1)
+    if (!loaded || reference.width <= 0 || reference.height <= 0)
     {
         output << "status,error\nerror," << csvescape(error) << '\n';
         return;
@@ -3432,7 +3572,13 @@ void writetemperaturethresholdcomparison(
 
                 for (int month = 0; month < reference.monthCount; month++)
                 {
-                    const double value = reference.value(month, x, y);
+                    const double value = samplemonthlyreference(
+                        reference,
+                        month,
+                        x,
+                        y,
+                        world.width() + 1,
+                        world.height() + 1);
 
                     if (!std::isfinite(value))
                         continue;
@@ -3578,6 +3724,47 @@ bool persistclimatebenchmarkdiagnostics(
             return false;
 
         copiedfiles.push_back(filename);
+    }
+
+    const filesystem::path circulationdirectory = sourcedirectory / "circulation";
+    if (filesystem::exists(circulationdirectory))
+    {
+        for (filesystem::recursive_directory_iterator iterator(circulationdirectory, error), end;
+             iterator != end;
+             iterator.increment(error))
+        {
+            if (error)
+                return false;
+
+            const filesystem::path relativepath = filesystem::relative(
+                iterator->path(), sourcedirectory, error);
+            if (error)
+                return false;
+
+            const filesystem::path destination = targetdirectory / relativepath;
+            if (iterator->is_directory())
+            {
+                filesystem::create_directories(destination, error);
+            }
+            else if (iterator->is_regular_file())
+            {
+                filesystem::create_directories(destination.parent_path(), error);
+                if (!error)
+                {
+                    filesystem::copy_file(
+                        iterator->path(),
+                        destination,
+                        filesystem::copy_options::overwrite_existing,
+                        error);
+                }
+
+                if (!error)
+                    copiedfiles.push_back(relativepath.generic_string());
+            }
+
+            if (error)
+                return false;
+        }
     }
 
     const filesystem::path rawpixelspath = targetdirectory / "climate_benchmark_raw_pixels.csv";
@@ -4048,6 +4235,7 @@ void exportclimatevalidationreport(planet& world)
     writephysicalreferencecomparison(outputdir, world);
     writeipccregioncomparison(outputdir, world);
     writeatmosphericbudget(outputdir, world);
+    climatevalidation::exportcirculationdiagnostics(outputdir / "circulation", world);
     writecirculationprecision(outputdir);
     writepressuredecompositioncomparison(outputdir, world);
     writetemperaturethresholdcomparison(outputdir, world);
@@ -4255,7 +4443,7 @@ void exportclimatevalidationreport(planet& world)
         summaryfile << "north_subtropical_dry_zonal_precip=" << northdryrain << '\n';
         summaryfile << "south_subtropical_dry_zonal_precip=" << southdryrain << '\n';
         summaryfile << "grid_files=annual_precipitation_grid.csv,january_precipitation_grid.csv,july_precipitation_grid.csv,land_mask_grid.csv\n";
-        summaryfile << "physics_diagnostics=climate_energy_budget.csv,climate_water_budget.csv,climate_water_budget_area_weighted.csv,climate_precipitation_distribution.csv,climate_hydrology_spinup.csv,climate_condensation_activity.csv,climate_precipitation_processes.csv,climate_atmosphere_budget.csv,climate_circulation_precision.csv,pressure_decomposition_comparison.csv,temperature_threshold_comparison.csv,monthly_climate_reference_comparison.csv,monthly_physical_reference_comparison.csv,ipcc_region_climate_comparison.csv,annual_imerg_precipitation_comparison.csv\n";
+        summaryfile << "physics_diagnostics=climate_energy_budget.csv,climate_water_budget.csv,climate_water_budget_area_weighted.csv,climate_precipitation_distribution.csv,climate_hydrology_spinup.csv,climate_condensation_activity.csv,climate_precipitation_processes.csv,climate_atmosphere_budget.csv,circulation/,climate_circulation_precision.csv,pressure_decomposition_comparison.csv,temperature_threshold_comparison.csv,monthly_climate_reference_comparison.csv,monthly_physical_reference_comparison.csv,ipcc_region_climate_comparison.csv,annual_imerg_precipitation_comparison.csv\n";
         summaryfile << "reference_grid_path=" << getappenvironment().referencePrecipitationGridPath.string() << '\n';
         summaryfile << "reference_found=" << (comparison.referencefound ? 1 : 0) << '\n';
         summaryfile << "reference_dimensions_match=" << (comparison.dimensionsmatch ? 1 : 0) << '\n';

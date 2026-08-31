@@ -33,4 +33,4 @@ The work changes the temperature, circulation, moisture, ocean, cryosphere, and 
 
 # Status
 
-Phases 1-3 complete. Phase 4 in progress: precipitation closure, land-water recycling, and hydrological convergence. Persistent atmospheric/soil storage is complete; the current branch targets the run-43 zero-rain distribution.
+Phases 1-4 complete. Phase 5 is validating run 118's circulation and moisture transport before retaining further physics changes.
