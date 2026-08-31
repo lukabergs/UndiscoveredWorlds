@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <vector>
 
 #include "physical_layers.hpp"
 
@@ -66,6 +67,27 @@ float axisymmetricOverturningPressureAnomalyHpa(
     float thermalEquatorLatitudeDegrees,
     float hadleyHalfWidthDegrees,
     float pressureAmplitudeHpa);
+std::vector<float> nonlocalThermalResponse(
+    int longitudeCells,
+    int latitudeCells,
+    const std::vector<float>& localTemperatureAnomalyK,
+    float tropicalLatitudeDegrees,
+    float longitudinalReachDegrees,
+    float meridionalReachDegrees,
+    float rotationDirection = 1.0f);
+std::vector<float> mechanicalTopographicPressureForcingHpa(
+    int longitudeCells,
+    int latitudeCells,
+    const std::vector<float>& terrainMetres,
+    const std::vector<float>& eastWindMps,
+    const std::vector<float>& southWindMps,
+    float sampleDistanceCells,
+    float terrainScaleMetres,
+    float maximumAmplitudeHpa,
+    float minimumWindMps,
+    float fullStrengthWindMps,
+    float minimumLatitudeDegrees,
+    float fullStrengthLatitudeDegrees);
 CellSpacing cellSpacingMetres(
     float latitudeDegrees,
     int longitudeCells,

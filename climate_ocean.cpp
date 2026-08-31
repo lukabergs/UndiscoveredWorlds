@@ -1831,6 +1831,30 @@ void createpressuremap(planet& world)
         for (float& rowpressure : zonalpressure)
             rowpressure -= meanpressure;
 
+        vector<float> localstationarytemperature(
+            static_cast<size_t>(width + 1) * static_cast<size_t>(height + 1),
+            0.0f);
+        for (int y = 0; y <= height; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                localstationarytemperature[
+                    static_cast<size_t>(y) * (width + 1) + x] =
+                    stationarytemperature[x][y] - stationaryzonaltemperature[y];
+            }
+        }
+        const vector<float> nonlocalstationarytemperature =
+            climateatmosphere::nonlocalThermalResponse(
+                width + 1,
+                height + 1,
+                localstationarytemperature,
+                hadleyhalfwidth,
+                hadleyhalfwidth * tuning::climate::circulation::
+                    stationaryThermalLongitudinalReachHadleyFraction,
+                hadleyhalfwidth * tuning::climate::circulation::
+                    stationaryThermalMeridionalReachHadleyFraction,
+                world.rotation() ? 1.0f : -1.0f);
+
         cout
             << "Overturning pressure season " << season
             << ": thermal_equator=" << thermalequator
@@ -1844,8 +1868,12 @@ void createpressuremap(planet& world)
             {
                 for (int x = 0; x <= width; x++)
                 {
+                    const size_t cellindex = static_cast<size_t>(y) * (width + 1) + x;
                     const float stationarytemperatureanomaly =
-                        stationarytemperature[x][y] - stationaryzonaltemperature[y];
+                        localstationarytemperature[cellindex] +
+                        (nonlocalstationarytemperature[cellindex] -
+                            localstationarytemperature[cellindex]) *
+                        tuning::climate::circulation::stationaryThermalNonlocalResponseFraction;
                     pressure[x][y] = zonalpressure[y] +
                         climateatmosphere::thermalSurfacePressureAnomalyHpa(
                             stationarytemperatureanomaly,
@@ -2283,6 +2311,72 @@ void createvectorwindmap(planet& world)
         };
 
         updatesurfaceflow();
+
+        vector<float> flattenedterrain(
+            static_cast<size_t>(width + 1) * static_cast<size_t>(height + 1),
+            0.0f);
+        vector<float> flattenedeastwind(flattenedterrain.size(), 0.0f);
+        vector<float> flattenedsouthwind(flattenedterrain.size(), 0.0f);
+        for (int y = 0; y <= height; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                const size_t cellindex = static_cast<size_t>(y) * (width + 1) + x;
+                flattenedterrain[cellindex] = macroterrain[x][y];
+                flattenedeastwind[cellindex] = windu[x][y];
+                flattenedsouthwind[cellindex] = windv[x][y];
+            }
+        }
+        const vector<float> flattenedmechanicalforcing =
+            climateatmosphere::mechanicalTopographicPressureForcingHpa(
+                width + 1,
+                height + 1,
+                flattenedterrain,
+                flattenedeastwind,
+                flattenedsouthwind,
+                std::max(
+                    1.0f,
+                    tuning::climate::circulation::
+                        mechanicalTopographicSampleDistanceAtReferenceGrid * topographyscale),
+                tuning::climate::circulation::mechanicalTopographicTerrainScaleMetres,
+                tuning::climate::circulation::mechanicalTopographicPressureAmplitudeHpa,
+                tuning::climate::circulation::mechanicalTopographicMinimumWindMps,
+                tuning::climate::circulation::mechanicalTopographicFullStrengthWindMps,
+                tuning::climate::circulation::mechanicalTopographicMinimumLatitudeDegrees,
+                tuning::climate::circulation::mechanicalTopographicFullStrengthLatitudeDegrees);
+        floatgrid mechanicalforcing(width + 1, vector<float>(height + 1, 0.0f));
+        for (int y = 0; y <= height; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                mechanicalforcing[x][y] = flattenedmechanicalforcing[
+                    static_cast<size_t>(y) * (width + 1) + x];
+            }
+        }
+        smoothallfield(
+            world,
+            mechanicalforcing,
+            std::max(
+                1,
+                static_cast<int>(std::round(
+                    tuning::climate::circulation::
+                        mechanicalTopographicSmoothingAtReferenceGrid * topographyscale))));
+        parallelforrows(0, height, [&](int startrow, int endrow)
+        {
+            for (int y = startrow; y <= endrow; y++)
+            {
+                for (int x = 0; x <= width; x++)
+                    pressure[x][y] += mechanicalforcing[x][y];
+            }
+        });
+        basepressure = pressure;
+        updatesurfaceflow();
+        precisiondiagnostics.base = measurecirculationprecision(
+            world,
+            resolvedpressure,
+            resolvedupperheight,
+            continentality,
+            macroterrain);
 
         for (int iteration = 0; iteration < tuning::climate::circulation::iterations; iteration++)
         {
