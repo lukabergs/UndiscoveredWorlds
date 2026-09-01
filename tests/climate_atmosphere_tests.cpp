@@ -194,5 +194,24 @@ int main()
         northern.eastMetresPerSecond > 0.0f && southern.eastMetresPerSecond < 0.0f,
         "the same meridional height force must produce opposite zonal flow across the equator");
 
+    const auto quadraticEquatorial = climateatmosphere::steadyQuadraticDragCoriolisWind(
+        0.001f, 0.0f, 0.0f, 0.001f, 100.0f, earthRotation);
+    const auto quadraticEquatorialStronger = climateatmosphere::steadyQuadraticDragCoriolisWind(
+        0.004f, 0.0f, 0.0f, 0.001f, 100.0f, earthRotation);
+    expect(
+        std::abs(quadraticEquatorial.eastMetresPerSecond - 10.0f) < 0.001f &&
+            std::abs(quadraticEquatorial.southMetresPerSecond) < 0.001f &&
+            std::abs(quadraticEquatorialStronger.eastMetresPerSecond - 20.0f) < 0.001f,
+        "quadratic drag must keep equatorial flow finite and scale speed with the square root of force");
+
+    const auto quadraticNorthern = climateatmosphere::steadyQuadraticDragCoriolisWind(
+        0.0f, 0.001f, 45.0f, 0.0013f, 300.0f, earthRotation);
+    const auto quadraticSouthern = climateatmosphere::steadyQuadraticDragCoriolisWind(
+        0.0f, 0.001f, -45.0f, 0.0013f, 300.0f, earthRotation);
+    expect(
+        quadraticNorthern.eastMetresPerSecond > 0.0f &&
+            quadraticSouthern.eastMetresPerSecond < 0.0f,
+        "quadratic surface drag must preserve the Coriolis reversal across the equator");
+
     return failures == 0 ? 0 : 1;
 }

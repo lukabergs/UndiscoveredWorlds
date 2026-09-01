@@ -1548,24 +1548,27 @@ climateatmosphere::CirculationPrecisionStageDiagnostics measurecirculationprecis
                 (2.0f * spacing.meridionalMetres);
             const float continental = std::clamp(continentality[x][y], 0.0f, 1.0f);
             const float relief = std::clamp(macroterrain[x][y] / 4500.0f, 0.0f, 1.0f);
-            const float basedragtime =
-                tuning::climate::atmosphere::oceanBoundaryLayerDragTimeSeconds +
-                continental * (tuning::climate::atmosphere::landBoundaryLayerDragTimeSeconds -
-                    tuning::climate::atmosphere::oceanBoundaryLayerDragTimeSeconds);
-            const float dragtime = basedragtime + relief *
-                (tuning::climate::atmosphere::highReliefDragTimeSeconds - basedragtime);
-            const auto floatwind = climateatmosphere::steadyRayleighCoriolisWind(
+            const float basedragcoefficient =
+                tuning::climate::atmosphere::oceanMomentumDragCoefficient +
+                continental * (tuning::climate::atmosphere::landMomentumDragCoefficient -
+                    tuning::climate::atmosphere::oceanMomentumDragCoefficient);
+            const float dragcoefficient = basedragcoefficient + relief *
+                (tuning::climate::atmosphere::highReliefMomentumDragCoefficient -
+                    basedragcoefficient);
+            const auto floatwind = climateatmosphere::steadyQuadraticDragCoriolisWind(
                 -floatpressureeast / tuning::climate::atmosphere::surfaceAirDensityKgM3,
                 -floatpressurenorth / tuning::climate::atmosphere::surfaceAirDensityKgM3,
                 latitude,
-                dragtime,
+                dragcoefficient,
+                tuning::climate::atmosphere::surfaceBoundaryLayerMomentumDepthMetres,
                 tuning::climate::atmosphere::rotationRatePerSecond,
                 world.rotation() ? 1.0f : -1.0f);
-            const auto roundedwind = climateatmosphere::steadyRayleighCoriolisWind(
+            const auto roundedwind = climateatmosphere::steadyQuadraticDragCoriolisWind(
                 -roundedpressureeast / tuning::climate::atmosphere::surfaceAirDensityKgM3,
                 -roundedpressurenorth / tuning::climate::atmosphere::surfaceAirDensityKgM3,
                 latitude,
-                dragtime,
+                dragcoefficient,
+                tuning::climate::atmosphere::surfaceBoundaryLayerMomentumDepthMetres,
                 tuning::climate::atmosphere::rotationRatePerSecond,
                 world.rotation() ? 1.0f : -1.0f);
             const float floatheighteast =
@@ -2243,26 +2246,29 @@ void createvectorwindmap(planet& world)
                             (2.0f * spacing.meridionalMetres);
                         const float continental = std::clamp(continentality[x][y], 0.0f, 1.0f);
                         const float relief = std::clamp(macroterrain[x][y] / 4500.0f, 0.0f, 1.0f);
-                        const float baseDragTime =
-                            tuning::climate::atmosphere::oceanBoundaryLayerDragTimeSeconds +
-                            continental * (tuning::climate::atmosphere::landBoundaryLayerDragTimeSeconds -
-                                tuning::climate::atmosphere::oceanBoundaryLayerDragTimeSeconds);
-                        const float dragTime = baseDragTime + relief *
-                            (tuning::climate::atmosphere::highReliefDragTimeSeconds - baseDragTime);
-                        const auto wind = climateatmosphere::steadyRayleighCoriolisWind(
+                        const float baseDragCoefficient =
+                            tuning::climate::atmosphere::oceanMomentumDragCoefficient +
+                            continental * (tuning::climate::atmosphere::landMomentumDragCoefficient -
+                                tuning::climate::atmosphere::oceanMomentumDragCoefficient);
+                        const float dragCoefficient = baseDragCoefficient + relief *
+                            (tuning::climate::atmosphere::highReliefMomentumDragCoefficient -
+                                baseDragCoefficient);
+                        const auto wind = climateatmosphere::steadyQuadraticDragCoriolisWind(
                             -pressuregradienteast / tuning::climate::atmosphere::surfaceAirDensityKgM3,
                             -pressuregradientnorth / tuning::climate::atmosphere::surfaceAirDensityKgM3,
                             latitude,
-                            dragTime,
+                            dragCoefficient,
+                            tuning::climate::atmosphere::surfaceBoundaryLayerMomentumDepthMetres,
                             tuning::climate::atmosphere::rotationRatePerSecond,
                             world.rotation() ? 1.0f : -1.0f);
-                        const auto largescalewind = climateatmosphere::steadyRayleighCoriolisWind(
+                        const auto largescalewind = climateatmosphere::steadyQuadraticDragCoriolisWind(
                             -largescalepressuregradienteast /
                                 tuning::climate::atmosphere::surfaceAirDensityKgM3,
                             -largescalepressuregradientnorth /
                                 tuning::climate::atmosphere::surfaceAirDensityKgM3,
                             latitude,
-                            dragTime,
+                            dragCoefficient,
+                            tuning::climate::atmosphere::surfaceBoundaryLayerMomentumDepthMetres,
                             tuning::climate::atmosphere::rotationRatePerSecond,
                             world.rotation() ? 1.0f : -1.0f);
 

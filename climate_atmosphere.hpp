@@ -100,6 +100,14 @@ HorizontalWind steadyRayleighCoriolisWind(
     float dragTimeSeconds,
     float rotationRatePerSecond,
     float rotationDirection = 1.0f);
+HorizontalWind steadyQuadraticDragCoriolisWind(
+    float forceEastMetresPerSecondSquared,
+    float forceNorthMetresPerSecondSquared,
+    float latitudeDegrees,
+    float dragCoefficient,
+    float boundaryLayerDepthMetres,
+    float rotationRatePerSecond,
+    float rotationDirection = 1.0f);
 void setLastCirculationPrecisionDiagnostics(
     int season,
     const CirculationPrecisionDiagnostics& diagnostics);
