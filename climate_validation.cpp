@@ -2862,6 +2862,48 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
         return false;
     }
 
+    constexpr array<const char*, CLIMATESEASONCOUNT> circulationseasons = {
+        "january", "april", "july", "october"
+    };
+    constexpr array<const char*, 7> circulationpreviews = {
+        "surface_wind_particles.png",
+        "upper_wind_particles.png",
+        "surface_wind_lic.png",
+        "upper_wind_lic.png",
+        "surface_wind_speed.png",
+        "surface_divergence.png",
+        "moisture_flux_convergence.png"
+    };
+    const filesystem::path circulationdirectory =
+        climatevalidationoutputdirectory(world.seed()) / "circulation";
+    for (const char* season : circulationseasons)
+    {
+        for (const char* preview : circulationpreviews)
+        {
+            const string filename = string(season) + "_" + preview;
+            const filesystem::path source = circulationdirectory / filename;
+            const filesystem::path destination =
+                outputdir / (to_string(runid) + "_" + filename);
+            if (!filesystem::exists(source))
+            {
+                cerr << "Circulation preview not found: " << source.string() << '\n';
+                return false;
+            }
+
+            filesystem::copy_file(
+                source,
+                destination,
+                filesystem::copy_options::overwrite_existing,
+                filesystemerror);
+            if (filesystemerror)
+            {
+                cerr << "Failed to copy circulation preview: "
+                    << filesystemerror.message() << '\n';
+                return false;
+            }
+        }
+    }
+
     ofstream scalefile(outputdir / "physical_map_scales.txt");
 
     if (!scalefile.is_open())
@@ -2886,6 +2928,47 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
     scalefile << "precipitation_preview_range=0 to 6000 mm/year (values above the range are clamped)\n";
     scalefile << "precipitation_water=included\n";
     scalefile << "precipitation_reference=extra/reference/imerg_precipitation_mm_year.tif\n";
+    scalefile << "circulation_preview={run_id}_{season}_{map}.png\n";
+    scalefile << "circulation_seasons=january,april,july,october\n";
+    scalefile << "circulation_maps=surface_wind_particles,upper_wind_particles,surface_wind_lic,upper_wind_lic,surface_wind_speed,surface_divergence,moisture_flux_convergence\n";
+    scalefile << "circulation_guide=circulation_map_guide.txt\n";
+
+    ofstream circulationguide(outputdir / "circulation_map_guide.txt");
+    if (!circulationguide.is_open())
+    {
+        cerr << "Failed to save circulation-map guide.\n";
+        return false;
+    }
+
+    circulationguide
+        << "CIRCULATION MAP GUIDE\n\n"
+        << "Filename: {run_id}_{season}_{map}.png\n"
+        << "Seasons: January, April, July, and October representative snapshots.\n"
+        << "Projection: global equirectangular; north is at the top and longitude is periodic.\n\n"
+        << "surface_wind_lic\n"
+        << "  Surface/boundary-layer wind streamlines rendered by line-integral convolution (LIC).\n"
+        << "  Bright and dark filaments show streamline orientation, not speed or direction.\n"
+        << "  Yellow arrows resolve LIC's direction ambiguity. The background uses the wind-speed palette below.\n\n"
+        << "upper_wind_lic\n"
+        << "  The same LIC rendering for the model upper layer, referenced to the 500 hPa circulation field.\n\n"
+        << "surface_wind_particles and upper_wind_particles\n"
+        << "  White deterministic particle trails show forward paths through the surface or upper wind field.\n"
+        << "  Trail density is a seeded visualization choice, not wind magnitude. Yellow arrows show direction.\n"
+        << "  Background speed: dark navy = 0 m/s, cyan = about 13.75 m/s, pale yellow = 25 m/s or faster.\n"
+        << "  Land is brown-gray, ocean is navy, and coastlines are gray.\n\n"
+        << "surface_wind_speed\n"
+        << "  Scalar surface wind magnitude in m/s. Dark navy = 0, cyan = about 13.75, pale yellow = 25 or more.\n\n"
+        << "surface_divergence\n"
+        << "  Horizontal surface-wind divergence in day^-1, displayed over -1 to +1 day^-1.\n"
+        << "  Blue = negative divergence (air converging), near-black = zero, orange = positive divergence (air spreading).\n\n"
+        << "moisture_flux_convergence\n"
+        << "  Convergence of vertically integrated surface moisture transport in kg m^-2 day^-1 (numerically mm/day of water).\n"
+        << "  Red = negative convergence/divergent drying, near-black = zero, turquoise = positive convergence/moisture supply.\n"
+        << "  The display is clamped to -20 through +20; the GeoTIFF retains the unclamped values.\n\n"
+        << "Raw fields\n"
+        << "  GeoTIFFs for u/v components, speed, divergence, column water, and moisture-flux convergence are in\n"
+        << "  extra/validation/runs/{run_id}/circulation. Their exact units, minima, maxima, and display limits are\n"
+        << "  listed in circulation_diagnostics.csv. PNG palettes are diagnostic, not categorical climate classes.\n";
 
     return true;
 }

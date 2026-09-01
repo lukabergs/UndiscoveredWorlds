@@ -32,6 +32,9 @@ constexpr float surfacedivergencedisplaymaximum = 1.0f;
 constexpr float moistureconvergencedisplaymaximum = 20.0f;
 constexpr int particlesteps = 36;
 constexpr int particlerenderscale = 2;
+constexpr int licstepsperdirection = 12;
+constexpr float licstepcells = 0.65f;
+constexpr int licrenderscale = 1;
 
 constexpr std::array<const char*, CLIMATESEASONCOUNT> seasonnames = {
     "january", "april", "july", "october"
@@ -225,6 +228,94 @@ std::pair<float, float> samplevector(
     return { sample(u), sample(v) };
 }
 
+sf::Color windbackgroundcolour(planet& world, int x, int y, float speed)
+{
+    const int columns = world.width() + 1;
+    sf::Color background = scalarcolour(
+        speed,
+        particlespeeddisplaymaximum,
+        scalarpalette::speed);
+    background = blendcolour(
+        background,
+        island(world, x, y) ? sf::Color(32, 27, 23) : sf::Color(4, 13, 25),
+        0.55f);
+
+    const bool coastline =
+        island(world, x, y) != island(world, wrapcolumn(x + 1, columns), y) ||
+        island(world, x, y) != island(world, wrapcolumn(x - 1, columns), y) ||
+        (y > 0 && island(world, x, y) != island(world, x, y - 1)) ||
+        (y < world.height() && island(world, x, y) != island(world, x, y + 1));
+    return coastline
+        ? blendcolour(background, sf::Color(155, 155, 145), 0.45f)
+        : background;
+}
+
+void drawdirectionarrows(
+    sf::Image& image,
+    const std::vector<float>& u,
+    const std::vector<float>& v,
+    int columns,
+    int rows,
+    int renderscale)
+{
+    constexpr int arrowcolumns = 16;
+    constexpr int arrowrows = 8;
+    for (int arrowy = 0; arrowy < arrowrows; arrowy++)
+    {
+        const float y = (static_cast<float>(arrowy) + 0.5f) *
+            static_cast<float>(rows - 1) / static_cast<float>(arrowrows);
+
+        for (int arrowx = 0; arrowx < arrowcolumns; arrowx++)
+        {
+            const float x = (static_cast<float>(arrowx) + 0.5f) *
+                static_cast<float>(columns) / static_cast<float>(arrowcolumns);
+            const auto wind = samplevector(u, v, x, y, columns, rows);
+            const auto spacing = climateatmosphere::cellSpacingMetres(
+                latitudeforrow(static_cast<int>(std::lround(y)), rows),
+                columns,
+                rows,
+                tuning::climate::atmosphere::referencePlanetRadiusMetres);
+            float dx = wind.first / spacing.zonalMetres;
+            float dy = wind.second / spacing.meridionalMetres;
+            const float magnitude = std::sqrt(dx * dx + dy * dy);
+
+            if (magnitude <= 1.0e-9f)
+                continue;
+
+            dx /= magnitude;
+            dy /= magnitude;
+            const float length = 7.0f * renderscale;
+            const float centrex = x * renderscale;
+            const float centrey = y * renderscale;
+            const float startx = centrex - dx * length * 0.5f;
+            const float starty = centrey - dy * length * 0.5f;
+            const float endx = centrex + dx * length * 0.5f;
+            const float endy = centrey + dy * length * 0.5f;
+            const sf::Color arrowcolour(255, 210, 55);
+            drawline(image, startx, starty, endx, endy, arrowcolour, 0.95f);
+            const float headlength = 2.5f * renderscale;
+            const float perpendicularx = -dy;
+            const float perpendiculary = dx;
+            drawline(
+                image,
+                endx,
+                endy,
+                endx - dx * headlength + perpendicularx * headlength * 0.55f,
+                endy - dy * headlength + perpendiculary * headlength * 0.55f,
+                arrowcolour,
+                0.95f);
+            drawline(
+                image,
+                endx,
+                endy,
+                endx - dx * headlength - perpendicularx * headlength * 0.55f,
+                endy - dy * headlength - perpendiculary * headlength * 0.55f,
+                arrowcolour,
+                0.95f);
+        }
+    }
+}
+
 bool renderscalarimage(
     const std::filesystem::path& path,
     const std::vector<float>& field,
@@ -247,6 +338,152 @@ bool renderscalarimage(
         }
     }
 
+    return image.saveToFile(path.string());
+}
+
+bool renderlicimage(
+    const std::filesystem::path& path,
+    planet& world,
+    const std::vector<float>& u,
+    const std::vector<float>& v,
+    std::uint32_t seed)
+{
+    const int columns = world.width() + 1;
+    const int rows = world.height() + 1;
+    const int imagecolumns = columns * licrenderscale;
+    const int imagerows = rows * licrenderscale;
+    const std::size_t noisecount = static_cast<std::size_t>(imagecolumns) * imagerows;
+    std::mt19937 generator(seed);
+    std::uniform_real_distribution<float> noisedistribution(0.0f, 1.0f);
+    std::vector<float> noise(noisecount, 0.0f);
+    for (float& value : noise)
+        value = noisedistribution(generator);
+
+    auto samplenoise = [&](float x, float y)
+    {
+        const float wrappedx = std::fmod(std::fmod(x, static_cast<float>(imagecolumns)) +
+            static_cast<float>(imagecolumns), static_cast<float>(imagecolumns));
+        const float boundedy = std::clamp(y, 0.0f, static_cast<float>(imagerows - 1));
+        const int x0 = wrapcolumn(static_cast<int>(std::floor(wrappedx)), imagecolumns);
+        const int x1 = wrapcolumn(x0 + 1, imagecolumns);
+        const int y0 = std::clamp(static_cast<int>(std::floor(boundedy)), 0, imagerows - 1);
+        const int y1 = std::min(imagerows - 1, y0 + 1);
+        const float xf = wrappedx - std::floor(wrappedx);
+        const float yf = boundedy - std::floor(boundedy);
+        const auto noiseindex = [imagecolumns](int xx, int yy)
+        {
+            return static_cast<std::size_t>(yy) * imagecolumns + xx;
+        };
+        const float north = noise[noiseindex(x0, y0)] * (1.0f - xf) +
+            noise[noiseindex(x1, y0)] * xf;
+        const float south = noise[noiseindex(x0, y1)] * (1.0f - xf) +
+            noise[noiseindex(x1, y1)] * xf;
+        return north * (1.0f - yf) + south * yf;
+    };
+
+    auto streamdirection = [&](float x, float y)
+    {
+        const auto wind = samplevector(u, v, x, y, columns, rows);
+        const float latitude = 90.0f - 180.0f * std::clamp(
+            y / static_cast<float>(std::max(1, rows - 1)),
+            0.0f,
+            1.0f);
+        const auto spacing = climateatmosphere::cellSpacingMetres(
+            latitude,
+            columns,
+            rows,
+            tuning::climate::atmosphere::referencePlanetRadiusMetres);
+        float dx = wind.first / spacing.zonalMetres;
+        float dy = wind.second / spacing.meridionalMetres;
+        const float magnitude = std::sqrt(dx * dx + dy * dy);
+        if (magnitude <= 1.0e-12f)
+            return std::pair<float, float>(0.0f, 0.0f);
+        return std::pair<float, float>(dx / magnitude, dy / magnitude);
+    };
+
+    sf::Image image;
+    image.create(
+        static_cast<unsigned int>(imagecolumns),
+        static_cast<unsigned int>(imagerows),
+        sf::Color::Black);
+    for (int imagey = 0; imagey < imagerows; imagey++)
+    {
+        const float sourcey = std::clamp(
+            (static_cast<float>(imagey) + 0.5f) /
+                static_cast<float>(licrenderscale) - 0.5f,
+            0.0f,
+            static_cast<float>(rows - 1));
+        for (int imagex = 0; imagex < imagecolumns; imagex++)
+        {
+            const float sourcex = (static_cast<float>(imagex) + 0.5f) /
+                static_cast<float>(licrenderscale) - 0.5f;
+            float convolution = noise[static_cast<std::size_t>(imagey) * imagecolumns + imagex];
+            float weighttotal = 1.0f;
+
+            for (int direction : { -1, 1 })
+            {
+                float x = sourcex;
+                float y = sourcey;
+                for (int step = 1; step <= licstepsperdirection; step++)
+                {
+                    const auto initialdirection = streamdirection(x, y);
+                    if (initialdirection.first == 0.0f && initialdirection.second == 0.0f)
+                        break;
+                    float midpointx = x + static_cast<float>(direction) *
+                        initialdirection.first * licstepcells * 0.5f;
+                    const float midpointy = y + static_cast<float>(direction) *
+                        initialdirection.second * licstepcells * 0.5f;
+                    midpointx = std::fmod(std::fmod(midpointx, static_cast<float>(columns)) +
+                        static_cast<float>(columns), static_cast<float>(columns));
+                    if (midpointy < 0.0f || midpointy > static_cast<float>(rows - 1))
+                        break;
+
+                    const auto midpointdirection = streamdirection(midpointx, midpointy);
+                    x += static_cast<float>(direction) * midpointdirection.first * licstepcells;
+                    y += static_cast<float>(direction) * midpointdirection.second * licstepcells;
+                    x = std::fmod(std::fmod(x, static_cast<float>(columns)) +
+                        static_cast<float>(columns), static_cast<float>(columns));
+                    if (y < 0.0f || y > static_cast<float>(rows - 1))
+                        break;
+
+                    const float weight = 0.5f + 0.5f * std::cos(
+                        pi * static_cast<float>(step) /
+                        static_cast<float>(licstepsperdirection + 1));
+                    convolution += weight * samplenoise(
+                        x * licrenderscale,
+                        y * licrenderscale);
+                    weighttotal += weight;
+                }
+            }
+
+            const float luminance = std::clamp(
+                ((convolution / weighttotal) - 0.5f) * 2.2f + 0.5f,
+                0.0f,
+                1.0f);
+            const int cellx = wrapcolumn(
+                static_cast<int>(sourcex),
+                columns);
+            const int celly = std::clamp(static_cast<int>(sourcey), 0, rows - 1);
+            const auto wind = samplevector(u, v, sourcex, sourcey, columns, rows);
+            const float speed = std::sqrt(wind.first * wind.first + wind.second * wind.second);
+            sf::Color colour = windbackgroundcolour(world, cellx, celly, speed);
+            colour = luminance < 0.5f
+                ? blendcolour(colour, sf::Color::Black, (0.5f - luminance) * 1.4f)
+                : blendcolour(colour, sf::Color::White, (luminance - 0.5f) * 1.1f);
+            image.setPixel(
+                static_cast<unsigned int>(imagex),
+                static_cast<unsigned int>(imagey),
+                colour);
+        }
+    }
+
+    drawdirectionarrows(
+        image,
+        u,
+        v,
+        columns,
+        rows,
+        licrenderscale);
     return image.saveToFile(path.string());
 }
 
@@ -273,21 +510,7 @@ bool renderparticleimage(
         {
             const std::size_t index = fieldindex(x, y, columns);
             const float speed = std::sqrt(u[index] * u[index] + v[index] * v[index]);
-            sf::Color background = scalarcolour(
-                speed,
-                particlespeeddisplaymaximum,
-                scalarpalette::speed);
-            background = blendcolour(
-                background,
-                island(world, x, y) ? sf::Color(32, 27, 23) : sf::Color(4, 13, 25),
-                0.55f);
-
-            const bool coastline = island(world, x, y) != island(world, wrapcolumn(x + 1, columns), y) ||
-                island(world, x, y) != island(world, wrapcolumn(x - 1, columns), y) ||
-                (y > 0 && island(world, x, y) != island(world, x, y - 1)) ||
-                (y + 1 < rows && island(world, x, y) != island(world, x, y + 1));
-            if (coastline)
-                background = blendcolour(background, sf::Color(155, 155, 145), 0.45f);
+            const sf::Color background = windbackgroundcolour(world, x, y, speed);
 
             for (int py = 0; py < particlerenderscale; py++)
             {
@@ -362,62 +585,13 @@ bool renderparticleimage(
         }
     }
 
-    constexpr int arrowcolumns = 16;
-    constexpr int arrowrows = 8;
-    for (int arrowy = 0; arrowy < arrowrows; arrowy++)
-    {
-        const float y = (static_cast<float>(arrowy) + 0.5f) *
-            static_cast<float>(rows - 1) / static_cast<float>(arrowrows);
-
-        for (int arrowx = 0; arrowx < arrowcolumns; arrowx++)
-        {
-            const float x = (static_cast<float>(arrowx) + 0.5f) *
-                static_cast<float>(columns) / static_cast<float>(arrowcolumns);
-            const auto wind = samplevector(u, v, x, y, columns, rows);
-            const auto spacing = climateatmosphere::cellSpacingMetres(
-                latitudeforrow(static_cast<int>(std::lround(y)), rows),
-                columns,
-                rows,
-                tuning::climate::atmosphere::referencePlanetRadiusMetres);
-            float dx = wind.first / spacing.zonalMetres;
-            float dy = wind.second / spacing.meridionalMetres;
-            const float magnitude = std::sqrt(dx * dx + dy * dy);
-
-            if (magnitude <= 1.0e-9f)
-                continue;
-
-            dx /= magnitude;
-            dy /= magnitude;
-            const float length = 7.0f * particlerenderscale;
-            const float centrex = x * particlerenderscale;
-            const float centrey = y * particlerenderscale;
-            const float startx = centrex - dx * length * 0.5f;
-            const float starty = centrey - dy * length * 0.5f;
-            const float endx = centrex + dx * length * 0.5f;
-            const float endy = centrey + dy * length * 0.5f;
-            const sf::Color arrowcolour(255, 210, 55);
-            drawline(image, startx, starty, endx, endy, arrowcolour, 0.95f);
-            const float headlength = 2.5f * particlerenderscale;
-            const float perpendicularx = -dy;
-            const float perpendiculary = dx;
-            drawline(
-                image,
-                endx,
-                endy,
-                endx - dx * headlength + perpendicularx * headlength * 0.55f,
-                endy - dy * headlength + perpendiculary * headlength * 0.55f,
-                arrowcolour,
-                0.95f);
-            drawline(
-                image,
-                endx,
-                endy,
-                endx - dx * headlength - perpendicularx * headlength * 0.55f,
-                endy - dy * headlength - perpendiculary * headlength * 0.55f,
-                arrowcolour,
-                0.95f);
-        }
-    }
+    drawdirectionarrows(
+        image,
+        u,
+        v,
+        columns,
+        rows,
+        particlerenderscale);
 
     return image.saveToFile(path.string());
 }
@@ -723,6 +897,18 @@ bool exportcirculationdiagnostics(
             fields.upperu,
             fields.upperv,
             0x1185a91u + static_cast<std::uint32_t>(season) * 17u) && success;
+        success = renderlicimage(
+            outputdirectory / (std::string(seasonname) + "_surface_wind_lic.png"),
+            world,
+            fields.surfaceu,
+            fields.surfacev,
+            0x1185b11u + static_cast<std::uint32_t>(season) * 17u) && success;
+        success = renderlicimage(
+            outputdirectory / (std::string(seasonname) + "_upper_wind_lic.png"),
+            world,
+            fields.upperu,
+            fields.upperv,
+            0x1185b91u + static_cast<std::uint32_t>(season) * 17u) && success;
         success = renderscalarimage(
             outputdirectory / (std::string(seasonname) + "_surface_wind_speed.png"),
             fields.surfacespeed,

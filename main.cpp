@@ -759,6 +759,8 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         updatereport("Climate benchmark temperature image: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + "_temperature_c.png")).string());
         updatereport("Climate benchmark precipitation GeoTIFF: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + "_precipitation_mm_year.tif")).string());
         updatereport("Climate benchmark precipitation preview: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + "_precipitation_mm_year_preview.png")).string());
+        updatereport("Climate benchmark circulation previews: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + "_{season}_{map}.png")).string());
+        updatereport("Climate benchmark circulation guide: " + (appenv.climateBenchmarkImageDirectory / "circulation_map_guide.txt").string());
     }
 
     if (options.printClimateRelativeError)
