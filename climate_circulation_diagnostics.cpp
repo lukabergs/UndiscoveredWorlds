@@ -28,6 +28,7 @@ constexpr float pi = 3.14159265358979323846f;
 constexpr float secondsperday = 86400.0f;
 constexpr float particletracetimestepseconds = 10800.0f;
 constexpr float particlespeeddisplaymaximum = 25.0f;
+constexpr float vectorerrordisplaymaximum = 25.0f;
 constexpr float surfacedivergencedisplaymaximum = 1.0f;
 constexpr float moistureconvergencedisplaymaximum = 20.0f;
 constexpr int particlesteps = 36;
@@ -35,6 +36,9 @@ constexpr int particlerenderscale = 2;
 constexpr int licstepsperdirection = 12;
 constexpr float licstepcells = 0.65f;
 constexpr int licrenderscale = 1;
+constexpr int maxflowvisualizationcolumns = 1024;
+constexpr int maxflowvisualizationcells = 1024 * 513;
+constexpr int referencevisualizationversion = 1;
 
 constexpr std::array<const char*, CLIMATESEASONCOUNT> seasonnames = {
     "january", "april", "july", "october"
@@ -79,6 +83,7 @@ capturedwindcache windcache;
 enum class scalarpalette
 {
     speed,
+    vectorerror,
     divergence,
     convergence
 };
@@ -142,6 +147,24 @@ sf::Color scalarcolour(float value, float displaymaximum, scalarpalette palette)
 
         return blendcolour(sf::Color(18, 125, 175), sf::Color(250, 235, 125),
             (phase - 0.55f) / 0.45f);
+    }
+
+    if (palette == scalarpalette::vectorerror)
+    {
+        const float phase = std::clamp(value /
+            std::max(0.001f, displaymaximum), 0.0f, 1.0f);
+        if (phase < 0.5f)
+        {
+            return blendcolour(
+                sf::Color(12, 14, 20),
+                sf::Color(130, 55, 205),
+                phase * 2.0f);
+        }
+
+        return blendcolour(
+            sf::Color(130, 55, 205),
+            sf::Color(255, 225, 70),
+            (phase - 0.5f) * 2.0f);
     }
 
     const float signedphase = std::clamp(
@@ -228,9 +251,18 @@ std::pair<float, float> samplevector(
     return { sample(u), sample(v) };
 }
 
-sf::Color windbackgroundcolour(planet& world, int x, int y, float speed)
+bool coastline(planet& world, int x, int y)
 {
     const int columns = world.width() + 1;
+    return
+        island(world, x, y) != island(world, wrapcolumn(x + 1, columns), y) ||
+        island(world, x, y) != island(world, wrapcolumn(x - 1, columns), y) ||
+        (y > 0 && island(world, x, y) != island(world, x, y - 1)) ||
+        (y < world.height() && island(world, x, y) != island(world, x, y + 1));
+}
+
+sf::Color windbackgroundcolour(planet& world, int x, int y, float speed)
+{
     sf::Color background = scalarcolour(
         speed,
         particlespeeddisplaymaximum,
@@ -240,12 +272,7 @@ sf::Color windbackgroundcolour(planet& world, int x, int y, float speed)
         island(world, x, y) ? sf::Color(32, 27, 23) : sf::Color(4, 13, 25),
         0.55f);
 
-    const bool coastline =
-        island(world, x, y) != island(world, wrapcolumn(x + 1, columns), y) ||
-        island(world, x, y) != island(world, wrapcolumn(x - 1, columns), y) ||
-        (y > 0 && island(world, x, y) != island(world, x, y - 1)) ||
-        (y < world.height() && island(world, x, y) != island(world, x, y + 1));
-    return coastline
+    return coastline(world, x, y)
         ? blendcolour(background, sf::Color(155, 155, 145), 0.45f)
         : background;
 }
@@ -338,6 +365,42 @@ bool renderscalarimage(
         }
     }
 
+    return image.saveToFile(path.string());
+}
+
+bool rendervectorerrorimage(
+    const std::filesystem::path& path,
+    planet& world,
+    const std::vector<float>& erroru,
+    const std::vector<float>& errorv,
+    const std::vector<float>& errormagnitude)
+{
+    const int columns = world.width() + 1;
+    const int rows = world.height() + 1;
+    sf::Image image;
+    image.create(
+        static_cast<unsigned int>(columns),
+        static_cast<unsigned int>(rows),
+        sf::Color::Black);
+
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            sf::Color colour = scalarcolour(
+                errormagnitude[fieldindex(x, y, columns)],
+                vectorerrordisplaymaximum,
+                scalarpalette::vectorerror);
+            if (coastline(world, x, y))
+                colour = blendcolour(colour, sf::Color(210, 210, 205), 0.55f);
+            image.setPixel(
+                static_cast<unsigned int>(x),
+                static_cast<unsigned int>(y),
+                colour);
+        }
+    }
+
+    drawdirectionarrows(image, erroru, errorv, columns, rows, 1);
     return image.saveToFile(path.string());
 }
 
@@ -885,30 +948,33 @@ bool exportcirculationdiagnostics(
             fields.moisturefluxconvergence, columns, rows,
             moistureconvergencedisplaymaximum) && success;
 
-        success = renderparticleimage(
-            outputdirectory / (std::string(seasonname) + "_surface_wind_particles.png"),
-            world,
-            fields.surfaceu,
-            fields.surfacev,
-            0x1185a11u + static_cast<std::uint32_t>(season) * 17u) && success;
-        success = renderparticleimage(
-            outputdirectory / (std::string(seasonname) + "_upper_wind_particles.png"),
-            world,
-            fields.upperu,
-            fields.upperv,
-            0x1185a91u + static_cast<std::uint32_t>(season) * 17u) && success;
-        success = renderlicimage(
-            outputdirectory / (std::string(seasonname) + "_surface_wind_lic.png"),
-            world,
-            fields.surfaceu,
-            fields.surfacev,
-            0x1185b11u + static_cast<std::uint32_t>(season) * 17u) && success;
-        success = renderlicimage(
-            outputdirectory / (std::string(seasonname) + "_upper_wind_lic.png"),
-            world,
-            fields.upperu,
-            fields.upperv,
-            0x1185b91u + static_cast<std::uint32_t>(season) * 17u) && success;
+        if (circulationflowvisualizationenabled(world))
+        {
+            success = renderparticleimage(
+                outputdirectory / (std::string(seasonname) + "_surface_wind_particles.png"),
+                world,
+                fields.surfaceu,
+                fields.surfacev,
+                0x1185a11u + static_cast<std::uint32_t>(season) * 17u) && success;
+            success = renderparticleimage(
+                outputdirectory / (std::string(seasonname) + "_upper_wind_particles.png"),
+                world,
+                fields.upperu,
+                fields.upperv,
+                0x1185a91u + static_cast<std::uint32_t>(season) * 17u) && success;
+            success = renderlicimage(
+                outputdirectory / (std::string(seasonname) + "_surface_wind_lic.png"),
+                world,
+                fields.surfaceu,
+                fields.surfacev,
+                0x1185b11u + static_cast<std::uint32_t>(season) * 17u) && success;
+            success = renderlicimage(
+                outputdirectory / (std::string(seasonname) + "_upper_wind_lic.png"),
+                world,
+                fields.upperu,
+                fields.upperv,
+                0x1185b91u + static_cast<std::uint32_t>(season) * 17u) && success;
+        }
         success = renderscalarimage(
             outputdirectory / (std::string(seasonname) + "_surface_wind_speed.png"),
             fields.surfacespeed,
@@ -933,5 +999,216 @@ bool exportcirculationdiagnostics(
     }
 
     return success;
+}
+
+bool exportcirculationreferencecomparisons(
+    const std::filesystem::path& diagnosticoutputdirectory,
+    const std::filesystem::path& referencecacheoutputdirectory,
+    planet& world,
+    const circulationreferencewindfields& referencefields)
+{
+    if (!circulationflowvisualizationenabled(world))
+        return true;
+
+    const int columns = world.width() + 1;
+    const int rows = world.height() + 1;
+    const std::size_t cellcount = static_cast<std::size_t>(columns) * rows;
+    if (referencefields.columns != columns || referencefields.rows != rows)
+        return false;
+
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        if (referencefields.surfaceu[season].size() != cellcount ||
+            referencefields.surfacev[season].size() != cellcount ||
+            referencefields.upperu[season].size() != cellcount ||
+            referencefields.upperv[season].size() != cellcount)
+        {
+            return false;
+        }
+    }
+
+    std::error_code error;
+    std::filesystem::create_directories(diagnosticoutputdirectory, error);
+    if (error)
+        return false;
+    std::filesystem::create_directories(referencecacheoutputdirectory, error);
+    if (error)
+        return false;
+
+    const std::string referenceprefix =
+        "era5_v" + std::to_string(referencevisualizationversion) + "_" +
+        std::to_string(columns) + "x" + std::to_string(rows);
+    std::ofstream comparison(
+        diagnosticoutputdirectory / "wind_vector_comparison.csv");
+    if (!comparison.is_open())
+        return false;
+    comparison
+        << "season,layer,compared_cells,area_weighted_mean_vector_error_m_s,"
+        << "area_weighted_vector_rmse_m_s,area_weighted_speed_bias_m_s,"
+        << "area_weighted_mean_direction_error_degrees\n"
+        << std::fixed << std::setprecision(7);
+
+    bool success = true;
+    bool renderedreference = false;
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        const std::string seasonname = seasonnames[season];
+        const seasonfields simulated = buildseasonfields(world, season);
+        for (int layer = 0; layer < 2; layer++)
+        {
+            const bool upper = layer == 1;
+            const char* layername = upper ? "upper" : "surface";
+            const std::vector<float>& simulatedu = upper
+                ? simulated.upperu : simulated.surfaceu;
+            const std::vector<float>& simulatedv = upper
+                ? simulated.upperv : simulated.surfacev;
+            const std::vector<float>& referenceu = upper
+                ? referencefields.upperu[season] : referencefields.surfaceu[season];
+            const std::vector<float>& referencev = upper
+                ? referencefields.upperv[season] : referencefields.surfacev[season];
+            const std::filesystem::path referenceparticlepath =
+                referencecacheoutputdirectory /
+                (referenceprefix + "_" + seasonname + "_" + layername +
+                    "_wind_particles.png");
+            const std::filesystem::path referencelicpath =
+                referencecacheoutputdirectory /
+                (referenceprefix + "_" + seasonname + "_" + layername +
+                    "_wind_lic.png");
+            const std::uint32_t particlebase = upper ? 0x1185a91u : 0x1185a11u;
+            const std::uint32_t licbase = upper ? 0x1185b91u : 0x1185b11u;
+
+            if (!std::filesystem::exists(referenceparticlepath))
+            {
+                success = renderparticleimage(
+                    referenceparticlepath,
+                    world,
+                    referenceu,
+                    referencev,
+                    particlebase + static_cast<std::uint32_t>(season) * 17u) && success;
+                renderedreference = true;
+            }
+            if (!std::filesystem::exists(referencelicpath))
+            {
+                success = renderlicimage(
+                    referencelicpath,
+                    world,
+                    referenceu,
+                    referencev,
+                    licbase + static_cast<std::uint32_t>(season) * 17u) && success;
+                renderedreference = true;
+            }
+
+            std::vector<float> erroru(cellcount, 0.0f);
+            std::vector<float> errorv(cellcount, 0.0f);
+            std::vector<float> errormagnitude(cellcount, 0.0f);
+            double weighttotal = 0.0;
+            double directionweighttotal = 0.0;
+            double weightedabsoluteerror = 0.0;
+            double weightedsquarederror = 0.0;
+            double weightedspeedbias = 0.0;
+            double weighteddirectionerror = 0.0;
+            std::size_t comparedcells = 0;
+            for (int y = 0; y < rows; y++)
+            {
+                const double areaweight = std::max(
+                    0.0,
+                    std::cos(static_cast<double>(latitudeforrow(y, rows)) * pi / 180.0));
+                for (int x = 0; x < columns; x++)
+                {
+                    const std::size_t index = fieldindex(x, y, columns);
+                    const float su = simulatedu[index];
+                    const float sv = simulatedv[index];
+                    const float ru = referenceu[index];
+                    const float rv = referencev[index];
+                    if (!std::isfinite(su) || !std::isfinite(sv) ||
+                        !std::isfinite(ru) || !std::isfinite(rv))
+                    {
+                        continue;
+                    }
+
+                    erroru[index] = su - ru;
+                    errorv[index] = sv - rv;
+                    const double magnitude = std::hypot(
+                        static_cast<double>(erroru[index]),
+                        static_cast<double>(errorv[index]));
+                    errormagnitude[index] = static_cast<float>(magnitude);
+                    const double simulatedspeed = std::hypot(
+                        static_cast<double>(su), static_cast<double>(sv));
+                    const double referencespeed = std::hypot(
+                        static_cast<double>(ru), static_cast<double>(rv));
+                    weighttotal += areaweight;
+                    weightedabsoluteerror += areaweight * magnitude;
+                    weightedsquarederror += areaweight * magnitude * magnitude;
+                    weightedspeedbias += areaweight * (simulatedspeed - referencespeed);
+                    comparedcells++;
+
+                    if (simulatedspeed > 1.0e-6 && referencespeed > 1.0e-6)
+                    {
+                        const double cosine = std::clamp(
+                            (static_cast<double>(su) * ru + static_cast<double>(sv) * rv) /
+                                (simulatedspeed * referencespeed),
+                            -1.0,
+                            1.0);
+                        weighteddirectionerror += areaweight * std::acos(cosine) *
+                            180.0 / static_cast<double>(pi);
+                        directionweighttotal += areaweight;
+                    }
+                }
+            }
+
+            const std::string errorbasename = seasonname + "_" + layername +
+                "_wind_vector_error";
+            success = rendervectorerrorimage(
+                diagnosticoutputdirectory / (errorbasename + ".png"),
+                world,
+                erroru,
+                errorv,
+                errormagnitude) && success;
+            success = climateio::writefloat32geotiff(
+                (diagnosticoutputdirectory / (errorbasename + "_m_s.tif")).string().c_str(),
+                static_cast<std::uint32_t>(columns),
+                static_cast<std::uint32_t>(rows),
+                errormagnitude.data()) && success;
+
+            comparison
+                << seasonname << ',' << layername << ',' << comparedcells << ','
+                << (weighttotal > 0.0 ? weightedabsoluteerror / weighttotal : 0.0) << ','
+                << (weighttotal > 0.0
+                    ? std::sqrt(weightedsquarederror / weighttotal) : 0.0) << ','
+                << (weighttotal > 0.0 ? weightedspeedbias / weighttotal : 0.0) << ','
+                << (directionweighttotal > 0.0
+                    ? weighteddirectionerror / directionweighttotal : 0.0) << '\n';
+        }
+    }
+
+    std::ofstream cachestatus(
+        diagnosticoutputdirectory / "wind_reference_visualization_cache.txt");
+    if (!cachestatus.is_open())
+        return false;
+    cachestatus << "reference_prefix=" << referenceprefix << '\n';
+    cachestatus << "renderer_version=" << referencevisualizationversion << '\n';
+    cachestatus << "reference_images_rendered=" << (renderedreference ? 1 : 0) << '\n';
+    cachestatus << "reference_images_reused=" << (renderedreference ? 0 : 1) << '\n';
+    cachestatus << "vector_error=simulated_minus_era5\n";
+    cachestatus << "vector_error_display_range_m_s=0_to_" << vectorerrordisplaymaximum << '\n';
+    return success;
+}
+
+bool circulationflowvisualizationenabled(const planet& world)
+{
+    const int columns = world.width() + 1;
+    const int rows = world.height() + 1;
+    return columns <= maxflowvisualizationcolumns &&
+        static_cast<long long>(columns) * rows <= maxflowvisualizationcells;
+}
+
+int circulationflowvisualizationmaxcolumns()
+{
+    return maxflowvisualizationcolumns;
+}
+
+int circulationflowvisualizationmaxcells()
+{
+    return maxflowvisualizationcells;
 }
 }
