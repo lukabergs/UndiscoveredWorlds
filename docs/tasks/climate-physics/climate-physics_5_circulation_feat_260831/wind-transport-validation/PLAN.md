@@ -2,6 +2,15 @@
 
 Validate and improve the circulation and moisture transport controlling regional rainfall while preserving run 118's determinism and conservation.
 
+# Current checkpoint
+
+- Run 123 shows that the existing explicit column-mass pressure update is unstable at its configured timestep; the production response is restored to zero.
+- Run 124 confirms that longer surface drag times restore curved circulation but over-accelerate equatorial flow in a linear steady balance.
+- Runs 125 and 126 retain bulk quadratic drag only at the surface; the upper layer keeps its linear Rayleigh solver.
+- Use a 300 m surface momentum layer and dimensionless drag coefficients of 0.0013 over ocean, 0.0030 over land, and 0.0060 over high relief. The ocean value and approximately 12 h effective damping at 5 m/s agree with the ERA5 pressure-work fit; land and relief remain less certain.
+- Run 125 raises the surface rotation/divergence RMS ratio from approximately 0.47 to 0.76 versus ERA5's 1.44, but broad stationary pressure cells remain too weak.
+- Treat rejected candidates as checkpoint-specific evidence, not proof that their physical mechanisms are intrinsically harmful.
+
 # Final state
 
 - Run 118 remains reproducible at commit `b402b8a5f1270545f0278926cbff7a188707fd62`.
@@ -14,8 +23,12 @@ Validate and improve the circulation and moisture transport controlling regional
 - The CFL-controlled transport candidate was tested but not activated: it reduced column-water correlation from 0.733 to 0.461 and precipitation correlation from 0.392 to 0.313.
 - MPDATA itself was not implemented. Production moisture transport remains the conservative adjacent-row scheme retained for run 118; replacing it needs a separate numerical-transport phase.
 - The upper-height mechanical forcing candidate was rejected because it did not improve upper-level wind agreement.
+- That result rejects only the tested extension at this checkpoint. It does not establish that mechanical upper forcing is intrinsically harmful; revisit it after correcting upper-layer length scale and amplitude.
 - Relative to the diagnostic run 118 baseline, run 119 changes area-weighted correlation as follows: surface eastward wind 0.471 to 0.487, surface northward wind 0.285 to 0.287, pressure 0.493 to 0.495, column water 0.733 to 0.732, ascent 0.072 to 0.073, and precipitation 0.392 to 0.399.
 - Maximum seasonal area-weighted water-budget residual is `2.51442e-9`; wettest 10% of land receives 41.4% of land rainfall.
+- Run 123's full explicit pressure feedback is not retained: stationary-pressure RMS grows to 8.2–9.6 hPa versus ERA5's 3.1–4.7 hPa, stationary correlation falls to 0.02–0.23, and local surface divergence approaches 900 day-1. The continuity mechanism remains a candidate for implicit or stability-controlled integration.
+- Run 125 improves surface `u` correlation from 0.487 to 0.519, surface `v` from 0.287 to 0.293, column water from 0.732 to 0.775, and ERA5 land-precipitation correlation from 0.396 to 0.434. Seasonal mean surface vector error increases from 3.836 to 5.759 m/s and northern 50–70 degree precipitation remains excessive.
+- Surface pressure and upper height are separate fields and solvers but share the column-divergence coupling. Run 125 changes upper correlations only from `0.155/-0.072` to `0.157/-0.072`; exact isolation would require a diagnostic coupling switch.
 
 # Verification
 
@@ -26,10 +39,13 @@ Validate and improve the circulation and moisture transport controlling regional
 - The 28 circulation PNGs in `extra/img/earth/benchmark` match their run-120 diagnostic sources by SHA-256; run 120 contains 40 raw GeoTIFFs and the CSV manifest.
 - Runs 121 and 122 produced byte-identical sets of 36 circulation PNGs. All 16 cached ERA5 PNG hashes were unchanged during run 122; its cache status reports reuse.
 - Cached run 122 completed in 26.878 seconds at 512x257. The LIC contribution remains approximately 5.3 seconds relative to the pre-LIC diagnostic stage.
-- Recorded benchmarks: `extra/validation/runs/119` through `extra/validation/runs/122`.
+- Runs 125 and 126 match in 103 of 105 recorded artifacts; the only differences are run metadata. All 38 published benchmark PNGs are byte-identical.
+- Maximum run-125 seasonal area-weighted water-budget residual is `2.75943e-9`; wettest 10% of land receives 50.2% of land rainfall.
+- Recorded benchmarks: `extra/validation/runs/119` through `extra/validation/runs/126`.
 
 # Remaining uncertainty
 
 - Generalization beyond the Earth fixture remains unmeasured.
-- Upper-level wind correlations remain poor (`u=0.155`, `v=-0.072`) and need a separate circulation-model phase.
+- Upper-level wind correlations remain poor (`u=0.157`, `v=-0.072`) and need layer-specific length-scale and amplitude work.
+- The next non-heuristic surface step is a steady linear shallow-water/stationary-wave response to non-zonal heating and orography; drag tuning alone cannot create the missing pressure-cell amplitude.
 - Whether a true positive-definite MPDATA implementation improves spatial rainfall without harming conservation remains untested.
