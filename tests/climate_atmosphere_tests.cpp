@@ -1,5 +1,6 @@
 #include "climate_atmosphere.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -52,6 +53,12 @@ int main()
         warmSurfacePressure < 0.0f && coldSurfacePressure > 0.0f &&
             std::abs(warmSurfacePressure + coldSurfacePressure) < 0.0001f,
         "warm columns must form thermal lows and cold columns thermal highs");
+
+    const float warmModePressure = climateatmosphere::thermalModePressureAnomalyHpa(
+        10.0f, 1.225f, 100000.0f, 50000.0f);
+    expect(
+        std::abs(warmModePressure + 24.37f) < 0.05f,
+        "the thermal-mode pressure must equal the hypsometric geopotential anomaly");
 
     const float equatorialPressure =
         climateatmosphere::axisymmetricOverturningPressureAnomalyHpa(0.0f, 0.0f, 25.0f, 10.0f);
@@ -212,6 +219,134 @@ int main()
         quadraticNorthern.eastMetresPerSecond > 0.0f &&
             quadraticSouthern.eastMetresPerSecond < 0.0f,
         "quadratic surface drag must preserve the Coriolis reversal across the equator");
+
+    constexpr int waveColumns = 64;
+    constexpr int waveRows = 33;
+    constexpr int waveCentreX = 16;
+    constexpr int waveCentreY = waveRows / 2;
+    const auto waveIndex = [=](int x, int y)
+    {
+        return static_cast<size_t>(y) * waveColumns + x;
+    };
+    std::vector<float> waveForcing(waveColumns * waveRows, 0.0f);
+    std::vector<float> waveDragTime(waveForcing.size(), 43200.0f);
+    for (int y = 0; y < waveRows; y++)
+    {
+        for (int x = 0; x < waveColumns; x++)
+        {
+            int distanceX = x - waveCentreX;
+            if (distanceX > waveColumns / 2)
+                distanceX -= waveColumns;
+            if (distanceX < -waveColumns / 2)
+                distanceX += waveColumns;
+            const int distanceY = y - waveCentreY;
+            waveForcing[waveIndex(x, y)] = std::exp(
+                -static_cast<float>(distanceX * distanceX) / 25.0f -
+                static_cast<float>(distanceY * distanceY) / 9.0f);
+        }
+    }
+    const auto progradeWave = climateatmosphere::solveSteadyStationaryWavePressure(
+        waveColumns,
+        waveRows,
+        waveForcing,
+        waveDragTime,
+        48.0f,
+        2.2f * 86400.0f,
+        1.225f,
+        6371000.0f,
+        earthRotation,
+        1.0f,
+        true,
+        200,
+        1.0e-4f);
+    const auto retrogradeWave = climateatmosphere::solveSteadyStationaryWavePressure(
+        waveColumns,
+        waveRows,
+        waveForcing,
+        waveDragTime,
+        48.0f,
+        2.2f * 86400.0f,
+        1.225f,
+        6371000.0f,
+        earthRotation,
+        -1.0f,
+        true,
+        200,
+        1.0e-4f);
+    const auto fullPressureWave = climateatmosphere::solveSteadyStationaryWavePressure(
+        waveColumns,
+        waveRows,
+        waveForcing,
+        waveDragTime,
+        48.0f,
+        2.2f * 86400.0f,
+        1.225f,
+        6371000.0f,
+        earthRotation,
+        1.0f,
+        false,
+        300,
+        1.0e-4f);
+    double waveMagnitude = 0.0;
+    double waveAsymmetry = 0.0;
+    double reversedWaveDifference = 0.0;
+    double maximumRowMean = 0.0;
+    double fullPressureAreaTotal = 0.0;
+    double fullPressureAreaWeight = 0.0;
+    double fullPressureRowMeanMagnitude = 0.0;
+    for (int y = 0; y < waveRows; y++)
+    {
+        double rowMean = 0.0;
+        double fullPressureRowMean = 0.0;
+        for (int x = 0; x < waveColumns; x++)
+        {
+            const int mirroredX = (2 * waveCentreX - x + waveColumns) % waveColumns;
+            const float value = progradeWave.pressureAnomalyHpa[waveIndex(x, y)];
+            waveMagnitude += std::abs(value);
+            waveAsymmetry += std::abs(
+                value - progradeWave.pressureAnomalyHpa[waveIndex(mirroredX, y)]);
+            reversedWaveDifference += std::abs(
+                value - retrogradeWave.pressureAnomalyHpa[waveIndex(mirroredX, y)]);
+            rowMean += value;
+            fullPressureRowMean +=
+                fullPressureWave.pressureAnomalyHpa[waveIndex(x, y)];
+        }
+        maximumRowMean = std::max(
+            maximumRowMean,
+            std::abs(rowMean / static_cast<double>(waveColumns)));
+        fullPressureRowMean /= static_cast<double>(waveColumns);
+        fullPressureRowMeanMagnitude += std::abs(fullPressureRowMean);
+        const double latitudeRadians =
+            (90.0 - 180.0 * y / static_cast<double>(waveRows - 1)) *
+            3.14159265358979323846 / 180.0;
+        const double areaWeight = std::max(0.0, std::cos(latitudeRadians));
+        fullPressureAreaTotal += fullPressureRowMean * areaWeight;
+        fullPressureAreaWeight += areaWeight;
+    }
+    if (!progradeWave.converged || !retrogradeWave.converged)
+    {
+        std::cerr
+            << "stationary-wave diagnostics prograde_iterations=" << progradeWave.iterations
+            << " prograde_residual=" << progradeWave.relativeResidual
+            << " retrograde_iterations=" << retrogradeWave.iterations
+            << " retrograde_residual=" << retrogradeWave.relativeResidual << '\n';
+    }
+    expect(
+        progradeWave.converged && retrogradeWave.converged &&
+            progradeWave.relativeResidual < 1.0e-4f &&
+            retrogradeWave.relativeResidual < 1.0e-4f,
+        "stationary-wave pressure solves must converge to their requested residual");
+    expect(
+        waveMagnitude > 0.0 && waveAsymmetry / waveMagnitude > 0.01 &&
+            reversedWaveDifference / waveMagnitude < 0.001,
+        "rotation must create a longitudinally asymmetric response that mirrors when rotation reverses");
+    expect(
+        maximumRowMean < 1.0e-5,
+        "the stationary-wave response must preserve each row's zonal mean");
+    expect(
+        fullPressureWave.converged && fullPressureRowMeanMagnitude > 0.01 &&
+            std::abs(fullPressureAreaTotal / fullPressureAreaWeight) < 1.0e-5,
+        "the full pressure solve must retain zonal structure while conserving global mean pressure");
 
     return failures == 0 ? 0 : 1;
 }
