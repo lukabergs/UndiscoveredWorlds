@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <filesystem>
 #include <vector>
 
@@ -7,6 +8,16 @@ class planet;
 
 namespace climatevalidation
 {
+struct circulationreferencewindfields
+{
+    int columns = 0;
+    int rows = 0;
+    std::array<std::vector<float>, 4> surfaceu;
+    std::array<std::vector<float>, 4> surfacev;
+    std::array<std::vector<float>, 4> upperu;
+    std::array<std::vector<float>, 4> upperv;
+};
+
 void capturecirculationwindfields(
     planet& world,
     int season,
@@ -25,4 +36,12 @@ bool capturedcirculationwind(
 bool exportcirculationdiagnostics(
     const std::filesystem::path& outputdirectory,
     planet& world);
+bool circulationflowvisualizationenabled(const planet& world);
+int circulationflowvisualizationmaxcolumns();
+int circulationflowvisualizationmaxcells();
+bool exportcirculationreferencecomparisons(
+    const std::filesystem::path& diagnosticoutputdirectory,
+    const std::filesystem::path& referencecacheoutputdirectory,
+    planet& world,
+    const circulationreferencewindfields& referencefields);
 }

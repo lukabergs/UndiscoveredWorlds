@@ -2383,12 +2383,22 @@ bool appendclimatebenchmarkrunlog(
 
     const size_t runskey = content.find("\"runs\"");
     const size_t arraybegin = runskey == string::npos ? string::npos : content.find('[', runskey);
-    const size_t arrayend = arraybegin == string::npos ? string::npos : content.rfind(']');
+    size_t arrayend = arraybegin == string::npos ? string::npos : content.rfind(']');
 
     if (arraybegin == string::npos || arrayend == string::npos || arrayend < arraybegin)
         return false;
 
     const bool hasentries = content.find_first_not_of(" \t\r\n", arraybegin + 1) < arrayend;
+    if (hasentries)
+    {
+        const size_t lastentrycharacter = content.find_last_not_of(" \t\r\n", arrayend - 1);
+        if (lastentrycharacter != string::npos && lastentrycharacter >= arraybegin)
+        {
+            const size_t insertionposition = lastentrycharacter + 1;
+            content.erase(insertionposition, arrayend - insertionposition);
+            arrayend = insertionposition;
+        }
+    }
     ostringstream entry;
 
     if (hasentries)
@@ -2683,6 +2693,67 @@ bool updateclimatebenchmarkworkbook(
     return succeeded;
 }
 
+bool loadcirculationreferencewindfields(
+    planet& world,
+    climatevalidation::circulationreferencewindfields& fields,
+    string* failuremessage)
+{
+    constexpr array<int, CLIMATESEASONCOUNT> referencemonths = { 0, 3, 6, 9 };
+    fields = {};
+    fields.columns = world.width() + 1;
+    fields.rows = world.height() + 1;
+    const size_t cellcount = static_cast<size_t>(fields.columns) * fields.rows;
+    const filesystem::path referencedirectory =
+        getappenvironment().referenceClimateDirectory;
+
+    auto loadcomponent = [&](const char* filename,
+                             const char* variable,
+                             array<vector<float>, CLIMATESEASONCOUNT>& destination,
+                             float scale)
+    {
+        climatereference::MonthlyGrid reference;
+        string error;
+        if (!climatereference::loadMonthlyGrid(
+                referencedirectory / filename,
+                variable,
+                reference,
+                &error))
+        {
+            if (failuremessage != nullptr)
+                *failuremessage = error;
+            return false;
+        }
+
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        {
+            destination[season].resize(cellcount);
+            for (int y = 0; y < fields.rows; y++)
+            {
+                for (int x = 0; x < fields.columns; x++)
+                {
+                    const float value = samplemonthlyreference(
+                        reference,
+                        referencemonths[season],
+                        x,
+                        y,
+                        fields.columns,
+                        fields.rows);
+                    destination[season][static_cast<size_t>(y) * fields.columns + x] =
+                        std::isfinite(value) ? value * scale : 0.0f;
+                }
+            }
+        }
+
+        return true;
+    };
+
+    return
+        loadcomponent("era5_u10m_monthly.uwclim", "u10m", fields.surfaceu, 1.0f) &&
+        loadcomponent("era5_v10m_monthly.uwclim", "v10m", fields.surfacev, -1.0f) &&
+        loadcomponent("era5_u500_monthly.uwclim", "u500", fields.upperu, 1.0f) &&
+        loadcomponent("era5_v500_monthly.uwclim", "v500", fields.upperv, -1.0f);
+}
+
 bool exportclimatebenchmarkimages(planet& world, int runid)
 {
     const AppEnvironmentConfig& appenv = getappenvironment();
@@ -2865,20 +2936,58 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
     constexpr array<const char*, CLIMATESEASONCOUNT> circulationseasons = {
         "january", "april", "july", "october"
     };
-    constexpr array<const char*, 7> circulationpreviews = {
-        "surface_wind_particles.png",
-        "upper_wind_particles.png",
-        "surface_wind_lic.png",
-        "upper_wind_lic.png",
+    const filesystem::path circulationdirectory =
+        climatevalidationoutputdirectory(world.seed()) / "circulation";
+    const bool flowvisualizationenabled =
+        climatevalidation::circulationflowvisualizationenabled(world);
+    bool referencecomparisonavailable = false;
+    if (flowvisualizationenabled)
+    {
+        climatevalidation::circulationreferencewindfields referencefields;
+        string referencefailure;
+        if (!loadcirculationreferencewindfields(world, referencefields, &referencefailure))
+        {
+            cerr << "ERA5 wind visualization skipped: " << referencefailure << '\n';
+        }
+        else if (!climatevalidation::exportcirculationreferencecomparisons(
+                     circulationdirectory,
+                     outputdir,
+                     world,
+                     referencefields))
+        {
+            cerr << "Failed to export ERA5 circulation comparisons.\n";
+            return false;
+        }
+        else
+        {
+            referencecomparisonavailable = true;
+        }
+    }
+
+    vector<string> circulationpreviews = {
         "surface_wind_speed.png",
         "surface_divergence.png",
         "moisture_flux_convergence.png"
     };
-    const filesystem::path circulationdirectory =
-        climatevalidationoutputdirectory(world.seed()) / "circulation";
+    if (flowvisualizationenabled)
+    {
+        circulationpreviews.insert(circulationpreviews.end(), {
+            "surface_wind_particles.png",
+            "upper_wind_particles.png",
+            "surface_wind_lic.png",
+            "upper_wind_lic.png"
+        });
+    }
+    if (referencecomparisonavailable)
+    {
+        circulationpreviews.insert(circulationpreviews.end(), {
+            "surface_wind_vector_error.png",
+            "upper_wind_vector_error.png"
+        });
+    }
     for (const char* season : circulationseasons)
     {
-        for (const char* preview : circulationpreviews)
+        for (const string& preview : circulationpreviews)
         {
             const string filename = string(season) + "_" + preview;
             const filesystem::path source = circulationdirectory / filename;
@@ -2930,7 +3039,16 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
     scalefile << "precipitation_reference=extra/reference/imerg_precipitation_mm_year.tif\n";
     scalefile << "circulation_preview={run_id}_{season}_{map}.png\n";
     scalefile << "circulation_seasons=january,april,july,october\n";
-    scalefile << "circulation_maps=surface_wind_particles,upper_wind_particles,surface_wind_lic,upper_wind_lic,surface_wind_speed,surface_divergence,moisture_flux_convergence\n";
+    scalefile << "circulation_maps=surface_wind_particles,upper_wind_particles,surface_wind_lic,upper_wind_lic,surface_wind_vector_error,upper_wind_vector_error,surface_wind_speed,surface_divergence,moisture_flux_convergence\n";
+    scalefile << "flow_visualization_enabled=" << (flowvisualizationenabled ? 1 : 0) << '\n';
+    scalefile << "flow_visualization_max_horizontal_cells="
+        << climatevalidation::circulationflowvisualizationmaxcolumns() << '\n';
+    scalefile << "flow_visualization_max_total_cells="
+        << climatevalidation::circulationflowvisualizationmaxcells() << '\n';
+    scalefile << "era5_reference_visualization=era5_v1_"
+        << width + 1 << 'x' << height + 1
+        << "_{season}_{surface|upper}_wind_{lic|particles}.png\n";
+    scalefile << "vector_error_range=0 to 25 m/s (values above the range are clamped)\n";
     scalefile << "circulation_guide=circulation_map_guide.txt\n";
 
     ofstream circulationguide(outputdir / "circulation_map_guide.txt");
@@ -2943,6 +3061,7 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
     circulationguide
         << "CIRCULATION MAP GUIDE\n\n"
         << "Filename: {run_id}_{season}_{map}.png\n"
+        << "ERA5 filename: era5_v1_{width}x{height}_{season}_{surface|upper}_wind_{lic|particles}.png\n"
         << "Seasons: January, April, July, and October representative snapshots.\n"
         << "Projection: global equirectangular; north is at the top and longitude is periodic.\n\n"
         << "surface_wind_lic\n"
@@ -2951,11 +3070,24 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
         << "  Yellow arrows resolve LIC's direction ambiguity. The background uses the wind-speed palette below.\n\n"
         << "upper_wind_lic\n"
         << "  The same LIC rendering for the model upper layer, referenced to the 500 hPa circulation field.\n\n"
+        << "ERA5 LIC maps\n"
+        << "  Cached reference maps use ERA5 10 m surface winds and 500 hPa upper winds, bilinearly resampled to\n"
+        << "  the simulation grid. They use the same LIC kernel, noise seeds, projection, arrows, and speed palette\n"
+        << "  as the simulated maps, so visual differences come from the vector fields rather than rendering.\n\n"
         << "surface_wind_particles and upper_wind_particles\n"
         << "  White deterministic particle trails show forward paths through the surface or upper wind field.\n"
         << "  Trail density is a seeded visualization choice, not wind magnitude. Yellow arrows show direction.\n"
         << "  Background speed: dark navy = 0 m/s, cyan = about 13.75 m/s, pale yellow = 25 m/s or faster.\n"
         << "  Land is brown-gray, ocean is navy, and coastlines are gray.\n\n"
+        << "ERA5 particle maps\n"
+        << "  These are possible because ERA5 supplies the same u/v inputs. They reuse the simulated maps' particle\n"
+        << "  seeds and integration settings, and are cached by renderer version and output dimensions.\n\n"
+        << "surface_wind_vector_error and upper_wind_vector_error\n"
+        << "  Magnitude of the full vector difference |simulated - ERA5| in m/s, not separate component error.\n"
+        << "  Near-black = 0 m/s, purple = 12.5 m/s, yellow = 25 m/s or more. Yellow arrows point in the\n"
+        << "  simulated-minus-ERA5 error-vector direction; subtract that vector to move the simulation toward ERA5.\n"
+        << "  Coastlines are pale gray. The unclamped magnitude GeoTIFF and seasonal/layer summary metrics are stored\n"
+        << "  with the run diagnostics.\n\n"
         << "surface_wind_speed\n"
         << "  Scalar surface wind magnitude in m/s. Dark navy = 0, cyan = about 13.75, pale yellow = 25 or more.\n\n"
         << "surface_divergence\n"
@@ -2968,7 +3100,12 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
         << "Raw fields\n"
         << "  GeoTIFFs for u/v components, speed, divergence, column water, and moisture-flux convergence are in\n"
         << "  extra/validation/runs/{run_id}/circulation. Their exact units, minima, maxima, and display limits are\n"
-        << "  listed in circulation_diagnostics.csv. PNG palettes are diagnostic, not categorical climate classes.\n";
+        << "  listed in circulation_diagnostics.csv. Vector-error metrics are in wind_vector_comparison.csv.\n"
+        << "  LIC and particle maps are generated at up to "
+        << climatevalidation::circulationflowvisualizationmaxcolumns()
+        << " horizontal and " << climatevalidation::circulationflowvisualizationmaxcells()
+        << " total cells; larger runs retain scalar and raw diagnostics but skip expensive flow rendering.\n"
+        << "  PNG palettes are diagnostic, not categorical climate classes.\n";
 
     return true;
 }
