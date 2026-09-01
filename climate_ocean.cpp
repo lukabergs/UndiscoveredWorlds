@@ -1846,18 +1846,6 @@ void createpressuremap(planet& world)
                     stationarytemperature[x][y] - stationaryzonaltemperature[y];
             }
         }
-        const vector<float> nonlocalstationarytemperature =
-            climateatmosphere::nonlocalThermalResponse(
-                width + 1,
-                height + 1,
-                localstationarytemperature,
-                hadleyhalfwidth,
-                hadleyhalfwidth * tuning::climate::circulation::
-                    stationaryThermalLongitudinalReachHadleyFraction,
-                hadleyhalfwidth * tuning::climate::circulation::
-                    stationaryThermalMeridionalReachHadleyFraction,
-                world.rotation() ? 1.0f : -1.0f);
-
         cout
             << "Overturning pressure season " << season
             << ": thermal_equator=" << thermalequator
@@ -1873,16 +1861,13 @@ void createpressuremap(planet& world)
                 {
                     const size_t cellindex = static_cast<size_t>(y) * (width + 1) + x;
                     const float stationarytemperatureanomaly =
-                        localstationarytemperature[cellindex] +
-                        (nonlocalstationarytemperature[cellindex] -
-                            localstationarytemperature[cellindex]) *
-                        tuning::climate::circulation::stationaryThermalNonlocalResponseFraction;
+                        localstationarytemperature[cellindex];
                     pressure[x][y] = zonalpressure[y] +
-                        climateatmosphere::thermalSurfacePressureAnomalyHpa(
+                        climateatmosphere::thermalModePressureAnomalyHpa(
                             stationarytemperatureanomaly,
-                            tuning::climate::circulation::surfacePressureReferenceHpa,
-                            tuning::climate::circulation::referenceTemperatureK,
-                            tuning::climate::circulation::stationaryThermalMassRedistributionEfficiency);
+                            tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                            tuning::climate::circulation::surfaceReferencePressurePa,
+                            tuning::climate::circulation::upperReferencePressurePa);
                     upperheight[x][y] = (surface[x][y] - globalmean) * thicknessresponse;
                 }
             }
@@ -2375,6 +2360,242 @@ void createvectorwindmap(planet& world)
                     pressure[x][y] += mechanicalforcing[x][y];
             }
         });
+
+        const int stationarywavecolumns = std::min(
+            width + 1,
+            tuning::climate::circulation::stationaryWaveLongitudeCells);
+        const int stationarywaverows = std::min(
+            height + 1,
+            stationarywavecolumns / 2 + 1);
+        if (stationarywavecolumns >= 3 && stationarywaverows >= 3)
+        {
+            vector<float> zonalpressuremean(height + 1, 0.0f);
+            for (int y = 0; y <= height; y++)
+            {
+                double rowsum = 0.0;
+                for (int x = 0; x <= width; x++)
+                    rowsum += static_cast<double>(pressure[x][y]);
+                zonalpressuremean[y] = static_cast<float>(
+                    rowsum / static_cast<double>(width + 1));
+            }
+
+            const auto samplefield = [&](const floatgrid& field, int targetx, int targety)
+            {
+                const float sourcex = (static_cast<float>(targetx) + 0.5f) *
+                    static_cast<float>(width + 1) /
+                    static_cast<float>(stationarywavecolumns) - 0.5f;
+                const int basex = static_cast<int>(std::floor(sourcex));
+                const float fractionx = sourcex - std::floor(sourcex);
+                const int x0 = wrapx(basex, width);
+                const int x1 = wrapx(basex + 1, width);
+                const float sourcey = static_cast<float>(targety * height) /
+                    static_cast<float>(stationarywaverows - 1);
+                const int y0 = std::clamp(
+                    static_cast<int>(std::floor(sourcey)),
+                    0,
+                    height);
+                const int y1 = std::min(height, y0 + 1);
+                const float fractiony = sourcey - std::floor(sourcey);
+                const float north = field[x0][y0] * (1.0f - fractionx) +
+                    field[x1][y0] * fractionx;
+                const float south = field[x0][y1] * (1.0f - fractionx) +
+                    field[x1][y1] * fractionx;
+                return north * (1.0f - fractiony) + south * fractiony;
+            };
+            const auto samplezonalmean = [&](int targety)
+            {
+                const float sourcey = static_cast<float>(targety * height) /
+                    static_cast<float>(stationarywaverows - 1);
+                const int y0 = std::clamp(
+                    static_cast<int>(std::floor(sourcey)),
+                    0,
+                    height);
+                const int y1 = std::min(height, y0 + 1);
+                const float fractiony = sourcey - std::floor(sourcey);
+                return zonalpressuremean[y0] * (1.0f - fractiony) +
+                    zonalpressuremean[y1] * fractiony;
+            };
+            const size_t stationarywavecellcount =
+                static_cast<size_t>(stationarywavecolumns) * stationarywaverows;
+            vector<float> stationaryforcing(stationarywavecellcount, 0.0f);
+            vector<float> stationarydragtime(stationarywavecellcount, 0.0f);
+            double forcingrms = 0.0;
+
+            for (int y = 0; y < stationarywaverows; y++)
+            {
+                const float rowmean = samplezonalmean(y);
+                for (int x = 0; x < stationarywavecolumns; x++)
+                {
+                    const size_t cellindex = static_cast<size_t>(y) *
+                        stationarywavecolumns + x;
+                    stationaryforcing[cellindex] = samplefield(pressure, x, y);
+                    if (tuning::climate::circulation::stationaryWavePreserveZonalMean)
+                        stationaryforcing[cellindex] -= rowmean;
+                    forcingrms += static_cast<double>(stationaryforcing[cellindex]) *
+                        stationaryforcing[cellindex];
+                    const float continental = std::clamp(
+                        samplefield(continentality, x, y),
+                        0.0f,
+                        1.0f);
+                    const float relief = std::clamp(
+                        samplefield(macroterrain, x, y) / 4500.0f,
+                        0.0f,
+                        1.0f);
+                    const float basedragcoefficient =
+                        tuning::climate::atmosphere::oceanMomentumDragCoefficient +
+                        continental *
+                            (tuning::climate::atmosphere::landMomentumDragCoefficient -
+                                tuning::climate::atmosphere::oceanMomentumDragCoefficient);
+                    const float dragcoefficient = basedragcoefficient + relief *
+                        (tuning::climate::atmosphere::highReliefMomentumDragCoefficient -
+                            basedragcoefficient);
+                    stationarydragtime[cellindex] =
+                        tuning::climate::atmosphere::surfaceBoundaryLayerMomentumDepthMetres /
+                        (dragcoefficient *
+                            tuning::climate::circulation::stationaryWaveLinearizationWindMps);
+                }
+            }
+
+            // Gill's equatorial scaling: c = sqrt(g H_e), beta = 2 Omega / a,
+            // and t_wave = 1 / sqrt(2 beta c). The damping time is
+            // t_wave / epsilon; rho c^2 converts the mode depth to pressure.
+            const float stationarywavegravity =
+                tuning::climate::atmosphere::gravityMetresPerSecondSquared *
+                std::max(0.05f, world.gravity());
+            const float stationarywavephasespeed = std::sqrt(
+                stationarywavegravity *
+                tuning::climate::circulation::stationaryWaveEquivalentDepthMetres);
+            const float stationarywavebeta =
+                2.0f * tuning::climate::atmosphere::rotationRatePerSecond /
+                tuning::climate::atmosphere::referencePlanetRadiusMetres;
+            const float stationarywaveadjustmentseconds = 1.0f / std::sqrt(
+                2.0f * stationarywavebeta * stationarywavephasespeed);
+            const float stationarywavedampingseconds =
+                stationarywaveadjustmentseconds /
+                tuning::climate::circulation::stationaryWaveNondimensionalDamping;
+            const float stationarywavepressuredepthhpa =
+                tuning::climate::atmosphere::surfaceAirDensityKgM3 *
+                stationarywavephasespeed * stationarywavephasespeed /
+                tuning::climate::atmosphere::pressurePascalsPerHectopascal;
+
+            const auto stationaryresponse =
+                climateatmosphere::solveSteadyStationaryWavePressure(
+                    stationarywavecolumns,
+                    stationarywaverows,
+                    stationaryforcing,
+                    stationarydragtime,
+                    stationarywavepressuredepthhpa,
+                    stationarywavedampingseconds,
+                    tuning::climate::atmosphere::surfaceAirDensityKgM3,
+                    tuning::climate::atmosphere::referencePlanetRadiusMetres,
+                    tuning::climate::atmosphere::rotationRatePerSecond,
+                    world.rotation() ? 1.0f : -1.0f,
+                    tuning::climate::circulation::stationaryWavePreserveZonalMean,
+                    tuning::climate::circulation::stationaryWaveMaximumIterations,
+                    tuning::climate::circulation::stationaryWaveRelativeTolerance);
+
+            double responserms = 0.0;
+            for (float value : stationaryresponse.pressureAnomalyHpa)
+                responserms += static_cast<double>(value) * value;
+            forcingrms = std::sqrt(forcingrms /
+                static_cast<double>(stationarywavecellcount));
+            responserms = std::sqrt(responserms /
+                static_cast<double>(stationarywavecellcount));
+            cout
+                << "Stationary wave season " << season
+                << ": grid=" << stationarywavecolumns << 'x' << stationarywaverows
+                << " iterations=" << stationaryresponse.iterations
+                << " relative_residual=" << stationaryresponse.relativeResidual
+                << " forcing_rms_hpa=" << forcingrms
+                << " response_rms_hpa=" << responserms
+                << " equivalent_depth_m="
+                << tuning::climate::circulation::stationaryWaveEquivalentDepthMetres
+                << " adjustment_hours=" << stationarywaveadjustmentseconds / 3600.0f
+                << " damping_days=" << stationarywavedampingseconds /
+                    tuning::climate::circulation::secondsPerDay
+                << " converged=" << (stationaryresponse.converged ? 1 : 0) << '\n';
+
+            if (stationaryresponse.converged)
+            {
+                const auto sampleresponse = [&](int targetx, int targety)
+                {
+                    const float sourcex = (static_cast<float>(targetx) + 0.5f) *
+                        static_cast<float>(stationarywavecolumns) /
+                        static_cast<float>(width + 1) - 0.5f;
+                    const int basex = static_cast<int>(std::floor(sourcex));
+                    const float fractionx = sourcex - std::floor(sourcex);
+                    const int x0 = ((basex % stationarywavecolumns) +
+                        stationarywavecolumns) % stationarywavecolumns;
+                    const int x1 = (x0 + 1) % stationarywavecolumns;
+                    const float sourcey = height > 0 ?
+                        static_cast<float>(targety * (stationarywaverows - 1)) /
+                            static_cast<float>(height) :
+                        0.0f;
+                    const int y0 = std::clamp(
+                        static_cast<int>(std::floor(sourcey)),
+                        0,
+                        stationarywaverows - 1);
+                    const int y1 = std::min(stationarywaverows - 1, y0 + 1);
+                    const float fractiony = sourcey - std::floor(sourcey);
+                    const auto responseat = [&](int sourcecolumn, int sourcerow)
+                    {
+                        return stationaryresponse.pressureAnomalyHpa[
+                            static_cast<size_t>(sourcerow) * stationarywavecolumns +
+                            sourcecolumn];
+                    };
+                    const float north = responseat(x0, y0) * (1.0f - fractionx) +
+                        responseat(x1, y0) * fractionx;
+                    const float south = responseat(x0, y1) * (1.0f - fractionx) +
+                        responseat(x1, y1) * fractionx;
+                    return north * (1.0f - fractiony) + south * fractiony;
+                };
+
+                if (tuning::climate::circulation::stationaryWavePreserveZonalMean)
+                {
+                    vector<float> rowresponse(width + 1, 0.0f);
+                    for (int y = 0; y <= height; y++)
+                    {
+                        double rowmean = 0.0;
+                        for (int x = 0; x <= width; x++)
+                        {
+                            rowresponse[x] = sampleresponse(x, y);
+                            rowmean += rowresponse[x];
+                        }
+                        rowmean /= static_cast<double>(width + 1);
+                        for (int x = 0; x <= width; x++)
+                        {
+                            pressure[x][y] = zonalpressuremean[y] + rowresponse[x] -
+                                static_cast<float>(rowmean);
+                        }
+                    }
+                }
+                else
+                {
+                    double weightedtotal = 0.0;
+                    double weighttotal = 0.0;
+                    for (int y = 0; y <= height; y++)
+                    {
+                        const double areaweight = std::max(
+                            0.0,
+                            std::cos(static_cast<double>(latitudeforrow(y, height)) *
+                                3.14159265358979323846 / 180.0));
+                        for (int x = 0; x <= width; x++)
+                        {
+                            pressure[x][y] = sampleresponse(x, y);
+                            weightedtotal += static_cast<double>(pressure[x][y]) * areaweight;
+                            weighttotal += areaweight;
+                        }
+                    }
+                    const float globalmean = weighttotal > 0.0 ?
+                        static_cast<float>(weightedtotal / weighttotal) : 0.0f;
+                    for (int y = 0; y <= height; y++)
+                    {
+                        for (int x = 0; x <= width; x++)
+                            pressure[x][y] -= globalmean;
+                    }
+                }
+            }
+        }
         basepressure = pressure;
         updatesurfaceflow();
         precisiondiagnostics.base = measurecirculationprecision(

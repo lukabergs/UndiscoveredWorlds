@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace climateatmosphere
 {
@@ -88,6 +89,24 @@ float thermalSurfacePressureAnomalyHpa(
 
     return -referencePressureHpa * temperatureAnomalyK /
         referenceTemperatureK * massRedistributionEfficiency;
+}
+
+float thermalModePressureAnomalyHpa(
+    float temperatureAnomalyK,
+    float airDensityKgM3,
+    float lowerPressurePa,
+    float upperPressurePa,
+    float dryAirGasConstant)
+{
+    if (airDensityKgM3 <= 0.0f || lowerPressurePa <= upperPressurePa ||
+        upperPressurePa <= 0.0f || dryAirGasConstant <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const float geopotentialAnomaly = dryAirGasConstant *
+        std::log(lowerPressurePa / upperPressurePa) * temperatureAnomalyK;
+    return -airDensityKgM3 * geopotentialAnomaly / 100.0f;
 }
 
 float axisymmetricOverturningPressureAnomalyHpa(
@@ -445,6 +464,401 @@ HorizontalWind steadyQuadraticDragCoriolisWind(
         (dragRate * forceNorthMetresPerSecondSquared - coriolis * forceEastMetresPerSecondSquared) /
         denominator;
     return { east, -north };
+}
+
+StationaryWaveResponse solveSteadyStationaryWavePressure(
+    int longitudeCells,
+    int latitudeCells,
+    const std::vector<float>& equilibriumPressureAnomalyHpa,
+    const std::vector<float>& dragTimeSeconds,
+    float equivalentPressureDepthHpa,
+    float pressureDampingTimeSeconds,
+    float airDensityKgM3,
+    float planetRadiusMetres,
+    float rotationRatePerSecond,
+    float rotationDirection,
+    bool preserveZonalMean,
+    int maximumIterations,
+    float relativeTolerance)
+{
+    // Solve p' + tau_p P_e div(u(p')) = p'_eq with the steady
+    // Rayleigh-Coriolis momentum balance used by the surface wind model.
+    StationaryWaveResponse response;
+    const size_t cellCount = static_cast<size_t>(std::max(0, longitudeCells)) *
+        static_cast<size_t>(std::max(0, latitudeCells));
+    response.pressureAnomalyHpa = equilibriumPressureAnomalyHpa;
+
+    if (longitudeCells < 3 || latitudeCells < 3 ||
+        equilibriumPressureAnomalyHpa.size() != cellCount ||
+        dragTimeSeconds.size() != cellCount || equivalentPressureDepthHpa <= 0.0f ||
+        pressureDampingTimeSeconds <= 0.0f || airDensityKgM3 <= 0.0f ||
+        planetRadiusMetres <= 0.0f || maximumIterations <= 0 ||
+        relativeTolerance <= 0.0f)
+    {
+        return response;
+    }
+
+    const auto index = [longitudeCells](int x, int y)
+    {
+        return static_cast<size_t>(y) * static_cast<size_t>(longitudeCells) +
+            static_cast<size_t>(x);
+    };
+    const auto wrappedColumn = [longitudeCells](int x)
+    {
+        const int remainder = x % longitudeCells;
+        return remainder < 0 ? remainder + longitudeCells : remainder;
+    };
+    const auto latitudeForRow = [latitudeCells](int y)
+    {
+        return 90.0 - 180.0 * static_cast<double>(y) /
+            static_cast<double>(latitudeCells - 1);
+    };
+    const auto projectPressure = [&](std::vector<double>& values)
+    {
+        if (!preserveZonalMean)
+        {
+            for (int y : { 0, latitudeCells - 1 })
+            {
+                double poleMean = 0.0;
+                for (int x = 0; x < longitudeCells; x++)
+                    poleMean += values[index(x, y)];
+                poleMean /= static_cast<double>(longitudeCells);
+                for (int x = 0; x < longitudeCells; x++)
+                    values[index(x, y)] = poleMean;
+            }
+
+            double weightedTotal = 0.0;
+            double weightTotal = 0.0;
+            for (int y = 0; y < latitudeCells; y++)
+            {
+                const double weight = std::max(
+                    0.0,
+                    std::cos(latitudeForRow(y) * static_cast<double>(pi) / 180.0));
+                for (int x = 0; x < longitudeCells; x++)
+                {
+                    weightedTotal += values[index(x, y)] * weight;
+                    weightTotal += weight;
+                }
+            }
+            const double globalMean = weightTotal > 0.0 ?
+                weightedTotal / weightTotal : 0.0;
+            for (double& value : values)
+                value -= globalMean;
+            return;
+        }
+
+        for (int y = 0; y < latitudeCells; y++)
+        {
+            if (y == 0 || y == latitudeCells - 1)
+            {
+                for (int x = 0; x < longitudeCells; x++)
+                    values[index(x, y)] = 0.0;
+                continue;
+            }
+
+            double rowMean = 0.0;
+            for (int x = 0; x < longitudeCells; x++)
+                rowMean += values[index(x, y)];
+            rowMean /= static_cast<double>(longitudeCells);
+            for (int x = 0; x < longitudeCells; x++)
+                values[index(x, y)] -= rowMean;
+        }
+    };
+    const auto dot = [](const std::vector<double>& first, const std::vector<double>& second)
+    {
+        double total = 0.0;
+        for (size_t cell = 0; cell < first.size(); cell++)
+            total += first[cell] * second[cell];
+        return total;
+    };
+
+    std::vector<double> eastWind(cellCount, 0.0);
+    std::vector<double> southWind(cellCount, 0.0);
+    std::vector<double> divergence(cellCount, 0.0);
+    const auto applyOperator = [&](const std::vector<double>& pressure, std::vector<double>& result)
+    {
+        std::fill(eastWind.begin(), eastWind.end(), 0.0);
+        std::fill(southWind.begin(), southWind.end(), 0.0);
+
+        for (int y = 1; y < latitudeCells - 1; y++)
+        {
+            const double latitude = latitudeForRow(y);
+            const double latitudeRadians = latitude * static_cast<double>(pi) / 180.0;
+            const double cosine = std::max(0.02, std::fabs(std::cos(latitudeRadians)));
+            const double zonalSpacing = 2.0 * static_cast<double>(pi) *
+                static_cast<double>(planetRadiusMetres) * cosine /
+                static_cast<double>(longitudeCells);
+            const double meridionalSpacing = static_cast<double>(pi) *
+                static_cast<double>(planetRadiusMetres) /
+                static_cast<double>(latitudeCells - 1);
+            const double coriolis = 2.0 * static_cast<double>(rotationRatePerSecond) *
+                static_cast<double>(rotationDirection) * std::sin(latitudeRadians);
+
+            for (int x = 0; x < longitudeCells; x++)
+            {
+                const size_t cell = index(x, y);
+                const double dragTime = static_cast<double>(dragTimeSeconds[cell]);
+                if (dragTime <= 0.0)
+                    continue;
+
+                const double pressureGradientEast =
+                    (pressure[index(wrappedColumn(x + 1), y)] -
+                        pressure[index(wrappedColumn(x - 1), y)]) * 100.0 /
+                    (2.0 * zonalSpacing);
+                const double pressureGradientNorth =
+                    (pressure[index(x, y - 1)] - pressure[index(x, y + 1)]) * 100.0 /
+                    (2.0 * meridionalSpacing);
+                const double forceEast = -pressureGradientEast /
+                    static_cast<double>(airDensityKgM3);
+                const double forceNorth = -pressureGradientNorth /
+                    static_cast<double>(airDensityKgM3);
+                const double dragRate = 1.0 / dragTime;
+                const double denominator = dragRate * dragRate + coriolis * coriolis;
+                const double east =
+                    (dragRate * forceEast + coriolis * forceNorth) / denominator;
+                const double north =
+                    (dragRate * forceNorth - coriolis * forceEast) / denominator;
+                eastWind[cell] = east;
+                southWind[cell] = -north;
+            }
+        }
+
+        std::fill(divergence.begin(), divergence.end(), 0.0);
+        for (int y = 1; y < latitudeCells - 1; y++)
+        {
+            const double latitude = latitudeForRow(y);
+            const double latitudeRadians = latitude * static_cast<double>(pi) / 180.0;
+            const double centreCosine = std::max(0.02, std::fabs(std::cos(latitudeRadians)));
+            const double northCosine = std::max(
+                0.0,
+                std::cos(latitudeForRow(y - 1) * static_cast<double>(pi) / 180.0));
+            const double southCosine = std::max(
+                0.0,
+                std::cos(latitudeForRow(y + 1) * static_cast<double>(pi) / 180.0));
+            const double zonalSpacing = 2.0 * static_cast<double>(pi) *
+                static_cast<double>(planetRadiusMetres) * centreCosine /
+                static_cast<double>(longitudeCells);
+            const double meridionalSpacing = static_cast<double>(pi) *
+                static_cast<double>(planetRadiusMetres) /
+                static_cast<double>(latitudeCells - 1);
+            double rowMean = 0.0;
+
+            for (int x = 0; x < longitudeCells; x++)
+            {
+                const double zonal =
+                    (eastWind[index(wrappedColumn(x + 1), y)] -
+                        eastWind[index(wrappedColumn(x - 1), y)]) /
+                    (2.0 * zonalSpacing);
+                const double meridional =
+                    (southWind[index(x, y + 1)] * southCosine -
+                        southWind[index(x, y - 1)] * northCosine) /
+                    (2.0 * meridionalSpacing * centreCosine);
+                divergence[index(x, y)] = zonal + meridional;
+                rowMean += zonal + meridional;
+            }
+
+            if (preserveZonalMean)
+            {
+                rowMean /= static_cast<double>(longitudeCells);
+                for (int x = 0; x < longitudeCells; x++)
+                    divergence[index(x, y)] -= rowMean;
+            }
+        }
+
+        result.resize(cellCount);
+        const double coupling = static_cast<double>(pressureDampingTimeSeconds) *
+            static_cast<double>(equivalentPressureDepthHpa);
+        for (size_t cell = 0; cell < cellCount; cell++)
+            result[cell] = pressure[cell] + coupling * divergence[cell];
+        projectPressure(result);
+    };
+
+    // A local dissipative-response estimate is sufficient as a Jacobi
+    // preconditioner; restarted GMRES handles the Coriolis asymmetry.
+    std::vector<double> inverseDiagonal(cellCount, 1.0);
+    const double coupling = static_cast<double>(pressureDampingTimeSeconds) *
+        static_cast<double>(equivalentPressureDepthHpa);
+    for (int y = 1; y < latitudeCells - 1; y++)
+    {
+        const double latitude = latitudeForRow(y);
+        const double latitudeRadians = latitude * static_cast<double>(pi) / 180.0;
+        const double cosine = std::max(0.02, std::fabs(std::cos(latitudeRadians)));
+        const double zonalSpacing = 2.0 * static_cast<double>(pi) *
+            static_cast<double>(planetRadiusMetres) * cosine /
+            static_cast<double>(longitudeCells);
+        const double meridionalSpacing = static_cast<double>(pi) *
+            static_cast<double>(planetRadiusMetres) /
+            static_cast<double>(latitudeCells - 1);
+        const double coriolis = 2.0 * static_cast<double>(rotationRatePerSecond) *
+            static_cast<double>(rotationDirection) * std::sin(latitudeRadians);
+        for (int x = 0; x < longitudeCells; x++)
+        {
+            const size_t cell = index(x, y);
+            const double dragTime = static_cast<double>(dragTimeSeconds[cell]);
+            if (dragTime <= 0.0)
+                continue;
+            const double dragRate = 1.0 / dragTime;
+            const double directPressureResponse =
+                100.0 / static_cast<double>(airDensityKgM3) * dragRate /
+                (dragRate * dragRate + coriolis * coriolis);
+            const double approximateDiagonal = 1.0 + coupling * directPressureResponse *
+                (0.5 / (zonalSpacing * zonalSpacing) +
+                    0.5 / (meridionalSpacing * meridionalSpacing));
+            inverseDiagonal[cell] = 1.0 / approximateDiagonal;
+        }
+    }
+    const auto applyPreconditionedOperator = [&](
+        const std::vector<double>& pressure,
+        std::vector<double>& result)
+    {
+        applyOperator(pressure, result);
+        for (size_t cell = 0; cell < cellCount; cell++)
+            result[cell] *= inverseDiagonal[cell];
+    };
+
+    std::vector<double> rightHandSide(cellCount, 0.0);
+    for (size_t cell = 0; cell < cellCount; cell++)
+        rightHandSide[cell] = static_cast<double>(equilibriumPressureAnomalyHpa[cell]);
+    projectPressure(rightHandSide);
+
+    const double physicalRightHandSideNorm = std::sqrt(dot(rightHandSide, rightHandSide));
+    if (physicalRightHandSideNorm <= std::numeric_limits<double>::epsilon())
+    {
+        response.pressureAnomalyHpa.assign(cellCount, 0.0f);
+        response.converged = true;
+        return response;
+    }
+
+    std::vector<double> solution = rightHandSide;
+    std::vector<double> operatorSolution;
+    std::vector<double> residual(cellCount, 0.0);
+    constexpr int restartLength = 60;
+    constexpr double breakdownTolerance = 1.0e-24;
+    const int krylovColumns = std::min(restartLength, maximumIterations);
+    std::vector<std::vector<double>> basis(
+        krylovColumns + 1,
+        std::vector<double>(cellCount, 0.0));
+    std::vector<std::vector<double>> hessenberg(
+        krylovColumns + 1,
+        std::vector<double>(krylovColumns, 0.0));
+    std::vector<double> cosine(krylovColumns, 0.0);
+    std::vector<double> sine(krylovColumns, 0.0);
+    std::vector<double> projectedResidual(krylovColumns + 1, 0.0);
+    std::vector<double> work(cellCount, 0.0);
+
+    while (response.iterations < maximumIterations)
+    {
+        applyOperator(solution, operatorSolution);
+        for (size_t cell = 0; cell < cellCount; cell++)
+            residual[cell] = rightHandSide[cell] - operatorSolution[cell];
+        response.relativeResidual = static_cast<float>(
+            std::sqrt(dot(residual, residual)) / physicalRightHandSideNorm);
+        if (response.relativeResidual <= relativeTolerance)
+        {
+            response.converged = true;
+            break;
+        }
+
+        for (size_t cell = 0; cell < cellCount; cell++)
+            residual[cell] *= inverseDiagonal[cell];
+        const double residualNorm = std::sqrt(dot(residual, residual));
+        for (size_t cell = 0; cell < cellCount; cell++)
+            basis[0][cell] = residual[cell] / residualNorm;
+        for (auto& row : hessenberg)
+            std::fill(row.begin(), row.end(), 0.0);
+        std::fill(cosine.begin(), cosine.end(), 0.0);
+        std::fill(sine.begin(), sine.end(), 0.0);
+        std::fill(projectedResidual.begin(), projectedResidual.end(), 0.0);
+        projectedResidual[0] = residualNorm;
+        const int availableColumns = std::min(
+            krylovColumns,
+            maximumIterations - response.iterations);
+        int usedColumns = 0;
+
+        for (int column = 0; column < availableColumns; column++)
+        {
+            applyPreconditionedOperator(basis[column], work);
+            for (int previous = 0; previous <= column; previous++)
+            {
+                hessenberg[previous][column] = dot(work, basis[previous]);
+                for (size_t cell = 0; cell < cellCount; cell++)
+                    work[cell] -= hessenberg[previous][column] * basis[previous][cell];
+            }
+
+            hessenberg[column + 1][column] = std::sqrt(dot(work, work));
+            if (hessenberg[column + 1][column] > breakdownTolerance)
+            {
+                for (size_t cell = 0; cell < cellCount; cell++)
+                    basis[column + 1][cell] =
+                        work[cell] / hessenberg[column + 1][column];
+            }
+
+            for (int previous = 0; previous < column; previous++)
+            {
+                const double rotated =
+                    cosine[previous] * hessenberg[previous][column] +
+                    sine[previous] * hessenberg[previous + 1][column];
+                hessenberg[previous + 1][column] =
+                    -sine[previous] * hessenberg[previous][column] +
+                    cosine[previous] * hessenberg[previous + 1][column];
+                hessenberg[previous][column] = rotated;
+            }
+
+            const double rotationMagnitude = std::hypot(
+                hessenberg[column][column],
+                hessenberg[column + 1][column]);
+            if (rotationMagnitude <= breakdownTolerance)
+                break;
+            cosine[column] = hessenberg[column][column] / rotationMagnitude;
+            sine[column] = hessenberg[column + 1][column] / rotationMagnitude;
+            hessenberg[column][column] = rotationMagnitude;
+            hessenberg[column + 1][column] = 0.0;
+            projectedResidual[column + 1] =
+                -sine[column] * projectedResidual[column];
+            projectedResidual[column] *= cosine[column];
+            usedColumns = column + 1;
+            response.iterations++;
+
+        }
+
+        if (usedColumns == 0)
+            break;
+
+        std::vector<double> coefficients(usedColumns, 0.0);
+        for (int row = usedColumns - 1; row >= 0; row--)
+        {
+            double value = projectedResidual[row];
+            for (int column = row + 1; column < usedColumns; column++)
+                value -= hessenberg[row][column] * coefficients[column];
+            if (std::fabs(hessenberg[row][row]) <= breakdownTolerance)
+            {
+                usedColumns = 0;
+                break;
+            }
+            coefficients[row] = value / hessenberg[row][row];
+        }
+
+        if (usedColumns == 0)
+            break;
+        for (int column = 0; column < usedColumns; column++)
+        {
+            for (size_t cell = 0; cell < cellCount; cell++)
+                solution[cell] += coefficients[column] * basis[column][cell];
+        }
+    }
+
+    applyOperator(solution, operatorSolution);
+    for (size_t cell = 0; cell < cellCount; cell++)
+        residual[cell] = rightHandSide[cell] - operatorSolution[cell];
+    response.relativeResidual = static_cast<float>(
+        std::sqrt(dot(residual, residual)) / physicalRightHandSideNorm);
+    response.converged = response.relativeResidual <= relativeTolerance;
+
+    projectPressure(solution);
+    response.pressureAnomalyHpa.resize(cellCount);
+    for (size_t cell = 0; cell < cellCount; cell++)
+        response.pressureAnomalyHpa[cell] = static_cast<float>(solution[cell]);
+    return response;
 }
 
 void setLastCirculationPrecisionDiagnostics(

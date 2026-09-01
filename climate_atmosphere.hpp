@@ -19,6 +19,14 @@ struct HorizontalWind
     float southMetresPerSecond = 0.0f;
 };
 
+struct StationaryWaveResponse
+{
+    std::vector<float> pressureAnomalyHpa;
+    int iterations = 0;
+    float relativeResidual = 0.0f;
+    bool converged = false;
+};
+
 struct CirculationPrecisionStageDiagnostics
 {
     double areaWeightedFloatPressureGradientRmsPaPerMetre = 0.0;
@@ -62,6 +70,12 @@ float thermalSurfacePressureAnomalyHpa(
     float referencePressureHpa,
     float referenceTemperatureK,
     float massRedistributionEfficiency);
+float thermalModePressureAnomalyHpa(
+    float temperatureAnomalyK,
+    float airDensityKgM3,
+    float lowerPressurePa,
+    float upperPressurePa,
+    float dryAirGasConstant = 287.05f);
 float axisymmetricOverturningPressureAnomalyHpa(
     float latitudeDegrees,
     float thermalEquatorLatitudeDegrees,
@@ -108,6 +122,20 @@ HorizontalWind steadyQuadraticDragCoriolisWind(
     float boundaryLayerDepthMetres,
     float rotationRatePerSecond,
     float rotationDirection = 1.0f);
+StationaryWaveResponse solveSteadyStationaryWavePressure(
+    int longitudeCells,
+    int latitudeCells,
+    const std::vector<float>& equilibriumPressureAnomalyHpa,
+    const std::vector<float>& dragTimeSeconds,
+    float equivalentPressureDepthHpa,
+    float pressureDampingTimeSeconds,
+    float airDensityKgM3,
+    float planetRadiusMetres,
+    float rotationRatePerSecond,
+    float rotationDirection,
+    bool preserveZonalMean,
+    int maximumIterations,
+    float relativeTolerance);
 void setLastCirculationPrecisionDiagnostics(
     int season,
     const CirculationPrecisionDiagnostics& diagnostics);
