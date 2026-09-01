@@ -407,6 +407,46 @@ HorizontalWind steadyRayleighCoriolisWind(
     return { east, -north };
 }
 
+HorizontalWind steadyQuadraticDragCoriolisWind(
+    float forceEastMetresPerSecondSquared,
+    float forceNorthMetresPerSecondSquared,
+    float latitudeDegrees,
+    float dragCoefficient,
+    float boundaryLayerDepthMetres,
+    float rotationRatePerSecond,
+    float rotationDirection)
+{
+    if (dragCoefficient <= 0.0f || boundaryLayerDepthMetres <= 0.0f)
+        return {};
+
+    const float forceSquared =
+        forceEastMetresPerSecondSquared * forceEastMetresPerSecondSquared +
+        forceNorthMetresPerSecondSquared * forceNorthMetresPerSecondSquared;
+
+    if (forceSquared <= 0.0f)
+        return {};
+
+    const float dragPerMetre = dragCoefficient / boundaryLayerDepthMetres;
+    const float coriolis = coriolisParameterPerSecond(
+        latitudeDegrees,
+        rotationRatePerSecond,
+        rotationDirection);
+    const float coriolisSquared = coriolis * coriolis;
+    const float speedSquared = 2.0f * forceSquared /
+        (coriolisSquared + std::sqrt(
+            coriolisSquared * coriolisSquared +
+            4.0f * dragPerMetre * dragPerMetre * forceSquared));
+    const float dragRate = dragPerMetre * std::sqrt(speedSquared);
+    const float denominator = dragRate * dragRate + coriolisSquared;
+    const float east =
+        (dragRate * forceEastMetresPerSecondSquared + coriolis * forceNorthMetresPerSecondSquared) /
+        denominator;
+    const float north =
+        (dragRate * forceNorthMetresPerSecondSquared - coriolis * forceEastMetresPerSecondSquared) /
+        denominator;
+    return { east, -north };
+}
+
 void setLastCirculationPrecisionDiagnostics(
     int season,
     const CirculationPrecisionDiagnostics& diagnostics)
