@@ -30,7 +30,8 @@ The work changes the temperature, circulation, moisture, ocean, cryosphere, and 
 - `climate_validation.cpp`
 - `extra/climate.xlsx`
 - `climate_benchmark_runs.json`
+- `docs/tasks/climate-physics/FUTURE_WORK.md`
 
 # Status
 
-Phases 1-4 complete. Phase 5 is validating run 118's circulation and moisture transport before retaining further physics changes.
+Phases 1-4 complete. Phase 5 is validating run 118's circulation and moisture transport before retaining further physics changes. Deferred and temporarily disabled candidates are tracked in `FUTURE_WORK.md`.
