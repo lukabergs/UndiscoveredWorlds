@@ -3029,7 +3029,7 @@ bool exportclimatebenchmarkimages(
         << "{ID}_{season}_heating.png: net atmospheric radiative+sensible+phase-change heating; red cooling, dark zero, turquoise heating; +/-300 W/m2.\n"
         << "{ID}_{season}_{s|u}_wind_cons.png: climate-sampled wind; hue cyan=variable to red=consistent (0..1); brightness increases with mean speed (0..25+ m/s); arrows show mean direction.\n"
         << "{ID}_{season}_ocean_current.png: current direction arrows; navy/cyan/yellow = 0/1.1/2+ m/s; land black.\n"
-        << "{ID}_{season}_sst.png: ocean surface temperature; blue below 0 C, dark at 0 C, orange above 0 C, +/-35 C; land black.\n"
+        << "{ID}_{season}_sst.png: liquid mixed-layer temperature (freezing floor -1.8 C); blue below 0 C, dark at 0 C, orange above 0 C, +/-35 C; land black. Ice-skin temperature and thickness are separate ocean_fields.csv columns.\n"
         << "Seasonal process/statistics CSVs retain unclamped values, actual durations, per-layer budgets and correlation-adjusted sample-count estimates.\n"
         << "LIC/trails show representative-month circulation. Process/consistency maps average the quarter starting at the named month: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec.\n"
         << "ERA5 LIC/particle maps use the same renderer and seeds and are cached once per dimensions and renderer version.\n\n"
@@ -3821,6 +3821,52 @@ void writeprecipitationgrid(const filesystem::path& filepath, planet& world, int
     }
 }
 
+// Numeric validation input: independent of image palettes and workbook layout.
+// Coordinates and latitude-band weights follow the pole-inclusive output grid.
+bool exportbenchmarkcomparisoncells(planet& world, int runid)
+{
+    const filesystem::path directory = getappenvironment().climateBenchmarkRunDirectory / to_string(runid);
+    error_code error;
+    filesystem::create_directories(directory, error);
+    if (error) return false;
+    ofstream output(directory / "climate_comparison_cells.csv");
+    if (!output.is_open()) return false;
+    sf::Image koppenreference;
+    sf::Image regionmask;
+    const bool haskoppen = koppenreference.loadFromFile(getappenvironment().earthKoppenImagePath.string()) &&
+        aligncategoricalreference(koppenreference, world);
+    const bool hasregions = regionmask.loadFromFile((getappenvironment().referenceClimateDirectory /
+        "ipcc_ar6_regions.png").string()) && aligncategoricalreference(regionmask, world);
+    output << "x,y,latitude,longitude,latitude_band_weight,land,ocean,elevation_m,koppen_id,reference_koppen_id,ipcc_region_id,season,temperature_c,precipitation_mm_month,pressure_anomaly_hpa,surface_u_mps,surface_v_north_mps,upper_u_mps,upper_v_north_mps,column_water_mm,ascent_hpa_day,ocean_evaporation_proxy_mm_day\n";
+    output << setprecision(10);
+    for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
+        for (int y = 0; y <= world.height(); ++y)
+            for (int x = 0; x <= world.width(); ++x)
+            {
+                int expected = 0;
+                if (haskoppen)
+                {
+                    int distance = 0;
+                    expected = nearestbenchmarkclimate(koppenreference.getPixel(x, y), distance);
+                    if (distance > benchmarkcolourdistancelimitsquared) expected = 0;
+                }
+                output << x << ',' << y << ',' << 90.0 - 180.0 * y / world.height() << ','
+                    << -180.0 + 360.0 * (x + 0.5) / (world.width() + 1) << ','
+                    << gridcellareaweight(y, world.height()) << ',' << isvalidationland(world, x, y) << ','
+                    << (world.sea(x, y) != 0) << ',' << world.map(x, y) - world.sealevel() << ','
+                    << world.climate(x, y) << ',' << expected << ','
+                    << (hasregions ? static_cast<int>(regionmask.getPixel(x, y).r) - 1 : -1) << ',' << season;
+                for (const auto field : { monthlyreferencefield::temperature, monthlyreferencefield::precipitation,
+                    monthlyreferencefield::surfacepressure, monthlyreferencefield::surfaceuwind,
+                    monthlyreferencefield::surfacevwind, monthlyreferencefield::upperuwind,
+                    monthlyreferencefield::uppervwind, monthlyreferencefield::columnwater,
+                    monthlyreferencefield::verticalascent })
+                    output << ',' << simulatedmonthlyvalue(world, field, season, x, y);
+                output << ',' << world.seasonalevaporation(season, x, y) << '\n';
+            }
+    return output.good();
+}
+
 bool persistclimatebenchmarkdiagnostics(
     long seed,
     int runid,
@@ -3986,6 +4032,9 @@ bool recordclimatebenchmarkrun(
         return false;
 
     if (exportclimatebenchmarkimages(world, nextrunid, maps) == false)
+        return false;
+
+    if (!exportbenchmarkcomparisoncells(world, nextrunid))
         return false;
 
     if (persistclimatebenchmarkdiagnostics(
@@ -4158,10 +4207,10 @@ void exportclimatevalidationreport(planet& world)
     const filesystem::path outputdir = climatevalidationoutputdirectory();
 
     ofstream couplingfile(outputdir / "climate_coupling.csv");
-    couplingfile << "iteration,wind_change,sst_change,heating_change,rainfall_change,inner_accepted,converged\n";
+    couplingfile << "iteration,wind_change,sst_change,heating_change,rainfall_change,inner_accepted,converged,heating_relaxation\n";
     for (const auto& d : climatephysics::lastClimateCouplingDiagnostics())
         couplingfile << d.iteration << ',' << d.windChange << ',' << d.sstChange << ',' << d.heatingChange << ','
-            << d.rainfallChange << ',' << d.innerSolvesAccepted << ',' << d.converged << '\n';
+            << d.rainfallChange << ',' << d.innerSolvesAccepted << ',' << d.converged << ',' << d.heatingRelaxation << '\n';
 
     ofstream energybudgetfile(outputdir / "climate_energy_budget.csv");
 

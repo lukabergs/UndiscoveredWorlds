@@ -13,9 +13,13 @@ struct OceanForcing
     std::vector<float> southWindMps;
     std::vector<float> atmosphericTemperatureC;
     std::vector<float> initialSstC;
+    // Optional prescribed seasonal ice reservoir; no ice if omitted.
+    std::vector<float> initialIceThicknessMetres;
     // Optional diagnosed net surface radiative/sensible/latent exchange.
     // When present it replaces the Newtonian surface heat-exchange proxy.
     std::vector<float> surfaceHeatFluxWm2;
+    // Temperature at which the diagnosed flux was evaluated (otherwise air T).
+    std::vector<float> surfaceHeatFluxReferenceTemperatureC;
 };
 
 struct OceanConfig
@@ -32,6 +36,10 @@ struct OceanConfig
     float heatDiffusivityM2S = 750.0f;
     float surfaceHeatExchangeWm2K = 18.0f;
     float waterHeatCapacityJkgK = 3990.0f;
+    float freezingTemperatureC = -1.8f;
+    float iceDensityKgM3 = 917.0f;
+    float latentHeatFusionJkg = 334000.0f;
+    float iceConductivityWmK = 2.0f;
     float oceanTimeStepSeconds = 86400.0f;
     int streamfunctionIterations = 800;
     int heatStepsPerIteration = 30;
@@ -57,6 +65,8 @@ struct OceanState
     std::vector<float> southCurrentMps;
     std::vector<float> ekmanUpwellingMps;
     std::vector<float> sstC;
+    std::vector<float> surfaceSkinTemperatureC;
+    std::vector<float> iceThicknessMetres;
     std::vector<float> coupledEastWindMps;
     std::vector<float> coupledSouthWindMps;
     std::vector<float> coupledPressureAnomalyHpa;
