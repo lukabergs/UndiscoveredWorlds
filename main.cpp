@@ -36,6 +36,7 @@
 #include <SFML/Window/Event.hpp>
 
 #include "classes.hpp"
+#include "climate_benchmark_outputs.hpp"
 #include "planet.hpp"
 #include "physical_layers.hpp"
 #include "social_generation.hpp"
@@ -75,8 +76,8 @@ namespace
 constexpr const char* kRasterImportFilter = ".png,.tif,.tiff";
 constexpr const char* kGradientStripFilter = ".png";
 constexpr const char* kVolcanoImportFilter = ".png";
-constexpr int kEarthBenchmarkWidth = 2048;
-constexpr int kEarthBenchmarkHeight = 1025;
+constexpr int kEarthBenchmarkWidth = 512;
+constexpr int kEarthBenchmarkHeight = 257;
 
 struct CommandLineGenerationOptions
 {
@@ -92,7 +93,6 @@ struct CommandLineGenerationOptions
     bool usePrehistory = true;
     int historyYears = 1200;
     bool logToProfilingWorkbook = true;
-    bool appendClimateWorkbook = false;
     bool hasSeed = false;
     bool hasSavePath = false;
     bool hasReferencePath = false;
@@ -100,17 +100,22 @@ struct CommandLineGenerationOptions
     bool hasImportSeaPath = false;
     bool hasWorldWidth = false;
     bool hasWorldHeight = false;
+    bool hasResolution = false;
+    bool benchmarkMapsSpecified = false;
     long seed = 0;
     int plateTectonicsCycleCount = 2;
     int plateTectonicsCycleStepLimit = 600;
     int plateTectonicsPlateCount = 10;
     int worldWidth = 0;
     int worldHeight = 0;
+    int resolution = 0;
     string savePath;
     string referencePath;
     string importLandPath;
     string importSeaPath;
     string benchmarkInformation;
+    climatebenchmarkmapselection benchmarkMaps =
+        climatebenchmarkmapselection::defaultselection();
 };
 
 template<typename T, typename = void>
@@ -340,13 +345,16 @@ void printcommandlineusage()
     cout << "  --plates <count>        Set tectonic plate count.\n";
     cout << "  --world-width <pixels>  Set generated world width in pixels.\n";
     cout << "  --world-height <pixels> Set generated world height in pixels.\n";
+    cout << "  --resolution <width>    Set an even global width and derive height as width/2+1.\n";
     cout << "  --reference-precip <csv> Compare against a precipitation reference grid.\n";
     cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
     cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
     cout << "  --earth-climate-benchmark Run the imported Earth benchmark workflow.\n";
     cout << "  --benchmark-info <text> Store a change summary in the benchmark run log.\n";
+    cout << "  --map <id[,id...]>      Replace default benchmark maps; repeat to add maps.\n";
+    cout << "                           Default: koppen,jan-s-wind-lic,jan-s-wind-part,precip,precip-tif.\n";
+    cout << "                           Seasons: jan, apr, jul, oct. Use --map all or --map none.\n";
     cout << "  --print-climate-relative-error Print per-climate relative error against the Earth benchmark counts.\n";
-    cout << "  --no-climate-workbook   Skip appending benchmark counts to climate.xlsx.\n";
     cout << "  --no-rivers             Disable river generation.\n";
     cout << "  --no-lakes              Disable lake generation.\n";
     cout << "  --no-deltas             Disable delta generation.\n";
@@ -391,7 +399,6 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
         {
             options.run = true;
             options.earthClimateBenchmark = true;
-            options.appendClimateWorkbook = true;
             options.logToProfilingWorkbook = false;
             continue;
         }
@@ -443,13 +450,7 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
             continue;
         }
 
-        if (argument == "--no-climate-workbook")
-        {
-            options.appendClimateWorkbook = false;
-            continue;
-        }
-
-        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--cycle-steps" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
+        if (argument == "--seed" || argument == "--save" || argument == "--plate-cycles" || argument == "--cycle-steps" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -488,6 +489,29 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
                 {
                     options.worldHeight = stoi(value);
                     options.hasWorldHeight = true;
+                }
+                else if (argument == "--resolution")
+                {
+                    options.resolution = stoi(value);
+                    if (options.resolution < 2 || options.resolution % 2 != 0)
+                        throw invalid_argument("resolution");
+                    options.hasResolution = true;
+                }
+                else if (argument == "--map" || argument == "--maps")
+                {
+                    if (!options.benchmarkMapsSpecified)
+                    {
+                        options.benchmarkMaps.clear();
+                        options.benchmarkMapsSpecified = true;
+                    }
+                    string failure;
+                    if (!addclimatebenchmarkmapargument(
+                            options.benchmarkMaps, value, &failure))
+                    {
+                        cerr << failure << '\n';
+                        cleanup();
+                        return false;
+                    }
                 }
                 else if (argument == "--reference-precip")
                 {
@@ -552,12 +576,23 @@ bool parsecommandlineoptions(CommandLineGenerationOptions& options)
 
 filesystem::path commandlinevalidationdirectory(long seed)
 {
-    filesystem::path outputroot = getappenvironment().profilingWorkbookPath.parent_path();
+    filesystem::path outputroot = getappenvironment().climateValidationDirectory;
 
     if (outputroot.empty())
         outputroot = filesystem::current_path();
 
-    return outputroot / "validation" / ("seed_" + to_string(seed));
+    return outputroot / ("seed_" + to_string(seed));
+}
+
+filesystem::path resolutionvariant(
+    const filesystem::path& source,
+    int columns,
+    int rows)
+{
+    const filesystem::path candidate = source.parent_path() /
+        (source.stem().string() + "_" + to_string(columns) + "x" +
+            to_string(rows) + source.extension().string());
+    return filesystem::exists(candidate) ? candidate : source;
 }
 
 SocialGenerationOptions makesocialoptions(bool enabled, SocialGenerationOptions::Mode mode, bool useprehistory, int historyyears)
@@ -629,6 +664,18 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         return 1;
     }
 
+    if (options.hasResolution && (options.hasWorldWidth || options.hasWorldHeight))
+    {
+        cerr << "Use either --resolution or --world-width/--world-height, not both.\n";
+        return 1;
+    }
+
+    if (options.benchmarkMapsSpecified && !options.earthClimateBenchmark)
+    {
+        cerr << "--map is only valid with --earth-climate-benchmark.\n";
+        return 1;
+    }
+
     boolshapetemplate landshape[12];
     createlandshapetemplates(landshape);
     boolshapetemplate chainland[2];
@@ -653,17 +700,24 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     if (options.earthClimateBenchmark)
     {
         world->setwidth(std::clamp(
-            options.hasWorldWidth ? options.worldWidth : kEarthBenchmarkWidth,
+            options.hasResolution ? options.resolution :
+                (options.hasWorldWidth ? options.worldWidth : kEarthBenchmarkWidth),
             2,
             ARRAYWIDTH) - 1);
         world->setheight(std::clamp(
-            options.hasWorldHeight ? options.worldHeight : kEarthBenchmarkHeight,
+            options.hasResolution ? options.resolution / 2 + 1 :
+                (options.hasWorldHeight ? options.worldHeight : kEarthBenchmarkHeight),
             2,
             ARRAYHEIGHT) - 1);
     }
     else if (importedworld)
     {
-        if (options.hasWorldWidth && options.hasWorldHeight)
+        if (options.hasResolution)
+        {
+            world->setwidth(std::clamp(options.resolution, 2, ARRAYWIDTH) - 1);
+            world->setheight(std::clamp(options.resolution / 2 + 1, 2, ARRAYHEIGHT) - 1);
+        }
+        else if (options.hasWorldWidth && options.hasWorldHeight)
         {
             world->setwidth(std::clamp(options.worldWidth, 2, ARRAYWIDTH) - 1);
             world->setheight(std::clamp(options.worldHeight, 2, ARRAYHEIGHT) - 1);
@@ -672,8 +726,10 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     else if (importedworld == false)
     {
         changeworldproperties(*world);
-        world->setwidth(std::clamp(options.hasWorldWidth ? options.worldWidth : world->width() + 1, 2, ARRAYWIDTH) - 1);
-        world->setheight(std::clamp(options.hasWorldHeight ? options.worldHeight : world->height() + 1, 2, ARRAYHEIGHT) - 1);
+        world->setwidth(std::clamp(options.hasResolution ? options.resolution :
+            (options.hasWorldWidth ? options.worldWidth : world->width() + 1), 2, ARRAYWIDTH) - 1);
+        world->setheight(std::clamp(options.hasResolution ? options.resolution / 2 + 1 :
+            (options.hasWorldHeight ? options.worldHeight : world->height() + 1), 2, ARRAYHEIGHT) - 1);
     }
 
     const SocialGenerationOptions socialoptions = makesocialoptions(options.socialEnabled, options.socialMode, options.usePrehistory, options.historyYears);
@@ -687,28 +743,34 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     if (importedworld)
     {
         const AppEnvironmentConfig& appenv = getappenvironment();
-        const string landpath = options.hasImportLandPath ? options.importLandPath : appenv.earthBenchmarkLandPath.string();
-        const string seapath = options.hasImportSeaPath ? options.importSeaPath : appenv.earthBenchmarkSeaPath.string();
+        const filesystem::path landpath = options.hasImportLandPath
+            ? filesystem::path(options.importLandPath)
+            : resolutionvariant(
+                appenv.earthBenchmarkLandPath, world->width() + 1, world->height() + 1);
+        const filesystem::path seapath = options.hasImportSeaPath
+            ? filesystem::path(options.importSeaPath)
+            : resolutionvariant(
+                appenv.earthBenchmarkSeaPath, world->width() + 1, world->height() + 1);
         vector<vector<bool>> okmountains(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, false));
 
-        if (importlandheightmap(*world, landpath) == false)
+        if (importlandheightmap(*world, landpath.string()) == false)
         {
             endtimedreporting();
             endworldgendebugrun();
-            cerr << "Failed to import land map: " << landpath << '\n';
+            cerr << "Failed to import land map: " << landpath.string() << '\n';
             return 1;
         }
 
-        if (importseadepthmap(*world, seapath) == false)
+        if (importseadepthmap(*world, seapath.string()) == false)
         {
             endtimedreporting();
             endworldgendebugrun();
-            cerr << "Failed to import sea map: " << seapath << '\n';
+            cerr << "Failed to import sea map: " << seapath.string() << '\n';
             return 1;
         }
 
-        const bool appendduringgeneration = options.appendClimateWorkbook && options.earthClimateBenchmark == false;
-        completeimportedworldgeneration(*world, options.rivers, options.lakes, options.deltas, appendduringgeneration, socialoptions, smalllake, largelake, landshape, okmountains);
+        completeimportedworldgeneration(*world, options.rivers, options.lakes, options.deltas,
+            false, socialoptions, smalllake, largelake, landshape, okmountains);
     }
     else
     {
@@ -725,7 +787,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         context.dorivers = options.rivers;
         context.dolakes = options.lakes;
         context.dodeltas = options.deltas;
-        context.appendclimateworkbook = options.appendClimateWorkbook;
+        context.appendclimateworkbook = false;
         context.socialoptions = socialoptions;
         context.landshape = landshape;
         context.chainland = chainland;
@@ -746,7 +808,11 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     {
         int benchmarkrunid = 0;
 
-        if (recordclimatebenchmarkrun(*world, options.benchmarkInformation, options.appendClimateWorkbook, &benchmarkrunid) == false)
+        if (recordclimatebenchmarkrun(
+                *world,
+                options.benchmarkInformation,
+                options.benchmarkMaps,
+                &benchmarkrunid) == false)
         {
             cerr << "Failed to record climate benchmark artifacts.\n";
             return 1;
@@ -755,12 +821,17 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         const AppEnvironmentConfig& appenv = getappenvironment();
         updatereport("Climate benchmark run ID: " + to_string(benchmarkrunid));
         updatereport("Climate benchmark log: " + appenv.climateBenchmarkRunLogPath.string());
-        updatereport("Climate benchmark image: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + ".png")).string());
-        updatereport("Climate benchmark temperature image: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + "_temperature_c.png")).string());
-        updatereport("Climate benchmark precipitation GeoTIFF: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + "_precipitation_mm_year.tif")).string());
-        updatereport("Climate benchmark precipitation preview: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + "_precipitation_mm_year_preview.png")).string());
-        updatereport("Climate benchmark circulation previews: " + (appenv.climateBenchmarkImageDirectory / (to_string(benchmarkrunid) + "_{season}_{map}.png")).string());
-        updatereport("Climate benchmark circulation guide: " + (appenv.climateBenchmarkImageDirectory / "circulation_map_guide.txt").string());
+        for (const climatebenchmarkmaprequest& request : options.benchmarkMaps.requests())
+        {
+            if (!climatebenchmarkmapisreference(request.kind))
+            {
+                updatereport("Climate benchmark map: " +
+                    (appenv.climateBenchmarkImageDirectory /
+                        climatebenchmarkmapfilename(request, benchmarkrunid)).string());
+            }
+        }
+        updatereport("Climate benchmark map guide: " +
+            (appenv.climateBenchmarkImageDirectory / "benchmark_map_guide.txt").string());
     }
 
     if (options.printClimateRelativeError)
@@ -3306,7 +3377,7 @@ int main()
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Calculate climates, lakes, and rivers, and finish the world.");
 
-            ImGui::Checkbox("Append climate.xlsx benchmark row", &compareclimateworkbook);
+            ImGui::Checkbox("Record climate benchmark (updates workbook)", &compareclimateworkbook);
 
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Appends this world's land-climate counts to the RAW_PIXELS sheet in climate.xlsx.");

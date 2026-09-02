@@ -107,13 +107,13 @@ def main() -> int:
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("extra/reference/worldclim-2.1-10m/grids"),
+        default=Path("extra/reference/climate/sources/worldclim-2.1-10m/grids"),
         help="Directory containing extracted wc2.1_10m_*.tif files.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("extra/reference"),
+        default=Path("extra/reference/climate/processed"),
         help="Directory for simulator-aligned validation artifacts.",
     )
     parser.add_argument("--width", type=int, default=2048)

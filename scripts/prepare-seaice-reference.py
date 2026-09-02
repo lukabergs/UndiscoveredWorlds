@@ -79,7 +79,7 @@ def main() -> int:
     parser.add_argument(
         "--directory",
         type=Path,
-        default=Path("extra/reference/nsidc-g02202-v6-2001-2020"),
+        default=Path("extra/reference/climate/sources/nsidc-g02202-v6-2001-2020"),
     )
     args = parser.parse_args()
 

@@ -138,7 +138,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("extra/reference/era5-planette-2001-2020"),
+        default=Path("extra/reference/climate/sources/era5-planette-2001-2020"),
     )
     parser.add_argument("--variables", nargs="+", default=DEFAULT_VARIABLES)
     args = parser.parse_args()

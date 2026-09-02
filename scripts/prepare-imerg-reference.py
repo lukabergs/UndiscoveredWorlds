@@ -117,7 +117,7 @@ def main() -> int:
         "--input",
         type=Path,
         default=Path(
-            "extra/reference/imerg-v07b-annual/grids/"
+            "extra/reference/climate/sources/imerg-v07b-annual/grids/"
             "IMERG-Final.CLIM.200006-202305.V07B.tif"
         ),
     )
@@ -129,7 +129,7 @@ def main() -> int:
             "When supplied, writes a twelve-month bundle instead of the annual bundle."
         ),
     )
-    parser.add_argument("--output", type=Path, default=Path("extra/reference"))
+    parser.add_argument("--output", type=Path, default=Path("extra/reference/climate/processed"))
     parser.add_argument("--width", type=int, default=2048)
     parser.add_argument("--height", type=int, default=1025)
     args = parser.parse_args()

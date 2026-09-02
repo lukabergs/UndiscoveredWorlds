@@ -13,6 +13,7 @@ The work changes the temperature, circulation, moisture, ocean, cryosphere, and 
 3. Two-layer atmospheric circulation.
 4. Clouds, snow, runoff, and inter-season storage.
 5. Calibration, regression hardening, and cleanup.
+6. Benchmark pipeline and artifact organization.
 
 # Shared constraints
 
@@ -28,10 +29,10 @@ The work changes the temperature, circulation, moisture, ocean, cryosphere, and 
 - `globalclimate.cpp`
 - `generation_tuning.hpp`
 - `climate_validation.cpp`
-- `extra/climate.xlsx`
-- `climate_benchmark_runs.json`
+- `extra/climate/workbooks/climate.xlsx`
+- `data/climate/benchmark_runs.json`
 - `docs/tasks/climate-physics/FUTURE_WORK.md`
 
 # Status
 
-Phases 1-4 complete. Phase 5 is validating run 118's circulation and moisture transport before retaining further physics changes. Deferred and temporarily disabled candidates are tracked in `FUTURE_WORK.md`.
+Phases 1-4 complete. Phase 5 retained the surface stationary-wave response and documented rejected experiments. Phase 6 made benchmark resolution, map selection, workbook updates, and artifact locations explicit and reproducible. Deferred and temporarily disabled candidates are tracked in `FUTURE_WORK.md`.

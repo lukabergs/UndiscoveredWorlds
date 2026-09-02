@@ -179,14 +179,14 @@ def main() -> int:
     parser.add_argument(
         "--era5",
         type=Path,
-        default=Path("extra/reference/era5-planette-2001-2020"),
+        default=Path("extra/reference/climate/sources/era5-planette-2001-2020"),
     )
     parser.add_argument(
         "--regions",
         type=Path,
-        default=Path("extra/reference/ipcc-ar6-wgi-regions-v4/IPCC-WGI-reference-regions-v4.geojson"),
+        default=Path("extra/reference/climate/sources/ipcc-ar6-wgi-regions-v4/IPCC-WGI-reference-regions-v4.geojson"),
     )
-    parser.add_argument("--output", type=Path, default=Path("extra/reference"))
+    parser.add_argument("--output", type=Path, default=Path("extra/reference/climate/processed"))
     parser.add_argument("--width", type=int, default=2048)
     parser.add_argument("--height", type=int, default=1025)
     args = parser.parse_args()

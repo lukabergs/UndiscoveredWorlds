@@ -2145,7 +2145,10 @@ void finalizegeneratedworld(planet& world, GenerationScratch& scratch, const Gen
     generatephysicalworldlayers(world, scratch.shelves);
     generatesocialworld(world, context.socialoptions);
 
-    if (context.appendclimateworkbook && recordclimatebenchmarkrun(world, "", true) == false)
+    if (context.appendclimateworkbook && recordclimatebenchmarkrun(
+            world,
+            "",
+            climatebenchmarkmapselection::defaultselection()) == false)
         updatereport("Climate benchmark artifact update failed");
 }
 

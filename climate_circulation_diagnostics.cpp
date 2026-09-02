@@ -32,7 +32,7 @@ constexpr float vectorerrordisplaymaximum = 25.0f;
 constexpr float surfacedivergencedisplaymaximum = 1.0f;
 constexpr float moistureconvergencedisplaymaximum = 20.0f;
 constexpr int particlesteps = 36;
-constexpr int particlerenderscale = 2;
+constexpr int particlerenderscale = 1;
 constexpr int licstepsperdirection = 12;
 constexpr float licstepcells = 0.65f;
 constexpr int licrenderscale = 1;
@@ -41,8 +41,14 @@ constexpr int maxflowvisualizationcells = 1024 * 513;
 constexpr int referencevisualizationversion = 1;
 
 constexpr std::array<const char*, CLIMATESEASONCOUNT> seasonnames = {
-    "january", "april", "july", "october"
+    "jan", "apr", "jul", "oct"
 };
+
+std::string diagnosticmapfilename(climatebenchmarkmapkind kind, int season)
+{
+    const std::string filename = climatebenchmarkmapfilename({ kind, season }, 0);
+    return filename.substr(2);
+}
 
 struct seasonfields
 {
@@ -893,109 +899,141 @@ bool capturedcirculationwind(
 
 bool exportcirculationdiagnostics(
     const std::filesystem::path& outputdirectory,
-    planet& world)
+    planet& world,
+    const climatebenchmarkmapselection& selection)
 {
     std::error_code error;
     std::filesystem::create_directories(outputdirectory, error);
     if (error)
         return false;
 
-    std::ofstream manifest(outputdirectory / "circulation_diagnostics.csv");
+    std::ofstream manifest(outputdirectory / "circulation_maps.csv");
     if (!manifest.is_open())
         return false;
 
-    manifest << "season,field,units,minimum,maximum,display_limit,file,status\n";
-    manifest << std::fixed << std::setprecision(7);
+    manifest << "map_id,file,status\n";
     const int columns = world.width() + 1;
     const int rows = world.height() + 1;
     bool success = true;
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
-        const char* seasonname = seasonnames[season];
+        const bool surfaceparticles = selection.includes(
+            climatebenchmarkmapkind::surfacewindparticles, season);
+        const bool upperparticles = selection.includes(
+            climatebenchmarkmapkind::upperwindparticles, season);
+        const bool surfacelic = selection.includes(
+            climatebenchmarkmapkind::surfacewindlic, season);
+        const bool upperlic = selection.includes(
+            climatebenchmarkmapkind::upperwindlic, season);
+        const bool surfacespeed = selection.includes(
+            climatebenchmarkmapkind::surfacewindspeed, season);
+        const bool surfacedivergence = selection.includes(
+            climatebenchmarkmapkind::surfacedivergence, season);
+        const bool moistureconvergence = selection.includes(
+            climatebenchmarkmapkind::moisturefluxconvergence, season);
+        if (!surfaceparticles && !upperparticles && !surfacelic && !upperlic &&
+            !surfacespeed && !surfacedivergence && !moistureconvergence)
+        {
+            continue;
+        }
+
         const seasonfields fields = buildseasonfields(world, season);
-        std::vector<float> surfacenorthward = fields.surfacev;
-        std::vector<float> uppernorthward = fields.upperv;
-        for (float& value : surfacenorthward)
-            value = -value;
-        for (float& value : uppernorthward)
-            value = -value;
+        const bool flowenabled = circulationflowvisualizationenabled(world);
+        const auto renderstatus = [&](climatebenchmarkmapkind kind, bool requested, bool rendered)
+        {
+            if (!requested)
+                return;
+            const climatebenchmarkmaprequest request{ kind, season };
+            manifest << climatebenchmarkmapid(request) << ','
+                << diagnosticmapfilename(kind, season) << ','
+                << (rendered ? "written" : "skipped-resolution") << '\n';
+        };
 
-        success = writefield(outputdirectory, manifest, seasonname,
-            "surface_u_eastward_m_s", "m s-1", fields.surfaceu, columns, rows) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "surface_v_northward_m_s", "m s-1", surfacenorthward, columns, rows) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "upper_u_eastward_m_s", "m s-1", fields.upperu, columns, rows) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "upper_v_northward_m_s", "m s-1", uppernorthward, columns, rows) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "column_water_mm", "kg m-2", fields.moisture, columns, rows) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "surface_wind_speed_m_s", "m s-1", fields.surfacespeed,
-            columns, rows, particlespeeddisplaymaximum) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "upper_wind_speed_m_s", "m s-1", fields.upperspeed,
-            columns, rows, particlespeeddisplaymaximum) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "surface_divergence_per_day", "day-1", fields.surfacedivergence,
-            columns, rows, surfacedivergencedisplaymaximum) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "upper_divergence_per_day", "day-1", fields.upperdivergence,
-            columns, rows, surfacedivergencedisplaymaximum) && success;
-        success = writefield(outputdirectory, manifest, seasonname,
-            "surface_moisture_flux_convergence_mm_day", "kg m-2 day-1",
-            fields.moisturefluxconvergence, columns, rows,
-            moistureconvergencedisplaymaximum) && success;
-
-        if (circulationflowvisualizationenabled(world))
+        if (surfaceparticles && flowenabled)
         {
             success = renderparticleimage(
-                outputdirectory / (std::string(seasonname) + "_surface_wind_particles.png"),
+                outputdirectory / diagnosticmapfilename(
+                    climatebenchmarkmapkind::surfacewindparticles, season),
                 world,
                 fields.surfaceu,
                 fields.surfacev,
                 0x1185a11u + static_cast<std::uint32_t>(season) * 17u) && success;
+        }
+        renderstatus(climatebenchmarkmapkind::surfacewindparticles, surfaceparticles,
+            surfaceparticles && flowenabled);
+        if (upperparticles && flowenabled)
+        {
             success = renderparticleimage(
-                outputdirectory / (std::string(seasonname) + "_upper_wind_particles.png"),
+                outputdirectory / diagnosticmapfilename(
+                    climatebenchmarkmapkind::upperwindparticles, season),
                 world,
                 fields.upperu,
                 fields.upperv,
                 0x1185a91u + static_cast<std::uint32_t>(season) * 17u) && success;
+        }
+        renderstatus(climatebenchmarkmapkind::upperwindparticles, upperparticles,
+            upperparticles && flowenabled);
+        if (surfacelic && flowenabled)
+        {
             success = renderlicimage(
-                outputdirectory / (std::string(seasonname) + "_surface_wind_lic.png"),
+                outputdirectory / diagnosticmapfilename(
+                    climatebenchmarkmapkind::surfacewindlic, season),
                 world,
                 fields.surfaceu,
                 fields.surfacev,
                 0x1185b11u + static_cast<std::uint32_t>(season) * 17u) && success;
+        }
+        renderstatus(climatebenchmarkmapkind::surfacewindlic, surfacelic,
+            surfacelic && flowenabled);
+        if (upperlic && flowenabled)
+        {
             success = renderlicimage(
-                outputdirectory / (std::string(seasonname) + "_upper_wind_lic.png"),
+                outputdirectory / diagnosticmapfilename(
+                    climatebenchmarkmapkind::upperwindlic, season),
                 world,
                 fields.upperu,
                 fields.upperv,
                 0x1185b91u + static_cast<std::uint32_t>(season) * 17u) && success;
         }
-        success = renderscalarimage(
-            outputdirectory / (std::string(seasonname) + "_surface_wind_speed.png"),
+        renderstatus(climatebenchmarkmapkind::upperwindlic, upperlic,
+            upperlic && flowenabled);
+        if (surfacespeed)
+        {
+            success = renderscalarimage(
+            outputdirectory / diagnosticmapfilename(
+                climatebenchmarkmapkind::surfacewindspeed, season),
             fields.surfacespeed,
             columns,
             rows,
             particlespeeddisplaymaximum,
             scalarpalette::speed) && success;
-        success = renderscalarimage(
-            outputdirectory / (std::string(seasonname) + "_surface_divergence.png"),
+            renderstatus(climatebenchmarkmapkind::surfacewindspeed, true, true);
+        }
+        if (surfacedivergence)
+        {
+            success = renderscalarimage(
+            outputdirectory / diagnosticmapfilename(
+                climatebenchmarkmapkind::surfacedivergence, season),
             fields.surfacedivergence,
             columns,
             rows,
             surfacedivergencedisplaymaximum,
             scalarpalette::divergence) && success;
-        success = renderscalarimage(
-            outputdirectory / (std::string(seasonname) + "_moisture_flux_convergence.png"),
+            renderstatus(climatebenchmarkmapkind::surfacedivergence, true, true);
+        }
+        if (moistureconvergence)
+        {
+            success = renderscalarimage(
+            outputdirectory / diagnosticmapfilename(
+                climatebenchmarkmapkind::moisturefluxconvergence, season),
             fields.moisturefluxconvergence,
             columns,
             rows,
             moistureconvergencedisplaymaximum,
             scalarpalette::convergence) && success;
+            renderstatus(climatebenchmarkmapkind::moisturefluxconvergence, true, true);
+        }
     }
 
     return success;
@@ -1005,7 +1043,8 @@ bool exportcirculationreferencecomparisons(
     const std::filesystem::path& diagnosticoutputdirectory,
     const std::filesystem::path& referencecacheoutputdirectory,
     planet& world,
-    const circulationreferencewindfields& referencefields)
+    const circulationreferencewindfields& referencefields,
+    const climatebenchmarkmapselection& selection)
 {
     if (!circulationflowvisualizationenabled(world))
         return true;
@@ -1058,6 +1097,19 @@ bool exportcirculationreferencecomparisons(
         {
             const bool upper = layer == 1;
             const char* layername = upper ? "upper" : "surface";
+            const climatebenchmarkmapkind referenceparticlekind = upper
+                ? climatebenchmarkmapkind::era5upperwindparticles
+                : climatebenchmarkmapkind::era5surfacewindparticles;
+            const climatebenchmarkmapkind referencelickind = upper
+                ? climatebenchmarkmapkind::era5upperwindlic
+                : climatebenchmarkmapkind::era5surfacewindlic;
+            const climatebenchmarkmapkind errorkind = upper
+                ? climatebenchmarkmapkind::upperwindvectorerror
+                : climatebenchmarkmapkind::surfacewindvectorerror;
+            const bool referenceparticlesrequested =
+                selection.includes(referenceparticlekind, season);
+            const bool referencelicrequested = selection.includes(referencelickind, season);
+            const bool errorrequested = selection.includes(errorkind, season);
             const std::vector<float>& simulatedu = upper
                 ? simulated.upperu : simulated.surfaceu;
             const std::vector<float>& simulatedv = upper
@@ -1068,16 +1120,17 @@ bool exportcirculationreferencecomparisons(
                 ? referencefields.upperv[season] : referencefields.surfacev[season];
             const std::filesystem::path referenceparticlepath =
                 referencecacheoutputdirectory /
-                (referenceprefix + "_" + seasonname + "_" + layername +
-                    "_wind_particles.png");
+                (referenceprefix + "_" + seasonname + "_" +
+                    (upper ? "u" : "s") + "_wind_part.png");
             const std::filesystem::path referencelicpath =
                 referencecacheoutputdirectory /
-                (referenceprefix + "_" + seasonname + "_" + layername +
-                    "_wind_lic.png");
+                (referenceprefix + "_" + seasonname + "_" +
+                    (upper ? "u" : "s") + "_wind_lic.png");
             const std::uint32_t particlebase = upper ? 0x1185a91u : 0x1185a11u;
             const std::uint32_t licbase = upper ? 0x1185b91u : 0x1185b11u;
 
-            if (!std::filesystem::exists(referenceparticlepath))
+            if (referenceparticlesrequested &&
+                !std::filesystem::exists(referenceparticlepath))
             {
                 success = renderparticleimage(
                     referenceparticlepath,
@@ -1087,7 +1140,7 @@ bool exportcirculationreferencecomparisons(
                     particlebase + static_cast<std::uint32_t>(season) * 17u) && success;
                 renderedreference = true;
             }
-            if (!std::filesystem::exists(referencelicpath))
+            if (referencelicrequested && !std::filesystem::exists(referencelicpath))
             {
                 success = renderlicimage(
                     referencelicpath,
@@ -1156,19 +1209,15 @@ bool exportcirculationreferencecomparisons(
                 }
             }
 
-            const std::string errorbasename = seasonname + "_" + layername +
-                "_wind_vector_error";
-            success = rendervectorerrorimage(
-                diagnosticoutputdirectory / (errorbasename + ".png"),
-                world,
-                erroru,
-                errorv,
-                errormagnitude) && success;
-            success = climateio::writefloat32geotiff(
-                (diagnosticoutputdirectory / (errorbasename + "_m_s.tif")).string().c_str(),
-                static_cast<std::uint32_t>(columns),
-                static_cast<std::uint32_t>(rows),
-                errormagnitude.data()) && success;
+            if (errorrequested)
+            {
+                success = rendervectorerrorimage(
+                    diagnosticoutputdirectory / diagnosticmapfilename(errorkind, season),
+                    world,
+                    erroru,
+                    errorv,
+                    errormagnitude) && success;
+            }
 
             comparison
                 << seasonname << ',' << layername << ',' << comparedcells << ','

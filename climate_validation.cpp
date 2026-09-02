@@ -1,5 +1,6 @@
 #include "app_environment.hpp"
 #include "climate_atmosphere.hpp"
+#include "climate_benchmark_outputs.hpp"
 #include "climate_circulation_diagnostics.hpp"
 #include "climate_energy.hpp"
 #include "climate_koppen.hpp"
@@ -1565,12 +1566,11 @@ float latitudeforrow(int row, int height)
 
 filesystem::path climatevalidationoutputdirectory(long seed)
 {
-    filesystem::path outputroot = getappenvironment().profilingWorkbookPath.parent_path();
+    filesystem::path outputroot = getappenvironment().climateValidationDirectory;
 
     if (outputroot.empty())
         outputroot = filesystem::current_path();
 
-    outputroot /= "validation";
     outputroot /= "seed_" + to_string(seed);
     filesystem::create_directories(outputroot);
 
@@ -1831,6 +1831,18 @@ vector<long long> referenceclimatecounts()
         5124, 3226, 6, 11798, 4443, 6, 19304, 12052, 17,
         758, 2188, 9114, 65, 3831, 6466, 12105, 1494,
         6413, 40215, 86356, 757, 48284, 215627
+    };
+}
+
+vector<double> referenceclimatecounts3600()
+{
+    return
+    {
+        62064.0, 42738.0, 75295.5, 75295.5, 200752.0, 75185.0,
+        74499.0, 90464.0, 15833.0, 9967.0, 18.0, 36456.0, 13728.0,
+        20.0, 59648.0, 37240.0, 51.0, 2341.0, 6761.0, 28161.0,
+        200.0, 11837.0, 19978.0, 37404.0, 4615.0, 19815.0,
+        124260.0, 266833.0, 2338.0, 149192.0, 666267.0
     };
 }
 
@@ -2411,7 +2423,8 @@ bool appendclimatebenchmarkrunlog(
         << "      \"datetime\": \"" << timestamp << "\",\n"
         << "      \"information\": \"" << jsonescape(information) << "\",\n"
         << "      \"diagnostics_directory\": \""
-        << jsonescape((filesystem::path("extra") / "validation" / "runs" / to_string(runid)).generic_string())
+        << jsonescape((getappenvironment().climateBenchmarkRunDirectory /
+            to_string(runid)).generic_string())
         << "\",\n"
         << "      \"metrics\": {\n"
         << fixed << setprecision(10)
@@ -2620,6 +2633,8 @@ bool updateclimatebenchmarkworkbook(
         scriptfile << "$excel = $null\n";
         scriptfile << "$workbook = $null\n";
         scriptfile << "$sheet = $null\n";
+        scriptfile << "$percentageSheet = $null\n";
+        scriptfile << "$differenceSheet = $null\n";
         scriptfile << "try {\n";
         scriptfile << "$lines = Get-Content -Path $DataPath\n";
         scriptfile << "if ($lines.Count -lt 2) { throw 'Benchmark input is incomplete' }\n";
@@ -2631,6 +2646,8 @@ bool updateclimatebenchmarkworkbook(
         scriptfile << "$workbook = $excel.Workbooks.Open($WorkbookPath)\n";
         scriptfile << "if ($workbook.ReadOnly) { throw 'Climate benchmark workbook is open read-only; close it in Excel and retry' }\n";
         scriptfile << "$sheet = $workbook.Worksheets.Item('RAW_PIXELS')\n";
+        scriptfile << "$percentageSheet = $workbook.Worksheets.Item('PERCENTAGES')\n";
+        scriptfile << "$differenceSheet = $workbook.Worksheets.Item('DIFFERENCE')\n";
         scriptfile << "for ($index = 0; $index -lt $headers.Count; $index++) {\n";
         scriptfile << "    $actual = [string]$sheet.Cells.Item(1, $index + 1).Text\n";
         scriptfile << "    if ($actual -ne $headers[$index]) { throw \"Workbook header mismatch at column $($index + 1): expected '$($headers[$index])', found '$actual'\" }\n";
@@ -2640,12 +2657,33 @@ bool updateclimatebenchmarkworkbook(
         scriptfile << "$row = $runId + 1\n";
         scriptfile << "$existingId = $sheet.Cells.Item($row, 1).Value2\n";
         scriptfile << "if ($null -ne $existingId -and -not [string]::IsNullOrWhiteSpace([string]$existingId) -and [int]$existingId -ne $runId) { throw \"Workbook row $row already belongs to run $existingId\" }\n";
-        scriptfile << "for ($column = $simulation.Count + 1; $column -le 35; $column++) {\n";
-        scriptfile << "    if (-not $sheet.Cells.Item($row, $column).HasFormula) { throw \"RAW_PIXELS formula missing at row $row, column $column\" }\n";
-        scriptfile << "}\n";
+        scriptfile << "$rawFormulaSourceRow = $row - 1\n";
+        scriptfile << "while ($rawFormulaSourceRow -ge 2 -and -not $sheet.Cells.Item($rawFormulaSourceRow, 35).HasFormula) { $rawFormulaSourceRow-- }\n";
+        scriptfile << "if ($rawFormulaSourceRow -lt 2) { throw 'No RAW_PIXELS formula template row found' }\n";
+        scriptfile << "$sheet.Range(\"A$rawFormulaSourceRow:AI$rawFormulaSourceRow\").Copy($sheet.Range(\"A$row:AI$row\"))\n";
+        scriptfile << "$percentageRow = $row + 1\n";
+        scriptfile << "$percentageSourceRow = $percentageRow - 1\n";
+        scriptfile << "while ($percentageSourceRow -ge 2 -and -not $percentageSheet.Cells.Item($percentageSourceRow, 1).HasFormula) { $percentageSourceRow-- }\n";
+        scriptfile << "if ($percentageSourceRow -lt 2) { throw 'No PERCENTAGES formula template row found' }\n";
+        scriptfile << "$percentageSheet.Range(\"A$percentageSourceRow:AG$percentageSourceRow\").Copy($percentageSheet.Range(\"A$percentageRow:AG$percentageRow\"))\n";
+        scriptfile << "$differenceSourceRow = $row - 1\n";
+        scriptfile << "while ($differenceSourceRow -ge 2 -and -not $differenceSheet.Cells.Item($differenceSourceRow, 1).HasFormula) { $differenceSourceRow-- }\n";
+        scriptfile << "if ($differenceSourceRow -lt 2) { throw 'No DIFFERENCE formula template row found' }\n";
+        scriptfile << "$differenceSheet.Range(\"A$differenceSourceRow:AG$differenceSourceRow\").Copy($differenceSheet.Range(\"A$row:AG$row\"))\n";
         scriptfile << "for ($index = 0; $index -lt $simulation.Count; $index++) {\n";
         scriptfile << "    $sheet.Cells.Item($row, $index + 1).Value2 = [double]$simulation[$index]\n";
         scriptfile << "}\n";
+        scriptfile << "$wreTerms = @()\n";
+        scriptfile << "for ($column = 2; $column -le 32; $column++) {\n";
+        scriptfile << "    $columnName = $sheet.Cells.Item(1, $column).Address($false, $false) -replace '[0-9]', ''\n";
+        scriptfile << "    $wreTerms += \"ABS(${columnName}${row}-REFERENCE_3600!`$${columnName}`$2/POWER(3600/AH${row},2))\"\n";
+        scriptfile << "}\n";
+        scriptfile << "$wreFormula = '=IF(A{0}=\"\",\"\",({1})/SUM(B{0}:AF{0}))' -f $row,($wreTerms -join '+')\n";
+        scriptfile << "$sheet.Cells.Item($row, 35).Formula = $wreFormula\n";
+        scriptfile << "$excel.CalculateFull()\n";
+        scriptfile << "if (-not $sheet.Cells.Item($row, 35).HasFormula) { throw \"RAW_PIXELS WRE formula missing at row $row\" }\n";
+        scriptfile << "if (-not $percentageSheet.Cells.Item($percentageRow, 1).HasFormula) { throw \"PERCENTAGES formula missing at row $percentageRow\" }\n";
+        scriptfile << "if (-not $differenceSheet.Cells.Item($row, 1).HasFormula) { throw \"DIFFERENCE formula missing at row $row\" }\n";
         scriptfile << "$workbook.Save()\n";
         scriptfile << "}\n";
         scriptfile << "catch {\n";
@@ -2653,6 +2691,8 @@ bool updateclimatebenchmarkworkbook(
         scriptfile << "    exit 1\n";
         scriptfile << "}\n";
         scriptfile << "finally {\n";
+        scriptfile << "    if ($null -ne $differenceSheet) { [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($differenceSheet) }\n";
+        scriptfile << "    if ($null -ne $percentageSheet) { [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($percentageSheet) }\n";
         scriptfile << "    if ($null -ne $sheet) { [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($sheet) }\n";
         scriptfile << "    if ($null -ne $workbook) { try { $workbook.Close($false) } catch {}; [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($workbook) }\n";
         scriptfile << "    if ($null -ne $excel) { try { $excel.Quit() } catch {}; [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) }\n";
@@ -2754,11 +2794,13 @@ bool loadcirculationreferencewindfields(
         loadcomponent("era5_v500_monthly.uwclim", "v500", fields.upperv, -1.0f);
 }
 
-bool exportclimatebenchmarkimages(planet& world, int runid)
+bool exportclimatebenchmarkimages(
+    planet& world,
+    int runid,
+    const climatebenchmarkmapselection& selection)
 {
     const AppEnvironmentConfig& appenv = getappenvironment();
     const filesystem::path outputdir = appenv.climateBenchmarkImageDirectory;
-    const filesystem::path referencepath = appenv.earthKoppenImagePath;
     const int width = world.width();
     const int height = world.height();
 
@@ -2777,171 +2819,115 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
         return false;
     }
 
-    const filesystem::path benchmarkreferencepath = outputdir / "0.png";
-    bool writereference = filesystem::exists(benchmarkreferencepath) == false;
-
-    if (!writereference)
+    const auto saveimage = [&](const sf::Image& image, climatebenchmarkmapkind kind)
     {
-        sf::Image existingreference;
-        writereference = existingreference.loadFromFile(benchmarkreferencepath.string()) == false ||
-            existingreference.getSize().x != static_cast<unsigned int>(width + 1) ||
-            existingreference.getSize().y != static_cast<unsigned int>(height + 1);
-
-        if (!writereference)
+        const climatebenchmarkmaprequest request{ kind, -1 };
+        const filesystem::path path = outputdir /
+            climatebenchmarkmapfilename(request, runid);
+        if (!image.saveToFile(path.string()))
         {
-            const sf::Color efcolour = benchmarkclimatecolour(31);
-            bool containsEf = false;
-
-            for (unsigned int y = 0; y < existingreference.getSize().y && !containsEf; y++)
-            {
-                for (unsigned int x = 0; x < existingreference.getSize().x; x++)
-                {
-                    if (existingreference.getPixel(x, y) == efcolour)
-                    {
-                        containsEf = true;
-                        break;
-                    }
-                }
-            }
-
-            writereference = !containsEf;
-        }
-    }
-
-    if (writereference)
-    {
-        if (filesystem::exists(referencepath) == false)
-        {
-            cerr << "Climate benchmark reference image not found: " << referencepath.string() << '\n';
+            cerr << "Failed to save benchmark map: " << path.string() << '\n';
             return false;
         }
-
-        sf::Image referenceimage;
-
-        if (referenceimage.loadFromFile(referencepath.string()) == false)
-        {
-            cerr << "Failed to load climate benchmark reference image: " << referencepath.string() << '\n';
-            return false;
-        }
-
-        const sf::Vector2u referencesize = referenceimage.getSize();
-
-        for (unsigned int y = 0; y < referencesize.y; y++)
-        {
-            for (unsigned int x = 0; x < referencesize.x; x++)
-            {
-                int distancesquared = 0;
-                const short climate = nearestbenchmarkclimate(referenceimage.getPixel(x, y), distancesquared);
-
-                if (distancesquared <= benchmarkcolourdistancelimitsquared)
-                    referenceimage.setPixel(x, y, benchmarkclimatecolour(climate));
-                else
-                    referenceimage.setPixel(x, y, sf::Color::Black);
-            }
-        }
-
-        if (referenceimage.saveToFile(benchmarkreferencepath.string()) == false)
-        {
-            cerr << "Failed to save climate benchmark reference image: " << benchmarkreferencepath.string() << '\n';
-            return false;
-        }
-    }
-
-    sf::Image simulatedimage;
-    simulatedimage.create(width + 1, height + 1, sf::Color::Black);
-
-    for (int y = 0; y <= height; y++)
-    {
-        for (int x = 0; x <= width; x++)
-        {
-            const short climate = static_cast<short>(world.climate(x, y));
-            const bool water = world.sea(x, y) == 1 || world.truelake(x, y) != 0 || world.riftlakesurface(x, y) != 0;
-
-            if (water == false && climate >= 1 && climate <= 31)
-                simulatedimage.setPixel(x, y, benchmarkclimatecolour(climate));
-        }
-    }
-
-    const filesystem::path simulatedpath = outputdir / (to_string(runid) + ".png");
-
-    if (simulatedimage.saveToFile(simulatedpath.string()) == false)
-    {
-        cerr << "Failed to save simulated climate image: " << simulatedpath.string() << '\n';
-        return false;
-    }
-
-    sf::Image temperatureimage;
-    sf::Image precipitationimage;
-    temperatureimage.create(width + 1, height + 1, sf::Color::Black);
-    precipitationimage.create(width + 1, height + 1, sf::Color::Black);
-    vector<float> annualprecipitationvalues(
-        static_cast<size_t>(width + 1) * static_cast<size_t>(height + 1));
-
-    for (int y = 0; y <= height; y++)
-    {
-        for (int x = 0; x <= width; x++)
-        {
-            const bool water = world.sea(x, y) == 1 || world.truelake(x, y) != 0 ||
-                world.riftlakesurface(x, y) != 0;
-
-            if (!water)
-            {
-                temperatureimage.setPixel(
-                    x,
-                    y,
-                    benchmarktemperaturecolour(static_cast<float>(world.avetemp(x, y))));
-            }
-
-            const float annualprecipitation =
-                world.averainfloat(x, y) * 12.0f;
-            annualprecipitationvalues[
-                static_cast<size_t>(y) * static_cast<size_t>(width + 1) +
-                static_cast<size_t>(x)] = annualprecipitation;
-            precipitationimage.setPixel(
-                x,
-                y,
-                benchmarkprecipitationcolour(annualprecipitation));
-        }
-    }
-
-    const filesystem::path temperaturepath =
-        outputdir / (to_string(runid) + "_temperature_c.png");
-    const filesystem::path precipitationpreviewpath =
-        outputdir / (to_string(runid) + "_precipitation_mm_year_preview.png");
-    const filesystem::path precipitationtiffpath =
-        outputdir / (to_string(runid) + "_precipitation_mm_year.tif");
-
-    if (temperatureimage.saveToFile(temperaturepath.string()) == false)
-    {
-        cerr << "Failed to save simulated temperature image: " << temperaturepath.string() << '\n';
-        return false;
-    }
-
-    if (precipitationimage.saveToFile(precipitationpreviewpath.string()) == false)
-    {
-        cerr << "Failed to save simulated precipitation preview: " << precipitationpreviewpath.string() << '\n';
-        return false;
-    }
-
-    if (climateio::writefloat32geotiff(
-            precipitationtiffpath.string().c_str(),
-            static_cast<uint32_t>(width + 1),
-            static_cast<uint32_t>(height + 1),
-            annualprecipitationvalues.data()) == false)
-    {
-        cerr << "Failed to save simulated precipitation GeoTIFF: " << precipitationtiffpath.string() << '\n';
-        return false;
-    }
-
-    constexpr array<const char*, CLIMATESEASONCOUNT> circulationseasons = {
-        "january", "april", "july", "october"
+        return true;
     };
-    const filesystem::path circulationdirectory =
-        climatevalidationoutputdirectory(world.seed()) / "circulation";
+
+    if (selection.includes(climatebenchmarkmapkind::koppen))
+    {
+        sf::Image image;
+        image.create(width + 1, height + 1, sf::Color::Black);
+        for (int y = 0; y <= height; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                const short climate = static_cast<short>(world.climate(x, y));
+                const bool water = world.sea(x, y) == 1 || world.truelake(x, y) != 0 ||
+                    world.riftlakesurface(x, y) != 0;
+                if (!water && climate >= 1 && climate <= 31)
+                    image.setPixel(x, y, benchmarkclimatecolour(climate));
+            }
+        }
+        if (!saveimage(image, climatebenchmarkmapkind::koppen))
+            return false;
+    }
+
+    if (selection.includes(climatebenchmarkmapkind::temperature))
+    {
+        sf::Image image;
+        image.create(width + 1, height + 1, sf::Color::Black);
+        for (int y = 0; y <= height; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                const bool water = world.sea(x, y) == 1 || world.truelake(x, y) != 0 ||
+                    world.riftlakesurface(x, y) != 0;
+                if (!water)
+                    image.setPixel(x, y,
+                        benchmarktemperaturecolour(static_cast<float>(world.avetemp(x, y))));
+            }
+        }
+        if (!saveimage(image, climatebenchmarkmapkind::temperature))
+            return false;
+    }
+
+    if (selection.includes(climatebenchmarkmapkind::precipitation) ||
+        selection.includes(climatebenchmarkmapkind::precipitationtiff))
+    {
+        sf::Image image;
+        image.create(width + 1, height + 1, sf::Color::Black);
+        vector<float> values(static_cast<size_t>(width + 1) * (height + 1));
+        for (int y = 0; y <= height; y++)
+        {
+            for (int x = 0; x <= width; x++)
+            {
+                const float precipitation = world.averainfloat(x, y) * 12.0f;
+                values[static_cast<size_t>(y) * (width + 1) + x] = precipitation;
+                image.setPixel(x, y, benchmarkprecipitationcolour(precipitation));
+            }
+        }
+        if (selection.includes(climatebenchmarkmapkind::precipitation) &&
+            !saveimage(image, climatebenchmarkmapkind::precipitation))
+        {
+            return false;
+        }
+        if (selection.includes(climatebenchmarkmapkind::precipitationtiff))
+        {
+            const climatebenchmarkmaprequest request{
+                climatebenchmarkmapkind::precipitationtiff, -1 };
+            const filesystem::path path = outputdir /
+                climatebenchmarkmapfilename(request, runid);
+            if (!climateio::writefloat32geotiff(
+                    path.string().c_str(),
+                    static_cast<uint32_t>(width + 1),
+                    static_cast<uint32_t>(height + 1),
+                    values.data()))
+            {
+                cerr << "Failed to save benchmark GeoTIFF: " << path.string() << '\n';
+                return false;
+            }
+        }
+    }
+
+    const filesystem::path circulationdirectory = climatevalidationoutputdirectory(
+        world.seed()) / "circulation" / ("run_" + to_string(runid));
+    filesystem::create_directories(circulationdirectory, filesystemerror);
+    if (filesystemerror)
+    {
+        cerr << "Failed to create circulation map directory: "
+            << filesystemerror.message() << '\n';
+        return false;
+    }
+    if (selection.requirescirculation() &&
+        !climatevalidation::exportcirculationdiagnostics(
+            circulationdirectory, world, selection))
+    {
+        cerr << "Failed to export selected circulation maps.\n";
+        return false;
+    }
+
     const bool flowvisualizationenabled =
         climatevalidation::circulationflowvisualizationenabled(world);
-    bool referencecomparisonavailable = false;
-    if (flowvisualizationenabled)
+    if (selection.requiresreferencewinds() && flowvisualizationenabled)
     {
         climatevalidation::circulationreferencewindfields referencefields;
         string referencefailure;
@@ -2951,161 +2937,74 @@ bool exportclimatebenchmarkimages(planet& world, int runid)
         }
         else if (!climatevalidation::exportcirculationreferencecomparisons(
                      circulationdirectory,
-                     outputdir,
+                     appenv.referenceClimatePreviewDirectory,
                      world,
-                     referencefields))
+                     referencefields,
+                     selection))
         {
             cerr << "Failed to export ERA5 circulation comparisons.\n";
             return false;
         }
-        else
+    }
+
+    ofstream mapmanifest(circulationdirectory / "map_manifest.csv");
+    if (!mapmanifest.is_open())
+        return false;
+    mapmanifest << "map_id,requested_file,status\n";
+    for (const climatebenchmarkmaprequest& request : selection.requests())
+    {
+        if (request.season < 0 || climatebenchmarkmapisreference(request.kind))
+            continue;
+
+        const string diagnosticfilename = climatebenchmarkmapfilename(request, 0).substr(2);
+        const filesystem::path source = circulationdirectory / diagnosticfilename;
+        const filesystem::path destination = outputdir /
+            climatebenchmarkmapfilename(request, runid);
+        if (!filesystem::exists(source))
         {
-            referencecomparisonavailable = true;
+            mapmanifest << climatebenchmarkmapid(request) << ','
+                << destination.filename().string() << ",skipped\n";
+            continue;
         }
-    }
 
-    vector<string> circulationpreviews = {
-        "surface_wind_speed.png",
-        "surface_divergence.png",
-        "moisture_flux_convergence.png"
-    };
-    if (flowvisualizationenabled)
-    {
-        circulationpreviews.insert(circulationpreviews.end(), {
-            "surface_wind_particles.png",
-            "upper_wind_particles.png",
-            "surface_wind_lic.png",
-            "upper_wind_lic.png"
-        });
-    }
-    if (referencecomparisonavailable)
-    {
-        circulationpreviews.insert(circulationpreviews.end(), {
-            "surface_wind_vector_error.png",
-            "upper_wind_vector_error.png"
-        });
-    }
-    for (const char* season : circulationseasons)
-    {
-        for (const string& preview : circulationpreviews)
+        filesystemerror.clear();
+        filesystem::copy_file(source, destination,
+            filesystem::copy_options::overwrite_existing, filesystemerror);
+        if (filesystemerror)
         {
-            const string filename = string(season) + "_" + preview;
-            const filesystem::path source = circulationdirectory / filename;
-            const filesystem::path destination =
-                outputdir / (to_string(runid) + "_" + filename);
-            if (!filesystem::exists(source))
-            {
-                cerr << "Circulation preview not found: " << source.string() << '\n';
-                return false;
-            }
-
-            filesystem::copy_file(
-                source,
-                destination,
-                filesystem::copy_options::overwrite_existing,
-                filesystemerror);
-            if (filesystemerror)
-            {
-                cerr << "Failed to copy circulation preview: "
-                    << filesystemerror.message() << '\n';
-                return false;
-            }
+            cerr << "Failed to copy circulation map: "
+                << filesystemerror.message() << '\n';
+            return false;
         }
+        mapmanifest << climatebenchmarkmapid(request) << ','
+            << destination.filename().string() << ",written\n";
     }
 
-    ofstream scalefile(outputdir / "physical_map_scales.txt");
-
-    if (!scalefile.is_open())
+    ofstream guide(outputdir / "benchmark_map_guide.txt");
+    if (!guide.is_open())
     {
-        cerr << "Failed to save benchmark physical-map scale description.\n";
+        cerr << "Failed to save benchmark-map guide.\n";
         return false;
     }
-
-    scalefile << "temperature_file={run_id}_temperature_c.png\n";
-    scalefile << "temperature_quantity=four-season mean surface air temperature\n";
-    scalefile << "temperature_units=degrees C\n";
-    scalefile << "temperature_range=-54 to 30 (values outside the range are clamped)\n";
-    scalefile << "temperature_water=black\n";
-    scalefile << "temperature_reference=extra/img/earth/in/earth_temp_l.png\n";
-    scalefile << "precipitation_file={run_id}_precipitation_mm_year.tif\n";
-    scalefile << "precipitation_preview={run_id}_precipitation_mm_year_preview.png\n";
-    scalefile << "precipitation_quantity=four-season mean monthly precipitation multiplied by 12\n";
-    scalefile << "precipitation_units=mm/year\n";
-    scalefile << "precipitation_sample=single-band IEEE float32 (unclamped physical values)\n";
-    scalefile << "precipitation_nodata=-9999.9\n";
-    scalefile << "precipitation_georeference=WGS84 EPSG:4326, global equirectangular, north-to-south\n";
-    scalefile << "precipitation_preview_range=0 to 6000 mm/year (values above the range are clamped)\n";
-    scalefile << "precipitation_water=included\n";
-    scalefile << "precipitation_reference=extra/reference/imerg_precipitation_mm_year.tif\n";
-    scalefile << "circulation_preview={run_id}_{season}_{map}.png\n";
-    scalefile << "circulation_seasons=january,april,july,october\n";
-    scalefile << "circulation_maps=surface_wind_particles,upper_wind_particles,surface_wind_lic,upper_wind_lic,surface_wind_vector_error,upper_wind_vector_error,surface_wind_speed,surface_divergence,moisture_flux_convergence\n";
-    scalefile << "flow_visualization_enabled=" << (flowvisualizationenabled ? 1 : 0) << '\n';
-    scalefile << "flow_visualization_max_horizontal_cells="
-        << climatevalidation::circulationflowvisualizationmaxcolumns() << '\n';
-    scalefile << "flow_visualization_max_total_cells="
-        << climatevalidation::circulationflowvisualizationmaxcells() << '\n';
-    scalefile << "era5_reference_visualization=era5_v1_"
-        << width + 1 << 'x' << height + 1
-        << "_{season}_{surface|upper}_wind_{lic|particles}.png\n";
-    scalefile << "vector_error_range=0 to 25 m/s (values above the range are clamped)\n";
-    scalefile << "circulation_guide=circulation_map_guide.txt\n";
-
-    ofstream circulationguide(outputdir / "circulation_map_guide.txt");
-    if (!circulationguide.is_open())
-    {
-        cerr << "Failed to save circulation-map guide.\n";
-        return false;
-    }
-
-    circulationguide
-        << "CIRCULATION MAP GUIDE\n\n"
-        << "Filename: {run_id}_{season}_{map}.png\n"
-        << "ERA5 filename: era5_v1_{width}x{height}_{season}_{surface|upper}_wind_{lic|particles}.png\n"
-        << "Seasons: January, April, July, and October representative snapshots.\n"
-        << "Projection: global equirectangular; north is at the top and longitude is periodic.\n\n"
-        << "surface_wind_lic\n"
-        << "  Surface/boundary-layer wind streamlines rendered by line-integral convolution (LIC).\n"
-        << "  Bright and dark filaments show streamline orientation, not speed or direction.\n"
-        << "  Yellow arrows resolve LIC's direction ambiguity. The background uses the wind-speed palette below.\n\n"
-        << "upper_wind_lic\n"
-        << "  The same LIC rendering for the model upper layer, referenced to the 500 hPa circulation field.\n\n"
-        << "ERA5 LIC maps\n"
-        << "  Cached reference maps use ERA5 10 m surface winds and 500 hPa upper winds, bilinearly resampled to\n"
-        << "  the simulation grid. They use the same LIC kernel, noise seeds, projection, arrows, and speed palette\n"
-        << "  as the simulated maps, so visual differences come from the vector fields rather than rendering.\n\n"
-        << "surface_wind_particles and upper_wind_particles\n"
-        << "  White deterministic particle trails show forward paths through the surface or upper wind field.\n"
-        << "  Trail density is a seeded visualization choice, not wind magnitude. Yellow arrows show direction.\n"
-        << "  Background speed: dark navy = 0 m/s, cyan = about 13.75 m/s, pale yellow = 25 m/s or faster.\n"
-        << "  Land is brown-gray, ocean is navy, and coastlines are gray.\n\n"
-        << "ERA5 particle maps\n"
-        << "  These are possible because ERA5 supplies the same u/v inputs. They reuse the simulated maps' particle\n"
-        << "  seeds and integration settings, and are cached by renderer version and output dimensions.\n\n"
-        << "surface_wind_vector_error and upper_wind_vector_error\n"
-        << "  Magnitude of the full vector difference |simulated - ERA5| in m/s, not separate component error.\n"
-        << "  Near-black = 0 m/s, purple = 12.5 m/s, yellow = 25 m/s or more. Yellow arrows point in the\n"
-        << "  simulated-minus-ERA5 error-vector direction; subtract that vector to move the simulation toward ERA5.\n"
-        << "  Coastlines are pale gray. The unclamped magnitude GeoTIFF and seasonal/layer summary metrics are stored\n"
-        << "  with the run diagnostics.\n\n"
-        << "surface_wind_speed\n"
-        << "  Scalar surface wind magnitude in m/s. Dark navy = 0, cyan = about 13.75, pale yellow = 25 or more.\n\n"
-        << "surface_divergence\n"
-        << "  Horizontal surface-wind divergence in day^-1, displayed over -1 to +1 day^-1.\n"
-        << "  Blue = negative divergence (air converging), near-black = zero, orange = positive divergence (air spreading).\n\n"
-        << "moisture_flux_convergence\n"
-        << "  Convergence of vertically integrated surface moisture transport in kg m^-2 day^-1 (numerically mm/day of water).\n"
-        << "  Red = negative convergence/divergent drying, near-black = zero, turquoise = positive convergence/moisture supply.\n"
-        << "  The display is clamped to -20 through +20; the GeoTIFF retains the unclamped values.\n\n"
-        << "Raw fields\n"
-        << "  GeoTIFFs for u/v components, speed, divergence, column water, and moisture-flux convergence are in\n"
-        << "  extra/validation/runs/{run_id}/circulation. Their exact units, minima, maxima, and display limits are\n"
-        << "  listed in circulation_diagnostics.csv. Vector-error metrics are in wind_vector_comparison.csv.\n"
-        << "  LIC and particle maps are generated at up to "
+    guide
+        << "BENCHMARK MAP GUIDE\n\n"
+        << "All maps are global equirectangular grids with north at the top and periodic longitude.\n\n"
+        << "{ID}_koppen.png: categorical land climate class; colors follow the workbook's Koeppen-Geiger legend; water is black.\n"
+        << "{ID}_temp.png: four-season mean land surface-air temperature; -54 C dark blue, 0 C pale, 30 C dark red; water black.\n"
+        << "{ID}_precip.png: annual precipitation; black/purple is near 0, blue/cyan moderate, yellow/white 6000+ mm/year.\n"
+        << "{ID}_precip.tif: the same annual precipitation as unclamped float32 mm/year in WGS84 EPSG:4326.\n"
+        << "{ID}_{jan|apr|jul|oct}_s_wind_lic.png: surface-wind LIC. Filaments show flow axes; yellow arrows show direction.\n"
+        << "{ID}_{season}_s_wind_part.png: deterministic surface particle paths. Trail density is not wind speed.\n"
+        << "Upper-wind variants use u_wind. LIC/particle backgrounds encode speed: navy 0, cyan about 13.75, pale yellow 25+ m/s.\n"
+        << "{ID}_{season}_s_wind_err.png: |simulation minus ERA5|; black 0, purple 12.5, yellow 25+ m/s; arrows show error direction.\n"
+        << "{ID}_{season}_s_wind_speed.png: scalar wind speed with the same 0-to-25+ m/s palette.\n"
+        << "{ID}_{season}_s_div.png: divergence per day; blue convergent, black zero, orange divergent, clamped to +/-1 day^-1.\n"
+        << "{ID}_{season}_moist_conv.png: moisture-flux convergence; red drying, black zero, turquoise moisture supply, +/-20 mm/day.\n"
+        << "ERA5 LIC/particle maps use the same renderer and seeds and are cached once per dimensions and renderer version.\n\n"
+        << "LIC and particle maps are generated at up to "
         << climatevalidation::circulationflowvisualizationmaxcolumns()
-        << " horizontal and " << climatevalidation::circulationflowvisualizationmaxcells()
-        << " total cells; larger runs retain scalar and raw diagnostics but skip expensive flow rendering.\n"
-        << "  PNG palettes are diagnostic, not categorical climate classes.\n";
+        << " columns and " << climatevalidation::circulationflowvisualizationmaxcells()
+        << " total cells; higher-resolution runs record them as skipped.\n";
 
     return true;
 }
@@ -3918,7 +3817,8 @@ bool persistclimatebenchmarkdiagnostics(
         "annual_imerg_precipitation_comparison.csv"
     };
     const filesystem::path sourcedirectory = climatevalidationoutputdirectory(seed);
-    const filesystem::path targetdirectory = sourcedirectory.parent_path() / "runs" / to_string(runid);
+    const filesystem::path targetdirectory =
+        getappenvironment().climateBenchmarkRunDirectory / to_string(runid);
     error_code error;
     filesystem::create_directories(targetdirectory, error);
 
@@ -3946,7 +3846,8 @@ bool persistclimatebenchmarkdiagnostics(
         copiedfiles.push_back(filename);
     }
 
-    const filesystem::path circulationdirectory = sourcedirectory / "circulation";
+    const filesystem::path circulationdirectory = sourcedirectory / "circulation" /
+        ("run_" + to_string(runid));
     if (filesystem::exists(circulationdirectory))
     {
         for (filesystem::recursive_directory_iterator iterator(circulationdirectory, error), end;
@@ -3957,11 +3858,11 @@ bool persistclimatebenchmarkdiagnostics(
                 return false;
 
             const filesystem::path relativepath = filesystem::relative(
-                iterator->path(), sourcedirectory, error);
+                iterator->path(), circulationdirectory, error);
             if (error)
                 return false;
 
-            const filesystem::path destination = targetdirectory / relativepath;
+            const filesystem::path destination = targetdirectory / "maps" / relativepath;
             if (iterator->is_directory())
             {
                 filesystem::create_directories(destination, error);
@@ -3979,7 +3880,7 @@ bool persistclimatebenchmarkdiagnostics(
                 }
 
                 if (!error)
-                    copiedfiles.push_back(relativepath.generic_string());
+                    copiedfiles.push_back((filesystem::path("maps") / relativepath).generic_string());
             }
 
             if (error)
@@ -4031,33 +3932,27 @@ bool persistclimatebenchmarkdiagnostics(
 }
 }
 
-bool recordclimatebenchmarkrun(planet& world, const string& information, bool updateworkbook, int* runid)
+bool recordclimatebenchmarkrun(
+    planet& world,
+    const string& information,
+    const climatebenchmarkmapselection& maps,
+    int* runid)
 {
     const int nextrunid = nextclimatebenchmarkrunid();
     const int horizontalresolution = world.width() + 1;
     const string timestamp = climatebenchmarktimestamp();
     const vector<string> codes = orderedclimatecodes();
     const vector<long long> simulationcounts = collectsimulatedclimatecounts(world);
-    const vector<long long> referencecounts = referenceclimatecounts();
+    const vector<double> referencecounts = referenceclimatecounts3600();
     const climatespatialmetrics spatial = compareclimatespatially(world);
     const benchmarkphysicsmetrics physics = collectbenchmarkphysicsmetrics(world);
-    long long totalabsoluteerror = 0;
-    long long totalreference = 0;
-
-    for (size_t index = 0; index < simulationcounts.size() && index < referencecounts.size(); index++)
-    {
-        totalabsoluteerror += llabs(simulationcounts[index] - referencecounts[index]);
-        totalreference += referencecounts[index];
-    }
-
-    const double weightedrelativeerror = totalreference > 0
-        ? static_cast<double>(totalabsoluteerror) / static_cast<double>(totalreference)
-        : 0.0;
+    const double weightedrelativeerror = climatebenchmarkweightedrelativeerror(
+        simulationcounts, referencecounts, horizontalresolution);
 
     if (nextrunid < 2)
         return false;
 
-    if (exportclimatebenchmarkimages(world, nextrunid) == false)
+    if (exportclimatebenchmarkimages(world, nextrunid, maps) == false)
         return false;
 
     if (persistclimatebenchmarkdiagnostics(
@@ -4067,32 +3962,29 @@ bool recordclimatebenchmarkrun(planet& world, const string& information, bool up
         return false;
     }
 
+    string workbookfailure;
+
+    if (updateclimatebenchmarkworkbook(
+        nextrunid, horizontalresolution, codes, simulationcounts, &workbookfailure) == false)
+    {
+        const filesystem::path statuspath =
+            getappenvironment().climateBenchmarkRunDirectory /
+            to_string(nextrunid) / "workbook_update_error.txt";
+        ofstream statusfile(statuspath);
+
+        if (statusfile.is_open())
+            statusfile << workbookfailure << '\n';
+
+        cerr << "Climate benchmark workbook update failed for run "
+            << nextrunid << ".\n";
+        return false;
+    }
+
     if (appendclimatebenchmarkrunlog(
         nextrunid, horizontalresolution, timestamp, information, weightedrelativeerror, spatial, physics) == false)
     {
         cerr << "Failed to update climate benchmark run log.\n";
         return false;
-    }
-
-    if (updateworkbook)
-    {
-        string workbookfailure;
-
-        if (updateclimatebenchmarkworkbook(
-            nextrunid, horizontalresolution, codes, simulationcounts, &workbookfailure) == false)
-        {
-            const filesystem::path statuspath =
-                climatevalidationoutputdirectory(world.seed()).parent_path() /
-                "runs" / to_string(nextrunid) / "workbook_update_error.txt";
-            ofstream statusfile(statuspath);
-
-            if (statusfile.is_open())
-                statusfile << workbookfailure << '\n';
-
-            cerr
-                << "Climate benchmark workbook update failed; run " << nextrunid
-                << " remains recorded in JSON/CSV with all images and diagnostics.\n";
-        }
     }
 
     if (runid != nullptr)
@@ -4455,7 +4347,6 @@ void exportclimatevalidationreport(planet& world)
     writephysicalreferencecomparison(outputdir, world);
     writeipccregioncomparison(outputdir, world);
     writeatmosphericbudget(outputdir, world);
-    climatevalidation::exportcirculationdiagnostics(outputdir / "circulation", world);
     writecirculationprecision(outputdir);
     writepressuredecompositioncomparison(outputdir, world);
     writetemperaturethresholdcomparison(outputdir, world);

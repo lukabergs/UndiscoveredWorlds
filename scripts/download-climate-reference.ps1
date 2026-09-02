@@ -1,5 +1,5 @@
 param(
-    [string]$Destination = "extra/reference/worldclim-2.1-10m",
+    [string]$Destination = "extra/reference/climate/sources/worldclim-2.1-10m",
     [ValidateSet("core", "wind", "imerg", "all")]
     [string]$VariableSet = "core"
 )
@@ -57,7 +57,7 @@ $receipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $destin
 Write-Host "WorldClim reference data is ready at $destinationPath"
 
 if ($VariableSet -eq "imerg" -or $VariableSet -eq "all") {
-    $imergPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\extra\reference\imerg-v07b-annual"))
+    $imergPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\extra\reference\climate\sources\imerg-v07b-annual"))
     $imergGridPath = Join-Path $imergPath "grids"
     $imergArchive = Join-Path $imergPath "IMERG-Final.CLIM.200006-202305.V07B.tif.zip"
     $imergUrl = "https://gpm.nasa.gov/sites/default/files/data/climatologies/2024/IMERG-Final.CLIM.200006-202305.V07B.tif.zip"

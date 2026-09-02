@@ -39,6 +39,8 @@
 #include <vector>
 #include <SFML/Graphics.hpp>
 
+#include "climate_benchmark_outputs.hpp"
+
 #include "world_generation_debug.hpp"
 
 #include "classes.hpp"
@@ -700,7 +702,11 @@ void createoceancurrentmap(planet& world);
 void createsurfacetemperaturemap(planet& world);
 void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<vector<int>>& fractal);
 void exportclimatevalidationreport(planet& world);
-bool recordclimatebenchmarkrun(planet& world, const string& information, bool updateworkbook = true, int* runid = nullptr);
+bool recordclimatebenchmarkrun(
+    planet& world,
+    const string& information,
+    const climatebenchmarkmapselection& maps,
+    int* runid = nullptr);
 void printclimaterelativeerrorreport(planet& world);
 void createtemperaturemap(planet& world, vector<vector<int>>& fractal);
 void createseaicemap(planet& world, vector<vector<int>>& fractal);
