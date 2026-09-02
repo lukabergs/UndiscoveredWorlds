@@ -1975,6 +1975,10 @@ void createtemperaturemap(planet& world, vector<vector<int>>& fractal)
 
 void createseaicemap(planet& world, vector<vector<int>>& fractal)
 {
+    // The coupled ocean already classified seasonal/permanent cover from ice
+    // enthalpy. Liquid SST is pinned at freezing and cannot classify ice age.
+    if (!tuning::climate::oceancurrents::oneWayDiagnosticsOnly)
+        return;
     int width = world.width();
     int height = world.height();
     int sealevel = world.sealevel();

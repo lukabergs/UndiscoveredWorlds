@@ -31,6 +31,24 @@ bool climateCouplingConverged(const ClimateCouplingDiagnostics& d, int minimumIt
         std::max({d.windChange, d.sstChange, d.heatingChange, d.rainfallChange}) <= tolerance;
 }
 void clearClimateCouplingDiagnostics() { couplingDiagnostics.clear(); }
+double adaptiveCouplingRelaxation(double previousRelaxation,
+    const std::vector<double>& previousResidual, const std::vector<double>& residual,
+    double minimumRelaxation, double maximumRelaxation)
+{
+    const double previous = std::clamp(previousRelaxation, minimumRelaxation, maximumRelaxation);
+    if (previousResidual.size() != residual.size() || residual.empty()) return previous;
+    double numerator = 0.0, denominator = 0.0;
+    for (std::size_t i = 0; i < residual.size(); ++i)
+    {
+        const double delta = residual[i] - previousResidual[i];
+        numerator += previousResidual[i] * delta;
+        denominator += delta * delta;
+    }
+    if (!(denominator > 1.0e-20) || !std::isfinite(numerator) || !std::isfinite(denominator)) return previous;
+    // Vector Aitken relaxation. A reversal in heating feedback reduces the
+    // next applied step; convergence is still measured on the raw residual.
+    return std::clamp(-previous * numerator / denominator, minimumRelaxation, maximumRelaxation);
+}
 void appendClimateCouplingDiagnostics(const ClimateCouplingDiagnostics& d) { couplingDiagnostics.push_back(d); }
 const std::vector<ClimateCouplingDiagnostics>& lastClimateCouplingDiagnostics() { return couplingDiagnostics; }
 

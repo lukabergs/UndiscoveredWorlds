@@ -131,5 +131,19 @@ int main()
     expect(!climatephysics::climateCouplingConverged(coupling, 2, 0.02), "heating must converge along with winds/SST/rainfall");
     coupling.heatingChange = 0.01;
     expect(climatephysics::climateCouplingConverged(coupling, 2, 0.02), "all bounded coupled residuals must permit convergence");
+    double fixedPoint = 0.0, relaxation = 0.5;
+    std::vector<double> previousResidual;
+    for (int step = 0; step < 5; ++step)
+    {
+        const std::vector<double> residual = {5.0 - 5.0 * fixedPoint};
+        relaxation = climatephysics::adaptiveCouplingRelaxation(relaxation, previousResidual, residual, 0.1, 0.5);
+        fixedPoint += relaxation * residual[0];
+        previousResidual = residual;
+    }
+    expect(std::abs(fixedPoint - 1.0) < 1.0e-10,
+        "adaptive relaxation must settle oscillatory fixed-point feedback that diverges at a fixed half step");
+    expect(climatephysics::adaptiveCouplingRelaxation(0.3, {2.0}, {2.0}, 0.1, 0.5) == 0.3 &&
+        climatephysics::adaptiveCouplingRelaxation(0.5, {2.0}, {3.0}, 0.1, 0.5) == 0.1,
+        "unchanged residuals must preserve relaxation and growing feedback must respect its lower bound");
     return failures == 0 ? 0 : 1;
 }

@@ -1,4 +1,5 @@
 #include "climate_atmosphere.hpp"
+#include "climate_weather.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -470,6 +471,71 @@ int main()
         zeroZonal, zeroHeating, zeroHeating, modeConfig);
     expect(zeroResponse.surfaceStationarySolver.converged && zeroResponse.upperStationarySolver.converged &&
         zeroResponse.areaWeightedKineticEnergyJm2 == 0.0, "zero forcing must produce zero flow without noise");
+    std::vector<float> thermalPressure(modeCellCount);
+    for (int y = 0; y < modeRows; ++y)
+        for (int x = 0; x < modeColumns; ++x)
+            thermalPressure[y * modeColumns + x] = climateatmosphere::thermalModePressureAnomalyHpa(
+                5.0f * std::cos(2.0f * pi * x / modeColumns), 1.225f, 100000.0f, 70000.0f);
+    const auto thermalResponse = climateatmosphere::solveModeSeparatedCirculation(modeColumns, modeRows,
+        zeroZonal, zeroHeating, thermalPressure, modeConfig);
+    double thermalAlignment = 0.0;
+    double thermalRowMean = 0.0;
+    for (int y = 0; y < modeRows; ++y)
+    {
+        double rowMean = 0.0;
+        for (int x = 0; x < modeColumns; ++x)
+        {
+            const int cell = y * modeColumns + x;
+            rowMean += thermalResponse.surfacePressureAnomalyHpa[cell];
+            thermalAlignment += thermalResponse.surfacePressureAnomalyHpa[cell] * thermalPressure[cell];
+        }
+        thermalRowMean = std::max(thermalRowMean, std::abs(rowMean / modeColumns));
+    }
+    expect(thermalResponse.surfaceStationarySolver.converged && thermalAlignment > 0.0 &&
+        thermalResponse.areaWeightedKineticEnergyJm2 > 0.0 && thermalRowMean < 1.0e-5,
+        "surface thermal gradients must drive pressure and wind without diabatic heating or zonal mass transfer");
+    // The two numerical models should approach the same forced, damped mode.
+    // Feeding the already adjusted steady pressure into the evolving model
+    // instead of its source attenuates this mode a second time.
+    constexpr int comparisonColumns = 32, comparisonRows = 16;
+    std::vector<float> waveSource(comparisonColumns * comparisonRows);
+    for (int y = 0; y < comparisonRows; ++y)
+        for (int x = 0; x < comparisonColumns; ++x)
+            waveSource[y * comparisonColumns + x] = 4.0f *
+                std::sin(pi * (y + 0.5f) / comparisonRows) * std::cos(2.0f * pi * x / comparisonColumns);
+    const auto steadyMode = climateatmosphere::solveSteadyStationaryWavePressure(
+        comparisonColumns, comparisonRows, waveSource, std::vector<float>(waveSource.size(), 43200.0f),
+        48.0f, 86400.0f, 1.225f, 6371000.0f, 0.0f, 1.0f, true, 1000, 1.0e-5f);
+    climateweather::ShallowWaterConfig evolvingConfig;
+    evolvingConfig.rotationRatePerSecond = 0.0f;
+    evolvingConfig.lowerDragTimeSeconds = 43200.0f;
+    evolvingConfig.heightRelaxationTimeSeconds = 86400.0f;
+    evolvingConfig.baroclinicCoupling = 0.0f;
+    const float pressurePerMetre = 1.225f * evolvingConfig.gravityMetresPerSecondSquared / 100.0f;
+    evolvingConfig.lowerMeanDepthMetres = 48.0f / pressurePerMetre;
+    auto evolvingMode = climateweather::makeState(comparisonColumns, comparisonRows, 1, 73);
+    climateweather::ShallowWaterForcing evolvingForcing;
+    evolvingForcing.equilibriumHeightMetres = {steadyMode.equilibriumPressureAnomalyHpa};
+    for (float& value : evolvingForcing.equilibriumHeightMetres[0]) value /= pressurePerMetre;
+    bool evolvingStable = true;
+    for (int step = 0; step < 64; ++step)
+    {
+        const auto d = climateweather::advance(evolvingMode, evolvingConfig, evolvingForcing, 21600.0f);
+        evolvingStable = evolvingStable && d.finite && d.bounded;
+    }
+    double modeDifference = 0.0, modeScale = 0.0;
+    for (int y = 0; y < comparisonRows; ++y)
+        for (int x = 0; x < comparisonColumns; ++x)
+        {
+            const int cell = y * comparisonColumns + x;
+            const double weight = std::sin(pi * (y + 0.5) / comparisonRows);
+            const double expected = steadyMode.pressureAnomalyHpa[cell];
+            modeDifference += weight * std::pow(pressurePerMetre *
+                evolvingMode.layers[0].heightAnomalyMetres[cell] - expected, 2);
+            modeScale += weight * expected * expected;
+        }
+    expect(steadyMode.converged && evolvingStable && std::sqrt(modeDifference / modeScale) < 0.25,
+        "steady and evolving pressure modes must share unadjusted forcing without double attenuation");
     for (int mask = 0; mask < 16; ++mask)
     {
         modeConfig.enabled = {(mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, (mask & 8) != 0};

@@ -21,6 +21,9 @@ struct HorizontalWind
 
 struct StationaryWaveResponse
 {
+    // Retain the forcing separately: a prognostic solve must not adjust the
+    // already adjusted pressure response a second time.
+    std::vector<float> equilibriumPressureAnomalyHpa;
     std::vector<float> pressureAnomalyHpa;
     std::vector<float> residualHistory;
     int iterations = 0;

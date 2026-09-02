@@ -41,6 +41,16 @@ Use repeatable `--map` arguments, or one comma-separated argument, to replace th
 
 Benchmark outputs are under `extra/climate/benchmarks`; numerical climate references, source downloads, and reusable visible previews are grouped under `extra/reference/climate`. Reference observations are validation inputs only and are not fed into generated-world physics.
 
+Recorded runs also export `climate_comparison_cells.csv`. For the fresh validation
+workbook workflow, run `python scripts/summarize-climate-validation.py --run-id ID
+--output DIR` (NumPy and Pillow required). This processes only the selected run
+and the prepared references. Its run-folder `excel_paired_data.csv` and
+`excel_vector_data.csv` match the workbook input column order; copy the matching
+topic formulas for new input rows. `excel_koppen_matrix.csv` contains global
+confusion areas in km2; recompute it at every resolution rather than scaling pixel
+counts. These exports do not automatically append to the new workbook. Coverage
+notes identify missing references and partial ocean-mask coverage.
+
 This remains a reduced climate simulator, not a full general circulation model such as ExoPlaSim. Internal dynamics/transport use cell-centred spherical grids, separate zonal and stationary two-layer closures, quadratic surface drag, linear upper damping, conservative MPDATA moisture transport, diagnosed column heating, and a wind-driven mixed-layer ocean. A bounded outer iteration couples winds, SST, heating and rainfall; conservation and convergence are reported separately. Climate-only shallow-water evolution supplies transient samples, but is not a three-dimensional primitive-equation atmosphere with resolved fronts, baroclinic cyclone development, many vertical levels, or validated storm-track statistics. Radiation is a grey two-layer approximation; convection, clouds, snow and unresolved mixing remain parameterized, and the ocean is not a full ocean GCM. Gameplay weather is deferred and climate generation does not initialize its runtime state. Implementation evidence and remaining tuning/validation are in `docs/tasks/climate-physics/FUTURE_WORK.md`.
 
 ----

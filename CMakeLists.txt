@@ -202,6 +202,7 @@ if(BUILD_TESTING)
         tests/climate_atmosphere_tests.cpp
         climate_atmosphere.cpp
         climate_grid.cpp
+        climate_weather.cpp
     )
     target_include_directories(climate_atmosphere_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     set_target_properties(climate_atmosphere_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)

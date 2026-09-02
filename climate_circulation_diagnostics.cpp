@@ -993,7 +993,7 @@ bool exportcirculationdiagnostics(
     if (oceanworld == &world)
     {
         std::ofstream ocean(outputdirectory / "ocean_fields.csv");
-        ocean << "season,latitude,longitude,east_current_mps,south_current_mps,sst_c,ekman_upwelling_mps,solver_converged,relative_heat_budget_residual\n";
+        ocean << "season,latitude,longitude,east_current_mps,south_current_mps,sst_c,ekman_upwelling_mps,solver_converged,relative_heat_budget_residual,ice_thickness_m,surface_skin_temperature_c\n";
         for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
         {
             const auto& state = oceanstatistics[season];
@@ -1004,7 +1004,8 @@ bool exportcirculationdiagnostics(
                     ocean << season << ',' << 90.0 - 180.0 * (y + 0.5) / oceanrows << ',' << -180.0 + 360.0 * (x + 0.5) / oceancolumns << ','
                         << state.eastCurrentMps[cell] << ',' << state.southCurrentMps[cell] << ',' << state.sstC[cell] << ','
                         << (state.ekmanUpwellingMps.size() > cell ? state.ekmanUpwellingMps[cell] : 0.0f) << ','
-                        << state.converged << ',' << state.relativeHeatBudgetResidual << '\n';
+                        << state.converged << ',' << state.relativeHeatBudgetResidual << ','
+                        << state.iceThicknessMetres[cell] << ',' << state.surfaceSkinTemperatureC[cell] << '\n';
                 }
         }
         success = ocean.good() && success;

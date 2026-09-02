@@ -207,7 +207,9 @@ float axisymmetricOverturningPressureAnomalyHpa(
         0.0f,
         hemisphereSpan);
     const float hadleyEdge = std::min(hadleyHalfWidthDegrees, hemisphereSpan * 0.80f);
-    const float subpolarLow = hadleyEdge + 0.5f * (hemisphereSpan - hadleyEdge);
+    // Reduced eddy-cell closure: the subpolar low lies poleward of the
+    // midpoint between the Hadley edge and the pole.
+    const float subpolarLow = hadleyEdge + 0.65f * (hemisphereSpan - hadleyEdge);
 
     if (distance <= hadleyEdge)
     {
@@ -756,6 +758,7 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
     const size_t cellCount = static_cast<size_t>(std::max(0, longitudeCells)) *
         static_cast<size_t>(std::max(0, latitudeCells));
     response.pressureAnomalyHpa = equilibriumPressureAnomalyHpa;
+    response.equilibriumPressureAnomalyHpa = equilibriumPressureAnomalyHpa;
 
     if (longitudeCells < 3 || latitudeCells < 3 ||
         equilibriumPressureAnomalyHpa.size() != cellCount ||
@@ -1219,6 +1222,7 @@ ModeSeparatedCirculation solveModeSeparatedCirculation(
     }
     else
     {
+        result.surfaceStationarySolver.equilibriumPressureAnomalyHpa.assign(cellCount, 0.0f);
         result.surfaceStationarySolver.pressureAnomalyHpa.assign(cellCount, 0.0f);
         result.surfaceStationarySolver.converged = true;
     }
@@ -1243,6 +1247,7 @@ ModeSeparatedCirculation solveModeSeparatedCirculation(
     }
     else
     {
+        result.upperStationarySolver.equilibriumPressureAnomalyHpa.assign(cellCount, 0.0f);
         result.upperStationarySolver.pressureAnomalyHpa.assign(cellCount, 0.0f);
         result.upperStationarySolver.converged = true;
     }

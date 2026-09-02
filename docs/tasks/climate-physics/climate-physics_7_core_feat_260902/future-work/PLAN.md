@@ -1,52 +1,31 @@
-# Goal
+# Final state
 
-Complete the approved climate-engine integrations before climate-skill tuning.
-Gameplay weather and runtime storm systems remain deferred.
+Fresh workbook: `outputs/01a062ac-02ef-7710-bf6a-25bd1f12cf87/climate_validation.xlsx`.
+Contains only benchmark 159: seed 1, 64x33 output, 64x32 wind/moisture,
+selected physics and 24-pass cap. Coupling converged at pass 13; aggregate
+heating change 1.49%. No earlier results migrated; original workbook preserved.
 
-# Final checkpoint
-
-Production integrations and verification are complete for this pass. This is
-not a claim of converged Earth climate or complete ocean thermodynamics.
-Pre-polish code is preserved at `5ae36fa`; run 146 and unrelated `outputs/`
-remain untouched. Run 118 is at `b402b8a5f1270545f0278926cbff7a188707fd62`.
-No files were deleted, dependencies/save contracts changed, or remote writes made.
-
-# Implemented
-
-Local quadratic drag; separate upper bandwidth and layer heating; grey column
-radiation plus actual condensation/re-evaporation/sensible heat; warm-started,
-bounded climate coupling; accepted-only ocean states and real atmosphere/SST
-feedback; daily finalized-wind statistics; actual MPDATA face-flux diagnostics;
-reference alignment, corrected legends/cache, and optional diagnostic map IDs.
-Five default maps and mandatory workbook population remain unchanged.
-Details: `docs/tasks/climate-physics/FUTURE_WORK.md`.
+28 sheets cover paired reference values, 87 spatial regions, formula-based
+scores, distributions/features, budgets and explicit coverage gaps. Koppen is
+global only, using common-mask spherical areas rather than resolution-scaled
+pixel counts. Numeric exports and `scripts/summarize-climate-validation.py`
+provide reusable inputs, including CSVs ordered for Excel pasting.
 
 # Verification
 
-- `cmake --build out/build/x64-Release --config Release --parallel 4`: passed.
-- `cmake --build out/build/x64-Debug --config Debug --parallel 4`: passed.
-- `ctest --test-dir out/build/x64-Release -C Release --output-on-failure`: 13/13.
-- `ctest --test-dir out/build/x64-Debug -C Debug --output-on-failure`: 13/13.
+- `cmake --build out/build/x64-Release --config Release --target UndiscoveredWorlds climate_physics_tests climate_ocean_dynamics_tests climate_atmosphere_tests climate_pipeline_tests climate_weather_tests climate_benchmark_outputs_tests --parallel 4`: passed before integration.
+- `ctest --test-dir out/build/x64-Release -C Release -R '^climate_(physics|ocean_dynamics|atmosphere|pipeline|weather|benchmark_outputs)_tests$' --output-on-failure`: 6/6 passed before integration.
+- Bundled Python: `tests/test_climate_validation_summary.py`: 5/5 deterministic checks.
+- One completed Earth benchmark, `--seed 1 --resolution 64`, imported `out/climate-tuning/earth64/` terrain, `--map none`: exit 0.
+- Workbook scalar/confusion reconciliation, four-quarter water closure, formula error/cache inspection, all-sheet visual inspection and ZIP/XML validation passed.
 - `git -c core.safecrlf=false diff --check`: passed.
-- Earth run 147, seed 1, 512x257: 1281.05 s summed generation stages; exactly five default maps.
-- Isolated repeat: identical benchmark metrics, five map hashes and checked budget/process/ocean/statistics CSVs. All 19 selected maps and four ERA5 previews written; PNG dimensions verified.
-- `out/climate-engine-verification/verify_maps.ps1`, `verify_outputs.mjs` and `verification.json`: exact commands and assertions.
-- Read-only artifact-tool workbook check: run 147 is row 148, HRES 512, counts/WRE agree, no formula errors, inspection preserved file hash. Script/report: `inspect_workbook.mjs`, `workbook-inspection.json` in the same verification folder.
-- Final generated-world smoke: `--generate-world --seed 73021 --resolution 32 --plate-cycles 1 --cycle-steps 1 --plates 4 --no-rivers --no-lakes --no-deltas --no-profile-log --save out/climate-engine-verification/final-smoke-32.uww`: passed, coupled convergence at iteration 3.
-- A 16-wide terrain smoke stalled before reaching climate and was terminated; that terrain-scale case is unverified and outside this climate pass.
-- Visual checks: run-147 LIC, particles, rainfall; optional consistency/current maps; reference LIC and workbook row. ERA5 v2 previews copied into the existing reference folder, preserving prior versions.
 
-# Remaining uncertainty
+# Remaining limits
 
-Run 147's inner solves and snow-inclusive hydrology converged, but its outer
-loop hit six passes: relative wind/heating/rainfall changes 0.216/0.231/0.318
-against 0.02 tolerance. Seasonal relative water residual is at most 6e-9 in the
-rounded CSV; column exchange closure below 4.47e-14 W/m2. Those budgets do not
-prove equilibrium. Rainfall remains excessively banded and gyres weak.
-
-Investigate nonlinear heating/rainfall coupling and adaptive relaxation.
-Ice-covered ocean cells still need separate ice-skin/liquid-SST and freeze/melt
-enthalpy treatment. Upper-layer sampling yields only about three effectively
-independent states per quarter. Multi-seed, high-resolution, long-duration,
-reference-variability and full runtime/save integration tiers remain unverified.
-Existing MSBuild shared-intermediate-directory warnings remain.
+Higher-resolution, long-duration and additional parameter/seed runs remain
+unverified. Reference gaps and temporal/layer proxies are explicit in Coverage.
+Ocean summaries cover cells identified by captured currents/ice; the solver's
+native wet mask is not exported, and final terrain is unsuitable as a substitute.
+Entirely stationary ice-free wet cells may be omitted. Future runs require new
+spatial inputs and formula rows; automatic appending to the new workbook is not
+implemented. Physics findings and next steps remain in `FUTURE_WORK.md`.

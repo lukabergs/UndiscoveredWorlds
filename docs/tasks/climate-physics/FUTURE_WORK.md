@@ -43,6 +43,13 @@ changing winds, positivity and mass; uniform flow, vortex and polar trails.
   the same local ocean/land/relief coefficients in the pressure solve and final
   wind diagnosis; the upper layer uses linear damping. The old output-grid
   pressure/height relaxation is removed.
+- Surface thermal anomalies now add a hydrostatic pressure response, tapering
+  to zero at 700 hPa; heating still supplies its separate diabatic response.
+  This reduced boundary-layer closure follows the mechanism of
+  [Lindzen and Nigam (1987)](https://ntrs.nasa.gov/citations/19880029939).
+  The calibrated overturning depth is 16 km and the subpolar low sits 65% of
+  the remaining latitude span poleward of the Hadley edge. These are reduced
+  closures, not resolved eddy dynamics or observed pressure inputs.
 - Upper topography uses damped rotating mountain-wave propagation/evanescence
   of zonal terrain modes, not copied surface windward/lee pressure. Calm
   incident flow gives zero wave forcing. This remains a reduced vertical-mode
@@ -82,6 +89,9 @@ geopotential is not a positive total water-column thickness. RK2, local wave
 viscosity, CFL/source substeps, amplitude bounds and atomic rollback protect the
 reduced model. The climate path spins up then averages 30 evolving states; its
 blend and independent fallback are explicit controls.
+The evolving solve receives the original equilibrium forcing, avoiding a
+second attenuation of the already adjusted stationary response. A matching
+forced-mode regression covers steady/evolving pressure consistency.
 
 An existing experimental gameplay backend follows interpolated seasonal jets.
 `planet::advanceweather(seconds, optionalHorizontalCells)` advances only the
@@ -124,8 +134,20 @@ are rejected; fallback uses atmospheric SST and zero currents/upwelling.
 `oneWayDiagnosticsOnly` prevents diagnosed SST from feeding atmospheric
 temperature/evaporation while keeping ocean diagnostics available. Wind stress
 shares the atmosphere's ocean drag, air density, radius and rotation constants.
-This is a fixed seasonal-interval mixed-layer response with a prescribed deep
-reservoir, not a spun-up three-dimensional global ocean/sea-ice model.
+Liquid SST and the deep reservoir cannot cool below the prescribed seawater
+freezing point (-1.8 C). A stationary slab-ice enthalpy reservoir receives further
+cooling; warming melts it before heating liquid. Zero-capacity conductive ice
+skin is diagnosed separately with linearized atmospheric exchange. Production
+feeds skin temperature and seasonal ice cover to atmospheric heating/evaporation
+while SST/current diagnostics retain liquid temperature. Ocean CSVs include ice
+thickness and skin temperature; heat closure includes latent energy. Initial
+seasonal ice thickness is prescribed as 1 m in frozen base-climate cells.
+This is a fixed seasonal-interval response, not a spun-up three-dimensional
+global ocean/sea-ice model; ice transport, brine and snow-on-ice are unresolved.
+Atmospheric latent/cloud temperature adjustments are separate from surface
+temperature. Surface exchange uses skin saturation and actual vapour storage;
+lifted-parcel cooling remains in condensation, not surface sensible exchange.
+Albedo and transfer coefficients vary continuously with snow/ice cover.
 
 Both generation pipelines now order winds before ocean/SST before evaporation
 and rainfall. Tests cover this order, coastal faces, western intensification,
@@ -156,17 +178,37 @@ deterministic coupling and rejected incomplete basin solves.
 
 ## Remaining tuning/validation, not missing engine activation
 
-- Run 147: inner atmosphere/ocean solves and snow-inclusive hydrology converged,
-  but the outer fixed point did not (six-pass limit; final relative wind/heating/
-  rainfall changes 0.216/0.231/0.318). First numerical follow-up: investigate
-  nonlinear heating/rainfall feedback, stability diagnosis and adaptive coupling
-  relaxation; do not remove a physical component just to recover a climate score.
-- Ocean ice-covered cells still need a freeze/melt enthalpy closure and a clear
-  distinction between ice-skin temperature and liquid mixed-layer SST. The
-  reduced reservoir presently inherits subfreezing polar temperatures; closed
-  heat accounting alone does not make those values physically valid ocean SST.
+- Coarse controls 151/158 (seed 1, 64x33, 12 passes): annual ERA5 surface u/v
+  correlations improve 0.525/0.338 to 0.735/0.406; quarterly vector RMSE falls
+  4.730 to 4.011 m/s. Stationary vector correlation improves only 0.172 to 0.221;
+  tropical basin structure and upper stationary circulation remain poor.
+  Equatorial rainfall falls 2181 to 2101 mm/year (IMERG 1808), land RMSE 806 to
+  790, but mean land rainfall worsens 469 to 404 against 708 mm/year. Better
+  wind-belt placement has not solved moisture delivery and rainfall geography.
+  Heating remains 2.77%, above the unchanged 2% fixed-point tolerance.
+  The earlier 512x257 attempt was interrupted. Fresh workbook baseline 159
+  subsequently completed at 64x33, seed 1, selected physics/24-pass cap;
+  coupling passed at iteration 13 with 1.49% aggregate heating change.
+  Higher-resolution validation remains open.
+- Fresh validation workbook: `outputs/01a062ac-02ef-7710-bf6a-25bd1f12cf87/climate_validation.xlsx`.
+  Only run 159 is included. Numeric cell exports and
+  `scripts/summarize-climate-validation.py` provide paired spatial inputs;
+  Excel calculates derived scores. Global Koppen uses spherical areas and
+  common masks; regional tables cover other variables. Reference gaps are explicit.
+- Export the ocean solver's native wet-cell mask: final terrain changes after
+  climate, so it cannot reliably reconstruct that mask. Workbook ocean summaries
+  use cells identified by nonzero captured currents or ice and flag partial
+  coverage; entirely stationary ice-free cells may be omitted.
+- Slab-ice freeze/melt and skin/SST separation are implemented. Validate the
+  prescribed initial ice reservoir and linearized ice-surface exchange against
+  seasonal ice extent; no observational sea-ice skill is claimed yet.
 - Earth moisture/precipitation/Koppen, surface/upper ERA5 vectors, pressure
   decomposition, jets, shear, ascent, ocean currents and SST comparisons.
+- Prioritize seasonal basin pressure structure and amplitude next: the thermal
+  pressure correction helps winter much more than spring/summer. Both global
+  and extratropical-ocean increases in momentum depth failed controlled trials
+  (148, 157). Diagnose simulated surface-temperature/heating gradients before
+  further drag tuning; then assess moisture delivery and ascent over dry land.
 - Multi-seed/planet-parameter and long-duration climate/energy soak suites;
   uncertainty-estimator validation and recovery of parent seasonal climatology.
 - Benchmark runtime, forcing-bandwidth/grid-refinement studies and tuning of

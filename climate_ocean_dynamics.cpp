@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace climateocean
 {
@@ -12,7 +13,8 @@ bool usableOceanState(const OceanState& state, std::size_t cellCount)
     const auto valid = [&](const auto& values) { return values.size() == cellCount &&
         std::all_of(values.begin(), values.end(), [](auto v) { return std::isfinite(v); }); };
     return state.finite && state.converged && valid(state.sstC) && valid(state.eastCurrentMps) &&
-        valid(state.southCurrentMps) && valid(state.coupledEastWindMps) && valid(state.coupledSouthWindMps);
+        valid(state.southCurrentMps) && valid(state.coupledEastWindMps) && valid(state.coupledSouthWindMps) &&
+        valid(state.surfaceSkinTemperatureC) && valid(state.iceThicknessMetres);
 }
 OceanState solveWindDrivenOcean(int columns, int rows,
     const OceanForcing& forcing, const OceanConfig& config)
@@ -26,11 +28,16 @@ OceanState solveWindDrivenOcean(int columns, int rows,
     if (columns < 4 || rows < 3 || forcing.landMask.size() != count ||
         !valid(forcing.bathymetryMetres) || !valid(forcing.eastWindMps) || !valid(forcing.southWindMps) ||
         !valid(forcing.atmosphericTemperatureC) || !valid(forcing.initialSstC) ||
+        (!forcing.initialIceThicknessMetres.empty() && (!valid(forcing.initialIceThicknessMetres) ||
+            std::any_of(forcing.initialIceThicknessMetres.begin(), forcing.initialIceThicknessMetres.end(), [](float h) { return h < 0.0f; }))) ||
+        (!forcing.surfaceHeatFluxReferenceTemperatureC.empty() && !valid(forcing.surfaceHeatFluxReferenceTemperatureC)) ||
         (!forcing.surfaceHeatFluxWm2.empty() && !valid(forcing.surfaceHeatFluxWm2)) ||
         !(config.planetRadiusMetres > 0.0f) || !(config.waterDensityKgM3 > 0.0f) ||
         !(config.airDensityKgM3 > 0.0f) || !(config.barotropicDragPerSecond > 0.0f) ||
         !(config.mixedLayerDepthMetres > 0.0f) || !(config.waterHeatCapacityJkgK > 0.0f) ||
         !(config.oceanTimeStepSeconds > 0.0f) || config.heatDiffusivityM2S < 0.0f ||
+        !std::isfinite(config.freezingTemperatureC) || !(config.iceDensityKgM3 > 0.0f) ||
+        !(config.latentHeatFusionJkg > 0.0f) || !(config.iceConductivityWmK > 0.0f) ||
         config.surfaceHeatExchangeWm2K < 0.0f || !(config.minimumCoriolisPerSecond > 0.0f))
     {
         state.finite = false;
@@ -39,6 +46,8 @@ OceanState solveWindDrivenOcean(int columns, int rows,
     const auto grid = climategrid::makeSphericalGrid(columns, rows, config.planetRadiusMetres);
     const double dy = config.planetRadiusMetres * grid.latitudeSpacingRadians;
     const double heatCapacity = config.waterDensityKgM3 * config.waterHeatCapacityJkgK * config.mixedLayerDepthMetres;
+    const double freezing = config.freezingTemperatureC;
+    const double latentHeatPerMetre = config.iceDensityKgM3 * config.latentHeatFusionJkg;
     const auto ocean = [&](std::size_t cell) { return !forcing.landMask[cell] && forcing.bathymetryMetres[cell] > 0.0f; };
     const auto depth = [&](std::size_t cell) { return std::max(50.0f, forcing.bathymetryMetres[cell]); };
     const auto vertex = [&](int x, int y) { return static_cast<std::size_t>(y) * columns + grid.wrapColumn(x); };
@@ -62,6 +71,38 @@ OceanState solveWindDrivenOcean(int columns, int rows,
     state.southVolumeTransportM3S.assign(count, 0.0);
     state.ekmanUpwellingMps.assign(count, 0.0f);
     state.sstC = forcing.initialSstC;
+    state.surfaceSkinTemperatureC = forcing.initialSstC;
+    state.iceThicknessMetres.assign(count, 0.0f);
+    // Enthalpy is relative to liquid water at freezing. Negative values store
+    // latent energy in stationary ice; only liquid sensible heat is advected.
+    std::vector<double> initialEnthalpy(count), coupledEnthalpy(count);
+    for (std::size_t c = 0; c < count; ++c)
+    {
+        initialEnthalpy[c] = heatCapacity * (forcing.initialSstC[c] - freezing) -
+            (forcing.initialIceThicknessMetres.empty() ? 0.0 : latentHeatPerMetre * forcing.initialIceThicknessMetres[c]);
+        coupledEnthalpy[c] = initialEnthalpy[c];
+        if (ocean(c)) state.sstC[c] = static_cast<float>(freezing + std::max(0.0, initialEnthalpy[c]) / heatCapacity);
+    }
+    const auto surfaceExchange = [&](std::size_t c, double enthalpy, double liquidT)
+    {
+        const double airT = forcing.atmosphericTemperatureC[c];
+        const double exchange = config.surfaceHeatExchangeWm2K;
+        const double referenceT = forcing.surfaceHeatFluxReferenceTemperatureC.empty()
+            ? airT : forcing.surfaceHeatFluxReferenceTemperatureC[c];
+        const double referenceFlux = forcing.surfaceHeatFluxWm2.empty() ? 0.0 : forcing.surfaceHeatFluxWm2[c];
+        double skin = liquidT;
+        if (enthalpy < 0.0)
+        {
+            const double conductance = config.iceConductivityWmK / std::max(1.0e-6, -enthalpy / latentHeatPerMetre);
+            // Zero heat-capacity ice: conduction balances the linearized
+            // atmospheric exchange; the surface is capped at melting.
+            const double sourceT = forcing.surfaceHeatFluxWm2.empty() ? airT : referenceT;
+            skin = std::min(freezing, (referenceFlux + exchange * sourceT + conductance * freezing) / (exchange + conductance));
+        }
+        const double flux = forcing.surfaceHeatFluxWm2.empty() ? exchange * (airT - skin)
+            : referenceFlux - exchange * (skin - referenceT);
+        return std::pair<double, double>{skin, flux};
+    };
     state.coupledEastWindMps = forcing.eastWindMps;
     state.coupledSouthWindMps = forcing.southWindMps;
     state.coupledPressureAnomalyHpa.assign(count, 0.0f);
@@ -187,6 +228,9 @@ OceanState solveWindDrivenOcean(int columns, int rows,
         // Each outer iteration solves the SAME finite seasonal interval from
         // T0, not a progressively longer integration mistaken for convergence.
         std::vector<double> temperature(forcing.initialSstC.begin(), forcing.initialSstC.end());
+        auto enthalpy = initialEnthalpy;
+        for (std::size_t c = 0; c < count; ++c)
+            if (ocean(c)) temperature[c] = freezing + std::max(0.0, enthalpy[c]) / heatCapacity;
         const double interval = config.oceanTimeStepSeconds * std::max(1, config.heatStepsPerIteration);
         const int substeps = std::max(1, static_cast<int>(std::ceil(interval * maximumRate / 0.7)));
         const double dt = interval / substeps;
@@ -217,15 +261,14 @@ OceanState solveWindDrivenOcean(int columns, int rows,
                     // Fixed-depth continuity closes horizontal convergence via
                     // vertical exchange with the deep reservoir. Uniform T is
                     // invariant when the deep contrast and heat exchange vanish.
-                    const double deepT = forcing.initialSstC[c] - config.deepWaterTemperatureContrastK;
-                    const double surfaceSource = forcing.surfaceHeatFluxWm2.empty()
-                        ? config.surfaceHeatExchangeWm2K * (forcing.atmosphericTemperatureC[c] - temperature[c])
-                        : forcing.surfaceHeatFluxWm2[c];
+                    const double deepT = std::max(freezing, static_cast<double>(forcing.initialSstC[c] - config.deepWaterTemperatureContrastK));
+                    const double surfaceSource = surfaceExchange(c, enthalpy[c], temperature[c]).second;
                     const double source = surfaceSource / heatCapacity +
                         divergence[c] * (divergence[c] > 0.0 ? deepT : temperature[c]);
                     expectedHeatChange += dt * area * heatCapacity * source;
                     absoluteHeatExchange += std::abs(dt * area * heatCapacity * source);
-                    temperature[c] += dt * (tendency[c] / area + source);
+                    enthalpy[c] += dt * heatCapacity * (tendency[c] / area + source);
+                    temperature[c] = freezing + std::max(0.0, enthalpy[c]) / heatCapacity;
                 }
         }
         double heatChange = 0.0, residual = 0.0, totalArea = 0.0;
@@ -237,13 +280,18 @@ OceanState solveWindDrivenOcean(int columns, int rows,
                 const auto c = grid.index(x, y);
                 if (!ocean(c)) continue;
                 const double area = grid.cellAreasSquareMetres[y];
-                heatChange += area * heatCapacity * (temperature[c] - forcing.initialSstC[c]);
-                const double delta = temperature[c] - state.sstC[c];
+                heatChange += area * (enthalpy[c] - initialEnthalpy[c]);
+                // Include ice-energy changes in convergence even while SST is
+                // pinned at freezing; relax energy, not temperature alone.
+                const double delta = (enthalpy[c] - coupledEnthalpy[c]) / heatCapacity;
                 residual += area * delta * delta; // normalized by 1 K below
                 totalArea += area;
-                state.sstC[c] += relaxation * static_cast<float>(delta);
+                coupledEnthalpy[c] += relaxation * (enthalpy[c] - coupledEnthalpy[c]);
+                state.sstC[c] = static_cast<float>(freezing + std::max(0.0, coupledEnthalpy[c]) / heatCapacity);
+                state.iceThicknessMetres[c] = static_cast<float>(std::max(0.0, -coupledEnthalpy[c]) / latentHeatPerMetre);
+                state.surfaceSkinTemperatureC[c] = static_cast<float>(surfaceExchange(c, coupledEnthalpy[c], state.sstC[c]).first);
                 targetPressure[c] = -config.sstWindFeedbackMpsPerK * 10.0f *
-                    (state.sstC[c] - forcing.atmosphericTemperatureC[c]);
+                    (state.surfaceSkinTemperatureC[c] - forcing.atmosphericTemperatureC[c]);
             }
         state.heatBudgetResidualJ = heatChange - expectedHeatChange;
         state.relativeHeatBudgetResidual = state.heatBudgetResidualJ /
@@ -273,6 +321,7 @@ OceanState solveWindDrivenOcean(int columns, int rows,
         state.relativeResidual = totalArea > 0.0 ? static_cast<float>(std::sqrt(residual / totalArea)) : 0.0f;
         state.residualHistory.push_back(state.relativeResidual);
         state.finite = valid(state.sstC) && valid(state.coupledEastWindMps) && valid(state.coupledSouthWindMps) &&
+            valid(state.iceThicknessMetres) && valid(state.surfaceSkinTemperatureC) &&
             std::isfinite(state.streamfunctionRelativeResidual);
         state.converged = state.finite && state.streamfunctionRelativeResidual <= config.streamfunctionTolerance &&
             (config.oneWay || state.relativeResidual <= config.convergenceTolerance);

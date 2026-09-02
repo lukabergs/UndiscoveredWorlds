@@ -181,8 +181,11 @@ namespace circulation
 inline constexpr int iterations = 24;
 inline constexpr float surfaceReferencePressurePa = 100000.0f;
 inline constexpr float upperReferencePressurePa = 50000.0f;
+// Thermal anomalies taper to zero at the top of the trade-cumulus layer.
+// This thermodynamic depth is separate from the surface momentum depth.
+inline constexpr float surfaceThermalTopPressurePa = 70000.0f;
 inline constexpr float referenceTemperatureK = 288.0f;
-inline constexpr float troposphereHeightMetres = 10000.0f;
+inline constexpr float troposphereHeightMetres = 16000.0f; // Held-Hou overturning depth
 inline constexpr float overturningMassRedistributionEfficiency = 0.060f;
 inline constexpr float mechanicalTopographicPressureAmplitudeHpa = 6.0f;
 inline constexpr float mechanicalTopographicTerrainScaleMetres = 2000.0f;
@@ -234,10 +237,11 @@ inline constexpr float lowerLongwaveOpticalDepth = 1.0f;
 inline constexpr float upperLongwaveOpticalDepth = 0.5f;
 inline constexpr float lowerShortwaveOpticalDepth = 0.12f;
 inline constexpr float upperShortwaveOpticalDepth = 0.10f;
-inline constexpr int maximumCouplingIterations = 6;
+inline constexpr int maximumCouplingIterations = 24;
 inline constexpr int minimumCouplingIterations = 2;
 inline constexpr float couplingRelativeTolerance = 0.02f;
 inline constexpr float couplingHeatingRelaxation = 0.5f;
+inline constexpr float couplingMinimumHeatingRelaxation = 0.1f;
 inline constexpr float surfaceToUpperModeCoupling = 0.10f;
 inline constexpr float upperOrographicProjection = 0.20f;
 inline constexpr bool enableZonalMode = true;
@@ -368,6 +372,7 @@ inline constexpr float allRainTemperatureC = 2.0f;
 inline constexpr float degreeDaySnowMeltMmPerDegreeC = 3.0f;
 inline constexpr float maximumSnowStorageMm = 5000.0f;
 inline constexpr float snowCoverConvergenceThresholdMm = 1.0f;
+inline constexpr float fullSnowCoverWaterEquivalentMm = 10.0f;
 inline constexpr float dynamicVerticalCooling = 0.025f;
 inline constexpr float topographicUpliftCoolingCPerMetre = 0.0040f;
 inline constexpr float dynamicSubsidenceWarming = 0.018f;
