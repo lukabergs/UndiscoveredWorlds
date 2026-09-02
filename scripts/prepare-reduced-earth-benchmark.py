@@ -114,12 +114,12 @@ def save_reference(path: Path, values: np.ndarray) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--factor", type=int, default=4)
-    parser.add_argument("--land", type=Path, default=Path("extra/img/earth/in/earth_land_l_3.png"))
-    parser.add_argument("--sea", type=Path, default=Path("extra/img/earth/in/earth_sea_l_1.png"))
+    parser.add_argument("--land", type=Path, default=Path("extra/reference/earth/base-maps/earth_land_l_3.png"))
+    parser.add_argument("--sea", type=Path, default=Path("extra/reference/earth/base-maps/earth_sea_l_1.png"))
     parser.add_argument(
         "--reference",
         type=Path,
-        default=Path("extra/reference/earth_precipitation_grid.csv"),
+        default=Path("extra/reference/climate/processed/earth_precipitation_grid.csv"),
     )
     parser.add_argument("--output-dir", type=Path, default=Path("out/reduced-earth-benchmark"))
     return parser.parse_args()

@@ -55,6 +55,7 @@ set(SOURCES
     assetdata.cpp
     classes.cpp
     climate_atmosphere.cpp
+    climate_benchmark_outputs.cpp
     climate_circulation_diagnostics.cpp
     climate_energy.cpp
     climate_hydrology.cpp
@@ -175,4 +176,12 @@ if(BUILD_TESTING)
     target_include_directories(climate_tiff_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     set_target_properties(climate_tiff_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
     add_test(NAME climate_tiff_tests COMMAND climate_tiff_tests)
+
+    add_executable(climate_benchmark_outputs_tests
+        tests/climate_benchmark_outputs_tests.cpp
+        climate_benchmark_outputs.cpp
+    )
+    target_include_directories(climate_benchmark_outputs_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_benchmark_outputs_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_benchmark_outputs_tests COMMAND climate_benchmark_outputs_tests)
 endif()

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "climate_benchmark_outputs.hpp"
+
 #include <array>
 #include <filesystem>
 #include <vector>
@@ -35,7 +37,8 @@ bool capturedcirculationwind(
     float& v);
 bool exportcirculationdiagnostics(
     const std::filesystem::path& outputdirectory,
-    planet& world);
+    planet& world,
+    const climatebenchmarkmapselection& selection);
 bool circulationflowvisualizationenabled(const planet& world);
 int circulationflowvisualizationmaxcolumns();
 int circulationflowvisualizationmaxcells();
@@ -43,5 +46,6 @@ bool exportcirculationreferencecomparisons(
     const std::filesystem::path& diagnosticoutputdirectory,
     const std::filesystem::path& referencecacheoutputdirectory,
     planet& world,
-    const circulationreferencewindfields& referencefields);
+    const circulationreferencewindfields& referencefields,
+    const climatebenchmarkmapselection& selection);
 }

@@ -21,6 +21,30 @@ For upstream dependency contract details and the fixed-seed validation workflow,
 
 ----
 
+* Climate benchmark workflow
+
+The Earth benchmark is a deterministic climate run over imported reference terrain. Its default grid is 512x257: 512 longitude samples, including a separate north and south pole row for 257 latitude samples. `--resolution` accepts an even width and derives the latitude count as `width / 2 + 1`, so switching to 2048x1025 does not require a code edit.
+
+```text
+UndiscoveredWorlds.exe --generate-world --earth-climate-benchmark --resolution 512
+```
+
+Every recorded benchmark appends its climate counts to `extra/climate/workbooks/climate.xlsx`; failure to update the workbook makes the command fail. By default, exactly five run maps are requested:
+
+- `{ID}_koppen.png`
+- `{ID}_jan_s_wind_lic.png`
+- `{ID}_jan_s_wind_part.png`
+- `{ID}_precip.png`
+- `{ID}_precip.tif`
+
+Use repeatable `--map` arguments, or one comma-separated argument, to replace that default. Nonseasonal IDs are `koppen`, `temp`, `precip`, and `precip-tif`. Seasonal IDs use `jan`, `apr`, `jul`, or `oct` followed by `s-wind-lic`, `s-wind-part`, `u-wind-lic`, `u-wind-part`, `s-wind-err`, `u-wind-err`, `s-wind-speed`, `s-div`, `moist-conv`, or the four `era5-...-wind-{lic|part}` variants. `all` and `none` are also accepted. LIC and particle maps are skipped above their documented renderer limit rather than forcing an expensive high-resolution export.
+
+Benchmark outputs are under `extra/climate/benchmarks`; numerical climate references, source downloads, and reusable visible previews are grouped under `extra/reference/climate`. Reference observations are validation inputs only and are not fed into generated-world physics.
+
+This is still a reduced climate simulator, not a full general circulation model such as ExoPlaSim. It diagnoses four representative seasonal equilibria on a coarse internal atmosphere; it does not time-integrate a three-dimensional primitive-equation atmosphere with many pressure levels. Consequently it cannot spontaneously generate weather fronts, baroclinic cyclones, evolving Rossby waves, or statistically sampled storm tracks. Its surface stationary-wave response, two moisture layers, parameterized convection/clouds, mixed-layer ocean temperature, hydrology, and deterministic synoptic perturbations capture selected climate-scale effects at much lower cost, but upper-air dynamics, interactive ocean currents, sea-ice dynamics, and atmosphere-ocean feedbacks remain simplified or absent. Deferred improvements are tracked in `docs/tasks/climate-physics/FUTURE_WORK.md`.
+
+----
+
 * Credits
 
 Undiscovered Worlds is written by Jonathan Hill, with additional contributions and corrections by Frank Gennari. Sections of code that are taken or adapted from other sources are noted in the comments.

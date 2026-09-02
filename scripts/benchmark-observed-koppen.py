@@ -236,22 +236,22 @@ def main() -> int:
     parser.add_argument(
         "--temperature",
         type=Path,
-        default=Path("extra/reference/worldclim_tavg_monthly.uwclim"),
+        default=Path("extra/reference/climate/processed/worldclim_tavg_monthly.uwclim"),
     )
     parser.add_argument(
         "--precipitation",
         type=Path,
-        default=Path("extra/reference/imerg_prec_monthly.uwclim"),
+        default=Path("extra/reference/climate/processed/imerg_prec_monthly.uwclim"),
     )
     parser.add_argument(
         "--land-mask",
         type=Path,
-        default=Path("extra/img/earth/in/earth_land_l_3.png"),
+        default=Path("extra/reference/earth/base-maps/earth_land_l_3.png"),
     )
     parser.add_argument(
         "--reference",
         type=Path,
-        default=Path("extra/img/earth/benchmark/0.png"),
+        default=Path("extra/reference/climate/previews/0.png"),
     )
     parser.add_argument(
         "--output",
