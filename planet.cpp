@@ -10,8 +10,13 @@
 #include <cmath>
 #include <fstream>
 #include <stdio.h>
+#include <utility>
 
 #include "planet.hpp"
+#include "climate_weather.hpp"
+#include "climate_grid.hpp"
+#include "climate_hydrology.hpp"
+#include "generation_tuning.hpp"
 #include "functions.hpp"
 
 namespace
@@ -179,6 +184,69 @@ void planet::cleartectonicprovenanceinternal()
 void planet::cleartectonicprovenance()
 {
     cleartectonicprovenanceinternal();
+}
+
+const std::vector<std::uint8_t>& planet::weatheranomalystate() const
+{
+    return weatheranomalystatebytes;
+}
+
+void planet::setweatheranomalystate(std::vector<std::uint8_t> state)
+{
+    weatheranomalystatebytes = std::move(state);
+}
+
+bool planet::advanceweather(float elapsedSeconds, int horizontalCells)
+{
+    climateweather::ShallowWaterState state;
+    if (!weatheranomalystatebytes.empty() && !climateweather::deserializeState(weatheranomalystatebytes, state))
+        return false;
+    const int columns = horizontalCells > 0 ? std::clamp(horizontalCells, 8, 128) :
+        state.columns > 0 ? state.columns : tuning::climate::moistureadvection::weatherAnomalyHorizontalCells;
+    if (state.layers.empty()) state = climateweather::makeState(columns, columns / 2, 1, static_cast<std::uint64_t>(seed()));
+    else if (columns != state.columns) state = climateweather::resampleState(state, columns);
+    climateweather::ShallowWaterConfig config;
+    config.layerCount = static_cast<int>(state.layers.size());
+    config.rotationDirection = rotation() ? 1.0f : -1.0f;
+    config.gravityMetresPerSecondSquared *= std::max(0.05f, gravity());
+    config.lowerMeanDepthMetres = tuning::climate::moistureadvection::weatherAnomalyEquivalentDepthMetres;
+    config.lowerDragTimeSeconds = tuning::climate::moistureadvection::weatherAnomalyDragTimeDays * 86400.0f;
+    config.heightRelaxationTimeSeconds = tuning::climate::moistureadvection::weatherAnomalyRelaxationTimeDays * 86400.0f;
+    config.stochasticHeightForcingMetresPerSecond = tuning::climate::moistureadvection::weatherAnomalyStochasticHeightMps;
+    if (!std::isfinite(elapsedSeconds) || elapsedSeconds < 0.0f) return false;
+    float remaining = elapsedSeconds;
+    // Refresh the seasonally interpolated jets at least once per simulated day.
+    while (remaining > 0.0f)
+    {
+        const float step = std::min(remaining, 86400.0f);
+        const float season = static_cast<float>(std::fmod((state.elapsedSeconds + step * 0.5) / (365.25 * 86400.0), 1.0) * 4.0);
+        const int first = static_cast<int>(season), second = (first + 1) % CLIMATESEASONCOUNT;
+        const float fraction = season - first;
+        const auto background = [&](bool south, bool upper)
+        {
+            std::vector<float> raster((width() + 1) * (height() + 1));
+            for (int y = 0; y <= height(); ++y)
+                for (int x = 0; x <= width(); ++x)
+                {
+                    const auto wind = [&](int s) { return upper ? (south ? seasonaluppervwind(s, x, y) : seasonalupperuwind(s, x, y)) :
+                        (south ? seasonalvwind(s, x, y) : seasonaluwind(s, x, y)); };
+                    raster[y * (width() + 1) + x] = wind(first) * (1.0f - fraction) + wind(second) * fraction;
+                }
+            return climategrid::remapField(width() + 1, height() + 1, climategrid::LatitudeLayout::poleInclusive,
+                raster, state.columns, state.rows, climategrid::LatitudeLayout::cellCentred);
+        };
+        climateweather::ShallowWaterForcing forcing;
+        for (int layer = 0; layer < config.layerCount; ++layer)
+        {
+            forcing.backgroundEastWindMps.push_back(background(false, layer > 0));
+            forcing.backgroundSouthWindMps.push_back(background(true, layer > 0));
+        }
+        const auto diagnostics = climateweather::advance(state, config, forcing, step);
+        if (!diagnostics.finite || !diagnostics.bounded) return false;
+        remaining -= step;
+    }
+    weatheranomalystatebytes = climateweather::serializeState(state);
+    return true;
 }
 
 void planet::writeshortvectordata(ofstream& outfile, const std::vector<short>& arr)
@@ -521,6 +589,7 @@ int planet::mountainheightwrap(int x, int y) const
 void planet::clear()
 {
     resizeseasonalclimatefields();
+    weatheranomalystatebytes.clear();
     itstectonictimeoriginstep = 0;
     itstectonictimemyr = 0.0f;
     itstectonicdeltatimemyr = 0.0f;
@@ -1191,6 +1260,10 @@ void planet::saveworld(string filename)
         writevariable(outfile, regiontype);
         writevariable(outfile, region.ageMyr);
     }
+
+    writevariable(outfile, static_cast<int>(weatheranomalystatebytes.size()));
+    for (std::uint8_t byte : weatheranomalystatebytes)
+        writevariable(outfile, static_cast<int>(byte));
 
     if (!outfile.good())
     {
@@ -1874,6 +1947,23 @@ bool planet::loadworld(string filename)
             }
         }, 64);
     }
+
+    int weatherstatesize = 0;
+    readvariable(infile, weatherstatesize);
+    if (weatherstatesize < 0 || weatherstatesize > 16 * 1024 * 1024)
+        return false;
+    weatheranomalystatebytes.resize(static_cast<std::size_t>(weatherstatesize));
+    for (std::uint8_t& byte : weatheranomalystatebytes)
+    {
+        int value = 0;
+        readvariable(infile, value);
+        if (value < 0 || value > 255)
+            return false;
+        byte = static_cast<std::uint8_t>(value);
+    }
+    climateweather::ShallowWaterState loadedweather;
+    if (!weatheranomalystatebytes.empty() && !climateweather::deserializeState(weatheranomalystatebytes, loadedweather))
+        return false;
 
     setmaxriverflow();
 

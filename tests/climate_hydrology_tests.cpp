@@ -1,5 +1,7 @@
 #include "climate_hydrology.hpp"
+#include "climate_grid.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -20,10 +22,132 @@ bool near(float first, float second, float tolerance = 1.0e-5f)
 {
     return std::abs(first - second) <= tolerance;
 }
+
+double rotationError(int columns, int correctivePasses)
+{
+    constexpr double pi = 3.14159265358979323846;
+    const int rows = columns / 2;
+    const auto grid = climategrid::makeSphericalGrid(columns, rows, 1000.0);
+    std::vector<float> tracer(columns * rows), u(tracer.size()), v(tracer.size(), 0.0f);
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            tracer[grid.index(x, y)] = static_cast<float>(1.0 + 0.5 *
+                std::cos(2.0 * pi * (x + 0.5) / columns) *
+                std::cos(grid.latitudeCentresRadians[y]));
+            u[grid.index(x, y)] = static_cast<float>(columns *
+                grid.cellAreasSquareMetres[y] / grid.zonalFaceLengthsMetres[y]);
+        }
+    }
+    std::vector<float> result;
+    climatehydrology::MpdataOptions options;
+    options.correctivePasses = correctivePasses;
+    const auto diagnostics = climatehydrology::advectSphericalTracerMpdata(
+        columns, rows, tracer, u, v, 1.0f, 1000.0f, options, result);
+    double squaredError = 0.0, area = 0.0;
+    for (std::size_t cell = 0; cell < tracer.size(); cell++)
+    {
+        const double weight = grid.cellAreasSquareMetres[cell / columns];
+        const double error = result[cell] - tracer[cell];
+        squaredError += weight * error * error;
+        area += weight;
+    }
+    expect(diagnostics.minimumMixingRatio >= 0.0f &&
+            std::abs(diagnostics.finalAreaWeightedMass / diagnostics.initialAreaWeightedMass - 1.0) < 2.0e-6,
+        "full spherical rotation must preserve positivity and mass through the seam");
+    return std::sqrt(squaredError / area);
+}
+
+void testVariableFlow()
+{
+    constexpr int columns = 32, rows = 16;
+    constexpr double pi = 3.14159265358979323846;
+    const auto grid = climategrid::makeSphericalGrid(columns, rows, 1000.0);
+    std::vector<float> initial(columns * rows), u(initial.size()), v(initial.size());
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < columns; x++)
+            initial[grid.index(x, y)] = static_cast<float>(0.1 + std::exp(
+                -std::pow((x - 15.0) / 5.0, 2) - std::pow((y - 7.5) / 3.0, 2)));
+    const double initialMass = climategrid::areaWeightedIntegral(
+        columns, rows, climategrid::LatitudeLayout::cellCentred, initial);
+    auto tracer = initial;
+    climatehydrology::MpdataOptions options;
+    options.correctivePasses = 2;
+    // Start at rest, accelerate through more than one cell per interval. The
+    // integrated midpoint velocity must match a resolved sequence of steps.
+    std::vector<float> accelerating(initial.size(), 0.0f), still(initial.size(), 0.0f), accelerated;
+    for (int y = 0; y < rows; ++y)
+        for (int x = 0; x < columns; ++x)
+            accelerating[grid.index(x, y)] = static_cast<float>(4.0 * grid.cellAreasSquareMetres[y] / grid.zonalFaceLengthsMetres[y]);
+    options.endZonalWindMps = accelerating;
+    const auto acceleratingDiagnostics = climatehydrology::advectSphericalTracerMpdata(columns, rows,
+        initial, still, still, 1.0f, 1000.0f, options, accelerated);
+    expect(acceleratingDiagnostics.substeps >= 5 && accelerated != initial &&
+        acceleratingDiagnostics.minimumMixingRatio >= 0.0f &&
+        std::abs(acceleratingDiagnostics.finalAreaWeightedMass / acceleratingDiagnostics.initialAreaWeightedMass - 1.0) < 1.0e-6,
+        "MPDATA must time-centre changing face winds with a complete-interval CFL bound");
+    options.endZonalWindMps.clear();
+    // Reversible, time-dependent sheared solid-body flow. Midpoint winds are
+    // evaluated anew on every physical timestep; the second half retraces it.
+    for (int step = 0; step < 80; step++)
+    {
+        for (int y = 0; y < rows; y++)
+        {
+            const double latitude = grid.latitudeCentresRadians[y];
+            for (int x = 0; x < columns; x++)
+            {
+                u[grid.index(x, y)] = static_cast<float>(100.0 * std::cos(latitude) *
+                    std::sin(2.0 * latitude) * std::cos(pi * (step + 0.5) / 80.0));
+                v[grid.index(x, y)] = 0.0f;
+            }
+        }
+        std::vector<float> next;
+        climatehydrology::advectSphericalTracerMpdata(
+            columns, rows, tracer, u, v, 0.5f, 1000.0f, options, next);
+        tracer.swap(next);
+    }
+    double squaredError = 0.0;
+    for (std::size_t cell = 0; cell < tracer.size(); cell++)
+        squaredError += std::pow(tracer[cell] - initial[cell], 2);
+    expect(std::sqrt(squaredError / tracer.size()) < 0.04,
+        "reversible shear must recover tracer shape without substantial numerical blur");
+
+    for (int sign : {-1, 1})
+    {
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < columns; x++)
+            {
+                const double longitude = 2.0 * pi * (x + 0.5) / columns;
+                u[grid.index(x, y)] = static_cast<float>(sign * 120.0 * std::sin(longitude));
+                v[grid.index(x, y)] = static_cast<float>(sign * 60.0 *
+                    std::sin(2.0 * grid.latitudeCentresRadians[y]));
+            }
+        }
+        std::vector<float> next, repeat;
+        climatehydrology::advectSphericalTracerMpdata(
+            columns, rows, initial, u, v, 4.0f, 1000.0f, options, next);
+        climatehydrology::advectSphericalTracerMpdata(
+            columns, rows, initial, u, v, 4.0f, 1000.0f, options, repeat);
+        const double finalMass = climategrid::areaWeightedIntegral(
+            columns, rows, climategrid::LatitudeLayout::cellCentred, next);
+        expect(next == repeat && std::all_of(next.begin(), next.end(), [](float q)
+                { return std::isfinite(q) && q >= 0.0f; }) &&
+                std::abs(finalMass / initialMass - 1.0) < 2.0e-6,
+            "convergent and divergent face winds must remain deterministic, positive, and conservative");
+    }
+}
 }
 
 int main()
 {
+    const double coarseRotationError = rotationError(24, 1);
+    const double fineRotationError = rotationError(48, 1);
+    expect(fineRotationError < coarseRotationError * 0.75 &&
+            fineRotationError < rotationError(48, 0),
+        "MPDATA must converge under grid refinement and sharpen full rotations versus donor cell");
+    testVariableFlow();
     const auto january = climatehydrology::calendarMonth(0);
     const auto march = climatehydrology::calendarMonth(2);
     const auto december = climatehydrology::calendarMonth(11);
@@ -46,14 +170,23 @@ int main()
     expect(near(climatehydrology::interpolateSeasonal(10.0f, 16.0f, 1.0f / 3.0f), 12.0f),
         "seasonal interpolation is wrong");
     const auto climategrid = climatehydrology::climateGridDimensions(512, 257, 128);
-    expect(climategrid.columns == 128 && climategrid.rows == 65,
-        "the reduced climate grid must preserve the output aspect ratio and poles");
-    expect(climatehydrology::climateCellLatitudeDegrees(0, 65) < 90.0f &&
-            climatehydrology::climateCellLatitudeDegrees(64, 65) > -90.0f,
+    const auto oddRaster = climatehydrology::climateGridDimensions(63, 24, 128);
+    expect(oddRaster.columns == 62 && oddRaster.rows == 31,
+        "odd arbitrary output widths must still use an exactly 2:1 internal grid");
+    expect(climategrid.columns == 128 && climategrid.rows == 64,
+        "the reduced climate grid must use the W by W/2 internal contract");
+    const auto nonstandardOutputGrid =
+        climatehydrology::climateGridDimensions(600, 400, 64);
+    expect(nonstandardOutputGrid.columns == 64 && nonstandardOutputGrid.rows == 32,
+        "requested raster aspect ratios must not leak into the internal spherical grid");
+    expect(climatehydrology::climateCellLatitudeDegrees(0, 64) < 90.0f &&
+            climatehydrology::climateCellLatitudeDegrees(63, 64) > -90.0f,
         "the reduced climate grid must use finite-area cap cells instead of point poles");
-    expect(near(climatehydrology::climateCellLatitudeDegrees(32, 65), 0.0f) &&
-            climatehydrology::climateCellAreaWeight(0, 65) > 0.0f,
-        "the reduced climate grid must remain equator-symmetric with positive cap area");
+    expect(near(
+            climatehydrology::climateCellLatitudeDegrees(31, 64),
+            -climatehydrology::climateCellLatitudeDegrees(32, 64)) &&
+            climatehydrology::climateCellAreaWeight(0, 64) > 0.0f,
+        "the even-row climate grid must remain equator-symmetric with positive cap area");
     expect(near(climatehydrology::polarTaperFactor(50.0f, 72.0f, 88.0f), 1.0f) &&
             near(climatehydrology::polarTaperFactor(90.0f, 72.0f, 88.0f), 0.0f) &&
             near(
@@ -68,7 +201,7 @@ int main()
         "meridional flux must remain inside the polar boundaries");
 
     constexpr int tracerColumns = 16;
-    constexpr int tracerRows = 9;
+    constexpr int tracerRows = tracerColumns / 2;
     constexpr float tracerRadius = 1000.0f;
     constexpr float tracerTimeStep = 1.0f;
     constexpr float pi = 3.14159265358979323846f;
@@ -119,10 +252,17 @@ int main()
     const int zonalSourceX = 4;
     const int equatorRow = tracerRows / 2;
     tracer[tracerIndex(zonalSourceX, equatorRow)] = 1.0f;
-    const float equatorialCellWidth = 2.0f * pi * tracerRadius /
-        static_cast<float>(tracerColumns);
-    zonalWind[tracerIndex(zonalSourceX, equatorRow)] = 2.25f * equatorialCellWidth;
-    climatehydrology::advectSphericalTracer(
+    const float sourceLatitude = climatehydrology::climateCellLatitudeDegrees(
+        equatorRow, tracerRows) * pi / 180.0f;
+    const float equatorialCellWidth = 2.0f * pi * tracerRadius *
+        std::cos(sourceLatitude) / static_cast<float>(tracerColumns);
+    for (int x = 0; x < tracerColumns; x++)
+        zonalWind[tracerIndex(x, equatorRow)] = 2.25f * equatorialCellWidth;
+    climatehydrology::MpdataOptions donorOptions;
+    donorOptions.maximumCourantPerSubstep = 0.5f;
+    donorOptions.correctivePasses = 0;
+    std::vector<float> donorTracer;
+    climatehydrology::advectSphericalTracerMpdata(
         tracerColumns,
         tracerRows,
         tracer,
@@ -130,19 +270,65 @@ int main()
         meridionalWind,
         tracerTimeStep,
         tracerRadius,
-        0.5f,
-        48.0f,
+        donorOptions,
+        donorTracer);
+    climatehydrology::MpdataOptions mpdataOptions = donorOptions;
+    mpdataOptions.correctivePasses = 1;
+    transportDiagnostics = climatehydrology::advectSphericalTracerMpdata(
+        tracerColumns,
+        tracerRows,
+        tracer,
+        zonalWind,
+        meridionalWind,
+        tracerTimeStep,
+        tracerRadius,
+        mpdataOptions,
         transportedTracer);
-    expect(near(transportedTracer[tracerIndex(6, equatorRow)], 0.75f) &&
-            near(transportedTracer[tracerIndex(7, equatorRow)], 0.25f),
-        "zonal remapping must resolve a Courant number above one without under-advection");
-    expect(near(static_cast<float>(tracerMass(transportedTracer)), 1.0f),
-        "multi-cell zonal remapping must conserve tracer mass");
+    const auto zonalMoments = [&](const std::vector<float>& field)
+    {
+        double total = 0.0;
+        double centroid = 0.0;
+        for (int x = 0; x < tracerColumns; x++)
+        {
+            int offset = x - zonalSourceX;
+            if (offset > tracerColumns / 2)
+                offset -= tracerColumns;
+            if (offset < -tracerColumns / 2)
+                offset += tracerColumns;
+            total += field[tracerIndex(x, equatorRow)];
+            centroid += static_cast<double>(offset) * field[tracerIndex(x, equatorRow)];
+        }
+        centroid /= total;
+        double variance = 0.0;
+        for (int x = 0; x < tracerColumns; x++)
+        {
+            int offset = x - zonalSourceX;
+            if (offset > tracerColumns / 2)
+                offset -= tracerColumns;
+            if (offset < -tracerColumns / 2)
+                offset += tracerColumns;
+            const double delta = static_cast<double>(offset) - centroid;
+            variance += delta * delta * field[tracerIndex(x, equatorRow)] / total;
+        }
+        return std::pair<double, double>{ centroid, variance };
+    };
+    const auto donorMoments = zonalMoments(donorTracer);
+    const auto mpdataMoments = zonalMoments(transportedTracer);
+    expect(std::abs(mpdataMoments.first - 2.25) < 0.05,
+        "super-CFL face transport must preserve the analytical zonal centroid");
+    expect(mpdataMoments.second < donorMoments.second,
+        "the MPDATA corrective pass must diffuse less than donor-cell transport");
+    expect(std::abs(
+            transportDiagnostics.finalAreaWeightedMass /
+                transportDiagnostics.initialAreaWeightedMass - 1.0) < 1.0e-6,
+        "multi-cell zonal flux transport must conserve tracer mass");
 
     tracer.assign(tracerCellCount, 0.0f);
     zonalWind.assign(tracerCellCount, 0.0f);
-    meridionalWind.assign(tracerCellCount, 2.2f * pi * tracerRadius /
-        static_cast<float>(tracerRows));
+    meridionalWind.assign(tracerCellCount, 0.0f);
+    for (int y = 1; y < tracerRows - 1; y++)
+        meridionalWind[tracerIndex(5, y)] = 2.2f * pi * tracerRadius /
+            static_cast<float>(tracerRows);
     const int meridionalSourceRow = 2;
     tracer[tracerIndex(5, meridionalSourceRow)] = 1.0f /
         climatehydrology::climateCellAreaWeight(meridionalSourceRow, tracerRows);
@@ -174,14 +360,15 @@ int main()
         const double offset = static_cast<double>(y) - meridionalCentroid;
         meridionalVariance += offset * offset * cellMass / transportedMass;
     }
-    expect(transportDiagnostics.substeps == 5 &&
-            near(transportDiagnostics.maximumMeridionalCourant, 2.2f, 1.0e-4f),
-        "super-CFL meridional transport must select deterministic stable substeps");
-    expect(std::abs(meridionalCentroid - 4.2) < 1.0e-4,
-        "super-CFL meridional transport must move the tracer through every intervening row");
-    expect(std::abs(meridionalVariance - 1.232) < 1.0e-3,
-        "meridional tracer spreading must match the subcycled donor-cell solution");
-    expect(std::abs(transportedMass - 1.0) < 1.0e-5,
+    expect(transportDiagnostics.substeps > 1 &&
+            transportDiagnostics.maximumMultidimensionalCourant > 1.0f,
+        "the spherical multidimensional CFL condition must select stable substeps");
+    expect(meridionalCentroid > static_cast<double>(meridionalSourceRow) + 0.5 &&
+            meridionalVariance > 0.0,
+        "super-CFL meridional fluxes must traverse intervening rows without teleportation");
+    expect(std::abs(
+            transportDiagnostics.finalAreaWeightedMass /
+                transportDiagnostics.initialAreaWeightedMass - 1.0) < 1.0e-6,
         "meridional transport must conserve area-weighted tracer mass");
     bool positiveTracer = true;
     for (float value : transportedTracer)

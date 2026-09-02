@@ -11,6 +11,7 @@
 #include <string>
 
 #include "generation_workbench.hpp"
+#include "generation_tuning.hpp"
 
 #include "fastlem_mountains.hpp"
 #include "map_appearance.hpp"
@@ -1889,6 +1890,16 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 
     case GenerationStageId::rainfall:
         applyrainfallstage(world, context);
+        if (world.seatotal() > 0 && tuning::climate::circulation::enableLaggedDiabaticCoupling)
+        {
+            createpressuremap(world);
+            createvectorwindmap(world);
+            updatehorsebeltsfrompressure(world);
+            createoceancurrentmap(world);
+            createsurfacetemperaturemap(world);
+            vector<vector<int>> fractal = buildterrainfractal(world, 0x5004, world.maxelevation());
+            refreshadvectedrainfall(world, fractal);
+        }
         return true;
 
     case GenerationStageId::fjords:

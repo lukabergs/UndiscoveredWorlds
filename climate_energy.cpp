@@ -1,5 +1,6 @@
 #include "climate_energy.hpp"
 
+#include "climate_grid.hpp"
 #include "generation_tuning.hpp"
 #include "physical_layers.hpp"
 #include "planet.hpp"
@@ -24,12 +25,14 @@ AnnualEnergyBudget annualEnergyBudget{};
 
 double latitudeDegreesForRow(int row, int height)
 {
-    return height > 0 ? 90.0 - 180.0 * static_cast<double>(row) / static_cast<double>(height) : 0.0;
+    return climategrid::latitudeCentreRadians(
+        row, height + 1, climategrid::LatitudeLayout::poleInclusive) * 180.0 / pi;
 }
 
 double gridCellAreaWeight(int row, int height)
 {
-    return std::max(0.0, std::cos(latitudeDegreesForRow(row, height) * pi / 180.0));
+    return climategrid::latitudeBandMeasure(
+        row, height + 1, climategrid::LatitudeLayout::poleInclusive);
 }
 
 double smoothstep01(double value)
@@ -89,13 +92,57 @@ struct CoupledProfileSimulation
 
 ProfileSimulation simulateProfiles(
     const planet& world,
-    const std::vector<int>& landCells,
-    const std::vector<int>& oceanCells,
-    const std::vector<double>& rowPermanentIceFraction,
+    const std::vector<int>& outputLandCells,
+    const std::vector<int>& outputOceanCells,
+    const std::vector<double>& outputPermanentIceFraction,
     double longwaveInterceptWm2,
     bool collectOutput)
 {
-    const int height = world.height();
+    // Prognostic energy profiles use the same cell-centred latitude bands as
+    // moisture. Pole-inclusive terrain and local ice diagnostics are I/O only.
+    const int rows = std::max(1, std::min(world.width() + 1,
+        tuning::climate::moistureadvection::internalClimateHorizontalCells) / 2);
+    const int height = rows - 1;
+    const auto floats = [](const auto& field)
+    {
+        std::vector<float> result(field.size());
+        std::transform(field.begin(), field.end(), result.begin(), [](auto value) { return static_cast<float>(value); });
+        return result;
+    };
+    const auto remapInput = [&](const auto& field)
+    {
+        return climategrid::remapField(1, world.height() + 1,
+            climategrid::LatitudeLayout::poleInclusive,
+            floats(field), 1, rows,
+            climategrid::LatitudeLayout::cellCentred);
+    };
+    const auto landCells = remapInput(outputLandCells);
+    const auto oceanCells = remapInput(outputOceanCells);
+    std::vector<double> outputIceArea(world.height() + 1, 0.0);
+    std::vector<double> outputElevationCooling(world.height() + 1, 0.0);
+    for (int y = 0; y <= world.height(); y++)
+    {
+        outputIceArea[y] = outputPermanentIceFraction[y] * outputLandCells[y];
+        for (int x = 0; x <= world.width(); x++)
+        {
+            if (world.sea(x, y) == 0)
+                outputElevationCooling[y] += std::max(0, world.map(x, y) - world.sealevel()) *
+                    static_cast<double>(world.tempdecrease()) / 1000.0;
+        }
+    }
+    auto rowPermanentIceFraction = remapInput(outputIceArea);
+    auto meanLandElevationCooling = remapInput(outputElevationCooling);
+    for (int y = 0; y < rows; y++)
+    {
+        const float denominator = std::max(1.0e-10f, landCells[y]);
+        rowPermanentIceFraction[y] /= denominator;
+        meanLandElevationCooling[y] /= denominator;
+    }
+    const auto latitudeForCell = [rows](int y)
+    {
+        return climategrid::latitudeCentreRadians(y, rows,
+            climategrid::LatitudeLayout::cellCentred) * 180.0 / pi;
+    };
     const double targetMeanTemperature = static_cast<double>(world.averagetemp());
     const double timeStepSeconds = 86400.0;
     const double longwaveSlope = tuning::climate::energybalance::longwaveSlopeWm2K;
@@ -117,7 +164,6 @@ ProfileSimulation simulateProfiles(
     std::array<std::vector<double>, 2> absorbedSolar = temperature;
     std::array<std::vector<double>, 2> baseTemperature = temperature;
     std::array<std::vector<double>, 2> weights = temperature;
-    std::vector<double> meanLandElevationCooling(height + 1, 0.0);
     std::vector<double> zonalMeanTemperature(height + 1, targetMeanTemperature);
     std::vector<double> nextZonalMeanTemperature = zonalMeanTemperature;
     std::vector<std::vector<double>> insolation(daysPerYear, std::vector<double>(height + 1, 0.0));
@@ -133,30 +179,13 @@ ProfileSimulation simulateProfiles(
 
     for (int y = 0; y <= height; y++)
     {
-        const double cellAreaWeight = gridCellAreaWeight(y, height);
+        const double cellAreaWeight = climategrid::latitudeBandMeasure(
+            y, rows, climategrid::LatitudeLayout::cellCentred);
         weights[0][y] = cellAreaWeight * static_cast<double>(landCells[y]);
         weights[1][y] = cellAreaWeight * static_cast<double>(oceanCells[y]);
         totalAreaWeight += weights[0][y] + weights[1][y];
 
-        if (landCells[y] > 0)
-        {
-            double elevationCoolingSum = 0.0;
-
-            for (int x = 0; x <= world.width(); x++)
-            {
-                if (world.sea(x, y) == 1)
-                    continue;
-
-                const double elevationKm = static_cast<double>(
-                    std::max(0, world.map(x, y) - world.sealevel())) / 1000.0;
-                elevationCoolingSum += elevationKm * static_cast<double>(world.tempdecrease());
-            }
-
-            meanLandElevationCooling[y] =
-                elevationCoolingSum / static_cast<double>(landCells[y]);
-        }
-
-        const double latitude = latitudeDegreesForRow(y, height);
+        const double latitude = latitudeForCell(y);
         const double polarFraction = std::pow(std::abs(latitude) / 90.0, 4.0);
         const double polarAdjustment = latitude >= 0.0 ?
             static_cast<double>(world.northpolaradjust()) :
@@ -192,7 +221,7 @@ ProfileSimulation simulateProfiles(
         {
             for (int y = 0; y <= height; y++)
             {
-                const double latitude = latitudeDegreesForRow(y, height);
+                const double latitude = latitudeForCell(y);
                 const double polarFraction = std::pow(std::abs(latitude) / 90.0, 4.0);
                 const double polarAdjustment = latitude >= 0.0 ?
                     static_cast<double>(world.northpolaradjust()) :
@@ -372,12 +401,23 @@ ProfileSimulation simulateProfiles(
             result.budget.storageTendencyWm2;
         result.budget.calibratedLongwaveInterceptWm2 = longwaveInterceptWm2;
         result.budget.areaWeightedMeanTemperatureC = result.annualMeanTemperatureC;
-        result.budget.areaWeightedLandTemperatureC = lastYearSurfaceTemperatureSum[0] /
-            (surfaceAreaWeight[0] * static_cast<double>(daysPerYear));
-        result.budget.areaWeightedOceanTemperatureC = lastYearSurfaceTemperatureSum[1] /
-            (surfaceAreaWeight[1] * static_cast<double>(daysPerYear));
+        result.budget.areaWeightedLandTemperatureC = surfaceAreaWeight[0] > 0.0
+            ? lastYearSurfaceTemperatureSum[0] / (surfaceAreaWeight[0] * daysPerYear) : 0.0;
+        result.budget.areaWeightedOceanTemperatureC = surfaceAreaWeight[1] > 0.0
+            ? lastYearSurfaceTemperatureSum[1] / (surfaceAreaWeight[1] * daysPerYear) : 0.0;
     }
-
+    const auto remapOutput = [&](std::vector<double>& field)
+    {
+        const auto raster = climategrid::remapField(1, rows,
+            climategrid::LatitudeLayout::cellCentred,
+            floats(field), 1, world.height() + 1,
+            climategrid::LatitudeLayout::poleInclusive);
+        field.assign(raster.begin(), raster.end());
+    };
+    for (auto& season : result.snapshots)
+        for (auto& surface : season)
+            remapOutput(surface);
+    remapOutput(result.deepLandTemperature);
     return result;
 }
 

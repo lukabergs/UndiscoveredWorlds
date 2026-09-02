@@ -20,6 +20,7 @@ void expect(bool condition, const char* message)
 
 int main()
 {
+    constexpr float pi = 3.14159265358979323846f;
     constexpr float earthRotation = 7.2921159e-5f;
     expect(
         std::abs(climateatmosphere::coriolisParameterPerSecond(0.0f, earthRotation)) < 1.0e-9f,
@@ -221,7 +222,7 @@ int main()
         "quadratic surface drag must preserve the Coriolis reversal across the equator");
 
     constexpr int waveColumns = 64;
-    constexpr int waveRows = 33;
+    constexpr int waveRows = waveColumns / 2;
     constexpr int waveCentreX = 16;
     constexpr int waveCentreY = waveRows / 2;
     const auto waveIndex = [=](int x, int y)
@@ -317,7 +318,8 @@ int main()
         fullPressureRowMean /= static_cast<double>(waveColumns);
         fullPressureRowMeanMagnitude += std::abs(fullPressureRowMean);
         const double latitudeRadians =
-            (90.0 - 180.0 * y / static_cast<double>(waveRows - 1)) *
+            (90.0 - 180.0 * (static_cast<double>(y) + 0.5) /
+                    static_cast<double>(waveRows)) *
             3.14159265358979323846 / 180.0;
         const double areaWeight = std::max(0.0, std::cos(latitudeRadians));
         fullPressureAreaTotal += fullPressureRowMean * areaWeight;
@@ -347,6 +349,172 @@ int main()
         fullPressureWave.converged && fullPressureRowMeanMagnitude > 0.01 &&
             std::abs(fullPressureAreaTotal / fullPressureAreaWeight) < 1.0e-5,
         "the full pressure solve must retain zonal structure while conserving global mean pressure");
+    expect(!progradeWave.residualHistory.empty() && progradeWave.restartCycles > 0 &&
+            progradeWave.residualHistory.back() <= progradeWave.residualHistory.front(),
+        "stationary solves must retain restart-cycle physical residual histories");
 
+    constexpr int modeColumns = 16;
+    constexpr int modeRows = 8;
+    constexpr std::size_t modeCellCount = modeColumns * modeRows;
+    std::vector<float> absorbed(modeCellCount, 220.0f);
+    std::vector<float> outgoing(modeCellCount, 220.0f);
+    std::vector<float> sensible(modeCellCount, 0.0f);
+    std::vector<float> condensation(modeCellCount, 0.0f);
+    for (int y = 0; y < modeRows; y++)
+    {
+        for (int x = 0; x < modeColumns; x++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(y) * modeColumns + x;
+            absorbed[cell] += 20.0f * std::cos(2.0f * pi * x / modeColumns);
+            sensible[cell] = 4.0f * std::sin(2.0f * pi * x / modeColumns);
+            condensation[cell] = x < modeColumns / 2 ? 10.0f : 0.0f;
+        }
+    }
+    const auto heating = climateatmosphere::diagnoseDiabaticHeating(
+        modeColumns,
+        modeRows,
+        absorbed,
+        outgoing,
+        sensible,
+        condensation,
+        86400.0f,
+        0.35f,
+        1.0f);
+    expect(heating.areaWeightedLatentHeatingWm2 > 140.0 &&
+            heating.areaWeightedLatentHeatingWm2 < 150.0,
+        "latent heating must convert millimetres per day to watts per square metre");
+    expect(heating.maximumAbsoluteRowMeanWm2 < 1.0e-5f,
+        "stationary heating projection must have a controlled zero zonal mean");
+    const auto noLatentHeating = climateatmosphere::diagnoseDiabaticHeating(
+        modeColumns,
+        modeRows,
+        absorbed,
+        outgoing,
+        sensible,
+        condensation,
+        86400.0f,
+        0.35f,
+        0.0f);
+    expect(std::abs(noLatentHeating.areaWeightedLatentHeatingWm2) < 1.0e-9,
+        "the latent projection switch must prevent double-counting hydrology energy");
+
+    const auto earthParameters = climateatmosphere::diagnoseStationaryParameters(
+        0.01f, 10000.0f, 9.80665f, 6371000.0f, earthRotation,
+        64, 32, 0.10f, 1200000.0f);
+    const auto slowRotationParameters = climateatmosphere::diagnoseStationaryParameters(
+        0.01f, 10000.0f, 9.80665f, 6371000.0f, earthRotation * 0.5f,
+        64, 32, 0.10f, 1200000.0f);
+    expect(earthParameters.equivalentDepthMetres > 0.0f &&
+            earthParameters.maximumZonalWavenumber <= modeColumns * 2 &&
+            slowRotationParameters.adjustmentLengthMetres >
+                earthParameters.adjustmentLengthMetres,
+        "stationary parameters must derive from stratification, rotation, and resolution");
+
+    std::vector<float> zonalPressure(modeRows, 0.0f);
+    std::vector<float> orographic(modeCellCount, 0.0f);
+    for (int y = 0; y < modeRows; y++)
+        zonalPressure[y] = 3.0f * std::cos(pi * (y + 0.5f) / modeRows);
+    climateatmosphere::ModeSeparatedCirculationConfig modeConfig;
+    modeConfig.maximumIterations = 500;
+    const auto separated = climateatmosphere::solveModeSeparatedCirculation(
+        modeColumns,
+        modeRows,
+        zonalPressure,
+        heating.stationaryProjectedHeatingWm2,
+        orographic,
+        modeConfig);
+    double surfaceMagnitude = 0.0;
+    double upperMagnitude = 0.0;
+    double maximumZonalTransfer = 0.0;
+    for (int y = 0; y < modeRows; y++)
+    {
+        double rowMean = 0.0;
+        for (int x = 0; x < modeColumns; x++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(y) * modeColumns + x;
+            rowMean += separated.surfacePressureAnomalyHpa[cell];
+            surfaceMagnitude += std::abs(separated.surfaceEastWindMps[cell]) +
+                std::abs(separated.surfaceSouthWindMps[cell]);
+            upperMagnitude += std::abs(separated.upperEastWindMps[cell]) +
+                std::abs(separated.upperSouthWindMps[cell]);
+        }
+        maximumZonalTransfer = std::max(
+            maximumZonalTransfer,
+            std::abs(rowMean / modeColumns - zonalPressure[y]));
+    }
+    expect(separated.surfaceStationarySolver.converged &&
+            separated.upperStationarySolver.converged &&
+            maximumZonalTransfer < 1.0e-4,
+        "surface and upper stationary modes must converge without collapsing the zonal mode");
+    expect(surfaceMagnitude > 0.0 && upperMagnitude > 0.0,
+        "separately closed surface and upper modes must both respond to heating");
+    modeConfig.enabled.stationary = false;
+    modeConfig.enabled.upper = false;
+    const auto zonalOnly = climateatmosphere::solveModeSeparatedCirculation(
+        modeColumns,
+        modeRows,
+        zonalPressure,
+        heating.stationaryProjectedHeatingWm2,
+        orographic,
+        modeConfig);
+    expect(std::all_of(
+            zonalOnly.upperHeightAnomalyMetres.begin(),
+            zonalOnly.upperHeightAnomalyMetres.end(),
+            [](float value) { return value == 0.0f; }),
+        "upper-only and stationary-only responses must remain isolatable");
+
+    const std::vector<float> zeroHeating(modeCellCount, 0.0f);
+    const std::vector<float> zeroZonal(modeRows, 0.0f);
+    modeConfig = {};
+    const auto zeroResponse = climateatmosphere::solveModeSeparatedCirculation(modeColumns, modeRows,
+        zeroZonal, zeroHeating, zeroHeating, modeConfig);
+    expect(zeroResponse.surfaceStationarySolver.converged && zeroResponse.upperStationarySolver.converged &&
+        zeroResponse.areaWeightedKineticEnergyJm2 == 0.0, "zero forcing must produce zero flow without noise");
+    for (int mask = 0; mask < 16; ++mask)
+    {
+        modeConfig.enabled = {(mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, (mask & 8) != 0};
+        modeConfig.zonalUpperHeightMetres = zonalPressure;
+        const auto isolated = climateatmosphere::solveModeSeparatedCirculation(modeColumns, modeRows,
+            zonalPressure, heating.stationaryProjectedHeatingWm2, orographic, modeConfig);
+        const auto zero = [](const auto& values) { return std::all_of(values.begin(), values.end(), [](float v) { return v == 0.0f; }); };
+        expect((modeConfig.enabled.surface || (zero(isolated.surfaceEastWindMps) && zero(isolated.surfacePressureAnomalyHpa))) &&
+            (modeConfig.enabled.upper || (zero(isolated.upperEastWindMps) && zero(isolated.upperHeightAnomalyMetres))),
+            "all 16 mode-isolation combinations must respect disabled layers");
+    }
+    modeConfig = {};
+    modeConfig.maximumIterations = 1;
+    modeConfig.relativeTolerance = 1.0e-12f;
+    const auto failed = climateatmosphere::solveModeSeparatedCirculation(modeColumns, modeRows,
+        zonalPressure, heating.stationaryProjectedHeatingWm2, orographic, modeConfig);
+    expect(!failed.surfaceStationarySolver.converged && failed.surfacePressureAnomalyHpa[0] == zonalPressure[0],
+        "a failed stationary solve must fall back to the independently closed zonal mode");
+    std::vector<float> mountain(modeCellCount), jets(modeCellCount, 20.0f), calm(modeCellCount, 0.0f);
+    for (int y = 0; y < modeRows; ++y)
+        for (int x = 0; x < modeColumns; ++x)
+            mountain[y * modeColumns + x] = 200.0f * std::cos(2.0f * pi * x / modeColumns);
+    modeConfig = {};
+    const auto lowerMountain = climateatmosphere::upperOrographicHeightForcing(modeColumns, modeRows,
+        mountain, jets, 0.01f, 3000.0f, 86400.0f, modeConfig);
+    const auto upperMountain = climateatmosphere::upperOrographicHeightForcing(modeColumns, modeRows,
+        mountain, jets, 0.01f, 8000.0f, 86400.0f, modeConfig);
+    const auto calmMountain = climateatmosphere::upperOrographicHeightForcing(modeColumns, modeRows,
+        mountain, calm, 0.01f, 5000.0f, 86400.0f, modeConfig);
+    expect(lowerMountain != upperMountain && std::all_of(upperMountain.begin(), upperMountain.end(),
+        [](float v) { return std::isfinite(v); }) && std::all_of(calmMountain.begin(), calmMountain.end(),
+        [](float v) { return v == 0.0f; }), "mountain waves must propagate/damp vertically and vanish without incident wind");
+    expect(climateatmosphere::diagnoseBruntVaisalaFrequency(280.0f, 0.006f, 9.80665f) > 0.0f &&
+        climateatmosphere::diagnoseBruntVaisalaFrequency(280.0f, 0.012f, 9.80665f) == 0.0f,
+        "stratification must distinguish stable and convectively unstable lapse rates");
+    const auto refined = climateatmosphere::diagnoseStationaryParameters(0.01f, 10000.0f, 9.80665f,
+        6371000.0f, earthRotation, 128, 64, 0.1f, 1200000.0f);
+    const auto twiceRefined = climateatmosphere::diagnoseStationaryParameters(0.01f, 10000.0f, 9.80665f,
+        6371000.0f, earthRotation, 256, 128, 0.1f, 1200000.0f);
+    expect(refined.maximumZonalWavenumber == twiceRefined.maximumZonalWavenumber,
+        "refinement must not invent physical forcing bandwidth");
+    const auto largeRestart = climateatmosphere::solveSteadyStationaryWavePressure(
+        modeColumns, modeRows, heating.stationaryProjectedHeatingWm2, std::vector<float>(modeCellCount, 43200.0f),
+        48.0f, 190080.0f, 1.225f, 6371000.0f, earthRotation, 1.0f, true, 500, 1.0e-4f, 128);
+    expect(largeRestart.converged && largeRestart.relativeResidual <= 1.0e-4f,
+        "configurable larger GMRES restart windows must retain physical residual acceptance");
     return failures == 0 ? 0 : 1;
 }

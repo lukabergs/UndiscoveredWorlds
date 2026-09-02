@@ -58,10 +58,14 @@ set(SOURCES
     climate_benchmark_outputs.cpp
     climate_circulation_diagnostics.cpp
     climate_energy.cpp
+    climate_flow.cpp
+    climate_grid.cpp
     climate_hydrology.cpp
+    climate_ocean_dynamics.cpp
     climate_physics.cpp
     climate_reference.cpp
     climate_tiff.cpp
+    climate_weather.cpp
     climate_ocean.cpp
     fastlem_mountains.cpp
     globalclimate.cpp
@@ -122,6 +126,10 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_RE
 include(CTest)
 
 if(BUILD_TESTING)
+    add_executable(climate_pipeline_tests tests/climate_pipeline_tests.cpp generation_stage_registry.cpp)
+    target_include_directories(climate_pipeline_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_pipeline_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_pipeline_tests COMMAND climate_pipeline_tests)
     add_executable(climate_physics_tests
         tests/climate_physics_tests.cpp
         climate_physics.cpp
@@ -133,10 +141,45 @@ if(BUILD_TESTING)
     add_executable(climate_hydrology_tests
         tests/climate_hydrology_tests.cpp
         climate_hydrology.cpp
+        climate_grid.cpp
     )
     target_include_directories(climate_hydrology_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     set_target_properties(climate_hydrology_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
     add_test(NAME climate_hydrology_tests COMMAND climate_hydrology_tests)
+
+    add_executable(climate_grid_tests
+        tests/climate_grid_tests.cpp
+        climate_grid.cpp
+    )
+    target_include_directories(climate_grid_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_grid_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_grid_tests COMMAND climate_grid_tests)
+
+    add_executable(climate_weather_tests
+        tests/climate_weather_tests.cpp
+        climate_weather.cpp
+        climate_grid.cpp
+    )
+    target_include_directories(climate_weather_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_weather_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_weather_tests COMMAND climate_weather_tests)
+
+    add_executable(climate_ocean_dynamics_tests
+        tests/climate_ocean_dynamics_tests.cpp
+        climate_ocean_dynamics.cpp
+        climate_grid.cpp
+    )
+    target_include_directories(climate_ocean_dynamics_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_ocean_dynamics_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_ocean_dynamics_tests COMMAND climate_ocean_dynamics_tests)
+
+    add_executable(climate_flow_tests
+        tests/climate_flow_tests.cpp
+        climate_flow.cpp
+    )
+    target_include_directories(climate_flow_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(climate_flow_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    add_test(NAME climate_flow_tests COMMAND climate_flow_tests)
 
     add_executable(climate_reference_tests
         tests/climate_reference_tests.cpp
@@ -149,6 +192,7 @@ if(BUILD_TESTING)
     add_executable(climate_energy_tests
         tests/climate_energy_tests.cpp
         climate_energy.cpp
+        climate_grid.cpp
     )
     target_include_directories(climate_energy_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     set_target_properties(climate_energy_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
@@ -157,6 +201,7 @@ if(BUILD_TESTING)
     add_executable(climate_atmosphere_tests
         tests/climate_atmosphere_tests.cpp
         climate_atmosphere.cpp
+        climate_grid.cpp
     )
     target_include_directories(climate_atmosphere_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     set_target_properties(climate_atmosphere_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)

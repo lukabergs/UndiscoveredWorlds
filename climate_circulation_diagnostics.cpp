@@ -1,6 +1,8 @@
 #include "climate_circulation_diagnostics.hpp"
 
 #include "climate_atmosphere.hpp"
+#include "climate_flow.hpp"
+#include "climate_grid.hpp"
 #include "climate_tiff.hpp"
 #include "generation_tuning.hpp"
 #include "planet.hpp"
@@ -85,6 +87,9 @@ struct capturedwindcache
 };
 
 capturedwindcache windcache;
+const planet* weatherworld = nullptr;
+int weathercolumns = 0, weatherrows = 0;
+std::array<climateweather::WeatherStatistics, CLIMATESEASONCOUNT> weatherstatistics;
 
 enum class scalarpalette
 {
@@ -102,11 +107,10 @@ std::size_t fieldindex(int x, int y, int columns)
 
 float latitudeforrow(int y, int rows)
 {
-    if (rows <= 1)
-        return 0.0f;
-
-    return 90.0f - 180.0f * static_cast<float>(y) /
-        static_cast<float>(rows - 1);
+    constexpr double radiansToDegrees = 57.2957795130823208768;
+    return static_cast<float>(climategrid::latitudeCentreRadians(
+        y, rows, climategrid::LatitudeLayout::poleInclusive) *
+        radiansToDegrees);
 }
 
 int wrapcolumn(int x, int columns)
@@ -607,50 +611,40 @@ bool renderparticleimage(
 
         for (int step = 0; step < particlesteps; step++)
         {
-            const auto wind = samplevector(u, v, x, y, columns, rows);
-            const float localLatitude = latitudeforrow(
-                std::clamp(static_cast<int>(std::lround(y)), 0, rows - 1),
-                rows);
-            const auto spacing = climateatmosphere::cellSpacingMetres(
-                localLatitude,
+            climateflow::ParticleTraceConfig traceconfig;
+            traceconfig.planetRadiusMetres =
+                tuning::climate::atmosphere::referencePlanetRadiusMetres;
+            const auto trace = climateflow::advectParticleRk2(
                 columns,
                 rows,
-                tuning::climate::atmosphere::referencePlanetRadiusMetres);
-            float dx = wind.first * particletracetimestepseconds / spacing.zonalMetres;
-            float dy = wind.second * particletracetimestepseconds / spacing.meridionalMetres;
-            const float maximumstep = std::max(std::abs(dx), std::abs(dy));
-
-            if (maximumstep < 0.01f)
+                u,
+                v,
+                x,
+                y,
+                particletracetimestepseconds,
+                traceconfig);
+            if (trace.points.size() < 2)
                 break;
-
-            if (maximumstep > 1.75f)
+            for (std::size_t point = 1; point < trace.points.size(); point++)
             {
-                dx *= 1.75f / maximumstep;
-                dy *= 1.75f / maximumstep;
+                const auto& previous = trace.points[point - 1];
+                const auto& next = trace.points[point];
+                if (std::abs(next.x - previous.x) < static_cast<float>(columns) * 0.5f)
+                {
+                    drawline(
+                        image,
+                        previous.x * particlerenderscale,
+                        previous.y * particlerenderscale,
+                        next.x * particlerenderscale,
+                        next.y * particlerenderscale,
+                        sf::Color(245, 247, 245),
+                        0.16f);
+                }
             }
-
-            float nextx = x + dx;
-            const float nexty = y + dy;
-            nextx = std::fmod(std::fmod(nextx, static_cast<float>(columns)) +
-                static_cast<float>(columns), static_cast<float>(columns));
-
-            if (nexty < 0.0f || nexty > static_cast<float>(rows - 1))
+            x = trace.points.back().x;
+            y = trace.points.back().y;
+            if (!trace.remainedInDomain)
                 break;
-
-            if (std::abs(nextx - x) < static_cast<float>(columns) * 0.5f)
-            {
-                drawline(
-                    image,
-                    x * particlerenderscale,
-                    y * particlerenderscale,
-                    nextx * particlerenderscale,
-                    nexty * particlerenderscale,
-                    sf::Color(245, 247, 245),
-                    0.16f);
-            }
-
-            x = nextx;
-            y = nexty;
         }
     }
 
@@ -818,6 +812,18 @@ seasonfields buildseasonfields(planet& world, int season)
 }
 }
 
+void captureweatherstatistics(const planet& world, int season, int columns, int rows,
+    const climateweather::WeatherStatistics& statistics)
+{
+    if (season < 0 || season >= CLIMATESEASONCOUNT || columns < 3 || rows < 2) return;
+    if (weatherworld != &world || weathercolumns != columns || weatherrows != rows || season == 0)
+        weatherstatistics = {};
+    weatherworld = &world;
+    weathercolumns = columns;
+    weatherrows = rows;
+    weatherstatistics[season] = statistics;
+}
+
 void capturecirculationwindfields(
     planet& world,
     int season,
@@ -915,6 +921,28 @@ bool exportcirculationdiagnostics(
     const int columns = world.width() + 1;
     const int rows = world.height() + 1;
     bool success = true;
+
+    if (weatherworld == &world)
+    {
+        std::ofstream statistics(outputdirectory / "weather_statistics.csv");
+        statistics << "season,latitude,longitude,samples,duration_s,effective_samples,mean_u_mps,mean_v_south_mps,mean_speed_mps,directional_consistency,speed_stddev_mps,independent_sample_stderr_mps\n";
+        for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
+        {
+            const auto& data = weatherstatistics[season];
+            if (data.meanSpeedMps.size() != static_cast<std::size_t>(weathercolumns * weatherrows)) continue;
+            for (int y = 0; y < weatherrows; ++y)
+                for (int x = 0; x < weathercolumns; ++x)
+                {
+                    const int cell = y * weathercolumns + x;
+                    statistics << season << ',' << 90.0 - 180.0 * (y + 0.5) / weatherrows << ','
+                        << -180.0 + 360.0 * (x + 0.5) / weathercolumns << ',' << data.sampleCount << ','
+                        << data.durationSeconds << ',' << data.effectiveSampleCount << ',' << data.meanEastWindMps[cell] << ','
+                        << data.meanSouthWindMps[cell] << ',' << data.meanSpeedMps[cell] << ',' << data.directionalConsistency[cell] << ','
+                        << data.speedStandardDeviationMps[cell] << ',' << data.speedStandardErrorMps[cell] << '\n';
+                }
+        }
+        success = statistics.good() && success;
+    }
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
