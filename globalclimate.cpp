@@ -895,15 +895,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         if (seatotal > 0 &&
             tuning::climate::circulation::enableLaggedDiabaticCoupling)
         {
-            // One deterministic lagged seasonal-mean iteration lets diagnosed
-            // condensation heating alter circulation without using observed
-            // precipitation or introducing an unconstrained fixed-point loop.
-            createpressuremap(world);
-            createvectorwindmap(world);
-            updatehorsebeltsfrompressure(world);
-            createoceancurrentmap(world);
-            createsurfacetemperaturemap(world);
-            refreshadvectedrainfall(world, fractal);
+            convergeclimatecoupling(world, fractal);
         }
     }
 

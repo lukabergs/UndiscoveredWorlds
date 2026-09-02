@@ -60,6 +60,50 @@ void filterStationary(int columns, int rows, int zonalModes, int meridionalModes
 }
 }
 
+ColumnHeating diagnoseColumnHeating(const ColumnHeatingInput& in)
+{
+    // Flux-divergence discretization of grey two-stream transfer; see GFDL's
+    // idealized moist model (Frierson et al. 2006, doi:10.1175/JAS3753.1).
+    // Optical depths are reduced-model parameters, not observed Earth fields.
+    constexpr double sigma = 5.670374419e-8, latentHeat = 2.5e6;
+    ColumnHeating out;
+    std::array<double, 2> transmission{}, emission{}, solarTransmission{};
+    for (int layer = 0; layer < 2; ++layer)
+    {
+        transmission[layer] = std::exp(-std::max(0.0, in.longwaveOpticalDepth[layer]));
+        solarTransmission[layer] = std::exp(-std::max(0.0, in.shortwaveOpticalDepth[layer]));
+        emission[layer] = (1.0 - transmission[layer]) * sigma * std::pow(std::max(1.0, in.airTemperatureK[layer]), 4);
+    }
+    const double surfaceEmission = sigma * std::pow(std::max(1.0, in.surfaceTemperatureK), 4);
+    const double downwardMiddle = emission[1];
+    const double downwardSurface = downwardMiddle * transmission[0] + emission[0];
+    const double upwardMiddle = surfaceEmission * transmission[0] + emission[0];
+    const double outgoingLongwave = upwardMiddle * transmission[1] + emission[1];
+    out.radiativeWm2[0] = surfaceEmission + downwardMiddle - upwardMiddle - downwardSurface;
+    out.radiativeWm2[1] = upwardMiddle - outgoingLongwave - downwardMiddle;
+    const double solarTop = std::max(0.0, in.incomingSolarWm2);
+    const double solarMiddle = solarTop * solarTransmission[1];
+    const double solarSurface = solarMiddle * solarTransmission[0];
+    const double reflectedSurface = solarSurface * std::clamp(in.surfaceAlbedo, 0.0, 1.0);
+    const double reflectedMiddle = reflectedSurface * solarTransmission[0];
+    const double reflectedTop = reflectedMiddle * solarTransmission[1];
+    out.radiativeWm2[0] += solarMiddle - solarSurface + reflectedSurface - reflectedMiddle;
+    out.radiativeWm2[1] += solarTop - solarMiddle + reflectedMiddle - reflectedTop;
+    out.surfaceRadiativeWm2 = solarSurface - reflectedSurface + downwardSurface - surfaceEmission;
+    out.topNetRadiationWm2 = solarTop - reflectedTop - outgoingLongwave;
+    const double latentPerMm = latentHeat / std::max(1.0, in.accumulationSeconds);
+    out.latentWm2[0] = latentPerMm * (in.condensationMm[0] - in.reevaporationMm);
+    out.latentWm2[1] = latentPerMm * in.condensationMm[1];
+    out.totalWm2[0] = out.radiativeWm2[0] + out.latentWm2[0] + in.sensibleHeatingWm2;
+    out.totalWm2[1] = out.radiativeWm2[1] + out.latentWm2[1];
+    out.surfaceNetHeatingWm2 = out.surfaceRadiativeWm2 - in.sensibleHeatingWm2 - latentPerMm * in.surfaceEvaporationMm;
+    out.vapourLatentStorageWm2 = latentPerMm * (in.surfaceEvaporationMm + in.reevaporationMm -
+        in.condensationMm[0] - in.condensationMm[1]);
+    out.closureResidualWm2 = out.surfaceNetHeatingWm2 + out.totalWm2[0] + out.totalWm2[1] +
+        out.vapourLatentStorageWm2 - out.topNetRadiationWm2;
+    return out;
+}
+
 float coriolisParameterPerSecond(
     float latitudeDegrees,
     float rotationRatePerSecond,
@@ -348,7 +392,7 @@ std::vector<float> upperOrographicHeightForcing(
         if (std::abs(wind) < 0.1) continue;
         const double f = 2.0 * config.rotationRatePerSecond * config.rotationDirection *
             std::sin(grid.latitudeCentresRadians[y]);
-        for (int mode = 1; mode <= std::min(config.maximumZonalWavenumber, (columns - 1) / 2); ++mode)
+        for (int mode = 1; mode <= std::min(config.upperMaximumZonalWavenumber, (columns - 1) / 2); ++mode)
         {
             const double k = mode / (config.planetRadiusMetres * std::cos(grid.latitudeCentresRadians[y]));
             // Complex intrinsic frequency damps critical levels continuously.
@@ -1140,7 +1184,8 @@ ModeSeparatedCirculation solveModeSeparatedCirculation(
                 : 0.0f;
             surfaceEquilibrium[cell] = surfaceStationary;
             const float upperHeight = config.enabled.stationary
-                ? stationaryHeatingWm2[cell] *
+                ? (config.upperStationaryHeatingWm2.size() == cellCount
+                    ? config.upperStationaryHeatingWm2[cell] : stationaryHeatingWm2[cell]) *
                         config.upperHeatingHeightResponseMetresPerWm2 +
                     (config.upperOrographicHeightMetres.size() == cellCount
                         ? config.upperOrographicHeightMetres[cell] : 0.0f)
@@ -1152,8 +1197,8 @@ ModeSeparatedCirculation solveModeSeparatedCirculation(
 
     filterStationary(longitudeCells, latitudeCells, config.maximumZonalWavenumber,
         config.maximumMeridionalWavenumber, surfaceEquilibrium);
-    filterStationary(longitudeCells, latitudeCells, config.maximumZonalWavenumber,
-        config.maximumMeridionalWavenumber, upperEquilibriumPressure);
+    filterStationary(longitudeCells, latitudeCells, config.upperMaximumZonalWavenumber,
+        config.upperMaximumMeridionalWavenumber, upperEquilibriumPressure);
     if (config.enabled.stationary && config.enabled.surface)
     {
         result.surfaceStationarySolver = solveSteadyStationaryWavePressure(
@@ -1275,7 +1320,8 @@ void diagnoseModeWinds(int longitudeCells, int latitudeCells,
                     -pressureGradientEast / config.airDensityKgM3,
                     -pressureGradientNorth / config.airDensityKgM3,
                     latitudeDegrees,
-                    config.surfaceDragCoefficient,
+                    config.surfaceDragCoefficients.size() == cellCount
+                        ? config.surfaceDragCoefficients[cell] : config.surfaceDragCoefficient,
                     config.surfaceBoundaryLayerDepthMetres,
                     config.rotationRatePerSecond,
                     config.rotationDirection);
@@ -1363,7 +1409,8 @@ void diagnoseModeWinds(int longitudeCells, int latitudeCells,
             const double upperMass = config.upperEquivalentPressureDepthHpa * 100.0 / config.gravityMetresPerSecondSquared;
             result.areaWeightedKineticEnergyJm2 += area * 0.5 * (surfaceMass * surfaceSpeed2 + upperMass * upperSpeed2);
             result.areaWeightedDragDissipationWm2 += area *
-                (surfaceMass * config.surfaceDragCoefficient / config.surfaceBoundaryLayerDepthMetres *
+                (surfaceMass * (config.surfaceDragCoefficients.size() == cellCount
+                    ? config.surfaceDragCoefficients[cell] : config.surfaceDragCoefficient) / config.surfaceBoundaryLayerDepthMetres *
                     surfaceSpeed2 * std::sqrt(surfaceSpeed2) + upperMass * upperSpeed2 / config.upperDragTimeSeconds);
             result.areaWeightedMassAnomalyKgM2 += area * result.surfacePressureAnomalyHpa[cell] *
                 100.0 / config.gravityMetresPerSecondSquared;

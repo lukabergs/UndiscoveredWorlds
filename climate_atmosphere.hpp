@@ -41,6 +41,35 @@ struct DiabaticHeatingBudget
     float maximumAbsoluteRowMeanWm2 = 0.0f;
 };
 
+// Two-stream grey column: layer 0 is lower, layer 1 upper. Positive fluxes
+// heat the indicated reservoir; condensate is measured before rain fallout.
+struct ColumnHeatingInput
+{
+    double incomingSolarWm2 = 0.0;
+    double surfaceAlbedo = 0.3;
+    double surfaceTemperatureK = 288.0;
+    std::array<double, 2> airTemperatureK{286.0, 260.0};
+    std::array<double, 2> longwaveOpticalDepth{1.0, 0.5};
+    std::array<double, 2> shortwaveOpticalDepth{0.12, 0.10};
+    double sensibleHeatingWm2 = 0.0;
+    std::array<double, 2> condensationMm{};
+    double reevaporationMm = 0.0;
+    double surfaceEvaporationMm = 0.0;
+    double accumulationSeconds = 86400.0;
+};
+struct ColumnHeating
+{
+    std::array<double, 2> radiativeWm2{};
+    std::array<double, 2> latentWm2{};
+    std::array<double, 2> totalWm2{};
+    double surfaceRadiativeWm2 = 0.0;
+    double surfaceNetHeatingWm2 = 0.0;
+    double topNetRadiationWm2 = 0.0;
+    double vapourLatentStorageWm2 = 0.0;
+    double closureResidualWm2 = 0.0;
+};
+ColumnHeating diagnoseColumnHeating(const ColumnHeatingInput& input);
+
 struct StationaryParameterDiagnosis
 {
     float equivalentDepthMetres = 0.0f;
@@ -76,9 +105,13 @@ struct ModeSeparatedCirculationConfig
     // Upper height is the 500 hPa hydrostatic mode, not a second surface pressure.
     std::vector<float> zonalUpperHeightMetres;
     std::vector<float> upperOrographicHeightMetres;
+    std::vector<float> upperStationaryHeatingWm2;
     std::vector<float> surfaceDragTimesSeconds;
+    std::vector<float> surfaceDragCoefficients;
     int maximumZonalWavenumber = 8;
     int maximumMeridionalWavenumber = 24;
+    int upperMaximumZonalWavenumber = 8;
+    int upperMaximumMeridionalWavenumber = 24;
     int solverRestartLength = 60;
     float airDensityKgM3 = 1.225f;
     float gravityMetresPerSecondSquared = 9.80665f;

@@ -2,6 +2,8 @@
 
 #include "climate_benchmark_outputs.hpp"
 #include "climate_weather.hpp"
+#include "climate_hydrology.hpp"
+#include "climate_ocean_dynamics.hpp"
 
 #include <array>
 #include <filesystem>
@@ -12,7 +14,11 @@ class planet;
 namespace climatevalidation
 {
 void captureweatherstatistics(const planet& world, int season, int columns, int rows,
-    const climateweather::WeatherStatistics& statistics);
+    const climateweather::WeatherStatistics& statistics, int layer = 0);
+void captureclimateprocessfields(const planet& world, int season,
+    const climatehydrology::SeasonalProcessFields& fields);
+void captureoceanfields(const planet& world, int season, int columns, int rows,
+    const climateocean::OceanState& state);
 struct circulationreferencewindfields
 {
     int columns = 0;

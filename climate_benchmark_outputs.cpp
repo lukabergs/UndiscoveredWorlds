@@ -35,6 +35,15 @@ const char* seasonalmapname(climatebenchmarkmapkind kind)
     case climatebenchmarkmapkind::surfacewindspeed: return "s-wind-speed";
     case climatebenchmarkmapkind::surfacedivergence: return "s-div";
     case climatebenchmarkmapkind::moisturefluxconvergence: return "moist-conv";
+    case climatebenchmarkmapkind::boundarymoistureflux: return "b-moist-flux";
+    case climatebenchmarkmapkind::freemoistureflux: return "f-moist-flux";
+    case climatebenchmarkmapkind::columnmoistureflux: return "moist-flux";
+    case climatebenchmarkmapkind::verticalascent: return "ascent";
+    case climatebenchmarkmapkind::surfacewindconsistency: return "s-wind-cons";
+    case climatebenchmarkmapkind::upperwindconsistency: return "u-wind-cons";
+    case climatebenchmarkmapkind::seasurfacetemperature: return "sst";
+    case climatebenchmarkmapkind::oceancurrents: return "ocean-current";
+    case climatebenchmarkmapkind::columnheating: return "heating";
     case climatebenchmarkmapkind::era5surfacewindlic: return "era5-s-wind-lic";
     case climatebenchmarkmapkind::era5surfacewindparticles: return "era5-s-wind-part";
     case climatebenchmarkmapkind::era5upperwindlic: return "era5-u-wind-lic";
@@ -59,7 +68,7 @@ bool parseseason(const std::string& value, int& season)
 
 bool parsekind(const std::string& value, climatebenchmarkmapkind& kind)
 {
-    constexpr std::array<climatebenchmarkmapkind, 13> kinds = {
+    constexpr std::array<climatebenchmarkmapkind, 22> kinds = {
         climatebenchmarkmapkind::surfacewindlic,
         climatebenchmarkmapkind::surfacewindparticles,
         climatebenchmarkmapkind::upperwindlic,
@@ -69,6 +78,15 @@ bool parsekind(const std::string& value, climatebenchmarkmapkind& kind)
         climatebenchmarkmapkind::surfacewindspeed,
         climatebenchmarkmapkind::surfacedivergence,
         climatebenchmarkmapkind::moisturefluxconvergence,
+        climatebenchmarkmapkind::boundarymoistureflux,
+        climatebenchmarkmapkind::freemoistureflux,
+        climatebenchmarkmapkind::columnmoistureflux,
+        climatebenchmarkmapkind::verticalascent,
+        climatebenchmarkmapkind::surfacewindconsistency,
+        climatebenchmarkmapkind::upperwindconsistency,
+        climatebenchmarkmapkind::seasurfacetemperature,
+        climatebenchmarkmapkind::oceancurrents,
+        climatebenchmarkmapkind::columnheating,
         climatebenchmarkmapkind::era5surfacewindlic,
         climatebenchmarkmapkind::era5surfacewindparticles,
         climatebenchmarkmapkind::era5upperwindlic,

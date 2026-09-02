@@ -50,6 +50,11 @@ double rotationError(int columns, int correctivePasses)
     {
         const double weight = grid.cellAreasSquareMetres[cell / columns];
         const double error = result[cell] - tracer[cell];
+        const int x = static_cast<int>(cell % columns), y = static_cast<int>(cell / columns);
+        const double transfer = diagnostics.eastIntegratedFlux[grid.index(x - 1, y)] - diagnostics.eastIntegratedFlux[cell] +
+            (y > 0 ? diagnostics.southIntegratedFlux[grid.index(x, y - 1)] : 0.0) - diagnostics.southIntegratedFlux[cell];
+        expect(std::abs(error - transfer / weight) < 2.0e-5,
+            "exported donor-plus-corrector flux divergence must reproduce actual cell tracer change");
         squaredError += weight * error * error;
         area += weight;
     }
@@ -57,6 +62,35 @@ double rotationError(int columns, int correctivePasses)
             std::abs(diagnostics.finalAreaWeightedMass / diagnostics.initialAreaWeightedMass - 1.0) < 2.0e-6,
         "full spherical rotation must preserve positivity and mass through the seam");
     return std::sqrt(squaredError / area);
+}
+
+void testSeasonalFluxDiagnostic()
+{
+    climatehydrology::SeasonalProcessFields fields;
+    fields.columns = 8; fields.rows = 4; fields.durationSeconds = 86400.0;
+    const auto grid = climategrid::makeSphericalGrid(8, 4, 6371000.0);
+    for (int layer = 0; layer < 2; ++layer)
+    {
+        fields.eastIntegratedFlux[layer].assign(32, 0.0);
+        fields.southIntegratedFlux[layer].assign(32, 0.0);
+    }
+    const auto cell = grid.index(3, 1);
+    fields.eastIntegratedFlux[0][cell] = grid.cellAreasSquareMetres[1];
+    auto diagnostic = climatehydrology::meanMoistureTransport(fields, 6371000.0);
+    expect(near(diagnostic.convergenceMmPerDay[cell], -1.0f) &&
+        near(diagnostic.convergenceMmPerDay[grid.index(4, 1)], 1.0f),
+        "integrated face transfer must diagnose signed mm/day convergence");
+    expect(std::abs(climategrid::areaWeightedIntegral(8, 4,
+        climategrid::LatitudeLayout::cellCentred, diagnostic.convergenceMmPerDay)) < 1.0e-12,
+        "global diagnosed moisture convergence must integrate to zero");
+    fields.eastIntegratedFlux[1][cell] = -fields.eastIntegratedFlux[0][cell];
+    diagnostic = climatehydrology::meanMoistureTransport(fields, 6371000.0);
+    expect(std::all_of(diagnostic.convergenceMmPerDay.begin(), diagnostic.convergenceMmPerDay.end(),
+        [](float value) { return value == 0.0f; }),
+        "opposing layer transports must cancel instead of using surface wind for the whole column");
+    expect(diagnostic.eastKgPerMetreSecond[0][cell] > 0.0f &&
+        diagnostic.eastKgPerMetreSecond[1][cell] < 0.0f,
+        "each layer must retain its own signed moisture flux");
 }
 
 void testVariableFlow()
@@ -142,6 +176,7 @@ void testVariableFlow()
 
 int main()
 {
+    testSeasonalFluxDiagnostic();
     const double coarseRotationError = rotationError(24, 1);
     const double fineRotationError = rotationError(48, 1);
     expect(fineRotationError < coarseRotationError * 0.75 &&

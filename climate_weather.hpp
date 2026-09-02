@@ -77,6 +77,10 @@ struct WeatherStatistics
     // Independent-sample estimate; correlated storm-track samples need more
     // sampling, not a claim that this is a confidence bound.
     std::vector<float> speedStandardErrorMps;
+    // Positive-sequence autocorrelation estimate, per cell. Descriptive only:
+    // finite seasonal samples do not establish climate-estimation confidence.
+    std::vector<float> decorrelatedSampleCount;
+    std::vector<float> correlatedSpeedStandardErrorMps;
 };
 
 ShallowWaterState makeState(
@@ -98,7 +102,8 @@ std::vector<ShallowWaterState> generateWeatherSequence(
     float sampleIntervalSeconds);
 WeatherStatistics calculateStatistics(
     const std::vector<ShallowWaterState>& states,
-    int layer = 0);
+    int layer = 0,
+    const std::vector<double>& sampleDurationsSeconds = {});
 std::vector<std::uint8_t> serializeState(const ShallowWaterState& state);
 bool deserializeState(
     const std::vector<std::uint8_t>& bytes,

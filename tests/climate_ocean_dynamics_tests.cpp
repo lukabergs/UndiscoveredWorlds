@@ -131,6 +131,13 @@ int main()
     const auto incomplete = climateocean::solveWindDrivenOcean(columns, rows, forcing, oneWayConfig);
     expect(!incomplete.converged && incomplete.streamfunctionRelativeResidual > oneWayConfig.streamfunctionTolerance,
         "one-way mode must not report an unconverged basin solve as converged");
+    expect(!climateocean::usableOceanState(incomplete, cellCount) && climateocean::usableOceanState(first, cellCount),
+        "production acceptance must reject finite but unconverged ocean solutions");
+    uniform.surfaceHeatFluxWm2.assign(cellCount, 25.0f);
+    oneWayConfig.streamfunctionIterations = coupledConfig.streamfunctionIterations;
+    const auto heated = climateocean::solveWindDrivenOcean(columns, rows, uniform, oneWayConfig);
+    expect(heated.sstC != constant.sstC && std::abs(heated.relativeHeatBudgetResidual) < 1.0e-8,
+        "diagnosed surface heat exchange must change SST and close a normalized ocean heat budget");
     auto aquaplanet = forcing;
     std::fill(aquaplanet.landMask.begin(), aquaplanet.landMask.end(), 0);
     std::fill(aquaplanet.bathymetryMetres.begin(), aquaplanet.bathymetryMetres.end(), 4000.0f);

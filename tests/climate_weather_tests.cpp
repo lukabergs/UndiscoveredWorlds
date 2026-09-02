@@ -106,6 +106,18 @@ int main()
     irregular[2].layers[0].southWindMps.clear();
     expect(climateweather::calculateStatistics(irregular).sampleCount == 0,
         "malformed sampled states must not produce misleading statistics");
+    std::vector<climateweather::ShallowWaterState> daily(90, climateweather::makeState(4, 2, 1, 9));
+    for (int day = 0; day < 90; ++day)
+    {
+        daily[day].elapsedSeconds = (day + 0.5) * 86400.0;
+        std::fill(daily[day].layers[0].eastWindMps.begin(), daily[day].layers[0].eastWindMps.end(),
+            5.0f + static_cast<float>(day) / 20.0f);
+    }
+    const auto dailyStatistics = climateweather::calculateStatistics(daily, 0, std::vector<double>(90, 86400.0));
+    expect(dailyStatistics.durationSeconds == 90.0 * 86400.0 && dailyStatistics.sampleCount == 90 &&
+        dailyStatistics.decorrelatedSampleCount[0] < dailyStatistics.effectiveSampleCount &&
+        dailyStatistics.correlatedSpeedStandardErrorMps[0] >= dailyStatistics.speedStandardErrorMps[0],
+        "daily midpoint samples must cover the full quarter without claiming correlated states are independent");
 
     const auto coarse = climateweather::resampleState(replayFirst, columns / 2);
     const double originalMass = climategrid::areaWeightedIntegral(columns, rows,

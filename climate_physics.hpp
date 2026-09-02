@@ -1,11 +1,22 @@
 #pragma once
 
 #include <array>
+#include <vector>
 
 #include "physical_layers.hpp"
 
 namespace climatephysics
 {
+struct ClimateCouplingDiagnostics
+{
+    int iteration = 0;
+    double windChange = 0.0, sstChange = 0.0, heatingChange = 0.0, rainfallChange = 0.0;
+    bool innerSolvesAccepted = false, converged = false;
+};
+bool climateCouplingConverged(const ClimateCouplingDiagnostics& diagnostics, int minimumIterations, double tolerance);
+void clearClimateCouplingDiagnostics();
+void appendClimateCouplingDiagnostics(const ClimateCouplingDiagnostics& diagnostics);
+const std::vector<ClimateCouplingDiagnostics>& lastClimateCouplingDiagnostics();
 struct WaterBudget
 {
     double initialAtmosphericStorage = 0.0;

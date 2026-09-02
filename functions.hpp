@@ -702,6 +702,7 @@ void createoceancurrentmap(planet& world);
 void createsurfacetemperaturemap(planet& world);
 void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<vector<int>>& fractal);
 void refreshadvectedrainfall(planet& world, vector<vector<int>>& fractal);
+void convergeclimatecoupling(planet& world, vector<vector<int>>& fractal);
 void exportclimatevalidationreport(planet& world);
 bool recordclimatebenchmarkrun(
     planet& world,

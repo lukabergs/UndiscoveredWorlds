@@ -13,6 +13,9 @@ struct OceanForcing
     std::vector<float> southWindMps;
     std::vector<float> atmosphericTemperatureC;
     std::vector<float> initialSstC;
+    // Optional diagnosed net surface radiative/sensible/latent exchange.
+    // When present it replaces the Newtonian surface heat-exchange proxy.
+    std::vector<float> surfaceHeatFluxWm2;
 };
 
 struct OceanConfig
@@ -63,9 +66,12 @@ struct OceanState
     std::vector<float> residualHistory;
     double maximumTransportDivergenceMps = 0.0;
     double heatBudgetResidualJ = 0.0;
+    double relativeHeatBudgetResidual = 0.0;
     bool converged = false;
     bool finite = true;
 };
+
+bool usableOceanState(const OceanState& state, std::size_t cellCount);
 
 OceanState solveWindDrivenOcean(
     int columns,

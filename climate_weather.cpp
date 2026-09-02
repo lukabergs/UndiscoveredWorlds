@@ -511,7 +511,8 @@ std::vector<ShallowWaterState> generateWeatherSequence(
 
 WeatherStatistics calculateStatistics(
     const std::vector<ShallowWaterState>& states,
-    int layer)
+    int layer,
+    const std::vector<double>& sampleDurationsSeconds)
 {
     WeatherStatistics statistics;
     if (states.empty() || layer < 0 ||
@@ -523,7 +524,17 @@ WeatherStatistics calculateStatistics(
     if (cellCount != static_cast<std::size_t>(states.front().columns) * states.front().rows)
         return {};
     std::vector<double> weights(states.size(), 1.0);
-    if (states.size() > 1)
+    if (!sampleDurationsSeconds.empty())
+    {
+        if (sampleDurationsSeconds.size() != states.size()) return {};
+        weights = sampleDurationsSeconds;
+        for (double duration : weights)
+        {
+            if (!(duration > 0.0) || !std::isfinite(duration)) return {};
+            statistics.durationSeconds += duration;
+        }
+    }
+    else if (states.size() > 1)
     {
         std::fill(weights.begin(), weights.end(), 0.0);
         for (std::size_t sample = 1; sample < states.size(); sample++)
@@ -552,6 +563,8 @@ WeatherStatistics calculateStatistics(
     statistics.directionalConsistency.assign(cellCount, 0.0f);
     statistics.speedStandardDeviationMps.assign(cellCount, 0.0f);
     statistics.speedStandardErrorMps.assign(cellCount, 0.0f);
+    statistics.decorrelatedSampleCount.assign(cellCount, 0.0f);
+    statistics.correlatedSpeedStandardErrorMps.assign(cellCount, 0.0f);
     for (std::size_t sample = 0; sample < states.size(); sample++)
     {
         const auto& state = states[sample];
@@ -590,6 +603,25 @@ WeatherStatistics calculateStatistics(
         statistics.speedStandardDeviationMps[cell] = static_cast<float>(std::sqrt(variance));
         statistics.speedStandardErrorMps[cell] = static_cast<float>(
             std::sqrt(variance / statistics.effectiveSampleCount));
+        double correlationTime = 1.0;
+        if (variance > 1.0e-12)
+            for (std::size_t lag = 1; lag < states.size() / 2; ++lag)
+            {
+                double covariance = 0.0, pairWeight = 0.0;
+                for (std::size_t i = lag; i < states.size(); ++i)
+                {
+                    const auto speed = [&](std::size_t index) { return std::hypot(states[index].layers[layer].eastWindMps[cell],
+                        states[index].layers[layer].southWindMps[cell]) - statistics.meanSpeedMps[cell]; };
+                    const double w = std::sqrt(weights[i] * weights[i - lag]);
+                    covariance += w * speed(i) * speed(i - lag); pairWeight += w;
+                }
+                const double rho = std::clamp(covariance / (pairWeight * variance), -1.0, 1.0);
+                if (rho <= 0.0) break;
+                correlationTime += 2.0 * rho * (1.0 - static_cast<double>(lag) / states.size());
+            }
+        const double effective = std::clamp(statistics.effectiveSampleCount / correlationTime, 1.0, statistics.effectiveSampleCount);
+        statistics.decorrelatedSampleCount[cell] = static_cast<float>(effective);
+        statistics.correlatedSpeedStandardErrorMps[cell] = static_cast<float>(std::sqrt(variance / effective));
         statistics.directionalConsistency[cell] = statistics.meanSpeedMps[cell] > 0.0f
             ? std::clamp(
                 std::hypot(
