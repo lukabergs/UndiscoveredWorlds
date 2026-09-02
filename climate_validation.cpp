@@ -313,6 +313,25 @@ double gridcellareaweight(int row, int height)
 
 bool isvalidationland(planet& world, int x, int y);
 
+bool aligncategoricalreference(sf::Image& reference, const planet& world)
+{
+    const auto size = reference.getSize();
+    const unsigned int columns = world.width() + 1, rows = world.height() + 1;
+    if (size.x == 0 || size.y == 0) return false;
+    if (size.x == columns && size.y == rows) return true;
+    sf::Image aligned;
+    aligned.create(columns, rows);
+    for (unsigned int y = 0; y < rows; ++y)
+        for (unsigned int x = 0; x < columns; ++x)
+        {
+            const unsigned int xx = (std::min)(size.x - 1, static_cast<unsigned int>((x + 0.5) * size.x / columns));
+            const unsigned int yy = rows > 1 ? static_cast<unsigned int>(std::round(static_cast<double>(y) * (size.y - 1) / (rows - 1))) : size.y / 2;
+            aligned.setPixel(x, y, reference.getPixel(xx, yy));
+        }
+    reference = std::move(aligned);
+    return true;
+}
+
 climatespatialmetrics compareclimatespatially(planet& world)
 {
     climatespatialmetrics metrics;
@@ -323,6 +342,7 @@ climatespatialmetrics compareclimatespatially(planet& world)
         return metrics;
 
     metrics.referencefound = true;
+    if (!aligncategoricalreference(reference, world)) return metrics;
     const int width = world.width();
     const int height = world.height();
     const sf::Vector2u referencesize = reference.getSize();
@@ -1327,6 +1347,8 @@ void writeipccregioncomparison(const filesystem::path& outputdir, planet& world)
         return;
     }
 
+    aligncategoricalreference(regionmask, world);
+    aligncategoricalreference(koppenreference, world);
     const sf::Vector2u regionsize = regionmask.getSize();
     const sf::Vector2u koppensize = koppenreference.getSize();
     const bool dimensionsmatch =
@@ -1623,6 +1645,7 @@ void printreferencedfcdriverreport(planet& world)
     if (reference.loadFromFile(referencepath.string()) == false)
         return;
 
+    aligncategoricalreference(reference, world);
     const int width = world.width();
     const int height = world.height();
     const sf::Vector2u referencesize = reference.getSize();
@@ -1763,6 +1786,7 @@ void printsimulatedclassconfusionreport(planet& world, short targetclimate)
     if (reference.loadFromFile(referencepath.string()) == false)
         return;
 
+    aligncategoricalreference(reference, world);
     const int width = world.width();
     const int height = world.height();
     const sf::Vector2u referencesize = reference.getSize();
@@ -1951,6 +1975,7 @@ void collectbenchmarktemperaturemetrics(planet& world, benchmarkphysicsmetrics& 
     if (!koppenreference.loadFromFile(getappenvironment().earthKoppenImagePath.string()))
         return;
 
+    aligncategoricalreference(koppenreference, world);
     if (koppenreference.getSize().x != static_cast<unsigned int>(world.width() + 1) ||
         koppenreference.getSize().y != static_cast<unsigned int>(world.height() + 1))
     {
@@ -2277,7 +2302,7 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(planet& world)
                 if (!isvalidationland(world, x, y))
                     continue;
 
-                const double observed = imergprecipitation.value(0, x, y);
+                const double observed = samplemonthlyreference(imergprecipitation, 0, x, y, world.width() + 1, world.height() + 1);
 
                 if (!std::isfinite(observed))
                     continue;
@@ -2916,8 +2941,7 @@ bool exportclimatebenchmarkimages(
             << filesystemerror.message() << '\n';
         return false;
     }
-    if (selection.requirescirculation() &&
-        !climatevalidation::exportcirculationdiagnostics(
+    if (!climatevalidation::exportcirculationdiagnostics(
             circulationdirectory, world, selection))
     {
         cerr << "Failed to export selected circulation maps.\n";
@@ -2989,8 +3013,8 @@ bool exportclimatebenchmarkimages(
         << "BENCHMARK MAP GUIDE\n\n"
         << "All maps are global equirectangular grids with north at the top and periodic longitude.\n\n"
         << "{ID}_koppen.png: categorical land climate class; colors follow the workbook's Koeppen-Geiger legend; water is black.\n"
-        << "{ID}_temp.png: four-season mean land surface-air temperature; -54 C dark blue, 0 C pale, 30 C dark red; water black.\n"
-        << "{ID}_precip.png: annual precipitation; black/purple is near 0, blue/cyan moderate, yellow/white 6000+ mm/year.\n"
+        << "{ID}_temp.png: four-season mean land surface-air temperature; -54 C light grey, -40 purple, -25/-10 blue, 0 cyan, 10 green, 20 yellow, 30+ red; water black.\n"
+        << "{ID}_precip.png: annual precipitation; 0 dark navy, 250 deep blue, 500 blue, 1000 cyan, 1500 green, 2500 yellow-green, 3500 yellow, 4500 orange, 6000+ red (mm/year).\n"
         << "{ID}_precip.tif: the same annual precipitation as unclamped float32 mm/year in WGS84 EPSG:4326.\n"
         << "{ID}_{jan|apr|jul|oct}_s_wind_lic.png: surface-wind LIC. Filaments show flow axes; yellow arrows show direction.\n"
         << "{ID}_{season}_s_wind_part.png: deterministic surface particle paths. Trail density is not wind speed.\n"
@@ -2999,6 +3023,15 @@ bool exportclimatebenchmarkimages(
         << "{ID}_{season}_s_wind_speed.png: scalar wind speed with the same 0-to-25+ m/s palette.\n"
         << "{ID}_{season}_s_div.png: divergence per day; blue convergent, black zero, orange divergent, clamped to +/-1 day^-1.\n"
         << "{ID}_{season}_moist_conv.png: moisture-flux convergence; red drying, black zero, turquoise moisture supply, +/-20 mm/day.\n"
+        << "Moisture convergence uses time-integrated donor-plus-corrective face fluxes from BOTH layers, not column water times surface wind.\n"
+        << "{ID}_{season}_{b_moist_flux|f_moist_flux|moist_flux}.png: lower, upper, or summed moisture transport; arrows show direction; navy/cyan/yellow = 0/275/500+ kg m^-1 s^-1.\n"
+        << "{ID}_{season}_ascent.png: mean transport-stage ascent; red descending, dark zero, turquoise ascending; +/-100 hPa/day.\n"
+        << "{ID}_{season}_heating.png: net atmospheric radiative+sensible+phase-change heating; red cooling, dark zero, turquoise heating; +/-300 W/m2.\n"
+        << "{ID}_{season}_{s|u}_wind_cons.png: climate-sampled wind; hue cyan=variable to red=consistent (0..1); brightness increases with mean speed (0..25+ m/s); arrows show mean direction.\n"
+        << "{ID}_{season}_ocean_current.png: current direction arrows; navy/cyan/yellow = 0/1.1/2+ m/s; land black.\n"
+        << "{ID}_{season}_sst.png: ocean surface temperature; blue below 0 C, dark at 0 C, orange above 0 C, +/-35 C; land black.\n"
+        << "Seasonal process/statistics CSVs retain unclamped values, actual durations, per-layer budgets and correlation-adjusted sample-count estimates.\n"
+        << "LIC/trails show representative-month circulation. Process/consistency maps average the quarter starting at the named month: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec.\n"
         << "ERA5 LIC/particle maps use the same renderer and seeds and are cached once per dimensions and renderer version.\n\n"
         << "LIC and particle maps are generated at up to "
         << climatevalidation::circulationflowvisualizationmaxcolumns()
@@ -3797,7 +3830,7 @@ bool persistclimatebenchmarkdiagnostics(
     const vector<string>& codes,
     const vector<long long>& simulationcounts)
 {
-    constexpr array<const char*, 16> diagnosticfiles = {
+    constexpr array<const char*, 17> diagnosticfiles = {
         "precipitation_summary.txt",
         "climate_energy_budget.csv",
         "climate_water_budget.csv",
@@ -3805,6 +3838,7 @@ bool persistclimatebenchmarkdiagnostics(
         "climate_precipitation_distribution.csv",
         "climate_precipitation_processes.csv",
         "climate_hydrology_spinup.csv",
+        "climate_coupling.csv",
         "climate_condensation_activity.csv",
         "climate_atmosphere_budget.csv",
         "climate_circulation_precision.csv",
@@ -4077,7 +4111,9 @@ void printclimaterelativeerrorreport(planet& world)
     cout << "Climate relative error summary:" << '\n';
     cout << "mean_relative_error=" << meanrelativeerror << '\n';
     cout << "mean_relative_error_adjusted=" << adjustedmeanrelativeerror << '\n';
-    cout << "weighted_relative_error=" << weightedrelativeerror << '\n';
+    cout << "raw_count_weighted_relative_error=" << weightedrelativeerror << '\n';
+    cout << "weighted_relative_error=" << climatebenchmarkweightedrelativeerror(simulated,
+        referenceclimatecounts3600(), world.width() + 1) << '\n';
     cout << "max_relative_error=" << maxrelativeerror << " (" << maxcode << ")" << '\n';
     cout << "max_relative_error_adjusted=" << adjustedmaxrelativeerror << " (" << adjustedmaxcode << ")" << '\n';
     cout << "simulated_land_total=" << totalsimulated << '\n';
@@ -4120,6 +4156,12 @@ void exportclimatevalidationreport(planet& world)
     const int width = world.width();
     const int height = world.height();
     const filesystem::path outputdir = climatevalidationoutputdirectory();
+
+    ofstream couplingfile(outputdir / "climate_coupling.csv");
+    couplingfile << "iteration,wind_change,sst_change,heating_change,rainfall_change,inner_accepted,converged\n";
+    for (const auto& d : climatephysics::lastClimateCouplingDiagnostics())
+        couplingfile << d.iteration << ',' << d.windChange << ',' << d.sstChange << ',' << d.heatingChange << ','
+            << d.rainfallChange << ',' << d.innerSolvesAccepted << ',' << d.converged << '\n';
 
     ofstream energybudgetfile(outputdir / "climate_energy_budget.csv");
 

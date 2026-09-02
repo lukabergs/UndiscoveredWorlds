@@ -516,5 +516,47 @@ int main()
         48.0f, 190080.0f, 1.225f, 6371000.0f, earthRotation, 1.0f, true, 500, 1.0e-4f, 128);
     expect(largeRestart.converged && largeRestart.relativeResidual <= 1.0e-4f,
         "configurable larger GMRES restart windows must retain physical residual acceptance");
+    modeConfig = {};
+    modeConfig.enabled = {true, false, true, false};
+    climateatmosphere::ColumnHeatingInput column;
+    column.incomingSolarWm2 = 340.0;
+    column.sensibleHeatingWm2 = 20.0;
+    column.condensationMm = {1.0, 4.0};
+    column.reevaporationMm = 2.0;
+    column.surfaceEvaporationMm = 3.0;
+    const auto heatColumn = climateatmosphere::diagnoseColumnHeating(column);
+    expect(std::abs(heatColumn.closureResidualWm2) < 1.0e-10 &&
+        heatColumn.latentWm2[0] < 0.0 && heatColumn.latentWm2[1] > 0.0,
+        "grey radiation and phase changes must close energy and locate re-evaporative cooling below condensation");
+    column.longwaveOpticalDepth = {0.0, 0.0};
+    column.shortwaveOpticalDepth = {0.0, 0.0};
+    const auto transparent = climateatmosphere::diagnoseColumnHeating(column);
+    expect(transparent.radiativeWm2[0] == 0.0 && transparent.radiativeWm2[1] == 0.0,
+        "transparent air must not receive surface radiative heating");
+    const auto uniformDrag = climateatmosphere::solveModeSeparatedCirculation(modeColumns, modeRows,
+        zonalPressure, zeroHeating, zeroHeating, modeConfig);
+    modeConfig.surfaceDragCoefficients.assign(modeCellCount, modeConfig.surfaceDragCoefficient);
+    for (int y = 0; y < modeRows; ++y)
+        for (int x = modeColumns / 2; x < modeColumns; ++x)
+            modeConfig.surfaceDragCoefficients[y * modeColumns + x] *= 8.0f;
+    const auto roughLand = climateatmosphere::solveModeSeparatedCirculation(modeColumns, modeRows,
+        zonalPressure, zeroHeating, zeroHeating, modeConfig);
+    const int equatorialRow = modeRows / 2;
+    const int oceanCell = equatorialRow * modeColumns;
+    const int landCell = oceanCell + modeColumns / 2;
+    const auto speed = [](const auto& flow, int cell) {
+        return std::hypot(flow.surfaceEastWindMps[cell], flow.surfaceSouthWindMps[cell]); };
+    expect(speed(roughLand, landCell) < speed(roughLand, oceanCell) &&
+        speed(roughLand, oceanCell) == speed(uniformDrag, oceanCell),
+        "the final quadratic wind solver must use local drag without changing ocean cells");
+    modeConfig = {};
+    modeConfig.interlayerMomentumCoupling = 0.0f;
+    modeConfig.upperMaximumZonalWavenumber = 0;
+    const auto upperFiltered = climateatmosphere::solveModeSeparatedCirculation(modeColumns, modeRows,
+        zonalPressure, heating.stationaryProjectedHeatingWm2, orographic, modeConfig);
+    expect(upperFiltered.surfacePressureAnomalyHpa == separated.surfacePressureAnomalyHpa &&
+        std::all_of(upperFiltered.upperHeightAnomalyMetres.begin(), upperFiltered.upperHeightAnomalyMetres.end(),
+            [](float v) { return std::abs(v) < 1.0e-4f; }),
+        "upper bandwidth must filter upper forcing independently of surface pressure");
     return failures == 0 ? 0 : 1;
 }

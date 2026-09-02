@@ -1,11 +1,30 @@
 #pragma once
 
 #include <vector>
+#include <array>
 
 namespace climatehydrology
 {
 inline constexpr int monthCount = 12;
 inline constexpr int seasonCount = 4;
+
+struct SeasonalProcessFields
+{
+    int columns = 0, rows = 0;
+    double durationSeconds = 0.0;
+    // Integrated face transfers retain source-grid geometry until export.
+    std::array<std::vector<double>, 2> eastIntegratedFlux, southIntegratedFlux;
+    // Time means on cell centres, populated from executed physics steps.
+    std::array<std::vector<float>, 2> radiativeHeatingWm2, latentHeatingWm2;
+    std::vector<float> sensibleHeatingWm2, surfaceNetHeatingWm2;
+    std::vector<float> columnWaterMm, ascentHpaPerDay, columnEnergyResidualWm2;
+};
+struct MeanMoistureTransport
+{
+    std::array<std::vector<float>, 2> eastKgPerMetreSecond, southKgPerMetreSecond;
+    std::vector<float> convergenceMmPerDay;
+};
+MeanMoistureTransport meanMoistureTransport(const SeasonalProcessFields& fields, double radiusMetres);
 
 struct CalendarMonth
 {
@@ -80,6 +99,10 @@ struct SphericalTracerTransportDiagnostics
     double initialAreaWeightedMass = 0.0;
     double finalAreaWeightedMass = 0.0;
     float minimumMixingRatio = 0.0f;
+    // Time-integrated, signed tracer transfer through east/south cell faces.
+    // Units: source units * m2. Includes donor AND limited corrective fluxes.
+    std::vector<double> eastIntegratedFlux;
+    std::vector<double> southIntegratedFlux;
 };
 
 struct MpdataOptions

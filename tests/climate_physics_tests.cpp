@@ -122,5 +122,14 @@ int main()
     expect(std::abs(persistent.residual()) < 1e-9,
         "persistent water budget must include initial atmospheric and soil storage");
 
+    climatephysics::ClimateCouplingDiagnostics coupling;
+    coupling.iteration = 6;
+    expect(!climatephysics::climateCouplingConverged(coupling, 2, 0.02),
+        "an iteration cap or small outer changes cannot accept failed inner climate solves");
+    coupling.innerSolvesAccepted = true;
+    coupling.heatingChange = 0.1;
+    expect(!climatephysics::climateCouplingConverged(coupling, 2, 0.02), "heating must converge along with winds/SST/rainfall");
+    coupling.heatingChange = 0.01;
+    expect(climatephysics::climateCouplingConverged(coupling, 2, 0.02), "all bounded coupled residuals must permit convergence");
     return failures == 0 ? 0 : 1;
 }

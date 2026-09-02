@@ -14,6 +14,7 @@ constexpr float dryAirGasConstantJoulesPerKilogramKelvin = 287.05f;
 constexpr float activeMoistureColumnFraction = 0.28f;
 
 std::array<WaterBudget, CLIMATESEASONCOUNT> waterBudgets{};
+std::vector<ClimateCouplingDiagnostics> couplingDiagnostics;
 std::array<WaterBudget, CLIMATESEASONCOUNT> areaWeightedWaterBudgets{};
 HydrologySpinupDiagnostics hydrologySpinupDiagnostics{};
 PrecipitationDistributionDiagnostics precipitationDistributionDiagnostics{};
@@ -22,6 +23,16 @@ std::array<CondensationActivityDiagnostics, CLIMATESEASONCOUNT>
 std::array<PrecipitationProcessDiagnostics, CLIMATESEASONCOUNT>
     precipitationProcessDiagnostics{};
 }
+
+bool climateCouplingConverged(const ClimateCouplingDiagnostics& d, int minimumIterations, double tolerance)
+{
+    return d.innerSolvesAccepted && d.iteration >= minimumIterations && tolerance > 0.0 &&
+        std::isfinite(d.windChange) && std::isfinite(d.sstChange) && std::isfinite(d.heatingChange) && std::isfinite(d.rainfallChange) &&
+        std::max({d.windChange, d.sstChange, d.heatingChange, d.rainfallChange}) <= tolerance;
+}
+void clearClimateCouplingDiagnostics() { couplingDiagnostics.clear(); }
+void appendClimateCouplingDiagnostics(const ClimateCouplingDiagnostics& d) { couplingDiagnostics.push_back(d); }
+const std::vector<ClimateCouplingDiagnostics>& lastClimateCouplingDiagnostics() { return couplingDiagnostics; }
 
 double WaterBudget::residual() const
 {

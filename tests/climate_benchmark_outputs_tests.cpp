@@ -1,9 +1,13 @@
 #include "climate_benchmark_outputs.hpp"
 
-#include <cassert>
+#include <cstdlib>
+#include <iostream>
 #include <cmath>
 #include <string>
 #include <vector>
+
+// Keep behavior checks active in Release, too.
+#define assert(condition) do { if (!(condition)) { std::cerr << "FAIL line " << __LINE__ << ": " #condition << '\n'; std::exit(1); } } while (false)
 
 int main()
 {
@@ -40,7 +44,9 @@ int main()
 
     selected.clear();
     assert(addclimatebenchmarkmapargument(selected, "all", &failure));
-    assert(selected.requests().size() == 56);
+    assert(selected.requests().size() == 92);
+    assert(selected.includes(climatebenchmarkmapkind::columnmoistureflux, 0));
+    assert(selected.includes(climatebenchmarkmapkind::surfacewindconsistency, 0));
     assert(selected.includes(climatebenchmarkmapkind::era5upperwindparticles, 3));
 
     const std::vector<double> referencecounts = { 16.0, 32.0, 48.0 };

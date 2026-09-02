@@ -7,6 +7,13 @@
 
 namespace climateocean
 {
+bool usableOceanState(const OceanState& state, std::size_t cellCount)
+{
+    const auto valid = [&](const auto& values) { return values.size() == cellCount &&
+        std::all_of(values.begin(), values.end(), [](auto v) { return std::isfinite(v); }); };
+    return state.finite && state.converged && valid(state.sstC) && valid(state.eastCurrentMps) &&
+        valid(state.southCurrentMps) && valid(state.coupledEastWindMps) && valid(state.coupledSouthWindMps);
+}
 OceanState solveWindDrivenOcean(int columns, int rows,
     const OceanForcing& forcing, const OceanConfig& config)
 {
@@ -19,6 +26,7 @@ OceanState solveWindDrivenOcean(int columns, int rows,
     if (columns < 4 || rows < 3 || forcing.landMask.size() != count ||
         !valid(forcing.bathymetryMetres) || !valid(forcing.eastWindMps) || !valid(forcing.southWindMps) ||
         !valid(forcing.atmosphericTemperatureC) || !valid(forcing.initialSstC) ||
+        (!forcing.surfaceHeatFluxWm2.empty() && !valid(forcing.surfaceHeatFluxWm2)) ||
         !(config.planetRadiusMetres > 0.0f) || !(config.waterDensityKgM3 > 0.0f) ||
         !(config.airDensityKgM3 > 0.0f) || !(config.barotropicDragPerSecond > 0.0f) ||
         !(config.mixedLayerDepthMetres > 0.0f) || !(config.waterHeatCapacityJkgK > 0.0f) ||
@@ -182,7 +190,7 @@ OceanState solveWindDrivenOcean(int columns, int rows,
         const double interval = config.oceanTimeStepSeconds * std::max(1, config.heatStepsPerIteration);
         const int substeps = std::max(1, static_cast<int>(std::ceil(interval * maximumRate / 0.7)));
         const double dt = interval / substeps;
-        double expectedHeatChange = 0.0;
+        double expectedHeatChange = 0.0, absoluteHeatExchange = 0.0;
         for (int step = 0; step < substeps; ++step)
         {
             std::fill(tendency.begin(), tendency.end(), 0.0);
@@ -210,10 +218,13 @@ OceanState solveWindDrivenOcean(int columns, int rows,
                     // vertical exchange with the deep reservoir. Uniform T is
                     // invariant when the deep contrast and heat exchange vanish.
                     const double deepT = forcing.initialSstC[c] - config.deepWaterTemperatureContrastK;
-                    const double source = config.surfaceHeatExchangeWm2K / heatCapacity *
-                        (forcing.atmosphericTemperatureC[c] - temperature[c]) +
+                    const double surfaceSource = forcing.surfaceHeatFluxWm2.empty()
+                        ? config.surfaceHeatExchangeWm2K * (forcing.atmosphericTemperatureC[c] - temperature[c])
+                        : forcing.surfaceHeatFluxWm2[c];
+                    const double source = surfaceSource / heatCapacity +
                         divergence[c] * (divergence[c] > 0.0 ? deepT : temperature[c]);
                     expectedHeatChange += dt * area * heatCapacity * source;
+                    absoluteHeatExchange += std::abs(dt * area * heatCapacity * source);
                     temperature[c] += dt * (tendency[c] / area + source);
                 }
         }
@@ -235,6 +246,8 @@ OceanState solveWindDrivenOcean(int columns, int rows,
                     (state.sstC[c] - forcing.atmosphericTemperatureC[c]);
             }
         state.heatBudgetResidualJ = heatChange - expectedHeatChange;
+        state.relativeHeatBudgetResidual = state.heatBudgetResidualJ /
+            std::max({1.0, std::abs(heatChange), absoluteHeatExchange});
         for (int y = 0; y < rows; ++y)
             for (int x = 0; x < columns; ++x)
             {

@@ -222,11 +222,22 @@ inline constexpr float stationaryWaveRelativeTolerance = 1.0e-4f;
 inline constexpr int maximumResolvedStationaryZonalWavenumber = 8;
 inline constexpr int maximumResolvedStationaryMeridionalWavenumber = 24;
 inline constexpr float diagnosedForcingScaleMetres = 1200000.0f;
+// Legacy scalar projection/response controls are retained for experiments;
+// production uses column exchanges and mass/cp/hypsometric mode conversion.
 inline constexpr float diabaticVerticalProjection = 0.35f;
 inline constexpr float sensibleHeatingCoefficientWm2K = 5.0f;
-inline constexpr float stationaryLatentHeatProjectionFraction = 1.0f;
+inline constexpr float stationaryLatentHeatProjectionFraction = 1.0f; // active latent-heating isolation control
 inline constexpr float surfaceHeatingPressureResponseHpaPerWm2 = -0.04f;
 inline constexpr float upperHeatingHeightResponseMetresPerWm2 = 1.5f;
+// Active grey-column radiation and climate-coupling controls.
+inline constexpr float lowerLongwaveOpticalDepth = 1.0f;
+inline constexpr float upperLongwaveOpticalDepth = 0.5f;
+inline constexpr float lowerShortwaveOpticalDepth = 0.12f;
+inline constexpr float upperShortwaveOpticalDepth = 0.10f;
+inline constexpr int maximumCouplingIterations = 6;
+inline constexpr int minimumCouplingIterations = 2;
+inline constexpr float couplingRelativeTolerance = 0.02f;
+inline constexpr float couplingHeatingRelaxation = 0.5f;
 inline constexpr float surfaceToUpperModeCoupling = 0.10f;
 inline constexpr float upperOrographicProjection = 0.20f;
 inline constexpr bool enableZonalMode = true;
@@ -256,6 +267,9 @@ inline constexpr int iterations = 30;
 inline constexpr int internalClimateHorizontalCells = 128;
 inline constexpr int weatherPhaseCount = 3;
 inline constexpr bool enableEvolvingWeatherAnomalies = true;
+inline constexpr float maximumClimateStepDays = 1.0f;
+inline constexpr bool enablePrescribedSynopticPerturbations = false;
+inline constexpr bool enablePrescribedCoastalDiurnalCycle = true;
 inline constexpr int weatherAnomalyHorizontalCells = 32;
 inline constexpr float weatherAnomalyEquivalentDepthMetres = 100.0f;
 inline constexpr float weatherAnomalyDragTimeDays = 3.0f;

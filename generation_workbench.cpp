@@ -1892,13 +1892,8 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         applyrainfallstage(world, context);
         if (world.seatotal() > 0 && tuning::climate::circulation::enableLaggedDiabaticCoupling)
         {
-            createpressuremap(world);
-            createvectorwindmap(world);
-            updatehorsebeltsfrompressure(world);
-            createoceancurrentmap(world);
-            createsurfacetemperaturemap(world);
             vector<vector<int>> fractal = buildterrainfractal(world, 0x5004, world.maxelevation());
-            refreshadvectedrainfall(world, fractal);
+            convergeclimatecoupling(world, fractal);
         }
         return true;
 

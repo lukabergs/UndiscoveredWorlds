@@ -180,6 +180,8 @@ SphericalTracerTransportDiagnostics advectSphericalTracerMpdata(
 
     const climategrid::SphericalGrid grid = climategrid::makeSphericalGrid(
         columns, rows, planetRadiusMetres);
+    diagnostics.eastIntegratedFlux.assign(cellCount, 0.0);
+    diagnostics.southIntegratedFlux.assign(cellCount, 0.0);
     const auto massIntegral = [&](const std::vector<float>& field)
     {
         double mass = 0.0;
@@ -331,6 +333,7 @@ SphericalTracerTransportDiagnostics advectSphericalTracerMpdata(
             const double tracerFlux = sweptArea * static_cast<double>(upwind);
             mass[fullFace.first] -= tracerFlux;
             mass[fullFace.second] += tracerFlux;
+            (fullFace.meridional ? diagnostics.southIntegratedFlux : diagnostics.eastIntegratedFlux)[fullFace.first] += tracerFlux;
         }
         for (int y = 0; y < rows; y++)
         {
@@ -475,6 +478,7 @@ SphericalTracerTransportDiagnostics advectSphericalTracerMpdata(
                 }
                 mass[face.first] -= limitedFlux;
                 mass[face.second] += limitedFlux;
+                (face.meridional ? diagnostics.southIntegratedFlux : diagnostics.eastIntegratedFlux)[face.first] += limitedFlux;
                 nextAdvector[faceIndex] *= correction[faceIndex] != 0.0
                     ? limitedFlux / correction[faceIndex] : 0.0;
             }
@@ -496,6 +500,36 @@ SphericalTracerTransportDiagnostics advectSphericalTracerMpdata(
     diagnostics.minimumMixingRatio = *std::min_element(
         destination.begin(), destination.end());
     return diagnostics;
+}
+
+MeanMoistureTransport meanMoistureTransport(const SeasonalProcessFields& fields, double radiusMetres)
+{
+    MeanMoistureTransport result;
+    const int cells = fields.columns * fields.rows;
+    if (cells <= 0 || fields.durationSeconds <= 0.0) return result;
+    const auto grid = climategrid::makeSphericalGrid(fields.columns, fields.rows, radiusMetres);
+    result.convergenceMmPerDay.assign(cells, 0.0f);
+    for (int layer = 0; layer < 2; ++layer)
+    {
+        if (fields.eastIntegratedFlux[layer].size() != static_cast<std::size_t>(cells) ||
+            fields.southIntegratedFlux[layer].size() != static_cast<std::size_t>(cells)) return {};
+        result.eastKgPerMetreSecond[layer].resize(cells);
+        result.southKgPerMetreSecond[layer].resize(cells);
+        for (int y = 0; y < fields.rows; ++y)
+            for (int x = 0; x < fields.columns; ++x)
+            {
+                const auto cell = grid.index(x, y), west = grid.index(x - 1, y), north = grid.index(x, y - 1);
+                const double e = fields.eastIntegratedFlux[layer][cell], w = fields.eastIntegratedFlux[layer][west];
+                const double s = fields.southIntegratedFlux[layer][cell], n = y > 0 ? fields.southIntegratedFlux[layer][north] : 0.0;
+                result.eastKgPerMetreSecond[layer][cell] = static_cast<float>((e + w) /
+                    (2.0 * fields.durationSeconds * grid.zonalFaceLengthsMetres[y]));
+                result.southKgPerMetreSecond[layer][cell] = static_cast<float>((s + n) /
+                    (fields.durationSeconds * std::max(1.0, grid.northFaceLengthsMetres[y] + grid.southFaceLengthsMetres[y])));
+                result.convergenceMmPerDay[cell] += static_cast<float>((w - e + n - s) * 86400.0 /
+                    (fields.durationSeconds * grid.cellAreasSquareMetres[y]));
+            }
+    }
+    return result;
 }
 
 WeatherPhase deterministicWeatherPhase(
