@@ -3709,7 +3709,7 @@ void initialiseworld(planet& world)
 {
     world.clear();
 
-    int saveversion = 16;        // Only saves of this exact version can be loaded.
+    int saveversion = 17;        // Only saves of this exact version can be loaded.
     int settingssaveversion = 5; // As above, but for settings files.
     int size = tuning::worlddefaults::size;
     int width = tuning::worlddefaults::width;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "climate_benchmark_outputs.hpp"
+#include "climate_weather.hpp"
 
 #include <array>
 #include <filesystem>
@@ -10,6 +11,8 @@ class planet;
 
 namespace climatevalidation
 {
+void captureweatherstatistics(const planet& world, int season, int columns, int rows,
+    const climateweather::WeatherStatistics& statistics);
 struct circulationreferencewindfields
 {
     int columns = 0;

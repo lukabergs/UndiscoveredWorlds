@@ -1,8 +1,11 @@
 #include "climate_hydrology.hpp"
 
+#include "climate_grid.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace climatehydrology
 {
@@ -69,30 +72,27 @@ ClimateGridDimensions climateGridDimensions(
     int outputRows,
     int targetHorizontalCells)
 {
-    const int columns = std::max(1, std::min(outputColumns, targetHorizontalCells));
-    const int latitudeIntervals = std::max(1, outputRows - 1);
-    const int targetLatitudeIntervals = std::max(
-        1,
-        static_cast<int>(std::round(
-            static_cast<float>(latitudeIntervals * columns) /
-            static_cast<float>(std::max(1, outputColumns)))));
-    return { columns, std::min(outputRows, targetLatitudeIntervals + 1) };
+    const int requested = std::min(outputColumns, targetHorizontalCells);
+    const int columns = std::max(2, requested - requested % 2);
+    // Climate state always uses the finite-volume 2:1 spherical contract.
+    // Requested raster dimensions affect only the explicit input/output remap.
+    (void)outputRows;
+    return { columns, std::max(1, columns / 2) };
 }
 
 float climateCellLatitudeDegrees(int row, int rowCount)
 {
-    const int count = std::max(1, rowCount);
-    const int boundedRow = std::clamp(row, 0, count - 1);
-    return 90.0f - 180.0f *
-        (static_cast<float>(boundedRow) + 0.5f) / static_cast<float>(count);
+    constexpr double radiansToDegrees = 57.2957795130823208768;
+    return static_cast<float>(climategrid::latitudeCentreRadians(
+        row, std::max(1, rowCount), climategrid::LatitudeLayout::cellCentred) * radiansToDegrees);
 }
 
 float climateCellAreaWeight(int row, int rowCount)
 {
-    constexpr float pi = 3.14159265358979323846f;
-    return std::max(
-        1.0e-5f,
-        std::cos(climateCellLatitudeDegrees(row, rowCount) * pi / 180.0f));
+    constexpr double pi = 3.14159265358979323846;
+    const int rows = std::max(1, rowCount);
+    return static_cast<float>(climategrid::latitudeBandMeasure(
+        row, rows, climategrid::LatitudeLayout::cellCentred) * rows / pi);
 }
 
 float polarTaperFactor(
@@ -129,145 +129,372 @@ SphericalTracerTransportDiagnostics advectSphericalTracer(
     float maximumDisplacementCells,
     std::vector<float>& destination)
 {
-    constexpr float pi = 3.14159265358979323846f;
+    (void)maximumDisplacementCells;
+    MpdataOptions options;
+    options.maximumCourantPerSubstep = maximumMeridionalCourantPerSubstep;
+    return advectSphericalTracerMpdata(
+        columns,
+        rows,
+        source,
+        zonalWindMps,
+        meridionalWindMps,
+        timeStepSeconds,
+        planetRadiusMetres,
+        options,
+        destination);
+}
+
+SphericalTracerTransportDiagnostics advectSphericalTracerMpdata(
+    int columns,
+    int rows,
+    const std::vector<float>& source,
+    const std::vector<float>& zonalWindMps,
+    const std::vector<float>& meridionalWindMps,
+    float timeStepSeconds,
+    float planetRadiusMetres,
+    const MpdataOptions& options,
+    std::vector<float>& destination)
+{
+    struct FaceFlux
+    {
+        std::size_t first = 0;
+        std::size_t second = 0;
+        double sweptArea = 0.0;
+        bool meridional = false;
+        double initialSweptArea = 0.0;
+        double finalSweptArea = 0.0;
+    };
+
     SphericalTracerTransportDiagnostics diagnostics;
-    const size_t cellCount = static_cast<size_t>(std::max(0, columns)) *
-        static_cast<size_t>(std::max(0, rows));
+    const std::size_t cellCount = static_cast<std::size_t>(std::max(0, columns)) *
+        static_cast<std::size_t>(std::max(0, rows));
     if (columns <= 0 || rows <= 0 || source.size() != cellCount ||
         zonalWindMps.size() != cellCount || meridionalWindMps.size() != cellCount ||
-        timeStepSeconds <= 0.0f || planetRadiusMetres <= 0.0f)
+        timeStepSeconds <= 0.0f || planetRadiusMetres <= 0.0f ||
+        (!options.endZonalWindMps.empty() && options.endZonalWindMps.size() != cellCount) ||
+        (!options.endMeridionalWindMps.empty() && options.endMeridionalWindMps.size() != cellCount))
     {
         destination = source;
         return diagnostics;
     }
 
-    const float meridionalCellHeight = pi * planetRadiusMetres /
-        static_cast<float>(rows);
-    const float displacementLimit = std::max(0.0f, maximumDisplacementCells);
-    for (float wind : meridionalWindMps)
+    const climategrid::SphericalGrid grid = climategrid::makeSphericalGrid(
+        columns, rows, planetRadiusMetres);
+    const auto massIntegral = [&](const std::vector<float>& field)
     {
-        diagnostics.maximumMeridionalCourant = std::max(
-            diagnostics.maximumMeridionalCourant,
-            std::min(
-                displacementLimit,
-                std::fabs(wind) * timeStepSeconds / meridionalCellHeight));
+        double mass = 0.0;
+        for (int y = 0; y < rows; y++)
+        {
+            const double area = grid.cellAreasSquareMetres[y];
+            for (int x = 0; x < columns; x++)
+                mass += area * static_cast<double>(field[grid.index(x, y)]);
+        }
+        return mass;
+    };
+
+    std::vector<FaceFlux> fullStepFaces;
+    fullStepFaces.reserve(static_cast<std::size_t>(columns) * (2 * rows - 1));
+    std::vector<double> outgoingArea(cellCount, 0.0);
+    for (int y = 0; y < rows; y++)
+    {
+        const double cellArea = grid.cellAreasSquareMetres[y];
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t west = grid.index(x, y);
+            const std::size_t east = grid.index(x + 1, y);
+            const double eastWind = 0.5 * (
+                static_cast<double>(zonalWindMps[west]) + zonalWindMps[east]);
+            const double sweptArea = eastWind * grid.zonalFaceLengthsMetres[y] *
+                static_cast<double>(timeStepSeconds);
+            fullStepFaces.push_back({ west, east, sweptArea });
+            diagnostics.maximumZonalCourant = std::max(
+                diagnostics.maximumZonalCourant,
+                static_cast<float>(std::abs(sweptArea) / cellArea));
+            outgoingArea[sweptArea >= 0.0 ? west : east] += std::abs(sweptArea);
+
+            if (y >= rows - 1)
+                continue;
+            const std::size_t north = west;
+            const std::size_t south = grid.index(x, y + 1);
+            const double southWind = 0.5 * (
+                static_cast<double>(meridionalWindMps[north]) + meridionalWindMps[south]);
+            const double meridionalSweptArea = southWind *
+                grid.southFaceLengthsMetres[y] * static_cast<double>(timeStepSeconds);
+            fullStepFaces.push_back({ north, south, meridionalSweptArea, true });
+            const double smallerArea = std::min(
+                grid.cellAreasSquareMetres[y], grid.cellAreasSquareMetres[y + 1]);
+            diagnostics.maximumMeridionalCourant = std::max(
+                diagnostics.maximumMeridionalCourant,
+                static_cast<float>(std::abs(meridionalSweptArea) / smallerArea));
+            outgoingArea[meridionalSweptArea >= 0.0 ? north : south] +=
+                std::abs(meridionalSweptArea);
+        }
     }
 
+    // Bound the complete time-varying route with the outgoing maxima on every
+    // face. This remains safe when a face reverses direction during the step.
+    std::fill(outgoingArea.begin(), outgoingArea.end(), 0.0);
+    for (auto& face : fullStepFaces)
+    {
+        const int row = static_cast<int>(face.first / columns);
+        const auto& endWind = face.meridional ? options.endMeridionalWindMps : options.endZonalWindMps;
+        face.initialSweptArea = face.sweptArea;
+        face.finalSweptArea = endWind.empty() ? face.sweptArea :
+            0.5 * (endWind[face.first] + endWind[face.second]) * timeStepSeconds *
+                (face.meridional ? grid.southFaceLengthsMetres[row] : grid.zonalFaceLengthsMetres[row]);
+        outgoingArea[face.first] += std::max({0.0, face.initialSweptArea, face.finalSweptArea});
+        outgoingArea[face.second] += std::max({0.0, -face.initialSweptArea, -face.finalSweptArea});
+    }
+    for (int y = 0; y < rows; y++)
+    {
+        const double inverseArea = 1.0 / grid.cellAreasSquareMetres[y];
+        for (int x = 0; x < columns; x++)
+        {
+            diagnostics.maximumMultidimensionalCourant = std::max(
+                diagnostics.maximumMultidimensionalCourant,
+                static_cast<float>(outgoingArea[grid.index(x, y)] * inverseArea));
+        }
+    }
     const float courantLimit = std::clamp(
-        maximumMeridionalCourantPerSubstep,
-        0.05f,
-        1.0f);
+        options.maximumCourantPerSubstep, 0.05f, 0.95f);
     diagnostics.substeps = std::max(
         1,
         static_cast<int>(std::ceil(
-            diagnostics.maximumMeridionalCourant / courantLimit)));
-    const float substepSeconds = timeStepSeconds /
-        static_cast<float>(diagnostics.substeps);
+            diagnostics.maximumMultidimensionalCourant / courantLimit)));
+    diagnostics.correctivePasses = std::clamp(options.correctivePasses, 0, 3);
+    diagnostics.initialAreaWeightedMass = massIntegral(source);
 
-    std::vector<float> rowAreaWeights(static_cast<size_t>(rows), 1.0f);
-    for (int y = 0; y < rows; y++)
-        rowAreaWeights[static_cast<size_t>(y)] = climateCellAreaWeight(y, rows);
+    std::vector<float> current = source;
+    std::vector<double> mass(cellCount, 0.0);
+    std::vector<float> donor(cellCount, 0.0f);
+    std::vector<double> positiveFlux(cellCount, 0.0);
+    std::vector<double> negativeFlux(cellCount, 0.0);
+    std::vector<double> positiveRatio(cellCount, 1.0);
+    std::vector<double> negativeRatio(cellCount, 1.0);
+    std::vector<double> correction(fullStepFaces.size(), 0.0);
+    std::vector<double> advector(fullStepFaces.size(), 0.0);
+    std::vector<double> nextAdvector(fullStepFaces.size(), 0.0);
+    std::vector<double> eastAdvector(cellCount, 0.0);
+    std::vector<double> southAdvector(cellCount, 0.0);
+    std::vector<double> divergence(cellCount, 0.0);
+    std::vector<float> lowerBound(cellCount, 0.0f);
+    std::vector<float> upperBound(cellCount, 0.0f);
 
-    const auto areaWeightedMass = [&](const std::vector<float>& field)
+    const auto localBounds = [&](const std::vector<float>& field)
     {
-        double total = 0.0;
         for (int y = 0; y < rows; y++)
         {
-            const double weight = rowAreaWeights[static_cast<size_t>(y)];
+            const int north = std::max(0, y - 1);
+            const int south = std::min(rows - 1, y + 1);
             for (int x = 0; x < columns; x++)
-                total += weight * field[static_cast<size_t>(y) * columns + x];
+            {
+                const std::size_t cell = grid.index(x, y);
+                float minimum = field[cell];
+                float maximum = field[cell];
+                for (const std::size_t neighbour : {
+                         grid.index(x - 1, y), grid.index(x + 1, y),
+                         grid.index(x, north), grid.index(x, south) })
+                {
+                    minimum = std::min(minimum, field[neighbour]);
+                    maximum = std::max(maximum, field[neighbour]);
+                }
+                lowerBound[cell] = options.monotone ? std::max(0.0f, minimum) : 0.0f;
+                upperBound[cell] = options.monotone
+                    ? maximum
+                    : std::numeric_limits<float>::max();
+            }
         }
-        return total;
-    };
-
-    diagnostics.initialAreaWeightedMass = areaWeightedMass(source);
-    std::vector<float> current = source;
-    std::vector<float> zonal(cellCount, 0.0f);
-    std::vector<float> next(cellCount, 0.0f);
-
-    const auto wrappedColumn = [columns](int x)
-    {
-        const int remainder = x % columns;
-        return remainder < 0 ? remainder + columns : remainder;
     };
 
     for (int step = 0; step < diagnostics.substeps; step++)
     {
-        std::fill(zonal.begin(), zonal.end(), 0.0f);
+        const double fraction = (step + 0.5) / diagnostics.substeps;
+        for (auto& face : fullStepFaces)
+            face.sweptArea = face.initialSweptArea + fraction * (face.finalSweptArea - face.initialSweptArea);
         for (int y = 0; y < rows; y++)
         {
-            const float latitudeRadians = climateCellLatitudeDegrees(y, rows) * pi / 180.0f;
-            const float circumference = 2.0f * pi * planetRadiusMetres *
-                std::max(0.05f, std::cos(latitudeRadians));
-            const float cellWidth = circumference / static_cast<float>(columns);
-
+            const double area = grid.cellAreasSquareMetres[y];
             for (int x = 0; x < columns; x++)
             {
-                const size_t sourceIndex = static_cast<size_t>(y) * columns + x;
-                const float fullDisplacement = std::clamp(
-                    zonalWindMps[sourceIndex] * timeStepSeconds / cellWidth,
-                    -displacementLimit,
-                    displacementLimit);
-                const float displacement = fullDisplacement /
-                    static_cast<float>(diagnostics.substeps);
-                const float magnitude = std::fabs(displacement);
-                const float transportedFraction = std::min(1.0f, magnitude);
-                const float targetPosition = static_cast<float>(x) +
-                    (magnitude < 1.0f
-                        ? static_cast<float>((displacement > 0.0f) - (displacement < 0.0f))
-                        : displacement);
-                const int targetBase = static_cast<int>(std::floor(targetPosition));
-                const float targetFraction = targetPosition - std::floor(targetPosition);
-                const int target0 = wrappedColumn(targetBase);
-                const int target1 = wrappedColumn(targetBase + 1);
-                const float transported = current[sourceIndex] * transportedFraction;
-
-                zonal[sourceIndex] += current[sourceIndex] - transported;
-                zonal[static_cast<size_t>(y) * columns + target0] +=
-                    transported * (1.0f - targetFraction);
-                zonal[static_cast<size_t>(y) * columns + target1] +=
-                    transported * targetFraction;
+                const std::size_t cell = grid.index(x, y);
+                mass[cell] = area * static_cast<double>(current[cell]);
             }
         }
 
-        std::fill(next.begin(), next.end(), 0.0f);
+        for (const FaceFlux& fullFace : fullStepFaces)
+        {
+            const double sweptArea = fullFace.sweptArea /
+                static_cast<double>(diagnostics.substeps);
+            const float upwind = sweptArea >= 0.0
+                ? current[fullFace.first]
+                : current[fullFace.second];
+            const double tracerFlux = sweptArea * static_cast<double>(upwind);
+            mass[fullFace.first] -= tracerFlux;
+            mass[fullFace.second] += tracerFlux;
+        }
         for (int y = 0; y < rows; y++)
         {
-            const float areaWeight = rowAreaWeights[static_cast<size_t>(y)];
+            const double inverseArea = 1.0 / grid.cellAreasSquareMetres[y];
             for (int x = 0; x < columns; x++)
             {
-                const size_t sourceIndex = static_cast<size_t>(y) * columns + x;
-                const float fullDisplacement = std::clamp(
-                    meridionalWindMps[sourceIndex] * timeStepSeconds /
-                        meridionalCellHeight,
-                    -displacementLimit,
-                    displacementLimit);
-                const float displacement = fullDisplacement /
-                    static_cast<float>(diagnostics.substeps);
-                const float transportedFraction = std::min(1.0f, std::fabs(displacement));
-                const int targetRow = adjacentMeridionalTransportTargetRow(
-                    y,
-                    displacement,
-                    rows - 1);
-                const float sourceMass = zonal[sourceIndex] * areaWeight;
-                const float transportedMass = sourceMass * transportedFraction;
-
-                next[sourceIndex] += sourceMass - transportedMass;
-                next[static_cast<size_t>(targetRow) * columns + x] += transportedMass;
+                const std::size_t cell = grid.index(x, y);
+                donor[cell] = static_cast<float>(mass[cell] * inverseArea);
             }
         }
 
-        for (int y = 0; y < rows; y++)
+        localBounds(current);
+        current.swap(donor);
+        // Allow extrema introduced by physical compression/expansion in the
+        // donor pass. The correction must not undo a real divergent tendency.
+        for (std::size_t cell = 0; cell < cellCount; cell++)
         {
-            const float inverseArea = 1.0f / rowAreaWeights[static_cast<size_t>(y)];
-            for (int x = 0; x < columns; x++)
-                next[static_cast<size_t>(y) * columns + x] *= inverseArea;
+            lowerBound[cell] = std::min(lowerBound[cell], current[cell]);
+            upperBound[cell] = std::max(upperBound[cell], current[cell]);
         }
-        current.swap(next);
+        for (std::size_t face = 0; face < fullStepFaces.size(); face++)
+            advector[face] = fullStepFaces[face].sweptArea / diagnostics.substeps;
+        for (int pass = 0; pass < diagnostics.correctivePasses; pass++)
+        {
+            std::fill(positiveFlux.begin(), positiveFlux.end(), 0.0);
+            std::fill(negativeFlux.begin(), negativeFlux.end(), 0.0);
+            std::fill(divergence.begin(), divergence.end(), 0.0);
+            for (std::size_t face = 0; face < fullStepFaces.size(); face++)
+            {
+                const auto& edge = fullStepFaces[face];
+                (edge.meridional ? southAdvector : eastAdvector)[edge.first] = advector[face];
+                divergence[edge.first] += advector[face];
+                divergence[edge.second] -= advector[face];
+            }
+            for (std::size_t cell = 0; cell < cellCount; cell++)
+                divergence[cell] /= grid.cellAreasSquareMetres[cell / columns];
+            for (std::size_t faceIndex = 0; faceIndex < fullStepFaces.size(); faceIndex++)
+            {
+                const FaceFlux& fullFace = fullStepFaces[faceIndex];
+                const double sweptArea = advector[faceIndex];
+                const double firstArea = grid.cellAreasSquareMetres[
+                    static_cast<int>(fullFace.first / static_cast<std::size_t>(columns))];
+                const double secondArea = grid.cellAreasSquareMetres[
+                    static_cast<int>(fullFace.second / static_cast<std::size_t>(columns))];
+                const double faceArea = 0.5 * (firstArea + secondArea);
+                const int x = static_cast<int>(fullFace.first % columns);
+                const int y = static_cast<int>(fullFace.first / columns);
+                const int north = std::max(0, y - 1);
+                const int south = std::min(rows - 1, y + 1);
+                double transverseAdvector = 0.0;
+                double transverseNumerator = 0.0;
+                double transverseDenominator = 0.0;
+                if (fullFace.meridional)
+                {
+                    transverseAdvector = 0.25 * (
+                        eastAdvector[grid.index(x, y)] + eastAdvector[grid.index(x - 1, y)] +
+                        eastAdvector[grid.index(x, south)] + eastAdvector[grid.index(x - 1, south)]);
+                    transverseNumerator = current[grid.index(x + 1, y)] +
+                        current[grid.index(x + 1, south)] - current[grid.index(x - 1, y)] -
+                        current[grid.index(x - 1, south)];
+                    transverseDenominator = current[grid.index(x + 1, y)] +
+                        current[grid.index(x + 1, south)] + current[grid.index(x - 1, y)] +
+                        current[grid.index(x - 1, south)];
+                }
+                else
+                {
+                    transverseAdvector = 0.25 * (
+                        southAdvector[grid.index(x, y)] + southAdvector[grid.index(x + 1, y)] +
+                        (y > 0 ? southAdvector[grid.index(x, north)] +
+                            southAdvector[grid.index(x + 1, north)] : 0.0));
+                    transverseNumerator = current[grid.index(x, south)] +
+                        current[grid.index(x + 1, south)] - current[grid.index(x, north)] -
+                        current[grid.index(x + 1, north)];
+                    transverseDenominator = current[grid.index(x, south)] +
+                        current[grid.index(x + 1, south)] + current[grid.index(x, north)] +
+                        current[grid.index(x + 1, north)];
+                }
+                const double sum = current[fullFace.first] + current[fullFace.second];
+                const double gradientRatio = sum > 1.0e-30
+                    ? (current[fullFace.second] - current[fullFace.first]) / sum : 0.0;
+                const double crossRatio = transverseDenominator > 1.0e-30
+                    ? 0.5 * transverseNumerator / transverseDenominator : 0.0;
+                // Generalized-coordinate MPDATA: normal, cross-dimensional,
+                // and divergent-flow terms. Every corrective pass is another
+                // donor-cell pass driven by the preceding pseudo-advector.
+                // Jaruga et al., doi:10.5194/gmd-8-1005-2015, section 3.1.
+                const double pseudoAdvector =
+                    (std::abs(sweptArea) - sweptArea * sweptArea / faceArea) * gradientRatio -
+                    sweptArea * transverseAdvector / faceArea * crossRatio -
+                    0.25 * sweptArea * (divergence[fullFace.first] + divergence[fullFace.second]);
+                nextAdvector[faceIndex] = pseudoAdvector;
+                const double antidiffusiveFlux = pseudoAdvector *
+                    (pseudoAdvector >= 0.0 ? current[fullFace.first] : current[fullFace.second]);
+                correction[faceIndex] = antidiffusiveFlux;
+                if (antidiffusiveFlux >= 0.0)
+                {
+                    negativeFlux[fullFace.first] += antidiffusiveFlux;
+                    positiveFlux[fullFace.second] += antidiffusiveFlux;
+                }
+                else
+                {
+                    positiveFlux[fullFace.first] -= antidiffusiveFlux;
+                    negativeFlux[fullFace.second] -= antidiffusiveFlux;
+                }
+            }
+
+            for (int y = 0; y < rows; y++)
+            {
+                const double area = grid.cellAreasSquareMetres[y];
+                for (int x = 0; x < columns; x++)
+                {
+                    const std::size_t cell = grid.index(x, y);
+                    const double allowedIncrease = area * std::max(
+                        0.0,
+                        static_cast<double>(upperBound[cell] - current[cell]));
+                    const double allowedDecrease = area * std::max(
+                        0.0,
+                        static_cast<double>(current[cell] - lowerBound[cell]));
+                    positiveRatio[cell] = positiveFlux[cell] > 0.0
+                        ? std::min(1.0, allowedIncrease / positiveFlux[cell])
+                        : 1.0;
+                    negativeRatio[cell] = negativeFlux[cell] > 0.0
+                        ? std::min(1.0, allowedDecrease / negativeFlux[cell])
+                        : 1.0;
+                    mass[cell] = area * static_cast<double>(current[cell]);
+                }
+            }
+
+            for (std::size_t faceIndex = 0; faceIndex < fullStepFaces.size(); faceIndex++)
+            {
+                const FaceFlux& face = fullStepFaces[faceIndex];
+                double limitedFlux = correction[faceIndex];
+                if (limitedFlux >= 0.0)
+                {
+                    limitedFlux *= std::min(
+                        negativeRatio[face.first], positiveRatio[face.second]);
+                }
+                else
+                {
+                    limitedFlux *= std::min(
+                        positiveRatio[face.first], negativeRatio[face.second]);
+                }
+                mass[face.first] -= limitedFlux;
+                mass[face.second] += limitedFlux;
+                nextAdvector[faceIndex] *= correction[faceIndex] != 0.0
+                    ? limitedFlux / correction[faceIndex] : 0.0;
+            }
+            for (int y = 0; y < rows; y++)
+            {
+                const double inverseArea = 1.0 / grid.cellAreasSquareMetres[y];
+                for (int x = 0; x < columns; x++)
+                {
+                    const std::size_t cell = grid.index(x, y);
+                    current[cell] = static_cast<float>(mass[cell] * inverseArea);
+                }
+            }
+            advector.swap(nextAdvector);
+        }
     }
 
     destination = std::move(current);
-    diagnostics.finalAreaWeightedMass = areaWeightedMass(destination);
+    diagnostics.finalAreaWeightedMass = massIntegral(destination);
+    diagnostics.minimumMixingRatio = *std::min_element(
+        destination.begin(), destination.end());
     return diagnostics;
 }
 

@@ -1,7 +1,9 @@
 #include "climate_atmosphere.hpp"
+#include "climate_grid.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <limits>
 
 namespace climateatmosphere
@@ -20,6 +22,41 @@ float smoothstep(float value)
 float smoothinterpolate(float start, float end, float fraction)
 {
     return start + (end - start) * smoothstep(fraction);
+}
+
+void filterStationary(int columns, int rows, int zonalModes, int meridionalModes,
+    std::vector<float>& field)
+{
+    // Fourier in longitude, cell-centred cosine modes in latitude. Projection
+    // is applied to the source, never to an already accepted solver residual.
+    std::vector<float> filtered(field.size(), 0.0f);
+    for (int y = 0; y < rows; ++y)
+        for (int k = 1; k <= std::min(zonalModes, (columns - 1) / 2); ++k)
+        {
+            double a = 0.0, b = 0.0;
+            for (int x = 0; x < columns; ++x)
+            {
+                const double angle = 2.0 * pi * k * x / columns;
+                a += field[y * columns + x] * std::cos(angle) * 2.0 / columns;
+                b += field[y * columns + x] * std::sin(angle) * 2.0 / columns;
+            }
+            for (int x = 0; x < columns; ++x)
+                filtered[y * columns + x] += static_cast<float>(
+                    a * std::cos(2.0 * pi * k * x / columns) +
+                    b * std::sin(2.0 * pi * k * x / columns));
+        }
+    std::fill(field.begin(), field.end(), 0.0f);
+    for (int x = 0; x < columns; ++x)
+        for (int k = 0; k <= std::min(meridionalModes, rows - 1); ++k)
+        {
+            double coefficient = 0.0;
+            for (int y = 0; y < rows; ++y)
+                coefficient += filtered[y * columns + x] *
+                    std::cos(pi * k * (y + 0.5) / rows) * (k == 0 ? 1.0 : 2.0) / rows;
+            for (int y = 0; y < rows; ++y)
+                field[y * columns + x] += static_cast<float>(coefficient *
+                    std::cos(pi * k * (y + 0.5) / rows));
+        }
 }
 }
 
@@ -150,6 +187,193 @@ float axisymmetricOverturningPressureAnomalyHpa(
         (distance - subpolarLow) / std::max(0.001f, hemisphereSpan - subpolarLow));
 }
 
+DiabaticHeatingBudget diagnoseDiabaticHeating(
+    int longitudeCells,
+    int latitudeCells,
+    const std::vector<float>& absorbedShortwaveWm2,
+    const std::vector<float>& outgoingLongwaveWm2,
+    const std::vector<float>& sensibleHeatingWm2,
+    const std::vector<float>& condensationMm,
+    float accumulationSeconds,
+    float verticalProjection,
+    float latentHeatCouplingFraction,
+    float latentHeatJkg,
+    bool removeZonalMean)
+{
+    DiabaticHeatingBudget budget;
+    const std::size_t cellCount = static_cast<std::size_t>(std::max(0, longitudeCells)) *
+        static_cast<std::size_t>(std::max(0, latitudeCells));
+    if (longitudeCells <= 0 || latitudeCells <= 0 ||
+        absorbedShortwaveWm2.size() != cellCount ||
+        outgoingLongwaveWm2.size() != cellCount ||
+        sensibleHeatingWm2.size() != cellCount || condensationMm.size() != cellCount ||
+        accumulationSeconds <= 0.0f || latentHeatJkg < 0.0f)
+    {
+        return budget;
+    }
+
+    budget.netColumnHeatingWm2.resize(cellCount, 0.0f);
+    budget.stationaryProjectedHeatingWm2.resize(cellCount, 0.0f);
+    const double projection = std::clamp(static_cast<double>(verticalProjection), 0.0, 1.0);
+    const double latentFraction = std::clamp(
+        static_cast<double>(latentHeatCouplingFraction), 0.0, 1.0);
+    double weightTotal = 0.0;
+    for (int y = 0; y < latitudeCells; y++)
+    {
+        const double latitude = pi * 0.5 -
+            (static_cast<double>(y) + 0.5) * pi / static_cast<double>(latitudeCells);
+        const double weight = std::max(0.0, std::cos(latitude));
+        for (int x = 0; x < longitudeCells; x++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(y) * longitudeCells + x;
+            const double radiative = static_cast<double>(absorbedShortwaveWm2[cell]) -
+                outgoingLongwaveWm2[cell];
+            const double sensible = sensibleHeatingWm2[cell];
+            const double latent = static_cast<double>(condensationMm[cell]) * latentHeatJkg /
+                static_cast<double>(accumulationSeconds) * latentFraction;
+            const double net = radiative + sensible + latent;
+            budget.netColumnHeatingWm2[cell] = static_cast<float>(net);
+            budget.stationaryProjectedHeatingWm2[cell] = static_cast<float>(net * projection);
+            budget.areaWeightedRadiativeHeatingWm2 += weight * radiative;
+            budget.areaWeightedSensibleHeatingWm2 += weight * sensible;
+            budget.areaWeightedLatentHeatingWm2 += weight * latent;
+            budget.areaWeightedProjectedHeatingWm2 += weight * net * projection;
+            weightTotal += weight;
+        }
+    }
+
+    if (weightTotal > 0.0)
+    {
+        budget.areaWeightedRadiativeHeatingWm2 /= weightTotal;
+        budget.areaWeightedSensibleHeatingWm2 /= weightTotal;
+        budget.areaWeightedLatentHeatingWm2 /= weightTotal;
+        budget.areaWeightedProjectedHeatingWm2 /= weightTotal;
+    }
+
+    if (removeZonalMean)
+    {
+        for (int y = 0; y < latitudeCells; y++)
+        {
+            double rowMean = 0.0;
+            for (int x = 0; x < longitudeCells; x++)
+                rowMean += budget.stationaryProjectedHeatingWm2[
+                    static_cast<std::size_t>(y) * longitudeCells + x];
+            rowMean /= static_cast<double>(longitudeCells);
+            double residualMean = 0.0;
+            for (int x = 0; x < longitudeCells; x++)
+            {
+                float& value = budget.stationaryProjectedHeatingWm2[
+                    static_cast<std::size_t>(y) * longitudeCells + x];
+                value -= static_cast<float>(rowMean);
+                residualMean += value;
+            }
+            budget.maximumAbsoluteRowMeanWm2 = std::max(
+                budget.maximumAbsoluteRowMeanWm2,
+                static_cast<float>(std::abs(residualMean / longitudeCells)));
+        }
+    }
+    return budget;
+}
+
+StationaryParameterDiagnosis diagnoseStationaryParameters(
+    float bruntVaisalaFrequencyPerSecond,
+    float modeDepthMetres,
+    float gravityMetresPerSecondSquared,
+    float planetRadiusMetres,
+    float rotationRatePerSecond,
+    int longitudeCells,
+    int latitudeCells,
+    float nondimensionalDamping,
+    float resolvedForcingScaleMetres)
+{
+    StationaryParameterDiagnosis diagnosis;
+    if (bruntVaisalaFrequencyPerSecond <= 0.0f || modeDepthMetres <= 0.0f ||
+        gravityMetresPerSecondSquared <= 0.0f || planetRadiusMetres <= 0.0f ||
+        longitudeCells < 3 || latitudeCells < 3)
+    {
+        return diagnosis;
+    }
+
+    diagnosis.gravityWaveSpeedMps = bruntVaisalaFrequencyPerSecond * modeDepthMetres / pi;
+    diagnosis.equivalentDepthMetres =
+        diagnosis.gravityWaveSpeedMps * diagnosis.gravityWaveSpeedMps /
+        gravityMetresPerSecondSquared;
+    diagnosis.adjustmentLengthMetres = diagnosis.gravityWaveSpeedMps /
+        std::max(1.0e-8f, 2.0f * std::abs(rotationRatePerSecond));
+    diagnosis.dampingTimeSeconds = diagnosis.adjustmentLengthMetres /
+        diagnosis.gravityWaveSpeedMps /
+        std::max(0.01f, nondimensionalDamping);
+    const float forcingScale = std::max(
+        resolvedForcingScaleMetres,
+        2.0f * pi * planetRadiusMetres / static_cast<float>(longitudeCells));
+    diagnosis.maximumZonalWavenumber = std::clamp(
+        static_cast<int>(std::floor(2.0f * pi * planetRadiusMetres / forcingScale)),
+        1,
+        longitudeCells / 2);
+    diagnosis.maximumMeridionalWavenumber = std::clamp(
+        static_cast<int>(std::floor(pi * planetRadiusMetres / forcingScale)),
+        1,
+        latitudeCells - 1);
+    return diagnosis;
+}
+
+float diagnoseBruntVaisalaFrequency(
+    float temperatureK, float lapseRateKPerMetre, float gravityMps2)
+{
+    if (temperatureK <= 0.0f || gravityMps2 <= 0.0f)
+        return 0.0f;
+    return std::sqrt(std::max(0.0f, gravityMps2 / temperatureK *
+        (gravityMps2 / 1004.0f - lapseRateKPerMetre)));
+}
+
+std::vector<float> upperOrographicHeightForcing(
+    int columns, int rows, const std::vector<float>& terrainMetres,
+    const std::vector<float>& backgroundEastWindMps,
+    float stabilityPerSecond, float levelHeightMetres,
+    float dampingTimeSeconds, const ModeSeparatedCirculationConfig& config)
+{
+    const std::size_t count = static_cast<std::size_t>(std::max(0, columns)) * std::max(0, rows);
+    std::vector<float> result(count, 0.0f);
+    if (columns < 3 || rows < 2 || terrainMetres.size() != count ||
+        backgroundEastWindMps.size() != count || stabilityPerSecond <= 0.0f ||
+        dampingTimeSeconds <= 0.0f || levelHeightMetres < 0.0f ||
+        config.planetRadiusMetres <= 0.0f || config.gravityMetresPerSecondSquared <= 0.0f)
+        return result;
+    const auto grid = climategrid::makeSphericalGrid(columns, rows, config.planetRadiusMetres);
+    for (int y = 0; y < rows; ++y)
+    {
+        double wind = 0.0;
+        for (int x = 0; x < columns; ++x)
+            wind += backgroundEastWindMps[y * columns + x] / columns;
+        if (std::abs(wind) < 0.1) continue;
+        const double f = 2.0 * config.rotationRatePerSecond * config.rotationDirection *
+            std::sin(grid.latitudeCentresRadians[y]);
+        for (int mode = 1; mode <= std::min(config.maximumZonalWavenumber, (columns - 1) / 2); ++mode)
+        {
+            const double k = mode / (config.planetRadiusMetres * std::cos(grid.latitudeCentresRadians[y]));
+            // Complex intrinsic frequency damps critical levels continuously.
+            const std::complex<double> omega(k * wind, -1.0 / dampingTimeSeconds);
+            const auto mSquared = k * k * (static_cast<double>(stabilityPerSecond) * stabilityPerSecond - omega * omega) /
+                (omega * omega - f * f);
+            auto m = std::sqrt(mSquared);
+            if (m.imag() < 0.0) m = -m;
+            std::complex<double> terrain(0.0, 0.0);
+            for (int x = 0; x < columns; ++x)
+                terrain += static_cast<double>(terrainMetres[y * columns + x]) *
+                    std::exp(std::complex<double>(0.0, -2.0 * pi * mode * x / columns)) *
+                    (2.0 / columns);
+            const auto response = terrain * (omega * omega - f * f) /
+                (config.gravityMetresPerSecondSquared * k * k) *
+                std::complex<double>(0.0, 1.0) * m *
+                std::exp(std::complex<double>(0.0, 1.0) * m * static_cast<double>(levelHeightMetres));
+            for (int x = 0; x < columns; ++x)
+                result[y * columns + x] += static_cast<float>((response *
+                    std::exp(std::complex<double>(0.0, 2.0 * pi * mode * x / columns))).real());
+        }
+    }
+    return result;
+}
+
 std::vector<float> nonlocalThermalResponse(
     int longitudeCells,
     int latitudeCells,
@@ -168,7 +392,7 @@ std::vector<float> nonlocalThermalResponse(
     }
 
     const float longitudeDegreesPerCell = 360.0f / static_cast<float>(longitudeCells);
-    const float latitudeDegreesPerCell = 180.0f / static_cast<float>(latitudeCells - 1);
+    const float latitudeDegreesPerCell = 180.0f / static_cast<float>(latitudeCells);
     const int meridionalRadius = std::max(
         1,
         static_cast<int>(std::round(
@@ -218,8 +442,8 @@ std::vector<float> nonlocalThermalResponse(
     const float tropicalCore = std::max(1.0f, std::fabs(tropicalLatitudeDegrees));
     for (int y = 0; y < latitudeCells; y++)
     {
-        const float latitude = 90.0f - 180.0f * static_cast<float>(y) /
-            static_cast<float>(latitudeCells - 1);
+        const float latitude = 90.0f - 180.0f *
+            (static_cast<float>(y) + 0.5f) / static_cast<float>(latitudeCells);
         const float tropicalBlend = 1.0f - smoothstep(
             (std::fabs(latitude) - tropicalCore) / (0.5f * tropicalCore));
         double sourceRowMean = 0.0;
@@ -328,8 +552,8 @@ std::vector<float> mechanicalTopographicPressureForcingHpa(
     double areaWeightTotal = 0.0;
     for (int y = 0; y < latitudeCells; y++)
     {
-        const float latitude = 90.0f - 180.0f * static_cast<float>(y) /
-            static_cast<float>(latitudeCells - 1);
+        const float latitude = 90.0f - 180.0f *
+            (static_cast<float>(y) + 0.5f) / static_cast<float>(latitudeCells);
         const float latitudeDenominator = std::max(
             0.001f,
             fullStrengthLatitudeDegrees - minimumLatitudeDegrees);
@@ -479,7 +703,8 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
     float rotationDirection,
     bool preserveZonalMean,
     int maximumIterations,
-    float relativeTolerance)
+    float relativeTolerance,
+    int restartLength)
 {
     // Solve p' + tau_p P_e div(u(p')) = p'_eq with the steady
     // Rayleigh-Coriolis momentum balance used by the surface wind model.
@@ -510,23 +735,13 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
     };
     const auto latitudeForRow = [latitudeCells](int y)
     {
-        return 90.0 - 180.0 * static_cast<double>(y) /
-            static_cast<double>(latitudeCells - 1);
+        return 90.0 - 180.0 * (static_cast<double>(y) + 0.5) /
+            static_cast<double>(latitudeCells);
     };
     const auto projectPressure = [&](std::vector<double>& values)
     {
         if (!preserveZonalMean)
         {
-            for (int y : { 0, latitudeCells - 1 })
-            {
-                double poleMean = 0.0;
-                for (int x = 0; x < longitudeCells; x++)
-                    poleMean += values[index(x, y)];
-                poleMean /= static_cast<double>(longitudeCells);
-                for (int x = 0; x < longitudeCells; x++)
-                    values[index(x, y)] = poleMean;
-            }
-
             double weightedTotal = 0.0;
             double weightTotal = 0.0;
             for (int y = 0; y < latitudeCells; y++)
@@ -549,13 +764,6 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
 
         for (int y = 0; y < latitudeCells; y++)
         {
-            if (y == 0 || y == latitudeCells - 1)
-            {
-                for (int x = 0; x < longitudeCells; x++)
-                    values[index(x, y)] = 0.0;
-                continue;
-            }
-
             double rowMean = 0.0;
             for (int x = 0; x < longitudeCells; x++)
                 rowMean += values[index(x, y)];
@@ -580,8 +788,10 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
         std::fill(eastWind.begin(), eastWind.end(), 0.0);
         std::fill(southWind.begin(), southWind.end(), 0.0);
 
-        for (int y = 1; y < latitudeCells - 1; y++)
+        for (int y = 0; y < latitudeCells; y++)
         {
+            const int northRow = std::max(0, y - 1);
+            const int southRow = std::min(latitudeCells - 1, y + 1);
             const double latitude = latitudeForRow(y);
             const double latitudeRadians = latitude * static_cast<double>(pi) / 180.0;
             const double cosine = std::max(0.02, std::fabs(std::cos(latitudeRadians)));
@@ -590,7 +800,7 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
                 static_cast<double>(longitudeCells);
             const double meridionalSpacing = static_cast<double>(pi) *
                 static_cast<double>(planetRadiusMetres) /
-                static_cast<double>(latitudeCells - 1);
+                static_cast<double>(latitudeCells);
             const double coriolis = 2.0 * static_cast<double>(rotationRatePerSecond) *
                 static_cast<double>(rotationDirection) * std::sin(latitudeRadians);
 
@@ -606,8 +816,8 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
                         pressure[index(wrappedColumn(x - 1), y)]) * 100.0 /
                     (2.0 * zonalSpacing);
                 const double pressureGradientNorth =
-                    (pressure[index(x, y - 1)] - pressure[index(x, y + 1)]) * 100.0 /
-                    (2.0 * meridionalSpacing);
+                    (pressure[index(x, northRow)] - pressure[index(x, southRow)]) * 100.0 /
+                    (static_cast<double>(southRow - northRow) * meridionalSpacing);
                 const double forceEast = -pressureGradientEast /
                     static_cast<double>(airDensityKgM3);
                 const double forceNorth = -pressureGradientNorth /
@@ -624,23 +834,25 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
         }
 
         std::fill(divergence.begin(), divergence.end(), 0.0);
-        for (int y = 1; y < latitudeCells - 1; y++)
+        for (int y = 0; y < latitudeCells; y++)
         {
+            const int northRow = std::max(0, y - 1);
+            const int southRow = std::min(latitudeCells - 1, y + 1);
             const double latitude = latitudeForRow(y);
             const double latitudeRadians = latitude * static_cast<double>(pi) / 180.0;
             const double centreCosine = std::max(0.02, std::fabs(std::cos(latitudeRadians)));
             const double northCosine = std::max(
                 0.0,
-                std::cos(latitudeForRow(y - 1) * static_cast<double>(pi) / 180.0));
+                std::cos(latitudeForRow(northRow) * static_cast<double>(pi) / 180.0));
             const double southCosine = std::max(
                 0.0,
-                std::cos(latitudeForRow(y + 1) * static_cast<double>(pi) / 180.0));
+                std::cos(latitudeForRow(southRow) * static_cast<double>(pi) / 180.0));
             const double zonalSpacing = 2.0 * static_cast<double>(pi) *
                 static_cast<double>(planetRadiusMetres) * centreCosine /
                 static_cast<double>(longitudeCells);
             const double meridionalSpacing = static_cast<double>(pi) *
                 static_cast<double>(planetRadiusMetres) /
-                static_cast<double>(latitudeCells - 1);
+                static_cast<double>(latitudeCells);
             double rowMean = 0.0;
 
             for (int x = 0; x < longitudeCells; x++)
@@ -650,9 +862,10 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
                         eastWind[index(wrappedColumn(x - 1), y)]) /
                     (2.0 * zonalSpacing);
                 const double meridional =
-                    (southWind[index(x, y + 1)] * southCosine -
-                        southWind[index(x, y - 1)] * northCosine) /
-                    (2.0 * meridionalSpacing * centreCosine);
+                    (southWind[index(x, southRow)] * southCosine -
+                        southWind[index(x, northRow)] * northCosine) /
+                    (static_cast<double>(southRow - northRow) *
+                        meridionalSpacing * centreCosine);
                 divergence[index(x, y)] = zonal + meridional;
                 rowMean += zonal + meridional;
             }
@@ -678,7 +891,7 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
     std::vector<double> inverseDiagonal(cellCount, 1.0);
     const double coupling = static_cast<double>(pressureDampingTimeSeconds) *
         static_cast<double>(equivalentPressureDepthHpa);
-    for (int y = 1; y < latitudeCells - 1; y++)
+    for (int y = 0; y < latitudeCells; y++)
     {
         const double latitude = latitudeForRow(y);
         const double latitudeRadians = latitude * static_cast<double>(pi) / 180.0;
@@ -688,7 +901,7 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
             static_cast<double>(longitudeCells);
         const double meridionalSpacing = static_cast<double>(pi) *
             static_cast<double>(planetRadiusMetres) /
-            static_cast<double>(latitudeCells - 1);
+            static_cast<double>(latitudeCells);
         const double coriolis = 2.0 * static_cast<double>(rotationRatePerSecond) *
             static_cast<double>(rotationDirection) * std::sin(latitudeRadians);
         for (int x = 0; x < longitudeCells; x++)
@@ -732,7 +945,7 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
     std::vector<double> solution = rightHandSide;
     std::vector<double> operatorSolution;
     std::vector<double> residual(cellCount, 0.0);
-    constexpr int restartLength = 60;
+    restartLength = std::clamp(restartLength, 1, maximumIterations);
     constexpr double breakdownTolerance = 1.0e-24;
     const int krylovColumns = std::min(restartLength, maximumIterations);
     std::vector<std::vector<double>> basis(
@@ -745,14 +958,27 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
     std::vector<double> sine(krylovColumns, 0.0);
     std::vector<double> projectedResidual(krylovColumns + 1, 0.0);
     std::vector<double> work(cellCount, 0.0);
+    float previousCycleResidual = std::numeric_limits<float>::infinity();
+    int stagnantCycles = 0;
 
     while (response.iterations < maximumIterations)
     {
+        response.restartCycles++;
         applyOperator(solution, operatorSolution);
         for (size_t cell = 0; cell < cellCount; cell++)
             residual[cell] = rightHandSide[cell] - operatorSolution[cell];
         response.relativeResidual = static_cast<float>(
             std::sqrt(dot(residual, residual)) / physicalRightHandSideNorm);
+        response.residualHistory.push_back(response.relativeResidual);
+        if (std::isfinite(previousCycleResidual))
+        {
+            const float improvement = previousCycleResidual - response.relativeResidual;
+            stagnantCycles = improvement <= previousCycleResidual * 1.0e-3f
+                ? stagnantCycles + 1
+                : 0;
+            response.stagnated = stagnantCycles >= 3;
+        }
+        previousCycleResidual = response.relativeResidual;
         if (response.relativeResidual <= relativeTolerance)
         {
             response.converged = true;
@@ -852,6 +1078,11 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
         residual[cell] = rightHandSide[cell] - operatorSolution[cell];
     response.relativeResidual = static_cast<float>(
         std::sqrt(dot(residual, residual)) / physicalRightHandSideNorm);
+    if (response.residualHistory.empty() ||
+        response.residualHistory.back() != response.relativeResidual)
+    {
+        response.residualHistory.push_back(response.relativeResidual);
+    }
     response.converged = response.relativeResidual <= relativeTolerance;
 
     projectPressure(solution);
@@ -859,6 +1090,308 @@ StationaryWaveResponse solveSteadyStationaryWavePressure(
     for (size_t cell = 0; cell < cellCount; cell++)
         response.pressureAnomalyHpa[cell] = static_cast<float>(solution[cell]);
     return response;
+}
+
+ModeSeparatedCirculation solveModeSeparatedCirculation(
+    int longitudeCells,
+    int latitudeCells,
+    const std::vector<float>& zonalSurfacePressureHpa,
+    const std::vector<float>& stationaryHeatingWm2,
+    const std::vector<float>& orographicSurfaceForcingHpa,
+    const ModeSeparatedCirculationConfig& config)
+{
+    ModeSeparatedCirculation result;
+    const std::size_t cellCount = static_cast<std::size_t>(std::max(0, longitudeCells)) *
+        static_cast<std::size_t>(std::max(0, latitudeCells));
+    if (longitudeCells < 3 || latitudeCells < 3 ||
+        zonalSurfacePressureHpa.size() != static_cast<std::size_t>(latitudeCells) ||
+        stationaryHeatingWm2.size() != cellCount ||
+        orographicSurfaceForcingHpa.size() != cellCount ||
+        config.airDensityKgM3 <= 0.0f || config.gravityMetresPerSecondSquared <= 0.0f ||
+        config.planetRadiusMetres <= 0.0f)
+    {
+        return result;
+    }
+
+    result.surfacePressureAnomalyHpa.assign(cellCount, 0.0f);
+    result.upperHeightAnomalyMetres.assign(cellCount, 0.0f);
+    result.surfaceEastWindMps.assign(cellCount, 0.0f);
+    result.surfaceSouthWindMps.assign(cellCount, 0.0f);
+    result.upperEastWindMps.assign(cellCount, 0.0f);
+    result.upperSouthWindMps.assign(cellCount, 0.0f);
+    std::vector<float> surfaceEquilibrium(cellCount, 0.0f);
+    std::vector<float> upperEquilibriumPressure(cellCount, 0.0f);
+    std::vector<float> surfaceDrag(cellCount, config.surfaceDragTimeSeconds);
+    if (config.surfaceDragTimesSeconds.size() == cellCount)
+        surfaceDrag = config.surfaceDragTimesSeconds;
+    std::vector<float> upperDrag(cellCount, config.upperDragTimeSeconds);
+    const float upperPressurePerMetre = config.airDensityKgM3 *
+        config.gravityMetresPerSecondSquared / 100.0f;
+
+    for (int y = 0; y < latitudeCells; y++)
+    {
+        for (int x = 0; x < longitudeCells; x++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(y) * longitudeCells + x;
+            const float surfaceStationary = config.enabled.stationary
+                ? stationaryHeatingWm2[cell] *
+                        config.surfaceHeatingPressureResponseHpaPerWm2 +
+                    orographicSurfaceForcingHpa[cell]
+                : 0.0f;
+            surfaceEquilibrium[cell] = surfaceStationary;
+            const float upperHeight = config.enabled.stationary
+                ? stationaryHeatingWm2[cell] *
+                        config.upperHeatingHeightResponseMetresPerWm2 +
+                    (config.upperOrographicHeightMetres.size() == cellCount
+                        ? config.upperOrographicHeightMetres[cell] : 0.0f)
+                : 0.0f;
+            upperEquilibriumPressure[cell] = upperHeight * upperPressurePerMetre +
+                (config.enabled.surface ? surfaceStationary * config.surfaceToUpperCoupling : 0.0f);
+        }
+    }
+
+    filterStationary(longitudeCells, latitudeCells, config.maximumZonalWavenumber,
+        config.maximumMeridionalWavenumber, surfaceEquilibrium);
+    filterStationary(longitudeCells, latitudeCells, config.maximumZonalWavenumber,
+        config.maximumMeridionalWavenumber, upperEquilibriumPressure);
+    if (config.enabled.stationary && config.enabled.surface)
+    {
+        result.surfaceStationarySolver = solveSteadyStationaryWavePressure(
+            longitudeCells,
+            latitudeCells,
+            surfaceEquilibrium,
+            surfaceDrag,
+            config.surfaceEquivalentPressureDepthHpa,
+            config.surfaceDampingTimeSeconds,
+            config.airDensityKgM3,
+            config.planetRadiusMetres,
+            config.rotationRatePerSecond,
+            config.rotationDirection,
+            true,
+            config.maximumIterations,
+            config.relativeTolerance,
+            config.solverRestartLength);
+    }
+    else
+    {
+        result.surfaceStationarySolver.pressureAnomalyHpa.assign(cellCount, 0.0f);
+        result.surfaceStationarySolver.converged = true;
+    }
+
+    if (config.enabled.stationary && config.enabled.upper)
+    {
+        result.upperStationarySolver = solveSteadyStationaryWavePressure(
+            longitudeCells,
+            latitudeCells,
+            upperEquilibriumPressure,
+            upperDrag,
+            config.upperEquivalentPressureDepthHpa,
+            config.upperDampingTimeSeconds,
+            config.airDensityKgM3,
+            config.planetRadiusMetres,
+            config.rotationRatePerSecond,
+            config.rotationDirection,
+            true,
+            config.maximumIterations,
+            config.relativeTolerance,
+            config.solverRestartLength);
+    }
+    else
+    {
+        result.upperStationarySolver.pressureAnomalyHpa.assign(cellCount, 0.0f);
+        result.upperStationarySolver.converged = true;
+    }
+
+    for (int y = 0; y < latitudeCells; y++)
+    {
+        for (int x = 0; x < longitudeCells; x++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(y) * longitudeCells + x;
+            if (config.enabled.surface)
+            {
+                result.surfacePressureAnomalyHpa[cell] =
+                    (config.enabled.zonal ? zonalSurfacePressureHpa[y] : 0.0f) +
+                    (result.surfaceStationarySolver.converged
+                        ? result.surfaceStationarySolver.pressureAnomalyHpa[cell] : 0.0f);
+            }
+            if (config.enabled.upper)
+            {
+                result.upperHeightAnomalyMetres[cell] =
+                    (config.enabled.zonal && config.zonalUpperHeightMetres.size() ==
+                        static_cast<std::size_t>(latitudeCells) ? config.zonalUpperHeightMetres[y] : 0.0f) +
+                    (result.upperStationarySolver.converged
+                        ? result.upperStationarySolver.pressureAnomalyHpa[cell] /
+                            std::max(1.0e-6f, upperPressurePerMetre) : 0.0f);
+            }
+        }
+    }
+
+    diagnoseModeWinds(longitudeCells, latitudeCells, config, result);
+    return result;
+}
+
+void diagnoseModeWinds(int longitudeCells, int latitudeCells,
+    const ModeSeparatedCirculationConfig& config, ModeSeparatedCirculation& result)
+{
+    const std::size_t cellCount = static_cast<std::size_t>(std::max(0, longitudeCells)) * std::max(0, latitudeCells);
+    if (longitudeCells < 3 || latitudeCells < 3 || result.surfacePressureAnomalyHpa.size() != cellCount ||
+        result.upperHeightAnomalyMetres.size() != cellCount)
+        return;
+    result.surfaceEastWindMps.assign(cellCount, 0.0f);
+    result.surfaceSouthWindMps.assign(cellCount, 0.0f);
+    result.upperEastWindMps.assign(cellCount, 0.0f);
+    result.upperSouthWindMps.assign(cellCount, 0.0f);
+    const double latitudeSpacing = pi * static_cast<double>(config.planetRadiusMetres) /
+        static_cast<double>(latitudeCells);
+    for (int y = 0; y < latitudeCells; y++)
+    {
+        const int north = std::max(0, y - 1);
+        const int south = std::min(latitudeCells - 1, y + 1);
+        const float latitudeDegrees = 90.0f - 180.0f *
+            (static_cast<float>(y) + 0.5f) / static_cast<float>(latitudeCells);
+        const double zonalSpacing = 2.0 * pi * config.planetRadiusMetres *
+            std::max(0.02, std::abs(std::cos(latitudeDegrees * pi / 180.0))) /
+            static_cast<double>(longitudeCells);
+        for (int x = 0; x < longitudeCells; x++)
+        {
+            const int west = (x + longitudeCells - 1) % longitudeCells;
+            const int east = (x + 1) % longitudeCells;
+            const std::size_t cell = static_cast<std::size_t>(y) * longitudeCells + x;
+            if (config.enabled.surface)
+            {
+                const float pressureGradientEast = static_cast<float>(
+                    (result.surfacePressureAnomalyHpa[
+                        static_cast<std::size_t>(y) * longitudeCells + east] -
+                     result.surfacePressureAnomalyHpa[
+                        static_cast<std::size_t>(y) * longitudeCells + west]) * 100.0 /
+                    (2.0 * zonalSpacing));
+                const float pressureGradientNorth = static_cast<float>(
+                    (result.surfacePressureAnomalyHpa[
+                        static_cast<std::size_t>(north) * longitudeCells + x] -
+                     result.surfacePressureAnomalyHpa[
+                        static_cast<std::size_t>(south) * longitudeCells + x]) * 100.0 /
+                    ((south - north) * latitudeSpacing));
+                const HorizontalWind wind = steadyQuadraticDragCoriolisWind(
+                    -pressureGradientEast / config.airDensityKgM3,
+                    -pressureGradientNorth / config.airDensityKgM3,
+                    latitudeDegrees,
+                    config.surfaceDragCoefficient,
+                    config.surfaceBoundaryLayerDepthMetres,
+                    config.rotationRatePerSecond,
+                    config.rotationDirection);
+                result.surfaceEastWindMps[cell] = wind.eastMetresPerSecond;
+                result.surfaceSouthWindMps[cell] = wind.southMetresPerSecond;
+            }
+            if (config.enabled.upper)
+            {
+                const float heightGradientEast = static_cast<float>(
+                    (result.upperHeightAnomalyMetres[
+                        static_cast<std::size_t>(y) * longitudeCells + east] -
+                     result.upperHeightAnomalyMetres[
+                        static_cast<std::size_t>(y) * longitudeCells + west]) /
+                    (2.0 * zonalSpacing));
+                const float heightGradientNorth = static_cast<float>(
+                    (result.upperHeightAnomalyMetres[
+                        static_cast<std::size_t>(north) * longitudeCells + x] -
+                     result.upperHeightAnomalyMetres[
+                        static_cast<std::size_t>(south) * longitudeCells + x]) /
+                    ((south - north) * latitudeSpacing));
+                const HorizontalWind wind = steadyRayleighCoriolisWind(
+                    -config.gravityMetresPerSecondSquared * heightGradientEast,
+                    -config.gravityMetresPerSecondSquared * heightGradientNorth,
+                    latitudeDegrees,
+                    config.upperDragTimeSeconds,
+                    config.rotationRatePerSecond,
+                    config.rotationDirection);
+                result.upperEastWindMps[cell] = wind.eastMetresPerSecond;
+                result.upperSouthWindMps[cell] = wind.southMetresPerSecond;
+            }
+        }
+    }
+    // Weak, equal-and-opposite exchange of stationary momentum only. Removing
+    // each transfer's row mean leaves the independent zonal closures intact.
+    result.maximumMomentumExchangeResidual = 0.0;
+    if (config.enabled.surface && config.enabled.upper && config.enabled.stationary)
+    {
+        const double lowerMass = config.surfaceEquivalentPressureDepthHpa;
+        const double upperMass = config.upperEquivalentPressureDepthHpa;
+        const double coupling = std::clamp(config.interlayerMomentumCoupling, 0.0f, 1.0f);
+        for (int y = 0; y < latitudeCells; ++y)
+            for (int component = 0; component < 2; ++component)
+            {
+                auto& lower = component == 0 ? result.surfaceEastWindMps : result.surfaceSouthWindMps;
+                auto& upper = component == 0 ? result.upperEastWindMps : result.upperSouthWindMps;
+                double rowShear = 0.0;
+                for (int x = 0; x < longitudeCells; ++x)
+                    rowShear += (upper[y * longitudeCells + x] - lower[y * longitudeCells + x]) / longitudeCells;
+                for (int x = 0; x < longitudeCells; ++x)
+                {
+                    const int cell = y * longitudeCells + x;
+                    const double shear = coupling * (upper[cell] - lower[cell] - rowShear);
+                    const double lowerDelta = shear * upperMass / (lowerMass + upperMass);
+                    const double upperDelta = -shear * lowerMass / (lowerMass + upperMass);
+                    lower[cell] += static_cast<float>(lowerDelta);
+                    upper[cell] += static_cast<float>(upperDelta);
+                    result.maximumMomentumExchangeResidual = std::max(result.maximumMomentumExchangeResidual,
+                        std::abs(lowerMass * lowerDelta + upperMass * upperDelta));
+                }
+            }
+    }
+    const auto grid = climategrid::makeSphericalGrid(longitudeCells, latitudeCells, config.planetRadiusMetres);
+    result.ascentHpaPerDay.assign(cellCount, 0.0f);
+    result.areaWeightedKineticEnergyJm2 = 0.0;
+    result.areaWeightedDragDissipationWm2 = 0.0;
+    result.areaWeightedMassAnomalyKgM2 = 0.0;
+    result.maximumStationaryRowMeanHpa = 0.0f;
+    double totalArea = 0.0;
+    for (int y = 0; y < latitudeCells; ++y)
+    {
+        double rowMean = 0.0;
+        for (int x = 0; x < longitudeCells; ++x)
+        {
+            const auto cell = grid.index(x, y);
+            const double area = grid.cellAreasSquareMetres[y];
+            totalArea += area;
+            rowMean += result.surfaceStationarySolver.converged &&
+                result.surfaceStationarySolver.pressureAnomalyHpa.size() == cellCount
+                ? result.surfaceStationarySolver.pressureAnomalyHpa[cell] : 0.0;
+            const double surfaceSpeed2 = std::pow(result.surfaceEastWindMps[cell], 2) +
+                std::pow(result.surfaceSouthWindMps[cell], 2);
+            const double upperSpeed2 = std::pow(result.upperEastWindMps[cell], 2) +
+                std::pow(result.upperSouthWindMps[cell], 2);
+            const double surfaceMass = config.surfaceEquivalentPressureDepthHpa * 100.0 / config.gravityMetresPerSecondSquared;
+            const double upperMass = config.upperEquivalentPressureDepthHpa * 100.0 / config.gravityMetresPerSecondSquared;
+            result.areaWeightedKineticEnergyJm2 += area * 0.5 * (surfaceMass * surfaceSpeed2 + upperMass * upperSpeed2);
+            result.areaWeightedDragDissipationWm2 += area *
+                (surfaceMass * config.surfaceDragCoefficient / config.surfaceBoundaryLayerDepthMetres *
+                    surfaceSpeed2 * std::sqrt(surfaceSpeed2) + upperMass * upperSpeed2 / config.upperDragTimeSeconds);
+            result.areaWeightedMassAnomalyKgM2 += area * result.surfacePressureAnomalyHpa[cell] *
+                100.0 / config.gravityMetresPerSecondSquared;
+            const auto divergence = [&](const std::vector<float>& u, const std::vector<float>& v)
+            {
+                const double east = 0.5 * (u[cell] + u[grid.index(x + 1, y)]) * grid.zonalFaceLengthsMetres[y];
+                const double west = 0.5 * (u[cell] + u[grid.index(x - 1, y)]) * grid.zonalFaceLengthsMetres[y];
+                const double southFlux = y + 1 < latitudeCells
+                    ? 0.5 * (v[cell] + v[grid.index(x, y + 1)]) * grid.southFaceLengthsMetres[y] : 0.0;
+                const double northFlux = y > 0
+                    ? 0.5 * (v[cell] + v[grid.index(x, y - 1)]) * grid.northFaceLengthsMetres[y] : 0.0;
+                return (east - west + southFlux - northFlux) / area;
+            };
+            // Positive is ascent. Equal-and-opposite interface mass exchange;
+            // closed face fluxes make its global area integral zero.
+            result.ascentHpaPerDay[cell] = static_cast<float>(43200.0 *
+                (config.upperEquivalentPressureDepthHpa * divergence(result.upperEastWindMps, result.upperSouthWindMps) -
+                 config.surfaceEquivalentPressureDepthHpa * divergence(result.surfaceEastWindMps, result.surfaceSouthWindMps)));
+        }
+        result.maximumStationaryRowMeanHpa = std::max(result.maximumStationaryRowMeanHpa,
+            static_cast<float>(std::abs(rowMean / longitudeCells)));
+    }
+    if (totalArea > 0.0)
+    {
+        result.areaWeightedKineticEnergyJm2 /= totalArea;
+        result.areaWeightedDragDissipationWm2 /= totalArea;
+        result.areaWeightedMassAnomalyKgM2 /= totalArea;
+    }
 }
 
 void setLastCirculationPrecisionDiagnostics(

@@ -819,18 +819,6 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
 
     if (seatotal > 0)
     {
-        if (beginworldgenstep("Generating ocean current map"))
-        {
-            reseedglobalclimatepass(world, 0x50021);
-            createoceancurrentmap(world);
-        }
-
-        if (beginworldgenstep("Generating sea surface temperatures"))
-        {
-            reseedglobalclimatepass(world, 0x50022);
-            createsurfacetemperaturemap(world);
-        }
-
         if (beginworldgenstep("Generating pressure map"))
         {
             reseedglobalclimatepass(world, 0x50023);
@@ -842,6 +830,18 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
             reseedglobalclimatepass(world, 0x50024);
             createvectorwindmap(world);
             updatehorsebeltsfrompressure(world);
+        }
+
+        if (beginworldgenstep("Coupling wind-driven ocean and SST"))
+        {
+            reseedglobalclimatepass(world, 0x50021);
+            createoceancurrentmap(world);
+        }
+
+        if (beginworldgenstep("Diagnosing ocean evaporation"))
+        {
+            reseedglobalclimatepass(world, 0x50022);
+            createsurfacetemperaturemap(world);
         }
     }
 
@@ -891,6 +891,20 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         warp(fractal, width, height, maxelev, warpfactor, 0);
 
         createrainmap(world, fractal, landtotal, seatotal, smalllake, landshape);
+
+        if (seatotal > 0 &&
+            tuning::climate::circulation::enableLaggedDiabaticCoupling)
+        {
+            // One deterministic lagged seasonal-mean iteration lets diagnosed
+            // condensation heating alter circulation without using observed
+            // precipitation or introducing an unconstrained fixed-point loop.
+            createpressuremap(world);
+            createvectorwindmap(world);
+            updatehorsebeltsfrompressure(world);
+            createoceancurrentmap(world);
+            createsurfacetemperaturemap(world);
+            refreshadvectedrainfall(world, fractal);
+        }
     }
 
     if (importedprecipitation)
@@ -1246,6 +1260,13 @@ void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, 
 }
 
 // Wind map creator.
+void refreshadvectedrainfall(planet& world, vector<vector<int>>& fractal)
+{
+    vector<vector<int>> inland(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    populateinlanddistances(world, inland);
+    createadvectedrainfall(world, inland, fractal);
+    createmountainprecipitation(world);
+}
 
 void createwindmap(planet& world)
 {

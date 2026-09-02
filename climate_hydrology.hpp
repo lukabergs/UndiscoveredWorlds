@@ -73,9 +73,24 @@ struct SnowAccumulation
 struct SphericalTracerTransportDiagnostics
 {
     int substeps = 1;
+    int correctivePasses = 0;
+    float maximumMultidimensionalCourant = 0.0f;
+    float maximumZonalCourant = 0.0f;
     float maximumMeridionalCourant = 0.0f;
     double initialAreaWeightedMass = 0.0;
     double finalAreaWeightedMass = 0.0;
+    float minimumMixingRatio = 0.0f;
+};
+
+struct MpdataOptions
+{
+    float maximumCourantPerSubstep = 0.80f;
+    int correctivePasses = 1;
+    bool monotone = true;
+    // Optional end-of-interval winds: linearly interpolated at EVERY substep
+    // midpoint. Empty means a stationary velocity during this interval.
+    std::vector<float> endZonalWindMps;
+    std::vector<float> endMeridionalWindMps;
 };
 
 CalendarMonth calendarMonth(int month);
@@ -103,6 +118,16 @@ SphericalTracerTransportDiagnostics advectSphericalTracer(
     float planetRadiusMetres,
     float maximumMeridionalCourantPerSubstep,
     float maximumDisplacementCells,
+    std::vector<float>& destination);
+SphericalTracerTransportDiagnostics advectSphericalTracerMpdata(
+    int columns,
+    int rows,
+    const std::vector<float>& source,
+    const std::vector<float>& zonalWindMps,
+    const std::vector<float>& meridionalWindMps,
+    float timeStepSeconds,
+    float planetRadiusMetres,
+    const MpdataOptions& options,
     std::vector<float>& destination);
 WeatherPhase deterministicWeatherPhase(
     int phase,

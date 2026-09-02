@@ -3,6 +3,7 @@
 #include "climate_benchmark_outputs.hpp"
 #include "climate_circulation_diagnostics.hpp"
 #include "climate_energy.hpp"
+#include "climate_grid.hpp"
 #include "climate_koppen.hpp"
 #include "climate_physics.hpp"
 #include "climate_reference.hpp"
@@ -307,9 +308,7 @@ double gridcellareaweight(int row, int height)
     if (height <= 0)
         return 0.0;
 
-    constexpr double pi = 3.14159265358979323846;
-    const double latitude = 90.0 - 180.0 * static_cast<double>(row) / static_cast<double>(height);
-    return max(0.0, cos(latitude * pi / 180.0));
+    return climategrid::latitudeBandMeasure(row, height + 1, climategrid::LatitudeLayout::poleInclusive);
 }
 
 bool isvalidationland(planet& world, int x, int y);

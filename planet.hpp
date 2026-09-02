@@ -1145,6 +1145,11 @@ public:
     void setmaxriverflow(); // Calculates the largest river flow on the map.
     void syncseasonalclimatefromlegacy(); // Populates explicit seasonal fields from the legacy Jan/Jul model.
     void cleartectonicprovenance();
+    const std::vector<std::uint8_t>& weatheranomalystate() const;
+    void setweatheranomalystate(std::vector<std::uint8_t> state);
+    // Advances only the replayable anomaly state, never the seasonal maps.
+    // A zero resolution preserves the saved LOD; failed steps leave it intact.
+    bool advanceweather(float elapsedSeconds, int horizontalCells = 0);
 
     void saveworld(string filename); // Saves the world.
     bool loadworld(string filename); // Loads the world.
@@ -1373,6 +1378,7 @@ private:
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalconvergencemaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupliftmaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalsubsidencemaps;
+    std::vector<std::uint8_t> weatheranomalystatebytes;
 
     short jantempmap[ARRAYWIDTH][ARRAYHEIGHT];
     short jultempmap[ARRAYWIDTH][ARRAYHEIGHT];
