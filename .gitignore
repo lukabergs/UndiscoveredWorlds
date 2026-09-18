@@ -62,38 +62,43 @@ desktop.ini
 # ==========================================
 # Project Specific (Optional)
 # ==========================================
-# Local reference data; retain preparation code and scope notes.
-/refs/source/
-/refs/processed/
-# Retain the human-written map guide; rasters and generated index stay local.
-!/refs/processed/
-/refs/processed/*
-!/refs/processed/climate/
-/refs/processed/climate/*
-!/refs/processed/climate/maps/
-/refs/processed/climate/maps/*
-!/refs/processed/climate/maps/README.md
-
-# Generated results; retain active metadata and selected workbooks.
-/runs/*
-!/runs/registry/
-!/runs/maps/
-/runs/maps/*
-!/runs/maps/climate/
-/runs/maps/climate/*
-!/runs/maps/climate/README.md
-!/runs/metrics/
-/runs/registry/archive/
-/runs/metrics/*
-!/runs/metrics/metrics.xlsx
-!/runs/metrics/run_history.xlsx
+# Local-only material. No exceptions for registries, workbooks or guides.
+/meta/
+/docs/
+/refs/
+/runs/
+/extra/
+/data/
+/climate_benchmark_runs.json
+/climate_reference_data.json
+/UWinstaller.zip
 
 # Local research, historical scripts, and files awaiting manual sorting.
 /references/
 /scripts/archive/*
 !/scripts/archive/reorganize-climate-assets.ps1
-/0/*
-!/0/README.txt
+/0/
+/tools/ripgrep/
+
+# Downloaded archives and numerical/generated data are not source code.
+*.zip
+*.7z
+*.tar
+*.gz
+*.bz2
+*.xz
+*.uwclim
+*.nc
+*.hdf
+*.h5
+*.tif
+*.tiff
+*.npz
+*.npy
+*.xlsx
+*.xls
+# Small deterministic fixtures are reviewed by the repository-scope checker.
+!tests/**/fixtures/**
 
 # Task plans are local by default; already tracked plans remain tracked.
 /docs/tasks/

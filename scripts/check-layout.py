@@ -5,7 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_DIRECTORIES = {
-    ".git", ".codex", ".agents", "0", "assets", "configs", "refs",
+    ".git", ".githooks", ".codex", ".agents", "0", "assets", "configs", "refs",
     "definitions", "docs", "meta", "out", "references", "runs", "scripts", "src",
     "tests", "tools", "vcpkg-ports", "saved_worlds",
 }
@@ -23,7 +23,7 @@ def main():
         if path.name not in allowed:
             issues.append(f"Unclassified root item: {path.name}; review for 0/ or its scope folder")
 
-    for path in (ROOT / "refs").iterdir():
+    for path in ((ROOT / "refs").iterdir() if (ROOT / "refs").exists() else ()):
         if path.name not in {"source", "processed", "prepare.py", "README.md", "TODO.txt"}:
             issues.append(f"Unclassified dataset root item: {path.name}; generated metadata belongs in processed/metadata/")
 
@@ -48,7 +48,8 @@ def main():
             issues.append(f"GDAL sidecar must retain the image filename and .aux.xml: {path.relative_to(ROOT)}")
 
     for category in ("maps", "fields"):
-        for path in (ROOT / "runs" / category).iterdir():
+        directory = ROOT / "runs" / category
+        for path in (directory.iterdir() if directory.exists() else ()):
             if path.is_dir() and path.name != "climate":
                 issues.append(f"Unclassified run category: {path.relative_to(ROOT)}")
         for path in (ROOT / "runs" / category / "climate").rglob("*"):

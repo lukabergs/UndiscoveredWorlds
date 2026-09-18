@@ -4,6 +4,7 @@
 
 - Procedural planetary simulation with terrain, tectonics, climate, hydrology, and early society systems. The fuller ecology and civilization lifecycle in `README.md` is a design goal; distinguish intended behavior from implemented behavior.
 - C++/CMake/vcpkg project on Windows. The desktop app uses C++17 with SFML/ImGui; the internal tectonics module uses C++20. CUDA rendering is optional. `CMakePresets.json` defines the Visual Studio 18 2026 baseline and uses `VCPKG_ROOT`.
+- `meta/`, `docs/`, `refs/` and `runs/` are entirely local-only, including registries and documentation. Keep reusable preparation and reporting code under `scripts/`; never force-add generated data or downloaded archives. `scripts/repository_scope.py` checks the index and push history, including a 5 MiB blob limit.
 - Simulation behavior belongs in `src/simulations/`; stage ordering and dependencies in `src/pipeline/`; artifact I/O in `src/io/`; observed-data comparisons in `src/validation/`; presentation in `src/app/`. Include the owning module's header in new callers; `src/wip/functions.hpp` is a compatibility umbrella.
 - Read `README.md` for project scope and commands, `docs/architecture/simulation-modules.md` for module changes, and `docs/architecture/tectonics/tectonic-output-contract.md` for tectonic output changes, as relevant to the task.
 

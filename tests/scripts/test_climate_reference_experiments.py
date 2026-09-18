@@ -6,7 +6,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('reference_experiment_prepare',
-    ROOT / 'runs/reports/climate-reference-experiment-prepare.py')
+    ROOT / 'scripts/benchmarks/climate_reference_experiment_prepare.py')
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
 

@@ -162,7 +162,9 @@ cmake --build out/build/headless-modules --config Debug --target uw_climate uw_c
 
 `BUILD_TESTING` also builds the tectonics regression suite using GoogleTest v1.15.2 (downloaded on first configuration). Enable `UW_BUILD_TECTONICS_TOOLS` to build `tectonic_simulation`, `contract_fixture`, and `tectonic_pipeline`. Tool PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The optional `check-tectonics-slow` target runs the full-size deterministic replay and generates comparison images.
 
-Large local source data, generated artifacts, reference projects, archives, and scratch files are ignored by Git. Reference preparation code, scope notes, the active registry, and selected workbooks can be versioned. Existing local climate status notes remain under `docs/tasks/climate-physics/`.
+Git tracks application code, tooling, configuration, small runtime assets and deterministic test fixtures. `meta/`, `docs/`, `refs/` and `runs/` are entirely local-only, including guides, registries and workbooks. Historical `extra/`, research copies, downloads and generated artifacts are also excluded. Local links into these directories require the local workspace data. Keep preparation and reporting code in `scripts/`; the Earth-map entry point is `uv run scripts/refs/prepare-earth-maps.py`.
+
+Enable the repository guards with `git config core.hooksPath .githooks`. They reject local-only paths and files larger than 5 MiB before commits and inspect reachable history before pushes. Run `uv run --offline python scripts/repository_scope.py --staged` or `--history HEAD` manually. After the data-removal history rewrite, use a fresh clone or rebase work onto the cleaned history; merging an old branch would reintroduce the discarded data. The local run registry still supplies IDs and is preserved outside version control.
 
 ## Using the application
 
