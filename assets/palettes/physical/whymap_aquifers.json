@@ -1,0 +1,738 @@
+{
+  "source": "https://services.bgr.de/arcgis/rest/services/grundwasser/whymap_gwr/MapServer/11?f=pjson",
+  "renderer": {
+    "type": "uniqueValue",
+    "field1": "HYGEO2",
+    "uniqueValueGroups": [
+      {
+        "heading": "",
+        "classes": [
+          {
+            "label": "MAJOR GROUNDWATER BASINS",
+            "description": "MAJOR GROUNDWATER BASINS",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                212,
+                207,
+                199,
+                0
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "16"
+              ]
+            ]
+          },
+          {
+            "label": "very high (> 300)",
+            "description": "very high (> 300)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                30,
+                135,
+                204,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "15"
+              ]
+            ]
+          },
+          {
+            "label": "high (100 - 300)",
+            "description": "high (100 - 300)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                76,
+                166,
+                217,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "14"
+              ]
+            ]
+          },
+          {
+            "label": "medium (20 - 100)",
+            "description": "medium (20 - 100)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                115,
+                191,
+                242,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "13"
+              ]
+            ]
+          },
+          {
+            "label": "low (2 - 20)",
+            "description": "low (2 - 20)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                153,
+                227,
+                255,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "12"
+              ]
+            ]
+          },
+          {
+            "label": "very low (< 2)",
+            "description": "very low (< 2)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                204,
+                242,
+                255,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "11"
+              ]
+            ]
+          },
+          {
+            "label": "COMPLEX HYDROGEOLOGICAL STRUCTURES",
+            "description": "COMPLEX HYDROGEOLOGICAL STRUCTURES",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                212,
+                207,
+                199,
+                0
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "26"
+              ]
+            ]
+          },
+          {
+            "label": "very high (> 300)",
+            "description": "very high (> 300)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                95,
+                155,
+                120,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "25"
+              ]
+            ]
+          },
+          {
+            "label": "high (100 - 300)",
+            "description": "high (100 - 300)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                129,
+                179,
+                143,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "24"
+              ]
+            ]
+          },
+          {
+            "label": "medium (20 - 100)",
+            "description": "medium (20 - 100)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                166,
+                209,
+                163,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "23"
+              ]
+            ]
+          },
+          {
+            "label": "low - very low (< 20)",
+            "description": "low - very low (< 20)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                204,
+                242,
+                204,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "22"
+              ]
+            ]
+          },
+          {
+            "label": "LOCAL AND SHALLOW AQUIFERS",
+            "description": "LOCAL AND SHALLOW AQUIFERS",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                212,
+                207,
+                199,
+                0
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "35"
+              ]
+            ]
+          },
+          {
+            "label": "very high - high (> 100)",
+            "description": "very high - high (> 100)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                186,
+                168,
+                125,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "34"
+              ]
+            ]
+          },
+          {
+            "label": "medium - very low (< 100)",
+            "description": "medium - very low (< 100)",
+            "symbol": {
+              "type": "esriSFS",
+              "style": "esriSFSSolid",
+              "color": [
+                244,
+                225,
+                173,
+                255
+              ],
+              "outline": null
+            },
+            "values": [
+              [
+                "33"
+              ]
+            ]
+          }
+        ]
+      }
+    ],
+    "uniqueValueInfos": [
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            212,
+            207,
+            199,
+            0
+          ],
+          "outline": null
+        },
+        "value": "16",
+        "label": "MAJOR GROUNDWATER BASINS"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            30,
+            135,
+            204,
+            255
+          ],
+          "outline": null
+        },
+        "value": "15",
+        "label": "very high (> 300)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            76,
+            166,
+            217,
+            255
+          ],
+          "outline": null
+        },
+        "value": "14",
+        "label": "high (100 - 300)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            115,
+            191,
+            242,
+            255
+          ],
+          "outline": null
+        },
+        "value": "13",
+        "label": "medium (20 - 100)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            153,
+            227,
+            255,
+            255
+          ],
+          "outline": null
+        },
+        "value": "12",
+        "label": "low (2 - 20)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            204,
+            242,
+            255,
+            255
+          ],
+          "outline": null
+        },
+        "value": "11",
+        "label": "very low (< 2)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            212,
+            207,
+            199,
+            0
+          ],
+          "outline": null
+        },
+        "value": "26",
+        "label": "COMPLEX HYDROGEOLOGICAL STRUCTURES"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            95,
+            155,
+            120,
+            255
+          ],
+          "outline": null
+        },
+        "value": "25",
+        "label": "very high (> 300)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            129,
+            179,
+            143,
+            255
+          ],
+          "outline": null
+        },
+        "value": "24",
+        "label": "high (100 - 300)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            166,
+            209,
+            163,
+            255
+          ],
+          "outline": null
+        },
+        "value": "23",
+        "label": "medium (20 - 100)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            204,
+            242,
+            204,
+            255
+          ],
+          "outline": null
+        },
+        "value": "22",
+        "label": "low - very low (< 20)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            212,
+            207,
+            199,
+            0
+          ],
+          "outline": null
+        },
+        "value": "35",
+        "label": "LOCAL AND SHALLOW AQUIFERS"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            186,
+            168,
+            125,
+            255
+          ],
+          "outline": null
+        },
+        "value": "34",
+        "label": "very high - high (> 100)"
+      },
+      {
+        "symbol": {
+          "type": "esriSFS",
+          "style": "esriSFSSolid",
+          "color": [
+            244,
+            225,
+            173,
+            255
+          ],
+          "outline": null
+        },
+        "value": "33",
+        "label": "medium - very low (< 100)"
+      }
+    ],
+    "fieldDelimiter": ",",
+    "authoringInfo": {
+      "colorRamp": {
+        "type": "multipart",
+        "colorRamps": [
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              192,
+              252,
+              198,
+              255
+            ],
+            "toColor": [
+              192,
+              252,
+              198,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              244,
+              179,
+              252,
+              255
+            ],
+            "toColor": [
+              244,
+              179,
+              252,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              252,
+              201,
+              187,
+              255
+            ],
+            "toColor": [
+              252,
+              201,
+              187,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              194,
+              228,
+              252,
+              255
+            ],
+            "toColor": [
+              194,
+              228,
+              252,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              252,
+              245,
+              179,
+              255
+            ],
+            "toColor": [
+              252,
+              245,
+              179,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              182,
+              182,
+              252,
+              255
+            ],
+            "toColor": [
+              182,
+              182,
+              252,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              252,
+              204,
+              233,
+              255
+            ],
+            "toColor": [
+              252,
+              204,
+              233,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              212,
+              252,
+              238,
+              255
+            ],
+            "toColor": [
+              212,
+              252,
+              238,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              252,
+              242,
+              210,
+              255
+            ],
+            "toColor": [
+              252,
+              242,
+              210,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              212,
+              210,
+              252,
+              255
+            ],
+            "toColor": [
+              212,
+              210,
+              252,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              221,
+              252,
+              182,
+              255
+            ],
+            "toColor": [
+              221,
+              252,
+              182,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              252,
+              179,
+              188,
+              255
+            ],
+            "toColor": [
+              252,
+              179,
+              188,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              231,
+              252,
+              210,
+              255
+            ],
+            "toColor": [
+              231,
+              252,
+              210,
+              255
+            ]
+          },
+          {
+            "type": "algorithmic",
+            "algorithm": "esriCIELabAlgorithm",
+            "fromColor": [
+              223,
+              192,
+              252,
+              255
+            ],
+            "toColor": [
+              223,
+              192,
+              252,
+              255
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,191 +1,187 @@
-# Undiscovered_Worlds
-Procedural map creator
+# Undiscovered Worlds
 
-Undiscovered Worlds is a simple world creation and viewing tool. It can create maps at the global and regional scale.
+Undiscovered Worlds is a world engine for generating a planet's physical environment and simulating the emergence of ecosystems, settlements, and political geography. The intended output is a world snapshot with enough natural and social history to explain its terrain, resources, population, and borders.
 
-For more information, and to complain about bugs, please visit the blog: https://undiscoveredworlds.blogspot.com/2019/01/what-is-undiscovered-worlds.html
+The engine combines procedural heuristics with more physically based simulations. Each stage should be independently configurable, inspectable, and repeatable, with computational effort chosen for its purpose.
 
-----
+## Intended simulation lifecycle
 
-* Current architecture status (2026-04)
+1. **Initial conditions.** Start from noisy terrain, another procedural initial state, or imported maps. Record the seed, planetary parameters, and input provenance.
+2. **Geology and terrain.** Run plate tectonics, then selected terraforming passes: mountain building, volcanism, coastline refinement, erosion, and deposition. Mineral formation belongs to this geological history; later erosion and deposition can expose or redistribute deposits.
+3. **Coarse climate and hydrology.** Run an inexpensive climate pass to estimate precipitation. Use it to shape drainage, erosion, rivers, lakes, and finer terrain detail.
+4. **Detailed climate.** Run the same climate system with a larger computational budget against the revised terrain and surface-water state. Explicitly bounded feedback passes may update hydrology again when needed.
+5. **Ecology and biological resources.** Simulate coarse vegetation spread and procedurally populate suitable habitats with animals. Evolutionary simulation is outside the intended scope. Combine biological resources with the existing geological resources.
+6. **Early settlement.** Seed and develop populations using resource availability and desirability profiles that can differ between fictional species or races. Represent early migration and settlement before introducing more complex institutions.
+7. **Settled societies.** After a configurable settlement threshold, simulate trade, political organization, administrative borders, and geopolitical relationships. Stop at the chosen social-development threshold or simulation horizon and export the world snapshot.
 
-The active terrain architecture is tectonic-first and intentionally simplified:
+These are lifecycle stages, not mandatory one-time function calls. The coarse and detailed climate passes should be two configurations of one implementation. Geological, climatic, ecological, and social time scales should remain explicit.
 
-- There is exactly one supported global terrain pipeline.
-- Plate tectonics and FastLEM mountains are always enabled.
-- `C:\dev\plate-tectonics` is the only tectonics source of truth.
-- The old vendored `third_party\plate_tectonics` path is removed and must not be reintroduced.
-- World save compatibility was intentionally broken; current saves require the new format baseline (version 16).
+## Current state
 
-For upstream dependency contract details and the fixed-seed validation workflow, see `tectonic-contract-validation.md`.
+The repository contains terrain generation and import support, an internal plate-tectonics module and world adapter, a generation workbench and stage registry, a reduced climate simulator, physical-resource heuristics, and initial settlement/trade/polity generation. Climate is the current development focus. Terrain refinement remains work in progress; the full ecological and staged civilizational lifecycle above is a design goal.
 
-----
+The September 2026 cleanup aligns CMake sources, includes, configuration, and preparation/analysis scripts with the new layout. Historical and new benchmark maps use category/season/layer paths under `runs/maps/climate/`, with registered run IDs as filenames. Season folders are 1=January, 2=April, 3=July and 4=October. Earth benchmark land/sea imports can be regenerated at arbitrary even resolutions from the retained signed Earth master.
 
-* Climate benchmark workflow
-
-The Earth benchmark is a deterministic climate run over imported reference terrain. Its default grid is 512x257: 512 longitude samples, including a separate north and south pole row for 257 latitude samples. `--resolution` accepts an even width and derives the latitude count as `width / 2 + 1`, so switching to 2048x1025 does not require a code edit.
+## Repository layout
 
 ```text
-UndiscoveredWorlds.exe --generate-world --earth-climate-benchmark --resolution 512
+src/
+  core/                    Grids, seasonal indices, deterministic seeds, row workers
+  pipeline/                Stage registry, climate and physical/social orchestration
+  simulations/
+    geology/               Plate-tectonics engine and world adapter
+    terrain/               Fractals, coasts, ridges, elevation, FastLEM, landforms
+    climate/               Atmosphere, ocean, energy, moisture, transport
+      legacy/              Tested alternative thermal and ocean feedback closures
+    hydrology/             Drainage, basins, lakes, deltas, wetlands, tides
+    resources/             Mineral and marine resource potentials
+    society/               Settlement, routes, trade, polities, history
+  io/                      Map imports, raster/reference readers, export selection
+  validation/climate/      Reference comparisons and climate diagnostics
+  app/                     Desktop entry point, windows, controls
+    rendering/             Map appearance and CPU/CUDA rendering
+    diagnostics/           Profiling and generation debug integration
+  wip/                     Mixed responsibilities awaiting extraction
+assets/                    Presentation files: textures and appearance presets
+definitions/society/       Reserved for authored society content; currently empty
+configs/                   Application configuration and saved UI layout
+refs/
+  source/                  Original downloads, receipts, and licenses
+  processed/               Prepared grids grouped by physical quantity
+  prepare.py               Reusable Earth-map preparation; configurable width
+runs/                      Simulation artifacts, organized by artifact category
+tests/                     Core, pipeline, I/O, simulation, and script tests
+scripts/
+  refs/                    Reference download and preparation
+  benchmarks/              Benchmark analysis and workbook input preparation
+  archive/                 Previous analysis scripts and tuning experiments
+docs/                      Architecture, reference guides, and current climate notes
+references/                Local research images, papers, and reference projects
+0/                         Files awaiting manual classification
+tools/tectonics/           Simulation, snapshot/export tools, heightmap statistics
+vcpkg-ports/               Dependency overlay ports
+out/                       Build products, editor caches, scratch work
 ```
 
-Every recorded benchmark appends its climate counts to `extra/climate/workbooks/climate.xlsx`; failure to update the workbook makes the command fail. By default, exactly five run maps are requested:
+Root files are limited to the README, license, version, Git ignore rules, and CMake/vcpkg entry points. Git and Codex metadata retain their operational locations.
 
-- `{ID}_koppen.png`
-- `{ID}_jan_s_wind_lic.png`
-- `{ID}_jan_s_wind_part.png`
-- `{ID}_precip.png`
-- `{ID}_precip.tif`
+### Code boundaries
 
-Use repeatable `--map` arguments, or one comma-separated argument, to replace that default. Nonseasonal IDs are `koppen`, `temp`, `precip`, and `precip-tif`. Seasonal IDs use `jan`, `apr`, `jul`, or `oct` followed by `s-wind-lic`, `s-wind-part`, `u-wind-lic`, `u-wind-part`, `s-wind-err`, `u-wind-err`, `s-wind-speed`, `s-div`, `moist-conv`, `b-moist-flux`, `f-moist-flux`, `moist-flux`, `ascent`, `heating`, `s-wind-cons`, `u-wind-cons`, `sst`, `ocean-current`, or the four `era5-...-wind-{lic|part}` variants. `all` and `none` are also accepted. LIC and particle maps are skipped above their documented renderer limit rather than forcing an expensive high-resolution export. Reference LIC/trails are cached by renderer version and grid. `extra/climate/benchmarks/maps/benchmark_map_guide.txt` describes units and palettes; additional CSV diagnostics do not add run images. LICs show representative-month circulation; process/consistency maps summarize the quarter starting with the named month (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec).
+Keep headers beside their implementations. Organize by the responsibility of a module; express execution order in pipeline recipes. Avoid creating a separate climate implementation for each place it appears in a recipe.
 
-Benchmark outputs are under `extra/climate/benchmarks`; numerical climate references, source downloads, and reusable visible previews are grouped under `extra/reference/climate`. Reference observations are validation inputs only and are not fed into generated-world physics.
+- `core/` should contain shared state primitives, coordinates, units, grids, and deterministic randomness. Extraction of world state into this boundary is still pending.
+- `simulations/` should operate on explicit world inputs and produce defined world layers. Presentation, filesystem operations, and reference-data validation have their own boundaries.
+- `pipeline/` should select stages, validate their dependencies, schedule them, and control checkpoints and stopping conditions. A disabled stage requires either valid existing outputs, an imported replacement, or an explicit fallback.
+- `io/` contains code that reads and writes artifacts. `refs/` and `runs/` contain the artifacts themselves.
+- `validation/` compares simulated results with observations and checks budgets. Observed climate references are validation inputs, not hidden forcing for procedural worlds.
+- `app/` presents and controls the engine. Both interactive and eventual headless workflows should use the same simulation stages.
 
-Recorded runs also export `climate_comparison_cells.csv`. For the fresh validation
-workbook workflow, run `python scripts/summarize-climate-validation.py --run-id ID
---output DIR` (NumPy and Pillow required). This processes only the selected run
-and the prepared references. Its run-folder `excel_paired_data.csv` and
-`excel_vector_data.csv` match the workbook input column order; copy the matching
-topic formulas for new input rows. `excel_koppen_matrix.csv` contains global
-confusion areas in km2; recompute it at every resolution rather than scaling pixel
-counts. These exports do not automatically append to the new workbook. Coverage
-notes identify missing references and partial ocean-mask coverage.
+`globalterrain`, `globalclimate`, and `physical_layers` have been split into simulation modules and pipeline entry points. Society CSV loading belongs to `io/social_definitions`; its stage order belongs to `pipeline/social_generation`. [Module boundaries and retention decisions](docs/architecture/simulation-modules.md) describe the active and legacy paths.
 
-This remains a reduced climate simulator, not a full general circulation model such as ExoPlaSim. Internal dynamics/transport use cell-centred spherical grids, separate zonal and stationary two-layer closures, quadratic surface drag, linear upper damping, conservative MPDATA moisture transport, diagnosed column heating, and a wind-driven mixed-layer ocean. A bounded outer iteration couples winds, SST, heating and rainfall; conservation and convergence are reported separately. Climate-only shallow-water evolution supplies transient samples, but is not a three-dimensional primitive-equation atmosphere with resolved fronts, baroclinic cyclone development, many vertical levels, or validated storm-track statistics. Radiation is a grey two-layer approximation; convection, clouds, snow and unresolved mixing remain parameterized, and the ocean is not a full ocean GCM. Gameplay weather is deferred and climate generation does not initialize its runtime state. Implementation evidence and remaining tuning/validation are in `docs/tasks/climate-physics/FUTURE_WORK.md`.
+`src/wip/` still holds `planet`, `region`, `regionalmap`, `classes`, `misc`, `functions`, `generation_tuning`, and `generation_workbench`. World storage/persistence, regional generation, shared utilities, and workbench UI remain coupled there. `functions.hpp` is a compatibility umbrella; new callers should include the owning module's header.
 
-----
+Further land-surface hydrology and ecology belong under `src/simulations/hydrology/` and `src/simulations/ecology/`. Existing climate moisture/storage physics remains in `climate/`. Current mineral and marine scores are derived heuristics in `resources/`; future mineral formation belongs in geology and biological production in ecology, with society consuming both.
 
-* Credits
+### Assets, definitions, configurations, and references
 
-Undiscovered Worlds is written by Jonathan Hill, with additional contributions and corrections by Frank Gennari. Sections of code that are taken or adapted from other sources are noted in the comments.
+| Location | Role | Examples |
+| --- | --- | --- |
+| `assets/` | Presentation | Sphere texture, map appearance presets |
+| `definitions/` | Authored simulation content | Commodity properties, knowledge definitions, species preferences |
+| `configs/` | How an application or run is configured | Application paths; future recipes, resolution, duration, stage switches |
+| `refs/` | Imported inputs and external reference data | Heightmaps, observed precipitation, prepared Earth grids |
 
-----
+The distinction follows purpose. An imported heightmap is a dataset; a generated heightmap is a run artifact. Current tuning constants remain in `src/wip/generation_tuning.hpp`; moving them into configurable recipes is future work.
 
-* The code
+Keep downloads and their receipts/licenses under `refs/source/<dataset>/`. Prepared grids belong under `refs/processed/<quantity>/`; Earth rasters use `{width}` filenames and metadata under `processed/metadata/{width}/`. See [reference preparation](refs/README.md). Research material and reference projects live in `references/`; unresolved files belong in `0/`.
 
-Please note that this code requires the following libraries to work:
+## Runs and comparisons
 
-SFML - https://www.sfml-dev.org/
+Artifact category comes before run identity. Map filenames contain only the run ID and extension:
 
-Dear ImGui - https://github.com/ocornut/imgui
+```text
+runs/
+  maps/
+    climate/koppen/
+      145.png
+      146.png
+    climate/wind/lic/1/s/
+      145.png
+      146.png
+    climate/rain/annual/s/
+      145.png
+      146.png
+  fields/climate/<quantity>/<season>/<layer>/<run_id>.tif
+  diagnostics/climate/<run_id>/   # new durable diagnostic batches
+  diagnostics/<topic>/<run_id>.csv # historical diagnostics
+  parameters/<run_id>.txt
+  manifests/<manifest_type>/<run_id>.<ext>
+  metrics/
+    climate.xlsx
+    metrics.xlsx
+    profiling.xlsx
+    run_history.xlsx
+  registry/climate.json
+  checkpoints/
+  logs/
+  reports/
+```
 
-ImGui-SFML - https://github.com/eliasdaler/imgui-sfml
+Open a category to compare successive runs. Seasons `1/2/3/4` mean January/April/July/October; `s/u` mean surface/upper winds. Raw fields mirror map folders and retain their numerical values and units. Annual temperature and rain use `annual/s/`; Koppen omits season/layer folders. `climate/air_temp/annual/s/` contains land surface-air temperature, not land skin temperature.
 
-ImGuiFileDialog - https://github.com/aiekick/ImGuiFileDialog
+Unregistered map experiments retain their descriptive identifiers under `runs/work/legacy-maps/`.
 
+**Excel workbooks hold comparable metrics.** `runs/metrics/run_history.xlsx` preserves 304 records from both historical registries and 89 parameter files, including the distinct verification run 147. The main `runs/registry/climate.json` remains required by the executable's run-ID allocator and writer. Numerical CSV diagnostics remain reusable calculation inputs. Reports summarize findings; logs retain verbatim execution output. See the [run 159 report](runs/reports/159.md) for the reporting format.
 
-The code is offered under the GNU General Public Licence - https://choosealicense.com/licenses/gpl-3.0/. Feel free to make whatever use of it you like, but please credit me if you repurpose any of it!
+For future runs, record the seed, recipe and stage parameters, code revision, input versions, grid geometry, simulation duration, convergence criteria, and output provenance. Preserve numerical fields as well as previews when they are needed to reproduce a comparison. Changes in palettes, units, grids, or renderer versions should remain visible in the run metadata.
 
-----
+## Development and remaining integration
 
-* How to use Undiscovered Worlds
+The project uses C++ with CMake and vcpkg, SFML, Dear ImGui, ImGui-SFML, and ImGuiFileDialog. CUDA rendering is optional in the existing build configuration. Tectonics is built from `src/simulations/geology/plate_tectonics` as the internal `plate_tectonics` target; no standalone checkout is required. The engine uses C++20 and the app retains C++17. See the [tectonics integration and checks](docs/architecture/tectonic-contract-validation.md) and [native output contract](docs/architecture/tectonics/tectonic-output-contract.md).
 
-When you start the program, you are prompted to enter a seed number for the new world. You can choose a random number or enter your own, before clicking "OK" to begin the generation process.
+The active JSON registry still supplies benchmark IDs; replacing it requires preserving those IDs. Compatible benchmark imports are generated from the retained Earth master. Later refactoring can extract `src/wip/` responsibilities.
 
-Alternatively, you can load a previously created world (using the current save format baseline), or import your own maps (see below).
+```powershell
+cmake --preset x64-debug
+cmake --build out/build/x64-Debug --config Debug --parallel 4
+ctest --test-dir out/build/x64-Debug -C Debug --output-on-failure -j 4
+uv run --offline --with numpy --with pillow python -m unittest discover -s tests/scripts
+uv run --offline python scripts/check-layout.py
+```
 
-When the world is ready, you will see the global map screen.
+Tests mirror the code domains. Prefer deterministic headless checks of state, budgets, and data contracts before visual comparisons. Fixed seeds, explicit inputs, and recorded units/resolutions should accompany benchmark results.
 
-* The global map screen
+Climate generation accepts `--climate-resolution 64` independently of `--resolution` (the exported world width). This sets atmosphere/ocean width to 64, moisture/energy width to 128, and weather width to 32, capped by the world grid. Use multiples of four, at least eight. `--climate-temperature-mode calibrated` retains the requested global mean; `radiative` fixes the longwave intercept so the mean emerges from the energy balance. The default uses conservative latitude diffusion, continuous land/soil and ocean/ice heat stores, and monthly Köppen classification. Climate working state belongs to each world; monthly fields and spin-up reservoirs are transient and are not added to the save format.
 
-This screen displays a map of your world. You can click on any point to see information about it. The buttons to the left perform several functions:
+The numerical climate, grid, reference I/O, and stage-registry libraries also build with `-DUW_BUILD_APP=OFF`; this skips SFML/ImGui and CUDA discovery. Tests link these same libraries. For a library-only build using the existing toolchain:
 
-"World controls" - these buttons let you create a new world, load in a different one, save the current one, or import your own maps (see below).
+```powershell
+cmake --preset x64-debug -B out/build/headless-modules -DUW_BUILD_APP=OFF -DBUILD_TESTING=OFF
+cmake --build out/build/headless-modules --config Debug --target uw_climate uw_climate_io uw_generation_stages --parallel 4
+```
 
-"Export options" - these allow you to export images showing maps of the world, or of a user-defined area (see below).
+`BUILD_TESTING` also builds the tectonics regression suite using GoogleTest v1.15.2 (downloaded on first configuration). Enable `UW_BUILD_TECTONICS_TOOLS` to build `tectonic_simulation`, `contract_fixture`, and `tectonic_pipeline`. Tool PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The optional `check-tectonics-slow` target runs the full-size deterministic replay and generates comparison images.
 
-"Display map type" - these allow you to display different kinds of information on the map.
+Large local source data, generated artifacts, reference projects, archives, and scratch files are ignored by Git. Reference preparation code, scope notes, the active registry, and selected workbooks can be versioned. Existing local climate status notes remain under `docs/tasks/climate-physics/`.
 
-"Appearance" - open the settings to change the map appearance (see below).
+## Using the application
 
-"Zoom" - open up the regional map screen for the selected point.
+Create a seeded world, load a compatible saved world, or import maps through World controls. Click the global map to inspect a location; Zoom opens its region, whose minimap and arrow keys navigate nearby areas. Export options support world, region, and selected-area maps.
 
-* The regional map screen
+Appearance edits affect rendering, not simulated fields. Gradient controls support continuous or discrete colours and editable value/colour anchors. Load or save `.uws` presets through the appearance panel; worlds also save their appearance settings.
 
-This screen displays a map of a small area of your world, shown at a scale of approximately 1 pixel to 1 km. As with the global map screen, you can click on the map to get information about that point. The buttons to the left perform several functions:
+Map imports must match the current world dimensions. Numeric imports accept supported grayscale uint16 TIFFs; PNG imports use field-specific channel scales or a one-pixel gradient strip with an explicit minimum and increment. The signed float32 Earth master is converted into the unsigned land/sea import pair during reference processing. See `src/io/map_imports.cpp` for the current decoding rules.
 
-"World controls" - the button here lets you return to the global map screen.
+Run `./scripts/benchmarks/run-climate-benchmark.ps1 -Resolution 512 -ClimateResolution 64 -Seed 20260906` for a complete benchmark with logs and a side-by-side map gallery. See [benchmark commands and outputs](runs/maps/climate/README.md) and the [reference map/palette guide](refs/processed/climate/maps/README.md). Builds stay in `out/`; benchmark artifacts default to `runs/`.
 
-"Export options" - these allow you to export images showing maps of the currently viewed region, or of a user-defined area (see below).
+The [experimental tropical boundary-layer replacement](runs/maps/climate/README.md#experimental-tropical-boundary-layer) is selectable with `-TropicalClosure mixed-layer`. The default remains `legacy`: the new wind balance improves tropical wind error but currently regresses rainfall, so it has not passed promotion checks.
 
-"Display map type" - these allow you to display different kinds of information on the map.
+The simulator, Earth benchmark imports and exports, and every processed reference use cell-centred `W x W/2` grids. Raw sources keep their native registration until the preparation script performs the ingestion-boundary remap. The default benchmark selection is Koppen, January surface LIC and particles, and precipitation PNG/TIFF. Repeat `--map` (or use a comma-separated list) to select outputs; `all` and `none` are supported. [Map guides](docs/reference-guides/) explain quantity, units, scales, and seasonal meaning. The summary command `uv run --offline --with numpy --with pillow python scripts/benchmarks/summarize-climate-validation.py --run-id ID --output DIR` prepares workbook input tables from category-organized diagnostics and carries the latest earlier report as context. It does not append to `metrics.xlsx` automatically.
 
-"Appearance" - open the settings to change the map appearance (see below).
+Generate compatible topography and climate reference maps for one or more widths with `uv run --offline --with numpy --with pillow python scripts/refs/prepare-reduced-earth-benchmark.py --width 128 256 512 1024 2048`. PNG previews, float32 GeoTIFF fields, and CSVs go to category-specific `refs/processed/<category>/maps/`, `fields/`, and `csv/` folders. Products include the binary land/ocean mask, rain, temperature, observed Köppen classes, seasonal winds/LIC/particles, and available ERA5 diagnostics. The manifest reports missing reference fields; see [reference preparation](refs/README.md) for coverage, units, and moisture-flux input requirements. Existing uint16 land/sea import TIFFs remain in `maps/`; `configs/app.env` names their base paths, and the executable selects the matching `_WIDTHxHEIGHT` variant.
 
-To the top right of the screen is a minimap showing the current region on a world map. You can click on this map to go directly to another region. You can also use the cursor keys to move to neighbouring regions.
+## Credits and license
 
-* The map appearance settings
+Undiscovered Worlds was written by Jonathan Hill, with additional contributions and corrections by Frank Gennari. Sources of adapted code are credited in the code comments. The project is distributed under the [GNU General Public License v3](LICENSE).
 
-This window allows you to change the appearance of the relief maps. Note that any changes here will be applied to both global and regional maps. These changes are purely aesthetic - nothing about the world itself is changed here, and none of these changes affects the other maps such as elevation, temperature, etc.
-
-You can click on the colour boxes to bring up a colour picker. The program mixes these colours to create the relief maps - try changing them to see what sort of effect it has. You can also try making some colours identical to produce simpler maps - e.g. if you want the sea to be a single colour throughout, set "shallow ocean" and "deep ocean" to the same colour and turn off both shading and marbling on sea. Note that you can type new values directly into the boxes by clicking on them while holding down the control key.
-
-Underneath the colour boxes are several sliders:
-
-"Shading" - this controls the pseudo-3D shading effect. The sliders allow you to change its intensity on land, on lakes, and on sea.
-
-"Marbling" - this controls the marbling effect, which adds variety to the appearance of the maps. You can, again, change its intensity on land, on lakes, and on sea.
-
-"Rivers" - this controls how many rivers are shown on the map. Only rivers with flow greater than the given number are shown, so the lower the number, the more rivers you will see. You can set different values for the global and regional maps.
-
-There are also some other controls to the right. The "light" box allows you to change the apparent direction of the lighting. The "snow" box under it allows you to change the way the map displays the transition between snowy and non-snowy regions on the map. Finally, the "sea ice" button allows you to set whether sea ice is shown.
-
-The buttons at the bottom right allow you to save or load settings, restore the defaults, and close the panel. Note that if you save the world from the global map screen, its appearance settings are saved with it and will be restored if you reload it. So you don't need to save the settings separately unless you plan to load them into other worlds.
-
-* The custom area export screen
-
-This window allows you to export maps from a custom-defined area of the world. These maps are at the same scale as the regional map - 1 pixel to 1km - but they can be of larger areas.
-
-Click a point on the map to select a point. Do this again to select a second point, defining a rectangle. You can continue to click or drag the points to re-define the area. When you have the area you want, click on "export maps". There are also buttons to clear your selected area and to return to the global map screen.
-
-* The import maps screen
-
-Please note that this feature is experimental! You may need trial and error to get good results.
-
-This screen allows you to import your own maps - created with an image editor - and turn them into Undiscovered Worlds worlds. In this way, you can create your own terrain, and have Undiscovered Worlds calculate the climates, rivers, lakes, etc. You can then explore maps of your world just like any other. The zip file "Example import files" contains some maps that you can import to recreate Tolkien's Arda, which should give you a good idea of the format they need to be in to create your own.
-
-The buttons to the left are in two main groups:
-
-"Import" - these buttons are for importing your own maps. They must be 2048x1025 pixels. Land, sea, mountains, temperature, and precipitation imports now accept grayscale uint16 `.tif`/`.tiff` files directly, and they also still support the older PNG import modes. Volcanoes and gradient strips still use PNG because they depend on colour channels. The program interprets them in the following way:
-
-land map - TIFF: uint16 metres above sea level, with 0 indicating sea. PNG: only the red value is used. 0 indicates sea, and any higher value is elevation above sea level, in increments of 10.
-
-sea map - TIFF: uint16 metres below sea level, with 0 indicating land. PNG: only the red value is used. 0 indicates land, and any higher value is depth below sea level, in increments of 50.
-
-mountains map - TIFF: uint16 peak elevation above the surrounding land. PNG: only the red value is used, in increments of 50.
-
-volanoes map - the red value shows the peak elevation above the surrounding land, in increments of 50. A blue value of 0 indicates a shield volcano, or a higher value indicates a stratovolcano. A green value of 0 indicates an extinct volcano, or a higher value indicates an active volcano.
-
-temperature map - TIFF: uint16 values are imported directly as mean annual temperature. PNG: only the red value is used. 0 maps to -60 C mean annual temperature, and 255 maps to +60 C mean annual temperature.
-
-precipitation map - TIFF: uint16 values are imported directly as mean precipitation. PNG: only the red value is used. 0 maps to 0 mean precipitation, and 255 maps to 1020 mean precipitation.
-
-You can also switch PNG imports to "strip" mode. In that mode, you first load a 1-pixel-tall PNG gradient strip. The leftmost strip colour maps to a minimum value that you enter, and each pixel to the right adds the chosen floating-point increment. Imported map colours are then matched against that strip to recover their values. TIFF imports bypass strip decoding and use the stored uint16 values directly.
-
-In theory you only need a land map - the others are optional. It's important to note that the land map shouldn't show mountain ranges. Undiscovered Worlds does not treat mountain ranges as normal elevation. If you want to define your own mountain ranges, you must import a mountains map, on which you have drawn the lines of the main mountain ranges as indicated above.
-
-Also, the land map doesn't have to be very detailed. If you want, you could simply use the values of 0 to show sea and 1 to show land, without bothering about specifying elevation beyond that. You can use the "land elevation" button in the "generate" section to add random elevation to your map.
-
-"Generate" - once you have imported your own maps, you can use these buttons to add features to your world.
-
-When you have finished, click the "done" button. This finalises the terrain and then calculates rainfall, temperature, rivers, lakes, etc. When it is finished, the custom world will be displayed in the global map screen as usual, and you can view or save it like any other.
-
-----
-
-* Known issues
-
-The ability to resize the window is turned off, because it messes up the mouse tracking. (You can minimise it, of course.)
-
-Saving and loading worlds is slow, but it works.
-
-It occasionally crashes when exporting area maps. The cause is as yet unknown. Be sure to save worlds/settings before using this.
-
-Occasionally, exporting maps doesn't work. Save the world, restart UW, load the world back in, and try again. I don't know why this happens or why restarting UW usually solves the issue.
-
-Continents occasionally appear with straight sides. The cause of this is unknown too, but it is rare.
-
-Gridlike artefacts sometimes appear on the ocean floor of custom worlds created from imported maps. I'm looking into this.
-
-The climate simulation is imperfect. Climate regions are more jumbled together than they should be. There is too much monsoon (Am) and not enough savannah (Aw/As). There is less warm-summer humid continental (Dfb) than there should be. However, a perfect climate simulation would require a lot more processing power and time than I have available!
-
-Lakes occasionally go haywire. Known cause: lakes are the work of the devil - https://undiscoveredworlds.blogspot.com/2019/02/grappling-with-lakes.html
+The internal plate-tectonics module retains its original copyright notices and [upstream license](src/simulations/geology/plate_tectonics/LICENSE).

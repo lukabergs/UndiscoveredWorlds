@@ -1,0 +1,992 @@
+//
+//  functions.hpp
+//  Undiscovered Worlds
+//
+//  Created by Jonathan Hill on 24/07/2019.
+//
+//  The code for this project is released under the GNU General Public Licence v3.0f - https://choosealicense.com/licenses/gpl-3.0/
+//
+//  Please note that this code requires the following libraries to work:
+// 
+//  SFML - https://www.sfml-dev.org/
+//  Dear ImGui - https://github.com/ocornut/imgui
+//  ImGui-SFML - https://github.com/eliasdaler/imgui-sfml
+//  ImGuiFileDialog - https://github.com/aiekick/ImGuiFileDialog
+//
+//  main.cpp contains the functions for drawing the map images (as well as the main loop, of course), and all functions that require external libraries.
+//  misc.cpp contains various utility functions that are used throughout the program.
+//  Simulation modules under src/simulations contain terrain, climate, and hydrology.
+//  regionalmap.cpp contains the functions used to generate the regional terrain.
+//
+//  There are no asset files other than the app icon and font. The code uses a number of templates, but these are stored in the code itself, in assetdata.cpp.
+//
+//  The global terrain/climate information is stored in an object of the planet class. The regional terrain/climate information is stored in an object of the region class. Both of these classes are defined in the relevant hpp/cpp files.
+//
+//  One oddity to be aware of: variables that hold the width/height of objects typically hold the index number of the final item, rather than the actual size. E.g. if planet.width() is set to 100, that means the width has 101 elements, with the index of the last one being 100. Hence the frequent use of loops such as for (int i=0; i<=width; i++). I'm aware that this is eccentric but I find it more intuitive.
+
+
+#ifndef functions_hpp
+#define functions_hpp
+
+#include <stdio.h>
+#include <stdint.h>
+#include <cstdint>
+#include <algorithm>
+#include <array>
+#include <functional>
+#include <thread>
+#include <vector>
+#include <SFML/Graphics.hpp>
+
+#include "climate_benchmark_outputs.hpp"
+
+#include "world_generation_debug.hpp"
+
+#include "classes.hpp"
+#include "planet.hpp"
+#include "region.hpp"
+
+#define ARRAYWIDTH 2048
+#define ARRAYHEIGHT 1024
+
+
+constexpr int GLOBALMAPTYPES = 22;
+constexpr int DISPLAYMAPSIZEX = 1024;
+constexpr int DISPLAYMAPSIZEY = 512;
+
+#define REGIONALTILEWIDTH 32
+#define REGIONALTILEHEIGHT 32
+
+#define MOUNTAINTEMPLATESTOTAL 27
+
+#define MAXCRATERRADIUS 50
+
+using namespace std;
+
+// Define some enums.
+
+enum screenmodeenum { quit, createworldscreen, creatingworldscreen, globalmapscreen, regionalmapscreen, generatingregionscreen, importscreen, completingimportscreen, movingtoglobalmapscreen, exportareascreen, exportingareascreen, loadingworldscreen, savingworldscreen, generatingterrainscreen, loadfailure, settingsloadfailure };
+enum mapviewenum
+{
+    elevation,
+    temperature,
+    precipitation,
+    climate,
+    biomes,
+    rivers,
+    relief,
+    geology,
+    tectonic_uplift,
+    tectonic_boundaries,
+    basins,
+    erosion,
+    deposition,
+    fertility,
+    resources,
+    suitability,
+    settlements_map,
+    population,
+    infrastructure_map,
+    polities_map,
+    trade_map,
+    recent_conflict_map
+};
+enum mapdatakindenum { indexedmapdata, gradientmapdata };
+enum mapindexedstyleenum { noindexedstyle, reliefindexedstyle, climateindexedstyle, biomeindexedstyle };
+enum mapgradientstyleenum { nogradientstyle, standardgradientstyle, riversgradientstyle };
+
+struct AppearanceSettings;
+struct maplayer;
+struct ImportedClimateMaps;
+
+void drawglobalelevationmapimage(planet& world, maplayer& layer);
+void drawglobaltemperaturemapimage(planet& world, maplayer& layer);
+void drawglobalprecipitationmapimage(planet& world, maplayer& layer);
+void drawglobalclimatemapimage(planet& world, maplayer& layer);
+void drawglobalbiomemapimage(planet& world, maplayer& layer);
+void drawglobalriversmapimage(planet& world, maplayer& layer);
+void drawglobalreliefmapimage(planet& world, maplayer& layer);
+void drawglobalgeologymapimage(planet& world, maplayer& layer);
+void drawglobaltectonicupliftmapimage(planet& world, maplayer& layer);
+void drawglobaltectonicboundariesmapimage(planet& world, maplayer& layer);
+void drawglobalbasinsmapimage(planet& world, maplayer& layer);
+void drawglobalerosionmapimage(planet& world, maplayer& layer);
+void drawglobaldepositionmapimage(planet& world, maplayer& layer);
+void drawglobalfertilitymapimage(planet& world, maplayer& layer);
+void drawglobalresourcesmapimage(planet& world, maplayer& layer);
+void drawglobalsuitabilitymapimage(planet& world, maplayer& layer);
+void drawglobalsettlementsmapimage(planet& world, maplayer& layer);
+void drawglobalpopulationmapimage(planet& world, maplayer& layer);
+void drawglobalinfrastructuremapimage(planet& world, maplayer& layer);
+void drawglobalpolitiesmapimage(planet& world, maplayer& layer);
+void drawglobaltrademapimage(planet& world, maplayer& layer);
+void drawglobalrecentconflictmapimage(planet& world, maplayer& layer);
+void drawregionalelevationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltemperaturemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalprecipitationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalbiomemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalriversmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalgeologymapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltectonicupliftmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltectonicboundariesmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalbasinsmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalerosionmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaldepositionmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalfertilitymapimage(planet& world, region& region, maplayer& layer);
+void drawregionalresourcesmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalsuitabilitymapimage(planet& world, region& region, maplayer& layer);
+void drawregionalsettlementsmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalpopulationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalinfrastructuremapimage(planet& world, region& region, maplayer& layer);
+void drawregionalpolitiesmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltrademapimage(planet& world, region& region, maplayer& layer);
+void drawregionalrecentconflictmapimage(planet& world, region& region, maplayer& layer);
+void drawgradientmapappearance(const struct mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
+void drawindexedmapappearance(const struct mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
+void drawstaticmapappearance(const struct mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
+
+struct mapviewdefinition
+{
+    mapviewenum view;
+    const char* label;
+    const char* exportstem;
+    mapdatakindenum datakind;
+    mapindexedstyleenum indexedstyle;
+    mapgradientstyleenum gradientstyle;
+    int gradientindex;
+    const char* description;
+    void (*drawglobal)(planet& world, maplayer& layer);
+    void (*drawregional)(planet& world, region& region, maplayer& layer);
+    void (*drawappearance)(const mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);
+};
+
+constexpr std::array<mapviewenum, GLOBALMAPTYPES> allmapviews = { elevation, temperature, precipitation, climate, biomes, rivers, relief, geology, tectonic_uplift, tectonic_boundaries, basins, erosion, deposition, fertility, resources, suitability, settlements_map, population, infrastructure_map, polities_map, trade_map, recent_conflict_map };
+constexpr std::array<mapviewdefinition, GLOBALMAPTYPES> allmapviewdefinitions =
+{ {
+    { relief, "Relief", "Relief", indexedmapdata, reliefindexedstyle, nogradientstyle, -1, "", drawglobalreliefmapimage, drawregionalreliefmapimage, drawindexedmapappearance },
+    { elevation, "Elevation", "Elevation", gradientmapdata, noindexedstyle, standardgradientstyle, mapgradientelevation, "0 m is sea level. Negative values are below sea level.", drawglobalelevationmapimage, drawregionalelevationmapimage, drawgradientmapappearance },
+    { temperature, "Temperature", "Temperature", gradientmapdata, noindexedstyle, standardgradientstyle, mapgradienttemperature, "", drawglobaltemperaturemapimage, drawregionaltemperaturemapimage, drawgradientmapappearance },
+    { precipitation, "Precipitation", "Precipitation", gradientmapdata, noindexedstyle, standardgradientstyle, mapgradientprecipitation, "", drawglobalprecipitationmapimage, drawregionalprecipitationmapimage, drawgradientmapappearance },
+    { climate, "Climate", "Climate", indexedmapdata, climateindexedstyle, nogradientstyle, -1, "", drawglobalclimatemapimage, drawregionalclimatemapimage, drawindexedmapappearance },
+    { biomes, "Biomes", "Biomes", indexedmapdata, biomeindexedstyle, nogradientstyle, -1, "Sea uses the Climate tab sea palette.", drawglobalbiomemapimage, drawregionalbiomemapimage, drawindexedmapappearance },
+    { rivers, "Rivers", "Rivers", gradientmapdata, noindexedstyle, riversgradientstyle, mapgradientriverflow, "", drawglobalriversmapimage, drawregionalriversmapimage, drawgradientmapappearance },
+    { geology, "Geology", "Geology", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Derived geologic regimes from retained tectonic signals.", drawglobalgeologymapimage, drawregionalgeologymapimage, drawstaticmapappearance },
+    { tectonic_uplift, "Tectonic Uplift", "TectonicUplift", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Native uplift/subsidence tendency with accumulated strain memory.", drawglobaltectonicupliftmapimage, drawregionaltectonicupliftmapimage, drawstaticmapappearance },
+    { tectonic_boundaries, "Tectonic Boundaries", "TectonicBoundaries", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Native boundary class, proximity, lifecycle history, and deforming-region overlay.", drawglobaltectonicboundariesmapimage, drawregionaltectonicboundariesmapimage, drawstaticmapappearance },
+    { basins, "Basins", "Basins", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Drainage basin classes derived from final hydrology.", drawglobalbasinsmapimage, drawregionalbasinsmapimage, drawstaticmapappearance },
+    { erosion, "Erosion", "Erosion", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Relative erosion potential, normalized to 0..100.", drawglobalerosionmapimage, drawregionalerosionmapimage, drawstaticmapappearance },
+    { deposition, "Deposition", "Deposition", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Relative deposition potential, normalized to 0..100.", drawglobaldepositionmapimage, drawregionaldepositionmapimage, drawstaticmapappearance },
+    { fertility, "Fertility", "Fertility", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Floodplain and lowland fertility proxy, normalized to 0..100.", drawglobalfertilitymapimage, drawregionalfertilitymapimage, drawstaticmapappearance },
+    { resources, "Resources", "Resources", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Dominant reserve-style physical resource potential.", drawglobalresourcesmapimage, drawregionalresourcesmapimage, drawstaticmapappearance },
+    { suitability, "Suitability", "Suitability", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Settlement suitability score (0..100).", drawglobalsuitabilitymapimage, drawregionalsuitabilitymapimage, drawstaticmapappearance },
+    { settlements_map, "Settlements", "Settlements", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Settlement locations and urban size.", drawglobalsettlementsmapimage, drawregionalsettlementsmapimage, drawstaticmapappearance },
+    { population, "Population", "Population", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Combined rural and urban population intensity.", drawglobalpopulationmapimage, drawregionalpopulationmapimage, drawstaticmapappearance },
+    { infrastructure_map, "Infrastructure", "Infrastructure", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Infrastructure diffusion and hinterland reach.", drawglobalinfrastructuremapimage, drawregionalinfrastructuremapimage, drawstaticmapappearance },
+    { polities_map, "Polities", "Polities", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Current polity ownership.", drawglobalpolitiesmapimage, drawregionalpolitiesmapimage, drawstaticmapappearance },
+    { trade_map, "Trade", "Trade", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Route traffic and trade intensity.", drawglobaltrademapimage, drawregionaltrademapimage, drawstaticmapappearance },
+    { recent_conflict_map, "Recent Conflict", "RecentConflict", indexedmapdata, noindexedstyle, nogradientstyle, -1, "Border friction and recent conflict pressure.", drawglobalrecentconflictmapimage, drawregionalrecentconflictmapimage, drawstaticmapappearance },
+} };
+
+constexpr const mapviewdefinition& getmapviewdefinition(mapviewenum view)
+{
+    for (const mapviewdefinition& definition : allmapviewdefinitions)
+    {
+        if (definition.view == view)
+            return definition;
+    }
+
+    return allmapviewdefinitions[0];
+}
+
+constexpr std::array<const char*, BIOMEMAPCOLOURCOUNT> biomemapnames =
+{ {
+    "Ice",
+    "Polar desert",
+    "Polar dry tundra",
+    "Polar moist tundra",
+    "Polar wet tundra",
+    "Polar rain tundra",
+    "Subpolar desert",
+    "Subpolar dry tundra",
+    "Subpolar moist tundra",
+    "Subpolar wet tundra",
+    "Subpolar rain tundra",
+    "Boreal desert",
+    "Boreal dry bush",
+    "Boreal moist forest",
+    "Boreal wet forest",
+    "Boreal rain forest",
+    "Cool temperate desert",
+    "Cool temperate desert bush",
+    "Cool temperate steppe",
+    "Cool temperate moist forest",
+    "Cool temperate wet forest",
+    "Cool temperate rain forest",
+    "Warm temperate desert",
+    "Warm temperate desert bush",
+    "Warm temperate thorn steppe",
+    "Warm temperate dry forest",
+    "Warm temperate moist forest",
+    "Warm temperate wet forest",
+    "Warm temperate rain forest",
+    "Subtropical desert",
+    "Subtropical desert bush",
+    "Subtropical thorn steppe",
+    "Subtropical dry forest",
+    "Subtropical moist forest",
+    "Subtropical wet forest",
+    "Subtropical rain forest",
+    "Tropical desert",
+    "Tropical desert bush",
+    "Tropical thorn steppe",
+    "Tropical very dry forest",
+    "Tropical dry forest",
+    "Tropical moist forest",
+    "Tropical wet forest",
+    "Tropical rain forest",
+} };
+
+constexpr std::array<std::array<int, 3>, BIOMEMAPCOLOURCOUNT> defaultbiomemapcolours =
+{ {
+    { 65, 171, 155 },
+    { 173, 68, 83 },
+    { 158, 51, 146 },
+    { 61, 125, 179 },
+    { 42, 199, 102 },
+    { 103, 66, 166 },
+    { 163, 60, 137 },
+    { 165, 121, 109 },
+    { 127, 86, 116 },
+    { 39, 182, 105 },
+    { 71, 111, 175 },
+    { 154, 52, 191 },
+    { 173, 191, 73 },
+    { 194, 47, 54 },
+    { 36, 166, 108 },
+    { 40, 157, 184 },
+    { 55, 80, 153 },
+    { 199, 62, 130 },
+    { 36, 41, 173 },
+    { 176, 122, 56 },
+    { 91, 153, 58 },
+    { 66, 196, 49 },
+    { 171, 36, 88 },
+    { 196, 65, 152 },
+    { 168, 39, 58 },
+    { 59, 50, 161 },
+    { 130, 59, 156 },
+    { 156, 59, 125 },
+    { 120, 153, 44 },
+    { 194, 161, 43 },
+    { 161, 68, 50 },
+    { 60, 199, 155 },
+    { 135, 199, 58 },
+    { 201, 60, 190 },
+    { 66, 197, 201 },
+    { 61, 85, 191 },
+    { 161, 152, 56 },
+    { 56, 161, 37 },
+    { 101, 67, 196 },
+    { 189, 78, 42 },
+    { 176, 96, 42 },
+    { 101, 36, 158 },
+    { 48, 201, 133 },
+    { 54, 143, 162 },
+} };
+
+struct maplayer
+{
+    sf::Image image;
+    sf::Image displayimage;
+    bool created = false;
+};
+
+struct mapcache
+{
+    std::array<maplayer, GLOBALMAPTYPES> layers;
+};
+
+#include "parallel_rows.hpp"
+#include "grid_coordinates.hpp"
+
+#include "deterministic_random.hpp"
+
+constexpr int mapviewindex(mapviewenum mapview)
+{
+    return static_cast<int>(mapview);
+}
+
+// Declare functions that are in main.cpp
+
+void fast_srand(long seed);
+int fast_rand(void);
+float getlatestversion();
+void resetmapcache(mapcache& maps);
+maplayer& getmaplayer(mapcache& maps, mapviewenum mapview);
+const maplayer& getmaplayer(const mapcache& maps, mapviewenum mapview);
+sf::Image& getmapimage(mapcache& maps, mapviewenum mapview);
+const sf::Image& getmapimage(const mapcache& maps, mapviewenum mapview);
+sf::Image& getdisplaymapimage(mapcache& maps, mapviewenum mapview);
+const sf::Image& getdisplaymapimage(const mapcache& maps, mapviewenum mapview);
+void updateTextureFromImage(sf::Texture& texture, const sf::Image& image);
+void adjustforsize(planet& world, sf::Vector2i& globaltexturesize, mapcache& globalmaps, sf::Image& highlightimage, int highlightsize, sf::Image& minihighlightimage, int& minihighlightsize);
+void drawhighlightobjects(planet& world, sf::Image& highlightimage, int highlightsize, sf::Image& minihighlightimage, int& minihighlightsize);
+#include "generation_progress.hpp"
+void begintimedreporting();
+void endtimedreporting();
+bool standardbutton(const char* label);
+void drawglobalmapimage(mapviewenum mapview, planet& world, mapcache& maps);
+void drawallglobalmapimages(planet& world, mapcache& maps);
+void applyglobalmapview(mapviewenum mapview, planet& world, mapcache& maps, sf::Texture& texture, sf::Sprite& sprite, sf::Sprite* minimap = nullptr);
+void drawglobalelevationmapimage(planet& world, maplayer& layer);
+void drawglobaltemperaturemapimage(planet& world, maplayer& layer);
+void drawglobalprecipitationmapimage(planet& world, maplayer& layer);
+void drawglobalclimatemapimage(planet& world, maplayer& layer);
+void drawglobalbiomemapimage(planet& world, maplayer& layer);
+void drawglobalriversmapimage(planet& world, maplayer& layer);
+void drawglobalreliefmapimage(planet& world, maplayer& layer);
+void drawglobalgeologymapimage(planet& world, maplayer& layer);
+void drawglobaltectonicupliftmapimage(planet& world, maplayer& layer);
+void drawglobaltectonicboundariesmapimage(planet& world, maplayer& layer);
+void drawglobalbasinsmapimage(planet& world, maplayer& layer);
+void drawglobalerosionmapimage(planet& world, maplayer& layer);
+void drawglobaldepositionmapimage(planet& world, maplayer& layer);
+void drawglobalfertilitymapimage(planet& world, maplayer& layer);
+void drawglobalresourcesmapimage(planet& world, maplayer& layer);
+void drawglobalsuitabilitymapimage(planet& world, maplayer& layer);
+void drawglobalsettlementsmapimage(planet& world, maplayer& layer);
+void drawglobalpopulationmapimage(planet& world, maplayer& layer);
+void drawglobalinfrastructuremapimage(planet& world, maplayer& layer);
+void drawglobalpolitiesmapimage(planet& world, maplayer& layer);
+void drawglobaltrademapimage(planet& world, maplayer& layer);
+void drawglobalrecentconflictmapimage(planet& world, maplayer& layer);
+sf::Color getclimatecolours(const planet& world, short climate);
+void drawregionalmapimage(mapviewenum mapview, planet& world, region& region, mapcache& maps);
+void drawallregionalmapimages(planet& world, region& region, mapcache& maps);
+void applyregionalmapview(mapviewenum mapview, planet& world, region& region, mapcache& maps, sf::Texture& texture, sf::Sprite& sprite);
+void drawregionalelevationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltemperaturemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalprecipitationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalclimatemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalbiomemapimage(planet& world, region& region, maplayer& layer);
+void drawregionalriversmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalreliefmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalgeologymapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltectonicupliftmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltectonicboundariesmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalbasinsmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalerosionmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaldepositionmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalfertilitymapimage(planet& world, region& region, maplayer& layer);
+void drawregionalresourcesmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalsuitabilitymapimage(planet& world, region& region, maplayer& layer);
+void drawregionalsettlementsmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalpopulationmapimage(planet& world, region& region, maplayer& layer);
+void drawregionalinfrastructuremapimage(planet& world, region& region, maplayer& layer);
+void drawregionalpolitiesmapimage(planet& world, region& region, maplayer& layer);
+void drawregionaltrademapimage(planet& world, region& region, maplayer& layer);
+void drawregionalrecentconflictmapimage(planet& world, region& region, maplayer& layer);
+
+// Declare functions that are in misc.cpp
+
+void toggle(bool &val);
+string formatnumber(int val);
+bool stob(string const& instring);
+short stos(string const& instring);
+unsigned short stous(string const& instring);
+char stoc(string const& instring);
+unsigned char stouc(string const& instring);
+void savesettings(planet& world, string filename);
+bool loadsettings(planet& world, string filename);
+void createriftblob(vector<vector<float>>& riftblob, int size);
+int random(int a, int b);
+int randomsign(int a);
+float randomsign(float a);
+int altrandom(int a, int b);
+int altrandomsign(int a);
+int wrappedaverage(int x, int y, int max);
+int normalise(int x, int y, int max);
+int tilt(int a, int b, int percentage);
+float tilt(float a, float b, int percentage);
+void warp(vector<vector<int>>& map, int width, int height, int maxelev, int warpfactor, bool vary);
+void monstrouswarp(vector<vector<int>>& map, int width, int height, int maxelev, int warpfactor);
+void shift(vector<vector<int>>& map, int width, int height, int offset);
+void flip(vector<vector<int>>& arr, int awidth, int aheight, bool vert, bool horiz);
+void smooth(vector<vector<int>>& arr, int width, int height, int maxelev, int amount, bool vary);
+bool edge(vector<vector<bool>>& arr, int width, int height, int i, int j);
+void drawline(vector<vector<bool>>& arr, int x1, int y1, int x2, int y2);
+void drawlinewrapped(vector<vector<bool>>& arr, int width, int height, int x1, int y1, int x2, int y2);
+void drawcircle(vector<vector<int>>& arr, int x, int y, int col, int radius);
+void box(vector<vector<int>>& arr, int x1, int y1, int x2, int y2, int col);
+void drawcircle3d(vector<vector<vector<int>>>& arr, int x, int y, int col, int radius, int index);
+void box3d(vector<vector<vector<int>>>& arr, int x1, int y1, int x2, int y2, int col, int index);
+twofloats curvepos(twofloats p0, twofloats p1, twofloats p2, twofloats p3, float t);
+void fill(vector<vector<bool>>& arr, int width, int height, int x, int y, bool replacement);
+void fillcontinent(vector<vector<bool>>& arr, vector<vector<short>>& mask, short maskcheck, int width, int height, int startx, int starty, bool replacement);
+int tempelevadd(planet& world, int temp, int i, int j);
+int tempelevadd(planet& world, region& region, int temp, int i, int j);
+int tempelevremove(planet& world, int temp, int i, int j);
+int tempelevremove(planet& world, region& region, int temp, int i, int j);
+string getdirstring(int dir);
+int getdir(int x, int y, int xx, int yy);
+int findlowestdir(planet& world, int neighbours[8][2], int x, int y);
+int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, vector<vector<int>>& mountaindrainage);
+int getslope(planet& world, int x, int y, int xx, int yy);
+int getslope(region& region, int x, int y, int xx, int yy);
+int getflatness(planet& world, int x, int y);
+int getflatelevation(planet& world, int x, int y);
+int landdistance(planet& world, int x, int y);
+twointegers nearestsea(planet& world, int i, int j, bool land, int limit, int grain);
+twointegers nearestsea(region& region, int leftx, int lefty, int rightx, int righty, int i, int j);
+bool vaguelycoastal(planet& world, int x, int y);
+bool vaguelycoastal(region& region, int x, int y);
+bool northwestlandonly(planet& world, int x, int y);
+bool northwestlandonly(region& region, int x, int y);
+bool lakenorthwestlandonly(region& region, int x, int y);
+bool northeastlandonly(planet& world, int x, int y);
+bool northeastlandonly(region& region, int x, int y);
+bool lakenortheastlandonly(region& region, int x, int y);
+bool southwestlandonly(planet& world, int x, int y);
+bool southwestlandonly(region& region, int x, int y);
+bool lakesouthwestlandonly(region& region, int x, int y);
+bool southeastlandonly(planet& world, int x, int y);
+bool southeastlandonly(region& region, int x, int y);
+bool lakesoutheastlandonly(region& region, int x, int y);
+twointegers findseatile(planet& world, int x, int y, int dir);
+twointegers getflowdestination(planet& world, int x, int y, int dir);
+twointegers getregionalflowdestination(region& region, int x, int y, int dir);
+twointegers getupstreamcell(planet& world, int x, int y);
+int checkwaterinflow(planet& world, int x, int y);
+int checkregionalwaterinflow(region& region, int x, int y);
+twointegers gettotalinflow(planet& world, int x, int y);
+twointegers gettotalinflow(region& region, int x, int y);
+twointegers findlowesthigher(region& region, int dx, int dy, int x, int y, int janload, int julload, int crount, vector<vector<bool>>& mainriver);
+int nearlake(planet& world, int x, int y, int dist, bool rift);
+int getlakeedge(planet& world, int x, int y);
+int getnearestlakelevel(region& region, int x, int y);
+int getnearestlakespecial(region& region, int x, int y);
+twointegers findclosestriver(region& region, int x, int y, bool delta);
+twointegers findclosestriverquickly(region& region, int x, int y);
+int countinflows(region& region, int x, int y);
+void initialiseworld(planet& world);
+void initialisemapcolours(planet& world);
+void initialisegradientmapappearance(planet& world);
+void setdefaultnonreliefmapappearance(planet& world);
+void initialiseregion(planet& world, region& region);
+void changeworldproperties(planet& world);
+void getlandandseatotals(planet& world);
+void makevoronoi(vector<vector<short>>& voronoi, int width, int height, int points);
+void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<vector<bool>>& outline, int pointdist);
+
+// Simulation entry points live with their implementations. This header
+// remains a compatibility umbrella for the desktop and regional generator.
+#include "terrain.hpp"
+#include "plate_tectonics_adapter.hpp"
+
+#include "climate_generation.hpp"
+#include "climate_fields.hpp"
+#include "climate_classification.hpp"
+#include "drainage.hpp"
+#include "lakes.hpp"
+#include "lake_effects.hpp"
+#include "deltas.hpp"
+#include "wetlands.hpp"
+#include "tides.hpp"
+#include "climate_landforms.hpp"
+
+// Coupled ocean/atmosphere and validation integration.
+#include "climate_coupling.hpp"
+void exportclimatevalidationreport(planet& world);
+bool recordclimatebenchmarkrun(
+    planet& world,
+    const string& information,
+    const climatebenchmarkmapselection& maps,
+    int* runid = nullptr);
+void printclimaterelativeerrorreport(planet& world);
+
+// Declare functions that are in regionalmap.cpp
+
+void removesealakes(planet& world, region& region, int leftx, int lefty, int rightx, int righty);
+
+void generateregionalmap(planet& world, region& region, boolshapetemplate smalllake[], boolshapetemplate island[], peaktemplate& peaks, vector<vector<float>>& riftblob, int riftblobsize, int partial, byteshapetemplate smudge[], byteshapetemplate smallsmudge[], vector<int>& squareroot);
+void makeregionalwater(planet& world, region& region, vector<vector<bool>>& safesaltlakes, vector<vector<bool>>& disruptpoints, vector<vector<int>>& rriverscarved, vector<vector<int>>& fakesourcex, vector<vector<int>>& fakesourcey, boolshapetemplate smalllake[], boolshapetemplate island[], vector<vector<float>>& riftblob, int riftblobsize, int xleft, int xright, int ytop, int ybottom);
+void makeregionalterrain(planet& world, region& region, vector<vector<bool>>& disruptpoints, vector<vector<bool>>& riverinlets, vector<vector<bool>>& globalestuaries, vector<vector<int>>& rriverscarved, vector<vector<int>>& fakesourcex, vector<vector<int>>& fakesourcey, boolshapetemplate smalllake[], peaktemplate& peaks, byteshapetemplate smallsmudge[], int xleft, int xright, int ytop, int ybottom, vector<int>& squareroot, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void makeregionalunderseaterrain(planet& world, region& region, peaktemplate& peaks, byteshapetemplate smudge[], byteshapetemplate smallsmudge[], int xleft, int xright, int ytop, int ybottom, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void makeregionalmiscellanies(planet& world, region& region, vector<vector<bool>>& safesaltlakes, vector<vector<bool>>& riverinlets, vector<vector<bool>>& globalestuaries, boolshapetemplate smalllake[], byteshapetemplate smallsmudge[], int xleft, int xright, int ytop, int ybottom);
+void makeregionalclimates(planet& world, region& region, vector<vector<bool>>& safesaltlakes, boolshapetemplate smalllake[], int xleft, int xright, int ytop, int ybottom);
+twointegers convertregionaltoglobal(planet& world, region& region, int x, int y);
+void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& rriverscarved, boolshapetemplate smalllake[], vector<vector<bool>>& rivercurves);
+twointegers getjunctionpoint(planet& world, region& region, int dx, int dy, int sx, int sy, bool lakepresent, bool goingtolake, bool diag, int maininflow, int inx, int iny, int outx, int outy);
+void makedeltatile(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& rriverscarved);
+threeintegers calculateregionalriver(planet& world, region& region, int dx, int dy, int sx, int sy, twofloats pt, twofloats mm1, twofloats mm2, twofloats mm3, int janinflow, int julinflow, int riverlength, int isittributary, int goingtolake, bool delta);
+void removeweirdelevations(planet& world, region& region, int dx, int dy, int sx, int sy);
+void removelowflow(region& region, int dx, int dy);
+void addtoexistingregionalriver(planet& world, region& region, int dx, int dy, int sx, int sy, int x, int y, int janinflow, int julinflow, bool delta);
+void carveriver(planet& world, region& region, int dx, int dy, int sx, int sy, int riverlength, int riverstartx, int riverstarty, int riverendx, int riverendy, int startlandlevel, int endlandlevel, bool goingtolake, vector<vector<int>>& rriverscarved);
+void carverivertributary(planet& world, region& region, int dx, int dy, int sx, int sy, int thisriverlength, int thisriverstartx, int thisriverstarty, int thisriverendx, int thisriverendy, int thisstartlandlevel, int thisendlandlevel, int riverendx, int riverendy, int endlandlevel, vector<vector<int>>& rriverscarved);
+twointegers gettributaryendpoint(region& region, int startx, int starty);
+void addsprings(planet& world, region& region, int sx, int sy, int dx, int dy, int junctionpointx, int junctionpointy, int riverendx, int riverendy, int maxmidvar, vector<vector<int>>& rriverscarved);
+twointegers nearestlowerriver(region& region, int dx, int dy, int i, int j, int landlevel);
+bool riverdircheck(region& region, int x, int y, int x2, int y2, int delta);
+int removeriverorphans(planet& world, region& region, int sx, int sy, int dx, int dy, int riverlength);
+void removeriverwidows(planet& world, region& region, int sx, int sy, int dx, int dy, int junctionpointx, int junctionpointy);
+void removeregionalriverstraights(region& region, int dx, int dy, bool delta, vector<vector<int>>& rriverscarved);
+int findriverlength(region& region, int startx, int starty, int endx, int endy, bool delta);
+void joinuprivers(region& region, int dx, int dy, int sx, int sy);
+void removenegativeflow(region& region, int dx, int dy);
+void createsmalllake(planet& world, region& region, int dx, int dy, int sx, int sy, int centrex, int centrey, vector<vector<int>>& mainriver, boolshapetemplate smalllake[]);
+void createsmallsaltlake(planet& world, region& region, int dx, int dy, int sx, int sy, int centrex, int centrey, int surfacelevel, vector<vector<bool>>& safesaltlakes, boolshapetemplate smalllake[]);
+void createsmallglaciallake(planet& world, region& region, int dx, int dy, int sx, int sy, int centrex, int centrey, vector<vector<int>>& mainriver);
+void expandrivers(planet& world, region& region, int dx, int dy, int sx, int sy, bool delta, vector<vector<int>>& fakesourcex, vector<vector<int>>& fakesourcey);
+int getriverwidth(region& region, int x, int y, bool delta, int season);
+void pasterivercircle(region& region, int centrex, int centrey, int pixels, bool river, int dir, int janload, int julload, bool delta, vector<vector<int>>& fakesourcex, vector<vector<int>>& fakesourcey);
+void turnriverstolakes(planet& world, region& region, int dx, int dy, int sx, int sy);
+void finishrivers(planet& world, region& region, int leftx, int lefty, int rightx, int righty);
+void drawriverline(region& region, int leftx, int lefty, int rightx, int righty, int startx, int starty, int endx, int endy, int janload, int julload, int elev);
+void makeelevationtile(planet& world, region& region, int dx, int dy, int sx, int sy, int coords[4][2], boolshapetemplate smalllake[]);
+int rsquare(region& region, int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], bool onlyup, int negchance, int sealevel, bool nosea);
+int rcoastsquare(region& region, int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], int sealevel);
+int rlakesquare(region& region, int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], int lakesurface);
+int rlakediamond(region& region, int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], int lakesurface);
+int rdiamond(region& region, int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], bool onlyup, int negchance, int sealevel, bool nosea);
+int rcoastdiamond(region& region, int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], int sealevel);
+//void landfill(const planet &world, region &region, int dx, int dy, int sx, int sy, int surfaceleve, boolshapetemplate smalllake[]);
+void warpcoasts(planet& world, region& region, int leftx, int lefty, int rightx, int righty, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void removestraights(planet& world, region& region, int dx, int dy, int sx, int sy, boolshapetemplate smalllake[]);
+void disruptseacoastline(planet& world, region& region, int dx, int dy, int centrex, int centrey, int avedepth, bool raise, int maxsize, bool stayintile, boolshapetemplate smalllake[]);
+void disruptlakecoastline(planet& world, region& region, int dx, int dy, int centrex, int centrey, int surfacelevel, int avedepth, bool raise, int size, bool stayintile, int special, boolshapetemplate smalllake[]);
+void removeseatilerivers(planet& world, region& region, int dx, int dy, int sx, int sy);
+void removesearivers(planet& world, region& region, int dx, int dy);
+void removeextrasearivers(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& regionsea);
+void removeriverscomingfromsea(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& fakesourcex, vector<vector<int>>& fakesourcey, vector<vector<bool>>& regionsea);
+void removeregionalriver(region& region, int dx, int dy, int sx, int sy, int startx, int starty, vector<vector<int>>& fakesourcex, vector<vector<int>>& fakesourcey);
+int findsurroundingsea(region& region, int x, int y);
+int findinflowinglandriver(region& region, int x, int y);
+int checknearbyriver(region& region, int x, int y);
+void removeriverlakeloops(planet& world, region& region, int dx, int dy, int sx, int sy, boolshapetemplate smalllake[]);
+void makemountaintile(planet& world, region& region, int dx, int dy, int sx, int sy, peaktemplate& peaks, vector<vector<int>>& rmountainmap, vector<vector<int>>& ridgeids, short markgap, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void calculateridges(planet& world, region& region, int dx, int dy, int sx, int sy, twofloats pt, twofloats mm1, twofloats mm2, twofloats mm3, int newheight, int midheight, int destheight, peaktemplate& peaks, vector<vector<int>>& rmountainmap, int ridgedir, vector<vector<int>>& ridgeids, short markgap, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void assignridgeregions(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& rmountainmap, vector<vector<int>>& ridgeids, vector<vector<int>>& ridgeregions, vector<vector<int>>& nearestridgepointx, vector<vector<int>>& nearestridgepointy, int smallermaxdist, int maxdist);
+void findmountainedges(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& nearestridgepointdist, vector<vector<int>>& nearestridgepointx, vector<vector<int>>& nearestridgepointy, vector<vector<bool>>& mountainedges);
+void findbuttresspoints(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& ridgeids, vector<vector<int>>& nearestridgepointdist, vector<vector<int>>& nearestridgepointx, vector<vector<int>>& nearestridgepointy, vector<vector<bool>>& mountainedges, vector<vector<bool>>& buttresspoints, int maxdist, int spacing);
+void makebuttresses(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& rmountainmap, peaktemplate& peaks, vector<vector<int>>& nearestridgepointx, vector<vector<int>>& nearestridgepointy, vector<vector<int>>& nearestridgepointdist, int maxdist, vector<vector<bool>>& buttresspoints, vector<vector<int>>& ridgeids, short markgap, bool minibuttresses);
+void drawpeak(planet& world, region& region, int sx, int sy, int dx, int dy, int x, int y, int peakheight, peaktemplate& peaks, vector<vector<int>>& rmountainmap, bool buttress);
+void pastepeak(planet& world, region& region, int x, int y, float peakheight, int templateno, bool leftr, bool downr, peaktemplate& peaks, vector<vector<int>>& rmountainmap);
+void removepools(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& pathchecked, int& checkno);
+bool findpath(region& region, int& leftx, int& lefty, int& rightx, int& righty, int& fromx, int& fromy, int& destx, int& desty, int& checkno, vector<vector<int>>& pathchecked, int& recursion);
+void turnpoolstolakes(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& regionsea, vector<vector<int>>& pathchecked, int& checkno);
+void poolcheckrecursive(region const& region, int const currentx, int const currenty, int& tally, int maxtally, int const checkno, vector<vector<bool>> const& regionsea, vector<vector<int>>& pathchecked);
+void poolcheck(region const& region, int const currentx, int const currenty, int& tally, int maxtally, int const checkno, vector<vector<bool>> const& regionsea, vector<vector<int>>& pathchecked);
+void turntosea(region& region, int leftx, int rightx, int lefty, int righty, int x, int y, int newheight, int sealevel);
+void removediagonalwater(region& region, int leftx, int lefty, int rightx, int righty, int sealevel);
+void removelakesbysea(region& region, int leftx, int lefty, int rightx, int righty, int sealevel);
+void removesinks(planet& world, region& region, int dx, int dy, int sx, int sy);
+void fillregionaldepression(region& region, int dx, int dy, int x, int y, int elev);
+void checkdepression(region& region, int dx, int dy, int x, int y, int elev, bool& overrun, vector<vector<bool>>& checked);
+void filldepression(region& region, int dx, int dy, int x, int y, int elev);
+void addinlets(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& riverinlets, vector<vector<bool>>& globalestuaries);
+void pasteinletcircle(region& region, int centrex, int centrey, int depth, int pixels, vector<vector<bool>>& riverinlets);
+//void addmountainsprings(const planet &world, region &region, int dx, int dy, int sx, int sy);
+void makewetlandtile(planet& world, region& region, int dx, int dy, int sx, int sy, boolshapetemplate smalllake[]);
+void pasteregionalwetlands(region& region, int centrex, int centrey, int special, int elev, int shapenumber, boolshapetemplate smalllake[]);
+void convertlakestospecials(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& safesaltlakes);
+void removedeltasea(planet& world, region& region, int dx, int dy, int sx, int sy);
+void adddeltamap(planet& world, region& region, int leftx, int lefty, int rightx, int righty);
+void makegenerictile(planet& world, int dx, int dy, int sx, int sy, float valuemod, int coords[4][2], vector<vector<int>>& source, vector<vector<int>>& dest, int max, int min, bool interpolate);
+int genericsquare(int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], vector<vector<int>>& dest);
+int genericdiamond(int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], vector<vector<int>>& dest);
+void smoothprecipitation(region& region, int leftx, int lefty, int rightx, int righty, int amount);
+int getsurroundingice(planet& world, int x, int y);
+void makesmallsaltpans(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& safesaltlakes, boolshapetemplate smalllake[]);
+void makesaltpantile(planet& world, region& region, int dx, int dy, int sx, int sy, boolshapetemplate smalllake[]);
+void pastesaltpan(region& region, int centrex, int centrey, int surfacelevel, boolshapetemplate smalllake[]);
+void removewetsaltpans(region& region, int leftx, int lefty, int rightx, int righty);
+void addbarrierislands(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& riverinlets);
+void addregionalglaciers(planet& world, region& region, int dx, int dy, int sx, int sy);
+void makeriftlaketemplates(planet& world, region& region, int dx, int dy, int sx, int sy, int extra, vector<vector<bool>>& riftlakemap);
+void makeriftlaketile(planet& world, region& region, int dx, int dy, int sx, int sy, int extra, vector<vector<bool>>& riftlakemap, vector<vector<float>>& riftblob, int riftblobsize);
+void makelaketile(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& lakemap, int surfacelevel, int coords[4][2], vector<vector<int>>& source, vector<vector<int>>& dest, vector<vector<bool>>& safesaltlakes, boolshapetemplate smalllake[]);
+void makelakeislands(planet& world, region& region, int dx, int dy, int sx, int sy, int surfacelevel, boolshapetemplate island[], vector<vector<bool>>& lakeislands);
+void createlakeisland(planet& world, region& region, int centrex, int centrey, int surfacelevel, boolshapetemplate island[], vector<vector<bool>>& lakeislands, bool nooverlap, int special);
+void complicatecoastlines(planet& world, region& region, int dx, int dy, int sx, int sy, boolshapetemplate smalllake[], int chance);
+void addregionalmountainprecipitation(planet& world, region& region, int dx, int dy, int sx, int sy, bool summer);
+void removeregionalstraightrivers(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& rivercurves);
+bool checkrivercurve(region& region, int dx, int dy, twofloats pt, twofloats mm1, twofloats mm2, twofloats mm3);
+void makenewrivercurve(region& region, twofloats pt, twofloats mm1, twofloats mm2, twofloats mm3, int riverjan, int riverjul);
+void addterraces(planet& world, region& region, int dx, int dy, int sx, int sy, boolshapetemplate smalllake[], byteshapetemplate smudge[]);
+void addlaketerraces(planet& world, region& region, int dx, int dy, int sx, int sy, boolshapetemplate smalllake[], byteshapetemplate smudge[]);
+void disruptcliff(planet& world, region& region, int dx, int dy, int sx, int sy, int startx, int starty, int endx, int endy, boolshapetemplate smalllake[], byteshapetemplate smudge[]);
+void disruptlakecliff(planet& world, region& region, int dx, int dy, int sx, int sy, int startx, int starty, int endx, int endy, boolshapetemplate smalllake[], byteshapetemplate smudge[]);
+void disruptland(region& region, int centrex, int centrey, int newheight, boolshapetemplate smalllake[]);
+void disruptlakebed(region& region, int centrex, int centrey, int newheight, boolshapetemplate smalllake[]);
+//void checkgrid(const planet &world, region &region, int dx, int dy, int sx, int sy, vector<vector<int>> &elevs, vector<vector<int>> &severities);
+void makesubmarineelevationtile(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& underseamap, int coords[4][2], int extra);
+int submarinesquare(vector<vector<int>>& underseamap, int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], bool onlyup);
+int submarinediamond(vector<vector<int>>& underseamap, int dx, int dy, int s, int x, int y, int value, int min, int max, int coords[4][2], bool onlyup);
+int disruptsubmarineelevationtile(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& underseamap, byteshapetemplate smudge[], int extra);
+void smudgesubmarineterrain(planet& world, region& region, int centrex, int centrey, int searchdist, vector<vector<int>>& underseamap, byteshapetemplate smudge[]);
+void smudgeterrain(planet& world, region& region, int centrex, int centrey, int searchdist, byteshapetemplate smudge[]);
+void makesubmarineridgelines(planet& world, region& region, int dx, int dy, int s, int sy, vector<vector<bool>>& undersearidgelines, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void marksubmarineridgeline(region& region, vector<vector<bool>>& undersearidgelines, int fromx, int fromy, int tox, int toy, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void drawsubmarineridges(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& undersearidgelines, peaktemplate& peaks, vector<vector<int>>& undersearidges);
+void pastesubmarinepeak(planet& world, region& region, int x, int y, float peakheight, int templateno, peaktemplate& peaks, vector<vector<int>>& undersearidges, int rwidth, int rheight);
+void makesubmarineriftradiations(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& undersearidges, peaktemplate& peaks, int extra);
+void drawriftspine(planet& world, region& region, int dx, int dy, int sx, int sy, int x1, int y1, int x2, int y2, float peakheight, float heightstep, vector<vector<int>>& underseaspikes, peaktemplate& peaks, bool lower);
+void makesubmarineriftmountains(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& undersearidges, peaktemplate& peaks, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void makeoceanicriftmountains(planet& world, region& region, int sx, int sy, int fromx, int fromy, int tox, int toy, vector<vector<int>>& undersearidges, peaktemplate& peaks, vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void makesubmarinerift(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& undersearidges, byteshapetemplate smudge[], vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void makesubmarineriftvalley(planet& world, region& region, int sx, int sy, int fromx, int fromy, int tox, int toy, int tileriftheight, vector<vector<int>>& undersearidges, byteshapetemplate smudge[], vector<vector<int>>& warptox, vector<vector<int>>& warptoy);
+void trimmountainislands(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& rmountainmap, vector<vector<bool>>& riverinlets, vector<vector<bool>>& globalestuaries, boolshapetemplate smalllake[]);
+void removetoohighelevations(planet& world, region& region, int dx, int dy, int sx, int sy);
+void makevolcano(planet& world, region& region, int dx, int dy, int sx, int sy, peaktemplate& peaks, vector<vector<int>>& rmountainmap, vector<vector<int>>& ridgeids, int templateno);
+void makesubmarinevolcano(planet& world, region& region, int dx, int dy, int sx, int sy, peaktemplate& peaks, vector<vector<int>>& undersearidges, vector<vector<bool>>& volcanomap);
+void fixrivers(planet& world, region& region, int leftx, int lefty, int rightx, int righty);
+void findcoastdiagonals(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& disruptpoints);
+void removecoastdiagonals(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& disruptpoints, boolshapetemplate smalllake[]);
+void findlakecoastdiagonals(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& disruptpoints);
+void removelakecoastdiagonals(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& disruptpoints, boolshapetemplate smalllake[]);
+void rotatetileedges(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& rotatearray, bool lakes);
+void rotateland(planet& world, region& region, int centrex, int centrey, int maxradius, float angle, vector<vector<int>>& rotatearray);
+void rotatelakes(planet& world, region& region, int centrex, int centrey, int maxradius, float angle, vector<vector<int>>& rotatearray);
+void rotatetileedgesarray(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<int>>& destarray, vector<vector<int>>& rotatearray, int min);
+void rotatelandarray(planet& world, region& region, int centrex, int centrey, int maxradius, float angle, vector<vector<int>>& destarray, vector<vector<int>>& rotatearray, int min);
+void removesmallislands(planet& world, region& region, int dx, int dy, int sx, int sy);
+void removeparallelislands(region& region, int leftx, int lefty, int rightx, int righty, int sealevel);
+void removeseaiceglitches(region& region);
+void smoothlakebeds(region& region);
+void removetoolow(planet& world, region& region, int dx, int dy, int sx, int sy);
+void removelakeseas(planet& world, region& region, int dx, int dy, int sx, int sy);
+void checklakebeds(region& region, int leftx, int lefty, int rightx, int righty);
+void checkanomalies(planet& world, region& region, vector<vector<int>>& dest, int leftx, int lefty, int rightx, int righty);
+void makeregionalcraterrim(planet& world, region& region, int dx, int dy, int sx, int sy, int leftx, int lefty, int rightx, int righty, int craterno, vector<vector<int>>& rcratermap, peaktemplate& peaks, vector<int>squareroot);
+void makemudflatseeds(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& riverinlets, vector<vector<float>>& siltstrength);
+void spreadsilt(planet& world, region& region, int leftx, int lefty, int rightx, int righty, vector<vector<float>>& siltstrength, boolshapetemplate smalllake[]);
+void makesandseeds(planet& world, region& region, int dx, int dy, int sx, int sy, vector<vector<bool>>& riverinlets, vector<vector<float>>& sandstrength, vector<vector<float>>& shinglestrength);
+bool spreadsand(planet& world, region& region, int dx, int dy, int sx, int sy, float reduce, float diagreduce, float landreduce, float landdiagreduce, float coastreduce, float coastdiagreduce, int crount, bool shingle, vector<vector<bool>>& checked, vector<vector<float>>& sandstrength);
+void createbeaches(planet& world, region& region, int leftx, int lefty, int rightx, int righty, bool shingle, vector<vector<float>>& sandstrength);
+void putmudonsand(planet& world, region& region, int leftx, int lefty, int rightx, int righty);
+void checkbeachcoasts(planet& world, region& region, int leftx, int lefty, int rightx, int righty);
+void makemudbarriers(planet& world, region& region, int dx, int dy, int sx, int sy);
+void checklakesurfaces(planet& world, region& region);
+
+
+// Declare functions that are in assetdata.cpp
+
+void loadpeaktemplates(peaktemplate& peaks);
+void loadpeaktemplate0(peaktemplate& peaks);
+void loadpeaktemplate1(peaktemplate& peaks);
+void loadpeaktemplate2(peaktemplate& peaks);
+void loadpeaktemplate3(peaktemplate& peaks);
+int createmountainrangetemplate(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int tempno, int dir);
+int createmountainrangetemplate1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate1_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate1_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate1_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate1_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate1_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate1_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate1_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate1_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate2_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate2_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate2_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate2_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate2_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate2_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate2_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate2_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate3_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate3_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate3_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate3_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate3_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate3_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate3_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate3_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate4_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate4_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate4_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate4_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate4_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate4_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate4_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate4_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate5_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate5_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate5_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate5_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate5_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate5_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate5_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate5_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate6_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate6_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate6_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate6_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate6_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate6_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate6_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate6_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate7_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate7_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate7_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate7_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate7_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate7_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate7_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate7_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate8_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate8_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate8_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate8_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate8_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate8_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate8_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate8_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate9(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate9_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate9_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate9_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate9_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate9_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate9_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate9_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate9_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate10(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate10_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate10_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate10_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate10_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate10_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate10_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate10_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate10_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate11(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate11_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate11_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate11_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate11_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate11_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate11_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate11_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate11_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate12(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate12_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate12_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate12_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate12_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate12_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate12_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate12_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate12_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate13(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate13_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate13_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate13_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate13_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate13_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate13_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate13_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate13_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate14(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate14_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate14_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate14_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate14_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate14_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate14_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate14_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate14_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate15(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate15_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate15_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate15_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate15_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate15_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate15_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate15_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate15_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate16(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate16_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate16_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate16_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate16_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate16_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate16_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate16_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate16_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate17(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate17_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate17_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate17_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate17_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate17_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate17_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate17_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate17_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate18(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate18_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate18_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate18_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate18_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate18_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate18_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate18_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate18_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate19(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate19_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate19_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate19_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate19_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate19_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate19_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate19_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate19_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate20(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate20_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate20_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate20_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate20_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate20_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate20_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate20_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate20_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate21(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate21_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate21_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate21_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate21_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate21_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate21_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate21_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate21_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate22(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate22_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate22_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate22_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate22_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate22_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate22_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate22_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate22_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate23(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate23_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate23_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate23_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate23_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate23_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate23_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate23_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate23_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate24(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate24_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate24_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate24_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate24_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate24_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate24_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate24_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate24_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate25(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate25_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate25_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate25_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate25_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate25_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate25_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate25_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate25_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate26(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate26_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate26_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate26_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate26_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate26_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate26_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate26_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate26_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate27(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate, int dir);
+int createmountainrangetemplate27_1(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate27_2(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate27_3(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate27_4(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate27_5(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate27_6(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate27_7(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createmountainrangetemplate27_8(vector<vector<unsigned char>>& dirtemplate, vector<vector<unsigned char>>& heighttemplate);
+int createsmalllaketemplates(boolshapetemplate smalllake[]);
+void createsmalllaketemplate0(boolshapetemplate smalllake[]);
+void createsmalllaketemplate1(boolshapetemplate smalllake[]);
+void createsmalllaketemplate2(boolshapetemplate smalllake[]);
+void createsmalllaketemplate3(boolshapetemplate smalllake[]);
+void createsmalllaketemplate4(boolshapetemplate smalllake[]);
+void createsmalllaketemplate5(boolshapetemplate smalllake[]);
+void createsmalllaketemplate6(boolshapetemplate smalllake[]);
+void createsmalllaketemplate7(boolshapetemplate smalllake[]);
+void createsmalllaketemplate8(boolshapetemplate smalllake[]);
+void createsmalllaketemplate9(boolshapetemplate smalllake[]);
+void createsmalllaketemplate10(boolshapetemplate smalllake[]);
+void createsmalllaketemplate11(boolshapetemplate smalllake[]);
+int createislandtemplates(boolshapetemplate island[]);
+void createislandtemplate0(boolshapetemplate island[]);
+void createislandtemplate1(boolshapetemplate island[]);
+void createislandtemplate2(boolshapetemplate island[]);
+void createislandtemplate3(boolshapetemplate island[]);
+void createislandtemplate4(boolshapetemplate island[]);
+void createislandtemplate5(boolshapetemplate island[]);
+void createislandtemplate6(boolshapetemplate island[]);
+void createislandtemplate7(boolshapetemplate island[]);
+void createislandtemplate8(boolshapetemplate island[]);
+void createislandtemplate9(boolshapetemplate island[]);
+void createislandtemplate10(boolshapetemplate island[]);
+void createislandtemplate11(boolshapetemplate island[]);
+int createsmudgetemplates(byteshapetemplate smudge[]);
+void createsmudgetemplate1(byteshapetemplate smudge[]);
+void createsmudgetemplate2(byteshapetemplate smudge[]);
+void createsmudgetemplate3(byteshapetemplate smudge[]);
+void createsmudgetemplate4(byteshapetemplate smudge[]);
+void createsmudgetemplate5(byteshapetemplate smudge[]);
+int createsmallsmudgetemplates(byteshapetemplate smallsmudge[]);
+void createsmallsmudgetemplate1(byteshapetemplate smallsmudge[]);
+void createsmallsmudgetemplate2(byteshapetemplate smallsmudge[]);
+void createsmallsmudgetemplate3(byteshapetemplate smallsmudge[]);
+void createsmallsmudgetemplate4(byteshapetemplate smallsmudge[]);
+void createsmallsmudgetemplate5(byteshapetemplate smallsmudge[]);
+int createlargelaketemplates(boolshapetemplate largelake[]);
+void createlargelaketemplate0(boolshapetemplate largelake[]);
+void createlargelaketemplate1(boolshapetemplate largelake[]);
+void createlargelaketemplate2(boolshapetemplate largelake[]);
+void createlargelaketemplate3(boolshapetemplate largelake[]);
+void createlargelaketemplate4(boolshapetemplate largelake[]);
+void createlargelaketemplate5(boolshapetemplate largelake[]);
+void createlargelaketemplate6(boolshapetemplate largelake[]);
+void createlargelaketemplate7(boolshapetemplate largelake[]);
+void createlargelaketemplate8(boolshapetemplate largelake[]);
+void createlargelaketemplate9(boolshapetemplate largelake[]);
+int createlandshapetemplates(boolshapetemplate landshape[]);
+void createlandshapetemplate0(boolshapetemplate landshape[]);
+void createlandshapetemplate1(boolshapetemplate landshape[]);
+void createlandshapetemplate2(boolshapetemplate landshape[]);
+void createlandshapetemplate3(boolshapetemplate landshape[]);
+void createlandshapetemplate4(boolshapetemplate landshape[]);
+void createlandshapetemplate5(boolshapetemplate landshape[]);
+void createlandshapetemplate6(boolshapetemplate landshape[]);
+void createlandshapetemplate7(boolshapetemplate landshape[]);
+void createlandshapetemplate8(boolshapetemplate landshape[]);
+void createlandshapetemplate9(boolshapetemplate landshape[]);
+void createlandshapetemplate10(boolshapetemplate landshape[]);
+void createlandshapetemplate11(boolshapetemplate landshape[]);
+int createchainlandtemplates(boolshapetemplate chainland[]);
+void createchainlandtemplate0(boolshapetemplate chainland[]);
+void createchainlandtemplate1(boolshapetemplate chainland[]);
+
+#endif /* functions_hpp */

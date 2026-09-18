@@ -1,0 +1,38 @@
+[
+  {
+    "file": "age_2020.cpt",
+    "url": "https://www.earthbyte.org/webdav/ftp/earthbyte/agegrid/2020/Grids/cpt/age_2020.cpt",
+    "sha256": "5c9ded44718da93d71523d6ccc661b8066d122b47648a14a44d1e0bb8596e1bd",
+    "licence": "EarthByte CC BY 4.0; see downloaded EarthByte data licence"
+  },
+  {
+    "file": "asymgrid.cpt",
+    "url": "https://www.earthbyte.org/webdav/ftp/earthbyte/agegrid/2020/Grids/cpt/asymgrid.cpt",
+    "sha256": "700660d3fd5df53803a6de93f3f18af535e2e35edb52cc4307613289c16f4362",
+    "licence": "EarthByte CC BY 4.0; see downloaded EarthByte data licence"
+  },
+  {
+    "file": "confidence_rating.cpt",
+    "url": "https://www.earthbyte.org/webdav/ftp/earthbyte/agegrid/2020/Grids/cpt/confidence_rating.cpt",
+    "sha256": "1fd5eba3aa9951edc84d7cf94919793616823a1c01147e85984f0e250f1c485e",
+    "licence": "EarthByte CC BY 4.0; see downloaded EarthByte data licence"
+  },
+  {
+    "file": "fullrategrid.cpt",
+    "url": "https://www.earthbyte.org/webdav/ftp/earthbyte/agegrid/2020/Grids/cpt/fullrategrid.cpt",
+    "sha256": "d7b9a5751dfee68078cf1544ba9c433728a95ce39167ab728b05dfadaf2d8212",
+    "licence": "EarthByte CC BY 4.0; see downloaded EarthByte data licence"
+  },
+  {
+    "file": "spreaddirgrid.cpt",
+    "url": "https://www.earthbyte.org/webdav/ftp/earthbyte/agegrid/2020/Grids/cpt/spreaddirgrid.cpt",
+    "sha256": "b5d93a522633e06bdda977c04463bb0504c9bc2c032e8a3be0dd1bd87f0745b4",
+    "licence": "EarthByte CC BY 4.0; see downloaded EarthByte data licence"
+  },
+  {
+    "file": "spreadobliqgrid.cpt",
+    "url": "https://www.earthbyte.org/webdav/ftp/earthbyte/agegrid/2020/Grids/cpt/spreadobliqgrid.cpt",
+    "sha256": "2ef2b9440ff5ce24328d9d631a15b4f67023d8df4e335f92d1016aad3288e5cd",
+    "licence": "EarthByte CC BY 4.0; see downloaded EarthByte data licence"
+  }
+]

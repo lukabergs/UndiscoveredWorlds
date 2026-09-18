@@ -5,7 +5,6 @@ build/
 out/
 bin/
 obj/
-extra/
 # Ignore CMake generated files
 CMakeCache.txt
 CMakeFiles/
@@ -63,6 +62,42 @@ desktop.ini
 # ==========================================
 # Project Specific (Optional)
 # ==========================================
+# Local reference data; retain preparation code and scope notes.
+/refs/source/
+/refs/processed/
+# Retain the human-written map guide; rasters and generated index stay local.
+!/refs/processed/
+/refs/processed/*
+!/refs/processed/climate/
+/refs/processed/climate/*
+!/refs/processed/climate/maps/
+/refs/processed/climate/maps/*
+!/refs/processed/climate/maps/README.md
+
+# Generated results; retain active metadata and selected workbooks.
+/runs/*
+!/runs/registry/
+!/runs/maps/
+/runs/maps/*
+!/runs/maps/climate/
+/runs/maps/climate/*
+!/runs/maps/climate/README.md
+!/runs/metrics/
+/runs/registry/archive/
+/runs/metrics/*
+!/runs/metrics/metrics.xlsx
+!/runs/metrics/run_history.xlsx
+
+# Local research, historical scripts, and files awaiting manual sorting.
+/references/
+/scripts/archive/*
+!/scripts/archive/reorganize-climate-assets.ps1
+/0/*
+!/0/README.txt
+
+# Task plans are local by default; already tracked plans remain tracked.
+/docs/tasks/
+
 # Saved Worlds
 saved_worlds/
 # Local notes or scratchpad files

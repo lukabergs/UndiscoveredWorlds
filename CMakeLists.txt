@@ -1,233 +1,137 @@
 cmake_minimum_required(VERSION 3.15)
 project(UndiscoveredWorlds LANGUAGES CXX)
 
-# Use vcpkg for finding packages
-set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
-include(CheckLanguage)
-check_language(CUDA)
-if(CMAKE_CUDA_COMPILER)
-    enable_language(CUDA)
-    find_package(CUDAToolkit REQUIRED)
-endif()
-
-# 1. Find the dependencies via vcpkg
-find_package(SFML COMPONENTS graphics window system audio CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
-find_package(ImGuiFileDialog CONFIG REQUIRED)
-find_package(imgui-sfml CONFIG REQUIRED)
-find_package(Threads REQUIRED)
-
-foreach(dep_target
-    imgui::imgui
-    ImGui-SFML::ImGui-SFML
-    ImGuiFileDialog::ImGuiFileDialog
-    fmt::fmt
-    fmt::fmt-header-only)
-    if(TARGET ${dep_target})
-        set_property(TARGET ${dep_target} PROPERTY INTERFACE_COMPILE_FEATURES "")
-    endif()
-endforeach()
-
-# 2. Define your source files (based on your directory listing)
-set(SOURCES
-    main.cpp
-    app_environment.cpp
-    create_world_screen.cpp
-    generation_stage_registry.cpp
-    generation_workbench.cpp
-    rendering.cpp
-    world_generation_debug.cpp
-    cuda_renderers_stub.cpp
-    appearance_settings.cpp
-    map_appearance.cpp
-    plate_tectonics_adapter.cpp
-    physical_layers.cpp
-    social_generation.cpp
-    social_sites.cpp
-    social_routes.cpp
-    social_polities.cpp
-    social_trade.cpp
-    world_property_controls.cpp
-    app_windows.cpp
-    ui_panels.cpp
-    ui_charts.cpp
-    map_imports.cpp
-    assetdata.cpp
-    classes.cpp
-    climate_atmosphere.cpp
-    climate_benchmark_outputs.cpp
-    climate_circulation_diagnostics.cpp
-    climate_energy.cpp
-    climate_flow.cpp
-    climate_grid.cpp
-    climate_hydrology.cpp
-    climate_ocean_dynamics.cpp
-    climate_physics.cpp
-    climate_reference.cpp
-    climate_tiff.cpp
-    climate_weather.cpp
-    climate_ocean.cpp
-    fastlem_mountains.cpp
-    globalclimate.cpp
-    globalterrain.cpp
-    misc.cpp
-    planet.cpp
-    profiler.cpp
-    region.cpp
-    regionalmap.cpp
-)
-
-set(PLATE_TECTONICS_ROOT "C:/dev/plate-tectonics" CACHE PATH "Path to the upstream plate-tectonics repository")
-set(PLATE_TECTONICS_SRC_DIR "${PLATE_TECTONICS_ROOT}/src")
-
-if(NOT EXISTS "${PLATE_TECTONICS_SRC_DIR}/platecapi.cpp")
-    message(FATAL_ERROR "PLATE_TECTONICS_ROOT must point to the upstream plate-tectonics repo. Missing: ${PLATE_TECTONICS_SRC_DIR}/platecapi.cpp")
-endif()
-
-file(GLOB PLATE_TECTONICS_SOURCES CONFIGURE_DEPENDS "${PLATE_TECTONICS_SRC_DIR}/*.cpp")
-
-add_library(plate_tectonics_vendor STATIC ${PLATE_TECTONICS_SOURCES})
-target_include_directories(plate_tectonics_vendor PUBLIC "${PLATE_TECTONICS_SRC_DIR}")
-target_compile_definitions(plate_tectonics_vendor PRIVATE NOMINMAX)
-set_target_properties(plate_tectonics_vendor PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED YES)
-
-# 3. Create the executable
-add_executable(${PROJECT_NAME} ${SOURCES})
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
-)
-
-if(CMAKE_CUDA_COMPILER)
-    target_sources(${PROJECT_NAME} PRIVATE cuda_renderers.cu)
-    target_link_libraries(${PROJECT_NAME} PRIVATE CUDA::cudart)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE UW_ENABLE_CUDA_RENDERERS=1)
-    set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED YES)
-endif()
-
-# 4. Link everything together
-# vcpkg handles the include paths and library paths automatically here
-target_link_libraries(${PROJECT_NAME} PRIVATE 
-    sfml-graphics
-    sfml-window
-    sfml-system
-    sfml-audio
-    Threads::Threads
-    imgui::imgui
-    ImGui-SFML::ImGui-SFML
-    ImGuiFileDialog::ImGuiFileDialog
-    plate_tectonics_vendor
-)
-
-# 5. Set C++ Standard
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-
 include(CTest)
+option(UW_BUILD_APP "Build the SFML/ImGui desktop application" ON)
+option(UW_BUILD_TECTONICS_TOOLS "Build tectonics simulation, export, and inspection tools" OFF)
+
+add_subdirectory(src/simulations)
+add_subdirectory(src/simulations/geology/plate_tectonics)
+if(BUILD_TESTING OR UW_BUILD_TECTONICS_TOOLS)
+    add_subdirectory(tools/tectonics)
+endif()
+
+if(UW_BUILD_APP)
+    # Use vcpkg for finding packages
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER)
+        enable_language(CUDA)
+        find_package(CUDAToolkit REQUIRED)
+    endif()
+
+    # Desktop dependencies
+    find_package(SFML COMPONENTS graphics window system audio CONFIG REQUIRED)
+    find_package(imgui CONFIG REQUIRED)
+    find_package(ImGuiFileDialog CONFIG REQUIRED)
+    find_package(imgui-sfml CONFIG REQUIRED)
+    find_package(Threads REQUIRED)
+
+    foreach(dep_target
+        imgui::imgui
+        ImGui-SFML::ImGui-SFML
+        ImGuiFileDialog::ImGuiFileDialog
+        fmt::fmt
+        fmt::fmt-header-only)
+        if(TARGET ${dep_target})
+            set_property(TARGET ${dep_target} PROPERTY INTERFACE_COMPILE_FEATURES "")
+        endif()
+    endforeach()
+
+    # Desktop integration and world-level stages.
+    set(SOURCES
+        src/app/main.cpp
+        src/app/app_environment.cpp
+        src/app/create_world_screen.cpp
+        src/wip/generation_workbench.cpp
+        src/app/rendering/rendering.cpp
+        src/app/diagnostics/world_generation_debug.cpp
+        src/app/rendering/cuda_renderers_stub.cpp
+        src/app/rendering/appearance_settings.cpp
+        src/app/rendering/map_appearance.cpp
+        src/pipeline/physical_layers.cpp
+        src/pipeline/social_generation.cpp
+        src/io/social_definitions.cpp
+        src/core/grid_coordinates.cpp
+        src/app/world_property_controls.cpp
+        src/app/app_windows.cpp
+        src/app/ui_panels.cpp
+        src/app/ui_charts.cpp
+        src/io/map_imports.cpp
+        src/wip/classes.cpp
+        src/validation/climate/climate_circulation_diagnostics.cpp
+        src/pipeline/climate_generation.cpp
+        src/wip/misc.cpp
+        src/wip/planet.cpp
+        src/app/diagnostics/profiler.cpp
+        src/wip/region.cpp
+        src/wip/regionalmap.cpp
+    )
+
+    set(UW_INCLUDE_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/app"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/app/diagnostics"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/app/rendering"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/core"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/io"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/climate"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/geology"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/hydrology"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/society"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/terrain"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/climate"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/wip"
+    )
+
+    include(src/simulations/world_modules.cmake)
+
+    add_executable(${PROJECT_NAME} ${SOURCES})
+    target_include_directories(${PROJECT_NAME} PRIVATE ${UW_INCLUDE_DIRS})
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+    )
+
+    if(CMAKE_CUDA_COMPILER)
+        target_sources(${PROJECT_NAME} PRIVATE src/app/rendering/cuda_renderers.cu)
+        target_link_libraries(${PROJECT_NAME} PRIVATE CUDA::cudart)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE UW_ENABLE_CUDA_RENDERERS=1)
+        set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED YES)
+    endif()
+
+    # Desktop and simulation modules
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        sfml-graphics
+        sfml-window
+        sfml-system
+        sfml-audio
+        Threads::Threads
+        imgui::imgui
+        ImGui-SFML::ImGui-SFML
+        ImGuiFileDialog::ImGuiFileDialog
+        plate_tectonics
+        uw_climate
+        uw_climate_io
+        uw_generation_stages
+        uw_geology
+        uw_terrain
+        uw_world_climate
+        uw_hydrology
+        uw_resources
+        uw_society
+    )
+
+    set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+
+endif()
 
 if(BUILD_TESTING)
-    add_executable(climate_pipeline_tests tests/climate_pipeline_tests.cpp generation_stage_registry.cpp)
-    target_include_directories(climate_pipeline_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_pipeline_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_pipeline_tests COMMAND climate_pipeline_tests)
-    add_executable(climate_physics_tests
-        tests/climate_physics_tests.cpp
-        climate_physics.cpp
-    )
-    target_include_directories(climate_physics_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_physics_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_physics_tests COMMAND climate_physics_tests)
-
-    add_executable(climate_hydrology_tests
-        tests/climate_hydrology_tests.cpp
-        climate_hydrology.cpp
-        climate_grid.cpp
-    )
-    target_include_directories(climate_hydrology_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_hydrology_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_hydrology_tests COMMAND climate_hydrology_tests)
-
-    add_executable(climate_grid_tests
-        tests/climate_grid_tests.cpp
-        climate_grid.cpp
-    )
-    target_include_directories(climate_grid_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_grid_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_grid_tests COMMAND climate_grid_tests)
-
-    add_executable(climate_weather_tests
-        tests/climate_weather_tests.cpp
-        climate_weather.cpp
-        climate_grid.cpp
-    )
-    target_include_directories(climate_weather_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_weather_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_weather_tests COMMAND climate_weather_tests)
-
-    add_executable(climate_ocean_dynamics_tests
-        tests/climate_ocean_dynamics_tests.cpp
-        climate_ocean_dynamics.cpp
-        climate_grid.cpp
-    )
-    target_include_directories(climate_ocean_dynamics_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_ocean_dynamics_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_ocean_dynamics_tests COMMAND climate_ocean_dynamics_tests)
-
-    add_executable(climate_flow_tests
-        tests/climate_flow_tests.cpp
-        climate_flow.cpp
-    )
-    target_include_directories(climate_flow_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_flow_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_flow_tests COMMAND climate_flow_tests)
-
-    add_executable(climate_reference_tests
-        tests/climate_reference_tests.cpp
-        climate_reference.cpp
-    )
-    target_include_directories(climate_reference_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_reference_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_reference_tests COMMAND climate_reference_tests)
-
-    add_executable(climate_energy_tests
-        tests/climate_energy_tests.cpp
-        climate_energy.cpp
-        climate_grid.cpp
-    )
-    target_include_directories(climate_energy_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_energy_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_energy_tests COMMAND climate_energy_tests)
-
-    add_executable(climate_atmosphere_tests
-        tests/climate_atmosphere_tests.cpp
-        climate_atmosphere.cpp
-        climate_grid.cpp
-        climate_weather.cpp
-    )
-    target_include_directories(climate_atmosphere_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_atmosphere_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_atmosphere_tests COMMAND climate_atmosphere_tests)
-
-    add_executable(climate_koppen_tests
-        tests/climate_koppen_tests.cpp
-    )
-    target_include_directories(climate_koppen_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_koppen_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_koppen_tests COMMAND climate_koppen_tests)
-
-    add_executable(climate_tiff_tests
-        tests/climate_tiff_tests.cpp
-        climate_tiff.cpp
-    )
-    target_include_directories(climate_tiff_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_tiff_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_tiff_tests COMMAND climate_tiff_tests)
-
-    add_executable(climate_benchmark_outputs_tests
-        tests/climate_benchmark_outputs_tests.cpp
-        climate_benchmark_outputs.cpp
-    )
-    target_include_directories(climate_benchmark_outputs_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_target_properties(climate_benchmark_outputs_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    add_test(NAME climate_benchmark_outputs_tests COMMAND climate_benchmark_outputs_tests)
+    add_subdirectory(tests)
 endif()
+
+# Optional headless report-rendering accelerator; independent of the simulator.
+add_library(climate_flow_texture SHARED src/validation/climate/flow_texture_kernel.cpp)
+set_target_properties(climate_flow_texture PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
