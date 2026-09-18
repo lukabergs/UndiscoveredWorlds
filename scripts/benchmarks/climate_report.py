@@ -224,6 +224,13 @@ def write_report(prefix,archive,ids,ranking,audit):
         links=[f'[Raw log](../logs/climate/{run}.log)',f'[Numerical analysis]({relative(archive.path/f"{key}-analysis.json",prefix.parent)})']
         if (folder/'changes-from-parent.patch').exists():links.append(f'[Source patch]({relative(folder/"changes-from-parent.patch",prefix.parent)})')
         lines+=[' · '.join(links),'']
+    findings=archive.path/'batch-findings.json'
+    if findings.exists():
+        review=read_json(findings)
+        lines+=['## Cross-run findings and experiment limits','']
+        lines.extend(text+'\n' for text in review.get('findings',[]))
+        for label,path in review.get('evidence',{}).items():
+            lines.append(f'[{label}]({relative(archive.path/path,prefix.parent)})')
     prefix.with_suffix('.md').write_text('\n'.join(lines),encoding='utf-8')
 
 def apply_selection(out,archive,ranking,override=None,reason=None):

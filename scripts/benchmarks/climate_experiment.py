@@ -72,7 +72,7 @@ def run(archive, run_id, plan):
             '^climate_(atmosphere|hydrology|ocean_dynamics|ocean_heat)_tests$'],
             cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, check=True)
     folder.mkdir()
-    paths = subprocess.check_output(['git','ls-files','src','tests','CMakeLists.txt','CMakePresets.json','configs','scripts/benchmarks'], cwd=ROOT, text=True).splitlines()
+    paths = subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','src','tests','CMakeLists.txt','CMakePresets.json','configs','scripts/benchmarks'], cwd=ROOT, text=True).splitlines()
     paths.extend(p.relative_to(ROOT).as_posix() for p in (ROOT/'scripts/benchmarks').glob('climate_experiment*.py'))
     paths = sorted(set(p for p in paths if (ROOT / p).is_file()))
     with zipfile.ZipFile(folder / 'source.zip','w',zipfile.ZIP_DEFLATED) as z:
@@ -93,12 +93,18 @@ def run(archive, run_id, plan):
     env.pop('UW_CLIMATE_EXPERIMENT_INPUT',None)
     env['UW_CLIMATE_SURFACE_DRAG_INPUT'] = str(ROOT / 'refs/processed/climate/vegetation-drag-20260914/land-drag-contrast-1024.txt')
     inputs = inherited['inputs_sha256']
-    # Rehash the actual inputs rather than relying on inherited receipts.
-    inputs = {path:sha(ROOT / path) for path in inputs}
+    stats = {path:dict(bytes=(ROOT/path).stat().st_size,mtime_ns=(ROOT/path).stat().st_mtime_ns) for path in inputs}
+    verified = read(archive/'364/manifest.json') if run_id > 364 else None
+    previous_stats = verified.get('input_file_stats',inherited.get('input_file_stats',{})) if verified else {}
+    # The first case hashes every input. Reuse those hashes only while both
+    # size and modification time still match their recorded input receipts.
+    inputs = {path:(verified['inputs_sha256'][path] if verified and previous_stats.get(path)==stats[path]
+                   else sha(ROOT/path)) for path in inputs}
     manifest = dict(case=str(run_id),parent=str(parent),reason=plan['hypothesis'],utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        git_head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
         source_sha256={path:sha(ROOT / path) for path in paths},source_zip_sha256=sha(folder/'source.zip'),
         executable_sha256=sha(folder/EXE.name),runtime_sha256={p.name:sha(p) for p in folder.glob('*.dll')},
-        inputs_sha256=inputs,all_tuning_parameters=dict(re.findall(r'inline constexpr (?:float|double|bool|int) (\w+)\s*=\s*([^;]+);',tuning)),
+        inputs_sha256=inputs,input_file_stats=stats,input_hash_provenance='First case hashes all inputs; successors reuse matching size/mtime receipts and rehash changed inputs.',all_tuning_parameters=dict(re.findall(r'inline constexpr (?:float|double|bool|int) (\w+)\s*=\s*([^;]+);',tuning)),
         environment={'UW_CLIMATE_EXPERIMENT_INPUT':None,'UW_CLIMATE_SURFACE_DRAG_INPUT':env['UW_CLIMATE_SURFACE_DRAG_INPUT']},
         seed=20260906,world=[1024,512],native_grids={'atmosphere':[128,64],'ocean':[128,64],'hydrology':[256,128]},
         coupling_updates=8,climate_reference_forcing=False,visual_review='User')

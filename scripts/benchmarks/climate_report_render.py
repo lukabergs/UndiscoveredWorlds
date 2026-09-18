@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw
 from climate_palettes import field_rgb,DEFINITION
 from climate_report_data import magnitude,ROOT,SOURCES,bundle,quarter
 from ocean_flow_rendering import resample,particles,arrows
-from reference_map_rendering import lic_preview,particle_preview,write_float32_geotiff
+from reference_map_rendering import write_float32_geotiff
 from climate_flow_texture import lic_luminance,particle_intensity
 
 def resize_scalar(a,width):
@@ -84,14 +84,22 @@ def nearest_path(path):
     path=Path(path)
     return path.parent/'nearest'/path.name
 
+def compose_flow(data,texture,field,style):
+    """Keep outlines separate so the dashboard toggle removes them completely."""
+    east,north=data;valid=np.isfinite(east)&np.isfinite(north)
+    base=field_rgb(np.hypot(east,north),field).astype(float)
+    light=np.nan_to_num(texture)[...,None]
+    rgb=base*(.65+.7*light) if style=='lic' else base*.7+(255-base*.7)*light
+    rgb[~valid]=0
+    im=Image.fromarray(np.clip(rgb,0,255).astype(np.uint8));arrows(im,east,north,valid)
+    return im
+
 def save_wind_flow(prefix,field,value,mask,land,width=2048):
     data,valid=raster(field,value,mask,width);east,north=data
-    land=resize_scalar(land,width)>.5
     seed=20260906
     textures={'lic':lic_luminance(east,north,seed),'particles':particle_intensity(east,north,seed)}
     for style,texture in textures.items():
-        renderer=lic_preview if style=='lic' else particle_preview
-        image=renderer(east,north,land,texture,DEFINITION['scales'][field][1])
+        image=compose_flow(data,texture,field,style)
         path=flow_path(prefix,style);path.parent.mkdir(parents=True,exist_ok=True);image.save(path)
         write_float32_geotiff(flow_path(prefix,style,'.tif'),texture)
     return dict(field=field,seed=seed,particle_days=4.5,width=width)
@@ -107,14 +115,10 @@ def save_continent_outlines(path,width=2048):
 def save_ocean_flow(prefix,value,mask,width=2048):
     prefix=Path(prefix);prefix.parent.mkdir(parents=True,exist_ok=True)
     data,valid=raster('current',value,mask,width);east,north=data
-    base=field_rgb(np.hypot(east,north),'current').astype(float)
     light=lic_luminance(east,north,20260906)
     intensity,heads,steps=particles(east,north,20260906,45)
     for name,texture in [('lic',light),('particles',intensity)]:
-        a=(base*(.65+.7*np.nan_to_num(texture)[...,None]) if name=='lic' else
-           base*.7+(255-base*.7)*np.nan_to_num(texture)[...,None])
-        a[~valid]=0
-        im=Image.fromarray(np.clip(a,0,255).astype(np.uint8));arrows(im,east,north,valid)
+        im=compose_flow(data,texture,'current',name)
         if name=='particles':
             draw=ImageDraw.Draw(im)
             for x,y in heads:draw.ellipse((x-1,y-1,x+1,y+1),fill=(255,246,184))

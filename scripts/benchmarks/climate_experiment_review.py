@@ -17,7 +17,7 @@ def main():
     for run in args.runs:
         print('\nRUN',run,'COST',round(ranking['scores'][str(run)],4))
         for field,loss in ranking['field_losses'][str(run)].items():
-            baseline=ranking['field_losses']['355'][field]
+            baseline=ranking['field_losses'][str(ranking['baseline'])][field]
             entries=metrics[str(run)][field]
             row=lambda name: np.mean([next(value for label,value,_ in e['rows'] if label==name) for e in entries.values()])
             vector='Vector RMSE' in [x[0] for x in next(iter(entries.values()))['rows']]
@@ -27,6 +27,11 @@ def main():
                 round(np.mean([x['reference_percentiles']['0.99'] for x in entries.values()]),3),
                 'direction',round(row('Direction error (°)'),1) if vector else '')
         fields,land,masks=archive.load(run)
+        annual=fields['annual_rain_0'];refannual=archive.reference('annual_rain',0,annual.shape[-1])
+        valid=np.isfinite(refannual);aw=weights(annual.shape)[valid]
+        for label,lo,hi in [('moderate annual',1000,2500),('heavy annual',4500,np.inf)]:
+            area=lambda x:float(np.average((x[valid]>=lo)&(x[valid]<hi),weights=aw)*100)
+            print(label,'area% model/ref',round(area(annual),3),round(area(refannual),3))
         regions={'Pacific equator':(-2.5,2.5,-160,-90),'Pacific north':(3,10,-160,-90),'Pacific south':(-10,-3,-160,-90),
                  'Arabian Sea':(5,20,50,75),'India':(5,30,70,90),'Southern Ocean':(-65,-40,-180,180),
                  'Kuroshio':(20,40,125,150),'Agulhas':(-45,-20,15,40)}

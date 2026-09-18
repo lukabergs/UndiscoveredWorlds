@@ -23,9 +23,11 @@ const d=new Element('script');d.textContent=source.match(/<script id="comparison
 for(const m of source.matchAll(/<input id="([^"]+)" type="checkbox"([^>]*)>/g)){const e=new Element('input');e.checked=m[2].includes('checked');elements.set(m[1],e);}
 const document={getElementById(id){if(!elements.has(id))elements.set(id,new Element());return elements.get(id);},createElement:t=>new Element(t),createElementNS:(_,t)=>new Element(t)};
 class FakeImage {constructor(){this.naturalWidth=2048;this.naturalHeight=1024;}set src(v){images.push(v);this.onload();}}
-const window={location:{search:'?run=363'}},context=vm.createContext({document,window,Image:FakeImage,URLSearchParams});
+const requestedRun=JSON.parse(d.textContent).runs.at(-1);
+const window={location:{search:`?run=${requestedRun}`}},context=vm.createContext({document,window,Image:FakeImage,URLSearchParams});
 vm.runInContext(fs.readFileSync(path.resolve('scripts/benchmarks/climate_report_dashboard.js'),'utf8'),context);
 const app=window.climateComparison,data=app.data;
+assert.equal(Number(elements.get('run').value),requestedRun);
 assert.equal(source.match(/<title>(.*?)<\/title>/)[1],`(${data.baseline}) - ${Math.min(...data.runs)}-${Math.max(...data.runs)}`);
 assert.ok(elements.get('run').children.every(x=>/^\d+$/.test(x.textContent)));
 let combinations=0;
