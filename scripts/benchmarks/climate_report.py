@@ -249,7 +249,7 @@ def apply_selection(out,archive,ranking,override=None,reason=None):
         comparison_policy='Use the selected run ID and observed references. No permanently protected historical wind run.',
         source_manifest=relative(folder/'manifest.json',p.parent),source_zip_sha256=manifest['source_zip_sha256'],
         executable_sha256=manifest['executable_sha256'],live_source_and_executable_match=False,
-        working_physics_run=working,working_note='Reporting and palette changes only; no physics rollback was performed. Start the next batch from the selected archived physics after visual review.',
+        working_physics_run=working,working_note='Working physics is recorded separately from the selected baseline. Use the selected archived source for the next batch unless a visual override changes the selection.',
         climate_reference_forcing=False,new_simulations_run_for_this_selection=0)
     selection.update(batch=out.name,selection_mode='visual_override' if override is not None else 'numerical',visual_override_reason=reason)
     dump(p,selection);dump(out/'selection-after.json',selection)

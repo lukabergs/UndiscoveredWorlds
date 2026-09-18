@@ -670,39 +670,18 @@ int main(int argc, char** argv)
     }
     expect(polarSymmetry,"uniform zonal stress must give symmetric downwind and antisymmetric crosswind Ekman flow through both polar rows");
 
-    // Manufacture constant cell-mean currents using independent quadrature of
-    // the subcell momentum equations. Constant means make face averaging exact.
-    // Work must balance r * mean(|u|^2), not r * |mean(u)|^2: the latter drops
-    // real within-cell velocity variation, most significant near the equator.
+    // Manufacture constant centre-cell velocities from the momentum equations;
+    // constant velocities make face averaging exact in both hemispheres.
     slabConfig.rotationRatePerSecond = climateocean::OceanConfig{}.rotationRatePerSecond;
     // This manufactured zonal-mean stress drives a slowly relaxing global
     // barotropic mode; resolve it without weakening either equation tolerance.
     slabConfig.streamfunctionIterations = 16000;
     constexpr double desiredEast = 0.035, desiredSouth = 0.020;
-    std::vector<double> rowStressEast(rows),rowStressSouth(rows),rowDissipation(rows);
     for (int y = 0; y < rows; ++y)
     {
-        const double fn=2.0*slabConfig.rotationRatePerSecond*std::sin(slabGrid.latitudeNorthFacesRadians[y]);
-        const double fs=2.0*slabConfig.rotationRatePerSecond*std::sin(slabGrid.latitudeSouthFacesRadians[y]);
-        constexpr int samples=10000;
-        double along=0.0,cross=0.0;
-        for (int i=0;i<samples;++i)
-        {
-            const double f=fs+(i+.5)*(fn-fs)/samples;
-            along+=drag/(drag*drag+f*f)/samples;
-            cross+=f/(drag*drag+f*f)/samples;
-        }
-        const double determinant=along*along+cross*cross;
-        const double stressEast=slabMass*(along*desiredEast+cross*desiredSouth)/determinant;
-        const double stressSouth=slabMass*(along*desiredSouth-cross*desiredEast)/determinant;
-        rowStressEast[y]=stressEast;rowStressSouth[y]=stressSouth;
-        for (int i=0;i<samples;++i)
-        {
-            const double f=fs+(i+.5)*(fn-fs)/samples;
-            const double east=(drag*stressEast-f*stressSouth)/(slabMass*(drag*drag+f*f));
-            const double south=(f*stressEast+drag*stressSouth)/(slabMass*(drag*drag+f*f));
-            rowDissipation[y]+=slabMass*drag*(east*east+south*south)/samples;
-        }
+        const double f = 2.0 * slabConfig.rotationRatePerSecond * std::sin(slabGrid.latitudeCentresRadians[y]);
+        const double stressEast = slabMass * (drag * desiredEast + f * desiredSouth);
+        const double stressSouth = slabMass * (drag * desiredSouth - f * desiredEast);
         const double stressMagnitude = std::hypot(stressEast, stressSouth);
         const double speed = std::sqrt(stressMagnitude / windStressFactor);
         for (int x = 0; x < columns; ++x)
@@ -725,18 +704,16 @@ int main(int argc, char** argv)
                     (slabGrid.northFaceLengthsMetres[y] + slabGrid.southFaceLengthsMetres[y]));
             const double east = rotatingSlab.eastCurrentMps[cell] - eastBarotropic;
             const double south = rotatingSlab.southCurrentMps[cell] - southBarotropic;
-            const double stressEast=rowStressEast[y],stressSouth=rowStressSouth[y];
-            const double residual=std::hypot(east-desiredEast,south-desiredSouth)/
-                std::hypot(desiredEast,desiredSouth);
+            const double f = 2.0 * slabConfig.rotationRatePerSecond * std::sin(slabGrid.latitudeCentresRadians[y]);
+            const double stressEast = slabMass * (drag * desiredEast + f * desiredSouth);
+            const double stressSouth = slabMass * (drag * desiredSouth - f * desiredEast);
+            const double residual = std::hypot(slabMass * (drag * east + f * south) - stressEast,
+                slabMass * (drag * south - f * east) - stressSouth);
             maximumMomentumRelativeResidual = std::max(maximumMomentumRelativeResidual,
-                residual);
-            if (residual >= 1.0e-5 && x == 0)
-                std::cerr << "Slab row=" << y << " east=" << east << " south=" << south
-                    << " ekman_east=" << rotatingSlab.transportComponents[cell].ekmanEastMps
-                    << " ekman_south=" << rotatingSlab.transportComponents[cell].ekmanSouthMps << '\n';
-            momentumBalance = momentumBalance && residual < 1.0e-5;
+                residual / std::hypot(stressEast, stressSouth));
+            momentumBalance = momentumBalance && residual / std::hypot(stressEast, stressSouth) < 1.0e-5;
             const double windWork = stressEast * east + stressSouth * south;
-            const double dissipation=rowDissipation[y];
+            const double dissipation = slabMass * drag * (east * east + south * south);
             dissipationBalance = dissipationBalance && windWork > 0.0 &&
                 std::abs(windWork - dissipation) / dissipation < 2.0e-5;
         }
@@ -744,8 +721,8 @@ int main(int argc, char** argv)
         std::cerr << "Manufactured slab: maximum_momentum_relative_residual=" << maximumMomentumRelativeResidual
             << " basin_relative_residual=" << rotatingSlab.streamfunctionRelativeResidual
             << " converged=" << rotatingSlab.converged << '\n';
-    expect(momentumBalance, "damped Ekman cell means must match independently integrated momentum in both hemispheres");
-    expect(dissipationBalance, "cell wind work must equal integrated positive slab drag; Coriolis does no work");
+    expect(momentumBalance, "damped Ekman currents must satisfy both momentum equations in both hemispheres");
+    expect(dissipationBalance, "steady wind work must equal positive slab drag dissipation; Coriolis does no work");
 
     // A polar-land annulus avoids the singular poles of tau_east = A/cos(phi).
     // Its spherical curl vanishes; Cartesian d(tau_east)/dy would force a gyre.

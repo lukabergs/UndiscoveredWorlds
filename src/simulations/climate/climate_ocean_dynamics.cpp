@@ -3,7 +3,6 @@
 #include "detail/ocean_zonal_diffusion.hpp"
 #include "detail/ocean_mixed_layer.hpp"
 #include "detail/ocean_circulation_solver.hpp"
-#include "detail/ekman_cell_mobility.hpp"
 #include "legacy/ocean_feedback.hpp"
 #include "parallel_rows.hpp"
 
@@ -355,19 +354,15 @@ OceanState solveOcean(int columns, int rows,
                 const double speed = std::hypot(state.coupledEastWindMps[c], state.coupledSouthWindMps[c]);
                 stressU[c] = config.airDensityKgM3 * config.dragCoefficient * speed * state.coupledEastWindMps[c];
                 stressV[c] = config.airDensityKgM3 * config.dragCoefficient * speed * state.coupledSouthWindMps[c];
+                const double f = 2.0 * config.rotationRatePerSecond * config.rotationDirection * std::sin(grid.latitudeCentresRadians[y]);
                 // The regularization scale is the slab's linear damping r.
                 // In east/south coordinates: r U + f V = tau_east/rho,
                 // r V - f U = tau_south/rho. Retain downwind drag as well as
                 // perpendicular transport so the f=0 balance and wind work close.
                 const double r = config.minimumCoriolisPerSecond;
-                const double rotation = 2.0 * config.rotationRatePerSecond * config.rotationDirection;
-                const auto mobility = detail::ekmanCellMobility(r,
-                    rotation * std::sin(grid.latitudeNorthFacesRadians[y]),
-                    rotation * std::sin(grid.latitudeSouthFacesRadians[y]));
-                ekmanU[c] = (mobility.alongStressSeconds * stressU[c] -
-                    mobility.crossStressSeconds * stressV[c]) / config.waterDensityKgM3;
-                ekmanV[c] = (mobility.crossStressSeconds * stressU[c] +
-                    mobility.alongStressSeconds * stressV[c]) / config.waterDensityKgM3;
+                const double inverse = 1.0 / (config.waterDensityKgM3 * (f * f + r * r));
+                ekmanU[c] = (r * stressU[c] - f * stressV[c]) * inverse;
+                ekmanV[c] = (f * stressU[c] + r * stressV[c]) * inverse;
             }
         // Finite-volume Stommel/PV closure at corners. Dirichlet psi=0 on every
         // coast/pole means exactly zero normal transport, including islands.

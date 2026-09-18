@@ -108,9 +108,9 @@ inline constexpr bool variableHeatStorage = true;
 inline constexpr float minimumStorageDepthMetres = 20.0f;
 inline constexpr float storageStratificationPerSecond2 = 2.0e-6f;
 inline constexpr float storageWindMixingEfficiency = 0.2f;
-inline constexpr float barotropicDragPerSecond = 1.0e-6f;
+inline constexpr float barotropicDragPerSecond = 1.5e-6f;
 		// Linear damping of the wind-driven slab; also regularizes f=0.
-		inline constexpr float ekmanDampingPerSecond = 8.0e-6f;
+		inline constexpr float ekmanDampingPerSecond = 2.0e-6f;
 		// Reduced wind-driven upper ocean; zero retains full-depth circulation.
 		// At 300 m the existing thermodynamic storage column is unchanged.
 		inline constexpr float windDrivenActiveDepthMetres = 300.0f;
@@ -273,7 +273,7 @@ inline constexpr float subpolarHemisphericContrastExponent = 2.0f;
 inline constexpr int zonalTemperatureSmoothingIterations = 4;
 inline constexpr float upperLayerDragTimeSeconds = 86400.0f;
 // Project temperature differences before integration; preserve their sign.
-inline constexpr float upperThermalCoreGradientFraction = 0.70f;
+inline constexpr float upperThermalCoreGradientFraction = 0.35f;
 inline constexpr float upperThermalPolarGradientFraction = 0.25f;
 inline constexpr float upperThermalPolarStartLatitude = 60.0f;
 inline constexpr float upperThermalPolarEndLatitude = 80.0f;
@@ -334,7 +334,7 @@ inline constexpr int minimumCouplingIterations = 2;
 inline constexpr float couplingRelativeTolerance = 0.02f;
 inline constexpr float couplingHeatingRelaxation = 0.5f;
 inline constexpr float couplingMinimumHeatingRelaxation = 0.1f;
-inline constexpr float surfaceToUpperModeCoupling = 0.50f;
+inline constexpr float surfaceToUpperModeCoupling = 0.10f;
 inline constexpr float stationaryInterlayerMomentumCoupling = 0.05f;
 inline constexpr float upperOrographicProjection = 0.20f; // Legacy; current linear-wave path does not use this knob.
 // Experimental effective launch height for the linear upper mountain response.
@@ -439,8 +439,8 @@ inline constexpr float cloudOnsetRelativeHumidity = 0.85f;
 inline constexpr float stratiformCriticalRelativeHumidity = 0.98f;
 inline constexpr float condensationConversionTimeDays = 2.0f;
 inline constexpr float convectiveConversionEfficiency = 0.75f;
-inline constexpr float kuoCriticalRelativeHumidity = 0.0f;
-inline constexpr float kuoHumidityExponent = 3.0f;
+inline constexpr float kuoCriticalRelativeHumidity = 0.60f;
+inline constexpr float kuoHumidityExponent = 1.0f;
 inline constexpr float elevatedMoistureAccessionFraction = 0.50f;
 inline constexpr float freeTroposphereEnvironmentalLapseC = 12.0f;
 inline constexpr float convectiveActivationBuoyancyC = 0.0f;
