@@ -1,0 +1,26 @@
+{
+  "name": "undiscovered-worlds",
+  "version": "1.0.0",
+  "dependencies": [
+    "sfml",
+    "imgui",
+    "imgui-sfml",
+    "imguifiledialog"
+  ],
+  "builtin-baseline": "b5d1a94fb7f88fd835e360fd23a45a09ceedbf48",
+  "overrides": [
+    {
+      "name": "sfml",
+      "version": "2.6.2"
+    },
+    {
+      "name": "imgui-sfml",
+      "version": "2.6",
+      "port-version": 1
+    },
+    {
+      "name": "imgui",
+      "version": "1.91.9"
+    }
+  ]
+}

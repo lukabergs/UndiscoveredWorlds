@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tectonics comparison</title>
+<style>
+:root{color-scheme:dark;--bg:#101720;--panel:#19232f;--line:#344452;--ink:#e1e8ed;--muted:#a6b9c6;--accent:#8bddba}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,sans-serif}
+main{max-width:1550px;margin:auto;padding:32px}header{display:flex;justify-content:space-between;gap:20px;align-items:start}
+h1{font-size:30px;letter-spacing:-1px;margin:0 0 6px}h2{font-size:18px;margin:0 0 15px}p{margin:5px 0 18px;color:var(--muted)}
+.eyebrow{color:var(--accent);letter-spacing:2px;font-size:11px;text-transform:uppercase;margin-bottom:8px}.badge{border:1px solid #497867;border-radius:25px;padding:7px 14px;color:var(--accent);white-space:nowrap}
+.toolbar,.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin:20px 0}.toolbar{display:flex;gap:20px;align-items:end;flex-wrap:wrap}
+label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:12px}select,button{background:#101923;color:var(--ink);border:1px solid #506473;border-radius:5px;padding:9px;font:inherit}button{cursor:pointer}
+.toggle{flex-direction:row;align-items:center;margin-bottom:10px}input{accent-color:var(--accent)}.maps{display:grid;grid-template-columns:1fr 1fr;gap:20px}.mapPanel{min-width:0}
+.mapPanel h2{margin-bottom:3px}.mapPanel p{font-size:12px;margin-bottom:10px}.viewport{overflow:auto;border:1px solid var(--line);background:#070d15}.stack{position:relative;width:100%}.stack img{display:block;width:100%;image-rendering:pixelated}.stack .overlay{position:absolute;inset:0;pointer-events:none}
+.stack img[hidden]{display:none}.legend{display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:14px 0}.gradient{height:12px;width:240px;border-radius:3px}.swatch{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:middle;border-radius:2px}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:20px}.charts .panel{margin:0}svg{width:100%;height:auto;display:block}svg text{fill:#a6b9c6;font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right}td:first-child,th:first-child{text-align:left}th{color:var(--muted);font-weight:500}.note{font-size:12px}.fail{color:#ffa09d}.ok{color:var(--accent)}a{color:var(--accent)}details{margin:14px 0}summary{cursor:pointer;color:var(--muted)}
+@media(max-width:900px){main{padding:18px}.maps,.charts{grid-template-columns:1fr}header{display:block}.badge{display:inline-block;margin:12px 0}}
+</style></head><body><main>
+<header><div><div class="eyebrow">Undiscovered Worlds / geology</div><h1 id="title">Tectonics comparison</h1><p id="subtitle"></p></div><span class="badge" id="replay"></span></header>
+<div id="quickViews" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+<details><summary>Run descriptions and execution times</summary><p class="note">Native times include simulation and checkpoint export, excluding this report. Feedback timing reuses its parent's terrain and includes climate solves, erosion and the uniform control; the additional matched control is listed separately.</p><table><thead><tr><th>Run / seed</th><th>Configuration</th><th>Execution (s)</th></tr></thead><tbody id="runTimes"></tbody></table></details>
+<details><summary>Changed run parameters</summary><p class="note">Archived recipe values. A dash means the option was absent and that run's archived engine default applies.</p><div style="overflow:auto"><table id="recipeChanges"></table></div></details>
+<div class="toolbar">
+<label>Quantity<select id="field"></select></label>
+<label>View A<select id="left"></select></label><label>View B<select id="right"></select></label>
+<button id="swap">Swap A / B</button><button id="matchTime">Match initial / final</button><label class="toggle"><input id="boundaries" type="checkbox">Boundary overlay</label>
+<label class="toggle"><input id="coastlines" type="checkbox">Coastline overlay</label>
+<label class="toggle"><input id="allRuns" type="checkbox">Graphs: all runs (off = A/B only)</label>
+<label>Map zoom<select id="zoom"><option value="1">Fit</option><option value="2">2×</option><option value="4">4×</option></select></label>
+</div>
+<p id="context" class="note"></p><div id="legend" class="legend"></div>
+<div class="maps">
+<section class="mapPanel"><h2 id="headingA"></h2><p id="captionA"></p><div class="viewport"><div class="stack"><img id="mapA" alt="Map A"><img id="overlayA" class="overlay" alt="Boundary overlay A"><img id="coastA" class="overlay" alt="Coastline overlay A"></div></div></section>
+<section class="mapPanel"><h2 id="headingB"></h2><p id="captionB"></p><div class="viewport"><div class="stack"><img id="mapB" alt="Map B"><img id="overlayB" class="overlay" alt="Boundary overlay B"><img id="coastB" class="overlay" alt="Coastline overlay B"></div></div></section>
+</div>
+<p class="note" id="saturation"></p>
+<section class="panel"><h2>Hypsographic curve</h2><p id="curveLegend" class="note"></p><svg id="curve" viewBox="0 0 650 300" role="img" aria-label="Hypsographic curves" style="max-width:950px;margin:auto"></svg><p id="earthContext" class="note"></p><p class="note">Earth remains a reference in both graph modes. Additional runs use B's initial/final phase; the legend shows each curve's age. History graphs retain full recorded timelines for the selected runs.</p></section>
+<details class="panel" id="regionalPanel" hidden><summary>Coastal window: x = 160–180, y = 60–80</summary><p class="note">Fixed native coordinates, not tracked material. Each image shows 0, 100, 300 and 600 Myr, plus the y = 70 elevation profile. Yellow boxes mark the requested window. These 156.25 km cells cannot resolve narrow beaches or terraces.</p><div id="regionalImages"></div></details>
+<section class="panel" id="feedbackPanel" hidden><h2 id="feedbackTitle">Climate feedback controls</h2><p class="note" id="feedbackContext"></p>
+<label>Control surface or difference<select id="feedbackControl"></select></label><div class="legend" id="feedbackLegend"></div>
+<div class="maps"><div class="mapPanel"><h2 id="feedbackMapTitle"></h2><div class="viewport"><div class="stack"><img id="feedbackMap" alt="Feedback control or difference"></div></div></div><div class="mapPanel"><h2>Spatial climate feedback · final elevation</h2><div class="viewport"><div class="stack"><img id="feedbackFinal" alt="Climate feedback final elevation"></div></div><p class="note">Uses the main elevation palette.</p></div></div>
+<p class="note" id="feedbackSaturation"></p><div style="overflow:auto"><table id="feedbackMetrics"></table></div><p class="note" id="feedbackTiming"></p></section>
+<section class="panel"><h2>Height through time</h2><p class="note" id="historyLegend"></p><svg id="heightHistory" viewBox="0 0 1000 260" role="img" aria-label="Peak and 99th-percentile land elevations through time"></svg></section>
+<section class="panel"><h2>Plate motion through time</h2><p class="note">Mean plate translation speed, in native cells per update. Initial motion follows each archived recipe: boundary-conditioned terrain already includes an initialization force solve. Physical speeds appear in the numerical table when available. Compare curves at matching grid size and timestep. A near-zero line means the plates have largely stopped, even while cooling and erosion continue.</p><svg id="motionHistory" viewBox="0 0 1000 220" role="img" aria-label="Mean plate speed through geological time"></svg></section>
+<div class="charts">
+<section class="panel"><h2>Terrain detail through time</h2><p class="note">Interior land RMS departure from a 5×5-cell mean. The sampled land changes over time; increased roughness alone does not prove preservation. Colours match height history.</p><svg id="detailHistory" viewBox="0 0 650 220" role="img" aria-label="Interior terrain detail through time"></svg></section>
+<section class="panel"><h2>Plate fragmentation through time</h2><p class="note">Disconnected regions beyond each plate's largest region, with both periodic seams joined. Physical split/merge events are not inferred from raster fragments.</p><svg id="topologyHistory" viewBox="0 0 650 220" role="img" aria-label="Detached plate regions through time"></svg></section>
+</div>
+<div class="charts" style="margin-top:20px">
+<section class="panel"><h2>Ocean detail through time</h2><p class="note">Interior ocean RMS departure from a 5×5-cell mean. Excludes coastal steps and plate boundaries; the sampled ocean changes over time.</p><svg id="oceanDetailHistory" viewBox="0 0 650 220" role="img" aria-label="Interior ocean detail through time"></svg></section>
+<section class="panel"><h2>Coastal height through time</h2><p class="note">Land elevation p95 in cells touching water. Compare the selected inland profiles below to distinguish lower coastlines from broadly flattened mountains.</p><svg id="coastalHeightHistory" viewBox="0 0 650 220" role="img" aria-label="Coastal elevation through time"></svg></section>
+</div>
+<section class="panel"><h2>Elevation inland from the coast</h2><p class="note">Curves follow the global graph toggle and hypsographic legend. Solid: land elevation p95; dashed: mean. 200 km bins over all coasts, including passive margins. Distance follows four-neighbour native cells with both seams joined; this is not a resolved coastal cliff slope or a causal uplift measurement.</p><svg id="coastProfile" viewBox="0 0 1000 260" role="img" aria-label="Elevation versus inland distance"></svg></section>
+<section class="panel" id="probePanel" hidden><h2>Controlled height-reduction probe</h2>
+<p class="note">Stationary single plate · uniform imported plateau · ordinary erosion off. Glacial strength: green = 0; yellow = 0.000001; orange = 0.35. Solid = 1 Myr per update; dashed = 0.1 Myr per update. Five updates in each case; seed recorded in the probe file.</p>
+<label>Initial plateau elevation<select id="probeRelief"></select></label><svg id="probeChart" viewBox="0 0 1000 260" role="img" aria-label="Controlled plateau erosion by glacial strength and timestep"></svg>
+<p class="note">The near-zero setting already activates almost the full glacial height cap. Similar per-update loss over different geological durations reveals missing timestep scaling. These probes diagnose current heuristics; they do not calibrate physical erosion rates.</p></section>
+<section class="panel"><h2 id="animationTitle">Run animation</h2>
+<div class="toolbar" style="margin-top:0"><label>Animation run<select id="animationRun"></select></label><button id="playAnimation">Play animation</button>
+<label class="toggle"><input id="animationBoundaries" type="checkbox">Animation boundaries</label>
+<label class="toggle"><input id="animationCoastlines" type="checkbox">Animation coastlines</label>
+<label>Animation speed <output id="speedValue">1×</output><input id="animationSpeed" type="range" min="0.25" max="4" step="0.25" value="1"></label>
+<a id="downloadAnimation" download>Download APNG</a></div>
+<p class="note" id="animationCaption"></p><canvas id="animationCanvas" role="img" aria-label="Simulation animation" style="display:block;width:100%;max-width:1024px;image-rendering:pixelated"></canvas>
+<p class="note">Playback uses recorded maps and matching overlays, without interpolated terrain. Speed and overlays affect this preview; the downloadable APNG retains its original timing and plain maps.</p>
+</section>
+<section class="panel"><h2>Numerical checks</h2><p class="note" id="bandContext"></p><table><thead><tr><th>Metric</th><th>A</th><th>B</th><th>Earth</th></tr></thead><tbody id="metrics"></tbody></table></section>
+<section class="panel"><h2 id="diffTitle">Field comparison</h2><p id="diff" class="note"></p><details><summary>All invariant checks</summary><table><thead><tr><th>Violation count</th><th>A</th><th>B</th></tr></thead><tbody id="checks"></tbody></table></details></section>
+<p class="note">Native geometry is a planar torus: both axes wrap. Maps show cell centres at their original resolution, without smoothing or histogram remapping. Crust age includes initialized prehistory. Plate ownership colours use runtime indices, which can change after plate removal. Plate identity colours use persistent ancestry IDs when recorded; historical runs fall back to indices. Boundary overlays show the native classification. Display saturation never changes numerical fields. This report is visual and numerical evidence, not an Earth reconstruction or a physical-skill score.</p>
+<p class="note">Findings and architecture review: <a id="findings" href="1.md">Markdown report</a>. Raw fields, logs, recipe and source/binary hashes remain in the module's runs folders.</p>
+</main><script>
+__MAP_ANIMATION_JS__
+__MAP_COMPARISON_JS__
+__MAP_SELECTION_JS__
+const DATA=__REPORT_DATA__;
+const fieldComparison=new MapFieldComparison();
+let comparisonGeneration=0;
+async function showComparison(a,b,key,spec,i,j) {
+ const generation=++comparisonGeneration;
+ if(a.seed!=null&&b.seed!=null&&a.seed!==b.seed){$('diff').textContent='Different seeds: compare distributions and visual structure; cells do not represent matching geography.';return;}
+ const format=diff=>fmt(diff.changed_cells,0)+' changed cells'+('mae' in diff?' · mean Δ '+fmt(diff.mean_delta,3)+' · mean |Δ| '+fmt(diff.mae,3)+' · RMSE '+fmt(diff.rmse,3)+' · max |Δ| '+fmt(diff.max_abs,3)+' ('+spec.units+')':'. Categorical labels are compared exactly; no numeric distance is assigned to them.');
+ const precomputed=DATA.comparisons[i+':'+j]?.[key];
+ if(precomputed){$('diff').textContent=format(precomputed);return;}
+ const first=a.numeric?.[key],second=b.numeric?.[key];
+ if(!first||!second||a.shape.toString()!==b.shape.toString()){$('diff').textContent='Cellwise comparison unavailable: quantity not recorded in both states, or grids differ.';return;}
+ $('diff').textContent='Loading selected numerical fields…';
+ try {
+   const diff=await fieldComparison.compare(first,second,first.categorical);
+   if(generation===comparisonGeneration)$('diff').textContent=format(diff);
+ } catch(error) {
+   if(generation===comparisonGeneration)$('diff').textContent='Unable to load numerical fields. Serve this report and its assets through the local HTTP server.';
+ }
+}
+const $=id=>document.getElementById(id), fmt=(v,d=1)=>v==null?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:d});
+$('title').textContent=DATA.run_ids.length>5?'Tectonics · '+DATA.run_ids.length+' runs · '+DATA.run_ids[0]+'–'+DATA.run_ids.at(-1):'Tectonics · '+DATA.run_ids.map(id=>'run '+id).join(' / ');
+$('subtitle').textContent=(DATA.same_seed===false?'Seed sensitivity comparison; different seeds have different geography':'Seed '+DATA.seed)+' · '+DATA.states[0].shape.slice().reverse().join(' × ')+' native cells · '+DATA.states.length+' snapshots';
+$('replay').textContent=DATA.replay_exact?'Exact replay verified':'Replay not verified';
+$('findings').href=DATA.findings_url??DATA.run_ids[DATA.run_ids.length-1]+'.md';
+$('bandContext').textContent='Elevation bands use total planet area. '+(DATA.earth_reference?.threshold_cache?'Earth depth thresholds use the exact cached spherical area measurements.':'Earth band percentages are approximate, interpolated from its cached curve.')+' Earth’s land-area row uses its land mask; the curve and depth thresholds use signed elevation, so the zero contour can differ slightly. Shallow water alone does not identify continental shelf geology. Feedback rows retain equal-cell weighting for comparison to the parent; spherical land fractions appear in the feedback control panel.';
+for(const [key,spec] of Object.entries(DATA.fields))$('field').add(new Option(spec.title,key));
+for(const id of ['left','right'])for(const run of DATA.run_ids){
+ const group=document.createElement('optgroup');group.label='Run '+run+(DATA.seeds?' · seed '+DATA.seeds[run]:'');
+ MapReportSelection.endpoints(DATA.states).forEach(({state:s,index:i})=>{if(s.run===run)group.append(new Option('Run '+s.run+' · '+s.label+' · '+s.time+' Myr',i));});$(id).append(group);
+}
+DATA.run_ids.forEach(id=>$('animationRun').add(new Option('Run '+id,id)));
+$('animationRun').value=DATA.run_ids.at(-1);
+let animationDownloadURL=null, animationSelection='';
+const player=new MapAnimationPlayer($('animationCanvas'),(frame,index,playing,error)=>{
+ $('playAnimation').textContent=playing?'Stop animation':'Play animation';
+ $('animationCaption').textContent=error?'Unable to load animation frame.':`Run ${$('animationRun').value} · ${frame.label} · ${fmt(frame.time)} Myr · frame ${index+1}/${player.frames.length} · ${fmt(player.speed,2)}×`+(DATA.feedback?.[$('animationRun').value]?' · Surface erosion with frozen parent boundaries.':'');
+});
+function updateAnimation(){const run=$('animationRun').value,key=$('field').value,animation=DATA.animations[run][key];
+ $('animationTitle').textContent='Animation · '+DATA.fields[key].title;
+ $('animationCanvas').hidden=!animation;$('playAnimation').disabled=!animation;$('downloadAnimation').hidden=!animation;
+ if(animationSelection===run+':'+key)return;
+ animationSelection=run+':'+key;
+ if(!animation){player.setFrames([]);$('animationCaption').textContent='This quantity was not recorded in run '+run+'.';return}
+ const states=DATA.states.filter(s=>s.run===+run);
+ player.setFrames(states.map((s,i)=>({base:s.maps[key],boundary:s.overlay,coast:s.coastline,time:s.time,label:s.label,duration_ms:animation.durations_ms[i]})));
+ if(animationDownloadURL)URL.revokeObjectURL(animationDownloadURL);
+ animationDownloadURL=null;
+ if(animation.image.startsWith('data:')){const bytes=Uint8Array.from(atob(animation.image.split(',')[1]),c=>c.charCodeAt(0));animationDownloadURL=URL.createObjectURL(new Blob([bytes],{type:'image/png'}))}
+ $('downloadAnimation').href=animationDownloadURL||animation.image;$('downloadAnimation').download='tectonics-'+run+'-'+key+'.png';
+}
+$('playAnimation').onclick=()=>player.playing?player.stop():player.play();
+$('animationRun').addEventListener('change',updateAnimation);
+for(const id of ['animationBoundaries','animationCoastlines'])$(id).onchange=()=>player.setLayers([
+ ...($('animationBoundaries').checked?['boundary']:[]),...($('animationCoastlines').checked?['coast']:[])]);
+$('animationSpeed').oninput=()=>{const speed=+$('animationSpeed').value;$('speedValue').textContent=fmt(speed,2)+'×';player.setSpeed(speed)};
+const lastState=DATA.states.at(-1);
+const matchedBaseline=DATA.states.findIndex(s=>s.run!==lastState.run&&s.label==='final'&&s.time===lastState.time);
+$('left').value=matchedBaseline>=0?matchedBaseline:DATA.run_ids.length>1?DATA.states.findIndex(s=>s.run===DATA.run_ids[0]&&s.label==='final'):0;
+$('right').value=DATA.states.length-1;
+function row(...values){const tr=document.createElement('tr');for(const value of values){const td=document.createElement('td');td.textContent=value;tr.append(td)}return tr}
+for(const run of DATA.run_ids){const info=DATA.run_summaries?.[run];if(info)$('runTimes').append(row(run+' / seed '+DATA.seeds[run],info.name,fmt(info.seconds,2)));const feedback=DATA.feedback?.[run];if(feedback)$('runTimes').append(row(run+' · additional control','Matched mean climate forcing',fmt(feedback.matched_control_seconds,2)));}
+function quickView(label,leftRun,rightRun,leftPhase='final'){
+ if(!DATA.run_ids.includes(leftRun)||!DATA.run_ids.includes(rightRun))return;
+ const button=document.createElement('button');button.textContent=label;button.onclick=()=>{chooseViews(leftRun,rightRun,leftPhase);update()};$('quickViews').append(button);
+}
+function chooseViews(leftRun,rightRun,leftPhase='final'){
+ $('left').value=DATA.states.findIndex(s=>s.run===leftRun&&s.label===leftPhase);
+ $('right').value=DATA.states.findIndex(s=>s.run===rightRun&&s.label==='final');
+ $('field').value='elevation';$('animationRun').value=rightRun;
+}
+quickView('42 → 62 · baseline / candidate',42,62);
+quickView('60 → 62 · native alternatives',60,62);
+quickView('62 → 63 · climate feedback',62,63);
+quickView('63 · initial / final climate',63,63,'initial');
+if(DATA.run_ids.includes(42)&&DATA.run_ids.includes(62))chooseViews(42,62);
+if(DATA.preferred_runs){
+ const [baseline,candidate]=DATA.preferred_runs;
+ quickView(baseline+' → '+candidate+' · baseline / candidate',baseline,candidate);
+ for(let i=1;i<DATA.run_ids.length;i++){
+  const a=baseline,b=DATA.run_ids[i];
+  if(a!==baseline||b!==candidate)quickView(a+' → '+b,a,b);
+ }
+ chooseViews(baseline,candidate);
+}
+let activeFeedback=null;
+function updateRegional(a,b){
+ const runs=[...new Set([a.run,b.run])].filter(run=>DATA.regional_reviews?.[run]);
+ $('regionalPanel').hidden=!runs.length;
+ const container=$('regionalImages');container.replaceChildren();
+ for(const run of runs){
+  const title=document.createElement('h2');title.textContent='Run '+run;
+  const img=document.createElement('img');img.src=DATA.regional_reviews[run];img.alt='Coastal history and cross-sections for run '+run;img.style.width='100%';img.style.maxWidth='1280px';img.loading='lazy';
+  container.append(title,img);
+ }
+}
+function updateFeedback(a,b){
+ const run=[b.run,a.run].find(id=>DATA.feedback?.[id]);$('feedbackPanel').hidden=run==null;
+ if(run==null)return;
+ const item=DATA.feedback[run];$('feedbackTitle').textContent='Run '+run+' · climate feedback controls';
+ $('feedbackContext').textContent=item.duration_myr+' Myr surface experiment after run '+item.parent+'. '+item.geometry+'. '+item.limitations.join('; ')+'. Climate solves reached their iteration cap without convergence. Boundary overlays in the main viewer are inherited from the frozen parent. Unrecorded crust quantities are left unavailable.';
+ if(activeFeedback!==run){activeFeedback=run;$('feedbackControl').replaceChildren();for(const [key,value] of Object.entries(item.controls))$('feedbackControl').add(new Option(value.title,key));$('feedbackControl').value='spatial_effect';}
+ const table=$('feedbackMetrics');table.replaceChildren();const names=['initial','final','uniform_control','matched_control'];table.append(row('Control metric',...names.map(n=>item.controls[n].title)));
+ const get=n=>item.review.distributions[n];
+ for(const [label,read] of [
+  ['Land area · equal cells (%)',m=>fmt(100*m.native_equal_area.land_fraction,2)],
+  ['Land area · spherical (%)',m=>fmt(100*m.spherical.land_fraction,2)],
+  ['Peak elevation (m)',m=>fmt(m.native_equal_area.elevation_m.max,0)],
+  ['Curve gap to Earth · equal cells (m)',m=>fmt(m.native_equal_area.earth_gap_m,0)],
+  ['Interior land detail RMS (m)',m=>fmt(m.native_detail.interior_land_relief_rms_m,1)],
+  ['Interior ocean detail RMS (m)',m=>fmt(m.native_detail.interior_ocean_relief_rms_m,1)]])table.append(row(label,...names.map(n=>read(get(n)))));
+ const climateSeconds=item.review.climate_stages.reduce((sum,s)=>sum+s.elapsed_seconds,0), erosionSeconds=item.review.erosion_stages.filter(s=>s.stage.startsWith('erosion-')).reduce((sum,s)=>sum+s.elapsed_seconds,0);
+ const volumeResidual=Math.max(...item.review.erosion_stages.map(s=>Math.abs(s.relative_volume_residual)));
+ $('feedbackTiming').textContent=item.review.climate_stages.length+' climate solves: '+fmt(climateSeconds,1)+' s; spatial erosion stages: '+fmt(erosionSeconds,1)+' s. Maximum relative erosion volume residual (including controls): '+volumeResidual.toExponential(2)+'. Experimental result: excess near-sea-level accumulation and terrain detail loss; see the findings report. A smaller curve gap alone does not establish improved terrain.';
+ updateFeedbackControl();
+}
+function updateFeedbackControl(){
+ if(activeFeedback==null)return;const item=DATA.feedback[activeFeedback],control=item.controls[$('feedbackControl').value];
+ $('feedbackMapTitle').textContent=control.title;$('feedbackMap').src=control.image;$('feedbackFinal').src=item.controls.final.image;
+ const stops=control.stops,low=stops[0][0],high=stops.at(-1)[0],bar=document.createElement('span');bar.className='gradient';bar.style.background='linear-gradient(to right,'+stops.map(([v,c])=>`rgb(${c}) ${(v-low)/(high-low)*100}%`).join(',')+')';$('feedbackLegend').replaceChildren(fmt(low),bar,fmt(high)+' '+control.units);
+ $('feedbackSaturation').textContent=fmt(control.below,0)+' cells below and '+fmt(control.above,0)+' above this display scale. '+(control.units==='m difference'?'Signed differences: blue = lower with spatial feedback; orange = higher. ':'')+'All control metrics use endpoint surfaces.';
+}
+$('feedbackControl').onchange=updateFeedbackControl;
+if(DATA.recipes){
+ const table=$('recipeChanges');table.append(row('Parameter',...DATA.run_ids.map(id=>'Run '+id)));
+ const keys=new Set(DATA.run_ids.flatMap(id=>Object.keys(DATA.recipes[id].scenario??{})));
+ for(const key of keys){const values=DATA.run_ids.map(id=>DATA.recipes[id].scenario?.[key]??'—');if(new Set(values).size>1)table.append(row(key,...values));}
+}
+const graphColors=['#8bddba','#eead78','#b1a3ed','#91b8ff','#ed8cac','#c9d572','#55cbd3','#e2764d','#a5c979','#c7a787'];
+function selectedGraphRuns(){return MapReportSelection.runs(DATA.run_ids,DATA.states[+$('left').value],DATA.states[+$('right').value],$('allRuns').checked)}
+function selectedGraphStates(a,b){return MapReportSelection.snapshots(DATA.states,DATA.run_ids,a,b,$('allRuns').checked)}
+function graphColor(run,i){return $('allRuns').checked&&DATA.run_ids.length>graphColors.length?`hsl(${(DATA.run_ids.indexOf(run)*137.508)%360} 65% 72%)`:graphColors[($('allRuns').checked?DATA.run_ids.indexOf(run):i)%graphColors.length]}
+function historyStates(){const runs=selectedGraphRuns();return DATA.states.filter(s=>runs.includes(s.run))}
+function graphLegend(id,items){const el=$(id);el.replaceChildren();for(const item of items){const span=document.createElement('span');span.style.color=item.color;span.style.marginRight='16px';span.textContent='━ '+item.label;el.append(span)}}
+function historyChart(){
+ const timeline=historyStates(),states=timeline.filter(s=>s.metrics.land_elevation_m),minTime=Math.min(...timeline.map(s=>s.time)),maxTime=Math.max(minTime+1,...timeline.map(s=>s.time)),maxZ=Math.max(1,...states.map(s=>s.metrics.land_elevation_m.max));
+ const x=t=>65+(t-minTime)/(maxTime-minTime)*910,y=z=>210-z/maxZ*185;let markup='';
+ for(let i=0;i<=4;i++){const z=maxZ*i/4,t=minTime+(maxTime-minTime)*i/4;markup+=`<line x1="65" x2="975" y1="${y(z)}" y2="${y(z)}" stroke="#344452"/><text x="57" y="${y(z)+4}" text-anchor="end">${fmt(z,0)}</text><text x="${x(t)}" y="232" text-anchor="middle">${fmt(t)}</text>`}
+ selectedGraphRuns().forEach((run,i)=>{const selected=states.filter(s=>s.run===run);for(const field of ['max','p99']){const points=selected.map(s=>`${x(s.time)},${y(s.metrics.land_elevation_m[field])}`).join(' ');markup+=`<polyline points="${points}" fill="none" stroke="${graphColor(run,i)}" stroke-width="2" ${field==='p99'?'stroke-dasharray="5 4"':''}/>`}});
+ markup+='<text x="65" y="16">Land elevation (m)</text><text x="520" y="254" text-anchor="middle">Recorded geological time (Myr)</text>';$('heightHistory').innerHTML=markup;
+ graphLegend('historyLegend',selectedGraphRuns().map((run,i)=>({label:'Run '+run,color:graphColor(run,i)})));$('historyLegend').append('Solid = maximum; dashed = land p99.');
+}
+function motionChart(){
+ const all=historyStates(),minTime=Math.min(...all.map(s=>s.time)),maxTime=Math.max(minTime+1,...all.map(s=>s.time)),maxV=Math.max(.01,...all.map(s=>s.metrics.mountain_activity?.mean_plate_speed??0));
+ const x=t=>65+(t-minTime)/(maxTime-minTime)*910,y=v=>170-v/maxV*145;let markup='';
+ for(let i=0;i<=4;i++){const v=maxV*i/4,t=minTime+(maxTime-minTime)*i/4;markup+=`<line x1="65" x2="975" y1="${y(v)}" y2="${y(v)}" stroke="#344452"/><text x="57" y="${y(v)+4}" text-anchor="end">${fmt(v,2)}</text><text x="${x(t)}" y="195" text-anchor="middle">${fmt(t)}</text>`}
+ selectedGraphRuns().forEach((run,i)=>{const states=all.filter(s=>s.run===run&&s.metrics.mountain_activity?.mean_plate_speed!=null),points=states.map(s=>`${x(s.time)},${y(s.metrics.mountain_activity.mean_plate_speed)}`).join(' ');markup+=`<polyline points="${points}" fill="none" stroke="${graphColor(run,i)}" stroke-width="2.5"/>`});
+ $('motionHistory').innerHTML=markup+'<text x="65" y="16">Native cells / update</text><text x="520" y="218" text-anchor="middle">Geological time (Myr); colours match height history</text>';
+}
+function diagnosticHistory(id,get,label){
+ const timeline=historyStates(),states=timeline.filter(s=>get(s.metrics)!=null);
+ const minT=Math.min(...timeline.map(s=>s.time)),maxT=Math.max(minT+1,...timeline.map(s=>s.time)),maxV=Math.max(4,...states.map(s=>get(s.metrics)));
+ const x=t=>65+(t-minT)/(maxT-minT)*560,y=v=>170-v/maxV*145;let markup='';
+ for(let i=0;i<=4;i++){const v=maxV*i/4,t=minT+(maxT-minT)*i/4;markup+=`<line x1="65" x2="625" y1="${y(v)}" y2="${y(v)}" stroke="#344452"/><text x="57" y="${y(v)+4}" text-anchor="end">${fmt(v,0)}</text><text x="${x(t)}" y="195" text-anchor="middle">${fmt(t)}</text>`}
+ selectedGraphRuns().forEach((run,i)=>{const points=states.filter(s=>s.run===run).map(s=>`${x(s.time)},${y(get(s.metrics))}`).join(' ');markup+=`<polyline points="${points}" fill="none" stroke="${graphColor(run,i)}" stroke-width="2.5"/>`});
+ $(id).innerHTML=markup+`<text x="65" y="16">${label}</text><text x="345" y="218" text-anchor="middle">Geological time (Myr)</text>`;
+}
+function updateHistoryCharts(){
+ historyChart();motionChart();
+ diagnosticHistory('detailHistory',m=>m.terrain_detail?.interior_land_relief_rms_m,'Interior land detail (m RMS)');
+ diagnosticHistory('topologyHistory',m=>m.plate_topology?.detached_components,'Detached regions');
+ diagnosticHistory('oceanDetailHistory',m=>m.terrain_detail?.interior_ocean_relief_rms_m,'Interior ocean detail (m RMS)');
+ diagnosticHistory('coastalHeightHistory',m=>m.coastal_terrain?.coastal_land_m?.p95,'Coastal land p95 (m)');
+}
+function probeChart(){
+ if(!DATA.surface_probe)return;const cases=DATA.surface_probe.data.cases.filter(c=>c.initial_relief_m===+$('probeRelief').value),maxZ=+$('probeRelief').value,x=t=>65+t/5*910,y=z=>210-z/maxZ*185;let markup='';
+ for(let i=0;i<=4;i++){const z=maxZ*i/4;markup+=`<line x1="65" x2="975" y1="${y(z)}" y2="${y(z)}" stroke="#344452"/><text x="57" y="${y(z)+4}" text-anchor="end">${fmt(z,0)}</text>`}
+ for(let t=0;t<=5;t++)markup+=`<text x="${x(t)}" y="232" text-anchor="middle">${t}</text>`;
+ for(const c of cases){const color=c.glacial_strength===0?'#8bddba':c.glacial_strength<.01?'#e7d377':'#eead78',points=c.states.map(s=>`${x(s.time_myr)},${y(s.mean_m)}`).join(' ');markup+=`<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" ${c.delta_time_myr<1?'stroke-dasharray="5 4"':''}/>`}
+ markup+='<text x="65" y="16">Mean plateau elevation (m)</text><text x="520" y="254" text-anchor="middle">Geological time (Myr)</text>';$('probeChart').innerHTML=markup;
+}
+if(DATA.surface_probe){$('probePanel').hidden=false;[...new Set(DATA.surface_probe.data.cases.map(c=>c.initial_relief_m))].forEach(h=>$('probeRelief').add(new Option(fmt(h,0)+' m',h)));$('probeRelief').value=12000;$('probeRelief').onchange=probeChart;probeChart()}
+function chart(a,b){
+ const svg=$('curve'),states=selectedGraphStates(a,b),curves=states.map(s=>s.metrics.hypsography),colors=states.map((s,i)=>graphColor(s.run,i));
+ const labels=states.map((s,i)=>({label:(s===a?'A · ':s===b?'B · ':'')+'Run '+s.run+' · '+s.label+' · '+fmt(s.time)+' Myr',color:colors[i]}));
+ if(DATA.earth_reference){curves.push(DATA.earth_reference.metrics.hypsography);colors.push('#ffffff');labels.push({label:'Earth',color:'#ffffff'});}
+ graphLegend('curveLegend',labels);const vals=curves.flatMap(c=>c.elevation_m);
+ let low=Math.min(0,...vals),high=Math.max(1,...vals);if(high<=low)high=low+1;
+ const x=v=>65+v*560,y=v=>250-(v-low)/(high-low)*220;
+ let markup='';for(let i=0;i<=4;i++){const v=low+(high-low)*i/4,py=y(v);markup+=`<line x1="65" x2="625" y1="${py}" y2="${py}" stroke="#344452"/><text x="57" y="${py+4}" text-anchor="end">${fmt(v,0)}</text>`}
+ for(let i=0;i<=4;i++)markup+=`<text x="${x(i/4)}" y="273" text-anchor="middle">${i*25}%</text>`;
+ markup+='<text x="340" y="296" text-anchor="middle">Fraction of area below elevation</text><text x="65" y="16">Elevation (m)</text>';
+ if(low<0&&high>0)markup+=`<line x1="65" x2="625" y1="${y(0)}" y2="${y(0)}" stroke="#9eacb7" stroke-dasharray="4 5"/>`;
+ curves.forEach((c,i)=>{const points=c.elevation_m.map((z,k)=>`${x(c.fraction_below[k])},${y(z)}`).join(' ');markup+=`<polyline points="${points}" fill="none" stroke="${colors[i]}" stroke-width="2.5" ${states[i]?.label==='initial'?'stroke-dasharray="5 4"':''}/>`});svg.innerHTML=markup;
+ $('earthContext').textContent=DATA.earth_reference?DATA.earth_reference.title+'. '+DATA.earth_reference.notes:'Earth reference omitted.';
+}
+function coastalChart(a,b){
+ const states=selectedGraphStates(a,b),profiles=states.map(s=>s.metrics.coastal_terrain?.profile||[]),top=Math.max(1,...profiles.flatMap(p=>p.map(v=>v.p95_m??0))),x=d=>65+d/1600*910,y=z=>215-z/top*185;
+ let markup='';for(let i=0;i<=4;i++){const z=top*i/4;markup+=`<line x1="65" x2="975" y1="${y(z)}" y2="${y(z)}" stroke="#344452"/><text x="57" y="${y(z)+4}" text-anchor="end">${fmt(z,0)}</text>`;markup+=`<text x="${x(i*400)}" y="234" text-anchor="middle">${i*400}</text>`}
+ profiles.forEach((p,i)=>{for(const metric of ['p95_m','mean_m']){let path='',drawing=false;for(const v of p){if(v[metric]==null){drawing=false;continue}path+=`${drawing?'L':'M'}${x(v.distance_km)},${y(v[metric])} `;drawing=true}markup+=`<path d="${path}" fill="none" stroke="${graphColor(states[i].run,i)}" stroke-width="2.5" ${metric==='mean_m'?'stroke-dasharray="5 4"':''}/>`}});
+ markup+='<text x="65" y="16">Land elevation (m)</text><text x="520" y="257" text-anchor="middle">Distance inland (km)</text>';$('coastProfile').innerHTML=markup;
+}
+function update(){
+ const i=+$('left').value,j=+$('right').value,a=DATA.states[i],b=DATA.states[j],key=$('field').value,spec=DATA.fields[key];
+ for(const [s,suffix] of [[a,'A'],[b,'B']]){
+  $('heading'+suffix).textContent=suffix+' · Run '+s.run+' · '+s.label;
+  $('caption'+suffix).textContent=fmt(s.time)+' Myr · '+(s.phase??s.updates+' update calls · '+(s.metrics.evolution_mode==='continuous'?'continuous evolution':'cycle '+s.cycle))+' · '+spec.units+' · run time '+fmt(s.runtime_seconds,1)+' s';
+  const missing=!s.maps[key];$('map'+suffix).hidden=missing;
+  if(missing)$('caption'+suffix).textContent+=' · Quantity not recorded in this run';
+  else $('map'+suffix).src=s.maps[key];$('overlay'+suffix).src=s.overlay;$('overlay'+suffix).hidden=missing||!$('boundaries').checked;
+  if(s.coastline)$('coast'+suffix).src=s.coastline;
+  $('coast'+suffix).hidden=missing||!$('coastlines').checked||!s.coastline;
+ }
+ document.querySelectorAll('.stack').forEach(el=>el.style.width=(+$('zoom').value*100)+'%');
+ $('context').textContent=a.run===b.run?'Within-run evolution. These are observations of one simulation, not independent experiments.':a.time===b.time?'Between-run comparison at matching geological time. Update counts may differ because of timestep or administrative restarts.':'Different stopping times: this comparison includes both code/parameter changes and different durations.';
+ if(a.surface_model!==b.surface_model)$('context').textContent+=' Surface formulations differ; inspect initial checkpoints as well as the final states.';
+ for(const note of new Set([a.boundary_note,b.boundary_note].filter(Boolean)))$('context').textContent+=' '+note;
+ const legend=$('legend');legend.replaceChildren();
+ if(spec.colours){spec.labels.forEach((label,k)=>{const el=document.createElement('span');el.innerHTML=`<i class="swatch" style="background:rgb(${spec.colours[k]})"></i>`;el.append(label);legend.append(el)})}
+ else if(spec.ids){legend.textContent=key==='plate_identity'?'Persistent ancestry colours when recorded; historical runs use runtime indices.':'Stable colour per runtime plate index; indices can change after plate removal.'}
+ else{const stops=spec.stops||DATA.sequential.map(([t,c])=>[spec.range[0]+t*(spec.range[1]-spec.range[0]),c]),lo=stops[0][0],hi=stops[stops.length-1][0];const bar=document.createElement('span');bar.className='gradient';bar.style.background='linear-gradient(to right,'+stops.map(([v,c])=>`rgb(${c}) ${(v-lo)/(hi-lo)*100}%`).join(',')+')';legend.append(fmt(lo),bar,fmt(hi)+' '+spec.units+(key==='elevation'?' · Sea level = 0 m':''))}
+ $('saturation').textContent=[['A',a],['B',b]].map(([label,s])=>{const q=s.display_saturation[key];return q?label+': '+fmt(q.below,0)+' cells below and '+fmt(q.above,0)+' above the fixed colour scale.':''}).join('  ');
+ const tbody=$('metrics');tbody.replaceChildren();
+ const metrics=[['Land area',m=>fmt(m.land_fraction*100)+'%'],['Peak land (m)',m=>fmt(m.land_elevation_m?.max,0)],['Land p99 (m)',m=>fmt(m.land_elevation_m?.p99,0)],['Land median (m)',m=>fmt(m.land_elevation_m?.median,0)],['Mean ocean depth (m)',m=>fmt(m.ocean_depth_m?.mean,0)],['Deepest ocean (m)',m=>fmt(m.ocean_depth_m?.max,0)],['Area > 9 km',m=>m.area_above_9000_m==null?'—':fmt(m.area_above_9000_m*100,2)+'%'],['Codec overflow cells',m=>fmt(m.checks?.above_uint16_codec,0)],['Codec floor-clipped cells',m=>fmt(m.checks?.below_native_physical_floor,0)],['Neighbour jump p99 (m/cell)',m=>fmt(m.neighbour_jump_m?.p99,0)],['Mean seafloor age (Myr)',m=>fmt(m.seafloor_age_myr?.mean)],['Curve gap to Earth (m)',m=>fmt(m.earth_comparison?.hypsography_mean_absolute_quantile_gap_m,0)],['Native field invariants',m=>m.invariants_pass==null?'—':m.invariants_pass?'PASS':'FAIL']];
+ metrics.splice(6,0,
+  ['Largest 0.5% curve step (m)*',m=>fmt(m.hypsography_shape?.max_central_quantile_step_m,0)],
+  ['Step location (% area)',m=>m.hypsography_shape?.max_step_fraction_below.map(q=>fmt(q*100)).join('–')??'—'],
+  ['Elevation span, 35–40% area (m)',m=>fmt(m.hypsography_shape?.elevation_span_35_40_percent_m,0)],
+ ['Area below −11 km',m=>m.area_below_minus_11000_m==null?'—':fmt(m.area_below_minus_11000_m*100,2)+'%']);
+ for(const [label,key] of [['Shallow ocean, 0–200 m','shelf_0_200_m'],['Upper ocean, 200–2,000 m','upper_ocean_200_2000_m'],['Ocean below 6,000 m','deep_ocean_below_6000_m'],['Lowland, 0–1,000 m','lowland_0_1000_m'],['Land above 2,000 m','highland_above_2000_m']])
+  metrics.push([label+' (% total area)*',m=>m.elevation_area_bands?fmt(m.elevation_area_bands[key]*100,2)+'%':'—']);
+ for(const level of [-1000,-258,-200,-160,0])metrics.push(['Area below '+fmt(level,0)+' m',m=>m.fraction_below?.[level]==null?'—':fmt(100*m.fraction_below[level],3)+'%']);
+ metrics.push(['Area within ±1 m of sea level',m=>m.shoreline_within_1m==null?'—':fmt(100*m.shoreline_within_1m,3)+'%']);
+ metrics.push(
+  ['Area ≥ 5 km',m=>m.mountain_activity?fmt(m.mountain_activity.area_above_5000_m*100,3)+'%':'—'],
+  ['Area ≥ 8 km',m=>m.mountain_activity?fmt(m.mountain_activity.area_above_8000_m*100,3)+'%':'—'],
+  ['Largest ≥ 3 km patch (cells)',m=>fmt(m.mountain_activity?.largest_highland_patch_cells,0)],
+  ['Highlands near convergence',m=>m.mountain_activity?.highland_fraction_near_convergence==null?'—':fmt(m.mountain_activity.highland_fraction_near_convergence*100)+'%'],
+  ['Peak near convergence (m)',m=>fmt(m.mountain_activity?.land_near_convergence_m?.max,0)],
+  ['Mean plate speed (cells/update)',m=>fmt(m.mountain_activity?.mean_plate_speed,3)],
+  ['Moving plates (> 0.01)',m=>m.mountain_activity?.moving_plates==null?'—':m.mountain_activity.moving_plates+' / '+m.mountain_activity.plate_count],
+  ['Solved mean speed (cm/year)',m=>m.motion_budget?.enabled?fmt(m.motion_budget.mean_speed_cm_yr,3):'—'],
+  ['Relative force residual',m=>m.motion_budget?.enabled?m.motion_budget.relative_force_residual.toExponential(2):'—'],
+  ['Driving power / dissipation (TW)',m=>m.motion_budget?.enabled?fmt(m.motion_budget.driving_power_w/1e12,3)+' / '+fmt(m.motion_budget.dissipation_w/1e12,3):'—'],
+  ['Active subduction proxy (km)',m=>m.motion_budget?.enabled?fmt(m.motion_budget.subduction_length_km,0):'—']);
+ metrics.push(
+  ['Detached plate components',m=>fmt(m.plate_topology?.detached_components,0)],
+  ['Mountain boundary force (N)',m=>m.motion_budget?.mountain_boundary_force_n?.toExponential(3)??'—'],
+  ['Maximum crust age (Myr)',m=>fmt(m.crust_age_myr?.max,1)],
+  ['Cells outside largest plate regions',m=>fmt(m.plate_topology?.detached_cells,0)],
+  ['Boundary faces (native grid)',m=>fmt(m.plate_topology?.boundary_faces,0)],
+  ['Ambiguous diagonal boundary vertices',m=>fmt(m.plate_topology?.checkerboard_vertices,0)],
+  ['Connectivity repair cells (cumulative)',m=>m.topology_repairs?.enabled?fmt(m.topology_repairs.reassigned_cells,0):'—'],
+  ['Terrain detail RMS (m)*',m=>fmt(m.terrain_detail?.local_relief_rms_m,1)],
+  ['Interior land detail RMS (m)*',m=>fmt(m.terrain_detail?.interior_land_relief_rms_m,1)],
+  ['Interior land sample (cells)',m=>fmt(m.terrain_detail?.interior_land_cells,0)],
+  ['Interior ocean detail RMS (m)*',m=>fmt(m.terrain_detail?.interior_ocean_relief_rms_m,1)],
+  ['Resolved islands (2–64 cells)',m=>fmt(m.islands?.islands_2_to_64_cells,0)],
+  ['Single-cell landmasses',m=>fmt(m.islands?.single_cell_islands,0)],
+  ['Coastal land p95 (m)',m=>fmt(m.coastal_terrain?.coastal_land_m?.p95,0)],
+  ['Coastal p95 near convergence (m; within 3 cells)',m=>fmt(m.coastal_terrain?.active_coastal_land_m?.p95,0)],
+  ['Coastal face jump p95 (m)',m=>fmt(m.coastal_terrain?.coastal_face_jump_m?.p95,0)],
+  ['Highlands touching water',m=>m.coastal_terrain?fmt(m.coastal_terrain.highland_fraction_on_coast*100,1)+'%':'—'],
+  ['Highland mean inland distance (km)',m=>fmt(m.coastal_terrain?.highland_mean_inland_km,0)],
+  ['Crust mass residual',m=>m.column_budget?.enabled?m.column_budget.relative_mass_residual.toExponential(2):'—'],
+  ['Crust + sediment mass (10²¹ kg)',m=>m.column_budget?.enabled?fmt(m.column_budget.mass_kg/1e21,3):'—'],
+  ['New basalt, including arcs (10²¹ kg)',m=>m.column_budget?.enabled?fmt(m.column_budget.generated_ocean_kg/1e21,3):'—'],
+  ['Subducted ocean crust (10²¹ kg)',m=>m.column_budget?.enabled?fmt(m.column_budget.subducted_ocean_kg/1e21,3):'—'],
+  ['Continental rock moved by root flow (10²¹ kg)',m=>m.column_budget?.enabled?fmt(m.column_budget.redistributed_continent_kg/1e21,3):'—'],
+  ['Sediment moved by root flow (10²¹ kg)',m=>m.column_budget?.redistributed_sediment_kg==null?'—':fmt(m.column_budget.redistributed_sediment_kg/1e21,3)],
+  ['Eroded / deposited (10²¹ kg)',m=>m.column_budget?.enabled?fmt(m.column_budget.eroded_kg/1e21,3)+' / '+fmt(m.column_budget.deposited_kg/1e21,3):'—'],
+  ['Arc basalt added (10²¹ kg; part of new basalt)',m=>m.column_budget?.generated_arc_kg==null?'—':fmt(m.column_budget.generated_arc_kg/1e21,3)],
+  ['River erosion (10²¹ kg; part of erosion)',m=>m.column_budget?.river_eroded_kg==null?'—':fmt(m.column_budget.river_eroded_kg/1e21,3)],
+  ['Experimental noise transfer (10²¹ kg; no net mass)',m=>m.column_budget?.noise_redistributed_kg==null?'—':fmt(m.column_budget.noise_redistributed_kg/1e21,3)]);
+ metrics.forEach(([name,get])=>{const values=[get(a.metrics),get(b.metrics),DATA.earth_reference?get(DATA.earth_reference.metrics):'—'];if(values.some(value=>value!=='—'))tbody.append(row(name,...values))});
+ const foot=document.createElement('tr');const cell=document.createElement('td');cell.colSpan=4;cell.textContent='* Curve steps exclude the outer 5% tails. Detail is departure from a 5×5 cell mean; interior samples require this whole window on the same surface (land or ocean) within one plate. Higher detail can include artifacts and does not prove preservation. Island sizes count native cells. Topology includes both periodic seams; repair counts are numerical reassignments, not physical mergers. Highlands: ≥ 3 km; near convergence: within 3 cells.';foot.append(cell);tbody.append(foot);
+ const checks=$('checks');checks.replaceChildren();for(const key of new Set([...Object.keys(a.metrics.checks??{}),...Object.keys(b.metrics.checks??{})]))checks.append(row(key,a.metrics.checks?.[key]??'—',b.metrics.checks?.[key]??'—'));
+ $('diffTitle').textContent=spec.title+' · B minus A';
+ showComparison(a,b,key,spec,i,j);chart(a,b);updateAnimation();
+ coastalChart(a,b);updateHistoryCharts();updateFeedback(a,b);updateRegional(a,b);
+}
+for(const id of ['left','right','field','boundaries','coastlines','zoom','allRuns'])$(id).addEventListener('change',update);
+$('matchTime').onclick=()=>{
+ const a=DATA.states[+$('left').value],b=DATA.states[+$('right').value];
+ const selected=DATA.states.findIndex(s=>s.run===b.run&&s.label===a.label);
+ if(selected>=0){$('right').value=selected;update();}
+};
+$('swap').onclick=()=>{const value=$('left').value;$('left').value=$('right').value;$('right').value=value;update()};update();
+</script></body></html>

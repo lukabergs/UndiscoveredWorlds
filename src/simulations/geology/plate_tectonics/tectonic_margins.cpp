@@ -1,0 +1,138 @@
+#include "tectonic_margins.hpp"
+#include "tectonic_columns.hpp"
+#include "tectonic_variation.hpp"
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <queue>
+#include <stdexcept>
+#include <tuple>
+
+namespace tectonics::margins {
+void validate(const Parameters& p) {
+    variation::validate(p.process_variation,p.process_wavelength_km,p.process_period_myr);
+    if (!std::isfinite(p.sediment_subduction_fraction) || p.sediment_subduction_fraction<0 || p.sediment_subduction_fraction>1)
+        throw std::runtime_error("Invalid sediment subduction fraction");
+    for (double value : {p.trench_load_n_m,p.arc_distance_km,p.arc_melt_ratio,p.river_erosion,
+            p.thermal_age_rate,p.wave_erosion_m_myr,p.root_mobility,p.alluvial_transport,p.wave_retreat_km_myr})
+        if (!std::isfinite(value) || value<0) throw std::runtime_error("Invalid margin process parameter");
+    for (double value : {p.flexural_length_km,p.trench_response_myr,p.sediment_travel_km,p.rift_breakup_thickness_m,p.wave_height_scale_m})
+        if (!std::isfinite(value) || value<=0) throw std::runtime_error("Invalid margin process length");
+}
+Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
+        const std::vector<uint32_t>& owners,const std::vector<columns::Cell>& cells,
+        const std::vector<transport::Displacement>& rigid,const Parameters& p,Polarity* polarity,long seed,double time_myr) {
+    validate(p);
+    const size_t count=static_cast<size_t>(w)*h;
+    if (w<2 || h<2 || owners.size()!=count || cells.size()!=count || rigid.size()!=count ||
+        !std::isfinite(cell_m) || cell_m<=0 || !std::isfinite(dt) || dt<=0 || !std::isfinite(time_myr))
+        throw std::runtime_error("Invalid margin forcing grid");
+    constexpr auto none=std::numeric_limits<uint32_t>::max();
+    Forcing result{std::vector<double>(count,-1),std::vector<double>(count),std::vector<uint32_t>(count,none),owners,{},{},{}};
+    if (!p.enabled) return result;
+    const auto factor=[&](size_t i,uint32_t channel) {
+        return variation::multiplier((i%w+.5)/w,(i/w+.5)/h,w*cell_m/1000,h*cell_m/1000,time_myr,
+            seed,channel,p.process_variation,p.process_wavelength_km,p.process_period_myr);
+    };
+    if (p.process_variation>0) {
+        result.arc_multiplier.resize(count);result.erosion_multiplier.resize(count);result.sediment_multiplier.resize(count);
+        for (size_t i=0;i<count;++i) {
+            result.arc_multiplier[i]=factor(i,1);result.erosion_multiplier[i]=factor(i,2);
+            result.sediment_multiplier[i]=factor(i,3);
+        }
+    }
+    const auto index=[&](int x,int y) { return static_cast<uint32_t>((y%static_cast<int>(h)+h)%h)*w
+        + static_cast<uint32_t>((x%static_cast<int>(w)+w)%w); };
+    struct Source { double rate=0, load=0; uint32_t receiver=std::numeric_limits<uint32_t>::max(); };
+    std::vector<Source> ridge(count),trench(count);
+    std::vector<Source> overlap(count);
+    const auto ocean_age=[&](size_t i) { return cells[i].ocean>0?cells[i].oceanic_age_volume/cells[i].ocean:0; };
+    for (uint32_t y=0;y<h;++y) for (uint32_t x=0;x<w;++x) {
+        const auto a=index(x,y);
+        if (!std::isfinite(rigid[a].x) || !std::isfinite(rigid[a].y))
+            throw std::runtime_error("Invalid margin velocity");
+        for (int axis=0;axis<2;++axis) {
+            const auto b=index(x+(axis==0),y+(axis==1));
+            if (owners[a]==owners[b]) continue;
+            // Normal relative motion in m/Myr. Sliding alone creates no arc/trench.
+            const double closing=(axis==0?rigid[a].x-rigid[b].x:rigid[a].y-rigid[b].y)*cell_m/dt;
+            if (closing<0) {
+                for (auto i : {a,b}) if (cells[i].oceanic_area>.5)
+                    ridge[i].rate=std::max(ridge[i].rate,-closing*.5);
+                continue;
+            }
+            if (closing==0 || (cells[a].continental_area>=.5 && cells[b].continental_area>=.5)) continue;
+            // Continental crust overrides oceanic crust; for ocean/ocean contact,
+            // older (colder) lithosphere descends. Ties use stable raster ordering.
+            auto lower=cells[a].continental_area>=.5?b:cells[b].continental_area>=.5?a:
+                (ocean_age(a)>=ocean_age(b)?a:b);
+            if (polarity && cells[a].continental_area<.5 && cells[b].continental_area<.5) {
+                const std::pair<uint32_t,uint32_t> pair=std::minmax(owners[a],owners[b]);
+                const auto [entry,inserted]=polarity->emplace(pair,owners[lower]);
+                (void)inserted;
+                lower=owners[a]==entry->second?a:b;
+            }
+            const auto upper=lower==a?b:a;
+            const int sign=lower==a?1:-1;
+            uint32_t receiver=upper;
+            const int steps=static_cast<int>(std::ceil(p.arc_distance_km*1000/cell_m));
+            // Walk inward on the overriding plate, never across another plate.
+            for (int s=1;s<=steps;++s) {
+                const auto j=index(static_cast<int>(upper%w)+(axis==0?sign*s:0),
+                                   static_cast<int>(upper/w)+(axis==1?sign*s:0));
+                if (owners[j]!=owners[upper]) break;
+                receiver=j;
+            }
+            const double maturity=1-std::exp(-ocean_age(lower)/20);
+            const double load=p.trench_load_n_m*(closing/(closing+10000))*maturity*factor(lower,0);
+            if (load>trench[lower].load) trench[lower]={closing,load,receiver};
+            // Eulerian overlap is often received by the upper boundary cell as
+            // the descending slab moves into it. Route that removed basalt to
+            // the same arc without incorrectly bending the overriding plate.
+            if (load>overlap[upper].load) overlap[upper]={closing,load,receiver};
+        }
+    }
+    // Nearest-source propagation is confined to its plate, joins both periodic
+    // seams and has deterministic ties. It does not add dozens of raster-face
+    // forces at a jagged boundary onto the same cell.
+    const auto spread=[&](const std::vector<Source>& sources,bool heating) {
+        using Entry=std::tuple<double,uint32_t,uint32_t>;
+        std::priority_queue<Entry,std::vector<Entry>,std::greater<Entry>> queue;
+        std::vector<double> distance(count,std::numeric_limits<double>::infinity());
+        std::vector<uint32_t> origin(count,none);
+        for (uint32_t i=0;i<count;++i) if (sources[i].rate>0) {
+            distance[i]=cell_m*.5; origin[i]=i; queue.emplace(distance[i],i,i);
+        }
+        const double extent=heating?600000:4*p.flexural_length_km*1000;
+        while (!queue.empty()) {
+            const auto [d,s,i]=queue.top(); queue.pop();
+            if (d!=distance[i] || s!=origin[i]) continue;
+            const int x=i%w,y=i/w;
+            for (const auto j : {index(x-1,y),index(x+1,y),index(x,y-1),index(x,y+1)}) {
+                if (owners[j]!=owners[i] || cells[j].oceanic_area<=.5) continue;
+                const double next=d+cell_m;
+                if (next>extent) continue;
+                if (next<distance[j] || (next==distance[j] && s<origin[j])) {
+                    distance[j]=next;origin[j]=s;queue.emplace(next,s,j);
+                }
+            }
+        }
+        for (size_t i=0;i<count;++i) if (origin[i]!=none) {
+            const auto& source=sources[origin[i]];
+            if (heating) result.thermal_age_myr[i]=distance[i]/source.rate;
+            else {
+                const double length=p.flexural_length_km*1000,u=distance[i]/length;
+                // Downward lobe of an elastic line-load response. The unresolved
+                // outer bulge is omitted. Water-loaded restoring force is rho*g.
+                result.trench_m[i]=source.load/(2*(columns::mantle_density-columns::water_density)*9.80665*length)
+                    *std::max(0.0,std::exp(-u)*(std::cos(u)+std::sin(u)));
+                result.arc_receiver[i]=source.receiver;
+            }
+        }
+    };
+    spread(ridge,true); spread(trench,false);
+    for (size_t i=0;i<count;++i) if (overlap[i].receiver!=none)
+        result.arc_receiver[i]=overlap[i].receiver;
+    return result;
+}
+}

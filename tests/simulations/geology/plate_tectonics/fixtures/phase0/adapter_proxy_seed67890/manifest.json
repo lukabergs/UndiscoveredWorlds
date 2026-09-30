@@ -1,0 +1,92 @@
+{
+  "schema": "phase0-contract-fixture/v1",
+  "schema_version": 1,
+  "seed": 67890,
+  "width": 96,
+  "height": 48,
+  "iteration_count": 57,
+  "cycle_count": 4,
+  "sea_level_m": 20000,
+  "parameters": {
+    "sea_level": 0.65,
+    "erosion_period": 0,
+    "folding_ratio": 0.02,
+    "aggregation_overlap_abs": 1000000,
+    "aggregation_overlap_rel": 0.33,
+    "cycle_count": 4,
+    "plate_count": 4,
+    "cycle_step_limit": 600
+  },
+  "files": {
+    "heightmap": "heightmap.f32",
+    "plate_id": "plate_id.u32",
+    "crust_age_steps": "crust_age_steps.u32",
+    "convergence_score": "convergence_score.u8",
+    "divergence_score": "divergence_score.u8",
+    "shear_score": "shear_score.u8",
+    "geologic_regime": "geologic_regime.u8"
+  },
+  "hashes": {
+    "heightmap": "119add4191721960",
+    "plate_id": "e8fbcc5441ac0c56",
+    "crust_age_steps": "cf70f1e8dac0d172",
+    "convergence_score": "ea58b3072cc7b6ea",
+    "divergence_score": "f77cb28ff388a7ab",
+    "shear_score": "94ff43b22f5581fe",
+    "geologic_regime": "08d7d1e2c820c221"
+  },
+  "heightmap_stats": {
+    "internal_min": 0.509518,
+    "internal_max": 22.1479,
+    "internal_mean": 5.05304,
+    "metric_min": 9100,
+    "metric_max": 65535,
+    "metric_mean": 62589.6
+  },
+  "crust_age_stats": {
+    "min": 16,
+    "max": 56,
+    "mean": 40.798
+  },
+  "regime_counts": {
+    "stable": 3964,
+    "convergent_arc": 10,
+    "continent_collision": 139,
+    "divergent_rift": 150,
+    "transform": 227,
+    "passive_margin": 117,
+    "mid_ocean_ridge": 0,
+    "trench_adjacent": 1
+  },
+  "plate_cell_counts": [547, 1514, 1818, 729],
+  "plates": [
+    {
+      "plate_id": 0,
+      "unit_velocity": [-0.374164, -0.927363],
+      "linear_velocity": [-0.115431, -0.286095],
+      "angular_velocity": 0.00372794,
+      "mass_center": [39.4196, 5.68654]
+    },
+    {
+      "plate_id": 1,
+      "unit_velocity": [0.999839, 0.017958],
+      "linear_velocity": [0.721894, 0.0129659],
+      "angular_velocity": -0.0171764,
+      "mass_center": [80.1821, 35.3337]
+    },
+    {
+      "plate_id": 2,
+      "unit_velocity": [-0.890101, -0.455763],
+      "linear_velocity": [-0.645506, -0.330522],
+      "angular_velocity": 0.017139,
+      "mass_center": [24.7351, 23.6363]
+    },
+    {
+      "plate_id": 3,
+      "unit_velocity": [0.974679, -0.223609],
+      "linear_velocity": [0.148132, -0.0339843],
+      "angular_velocity": -0.00102013,
+      "mass_center": [59.7954, 28.4789]
+    }
+  ]
+}

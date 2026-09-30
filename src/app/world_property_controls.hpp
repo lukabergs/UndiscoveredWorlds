@@ -1,0 +1,38 @@
+#pragma once
+
+#include "planet.hpp"
+
+struct WorldPropertyControls
+{
+    int size = 0;
+    int mapWidth = 0;
+    int mapHeight = 0;
+    float gravity = 0.0f;
+    float lunar = 0.0f;
+    float eccentricity = 0.0f;
+    int perihelion = 0;
+    int rotation = 0;
+    float tilt = 0.0f;
+    float tempdecrease = 0.0f;
+    int northpolaradjust = 0;
+    int southpolaradjust = 0;
+    int averagetemp = 0;
+    float waterpickup = 0.0f;
+    int glacialtemp = 0;
+    bool rivers = true;
+    bool lakes = true;
+    bool deltas = true;
+    bool socialEnabled = false;
+    SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
+    bool usePrehistory = true;
+    int historyYears = 1200;
+};
+
+WorldPropertyControls makeworldpropertycontrols(const planet& world);
+void syncworldpropertycontrols(const planet& world, WorldPropertyControls& controls);
+void applyworldpropertycontrols(planet& world, const WorldPropertyControls& controls);
+void applyworlddimensions(planet& world, const WorldPropertyControls& controls);
+void clampworldpropertycontrols(WorldPropertyControls& controls);
+float getdefaultgravityforsize(int size);
+int getdefaultmapwidthforsize(int size);
+int getdefaultmapheightforsize(int size);

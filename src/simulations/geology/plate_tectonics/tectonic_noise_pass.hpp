@@ -1,0 +1,20 @@
+#ifndef TECTONIC_NOISE_PASS_HPP
+#define TECTONIC_NOISE_PASS_HPP
+#include <cstdint>
+#include <vector>
+namespace tectonics::columns { struct Cell; }
+namespace tectonics::noise_pass {
+// Deliberately synthetic detail experiment, not an erosion or tectonic law.
+struct Parameters {
+    double amplitude_m = 0; // Height-equivalent potential, not a guaranteed RMS.
+    double wavelength_km = 600;
+    double period_myr = 180;
+    double coast_taper_m = 500; // Smooth suppression near sea level; zero reproduces the untapered experiment.
+};
+void validate(const Parameters& parameters);
+// Conservative face transfers driven by the change in a bounded, continuous
+// noise potential. No new material, per-step RNG draws, or initialization pass.
+double apply(uint32_t width,uint32_t height,double cell_m,std::vector<columns::Cell>& cells,
+             long seed,double start_myr,double end_myr,const Parameters& parameters,double thermal_strength = 1);
+}
+#endif

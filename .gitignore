@@ -1,0 +1,111 @@
+# ==========================================
+# Build Outputs (CMake)
+# ==========================================
+build/
+out/
+bin/
+obj/
+# Ignore CMake generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+.cmake/
+
+# ==========================================
+# Dependency Manager (vcpkg)
+# ==========================================
+vcpkg_installed/
+vcpkg-manifest-install.log
+
+# ==========================================
+# Visual Studio / MSVC
+# ==========================================
+.vs/
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.filters
+*.aps
+*.idb
+*.pdb
+*.ilk
+*.exp
+*.map
+*.ncb
+*.opendb
+*.db
+*.ipch
+
+# ==========================================
+# Compiled Binaries & Libraries
+# ==========================================
+*.exe
+*.dll
+*.lib
+*.so
+*.a
+*.dylib
+__pycache__/
+*.py[cod]
+
+# ==========================================
+# OS Specific
+# ==========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# Project Specific (Optional)
+# ==========================================
+# Local-only material. No exceptions for registries, workbooks or guides.
+/meta/
+/docs/
+/refs/
+/runs/
+/extra/
+/data/
+/climate_benchmark_runs.json
+/climate_reference_data.json
+/UWinstaller.zip
+
+# Local research, historical scripts, and files awaiting manual sorting.
+/references/
+/scripts/archive/*
+!/scripts/archive/reorganize-climate-assets.ps1
+/0/
+/tools/ripgrep/
+
+# Downloaded archives and numerical/generated data are not source code.
+*.zip
+*.7z
+*.tar
+*.gz
+*.bz2
+*.xz
+*.uwclim
+*.nc
+*.hdf
+*.h5
+*.tif
+*.tiff
+*.npz
+*.npy
+*.xlsx
+*.xls
+# Small deterministic fixtures are reviewed by the repository-scope checker.
+!tests/**/fixtures/**
+
+# Task plans are local by default; already tracked plans remain tracked.
+/docs/tasks/
+
+# Saved Worlds
+saved_worlds/
+# Local notes or scratchpad files
+notes.txt
+temp/extra/
+.codex_tmp/

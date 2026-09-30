@@ -1,0 +1,29 @@
+{
+  "version": "tectonics-v3-long-age",
+  "missing": [15, 19, 27],
+  "sequential": [[0, [22, 25, 67]], [0.25, [50, 91, 140]], [0.5, [38, 154, 149]], [0.75, [136, 204, 92]], [1, [250, 232, 96]]],
+  "fields": {
+    "elevation": {"title": "Elevation", "units": "m relative to sea level", "stops": [[-11000, [8, 8, 30]], [-8000, [24, 20, 75]], [-6000, [28, 54, 124]], [-4500, [31, 112, 160]], [-3000, [30, 158, 177]], [-1000, [91, 198, 196]], [-200, [162, 220, 210]], [-1, [206, 237, 223]], [0, [57, 111, 74]], [500, [110, 150, 86]], [1500, [167, 174, 112]], [3000, [179, 150, 106]], [6000, [160, 132, 125]], [10000, [245, 242, 237]]]},
+    "crust_age_myr": {"title": "Crust age", "units": "Myr; includes seeded prehistory", "stops": [[0,[22,25,67]],[25,[50,91,140]],[100,[38,154,149]],[200,[90,186,119]],[400,[170,204,92]],[800,[233,204,93]],[1600,[250,232,196]]]},
+    "local_relief": {"title": "Terrain detail", "units": "m departure from 5 x 5 cell mean; diagnostic only", "stops": [[-2000, [49, 87, 154]], [0, [229, 229, 219]], [2000, [170, 66, 40]]]},
+    "mountain_zones": {"title": "Highlands and convergence", "units": "diagnostic mask; highland >= 3 km; near = within 3 native cells", "labels": ["below 3 km", "highland away from convergence", "highland near convergence"], "colours": [[25, 35, 47], [211, 177, 119], [248, 105, 92]]},
+    "plate_id": {"title": "Plate ownership", "units": "runtime plate index", "ids": true},
+    "plate_identity": {"title": "Plate identity / ancestry", "units": "persistent ID; legacy runs use indices", "ids": true},
+    "coast_distance_km": {"title": "Distance inland", "units": "km; four-neighbour grid distance, water = -1", "stops": [[-1,[22,28,38]],[0,[231,208,127]],[300,[180,155,87]],[800,[61,149,111]],[1600,[58,94,151]],[3200,[93,58,135]]]},
+    "crust_class": {"title": "Crust class", "units": "class", "labels": ["none", "oceanic", "transitional", "continental"], "colours": [[20, 25, 35], [51, 128, 180], [218, 178, 80], [161, 93, 97]]},
+    "geologic_regime": {"title": "Geologic regime", "units": "class", "labels": ["stable", "convergent arc", "continental collision", "divergent rift", "transform", "passive margin", "mid-ocean ridge", "trench-adjacent"], "colours": [[44, 53, 63], [245, 145, 68], [223, 72, 86], [153, 116, 215], [237, 214, 91], [102, 154, 115], [75, 194, 197], [68, 111, 208]]},
+    "boundary_type": {"title": "Boundary type", "units": "class", "labels": ["none", "convergent", "divergent", "transform", "passive margin"], "colours": [[22, 28, 38], [238, 91, 91], [78, 198, 205], [242, 205, 100], [126, 169, 126]]},
+    "crust_thickness": {"title": "Legacy crust proxy", "units": "native simulation units, not physical thickness", "range": [0, 3]},
+    "continental_crust_m": {"title": "Continental crust thickness", "units": "m; rock volume per cell area", "range": [0, 80000]},
+    "oceanic_crust_m": {"title": "Oceanic crust thickness", "units": "m; rock volume per cell area", "range": [0, 60000]},
+    "sediment_m": {"title": "Sediment thickness", "units": "m; compacted rock-equivalent sediment", "range": [0, 5000]},
+    "rift_damage": {"title": "Incipient rift damage", "units": "0 intact; 1 fully weakened; unavailable in old runs", "range": [0, 1]},
+    "uplift_tendency": {"title": "Uplift tendency", "units": "normalized signal, not m/Myr", "range": [0, 1]},
+    "subsidence_tendency": {"title": "Subsidence tendency", "units": "normalized signal, not m/Myr", "range": [0, 1]},
+    "accumulated_strain": {"title": "Strain memory", "units": "normalized signal", "range": [0, 1]},
+    "deformation_rate": {"title": "Deformation intensity", "units": "normalized signal", "range": [0, 1]},
+    "convergence_score": {"title": "Convergence", "units": "score", "range": [0, 100]},
+    "divergence_score": {"title": "Divergence", "units": "score", "range": [0, 100]},
+    "shear_score": {"title": "Shear", "units": "score", "range": [0, 100]}
+  }
+}
