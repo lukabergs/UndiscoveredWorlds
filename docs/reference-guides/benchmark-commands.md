@@ -169,11 +169,7 @@ $tp = "out/build/headless/bin/Release/tectonic_pipeline.exe"
 & $tp compare --bundle-a out/bench/a --bundle-b out/bench/b --output out/bench/compare.json
 ```
 
-Climate/erosion feedback on a finished registered run (experimental, frozen plates):
-
-```powershell
-uv run --offline scripts/benchmarks/tectonics_climate_feedback.py --parent 13 --run 14 --cycles 3 --interval-myr 10
-```
+The climate/erosion feedback experiment (run 63) has no runner at present; it returns as a recipe once `terrain.climate_erosion` is an evolver (`docs/architecture/consolidation-plan.md` §6). `bench.py tectonics report` still renders run 63.
 
 ## Geology
 

@@ -47,12 +47,11 @@ liberated gold into placers on the final drainage network.
 Climate atmospheric water transport is distinct from the surface routing in
 `hydrology/`.
 
-The opt-in tectonics climate-feedback experiment uses the standalone
-`uw_climate_erosion` library in `simulations/terrain/climate_erosion.*`. It accepts
-numerical terrain and climate fields, conserves rock-equivalent volume on a
-cell-centred spherical grid, and has no app or renderer dependency. Its CLI
-adapter owns raw field I/O; the benchmark script owns sequencing, provenance,
-maps and comparison with uniform forcing. The app's climate-only import mode
+The standalone `uw_climate_erosion` library in `simulations/terrain/climate_erosion.*`
+accepts numerical terrain and climate fields, conserves rock-equivalent volume on a
+cell-centred spherical grid, and has no app or renderer dependency. Nothing calls it
+at present: its CLI adapter and the feedback script that sequenced it (tectonics run
+63) were removed, and it waits for a `terrain.climate_erosion` evolver. The app's climate-only import mode
 selects climate stages through `pipeline/` and asserts that terrain is unchanged.
 This is a surface experiment with frozen plates; the tectonic state is not advanced.
 
