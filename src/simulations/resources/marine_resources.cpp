@@ -7,12 +7,12 @@ using namespace detail;
 
 namespace
 {
-bool isshelfproxy(const planet& world, const std::vector<std::vector<bool>>& shelves, int x, int y)
+bool isshelfproxy(const planet& world, const worldgrid<bool>& shelves, int x, int y)
 {
     if (world.sea(x, y) == 0)
         return false;
 
-    if (x < static_cast<int>(shelves.size()) && y < static_cast<int>(shelves[x].size()) && shelves[x][y])
+    if (x < shelves.columns() && y < shelves.rows() && shelves[x][y])
         return true;
 
     if (world.nom(x, y) < world.sealevel() - 220)
@@ -110,7 +110,7 @@ float mean_ocean_sst(const planet& world)
     return sstcells > 0 ? static_cast<float>(ssttotal / static_cast<double>(sstcells)) : 0.0f;
 }
 
-void generate_ocean_fisheries(planet& world, const std::vector<std::vector<bool>>& shelves)
+void generate_ocean_fisheries(planet& world, const worldgrid<bool>& shelves)
 {
     const int width = world.width();
     const int height = world.height();
@@ -182,7 +182,7 @@ void generate_coastal_fisheries(planet& world)
 }
 }
 
-void generate_marine_resources(planet& world, const std::vector<std::vector<bool>>& shelves)
+void generate_marine_resources(planet& world, const worldgrid<bool>& shelves)
 {
     // Coastal land reads the completed neighbouring ocean fishery scores.
     generate_ocean_fisheries(world, shelves);

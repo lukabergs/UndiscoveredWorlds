@@ -4,14 +4,138 @@ cmake_minimum_required(VERSION 3.19)
 cmake_policy(SET CMP0104 OLD)
 project(UndiscoveredWorlds LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED YES)
+# Multi-config generators append the configuration: bin/Release, bin/Debug.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
 include(CTest)
 option(UW_BUILD_APP "Build the SFML/ImGui desktop application" ON)
+option(UW_BUILD_WORLD "Build the headless world core and world_pipeline" ON)
 option(UW_BUILD_TECTONICS_TOOLS "Build tectonics simulation, export, and inspection tools" OFF)
+# Analysis builds only: world accessors record which fields each step reads.
+option(UW_TRACK_FIELD_READS "Record world field reads per generation step" OFF)
+if(UW_TRACK_FIELD_READS)
+    add_compile_definitions(UW_TRACK_FIELD_READS)
+endif()
 
 add_subdirectory(src/simulations)
 add_subdirectory(src/simulations/geology/plate_tectonics)
 if(BUILD_TESTING OR UW_BUILD_TECTONICS_TOOLS)
     add_subdirectory(tools/tectonics)
+endif()
+
+if(UW_BUILD_WORLD OR UW_BUILD_APP)
+    find_package(PNG REQUIRED)
+    find_package(Threads REQUIRED)
+
+    # Headless world core: world state, generation stages, recipes, I/O and
+    # validation. No SFML or ImGui; shared by world_pipeline and the desktop.
+    set(UW_WORLD_CORE_SOURCES
+        src/app/command_line_generation.cpp
+        src/app/diagnostics/profiler.cpp
+        src/core/grid_coordinates.cpp
+        src/io/map_imports.cpp
+        src/io/social_definitions.cpp
+        src/pipeline/climate_generation.cpp
+        src/pipeline/physical_layers.cpp
+        src/pipeline/social_generation.cpp
+        src/pipeline/world_recipes.cpp
+        src/pipeline/world_stages.cpp
+        src/wip/classes.cpp
+        src/wip/misc.cpp
+        src/wip/planet.cpp
+        src/wip/planet_bundle.cpp
+        src/wip/planet_fields.cpp
+        src/wip/region.cpp
+        src/wip/regionalmap.cpp
+    )
+
+    set(UW_INCLUDE_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/app"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/app/diagnostics"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/core"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/io"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/climate"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/geology"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/hydrology"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/society"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/terrain"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/climate"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/wip"
+    )
+
+    include(src/simulations/world_modules.cmake)
+
+    # Climate on a climateworld, without planet: the climate processes and their
+    # stage runner, validation, map imports, progress and environment. Shared by
+    # uw_world_core and climate_pipeline.
+    add_library(uw_climate_world STATIC
+        src/app/app_environment.cpp
+        src/app/climate_options.cpp
+        src/io/profiling_workbook.cpp
+        src/io/raster_image.cpp
+        src/io/raster_imports.cpp
+        src/pipeline/climate_stages.cpp
+        src/pipeline/generation_progress.cpp
+        src/pipeline/world_generation_debug.cpp
+        src/pipeline/world_processes.cpp
+        src/simulations/climate/climate_classification.cpp
+        src/simulations/climate/climate_coupling.cpp
+        src/simulations/climate/climate_fields.cpp
+        src/validation/climate/climate_circulation_diagnostics.cpp
+        src/validation/climate/climate_validation.cpp
+    )
+    target_include_directories(uw_climate_world PUBLIC ${UW_INCLUDE_DIRS})
+    target_link_libraries(uw_climate_world PUBLIC
+        Threads::Threads
+        PNG::PNG
+        uw_climate
+        uw_climate_io
+        uw_topography_io
+        uw_world_fields
+        uw_run_bundle
+        uw_generation_stages
+        uw_procedural_noise
+    )
+
+    add_library(uw_world_core OBJECT ${UW_WORLD_CORE_SOURCES})
+    target_include_directories(uw_world_core PUBLIC ${UW_INCLUDE_DIRS})
+    target_link_libraries(uw_world_core PUBLIC
+        uw_climate_world
+        Threads::Threads
+        PNG::PNG
+        plate_tectonics
+        uw_mineral_tectonics
+        uw_climate
+        uw_climate_io
+        uw_topography_io
+        uw_world_fields
+        uw_run_bundle
+        uw_generation_stages
+        uw_procedural_noise
+    )
+
+    # Object libraries contribute their objects only to direct dependents, so
+    # each executable links the core and every world module.
+    function(uw_add_world_executable name entry)
+        add_executable(${name} ${entry})
+        target_link_libraries(${name} PRIVATE
+            uw_world_core
+            uw_geology
+            uw_terrain
+            uw_hydrology
+            uw_resources
+            uw_society
+        )
+    endfunction()
+
+    uw_add_world_executable(world_pipeline src/app/world_pipeline_main.cpp)
+
+    # Climate on imported terrain without the world class.
+    add_executable(climate_pipeline src/app/climate_pipeline_main.cpp)
+    target_link_libraries(climate_pipeline PRIVATE uw_climate_world)
 endif()
 
 if(UW_BUILD_APP)
@@ -29,7 +153,6 @@ if(UW_BUILD_APP)
     find_package(imgui CONFIG REQUIRED)
     find_package(ImGuiFileDialog CONFIG REQUIRED)
     find_package(imgui-sfml CONFIG REQUIRED)
-    find_package(Threads REQUIRED)
 
     foreach(dep_target
         imgui::imgui
@@ -42,94 +165,42 @@ if(UW_BUILD_APP)
         endif()
     endforeach()
 
-    # Desktop integration and world-level stages.
-    set(SOURCES
-        src/app/main.cpp
-        src/app/app_environment.cpp
-        src/app/create_world_screen.cpp
-        src/wip/generation_workbench.cpp
-        src/app/rendering/rendering.cpp
-        src/app/diagnostics/world_generation_debug.cpp
-        src/app/rendering/cuda_renderers_stub.cpp
-        src/app/rendering/appearance_settings.cpp
-        src/app/rendering/map_appearance.cpp
-        src/pipeline/physical_layers.cpp
-        src/pipeline/social_generation.cpp
-        src/io/social_definitions.cpp
-        src/core/grid_coordinates.cpp
-        src/app/world_property_controls.cpp
+    # Desktop presentation: rendering, windows, panels and the generation workbench.
+    set(UW_DESKTOP_SOURCES
         src/app/app_windows.cpp
-        src/app/ui_panels.cpp
+        src/app/create_world_screen.cpp
+        src/app/rendering/appearance_settings.cpp
+        src/app/rendering/cuda_renderers_stub.cpp
+        src/app/rendering/map_appearance.cpp
+        src/app/rendering/rendering.cpp
         src/app/ui_charts.cpp
-        src/io/map_imports.cpp
-        src/wip/classes.cpp
-        src/validation/climate/climate_circulation_diagnostics.cpp
-        src/pipeline/climate_generation.cpp
-        src/wip/misc.cpp
-        src/wip/planet.cpp
-        src/app/diagnostics/profiler.cpp
-        src/wip/region.cpp
-        src/wip/regionalmap.cpp
+        src/app/ui_panels.cpp
+        src/app/world_property_controls.cpp
+        src/wip/generation_workbench.cpp
     )
 
-    set(UW_INCLUDE_DIRS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/app"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/app/diagnostics"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/app/rendering"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/core"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/io"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/climate"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/geology"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/hydrology"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/society"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/terrain"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/climate"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/wip"
-    )
-
-    include(src/simulations/world_modules.cmake)
-
-    add_executable(${PROJECT_NAME} ${SOURCES})
-    target_include_directories(${PROJECT_NAME} PRIVATE ${UW_INCLUDE_DIRS})
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
-    )
-
-    if(CMAKE_CUDA_COMPILER)
-        target_sources(${PROJECT_NAME} PRIVATE src/app/rendering/cuda_renderers.cu)
-        target_link_libraries(${PROJECT_NAME} PRIVATE CUDA::cudart)
-        target_compile_definitions(${PROJECT_NAME} PRIVATE UW_ENABLE_CUDA_RENDERERS=1)
-        set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED YES)
-    endif()
-
-    # Desktop and simulation modules
-    target_link_libraries(${PROJECT_NAME} PRIVATE
+    add_library(uw_app_core OBJECT ${UW_DESKTOP_SOURCES})
+    target_include_directories(uw_app_core PUBLIC ${UW_INCLUDE_DIRS} "${CMAKE_CURRENT_SOURCE_DIR}/src/app/rendering")
+    target_link_libraries(uw_app_core PUBLIC
+        uw_world_core
         sfml-graphics
         sfml-window
         sfml-system
         sfml-audio
-        Threads::Threads
         imgui::imgui
         ImGui-SFML::ImGui-SFML
         ImGuiFileDialog::ImGuiFileDialog
-        plate_tectonics
-        uw_mineral_tectonics
-        uw_climate
-        uw_climate_io
-        uw_generation_stages
-        uw_geology
-        uw_terrain
-        uw_world_climate
-        uw_hydrology
-        uw_resources
-        uw_society
     )
 
-    set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+    if(CMAKE_CUDA_COMPILER)
+        target_sources(uw_app_core PRIVATE src/app/rendering/cuda_renderers.cu)
+        target_link_libraries(uw_app_core PUBLIC CUDA::cudart)
+        target_compile_definitions(uw_app_core PUBLIC UW_ENABLE_CUDA_RENDERERS=1)
+        set_target_properties(uw_app_core PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED YES)
+    endif()
 
+    uw_add_world_executable(${PROJECT_NAME} src/app/main.cpp)
+    target_link_libraries(${PROJECT_NAME} PRIVATE uw_app_core)
 endif()
 
 if(BUILD_TESTING)
@@ -138,4 +209,3 @@ endif()
 
 # Optional headless report-rendering accelerator; independent of the simulator.
 add_library(climate_flow_texture SHARED src/validation/climate/flow_texture_kernel.cpp)
-set_target_properties(climate_flow_texture PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)

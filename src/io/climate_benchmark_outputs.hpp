@@ -51,14 +51,10 @@ public:
     bool includes(climatebenchmarkmapkind kind, int season = -1) const;
     bool requirescirculation() const;
     bool requiresreferencewinds() const;
-    // Rendering only: does not change world or simulation grids.
-    int windmapcolumns() const { return windmapcolumns_; }
-    void setwindmapcolumns(int columns);
     const std::vector<climatebenchmarkmaprequest>& requests() const;
 
 private:
     std::vector<climatebenchmarkmaprequest> requests_;
-    int windmapcolumns_ = 2048;
 };
 
 bool addclimatebenchmarkmapargument(

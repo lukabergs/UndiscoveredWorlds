@@ -1,37 +1,22 @@
 # Undiscovered Worlds
 
-## Project context
+Procedural planetary simulation (terrain, tectonics, climate, hydrology, early society) in C++17/CMake/vcpkg on Windows. `README.md` describes the intended lifecycle; distinguish intended from implemented behaviour. Design and status live in `docs/architecture/` (`world-model.md`: components, process kinds, recipes; `consolidation-plan.md`: target structure, phases and open decisions). `meta/`, `refs/` and `runs/` (except `runs/registry/` and `runs/ledger/`) are local-only and gitignored.
 
-- Procedural planetary simulation with terrain, tectonics, climate, hydrology, and early society systems. The fuller ecology and civilization lifecycle in `README.md` is a design goal; distinguish intended behavior from implemented behavior.
-- C++/CMake/vcpkg project on Windows. The desktop app uses C++17 with SFML/ImGui; the internal tectonics module uses C++20. CUDA rendering is optional. `CMakePresets.json` defines the Visual Studio 18 2026 baseline and uses `VCPKG_ROOT`.
-- `meta/`, `docs/`, `refs/` and `runs/` are entirely local-only, including registries and documentation. Keep reusable preparation and reporting code under `scripts/`; never force-add generated data or downloaded archives. `scripts/repository_scope.py` checks the index and push history, including a 5 MiB blob limit.
-- Simulation behavior belongs in `src/simulations/`; stage ordering and dependencies in `src/pipeline/`; artifact I/O in `src/io/`; observed-data comparisons in `src/validation/`; presentation in `src/app/`. Include the owning module's header in new callers; `src/wip/functions.hpp` is a compatibility umbrella.
-- Read `README.md` for project scope and commands, `docs/architecture/simulation-modules.md` for module changes, and `docs/architecture/tectonics/tectonic-output-contract.md` for tectonic output changes, as relevant to the task.
+## Working conventions
+
+- Work directly on `main`; uncommitted changes in the working tree are current work, so build on them and never reset, stash or revert them.
+- A compile build is the default check. Run tests, benchmarks, `check_tectonics_cli.py` or the Python suite only when asked or when a bug persists after a fix; say which checks were skipped. Commands are in `docs/reference-guides/verification.md`.
+- Seed 1 for every new run; another seed only when the user asks for a seed comparison (20260906 only to reproduce climate runs up to 365). Module checks go through `scripts/benchmarks/bench.py <module> <command>` and the headless CLIs; never launch `UndiscoveredWorlds.exe` for a check.
+- Tectonics has exactly one implementation, `src/simulations/geology/plate_tectonics` (namespace `tectonics::`, baseline from `configs/tectonics-baseline.json`). Do not reference or describe any other or former tectonics code. `scripts/check-layout.py` enforces its public-header boundary.
+- Delegate read-only surveys to subagents and keep working. Before claiming a run improved anything, have a fresh-context reviewer check the evaluation. Never write per-run HTML or scripts: reports are rendered from JSON by `scripts/evaluation/`.
+
+## Where things go
+
+- Behaviour in `src/simulations/<module>/`, stage order and recipes in `src/pipeline/`, I/O in `src/io/`, observed-data comparisons in `src/validation/`, GUI only in `src/app/`. One translation unit per process, named by its process id. `src/wip/functions.hpp` is a compatibility umbrella; include the owning header instead.
+- Downloads and receipts in `refs/source/`, prepared inputs in `refs/processed/`, run artefacts in `runs/`, builds and scratch in `out/`. Bulk directories are junctions into `D:/dev/undiscovered-worlds/` (`runs/storage.json`): keep repo-relative paths, never replace a junction with a directory, and create new archive directories through `scripts/benchmarks/run_storage.py`'s `ensure_archive_directory`. `scripts/repository_scope.py` enforces the 5 MiB blob limit and local-only paths.
 
 ## Simulation evidence
 
-- For physics changes, check the affected units, budgets/conservation laws, finite values, grid registration, and stage dependencies. Simulator and processed Earth benchmark grids are cell-centred `W x W/2`; raw sources retain their native registration until ingestion.
-- Separate deterministic correctness from physical validity. An unchanged seed or passing unit test does not establish improved climate skill; compare affected numerical fields and metrics on representative inputs when making that claim. A plausible map alone is insufficient.
-- Observed climate references are validation inputs, not hidden forcing for procedural worlds. Keep physical assumptions, approximations, and calibration choices explicit.
-- For simulation comparisons, record seed, parameters, code/input versions, grid geometry, duration/convergence criteria, and output provenance. Preserve numerical fields needed to reproduce the comparison; avoid overwriting prior run evidence.
-- Use `refs/source/` for downloads and receipts, `refs/processed/` for prepared inputs, `runs/` for simulation artifacts, and `out/` for builds and scratch work. The active `runs/registry/climate.json` supplies run IDs; retain its IDs and role unless its replacement is authorized.
-- Local bulk-data storage is configured in ignored `runs/storage.json`. Generated output directories and experiment archives use directory junctions into `D:/dev/undiscovered-worlds/`; keep code, references, builds, registry and active working files on C:. Preserve logical repo-relative paths. Before creating a new direct `runs/reports/<experiment>` archive, call `scripts/benchmarks/run_storage.py`'s `ensure_archive_directory`, or `configure-run-storage.ps1 -RelativePaths runs/reports/<experiment> -EnsureArchive`. The shared climate experiment runner does this automatically. Do not replace junctions with ordinary directories or migrate data while a writer is active.
-- Climate comparison reports use `scripts/benchmarks/climate_report.py` and the common `configs/climate-palettes.json` palette contract. Use numeric run IDs in new report controls, filenames and narratives; historical archive aliases are input adapters only. Keep visual maps/charts in HTML, hypotheses/findings/decisions in the generated Markdown report, and raw execution output in logs. Use the fixed global-balanced-v1 score for numerical baseline recommendations and honor user visual overrides. No historical wind run is permanently protected. See `docs/reference-guides/climate-reporting.md` for commands and definitions.
-
-## Verification commands
-
-Choose commands for the changed surface. The C++ and Python suite commands below are broader checks, not prerequisites for every edit.
-
-```powershell
-cmake --preset x64-debug
-cmake --build out/build/x64-Debug --config Debug --parallel 4
-ctest --test-dir out/build/x64-Debug -C Debug --output-on-failure -j 4
-uv run --offline --with numpy --with pillow python -m unittest discover -s tests/scripts
-uv run --offline python scripts/check-layout.py
-```
-
-- For targeted C++ work, build the affected test target with `--target` and select its registered test with CTest `-R`. `tests/CMakeLists.txt` and `tests/simulations/geology/plate_tectonics/CMakeLists.txt` define the names. `UW_BUILD_APP=OFF` supports numerical library/test work without desktop or CUDA discovery; see the headless build example in `README.md`.
-- For climate benchmark changes or claims about physical skill, use the relevant workflow in `runs/maps/climate/README.md`; preparation and analysis commands are in `refs/README.md` and `scripts/benchmarks/`. Keep resolution, inputs, and comparison settings explicit.
-- Tectonics has one current implementation in `src/simulations/geology/plate_tectonics`, shared by the app, workbench, mineral history and `tectonic_pipeline`. Use `tectonics::scenario::baseline()` from `tectonic_recipe.hpp`; `configs/tectonics-baseline.json` supplies its compiled defaults. Run seed 1 for new tectonic checks. No external tectonics dependency, alternate raster solver or cycle/restart workflow is supported. Archived runs are evidence only.
-- Run `uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless-modules/bin/tectonic_pipeline.exe` after changes to recipes, CLI or engine entry points. It checks default/explicit recipe equality, current column budgets and rejection of retired controls.
-- Headless checks do not establish GUI rendering, historical save compatibility, full Earth benchmark skill, or high-resolution performance. Verify the relevant boundary when it is part of the requested outcome.
+- Separate deterministic correctness from physical validity: an unchanged seed or a passing test does not show improved skill; compare the affected fields and metrics, and expect a visual review. Observed Earth data are validation inputs, never hidden forcing for procedural worlds; keep assumptions and calibrations explicit.
+- A refactor that must not change results is checked with seed-1 `world_pipeline --bundle` runs compared by `scripts/evaluation/compare_bundles.py`; a stage whose writes change keeps its declared access current (`--audit-access`, `scripts/evaluation/process_access.py`).
+- New modules get an evaluation profile in `configs/evaluation/<module>.json`, not their own benchmark scripts. Grids are cell-centred `W x W/2`. Record seed, parameters, code version, grid and inputs with every comparison; never overwrite prior run evidence. `runs/registry/<module>.json` supplies run IDs; use numeric IDs in new reports. The fixed global-balanced-v1 score gives the numerical recommendation; the user's visual verdict overrides it. Runs and references use the same palettes, `configs/climate-palettes.json` and `configs/tectonics-palettes.json`.

@@ -3,10 +3,12 @@
 
 #include <vector>
 
+#include "world/world_grid.hpp"
+
 class planet;
 
 // Derive physical potential layers after terrain, drainage and climate finish.
 // Scores preserve the existing 0..100 heuristic interpretation.
-void generatephysicalworldlayers(planet& world, const std::vector<std::vector<bool>>& shelves);
+void generatephysicalworldlayers(planet& world, const worldgrid<bool>& shelves);
 
 #endif

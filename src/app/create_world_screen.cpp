@@ -1,27 +1,8 @@
-#include <windows.h>
-#include <shellapi.h>
-
 #include "create_world_screen.hpp"
 
-CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, float currentversion, float latestversion)
+CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags)
 {
     CreateWorldScreenActions actions;
-
-    if (latestversion > currentversion)
-    {
-        ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 10, main_viewport->WorkPos.y + 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(224, 107), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Update available!", NULL, window_flags);
-        ImGui::Text("Click here to visit the website.");
-        ImGui::Text(" ");
-        ImGui::Text(" ");
-        ImGui::SameLine(95.0f);
-
-        if (ImGui::Button("Go"))
-            ShellExecuteW(0, 0, L"https://undiscoveredworlds.blogspot.com/2019/01/what-is-undiscovered-worlds.html", 0, 0, SW_SHOW);
-
-        ImGui::End();
-    }
 
     ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + 483, main_viewport->WorkPos.y + 206), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(266, 78), ImGuiCond_FirstUseEver);

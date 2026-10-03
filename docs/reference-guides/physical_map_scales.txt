@@ -1,0 +1,27 @@
+temperature_file=runs/maps/climate/air_temp/annual/s/{run_id}.png
+temperature_quantity=four-season mean surface air temperature
+temperature_units=degrees C
+temperature_range=-54 to 30 (values outside the range are clamped)
+temperature_water=black
+temperature_reference=refs/processed/climate/worldclim_tavg_monthly.uwclim (align grids; average Jan/Apr/Jul/Oct)
+precipitation_file=runs/fields/climate/rain/annual/s/{run_id}.tif
+precipitation_preview=runs/maps/climate/rain/annual/s/{run_id}.png
+precipitation_quantity=four-season mean monthly precipitation multiplied by 12
+precipitation_units=mm/year
+precipitation_sample=single-band IEEE float32 (unclamped physical values)
+precipitation_nodata=-9999.9
+precipitation_georeference=WGS84 EPSG:4326, global equirectangular, north-to-south
+precipitation_preview_range=0 to 6000 mm/year (values above the range are clamped)
+precipitation_water=included
+precipitation_reference=refs/processed/climate/imerg_precipitation_mm_year.tif
+circulation_preview=runs/maps/climate/<quantity>/<season>/<layer>/{run_id}.png (see benchmark_map_guide.txt)
+circulation_seasons=january,april,july,october
+circulation_maps=surface_wind_particles,upper_wind_particles,surface_wind_lic,upper_wind_lic,surface_wind_vector_error,upper_wind_vector_error,surface_wind_speed,surface_divergence,moisture_flux_convergence
+flow_visualization_enabled=1
+flow_visualization_max_horizontal_cells=1024
+flow_visualization_max_effective_cells=524288
+era5_reference_visualization=era5_v{renderer_version}_{width}x{height}_{season}_{surface|upper}_wind_{lic|particles}.png
+vector_error_range=0 to 25 m/s (values above the range are clamped)
+circulation_guide=circulation_map_guide.txt
+resolution=engine --resolution width; simulator and processed references use width x width/2 cell-centred grids; Earth and climate preparation select width independently and derive height=width/2
+display_ranges=fixed diagnostic export defaults, independent of chosen grid resolution

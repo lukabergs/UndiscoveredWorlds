@@ -7,6 +7,7 @@
 #include "tectonic_ocean_relief.hpp"
 #include "tectonic_margins.hpp"
 #include "tectonic_noise_pass.hpp"
+#include "tectonic_plumes.hpp"
 
 namespace tectonics::columns {
 inline constexpr double mantle_density = 3300;
@@ -34,6 +35,7 @@ struct Budget {
     double generated_ocean_kg = 0, subducted_ocean_kg = 0;
     double subducted_sediment_kg = 0;
     double generated_arc_kg = 0; // Subset of generated_ocean_kg; mantle-derived basalt.
+    double generated_plume_kg = 0; // Subset of generated_ocean_kg; mantle plume basalt.
     double river_eroded_kg = 0; // Subset of eroded_kg, routed downstream to sediment sinks.
     double eroded_kg = 0, deposited_kg = 0;
     double redistributed_continent_kg = 0;
@@ -55,7 +57,8 @@ public:
     void advance(const std::vector<Displacement>& velocity, double dt_myr,
                  double erosion_strength, double thermal_strength, double submarine_erosion_ratio = 1,
                  const margins::Forcing* forcing = nullptr, const margins::Parameters& margins = {},
-                 const noise_pass::Parameters& noise = {}, bool sediment_feedback = false);
+                 const noise_pass::Parameters& noise = {}, bool sediment_feedback = false,
+                 const plumes::Source* plume = nullptr);
     const std::vector<Cell>& cells() const { return cells_; }
     const Budget& budget() const { return budget_; }
 private:

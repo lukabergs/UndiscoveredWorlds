@@ -17,14 +17,14 @@ using namespace std;
 
 namespace
 {
-bool shelfedge(planet& world, std::vector<std::vector<bool>>& shelves, int x, int y);
+bool shelfedge(planet& world, worldgrid<bool>& shelves, int x, int y);
 void drawoceanridgeline(planet& world, int fromx, int fromy, int tox, int toy, std::vector<std::vector<int>>& array, int value);
 void createoceanfault(planet& world, int midx, int midy, int mindist, int maxdist, std::vector<std::vector<int>>& ridgesmap, std::vector<std::vector<bool>>& checked, int masksize);
 }
 
 // This creates mid-ocean ridges.
 
-void createoceanridges(planet& world, vector<vector<bool>>& shelves)
+void createoceanridges(planet& world, worldgrid<bool>& shelves)
 {
     int width = world.width();
     int height = world.height();
@@ -611,10 +611,7 @@ void createoceanridges(planet& world, vector<vector<bool>>& shelves)
 
     auto ridgeworkerstouse = [](int totalitems, int minitemsperworker)
     {
-        unsigned int workerstouse = std::thread::hardware_concurrency();
-
-        if (workerstouse == 0)
-            workerstouse = 4;
+        unsigned int workerstouse = rowworkers::concurrency();
 
         if (workerstouse <= 1 || totalitems <= minitemsperworker)
             return 1u;
@@ -1326,7 +1323,7 @@ namespace
 {
 // This checks to see whether the given point is on the edge of a continental shelf.
 
-bool shelfedge(planet& world, vector<vector<bool>>& shelves, int x, int y)
+bool shelfedge(planet& world, worldgrid<bool>& shelves, int x, int y)
 {
     if (shelves[x][y] == 0)
         return 0;
@@ -1912,7 +1909,7 @@ void createoceanfault(planet& world, int midx, int midy, int mindist, int maxdis
 
 // This creates the ocean trenches.
 
-void createoceantrenches(planet& world, vector<vector<bool>>& shelves)
+void createoceantrenches(planet& world, worldgrid<bool>& shelves)
 {
     int width = world.width();
     int height = world.height();

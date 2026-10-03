@@ -25,7 +25,8 @@ const vector<GenerationStageDefinition>& getgenerationstages()
 {
     static const vector<GenerationStageDefinition> generationstages =
     {
-        { GenerationStageId::plate_tectonics, "Plate tectonics", "Generate the starting global heightmap from the tectonic simulation seed and parameters.", GenerationStageDomain::terrain, true, false },
+        { GenerationStageId::geosphere_initialization, "Initial geosphere", "Create the starting crust, plates and elevation and the inherited deposit provinces from the tectonic seed and parameters.", GenerationStageDomain::terrain, true, false },
+        { GenerationStageId::plate_tectonics, "Plate tectonics", "Evolve the starting geosphere through the tectonic simulation to the global heightmap.", GenerationStageDomain::terrain, true, false },
         { GenerationStageId::terraforming, "Terraforming", "Adjust sea level and remap the world height distribution to reshape continents and ocean basins.", GenerationStageDomain::terrain, true, false },
         { GenerationStageId::inland_seas, "Inland seas", "Review connected inland seas and choose which ones to keep, fill, or drain.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::archipelagos, "Archipelagos", "Optionally add fragmented coastal islands and archipelago chains.", GenerationStageDomain::terrain, true, true },

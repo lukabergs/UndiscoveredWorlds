@@ -85,104 +85,147 @@ DeformingRegionType decodedeformingregiontype(std::uint8_t value)
 
 planet::planet() //constructor
 {
-    itswidth = 599;
-    itsheight = 299;
-    itstectonictimeoriginstep = 0;
-    itstectonictimemyr = 0.0f;
-    itstectonicdeltatimemyr = 0.0f;
-    itstectoniccyclecount = 0;
-    itstectonicplatecount = 0;
-    itstectonicsealevelm = 0;
-    resizeseasonalclimatefields();
+    body_.itswidth = 599;
+    body_.itsheight = 299;
+    geosphere_.itstectonictimeoriginstep = 0;
+    geosphere_.itstectonictimemyr = 0.0f;
+    geosphere_.itstectonicdeltatimemyr = 0.0f;
+    geosphere_.itstectonicplatecount = 0;
+    geosphere_.itstectonicsealevelm = 0;
+    resizegrids();
 }
 
 planet::~planet()
 {
 }
 
-void planet::resizeseasonalclimatefields()
+void planet::resizegrids()
 {
-    const auto resolution = climatecontext_.resolution;
-    const bool calibrate = climatecontext_.calibrateMeanTemperature;
-    climatecontext_ = {};
-    climatecontext_.resolution = resolution;
-    climatecontext_.calibrateMeanTemperature = calibrate;
-    const int cellcount = (itswidth + 1) * (itsheight + 1);
-
-    auto resizefield = [cellcount](std::array<std::vector<short>, CLIMATESEASONCOUNT>& field)
+    climate_.resize(body_.itswidth, body_.itsheight);
+    const int columns = body_.itswidth + 1;
+    const int rows = body_.itsheight + 1;
+    const bool resized = geosphere_.mapnom.columns() != columns || geosphere_.mapnom.rows() != rows;
+    hydrosphere_.rivermapdir.resize(columns, rows);
+    hydrosphere_.rivermapjan.resize(columns, rows);
+    hydrosphere_.rivermapjul.resize(columns, rows);
+    hydrosphere_.lakemap.resize(columns, rows);
+    geosphere_.roughnessmap.resize(columns, rows);
+    geosphere_.mountainridges.resize(columns, rows);
+    geosphere_.mountainheights.resize(columns, rows);
+    geosphere_.craterrims.resize(columns, rows);
+    geosphere_.cratercentres.resize(columns, rows);
+    geosphere_.mapnom.resize(columns, rows);
+    hydrosphere_.tidalmap.resize(columns, rows);
+    hydrosphere_.riftlakemapsurface.resize(columns, rows);
+    hydrosphere_.riftlakemapbed.resize(columns, rows);
+    hydrosphere_.lakestartmap.resize(columns, rows);
+    hydrosphere_.specials.resize(columns, rows);
+    geosphere_.geologicregimemap.resize(columns, rows);
+    geosphere_.tectonicconvergencemap.resize(columns, rows);
+    geosphere_.tectonicdivergencemap.resize(columns, rows);
+    geosphere_.tectonicshearmap.resize(columns, rows);
+    geosphere_.tectoniccrustagemyrmap.resize(columns, rows);
+    geosphere_.tectoniccrustthicknessmap.resize(columns, rows);
+    geosphere_.tectoniccrustclassmap.resize(columns, rows);
+    geosphere_.tectonicuplifttendencymap.resize(columns, rows);
+    geosphere_.tectonicsubsidencetendencymap.resize(columns, rows);
+    geosphere_.tectonicaccumulatedstrainmap.resize(columns, rows);
+    geosphere_.tectonicboundarytypemap.resize(columns, rows);
+    geosphere_.tectonicboundarydistancemap.resize(columns, rows);
+    geosphere_.tectonicboundarysegmentidmap.resize(columns, rows);
+    geosphere_.tectonicnearestboundaryidmap.resize(columns, rows);
+    geosphere_.tectonicboundaryhistorymap.resize(columns, rows);
+    geosphere_.tectonicdeformingregionidmap.resize(columns, rows);
+    geosphere_.tectonicdeformingregiontypemap.resize(columns, rows);
+    geosphere_.tectonicdeformationratemap.resize(columns, rows);
+    geosphere_.tectonicdeformationvelocityxmap.resize(columns, rows);
+    geosphere_.tectonicdeformationvelocityymap.resize(columns, rows);
+    hydrosphere_.basinclassmap.resize(columns, rows);
+    geosphere_.erosionpotentialmap.resize(columns, rows);
+    geosphere_.depositionpotentialmap.resize(columns, rows);
+    geosphere_.floodplainfertilitymap.resize(columns, rows);
+    geosphere_.metalorereservemap.resize(columns, rows);
+    geosphere_.placerreservemap.resize(columns, rows);
+    geosphere_.evaporitereservemap.resize(columns, rows);
+    geosphere_.volcanicreservemap.resize(columns, rows);
+    biosphere_.fisheryreservemap.resize(columns, rows);
+    anthroposphere_.settlement_suitability.resize(columns, rows);
+    anthroposphere_.social_infrastructure.resize(columns, rows);
+    anthroposphere_.agricultural_capacity.resize(columns, rows);
+    anthroposphere_.route_traffic.resize(columns, rows);
+    anthroposphere_.river_access.resize(columns, rows);
+    anthroposphere_.harbor_score.resize(columns, rows);
+    anthroposphere_.owner_settlement_id.resize(columns, rows);
+    anthroposphere_.owner_polity_id.resize(columns, rows);
+    geosphere_.extraelevmap.resize(columns, rows);
+    hydrosphere_.deltamapdir.resize(columns, rows);
+    hydrosphere_.deltamapjan.resize(columns, rows);
+    hydrosphere_.deltamapjul.resize(columns, rows);
+    geosphere_.islandmap.resize(columns, rows);
+    geosphere_.mountainislandmap.resize(columns, rows);
+    geosphere_.noisemap.resize(columns, rows);
+    geosphere_.oceanridgemap.resize(columns, rows);
+    geosphere_.oceanridgeheightmap.resize(columns, rows);
+    geosphere_.oceanriftmap.resize(columns, rows);
+    geosphere_.oceanridgeoffsetmap.resize(columns, rows);
+    geosphere_.oceanridgeanglemap.resize(columns, rows);
+    geosphere_.volcanomap.resize(columns, rows);
+    geosphere_.stratomap.resize(columns, rows);
+    presentation_.noshademap.resize(columns, rows);
+    presentation_.testmap.resize(columns, rows);
+    geosphere_.shelfmap.resize(columns, rows);
+    // Resized grids are zero; give them the values clear() sets, as the former
+    // fixed arrays kept them across size changes (imports size the world after clear()).
+    if (resized)
     {
-        for (std::vector<short>& season : field)
-            season.assign(cellcount, 0);
-    };
-    auto resizefloatfield = [cellcount](
-        std::array<std::vector<float>, CLIMATESEASONCOUNT>& field)
-    {
-        for (std::vector<float>& season : field)
-            season.assign(cellcount, 0.0f);
-    };
-
-    resizefield(seasonaltempmaps);
-    resizefield(seasonalrainmaps);
-    resizefloatfield(seasonalrainfloatmaps);
-    resizefield(seasonalpressuremaps);
-    resizefield(seasonaluwindmaps);
-    resizefield(seasonalvwindmaps);
-    resizefield(seasonalupperheightmaps);
-    resizefield(seasonalupperuwindmaps);
-    resizefield(seasonaluppervwindmaps);
-    resizefield(seasonalverticalvelocitymaps);
-    resizefield(seasonalcurrentumaps);
-    resizefield(seasonalcurrentvmaps);
-    resizefield(seasonalsstmaps);
-    resizefield(seasonalevaporationmaps);
-    resizefield(seasonalmaritimeinfluencemaps);
-    resizefield(seasonalmaritimethermalanomalymaps);
-    resizefield(seasonalmaritimefetchmaps);
-    resizefield(seasonalmoisturemaps);
-    resizefield(seasonalconvergencemaps);
-    resizefield(seasonalupliftmaps);
-    resizefield(seasonalsubsidencemaps);
+        geosphere_.geologicregimemap.fill(static_cast<std::uint8_t>(GeologicRegime::stable));
+        geosphere_.tectoniccrustclassmap.fill(static_cast<std::uint8_t>(CrustClass::none));
+        geosphere_.tectonicboundarytypemap.fill(static_cast<std::uint8_t>(BoundaryType::none));
+        geosphere_.tectonicdeformingregiontypemap.fill(static_cast<std::uint8_t>(DeformingRegionType::none));
+        hydrosphere_.basinclassmap.fill(static_cast<std::uint8_t>(BasinClass::none));
+        anthroposphere_.owner_settlement_id.fill(-1);
+        anthroposphere_.owner_polity_id.fill(-1);
+    }
 }
 
 void planet::cleartectonicprovenanceinternal()
 {
-    itstectonictimeoriginstep = 0;
-    itstectonictimemyr = 0.0f;
-    itstectonicdeltatimemyr = 0.0f;
-    itstectoniccyclecount = 0;
-    itstectonicplatecount = 0;
-    itstectonicsealevelm = 0;
-    tectonicboundarysegmentlist.clear();
-    tectonicdeformingregionlist.clear();
-    mineraldepositlist.clear();
-    mineralbudgetstate = {};
+    geosphere_.itstectonictimeoriginstep = 0;
+    geosphere_.itstectonictimemyr = 0.0f;
+    geosphere_.itstectonicdeltatimemyr = 0.0f;
+    geosphere_.itstectonicplatecount = 0;
+    geosphere_.itstectonicsealevelm = 0;
+    geosphere_.tectonicboundarysegmentlist.clear();
+    geosphere_.tectonicdeformingregionlist.clear();
+    geosphere_.mineraldepositlist.clear();
+    geosphere_.mineralbudgetstate = {};
 
-    parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+    parallelforrows(0, body_.itswidth, [&](int startx, int endx)
     {
         for (int i = startx; i <= endx; i++)
         {
-            for (int j = 0; j < ARRAYHEIGHT; j++)
+            for (int j = 0; j <= body_.itsheight; j++)
             {
-                geologicregimemap[i][j] = static_cast<std::uint8_t>(GeologicRegime::stable);
-                tectonicconvergencemap[i][j] = 0;
-                tectonicdivergencemap[i][j] = 0;
-                tectonicshearmap[i][j] = 0;
-                tectoniccrustagemyrmap[i][j] = 0.0f;
-                tectoniccrustthicknessmap[i][j] = 0.0f;
-                tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
-                tectonicuplifttendencymap[i][j] = 0.0f;
-                tectonicsubsidencetendencymap[i][j] = 0.0f;
-                tectonicaccumulatedstrainmap[i][j] = 0.0f;
-                tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
-                tectonicboundarydistancemap[i][j] = 0;
-                tectonicboundarysegmentidmap[i][j] = 0;
-                tectonicnearestboundaryidmap[i][j] = 0;
-                tectonicboundaryhistorymap[i][j] = 0.0f;
-                tectonicdeformingregionidmap[i][j] = 0;
-                tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
-                tectonicdeformationratemap[i][j] = 0.0f;
-                tectonicdeformationvelocityxmap[i][j] = 0.0f;
-                tectonicdeformationvelocityymap[i][j] = 0.0f;
+                geosphere_.geologicregimemap[i][j] = static_cast<std::uint8_t>(GeologicRegime::stable);
+                geosphere_.tectonicconvergencemap[i][j] = 0;
+                geosphere_.tectonicdivergencemap[i][j] = 0;
+                geosphere_.tectonicshearmap[i][j] = 0;
+                geosphere_.tectoniccrustagemyrmap[i][j] = 0.0f;
+                geosphere_.tectoniccrustthicknessmap[i][j] = 0.0f;
+                geosphere_.tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
+                geosphere_.tectonicuplifttendencymap[i][j] = 0.0f;
+                geosphere_.tectonicsubsidencetendencymap[i][j] = 0.0f;
+                geosphere_.tectonicaccumulatedstrainmap[i][j] = 0.0f;
+                geosphere_.tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
+                geosphere_.tectonicboundarydistancemap[i][j] = 0;
+                geosphere_.tectonicboundarysegmentidmap[i][j] = 0;
+                geosphere_.tectonicnearestboundaryidmap[i][j] = 0;
+                geosphere_.tectonicboundaryhistorymap[i][j] = 0.0f;
+                geosphere_.tectonicdeformingregionidmap[i][j] = 0;
+                geosphere_.tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
+                geosphere_.tectonicdeformationratemap[i][j] = 0.0f;
+                geosphere_.tectonicdeformationvelocityxmap[i][j] = 0.0f;
+                geosphere_.tectonicdeformationvelocityymap[i][j] = 0.0f;
             }
         }
     }, 64);
@@ -195,65 +238,18 @@ void planet::cleartectonicprovenance()
 
 const std::vector<std::uint8_t>& planet::weatheranomalystate() const
 {
-    return weatheranomalystatebytes;
+    return climate_.weatheranomalystate();
 }
 
 void planet::setweatheranomalystate(std::vector<std::uint8_t> state)
 {
-    weatheranomalystatebytes = std::move(state);
+    climate_.setweatheranomalystate(std::move(state));
 }
 
 bool planet::advanceweather(float elapsedSeconds, int horizontalCells)
 {
-    climateweather::ShallowWaterState state;
-    if (!weatheranomalystatebytes.empty() && !climateweather::deserializeState(weatheranomalystatebytes, state))
-        return false;
-    const int columns = horizontalCells > 0 ? std::clamp(horizontalCells, 8, 128) :
-        state.columns > 0 ? state.columns : tuning::climate::moistureadvection::weatherAnomalyHorizontalCells;
-    if (state.layers.empty()) state = climateweather::makeState(columns, columns / 2, 1, static_cast<std::uint64_t>(seed()));
-    else if (columns != state.columns) state = climateweather::resampleState(state, columns);
-    climateweather::ShallowWaterConfig config;
-    config.layerCount = static_cast<int>(state.layers.size());
-    config.rotationDirection = rotation() ? 1.0f : -1.0f;
-    config.gravityMetresPerSecondSquared *= std::max(0.05f, gravity());
-    config.lowerMeanDepthMetres = tuning::climate::moistureadvection::weatherAnomalyEquivalentDepthMetres;
-    config.lowerDragTimeSeconds = tuning::climate::moistureadvection::weatherAnomalyDragTimeDays * 86400.0f;
-    config.heightRelaxationTimeSeconds = tuning::climate::moistureadvection::weatherAnomalyRelaxationTimeDays * 86400.0f;
-    config.stochasticHeightForcingMetresPerSecond = tuning::climate::moistureadvection::weatherAnomalyStochasticHeightMps;
-    if (!std::isfinite(elapsedSeconds) || elapsedSeconds < 0.0f) return false;
-    float remaining = elapsedSeconds;
-    // Refresh the seasonally interpolated jets at least once per simulated day.
-    while (remaining > 0.0f)
-    {
-        const float step = std::min(remaining, 86400.0f);
-        const float season = static_cast<float>(std::fmod((state.elapsedSeconds + step * 0.5) / (365.25 * 86400.0), 1.0) * 4.0);
-        const int first = static_cast<int>(season), second = (first + 1) % CLIMATESEASONCOUNT;
-        const float fraction = season - first;
-        const auto background = [&](bool south, bool upper)
-        {
-            std::vector<float> raster((width() + 1) * (height() + 1));
-            for (int y = 0; y <= height(); ++y)
-                for (int x = 0; x <= width(); ++x)
-                {
-                    const auto wind = [&](int s) { return upper ? (south ? seasonaluppervwind(s, x, y) : seasonalupperuwind(s, x, y)) :
-                        (south ? seasonalvwind(s, x, y) : seasonaluwind(s, x, y)); };
-                    raster[y * (width() + 1) + x] = wind(first) * (1.0f - fraction) + wind(second) * fraction;
-                }
-            return climategrid::remapField(
-                width() + 1, height() + 1, raster, state.columns, state.rows);
-        };
-        climateweather::ShallowWaterForcing forcing;
-        for (int layer = 0; layer < config.layerCount; ++layer)
-        {
-            forcing.backgroundEastWindMps.push_back(background(false, layer > 0));
-            forcing.backgroundSouthWindMps.push_back(background(true, layer > 0));
-        }
-        const auto diagnostics = climateweather::advance(state, config, forcing, step);
-        if (!diagnostics.finite || !diagnostics.bounded) return false;
-        remaining -= step;
-    }
-    weatheranomalystatebytes = climateweather::serializeState(state);
-    return true;
+    climate_.bindinputs(climateinputsview());
+    return climate_.advanceweather(elapsedSeconds, horizontalCells);
 }
 
 void planet::writeshortvectordata(ofstream& outfile, const std::vector<short>& arr)
@@ -268,142 +264,13 @@ void planet::readshortvectordata(ifstream& infile, std::vector<short>& arr)
 
 void planet::syncseasonalclimatefromlegacy()
 {
-    bool hasexplicittransitiontemp = false;
-    bool hasexplicittransitionrain = false;
-
-    for (const short value : seasonaltempmaps[seasonapril])
-    {
-        if (value != 0)
-        {
-            hasexplicittransitiontemp = true;
-            break;
-        }
-    }
-
-    if (hasexplicittransitiontemp == false)
-    {
-        for (const short value : seasonaltempmaps[seasonoctober])
-        {
-            if (value != 0)
-            {
-                hasexplicittransitiontemp = true;
-                break;
-            }
-        }
-    }
-
-    for (const short value : seasonalrainmaps[seasonapril])
-    {
-        if (value != 0)
-        {
-            hasexplicittransitionrain = true;
-            break;
-        }
-    }
-
-    if (hasexplicittransitionrain == false)
-    {
-        for (const short value : seasonalrainmaps[seasonoctober])
-        {
-            if (value != 0)
-            {
-                hasexplicittransitionrain = true;
-                break;
-            }
-        }
-    }
-
-    for (int y = 0; y <= itsheight; y++)
-    {
-        for (int x = 0; x <= itswidth; x++)
-        {
-            const int index = seasonalclimateindex(x, y);
-
-            const float januarytemp = static_cast<float>(jantempmap[x][y]);
-            const float julytemp = static_cast<float>(jultempmap[x][y]);
-            const float januaryrain = static_cast<float>(janrainmap[x][y]);
-            const float julyrain = static_cast<float>(julrainmap[x][y]);
-
-            seasonaltempmaps[seasonjanuary][index] = static_cast<short>(jantempmap[x][y]);
-            seasonaltempmaps[seasonjuly][index] = static_cast<short>(jultempmap[x][y]);
-            seasonalrainmaps[seasonjanuary][index] = static_cast<short>(janrainmap[x][y]);
-            seasonalrainmaps[seasonjuly][index] = static_cast<short>(julrainmap[x][y]);
-
-            float summertemp = julytemp;
-            float wintertemp = januarytemp;
-
-            if (itsperihelion == 1)
-            {
-                summertemp = januarytemp;
-                wintertemp = julytemp;
-            }
-
-            const float winterstrength = 0.5f + itseccentricity * 0.5f;
-            const float summerstrength = 1.0f - winterstrength;
-            float transitiontemp = summertemp * summerstrength + wintertemp * winterstrength;
-
-            float fourseason = itstilt * 0.294592f - 2.45428f;
-            float lat = static_cast<float>(y);
-
-            if (y > itsheight / 2.0f)
-                lat = static_cast<float>(itsheight - y);
-
-            const float fourseasonstrength = lat / (static_cast<float>(itsheight) / 2.0f);
-            const float transitiontempdiff = (fourseason * fourseasonstrength) / 2.0f;
-
-            if (hasexplicittransitiontemp == false)
-            {
-                seasonaltempmaps[seasonapril][index] = static_cast<short>(transitiontemp + transitiontempdiff);
-                seasonaltempmaps[seasonoctober][index] = static_cast<short>(transitiontemp + transitiontempdiff);
-            }
-
-            if (hasexplicittransitionrain == false)
-            {
-                float apriljanfactor = 0.5f;
-                float apriljulfactor = 0.5f;
-
-                if (jultempmap[x][y] > jantempmap[x][y] && julrainmap[x][y] > janrainmap[x][y] && julyrain > 0.0f)
-                {
-                    const float monsoonfactor = 1.0f - januaryrain / julyrain;
-                    apriljanfactor = monsoonfactor * 0.9f;
-                    apriljulfactor = 1.0f - apriljanfactor;
-                }
-
-                if (jultempmap[x][y] < jantempmap[x][y] && julrainmap[x][y] < janrainmap[x][y] && januaryrain > 0.0f)
-                {
-                    const float monsoonfactor = 1.0f - julyrain / januaryrain;
-                    apriljanfactor = monsoonfactor * 0.7f;
-                    apriljulfactor = 1.0f - apriljanfactor;
-                }
-
-                seasonalrainmaps[seasonapril][index] = static_cast<short>(januaryrain * apriljanfactor + julyrain * apriljulfactor);
-
-                float octoberjanfactor = 0.5f;
-                float octoberjulfactor = 0.5f;
-
-                if (jultempmap[x][y] > jantempmap[x][y] && julrainmap[x][y] > janrainmap[x][y] && julyrain > 0.0f)
-                {
-                    const float monsoonfactor = 1.0f - januaryrain / julyrain;
-                    octoberjulfactor = monsoonfactor * 0.7f;
-                    octoberjanfactor = 1.0f - octoberjulfactor;
-                }
-
-                if (jultempmap[x][y] < jantempmap[x][y] && julrainmap[x][y] < janrainmap[x][y] && januaryrain > 0.0f)
-                {
-                    const float monsoonfactor = 1.0f - julyrain / januaryrain;
-                    octoberjulfactor = monsoonfactor * 0.9f;
-                    octoberjanfactor = 1.0f - octoberjulfactor;
-                }
-
-                seasonalrainmaps[seasonoctober][index] = static_cast<short>(januaryrain * octoberjanfactor + julyrain * octoberjulfactor);
-            }
-        }
-    }
+    climate_.bindinputs(climateinputsview());
+    climate_.syncseasonalclimatefromlegacy();
 }
 
 bool planet::outline(int x, int y) const
 {
-    if (y<1 || y>itsheight - 1)
+    if (y<1 || y>body_.itsheight - 1)
         return 0;
 
     if (sea(x, y) == 0)
@@ -426,7 +293,7 @@ bool planet::outline(int x, int y) const
 
 bool planet::coast(int x, int y) const
 {
-    if (y<1 || y>itsheight - 1 || x<0 || x>itswidth)
+    if (y<1 || y>body_.itsheight - 1 || x<0 || x>body_.itswidth)
         return 0;
 
     if (sea(x, y) == 1)
@@ -449,12 +316,12 @@ bool planet::coast(int x, int y) const
 
 void planet::longitude(int x, int &degrees, int &minutes, int &seconds, bool& negative) const
 {
-    if ( x<0 || x>itswidth)
+    if ( x<0 || x>body_.itswidth)
         return;
 
     float fx = (float)x;
 
-    float worldwidth = (float)itswidth + 1.0f;
+    float worldwidth = (float)body_.itswidth + 1.0f;
 
     float pixelsperlong = worldwidth / 360.0f;
 
@@ -491,14 +358,14 @@ void planet::longitude(int x, int &degrees, int &minutes, int &seconds, bool& ne
 
 void planet::latitude(int y, int& degrees, int& minutes, int& seconds, bool &negative) const
 {
-    if (y<0 || y>itsheight)
+    if (y<0 || y>body_.itsheight)
         return;
 
     bool hemisphere = 0; // 1 for southern
 
     float fy = (float)y;
 
-    float worldheight = (float)itsheight;
+    float worldheight = (float)body_.itsheight;
     float worldhalfheight = worldheight / 2.0f;
 
     float pixelsperlat = worldhalfheight / 90.0f;
@@ -535,7 +402,7 @@ int planet::reverselatitude(int lat) const
 {
     float flat = 90.0f - (float)lat;
 
-    float equator = (float)itsheight / 2.0f;
+    float equator = (float)body_.itsheight / 2.0f;
 
     float pixelsperlat = equator / 90.0f;
 
@@ -548,10 +415,13 @@ int planet::reverselatitude(int lat) const
 
 bool planet::seawrap(int x, int y) const
 {
+    UW_FIELD_READ(base_elevation);
+    UW_FIELD_READ(sea_level);
+    UW_FIELD_READ(lake_surface);
     x = wrapx(x);
     y = clipy(y);
 
-    if (mapnom[x][y] <= itssealevel && lakemap[x][y] == 0)
+    if (geosphere_.mapnom[x][y] <= geosphere_.itssealevel && hydrosphere_.lakemap[x][y] == 0)
         return 1;
 
     else
@@ -562,7 +432,7 @@ bool planet::outlinewrap(int x, int y) const
 {
     x = wrapx(x);
 
-    if (y<1 || y>itsheight - 1)
+    if (y<1 || y>body_.itsheight - 1)
         return 0;
 
     if (sea(x, y) == 0)
@@ -585,128 +455,126 @@ bool planet::outlinewrap(int x, int y) const
 
 int planet::mountainheightwrap(int x, int y) const
 {
+    UW_FIELD_READ(mountain_height);
     x = wrapx(x);
     y = clipy(y);
 
-    return mountainheights[x][y];
+    return geosphere_.mountainheights[x][y];
 }
 
 // Other public functions.
 
 void planet::clear()
 {
-    resizeseasonalclimatefields();
-    weatheranomalystatebytes.clear();
-    itstectonictimeoriginstep = 0;
-    itstectonictimemyr = 0.0f;
-    itstectonicdeltatimemyr = 0.0f;
-    itstectoniccyclecount = 0;
-    itstectonicplatecount = 0;
-    itstectonicsealevelm = 0;
-    tectonicboundarysegmentlist.clear();
-    tectonicdeformingregionlist.clear();
-    mineraldepositlist.clear();
-    mineralbudgetstate = {};
+    resizegrids();
+    climate_.weatheranomalystatebytes.clear();
+    geosphere_.itstectonictimeoriginstep = 0;
+    geosphere_.itstectonictimemyr = 0.0f;
+    geosphere_.itstectonicdeltatimemyr = 0.0f;
+    geosphere_.itstectonicplatecount = 0;
+    geosphere_.itstectonicsealevelm = 0;
+    geosphere_.tectonicboundarysegmentlist.clear();
+    geosphere_.tectonicdeformingregionlist.clear();
+    geosphere_.mineraldepositlist.clear();
+    geosphere_.mineralbudgetstate = {};
 
-    parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+    parallelforrows(0, body_.itswidth, [&](int startx, int endx)
     {
         for (int i = startx; i <= endx; i++) // Set all the maps to 0.
         {
-            for (int j = 0; j < ARRAYHEIGHT; j++)
+            for (int j = 0; j <= body_.itsheight; j++)
             {
-                jantempmap[i][j] = 0;
-                jultempmap[i][j] = 0;
-                climatemap[i][j] = 0;
-                biomemap[i][j] = 0;
-                janrainmap[i][j] = 0;
-                julrainmap[i][j] = 0;
-                janmountainrainmap[i][j] = 0;
-                julmountainrainmap[i][j] = 0;
-                janmountainraindirmap[i][j] = 0;
-                julmountainraindirmap[i][j] = 0;
-                seaicemap[i][j] = 0;
-                rivermapdir[i][j] = 0;
-                rivermapjan[i][j] = 0;
-                rivermapjul[i][j] = 0;
-                windmap[i][j] = 0;
-                lakemap[i][j] = 0;
-                roughnessmap[i][j] = 0;
-                mountainridges[i][j] = 0;
-                mountainheights[i][j] = 0;
-                craterrims[i][j] = 0;
-                cratercentres[i][j] = 0;
-                mapnom[i][j] = 0;
-                tidalmap[i][j] = 0;
-                riftlakemapsurface[i][j] = 0;
-                riftlakemapbed[i][j] = 0;
-                specials[i][j] = 0;
-                geologicregimemap[i][j] = static_cast<std::uint8_t>(GeologicRegime::stable);
-                tectonicconvergencemap[i][j] = 0;
-                tectonicdivergencemap[i][j] = 0;
-                tectonicshearmap[i][j] = 0;
-                tectoniccrustagemyrmap[i][j] = 0.0f;
-                tectoniccrustthicknessmap[i][j] = 0.0f;
-                tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
-                tectonicuplifttendencymap[i][j] = 0.0f;
-                tectonicsubsidencetendencymap[i][j] = 0.0f;
-                tectonicaccumulatedstrainmap[i][j] = 0.0f;
-                tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
-                tectonicboundarydistancemap[i][j] = 0;
-                tectonicboundarysegmentidmap[i][j] = 0;
-                tectonicnearestboundaryidmap[i][j] = 0;
-                tectonicboundaryhistorymap[i][j] = 0.0f;
-                tectonicdeformingregionidmap[i][j] = 0;
-                tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
-                tectonicdeformationratemap[i][j] = 0.0f;
-                tectonicdeformationvelocityxmap[i][j] = 0.0f;
-                tectonicdeformationvelocityymap[i][j] = 0.0f;
-                basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
-                erosionpotentialmap[i][j] = 0;
-                depositionpotentialmap[i][j] = 0;
-                floodplainfertilitymap[i][j] = 0;
-                metalorereservemap[i][j] = 0;
-                placerreservemap[i][j] = 0;
-                evaporitereservemap[i][j] = 0;
-                volcanicreservemap[i][j] = 0;
-                fisheryreservemap[i][j] = 0;
-                settlement_suitability[i][j] = 0;
-                social_infrastructure[i][j] = 0;
-                agricultural_capacity[i][j] = 0;
-                route_traffic[i][j] = 0;
-                river_access[i][j] = 0;
-                harbor_score[i][j] = 0;
-                owner_settlement_id[i][j] = -1;
-                owner_polity_id[i][j] = -1;
-                extraelevmap[i][j] = 0;
-                deltamapdir[i][j] = 0;
-                deltamapjan[i][j] = 0;
-                deltamapjul[i][j] = 0;
-                oceanridgemap[i][j] = 0;
-                oceanridgeheightmap[i][j] = 0;
-                oceanriftmap[i][j] = 0;
-                oceanridgeoffsetmap[i][j] = 0;
-                islandmap[i][j] = 0;
-                noshademap[i][j] = 0;
-                mountainislandmap[i][j] = 0;
-                volcanomap[i][j] = 0;
-                stratomap[i][j] = 0;
-                noisemap[i][j] = 0;
-                testmap[i][j] = 0;
-            }
-
-            for (int j = 0; j < 6; j++)
-            {
-                horselats[i][j] = 0;
+                climate_.jantempmap[i][j] = 0;
+                climate_.jultempmap[i][j] = 0;
+                climate_.climatemap[i][j] = 0;
+                climate_.biomemap[i][j] = 0;
+                climate_.janrainmap[i][j] = 0;
+                climate_.julrainmap[i][j] = 0;
+                climate_.janmountainrainmap[i][j] = 0;
+                climate_.julmountainrainmap[i][j] = 0;
+                climate_.janmountainraindirmap[i][j] = 0;
+                climate_.julmountainraindirmap[i][j] = 0;
+                climate_.seaicemap[i][j] = 0;
+                hydrosphere_.rivermapdir[i][j] = 0;
+                hydrosphere_.rivermapjan[i][j] = 0;
+                hydrosphere_.rivermapjul[i][j] = 0;
+                climate_.windmap[i][j] = 0;
+                hydrosphere_.lakemap[i][j] = 0;
+                geosphere_.roughnessmap[i][j] = 0;
+                geosphere_.mountainridges[i][j] = 0;
+                geosphere_.mountainheights[i][j] = 0;
+                geosphere_.craterrims[i][j] = 0;
+                geosphere_.cratercentres[i][j] = 0;
+                geosphere_.mapnom[i][j] = 0;
+                hydrosphere_.tidalmap[i][j] = 0;
+                hydrosphere_.riftlakemapsurface[i][j] = 0;
+                hydrosphere_.riftlakemapbed[i][j] = 0;
+                hydrosphere_.specials[i][j] = 0;
+                geosphere_.geologicregimemap[i][j] = static_cast<std::uint8_t>(GeologicRegime::stable);
+                geosphere_.tectonicconvergencemap[i][j] = 0;
+                geosphere_.tectonicdivergencemap[i][j] = 0;
+                geosphere_.tectonicshearmap[i][j] = 0;
+                geosphere_.tectoniccrustagemyrmap[i][j] = 0.0f;
+                geosphere_.tectoniccrustthicknessmap[i][j] = 0.0f;
+                geosphere_.tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
+                geosphere_.tectonicuplifttendencymap[i][j] = 0.0f;
+                geosphere_.tectonicsubsidencetendencymap[i][j] = 0.0f;
+                geosphere_.tectonicaccumulatedstrainmap[i][j] = 0.0f;
+                geosphere_.tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
+                geosphere_.tectonicboundarydistancemap[i][j] = 0;
+                geosphere_.tectonicboundarysegmentidmap[i][j] = 0;
+                geosphere_.tectonicnearestboundaryidmap[i][j] = 0;
+                geosphere_.tectonicboundaryhistorymap[i][j] = 0.0f;
+                geosphere_.tectonicdeformingregionidmap[i][j] = 0;
+                geosphere_.tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
+                geosphere_.tectonicdeformationratemap[i][j] = 0.0f;
+                geosphere_.tectonicdeformationvelocityxmap[i][j] = 0.0f;
+                geosphere_.tectonicdeformationvelocityymap[i][j] = 0.0f;
+                hydrosphere_.basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
+                geosphere_.erosionpotentialmap[i][j] = 0;
+                geosphere_.depositionpotentialmap[i][j] = 0;
+                geosphere_.floodplainfertilitymap[i][j] = 0;
+                geosphere_.metalorereservemap[i][j] = 0;
+                geosphere_.placerreservemap[i][j] = 0;
+                geosphere_.evaporitereservemap[i][j] = 0;
+                geosphere_.volcanicreservemap[i][j] = 0;
+                biosphere_.fisheryreservemap[i][j] = 0;
+                anthroposphere_.settlement_suitability[i][j] = 0;
+                anthroposphere_.social_infrastructure[i][j] = 0;
+                anthroposphere_.agricultural_capacity[i][j] = 0;
+                anthroposphere_.route_traffic[i][j] = 0;
+                anthroposphere_.river_access[i][j] = 0;
+                anthroposphere_.harbor_score[i][j] = 0;
+                anthroposphere_.owner_settlement_id[i][j] = -1;
+                anthroposphere_.owner_polity_id[i][j] = -1;
+                geosphere_.extraelevmap[i][j] = 0;
+                hydrosphere_.deltamapdir[i][j] = 0;
+                hydrosphere_.deltamapjan[i][j] = 0;
+                hydrosphere_.deltamapjul[i][j] = 0;
+                geosphere_.oceanridgemap[i][j] = 0;
+                geosphere_.oceanridgeheightmap[i][j] = 0;
+                geosphere_.oceanriftmap[i][j] = 0;
+                geosphere_.oceanridgeoffsetmap[i][j] = 0;
+                geosphere_.islandmap[i][j] = 0;
+                presentation_.noshademap[i][j] = 0;
+                geosphere_.mountainislandmap[i][j] = 0;
+                geosphere_.volcanomap[i][j] = 0;
+                geosphere_.stratomap[i][j] = 0;
+                geosphere_.noisemap[i][j] = 0;
+                presentation_.testmap[i][j] = 0;
             }
         }
     }, 64);
+    geosphere_.shelfmap.fill(false);
+    // Subtropical-high rows span the full 2048-column capacity in saves.
+    climate_.horselats.fill(0);
 
     for (int i = 0; i < MAXCRATERS; i++)
     {
-        cratercentreslist[i].w = 0;
-        cratercentreslist[i].x = 0;
-        cratercentreslist[i].y = 0;
-        cratercentreslist[i].z = 0;
+        geosphere_.cratercentreslist[i].w = 0;
+        geosphere_.cratercentreslist[i].x = 0;
+        geosphere_.cratercentreslist[i].y = 0;
+        geosphere_.cratercentreslist[i].z = 0;
     }
 
     clearsocialstate();
@@ -714,98 +582,98 @@ void planet::clear()
 
 void planet::smoothnom(int amount)
 {
-    smooth(mapnom, amount, 1, 1);
+    smooth(geosphere_.mapnom, amount, 1, 1);
 }
 
 void planet::smoothextraelev(int amount)
 {
-    smoothoverland(extraelevmap, amount, 0);
+    smoothoverland(geosphere_.extraelevmap, amount, 0);
 }
 
 void planet::shiftterrain(int offset)
 {
     // Map columns move left by the offset; deposits move with them.
-    const double columns = static_cast<double>(itswidth + 1);
-    for (mineralsystems::Deposit& deposit : mineraldepositlist)
+    const double columns = static_cast<double>(body_.itswidth + 1);
+    for (mineralsystems::Deposit& deposit : geosphere_.mineraldepositlist)
     {
         double u = std::fmod(deposit.u - offset / columns, 1.0);
         u = u < 0.0 ? u + 1.0 : u;
         deposit.u = u >= 1.0 ? 0.0 : u;
     }
 
-    shift(mapnom, offset);
-    shift(geologicregimemap, offset);
-    shift(tectonicconvergencemap, offset);
-    shift(tectonicdivergencemap, offset);
-    shift(tectonicshearmap, offset);
-    shift(tectoniccrustagemyrmap, offset);
-    shift(tectoniccrustthicknessmap, offset);
-    shift(tectoniccrustclassmap, offset);
-    shift(tectonicuplifttendencymap, offset);
-    shift(tectonicsubsidencetendencymap, offset);
-    shift(tectonicaccumulatedstrainmap, offset);
-    shift(tectonicboundarytypemap, offset);
-    shift(tectonicboundarydistancemap, offset);
-    shift(tectonicboundarysegmentidmap, offset);
-    shift(tectonicnearestboundaryidmap, offset);
-    shift(tectonicboundaryhistorymap, offset);
-    shift(tectonicdeformingregionidmap, offset);
-    shift(tectonicdeformingregiontypemap, offset);
-    shift(tectonicdeformationratemap, offset);
-    shift(tectonicdeformationvelocityxmap, offset);
-    shift(tectonicdeformationvelocityymap, offset);
-    shift(basinclassmap, offset);
-    shift(erosionpotentialmap, offset);
-    shift(depositionpotentialmap, offset);
-    shift(floodplainfertilitymap, offset);
-    shift(metalorereservemap, offset);
-    shift(placerreservemap, offset);
-    shift(evaporitereservemap, offset);
-    shift(volcanicreservemap, offset);
-    shift(fisheryreservemap, offset);
-    shift(settlement_suitability, offset);
-    shift(social_infrastructure, offset);
-    shift(agricultural_capacity, offset);
-    shift(route_traffic, offset);
-    shift(river_access, offset);
-    shift(harbor_score, offset);
-    shift(owner_settlement_id, offset);
-    shift(owner_polity_id, offset);
-    shift(mountainheights, offset);
-    shift(mountainridges, offset);
-    shift(craterrims, offset);
-    shift(cratercentres, offset);
-    shift(extraelevmap, offset);
-    shift(oceanridgemap, offset);
-    shift(oceanridgeheightmap, offset);
-    shift(oceanriftmap, offset);
-    shift(oceanridgeanglemap, offset);
-    shift(mountainislandmap, offset);
-    shift(noshademap, offset);
-    shift(volcanomap, offset);
-    shift(stratomap, offset);
-    shift(testmap, offset);
+    shift(geosphere_.mapnom, offset);
+    shift(geosphere_.geologicregimemap, offset);
+    shift(geosphere_.tectonicconvergencemap, offset);
+    shift(geosphere_.tectonicdivergencemap, offset);
+    shift(geosphere_.tectonicshearmap, offset);
+    shift(geosphere_.tectoniccrustagemyrmap, offset);
+    shift(geosphere_.tectoniccrustthicknessmap, offset);
+    shift(geosphere_.tectoniccrustclassmap, offset);
+    shift(geosphere_.tectonicuplifttendencymap, offset);
+    shift(geosphere_.tectonicsubsidencetendencymap, offset);
+    shift(geosphere_.tectonicaccumulatedstrainmap, offset);
+    shift(geosphere_.tectonicboundarytypemap, offset);
+    shift(geosphere_.tectonicboundarydistancemap, offset);
+    shift(geosphere_.tectonicboundarysegmentidmap, offset);
+    shift(geosphere_.tectonicnearestboundaryidmap, offset);
+    shift(geosphere_.tectonicboundaryhistorymap, offset);
+    shift(geosphere_.tectonicdeformingregionidmap, offset);
+    shift(geosphere_.tectonicdeformingregiontypemap, offset);
+    shift(geosphere_.tectonicdeformationratemap, offset);
+    shift(geosphere_.tectonicdeformationvelocityxmap, offset);
+    shift(geosphere_.tectonicdeformationvelocityymap, offset);
+    shift(hydrosphere_.basinclassmap, offset);
+    shift(geosphere_.erosionpotentialmap, offset);
+    shift(geosphere_.depositionpotentialmap, offset);
+    shift(geosphere_.floodplainfertilitymap, offset);
+    shift(geosphere_.metalorereservemap, offset);
+    shift(geosphere_.placerreservemap, offset);
+    shift(geosphere_.evaporitereservemap, offset);
+    shift(geosphere_.volcanicreservemap, offset);
+    shift(biosphere_.fisheryreservemap, offset);
+    shift(anthroposphere_.settlement_suitability, offset);
+    shift(anthroposphere_.social_infrastructure, offset);
+    shift(anthroposphere_.agricultural_capacity, offset);
+    shift(anthroposphere_.route_traffic, offset);
+    shift(anthroposphere_.river_access, offset);
+    shift(anthroposphere_.harbor_score, offset);
+    shift(anthroposphere_.owner_settlement_id, offset);
+    shift(anthroposphere_.owner_polity_id, offset);
+    shift(geosphere_.mountainheights, offset);
+    shift(geosphere_.mountainridges, offset);
+    shift(geosphere_.craterrims, offset);
+    shift(geosphere_.cratercentres, offset);
+    shift(geosphere_.extraelevmap, offset);
+    shift(geosphere_.oceanridgemap, offset);
+    shift(geosphere_.oceanridgeheightmap, offset);
+    shift(geosphere_.oceanriftmap, offset);
+    shift(geosphere_.oceanridgeanglemap, offset);
+    shift(geosphere_.mountainislandmap, offset);
+    shift(presentation_.noshademap, offset);
+    shift(geosphere_.volcanomap, offset);
+    shift(geosphere_.stratomap, offset);
+    shift(presentation_.testmap, offset);
 
-    for (int i = 0; i < itscraterno; i++)
+    for (int i = 0; i < geosphere_.itscraterno; i++)
     {
-        cratercentreslist[i].x = cratercentreslist[i].x - offset;
+        geosphere_.cratercentreslist[i].x = geosphere_.cratercentreslist[i].x - offset;
 
-        if (cratercentreslist[i].x < 0)
-            cratercentreslist[i].x = cratercentreslist[i].x + itswidth;
+        if (geosphere_.cratercentreslist[i].x < 0)
+            geosphere_.cratercentreslist[i].x = geosphere_.cratercentreslist[i].x + body_.itswidth;
     }
 
-    for (Settlement& settlement : settlementlist)
+    for (Settlement& settlement : anthroposphere_.settlementlist)
     {
         settlement.x -= offset;
 
         while (settlement.x < 0)
-            settlement.x += itswidth;
+            settlement.x += body_.itswidth;
 
-        while (settlement.x > itswidth)
-            settlement.x -= itswidth;
+        while (settlement.x > body_.itswidth)
+            settlement.x -= body_.itswidth;
     }
 
-    const float worldspan = static_cast<float>(itswidth + 1);
+    const float worldspan = static_cast<float>(body_.itswidth + 1);
     const float offsetf = static_cast<float>(offset);
     const auto shiftcentroidx = [worldspan, offsetf](float x) -> float
     {
@@ -817,17 +685,11 @@ void planet::shiftterrain(int offset)
         return shifted;
     };
 
-    for (TectonicBoundarySegment& segment : tectonicboundarysegmentlist)
+    for (TectonicBoundarySegment& segment : geosphere_.tectonicboundarysegmentlist)
         segment.centroidX = shiftcentroidx(segment.centroidX);
 
-    for (TectonicDeformingRegion& region : tectonicdeformingregionlist)
+    for (TectonicDeformingRegion& region : geosphere_.tectonicdeformingregionlist)
         region.centroidX = shiftcentroidx(region.centroidX);
-}
-
-void planet::smoothrainmaps(int amount)
-{
-    smoothoverland(janrainmap, amount, 0);
-    smoothoverland(julrainmap, amount, 0);
 }
 
 void planet::setmaxriverflow()
@@ -835,9 +697,9 @@ void planet::setmaxriverflow()
     int largest = 0;
     int current = 0;
 
-    for (int i = 0; i <= itswidth; i++)
+    for (int i = 0; i <= body_.itswidth; i++)
     {
-        for (int j = 0; j <= itsheight; j++)
+        for (int j = 0; j <= body_.itsheight; j++)
         {
             current = riveraveflow(i, j);
 
@@ -845,7 +707,7 @@ void planet::setmaxriverflow()
                 largest = current;
         }
     }
-    itsmaxriverflow = largest;
+    hydrosphere_.itsmaxriverflow = largest;
 }
 
 void planet::saveworld(string filename)
@@ -857,249 +719,249 @@ void planet::saveworld(string filename)
     outfile.open(filename, ios::out);
 
     writevariable(outfile, itssaveversion);
-    writevariable(outfile, itssize);
-    writevariable(outfile, itswidth);
-    writevariable(outfile, itsheight);
-    writevariable(outfile, itsseed);
-    writevariable(outfile, itsrotation);
-    writevariable(outfile, itstilt);
-    writevariable(outfile, itseccentricity);
-    writevariable(outfile, itsperihelion);
-    writevariable(outfile, itsgravity);
-    writevariable(outfile, itslunar);
-    writevariable(outfile, itstempdecrease);
-    writevariable(outfile, itsnorthpolaradjust);
-    writevariable(outfile, itssouthpolaradjust);
-    writevariable(outfile, itsaveragetemp);
-    writevariable(outfile, itsnorthpolartemp);
-    writevariable(outfile, itssouthpolartemp);
-    writevariable(outfile, itseqtemp);
-    writevariable(outfile, itswaterpickup);
-    writevariable(outfile, itsriverfactor);
-    writevariable(outfile, itsriverlandreduce);
-    writevariable(outfile, itsestuarylimit);
-    writevariable(outfile, itsglacialtemp);
-    writevariable(outfile, itsglaciertemp);
-    writevariable(outfile, itsmountainreduce);
-    writevariable(outfile, itsclimateno);
-    writevariable(outfile, itsmaxheight);
-    writevariable(outfile, itssealevel);
-    writevariable(outfile, itslandtotal);
-    writevariable(outfile, itsseatotal);
-    writevariable(outfile, itscraterno);
+    writevariable(outfile, body_.itssize);
+    writevariable(outfile, body_.itswidth);
+    writevariable(outfile, body_.itsheight);
+    writevariable(outfile, body_.itsseed);
+    writevariable(outfile, body_.itsrotation);
+    writevariable(outfile, body_.itstilt);
+    writevariable(outfile, body_.itseccentricity);
+    writevariable(outfile, body_.itsperihelion);
+    writevariable(outfile, body_.itsgravity);
+    writevariable(outfile, body_.itslunar);
+    writevariable(outfile, atmosphere_.itstempdecrease);
+    writevariable(outfile, atmosphere_.itsnorthpolaradjust);
+    writevariable(outfile, atmosphere_.itssouthpolaradjust);
+    writevariable(outfile, atmosphere_.itsaveragetemp);
+    writevariable(outfile, climate_.itsnorthpolartemp);
+    writevariable(outfile, climate_.itssouthpolartemp);
+    writevariable(outfile, climate_.itseqtemp);
+    writevariable(outfile, atmosphere_.itswaterpickup);
+    writevariable(outfile, hydrosphere_.itsriverfactor);
+    writevariable(outfile, hydrosphere_.itsriverlandreduce);
+    writevariable(outfile, hydrosphere_.itsestuarylimit);
+    writevariable(outfile, cryosphere_.itsglacialtemp);
+    writevariable(outfile, cryosphere_.itsglaciertemp);
+    writevariable(outfile, geosphere_.itsmountainreduce);
+    writevariable(outfile, atmosphere_.itsclimateno);
+    writevariable(outfile, geosphere_.itsmaxheight);
+    writevariable(outfile, geosphere_.itssealevel);
+    writevariable(outfile, geosphere_.itslandtotal);
+    writevariable(outfile, geosphere_.itsseatotal);
+    writevariable(outfile, geosphere_.itscraterno);
 
-    writevariable(outfile, itslandshading);
-    writevariable(outfile, itslakeshading);
-    writevariable(outfile, itsseashading);
-    writevariable(outfile, itsshadingdir);
-    writevariable(outfile, itssnowchange);
-    writevariable(outfile, itsseaiceappearance);
-    writevariable(outfile, itslandmarbling);
-    writevariable(outfile, itslakemarbling);
-    writevariable(outfile, itsseamarbling);
-    writevariable(outfile, itsminriverflowglobal);
-    writevariable(outfile, itsminriverflowregional);
-    writevariable(outfile, itsmangroves);
-    writevariable(outfile, itscolourcliffs);
-    writevariable(outfile, itsseaice1);
-    writevariable(outfile, itsseaice2);
-    writevariable(outfile, itsseaice3);
-    writevariable(outfile, itsocean1);
-    writevariable(outfile, itsocean2);
-    writevariable(outfile, itsocean3);
-    writevariable(outfile, itsdeepocean1);
-    writevariable(outfile, itsdeepocean2);
-    writevariable(outfile, itsdeepocean3);
-    writevariable(outfile, itsbase1);
-    writevariable(outfile, itsbase2);
-    writevariable(outfile, itsbase3);
-    writevariable(outfile, itsbasetemp1);
-    writevariable(outfile, itsbasetemp2);
-    writevariable(outfile, itsbasetemp3);
-    writevariable(outfile, itshighbase1);
-    writevariable(outfile, itshighbase2);
-    writevariable(outfile, itshighbase3);
-    writevariable(outfile, itsdesert1);
-    writevariable(outfile, itsdesert2);
-    writevariable(outfile, itsdesert3);
-    writevariable(outfile, itshighdesert1);
-    writevariable(outfile, itshighdesert2);
-    writevariable(outfile, itshighdesert3);
-    writevariable(outfile, itscolddesert1);
-    writevariable(outfile, itscolddesert2);
-    writevariable(outfile, itscolddesert3);
-    writevariable(outfile, itsgrass1);
-    writevariable(outfile, itsgrass2);
-    writevariable(outfile, itsgrass3);
-    writevariable(outfile, itscold1);
-    writevariable(outfile, itscold2);
-    writevariable(outfile, itscold3);
-    writevariable(outfile, itstundra1);
-    writevariable(outfile, itstundra2);
-    writevariable(outfile, itstundra3);
-    writevariable(outfile, itseqtundra1);
-    writevariable(outfile, itseqtundra2);
-    writevariable(outfile, itseqtundra3);
-    writevariable(outfile, itssaltpan1);
-    writevariable(outfile, itssaltpan2);
-    writevariable(outfile, itssaltpan3);
-    writevariable(outfile, itserg1);
-    writevariable(outfile, itserg2);
-    writevariable(outfile, itserg3);
-    writevariable(outfile, itswetlands1);
-    writevariable(outfile, itswetlands2);
-    writevariable(outfile, itswetlands3);
-    writevariable(outfile, itslake1);
-    writevariable(outfile, itslake2);
-    writevariable(outfile, itslake3);
-    writevariable(outfile, itsriver1);
-    writevariable(outfile, itsriver2);
-    writevariable(outfile, itsriver3);
-    writevariable(outfile, itsglacier1);
-    writevariable(outfile, itsglacier2);
-    writevariable(outfile, itsglacier3);
-    writevariable(outfile, itssand1);
-    writevariable(outfile, itssand2);
-    writevariable(outfile, itssand3);
-    writevariable(outfile, itsmud1);
-    writevariable(outfile, itsmud2);
-    writevariable(outfile, itsmud3);
-    writevariable(outfile, itsshingle1);
-    writevariable(outfile, itsshingle2);
-    writevariable(outfile, itsshingle3);
-    writevariable(outfile, itsmangrove1);
-    writevariable(outfile, itsmangrove2);
-    writevariable(outfile, itsmangrove3);
-    writevariable(outfile, itshighlight1);
-    writevariable(outfile, itshighlight2);
-    writevariable(outfile, itshighlight3);
-    writevariable(outfile, itsshowmapoutline);
-    writevariable(outfile, itsoutline1);
-    writevariable(outfile, itsoutline2);
-    writevariable(outfile, itsoutline3);
-    writevariable(outfile, itselevationlow1);
-    writevariable(outfile, itselevationlow2);
-    writevariable(outfile, itselevationlow3);
-    writevariable(outfile, itselevationhigh1);
-    writevariable(outfile, itselevationhigh2);
-    writevariable(outfile, itselevationhigh3);
-    writevariable(outfile, itstemperaturecold1);
-    writevariable(outfile, itstemperaturecold2);
-    writevariable(outfile, itstemperaturecold3);
-    writevariable(outfile, itstemperaturetemperate1);
-    writevariable(outfile, itstemperaturetemperate2);
-    writevariable(outfile, itstemperaturetemperate3);
-    writevariable(outfile, itstemperaturehot1);
-    writevariable(outfile, itstemperaturehot2);
-    writevariable(outfile, itstemperaturehot3);
-    writevariable(outfile, itsprecipitationdry1);
-    writevariable(outfile, itsprecipitationdry2);
-    writevariable(outfile, itsprecipitationdry3);
-    writevariable(outfile, itsprecipitationwet1);
-    writevariable(outfile, itsprecipitationwet2);
-    writevariable(outfile, itsprecipitationwet3);
+    writevariable(outfile, presentation_.itslandshading);
+    writevariable(outfile, presentation_.itslakeshading);
+    writevariable(outfile, presentation_.itsseashading);
+    writevariable(outfile, presentation_.itsshadingdir);
+    writevariable(outfile, presentation_.itssnowchange);
+    writevariable(outfile, presentation_.itsseaiceappearance);
+    writevariable(outfile, presentation_.itslandmarbling);
+    writevariable(outfile, presentation_.itslakemarbling);
+    writevariable(outfile, presentation_.itsseamarbling);
+    writevariable(outfile, presentation_.itsminriverflowglobal);
+    writevariable(outfile, presentation_.itsminriverflowregional);
+    writevariable(outfile, presentation_.itsmangroves);
+    writevariable(outfile, presentation_.itscolourcliffs);
+    writevariable(outfile, presentation_.itsseaice1);
+    writevariable(outfile, presentation_.itsseaice2);
+    writevariable(outfile, presentation_.itsseaice3);
+    writevariable(outfile, presentation_.itsocean1);
+    writevariable(outfile, presentation_.itsocean2);
+    writevariable(outfile, presentation_.itsocean3);
+    writevariable(outfile, presentation_.itsdeepocean1);
+    writevariable(outfile, presentation_.itsdeepocean2);
+    writevariable(outfile, presentation_.itsdeepocean3);
+    writevariable(outfile, presentation_.itsbase1);
+    writevariable(outfile, presentation_.itsbase2);
+    writevariable(outfile, presentation_.itsbase3);
+    writevariable(outfile, presentation_.itsbasetemp1);
+    writevariable(outfile, presentation_.itsbasetemp2);
+    writevariable(outfile, presentation_.itsbasetemp3);
+    writevariable(outfile, presentation_.itshighbase1);
+    writevariable(outfile, presentation_.itshighbase2);
+    writevariable(outfile, presentation_.itshighbase3);
+    writevariable(outfile, presentation_.itsdesert1);
+    writevariable(outfile, presentation_.itsdesert2);
+    writevariable(outfile, presentation_.itsdesert3);
+    writevariable(outfile, presentation_.itshighdesert1);
+    writevariable(outfile, presentation_.itshighdesert2);
+    writevariable(outfile, presentation_.itshighdesert3);
+    writevariable(outfile, presentation_.itscolddesert1);
+    writevariable(outfile, presentation_.itscolddesert2);
+    writevariable(outfile, presentation_.itscolddesert3);
+    writevariable(outfile, presentation_.itsgrass1);
+    writevariable(outfile, presentation_.itsgrass2);
+    writevariable(outfile, presentation_.itsgrass3);
+    writevariable(outfile, presentation_.itscold1);
+    writevariable(outfile, presentation_.itscold2);
+    writevariable(outfile, presentation_.itscold3);
+    writevariable(outfile, presentation_.itstundra1);
+    writevariable(outfile, presentation_.itstundra2);
+    writevariable(outfile, presentation_.itstundra3);
+    writevariable(outfile, presentation_.itseqtundra1);
+    writevariable(outfile, presentation_.itseqtundra2);
+    writevariable(outfile, presentation_.itseqtundra3);
+    writevariable(outfile, presentation_.itssaltpan1);
+    writevariable(outfile, presentation_.itssaltpan2);
+    writevariable(outfile, presentation_.itssaltpan3);
+    writevariable(outfile, presentation_.itserg1);
+    writevariable(outfile, presentation_.itserg2);
+    writevariable(outfile, presentation_.itserg3);
+    writevariable(outfile, presentation_.itswetlands1);
+    writevariable(outfile, presentation_.itswetlands2);
+    writevariable(outfile, presentation_.itswetlands3);
+    writevariable(outfile, presentation_.itslake1);
+    writevariable(outfile, presentation_.itslake2);
+    writevariable(outfile, presentation_.itslake3);
+    writevariable(outfile, presentation_.itsriver1);
+    writevariable(outfile, presentation_.itsriver2);
+    writevariable(outfile, presentation_.itsriver3);
+    writevariable(outfile, presentation_.itsglacier1);
+    writevariable(outfile, presentation_.itsglacier2);
+    writevariable(outfile, presentation_.itsglacier3);
+    writevariable(outfile, presentation_.itssand1);
+    writevariable(outfile, presentation_.itssand2);
+    writevariable(outfile, presentation_.itssand3);
+    writevariable(outfile, presentation_.itsmud1);
+    writevariable(outfile, presentation_.itsmud2);
+    writevariable(outfile, presentation_.itsmud3);
+    writevariable(outfile, presentation_.itsshingle1);
+    writevariable(outfile, presentation_.itsshingle2);
+    writevariable(outfile, presentation_.itsshingle3);
+    writevariable(outfile, presentation_.itsmangrove1);
+    writevariable(outfile, presentation_.itsmangrove2);
+    writevariable(outfile, presentation_.itsmangrove3);
+    writevariable(outfile, presentation_.itshighlight1);
+    writevariable(outfile, presentation_.itshighlight2);
+    writevariable(outfile, presentation_.itshighlight3);
+    writevariable(outfile, presentation_.itsshowmapoutline);
+    writevariable(outfile, presentation_.itsoutline1);
+    writevariable(outfile, presentation_.itsoutline2);
+    writevariable(outfile, presentation_.itsoutline3);
+    writevariable(outfile, presentation_.itselevationlow1);
+    writevariable(outfile, presentation_.itselevationlow2);
+    writevariable(outfile, presentation_.itselevationlow3);
+    writevariable(outfile, presentation_.itselevationhigh1);
+    writevariable(outfile, presentation_.itselevationhigh2);
+    writevariable(outfile, presentation_.itselevationhigh3);
+    writevariable(outfile, presentation_.itstemperaturecold1);
+    writevariable(outfile, presentation_.itstemperaturecold2);
+    writevariable(outfile, presentation_.itstemperaturecold3);
+    writevariable(outfile, presentation_.itstemperaturetemperate1);
+    writevariable(outfile, presentation_.itstemperaturetemperate2);
+    writevariable(outfile, presentation_.itstemperaturetemperate3);
+    writevariable(outfile, presentation_.itstemperaturehot1);
+    writevariable(outfile, presentation_.itstemperaturehot2);
+    writevariable(outfile, presentation_.itstemperaturehot3);
+    writevariable(outfile, presentation_.itsprecipitationdry1);
+    writevariable(outfile, presentation_.itsprecipitationdry2);
+    writevariable(outfile, presentation_.itsprecipitationdry3);
+    writevariable(outfile, presentation_.itsprecipitationwet1);
+    writevariable(outfile, presentation_.itsprecipitationwet2);
+    writevariable(outfile, presentation_.itsprecipitationwet3);
     for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
     {
         for (int j = 0; j < 3; j++)
-            writevariable(outfile, itsclimatemapseacolours[i][j]);
+            writevariable(outfile, presentation_.itsclimatemapseacolours[i][j]);
     }
     for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
     {
         for (int j = 0; j < 3; j++)
-            writevariable(outfile, itsclimatemapcolours[i][j]);
+            writevariable(outfile, presentation_.itsclimatemapcolours[i][j]);
     }
     for (int i = 0; i < RIVERMAPCOLOURCOUNT; i++)
     {
         for (int j = 0; j < 3; j++)
-            writevariable(outfile, itsrivermapcolours[i][j]);
+            writevariable(outfile, presentation_.itsrivermapcolours[i][j]);
     }
     for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
-        writevariable(outfile, itsshowrivermapfeatures[i]);
+        writevariable(outfile, presentation_.itsshowrivermapfeatures[i]);
 
     for (int gradient = 0; gradient < MAPGRADIENTTYPECOUNT; gradient++)
     {
-        writevariable(outfile, itsmapgradientstopcounts[gradient]);
-        writevariable(outfile, itsmapgradientdiscrete[gradient]);
+        writevariable(outfile, presentation_.itsmapgradientstopcounts[gradient]);
+        writevariable(outfile, presentation_.itsmapgradientdiscrete[gradient]);
 
         for (int stop = 0; stop < MAPGRADIENTMAXSTOPS; stop++)
         {
-            writevariable(outfile, itsmapgradientpositions[gradient][stop]);
+            writevariable(outfile, presentation_.itsmapgradientpositions[gradient][stop]);
 
             for (int channel = 0; channel < 3; channel++)
-                writevariable(outfile, itsmapgradientcolours[gradient][stop][channel]);
+                writevariable(outfile, presentation_.itsmapgradientcolours[gradient][stop][channel]);
         }
     }
 
     for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
     {
         for (int j = 0; j < 3; j++)
-            writevariable(outfile, itsbiomemapcolours[i][j]);
+            writevariable(outfile, presentation_.itsbiomemapcolours[i][j]);
     }
 
-    writedata(outfile, jantempmap);
-    writedata(outfile, jultempmap);
-    writedata(outfile, climatemap);
-    writedata(outfile, biomemap);
-    writedata(outfile, janrainmap);
-    writedata(outfile, julrainmap);
-    writedata(outfile, janmountainrainmap);
-    writedata(outfile, julmountainrainmap);
-    writedata(outfile, janmountainraindirmap);
-    writedata(outfile, julmountainraindirmap);
-    writedata(outfile, seaicemap);
-    writedata(outfile, rivermapdir);
-    writedata(outfile, rivermapjan);
-    writedata(outfile, rivermapjul);
-    writedata(outfile, windmap);
-    writedata(outfile, lakemap);
-    writedata(outfile, roughnessmap);
-    writedata(outfile, mountainridges);
-    writedata(outfile, mountainheights);
-    writedata(outfile, craterrims);
-    writedata(outfile, cratercentres);
-    writedata(outfile, mapnom);
-    writedata(outfile, tidalmap);
-    writedata(outfile, riftlakemapsurface);
-    writedata(outfile, riftlakemapbed);
-    writedata(outfile, lakestartmap);
-    writedata(outfile, specials);
-    writedata(outfile, geologicregimemap);
-    writedata(outfile, tectonicconvergencemap);
-    writedata(outfile, tectonicdivergencemap);
-    writedata(outfile, tectonicshearmap);
-    writedata(outfile, basinclassmap);
-    writedata(outfile, erosionpotentialmap);
-    writedata(outfile, depositionpotentialmap);
-    writedata(outfile, floodplainfertilitymap);
-    writedata(outfile, metalorereservemap);
-    writedata(outfile, placerreservemap);
-    writedata(outfile, evaporitereservemap);
-    writedata(outfile, volcanicreservemap);
-    writedata(outfile, fisheryreservemap);
-    writedata(outfile, extraelevmap);
-    writedata(outfile, deltamapdir);
-    writedata(outfile, deltamapjan);
-    writedata(outfile, deltamapjul);
-    writedata(outfile, islandmap);
-    writedata(outfile, mountainislandmap);
-    writedata(outfile, oceanridgemap);
-    writedata(outfile, oceanridgeheightmap);
-    writedata(outfile, oceanriftmap);
-    writedata(outfile, oceanridgeoffsetmap);
-    writedata(outfile, oceanridgeanglemap);
-    writedata(outfile, volcanomap);
-    writedata(outfile, stratomap);
-    writedata(outfile, noshademap);
-    writedata(outfile, noisemap);
-    writedata(outfile, testmap);
-    writedata(outfile, settlement_suitability);
-    writedata(outfile, social_infrastructure);
-    writedata(outfile, agricultural_capacity);
-    writedata(outfile, route_traffic);
-    writedata(outfile, river_access);
-    writedata(outfile, harbor_score);
-    writedata(outfile, owner_settlement_id);
-    writedata(outfile, owner_polity_id);
+    writedata(outfile, climate_.jantempmap);
+    writedata(outfile, climate_.jultempmap);
+    writedata(outfile, climate_.climatemap);
+    writedata(outfile, climate_.biomemap);
+    writedata(outfile, climate_.janrainmap);
+    writedata(outfile, climate_.julrainmap);
+    writedata(outfile, climate_.janmountainrainmap);
+    writedata(outfile, climate_.julmountainrainmap);
+    writedata(outfile, climate_.janmountainraindirmap);
+    writedata(outfile, climate_.julmountainraindirmap);
+    writedata(outfile, climate_.seaicemap);
+    writedata(outfile, hydrosphere_.rivermapdir);
+    writedata(outfile, hydrosphere_.rivermapjan);
+    writedata(outfile, hydrosphere_.rivermapjul);
+    writedata(outfile, climate_.windmap);
+    writedata(outfile, hydrosphere_.lakemap);
+    writedata(outfile, geosphere_.roughnessmap);
+    writedata(outfile, geosphere_.mountainridges);
+    writedata(outfile, geosphere_.mountainheights);
+    writedata(outfile, geosphere_.craterrims);
+    writedata(outfile, geosphere_.cratercentres);
+    writedata(outfile, geosphere_.mapnom);
+    writedata(outfile, hydrosphere_.tidalmap);
+    writedata(outfile, hydrosphere_.riftlakemapsurface);
+    writedata(outfile, hydrosphere_.riftlakemapbed);
+    writedata(outfile, hydrosphere_.lakestartmap);
+    writedata(outfile, hydrosphere_.specials);
+    writedata(outfile, geosphere_.geologicregimemap);
+    writedata(outfile, geosphere_.tectonicconvergencemap);
+    writedata(outfile, geosphere_.tectonicdivergencemap);
+    writedata(outfile, geosphere_.tectonicshearmap);
+    writedata(outfile, hydrosphere_.basinclassmap);
+    writedata(outfile, geosphere_.erosionpotentialmap);
+    writedata(outfile, geosphere_.depositionpotentialmap);
+    writedata(outfile, geosphere_.floodplainfertilitymap);
+    writedata(outfile, geosphere_.metalorereservemap);
+    writedata(outfile, geosphere_.placerreservemap);
+    writedata(outfile, geosphere_.evaporitereservemap);
+    writedata(outfile, geosphere_.volcanicreservemap);
+    writedata(outfile, biosphere_.fisheryreservemap);
+    writedata(outfile, geosphere_.extraelevmap);
+    writedata(outfile, hydrosphere_.deltamapdir);
+    writedata(outfile, hydrosphere_.deltamapjan);
+    writedata(outfile, hydrosphere_.deltamapjul);
+    writedata(outfile, geosphere_.islandmap);
+    writedata(outfile, geosphere_.mountainislandmap);
+    writedata(outfile, geosphere_.oceanridgemap);
+    writedata(outfile, geosphere_.oceanridgeheightmap);
+    writedata(outfile, geosphere_.oceanriftmap);
+    writedata(outfile, geosphere_.oceanridgeoffsetmap);
+    writedata(outfile, geosphere_.oceanridgeanglemap);
+    writedata(outfile, geosphere_.volcanomap);
+    writedata(outfile, geosphere_.stratomap);
+    writedata(outfile, presentation_.noshademap);
+    writedata(outfile, geosphere_.noisemap);
+    writedata(outfile, presentation_.testmap);
+    writedata(outfile, anthroposphere_.settlement_suitability);
+    writedata(outfile, anthroposphere_.social_infrastructure);
+    writedata(outfile, anthroposphere_.agricultural_capacity);
+    writedata(outfile, anthroposphere_.route_traffic);
+    writedata(outfile, anthroposphere_.river_access);
+    writedata(outfile, anthroposphere_.harbor_score);
+    writedata(outfile, anthroposphere_.owner_settlement_id);
+    writedata(outfile, anthroposphere_.owner_polity_id);
 
     const auto writestring = [&](const std::string& value)
     {
@@ -1110,10 +972,10 @@ void planet::saveworld(string filename)
             outfile.write(value.data(), static_cast<std::streamsize>(length));
     };
 
-    const int settlementcount = static_cast<int>(settlementlist.size());
+    const int settlementcount = static_cast<int>(anthroposphere_.settlementlist.size());
     writevariable(outfile, settlementcount);
 
-    for (const Settlement& settlement : settlementlist)
+    for (const Settlement& settlement : anthroposphere_.settlementlist)
     {
         writevariable(outfile, settlement.id);
         writevariable(outfile, settlement.x);
@@ -1129,10 +991,10 @@ void planet::saveworld(string filename)
         writevariable(outfile, settlement.polityId);
     }
 
-    const int politycount = static_cast<int>(politylist.size());
+    const int politycount = static_cast<int>(anthroposphere_.politylist.size());
     writevariable(outfile, politycount);
 
-    for (const Polity& polity : politylist)
+    for (const Polity& polity : anthroposphere_.politylist)
     {
         writevariable(outfile, polity.id);
         writestring(polity.name);
@@ -1144,10 +1006,10 @@ void planet::saveworld(string filename)
         writevariable(outfile, polity.militaryPressure);
     }
 
-    const int routecount = static_cast<int>(routeedgelist.size());
+    const int routecount = static_cast<int>(anthroposphere_.routeedgelist.size());
     writevariable(outfile, routecount);
 
-    for (const RouteEdge& route : routeedgelist)
+    for (const RouteEdge& route : anthroposphere_.routeedgelist)
     {
         writevariable(outfile, route.fromSettlementId);
         writevariable(outfile, route.toSettlementId);
@@ -1158,10 +1020,10 @@ void planet::saveworld(string filename)
         writevariable(outfile, route.traffic);
     }
 
-    const int eventcount = static_cast<int>(historyeventlist.size());
+    const int eventcount = static_cast<int>(anthroposphere_.historyeventlist.size());
     writevariable(outfile, eventcount);
 
-    for (const HistoryEvent& event : historyeventlist)
+    for (const HistoryEvent& event : anthroposphere_.historyeventlist)
     {
         writevariable(outfile, event.year);
         writestring(event.type);
@@ -1174,68 +1036,67 @@ void planet::saveworld(string filename)
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
-        writeshortvectordata(outfile, seasonaltempmaps[season]);
-        writeshortvectordata(outfile, seasonalrainmaps[season]);
-        writeshortvectordata(outfile, seasonalpressuremaps[season]);
-        writeshortvectordata(outfile, seasonaluwindmaps[season]);
-        writeshortvectordata(outfile, seasonalvwindmaps[season]);
-        writeshortvectordata(outfile, seasonalupperheightmaps[season]);
-        writeshortvectordata(outfile, seasonalupperuwindmaps[season]);
-        writeshortvectordata(outfile, seasonaluppervwindmaps[season]);
-        writeshortvectordata(outfile, seasonalverticalvelocitymaps[season]);
-        writeshortvectordata(outfile, seasonalcurrentumaps[season]);
-        writeshortvectordata(outfile, seasonalcurrentvmaps[season]);
-        writeshortvectordata(outfile, seasonalsstmaps[season]);
-        writeshortvectordata(outfile, seasonalevaporationmaps[season]);
-        writeshortvectordata(outfile, seasonalmaritimeinfluencemaps[season]);
-        writeshortvectordata(outfile, seasonalmaritimethermalanomalymaps[season]);
-        writeshortvectordata(outfile, seasonalmaritimefetchmaps[season]);
-        writeshortvectordata(outfile, seasonalmoisturemaps[season]);
-        writeshortvectordata(outfile, seasonalconvergencemaps[season]);
-        writeshortvectordata(outfile, seasonalupliftmaps[season]);
-        writeshortvectordata(outfile, seasonalsubsidencemaps[season]);
+        writeshortvectordata(outfile, climate_.seasonaltempmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalrainmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalpressuremaps[season]);
+        writeshortvectordata(outfile, climate_.seasonaluwindmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalvwindmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalupperheightmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalupperuwindmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonaluppervwindmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalverticalvelocitymaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalcurrentumaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalcurrentvmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalsstmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalevaporationmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalmaritimeinfluencemaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalmaritimethermalanomalymaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalmaritimefetchmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalmoisturemaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalconvergencemaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalupliftmaps[season]);
+        writeshortvectordata(outfile, climate_.seasonalsubsidencemaps[season]);
     }
 
     for (int i = 0; i < ARRAYWIDTH; i++)
     {
         for (int j = 0; j < 6; j++)
-            writevariable(outfile, horselats[i][j]);
+            writevariable(outfile, climate_.horselats[i][j]);
     }
 
-    for (int i = 0; i < itscraterno; i++)
+    for (int i = 0; i < geosphere_.itscraterno; i++)
     {
-        writevariable(outfile, cratercentreslist[i].w);
-        writevariable(outfile, cratercentreslist[i].x);
-        writevariable(outfile, cratercentreslist[i].y);
-        writevariable(outfile, cratercentreslist[i].z);
+        writevariable(outfile, geosphere_.cratercentreslist[i].w);
+        writevariable(outfile, geosphere_.cratercentreslist[i].x);
+        writevariable(outfile, geosphere_.cratercentreslist[i].y);
+        writevariable(outfile, geosphere_.cratercentreslist[i].z);
     }
 
-    writevariable(outfile, itstectonictimeoriginstep);
-    writevariable(outfile, itstectonictimemyr);
-    writevariable(outfile, itstectonicdeltatimemyr);
-    writedata(outfile, tectoniccrustagemyrmap);
-    writedata(outfile, tectoniccrustthicknessmap);
-    writedata(outfile, tectoniccrustclassmap);
-    writedata(outfile, tectonicuplifttendencymap);
-    writedata(outfile, tectonicsubsidencetendencymap);
-    writedata(outfile, tectonicaccumulatedstrainmap);
-    writedata(outfile, tectonicboundarytypemap);
-    writedata(outfile, tectonicboundarydistancemap);
-    writedata(outfile, tectonicboundarysegmentidmap);
-    writedata(outfile, tectonicnearestboundaryidmap);
-    writedata(outfile, tectonicboundaryhistorymap);
-    writedata(outfile, tectonicdeformingregionidmap);
-    writedata(outfile, tectonicdeformingregiontypemap);
-    writedata(outfile, tectonicdeformationratemap);
-    writedata(outfile, tectonicdeformationvelocityxmap);
-    writedata(outfile, tectonicdeformationvelocityymap);
-    writevariable(outfile, itstectoniccyclecount);
-    writevariable(outfile, itstectonicplatecount);
-    writevariable(outfile, itstectonicsealevelm);
+    writevariable(outfile, geosphere_.itstectonictimeoriginstep);
+    writevariable(outfile, geosphere_.itstectonictimemyr);
+    writevariable(outfile, geosphere_.itstectonicdeltatimemyr);
+    writedata(outfile, geosphere_.tectoniccrustagemyrmap);
+    writedata(outfile, geosphere_.tectoniccrustthicknessmap);
+    writedata(outfile, geosphere_.tectoniccrustclassmap);
+    writedata(outfile, geosphere_.tectonicuplifttendencymap);
+    writedata(outfile, geosphere_.tectonicsubsidencetendencymap);
+    writedata(outfile, geosphere_.tectonicaccumulatedstrainmap);
+    writedata(outfile, geosphere_.tectonicboundarytypemap);
+    writedata(outfile, geosphere_.tectonicboundarydistancemap);
+    writedata(outfile, geosphere_.tectonicboundarysegmentidmap);
+    writedata(outfile, geosphere_.tectonicnearestboundaryidmap);
+    writedata(outfile, geosphere_.tectonicboundaryhistorymap);
+    writedata(outfile, geosphere_.tectonicdeformingregionidmap);
+    writedata(outfile, geosphere_.tectonicdeformingregiontypemap);
+    writedata(outfile, geosphere_.tectonicdeformationratemap);
+    writedata(outfile, geosphere_.tectonicdeformationvelocityxmap);
+    writedata(outfile, geosphere_.tectonicdeformationvelocityymap);
+    writevariable(outfile, geosphere_.itstectonicplatecount);
+    writevariable(outfile, geosphere_.itstectonicsealevelm);
 
-    int boundarysegmentcount = static_cast<int>(tectonicboundarysegmentlist.size());
+    int boundarysegmentcount = static_cast<int>(geosphere_.tectonicboundarysegmentlist.size());
     writevariable(outfile, boundarysegmentcount);
-    for (const TectonicBoundarySegment& segment : tectonicboundarysegmentlist)
+    for (const TectonicBoundarySegment& segment : geosphere_.tectonicboundarysegmentlist)
     {
         writevariable(outfile, segment.id);
         writevariable(outfile, segment.leftPlateId);
@@ -1257,9 +1118,9 @@ void planet::saveworld(string filename)
         writevariable(outfile, segment.ageMyr);
     }
 
-    int deformingregioncount = static_cast<int>(tectonicdeformingregionlist.size());
+    int deformingregioncount = static_cast<int>(geosphere_.tectonicdeformingregionlist.size());
     writevariable(outfile, deformingregioncount);
-    for (const TectonicDeformingRegion& region : tectonicdeformingregionlist)
+    for (const TectonicDeformingRegion& region : geosphere_.tectonicdeformingregionlist)
     {
         writevariable(outfile, region.id);
         writevariable(outfile, region.boundarySegmentId);
@@ -1279,8 +1140,8 @@ void planet::saveworld(string filename)
         writevariable(outfile, region.ageMyr);
     }
 
-    writevariable(outfile, static_cast<int>(weatheranomalystatebytes.size()));
-    for (std::uint8_t byte : weatheranomalystatebytes)
+    writevariable(outfile, static_cast<int>(climate_.weatheranomalystatebytes.size()));
+    for (std::uint8_t byte : climate_.weatheranomalystatebytes)
         writevariable(outfile, static_cast<int>(byte));
 
     writemineraldeposits(outfile);
@@ -1300,8 +1161,8 @@ void planet::writemineraldeposits(ofstream& outfile)
     using namespace mineralsystems;
     const std::streamsize precision = outfile.precision(12);
     outfile << kMineralDepositSection << '\n';
-    writevariable(outfile, static_cast<int>(mineraldepositlist.size()));
-    for (const Deposit& deposit : mineraldepositlist)
+    writevariable(outfile, static_cast<int>(geosphere_.mineraldepositlist.size()));
+    for (const Deposit& deposit : geosphere_.mineraldepositlist)
     {
         const FormationRecord& formation = deposit.formation;
         writevariable(outfile, static_cast<long>(deposit.id));
@@ -1345,7 +1206,7 @@ void planet::writemineraldeposits(ofstream& outfile)
         writevariable(outfile, surface.annualRainfallMm);
     }
 
-    const MineralBudget& budget = mineralbudgetstate;
+    const MineralBudget& budget = geosphere_.mineralbudgetstate;
     for (int system = 0; system < kDepositSystemCount; ++system)
     {
         writevariable(outfile, budget.formedGoldT[system]);
@@ -1362,8 +1223,8 @@ void planet::writemineraldeposits(ofstream& outfile)
 bool planet::readmineraldeposits(ifstream& infile)
 {
     using namespace mineralsystems;
-    mineraldepositlist.clear();
-    mineralbudgetstate = {};
+    geosphere_.mineraldepositlist.clear();
+    geosphere_.mineralbudgetstate = {};
 
     string tag;
     if (!getline(infile, tag) || tag != kMineralDepositSection)
@@ -1387,8 +1248,8 @@ bool planet::readmineraldeposits(ifstream& infile)
     int count = 0;
     if (!readint(0, 50000000, count))
         return false;
-    mineraldepositlist.resize(static_cast<size_t>(count));
-    for (Deposit& deposit : mineraldepositlist)
+    geosphere_.mineraldepositlist.resize(static_cast<size_t>(count));
+    for (Deposit& deposit : geosphere_.mineraldepositlist)
     {
         FormationRecord& formation = deposit.formation;
         int system = 0, origin = 0, fate = 0, regime = 0, boundary = 0, crust = 0;
@@ -1444,7 +1305,7 @@ bool planet::readmineraldeposits(ifstream& infile)
         readvariable(infile, surface.annualRainfallMm);
     }
 
-    MineralBudget& budget = mineralbudgetstate;
+    MineralBudget& budget = geosphere_.mineralbudgetstate;
     for (int system = 0; system < kDepositSystemCount; ++system)
     {
         readvariable(infile, budget.formedGoldT[system]);
@@ -1471,198 +1332,198 @@ bool planet::loadworld(string filename)
 
     const int fileversion = val;
 
-    if (fileversion != itssaveversion) // Incompatible file format!
+    if (fileversion != itssaveversion && fileversion != 17) // Incompatible file format!
         return 0;
 
-    readvariable(infile, itssize);
-    readvariable(infile, itswidth);
-    readvariable(infile, itsheight);
-    const int columns = itswidth + 1;
-    const int rows = itsheight + 1;
+    readvariable(infile, body_.itssize);
+    readvariable(infile, body_.itswidth);
+    readvariable(infile, body_.itsheight);
+    const int columns = body_.itswidth + 1;
+    const int rows = body_.itsheight + 1;
     if (columns < 2 || columns > ARRAYWIDTH || columns % 2 != 0 ||
         rows != columns / 2)
     {
         return false;
     }
-    readvariable(infile, itsseed);
-    resizeseasonalclimatefields();
-    readvariable(infile, itsrotation);
-    readvariable(infile, itstilt);
-    readvariable(infile, itseccentricity);
-    readvariable(infile, itsperihelion);
-    readvariable(infile, itsgravity);
-    readvariable(infile, itslunar);
-    readvariable(infile, itstempdecrease);
-    readvariable(infile, itsnorthpolaradjust);
-    readvariable(infile, itssouthpolaradjust);
-    readvariable(infile, itsaveragetemp);
-    readvariable(infile, itsnorthpolartemp);
-    readvariable(infile, itssouthpolartemp);
-    readvariable(infile, itseqtemp);
-    readvariable(infile, itswaterpickup);
-    readvariable(infile, itsriverfactor);
-    readvariable(infile, itsriverlandreduce);
-    readvariable(infile, itsestuarylimit);
-    readvariable(infile, itsglacialtemp);
-    readvariable(infile, itsglaciertemp);
-    readvariable(infile, itsmountainreduce);
-    readvariable(infile, itsclimateno);
-    readvariable(infile, itsmaxheight);
-    readvariable(infile, itssealevel);
-    readvariable(infile, itslandtotal);
-    readvariable(infile, itsseatotal);
-    readvariable(infile, itscraterno);
+    readvariable(infile, body_.itsseed);
+    resizegrids();
+    readvariable(infile, body_.itsrotation);
+    readvariable(infile, body_.itstilt);
+    readvariable(infile, body_.itseccentricity);
+    readvariable(infile, body_.itsperihelion);
+    readvariable(infile, body_.itsgravity);
+    readvariable(infile, body_.itslunar);
+    readvariable(infile, atmosphere_.itstempdecrease);
+    readvariable(infile, atmosphere_.itsnorthpolaradjust);
+    readvariable(infile, atmosphere_.itssouthpolaradjust);
+    readvariable(infile, atmosphere_.itsaveragetemp);
+    readvariable(infile, climate_.itsnorthpolartemp);
+    readvariable(infile, climate_.itssouthpolartemp);
+    readvariable(infile, climate_.itseqtemp);
+    readvariable(infile, atmosphere_.itswaterpickup);
+    readvariable(infile, hydrosphere_.itsriverfactor);
+    readvariable(infile, hydrosphere_.itsriverlandreduce);
+    readvariable(infile, hydrosphere_.itsestuarylimit);
+    readvariable(infile, cryosphere_.itsglacialtemp);
+    readvariable(infile, cryosphere_.itsglaciertemp);
+    readvariable(infile, geosphere_.itsmountainreduce);
+    readvariable(infile, atmosphere_.itsclimateno);
+    readvariable(infile, geosphere_.itsmaxheight);
+    readvariable(infile, geosphere_.itssealevel);
+    readvariable(infile, geosphere_.itslandtotal);
+    readvariable(infile, geosphere_.itsseatotal);
+    readvariable(infile, geosphere_.itscraterno);
 
-    readvariable(infile, itslandshading);
-    readvariable(infile, itslakeshading);
-    readvariable(infile, itsseashading);
-    readvariable(infile, itsshadingdir);
-    readvariable(infile, itssnowchange);
-    readvariable(infile, itsseaiceappearance);
-    readvariable(infile, itslandmarbling);
-    readvariable(infile, itslakemarbling);
-    readvariable(infile, itsseamarbling);
-    readvariable(infile, itsminriverflowglobal);
-    readvariable(infile, itsminriverflowregional);
-    readvariable(infile, itsmangroves);
-    readvariable(infile, itscolourcliffs);
-    readvariable(infile, itsseaice1);
-    readvariable(infile, itsseaice2);
-    readvariable(infile, itsseaice3);
-    readvariable(infile, itsocean1);
-    readvariable(infile, itsocean2);
-    readvariable(infile, itsocean3);
-    readvariable(infile, itsdeepocean1);
-    readvariable(infile, itsdeepocean2);
-    readvariable(infile, itsdeepocean3);
-    readvariable(infile, itsbase1);
-    readvariable(infile, itsbase2);
-    readvariable(infile, itsbase3);
-    readvariable(infile, itsbasetemp1);
-    readvariable(infile, itsbasetemp2);
-    readvariable(infile, itsbasetemp3);
-    readvariable(infile, itshighbase1);
-    readvariable(infile, itshighbase2);
-    readvariable(infile, itshighbase3);
-    readvariable(infile, itsdesert1);
-    readvariable(infile, itsdesert2);
-    readvariable(infile, itsdesert3);
-    readvariable(infile, itshighdesert1);
-    readvariable(infile, itshighdesert2);
-    readvariable(infile, itshighdesert3);
-    readvariable(infile, itscolddesert1);
-    readvariable(infile, itscolddesert2);
-    readvariable(infile, itscolddesert3);
-    readvariable(infile, itsgrass1);
-    readvariable(infile, itsgrass2);
-    readvariable(infile, itsgrass3);
-    readvariable(infile, itscold1);
-    readvariable(infile, itscold2);
-    readvariable(infile, itscold3);
-    readvariable(infile, itstundra1);
-    readvariable(infile, itstundra2);
-    readvariable(infile, itstundra3);
-    readvariable(infile, itseqtundra1);
-    readvariable(infile, itseqtundra2);
-    readvariable(infile, itseqtundra3);
-    readvariable(infile, itssaltpan1);
-    readvariable(infile, itssaltpan2);
-    readvariable(infile, itssaltpan3);
-    readvariable(infile, itserg1);
-    readvariable(infile, itserg2);
-    readvariable(infile, itserg3);
-    readvariable(infile, itswetlands1);
-    readvariable(infile, itswetlands2);
-    readvariable(infile, itswetlands3);
-    readvariable(infile, itslake1);
-    readvariable(infile, itslake2);
-    readvariable(infile, itslake3);
-    readvariable(infile, itsriver1);
-    readvariable(infile, itsriver2);
-    readvariable(infile, itsriver3);
-    readvariable(infile, itsglacier1);
-    readvariable(infile, itsglacier2);
-    readvariable(infile, itsglacier3);
-    readvariable(infile, itssand1);
-    readvariable(infile, itssand2);
-    readvariable(infile, itssand3);
-    readvariable(infile, itsmud1);
-    readvariable(infile, itsmud2);
-    readvariable(infile, itsmud3);
-    readvariable(infile, itsshingle1);
-    readvariable(infile, itsshingle2);
-    readvariable(infile, itsshingle3);
-    readvariable(infile, itsmangrove1);
-    readvariable(infile, itsmangrove2);
-    readvariable(infile, itsmangrove3);
-    readvariable(infile, itshighlight1);
-    readvariable(infile, itshighlight2);
-    readvariable(infile, itshighlight3);
+    readvariable(infile, presentation_.itslandshading);
+    readvariable(infile, presentation_.itslakeshading);
+    readvariable(infile, presentation_.itsseashading);
+    readvariable(infile, presentation_.itsshadingdir);
+    readvariable(infile, presentation_.itssnowchange);
+    readvariable(infile, presentation_.itsseaiceappearance);
+    readvariable(infile, presentation_.itslandmarbling);
+    readvariable(infile, presentation_.itslakemarbling);
+    readvariable(infile, presentation_.itsseamarbling);
+    readvariable(infile, presentation_.itsminriverflowglobal);
+    readvariable(infile, presentation_.itsminriverflowregional);
+    readvariable(infile, presentation_.itsmangroves);
+    readvariable(infile, presentation_.itscolourcliffs);
+    readvariable(infile, presentation_.itsseaice1);
+    readvariable(infile, presentation_.itsseaice2);
+    readvariable(infile, presentation_.itsseaice3);
+    readvariable(infile, presentation_.itsocean1);
+    readvariable(infile, presentation_.itsocean2);
+    readvariable(infile, presentation_.itsocean3);
+    readvariable(infile, presentation_.itsdeepocean1);
+    readvariable(infile, presentation_.itsdeepocean2);
+    readvariable(infile, presentation_.itsdeepocean3);
+    readvariable(infile, presentation_.itsbase1);
+    readvariable(infile, presentation_.itsbase2);
+    readvariable(infile, presentation_.itsbase3);
+    readvariable(infile, presentation_.itsbasetemp1);
+    readvariable(infile, presentation_.itsbasetemp2);
+    readvariable(infile, presentation_.itsbasetemp3);
+    readvariable(infile, presentation_.itshighbase1);
+    readvariable(infile, presentation_.itshighbase2);
+    readvariable(infile, presentation_.itshighbase3);
+    readvariable(infile, presentation_.itsdesert1);
+    readvariable(infile, presentation_.itsdesert2);
+    readvariable(infile, presentation_.itsdesert3);
+    readvariable(infile, presentation_.itshighdesert1);
+    readvariable(infile, presentation_.itshighdesert2);
+    readvariable(infile, presentation_.itshighdesert3);
+    readvariable(infile, presentation_.itscolddesert1);
+    readvariable(infile, presentation_.itscolddesert2);
+    readvariable(infile, presentation_.itscolddesert3);
+    readvariable(infile, presentation_.itsgrass1);
+    readvariable(infile, presentation_.itsgrass2);
+    readvariable(infile, presentation_.itsgrass3);
+    readvariable(infile, presentation_.itscold1);
+    readvariable(infile, presentation_.itscold2);
+    readvariable(infile, presentation_.itscold3);
+    readvariable(infile, presentation_.itstundra1);
+    readvariable(infile, presentation_.itstundra2);
+    readvariable(infile, presentation_.itstundra3);
+    readvariable(infile, presentation_.itseqtundra1);
+    readvariable(infile, presentation_.itseqtundra2);
+    readvariable(infile, presentation_.itseqtundra3);
+    readvariable(infile, presentation_.itssaltpan1);
+    readvariable(infile, presentation_.itssaltpan2);
+    readvariable(infile, presentation_.itssaltpan3);
+    readvariable(infile, presentation_.itserg1);
+    readvariable(infile, presentation_.itserg2);
+    readvariable(infile, presentation_.itserg3);
+    readvariable(infile, presentation_.itswetlands1);
+    readvariable(infile, presentation_.itswetlands2);
+    readvariable(infile, presentation_.itswetlands3);
+    readvariable(infile, presentation_.itslake1);
+    readvariable(infile, presentation_.itslake2);
+    readvariable(infile, presentation_.itslake3);
+    readvariable(infile, presentation_.itsriver1);
+    readvariable(infile, presentation_.itsriver2);
+    readvariable(infile, presentation_.itsriver3);
+    readvariable(infile, presentation_.itsglacier1);
+    readvariable(infile, presentation_.itsglacier2);
+    readvariable(infile, presentation_.itsglacier3);
+    readvariable(infile, presentation_.itssand1);
+    readvariable(infile, presentation_.itssand2);
+    readvariable(infile, presentation_.itssand3);
+    readvariable(infile, presentation_.itsmud1);
+    readvariable(infile, presentation_.itsmud2);
+    readvariable(infile, presentation_.itsmud3);
+    readvariable(infile, presentation_.itsshingle1);
+    readvariable(infile, presentation_.itsshingle2);
+    readvariable(infile, presentation_.itsshingle3);
+    readvariable(infile, presentation_.itsmangrove1);
+    readvariable(infile, presentation_.itsmangrove2);
+    readvariable(infile, presentation_.itsmangrove3);
+    readvariable(infile, presentation_.itshighlight1);
+    readvariable(infile, presentation_.itshighlight2);
+    readvariable(infile, presentation_.itshighlight3);
 
     if (fileversion >= 2)
     {
-        readvariable(infile, itsshowmapoutline);
-        readvariable(infile, itsoutline1);
-        readvariable(infile, itsoutline2);
-        readvariable(infile, itsoutline3);
-        readvariable(infile, itselevationlow1);
-        readvariable(infile, itselevationlow2);
-        readvariable(infile, itselevationlow3);
-        readvariable(infile, itselevationhigh1);
-        readvariable(infile, itselevationhigh2);
-        readvariable(infile, itselevationhigh3);
-        readvariable(infile, itstemperaturecold1);
-        readvariable(infile, itstemperaturecold2);
-        readvariable(infile, itstemperaturecold3);
-        readvariable(infile, itstemperaturetemperate1);
-        readvariable(infile, itstemperaturetemperate2);
-        readvariable(infile, itstemperaturetemperate3);
-        readvariable(infile, itstemperaturehot1);
-        readvariable(infile, itstemperaturehot2);
-        readvariable(infile, itstemperaturehot3);
-        readvariable(infile, itsprecipitationdry1);
-        readvariable(infile, itsprecipitationdry2);
-        readvariable(infile, itsprecipitationdry3);
-        readvariable(infile, itsprecipitationwet1);
-        readvariable(infile, itsprecipitationwet2);
-        readvariable(infile, itsprecipitationwet3);
+        readvariable(infile, presentation_.itsshowmapoutline);
+        readvariable(infile, presentation_.itsoutline1);
+        readvariable(infile, presentation_.itsoutline2);
+        readvariable(infile, presentation_.itsoutline3);
+        readvariable(infile, presentation_.itselevationlow1);
+        readvariable(infile, presentation_.itselevationlow2);
+        readvariable(infile, presentation_.itselevationlow3);
+        readvariable(infile, presentation_.itselevationhigh1);
+        readvariable(infile, presentation_.itselevationhigh2);
+        readvariable(infile, presentation_.itselevationhigh3);
+        readvariable(infile, presentation_.itstemperaturecold1);
+        readvariable(infile, presentation_.itstemperaturecold2);
+        readvariable(infile, presentation_.itstemperaturecold3);
+        readvariable(infile, presentation_.itstemperaturetemperate1);
+        readvariable(infile, presentation_.itstemperaturetemperate2);
+        readvariable(infile, presentation_.itstemperaturetemperate3);
+        readvariable(infile, presentation_.itstemperaturehot1);
+        readvariable(infile, presentation_.itstemperaturehot2);
+        readvariable(infile, presentation_.itstemperaturehot3);
+        readvariable(infile, presentation_.itsprecipitationdry1);
+        readvariable(infile, presentation_.itsprecipitationdry2);
+        readvariable(infile, presentation_.itsprecipitationdry3);
+        readvariable(infile, presentation_.itsprecipitationwet1);
+        readvariable(infile, presentation_.itsprecipitationwet2);
+        readvariable(infile, presentation_.itsprecipitationwet3);
 
         if (fileversion >= 3)
         {
             for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
             {
                 for (int j = 0; j < 3; j++)
-                    readvariable(infile, itsclimatemapseacolours[i][j]);
+                    readvariable(infile, presentation_.itsclimatemapseacolours[i][j]);
             }
 
             for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
             {
                 for (int j = 0; j < 3; j++)
-                    readvariable(infile, itsclimatemapcolours[i][j]);
+                    readvariable(infile, presentation_.itsclimatemapcolours[i][j]);
             }
 
             for (int i = 0; i < RIVERMAPCOLOURCOUNT; i++)
             {
                 for (int j = 0; j < 3; j++)
-                    readvariable(infile, itsrivermapcolours[i][j]);
+                    readvariable(infile, presentation_.itsrivermapcolours[i][j]);
             }
 
             for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
-                readvariable(infile, itsshowrivermapfeatures[i]);
+                readvariable(infile, presentation_.itsshowrivermapfeatures[i]);
 
             if (fileversion >= 4)
             {
                 for (int gradient = 0; gradient < MAPGRADIENTTYPECOUNT; gradient++)
                 {
-                    readvariable(infile, itsmapgradientstopcounts[gradient]);
-                    readvariable(infile, itsmapgradientdiscrete[gradient]);
+                    readvariable(infile, presentation_.itsmapgradientstopcounts[gradient]);
+                    readvariable(infile, presentation_.itsmapgradientdiscrete[gradient]);
 
                     for (int stop = 0; stop < MAPGRADIENTMAXSTOPS; stop++)
                     {
-                        readvariable(infile, itsmapgradientpositions[gradient][stop]);
+                        readvariable(infile, presentation_.itsmapgradientpositions[gradient][stop]);
 
                         for (int channel = 0; channel < 3; channel++)
-                            readvariable(infile, itsmapgradientcolours[gradient][stop][channel]);
+                            readvariable(infile, presentation_.itsmapgradientcolours[gradient][stop][channel]);
                     }
                 }
             }
@@ -1674,7 +1535,7 @@ bool planet::loadworld(string filename)
                 for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
                 {
                     for (int j = 0; j < 3; j++)
-                        readvariable(infile, itsbiomemapcolours[i][j]);
+                        readvariable(infile, presentation_.itsbiomemapcolours[i][j]);
                 }
             }
             else
@@ -1682,7 +1543,7 @@ bool planet::loadworld(string filename)
                 for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
                 {
                     for (int j = 0; j < 3; j++)
-                        itsbiomemapcolours[i][j] = defaultbiomemapcolours[i][j];
+                        presentation_.itsbiomemapcolours[i][j] = defaultbiomemapcolours[i][j];
                 }
             }
         }
@@ -1703,123 +1564,123 @@ bool planet::loadworld(string filename)
             for (int i = 0; i < CLIMATEMAPSEACOLOURCOUNT; i++)
             {
                 for (int j = 0; j < 3; j++)
-                    itsclimatemapseacolours[i][j] = defaultclimateseacolours[i][j];
+                    presentation_.itsclimatemapseacolours[i][j] = defaultclimateseacolours[i][j];
             }
 
             for (int i = 0; i < CLIMATEMAPCOLOURCOUNT; i++)
             {
                 for (int j = 0; j < 3; j++)
-                    itsclimatemapcolours[i][j] = defaultclimatecolours[i][j];
+                    presentation_.itsclimatemapcolours[i][j] = defaultclimatecolours[i][j];
             }
 
-            itsrivermapcolours[rivermapbackground] = { 255, 255, 255 };
-            itsrivermapcolours[rivermaplowflow] = { 255, 255, 255 };
-            itsrivermapcolours[rivermaphighflow] = { itsriver1, itsriver2, itsriver3 };
-            itsrivermapcolours[rivermaplake] = { itslake1, itslake2, itslake3 };
-            itsrivermapcolours[rivermapsaltpan] = { itssaltpan1, itssaltpan2, itssaltpan3 };
-            itsrivermapcolours[rivermapwetlands] = { itswetlands1, itswetlands2, itswetlands3 };
-            itsrivermapcolours[rivermapmud] = { itsmud1, itsmud2, itsmud3 };
-            itsrivermapcolours[rivermapsand] = { itssand1, itssand2, itssand3 };
-            itsrivermapcolours[rivermapshingle] = { itsshingle1, itsshingle2, itsshingle3 };
-            itsrivermapcolours[rivermapvolcano] = { 240, 0, 0 };
+            presentation_.itsrivermapcolours[rivermapbackground] = { 255, 255, 255 };
+            presentation_.itsrivermapcolours[rivermaplowflow] = { 255, 255, 255 };
+            presentation_.itsrivermapcolours[rivermaphighflow] = { presentation_.itsriver1, presentation_.itsriver2, presentation_.itsriver3 };
+            presentation_.itsrivermapcolours[rivermaplake] = { presentation_.itslake1, presentation_.itslake2, presentation_.itslake3 };
+            presentation_.itsrivermapcolours[rivermapsaltpan] = { presentation_.itssaltpan1, presentation_.itssaltpan2, presentation_.itssaltpan3 };
+            presentation_.itsrivermapcolours[rivermapwetlands] = { presentation_.itswetlands1, presentation_.itswetlands2, presentation_.itswetlands3 };
+            presentation_.itsrivermapcolours[rivermapmud] = { presentation_.itsmud1, presentation_.itsmud2, presentation_.itsmud3 };
+            presentation_.itsrivermapcolours[rivermapsand] = { presentation_.itssand1, presentation_.itssand2, presentation_.itssand3 };
+            presentation_.itsrivermapcolours[rivermapshingle] = { presentation_.itsshingle1, presentation_.itsshingle2, presentation_.itsshingle3 };
+            presentation_.itsrivermapcolours[rivermapvolcano] = { 240, 0, 0 };
 
             for (int i = 0; i < RIVERMAPFEATURECOUNT; i++)
-                itsshowrivermapfeatures[i] = true;
+                presentation_.itsshowrivermapfeatures[i] = true;
 
             initialisegradientmapappearance(*this);
 
             for (int i = 0; i < BIOMEMAPCOLOURCOUNT; i++)
             {
                 for (int j = 0; j < 3; j++)
-                    itsbiomemapcolours[i][j] = defaultbiomemapcolours[i][j];
+                    presentation_.itsbiomemapcolours[i][j] = defaultbiomemapcolours[i][j];
             }
         }
     }
     else
         setdefaultnonreliefmapappearance(*this);
 
-    readdata(infile, jantempmap);
-    readdata(infile, jultempmap);
-    readdata(infile, climatemap);
-    readdata(infile, biomemap);
-    readdata(infile, janrainmap);
-    readdata(infile, julrainmap);
-    readdata(infile, janmountainrainmap);
-    readdata(infile, julmountainrainmap);
-    readdata(infile, janmountainraindirmap);
-    readdata(infile, julmountainraindirmap);
-    readdata(infile, seaicemap);
-    readdata(infile, rivermapdir);
-    readdata(infile, rivermapjan);
-    readdata(infile, rivermapjul);
-    readdata(infile, windmap);
-    readdata(infile, lakemap);
-    readdata(infile, roughnessmap);
-    readdata(infile, mountainridges);
-    readdata(infile, mountainheights);
-    readdata(infile, craterrims);
-    readdata(infile, cratercentres);
-    readdata(infile, mapnom);
-    readdata(infile, tidalmap);
-    readdata(infile, riftlakemapsurface);
-    readdata(infile, riftlakemapbed);
-    readdata(infile, lakestartmap);
-    readdata(infile, specials);
+    readdata(infile, climate_.jantempmap);
+    readdata(infile, climate_.jultempmap);
+    readdata(infile, climate_.climatemap);
+    readdata(infile, climate_.biomemap);
+    readdata(infile, climate_.janrainmap);
+    readdata(infile, climate_.julrainmap);
+    readdata(infile, climate_.janmountainrainmap);
+    readdata(infile, climate_.julmountainrainmap);
+    readdata(infile, climate_.janmountainraindirmap);
+    readdata(infile, climate_.julmountainraindirmap);
+    readdata(infile, climate_.seaicemap);
+    readdata(infile, hydrosphere_.rivermapdir);
+    readdata(infile, hydrosphere_.rivermapjan);
+    readdata(infile, hydrosphere_.rivermapjul);
+    readdata(infile, climate_.windmap);
+    readdata(infile, hydrosphere_.lakemap);
+    readdata(infile, geosphere_.roughnessmap);
+    readdata(infile, geosphere_.mountainridges);
+    readdata(infile, geosphere_.mountainheights);
+    readdata(infile, geosphere_.craterrims);
+    readdata(infile, geosphere_.cratercentres);
+    readdata(infile, geosphere_.mapnom);
+    readdata(infile, hydrosphere_.tidalmap);
+    readdata(infile, hydrosphere_.riftlakemapsurface);
+    readdata(infile, hydrosphere_.riftlakemapbed);
+    readdata(infile, hydrosphere_.lakestartmap);
+    readdata(infile, hydrosphere_.specials);
     if (fileversion >= 12)
     {
-        readdata(infile, geologicregimemap);
-        readdata(infile, tectonicconvergencemap);
-        readdata(infile, tectonicdivergencemap);
-        readdata(infile, tectonicshearmap);
-        readdata(infile, basinclassmap);
-        readdata(infile, erosionpotentialmap);
-        readdata(infile, depositionpotentialmap);
-        readdata(infile, floodplainfertilitymap);
-        readdata(infile, metalorereservemap);
-        readdata(infile, placerreservemap);
-        readdata(infile, evaporitereservemap);
-        readdata(infile, volcanicreservemap);
-        readdata(infile, fisheryreservemap);
+        readdata(infile, geosphere_.geologicregimemap);
+        readdata(infile, geosphere_.tectonicconvergencemap);
+        readdata(infile, geosphere_.tectonicdivergencemap);
+        readdata(infile, geosphere_.tectonicshearmap);
+        readdata(infile, hydrosphere_.basinclassmap);
+        readdata(infile, geosphere_.erosionpotentialmap);
+        readdata(infile, geosphere_.depositionpotentialmap);
+        readdata(infile, geosphere_.floodplainfertilitymap);
+        readdata(infile, geosphere_.metalorereservemap);
+        readdata(infile, geosphere_.placerreservemap);
+        readdata(infile, geosphere_.evaporitereservemap);
+        readdata(infile, geosphere_.volcanicreservemap);
+        readdata(infile, biosphere_.fisheryreservemap);
     }
     else
     {
         cleartectonicprovenanceinternal();
 
-        parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+        parallelforrows(0, body_.itswidth, [&](int startx, int endx)
         {
             for (int i = startx; i <= endx; i++)
             {
-                for (int j = 0; j < ARRAYHEIGHT; j++)
+                for (int j = 0; j <= body_.itsheight; j++)
                 {
-                    basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
-                    erosionpotentialmap[i][j] = 0;
-                    depositionpotentialmap[i][j] = 0;
-                    floodplainfertilitymap[i][j] = 0;
-                    metalorereservemap[i][j] = 0;
-                    placerreservemap[i][j] = 0;
-                    evaporitereservemap[i][j] = 0;
-                    volcanicreservemap[i][j] = 0;
-                    fisheryreservemap[i][j] = 0;
+                    hydrosphere_.basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
+                    geosphere_.erosionpotentialmap[i][j] = 0;
+                    geosphere_.depositionpotentialmap[i][j] = 0;
+                    geosphere_.floodplainfertilitymap[i][j] = 0;
+                    geosphere_.metalorereservemap[i][j] = 0;
+                    geosphere_.placerreservemap[i][j] = 0;
+                    geosphere_.evaporitereservemap[i][j] = 0;
+                    geosphere_.volcanicreservemap[i][j] = 0;
+                    biosphere_.fisheryreservemap[i][j] = 0;
                 }
             }
         }, 64);
     }
-    readdata(infile, extraelevmap);
-    readdata(infile, deltamapdir);
-    readdata(infile, deltamapjan);
-    readdata(infile, deltamapjul);
-    readdata(infile, islandmap);
-    readdata(infile, mountainislandmap);
-    readdata(infile, oceanridgemap);
-    readdata(infile, oceanridgeheightmap);
-    readdata(infile, oceanriftmap);
-    readdata(infile, oceanridgeoffsetmap);
-    readdata(infile, oceanridgeanglemap);
-    readdata(infile, volcanomap);
-    readdata(infile, stratomap);
-    readdata(infile, noshademap);
-    readdata(infile, noisemap);
-    readdata(infile, testmap);
+    readdata(infile, geosphere_.extraelevmap);
+    readdata(infile, hydrosphere_.deltamapdir);
+    readdata(infile, hydrosphere_.deltamapjan);
+    readdata(infile, hydrosphere_.deltamapjul);
+    readdata(infile, geosphere_.islandmap);
+    readdata(infile, geosphere_.mountainislandmap);
+    readdata(infile, geosphere_.oceanridgemap);
+    readdata(infile, geosphere_.oceanridgeheightmap);
+    readdata(infile, geosphere_.oceanriftmap);
+    readdata(infile, geosphere_.oceanridgeoffsetmap);
+    readdata(infile, geosphere_.oceanridgeanglemap);
+    readdata(infile, geosphere_.volcanomap);
+    readdata(infile, geosphere_.stratomap);
+    readdata(infile, presentation_.noshademap);
+    readdata(infile, geosphere_.noisemap);
+    readdata(infile, presentation_.testmap);
 
     auto readstring = [&](std::string& value)
     {
@@ -1838,23 +1699,23 @@ bool planet::loadworld(string filename)
 
     if (fileversion >= 14)
     {
-        readdata(infile, settlement_suitability);
-        readdata(infile, social_infrastructure);
-        readdata(infile, agricultural_capacity);
-        readdata(infile, route_traffic);
-        readdata(infile, river_access);
-        readdata(infile, harbor_score);
-        readdata(infile, owner_settlement_id);
-        readdata(infile, owner_polity_id);
+        readdata(infile, anthroposphere_.settlement_suitability);
+        readdata(infile, anthroposphere_.social_infrastructure);
+        readdata(infile, anthroposphere_.agricultural_capacity);
+        readdata(infile, anthroposphere_.route_traffic);
+        readdata(infile, anthroposphere_.river_access);
+        readdata(infile, anthroposphere_.harbor_score);
+        readdata(infile, anthroposphere_.owner_settlement_id);
+        readdata(infile, anthroposphere_.owner_polity_id);
 
         clearsocialstate();
 
         int settlementcount = 0;
         readvariable(infile, settlementcount);
         settlementcount = std::max(0, settlementcount);
-        settlementlist.resize(static_cast<size_t>(settlementcount));
+        anthroposphere_.settlementlist.resize(static_cast<size_t>(settlementcount));
 
-        for (Settlement& settlement : settlementlist)
+        for (Settlement& settlement : anthroposphere_.settlementlist)
         {
             readvariable(infile, settlement.id);
             readvariable(infile, settlement.x);
@@ -1873,9 +1734,9 @@ bool planet::loadworld(string filename)
         int politycount = 0;
         readvariable(infile, politycount);
         politycount = std::max(0, politycount);
-        politylist.resize(static_cast<size_t>(politycount));
+        anthroposphere_.politylist.resize(static_cast<size_t>(politycount));
 
-        for (Polity& polity : politylist)
+        for (Polity& polity : anthroposphere_.politylist)
         {
             readvariable(infile, polity.id);
             readstring(polity.name);
@@ -1890,9 +1751,9 @@ bool planet::loadworld(string filename)
         int routecount = 0;
         readvariable(infile, routecount);
         routecount = std::max(0, routecount);
-        routeedgelist.resize(static_cast<size_t>(routecount));
+        anthroposphere_.routeedgelist.resize(static_cast<size_t>(routecount));
 
-        for (RouteEdge& route : routeedgelist)
+        for (RouteEdge& route : anthroposphere_.routeedgelist)
         {
             readvariable(infile, route.fromSettlementId);
             readvariable(infile, route.toSettlementId);
@@ -1909,9 +1770,9 @@ bool planet::loadworld(string filename)
         int eventcount = 0;
         readvariable(infile, eventcount);
         eventcount = std::max(0, eventcount);
-        historyeventlist.resize(static_cast<size_t>(eventcount));
+        anthroposphere_.historyeventlist.resize(static_cast<size_t>(eventcount));
 
-        for (HistoryEvent& event : historyeventlist)
+        for (HistoryEvent& event : anthroposphere_.historyeventlist)
         {
             readvariable(infile, event.year);
             readstring(event.type);
@@ -1924,20 +1785,20 @@ bool planet::loadworld(string filename)
     }
     else
     {
-        parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+        parallelforrows(0, body_.itswidth, [&](int startx, int endx)
         {
             for (int i = startx; i <= endx; i++)
             {
-                for (int j = 0; j < ARRAYHEIGHT; j++)
+                for (int j = 0; j <= body_.itsheight; j++)
                 {
-                    settlement_suitability[i][j] = 0;
-                    social_infrastructure[i][j] = 0;
-                    agricultural_capacity[i][j] = 0;
-                    route_traffic[i][j] = 0;
-                    river_access[i][j] = 0;
-                    harbor_score[i][j] = 0;
-                    owner_settlement_id[i][j] = -1;
-                    owner_polity_id[i][j] = -1;
+                    anthroposphere_.settlement_suitability[i][j] = 0;
+                    anthroposphere_.social_infrastructure[i][j] = 0;
+                    anthroposphere_.agricultural_capacity[i][j] = 0;
+                    anthroposphere_.route_traffic[i][j] = 0;
+                    anthroposphere_.river_access[i][j] = 0;
+                    anthroposphere_.harbor_score[i][j] = 0;
+                    anthroposphere_.owner_settlement_id[i][j] = -1;
+                    anthroposphere_.owner_polity_id[i][j] = -1;
                 }
             }
         }, 64);
@@ -1947,90 +1808,94 @@ bool planet::loadworld(string filename)
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
-        readshortvectordata(infile, seasonaltempmaps[season]);
-        readshortvectordata(infile, seasonalrainmaps[season]);
+        readshortvectordata(infile, climate_.seasonaltempmaps[season]);
+        readshortvectordata(infile, climate_.seasonalrainmaps[season]);
         std::transform(
-            seasonalrainmaps[season].begin(),
-            seasonalrainmaps[season].end(),
-            seasonalrainfloatmaps[season].begin(),
+            climate_.seasonalrainmaps[season].begin(),
+            climate_.seasonalrainmaps[season].end(),
+            climate_.seasonalrainfloatmaps[season].begin(),
             [](short value) { return static_cast<float>(value); });
-        readshortvectordata(infile, seasonalpressuremaps[season]);
-        readshortvectordata(infile, seasonaluwindmaps[season]);
-        readshortvectordata(infile, seasonalvwindmaps[season]);
+        readshortvectordata(infile, climate_.seasonalpressuremaps[season]);
+        readshortvectordata(infile, climate_.seasonaluwindmaps[season]);
+        readshortvectordata(infile, climate_.seasonalvwindmaps[season]);
         if (fileversion >= 13)
         {
-            readshortvectordata(infile, seasonalupperheightmaps[season]);
-            readshortvectordata(infile, seasonalupperuwindmaps[season]);
-            readshortvectordata(infile, seasonaluppervwindmaps[season]);
-            readshortvectordata(infile, seasonalverticalvelocitymaps[season]);
+            readshortvectordata(infile, climate_.seasonalupperheightmaps[season]);
+            readshortvectordata(infile, climate_.seasonalupperuwindmaps[season]);
+            readshortvectordata(infile, climate_.seasonaluppervwindmaps[season]);
+            readshortvectordata(infile, climate_.seasonalverticalvelocitymaps[season]);
         }
         else
         {
-            std::fill(seasonalupperheightmaps[season].begin(), seasonalupperheightmaps[season].end(), 0);
-            std::fill(seasonalupperuwindmaps[season].begin(), seasonalupperuwindmaps[season].end(), 0);
-            std::fill(seasonaluppervwindmaps[season].begin(), seasonaluppervwindmaps[season].end(), 0);
-            std::fill(seasonalverticalvelocitymaps[season].begin(), seasonalverticalvelocitymaps[season].end(), 0);
+            std::fill(climate_.seasonalupperheightmaps[season].begin(), climate_.seasonalupperheightmaps[season].end(), 0);
+            std::fill(climate_.seasonalupperuwindmaps[season].begin(), climate_.seasonalupperuwindmaps[season].end(), 0);
+            std::fill(climate_.seasonaluppervwindmaps[season].begin(), climate_.seasonaluppervwindmaps[season].end(), 0);
+            std::fill(climate_.seasonalverticalvelocitymaps[season].begin(), climate_.seasonalverticalvelocitymaps[season].end(), 0);
         }
-        readshortvectordata(infile, seasonalcurrentumaps[season]);
-        readshortvectordata(infile, seasonalcurrentvmaps[season]);
-        readshortvectordata(infile, seasonalsstmaps[season]);
-        readshortvectordata(infile, seasonalevaporationmaps[season]);
-        readshortvectordata(infile, seasonalmaritimeinfluencemaps[season]);
-        readshortvectordata(infile, seasonalmaritimethermalanomalymaps[season]);
-        readshortvectordata(infile, seasonalmaritimefetchmaps[season]);
-        readshortvectordata(infile, seasonalmoisturemaps[season]);
-        readshortvectordata(infile, seasonalconvergencemaps[season]);
-        readshortvectordata(infile, seasonalupliftmaps[season]);
-        readshortvectordata(infile, seasonalsubsidencemaps[season]);
+        readshortvectordata(infile, climate_.seasonalcurrentumaps[season]);
+        readshortvectordata(infile, climate_.seasonalcurrentvmaps[season]);
+        readshortvectordata(infile, climate_.seasonalsstmaps[season]);
+        readshortvectordata(infile, climate_.seasonalevaporationmaps[season]);
+        readshortvectordata(infile, climate_.seasonalmaritimeinfluencemaps[season]);
+        readshortvectordata(infile, climate_.seasonalmaritimethermalanomalymaps[season]);
+        readshortvectordata(infile, climate_.seasonalmaritimefetchmaps[season]);
+        readshortvectordata(infile, climate_.seasonalmoisturemaps[season]);
+        readshortvectordata(infile, climate_.seasonalconvergencemaps[season]);
+        readshortvectordata(infile, climate_.seasonalupliftmaps[season]);
+        readshortvectordata(infile, climate_.seasonalsubsidencemaps[season]);
     }
 
     for (int i = 0; i < ARRAYWIDTH; i++)
     {
         for (int j = 0; j < 6; j++)
-            readvariable(infile, horselats[i][j]);
+            readvariable(infile, climate_.horselats[i][j]);
     }
 
-    for (int i = 0; i < itscraterno; i++)
+    for (int i = 0; i < geosphere_.itscraterno; i++)
     {
-        readvariable(infile, cratercentreslist[i].w);
-        readvariable(infile, cratercentreslist[i].x);
-        readvariable(infile, cratercentreslist[i].y);
-        readvariable(infile, cratercentreslist[i].z);
+        readvariable(infile, geosphere_.cratercentreslist[i].w);
+        readvariable(infile, geosphere_.cratercentreslist[i].x);
+        readvariable(infile, geosphere_.cratercentreslist[i].y);
+        readvariable(infile, geosphere_.cratercentreslist[i].z);
     }
 
     if (fileversion >= 15)
     {
-        readvariable(infile, itstectonictimeoriginstep);
-        readvariable(infile, itstectonictimemyr);
-        readvariable(infile, itstectonicdeltatimemyr);
-        readdata(infile, tectoniccrustagemyrmap);
-        readdata(infile, tectoniccrustthicknessmap);
-        readdata(infile, tectoniccrustclassmap);
-        readdata(infile, tectonicuplifttendencymap);
-        readdata(infile, tectonicsubsidencetendencymap);
-        readdata(infile, tectonicaccumulatedstrainmap);
-        readdata(infile, tectonicboundarytypemap);
-        readdata(infile, tectonicboundarydistancemap);
-        readdata(infile, tectonicboundarysegmentidmap);
-        readdata(infile, tectonicnearestboundaryidmap);
-        readdata(infile, tectonicboundaryhistorymap);
-        readdata(infile, tectonicdeformingregionidmap);
-        readdata(infile, tectonicdeformingregiontypemap);
-        readdata(infile, tectonicdeformationratemap);
-        readdata(infile, tectonicdeformationvelocityxmap);
-        readdata(infile, tectonicdeformationvelocityymap);
+        readvariable(infile, geosphere_.itstectonictimeoriginstep);
+        readvariable(infile, geosphere_.itstectonictimemyr);
+        readvariable(infile, geosphere_.itstectonicdeltatimemyr);
+        readdata(infile, geosphere_.tectoniccrustagemyrmap);
+        readdata(infile, geosphere_.tectoniccrustthicknessmap);
+        readdata(infile, geosphere_.tectoniccrustclassmap);
+        readdata(infile, geosphere_.tectonicuplifttendencymap);
+        readdata(infile, geosphere_.tectonicsubsidencetendencymap);
+        readdata(infile, geosphere_.tectonicaccumulatedstrainmap);
+        readdata(infile, geosphere_.tectonicboundarytypemap);
+        readdata(infile, geosphere_.tectonicboundarydistancemap);
+        readdata(infile, geosphere_.tectonicboundarysegmentidmap);
+        readdata(infile, geosphere_.tectonicnearestboundaryidmap);
+        readdata(infile, geosphere_.tectonicboundaryhistorymap);
+        readdata(infile, geosphere_.tectonicdeformingregionidmap);
+        readdata(infile, geosphere_.tectonicdeformingregiontypemap);
+        readdata(infile, geosphere_.tectonicdeformationratemap);
+        readdata(infile, geosphere_.tectonicdeformationvelocityxmap);
+        readdata(infile, geosphere_.tectonicdeformationvelocityymap);
 
         if (fileversion >= 16)
         {
-            readvariable(infile, itstectoniccyclecount);
-            readvariable(infile, itstectonicplatecount);
-            readvariable(infile, itstectonicsealevelm);
+            if (fileversion == 17)
+            {
+                int retiredcounter = 0; // Always zero; dropped from version 18.
+                readvariable(infile, retiredcounter);
+            }
+            readvariable(infile, geosphere_.itstectonicplatecount);
+            readvariable(infile, geosphere_.itstectonicsealevelm);
 
             int boundarysegmentcount = 0;
             readvariable(infile, boundarysegmentcount);
             boundarysegmentcount = std::max(0, boundarysegmentcount);
-            tectonicboundarysegmentlist.resize(static_cast<size_t>(boundarysegmentcount));
-            for (TectonicBoundarySegment& segment : tectonicboundarysegmentlist)
+            geosphere_.tectonicboundarysegmentlist.resize(static_cast<size_t>(boundarysegmentcount));
+            for (TectonicBoundarySegment& segment : geosphere_.tectonicboundarysegmentlist)
             {
                 readvariable(infile, segment.id);
                 readvariable(infile, segment.leftPlateId);
@@ -2066,8 +1931,8 @@ bool planet::loadworld(string filename)
             int deformingregioncount = 0;
             readvariable(infile, deformingregioncount);
             deformingregioncount = std::max(0, deformingregioncount);
-            tectonicdeformingregionlist.resize(static_cast<size_t>(deformingregioncount));
-            for (TectonicDeformingRegion& region : tectonicdeformingregionlist)
+            geosphere_.tectonicdeformingregionlist.resize(static_cast<size_t>(deformingregioncount));
+            for (TectonicDeformingRegion& region : geosphere_.tectonicdeformingregionlist)
             {
                 readvariable(infile, region.id);
                 readvariable(infile, region.boundarySegmentId);
@@ -2097,46 +1962,44 @@ bool planet::loadworld(string filename)
         }
         else
         {
-            itstectoniccyclecount = 0;
-            itstectonicplatecount = 0;
-            itstectonicsealevelm = 0;
-            tectonicboundarysegmentlist.clear();
-            tectonicdeformingregionlist.clear();
+            geosphere_.itstectonicplatecount = 0;
+            geosphere_.itstectonicsealevelm = 0;
+            geosphere_.tectonicboundarysegmentlist.clear();
+            geosphere_.tectonicdeformingregionlist.clear();
         }
     }
     else
     {
-        itstectonictimeoriginstep = 0;
-        itstectonictimemyr = 0.0f;
-        itstectonicdeltatimemyr = 0.0f;
-        itstectoniccyclecount = 0;
-        itstectonicplatecount = 0;
-        itstectonicsealevelm = 0;
-        tectonicboundarysegmentlist.clear();
-        tectonicdeformingregionlist.clear();
+        geosphere_.itstectonictimeoriginstep = 0;
+        geosphere_.itstectonictimemyr = 0.0f;
+        geosphere_.itstectonicdeltatimemyr = 0.0f;
+        geosphere_.itstectonicplatecount = 0;
+        geosphere_.itstectonicsealevelm = 0;
+        geosphere_.tectonicboundarysegmentlist.clear();
+        geosphere_.tectonicdeformingregionlist.clear();
 
-        parallelforrows(0, ARRAYWIDTH - 1, [&](int startx, int endx)
+        parallelforrows(0, body_.itswidth, [&](int startx, int endx)
         {
             for (int i = startx; i <= endx; i++)
             {
-                for (int j = 0; j < ARRAYHEIGHT; j++)
+                for (int j = 0; j <= body_.itsheight; j++)
                 {
-                    tectoniccrustagemyrmap[i][j] = 0.0f;
-                    tectoniccrustthicknessmap[i][j] = 0.0f;
-                    tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
-                    tectonicuplifttendencymap[i][j] = 0.0f;
-                    tectonicsubsidencetendencymap[i][j] = 0.0f;
-                    tectonicaccumulatedstrainmap[i][j] = 0.0f;
-                    tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
-                    tectonicboundarydistancemap[i][j] = 0;
-                    tectonicboundarysegmentidmap[i][j] = 0;
-                    tectonicnearestboundaryidmap[i][j] = 0;
-                    tectonicboundaryhistorymap[i][j] = 0.0f;
-                    tectonicdeformingregionidmap[i][j] = 0;
-                    tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
-                    tectonicdeformationratemap[i][j] = 0.0f;
-                    tectonicdeformationvelocityxmap[i][j] = 0.0f;
-                    tectonicdeformationvelocityymap[i][j] = 0.0f;
+                    geosphere_.tectoniccrustagemyrmap[i][j] = 0.0f;
+                    geosphere_.tectoniccrustthicknessmap[i][j] = 0.0f;
+                    geosphere_.tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
+                    geosphere_.tectonicuplifttendencymap[i][j] = 0.0f;
+                    geosphere_.tectonicsubsidencetendencymap[i][j] = 0.0f;
+                    geosphere_.tectonicaccumulatedstrainmap[i][j] = 0.0f;
+                    geosphere_.tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
+                    geosphere_.tectonicboundarydistancemap[i][j] = 0;
+                    geosphere_.tectonicboundarysegmentidmap[i][j] = 0;
+                    geosphere_.tectonicnearestboundaryidmap[i][j] = 0;
+                    geosphere_.tectonicboundaryhistorymap[i][j] = 0.0f;
+                    geosphere_.tectonicdeformingregionidmap[i][j] = 0;
+                    geosphere_.tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
+                    geosphere_.tectonicdeformationratemap[i][j] = 0.0f;
+                    geosphere_.tectonicdeformationvelocityxmap[i][j] = 0.0f;
+                    geosphere_.tectonicdeformationvelocityymap[i][j] = 0.0f;
                 }
             }
         }, 64);
@@ -2146,8 +2009,8 @@ bool planet::loadworld(string filename)
     readvariable(infile, weatherstatesize);
     if (weatherstatesize < 0 || weatherstatesize > 16 * 1024 * 1024)
         return false;
-    weatheranomalystatebytes.resize(static_cast<std::size_t>(weatherstatesize));
-    for (std::uint8_t& byte : weatheranomalystatebytes)
+    climate_.weatheranomalystatebytes.resize(static_cast<std::size_t>(weatherstatesize));
+    for (std::uint8_t& byte : climate_.weatheranomalystatebytes)
     {
         int value = 0;
         readvariable(infile, value);
@@ -2156,7 +2019,7 @@ bool planet::loadworld(string filename)
         byte = static_cast<std::uint8_t>(value);
     }
     climateweather::ShallowWaterState loadedweather;
-    if (!weatheranomalystatebytes.empty() && !climateweather::deserializeState(weatheranomalystatebytes, loadedweather))
+    if (!climate_.weatheranomalystatebytes.empty() && !climateweather::deserializeState(climate_.weatheranomalystatebytes, loadedweather))
         return false;
 
     if (!readmineraldeposits(infile))
@@ -2176,14 +2039,14 @@ bool planet::loadworld(string filename)
 
 int planet::wrapx(int x) const // This wraps X coordinates so they point to proper locations on the map.
 {
-    while (x > itswidth) // If it's too large, wrap it.
+    while (x > body_.itswidth) // If it's too large, wrap it.
     {
-        x = x - itswidth;
+        x = x - body_.itswidth;
     }
 
     while (x < 0) // If it's too small, wrap it.
     {
-        x = x + itswidth;
+        x = x + body_.itswidth;
     }
 
     return(x);
@@ -2194,19 +2057,30 @@ int planet::clipy(int y) const // This clips Y coordinates so they can't be off 
     if (y < 0)
         y = 0;
 
-    if (y > itsheight)
-        y = itsheight;
+    if (y > body_.itsheight)
+        y = body_.itsheight;
 
     return(y);
 }
 
-void planet::smooth(int arr[][ARRAYHEIGHT], int amount, bool vary, bool avoidmountains) // This smoothes the given array by the given amount.
+namespace
 {
-    for (int i = 0; i <= itswidth; i++)
+// Rows beyond the poles count as zero in the averages, as they did when grids
+// were zero-filled 2048 x 1024 arrays; the averages keep their former results.
+template<typename T>
+T smoothingcell(const worldgrid<T>& grid, int x, int y)
+{
+    return y < 0 || y >= grid.rows() ? T{} : grid[x][y];
+}
+}
+
+void planet::smooth(worldgrid<int>& arr, int amount, bool vary, bool avoidmountains) // This smoothes the given array by the given amount.
+{
+    for (int i = 0; i <= body_.itswidth; i++)
     {
-        for (int j = 1; j < itsheight; j++)
+        for (int j = 1; j < body_.itsheight; j++)
         {
-            if (avoidmountains == 0 || mountainheights[i][j] == 0)
+            if (avoidmountains == 0 || geosphere_.mountainheights[i][j] == 0)
             {
                 int crount = 0;
                 int ave = 0;
@@ -2216,33 +2090,33 @@ void planet::smooth(int arr[][ARRAYHEIGHT], int amount, bool vary, bool avoidmou
                     int kk = k;
 
                     if (kk < 0)
-                        kk = itswidth;
+                        kk = body_.itswidth;
 
-                    if (kk > itswidth)
+                    if (kk > body_.itswidth)
                         kk = 0;
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + mapnom[kk][l];
+                        ave = ave + smoothingcell(geosphere_.mapnom, kk, l);
                         crount++;
                     }
                 }
                 ave = ave / crount;
 
-                if (ave > 0 && ave < itsmaxheight)
-                    mapnom[i][j] = ave;
+                if (ave > 0 && ave < geosphere_.itsmaxheight)
+                    geosphere_.mapnom[i][j] = ave;
             }
         }
     }
 }
 
-void planet::smooth(short arr[][ARRAYHEIGHT], int amount, bool vary, bool avoidmountains) // This smoothes the given array by the given amount.
+void planet::smooth(worldgrid<short>& arr, int amount, bool vary, bool avoidmountains) // This smoothes the given array by the given amount.
 {
-    for (int i = 0; i <= itswidth; i++)
+    for (int i = 0; i <= body_.itswidth; i++)
     {
-        for (int j = 1; j < itsheight; j++)
+        for (int j = 1; j < body_.itsheight; j++)
         {
-            if (avoidmountains == 0 || mountainheights[i][j] == 0)
+            if (avoidmountains == 0 || geosphere_.mountainheights[i][j] == 0)
             {
                 int crount = 0;
                 int ave = 0;
@@ -2252,21 +2126,21 @@ void planet::smooth(short arr[][ARRAYHEIGHT], int amount, bool vary, bool avoidm
                     int kk = k;
 
                     if (kk < 0)
-                        kk = itswidth;
+                        kk = body_.itswidth;
 
-                    if (kk > itswidth)
+                    if (kk > body_.itswidth)
                         kk = 0;
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + mapnom[kk][l];
+                        ave = ave + smoothingcell(geosphere_.mapnom, kk, l);
                         crount++;
                     }
                 }
                 ave = ave / crount;
 
-                if (ave > 0 && ave < itsmaxheight)
-                    mapnom[i][j] = ave;
+                if (ave > 0 && ave < geosphere_.itsmaxheight)
+                    geosphere_.mapnom[i][j] = ave;
             }
         }
     }
@@ -2274,11 +2148,11 @@ void planet::smooth(short arr[][ARRAYHEIGHT], int amount, bool vary, bool avoidm
 
 // This does the same, but only over land.
 
-void planet::smoothoverland(int arr[][ARRAYHEIGHT], int amount, bool uponly)
+void planet::smoothoverland(worldgrid<int>& arr, int amount, bool uponly)
 {
-    for (int i = 0; i <= itswidth; i++)
+    for (int i = 0; i <= body_.itswidth; i++)
     {
-        for (int j = 1; j < itsheight; j++)
+        for (int j = 1; j < body_.itsheight; j++)
         {
             if (sea(i, j) == 0)
             {
@@ -2290,14 +2164,14 @@ void planet::smoothoverland(int arr[][ARRAYHEIGHT], int amount, bool uponly)
                     int kk = k;
 
                     if (kk < 0)
-                        kk = itswidth;
+                        kk = body_.itswidth;
 
-                    if (kk > itswidth)
+                    if (kk > body_.itswidth)
                         kk = 0;
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + arr[kk][l];
+                        ave = ave + smoothingcell(arr, kk, l);
                         crount++;
                     }
                 }
@@ -2306,7 +2180,7 @@ void planet::smoothoverland(int arr[][ARRAYHEIGHT], int amount, bool uponly)
                 {
                     ave = ave / crount;
 
-                    if (ave > 0 && ave < itsmaxheight)
+                    if (ave > 0 && ave < geosphere_.itsmaxheight)
                     {
                         if (uponly == 0)
                             arr[i][j] = ave;
@@ -2322,11 +2196,11 @@ void planet::smoothoverland(int arr[][ARRAYHEIGHT], int amount, bool uponly)
     }
 }
 
-void planet::smoothoverland(short arr[][ARRAYHEIGHT], int amount, bool uponly)
+void planet::smoothoverland(worldgrid<short>& arr, int amount, bool uponly)
 {
-    for (int i = 0; i <= itswidth; i++)
+    for (int i = 0; i <= body_.itswidth; i++)
     {
-        for (int j = 1; j < itsheight; j++)
+        for (int j = 1; j < body_.itsheight; j++)
         {
             if (sea(i, j) == 0)
             {
@@ -2338,14 +2212,14 @@ void planet::smoothoverland(short arr[][ARRAYHEIGHT], int amount, bool uponly)
                     int kk = k;
 
                     if (kk < 0)
-                        kk = itswidth;
+                        kk = body_.itswidth;
 
-                    if (kk > itswidth)
+                    if (kk > body_.itswidth)
                         kk = 0;
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + (int)arr[kk][l];
+                        ave = ave + (int)smoothingcell(arr, kk, l);
                         crount++;
                     }
                 }
@@ -2354,7 +2228,7 @@ void planet::smoothoverland(short arr[][ARRAYHEIGHT], int amount, bool uponly)
                 {
                     ave = ave / crount;
 
-                    if (ave > 0 && ave < itsmaxheight)
+                    if (ave > 0 && ave < geosphere_.itsmaxheight)
                     {
                         if (uponly == 0)
                             arr[i][j] = (short)ave;
@@ -2372,26 +2246,26 @@ void planet::smoothoverland(short arr[][ARRAYHEIGHT], int amount, bool uponly)
 
 // This function shifts everything in an array to the left by a given number of pixels.
 
-template<typename T> void planet::shift(T arr[][ARRAYHEIGHT], int offset)
+template<typename T> void planet::shift(worldgrid<T>& arr, int offset)
 {
     vector<vector<T>> dummy(ARRAYWIDTH, vector<T>(ARRAYHEIGHT, 0));
 
     //T dummy[ARRAYWIDTH][ARRAYHEIGHT];
 
-    for (int i = 0; i <= itswidth; i++)
+    for (int i = 0; i <= body_.itswidth; i++)
     {
-        for (int j = 0; j <= itsheight; j++)
+        for (int j = 0; j <= body_.itsheight; j++)
             dummy[i][j] = arr[i][j];
     }
 
-    for (int i = 0; i <= itswidth; i++)
+    for (int i = 0; i <= body_.itswidth; i++)
     {
         int ii = i + offset;
 
-        if (ii<0 || ii>itswidth)
-            ii = wrap(ii, itswidth);
+        if (ii<0 || ii>body_.itswidth)
+            ii = wrap(ii, body_.itswidth);
 
-        for (int j = 0; j <= itsheight; j++)
+        for (int j = 0; j <= body_.itsheight; j++)
             arr[i][j] = dummy[ii][j];
     }
 }
@@ -2423,11 +2297,12 @@ template<typename T> void planet::writevariable(ofstream& outfile, T val)
 
 // Functions for saving member arrays.
 
-template<typename T> void planet::writedata(ofstream& outfile, T const arr[ARRAYWIDTH][ARRAYHEIGHT])
+// Grids are written column by column over the world size, the layout of the former arrays.
+template<typename T> void planet::writedata(ofstream& outfile, const worldgrid<T>& arr)
 {
-    for (int i = 0; i <= itswidth; i++)
+    for (int i = 0; i <= body_.itswidth; i++)
     {
-        for (int j = 0; j <= itsheight; j++)
+        for (int j = 0; j <= body_.itsheight; j++)
         {
             write_val(arr[i][j], outfile);
             outfile.put('\n');
@@ -2482,14 +2357,62 @@ template<typename T> void planet::readvariable(ifstream& infile, T& val)
 
 // Functions for loading member arrays.
 
-template<typename T> void planet::readdata(ifstream& infile, T arr[ARRAYWIDTH][ARRAYHEIGHT])
+template<typename T> void planet::readdata(ifstream& infile, worldgrid<T>& arr)
 {
-    for (int i = 0; i <= itswidth; i++)
+    for (int i = 0; i <= body_.itswidth; i++)
     {
-        for (int j = 0; j <= itsheight; j++)
+        for (int j = 0; j <= body_.itsheight; j++)
         {
             getline(infile, line_for_file_read);
             read_val(line_for_file_read, arr[i][j]);
         }
     }
+}
+
+climateinputs planet::climateinputsview() const
+{
+    climateinputs inputs;
+    inputs.width = body_.itswidth;
+    inputs.height = body_.itsheight;
+    inputs.seed = body_.itsseed;
+    inputs.rotation = body_.itsrotation;
+    inputs.tilt = body_.itstilt;
+    inputs.eccentricity = body_.itseccentricity;
+    inputs.perihelion = body_.itsperihelion;
+    inputs.gravity = body_.itsgravity;
+    inputs.lunar = body_.itslunar;
+    inputs.tempdecrease = atmosphere_.itstempdecrease;
+    inputs.northpolaradjust = atmosphere_.itsnorthpolaradjust;
+    inputs.southpolaradjust = atmosphere_.itssouthpolaradjust;
+    inputs.averagetemp = atmosphere_.itsaveragetemp;
+    inputs.waterpickup = atmosphere_.itswaterpickup;
+    inputs.maxelevation = geosphere_.itsmaxheight;
+    inputs.sealevel = geosphere_.itssealevel;
+    inputs.landtotal = geosphere_.itslandtotal;
+    inputs.seatotal = geosphere_.itsseatotal;
+    inputs.rows = body_.itsheight + 1;
+    inputs.nom = &geosphere_.mapnom[0][0];
+    inputs.mountainheights = &geosphere_.mountainheights[0][0];
+    inputs.extraelev = &geosphere_.extraelevmap[0][0];
+    inputs.craterrims = &geosphere_.craterrims[0][0];
+    inputs.cratercentres = &geosphere_.cratercentres[0][0];
+    inputs.volcano = &geosphere_.volcanomap[0][0];
+    inputs.oceanridgeheight = &geosphere_.oceanridgeheightmap[0][0];
+    inputs.lakesurface = &hydrosphere_.lakemap[0][0];
+    inputs.riftlakesurface = &hydrosphere_.riftlakemapsurface[0][0];
+    inputs.special = &hydrosphere_.specials[0][0];
+    return inputs;
+}
+
+// Binding on every call keeps the inputs pointing at this world after copies.
+climateworld& planet::climate()
+{
+    climate_.bindinputs(climateinputsview());
+    return climate_;
+}
+
+const climateworld& planet::climate() const
+{
+    climate_.bindinputs(climateinputsview());
+    return climate_;
 }

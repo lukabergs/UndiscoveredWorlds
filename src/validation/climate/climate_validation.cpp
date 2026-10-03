@@ -1,3 +1,6 @@
+// Windows headers first: project headers bring std names (std::byte) into scope.
+#include <windows.h>
+
 #include "climate_palette.hpp"
 #include "climate_artifacts.hpp"
 #include "app_environment.hpp"
@@ -10,10 +13,22 @@
 #include "climate_physics.hpp"
 #include "climate_reference.hpp"
 #include "climate_tiff.hpp"
-#include "functions.hpp"
+#include "raster_image.hpp"
+#include "classes.hpp"
+#include "climate_elevation.hpp"
+#include "climate_world.hpp"
+#include "climate_classification.hpp"
+#include "climate_coupling.hpp"
+#include "climate_fields.hpp"
+#include "deterministic_random.hpp"
+#include "generation_progress.hpp"
+#include "grid_coordinates.hpp"
+#include "land_distance.hpp"
+#include "parallel_rows.hpp"
+#include "procedural_noise.hpp"
+#include "world_generation_debug.hpp"
 #include "generation_tuning.hpp"
 
-#include <windows.h>
 
 #include <algorithm>
 #include <array>
@@ -178,23 +193,23 @@ constexpr array<array<int, 3>, 31> benchmarkclimatecolours =
     { 0, 69, 92 }, { 178, 178, 178 }, { 104, 104, 104 }
 };
 
-sf::Color benchmarkclimatecolour(short climate)
+rasterimage::Color benchmarkclimatecolour(short climate)
 {
     if (climate < 1 || climate > static_cast<short>(benchmarkclimatecolours.size()))
-        return sf::Color::Black;
+        return rasterimage::Color::Black;
 
     const auto& colour = benchmarkclimatecolours[climate - 1];
-    return sf::Color(colour[0], colour[1], colour[2]);
+    return rasterimage::Color(colour[0], colour[1], colour[2]);
 }
 
 struct benchmarkcolouranchor
 {
     float value = 0.0f;
-    sf::Color colour;
+    rasterimage::Color colour;
 };
 
 template <size_t AnchorCount>
-sf::Color benchmarkscalarcolour(
+rasterimage::Color benchmarkscalarcolour(
     float value,
     const array<benchmarkcolouranchor, AnchorCount>& anchors)
 {
@@ -212,9 +227,9 @@ sf::Color benchmarkscalarcolour(
         const benchmarkcolouranchor& lower = anchors[index - 1];
         const benchmarkcolouranchor& upper = anchors[index];
         const float fraction = (value - lower.value) / (upper.value - lower.value);
-        const auto interpolate = [&](sf::Uint8 first, sf::Uint8 second)
+        const auto interpolate = [&](rasterimage::Uint8 first, rasterimage::Uint8 second)
         {
-            return static_cast<sf::Uint8>(std::clamp(
+            return static_cast<rasterimage::Uint8>(std::clamp(
                 static_cast<int>(std::round(
                     static_cast<float>(first) + fraction *
                     (static_cast<float>(second) - static_cast<float>(first)))),
@@ -222,7 +237,7 @@ sf::Color benchmarkscalarcolour(
                 255));
         };
 
-        return sf::Color(
+        return rasterimage::Color(
             interpolate(lower.colour.r, upper.colour.r),
             interpolate(lower.colour.g, upper.colour.g),
             interpolate(lower.colour.b, upper.colour.b));
@@ -231,19 +246,19 @@ sf::Color benchmarkscalarcolour(
     return anchors.back().colour;
 }
 
-sf::Color benchmarktemperaturecolour(float temperaturec)
+rasterimage::Color benchmarktemperaturecolour(float temperaturec)
 {
     const auto rgb = climatepalette::colour(temperaturec, climatepalette::field_air_temperature_low, climatepalette::field_air_temperature_high, true);
-    return sf::Color(rgb[0], rgb[1], rgb[2]);
+    return rasterimage::Color(rgb[0], rgb[1], rgb[2]);
 }
 
-sf::Color benchmarkprecipitationcolour(float precipitationmmyear)
+rasterimage::Color benchmarkprecipitationcolour(float precipitationmmyear)
 {
     const auto rgb = climatepalette::colour(precipitationmmyear, climatepalette::field_annual_rain_low, climatepalette::field_annual_rain_high, false);
-    return sf::Color(rgb[0], rgb[1], rgb[2]);
+    return rasterimage::Color(rgb[0], rgb[1], rgb[2]);
 }
 
-short nearestbenchmarkclimate(const sf::Color& pixel, int& distancesquared)
+short nearestbenchmarkclimate(const rasterimage::Color& pixel, int& distancesquared)
 {
     short nearest = 0;
     distancesquared = 3 * 255 * 255;
@@ -290,15 +305,15 @@ double gridcellareaweight(int row, int height)
     return climategrid::latitudeBandMeasure(row, height + 1);
 }
 
-bool isvalidationland(planet& world, int x, int y);
+bool isvalidationland(climateworld& world, int x, int y);
 
-bool aligncategoricalreference(sf::Image& reference, const planet& world)
+bool aligncategoricalreference(rasterimage::Image& reference, const climateworld& world)
 {
     const auto size = reference.getSize();
     const unsigned int columns = world.width() + 1, rows = world.height() + 1;
     if (size.x == 0 || size.y == 0) return false;
     if (size.x == columns && size.y == rows) return true;
-    sf::Image aligned;
+    rasterimage::Image aligned;
     aligned.create(columns, rows);
     for (unsigned int y = 0; y < rows; ++y)
         for (unsigned int x = 0; x < columns; ++x)
@@ -312,10 +327,10 @@ bool aligncategoricalreference(sf::Image& reference, const planet& world)
     return true;
 }
 
-climatespatialmetrics compareclimatespatially(planet& world)
+climatespatialmetrics compareclimatespatially(climateworld& world)
 {
     climatespatialmetrics metrics;
-    sf::Image reference;
+    rasterimage::Image reference;
     const filesystem::path referencepath = getappenvironment().earthKoppenImagePath;
 
     if (reference.loadFromFile(referencepath.string()) == false)
@@ -325,7 +340,7 @@ climatespatialmetrics compareclimatespatially(planet& world)
     if (!aligncategoricalreference(reference, world)) return metrics;
     const int width = world.width();
     const int height = world.height();
-    const sf::Vector2u referencesize = reference.getSize();
+    const rasterimage::Size referencesize = reference.getSize();
 
     if (referencesize.x != static_cast<unsigned int>(width + 1) || referencesize.y != static_cast<unsigned int>(height + 1))
         return metrics;
@@ -530,7 +545,7 @@ enum class referencescope
     ocean
 };
 
-bool isvalidationland(planet& world, int x, int y)
+bool isvalidationland(climateworld& world, int x, int y)
 {
     return world.sea(x, y) == 0 &&
         world.truelake(x, y) == 0 &&
@@ -578,7 +593,7 @@ struct coarseprecipitationcell
 };
 
 double fivedegreelandprecipitationcorrelation(
-    planet& world,
+    climateworld& world,
     const climatereference::MonthlyGrid& reference)
 {
     constexpr int longitudebins = 72;
@@ -729,7 +744,7 @@ bool temperatureallowsreferencemajorgroup(
     return expectedcode[0] == 'D';
 }
 
-double simulatedmonthlyvalue(planet& world, monthlyreferencefield field, int season, int x, int y)
+double simulatedmonthlyvalue(climateworld& world, monthlyreferencefield field, int season, int x, int y)
 {
     if (field == monthlyreferencefield::temperature)
         return world.seasonaltemp(season, x, y);
@@ -799,7 +814,7 @@ double simulatedmonthlyvalue(planet& world, monthlyreferencefield field, int sea
 }
 
 comparisonmetrics comparemonthlyfield(
-    planet& world,
+    climateworld& world,
     const climatereference::MonthlyGrid& reference,
     int season,
     monthlyreferencefield field,
@@ -978,7 +993,7 @@ comparisonmetrics comparemonthlyfield(
     return metrics;
 }
 
-void writemonthlyreferencecomparison(const filesystem::path& outputdir, planet& world)
+void writemonthlyreferencecomparison(const filesystem::path& outputdir, climateworld& world)
 {
     const filesystem::path referencedirectory = getappenvironment().referenceClimateDirectory;
     climatereference::MonthlyGrid temperature;
@@ -1058,7 +1073,7 @@ void writemonthlyreferencecomparison(const filesystem::path& outputdir, planet& 
         writecomparisons("surface_wind_speed_m_s", surfacewind, monthlyreferencefield::surfacewindspeed);
 }
 
-void writeimergreferencecomparison(const filesystem::path& outputdir, planet& world)
+void writeimergreferencecomparison(const filesystem::path& outputdir, climateworld& world)
 {
     climatereference::MonthlyGrid precipitation;
     string error;
@@ -1123,7 +1138,7 @@ struct physicalreferencespecification
     monthlyreferencefield simulatedfield;
 };
 
-void writephysicalreferencecomparison(const filesystem::path& outputdir, planet& world)
+void writephysicalreferencecomparison(const filesystem::path& outputdir, climateworld& world)
 {
     constexpr array<physicalreferencespecification, 8> specifications = {
         physicalreferencespecification{ "era5_slp_anom_monthly.uwclim", "slp_anom", "sea_level_pressure_anomaly_hpa", monthlyreferencefield::surfacepressure },
@@ -1290,13 +1305,13 @@ vector<ipccregionlabel> loadipccregionlabels(const filesystem::path& path)
     return labels;
 }
 
-void writeipccregioncomparison(const filesystem::path& outputdir, planet& world)
+void writeipccregioncomparison(const filesystem::path& outputdir, climateworld& world)
 {
     const filesystem::path referencedirectory = getappenvironment().referenceClimateDirectory;
     const vector<ipccregionlabel> labels = loadipccregionlabels(
         referencedirectory / "ipcc_ar6_regions.tsv");
-    sf::Image regionmask;
-    sf::Image koppenreference;
+    rasterimage::Image regionmask;
+    rasterimage::Image koppenreference;
     climatereference::MonthlyGrid temperaturereference;
     climatereference::MonthlyGrid precipitationreference;
     string temperatureerror;
@@ -1327,8 +1342,8 @@ void writeipccregioncomparison(const filesystem::path& outputdir, planet& world)
 
     aligncategoricalreference(regionmask, world);
     aligncategoricalreference(koppenreference, world);
-    const sf::Vector2u regionsize = regionmask.getSize();
-    const sf::Vector2u koppensize = koppenreference.getSize();
+    const rasterimage::Size regionsize = regionmask.getSize();
+    const rasterimage::Size koppensize = koppenreference.getSize();
     const bool dimensionsmatch =
         regionsize.x == static_cast<unsigned int>(world.width() + 1) &&
         regionsize.y == static_cast<unsigned int>(world.height() + 1) &&
@@ -1593,7 +1608,7 @@ vector<string> orderedclimatecodes()
     return codes;
 }
 
-vector<long long> collectsimulatedclimatecounts(planet& world)
+vector<long long> collectsimulatedclimatecounts(climateworld& world)
 {
     vector<long long> counts(31, 0);
     const int width = world.width();
@@ -1616,9 +1631,9 @@ vector<long long> collectsimulatedclimatecounts(planet& world)
     return counts;
 }
 
-void printreferencedfcdriverreport(planet& world)
+void printreferencedfcdriverreport(climateworld& world)
 {
-    sf::Image reference;
+    rasterimage::Image reference;
     const filesystem::path referencepath = getappenvironment().earthKoppenImagePath;
 
     if (reference.loadFromFile(referencepath.string()) == false)
@@ -1627,7 +1642,7 @@ void printreferencedfcdriverreport(planet& world)
     aligncategoricalreference(reference, world);
     const int width = world.width();
     const int height = world.height();
-    const sf::Vector2u referencesize = reference.getSize();
+    const rasterimage::Size referencesize = reference.getSize();
 
     if (referencesize.x != static_cast<unsigned int>(width + 1) || referencesize.y != static_cast<unsigned int>(height + 1))
         return;
@@ -1757,9 +1772,9 @@ void printreferencedfcdriverreport(planet& world)
     }
 }
 
-void printsimulatedclassconfusionreport(planet& world, short targetclimate)
+void printsimulatedclassconfusionreport(climateworld& world, short targetclimate)
 {
-    sf::Image reference;
+    rasterimage::Image reference;
     const filesystem::path referencepath = getappenvironment().earthKoppenImagePath;
 
     if (reference.loadFromFile(referencepath.string()) == false)
@@ -1768,7 +1783,7 @@ void printsimulatedclassconfusionreport(planet& world, short targetclimate)
     aligncategoricalreference(reference, world);
     const int width = world.width();
     const int height = world.height();
-    const sf::Vector2u referencesize = reference.getSize();
+    const rasterimage::Size referencesize = reference.getSize();
 
     if (referencesize.x != static_cast<unsigned int>(width + 1) || referencesize.y != static_cast<unsigned int>(height + 1))
         return;
@@ -1919,7 +1934,7 @@ int nextclimatebenchmarkrunid()
     return maximumid + 1;
 }
 
-void collectbenchmarktemperaturemetrics(planet& world, benchmarkphysicsmetrics& metrics)
+void collectbenchmarktemperaturemetrics(climateworld& world, benchmarkphysicsmetrics& metrics)
 {
     double landweight = 0.0;
     double clippedweight = 0.0;
@@ -1949,7 +1964,7 @@ void collectbenchmarktemperaturemetrics(planet& world, benchmarkphysicsmetrics& 
     if (landweight > 0.0)
         metrics.areaweightedlandrainfallstorageclippingfraction = clippedweight / landweight;
 
-    sf::Image koppenreference;
+    rasterimage::Image koppenreference;
 
     if (!koppenreference.loadFromFile(getappenvironment().earthKoppenImagePath.string()))
         return;
@@ -2137,7 +2152,7 @@ void collectbenchmarktemperaturemetrics(planet& world, benchmarkphysicsmetrics& 
     }
 }
 
-benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(planet& world)
+benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(climateworld& world)
 {
     benchmarkphysicsmetrics metrics;
     collectbenchmarktemperaturemetrics(world, metrics);
@@ -2746,7 +2761,7 @@ bool updateclimatebenchmarkworkbook(
 }
 
 bool loadcirculationreferencewindfields(
-    planet& world,
+    climateworld& world,
     climatevalidation::circulationreferencewindfields& fields,
     string* failuremessage)
 {
@@ -2807,7 +2822,7 @@ bool loadcirculationreferencewindfields(
 }
 
 bool exportclimatebenchmarkimages(
-    planet& world,
+    climateworld& world,
     int runid,
     const climatebenchmarkmapselection& selection)
 {
@@ -2831,13 +2846,13 @@ bool exportclimatebenchmarkimages(
         return false;
     }
 
-    const auto saveimage = [&](const sf::Image& image, climatebenchmarkmapkind kind)
+    const auto saveimage = [&](const rasterimage::Image& image, climatebenchmarkmapkind kind)
     {
         const climatebenchmarkmaprequest request{ kind, -1 };
         const filesystem::path path = outputdir /
             climatebenchmarkmaprelativepath(request, runid);
         filesystem::create_directories(path.parent_path(), filesystemerror);
-        if (filesystemerror || !image.saveToFile(path.string()))
+        if (filesystemerror || !climatevalidation::saveclimatemapimage(image, path, width + 1))
         {
             cerr << "Failed to save benchmark map: " << path.string() << '\n';
             return false;
@@ -2847,8 +2862,8 @@ bool exportclimatebenchmarkimages(
 
     if (selection.includes(climatebenchmarkmapkind::koppen))
     {
-        sf::Image image;
-        image.create(width + 1, height + 1, sf::Color::Black);
+        rasterimage::Image image;
+        image.create(width + 1, height + 1, rasterimage::Color::Black);
         for (int y = 0; y <= height; y++)
         {
             for (int x = 0; x <= width; x++)
@@ -2866,8 +2881,8 @@ bool exportclimatebenchmarkimages(
 
     if (selection.includes(climatebenchmarkmapkind::temperature))
     {
-        sf::Image image;
-        image.create(width + 1, height + 1, sf::Color::Black);
+        rasterimage::Image image;
+        image.create(width + 1, height + 1, rasterimage::Color::Black);
         for (int y = 0; y <= height; y++)
         {
             for (int x = 0; x <= width; x++)
@@ -2886,8 +2901,8 @@ bool exportclimatebenchmarkimages(
     if (selection.includes(climatebenchmarkmapkind::precipitation) ||
         selection.includes(climatebenchmarkmapkind::precipitationtiff))
     {
-        sf::Image image;
-        image.create(width + 1, height + 1, sf::Color::Black);
+        rasterimage::Image image;
+        image.create(width + 1, height + 1, rasterimage::Color::Black);
         vector<float> values(static_cast<size_t>(width + 1) * (height + 1));
         for (int y = 0; y <= height; y++)
         {
@@ -3012,7 +3027,7 @@ bool exportclimatebenchmarkimages(
         << "See runs/maps/climate/README.md and refs/processed/climate/maps/README.md for paths and palettes.\n"
         << "The legacy names below identify diagnostic staging files only.\n\n"
         << "All maps are global equirectangular grids with north at the top and periodic longitude.\n\n"
-        << "Wind speed, LIC and particles use --wind-map-resolution (default 2048); scalar products keep world dimensions.\n"
+        << "Every PNG map and GeoTIFF field has the world grid's size (--resolution); coarser climate grids are remapped onto it.\n"
         << "These native wind maps show coarse seasonal circulation; W2/Q3 terrain refinement is a separate diagnostic pass.\n\n"
         << "{ID}_koppen.png: categorical land climate class; colors follow the workbook's Koeppen-Geiger legend; water is black.\n"
         << "Shared colours and fixed scales: configs/climate-palettes.json (climate-colour-v2).\n"
@@ -3087,7 +3102,7 @@ bool loadprecipitationgrid(const filesystem::path& filepath, vector<vector<doubl
     return grid.empty() == false;
 }
 
-comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, planet& world, const vector<zonalstats>& rows)
+comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, climateworld& world, const vector<zonalstats>& rows)
 {
     comparisonmetrics metrics;
     const filesystem::path referencepath = getappenvironment().referencePrecipitationGridPath;
@@ -3307,7 +3322,7 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
     return metrics;
 }
 
-void writeatmosphericbudget(const filesystem::path& outputdir, planet& world)
+void writeatmosphericbudget(const filesystem::path& outputdir, climateworld& world)
 {
     constexpr array<const char*, CLIMATESEASONCOUNT> seasonnames = { "january", "april", "july", "october" };
     constexpr double verticalstoragescale = tuning::climate::circulation::verticalVelocityStorageScale;
@@ -3518,7 +3533,7 @@ void writecirculationprecision(const filesystem::path& outputdir)
 
 void writepressuredecompositioncomparison(
     const filesystem::path& outputdir,
-    planet& world)
+    climateworld& world)
 {
     climatereference::MonthlyGrid reference;
     string error;
@@ -3645,7 +3660,7 @@ void writepressuredecompositioncomparison(
 
 void writetemperaturethresholdcomparison(
     const filesystem::path& outputdir,
-    planet& world)
+    climateworld& world)
 {
     climatereference::MonthlyGrid reference;
     string error;
@@ -3781,7 +3796,7 @@ void writetemperaturethresholdcomparison(
     }
 }
 
-void writeprecipitationgrid(const filesystem::path& filepath, planet& world, int mode)
+void writeprecipitationgrid(const filesystem::path& filepath, climateworld& world, int mode)
 {
     ofstream outfile(filepath);
 
@@ -3827,7 +3842,7 @@ void writeprecipitationgrid(const filesystem::path& filepath, planet& world, int
 }
 
 // Numeric validation input: independent of image palettes and workbook layout.
-bool exportbenchmarkcomparisoncells(planet& world, int runid)
+bool exportbenchmarkcomparisoncells(climateworld& world, int runid)
 {
     const filesystem::path directory = getappenvironment().climateBenchmarkRunDirectory / to_string(runid);
     error_code error;
@@ -3835,8 +3850,8 @@ bool exportbenchmarkcomparisoncells(planet& world, int runid)
     if (error) return false;
     ofstream output(directory / "climate_comparison_cells.csv");
     if (!output.is_open()) return false;
-    sf::Image koppenreference;
-    sf::Image regionmask;
+    rasterimage::Image koppenreference;
+    rasterimage::Image regionmask;
     const bool haskoppen = koppenreference.loadFromFile(getappenvironment().earthKoppenImagePath.string()) &&
         aligncategoricalreference(koppenreference, world);
     const bool hasregions = regionmask.loadFromFile((getappenvironment().referenceClimateDirectory /
@@ -4016,13 +4031,13 @@ bool persistclimatebenchmarkdiagnostics(
 }
 }
 
-bool exportproceduralclimateartifacts(planet& world, const climatebenchmarkmapselection& maps)
+bool exportproceduralclimateartifacts(climateworld& world, const climatebenchmarkmapselection& maps)
 {
     return exportclimatebenchmarkimages(world, 1, maps) && exportbenchmarkcomparisoncells(world, 1);
 }
 
 bool recordclimatebenchmarkrun(
-    planet& world,
+    climateworld& world,
     const string& information,
     const climatebenchmarkmapselection& maps,
     int* runid)
@@ -4085,7 +4100,7 @@ bool recordclimatebenchmarkrun(
     return true;
 }
 
-void printclimaterelativeerrorreport(planet& world)
+void printclimaterelativeerrorreport(climateworld& world)
 {
     const vector<string> codes = orderedclimatecodes();
     const vector<long long> references = referenceclimatecounts();
@@ -4207,7 +4222,7 @@ void printclimaterelativeerrorreport(planet& world)
     printsimulatedclassconfusionreport(world, 1);
 }
 
-void exportclimatevalidationreport(planet& world)
+void exportclimatevalidationreport(climateworld& world)
 {
     if (isworldgendebugrunactive() == false)
         return;

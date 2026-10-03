@@ -324,33 +324,33 @@ void generateinitialatmosphereandocean(planet& world)
     if (beginworldgenstep("Generating pressure map"))
     {
         reseedglobalclimatepass(world, 0x50023);
-        createpressuremap(world);
+        createpressuremap(world.climate());
     }
 
     if (beginworldgenstep("Generating vector wind map"))
     {
         reseedglobalclimatepass(world, 0x50024);
-        createvectorwindmap(world);
-        updatehorsebeltsfrompressure(world);
+        createvectorwindmap(world.climate());
+        updatehorsebeltsfrompressure(world.climate());
     }
 
     if (beginworldgenstep("Coupling wind-driven ocean and SST"))
     {
         reseedglobalclimatepass(world, 0x50021);
-        createoceancurrentmap(world);
+        createoceancurrentmap(world.climate());
     }
 
     if (beginworldgenstep("Diagnosing ocean evaporation"))
     {
         reseedglobalclimatepass(world, 0x50022);
-        createsurfacetemperaturemap(world);
+        createsurfacetemperaturemap(world.climate());
     }
 }
 }
 
 // This function creates the global climate.
 
-void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dodeltas, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, vector<vector<bool>>& shelves, const ImportedClimateMaps* importedClimate)
+void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dodeltas, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<int>>& mountaindrainage, worldgrid<bool>& shelves, const ImportedClimateMaps* importedClimate)
 {
     long seed = world.seed();
     fast_srand(seed);
@@ -425,7 +425,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         warpfactor = random(40, 80);
         warp(fractal, width, height, maxelev, warpfactor, 0);
 
-        createtemperaturemap(world, fractal);
+        createtemperaturemap(world.climate(), fractal);
 
         if (importedtemperature)
             applyimportedtemperaturemap(world, *importedClimate);
@@ -453,7 +453,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
             warpfactor = random(40, 80);
             warp(fractal, width, height, maxelev, warpfactor, 0);
 
-            createseaicemap(world, fractal);
+            createseaicemap(world.climate(), fractal);
         }
 
         if (beginworldgenstep("Calculating tides"))
@@ -479,12 +479,12 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         warp(fractal, width, height, maxelev, warpfactor, 0);
         warp(fractal, width, height, maxelev, warpfactor, 0);
 
-        createrainmap(world, fractal, landtotal, seatotal, smalllake, landshape);
+        createrainmap(world.climate(), fractal, landtotal, seatotal, smalllake, landshape);
 
         if (seatotal > 0 &&
             tuning::climate::circulation::enableLaggedDiabaticCoupling)
         {
-            convergeclimatecoupling(world, fractal);
+            convergeclimatecoupling(world.climate(), fractal);
         }
     }
 
@@ -575,7 +575,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
     if (beginworldgenstep("Applying mountain temperature lapse"))
     {
         reseedglobalclimatepass(world, 0x5009);
-        checkpoleclimates(world);
+        checkpoleclimates(world.climate());
         world.syncseasonalclimatefromlegacy();
 
         if (importedtemperature)
@@ -583,10 +583,10 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
     }
 
     if (beginworldgenstep("Calculating Koppen climates"))
-        createclimatemap(world);
+        createclimatemap(world.climate());
 
     if (beginworldgenstep("Calculating Holdridge biomes"))
-        createbiomemap(world);
+        createbiomemap(world.climate());
 
     // Now specials.
 
@@ -645,7 +645,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
     // Check that the climates at the edges of the map are correct.
 
     if (beginworldgenstep("Checking poles"))
-        checkpoleclimates(world);
+        checkpoleclimates(world.climate());
 
     world.syncseasonalclimatefromlegacy();
 
@@ -656,11 +656,11 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         applyimportedprecipitationmap(world, *importedClimate);
 
     if (importedprecipitation)
-        createmountainprecipitation(world);
+        createmountainprecipitation(world.climate());
 
-    createclimatemap(world);
-    createbiomemap(world);
-    exportclimatevalidationreport(world);
+    createclimatemap(world.climate());
+    createbiomemap(world.climate());
+    exportclimatevalidationreport(world.climate());
 
     if (dolakes == 0)
     {

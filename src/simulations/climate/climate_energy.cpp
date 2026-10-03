@@ -4,7 +4,7 @@
 #include "detail/land_ice.hpp"
 #include "detail/tropical_cloud_albedo.hpp"
 #include "generation_tuning.hpp"
-#include "planet.hpp"
+#include "climate_world.hpp"
 
 #include <algorithm>
 #include <array>
@@ -112,7 +112,7 @@ struct CoupledProfileSimulation
 };
 
 ProfileSimulation simulateProfiles(
-    const planet& world,
+    const climateworld& world,
     const std::vector<int>& outputLandCells,
     const std::vector<int>& outputOceanCells,
     const std::vector<double>& outputPermanentIceFraction,
@@ -406,7 +406,7 @@ ProfileSimulation simulateProfiles(
 }
 
 CoupledProfileSimulation simulateCoupledProfiles(
-    const planet& world,
+    const climateworld& world,
     const std::vector<int>& landCells,
     const std::vector<int>& oceanCells,
     const std::vector<double>& localTemperatureOffset,
@@ -774,7 +774,7 @@ MeridionalDiffusionResult implicitMeridionalDiffusion(const std::vector<double>&
 }
 
 void createSurfaceEnergyBalanceTemperatureMap(
-    planet& world,
+    climateworld& world,
     const std::vector<std::vector<int>>& fractal)
 {
     const int width = world.width();

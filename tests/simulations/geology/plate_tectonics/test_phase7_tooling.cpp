@@ -173,7 +173,6 @@ TEST(Phase7Tooling, SnapshotBundleRoundTripsCoreRasterFields) {
     EXPECT_EQ(loaded.snapshot.width, snapshot.width);
     EXPECT_EQ(loaded.snapshot.height, snapshot.height);
     EXPECT_EQ(loaded.snapshot.iteration_count, snapshot.iteration_count);
-    EXPECT_EQ(loaded.snapshot.cycle_count, snapshot.cycle_count);
     EXPECT_EQ(loaded.snapshot.time_origin_step, snapshot.time_origin_step);
     EXPECT_EQ(loaded.snapshot.sea_level_m, snapshot.sea_level_m);
     EXPECT_EQ(loaded.snapshot.time_myr, snapshot.time_myr);
@@ -317,12 +316,10 @@ TEST(Phase7Tooling, ContinuousSnapshotsKeepWholeRunTimeInBundlesAndSummaries) {
     const tectonics::contract::Snapshot snapshot =
         run_snapshot(make_phase7_continuous_scenario(12345), 3);
 
-    EXPECT_EQ(snapshot.cycle_count, 0U);
     EXPECT_DOUBLE_EQ(snapshot.time_myr, 3.0);
 
     const tectonics::tooling::SnapshotSummary summary =
         tectonics::tooling::summarize_snapshot(snapshot);
-    EXPECT_EQ(summary.cycle_count, 0U);
     EXPECT_DOUBLE_EQ(summary.time_myr, 3.0);
 
     const fs::path output_dir = temp_root() / "continuous-time";
@@ -338,7 +335,6 @@ TEST(Phase7Tooling, ContinuousSnapshotsKeepWholeRunTimeInBundlesAndSummaries) {
 
     const tectonics::tooling::LoadedSnapshotBundle loaded =
         tectonics::tooling::load_snapshot_bundle(output_dir);
-    EXPECT_EQ(loaded.snapshot.cycle_count, 0U);
     EXPECT_DOUBLE_EQ(loaded.snapshot.time_myr, 3.0);
 
     fs::remove_all(output_dir, ec);

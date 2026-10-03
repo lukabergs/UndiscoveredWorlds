@@ -358,8 +358,11 @@ void Model::routeSediment(std::vector<Cell>& cells, double dt, double thermal_st
 void Model::advance(const std::vector<Displacement>& velocity, double dt,
                     double erosion_strength, double thermal_strength, double submarine_erosion_ratio,
                     const margins::Forcing* forcing, const margins::Parameters& margin_parameters,
-                    const noise_pass::Parameters& noise, bool sediment_feedback) {
+                    const noise_pass::Parameters& noise, bool sediment_feedback,
+                    const plumes::Source* plume) {
     margins::validate(margin_parameters);
+    if (plume && (plume->basalt_m.size()!=cells_.size() || plume->influence.size()!=cells_.size()))
+        throw std::runtime_error("Mantle plume source shape mismatch");
     noise_pass::validate(noise);
     if (forcing && (forcing->thermal_age_myr.size()!=cells_.size() || forcing->trench_m.size()!=cells_.size()
         || forcing->arc_receiver.size()!=cells_.size() || forcing->owners.size()!=cells_.size()))
@@ -471,6 +474,22 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         for (const auto [j,weight] : outlets) next[j].ocean+=arc_source[i]*weight/total;
         const double mass=arc_source[i]*oceanic_density*area;
         budget_.generated_ocean_kg+=mass;budget_.generated_arc_kg+=mass;
+    }
+    if (plume) for (size_t i=0;i<next.size();++i) {
+        // New plume basalt has age zero, like arc magma, and is budgeted as generated ocean crust.
+        const double added=plume->basalt_m[i];
+        if (!std::isfinite(added) || added<0) throw std::runtime_error("Invalid mantle plume basalt");
+        next[i].ocean+=added;
+        const double mass=added*oceanic_density*area;
+        budget_.generated_ocean_kg+=mass;budget_.generated_plume_kg+=mass;
+        // Reheat ocean floor above the plume toward the swell age, with the ridge
+        // heating response; the plate carries the warm, shallow rock away.
+        if (plume->swell_age_myr>0 && plume->influence[i]>0 && next[i].ocean>0) {
+            const double response=-std::expm1(-dt/5)*plume->influence[i];
+            const double deficit=std::max(0.0,next[i].oceanic_age_volume-plume->swell_age_myr*next[i].ocean);
+            next[i].thermal_rejuvenation_volume=std::clamp(next[i].thermal_rejuvenation_volume
+                +response*std::max(0.0,deficit-next[i].thermal_rejuvenation_volume),0.0,next[i].oceanic_age_volume);
+        }
     }
     spreadRoots(next, dt*margin_parameters.root_mobility, thermal_strength,sediment_feedback);
     // Conservative downhill transport. Erode the top sediment first, then

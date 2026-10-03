@@ -115,7 +115,7 @@ void terrain::detail::makemountainisland(planet& world, int x, int y, int peakhe
 
 // This makes an isolated volcano, together with a line of extinct neighbours.
 
-void createisolatedvolcano(planet& world, int x, int y, vector<vector<bool>>& shelves, vector<vector<int>>& volcanodirection, int peakheight, bool strato)
+void createisolatedvolcano(planet& world, int x, int y, worldgrid<bool>& shelves, vector<vector<int>>& volcanodirection, int peakheight, bool strato)
 {
     int width = world.width();
     int height = world.height();

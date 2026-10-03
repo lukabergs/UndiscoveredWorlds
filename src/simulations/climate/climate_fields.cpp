@@ -4,8 +4,15 @@
 #include <vector>
 
 #include "classes.hpp"
-#include "planet.hpp"
-#include "functions.hpp"
+#include "climate_world.hpp"
+#include "climate_classification.hpp"
+#include "climate_benchmark_outputs.hpp"
+#include "climate_elevation.hpp"
+#include "deterministic_random.hpp"
+#include "generation_progress.hpp"
+#include "grid_coordinates.hpp"
+#include "parallel_rows.hpp"
+#include "procedural_noise.hpp"
 #include "generation_tuning.hpp"
 #include "world_generation_debug.hpp"
 #include "climate_fields.hpp"
@@ -24,43 +31,43 @@ struct maritimesample
     int fetchdistance = 0;
 };
 
-int coldseasonindex(planet& world, int x, int y);
-int warmseasonindex(planet& world, int x, int y);
-int coldoceansst(planet& world, int x, int y);
-int warmoceansst(planet& world, int x, int y);
-maritimesample sampleupwindmaritimeinfluence(planet& world, int season, int x, int y);
-maritimesample storedmaritimeinfluence(planet& world, int season, int x, int y);
-void storescaledmaritimeinfluence(planet& world, int season, int x, int y, const maritimesample& sample);
-void createcoastalclimateinfluence(planet& world);
-void populateinlanddistances(planet& world, vector<vector<int>>& inland);
-void createdesertworldrain(planet& world);
-void adjustseasonalrainfall(planet& world, vector<vector<int>>& inland);
-void smoothrainfall(planet& world, int maxmountainheight);
-void caprainfall(planet& world);
-void applycoastalclimates(planet& world);
-void smoothtemperatures(planet& world);
+int coldseasonindex(climateworld& world, int x, int y);
+int warmseasonindex(climateworld& world, int x, int y);
+int coldoceansst(climateworld& world, int x, int y);
+int warmoceansst(climateworld& world, int x, int y);
+maritimesample sampleupwindmaritimeinfluence(climateworld& world, int season, int x, int y);
+maritimesample storedmaritimeinfluence(climateworld& world, int season, int x, int y);
+void storescaledmaritimeinfluence(climateworld& world, int season, int x, int y, const maritimesample& sample);
+void createcoastalclimateinfluence(climateworld& world);
+void populateinlanddistances(climateworld& world, vector<vector<int>>& inland);
+void createdesertworldrain(climateworld& world);
+void adjustseasonalrainfall(climateworld& world, vector<vector<int>>& inland);
+void smoothrainfall(climateworld& world, int maxmountainheight);
+void caprainfall(climateworld& world);
+void applycoastalclimates(climateworld& world);
+void smoothtemperatures(climateworld& world);
 
-int coldseasonindex(planet& world, int x, int y)
+int coldseasonindex(climateworld& world, int x, int y)
 {
     return (world.jantemp(x, y) <= world.jultemp(x, y)) ? seasonjanuary : seasonjuly;
 }
 
-int warmseasonindex(planet& world, int x, int y)
+int warmseasonindex(climateworld& world, int x, int y)
 {
     return (world.jantemp(x, y) >= world.jultemp(x, y)) ? seasonjanuary : seasonjuly;
 }
 
-int coldoceansst(planet& world, int x, int y)
+int coldoceansst(climateworld& world, int x, int y)
 {
     return world.seasonalsst(coldseasonindex(world, x, y), x, y);
 }
 
-int warmoceansst(planet& world, int x, int y)
+int warmoceansst(climateworld& world, int x, int y)
 {
     return world.seasonalsst(warmseasonindex(world, x, y), x, y);
 }
 
-maritimesample sampleupwindmaritimeinfluence(planet& world, int season, int x, int y)
+maritimesample sampleupwindmaritimeinfluence(climateworld& world, int season, int x, int y)
 {
     maritimesample result;
 
@@ -153,7 +160,7 @@ maritimesample sampleupwindmaritimeinfluence(planet& world, int season, int x, i
     return result;
 }
 
-maritimesample storedmaritimeinfluence(planet& world, int season, int x, int y)
+maritimesample storedmaritimeinfluence(climateworld& world, int season, int x, int y)
 {
     maritimesample result;
     result.influence = static_cast<float>(world.seasonalmaritimeinfluence(season, x, y)) / tuning::climate::maritime::influenceStorageScale;
@@ -162,14 +169,14 @@ maritimesample storedmaritimeinfluence(planet& world, int season, int x, int y)
     return result;
 }
 
-void storescaledmaritimeinfluence(planet& world, int season, int x, int y, const maritimesample& sample)
+void storescaledmaritimeinfluence(climateworld& world, int season, int x, int y, const maritimesample& sample)
 {
     world.setseasonalmaritimeinfluence(season, x, y, static_cast<int>(roundf(sample.influence * tuning::climate::maritime::influenceStorageScale)));
     world.setseasonalmaritimethermalanomaly(season, x, y, static_cast<int>(roundf(sample.thermalanomaly * tuning::climate::maritime::thermalAnomalyStorageScale)));
     world.setseasonalmaritimefetch(season, x, y, sample.fetchdistance);
 }
 
-void createcoastalclimateinfluence(planet& world)
+void createcoastalclimateinfluence(climateworld& world)
 {
     const int width = world.width();
     const int height = world.height();
@@ -198,7 +205,7 @@ void createcoastalclimateinfluence(planet& world)
     }
 }
 
-void populateinlanddistances(planet& world, vector<vector<int>>& inland)
+void populateinlanddistances(climateworld& world, vector<vector<int>>& inland)
 {
     const int width = world.width();
     const int height = world.height();
@@ -230,7 +237,7 @@ void populateinlanddistances(planet& world, vector<vector<int>>& inland)
 
 // This adds a bit of rainfall to worlds with no sea.
 
-void createdesertworldrain(planet& world)
+void createdesertworldrain(climateworld& world)
 {
     int width = world.width();
     int height = world.height();
@@ -394,7 +401,7 @@ void createdesertworldrain(planet& world)
 
 // This adjusts the seasonal rainfall (to ensure certain climates)
 
-void adjustseasonalrainfall(planet& world, vector<vector<int>>& inland)
+void adjustseasonalrainfall(climateworld& world, vector<vector<int>>& inland)
 {
     (void)world;
     (void)inland;
@@ -696,7 +703,7 @@ void adjustseasonalrainfall(planet& world, vector<vector<int>>& inland)
 
 // This smooths the rainfall.
 
-void smoothrainfall(planet& world, int maxmountainheight)
+void smoothrainfall(climateworld& world, int maxmountainheight)
 {
     int width = world.width();
     int height = world.height();
@@ -931,7 +938,7 @@ void smoothrainfall(planet& world, int maxmountainheight)
 
 // This caps excessive rainfall.
 
-void caprainfall(planet& world)
+void caprainfall(climateworld& world)
 {
     int width = world.width();
     int height = world.height();
@@ -1019,7 +1026,7 @@ void caprainfall(planet& world)
     }
 }
 
-void applycoastalclimates(planet& world)
+void applycoastalclimates(climateworld& world)
 {
     const int width = world.width();
     const int height = world.height();
@@ -1080,7 +1087,7 @@ void applycoastalclimates(planet& world)
 
 // This smooths the temperatures in light of rainfall.
 
-void smoothtemperatures(planet& world)
+void smoothtemperatures(climateworld& world)
 {
     int width = world.width();
     int height = world.height();
@@ -1147,7 +1154,7 @@ void smoothtemperatures(planet& world)
 
 // Rain map creator.
 
-void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, int seatotal, boolshapetemplate smalllake[], boolshapetemplate shape[])
+void createrainmap(climateworld& world, vector<vector<int>>& fractal,  int landtotal, int seatotal, boolshapetemplate smalllake[], boolshapetemplate shape[])
 {
     int width = world.width();
     int height = world.height();
@@ -1212,7 +1219,7 @@ void createrainmap(planet& world, vector<vector<int>>& fractal,  int landtotal, 
 }
 
 // Wind map creator.
-void refreshadvectedrainfall(planet& world, vector<vector<int>>& fractal)
+void refreshadvectedrainfall(climateworld& world, vector<vector<int>>& fractal)
 {
     vector<vector<int>> inland(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
     populateinlanddistances(world, inland);
@@ -1222,14 +1229,14 @@ void refreshadvectedrainfall(planet& world, vector<vector<int>>& fractal)
 
 // Temperature map creator.
 
-void createtemperaturemap(planet& world, vector<vector<int>>& fractal)
+void createtemperaturemap(climateworld& world, vector<vector<int>>& fractal)
 {
     climateenergy::createSurfaceEnergyBalanceTemperatureMap(world, fractal);
 }
 
 // Work out the sea ice.
 
-void createseaicemap(planet& world, vector<vector<int>>& fractal)
+void createseaicemap(climateworld& world, vector<vector<int>>& fractal)
 {
     // The coupled ocean already classified seasonal/permanent cover from ice
     // enthalpy. Liquid SST is pinned at freezing and cannot classify ice age.
@@ -1350,7 +1357,7 @@ void createseaicemap(planet& world, vector<vector<int>>& fractal)
 
 // This creates mountain precipitation arrays (which are used at the regional level).
 
-void createmountainprecipitation(planet& world)
+void createmountainprecipitation(climateworld& world)
 {
     int width = world.width();
     int height = world.height();
@@ -1653,7 +1660,7 @@ void createmountainprecipitation(planet& world)
 
 // This ensures that the climates at the bottom of the map are correct.
 
-void checkpoleclimates(planet& world)
+void checkpoleclimates(climateworld& world)
 {
     int width = world.width();
     int height = world.height();

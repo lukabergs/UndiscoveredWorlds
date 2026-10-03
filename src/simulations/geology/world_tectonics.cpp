@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -31,6 +32,10 @@ struct PlateTectonicsHandle
 {
     void* pointer = nullptr;
 
+    PlateTectonicsHandle() = default;
+    PlateTectonicsHandle(const PlateTectonicsHandle&) = delete;
+    PlateTectonicsHandle& operator=(const PlateTectonicsHandle&) = delete;
+
     ~PlateTectonicsHandle()
     {
         if (pointer != nullptr)
@@ -48,7 +53,7 @@ int encodenativeheight(float value, uint16_t sealevelmeters)
     return TopographyCodec::internal_to_meters(value, sealevelmeters);
 }
 
-void applynativeheightmap(planet& world, std::vector<std::vector<bool>>& shelves, const float* outputheightmap, std::size_t cellcount, int simwidth, int simheight, uint16_t sealevelmeters)
+void applynativeheightmap(planet& world, worldgrid<bool>& shelves, const float* outputheightmap, std::size_t cellcount, int simwidth, int simheight, uint16_t sealevelmeters)
 {
     if (outputheightmap == nullptr || cellcount == 0)
         return;
@@ -171,7 +176,28 @@ float normalizeboundaryhistory(const tectonics::contract::BoundarySegment* segme
 
 }
 
-void generateworldtectonics(planet& world, std::vector<std::vector<bool>>& shelves, const WorldTectonicsOptions& options)
+struct GeologySolverState
+{
+    explicit GeologySolverState(const tectonics::scenario::Scenario& created)
+        : scenario(created), mineralframes(created.world_width_km) {}
+    GeologySolverState(const GeologySolverState&) = delete;
+    GeologySolverState& operator=(const GeologySolverState&) = delete;
+
+    tectonics::scenario::Scenario scenario;
+    PlateTectonicsHandle simulation;
+    mineralsystems::TectonicFrameReader mineralframes;
+    std::optional<mineralsystems::MineralHistory> minerals;
+    // What the state was made for; evolvegeosphere re-creates it on any mismatch.
+    long seed = 0;
+    float gravity = 0.0f;
+    int width = 0;
+    int height = 0;
+    WorldTectonicsOptions options;
+};
+
+namespace
+{
+std::shared_ptr<GeologySolverState> createsolverstate(const planet& world, const WorldTectonicsOptions& options)
 {
     auto scenario = tectonics::scenario::baseline();
     scenario.seed = world.seed();
@@ -179,26 +205,74 @@ void generateworldtectonics(planet& world, std::vector<std::vector<bool>>& shelv
     if (options.plateCount > 0) scenario.plate_count = static_cast<uint32_t>(options.plateCount);
     if (options.deltaTimeMyr > 0) scenario.delta_time_myr = options.deltaTimeMyr;
     scenario.gravity_mps2 = world.gravity() * tectonics::scenario::kDefaultGravityMps2;
+
+    auto state = std::make_shared<GeologySolverState>(scenario);
+    state->simulation.pointer = tectonics_create_from_scenario(&state->scenario);
+    if (state->simulation.pointer == nullptr)
+        return nullptr;
+    state->seed = world.seed();
+    state->gravity = world.gravity();
+    state->width = world.width();
+    state->height = world.height();
+    state->options = options;
+
+    if (options.mineralHistory)
+    {
+        state->minerals.emplace(mineralsystems::MineralParameters{}, mineralsystems::mineralseed(world.seed()));
+        state->minerals->begin(state->mineralframes.read(state->simulation.pointer));
+    }
+    return state;
+}
+
+bool madefor(const GeologySolverState& state, const planet& world, const WorldTectonicsOptions& options)
+{
+    return state.seed == world.seed() && state.gravity == world.gravity() && state.width == world.width() &&
+        state.height == world.height() && state.options.durationMyr == options.durationMyr &&
+        state.options.plateCount == options.plateCount && state.options.deltaTimeMyr == options.deltaTimeMyr &&
+        state.options.mineralHistory == options.mineralHistory;
+}
+}
+
+std::shared_ptr<GeologySolverState> initializegeosphere(planet& world, worldgrid<bool>& shelves,
+                                                        const WorldTectonicsOptions& options)
+{
+    world.cleartectonicprovenance();
+    auto state = createsolverstate(world, options);
+    if (state == nullptr)
+        return nullptr;
+
+    // The starting elevation, for review; tectonics rewrites every cell at the end.
+    const int simwidth = static_cast<int>(state->scenario.width), simheight = static_cast<int>(state->scenario.height);
+    applynativeheightmap(world, shelves, tectonics_get_heightmap(state->simulation.pointer),
+        static_cast<std::size_t>(simwidth) * simheight, simwidth, simheight,
+        tectonics_get_sea_level_m(state->simulation.pointer));
+    return state;
+}
+
+void generateworldtectonics(planet& world, worldgrid<bool>& shelves, const WorldTectonicsOptions& options)
+{
+    evolvegeosphere(world, shelves, options, initializegeosphere(world, shelves, options));
+}
+
+void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectonicsOptions& options,
+                     std::shared_ptr<GeologySolverState> state)
+{
+    if (state == nullptr || !madefor(*state, world, options))
+    {
+        world.cleartectonicprovenance();
+        state = createsolverstate(world, options);
+        if (state == nullptr)
+            return;
+    }
+    const auto& scenario = state->scenario;
+    PlateTectonicsHandle& simulation = state->simulation;
+    mineralsystems::TectonicFrameReader& mineralframes = state->mineralframes;
+    std::optional<mineralsystems::MineralHistory>& minerals = state->minerals;
     const int width = world.width(), height = world.height();
     const int simwidth = static_cast<int>(scenario.width), simheight = static_cast<int>(scenario.height);
     const std::size_t cellcount = static_cast<std::size_t>(simwidth) * simheight;
     const tectonics::WorldGrid grid(simwidth, simheight, width + 1, height + 1);
     const auto scale = static_cast<float>(grid.scale());
-    world.cleartectonicprovenance();
-
-    PlateTectonicsHandle simulation;
-    simulation.pointer = tectonics_create_from_scenario(&scenario);
-
-    if (simulation.pointer == nullptr)
-        return;
-
-    mineralsystems::TectonicFrameReader mineralframes(scenario.world_width_km);
-    std::optional<mineralsystems::MineralHistory> minerals;
-    if (options.mineralHistory)
-    {
-        minerals.emplace(mineralsystems::MineralParameters{}, mineralsystems::mineralseed(world.seed()));
-        minerals->begin(mineralframes.read(simulation.pointer));
-    }
 
     const bool visualizeprogress = hasworldgenvisualizationcallback();
     auto nextvisualization = std::chrono::steady_clock::now();
@@ -266,7 +340,6 @@ void generateworldtectonics(planet& world, std::vector<std::vector<bool>>& shelv
     world.settectonictimeoriginstep(static_cast<int>(tectonics_get_time_origin_step(simulation.pointer)));
     world.settectonictimemyr(static_cast<float>(tectonics_get_time_myr(simulation.pointer)));
     world.settectonicdeltatimemyr(static_cast<float>(tectonics_get_delta_time_myr(simulation.pointer)));
-    world.settectoniccyclecount(static_cast<int>(tectonics_get_cycle_count(simulation.pointer)));
     world.settectonicplatecount(static_cast<int>(tectonics_get_plate_count(simulation.pointer)));
     world.settectonicsealevelm(static_cast<int>(tectonics_get_sea_level_m(simulation.pointer)));
 

@@ -6,9 +6,9 @@
 #include "climate_grid.hpp"
 #include "climate_tiff.hpp"
 #include "generation_tuning.hpp"
-#include "planet.hpp"
+#include "climate_world.hpp"
 
-#include <SFML/Graphics/Image.hpp>
+#include "raster_image.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +28,29 @@
 
 namespace climatevalidation
 {
+rasterimage::Image expandclimatemapimage(const rasterimage::Image& cells, int mapcolumns)
+{
+    const rasterimage::Size size = cells.getSize();
+    const unsigned int columns = static_cast<unsigned int>(mapcolumns);
+    const unsigned int rows = columns / 2;
+    if (size.x == columns && size.y == rows)
+        return cells;
+    rasterimage::Image map;
+    map.create(columns, rows, rasterimage::Color::Black);
+    for (unsigned int y = 0; y < rows; y++)
+    {
+        const unsigned int celly = std::min(size.y - 1, (2 * y + 1) * size.y / (2 * rows));
+        for (unsigned int x = 0; x < columns; x++)
+            map.setPixel(x, y, cells.getPixel(std::min(size.x - 1, (2 * x + 1) * size.x / (2 * columns)), celly));
+    }
+    return map;
+}
+
+bool saveclimatemapimage(const rasterimage::Image& cells, const std::filesystem::path& path, int mapcolumns)
+{
+    return expandclimatemapimage(cells, mapcolumns).saveToFile(path.string());
+}
+
 namespace
 {
 constexpr float pi = 3.14159265358979323846f;
@@ -107,7 +130,7 @@ seasonfields windrenderfields(const seasonfields& source, int columns, int rows,
 
 struct capturedwindcache
 {
-    const planet* source = nullptr;
+    const climateworld* source = nullptr;
     int columns = 0;
     int rows = 0;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> surfaceu;
@@ -116,7 +139,7 @@ struct capturedwindcache
     std::array<std::vector<float>, CLIMATESEASONCOUNT> upperv;
     std::array<bool, CLIMATESEASONCOUNT> populated{};
 
-    void reset(const planet& world)
+    void reset(const climateworld& world)
     {
         source = &world;
         columns = world.width() + 1;
@@ -126,14 +149,13 @@ struct capturedwindcache
 };
 
 capturedwindcache windcache;
-const planet* weatherworld = nullptr;
-int weathercolumns = 0, weatherrows = 0;
-std::array<std::array<climateweather::WeatherStatistics, CLIMATESEASONCOUNT>, 2> weatherstatistics;
-const planet* processworld = nullptr;
-std::array<climatehydrology::SeasonalProcessFields, CLIMATESEASONCOUNT> processstatistics;
-const planet* oceanworld = nullptr;
-int oceancolumns = 0, oceanrows = 0;
-std::array<climateocean::OceanState, CLIMATESEASONCOUNT> oceanstatistics;
+// The world's recorded diagnostics, or an empty record when it has none.
+const climatediagnostics& recorded(const climateworld& world)
+{
+    static const climatediagnostics none;
+    const climatediagnostics* diagnostics = world.diagnostics();
+    return diagnostics != nullptr ? *diagnostics : none;
+}
 
 enum class scalarpalette
 {
@@ -165,18 +187,18 @@ int wrapcolumn(int x, int columns)
     return x < 0 ? x + columns : x;
 }
 
-bool island(planet& world, int x, int y)
+bool island(climateworld& world, int x, int y)
 {
     return world.sea(x, y) == 0 && world.truelake(x, y) == 0 &&
         world.riftlakesurface(x, y) == 0;
 }
 
-sf::Color blendcolour(const sf::Color& first, const sf::Color& second, float phase)
+rasterimage::Color blendcolour(const rasterimage::Color& first, const rasterimage::Color& second, float phase)
 {
     const float amount = std::clamp(phase, 0.0f, 1.0f);
-    auto blendchannel = [&](sf::Uint8 left, sf::Uint8 right)
+    auto blendchannel = [&](rasterimage::Uint8 left, rasterimage::Uint8 right)
     {
-        return static_cast<sf::Uint8>(std::clamp(
+        return static_cast<rasterimage::Uint8>(std::clamp(
             static_cast<int>(std::lround(
                 static_cast<float>(left) +
                 (static_cast<float>(right) - static_cast<float>(left)) * amount)),
@@ -184,26 +206,26 @@ sf::Color blendcolour(const sf::Color& first, const sf::Color& second, float pha
             255));
     };
 
-    return sf::Color(
+    return rasterimage::Color(
         blendchannel(first.r, second.r),
         blendchannel(first.g, second.g),
         blendchannel(first.b, second.b));
 }
 
-sf::Color scalarcolour(float value, float displaymaximum, scalarpalette palette)
+rasterimage::Color scalarcolour(float value, float displaymaximum, scalarpalette palette)
 {
     const bool isSigned = palette != scalarpalette::speed && palette != scalarpalette::vectorerror;
     const auto rgb = climatepalette::colour(value, isSigned ? -displaymaximum : 0.0, displaymaximum, isSigned);
-    return sf::Color(rgb[0], rgb[1], rgb[2]);
+    return rasterimage::Color(rgb[0], rgb[1], rgb[2]);
 }
 
-void blendpixel(sf::Image& image, int x, int y, const sf::Color& colour, float alpha)
+void blendpixel(rasterimage::Image& image, int x, int y, const rasterimage::Color& colour, float alpha)
 {
-    const sf::Vector2u size = image.getSize();
+    const rasterimage::Size size = image.getSize();
     if (x < 0 || y < 0 || x >= static_cast<int>(size.x) || y >= static_cast<int>(size.y))
         return;
 
-    const sf::Color destination = image.getPixel(static_cast<unsigned int>(x), static_cast<unsigned int>(y));
+    const rasterimage::Color destination = image.getPixel(static_cast<unsigned int>(x), static_cast<unsigned int>(y));
     image.setPixel(
         static_cast<unsigned int>(x),
         static_cast<unsigned int>(y),
@@ -211,12 +233,12 @@ void blendpixel(sf::Image& image, int x, int y, const sf::Color& colour, float a
 }
 
 void drawline(
-    sf::Image& image,
+    rasterimage::Image& image,
     float x0,
     float y0,
     float x1,
     float y1,
-    const sf::Color& colour,
+    const rasterimage::Color& colour,
     float alpha)
 {
     const float dx = x1 - x0;
@@ -265,7 +287,7 @@ std::pair<float, float> samplevector(
     return { sample(u), sample(v) };
 }
 
-bool coastline(planet& world, int x, int y)
+bool coastline(climateworld& world, int x, int y)
 {
     const int columns = world.width() + 1;
     return
@@ -275,32 +297,32 @@ bool coastline(planet& world, int x, int y)
         (y < world.height() && island(world, x, y) != island(world, x, y + 1));
 }
 
-sf::Color windbackgroundcolour(planet& world, int x, int y, float speed,
+rasterimage::Color windbackgroundcolour(climateworld& world, int x, int y, float speed,
     int columns, int rows, float displaymaximum)
 {
     x = std::clamp(static_cast<int>((x + 0.5) * (world.width() + 1) / columns), 0, world.width());
     y = std::clamp(static_cast<int>((y + 0.5) * (world.height() + 1) / rows), 0, world.height());
-    sf::Color background = scalarcolour(
+    rasterimage::Color background = scalarcolour(
         speed,
         displaymaximum,
         scalarpalette::speed);
     background = blendcolour(
         background,
-        island(world, x, y) ? sf::Color(32, 27, 23) : sf::Color(4, 13, 25),
+        island(world, x, y) ? rasterimage::Color(32, 27, 23) : rasterimage::Color(4, 13, 25),
         0.55f);
 
     return coastline(world, x, y)
-        ? blendcolour(background, sf::Color(155, 155, 145), 0.45f)
+        ? blendcolour(background, rasterimage::Color(155, 155, 145), 0.45f)
         : background;
 }
 
 void drawdirectionarrows(
-    sf::Image& image,
+    rasterimage::Image& image,
     const std::vector<float>& u,
     const std::vector<float>& v,
     int columns,
     int rows,
-    int renderscale)
+    float renderscale)
 {
     constexpr int arrowcolumns = 16;
     constexpr int arrowrows = 8;
@@ -335,7 +357,7 @@ void drawdirectionarrows(
             const float starty = centrey - dy * length * 0.5f;
             const float endx = centrex + dx * length * 0.5f;
             const float endy = centrey + dy * length * 0.5f;
-            const sf::Color arrowcolour(255, 210, 55);
+            const rasterimage::Color arrowcolour(255, 210, 55);
             drawline(image, startx, starty, endx, endy, arrowcolour, 0.95f);
             const float headlength = 2.5f * renderscale;
             const float perpendicularx = -dy;
@@ -360,16 +382,22 @@ void drawdirectionarrows(
     }
 }
 
+float mapscale(int columns, int mapcolumns)
+{
+    return static_cast<float>(mapcolumns) / static_cast<float>(columns);
+}
+
 bool renderscalarimage(
     const std::filesystem::path& path,
     const std::vector<float>& field,
     int columns,
     int rows,
     float displaymaximum,
-    scalarpalette palette)
+    scalarpalette palette,
+    int mapcolumns)
 {
-    sf::Image image;
-    image.create(static_cast<unsigned int>(columns), static_cast<unsigned int>(rows), sf::Color::Black);
+    rasterimage::Image image;
+    image.create(static_cast<unsigned int>(columns), static_cast<unsigned int>(rows), rasterimage::Color::Black);
 
     for (int y = 0; y < rows; y++)
     {
@@ -382,34 +410,35 @@ bool renderscalarimage(
         }
     }
 
-    return image.saveToFile(path.string());
+    return saveclimatemapimage(image, path, mapcolumns);
 }
 
 bool rendervectorerrorimage(
     const std::filesystem::path& path,
-    planet& world,
+    climateworld& world,
     const std::vector<float>& erroru,
     const std::vector<float>& errorv,
-    const std::vector<float>& errormagnitude)
+    const std::vector<float>& errormagnitude,
+    int mapcolumns)
 {
     const int columns = world.width() + 1;
     const int rows = world.height() + 1;
-    sf::Image image;
+    rasterimage::Image image;
     image.create(
         static_cast<unsigned int>(columns),
         static_cast<unsigned int>(rows),
-        sf::Color::Black);
+        rasterimage::Color::Black);
 
     for (int y = 0; y < rows; y++)
     {
         for (int x = 0; x < columns; x++)
         {
-            sf::Color colour = scalarcolour(
+            rasterimage::Color colour = scalarcolour(
                 errormagnitude[fieldindex(x, y, columns)],
                 vectorerrordisplaymaximum,
                 scalarpalette::vectorerror);
             if (coastline(world, x, y))
-                colour = blendcolour(colour, sf::Color(210, 210, 205), 0.55f);
+                colour = blendcolour(colour, rasterimage::Color(210, 210, 205), 0.55f);
             image.setPixel(
                 static_cast<unsigned int>(x),
                 static_cast<unsigned int>(y),
@@ -417,13 +446,15 @@ bool rendervectorerrorimage(
         }
     }
 
-    drawdirectionarrows(image, erroru, errorv, columns, rows, 1);
+    // Enlarge before drawing arrows so they stay thin at the map width.
+    image = expandclimatemapimage(image, mapcolumns);
+    drawdirectionarrows(image, erroru, errorv, columns, rows, mapscale(columns, mapcolumns));
     return image.saveToFile(path.string());
 }
 
 bool renderlicimage(
     const std::filesystem::path& path,
-    planet& world,
+    climateworld& world,
     const std::vector<float>& u,
     const std::vector<float>& v,
     std::uint32_t seed,
@@ -483,11 +514,11 @@ bool renderlicimage(
         return std::pair<float, float>(dx / magnitude, dy / magnitude);
     };
 
-    sf::Image image;
+    rasterimage::Image image;
     image.create(
         static_cast<unsigned int>(imagecolumns),
         static_cast<unsigned int>(imagerows),
-        sf::Color::Black);
+        rasterimage::Color::Black);
     for (int imagey = 0; imagey < imagerows; imagey++)
     {
         const float sourcey = std::clamp(
@@ -548,10 +579,10 @@ bool renderlicimage(
             const int celly = std::clamp(static_cast<int>(sourcey), 0, rows - 1);
             const auto wind = samplevector(u, v, sourcex, sourcey, columns, rows);
             const float speed = std::sqrt(wind.first * wind.first + wind.second * wind.second);
-            sf::Color colour = windbackgroundcolour(world, cellx, celly, speed, columns, rows, displaymaximum);
+            rasterimage::Color colour = windbackgroundcolour(world, cellx, celly, speed, columns, rows, displaymaximum);
             colour = luminance < 0.5f
-                ? blendcolour(colour, sf::Color::Black, (0.5f - luminance) * 1.4f)
-                : blendcolour(colour, sf::Color::White, (luminance - 0.5f) * 1.1f);
+                ? blendcolour(colour, rasterimage::Color::Black, (0.5f - luminance) * 1.4f)
+                : blendcolour(colour, rasterimage::Color::White, (luminance - 0.5f) * 1.1f);
             image.setPixel(
                 static_cast<unsigned int>(imagex),
                 static_cast<unsigned int>(imagey),
@@ -571,7 +602,7 @@ bool renderlicimage(
 
 bool renderparticleimage(
     const std::filesystem::path& path,
-    planet& world,
+    climateworld& world,
     const std::vector<float>& u,
     const std::vector<float>& v,
     std::uint32_t seed,
@@ -582,11 +613,11 @@ bool renderparticleimage(
     const int imagecolumns = columns * particlerenderscale;
     const int imagerows = rows * particlerenderscale;
     const RenderTimer timer{"particles", path, imagecolumns, imagerows};
-    sf::Image image;
+    rasterimage::Image image;
     image.create(
         static_cast<unsigned int>(imagecolumns),
         static_cast<unsigned int>(imagerows),
-        sf::Color::Black);
+        rasterimage::Color::Black);
 
     for (int y = 0; y < rows; y++)
     {
@@ -594,7 +625,7 @@ bool renderparticleimage(
         {
             const std::size_t index = fieldindex(x, y, columns);
             const float speed = std::sqrt(u[index] * u[index] + v[index] * v[index]);
-            const sf::Color background = windbackgroundcolour(world, x, y, speed, columns, rows, displaymaximum);
+            const rasterimage::Color background = windbackgroundcolour(world, x, y, speed, columns, rows, displaymaximum);
 
             for (int py = 0; py < particlerenderscale; py++)
             {
@@ -652,7 +683,7 @@ bool renderparticleimage(
                         previous.y * particlerenderscale,
                         next.x * particlerenderscale,
                         next.y * particlerenderscale,
-                        sf::Color(245, 247, 245),
+                        rasterimage::Color(245, 247, 245),
                         0.16f);
                 }
             }
@@ -719,7 +750,7 @@ bool writefield(
     return written;
 }
 
-seasonfields buildseasonfields(planet& world, int season)
+seasonfields buildseasonfields(climateworld& world, int season)
 {
     const int columns = world.width() + 1;
     const int rows = world.height() + 1;
@@ -822,9 +853,9 @@ seasonfields buildseasonfields(planet& world, int season)
         }
     }
 
-    if (processworld == &world && processstatistics[season].durationSeconds > 0.0)
+    if (recorded(world).hasprocess && recorded(world).process[season].durationSeconds > 0.0)
     {
-        const auto& processes = processstatistics[season];
+        const auto& processes = recorded(world).process[season];
         const auto flux = climatehydrology::meanMoistureTransport(processes, tuning::climate::atmosphere::referencePlanetRadiusMetres);
         const auto remap = [&](const std::vector<float>& values) {
             return climategrid::remapSmoothField(
@@ -846,38 +877,11 @@ seasonfields buildseasonfields(planet& world, int season)
 }
 }
 
-void captureoceanfields(const planet& world, int season, int columns, int rows,
-    const climateocean::OceanState& state)
-{
-    if (season < 0 || season >= CLIMATESEASONCOUNT) return;
-    if (oceanworld != &world || season == 0) oceanstatistics = {};
-    oceanworld = &world; oceancolumns = columns; oceanrows = rows;
-    oceanstatistics[season] = state;
-}
 
-void captureclimateprocessfields(const planet& world, int season,
-    const climatehydrology::SeasonalProcessFields& fields)
-{
-    if (season < 0 || season >= CLIMATESEASONCOUNT) return;
-    if (processworld != &world || season == 0) processstatistics = {};
-    processworld = &world;
-    processstatistics[season] = fields;
-}
 
-void captureweatherstatistics(const planet& world, int season, int columns, int rows,
-    const climateweather::WeatherStatistics& statistics, int layer)
-{
-    if (season < 0 || season >= CLIMATESEASONCOUNT || layer < 0 || layer > 1 || columns < 3 || rows < 2) return;
-    if (weatherworld != &world || weathercolumns != columns || weatherrows != rows || (season == 0 && layer == 0))
-        weatherstatistics = {};
-    weatherworld = &world;
-    weathercolumns = columns;
-    weatherrows = rows;
-    weatherstatistics[layer][season] = statistics;
-}
 
 void capturecirculationwindfields(
-    planet& world,
+    climateworld& world,
     int season,
     const std::vector<std::vector<float>>& surfaceu,
     const std::vector<std::vector<float>>& surfacev,
@@ -934,7 +938,7 @@ void capturecirculationwindfields(
 }
 
 bool capturedcirculationwind(
-    const planet& world,
+    const climateworld& world,
     int season,
     int x,
     int y,
@@ -957,7 +961,7 @@ bool capturedcirculationwind(
 
 bool exportcirculationdiagnostics(
     const std::filesystem::path& outputdirectory,
-    planet& world,
+    climateworld& world,
     const climatebenchmarkmapselection& selection)
 {
     std::error_code error;
@@ -972,15 +976,17 @@ bool exportcirculationdiagnostics(
     manifest << "map_id,file,status\n";
     const int columns = world.width() + 1;
     const int rows = world.height() + 1;
-    const int windcolumns = selection.windmapcolumns();
+    // Every PNG map has the world grid's size.
+    const int windcolumns = columns;
     const int windrows = windcolumns / 2;
-    std::ofstream windmetadata(outputdirectory / "wind_render_metadata.json");
-    windmetadata << "{\"version\":1,\"columns\":" << windcolumns << ",\"rows\":" << windrows
+    // One geometry for every PNG map; numerical fields keep the world grid.
+    std::ofstream mapmetadata(outputdirectory / "map_render_metadata.json");
+    mapmetadata << "{\"version\":2,\"columns\":" << windcolumns << ",\"rows\":" << windrows
         << ",\"source_columns\":" << columns << ",\"source_rows\":" << rows
         << ",\"renderer_version\":" << referencevisualizationversion
-        << ",\"fields\":\"coarse seasonal winds; no terrain refinement\",\"products\":[\"lic\",\"particles\",\"speed\"]}\n";
-    if (!windmetadata.good()) return false;
-    std::cout << "Climate wind render grid columns=" << windcolumns << " rows=" << windrows
+        << ",\"fields\":\"cell rasters enlarged without blending; winds smoothly remapped; no terrain refinement\",\"products\":\"all\"}\n";
+    if (!mapmetadata.good()) return false;
+    std::cout << "Climate map render grid columns=" << windcolumns << " rows=" << windrows
         << " source_columns=" << columns << " source_rows=" << rows << '\n';
     bool success = true;
 
@@ -1006,13 +1012,13 @@ bool exportcirculationdiagnostics(
         success = layer.good() && success;
     }
 
-    if (processworld == &world)
+    if (recorded(world).hasprocess)
     {
         std::ofstream processes(outputdirectory / "climate_process_fields.csv");
         processes << "season,latitude,longitude,duration_s,lower_flux_east_kg_m_s,lower_flux_south_kg_m_s,upper_flux_east_kg_m_s,upper_flux_south_kg_m_s,transport_convergence_mm_day,mean_column_water_mm,ascent_hpa_day,lower_radiative_wm2,upper_radiative_wm2,lower_latent_wm2,upper_latent_wm2,sensible_wm2,surface_net_heating_wm2,column_energy_residual_wm2\n";
         for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
         {
-            const auto& p = processstatistics[season];
+            const auto& p = recorded(world).process[season];
             const auto transport = climatehydrology::meanMoistureTransport(p, tuning::climate::atmosphere::referencePlanetRadiusMetres);
             for (int y = 0; y < p.rows; ++y)
                 for (int x = 0; x < p.columns; ++x)
@@ -1034,7 +1040,7 @@ bool exportcirculationdiagnostics(
         terrain << "season,latitude,longitude,duration_s,stratiform_mm_day,orographic_mm_day,convective_mm_day,lower_rh,upper_rh,uplift_m,descent_m,terrain_cooling_c,terrain_warming_c\n";
         for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
         {
-            const auto& p = processstatistics[season];
+            const auto& p = recorded(world).process[season];
             if (p.durationSeconds <= 0.0 || p.upliftMetreSeconds.size() !=
                 static_cast<std::size_t>(p.columns * p.rows)) continue;
             for (int y = 0; y < p.rows; ++y)
@@ -1059,7 +1065,7 @@ bool exportcirculationdiagnostics(
         thermal << "season,latitude,longitude,skin_temperature_c,land_snow_cover,sensible_wm2,surface_radiative_wm2,surface_latent_loss_wm2,surface_net_heating_wm2,permanent_land_ice_cover\n";
         for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
         {
-            const auto& p = processstatistics[season];
+            const auto& p = recorded(world).process[season];
             if (p.durationSeconds <= 0.0 || p.landSnowCoverFraction.size() !=
                 static_cast<std::size_t>(p.columns * p.rows)) continue;
             for (int y = 0; y < p.rows; ++y)
@@ -1076,7 +1082,7 @@ bool exportcirculationdiagnostics(
         }
         success = thermal.good() && success;
     }
-    if (oceanworld == &world)
+    if (recorded(world).hasocean)
     {
         std::ofstream ocean(outputdirectory / "ocean_fields.csv");
         std::ofstream storage(outputdirectory / "ocean_storage_fields.csv");
@@ -1086,12 +1092,12 @@ bool exportcirculationdiagnostics(
         ocean << "season,latitude,longitude,east_current_mps,south_current_mps,sst_c,ekman_upwelling_mps,solver_converged,relative_heat_budget_residual,ice_thickness_m,surface_skin_temperature_c,mean_sst_c,depth_m,deep_temperature_c,horizontal_heat_wm2,surface_heat_wm2,vertical_heat_wm2,storage_heat_wm2,barotropic_east_mps,barotropic_south_mps,ekman_east_mps,ekman_south_mps,barotropic_upwelling_mps,ekman_only_upwelling_mps\n";
         for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
         {
-            const auto& state = oceanstatistics[season];
-            for (int y = 0; y < oceanrows; ++y)
-                for (int x = 0; x < oceancolumns; ++x)
+            const auto& state = recorded(world).ocean[season];
+            for (int y = 0; y < recorded(world).oceanrows; ++y)
+                for (int x = 0; x < recorded(world).oceancolumns; ++x)
                 {
-                    const int cell = y * oceancolumns + x;
-                    ocean << season << ',' << 90.0 - 180.0 * (y + 0.5) / oceanrows << ',' << -180.0 + 360.0 * (x + 0.5) / oceancolumns << ','
+                    const int cell = y * recorded(world).oceancolumns + x;
+                    ocean << season << ',' << 90.0 - 180.0 * (y + 0.5) / recorded(world).oceanrows << ',' << -180.0 + 360.0 * (x + 0.5) / recorded(world).oceancolumns << ','
                         << state.eastCurrentMps[cell] << ',' << state.southCurrentMps[cell] << ',' << state.sstC[cell] << ','
                         << (state.ekmanUpwellingMps.size() > cell ? state.ekmanUpwellingMps[cell] : 0.0f) << ','
                         << state.converged << ',' << state.relativeHeatBudgetResidual << ','
@@ -1099,8 +1105,8 @@ bool exportcirculationdiagnostics(
                         << (state.meanSstC.size() > cell ? state.meanSstC[cell] : state.sstC[cell]);
                     const auto budget = state.heatBudget.size() > cell ? state.heatBudget[cell] : climateocean::OceanHeatBudget{};
                     if (state.storageDepthMetres.size() > cell && state.reservoirTemperatureC.size() > cell)
-                        storage << season << ',' << 90.0 - 180.0 * (y + 0.5) / oceanrows << ','
-                            << -180.0 + 360.0 * (x + 0.5) / oceancolumns << ',' << state.storageDepthMetres[cell] << ','
+                        storage << season << ',' << 90.0 - 180.0 * (y + 0.5) / recorded(world).oceanrows << ','
+                            << -180.0 + 360.0 * (x + 0.5) / recorded(world).oceancolumns << ',' << state.storageDepthMetres[cell] << ','
                             << state.meanStorageDepthMetres[cell] << ',' << state.reservoirTemperatureC[cell] << ','
                             << budget.entrainmentWm2 << ',' << budget.columnStorageWm2 << '\n';
                     ocean << ',' << budget.depthMetres << ',' << budget.deepTemperatureC << ','
@@ -1116,21 +1122,21 @@ bool exportcirculationdiagnostics(
         success = ocean.good() && storage.good() && success;
     }
 
-    if (weatherworld == &world)
+    if (recorded(world).hasweather)
     {
         std::ofstream statistics(outputdirectory / "weather_statistics.csv");
         statistics << "season,layer,latitude,longitude,samples,duration_s,effective_samples,mean_u_mps,mean_v_south_mps,mean_speed_mps,directional_consistency,speed_stddev_mps,independent_sample_stderr_mps,decorrelated_samples,correlated_stderr_mps\n";
         for (int layer = 0; layer < 2; ++layer)
         for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
         {
-            const auto& data = weatherstatistics[layer][season];
-            if (data.meanSpeedMps.size() != static_cast<std::size_t>(weathercolumns * weatherrows)) continue;
-            for (int y = 0; y < weatherrows; ++y)
-                for (int x = 0; x < weathercolumns; ++x)
+            const auto& data = recorded(world).weather[layer][season];
+            if (data.meanSpeedMps.size() != static_cast<std::size_t>(recorded(world).weathercolumns * recorded(world).weatherrows)) continue;
+            for (int y = 0; y < recorded(world).weatherrows; ++y)
+                for (int x = 0; x < recorded(world).weathercolumns; ++x)
                 {
-                    const int cell = y * weathercolumns + x;
-                    statistics << season << ',' << layer << ',' << 90.0 - 180.0 * (y + 0.5) / weatherrows << ','
-                        << -180.0 + 360.0 * (x + 0.5) / weathercolumns << ',' << data.sampleCount << ','
+                    const int cell = y * recorded(world).weathercolumns + x;
+                    statistics << season << ',' << layer << ',' << 90.0 - 180.0 * (y + 0.5) / recorded(world).weatherrows << ','
+                        << -180.0 + 360.0 * (x + 0.5) / recorded(world).weathercolumns << ',' << data.sampleCount << ','
                         << data.durationSeconds << ',' << data.effectiveSampleCount << ',' << data.meanEastWindMps[cell] << ','
                         << data.meanSouthWindMps[cell] << ',' << data.meanSpeedMps[cell] << ',' << data.directionalConsistency[cell] << ','
                         << data.speedStandardDeviationMps[cell] << ',' << data.speedStandardErrorMps[cell] << ','
@@ -1232,14 +1238,14 @@ bool exportcirculationdiagnostics(
             windcolumns,
             windrows,
             particlespeeddisplaymaximum,
-            scalarpalette::speed) && success;
+            scalarpalette::speed, windcolumns) && success;
             renderstatus(climatebenchmarkmapkind::surfacewindspeed, true, true);
         }
         if (surfacedivergence)
         {
             success = renderscalarimage(
                 outputdirectory / diagnosticmapfilename(climatebenchmarkmapkind::surfacedivergence, season),
-                fields.surfacedivergence, columns, rows, surfacedivergencedisplaymaximum, scalarpalette::divergence) && success;
+                fields.surfacedivergence, columns, rows, surfacedivergencedisplaymaximum, scalarpalette::divergence, windcolumns) && success;
             renderstatus(climatebenchmarkmapkind::surfacedivergence, true, true);
         }
         if (upperspeed)
@@ -1251,7 +1257,7 @@ bool exportcirculationdiagnostics(
             windcolumns,
             windrows,
             static_cast<float>(climatepalette::field_500_wind_high),
-            scalarpalette::speed) && success;
+            scalarpalette::speed, windcolumns) && success;
             renderstatus(climatebenchmarkmapkind::upperwindspeed, true, true);
         }
         if (moistureconvergence)
@@ -1263,7 +1269,7 @@ bool exportcirculationdiagnostics(
             columns,
             rows,
             moistureconvergencedisplaymaximum,
-            scalarpalette::convergence) && success;
+            scalarpalette::convergence, windcolumns) && success;
             renderstatus(climatebenchmarkmapkind::moisturefluxconvergence, true, true);
         }
         for (const auto& request : selection.requests())
@@ -1295,20 +1301,20 @@ bool exportcirculationdiagnostics(
             }
             else if (kind == climatebenchmarkmapkind::surfacewindconsistency || kind == climatebenchmarkmapkind::upperwindconsistency)
             {
-                const auto& data = weatherstatistics[kind == climatebenchmarkmapkind::upperwindconsistency ? 1 : 0][season];
-                if (weatherworld == &world && !data.meanSpeedMps.empty())
+                const auto& data = recorded(world).weather[kind == climatebenchmarkmapkind::upperwindconsistency ? 1 : 0][season];
+                if (recorded(world).hasweather && !data.meanSpeedMps.empty())
                 {
-                    values = remap(data.meanSpeedMps, weathercolumns, weatherrows);
-                    consistency = remap(data.directionalConsistency, weathercolumns, weatherrows);
-                    u = remap(data.meanEastWindMps, weathercolumns, weatherrows);
-                    v = remap(data.meanSouthWindMps, weathercolumns, weatherrows);
+                    values = remap(data.meanSpeedMps, recorded(world).weathercolumns, recorded(world).weatherrows);
+                    consistency = remap(data.directionalConsistency, recorded(world).weathercolumns, recorded(world).weatherrows);
+                    u = remap(data.meanEastWindMps, recorded(world).weathercolumns, recorded(world).weatherrows);
+                    v = remap(data.meanSouthWindMps, recorded(world).weathercolumns, recorded(world).weatherrows);
                 }
                 limit = 25.0f;
             }
-            else if (oceanworld == &world)
+            else if (recorded(world).hasocean)
             {
                 oceanonly = true;
-                const auto& data = oceanstatistics[season];
+                const auto& data = recorded(world).ocean[season];
                 if (kind == climatebenchmarkmapkind::seasurfacetemperature)
                 {
                     const auto& climate = world.climatesimulation();
@@ -1324,12 +1330,12 @@ bool exportcirculationdiagnostics(
                                 values[fieldindex(x, y, columns)] = sst[x][y];
                     }
                     else
-                        values = remap(data.meanSstC.empty() ? data.sstC : data.meanSstC, oceancolumns, oceanrows);
+                        values = remap(data.meanSstC.empty() ? data.sstC : data.meanSstC, recorded(world).oceancolumns, recorded(world).oceanrows);
                     limit = static_cast<float>(climatepalette::field_sst_high);
                     palette = scalarpalette::divergence;
                 }
                 else
-                { u = remap(data.eastCurrentMps, oceancolumns, oceanrows); v = remap(data.southCurrentMps, oceancolumns, oceanrows); limit = static_cast<float>(climatepalette::field_current_high); }
+                { u = remap(data.eastCurrentMps, recorded(world).oceancolumns, recorded(world).oceanrows); v = remap(data.southCurrentMps, recorded(world).oceancolumns, recorded(world).oceanrows); limit = static_cast<float>(climatepalette::field_current_high); }
             }
             if (values.empty() && !u.empty())
             {
@@ -1342,8 +1348,8 @@ bool exportcirculationdiagnostics(
                 success = false;
                 continue;
             }
-            sf::Image image;
-            image.create(columns, rows, sf::Color::Black);
+            rasterimage::Image image;
+            image.create(columns, rows, rasterimage::Color::Black);
             for (int y = 0; y < rows; ++y)
                 for (int x = 0; x < columns; ++x)
                 {
@@ -1353,12 +1359,13 @@ bool exportcirculationdiagnostics(
                     auto colour = scalarcolour(values[cell], limit, palette);
                     if (!consistency.empty())
                     {
-                        colour = blendcolour(sf::Color(30, 210, 240), sf::Color(240, 40, 25), consistency[cell]);
-                        colour = blendcolour(sf::Color(8, 10, 15), colour, 0.2f + 0.8f * std::clamp(values[cell] / limit, 0.0f, 1.0f));
+                        colour = blendcolour(rasterimage::Color(30, 210, 240), rasterimage::Color(240, 40, 25), consistency[cell]);
+                        colour = blendcolour(rasterimage::Color(8, 10, 15), colour, 0.2f + 0.8f * std::clamp(values[cell] / limit, 0.0f, 1.0f));
                     }
                     image.setPixel(x, y, colour);
                 }
-            if (!u.empty()) drawdirectionarrows(image, u, v, columns, rows, 1);
+            image = expandclimatemapimage(image, windcolumns);
+            if (!u.empty()) drawdirectionarrows(image, u, v, columns, rows, mapscale(columns, windcolumns));
             const bool written = image.saveToFile((outputdirectory / diagnosticmapfilename(kind, season)).string());
             success = written && success;
             renderstatus(kind, true, written);
@@ -1371,7 +1378,7 @@ bool exportcirculationdiagnostics(
 bool exportcirculationreferencecomparisons(
     const std::filesystem::path& diagnosticoutputdirectory,
     const std::filesystem::path& referencecacheoutputdirectory,
-    planet& world,
+    climateworld& world,
     const circulationreferencewindfields& referencefields,
     const climatebenchmarkmapselection& selection)
 {
@@ -1405,7 +1412,7 @@ bool exportcirculationreferencecomparisons(
 
     const std::string referenceprefix =
         "era5_v" + std::to_string(referencevisualizationversion) + "_" +
-        std::to_string(selection.windmapcolumns()) + "x" + std::to_string(selection.windmapcolumns() / 2) +
+        std::to_string(columns) + "x" + std::to_string(rows) +
         "_source" + std::to_string(columns) + "x" + std::to_string(rows);
     std::ofstream comparison(
         diagnosticoutputdirectory / "wind_vector_comparison.csv");
@@ -1458,7 +1465,7 @@ bool exportcirculationreferencecomparisons(
                     (upper ? "u" : "s") + "_wind_lic.png");
             const std::uint32_t particlebase = upper ? 0x1185a91u : 0x1185a11u;
             const std::uint32_t licbase = upper ? 0x1185b91u : 0x1185b11u;
-            const int windcolumns = selection.windmapcolumns(), windrows = windcolumns / 2;
+            const int windcolumns = columns, windrows = rows;
             const bool needrender = (referenceparticlesrequested && !std::filesystem::exists(referenceparticlepath)) ||
                 (referencelicrequested && !std::filesystem::exists(referencelicpath));
             const auto renderu = needrender ? climategrid::remapSmoothField(columns, rows, referenceu, windcolumns, windrows) : std::vector<float>{};
@@ -1551,7 +1558,7 @@ bool exportcirculationreferencecomparisons(
                     world,
                     erroru,
                     errorv,
-                    errormagnitude) && success;
+                    errormagnitude, windcolumns) && success;
             }
 
             comparison
@@ -1578,7 +1585,7 @@ bool exportcirculationreferencecomparisons(
     return success;
 }
 
-bool circulationflowvisualizationenabled(const planet& world)
+bool circulationflowvisualizationenabled(const climateworld& world)
 {
     const int columns = world.width() + 1;
     const int rows = world.height() + 1;

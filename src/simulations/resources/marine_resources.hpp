@@ -3,12 +3,14 @@
 
 #include <vector>
 
+#include "world/world_grid.hpp"
+
 class planet;
 
 namespace physical_layers
 {
 // Compute ocean and coastal fishery potential from finalized seasonal ocean fields.
-void generate_marine_resources(planet& world, const std::vector<std::vector<bool>>& shelves);
+void generate_marine_resources(planet& world, const worldgrid<bool>& shelves);
 }
 
 #endif

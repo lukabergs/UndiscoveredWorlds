@@ -8,53 +8,10 @@
 
 #include "appearance_settings.hpp"
 #include "functions.hpp"
+#include "map_views.hpp"
 #include "generation_stage_registry.hpp"
 #include "map_imports.hpp"
-
-enum class GenerationComponentPolicy
-{
-    keep,
-    fill,
-    drain
-};
-
-struct GenerationWaterComponent
-{
-    int id = 0;
-    int seedX = 0;
-    int seedY = 0;
-    int cellCount = 0;
-    bool touchesEdge = false;
-    GenerationComponentPolicy policy = GenerationComponentPolicy::keep;
-};
-
-struct GenerationBasinComponent
-{
-    int id = 0;
-    int seedX = 0;
-    int seedY = 0;
-    int cellCount = 0;
-    BasinClass basinClass = BasinClass::none;
-    GenerationComponentPolicy policy = GenerationComponentPolicy::keep;
-};
-
-struct GenerationScratch
-{
-    std::vector<std::vector<int>> mountaindrainage;
-    std::vector<std::vector<bool>> shelves;
-    std::vector<int> squareroot;
-    std::vector<std::vector<std::vector<int>>> saltLakeMap;
-    std::vector<std::vector<int>> noLake;
-    std::vector<std::vector<int>> basinSeeds;
-    std::vector<std::vector<int>> inlandSeaComponentIds;
-    std::vector<GenerationWaterComponent> inlandSeaComponents;
-    std::vector<std::vector<int>> basinComponentIds;
-    std::vector<GenerationBasinComponent> basinComponents;
-    std::vector<int> heightHistogram;
-    std::vector<float> heightCdf;
-    std::vector<std::vector<std::uint8_t>> stageFeatureMask;
-    int stageFeatureCellCount = 0;
-};
+#include "world_stages.hpp"
 
 struct GenerationCommittedSnapshot
 {
@@ -120,22 +77,6 @@ struct GenerationSessionState
     GenerationWorkbenchUiState ui;
 };
 
-struct GenerationExecutionContext
-{
-    bool dorivers = true;
-    bool dolakes = true;
-    bool dodeltas = true;
-    bool appendclimateworkbook = false;
-    SocialGenerationOptions socialoptions;
-    boolshapetemplate* landshape = nullptr;
-    boolshapetemplate* chainland = nullptr;
-    boolshapetemplate* smalllake = nullptr;
-    boolshapetemplate* largelake = nullptr;
-    std::vector<std::vector<bool>>* okmountains = nullptr;
-    const ImportedClimateMaps* importedClimate = nullptr;
-    bool climateOnly = false; // Recompute climate on an externally supplied, immutable terrain.
-};
-
 struct GenerationWorkbenchPanelResult
 {
     bool previewModeChanged = false;
@@ -150,7 +91,6 @@ struct GenerationWorkbenchPanelResult
     bool controlsChanged = false;
 };
 
-void initializegenerationscratch(GenerationScratch& scratch);
 void resetworkbenchsession(GenerationSessionState& session);
 void initializeproceduralworkbenchsession(GenerationSessionState& session, const planet& world, double durationMyr, int plateCount);
 void initializeimportedworkbenchsession(GenerationSessionState& session, const planet& world, bool importedClimateAvailable);
@@ -166,6 +106,7 @@ bool applycurrentgenerationstage(GenerationSessionState& session, planet& commit
 void skipcurrentgenerationstage(GenerationSessionState& session, const planet& committedworld);
 bool cycleinlandseacomponentpolicyat(GenerationSessionState& session, int x, int y);
 bool runcurrentgenerationstagewithoutpreview(GenerationSessionState& session, planet& committedworld, const GenerationExecutionContext& context, std::string* errormessage = nullptr);
+// Stage parameters edited in the workbench (samples the hypsometric curve).
+WorldStageParameters makestageparameters(const GenerationWorkbenchUiState& ui);
 bool runremaininggenerationstages(planet& world, GenerationScratch& scratch, GenerationWorkbenchUiState& ui, const GenerationExecutionContext& context, std::size_t startStageIndex, std::string* errormessage = nullptr);
-void finalizegeneratedworld(planet& world, GenerationScratch& scratch, const GenerationExecutionContext& context);
 GenerationWorkbenchPanelResult drawgenerationworkbenchpanel(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, const planet& displayedworld, GenerationSessionState& session);

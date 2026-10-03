@@ -1,0 +1,383 @@
+{
+  "schema": "tectonics-run-registry/v1",
+  "seed": 1,
+  "baseline": 42,
+  "runs": [
+    {
+      "id": 1,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/1.json"
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/2.json"
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/3.json"
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/4.json"
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/5.json"
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/6.json"
+    },
+    {
+      "id": 7,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/7.json"
+    },
+    {
+      "id": 8,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/8.json"
+    },
+    {
+      "id": 9,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/9.json"
+    },
+    {
+      "id": 10,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/10.json"
+    },
+    {
+      "id": 11,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/11.json"
+    },
+    {
+      "id": 12,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/12.json"
+    },
+    {
+      "id": 13,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/13.json"
+    },
+    {
+      "id": 14,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/14.json"
+    },
+    {
+      "id": 15,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/15.json"
+    },
+    {
+      "id": 16,
+      "status": "failed",
+      "manifest": "runs/manifests/tectonics/16.json"
+    },
+    {
+      "id": 17,
+      "status": "failed",
+      "manifest": "runs/manifests/tectonics/17.json"
+    },
+    {
+      "id": 18,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/18.json"
+    },
+    {
+      "id": 19,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/19.json"
+    },
+    {
+      "id": 20,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/20.json"
+    },
+    {
+      "id": 21,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/21.json"
+    },
+    {
+      "id": 22,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/22.json"
+    },
+    {
+      "id": 23,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/23.json"
+    },
+    {
+      "id": 24,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/24.json"
+    },
+    {
+      "id": 25,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/25.json"
+    },
+    {
+      "id": 26,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/26.json"
+    },
+    {
+      "id": 27,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/27.json"
+    },
+    {
+      "id": 28,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/28.json"
+    },
+    {
+      "id": 29,
+      "status": "failed",
+      "manifest": "runs/manifests/tectonics/29.json"
+    },
+    {
+      "id": 30,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/30.json"
+    },
+    {
+      "id": 31,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/31.json"
+    },
+    {
+      "id": 32,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/32.json"
+    },
+    {
+      "id": 33,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/33.json"
+    },
+    {
+      "id": 34,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/34.json"
+    },
+    {
+      "id": 35,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/35.json"
+    },
+    {
+      "id": 36,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/36.json"
+    },
+    {
+      "id": 37,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/37.json"
+    },
+    {
+      "id": 38,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/38.json"
+    },
+    {
+      "id": 39,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/39.json"
+    },
+    {
+      "id": 40,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/40.json"
+    },
+    {
+      "id": 41,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/41.json"
+    },
+    {
+      "id": 42,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/42.json"
+    },
+    {
+      "id": 43,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/43.json"
+    },
+    {
+      "id": 44,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/44.json"
+    },
+    {
+      "id": 45,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/45.json"
+    },
+    {
+      "id": 46,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/46.json"
+    },
+    {
+      "id": 47,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/47.json"
+    },
+    {
+      "id": 48,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/48.json"
+    },
+    {
+      "id": 49,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/49.json"
+    },
+    {
+      "id": 50,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/50.json"
+    },
+    {
+      "id": 51,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/51.json"
+    },
+    {
+      "id": 52,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/52.json"
+    },
+    {
+      "id": 53,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/53.json"
+    },
+    {
+      "id": 54,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/54.json"
+    },
+    {
+      "id": 55,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/55.json"
+    },
+    {
+      "id": 56,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/56.json"
+    },
+    {
+      "id": 57,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/57.json"
+    },
+    {
+      "id": 58,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/58.json"
+    },
+    {
+      "id": 59,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/59.json"
+    },
+    {
+      "id": 60,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/60.json"
+    },
+    {
+      "id": 61,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/61.json"
+    },
+    {
+      "id": 62,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/62.json"
+    },
+    {
+      "id": 63,
+      "status": "complete",
+      "kind": "tectonics-climate-feedback/v1",
+      "manifest": "runs/manifests/tectonics/63.json"
+    },
+    {
+      "id": 64,
+      "status": "failed",
+      "manifest": "runs/manifests/tectonics/64.json"
+    },
+    {
+      "id": 65,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/65.json"
+    },
+    {
+      "id": 66,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/66.json"
+    },
+    {
+      "id": 67,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/67.json"
+    },
+    {
+      "id": 68,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/68.json"
+    },
+    {
+      "id": 69,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/69.json"
+    },
+    {
+      "id": 70,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/70.json"
+    },
+    {
+      "id": 71,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/71.json"
+    },
+    {
+      "id": 72,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/72.json"
+    },
+    {
+      "id": 73,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/73.json"
+    },
+    {
+      "id": 74,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/74.json"
+    },
+    {
+      "id": 75,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/75.json"
+    }
+  ]
+}

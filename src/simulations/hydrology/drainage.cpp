@@ -17,7 +17,16 @@ namespace
 {
 int seaflowdir(int x, int y, int newx, int newy);
 void addriverflowlocked(planet& world, int x, int y, int janadd, int juladd, vector<mutex>& rowlocks);
-void tracedropparallel(planet& world, int x, int y, int minimum, vector<mutex>& rowlocks);
+// River-mouth directions written onto sea cells by one row's drops, applied after
+// the parallel trace in row order so that converging rivers resolve deterministically.
+struct seamouthdirection
+{
+    int x;
+    int y;
+    int dir;
+};
+
+void tracedropparallel(planet& world, int x, int y, int minimum, vector<mutex>& rowlocks, vector<seamouthdirection>& seamouths);
 void removediagonalrivers(planet& world);
 void adddiagonalriverjunctions(planet& world);
 void avoidvolcanoes(planet& world);
@@ -60,7 +69,7 @@ void addriverflowlocked(planet& world, int x, int y, int janadd, int juladd, vec
     world.setriverjul(x, y, world.riverjul(x, y) + juladd);
 }
 
-void tracedropparallel(planet& world, int x, int y, int minimum, vector<mutex>& rowlocks)
+void tracedropparallel(planet& world, int x, int y, int minimum, vector<mutex>& rowlocks, vector<seamouthdirection>& seamouths)
 {
     const int startx = x;
     const int starty = y;
@@ -162,11 +171,7 @@ void tracedropparallel(planet& world, int x, int y, int minimum, vector<mutex>& 
                 if (newseatile.x != -1)
                 {
                     seadir = seaflowdir(seax, seay, newseatile.x, newseatile.y);
-
-                    {
-                        lock_guard<mutex> lock(rowlocks[seay]);
-                        world.setriverdir(seax, seay, seadir);
-                    }
+                    seamouths.push_back({ seax, seay, seadir });
 
                     seax = newseatile.x;
                     seay = newseatile.y;
@@ -1111,6 +1116,7 @@ void accumulaterivercatchments(planet& world, int minimum, int mountainheightlim
     const int width = world.width();
     const int height = world.height();
     vector<mutex> riverrowlocks(height + 1);
+    vector<vector<seamouthdirection>> seamouths(height + 1); // by the row of the drop's source
     // Now, we go through the map tile by tile. Take the rainfall in each tile and add it to every downstream tile.
 
     parallelforrows(0, height, [&](int startrow, int endrow)
@@ -1155,12 +1161,17 @@ void accumulaterivercatchments(planet& world, int minimum, int mountainheightlim
                     }
 
                     if (goahead == 1)
-                        tracedropparallel(world, i, j, minimum, riverrowlocks);
+                        tracedropparallel(world, i, j, minimum, riverrowlocks, seamouths[j]);
                 }
             }
         }
     });
 
+
+    // Sea cells where rivers converge take the direction of the last source in row order.
+    for (const vector<seamouthdirection>& row : seamouths)
+        for (const seamouthdirection& mouth : row)
+            world.setriverdir(mouth.x, mouth.y, mouth.dir);
 }
 
 void reduceseasonalrivercontrast(planet& world)

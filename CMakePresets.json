@@ -2,31 +2,23 @@
     "version": 3,
     "configurePresets": [
         {
-            "name": "x64-debug",
+            "name": "desktop",
             "generator": "Visual Studio 18 2026",
-            "binaryDir": "${sourceDir}/out/build/x64-Debug",
+            "binaryDir": "${sourceDir}/out/build/desktop",
             "cacheVariables": {
                 "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
                 "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg-ports"
             }
         },
         {
-            "name": "x64-release",
-            "inherits": "x64-debug",
-            "binaryDir": "${sourceDir}/out/build/x64-Release"
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "build-x64-debug",
-            "configurePreset": "x64-debug",
-            "targets": ["UndiscoveredWorlds"]
-        },
-        {
-            "name": "build-x64-release",
-            "configurePreset": "x64-release",
-            "configuration": "Release",
-            "targets": ["UndiscoveredWorlds"]
+            "name": "headless",
+            "inherits": "desktop",
+            "binaryDir": "${sourceDir}/out/build/headless",
+            "cacheVariables": {
+                "UW_BUILD_APP": "OFF",
+                "UW_BUILD_TECTONICS_TOOLS": "ON",
+                "BUILD_TESTING": "ON"
+            }
         }
     ]
 }

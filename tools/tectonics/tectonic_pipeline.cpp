@@ -2,7 +2,7 @@
 #define NOMINMAX
 #endif
 
-#include "lithosphere.hpp"
+#include "tectonic_api.hpp"
 #include "mineral_history.hpp"
 #include "tectonic_frame_reader.hpp"
 #include "tectonic_pipeline_support.hpp"
@@ -78,7 +78,6 @@ struct ExportedSnapshotRecord {
     std::string label;
     uint32_t update_count = 0;
     uint32_t iteration_count = 0;
-    uint32_t cycle_count = 0;
     double time_myr = 0.0;
     std::string directory;
 };
@@ -204,9 +203,7 @@ void print_common_scenario_help() {
     std::printf("  --sea-level-m N\n");
     std::printf("  --initial-ocean-depth-m N (positive depth below sea level)\n");
     std::printf("  --initial-land-relief-m N (relief above sea level)\n");
-    std::printf("  --evolution-duration-myr X (continuous duration; no global restarts)\n");
-    std::printf("  --motion-model force-balance (the only supported solver)\n");
-    std::printf("  --surface-model isostatic (the only supported surface)\n");
+    std::printf("  --evolution-duration-myr X (continuous duration)\n");
     std::printf("  --world-width-km X --mantle-flow-speed-cm-yr X\n");
     std::printf("  --transport-subdivision 1|2|4 --deformation-peak-km X (0 disables)\n");
     std::printf("  --deformation-variation X (0..0.5) --subduction-coupling X (0..1)\n");
@@ -237,6 +234,12 @@ void print_common_scenario_help() {
     std::printf("  --noise-pass-amplitude-m X (nonnegative; synthetic conservative detail experiment)\n");
     std::printf("  --noise-pass-wavelength-km X --noise-pass-period-myr X (positive)\n");
     std::printf("  --noise-pass-coast-taper-m X (nonnegative; smooth suppression near sea level, default 500 m)\n");
+    std::printf("  --plume-count N (0..64; mantle plumes fixed in the mantle frame, default 0 = off)\n");
+    std::printf("  --plume-tail-flux-km3-yr X --plume-tail-radius-km X (basalt per plume after birth; Gaussian sigma)\n");
+    std::printf("  --plume-head-volume-km3 X --plume-head-radius-km X --plume-head-duration-myr X (head pulse at birth; 0 = none)\n");
+    std::printf("  --plume-birth-window-myr X (births spread over [0, X]) --plume-min-spacing-km X\n");
+    std::printf("  --plume-swell-age-myr X --plume-swell-radius-km X (reheat ocean floor toward X Myr; 0 = none)\n");
+    std::printf("  --plume-weakening X (0..1 rock-strength reduction; needs --progressive-rifting on)\n");
     std::printf("  --trench-response-myr X (time constant of local bending response)\n");
     std::printf("  --process-variation X --process-wavelength-km X --process-period-myr X\n");
     std::printf("  --delta-time-myr X\n");
@@ -375,16 +378,8 @@ void parse_common_scenario_arg(tectonics::scenario::Scenario& scenario, const st
         scenario.initial_ocean_depth_m = parse_u16("--initial-ocean-depth-m", value);
     } else if (arg == "--initial-land-relief-m") {
         scenario.initial_land_relief_m = parse_u16("--initial-land-relief-m", value);
-    } else if (arg == "--initial-min-height-m" || arg == "--initial-max-height-m") {
-        fail("Legacy amplitude controls were replaced by --initial-ocean-depth-m and --initial-land-relief-m (metres relative to sea level); replay old recipes with their archived executable");
     } else if (arg == "--evolution-duration-myr") {
         scenario.evolution_duration_myr = parse_double("--evolution-duration-myr", value);
-    } else if (arg == "--motion-model") {
-        const std::string model(value);
-        if (model != "force-balance") fail("Only the current force-balance tectonics solver is supported");
-    } else if (arg == "--surface-model") {
-        const std::string model(value);
-        if (model != "isostatic") fail("Only the current isostatic column surface is supported");
     } else if (arg == "--world-width-km") {
         scenario.world_width_km = parse_double("--world-width-km", value);
     } else if (arg == "--mantle-flow-speed-cm-yr") {
@@ -434,6 +429,28 @@ void parse_common_scenario_arg(tectonics::scenario::Scenario& scenario, const st
         scenario.experimental_noise.period_myr=parse_double(arg.c_str(),value);
     } else if (arg == "--noise-pass-coast-taper-m") {
         scenario.experimental_noise.coast_taper_m=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-count") {
+        scenario.plume_processes.count=parse_u32("--plume-count",value);
+    } else if (arg == "--plume-tail-flux-km3-yr") {
+        scenario.plume_processes.tail_flux_km3_yr=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-tail-radius-km") {
+        scenario.plume_processes.tail_radius_km=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-head-volume-km3") {
+        scenario.plume_processes.head_volume_km3=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-head-radius-km") {
+        scenario.plume_processes.head_radius_km=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-head-duration-myr") {
+        scenario.plume_processes.head_duration_myr=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-birth-window-myr") {
+        scenario.plume_processes.birth_window_myr=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-swell-age-myr") {
+        scenario.plume_processes.swell_age_myr=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-swell-radius-km") {
+        scenario.plume_processes.swell_radius_km=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-weakening") {
+        scenario.plume_processes.weakening=parse_double(arg.c_str(),value);
+    } else if (arg == "--plume-min-spacing-km") {
+        scenario.plume_processes.min_spacing_km=parse_double(arg.c_str(),value);
     } else if (arg == "--sediment-load-feedback") {
         const std::string mode(value);
         if (mode!="on" && mode!="off") fail("--sediment-load-feedback requires on or off");
@@ -552,10 +569,31 @@ std::vector<std::string> collect_args(int argc, char** argv, int start) {
     return args;
 }
 
+// Owns one engine instance through the public tectonics API.
+class Simulation {
+public:
+    explicit Simulation(const tectonics::scenario::Scenario& scenario)
+        : handle_(tectonics_create_from_scenario(&scenario)) {
+        if (handle_ == nullptr) throw std::runtime_error("Failed to create tectonics simulation");
+    }
+    ~Simulation() { tectonics_destroy(handle_); }
+    Simulation(const Simulation&) = delete;
+    Simulation& operator=(const Simulation&) = delete;
+
+    void update() { tectonics_step(handle_); }
+    bool isFinished() const { return tectonics_is_finished(handle_) != 0; }
+    double getTimeMyr() const { return tectonics_get_time_myr(handle_); }
+    tectonics::contract::Snapshot snapshot() const { return tectonics_capture_snapshot(handle_); }
+    void* handle() const { return handle_; }
+
+private:
+    void* handle_;
+};
+
 tectonics::contract::Snapshot run_to_target(const tectonics::scenario::Scenario& scenario,
                                          const TargetSelector& target,
                                          uint32_t& resolved_update_count) {
-    lithosphere simulation(scenario);
+    Simulation simulation(scenario);
     resolved_update_count = 0;
 
     if (target.mode == TargetMode::Final) {
@@ -563,7 +601,7 @@ tectonics::contract::Snapshot run_to_target(const tectonics::scenario::Scenario&
             simulation.update();
             ++resolved_update_count;
         }
-        return tectonics::contract::capture_snapshot(simulation);
+        return simulation.snapshot();
     }
 
     const auto target_pending = [&]() {
@@ -583,7 +621,7 @@ tectonics::contract::Snapshot run_to_target(const tectonics::scenario::Scenario&
                 << (target.came_from_time ? " Myr" : " updates");
         fail(message.str());
     }
-    return tectonics::contract::capture_snapshot(simulation);
+    return simulation.snapshot();
 }
 
 void write_batch_manifest(const fs::path& path, const BatchExportParams& params,
@@ -626,6 +664,18 @@ void write_batch_manifest(const fs::path& path, const BatchExportParams& params,
     output << "    \"noise_pass_wavelength_km\": " << params.scenario.experimental_noise.wavelength_km << ",\n";
     output << "    \"noise_pass_period_myr\": " << params.scenario.experimental_noise.period_myr << ",\n";
     output << "    \"noise_pass_coast_taper_m\": " << params.scenario.experimental_noise.coast_taper_m << ",\n";
+    const auto& plume = params.scenario.plume_processes;
+    output << "    \"plume_count\": " << plume.count << ",\n";
+    output << "    \"plume_tail_flux_km3_yr\": " << plume.tail_flux_km3_yr << ",\n";
+    output << "    \"plume_tail_radius_km\": " << plume.tail_radius_km << ",\n";
+    output << "    \"plume_head_volume_km3\": " << plume.head_volume_km3 << ",\n";
+    output << "    \"plume_head_radius_km\": " << plume.head_radius_km << ",\n";
+    output << "    \"plume_head_duration_myr\": " << plume.head_duration_myr << ",\n";
+    output << "    \"plume_birth_window_myr\": " << plume.birth_window_myr << ",\n";
+    output << "    \"plume_swell_age_myr\": " << plume.swell_age_myr << ",\n";
+    output << "    \"plume_swell_radius_km\": " << plume.swell_radius_km << ",\n";
+    output << "    \"plume_weakening\": " << plume.weakening << ",\n";
+    output << "    \"plume_min_spacing_km\": " << plume.min_spacing_km << ",\n";
     output << "    \"ocean_crust_variation_m\": " << params.scenario.ocean_crust_variation_m << ",\n";
     output << "    \"ocean_noise_wavelength_km\": " << params.scenario.ocean_noise_wavelength_km << ",\n";
     output << "    \"seamount_crust_m\": " << params.scenario.seamount_crust_m << ",\n";
@@ -689,7 +739,6 @@ void write_batch_manifest(const fs::path& path, const BatchExportParams& params,
         output << "      \"label\": \"" << json_escape(record.label) << "\",\n";
         output << "      \"update_count\": " << record.update_count << ",\n";
         output << "      \"iteration_count\": " << record.iteration_count << ",\n";
-        output << "      \"cycle_count\": " << record.cycle_count << ",\n";
         output << "      \"time_myr\": " << record.time_myr << ",\n";
         output << "      \"directory\": \"" << json_escape(record.directory) << "\"\n";
         output << "    }" << (i + 1 < records.size() ? "," : "") << "\n";
@@ -908,7 +957,7 @@ int command_batch_export(const std::vector<std::string>& args) {
                          return lhs.update_count < rhs.update_count;
                      });
 
-    lithosphere simulation(params.scenario);
+    Simulation simulation(params.scenario);
     uint32_t update_count = 0;
     size_t export_index = 0;
     std::vector<ExportedSnapshotRecord> records;
@@ -916,11 +965,11 @@ int command_batch_export(const std::vector<std::string>& args) {
     std::optional<mineralsystems::MineralHistory> minerals;
     if (params.mineral_history) {
         minerals.emplace(mineralsystems::MineralParameters{}, mineralsystems::mineralseed(params.scenario.seed));
-        minerals->begin(mineral_frames.read(&simulation));
+        minerals->begin(mineral_frames.read(simulation.handle()));
     }
 
     const auto export_snapshot = [&](const std::string& label, uint32_t current_update) {
-        const tectonics::contract::Snapshot snapshot = tectonics::contract::capture_snapshot(simulation);
+        const tectonics::contract::Snapshot snapshot = simulation.snapshot();
         const fs::path relative_dir = fs::path("snapshots") / snapshot_directory_name(export_index, label);
         tectonics::tooling::SnapshotBundleOptions options;
         options.label = label;
@@ -928,7 +977,7 @@ int command_batch_export(const std::vector<std::string>& args) {
         options.include_update_count = true;
         options.update_count = current_update;
         tectonics::tooling::write_snapshot_bundle(params.output_dir / relative_dir, snapshot, options);
-        records.push_back({label, current_update, snapshot.iteration_count, snapshot.cycle_count,
+        records.push_back({label, current_update, snapshot.iteration_count,
                            snapshot.time_myr, relative_dir.generic_string()});
         ++export_index;
     };
@@ -955,7 +1004,7 @@ int command_batch_export(const std::vector<std::string>& args) {
         simulation.update();
         ++update_count;
         if (minerals) {
-            minerals->step(mineral_frames.read(&simulation));
+            minerals->step(mineral_frames.read(simulation.handle()));
         }
 
         if (params.checkpoint_every_updates != 0 &&
@@ -972,7 +1021,7 @@ int command_batch_export(const std::vector<std::string>& args) {
 
     write_batch_manifest(params.output_dir / "batch_manifest.json", params, records, explicit_targets);
     if (minerals) {
-        minerals->finish(mineral_frames.read(&simulation));
+        minerals->finish(mineral_frames.read(simulation.handle()));
         std::ofstream deposits(params.output_dir / "mineral_deposits.csv");
         mineralsystems::writedepositscsv(deposits, minerals->deposits());
         std::ofstream budget(params.output_dir / "mineral_budget.json");

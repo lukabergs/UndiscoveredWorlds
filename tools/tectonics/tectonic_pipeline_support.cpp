@@ -365,6 +365,18 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"noise_pass_wavelength_km\": " << scenario.experimental_noise.wavelength_km << ",\n";
     output << indent << "  \"noise_pass_period_myr\": " << scenario.experimental_noise.period_myr << ",\n";
     output << indent << "  \"noise_pass_coast_taper_m\": " << scenario.experimental_noise.coast_taper_m << ",\n";
+    const auto& plume = scenario.plume_processes;
+    output << indent << "  \"plume_count\": " << plume.count << ",\n";
+    output << indent << "  \"plume_tail_flux_km3_yr\": " << plume.tail_flux_km3_yr << ",\n";
+    output << indent << "  \"plume_tail_radius_km\": " << plume.tail_radius_km << ",\n";
+    output << indent << "  \"plume_head_volume_km3\": " << plume.head_volume_km3 << ",\n";
+    output << indent << "  \"plume_head_radius_km\": " << plume.head_radius_km << ",\n";
+    output << indent << "  \"plume_head_duration_myr\": " << plume.head_duration_myr << ",\n";
+    output << indent << "  \"plume_birth_window_myr\": " << plume.birth_window_myr << ",\n";
+    output << indent << "  \"plume_swell_age_myr\": " << plume.swell_age_myr << ",\n";
+    output << indent << "  \"plume_swell_radius_km\": " << plume.swell_radius_km << ",\n";
+    output << indent << "  \"plume_weakening\": " << plume.weakening << ",\n";
+    output << indent << "  \"plume_min_spacing_km\": " << plume.min_spacing_km << ",\n";
     output << indent << "  \"ocean_crust_variation_m\": " << scenario.ocean_crust_variation_m << ",\n";
     output << indent << "  \"ocean_noise_wavelength_km\": " << scenario.ocean_noise_wavelength_km << ",\n";
     output << indent << "  \"seamount_crust_m\": " << scenario.seamount_crust_m << ",\n";
@@ -414,7 +426,6 @@ void append_summary_json(std::ostream& output, const SnapshotSummary& summary,
     output << indent << "  \"width\": " << summary.width << ",\n";
     output << indent << "  \"height\": " << summary.height << ",\n";
     output << indent << "  \"iteration_count\": " << summary.iteration_count << ",\n";
-    output << indent << "  \"cycle_count\": " << summary.cycle_count << ",\n";
     output << indent << "  \"time_origin_step\": " << summary.time_origin_step << ",\n";
     output << indent << "  \"sea_level_m\": " << summary.sea_level_m << ",\n";
     output << indent << "  \"time_myr\": " << summary.time_myr << ",\n";
@@ -550,7 +561,6 @@ void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snap
     output << "  \"width\": " << snapshot.width << ",\n";
     output << "  \"height\": " << snapshot.height << ",\n";
     output << "  \"iteration_count\": " << snapshot.iteration_count << ",\n";
-    output << "  \"cycle_count\": " << snapshot.cycle_count << ",\n";
     output << "  \"time_origin_step\": " << snapshot.time_origin_step << ",\n";
     output << "  \"time_myr\": " << snapshot.time_myr << ",\n";
     output << "  \"delta_time_myr\": " << snapshot.delta_time_myr << ",\n";
@@ -583,6 +593,7 @@ void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snap
     output << "    \"mass_kg\": " << budget.mass_kg << ",\n";
     output << "    \"generated_ocean_kg\": " << budget.generated_ocean_kg << ",\n";
     output << "    \"generated_arc_kg\": " << budget.generated_arc_kg << ",\n";
+    output << "    \"generated_plume_kg\": " << budget.generated_plume_kg << ",\n";
     output << "    \"river_eroded_kg\": " << budget.river_eroded_kg << ",\n";
     output << "    \"subducted_ocean_kg\": " << budget.subducted_ocean_kg << ",\n";
     output << "    \"subducted_sediment_kg\": " << budget.subducted_sediment_kg << ",\n";
@@ -624,6 +635,8 @@ void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snap
         output << "    \"sediment_m\": \"sediment_m.f32\",\n";
         output << "    \"rift_damage\": \"rift_damage.f32\",\n";
     }
+    if (!snapshot.plume_influence.empty())
+        output << "    \"plume_influence\": \"plume_influence.f32\",\n";
     output << "    \"heightmap\": \"heightmap.f32\",\n";
     output << "    \"plate_id\": \"plate_id.u32\",\n";
     output << "    \"crust_age_steps\": \"crust_age_steps.u32\",\n";
@@ -657,6 +670,8 @@ void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snap
         output << "    \"sediment_m\": \"" << fnv1a_hash(snapshot.sediment_m) << "\",\n";
         output << "    \"rift_damage\": \"" << fnv1a_hash(snapshot.rift_damage) << "\",\n";
     }
+    if (!snapshot.plume_influence.empty())
+        output << "    \"plume_influence\": \"" << fnv1a_hash(snapshot.plume_influence) << "\",\n";
     output << "    \"heightmap\": \"" << fnv1a_hash(snapshot.heightmap) << "\",\n";
     output << "    \"plate_id\": \"" << fnv1a_hash(snapshot.plate_id) << "\",\n";
     output << "    \"crust_age_steps\": \"" << fnv1a_hash(snapshot.crust_age_steps)
@@ -930,6 +945,8 @@ void write_snapshot_bundle(const fs::path& output_dir, const tectonics::contract
         write_binary_file(output_dir / "sediment_m.f32", snapshot.sediment_m);
         write_binary_file(output_dir / "rift_damage.f32", snapshot.rift_damage);
     }
+    if (!snapshot.plume_influence.empty())
+        write_binary_file(output_dir / "plume_influence.f32", snapshot.plume_influence);
     write_binary_file(output_dir / "crust_class.u8", snapshot.crust_class);
     write_binary_file(output_dir / "uplift_tendency.f32", snapshot.uplift_tendency);
     write_binary_file(output_dir / "subsidence_tendency.f32", snapshot.subsidence_tendency);
@@ -968,7 +985,6 @@ LoadedSnapshotBundle load_snapshot_bundle(const fs::path& input_dir) {
     bundle.snapshot.width = parse_json_u32(manifest, find_key(manifest, "width"));
     bundle.snapshot.height = parse_json_u32(manifest, find_key(manifest, "height"));
     bundle.snapshot.iteration_count = parse_json_u32(manifest, find_key(manifest, "iteration_count"));
-    bundle.snapshot.cycle_count = parse_json_u32(manifest, find_key(manifest, "cycle_count"));
     bundle.snapshot.time_origin_step =
         parse_json_u32(manifest, find_key(manifest, "time_origin_step"));
     bundle.snapshot.time_myr = parse_json_double(manifest, find_key(manifest, "time_myr"));
@@ -1031,6 +1047,8 @@ LoadedSnapshotBundle load_snapshot_bundle(const fs::path& input_dir) {
             }
         }
     }
+    if (find_optional_key_after(manifest, "plume_influence", 0) != std::string::npos)
+        bundle.snapshot.plume_influence = read_binary_file<float>(input_dir / "plume_influence.f32", cell_count);
     if (find_optional_key_after(manifest, "continental_crust_m", 0) != std::string::npos) {
         bundle.snapshot.continental_crust_m = read_binary_file<float>(input_dir / "continental_crust_m.f32", cell_count);
         bundle.snapshot.oceanic_crust_m = read_binary_file<float>(input_dir / "oceanic_crust_m.f32", cell_count);
@@ -1047,6 +1065,8 @@ LoadedSnapshotBundle load_snapshot_bundle(const fs::path& input_dir) {
         budget.generated_ocean_kg = value("generated_ocean_kg");
         if (find_optional_key_after(manifest, "generated_arc_kg", start) != std::string::npos)
             budget.generated_arc_kg = value("generated_arc_kg");
+        if (find_optional_key_after(manifest, "generated_plume_kg", start) != std::string::npos)
+            budget.generated_plume_kg = value("generated_plume_kg");
         if (find_optional_key_after(manifest, "river_eroded_kg", start) != std::string::npos)
             budget.river_eroded_kg = value("river_eroded_kg");
         budget.subducted_ocean_kg = value("subducted_ocean_kg");
@@ -1112,7 +1132,6 @@ SnapshotSummary summarize_snapshot(const tectonics::contract::Snapshot& snapshot
     summary.width = snapshot.width;
     summary.height = snapshot.height;
     summary.iteration_count = snapshot.iteration_count;
-    summary.cycle_count = snapshot.cycle_count;
     summary.time_origin_step = snapshot.time_origin_step;
     summary.sea_level_m = snapshot.sea_level_m;
     summary.time_myr = snapshot.time_myr;
@@ -1274,8 +1293,6 @@ SnapshotComparison compare_snapshots(const tectonics::contract::Snapshot& a,
     comparison.time_myr_b = b.time_myr;
     comparison.iteration_count_delta =
         static_cast<int64_t>(a.iteration_count) - static_cast<int64_t>(b.iteration_count);
-    comparison.cycle_count_delta =
-        static_cast<int64_t>(a.cycle_count) - static_cast<int64_t>(b.cycle_count);
     comparison.plate_count_delta =
         static_cast<int64_t>(a.plates.size()) - static_cast<int64_t>(b.plates.size());
     comparison.boundary_segment_count_delta =
@@ -1339,11 +1356,10 @@ SnapshotComparison compare_snapshots(const tectonics::contract::Snapshot& a,
 
     comparison.exact_match =
         a.continental_crust_m == b.continental_crust_m && a.oceanic_crust_m == b.oceanic_crust_m &&
-        a.sediment_m == b.sediment_m && a.rift_damage == b.rift_damage &&
+        a.sediment_m == b.sediment_m && a.rift_damage == b.rift_damage && a.plume_influence == b.plume_influence &&
         comparison.contract_schema_version_a == comparison.contract_schema_version_b &&
         comparison.time_myr_a == comparison.time_myr_b &&
         comparison.iteration_count_delta == 0 &&
-        comparison.cycle_count_delta == 0 &&
         comparison.plate_count_delta == 0 &&
         comparison.boundary_segment_count_delta == 0 &&
         comparison.deforming_region_count_delta == 0 &&
@@ -1392,7 +1408,6 @@ std::string boundary_stats_json(const SnapshotSummary& summary) {
     output << "  \"schema\": \"tectonic-boundary-stats/v1\",\n";
     output << "  \"time_myr\": " << summary.time_myr << ",\n";
     output << "  \"iteration_count\": " << summary.iteration_count << ",\n";
-    output << "  \"cycle_count\": " << summary.cycle_count << ",\n";
     output << "  \"tectonic_junction_count\": " << summary.tectonic_junction_count << ",\n";
     output << "  \"tectonic_junction_stability_counts\": {\n";
     for (size_t i = 0; i < summary.tectonic_junction_stability_counts.size(); ++i) {
@@ -1488,7 +1503,6 @@ std::string snapshot_comparison_json(const SnapshotComparison& comparison) {
     output << "  \"time_myr_a\": " << comparison.time_myr_a << ",\n";
     output << "  \"time_myr_b\": " << comparison.time_myr_b << ",\n";
     output << "  \"iteration_count_delta\": " << comparison.iteration_count_delta << ",\n";
-    output << "  \"cycle_count_delta\": " << comparison.cycle_count_delta << ",\n";
     output << "  \"plate_count_delta\": " << comparison.plate_count_delta << ",\n";
     output << "  \"boundary_segment_count_delta\": "
            << comparison.boundary_segment_count_delta << ",\n";

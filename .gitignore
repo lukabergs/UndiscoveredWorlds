@@ -62,23 +62,12 @@ desktop.ini
 # ==========================================
 # Project Specific (Optional)
 # ==========================================
-# Local-only material. No exceptions for registries, workbooks or guides.
+# Local-only material. From runs/ only the registry and the ledger are tracked.
 /meta/
-/docs/
 /refs/
-/runs/
-/extra/
-/data/
-/climate_benchmark_runs.json
-/climate_reference_data.json
-/UWinstaller.zip
-
-# Local research, historical scripts, and files awaiting manual sorting.
-/references/
-/scripts/archive/*
-!/scripts/archive/reorganize-climate-assets.ps1
-/0/
-/tools/ripgrep/
+/runs/*
+!/runs/registry/
+!/runs/ledger/
 
 # Downloaded archives and numerical/generated data are not source code.
 *.zip
@@ -100,11 +89,6 @@ desktop.ini
 # Small deterministic fixtures are reviewed by the repository-scope checker.
 !tests/**/fixtures/**
 
-# Task plans are local by default; already tracked plans remain tracked.
-/docs/tasks/
-
-# Saved Worlds
-saved_worlds/
 # Local notes or scratchpad files
 notes.txt
 temp/extra/

@@ -16,7 +16,6 @@ int main()
     const climatebenchmarkmapselection defaults =
         climatebenchmarkmapselection::defaultselection();
     assert(defaults.requests().size() == 20);
-    assert(defaults.windmapcolumns() == 2048);
     assert(defaults.includes(climatebenchmarkmapkind::oceancurrents, 0));
     assert(defaults.includes(climatebenchmarkmapkind::oceancurrents, 2));
     assert(defaults.includes(climatebenchmarkmapkind::koppen));
@@ -38,15 +37,7 @@ int main()
     }
 
     climatebenchmarkmapselection selected;
-    selected.setwindmapcolumns(512);
     selected.clear();
-    assert(selected.windmapcolumns() == 512);
-    for (const int width : { 0, 63, 65, 2049, 4096 })
-    {
-        bool rejected = false;
-        try { selected.setwindmapcolumns(width); } catch (const std::invalid_argument&) { rejected = true; }
-        assert(rejected && selected.windmapcolumns() == 512);
-    }
     std::string failure;
     assert(addclimatebenchmarkmapargument(
         selected,

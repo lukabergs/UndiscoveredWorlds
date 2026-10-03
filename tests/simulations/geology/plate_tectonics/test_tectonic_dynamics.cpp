@@ -195,7 +195,6 @@ TEST(TectonicDynamics, ContinuousStationaryWorldPreservesCrustUntilDurationEnds)
     while (!world.isFinished() && calls < 20) { world.update(); ++calls; }
     ASSERT_EQ(calls, 12);
     EXPECT_DOUBLE_EQ(world.getTimeMyr(), 6);
-    EXPECT_EQ(world.getCycleCount(), 0U);
     EXPECT_EQ(std::memcmp(initial.data(), world.getTopography(), initial.size() * sizeof(float)), 0);
     for (size_t i = 0; i < age.size(); ++i) EXPECT_FLOAT_EQ(world.getCrustAgeMyrMap()[i], age[i] + 6);
     world.update(); // Finished simulation is a no-op, including force solve.
@@ -211,7 +210,6 @@ TEST(TectonicDynamics, ContinuousDrivenWorldReplaysAndRetainsMotionAt200Myr) {
         ASSERT_FALSE(a.isFinished()) << i;
         a.update(); b.update();
         ASSERT_LT(a.getMotionDiagnostics().relative_force_residual, 1e-12) << i;
-        ASSERT_EQ(a.getCycleCount(), 0U) << i;
     }
     EXPECT_TRUE(a.isFinished());
     EXPECT_DOUBLE_EQ(a.getTimeMyr(), 200);

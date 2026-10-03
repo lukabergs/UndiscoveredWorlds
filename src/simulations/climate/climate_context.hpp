@@ -35,12 +35,14 @@ private:
     std::vector<T> values_;
 };
 
+// Defaults follow run 373: 128-wide atmosphere/ocean, 256-wide moisture.
+// Every grid is capped by the world grid.
 struct Resolution
 {
-    int atmosphereColumns = 64;
-    int oceanColumns = 64;
-    int hydrologyColumns = 128;
-    int weatherColumns = 32;
+    int atmosphereColumns = 128;
+    int oceanColumns = 128;
+    int hydrologyColumns = 256;
+    int weatherColumns = 64;
 };
 
 struct WindFields
@@ -52,6 +54,15 @@ struct WindFields
     // Surface-minus-carrier drainage increment, in the same east/south basis.
     std::array<FloatGrid, 4> drainagewindu, drainagewindv;
     std::array<bool, 4> hasDrainageProfile{};
+    // Experimental generic levels (Context::genericLevelPressuresHpa): one rule set
+    // for every pressure; diagnostic only, the model never reads them back.
+    struct GenericLevel
+    {
+        float pressureHpa = 0.0f;
+        std::array<FloatGrid, 4> windu, windv, available;
+        std::array<bool, 4> solved{};
+    };
+    std::vector<GenericLevel> genericlevels;
     std::array<bool, 4> populated{};
     void reset(int w, int h)
     {
@@ -109,6 +120,11 @@ struct Context
     bool transientWeather = false;
     // Experimental until the coupled rainfall/upper-flow regression is resolved.
     bool mixedLayerTropics = false;
+    // Experimental diagnostic levels between the boundary layer and 500 hPa, all
+    // from one rule set (climate_coupling.cpp, solvegenericlevel). Empty: none.
+    std::vector<float> genericLevelPressuresHpa;
+    // Pressure where the surface pressure pattern reverses sign aloft (heat-low depth).
+    float genericLevelReversalHpa = 760.0f;
     TransportMethod transportMethod = TransportMethod::Ffsl;
     int oceanHeatStepHours = 24;
     bool reuseOceanCirculation = true;

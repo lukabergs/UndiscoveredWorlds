@@ -9,8 +9,6 @@
     "sea-level": 0.65,
     "plates": 10,
     "evolution-duration-myr": 600,
-    "motion-model": "force-balance",
-    "surface-model": "isostatic",
     "world-width-km": 40000.0,
     "mantle-flow-speed-cm-yr": 4.0,
     "transport-subdivision": 4,

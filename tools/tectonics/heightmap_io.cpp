@@ -725,7 +725,7 @@ int writeImageGrayTiff16(const char* filename, int width, int height, const uint
         return 1;
     }
 
-    return tectonics::io::writeGrayscaleTiff16(filename, static_cast<uint32_t>(width),
+    return topographyio::writeGrayscaleTiff16(filename, static_cast<uint32_t>(width),
                                             static_cast<uint32_t>(height), heightmap)
                ? 0
                : 1;
@@ -736,7 +736,7 @@ int readImageGrayTiff16(const char* filename, std::vector<uint16_t>& heightmap, 
 {
     uint32_t loaded_width = 0;
     uint32_t loaded_height = 0;
-    if (!tectonics::io::readGrayscaleTiff16(filename, heightmap, loaded_width, loaded_height)) {
+    if (!topographyio::readGrayscaleTiff16(filename, heightmap, loaded_width, loaded_height)) {
         heightmap.clear();
         width = 0;
         height = 0;

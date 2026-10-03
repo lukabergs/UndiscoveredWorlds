@@ -15,6 +15,7 @@ enum class GenerationStageDomain
 
 enum class GenerationStageId
 {
+    geosphere_initialization,
     plate_tectonics,
     terraforming,
     inland_seas,

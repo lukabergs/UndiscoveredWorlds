@@ -163,13 +163,6 @@ climatebenchmarkmapselection climatebenchmarkmapselection::allselection()
     return selection;
 }
 
-void climatebenchmarkmapselection::setwindmapcolumns(int columns)
-{
-    if (columns < 64 || columns > 2048 || columns % 2 != 0)
-        throw std::invalid_argument("Wind map width must be even and between 64 and 2048");
-    windmapcolumns_ = columns;
-}
-
 void climatebenchmarkmapselection::clear()
 {
     requests_.clear();

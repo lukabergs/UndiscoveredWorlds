@@ -16,7 +16,7 @@ DTYPES = {
     "deformation_rate": "<f4", "deformation_velocity_x": "<f4", "deformation_velocity_y": "<f4",
     "convergence_score": "u1", "divergence_score": "u1", "shear_score": "u1", "geologic_regime": "u1",
 }
-OPTIONAL_DTYPES = {"rift_damage": "<f4", "continental_crust_m": "<f4", "oceanic_crust_m": "<f4", "sediment_m": "<f4"}
+OPTIONAL_DTYPES = {"rift_damage": "<f4", "plume_influence": "<f4", "continental_crust_m": "<f4", "oceanic_crust_m": "<f4", "sediment_m": "<f4"}
 
 
 def elevation_m(height, sea_level):
@@ -33,10 +33,14 @@ def elevation_m(height, sea_level):
     return absolute - sea_level
 
 
+# 6 carried an always-zero cycle counter; 7 removed it. Field files are identical.
+SUPPORTED_SCHEMAS = {6, 7}
+
+
 def load_bundle(path, expected_hashes=None):
     path = Path(path)
     manifest = json.loads((path / "manifest.json").read_text())
-    if manifest.get("schema") != "tectonic-snapshot-bundle/v1" or manifest.get("contract_schema_version") != 6:
+    if manifest.get("schema") != "tectonic-snapshot-bundle/v1" or manifest.get("contract_schema_version") not in SUPPORTED_SCHEMAS:
         raise ValueError("Unsupported native snapshot schema")
     shape = (int(manifest["height"]), int(manifest["width"]))
     if min(shape) <= 0:
@@ -333,6 +337,8 @@ def diagnostics(manifest, fields):
     checks["negative_crust_thickness"] = int((fields["crust_thickness"] < 0).sum())
     if "rift_damage" in fields:
         checks["rift_damage_outside_0_1"] = int(((fields["rift_damage"] < 0) | (fields["rift_damage"] > 1)).sum())
+    if "plume_influence" in fields:
+        checks["plume_influence_outside_0_1"] = int(((fields["plume_influence"] < 0) | (fields["plume_influence"] > 1)).sum())
     checks["oceanic_continental_collision"] = int(((fields["crust_class"] == 1) & (fields["geologic_regime"] == 2)).sum())
     motion = manifest.get("motion_diagnostics", {})
     budget = manifest.get("column_budget", {})
@@ -348,7 +354,8 @@ def diagnostics(manifest, fields):
                      and abs(budget["mass_kg"] - initial - budget["generated_ocean_kg"]
                              + budget["subducted_ocean_kg"] + budget.get("subducted_sediment_kg", 0)) < initial * 1e-9
                      and abs(budget["eroded_kg"] - budget["deposited_kg"]) < initial * 1e-9)
-            for subset, total in (("generated_arc_kg", "generated_ocean_kg"), ("river_eroded_kg", "eroded_kg")):
+            for subset, total in (("generated_arc_kg", "generated_ocean_kg"), ("generated_plume_kg", "generated_ocean_kg"),
+                                  ("river_eroded_kg", "eroded_kg")):
                 if subset in budget:
                     valid = valid and np.isfinite(budget[subset]) and 0 <= budget[subset] <= budget[total] + initial*1e-12
             for transfer in ("redistributed_continent_kg", "redistributed_sediment_kg", "noise_redistributed_kg"):
@@ -437,7 +444,6 @@ def diagnostics(manifest, fields):
         "islands": island_sizes(fields["elevation"]),
         "coastal_terrain": coastal_terrain(manifest, fields),
         "topology_repairs": manifest.get("topology_diagnostics", {}),
-        "evolution_mode": "continuous" if manifest.get("run_scenario", {}).get("evolution_duration_myr", 0) > 0 else "cycles",
         "plate_cells": np.bincount(fields["plate_id"].ravel(), minlength=len(manifest["plates"])).tolist(),
         "boundary_cells": np.bincount(fields["boundary_type"].ravel(), minlength=5).tolist(),
     }

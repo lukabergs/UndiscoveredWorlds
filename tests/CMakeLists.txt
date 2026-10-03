@@ -4,7 +4,6 @@ add_subdirectory(simulations/geology/mineral_systems)
 function(uw_add_test name source module)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE ${module})
-    set_target_properties(${name} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 

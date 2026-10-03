@@ -54,12 +54,13 @@ uint32_t tectonics_get_tectonic_junction_count(void*);
 const tectonics::contract::TectonicJunction* tectonics_get_tectonic_junctions(void*);
 const uint8_t* tectonics_get_material_map(void*);
 float* tectonics_get_heightmap(void*);
+// Proximity (0..1) to an active mantle plume over the last update; nullptr when plumes are off.
+const float* tectonics_get_plume_influence_map(void* pointer);
 uint32_t* tectonics_get_platesmap(void*);
 const uint8_t* tectonics_get_convergence_map(void*);
 const uint8_t* tectonics_get_divergence_map(void*);
 const uint8_t* tectonics_get_shear_map(void*);
 const uint8_t* tectonics_get_geologic_regime_map(void*);
-uint32_t tectonics_get_cycle_count(void*);
 uint32_t tectonics_get_iteration_count(void*);
 uint32_t tectonics_get_time_origin_step(void*);
 double tectonics_get_time_myr(void*);
@@ -86,7 +87,10 @@ uint64_t tectonics_get_plate_uid(void*, uint32_t plate_index);
 // width x height; null before the first physical update.
 const tectonics::transport::Displacement* tectonics_get_material_displacement(void*);
 
-uint32_t lithosphere_getMapWidth(void* object);
-uint32_t lithosphere_getMapHeight(void* object);
+uint32_t tectonics_get_map_width(void*);
+uint32_t tectonics_get_map_height(void*);
+// Isostatic column state, width x height cells; null before columns exist.
+const tectonics::columns::Cell* tectonics_get_column_cells(void*);
+tectonics::contract::Snapshot tectonics_capture_snapshot(void*);
 
 #endif

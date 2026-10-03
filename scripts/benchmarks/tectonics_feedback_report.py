@@ -87,7 +87,7 @@ def feedback_snapshots(record):
         metrics = surface_metrics(native, parent_fields, z)
         metadata = dict(label=label,
                         time_myr=record['tectonic_endpoint_time_myr'] + index * record['surface_interval_myr'],
-                        update_count=None, cycle_count=None, height=z.shape[0], width=z.shape[1],
+                        update_count=None, height=z.shape[0], width=z.shape[1],
                         run_scenario={'surface_model': 'climate-feedback; frozen plates'},
                         phase=f'{index * record["surface_interval_myr"]} Myr surface erosion after run {record["parent"]}',
                         boundary_note=f'Frozen run {record["parent"]} boundary overlay; no plate motion in this phase.')

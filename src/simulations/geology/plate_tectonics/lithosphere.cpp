@@ -457,6 +457,9 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
         throw runtime_error("Submarine erosion ratio must be in 0..1");
     tectonics::margins::validate(params.margin_processes);
     tectonics::noise_pass::validate(params.experimental_noise);
+    tectonics::plumes::validate(params.plume_processes);
+    if (params.plume_processes.weakening>0 && !params.topology_processes.progressive_rifting)
+        throw runtime_error("Plume weakening acts through progressive rifting; enable it or set weakening to 0");
     if (!std::isfinite(params.mountain_force_range_km) || params.mountain_force_range_km<0)
         throw runtime_error("Inland mountain force requires isostatic columns and a nonnegative range");
     if (!std::isfinite(params.initial_margin_width_m) || params.initial_margin_width_m<0 || params.initial_margin_width_m>4000 ||
@@ -1023,6 +1026,7 @@ bool lithosphere::isOceanic(float value) const noexcept {
 
 void lithosphere::resetSimulationState() {
     amap.set_all(0);
+    plume_influence_map.clear();
     imap.set_all(0xFFFFFFFF);
     prev_imap.set_all(0xFFFFFFFF);
     prev_hmap = hmap;
@@ -2458,9 +2462,18 @@ void lithosphere::updateColumns() {
         for (size_t i=0;i<displacement.size();++i) {displacement[i].x+=rift[i].x;displacement[i].y+=rift[i].y;}
     }
     material_displacement = displacement;
+    tectonics::plumes::Source plume;
+    if (scenario.plume_processes.count>0)
+        plume=tectonics::plumes::source(_worldDimension.getWidth(),_worldDimension.getHeight(),
+            scenario.world_width_km*1000/_worldDimension.getWidth(),scenario.seed,getTimeMyr(),
+            getTimeMyr()+scenario.delta_time_myr,scenario.plume_processes);
     column_model.advance(displacement, scenario.delta_time_myr,
         scenario.erosion_strength, scenario.thermal_subsidence_strength, scenario.submarine_erosion_ratio,
-        &margin_forcing,scenario.margin_processes,scenario.experimental_noise,scenario.sediment_load_feedback);
+        &margin_forcing,scenario.margin_processes,scenario.experimental_noise,scenario.sediment_load_feedback,
+        plume.basalt_m.empty()?nullptr:&plume);
+    plume_influence_map.resize(plume.influence.size());
+    std::transform(plume.influence.begin(),plume.influence.end(),plume_influence_map.begin(),
+        [](double value){return static_cast<float>(value);});
     std::vector<tectonics::transport::Displacement> plate_displacement(num_plates);
     for (uint32_t p = 0; p < num_plates; ++p) {
         const auto v = plates[p]->linearVelocityVector();
@@ -2481,8 +2494,10 @@ void lithosphere::updateColumns() {
         const auto& c=column_model.cells()[i];
         const double thickness=c.continental_area>1e-6?c.continent/c.continental_area:35000;
         const double thermal_age=c.ocean>0?std::max(0.0,(c.oceanic_age_volume-c.thermal_rejuvenation_volume)/c.ocean):60;
-        strength[i]=std::clamp(continent[i]*std::pow(thickness/35000,2)+
-            (1-continent[i])*std::sqrt((thermal_age+5)/65),.15,4.0);
+        const double weakening=plume_influence_map.empty()?0:
+            scenario.plume_processes.weakening*plume_influence_map[i];
+        strength[i]=std::clamp((continent[i]*std::pow(thickness/35000,2)+
+            (1-continent[i])*std::sqrt((thermal_age+5)/65))*(1-weakening),.15,4.0);
     }
     for (uint32_t p = 0; p < num_plates; ++p)
         velocity[p] = {plate_displacement[p].x * velocity_scale, plate_displacement[p].y * velocity_scale};

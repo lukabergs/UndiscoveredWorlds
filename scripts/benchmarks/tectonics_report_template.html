@@ -267,7 +267,7 @@ function update(){
  const i=+$('left').value,j=+$('right').value,a=DATA.states[i],b=DATA.states[j],key=$('field').value,spec=DATA.fields[key];
  for(const [s,suffix] of [[a,'A'],[b,'B']]){
   $('heading'+suffix).textContent=suffix+' · Run '+s.run+' · '+s.label;
-  $('caption'+suffix).textContent=fmt(s.time)+' Myr · '+(s.phase??s.updates+' update calls · '+(s.metrics.evolution_mode==='continuous'?'continuous evolution':'cycle '+s.cycle))+' · '+spec.units+' · run time '+fmt(s.runtime_seconds,1)+' s';
+  $('caption'+suffix).textContent=fmt(s.time)+' Myr · '+(s.phase??s.updates+' update calls')+' · '+spec.units+' · run time '+fmt(s.runtime_seconds,1)+' s';
   const missing=!s.maps[key];$('map'+suffix).hidden=missing;
   if(missing)$('caption'+suffix).textContent+=' · Quantity not recorded in this run';
   else $('map'+suffix).src=s.maps[key];$('overlay'+suffix).src=s.overlay;$('overlay'+suffix).hidden=missing||!$('boundaries').checked;
@@ -275,7 +275,7 @@ function update(){
   $('coast'+suffix).hidden=missing||!$('coastlines').checked||!s.coastline;
  }
  document.querySelectorAll('.stack').forEach(el=>el.style.width=(+$('zoom').value*100)+'%');
- $('context').textContent=a.run===b.run?'Within-run evolution. These are observations of one simulation, not independent experiments.':a.time===b.time?'Between-run comparison at matching geological time. Update counts may differ because of timestep or administrative restarts.':'Different stopping times: this comparison includes both code/parameter changes and different durations.';
+ $('context').textContent=a.run===b.run?'Within-run evolution. These are observations of one simulation, not independent experiments.':a.time===b.time?'Between-run comparison at matching geological time. Update counts may differ because of timestep differences.':'Different stopping times: this comparison includes both code/parameter changes and different durations.';
  if(a.surface_model!==b.surface_model)$('context').textContent+=' Surface formulations differ; inspect initial checkpoints as well as the final states.';
  for(const note of new Set([a.boundary_note,b.boundary_note].filter(Boolean)))$('context').textContent+=' '+note;
  const legend=$('legend');legend.replaceChildren();

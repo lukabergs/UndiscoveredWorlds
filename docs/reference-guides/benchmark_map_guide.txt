@@ -1,0 +1,35 @@
+BENCHMARK MAP GUIDE
+
+Current palette contract: configs/climate-palettes.json (climate-colour-v2).
+Positive: blue/cyan/green/yellow/orange/red. Signed: white/magenta/blue/cyan/green/yellow/red; zero cyan.
+Black means masked/missing data. Sealed historical images retain their original colours.
+Standard references: refs/processed/climate/maps/standard-v2/index.html.
+
+All maps are global equirectangular grids with north at the top and periodic longitude.
+Season folders 1/2/3/4 mean Jan/Apr/Jul/Oct. New benchmarks write these paths directly. See runs/maps/climate/README.md for commands and refs/processed/climate/maps/index.html for all reference palettes.
+
+runs/maps/climate/koppen/{ID}.png: categorical land climate class; colors follow the workbook's Koeppen-Geiger legend; water is black.
+runs/maps/climate/air_temp/annual/s/{ID}.png: four-season mean land surface-air temperature; shared signed palette -54 to +40 C; water black.
+runs/maps/climate/rain/annual/s/{ID}.png: annual precipitation; shared positive palette 0-6000 mm/year.
+runs/fields/climate/rain/annual/s/{ID}.tif: the same annual precipitation as unclamped float32 mm/year in WGS84 EPSG:4326.
+runs/maps/climate/wind/lic/{season}/s/{ID}.png: surface-wind LIC. Filaments show flow axes; yellow arrows show direction.
+runs/maps/climate/wind/particles/{season}/s/{ID}.png: deterministic surface particle paths. Trail density is not wind speed.
+Upper-wind variants use the u layer folder. LIC/particle backgrounds use the shared positive palette: 0-25 m/s surface, 0-40 m/s upper.
+runs/maps/climate/wind/error/{season}/s/{ID}.png: |simulation minus ERA5|; shared positive palette 0-25 m/s; arrows show error direction.
+runs/maps/climate/wind/speed/{season}/s/{ID}.png: scalar wind speed with the same 0-to-25+ m/s palette.
+runs/maps/climate/wind/divergence/{season}/s/{ID}.png: divergence per day; shared signed palette +/-1 day^-1.
+runs/maps/climate/moisture/convergence/{season}/column/{ID}.png: moisture-flux convergence; shared signed palette +/-20 mm/day.
+Moisture convergence uses time-integrated donor-plus-corrective face fluxes from BOTH layers, not column water times surface wind.
+runs/maps/climate/moisture/flux/{season}/{b|f|column}/{ID}.png: layer b, f, or column means lower, upper, or summed moisture transport; arrows show direction; shared positive palette 0-800 kg m^-1 s^-1.
+runs/maps/climate/wind/ascent/{season}/u/{ID}.png: mean transport-stage ascent; shared signed palette +/-100 hPa/day, upward positive.
+runs/maps/climate/energy/heating/{season}/column/{ID}.png: net atmospheric radiative+sensible+phase-change heating; shared signed palette +/-300 W/m2.
+runs/maps/climate/wind/consistency/{season}/{s|u}/{ID}.png: climate-sampled wind; hue cyan=variable to red=consistent (0..1); brightness increases with mean speed (0..25+ m/s); arrows show mean direction.
+runs/maps/climate/ocean/current/{season}/s/{ID}.png: current direction arrows; shared positive palette 0-1 m/s; land black.
+runs/maps/climate/sea_temp/{season}/s/{ID}.png: liquid mixed-layer temperature (freezing floor -1.8 C); shared signed palette +/-35 C; land black. Ice-skin temperature and thickness are separate ocean_fields.csv columns.
+Seasonal process/statistics CSVs retain unclamped values, actual durations, per-layer budgets and correlation-adjusted sample-count estimates.
+LIC/trails show representative-month circulation. Process/consistency maps average the quarter starting at the named month: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec.
+ERA5 LIC/particle maps use the same renderer and seeds and are cached once per dimensions and renderer version.
+
+LIC and particle maps are generated at up to 1024 columns and 524288 cells. Higher-resolution runs record them as skipped.
+
+Resolution and scale: --resolution selects engine grid width. The simulator, imports, exports, and processed references use cell-centred width x width/2 grids. Reference preparation selects width independently and derives height=width/2. Align widths explicitly. The colour limits above remain fixed export defaults; numerical fields are unclamped. Editable application gradients are separate from benchmark export palettes.

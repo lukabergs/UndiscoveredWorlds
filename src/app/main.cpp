@@ -4,9 +4,6 @@
 #include "ImGuiFileDialog.h"
 #include "create_world_screen.hpp"
 
-#pragma comment(lib, "urlmon.lib")
-
-#include <urlmon.h>
 #include <cstdio>
 
 #include <windows.h>
@@ -48,14 +45,14 @@
 #include "app_windows.hpp"
 #include "appearance_settings.hpp"
 #include "functions.hpp"
+#include "map_views.hpp"
 #include "generation_workbench.hpp"
 #include "map_appearance.hpp"
 #include "map_imports.hpp"
 #include "ui_charts.hpp"
 #include "ui_panels.hpp"
 #include "world_property_controls.hpp"
-
-#define getURL URLOpenBlockingStreamA
+#include "command_line_generation.hpp"
 
 // nodiscard attribute
 #pragma warning (disable: 4834)
@@ -67,142 +64,11 @@
 
 using namespace std;
 
-// Random number generator. From https://stackoverflow.com/questions/26237419/faster-than-rand
-// It uses a global variable. But this is the only one in the program, honest!
-
-static long g_seed = 1;
-
 namespace
 {
 constexpr const char* kRasterImportFilter = ".png,.tif,.tiff";
 constexpr const char* kGradientStripFilter = ".png";
 constexpr const char* kVolcanoImportFilter = ".png";
-constexpr int kEarthBenchmarkWidth = 512;
-
-struct CommandLineGenerationOptions
-{
-    bool run = false;
-    bool showHelp = false;
-    bool earthClimateBenchmark = false;
-    bool printClimateRelativeError = false;
-    bool rivers = true;
-    bool lakes = true;
-    bool deltas = true;
-    bool socialEnabled = false;
-    SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
-    bool usePrehistory = true;
-    int historyYears = 1200;
-    bool logToProfilingWorkbook = true;
-    bool climateOnly = false;
-    bool hasSeed = false;
-    bool hasSavePath = false;
-    bool hasReferencePath = false;
-    bool hasImportLandPath = false;
-    bool hasImportSeaPath = false;
-    bool hasWorldWidth = false;
-    bool hasWorldHeight = false;
-    bool hasResolution = false;
-    bool benchmarkMapsSpecified = false;
-    long seed = 0;
-    double plateTectonicsDurationMyr = 0;
-    int plateTectonicsPlateCount = 0;
-    int worldWidth = 0;
-    int worldHeight = 0;
-    int resolution = 0;
-    int climateResolution = 64;
-    int hydrologyResolution = 0; // Zero keeps the existing 2x climate default.
-    int climateCouplingIterations = 0;
-    int oceanHeatStepHours = 24;
-    bool reuseOceanCirculation = true;
-    bool krylovOceanCirculation = true;
-    bool gatherOceanHeatFluxes = true;
-    int oceanHeatWorkers = 0;
-    climateocean::CoastalScheme oceanCoastalScheme = climateocean::CoastalScheme::FaceForcing;
-    std::string oceanCaptureDirectory;
-    climateatmosphere::StationarySolver atmosphereSolver = climateatmosphere::StationarySolver::Zonal;
-    std::string atmosphereCaptureDirectory;
-    bool calibrateClimateTemperature = true;
-    bool transientClimateWeather = false;
-    bool mixedLayerTropics = false;
-    climatecontext::TransportMethod climateTransport = climatecontext::TransportMethod::Ffsl;
-    string savePath;
-    string referencePath;
-    string importLandPath;
-    string importSeaPath;
-    string benchmarkInformation;
-    climatebenchmarkmapselection benchmarkMaps =
-        climatebenchmarkmapselection::defaultselection();
-};
-
-template<typename T, typename = void>
-struct hastectoniccyclecount : std::false_type {};
-
-template<typename T>
-struct hastectoniccyclecount<T, std::void_t<decltype(std::declval<const T&>().tectoniccyclecount())>> : std::true_type {};
-
-template<typename T, typename = void>
-struct hastectonicplatecount : std::false_type {};
-
-template<typename T>
-struct hastectonicplatecount<T, std::void_t<decltype(std::declval<const T&>().tectonicplatecount())>> : std::true_type {};
-
-template<typename T, typename = void>
-struct hastectonicsealevelm : std::false_type {};
-
-template<typename T>
-struct hastectonicsealevelm<T, std::void_t<decltype(std::declval<const T&>().tectonicsealevelm())>> : std::true_type {};
-
-template<typename T, typename = void>
-struct hastectonicboundarysegmentcount : std::false_type {};
-
-template<typename T>
-struct hastectonicboundarysegmentcount<T, std::void_t<decltype(std::declval<const T&>().tectonicboundarysegmentcount())>> : std::true_type {};
-
-template<typename T, typename = void>
-struct hastectonicdeformingregioncount : std::false_type {};
-
-template<typename T>
-struct hastectonicdeformingregioncount<T, std::void_t<decltype(std::declval<const T&>().tectonicdeformingregioncount())>> : std::true_type {};
-
-int gettectoniccyclecount(const planet& world)
-{
-    if constexpr (hastectoniccyclecount<planet>::value)
-        return (std::max)(0, static_cast<int>(world.tectoniccyclecount()));
-
-    return -1;
-}
-
-int gettectonicplatecount(const planet& world)
-{
-    if constexpr (hastectonicplatecount<planet>::value)
-        return (std::max)(0, static_cast<int>(world.tectonicplatecount()));
-
-    return -1;
-}
-
-int gettectonicsealevelm(const planet& world)
-{
-    if constexpr (hastectonicsealevelm<planet>::value)
-        return (std::max)(0, static_cast<int>(world.tectonicsealevelm()));
-
-    return -1;
-}
-
-int gettectonicboundarysegmentcount(const planet& world)
-{
-    if constexpr (hastectonicboundarysegmentcount<planet>::value)
-        return (std::max)(0, static_cast<int>(world.tectonicboundarysegmentcount()));
-
-    return -1;
-}
-
-int gettectonicdeformingregioncount(const planet& world)
-{
-    if constexpr (hastectonicdeformingregioncount<planet>::value)
-        return (std::max)(0, static_cast<int>(world.tectonicdeformingregioncount()));
-
-    return -1;
-}
 
 const char* crustclasslabel(CrustClass crustclass)
 {
@@ -358,694 +224,6 @@ bool gettectonicinspectionpoint(const planet& world, const region& region, scree
 
     return false;
 }
-
-string narrowargument(const wchar_t* value)
-{
-    return filesystem::path(value).string();
-}
-
-long defaultcommandlineseed()
-{
-    const long long ticks = chrono::high_resolution_clock::now().time_since_epoch().count();
-    const long long normalized = llabs(ticks % 90000000ll) + 10000000ll;
-    return static_cast<long>(0 - normalized);
-}
-
-void printcommandlineusage()
-{
-    cout << "Undiscovered Worlds command line usage:\n";
-    cout << "  --generate-world [options]\n";
-    cout << "  --climate-only        Recompute climate on imported terrain without modifying terrain.\n";
-    cout << "Options:\n";
-    cout << "  --seed <number>         Use a fixed world seed.\n";
-    cout << "  --save <path>           Save the generated world as a .uww file.\n";
-    cout << "  --tectonic-duration-myr <Myr>  Set continuous tectonic duration in Myr (0 uses recipe).\n";
-    cout << "  --plates <count>        Set tectonic plate count.\n";
-    cout << "  --world-width <pixels>  Set generated world width in pixels.\n";
-    cout << "  --world-height <pixels> Set generated world height in pixels.\n";
-    cout << "  --climate-resolution <width>  Atmosphere/ocean width; moisture uses twice, weather half (default 64).\n";
-    cout << "  --climate-coupling-iterations <1..100>  Coupled annual update limit (default 24).\n";
-    cout << "  --climate-mode <baseline|transient>  Seasonal baseline or sampled weather (default baseline).\n";
-    cout << "  --climate-tropical-closure <mixed-layer|legacy>  Tropical circulation (default legacy; mixed-layer experimental).\n";
-    cout << "  --climate-ocean-step-hours <hours>  Maximum ocean heat step; positive divisor of 24 (default 24).\n";
-    cout << "  --climate-hydrology-resolution <width>  Native moisture grid width (default 2x climate resolution).\n";
-    cout << "  --wind-map-resolution <width>  Even wind image width 64..2048 (default 2048); simulation grids unchanged.\n";
-    cout << "  --climate-ocean-circulation-cache <reuse|recompute>  Seasonal spin-up circulation (default reuse).\n";
-    cout << "  --climate-ocean-circulation-solver <krylov|relaxation>  Ocean momentum solver (default krylov).\n";
-    cout << "  --climate-ocean-heat-kernel <gather|legacy>  Heat transport execution (default gather).\n";
-    cout << "  --climate-ocean-heat-workers <0..32>  Maximum heat workers; 0 automatic, 1 serial.\n";
-    cout << "  --climate-ocean-coastal-scheme <legacy|face-drag|face-forcing>  Depth/forcing discretization (default face-forcing).\n";
-    cout << "  --climate-ocean-capture <directory>  Optional exact seasonal ocean forcing fixtures.\n";
-    cout << "  --climate-atmosphere-solver <zonal|jacobi|legacy>  Pressure preconditioner (default zonal).\n";
-    cout << "  --climate-atmosphere-capture <directory>  Optional exact stationary-solver input fixtures.\n";
-    cout << "  --climate-transport <ffsl|mpdata>  Conservative moisture transport (default ffsl).\n";
-    cout << "  --climate-temperature-mode <calibrated|radiative>  Mean-temperature calibration (default calibrated).\n";
-    cout << "  --resolution <width>    Set an even global width and derive height as width/2.\n";
-    cout << "  --reference-precip <csv> Compare against a precipitation reference grid.\n";
-    cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
-    cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
-    cout << "  --earth-climate-benchmark Run the imported Earth benchmark workflow.\n";
-    cout << "  --benchmark-info <text> Store a change summary in the benchmark run log.\n";
-    cout << "  --map <id[,id...]>      Replace default benchmark maps; repeat to add maps.\n";
-    cout << "                           Default: koppen,temp,precip,precip-tif; Jan/Jul surface/upper speed, LIC, particles; SST, ocean currents.\n";
-    cout << "                           Seasons: jan, apr, jul, oct. Use --map all or --map none.\n";
-    cout << "  --print-climate-relative-error Print per-climate relative error against the Earth benchmark counts.\n";
-    cout << "  --no-rivers             Disable river generation.\n";
-    cout << "  --no-lakes              Disable lake generation.\n";
-    cout << "  --no-deltas             Disable delta generation.\n";
-    cout << "  --social                Enable social generation.\n";
-    cout << "  --social-mode <mode>    static or historical.\n";
-    cout << "  --no-prehistory         Disable prehistory pass in historical mode.\n";
-    cout << "  --history-years <years> Historical simulation span.\n";
-    cout << "  --no-profile-log        Skip profiling workbook logging.\n";
-    cout << "  --help                  Show this message.\n";
-}
-
-bool parsecommandlineoptions(CommandLineGenerationOptions& options)
-{
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-
-    if (argv == nullptr)
-        return true;
-
-    const auto cleanup = [&]()
-    {
-        LocalFree(argv);
-    };
-
-    for (int index = 1; index < argc; index++)
-    {
-        const string argument = narrowargument(argv[index]);
-
-        if (argument == "--help" || argument == "-h" || argument == "/?")
-        {
-            options.showHelp = true;
-            continue;
-        }
-
-        if (argument == "--generate-world")
-        {
-            options.run = true;
-            continue;
-        }
-
-        if (argument == "--earth-climate-benchmark")
-        {
-            options.run = true;
-            options.earthClimateBenchmark = true;
-            options.logToProfilingWorkbook = false;
-            continue;
-        }
-
-        if (argument == "--print-climate-relative-error")
-        {
-            options.printClimateRelativeError = true;
-            continue;
-        }
-
-        if (argument == "--fastlem" || argument == "--tectonics")
-        {
-            continue;
-        }
-
-        if (argument == "--climate-only")
-        {
-            options.climateOnly = true;
-            continue;
-        }
-        if (argument == "--no-rivers")
-        {
-            options.rivers = false;
-            continue;
-        }
-
-        if (argument == "--no-lakes")
-        {
-            options.lakes = false;
-            continue;
-        }
-
-        if (argument == "--no-deltas")
-        {
-            options.deltas = false;
-            continue;
-        }
-
-        if (argument == "--social")
-        {
-            options.socialEnabled = true;
-            continue;
-        }
-
-        if (argument == "--no-prehistory")
-        {
-            options.usePrehistory = false;
-            continue;
-        }
-
-        if (argument == "--no-profile-log")
-        {
-            options.logToProfilingWorkbook = false;
-            continue;
-        }
-
-        if (argument == "--climate-mode" || argument == "--climate-transport" || argument == "--climate-tropical-closure" ||
-            argument == "--climate-ocean-step-hours" || argument == "--climate-ocean-circulation-cache" ||
-            argument == "--climate-ocean-circulation-solver" ||
-            argument == "--climate-ocean-heat-kernel" || argument == "--climate-ocean-heat-workers" ||
-            argument == "--climate-ocean-coastal-scheme" || argument == "--climate-ocean-capture" ||
-            argument == "--climate-atmosphere-solver" || argument == "--climate-atmosphere-capture" ||
-            argument == "--climate-hydrology-resolution" || argument == "--wind-map-resolution" ||
-            argument == "--seed" || argument == "--save" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--climate-resolution" || argument == "--climate-coupling-iterations" || argument == "--climate-temperature-mode" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
-        {
-            if (index + 1 >= argc)
-            {
-                cerr << "Missing value for " << argument << '\n';
-                cleanup();
-                return false;
-            }
-
-            const string value = narrowargument(argv[++index]);
-
-            try
-            {
-                if (argument == "--seed")
-                {
-                    options.seed = stol(value);
-                    options.hasSeed = true;
-                }
-                else if (argument == "--tectonic-duration-myr")
-                {
-                    options.plateTectonicsDurationMyr = max(0.0, stod(value));
-                }
-                else if (argument == "--plates")
-                {
-                    options.plateTectonicsPlateCount = max(1, stoi(value));
-                }
-                else if (argument == "--world-width")
-                {
-                    options.worldWidth = stoi(value);
-                    options.hasWorldWidth = true;
-                }
-                else if (argument == "--world-height")
-                {
-                    options.worldHeight = stoi(value);
-                    options.hasWorldHeight = true;
-                }
-                else if (argument == "--climate-resolution")
-                {
-                    options.climateResolution = stoi(value);
-                    if (options.climateResolution < 8 || options.climateResolution % 4 != 0 ||
-                        options.climateResolution > ARRAYWIDTH / 2)
-                        throw invalid_argument("climate-resolution must be a multiple of 4 between 8 and half ARRAYWIDTH");
-                }
-                else if (argument == "--climate-hydrology-resolution")
-                {
-                    options.hydrologyResolution = stoi(value);
-                    if (options.hydrologyResolution < 8 || options.hydrologyResolution % 4 != 0 || options.hydrologyResolution > ARRAYWIDTH)
-                        throw invalid_argument("climate-hydrology-resolution must be a multiple of 4 between 8 and ARRAYWIDTH");
-                }
-                else if (argument == "--climate-coupling-iterations")
-                {
-                    options.climateCouplingIterations = stoi(value);
-                    if (options.climateCouplingIterations < 1 || options.climateCouplingIterations > 100)
-                        throw invalid_argument("climate-coupling-iterations must be between 1 and 100");
-                }
-                else if (argument == "--climate-ocean-step-hours")
-                {
-                    options.oceanHeatStepHours = stoi(value);
-                    if (options.oceanHeatStepHours < 1 || options.oceanHeatStepHours > 24 || 24 % options.oceanHeatStepHours != 0)
-                        throw invalid_argument("climate-ocean-step-hours must be a positive divisor of 24");
-                }
-                else if (argument == "--climate-ocean-heat-kernel")
-                {
-                    if (value != "gather" && value != "legacy") throw invalid_argument("climate-ocean-heat-kernel");
-                    options.gatherOceanHeatFluxes = value == "gather";
-                }
-                else if (argument == "--climate-ocean-heat-workers")
-                {
-                    options.oceanHeatWorkers = stoi(value);
-                    if (options.oceanHeatWorkers < 0 || options.oceanHeatWorkers > 32)
-                        throw invalid_argument("climate-ocean-heat-workers must be between 0 and 32");
-                }
-                else if (argument == "--climate-ocean-coastal-scheme")
-                {
-                    using Scheme = climateocean::CoastalScheme;
-                    if (value != "legacy" && value != "face-drag" && value != "face-forcing")
-                        throw invalid_argument("climate-ocean-coastal-scheme");
-                    options.oceanCoastalScheme = value == "legacy" ? Scheme::Legacy :
-                        value == "face-drag" ? Scheme::FaceDrag : Scheme::FaceForcing;
-                }
-                else if (argument == "--climate-ocean-capture") options.oceanCaptureDirectory = value;
-                else if (argument == "--climate-atmosphere-solver")
-                {
-                    using Solver = climateatmosphere::StationarySolver;
-                    if (value != "zonal" && value != "jacobi" && value != "legacy") throw invalid_argument("climate-atmosphere-solver");
-                    options.atmosphereSolver = value == "zonal" ? Solver::Zonal : value == "jacobi" ? Solver::ProjectedJacobi : Solver::LegacyJacobi;
-                }
-                else if (argument == "--climate-atmosphere-capture") options.atmosphereCaptureDirectory = value;
-                else if (argument == "--climate-ocean-circulation-solver")
-                {
-                    if (value != "krylov" && value != "relaxation") throw invalid_argument("climate-ocean-circulation-solver");
-                    options.krylovOceanCirculation = value == "krylov";
-                }
-                else if (argument == "--climate-ocean-circulation-cache")
-                {
-                    if (value != "reuse" && value != "recompute") throw invalid_argument("climate-ocean-circulation-cache");
-                    options.reuseOceanCirculation = value == "reuse";
-                }
-                else if (argument == "--climate-mode")
-                {
-                    if (value != "baseline" && value != "transient") throw invalid_argument("climate-mode");
-                    options.transientClimateWeather = value == "transient";
-                }
-                else if (argument == "--climate-tropical-closure")
-                {
-                    if (value != "mixed-layer" && value != "legacy") throw invalid_argument("climate-tropical-closure");
-                    options.mixedLayerTropics = value == "mixed-layer";
-                }
-                else if (argument == "--climate-transport")
-                {
-                    if (value != "ffsl" && value != "mpdata") throw invalid_argument("climate-transport");
-                    options.climateTransport = value == "ffsl" ? climatecontext::TransportMethod::Ffsl : climatecontext::TransportMethod::Mpdata;
-                }
-                else if (argument == "--climate-temperature-mode")
-                {
-                    if (value != "calibrated" && value != "radiative")
-                        throw invalid_argument("climate-temperature-mode");
-                    options.calibrateClimateTemperature = value == "calibrated";
-                }
-                else if (argument == "--resolution")
-                {
-                    options.resolution = stoi(value);
-                    if (options.resolution < 2 || options.resolution % 2 != 0)
-                        throw invalid_argument("resolution");
-                    options.hasResolution = true;
-                }
-                else if (argument == "--wind-map-resolution")
-                {
-                    options.benchmarkMaps.setwindmapcolumns(stoi(value));
-                }
-                else if (argument == "--map" || argument == "--maps")
-                {
-                    if (!options.benchmarkMapsSpecified)
-                    {
-                        options.benchmarkMaps.clear();
-                        options.benchmarkMapsSpecified = true;
-                    }
-                    string failure;
-                    if (!addclimatebenchmarkmapargument(
-                            options.benchmarkMaps, value, &failure))
-                    {
-                        cerr << failure << '\n';
-                        cleanup();
-                        return false;
-                    }
-                }
-                else if (argument == "--reference-precip")
-                {
-                    options.referencePath = value;
-                    options.hasReferencePath = true;
-                }
-                else if (argument == "--import-land")
-                {
-                    options.importLandPath = value;
-                    options.hasImportLandPath = true;
-                }
-                else if (argument == "--import-sea")
-                {
-                    options.importSeaPath = value;
-                    options.hasImportSeaPath = true;
-                }
-                else if (argument == "--benchmark-info")
-                {
-                    options.benchmarkInformation = value;
-                }
-                else if (argument == "--social-mode")
-                {
-                    if (value == "static")
-                        options.socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
-                    else if (value == "historical")
-                        options.socialMode = SocialGenerationOptions::Mode::historical;
-                    else
-                    {
-                        cerr << "Invalid value for --social-mode: " << value << '\n';
-                        cleanup();
-                        return false;
-                    }
-                }
-                else if (argument == "--history-years")
-                {
-                    options.historyYears = std::max(10, stoi(value));
-                }
-                else
-                {
-                    options.savePath = value;
-                    options.hasSavePath = true;
-                }
-            }
-            catch (const exception&)
-            {
-                cerr << "Invalid value for " << argument << ": " << value << '\n';
-                cleanup();
-                return false;
-            }
-
-            continue;
-        }
-
-        cerr << "Unknown argument: " << argument << '\n';
-        cleanup();
-        return false;
-    }
-
-    cleanup();
-    return true;
-}
-
-filesystem::path commandlinevalidationdirectory(long seed)
-{
-    filesystem::path outputroot = getappenvironment().climateValidationDirectory;
-
-    if (outputroot.empty())
-        outputroot = filesystem::current_path();
-
-    return outputroot / ("seed_" + to_string(seed));
-}
-
-filesystem::path resolutionvariant(
-    const filesystem::path& source,
-    int columns,
-    int rows)
-{
-    const filesystem::path candidate = source.parent_path() /
-        (source.stem().string() + "_" + to_string(columns) + "x" +
-            to_string(rows) + source.extension().string());
-    return filesystem::exists(candidate) ? candidate : source;
-}
-
-SocialGenerationOptions makesocialoptions(bool enabled, SocialGenerationOptions::Mode mode, bool useprehistory, int historyyears)
-{
-    SocialGenerationOptions options;
-    options.enabled = enabled;
-    options.mode = mode;
-    options.usePrehistory = mode == SocialGenerationOptions::Mode::historical ? useprehistory : false;
-    options.historyYears = std::max(10, historyyears);
-    return options;
-}
-
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate = nullptr, bool climateOnly = false)
-{
-    world.setmaxelevation(200000);
-
-    GenerationScratch scratch;
-    initializegenerationscratch(scratch);
-    makecontinentalshelves(world, scratch.shelves, 4);
-
-    GenerationWorkbenchUiState ui;
-    ui.tectonicDurationMyr = tectonicdurationmyr();
-    ui.seaLevel = world.sealevel();
-
-    GenerationExecutionContext context;
-    context.dorivers = dorivers;
-    context.climateOnly = climateOnly;
-    context.dolakes = dolakes;
-    context.dodeltas = dodeltas;
-    context.appendclimateworkbook = appendclimateworkbook;
-    context.socialoptions = socialoptions;
-    context.landshape = landshape;
-    context.smalllake = smalllake;
-    context.largelake = largelake;
-    context.okmountains = &okmountains;
-    context.importedClimate = importedclimate;
-
-    vector<int> inputterrain;
-    if (climateOnly) for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
-        inputterrain.push_back(world.nom(x,y));
-
-    string errormessage;
-    const bool generated=runremaininggenerationstages(world, scratch, ui, context,
-        getgenerationstageindex(GenerationStageId::mountain_bases), &errormessage);
-    if (climateOnly && !generated) throw runtime_error("Climate-only generation failed: "+errormessage);
-
-    if (climateOnly) {
-        size_t cell=0;
-        for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
-            if (world.nom(x,y)!=inputterrain[cell++]) throw runtime_error("Climate-only stage modified terrain");
-        updatereport("Climate-only input terrain preserved exactly after import.");
-    }
-
-    if (errormessage.empty() == false)
-        updatereport(errormessage);
-}
-
-int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
-{
-    auto world = std::make_unique<planet>();
-    initialiseworld(*world);
-    initialisemapcolours(*world);
-    world->clear();
-
-    const bool importedworld = options.earthClimateBenchmark || options.hasImportLandPath || options.hasImportSeaPath;
-    if (options.climateOnly && !importedworld) {
-        cerr << "--climate-only requires imported terrain.\n";
-        return 1;
-    }
-    const long seed = options.hasSeed ? options.seed : (importedworld ? 1 : defaultcommandlineseed());
-    world->setseed(seed);
-
-    fast_srand(world->seed());
-
-    if (options.hasReferencePath)
-        setreferenceprecipitationgridpath(options.referencePath);
-
-    if (options.earthClimateBenchmark == false && (options.hasImportLandPath != options.hasImportSeaPath))
-    {
-        cerr << "Imported runs require both --import-land and --import-sea unless --earth-climate-benchmark is used.\n";
-        return 1;
-    }
-
-    if (importedworld && (options.hasWorldWidth != options.hasWorldHeight))
-    {
-        cerr << "Imported runs require both --world-width and --world-height when either is specified.\n";
-        return 1;
-    }
-
-    if (options.hasResolution && (options.hasWorldWidth || options.hasWorldHeight))
-    {
-        cerr << "Use either --resolution or --world-width/--world-height, not both.\n";
-        return 1;
-    }
-
-    if (options.hasWorldWidth &&
-        (options.worldWidth < 2 || options.worldWidth % 2 != 0 ||
-         options.worldHeight != options.worldWidth / 2))
-    {
-        cerr << "World dimensions must be an even W by W/2.\n";
-        return 1;
-    }
-
-    if (options.benchmarkMapsSpecified && !options.earthClimateBenchmark && !options.climateOnly)
-    {
-        cerr << "--map requires --earth-climate-benchmark or --climate-only.\n";
-        return 1;
-    }
-
-    boolshapetemplate landshape[12];
-    createlandshapetemplates(landshape);
-    boolshapetemplate chainland[2];
-    createchainlandtemplates(chainland);
-    boolshapetemplate smalllake[12];
-    createsmalllaketemplates(smalllake);
-    boolshapetemplate largelake[10];
-    createlargelaketemplates(largelake);
-
-    vector<int> squareroot((MAXCRATERRADIUS * MAXCRATERRADIUS + MAXCRATERRADIUS + 1) * 24);
-
-    for (int n = 1; n < squareroot.size(); n++)
-        squareroot[n] = (int)sqrt(n);
-
-    WorldGenerationDebugOptions debugoptions;
-    debugoptions.visualizePlateTectonicsRealtime = false;
-    debugoptions.logToProfilingWorkbook = options.logToProfilingWorkbook;
-    debugoptions.plateTectonicsDurationMyr = options.plateTectonicsDurationMyr;
-    debugoptions.plateTectonicsPlateCount = options.plateTectonicsPlateCount;
-
-    if (options.earthClimateBenchmark)
-    {
-        world->setwidth(std::clamp(
-            options.hasResolution ? options.resolution :
-                (options.hasWorldWidth ? options.worldWidth : kEarthBenchmarkWidth),
-            2,
-            ARRAYWIDTH) - 1);
-    }
-    else if (importedworld)
-    {
-        if (options.hasResolution)
-        {
-            world->setwidth(std::clamp(options.resolution, 2, ARRAYWIDTH) - 1);
-        }
-        else if (options.hasWorldWidth && options.hasWorldHeight)
-        {
-            world->setwidth(std::clamp(options.worldWidth, 2, ARRAYWIDTH) - 1);
-        }
-    }
-    else if (importedworld == false)
-    {
-        changeworldproperties(*world);
-        world->setwidth(std::clamp(options.hasResolution ? options.resolution :
-            (options.hasWorldWidth ? options.worldWidth : world->width() + 1), 2, ARRAYWIDTH) - 1);
-    }
-
-    world->climatesimulation().resolution = {options.climateResolution, options.climateResolution,
-        options.hydrologyResolution ? options.hydrologyResolution : 2 * options.climateResolution, options.climateResolution / 2};
-    world->climatesimulation().calibrateMeanTemperature = options.calibrateClimateTemperature;
-    world->climatesimulation().transientWeather = options.transientClimateWeather;
-    world->climatesimulation().mixedLayerTropics = options.mixedLayerTropics;
-    world->climatesimulation().transportMethod = options.climateTransport;
-    world->climatesimulation().oceanHeatStepHours = options.oceanHeatStepHours;
-    world->climatesimulation().reuseOceanCirculation = options.reuseOceanCirculation;
-    world->climatesimulation().krylovOceanCirculation = options.krylovOceanCirculation;
-    world->climatesimulation().gatherOceanHeatFluxes = options.gatherOceanHeatFluxes;
-    world->climatesimulation().oceanHeatWorkers = options.oceanHeatWorkers;
-    world->climatesimulation().oceanCoastalScheme = options.oceanCoastalScheme;
-    world->climatesimulation().oceanCaptureDirectory = options.oceanCaptureDirectory;
-    world->climatesimulation().atmosphereSolver = options.atmosphereSolver;
-    world->climatesimulation().atmosphereCaptureDirectory = options.atmosphereCaptureDirectory;
-    world->climatesimulation().couplingIterationLimit = options.climateCouplingIterations;
-    const SocialGenerationOptions socialoptions = makesocialoptions(options.socialEnabled, options.socialMode, options.usePrehistory, options.historyYears);
-
-    updatereport((importedworld ? "Generating imported world from seed: " : "Generating world from seed: ") + to_string(world->seed()) + ":");
-    updatereport("");
-
-    beginworldgendebugrun(world->seed(), &debugoptions);
-    begintimedreporting();
-
-    if (importedworld)
-    {
-        const AppEnvironmentConfig& appenv = getappenvironment();
-        const filesystem::path landpath = options.hasImportLandPath
-            ? filesystem::path(options.importLandPath)
-            : resolutionvariant(
-                appenv.earthBenchmarkLandPath, world->width() + 1, world->height() + 1);
-        const filesystem::path seapath = options.hasImportSeaPath
-            ? filesystem::path(options.importSeaPath)
-            : resolutionvariant(
-                appenv.earthBenchmarkSeaPath, world->width() + 1, world->height() + 1);
-        vector<vector<bool>> okmountains(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, false));
-
-        if (importlandheightmap(*world, landpath.string()) == false)
-        {
-            endtimedreporting();
-            endworldgendebugrun();
-            cerr << "Failed to import land map: " << landpath.string() << '\n';
-            return 1;
-        }
-
-        if (importseadepthmap(*world, seapath.string()) == false)
-        {
-            endtimedreporting();
-            endworldgendebugrun();
-            cerr << "Failed to import sea map: " << seapath.string() << '\n';
-            return 1;
-        }
-
-        completeimportedworldgeneration(*world, options.rivers, options.lakes, options.deltas,
-            false, socialoptions, smalllake, largelake, landshape, okmountains, nullptr, options.climateOnly);
-    }
-    else
-    {
-        GenerationScratch scratch;
-        initializegenerationscratch(scratch);
-
-        GenerationWorkbenchUiState ui;
-        ui.tectonicDurationMyr = options.plateTectonicsDurationMyr;
-        ui.tectonicPlateCount = options.plateTectonicsPlateCount;
-        ui.seaLevel = world->sealevel();
-
-        GenerationExecutionContext context;
-        context.dorivers = options.rivers;
-        context.dolakes = options.lakes;
-        context.dodeltas = options.deltas;
-        context.appendclimateworkbook = false;
-        context.socialoptions = socialoptions;
-        context.landshape = landshape;
-        context.chainland = chainland;
-        context.smalllake = smalllake;
-        context.largelake = largelake;
-
-        string errormessage;
-        runremaininggenerationstages(*world, scratch, ui, context, getgenerationstageindex(GenerationStageId::plate_tectonics), &errormessage);
-
-        if (errormessage.empty() == false)
-            updatereport(errormessage);
-    }
-
-    endtimedreporting();
-    endworldgendebugrun();
-
-    if (options.earthClimateBenchmark || options.climateOnly)
-    {
-        int benchmarkrunid = options.climateOnly ? 1 : 0;
-
-        if ((options.climateOnly ? exportproceduralclimateartifacts(*world, options.benchmarkMaps) : recordclimatebenchmarkrun(
-                *world,
-                options.benchmarkInformation,
-                options.benchmarkMaps,
-                &benchmarkrunid)) == false)
-        {
-            cerr << "Failed to record climate benchmark artifacts.\n";
-            return 1;
-        }
-
-        const AppEnvironmentConfig& appenv = getappenvironment();
-        updatereport("Climate benchmark run ID: " + to_string(benchmarkrunid));
-        if (!options.climateOnly) updatereport("Climate benchmark log: " + appenv.climateBenchmarkRunLogPath.string());
-        for (const climatebenchmarkmaprequest& request : options.benchmarkMaps.requests())
-        {
-            if (!climatebenchmarkmapisreference(request.kind))
-            {
-                updatereport("Climate benchmark map: " +
-                    ((request.kind == climatebenchmarkmapkind::precipitationtiff
-                        ? appenv.climateBenchmarkImageDirectory.parent_path() / "fields"
-                        : appenv.climateBenchmarkImageDirectory) /
-                        climatebenchmarkmaprelativepath(request, benchmarkrunid)).string());
-            }
-        }
-        updatereport("Climate benchmark map guide: " +
-            (appenv.climateBenchmarkImageDirectory / "benchmark_map_guide.txt").string());
-    }
-
-    if (options.printClimateRelativeError)
-        printclimaterelativeerrorreport(*world);
-
-    updatereport("");
-    updatereport("World generation completed.");
-    updatereport("Validation output: " + commandlinevalidationdirectory(world->seed()).string());
-
-    if (options.hasSavePath)
-    {
-        world->saveworld(options.savePath);
-        updatereport("Saved world: " + options.savePath);
-    }
-
-    return 0;
-}
-}
-
-// Used to seed the generator.
-void fast_srand(long seed)
-{
-    g_seed = seed;
-}
-
-// Compute a pseudorandom integer.
-// Output value in range [0, 32767]
-int fast_rand(void)
-{
-    g_seed = (214013 * g_seed + 2531011);
-    return (g_seed >> 16) & 0x7FFF;
 }
 
 int createrandomseednumber()
@@ -1175,29 +353,6 @@ void resizeglobaldisplayforworld(planet& world, GlobalMapDisplay& globaldisplay,
     refreshminihighlightdisplay(highlightdisplay);
 }
 
-void ensureworkingdirectory()
-{
-    if (GetFileAttributesA("version.txt") != INVALID_FILE_ATTRIBUTES)
-        return;
-
-    char exepath[MAX_PATH] = { 0 };
-    GetModuleFileNameA(NULL, exepath, MAX_PATH);
-
-    filesystem::path directory = filesystem::path(exepath).parent_path();
-    while (!directory.empty())
-    {
-        if (filesystem::is_regular_file(directory / "version.txt"))
-        {
-            filesystem::current_path(directory);
-            return;
-        }
-        const filesystem::path parent = directory.parent_path();
-        if (parent == directory)
-            break;
-        directory = parent;
-    }
-}
-
 void configureimguistyle()
 {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -1269,33 +424,21 @@ int main()
     ensureworkingdirectory();
     reloadappenvironment();
 
-    CommandLineGenerationOptions commandlineoptions;
-
-    if (parsecommandlineoptions(commandlineoptions) == false)
+    int argc = 0;
+    if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc))
+        LocalFree(argv);
+    if (argc > 1)
     {
-        printcommandlineusage();
+        cerr << "UndiscoveredWorlds is the desktop application and takes no arguments.\n"
+                "Use world_pipeline.exe for headless generation and climate benchmarks.\n";
         return 1;
     }
 
-    if (commandlineoptions.showHelp)
-    {
-        printcommandlineusage();
-
-        if (commandlineoptions.run == false)
-            return 0;
-    }
-
-    if (commandlineoptions.run)
-        return runcommandlineworldgeneration(commandlineoptions);
-
     float currentversion = 1.0f;
-    float latestversion = getlatestversion();
 
     string currentversionstring = "Current version: " + to_string(currentversion);
-    string latestversionstring = "Latest version: " + to_string(latestversion);
 
     updatereport(currentversionstring.c_str());
-    updatereport(latestversionstring.c_str());
 
     // Set up the window.
 
@@ -2095,7 +1238,7 @@ int main()
 
             if (!showworldgenerationoptions)
             {
-                const CreateWorldScreenActions actions = drawcreateworldscreen(main_viewport, window_flags, currentversion, latestversion);
+                const CreateWorldScreenActions actions = drawcreateworldscreen(main_viewport, window_flags);
 
                 if (actions.openLoadDialog)
                 {
@@ -2176,7 +1319,7 @@ int main()
                 context.largelake = largelake;
 
                 string errormessage;
-                runremaininggenerationstages(*world, scratch, ui, context, getgenerationstageindex(GenerationStageId::plate_tectonics), &errormessage);
+                runremaininggenerationstages(*world, scratch, ui, context, getgenerationstageindex(GenerationStageId::geosphere_initialization), &errormessage);
 
                 if (errormessage.empty() == false)
                     updatereport(errormessage);
@@ -3165,7 +2308,8 @@ int main()
                 int maxelev = world->maxelevation();
                 int sealevel = world->sealevel();
 
-                vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
+                worldgrid<bool>& shelves = world->continentalshelves();
+                shelves.fill(false);
 
                 makecontinentalshelves(*world, shelves, 4);
                 createoceantrenches(*world, shelves);
@@ -3209,7 +2353,8 @@ int main()
                 int maxelev = world->maxelevation();
                 int sealevel = world->sealevel();
 
-                vector<vector<bool>> shelves(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
+                worldgrid<bool>& shelves = world->continentalshelves();
+                shelves.fill(false);
 
                 for (int i = 0; i <= width; i++)
                 {
@@ -4436,27 +3581,16 @@ int main()
                 if (ImGui::BeginTabItem("Tectonics"))
                 {
                     const planet& inspectworld = currentglobalworld();
-                    const int tectonicplatecount = gettectonicplatecount(inspectworld);
-                    const int tectonicsealevelm = gettectonicsealevelm(inspectworld);
-                    const int boundarysegmentcount = gettectonicboundarysegmentcount(inspectworld);
-                    const int deformingregioncount = gettectonicdeformingregioncount(inspectworld);
 
                     ImGui::Text("World metadata");
                     ImGui::Separator();
                     ImGui::Text("time_myr: %.3f", inspectworld.tectonictimemyr());
                     ImGui::Text("delta_time_myr: %.6f", inspectworld.tectonicdeltatimemyr());
 
-                    if (tectonicplatecount >= 0)
-                        ImGui::Text("plate_count: %d", tectonicplatecount);
-
-                    if (tectonicsealevelm >= 0)
-                        ImGui::Text("sea_level_m: %d", tectonicsealevelm);
-
-                    if (boundarysegmentcount >= 0)
-                        ImGui::Text("boundary_segments: %d", boundarysegmentcount);
-
-                    if (deformingregioncount >= 0)
-                        ImGui::Text("deforming_regions: %d", deformingregioncount);
+                    ImGui::Text("plate_count: %d", inspectworld.tectonicplatecount());
+                    ImGui::Text("sea_level_m: %d", inspectworld.tectonicsealevelm());
+                    ImGui::Text("boundary_segments: %d", inspectworld.tectonicboundarysegmentcount());
+                    ImGui::Text("deforming_regions: %d", inspectworld.tectonicdeformingregioncount());
 
                     ImGui::Spacing();
                     ImGui::Text("Point inspector");
@@ -4858,43 +3992,4 @@ int main()
     ImGui::SFML::Shutdown();
 
     return 0;
-}
-
-// This looks up the latest version of the program. Based on code by Parveen: https://hoven.in/cpp-network/c-program-download-file-from-url.html
-
-float getlatestversion()
-{
-    IStream* stream;
-
-    const char* URL = "https://raw.githubusercontent.com/JonathanCRH/Undiscovered_Worlds/main/version.txt";
-
-    if (getURL(0, URL, &stream, 0, 0)) // Didn't work for some reason.
-        return 0.0f;
-
-    // this char array will be cyclically filled with bytes from URL
-    char buff[100];
-
-    // we shall keep appending the bytes to this string
-    string s;
-
-    unsigned long bytesRead;
-
-    while (true)
-    {
-        // Reads a specified number of bytes from the stream object into char array and stores the actual bytes read to "bytesRead"
-        stream->Read(buff, 100, &bytesRead);
-
-        if (0U == bytesRead)
-            break;
-
-        // append and collect to the string
-        s.append(buff, bytesRead);
-    };
-
-    // release the interface
-    stream->Release();
-
-    float val = stof(s);
-
-    return val;
 }

@@ -45,11 +45,16 @@ class RepositoryScopeTests(unittest.TestCase):
         self.assertEqual(scope.inspect(self.root, ['HEAD'])[0], [])
 
     def test_local_directories_and_archives_are_rejected(self):
-        for path in ['meta/readme.md', 'docs/design.md', 'refs/prepare.py',
-                     'runs/registry/climate.json', 'assets/download.zip']:
+        for path in ['meta/readme.md', 'refs/prepare.py', 'runs/reports/index.html',
+                     'runs/registry.json', 'assets/download.zip']:
             self.stage(path)
         issues, _ = scope.inspect(self.root)
         self.assertEqual(len(issues), 5)
+
+    def test_docs_registry_and_ledger_are_tracked(self):
+        for path in ['docs/design.md', 'runs/registry/climate.json', 'runs/ledger/main.jsonl']:
+            self.stage(path)
+        self.assertEqual(scope.inspect(self.root)[0], [])
 
     def test_deleted_data_is_still_rejected_in_history(self):
         self.stage('src/main.cpp')

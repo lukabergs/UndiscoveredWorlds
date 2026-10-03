@@ -1,8 +1,8 @@
+#include "climate_biomes.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include "planet.hpp"
-#include "region.hpp"
+#include "climate_world.hpp"
 #include "climate_koppen.hpp"
 #include "climate_classification.hpp"
 
@@ -28,22 +28,22 @@ struct seasonalclimatesummary
     bool driestseasoniswarm = false;
 };
 
-bool isclassificationwater(planet& world, int x, int y);
-seasonalclimatesummary summariseseasonalclimate(planet& world, int x, int y);
-short calculateplanetclimate(planet& world, int x, int y);
-int calculateplanetbiome(planet& world, int x, int y);
+bool isclassificationwater(climateworld& world, int x, int y);
+seasonalclimatesummary summariseseasonalclimate(climateworld& world, int x, int y);
+short calculateplanetclimate(climateworld& world, int x, int y);
+int calculateplanetbiome(climateworld& world, int x, int y);
 float clampholdridgebiotemperature(float temperature);
 float calculateholdridgebiotemperature(const seasonalclimatesummary& summary);
 int calculateholdridgebiomeinternal(float janTemp, float aprTemp, float julTemp, float octTemp, float janRain, float aprRain, float julRain, float octRain);
 int calculateholdridgebiomefromseasonal(const seasonalclimatesummary& summary);
 short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimatesummary& summary);
 
-bool isclassificationwater(planet& world, int x, int y)
+bool isclassificationwater(climateworld& world, int x, int y)
 {
     return world.sea(x, y) == 1 || world.truelake(x, y) != 0 || world.riftlakesurface(x, y) != 0;
 }
 
-seasonalclimatesummary summariseseasonalclimate(planet& world, int x, int y)
+seasonalclimatesummary summariseseasonalclimate(climateworld& world, int x, int y)
 {
     seasonalclimatesummary summary;
     std::array<int, CLIMATESEASONCOUNT> order = { 0, 1, 2, 3 };
@@ -110,7 +110,7 @@ seasonalclimatesummary summariseseasonalclimate(planet& world, int x, int y)
     return summary;
 }
 
-short calculateplanetclimate(planet& world, int x, int y)
+short calculateplanetclimate(climateworld& world, int x, int y)
 {
     const auto& monthly = world.climatesimulation().monthly;
     if (monthly.columns == world.width() + 1 && monthly.rows == world.height() + 1 &&
@@ -138,7 +138,7 @@ short calculateplanetclimate(planet& world, int x, int y)
     return calculateclimatefromseasonal(elev, sealevel, summary);
 }
 
-int calculateplanetbiome(planet& world, int x, int y)
+int calculateplanetbiome(climateworld& world, int x, int y)
 {
     const seasonalclimatesummary summary = summariseseasonalclimate(world, x, y);
     return calculateholdridgebiomefromseasonal(summary);
@@ -385,7 +385,7 @@ short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimate
 
 // This creates the climate map.
 
-void createclimatemap(planet& world)
+void createclimatemap(climateworld& world)
 {
     int width = world.width();
     int height = world.height();
@@ -403,7 +403,7 @@ void createclimatemap(planet& world)
     }
 }
 
-void createbiomemap(planet& world)
+void createbiomemap(climateworld& world)
 {
     const int width = world.width();
     const int height = world.height();
@@ -422,7 +422,7 @@ void createbiomemap(planet& world)
 
 // This returns the climate type of the given point.
 
-short getclimate(planet& world, int x, int y)
+short getclimate(climateworld& world, int x, int y)
 {
     if (isclassificationwater(world, x, y))
         return (0);
@@ -431,24 +431,6 @@ short getclimate(planet& world, int x, int y)
 }
 
 // The same thing, but for the regional map.
-
-short getclimate(region& region, int x, int y)
-{
-    if (region.sea(x, y) == 1 || region.truelake(x, y) != 0)
-        return (0);
-
-    int elev = region.map(x, y);
-    int sealevel = region.sealevel();
-
-    float wrain = (float)region.winterrain(x, y);
-    float srain = (float)region.summerrain(x, y);
-    float mintemp = (float)region.mintemp(x, y);
-    float maxtemp = (float)region.maxtemp(x, y);
-
-    short climate = calculateclimate(elev, sealevel, wrain, srain, mintemp, maxtemp);
-
-    return climate;
-}
 
 int calculateholdridgebiome(float janTemp, float aprTemp, float julTemp, float octTemp, float janRain, float aprRain, float julRain, float octRain)
 {

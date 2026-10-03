@@ -1,0 +1,66 @@
+CIRCULATION MAP GUIDE
+
+Current palette contract: configs/climate-palettes.json (climate-colour-v2).
+Positive fields: blue/cyan/green/yellow/orange/red. Signed fields: white/magenta/blue/cyan/green/yellow/red; zero cyan.
+Black means masked/missing data. Sealed historical images retain their original palettes.
+Standard reference renders: refs/processed/climate/maps/standard-v2/index.html.
+
+Archive: runs/maps/climate/<quantity>/<season>/<layer>/{run_id}.png (see benchmark_map_guide.txt for exceptions).
+Seasons: 1/2/3/4 = Jan/Apr/Jul/Oct; wind layers s/u = surface/upper.
+The executable writes organized maps directly into runs/maps/. Internal diagnostics retain flat field identifiers. Reference previews and palette index: refs/processed/climate/maps/index.html.
+ERA5 filename: era5_v{renderer_version}_{width}x{height}_{season}_{surface|upper}_wind_{lic|particles}.png
+Seasons: January, April, July, and October representative snapshots.
+Projection: global equirectangular; north is at the top and longitude is periodic.
+
+surface_wind_lic
+  Surface/boundary-layer wind streamlines rendered by line-integral convolution (LIC).
+  Bright and dark filaments show streamline orientation, not speed or direction.
+  Yellow arrows resolve LIC's direction ambiguity. The background uses the wind-speed palette below.
+
+upper_wind_lic
+  The same LIC rendering for the model upper layer, referenced to the 500 hPa circulation field.
+
+ERA5 LIC maps
+  Cached reference maps use ERA5 10 m surface winds and 500 hPa upper winds, bilinearly resampled to
+  the simulation grid. They use the same LIC kernel, noise seeds, projection, arrows, and speed palette
+  as the simulated maps, so visual differences come from the vector fields rather than rendering.
+
+surface_wind_particles and upper_wind_particles
+  White deterministic particle trails show forward paths through the surface or upper wind field.
+  Trail density is a seeded visualization choice, not wind magnitude. Yellow arrows show direction.
+  Background speed uses the shared positive palette: 0-25 m/s surface, 0-40 m/s upper.
+  Land is brown-gray, ocean is navy, and coastlines are gray.
+
+ERA5 particle maps
+  These are possible because ERA5 supplies the same u/v inputs. They reuse the simulated maps' particle
+  seeds and integration settings, and are cached by renderer version and output dimensions.
+
+surface_wind_vector_error and upper_wind_vector_error
+  Magnitude of the full vector difference |simulated - ERA5| in m/s, not separate component error.
+  Shared positive palette spans 0-25 m/s. Yellow arrows point in the
+  simulated-minus-ERA5 error-vector direction; subtract that vector to move the simulation toward ERA5.
+  Coastlines are pale gray. Seasonal/layer summary metrics are stored with the run diagnostics.
+
+surface_wind_speed
+  Scalar surface wind magnitude in m/s. Shared positive palette spans 0-25 m/s.
+
+surface_divergence
+  Horizontal surface-wind divergence in day^-1, displayed over -1 to +1 day^-1.
+  Shared signed palette: negative is convergence, positive is divergence; zero cyan.
+
+moisture_flux_convergence
+  Convergence of actual donor-plus-corrector moisture transport summed over both atmospheric layers in kg m^-2 day^-1 (numerically mm/day of water).
+  Shared signed palette: negative is drying, positive is moisture supply; zero cyan.
+  The display is clamped to -20 through +20; climate_process_fields.csv retains the unclamped values.
+
+Raw fields
+  New numeric process, weather and ocean fields are CSVs in runs/diagnostics/climate/{run_id}/maps/.
+  climate_process_fields.csv contains transport and heating; weather_statistics.csv contains wind statistics;
+  ocean_fields.csv contains ocean state. circulation_maps.csv records image export status, not field extrema.
+  Vector-error metrics are in that same folder's wind_vector_comparison.csv.
+  Historical raw rasters are organized under runs/fields/climate/<quantity>/<season>/<layer>/{run_id}.tif;
+  historical numeric summaries remain in runs/diagnostics/<topic>/{run_id}.csv.
+  LIC and particle maps support up to 2048 horizontal and 2097152 cells. Larger runs retain scalar and raw diagnostics but skip expensive flow rendering.
+  PNG palettes are diagnostic, not categorical climate classes.
+
+Grid resolution is selectable independently of these fixed diagnostic colour limits. ERA5 output dimensions follow the selected cell-centred comparison grid. Raw fields retain their physical values outside display limits.

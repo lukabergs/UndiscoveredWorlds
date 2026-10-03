@@ -9,4 +9,4 @@ struct CreateWorldScreenActions
     bool openPlateTectonicsMenu = false;
 };
 
-CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, float currentversion, float latestversion);
+CreateWorldScreenActions drawcreateworldscreen(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags);

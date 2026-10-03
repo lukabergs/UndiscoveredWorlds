@@ -2,6 +2,7 @@
 
 #include "ui_panels.hpp"
 #include "functions.hpp"
+#include "map_views.hpp"
 
 using namespace std;
 

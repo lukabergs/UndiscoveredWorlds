@@ -1,3 +1,8 @@
+// Windows headers first: later headers bring std names into scope.
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
 #include "app_environment.hpp"
 
 #include <algorithm>
@@ -141,4 +146,38 @@ void setreferenceprecipitationgridpath(const filesystem::path& path)
 
     if (!environmentconfig.referencePrecipitationGridPath.empty() && environmentconfig.referencePrecipitationGridPath.has_parent_path())
         filesystem::create_directories(environmentconfig.referencePrecipitationGridPath.parent_path());
+}
+
+filesystem::path resolutionvariant(
+    const filesystem::path& source,
+    int columns,
+    int rows)
+{
+    const filesystem::path candidate = source.parent_path() /
+        (source.stem().string() + "_" + to_string(columns) + "x" +
+            to_string(rows) + source.extension().string());
+    return filesystem::exists(candidate) ? candidate : source;
+}
+
+void ensureworkingdirectory()
+{
+    if (GetFileAttributesA("version.txt") != INVALID_FILE_ATTRIBUTES)
+        return;
+
+    char exepath[MAX_PATH] = { 0 };
+    GetModuleFileNameA(NULL, exepath, MAX_PATH);
+
+    filesystem::path directory = filesystem::path(exepath).parent_path();
+    while (!directory.empty())
+    {
+        if (filesystem::is_regular_file(directory / "version.txt"))
+        {
+            filesystem::current_path(directory);
+            return;
+        }
+        const filesystem::path parent = directory.parent_path();
+        if (parent == directory)
+            break;
+        directory = parent;
+    }
 }

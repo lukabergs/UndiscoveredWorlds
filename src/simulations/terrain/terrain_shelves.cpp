@@ -16,13 +16,13 @@ using namespace std;
 
 namespace
 {
-void removeshelfgaps(planet& world, std::vector<std::vector<bool>>& shelves);
-int nonshelfareacheck(planet& world, std::vector<std::vector<bool>>& shelves, std::vector<std::vector<bool>>& checked, int startx, int starty);
+void removeshelfgaps(planet& world, worldgrid<bool>& shelves);
+int nonshelfareacheck(planet& world, worldgrid<bool>& shelves, std::vector<std::vector<bool>>& checked, int startx, int starty);
 }
 
 // This function makes continental shelves.
 
-void makecontinentalshelves(planet& world, vector<vector<bool>>& shelves, int pointdist)
+void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdist)
 {
     int width = world.width();
     int height = world.height();
@@ -289,7 +289,7 @@ namespace
 {
 // This function removes any gaps in the continental shelves
 
-void removeshelfgaps(planet& world, vector<vector<bool>>& shelves)
+void removeshelfgaps(planet& world, worldgrid<bool>& shelves)
 {
     int width = world.width();
     int height = world.height();
@@ -362,7 +362,7 @@ namespace
 {
 // This tells how large a given area of non-shelf sea is.
 
-int nonshelfareacheck(planet& world, vector<vector<bool>>& shelves, vector<vector<bool>>& checked, int startx, int starty)
+int nonshelfareacheck(planet& world, worldgrid<bool>& shelves, vector<vector<bool>>& checked, int startx, int starty)
 {
     int width = world.width();
     int height = world.height();

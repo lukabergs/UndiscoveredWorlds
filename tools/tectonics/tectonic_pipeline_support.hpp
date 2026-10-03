@@ -53,7 +53,6 @@ struct SnapshotSummary {
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t iteration_count = 0;
-    uint32_t cycle_count = 0;
     uint32_t time_origin_step = 0;
     uint16_t sea_level_m = 0;
     double time_myr = 0.0;
@@ -107,7 +106,6 @@ struct SnapshotComparison {
     double time_myr_a = 0.0;
     double time_myr_b = 0.0;
     int64_t iteration_count_delta = 0;
-    int64_t cycle_count_delta = 0;
     int64_t plate_count_delta = 0;
     int64_t boundary_segment_count_delta = 0;
     int64_t deforming_region_count_delta = 0;

@@ -28,3 +28,9 @@ struct AppEnvironmentConfig
 const AppEnvironmentConfig& getappenvironment();
 void reloadappenvironment();
 void setreferenceprecipitationgridpath(const std::filesystem::path& path);
+
+// Moves the working directory to the repository root (the folder with version.txt)
+// when started elsewhere, searching upwards from the executable.
+void ensureworkingdirectory();
+// The _WIDTHxHEIGHT variant of a reference file when it exists, else the file itself.
+std::filesystem::path resolutionvariant(const std::filesystem::path& source, int columns, int rows);

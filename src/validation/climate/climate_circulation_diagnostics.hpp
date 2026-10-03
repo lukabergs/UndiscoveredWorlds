@@ -1,6 +1,7 @@
 #pragma once
 
 #include "climate_benchmark_outputs.hpp"
+#include "raster_image.hpp"
 #include "climate_weather.hpp"
 #include "climate_hydrology.hpp"
 #include "climate_ocean_dynamics.hpp"
@@ -9,16 +10,10 @@
 #include <filesystem>
 #include <vector>
 
-class planet;
+class climateworld;
 
 namespace climatevalidation
 {
-void captureweatherstatistics(const planet& world, int season, int columns, int rows,
-    const climateweather::WeatherStatistics& statistics, int layer = 0);
-void captureclimateprocessfields(const planet& world, int season,
-    const climatehydrology::SeasonalProcessFields& fields);
-void captureoceanfields(const planet& world, int season, int columns, int rows,
-    const climateocean::OceanState& state);
 struct circulationreferencewindfields
 {
     int columns = 0;
@@ -30,31 +25,36 @@ struct circulationreferencewindfields
 };
 
 void capturecirculationwindfields(
-    planet& world,
+    climateworld& world,
     int season,
     const std::vector<std::vector<float>>& surfaceu,
     const std::vector<std::vector<float>>& surfacev,
     const std::vector<std::vector<float>>& upperu,
     const std::vector<std::vector<float>>& upperv);
 bool capturedcirculationwind(
-    const planet& world,
+    const climateworld& world,
     int season,
     int x,
     int y,
     bool upper,
     float& u,
     float& v);
+// Every exported PNG map has the world grid's size (width x width/2).
+// Coarser rasters are enlarged without blending, so each pixel keeps its
+// cell's colour.
+rasterimage::Image expandclimatemapimage(const rasterimage::Image& cells, int mapcolumns);
+bool saveclimatemapimage(const rasterimage::Image& cells, const std::filesystem::path& path, int mapcolumns);
 bool exportcirculationdiagnostics(
     const std::filesystem::path& outputdirectory,
-    planet& world,
+    climateworld& world,
     const climatebenchmarkmapselection& selection);
-bool circulationflowvisualizationenabled(const planet& world);
+bool circulationflowvisualizationenabled(const climateworld& world);
 int circulationflowvisualizationmaxcolumns();
 int circulationflowvisualizationmaxcells();
 bool exportcirculationreferencecomparisons(
     const std::filesystem::path& diagnosticoutputdirectory,
     const std::filesystem::path& referencecacheoutputdirectory,
-    planet& world,
+    climateworld& world,
     const circulationreferencewindfields& referencefields,
     const climatebenchmarkmapselection& selection);
 }

@@ -5,6 +5,7 @@
 
 #include "appearance_settings.hpp"
 #include "functions.hpp"
+#include "map_views.hpp"
 
 void drawmapviewbuttons(const std::function<void(mapviewenum)>& onSelect);
 void drawmapviewappearancetab(const mapviewdefinition& definition, planet& world, AppearanceSettings& appearance, std::array<int, MAPGRADIENTTYPECOUNT>& selectedgradientstops, int colouralign, int otheralign);

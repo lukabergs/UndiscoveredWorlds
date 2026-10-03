@@ -18,7 +18,7 @@ These are lifecycle stages, not mandatory one-time function calls. The coarse an
 
 ## Current state
 
-The repository contains terrain generation and import support, an internal plate-tectonics module and world adapter, a generation workbench and stage registry, a reduced climate simulator, physical-resource heuristics, gold deposits recorded through tectonic history, and initial settlement/trade/polity generation. Climate is the current development focus. Terrain refinement remains work in progress; the full ecological and staged civilizational lifecycle above is a design goal.
+The repository contains terrain generation and import support, an internal plate-tectonics module with world-grid ingestion, a generation workbench and stage registry, a reduced climate simulator, physical-resource heuristics, gold deposits recorded through tectonic history, and initial settlement/trade/polity generation. Climate is the current development focus. Terrain refinement remains work in progress; the full ecological and staged civilizational lifecycle above is a design goal.
 
 The September 2026 cleanup aligns CMake sources, includes, configuration, and preparation/analysis scripts with the new layout. Historical and new benchmark maps use category/season/layer paths under `runs/maps/climate/`, with registered run IDs as filenames. Season folders are 1=January, 2=April, 3=July and 4=October. Earth benchmark land/sea imports can be regenerated at arbitrary even resolutions from the retained signed Earth master.
 
@@ -27,7 +27,9 @@ The September 2026 cleanup aligns CMake sources, includes, configuration, and pr
 ```text
 src/
   core/                    Grids, seasonal indices, deterministic seeds, row workers
-  pipeline/                Stage registry, climate and physical/social orchestration
+    world/                 World field catalogue and field-read tracking
+    procedural_noise.*     Seeded random numbers and fractal noise (no world state)
+  pipeline/                Stages, process registry, recipes and scheduler, progress
   simulations/
     geology/               Plate-tectonics engine, world adapter, mineral deposit history
     terrain/               Fractals, coasts, ridges, elevation, FastLEM, landforms
@@ -43,22 +45,19 @@ src/
     diagnostics/           Profiling and generation debug integration
   wip/                     Mixed responsibilities awaiting extraction
 assets/                    Presentation files: textures and appearance presets
-definitions/society/       Reserved for authored society content; currently empty
 configs/                   Application configuration and saved UI layout
+  evaluation/              Evaluation profiles: checks, validation and review maps per module
 refs/
   source/                  Original downloads, receipts, and licenses
   processed/               Prepared grids grouped by physical quantity
-  prepare.py               Reusable Earth-map preparation; configurable width
 runs/                      Simulation artifacts, organized by artifact category
 tests/                     Core, pipeline, I/O, simulation, and script tests
 scripts/
   refs/                    Reference download and preparation
   benchmarks/              Benchmark analysis and workbook input preparation
-  archive/                 Previous analysis scripts and tuning experiments
+  evaluation/              Run bundles: checks, validation, review verdicts, experiments
 docs/                      Architecture, reference guides, and current climate notes
-references/                Local research images, papers, and reference projects
-0/                         Files awaiting manual classification
-tools/tectonics/           Simulation, snapshot/export tools, heightmap statistics
+tools/tectonics/           Simulation and snapshot/export tools
 vcpkg-ports/               Dependency overlay ports
 out/                       Build products, editor caches, scratch work
 ```
@@ -69,16 +68,16 @@ Root files are limited to the README, license, version, Git ignore rules, and CM
 
 Keep headers beside their implementations. Organize by the responsibility of a module; express execution order in pipeline recipes. Avoid creating a separate climate implementation for each place it appears in a recipe.
 
-- `core/` should contain shared state primitives, coordinates, units, grids, and deterministic randomness. Extraction of world state into this boundary is still pending.
+- `core/` should contain shared state primitives, coordinates, units, grids, and deterministic randomness. `core/world/world_fields.hpp` catalogues every world field (id, component, units); moving world storage into components is still pending.
 - `simulations/` should operate on explicit world inputs and produce defined world layers. Presentation, filesystem operations, and reference-data validation have their own boundaries.
-- `pipeline/` should select stages, validate their dependencies, schedule them, and control checkpoints and stopping conditions. A disabled stage requires either valid existing outputs, an imported replacement, or an explicit fallback.
+- `pipeline/` selects stages, validates their dependencies, schedules them, and controls checkpoints and stopping conditions. Every stage is a process with a kind and declared field access (`world_processes`); recipes (`world_recipes`) order them and can freeze components. A disabled stage requires either valid existing outputs, an imported replacement, or an explicit fallback.
 - `io/` contains code that reads and writes artifacts. `refs/` and `runs/` contain the artifacts themselves.
 - `validation/` compares simulated results with observations and checks budgets. Observed climate references are validation inputs, not hidden forcing for procedural worlds.
 - `app/` presents and controls the engine. Both interactive and eventual headless workflows should use the same simulation stages.
 
 `globalterrain`, `globalclimate`, and `physical_layers` have been split into simulation modules and pipeline entry points. Society CSV loading belongs to `io/social_definitions`; its stage order belongs to `pipeline/social_generation`. [Module boundaries and retention decisions](docs/architecture/simulation-modules.md) describe the active and legacy paths.
 
-`src/wip/` still holds `planet`, `region`, `regionalmap`, `classes`, `misc`, `functions`, `generation_tuning`, and `generation_workbench`. World storage/persistence, regional generation, shared utilities, and workbench UI remain coupled there. `functions.hpp` is a compatibility umbrella; new callers should include the owning module's header.
+`src/wip/` still holds `planet`, `region`, `regionalmap`, `classes`, `misc`, `functions`, `generation_tuning`, and the workbench UI (`generation_workbench`). World storage/persistence, regional generation and shared utilities remain coupled there; stage execution lives in `pipeline/world_stages`. `functions.hpp` is a compatibility umbrella without SFML; map views and drawing live in `app/rendering/map_views.hpp`. New callers should include the owning module's header. The target structure (data-only sphere components, processes, recipes, evaluation) and its migration status are in [world model](docs/architecture/world-model.md).
 
 Further land-surface hydrology and ecology belong under `src/simulations/hydrology/` and `src/simulations/ecology/`. Existing climate moisture/storage physics remains in `climate/`. Gold deposits form during tectonics in `geology/mineral_systems/`, travel with their host crust and erode as they are exhumed; `resources/` routes liberated gold into placers on the final drainage. Other mineral and marine scores remain derived heuristics in `resources/`. Biological production belongs in ecology, with society consuming both. `tectonic_pipeline batch-export --mineral-history on` writes the deposit list and gold budget of a native run.
 
@@ -93,7 +92,7 @@ Further land-surface hydrology and ecology belong under `src/simulations/hydrolo
 
 The distinction follows purpose. An imported heightmap is a dataset; a generated heightmap is a run artifact. Current tuning constants remain in `src/wip/generation_tuning.hpp`; moving them into configurable recipes is future work.
 
-Keep downloads and their receipts/licenses under `refs/source/<dataset>/`. Prepared grids belong under `refs/processed/<quantity>/`; Earth rasters use `{width}` filenames and metadata under `processed/metadata/{width}/`. See [reference preparation](refs/README.md). Research material and reference projects live in `references/`; unresolved files belong in `0/`.
+Keep downloads and their receipts/licenses under `refs/source/<dataset>/`. Prepared grids belong under `refs/processed/<quantity>/`; Earth rasters use `{width}` filenames and metadata under `processed/metadata/{width}/`. See [reference preparation](refs/README.md).
 
 ## Runs and comparisons
 
@@ -153,10 +152,15 @@ is the application's duration override; the native CLI uses
 `--evolution-duration-myr`.
 
 Every physical update uses reduced force-balance motion and conservative
-isostatic columns. There is no alternate raster-motion mode, global restart or
-cycle-based duration. Evolution continues until the positive duration is
+isostatic columns. Evolution continues until the positive duration is
 reached (rounded up to a whole timestep); local plate splitting, welding and
-removal can occur. The obsolete mode names and cycle controls are rejected.
+removal can occur.
+
+Code outside the engine uses only its public headers: `tectonic_api.hpp`,
+`tectonic_contract.hpp`, `tectonic_recipe.hpp`, `tectonic_scenario.hpp`,
+`tectonic_world_grid.hpp`, `topography_codec.hpp`, plus `material.hpp` (material
+codes) and `utils.hpp`. Engine tests may use internal headers;
+`scripts/check-layout.py` enforces this.
 
 The solver includes continental/oceanic rock and sediment transport, thermal
 subsidence, distributed deformation, root-pressure forces, active margins,
@@ -177,19 +181,16 @@ the solver into spherical tectonics. Downstream terrain stages can change the
 final application terrain, so compare native snapshots when checking the engine.
 
 ```powershell
-cmake --preset x64-debug -B out/build/headless-modules -DUW_BUILD_APP=OFF -DUW_BUILD_TECTONICS_TOOLS=ON -DBUILD_TESTING=ON
-cmake --build out/build/headless-modules --config Release --target tectonic_pipeline PlateTectonicsTests MineralSystemsTests --parallel 4
-ctest --test-dir out/build/headless-modules -C Release -R '^(PlateTectonicsTests|MineralSystemsTests)$' --output-on-failure
-uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless-modules/bin/tectonic_pipeline.exe
-out/build/headless-modules/bin/tectonic_pipeline.exe inspect --seed 1 --final --bundle-output out/tectonics-seed1
-uv run --offline scripts/benchmarks/tectonics_experiment.py
+cmake --preset headless
+cmake --build out/build/headless --config Release --target tectonic_pipeline PlateTectonicsTests MineralSystemsTests --parallel 4
+ctest --test-dir out/build/headless -C Release -R '^(PlateTectonicsTests|MineralSystemsTests)$' --output-on-failure
+uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/tectonic_pipeline.exe
+uv run --offline scripts/benchmarks/bench.py tectonics inspect
+uv run --offline scripts/benchmarks/bench.py tectonics run
 ```
 
-`tectonic_pipeline` is the world-simulation CLI. Its `inspect`, `batch-export`,
+`tectonic_pipeline` is the tectonics CLI; `world_pipeline` is the headless CLI for full-world generation and the Earth climate benchmark (`generate`, `climate-benchmark`). It runs recipes, can write a run bundle (`--bundle`) and audit each step's field access (`--audit-access`), and links no SFML or ImGui. `climate_pipeline` runs climate alone on imported terrain: it uses the climate module's own world (`climateworld`) and links no planet, terrain, hydrology or tectonics code. The desktop `UndiscoveredWorlds.exe` takes no arguments. The `tectonic_pipeline` `inspect`, `batch-export`,
 `boundary-stats` and `compare` commands share the same engine and recipe.
-`tectonic_column_probe` isolates current column operators on synthetic inputs;
-it is not another world generator. `tectonic_climate_erosion` is an experimental
-surface-only tool with frozen plates, not a tectonics implementation.
 
 Numbered experiments use `runs/registry/tectonics.json` and refuse existing
 output directories. They preserve the actual working source, recipe, executable
@@ -218,34 +219,34 @@ does not establish better physical realism.
 
 ## Development and remaining integration
 
-The project uses C++ with CMake and vcpkg, SFML, Dear ImGui, ImGui-SFML, and ImGuiFileDialog. CUDA rendering is optional in the existing build configuration. Tectonics is built from `src/simulations/geology/plate_tectonics` as the internal `plate_tectonics` target; no standalone checkout is required. The engine uses C++20 and the app retains C++17. See the [tectonics integration and checks](docs/architecture/tectonic-contract-validation.md) and [native output contract](docs/architecture/tectonics/tectonic-output-contract.md).
+The project uses C++ with CMake and vcpkg, SFML, Dear ImGui, ImGui-SFML, and ImGuiFileDialog. CUDA rendering is optional in the existing build configuration. Tectonics is built from `src/simulations/geology/plate_tectonics` as the internal `plate_tectonics` target; no standalone checkout is required. Every target is built as C++17. See the [tectonics integration and checks](docs/architecture/tectonic-contract-validation.md) and [native output contract](docs/architecture/tectonics/tectonic-output-contract.md).
 
 The active JSON registry still supplies benchmark IDs; replacing it requires preserving those IDs. Compatible benchmark imports are generated from the retained Earth master. Later refactoring can extract `src/wip/` responsibilities.
 
 ```powershell
-cmake --preset x64-debug
-cmake --build out/build/x64-Debug --config Debug --parallel 4
-ctest --test-dir out/build/x64-Debug -C Debug --output-on-failure -j 4
+cmake --preset desktop
+cmake --build out/build/desktop --config Release --parallel 4
+ctest --test-dir out/build/desktop -C Release --output-on-failure -j 4
 uv run --offline --with numpy --with pillow python -m unittest discover -s tests/scripts
 uv run --offline python scripts/check-layout.py
 ```
 
 Tests mirror the code domains. Prefer deterministic headless checks of state, budgets, and data contracts before visual comparisons. Fixed seeds, explicit inputs, and recorded units/resolutions should accompany benchmark results.
 
-Climate generation accepts `--climate-resolution 64` independently of `--resolution` (the exported world width). This sets atmosphere/ocean width to 64, moisture/energy width to 128, and weather width to 32, capped by the world grid. Use multiples of four, at least eight. `--climate-temperature-mode calibrated` retains the requested global mean; `radiative` fixes the longwave intercept so the mean emerges from the energy balance. The default uses conservative latitude diffusion, continuous land/soil and ocean/ice heat stores, and monthly Köppen classification. Climate working state belongs to each world; monthly fields and spin-up reservoirs are transient and are not added to the save format.
+Climate generation accepts `--climate-resolution` (default 128) independently of `--resolution`, the world width that also sets the size of every exported map. The default sets atmosphere/ocean width to 128, moisture/energy width to 256, and weather width to 64, capped by the world grid. Use multiples of four, at least eight. `--climate-temperature-mode calibrated` retains the requested global mean; `radiative` fixes the longwave intercept so the mean emerges from the energy balance. The default uses conservative latitude diffusion, continuous land/soil and ocean/ice heat stores, and monthly Köppen classification. Climate working state belongs to each world; monthly fields and spin-up reservoirs are transient and are not added to the save format.
 
-The numerical climate, grid, reference I/O, and stage-registry libraries also build with `-DUW_BUILD_APP=OFF`; this skips SFML/ImGui and CUDA discovery. Tests link these same libraries. For a library-only build using the existing toolchain:
+There are two configure presets: `desktop` (everything, in `out/build/desktop`) and `headless` (`out/build/headless`: no SFML/ImGui or CUDA discovery, with the tectonics tools and tests). The configuration is chosen at build time: `--config Release` for every simulation and benchmark, `--config Debug` only to debug. Binaries land in `bin/<Config>/`; scripts take the headless Release paths from `scripts/uwtools/paths.py`.
 
 ```powershell
-cmake --preset x64-debug -B out/build/headless-modules -DUW_BUILD_APP=OFF -DBUILD_TESTING=OFF
-cmake --build out/build/headless-modules --config Debug --target uw_climate uw_climate_io uw_generation_stages --parallel 4
+cmake --preset headless
+cmake --build out/build/headless --config Release --target world_pipeline tectonic_pipeline --parallel 4
 ```
 
-`BUILD_TESTING` also builds the tectonics regression suite using GoogleTest v1.15.2 (downloaded on first configuration). Enable `UW_BUILD_TECTONICS_TOOLS` to build `tectonic_pipeline`, `tectonic_column_probe`, and `tectonic_climate_erosion`. Tool PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The public CLI regression command above checks the shared defaults and rejects retired controls.
+`BUILD_TESTING` also builds the tectonics regression suite using GoogleTest v1.15.2 (downloaded on first configuration). `UW_BUILD_TECTONICS_TOOLS` (on in the `headless` preset) builds `tectonic_pipeline`. Tool PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The public CLI regression command above checks the shared defaults and rejects retired controls.
 
-Git tracks application code, tooling, configuration, small runtime assets and deterministic test fixtures. `meta/`, `docs/`, `refs/` and `runs/` are entirely local-only, including guides, registries and workbooks. Historical `extra/`, research copies, downloads and generated artifacts are also excluded. Local links into these directories require the local workspace data. Keep preparation and reporting code in `scripts/`; the Earth-map entry point is `uv run scripts/refs/prepare-earth-maps.py`.
+Git tracks application code, tooling, configuration, small runtime assets and deterministic test fixtures. `docs/`, `runs/registry/` and `runs/ledger/` are tracked; `meta/`, `refs/` and the rest of `runs/` are local-only. Historical `extra/`, research copies, downloads and generated artifacts are also excluded. Local links into these directories require the local workspace data. Keep preparation and reporting code in `scripts/`; the Earth-map entry point is `uv run scripts/refs/prepare-earth-maps.py`.
 
-Enable the repository guards with `git config core.hooksPath .githooks`. They reject local-only paths and files larger than 5 MiB before commits and inspect reachable history before pushes. Run `uv run --offline python scripts/repository_scope.py --staged` or `--history HEAD` manually. After the data-removal history rewrite, use a fresh clone or rebase work onto the cleaned history; merging an old branch would reintroduce the discarded data. The local run registry still supplies IDs and is preserved outside version control.
+Enable the repository guards with `git config core.hooksPath .githooks`. They reject local-only paths and files larger than 5 MiB before commits and inspect reachable history before pushes. Run `uv run --offline python scripts/repository_scope.py --staged` or `--history HEAD` manually. After the data-removal history rewrite, use a fresh clone or rebase work onto the cleaned history; merging an old branch would reintroduce the discarded data. The run registry (`runs/registry/`) supplies IDs and is tracked.
 
 ## Using the application
 
@@ -255,9 +256,9 @@ Appearance edits affect rendering, not simulated fields. Gradient controls suppo
 
 Map imports must match the current world dimensions. Numeric imports accept supported grayscale uint16 TIFFs; PNG imports use field-specific channel scales or a one-pixel gradient strip with an explicit minimum and increment. The signed float32 Earth master is converted into the unsigned land/sea import pair during reference processing. See `src/io/map_imports.cpp` for the current decoding rules.
 
-Run `./scripts/benchmarks/run-climate-benchmark.ps1 -Resolution 512 -ClimateResolution 64 -Seed 20260906` for a complete benchmark with logs and a side-by-side map gallery. See [benchmark commands and outputs](runs/maps/climate/README.md) and the [reference map/palette guide](refs/processed/climate/maps/README.md). Builds stay in `out/`; benchmark artifacts default to `runs/`.
+Run `uv run --offline scripts/benchmarks/bench.py climate run` (1024×512 world, 128-wide atmosphere/ocean, 256-wide moisture) for a complete benchmark with logs and a side-by-side map gallery. `bench.py` is the common entry point for tectonics, geology, climate and full-world runs; see `docs/reference-guides/benchmark-commands.md`. See [benchmark commands and outputs](runs/maps/climate/README.md) and the [reference map/palette guide](refs/processed/climate/maps/README.md). Builds stay in `out/`; benchmark artifacts default to `runs/`.
 
-The [experimental tropical boundary-layer replacement](runs/maps/climate/README.md#experimental-tropical-boundary-layer) is selectable with `-TropicalClosure mixed-layer`. The default remains `legacy`: the new wind balance improves tropical wind error but currently regresses rainfall, so it has not passed promotion checks.
+The [experimental tropical boundary-layer replacement](runs/maps/climate/README.md#experimental-tropical-boundary-layer) is selectable with `--climate-tropical-closure mixed-layer`. The default remains `legacy`: the new wind balance improves tropical wind error but currently regresses rainfall, so it has not passed promotion checks.
 
 The simulator, Earth benchmark imports and exports, and every processed reference use cell-centred `W x W/2` grids. Raw sources keep their native registration until the preparation script performs the ingestion-boundary remap. The default benchmark selection is Koppen, January surface LIC and particles, and precipitation PNG/TIFF. Repeat `--map` (or use a comma-separated list) to select outputs; `all` and `none` are supported. [Map guides](docs/reference-guides/) explain quantity, units, scales, and seasonal meaning. The summary command `uv run --offline --with numpy --with pillow python scripts/benchmarks/summarize-climate-validation.py --run-id ID --output DIR` prepares workbook input tables from category-organized diagnostics and carries the latest earlier report as context. It does not append to `metrics.xlsx` automatically.
 

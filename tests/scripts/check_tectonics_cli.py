@@ -21,11 +21,7 @@ def main(executable):
         ["--delta-time-myr", "0"], ["--time-myr", "1e20"], ["--time-myr", "-1"],
         ["--evolution-duration-myr", "0"], ["--evolution-duration-myr", "nan"],
         ["--evolution-duration-myr", "-1"], ["--evolution-duration-myr", "1e20"],
-        ["--motion-model", "legacy"], ["--surface-model", "legacy"],
-        ["--cycles", "2"], ["--cycle-step-limit", "600"], ["--cycle-duration-myr", "1"],
-        ["--folding-ratio", ".08"], ["--aggregation-overlap-abs", "64"],
-        ["--erosion-period", "60"], ["--rotation-strength", "1"],
-        ["--collision-uplift-ratio", ".02"], ["--divergent-carve", ".01"],
+        ["--unknown-option", "1"],
         ["--world-width-km", "0"], ["--mantle-flow-speed-cm-yr", "-1"],
         ["--coastal-gpe-strength", "1.01"], ["--boundary-force-ramp-cm-yr", "-1"],
         ["--initial-margin-width-m", "4001"], ["--sediment-load-feedback", "maybe"],
@@ -33,9 +29,11 @@ def main(executable):
         ["--deformation-variation", ".6"], ["--subduction-coupling", "1.1"],
         ["--submarine-erosion-ratio", "1.1"], ["--thermal-subsidence-strength", "-1"],
         ["--initial-ocean-depth-m", "65535"], ["--initial-max-height-m", "30000"],
+        ["--plume-count", "65"], ["--plume-tail-radius-km", "0"], ["--plume-weakening", "1.5"],
+        ["--plume-count", "2", "--plume-weakening", ".5"],  # weakening needs progressive rifting
     ):
         result = subprocess.run(base + extra, capture_output=True, text=True)
-        assert result.returncode != 0, f"Invalid or retired option accepted: {extra}"
+        assert result.returncode != 0, f"Invalid option accepted: {extra}"
 
     recipe = json.loads((Path(__file__).resolve().parents[2] / "configs/tectonics-baseline.json").read_text())
     explicit = [part for key, value in recipe["scenario"].items() for part in ("--" + key, str(value))]
@@ -52,7 +50,7 @@ def main(executable):
             assert scenario["surface_model"] == "isostatic-columns"
             assert scenario["transport_subdivision"] == recipe["scenario"]["transport-subdivision"]
             assert scenario["margin_processes"] and scenario["boundary_conditioned_terrain"]
-            assert manifest["cycle_count"] == 0 and manifest["time_myr"] == 6
+            assert manifest["time_myr"] == 6
             assert manifest["topology_diagnostics"]["enabled"]
             assert manifest["column_budget"]["enabled"]
             assert abs(manifest["column_budget"]["relative_mass_residual"]) < 1e-9
@@ -87,7 +85,7 @@ def main(executable):
         rejected = subprocess.run([executable, *small, "--output", str(root / "rejected"), "--mineral-history", "maybe"],
                                   capture_output=True, text=True)
         assert rejected.returncode != 0, "Invalid --mineral-history value accepted"
-    print("Tectonics CLI passed: shared recipe, native fields, budgets, continuous time, retired-option rejection, "
+    print("Tectonics CLI passed: shared recipe, native fields, budgets, continuous time, invalid-option rejection, "
           "mineral history")
 
 

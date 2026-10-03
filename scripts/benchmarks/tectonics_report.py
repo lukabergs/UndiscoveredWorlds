@@ -117,7 +117,7 @@ def run_animations(run_id, states, fieldspec, image_link=image_uri):
         if any(field in state.get("missing_fields", []) for state in selected):
             continue
         paths = [ROOT / f"runs/maps/tectonics/{field}/{s['label']}/{run_id}.png" for s in selected]
-        # Finalization/restarts can share model time and pixels with a preceding
+        # Finalization can share model time and pixels with a preceding
         # observation, even at the same update count. Checkpoint labels prevent
         # APNG coalescing those separately recorded observations.
         labels = [f"Run {run_id} | {s['time']:g} Myr | {s['label']} | {spec['title']} ({spec['units']})" for s in selected]
@@ -166,7 +166,7 @@ Inspect the configured procedural tectonics scenario against the established fix
 
 ## Interpretation and decision
 
-Record visual findings and the next controlled experiment here. Numerical correctness does not establish physical validity. Use the explicit column budget, including sources and sinks, when available; legacy crust-proxy sums are not a mass budget.
+Record visual findings and the next controlled experiment here. Numerical correctness does not establish physical validity. Use the explicit column budget, including sources and sinks, when available; crust-thickness proxy sums are not a mass budget.
 """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -238,8 +238,8 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
                 metrics["earth_comparison"] = compare_to_earth(metrics, earth_reference)
             state = {"run": run_id, "label": label, "time": manifest["time_myr"],
                      "seed": record["recipe"]["seed"], "runtime_seconds": record.get("elapsed_seconds"),
-                     "surface_model": manifest.get("run_scenario", {}).get("surface_model", "legacy"),
-                     "updates": manifest["update_count"], "cycle": manifest["cycle_count"],
+                     "surface_model": manifest.get("run_scenario", {}).get("surface_model", "unrecorded"),
+                     "updates": manifest["update_count"],
                      "shape": [manifest["height"], manifest["width"]], "metrics": metrics,
                      "phase": manifest.get('phase'), "boundary_note": manifest.get('boundary_note'),
                      "maps": {}, "numeric": {}, "display_saturation": {}, "missing_fields": []}

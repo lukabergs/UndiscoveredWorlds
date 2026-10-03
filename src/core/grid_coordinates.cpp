@@ -1,17 +1,5 @@
 #include "grid_coordinates.hpp"
 
-int wrap(int value, int max)
-{
-    max++;
-
-    value = value % max;
-
-    if (value < 0)
-        value = max + value;
-
-    return value;
-}
-
 twointegers getdestination(int x, int y, int dir)
 {
     if (dir == 8 || dir == 1 || dir == 2)

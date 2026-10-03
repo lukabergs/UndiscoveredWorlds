@@ -12,7 +12,6 @@ Snapshot capture_snapshot(const lithosphere& litho) {
     snapshot.width = litho.getWidth();
     snapshot.height = litho.getHeight();
     snapshot.iteration_count = litho.getIterationCount();
-    snapshot.cycle_count = litho.getCycleCount();
     snapshot.time_origin_step = litho.getTimeOriginStep();
     snapshot.sea_level_m = litho.getSeaLevelMeters();
     snapshot.time_myr = litho.getTimeMyr();
@@ -22,6 +21,7 @@ Snapshot capture_snapshot(const lithosphere& litho) {
     snapshot.column_budget = litho.getColumnModel().budget();
     snapshot.topology_diagnostics = litho.getTopologyDiagnostics();
     for (double damage:litho.getRiftDamage()) snapshot.rift_damage.push_back(static_cast<float>(damage));
+    snapshot.plume_influence = litho.getPlumeInfluenceMap();
     for (const auto& c : litho.getColumnModel().cells()) {
         snapshot.continental_crust_m.push_back(static_cast<float>(c.continent));
         snapshot.oceanic_crust_m.push_back(static_cast<float>(c.ocean));

@@ -5,8 +5,10 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCAL_ROOTS = {'meta', 'docs', 'refs', 'runs', 'extra', 'references', 'data',
+LOCAL_ROOTS = {'meta', 'refs', 'runs', 'extra', 'references', 'data',
                'out', 'build', 'bin', 'obj', 'saved_worlds', '0'}
+# The only tracked parts of runs/.
+TRACKED_RUN_DIRECTORIES = {'registry', 'ledger'}
 LOCAL_FILES = {'climate_benchmark_runs.json', 'climate_reference_data.json', 'UWinstaller.zip'}
 DATA_SUFFIXES = {'.zip', '.7z', '.tar', '.gz', '.bz2', '.xz', '.uwclim', '.nc',
                  '.hdf', '.h5', '.tif', '.tiff', '.npz', '.npy', '.xlsx', '.xls',
@@ -16,7 +18,8 @@ MAX_BYTES = 5 * 1024 * 1024
 
 def path_issue(path):
     parts = path.replace('\\', '/').split('/')
-    if parts[0].lower() in LOCAL_ROOTS or path in LOCAL_FILES:
+    tracked_run = parts[0] == 'runs' and len(parts) > 2 and parts[1] in TRACKED_RUN_DIRECTORIES
+    if (parts[0].lower() in LOCAL_ROOTS and not tracked_run) or path in LOCAL_FILES:
         return 'local-only directory or artifact'
     if path.startswith('tools/ripgrep/'):
         return 'downloaded tool distribution'

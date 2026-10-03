@@ -14,7 +14,7 @@ class lithosphere;
 
 namespace tectonics::contract {
 
-inline constexpr uint32_t kSchemaVersion = 6;
+inline constexpr uint32_t kSchemaVersion = 7;
 inline constexpr float kConvergentBoundaryThreshold = 0.18f;
 inline constexpr uint32_t kNoBoundaryId = 0;
 inline constexpr uint32_t kNoDeformingRegionId = 0;
@@ -144,7 +144,6 @@ struct Snapshot {
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t iteration_count = 0;
-    uint32_t cycle_count = 0;
     uint32_t time_origin_step = 0;
     uint16_t sea_level_m = 0;
     double time_myr = 0.0;
@@ -156,6 +155,7 @@ struct Snapshot {
     tectonics::topology::Diagnostics topology_diagnostics;
     std::vector<float> continental_crust_m, oceanic_crust_m, sediment_m;
     std::vector<float> rift_damage; // Advected incipient fracture damage, 0..1; optional in historical bundles.
+    std::vector<float> plume_influence; // 0..1 proximity to an active mantle plume; empty when plumes are off.
 
     std::vector<float> heightmap;
     std::vector<uint32_t> plate_id;

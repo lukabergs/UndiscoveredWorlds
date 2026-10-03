@@ -214,10 +214,10 @@ The retained reference Koeppen classifier uses a −3 °C C/D boundary; the simu
 <p>{wind_palette_note}</p>
 <div class="filters"><label>Find <input id="search" placeholder="wind/lic, rain, sea_temp…"></label><label>Month <select id="season"><option value="">All</option><option value="annual">Annual</option><option value="1">1 · January</option><option value="2">2 · April</option><option value="3">3 · July</option><option value="4">4 · October</option></select></label></div>
 {"".join(cards)}<script>function filter(){{const q=document.querySelector('#search').value.toLowerCase(),s=document.querySelector('#season').value;document.querySelectorAll('section').forEach(r=>r.hidden=!r.querySelector('h2').textContent.toLowerCase().includes(q)||(s&&r.dataset.season!==s));}}document.querySelectorAll('input,select').forEach(e=>e.addEventListener('input',filter));</script></html>'''
-    (output / f"{run_id}.html").write_text(document, encoding="utf-8")
+    (output / f"{run_id}-gallery.html").write_text(document, encoding="utf-8")
     summary = f"""# Climate benchmark {run_id}
 
-[Comparison gallery: {geometry_label}]({run_id}.html) · [commands]({guide}) · [reference palettes]({refindex}) · [earlier simulator history](climate-history-140-160.md)
+[Comparison gallery: {geometry_label}]({run_id}-gallery.html) · [Run page]({run_id}.html) · [commands]({guide}) · [reference palettes]({refindex}) · [earlier simulator history](climate-history-140-160.md)
 
 - Configuration: {information}
 - Elapsed: {elapsed}.
@@ -244,8 +244,8 @@ References retain their original pixels and source conventions. The observed Koe
 ## Maps
 
 """ + "\n".join(links) + "\n"
-    (output / f"{run_id}.md").write_text(summary, encoding="utf-8")
-    print(f"Run {run_id}: {len(cards)} maps, {matches} reference pairs, {status_label}; {output / f'{run_id}.html'}")
+    (output / f"{run_id}-gallery.md").write_text(summary, encoding="utf-8")
+    print(f"Run {run_id}: {len(cards)} maps, {matches} reference pairs, {status_label}; {output / f'{run_id}-gallery.html'}")
 
 
 if __name__ == "__main__":

@@ -23,202 +23,27 @@
 #include "../simulations/climate/climate_context.hpp"
 #include "../simulations/geology/mineral_systems/mineral_deposit.hpp"
 #include "social_generation.hpp"
+#include "world/field_access.hpp"
+#include "climate_biomes.hpp"
+#include "climate_world.hpp"
 
-#define ARRAYWIDTH 2048
-#define ARRAYHEIGHT 1024
-
-#define MAXCRATERS 100000
-
-constexpr int CLIMATEMAPSEACOLOURCOUNT = 3;
-constexpr int CLIMATEMAPCOLOURCOUNT = 32;
-constexpr int BIOMEMAPCOLOURCOUNT = 44;
-constexpr int RIVERMAPCOLOURCOUNT = 10;
-constexpr int RIVERMAPFEATURECOUNT = 7;
-constexpr int MAPGRADIENTTYPECOUNT = 4;
-constexpr int MAPGRADIENTMAXSTOPS = 12;
-
-enum ClimateMapSeaColourSlot
-{
-    climateopensea = 0,
-    climateseasonalseaice = 1,
-    climatepermanentseaice = 2
-};
-
-enum RiverMapColourSlot
-{
-    rivermapbackground = 0,
-    rivermaplowflow = 1,
-    rivermaphighflow = 2,
-    rivermaplake = 3,
-    rivermapsaltpan = 4,
-    rivermapwetlands = 5,
-    rivermapmud = 6,
-    rivermapsand = 7,
-    rivermapshingle = 8,
-    rivermapvolcano = 9
-};
-
-enum RiverMapFeatureSlot
-{
-    rivermapshowlakes = 0,
-    rivermapshowsaltpans = 1,
-    rivermapshowwetlands = 2,
-    rivermapshowmud = 3,
-    rivermapshowsand = 4,
-    rivermapshowshingle = 5,
-    rivermapshowvolcanoes = 6
-};
-
-enum BiomeMapColourSlot
-{
-    biomeice = 0,
-    biomepolardesert = 1,
-    biomepolardrytundra = 2,
-    biomepolarmoisttundra = 3,
-    biomepolarwettundra = 4,
-    biomepolarraindtundra = 5,
-    biomesubpolardesert = 6,
-    biomesubpolardrytundra = 7,
-    biomesubpolarmoisttundra = 8,
-    biomesubpolarwettundra = 9,
-    biomesubpolarraindtundra = 10,
-    biomeborealdesert = 11,
-    biomeborealdrybush = 12,
-    biomeborealmoistforest = 13,
-    biomeborealwetforest = 14,
-    biomeborealrainforest = 15,
-    biomecooltemperatedesert = 16,
-    biomecooltemperatedesertbush = 17,
-    biomecooltemperatesteppe = 18,
-    biomecooltemperatemoistforest = 19,
-    biomecooltemperatewetforest = 20,
-    biomecooltemperaterainforest = 21,
-    biomewarmtemperatedesert = 22,
-    biomewarmtemperatedesertbush = 23,
-    biomewarmtemperatethornsteppe = 24,
-    biomewarmtemperatedryforest = 25,
-    biomewarmtemperatemoistforest = 26,
-    biomewarmtemperatewetforest = 27,
-    biomewarmtemperaterainforest = 28,
-    biomesubtropicaldesert = 29,
-    biomesubtropicaldesertbush = 30,
-    biomesubtropicalthornsteppe = 31,
-    biomesubtropicaldryforest = 32,
-    biomesubtropicalmoistforest = 33,
-    biomesubtropicalwetforest = 34,
-    biomesubtropicalrainforest = 35,
-    biometropicaldesert = 36,
-    biometropicaldesertbush = 37,
-    biometropicalthornsteppe = 38,
-    biometropicalverydryforest = 39,
-    biometropicaldryforest = 40,
-    biometropicalmoistforest = 41,
-    biometropicalwetforest = 42,
-    biometropicalrainforest = 43
-};
-
-enum MapGradientType
-{
-    mapgradientelevation = 0,
-    mapgradienttemperature = 1,
-    mapgradientprecipitation = 2,
-    mapgradientriverflow = 3
-};
-
-enum class GeologicRegime : std::uint8_t
-{
-    stable = 0,
-    convergent_arc = 1,
-    continent_collision = 2,
-    divergent_rift = 3,
-    transform = 4,
-    passive_margin = 5,
-    mid_ocean_ridge = 6,
-    trench_adjacent = 7
-};
-
-enum class CrustClass : std::uint8_t
-{
-    none = 0,
-    oceanic = 1,
-    transitional = 2,
-    continental = 3
-};
-
-enum class BoundaryType : std::uint8_t
-{
-    none = 0,
-    convergent = 1,
-    divergent = 2,
-    transform = 3,
-    passive_margin = 4
-};
-
-enum class DeformingRegionType : std::uint8_t
-{
-    none = 0,
-    continental_rift = 1,
-    diffuse_collision = 2
-};
-
-enum class BasinClass : std::uint8_t
-{
-    none = 0,
-    exorheic = 1,
-    endorheic = 2,
-    coastal = 3
-};
-
-struct TectonicBoundarySegment
-{
-    int id = 0;
-    int leftPlateId = 0;
-    int rightPlateId = 0;
-    int cellCount = 0;
-    int persistenceSteps = 0;
-    float centroidX = 0.0f;
-    float centroidY = 0.0f;
-    float lengthCells = 0.0f;
-    float averageNormalMotion = 0.0f;
-    float averageShearMotion = 0.0f;
-    int averageConvergenceScore = 0;
-    int averageDivergenceScore = 0;
-    int averageShearScore = 0;
-    BoundaryType boundaryType = BoundaryType::none;
-    GeologicRegime geologicRegime = GeologicRegime::stable;
-    double ageMyr = 0.0;
-};
-
-struct TectonicDeformingRegion
-{
-    int id = 0;
-    int boundarySegmentId = 0;
-    int primaryPlateId = 0;
-    int secondaryPlateId = 0;
-    int cellCount = 0;
-    int persistenceSteps = 0;
-    float centroidX = 0.0f;
-    float centroidY = 0.0f;
-    float averageDeformationRate = 0.0f;
-    float averageInterpolatedVelocityX = 0.0f;
-    float averageInterpolatedVelocityY = 0.0f;
-    float averageNormalMotion = 0.0f;
-    float averageShearMotion = 0.0f;
-    DeformingRegionType type = DeformingRegionType::none;
-    double ageMyr = 0.0;
-};
-
-using namespace std;
+#include "planet_components.hpp"
 
 class planet
 {
+    // Catalogue access for run bundles and access audits (planet_fields.cpp).
+    friend struct planetfieldaccess;
+
 public:
 
     planet(); // constructor
     ~planet();  // destructor
 
-    climatecontext::Context& climatesimulation() { return climatecontext_; }
-    const climatecontext::Context& climatesimulation() const { return climatecontext_; }
+    climatecontext::Context& climatesimulation() { return climate_.climatesimulation(); }
+    const climatecontext::Context& climatesimulation() const { return climate_.climatesimulation(); }
+    // Climate module state with this world's terrain bound as its inputs.
+    climateworld& climate();
+    const climateworld& climate() const;
 
     // accessor functions
 
@@ -237,8 +62,6 @@ public:
     float tectonicdeltatimemyr() const;
     void settectonicdeltatimemyr(float amount);
 
-    int tectoniccyclecount() const;
-    void settectoniccyclecount(int amount);
 
     int tectonicplatecount() const;
     void settectonicplatecount(int amount);
@@ -381,293 +204,293 @@ public:
 
     // These are the accessor functions for the map colours.
 
-    int seaice1() const { return itsseaice1; };
-    void setseaice1(int amount) { itsseaice1 = amount; };
+    int seaice1() const { return presentation_.itsseaice1; };
+    void setseaice1(int amount) { presentation_.itsseaice1 = amount; };
 
-    int seaice2() const { return itsseaice2; };
-    void setseaice2(int amount) { itsseaice2 = amount; };
+    int seaice2() const { return presentation_.itsseaice2; };
+    void setseaice2(int amount) { presentation_.itsseaice2 = amount; };
 
-    int seaice3() const { return itsseaice3; };
-    void setseaice3(int amount) { itsseaice3 = amount; };
+    int seaice3() const { return presentation_.itsseaice3; };
+    void setseaice3(int amount) { presentation_.itsseaice3 = amount; };
 
-    int ocean1() const { return itsocean1; };
-    void setocean1(int amount) { itsocean1 = amount; };
+    int ocean1() const { return presentation_.itsocean1; };
+    void setocean1(int amount) { presentation_.itsocean1 = amount; };
 
-    int ocean2() const { return itsocean2; };
-    void setocean2(int amount) { itsocean2 = amount; };
+    int ocean2() const { return presentation_.itsocean2; };
+    void setocean2(int amount) { presentation_.itsocean2 = amount; };
 
-    int ocean3() const { return itsocean3; };
-    void setocean3(int amount) { itsocean3 = amount; };
+    int ocean3() const { return presentation_.itsocean3; };
+    void setocean3(int amount) { presentation_.itsocean3 = amount; };
 
-    int deepocean1() const { return itsdeepocean1; };
-    void setdeepocean1(int amount) { itsdeepocean1 = amount; };
+    int deepocean1() const { return presentation_.itsdeepocean1; };
+    void setdeepocean1(int amount) { presentation_.itsdeepocean1 = amount; };
 
-    int deepocean2() const { return itsdeepocean2; };
-    void setdeepocean2(int amount) { itsdeepocean2 = amount; };
+    int deepocean2() const { return presentation_.itsdeepocean2; };
+    void setdeepocean2(int amount) { presentation_.itsdeepocean2 = amount; };
 
-    int deepocean3() const { return itsdeepocean3; };
-    void setdeepocean3(int amount) { itsdeepocean3 = amount; };
+    int deepocean3() const { return presentation_.itsdeepocean3; };
+    void setdeepocean3(int amount) { presentation_.itsdeepocean3 = amount; };
 
-    int base1() const { return itsbase1; };
-    void setbase1(int amount) { itsbase1 = amount; };
+    int base1() const { return presentation_.itsbase1; };
+    void setbase1(int amount) { presentation_.itsbase1 = amount; };
 
-    int base2() const { return itsbase2; };
-    void setbase2(int amount) { itsbase2 = amount; };
+    int base2() const { return presentation_.itsbase2; };
+    void setbase2(int amount) { presentation_.itsbase2 = amount; };
 
-    int base3() const { return itsbase3; };
-    void setbase3(int amount) { itsbase3 = amount; };
+    int base3() const { return presentation_.itsbase3; };
+    void setbase3(int amount) { presentation_.itsbase3 = amount; };
 
-    int basetemp1() const { return itsbasetemp1; };
-    void setbasetemp1(int amount) { itsbasetemp1 = amount; };
+    int basetemp1() const { return presentation_.itsbasetemp1; };
+    void setbasetemp1(int amount) { presentation_.itsbasetemp1 = amount; };
 
-    int basetemp2() const { return itsbasetemp2; };
-    void setbasetemp2(int amount) { itsbasetemp2 = amount; };
+    int basetemp2() const { return presentation_.itsbasetemp2; };
+    void setbasetemp2(int amount) { presentation_.itsbasetemp2 = amount; };
 
-    int basetemp3() const { return itsbasetemp3; };
-    void setbasetemp3(int amount) { itsbasetemp3 = amount; };
+    int basetemp3() const { return presentation_.itsbasetemp3; };
+    void setbasetemp3(int amount) { presentation_.itsbasetemp3 = amount; };
 
-    int highbase1() const { return itshighbase1; };
-    void sethighbase1(int amount) { itshighbase1 = amount; };
+    int highbase1() const { return presentation_.itshighbase1; };
+    void sethighbase1(int amount) { presentation_.itshighbase1 = amount; };
 
-    int highbase2() const { return itshighbase2; };
-    void sethighbase2(int amount) { itshighbase2 = amount; };
+    int highbase2() const { return presentation_.itshighbase2; };
+    void sethighbase2(int amount) { presentation_.itshighbase2 = amount; };
 
-    int highbase3() const { return itshighbase3; };
-    void sethighbase3(int amount) { itshighbase3 = amount; };
+    int highbase3() const { return presentation_.itshighbase3; };
+    void sethighbase3(int amount) { presentation_.itshighbase3 = amount; };
 
-    int desert1() const { return itsdesert1; };
-    void setdesert1(int amount) { itsdesert1 = amount; };
+    int desert1() const { return presentation_.itsdesert1; };
+    void setdesert1(int amount) { presentation_.itsdesert1 = amount; };
 
-    int desert2() const { return itsdesert2; };
-    void setdesert2(int amount) { itsdesert2 = amount; };
+    int desert2() const { return presentation_.itsdesert2; };
+    void setdesert2(int amount) { presentation_.itsdesert2 = amount; };
 
-    int desert3() const { return itsdesert3; };
-    void setdesert3(int amount) { itsdesert3 = amount; };
+    int desert3() const { return presentation_.itsdesert3; };
+    void setdesert3(int amount) { presentation_.itsdesert3 = amount; };
 
-    int highdesert1() const { return itshighdesert1; };
-    void sethighdesert1(int amount) { itshighdesert1 = amount; };
+    int highdesert1() const { return presentation_.itshighdesert1; };
+    void sethighdesert1(int amount) { presentation_.itshighdesert1 = amount; };
 
-    int highdesert2() const { return itshighdesert2; };
-    void sethighdesert2(int amount) { itshighdesert2 = amount; };
+    int highdesert2() const { return presentation_.itshighdesert2; };
+    void sethighdesert2(int amount) { presentation_.itshighdesert2 = amount; };
 
-    int highdesert3() const { return itshighdesert3; };
-    void sethighdesert3(int amount) { itshighdesert3 = amount; };
+    int highdesert3() const { return presentation_.itshighdesert3; };
+    void sethighdesert3(int amount) { presentation_.itshighdesert3 = amount; };
 
-    int colddesert1() const { return itscolddesert1; };
-    void setcolddesert1(int amount) { itscolddesert1 = amount; };
+    int colddesert1() const { return presentation_.itscolddesert1; };
+    void setcolddesert1(int amount) { presentation_.itscolddesert1 = amount; };
 
-    int colddesert2() const { return itscolddesert2; };
-    void setcolddesert2(int amount) { itscolddesert2 = amount; };
+    int colddesert2() const { return presentation_.itscolddesert2; };
+    void setcolddesert2(int amount) { presentation_.itscolddesert2 = amount; };
 
-    int colddesert3() const { return itscolddesert3; };
-    void setcolddesert3(int amount) { itscolddesert3 = amount; };
+    int colddesert3() const { return presentation_.itscolddesert3; };
+    void setcolddesert3(int amount) { presentation_.itscolddesert3 = amount; };
 
-    int grass1() const { return itsgrass1; };
-    void setgrass1(int amount) { itsgrass1 = amount; };
+    int grass1() const { return presentation_.itsgrass1; };
+    void setgrass1(int amount) { presentation_.itsgrass1 = amount; };
 
-    int grass2() const { return itsgrass2; };
-    void setgrass2(int amount) { itsgrass2 = amount; };
+    int grass2() const { return presentation_.itsgrass2; };
+    void setgrass2(int amount) { presentation_.itsgrass2 = amount; };
 
-    int grass3() const { return itsgrass3; };
-    void setgrass3(int amount) { itsgrass3 = amount; };
+    int grass3() const { return presentation_.itsgrass3; };
+    void setgrass3(int amount) { presentation_.itsgrass3 = amount; };
 
-    int cold1() const { return itscold1; };
-    void setcold1(int amount) { itscold1 = amount; };
+    int cold1() const { return presentation_.itscold1; };
+    void setcold1(int amount) { presentation_.itscold1 = amount; };
 
-    int cold2() const { return itscold2; };
-    void setcold2(int amount) { itscold2 = amount; };
+    int cold2() const { return presentation_.itscold2; };
+    void setcold2(int amount) { presentation_.itscold2 = amount; };
 
-    int cold3() const { return itscold3; };
-    void setcold3(int amount) { itscold3 = amount; };
+    int cold3() const { return presentation_.itscold3; };
+    void setcold3(int amount) { presentation_.itscold3 = amount; };
 
-    int tundra1() const { return itstundra1; };
-    void settundra1(int amount) { itstundra1 = amount; };
+    int tundra1() const { return presentation_.itstundra1; };
+    void settundra1(int amount) { presentation_.itstundra1 = amount; };
 
-    int tundra2() const { return itstundra2; };
-    void settundra2(int amount) { itstundra2 = amount; };
+    int tundra2() const { return presentation_.itstundra2; };
+    void settundra2(int amount) { presentation_.itstundra2 = amount; };
 
-    int tundra3() const { return itstundra3; };
-    void settundra3(int amount) { itstundra3 = amount; };
+    int tundra3() const { return presentation_.itstundra3; };
+    void settundra3(int amount) { presentation_.itstundra3 = amount; };
 
-    int eqtundra1() const { return itseqtundra1; };
-    void seteqtundra1(int amount) { itseqtundra1 = amount; };
+    int eqtundra1() const { return presentation_.itseqtundra1; };
+    void seteqtundra1(int amount) { presentation_.itseqtundra1 = amount; };
 
-    int eqtundra2() const { return itseqtundra2; };
-    void seteqtundra2(int amount) { itseqtundra2 = amount; };
+    int eqtundra2() const { return presentation_.itseqtundra2; };
+    void seteqtundra2(int amount) { presentation_.itseqtundra2 = amount; };
 
-    int eqtundra3() const { return itseqtundra3; };
-    void seteqtundra3(int amount) { itseqtundra3 = amount; };
+    int eqtundra3() const { return presentation_.itseqtundra3; };
+    void seteqtundra3(int amount) { presentation_.itseqtundra3 = amount; };
 
-    int saltpan1() const { return itssaltpan1; };
-    void setsaltpan1(int amount) { itssaltpan1 = amount; };
+    int saltpan1() const { return presentation_.itssaltpan1; };
+    void setsaltpan1(int amount) { presentation_.itssaltpan1 = amount; };
 
-    int saltpan2() const { return itssaltpan2; };
-    void setsaltpan2(int amount) { itssaltpan2 = amount; };
+    int saltpan2() const { return presentation_.itssaltpan2; };
+    void setsaltpan2(int amount) { presentation_.itssaltpan2 = amount; };
 
-    int saltpan3() const { return itssaltpan3; };
-    void setsaltpan3(int amount) { itssaltpan3 = amount; };
+    int saltpan3() const { return presentation_.itssaltpan3; };
+    void setsaltpan3(int amount) { presentation_.itssaltpan3 = amount; };
 
-    int erg1() const { return itserg1; };
-    void seterg1(int amount) { itserg1 = amount; };
+    int erg1() const { return presentation_.itserg1; };
+    void seterg1(int amount) { presentation_.itserg1 = amount; };
 
-    int erg2() const { return itserg2; };
-    void seterg2(int amount) { itserg2 = amount; };
+    int erg2() const { return presentation_.itserg2; };
+    void seterg2(int amount) { presentation_.itserg2 = amount; };
 
-    int erg3() const { return itserg3; };
-    void seterg3(int amount) { itserg3 = amount; };
+    int erg3() const { return presentation_.itserg3; };
+    void seterg3(int amount) { presentation_.itserg3 = amount; };
 
-    int wetlands1() const { return itswetlands1; };
-    void setwetlands1(int amount) { itswetlands1 = amount; };
+    int wetlands1() const { return presentation_.itswetlands1; };
+    void setwetlands1(int amount) { presentation_.itswetlands1 = amount; };
 
-    int wetlands2() const { return itswetlands2; };
-    void setwetlands2(int amount) { itswetlands2 = amount; };
+    int wetlands2() const { return presentation_.itswetlands2; };
+    void setwetlands2(int amount) { presentation_.itswetlands2 = amount; };
 
-    int wetlands3() const { return itswetlands3; };
-    void setwetlands3(int amount) { itswetlands3 = amount; };
+    int wetlands3() const { return presentation_.itswetlands3; };
+    void setwetlands3(int amount) { presentation_.itswetlands3 = amount; };
 
-    int lake1() const { return itslake1; };
-    void setlake1(int amount) { itslake1 = amount; };
+    int lake1() const { return presentation_.itslake1; };
+    void setlake1(int amount) { presentation_.itslake1 = amount; };
 
-    int lake2() const { return itslake2; };
-    void setlake2(int amount) { itslake2 = amount; };
+    int lake2() const { return presentation_.itslake2; };
+    void setlake2(int amount) { presentation_.itslake2 = amount; };
 
-    int lake3() const { return itslake3; };
-    void setlake3(int amount) { itslake3 = amount; };
+    int lake3() const { return presentation_.itslake3; };
+    void setlake3(int amount) { presentation_.itslake3 = amount; };
 
-    int river1() const { return itsriver1; };
-    void setriver1(int amount) { itsriver1 = amount; };
+    int river1() const { return presentation_.itsriver1; };
+    void setriver1(int amount) { presentation_.itsriver1 = amount; };
 
-    int river2() const { return itsriver2; };
-    void setriver2(int amount) { itsriver2 = amount; };
+    int river2() const { return presentation_.itsriver2; };
+    void setriver2(int amount) { presentation_.itsriver2 = amount; };
 
-    int river3() const { return itsriver3; };
-    void setriver3(int amount) { itsriver3 = amount; };
+    int river3() const { return presentation_.itsriver3; };
+    void setriver3(int amount) { presentation_.itsriver3 = amount; };
 
-    int glacier1() const { return itsglacier1; };
-    void setglacier1(int amount) { itsglacier1 = amount; };
+    int glacier1() const { return presentation_.itsglacier1; };
+    void setglacier1(int amount) { presentation_.itsglacier1 = amount; };
 
-    int glacier2() const { return itsglacier2; };
-    void setglacier2(int amount) { itsglacier2 = amount; };
+    int glacier2() const { return presentation_.itsglacier2; };
+    void setglacier2(int amount) { presentation_.itsglacier2 = amount; };
 
-    int glacier3() const { return itsglacier3; };
-    void setglacier3(int amount) { itsglacier3 = amount; };
+    int glacier3() const { return presentation_.itsglacier3; };
+    void setglacier3(int amount) { presentation_.itsglacier3 = amount; };
 
-    int sand1() const { return itssand1; };
-    void setsand1(int amount) { itssand1 = amount; };
+    int sand1() const { return presentation_.itssand1; };
+    void setsand1(int amount) { presentation_.itssand1 = amount; };
 
-    int sand2() const { return itssand2; };
-    void setsand2(int amount) { itssand2 = amount; };
+    int sand2() const { return presentation_.itssand2; };
+    void setsand2(int amount) { presentation_.itssand2 = amount; };
 
-    int sand3() const { return itssand3; };
-    void setsand3(int amount) { itssand3 = amount; };
+    int sand3() const { return presentation_.itssand3; };
+    void setsand3(int amount) { presentation_.itssand3 = amount; };
 
-    int mud1() const { return itsmud1; };
-    void setmud1(int amount) { itsmud1 = amount; };
+    int mud1() const { return presentation_.itsmud1; };
+    void setmud1(int amount) { presentation_.itsmud1 = amount; };
 
-    int mud2() const { return itsmud2; };
-    void setmud2(int amount) { itsmud2 = amount; };
+    int mud2() const { return presentation_.itsmud2; };
+    void setmud2(int amount) { presentation_.itsmud2 = amount; };
 
-    int mud3() const { return itsmud3; };
-    void setmud3(int amount) { itsmud3 = amount; };
+    int mud3() const { return presentation_.itsmud3; };
+    void setmud3(int amount) { presentation_.itsmud3 = amount; };
 
-    int shingle1() const { return itsshingle1; };
-    void setshingle1(int amount) { itsshingle1 = amount; };
+    int shingle1() const { return presentation_.itsshingle1; };
+    void setshingle1(int amount) { presentation_.itsshingle1 = amount; };
 
-    int shingle2() const { return itsshingle2; };
-    void setshingle2(int amount) { itsshingle2 = amount; };
+    int shingle2() const { return presentation_.itsshingle2; };
+    void setshingle2(int amount) { presentation_.itsshingle2 = amount; };
 
-    int shingle3() const { return itsshingle3; };
-    void setshingle3(int amount) { itsshingle3 = amount; };
+    int shingle3() const { return presentation_.itsshingle3; };
+    void setshingle3(int amount) { presentation_.itsshingle3 = amount; };
 
-    int mangrove1() const { return itsmangrove1; };
-    void setmangrove1(int amount) { itsmangrove1 = amount; };
+    int mangrove1() const { return presentation_.itsmangrove1; };
+    void setmangrove1(int amount) { presentation_.itsmangrove1 = amount; };
 
-    int mangrove2() const { return itsmangrove2; };
-    void setmangrove2(int amount) { itsmangrove2 = amount; };
+    int mangrove2() const { return presentation_.itsmangrove2; };
+    void setmangrove2(int amount) { presentation_.itsmangrove2 = amount; };
 
-    int mangrove3() const { return itsmangrove3; };
-    void setmangrove3(int amount) { itsmangrove3 = amount; };
+    int mangrove3() const { return presentation_.itsmangrove3; };
+    void setmangrove3(int amount) { presentation_.itsmangrove3 = amount; };
 
-    int highlight1() const { return itshighlight1; };
-    void sethighlight1(int amount) { itshighlight1 = amount; };
+    int highlight1() const { return presentation_.itshighlight1; };
+    void sethighlight1(int amount) { presentation_.itshighlight1 = amount; };
 
-    int highlight2() const { return itshighlight2; };
-    void sethighlight2(int amount) { itshighlight2 = amount; };
+    int highlight2() const { return presentation_.itshighlight2; };
+    void sethighlight2(int amount) { presentation_.itshighlight2 = amount; };
 
-    int highlight3() const { return itshighlight3; };
-    void sethighlight3(int amount) { itshighlight3 = amount; };
+    int highlight3() const { return presentation_.itshighlight3; };
+    void sethighlight3(int amount) { presentation_.itshighlight3 = amount; };
 
-    int outline1() const { return itsoutline1; };
-    void setoutline1(int amount) { itsoutline1 = amount; };
+    int outline1() const { return presentation_.itsoutline1; };
+    void setoutline1(int amount) { presentation_.itsoutline1 = amount; };
 
-    int outline2() const { return itsoutline2; };
-    void setoutline2(int amount) { itsoutline2 = amount; };
+    int outline2() const { return presentation_.itsoutline2; };
+    void setoutline2(int amount) { presentation_.itsoutline2 = amount; };
 
-    int outline3() const { return itsoutline3; };
-    void setoutline3(int amount) { itsoutline3 = amount; };
+    int outline3() const { return presentation_.itsoutline3; };
+    void setoutline3(int amount) { presentation_.itsoutline3 = amount; };
 
-    int elevationlow1() const { return itselevationlow1; };
-    void setelevationlow1(int amount) { itselevationlow1 = amount; };
+    int elevationlow1() const { return presentation_.itselevationlow1; };
+    void setelevationlow1(int amount) { presentation_.itselevationlow1 = amount; };
 
-    int elevationlow2() const { return itselevationlow2; };
-    void setelevationlow2(int amount) { itselevationlow2 = amount; };
+    int elevationlow2() const { return presentation_.itselevationlow2; };
+    void setelevationlow2(int amount) { presentation_.itselevationlow2 = amount; };
 
-    int elevationlow3() const { return itselevationlow3; };
-    void setelevationlow3(int amount) { itselevationlow3 = amount; };
+    int elevationlow3() const { return presentation_.itselevationlow3; };
+    void setelevationlow3(int amount) { presentation_.itselevationlow3 = amount; };
 
-    int elevationhigh1() const { return itselevationhigh1; };
-    void setelevationhigh1(int amount) { itselevationhigh1 = amount; };
+    int elevationhigh1() const { return presentation_.itselevationhigh1; };
+    void setelevationhigh1(int amount) { presentation_.itselevationhigh1 = amount; };
 
-    int elevationhigh2() const { return itselevationhigh2; };
-    void setelevationhigh2(int amount) { itselevationhigh2 = amount; };
+    int elevationhigh2() const { return presentation_.itselevationhigh2; };
+    void setelevationhigh2(int amount) { presentation_.itselevationhigh2 = amount; };
 
-    int elevationhigh3() const { return itselevationhigh3; };
-    void setelevationhigh3(int amount) { itselevationhigh3 = amount; };
+    int elevationhigh3() const { return presentation_.itselevationhigh3; };
+    void setelevationhigh3(int amount) { presentation_.itselevationhigh3 = amount; };
 
-    int temperaturecold1() const { return itstemperaturecold1; };
-    void settemperaturecold1(int amount) { itstemperaturecold1 = amount; };
+    int temperaturecold1() const { return presentation_.itstemperaturecold1; };
+    void settemperaturecold1(int amount) { presentation_.itstemperaturecold1 = amount; };
 
-    int temperaturecold2() const { return itstemperaturecold2; };
-    void settemperaturecold2(int amount) { itstemperaturecold2 = amount; };
+    int temperaturecold2() const { return presentation_.itstemperaturecold2; };
+    void settemperaturecold2(int amount) { presentation_.itstemperaturecold2 = amount; };
 
-    int temperaturecold3() const { return itstemperaturecold3; };
-    void settemperaturecold3(int amount) { itstemperaturecold3 = amount; };
+    int temperaturecold3() const { return presentation_.itstemperaturecold3; };
+    void settemperaturecold3(int amount) { presentation_.itstemperaturecold3 = amount; };
 
-    int temperaturetemperate1() const { return itstemperaturetemperate1; };
-    void settemperaturetemperate1(int amount) { itstemperaturetemperate1 = amount; };
+    int temperaturetemperate1() const { return presentation_.itstemperaturetemperate1; };
+    void settemperaturetemperate1(int amount) { presentation_.itstemperaturetemperate1 = amount; };
 
-    int temperaturetemperate2() const { return itstemperaturetemperate2; };
-    void settemperaturetemperate2(int amount) { itstemperaturetemperate2 = amount; };
+    int temperaturetemperate2() const { return presentation_.itstemperaturetemperate2; };
+    void settemperaturetemperate2(int amount) { presentation_.itstemperaturetemperate2 = amount; };
 
-    int temperaturetemperate3() const { return itstemperaturetemperate3; };
-    void settemperaturetemperate3(int amount) { itstemperaturetemperate3 = amount; };
+    int temperaturetemperate3() const { return presentation_.itstemperaturetemperate3; };
+    void settemperaturetemperate3(int amount) { presentation_.itstemperaturetemperate3 = amount; };
 
-    int temperaturehot1() const { return itstemperaturehot1; };
-    void settemperaturehot1(int amount) { itstemperaturehot1 = amount; };
+    int temperaturehot1() const { return presentation_.itstemperaturehot1; };
+    void settemperaturehot1(int amount) { presentation_.itstemperaturehot1 = amount; };
 
-    int temperaturehot2() const { return itstemperaturehot2; };
-    void settemperaturehot2(int amount) { itstemperaturehot2 = amount; };
+    int temperaturehot2() const { return presentation_.itstemperaturehot2; };
+    void settemperaturehot2(int amount) { presentation_.itstemperaturehot2 = amount; };
 
-    int temperaturehot3() const { return itstemperaturehot3; };
-    void settemperaturehot3(int amount) { itstemperaturehot3 = amount; };
+    int temperaturehot3() const { return presentation_.itstemperaturehot3; };
+    void settemperaturehot3(int amount) { presentation_.itstemperaturehot3 = amount; };
 
-    int precipitationdry1() const { return itsprecipitationdry1; };
-    void setprecipitationdry1(int amount) { itsprecipitationdry1 = amount; };
+    int precipitationdry1() const { return presentation_.itsprecipitationdry1; };
+    void setprecipitationdry1(int amount) { presentation_.itsprecipitationdry1 = amount; };
 
-    int precipitationdry2() const { return itsprecipitationdry2; };
-    void setprecipitationdry2(int amount) { itsprecipitationdry2 = amount; };
+    int precipitationdry2() const { return presentation_.itsprecipitationdry2; };
+    void setprecipitationdry2(int amount) { presentation_.itsprecipitationdry2 = amount; };
 
-    int precipitationdry3() const { return itsprecipitationdry3; };
-    void setprecipitationdry3(int amount) { itsprecipitationdry3 = amount; };
+    int precipitationdry3() const { return presentation_.itsprecipitationdry3; };
+    void setprecipitationdry3(int amount) { presentation_.itsprecipitationdry3 = amount; };
 
-    int precipitationwet1() const { return itsprecipitationwet1; };
-    void setprecipitationwet1(int amount) { itsprecipitationwet1 = amount; };
+    int precipitationwet1() const { return presentation_.itsprecipitationwet1; };
+    void setprecipitationwet1(int amount) { presentation_.itsprecipitationwet1 = amount; };
 
-    int precipitationwet2() const { return itsprecipitationwet2; };
-    void setprecipitationwet2(int amount) { itsprecipitationwet2 = amount; };
+    int precipitationwet2() const { return presentation_.itsprecipitationwet2; };
+    void setprecipitationwet2(int amount) { presentation_.itsprecipitationwet2 = amount; };
 
-    int precipitationwet3() const { return itsprecipitationwet3; };
-    void setprecipitationwet3(int amount) { itsprecipitationwet3 = amount; };
+    int precipitationwet3() const { return presentation_.itsprecipitationwet3; };
+    void setprecipitationwet3(int amount) { presentation_.itsprecipitationwet3 = amount; };
 
     int climatemapseacolour(int slot, int channel) const;
     void setclimatemapseacolour(int slot, int channel, int amount);
@@ -701,6 +524,9 @@ public:
     bool sea(int x, int y) const; // whether this is sea or not
 
     bool outline(int x, int y) const;   // whether this is coast, next to sea
+    // Continental-shelf mask (geosphere.continental_shelf), edited in place by terrain passes.
+    worldgrid<bool>& continentalshelves() { UW_FIELD_READ(continental_shelf); return geosphere_.shelfmap; }
+    const worldgrid<bool>& continentalshelves() const { UW_FIELD_READ(continental_shelf); return geosphere_.shelfmap; }
 
     bool coast(int x, int y) const; // whether this is coast, next to land
 
@@ -1076,7 +902,7 @@ public:
     void clearsocialstate();
 
     int deltadir(int x, int y) const;    // delta branch flow direction (reversed)
-    int deltadir_no_bounds_check(int x, int y) const { return deltamapdir[x][y]; }
+    int deltadir_no_bounds_check(int x, int y) const { return hydrosphere_.deltamapdir[x][y]; }
     void setdeltadir(int x, int y, int amount);
 
     int deltajan(int x, int y) const;    // January delta branch flow volume
@@ -1146,7 +972,6 @@ public:
     void smoothnom(int amount); // Smoothes the no-mountain map to a given amount.
     void smoothextraelev(int amount); // Smoothes the extra elevation map to a given amount.
     void shiftterrain(int offset); // Shifts the physical terrain by a given amount.
-    void smoothrainmaps(int amount); // Smoothes the rain maps by a given amount.
     void setmaxriverflow(); // Calculates the largest river flow on the map.
     void syncseasonalclimatefromlegacy(); // Populates explicit seasonal fields from the legacy Jan/Jul model.
     void cleartectonicprovenance();
@@ -1167,317 +992,15 @@ private:
     int itssaveversion; // The save version. Only saves of this version can be loaded in.
     int itssettingssaveversion; // As above, but for settings files.
 
-    int itssize; // Size of planet. 1=tiny; 2=small; 3=Earthlike.
-    
-    int itswidth;   // width of global map
-    int itsheight;  // height of global map
-    long itsseed;    // seed number of this world
-    int itstectonictimeoriginstep;
-    float itstectonictimemyr;
-    float itstectonicdeltatimemyr;
-    int itstectoniccyclecount;
-    int itstectonicplatecount;
-    int itstectonicsealevelm;
-    bool itsrotation;    // 1 (true) like the Earth, 0 (false) the other way
-    float itstilt; // Axial tilt (affects seasonal differences). Earthlike = 22.5
-    float itseccentricity; // How elliptical the orbit is. Earthlike = 0.0167.
-    short itsperihelion; // Closest point to the sun. Earthlike = 0 (Jan)
-    float itsgravity; // Strength of gravity on the surface. Earthlike = 1.0
-    float itslunar; // Strength of lunar attraction. Earthlike = 1.0
-
-    float itstempdecrease; // How much temperature decreases with elevation. Earthlike = 6.5/km
-    int itsnorthpolaradjust; // Amount to adjust north pole temperature. Earthlike = +3
-    int itssouthpolaradjust; // Amount to adjust south pole temperature. Earthlike = -3
-    int itsaveragetemp; // Average global temperature. Earthlike = 14
-    int itsnorthpolartemp; // Average north polar temperature
-    int itssouthpolartemp; // Average south polar temperature
-    int itseqtemp; // Average equatorial temperature
-    float itswaterpickup; // How much water to pick up over oceans. Default = 1.0
-    float itsriverfactor;   // Divide river flow by this to get it in cubic metres/second
-    int itsriverlandreduce; // Rivers will carve channels at the base elevation of the tile, minus this
-    int itsestuarylimit;    // Rivers this size or above might have estuaries
-    int itsglacialtemp;     // Areas with this average temperature or lower will have glacial terrain
-    int itsglaciertemp;     // Rivers in areas with this maximum temperature or lower will be glaciers
-    float itsmountainreduce;    // Amount to reduce the heights by, to make the global map match the regional map a little better
-    int itsclimateno;   // Total number of climate types
-    int itsmaxheight;   // Maximum elevation
-    int itssealevel;    // Sea level
-    int itsmaxriverflow;    // Largest river flow
-    int itslandtotal; // Total cells of land
-    int itsseatotal; // Total cells of sea
-
-    int itscraterno; // Number of craters
-
-    float itslandshading;
-    float itslakeshading;
-    float itsseashading; // Amount of shading to do on these areas.
-
-    short itsshadingdir = 4; // Direction of light source for shading.
-
-    short itssnowchange = 1; // Kind of snow border.
-
-    short itsseaiceappearance = 1; // How much sea ice to display.
-
-    bool itscolourcliffs = 1; // If this is 1, high grass colours will only be used on steep slopes.
-    bool itsshowmapoutline = 1;
-
-    float itslandmarbling;
-    float itslakemarbling;
-    float itsseamarbling; // Amount of marbling to do on these areas on the regional map.
-
-    int itsminriverflowglobal; // Rivers greater than this will be shown on the global map.
-    int itsminriverflowregional; // Rivers greater than this will be shown on the regional map.
-
-    bool itsmangroves;
-
-    int itsseaice1;
-    int itsseaice2;
-    int itsseaice3;
-
-    int itsocean1;
-    int itsocean2;
-    int itsocean3;
-
-    int itsdeepocean1;
-    int itsdeepocean2;
-    int itsdeepocean3;
-
-    int itsbase1;
-    int itsbase2;
-    int itsbase3;
-
-    int itsbasetemp1;
-    int itsbasetemp2;
-    int itsbasetemp3;
-
-    int itshighbase1;
-    int itshighbase2;
-    int itshighbase3;
-
-    int itsdesert1;
-    int itsdesert2;
-    int itsdesert3;
-
-    int itshighdesert1;
-    int itshighdesert2;
-    int itshighdesert3;
-
-    int itscolddesert1;
-    int itscolddesert2;
-    int itscolddesert3;
-
-    int itsgrass1;
-    int itsgrass2;
-    int itsgrass3;
-
-    int itscold1;
-    int itscold2;
-    int itscold3;
-
-    int itstundra1;
-    int itstundra2;
-    int itstundra3;
-
-    int itseqtundra1;
-    int itseqtundra2;
-    int itseqtundra3;
-
-    int itssaltpan1;
-    int itssaltpan2;
-    int itssaltpan3;
-
-    int itserg1;
-    int itserg2;
-    int itserg3;
-
-    int itswetlands1;
-    int itswetlands2;
-    int itswetlands3;
-
-    int itslake1;
-    int itslake2;
-    int itslake3;
-
-    int itsriver1;
-    int itsriver2;
-    int itsriver3;
-
-    int itsglacier1;
-    int itsglacier2;
-    int itsglacier3;
-
-    int itssand1;
-    int itssand2;
-    int itssand3;
-
-    int itsmud1;
-    int itsmud2;
-    int itsmud3;
-
-    int itsshingle1;
-    int itsshingle2;
-    int itsshingle3;
-
-    int itsmangrove1;
-    int itsmangrove2;
-    int itsmangrove3;
-
-    int itshighlight1;
-    int itshighlight2;
-    int itshighlight3;
-
-    int itsoutline1;
-    int itsoutline2;
-    int itsoutline3;
-
-    int itselevationlow1;
-    int itselevationlow2;
-    int itselevationlow3;
-    int itselevationhigh1;
-    int itselevationhigh2;
-    int itselevationhigh3;
-
-    int itstemperaturecold1;
-    int itstemperaturecold2;
-    int itstemperaturecold3;
-    int itstemperaturetemperate1;
-    int itstemperaturetemperate2;
-    int itstemperaturetemperate3;
-    int itstemperaturehot1;
-    int itstemperaturehot2;
-    int itstemperaturehot3;
-
-    int itsprecipitationdry1;
-    int itsprecipitationdry2;
-    int itsprecipitationdry3;
-    int itsprecipitationwet1;
-    int itsprecipitationwet2;
-    int itsprecipitationwet3;
-    std::array<std::array<int, 3>, CLIMATEMAPSEACOLOURCOUNT> itsclimatemapseacolours;
-    std::array<std::array<int, 3>, CLIMATEMAPCOLOURCOUNT> itsclimatemapcolours;
-    std::array<std::array<int, 3>, BIOMEMAPCOLOURCOUNT> itsbiomemapcolours;
-    std::array<std::array<int, 3>, RIVERMAPCOLOURCOUNT> itsrivermapcolours;
-    std::array<bool, RIVERMAPFEATURECOUNT> itsshowrivermapfeatures;
-    std::array<int, MAPGRADIENTTYPECOUNT> itsmapgradientstopcounts{};
-    std::array<bool, MAPGRADIENTTYPECOUNT> itsmapgradientdiscrete{};
-    std::array<std::array<int, MAPGRADIENTMAXSTOPS>, MAPGRADIENTTYPECOUNT> itsmapgradientpositions{};
-    std::array<std::array<std::array<int, 3>, MAPGRADIENTMAXSTOPS>, MAPGRADIENTTYPECOUNT> itsmapgradientcolours{};
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaltempmaps;
-    climatecontext::Context climatecontext_;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalrainmaps;
-    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalrainfloatmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalpressuremaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaluwindmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalvwindmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupperheightmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupperuwindmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaluppervwindmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalverticalvelocitymaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalcurrentumaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalcurrentvmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalsstmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalevaporationmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimeinfluencemaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimethermalanomalymaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimefetchmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmoisturemaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalconvergencemaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupliftmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalsubsidencemaps;
-    std::vector<std::uint8_t> weatheranomalystatebytes;
-
-    short jantempmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short jultempmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short climatemap[ARRAYWIDTH][ARRAYHEIGHT];
-    short biomemap[ARRAYWIDTH][ARRAYHEIGHT];
-    short janrainmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short julrainmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short janmountainrainmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short julmountainrainmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short janmountainraindirmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short julmountainraindirmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short seaicemap[ARRAYWIDTH][ARRAYHEIGHT]; // 1=seasonal, 2=permanent
-    short rivermapdir[ARRAYWIDTH][ARRAYHEIGHT];
-    int rivermapjan[ARRAYWIDTH][ARRAYHEIGHT];
-    int rivermapjul[ARRAYWIDTH][ARRAYHEIGHT];
-    int windmap[ARRAYWIDTH][ARRAYHEIGHT];
-    int lakemap[ARRAYWIDTH][ARRAYHEIGHT];
-    float roughnessmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short mountainridges[ARRAYWIDTH][ARRAYHEIGHT];
-    short mountainheights[ARRAYWIDTH][ARRAYHEIGHT];
-    short craterrims[ARRAYWIDTH][ARRAYHEIGHT];
-    short cratercentres[ARRAYWIDTH][ARRAYHEIGHT];
-    int mapnom[ARRAYWIDTH][ARRAYHEIGHT];
-    short tidalmap[ARRAYWIDTH][ARRAYHEIGHT];
-    int riftlakemapsurface[ARRAYWIDTH][ARRAYHEIGHT];
-    int riftlakemapbed[ARRAYWIDTH][ARRAYHEIGHT];
-    bool lakestartmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short specials[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t geologicregimemap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t tectonicconvergencemap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t tectonicdivergencemap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t tectonicshearmap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectoniccrustagemyrmap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectoniccrustthicknessmap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t tectoniccrustclassmap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectonicuplifttendencymap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectonicsubsidencetendencymap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectonicaccumulatedstrainmap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t tectonicboundarytypemap[ARRAYWIDTH][ARRAYHEIGHT];
-    unsigned short tectonicboundarydistancemap[ARRAYWIDTH][ARRAYHEIGHT];
-    int tectonicboundarysegmentidmap[ARRAYWIDTH][ARRAYHEIGHT];
-    int tectonicnearestboundaryidmap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectonicboundaryhistorymap[ARRAYWIDTH][ARRAYHEIGHT];
-    int tectonicdeformingregionidmap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t tectonicdeformingregiontypemap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectonicdeformationratemap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectonicdeformationvelocityxmap[ARRAYWIDTH][ARRAYHEIGHT];
-    float tectonicdeformationvelocityymap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t basinclassmap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t erosionpotentialmap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t depositionpotentialmap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t floodplainfertilitymap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t metalorereservemap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t placerreservemap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t evaporitereservemap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t volcanicreservemap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t fisheryreservemap[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t settlement_suitability[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t social_infrastructure[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t agricultural_capacity[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t route_traffic[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t river_access[ARRAYWIDTH][ARRAYHEIGHT];
-    std::uint8_t harbor_score[ARRAYWIDTH][ARRAYHEIGHT];
-    int owner_settlement_id[ARRAYWIDTH][ARRAYHEIGHT];
-    int owner_polity_id[ARRAYWIDTH][ARRAYHEIGHT];
-    short extraelevmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short deltamapdir[ARRAYWIDTH][ARRAYHEIGHT];
-    int deltamapjan[ARRAYWIDTH][ARRAYHEIGHT];
-    int deltamapjul[ARRAYWIDTH][ARRAYHEIGHT];
-    bool islandmap[ARRAYWIDTH][ARRAYHEIGHT];
-    bool mountainislandmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short noisemap[ARRAYWIDTH][ARRAYHEIGHT];
-    short oceanridgemap[ARRAYWIDTH][ARRAYHEIGHT];
-    short oceanridgeheightmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short oceanriftmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short oceanridgeoffsetmap[ARRAYWIDTH][ARRAYHEIGHT];
-    short oceanridgeanglemap[ARRAYWIDTH][ARRAYHEIGHT];
-    short volcanomap[ARRAYWIDTH][ARRAYHEIGHT];
-    bool stratomap[ARRAYWIDTH][ARRAYHEIGHT];
-    bool noshademap[ARRAYWIDTH][ARRAYHEIGHT];
-    int testmap[ARRAYWIDTH][ARRAYHEIGHT];
-
-    int horselats[ARRAYWIDTH][6];
-
-    fourshorts cratercentreslist[MAXCRATERS]; // This duplicates the information in the cratercentres array, but it tells us the order in which to draw the craters, and their radius, which is also important.
-    std::vector<Settlement> settlementlist;
-    std::vector<Polity> politylist;
-    std::vector<RouteEdge> routeedgelist;
-    std::vector<HistoryEvent> historyeventlist;
-    std::vector<TectonicBoundarySegment> tectonicboundarysegmentlist;
-    std::vector<TectonicDeformingRegion> tectonicdeformingregionlist;
-    std::vector<mineralsystems::Deposit> mineraldepositlist;
-    mineralsystems::MineralBudget mineralbudgetstate;
+    // State by world component; climate state is climate_ (climateworld).
+    planetbodystate body_;
+    geospherestate geosphere_;
+    hydrospherestate hydrosphere_;
+    cryospherestate cryosphere_;
+    atmosphereparameters atmosphere_;
+    biospherestate biosphere_;
+    anthropospherestate anthroposphere_;
+    presentationsettings presentation_;
 
     // reused temporary state
     string line_for_file_read;
@@ -1486,25 +1009,28 @@ private:
 
     int wrapx(int x) const;
     int clipy(int y) const;
-    void smooth(int arr[][ARRAYHEIGHT], int amount, bool vary, bool avoidmountains);
-    void smooth(int short[][ARRAYHEIGHT], int amount, bool vary, bool avoidmountains);
-    void smoothoverland(int arr[][ARRAYHEIGHT], int amount, bool vary);
-    void smoothoverland(int short[][ARRAYHEIGHT], int amount, bool vary);
+    void smooth(worldgrid<int>& arr, int amount, bool vary, bool avoidmountains);
+    void smooth(worldgrid<short>& arr, int amount, bool vary, bool avoidmountains);
+    void smoothoverland(worldgrid<int>& arr, int amount, bool vary);
+    void smoothoverland(worldgrid<short>& arr, int amount, bool vary);
 
-    template<typename T> void shift(T arr[][ARRAYHEIGHT], int offset);
+    template<typename T> void shift(worldgrid<T>& arr, int offset);
     template<typename T> void writevariable(ofstream& outfile, T val);
-    template<typename T> void writedata(ofstream& outfile, T const arr[ARRAYWIDTH][ARRAYHEIGHT]);
     template<typename T> void readvariable(ifstream& infile, T& val);
-    template<typename T> void readdata(ifstream& infile, T arr[ARRAYWIDTH][ARRAYHEIGHT]);
     void writeshortvectordata(ofstream& outfile, const std::vector<short>& arr);
     void readshortvectordata(ifstream& infile, std::vector<short>& arr);
     void writemineraldeposits(ofstream& outfile);
     bool readmineraldeposits(ifstream& infile);
     int seasonalclimateindex(int x, int y) const;
     bool validseasonindex(int season) const;
-    void resizeseasonalclimatefields();
+    void resizegrids();
     void cleartectonicprovenanceinternal();
+    climateworld climate_; // atmosphere, ocean surface, sea ice and biome state
+    climateinputs climateinputsview() const;
+    template<typename T> void writedata(ofstream& outfile, const worldgrid<T>& arr);
+    template<typename T> void readdata(ifstream& infile, worldgrid<T>& arr);
 };
+
 
 inline int planet::saveversion() const { return itssaveversion; }
 inline void planet::setsaveversion(int amount) { itssaveversion = amount; }
@@ -1512,163 +1038,161 @@ inline void planet::setsaveversion(int amount) { itssaveversion = amount; }
 inline int planet::settingssaveversion() const { return itssettingssaveversion; }
 inline void planet::setsettingssaveversion(int amount) { itssettingssaveversion = amount; }
 
-inline int planet::tectonictimeoriginstep() const { return itstectonictimeoriginstep; }
-inline void planet::settectonictimeoriginstep(int amount) { itstectonictimeoriginstep = (std::max)(0, amount); }
+inline int planet::tectonictimeoriginstep() const { UW_FIELD_READ(tectonic_time_origin_step); return geosphere_.itstectonictimeoriginstep; }
+inline void planet::settectonictimeoriginstep(int amount) { geosphere_.itstectonictimeoriginstep = (std::max)(0, amount); }
 
-inline float planet::tectonictimemyr() const { return itstectonictimemyr; }
-inline void planet::settectonictimemyr(float amount) { itstectonictimemyr = (std::max)(0.0f, amount); }
+inline float planet::tectonictimemyr() const { UW_FIELD_READ(tectonic_time); return geosphere_.itstectonictimemyr; }
+inline void planet::settectonictimemyr(float amount) { geosphere_.itstectonictimemyr = (std::max)(0.0f, amount); }
 
-inline float planet::tectonicdeltatimemyr() const { return itstectonicdeltatimemyr; }
-inline void planet::settectonicdeltatimemyr(float amount) { itstectonicdeltatimemyr = (std::max)(0.0f, amount); }
+inline float planet::tectonicdeltatimemyr() const { UW_FIELD_READ(tectonic_time_step); return geosphere_.itstectonicdeltatimemyr; }
+inline void planet::settectonicdeltatimemyr(float amount) { geosphere_.itstectonicdeltatimemyr = (std::max)(0.0f, amount); }
 
-inline int planet::tectoniccyclecount() const { return itstectoniccyclecount; }
-inline void planet::settectoniccyclecount(int amount) { itstectoniccyclecount = (std::max)(0, amount); }
 
-inline int planet::tectonicplatecount() const { return itstectonicplatecount; }
-inline void planet::settectonicplatecount(int amount) { itstectonicplatecount = (std::max)(0, amount); }
+inline int planet::tectonicplatecount() const { UW_FIELD_READ(tectonic_plate_count); return geosphere_.itstectonicplatecount; }
+inline void planet::settectonicplatecount(int amount) { geosphere_.itstectonicplatecount = (std::max)(0, amount); }
 
-inline int planet::tectonicsealevelm() const { return itstectonicsealevelm; }
-inline void planet::settectonicsealevelm(int amount) { itstectonicsealevelm = (std::max)(0, amount); }
+inline int planet::tectonicsealevelm() const { UW_FIELD_READ(tectonic_sea_level); return geosphere_.itstectonicsealevelm; }
+inline void planet::settectonicsealevelm(int amount) { geosphere_.itstectonicsealevelm = (std::max)(0, amount); }
 
-inline long planet::seed() const { return itsseed; }
-inline void planet::setseed(long amount) { itsseed = amount; }
+inline long planet::seed() const { UW_FIELD_READ(seed); return body_.itsseed; }
+inline void planet::setseed(long amount) { body_.itsseed = amount; }
 
-inline int planet::size() const { return itssize; }
-inline void planet::setsize(int amount) { itssize = amount; }
+inline int planet::size() const { UW_FIELD_READ(size_class); return body_.itssize; }
+inline void planet::setsize(int amount) { body_.itssize = amount; }
 
-inline int planet::width() const { return itswidth; }
+inline int planet::width() const { return body_.itswidth; }
 inline void planet::setwidth(int amount)
 {
     const int columns = std::clamp(amount + 1, 2, ARRAYWIDTH) & ~1;
-    itswidth = columns - 1;
-    itsheight = columns / 2 - 1;
-    resizeseasonalclimatefields();
+    body_.itswidth = columns - 1;
+    body_.itsheight = columns / 2 - 1;
+    resizegrids();
 }
 
-inline int planet::height() const { return itsheight; }
+inline int planet::height() const { return body_.itsheight; }
 inline void planet::setheight(int amount)
 {
-    if (amount == (itswidth + 1) / 2 - 1)
-        itsheight = amount;
-    resizeseasonalclimatefields();
+    if (amount == (body_.itswidth + 1) / 2 - 1)
+        body_.itsheight = amount;
+    resizegrids();
 }
 
-inline bool planet::rotation() const { return itsrotation; }
-inline void planet::setrotation(bool amount) { itsrotation = amount; }
+inline bool planet::rotation() const { UW_FIELD_READ(prograde_rotation); return body_.itsrotation; }
+inline void planet::setrotation(bool amount) { body_.itsrotation = amount; }
 
-inline float planet::tilt() const { return itstilt; }
-inline void planet::settilt(float amount) { itstilt = amount; }
+inline float planet::tilt() const { UW_FIELD_READ(axial_tilt); return body_.itstilt; }
+inline void planet::settilt(float amount) { body_.itstilt = amount; }
 
-inline float planet::eccentricity() const { return itseccentricity; }
-inline void planet::seteccentricity(float amount) { itseccentricity = amount; }
+inline float planet::eccentricity() const { UW_FIELD_READ(eccentricity); return body_.itseccentricity; }
+inline void planet::seteccentricity(float amount) { body_.itseccentricity = amount; }
 
-inline int planet::perihelion() const { return (int)itsperihelion; }
-inline void planet::setperihelion(int amount) { itsperihelion = (short)amount; }
+inline int planet::perihelion() const { UW_FIELD_READ(perihelion); return (int)body_.itsperihelion; }
+inline void planet::setperihelion(int amount) { body_.itsperihelion = (short)amount; }
 
-inline float planet::gravity() const { return itsgravity; }
-inline void planet::setgravity(float amount) { itsgravity = amount; }
+inline float planet::gravity() const { UW_FIELD_READ(gravity); return body_.itsgravity; }
+inline void planet::setgravity(float amount) { body_.itsgravity = amount; }
 
-inline float planet::lunar() const { return itslunar; }
-inline void planet::setlunar(float amount) { itslunar = amount; }
+inline float planet::lunar() const { UW_FIELD_READ(lunar_strength); return body_.itslunar; }
+inline void planet::setlunar(float amount) { body_.itslunar = amount; }
 
-inline float planet::tempdecrease() const { return itstempdecrease; }
-inline void planet::settempdecrease(float amount) { itstempdecrease = amount; }
+inline float planet::tempdecrease() const { UW_FIELD_READ(lapse_rate); return atmosphere_.itstempdecrease; }
+inline void planet::settempdecrease(float amount) { atmosphere_.itstempdecrease = amount; }
 
-inline int planet::northpolaradjust() const { return itsnorthpolaradjust; }
-inline void planet::setnorthpolaradjust(int amount) { itsnorthpolaradjust = amount; }
+inline int planet::northpolaradjust() const { UW_FIELD_READ(north_polar_adjust); return atmosphere_.itsnorthpolaradjust; }
+inline void planet::setnorthpolaradjust(int amount) { atmosphere_.itsnorthpolaradjust = amount; }
 
-inline int planet::southpolaradjust() const { return itssouthpolaradjust; }
-inline void planet::setsouthpolaradjust(int amount) { itssouthpolaradjust = amount; }
+inline int planet::southpolaradjust() const { UW_FIELD_READ(south_polar_adjust); return atmosphere_.itssouthpolaradjust; }
+inline void planet::setsouthpolaradjust(int amount) { atmosphere_.itssouthpolaradjust = amount; }
 
-inline int planet::averagetemp() const { return itsaveragetemp; }
-inline void planet::setaveragetemp(int amount) { itsaveragetemp = amount; }
+inline int planet::averagetemp() const { UW_FIELD_READ(average_temperature); return atmosphere_.itsaveragetemp; }
+inline void planet::setaveragetemp(int amount) { atmosphere_.itsaveragetemp = amount; }
 
-inline int planet::northpolartemp() const { return itsnorthpolartemp; }
-inline void planet::setnorthpolartemp(int amount) { itsnorthpolartemp = amount; }
+inline int planet::northpolartemp() const { return climate_.northpolartemp(); }
+inline void planet::setnorthpolartemp(int amount) { climate_.setnorthpolartemp(amount); }
 
-inline int planet::southpolartemp() const { return itssouthpolartemp; }
-inline void planet::setsouthpolartemp(int amount) { itssouthpolartemp = amount; }
+inline int planet::southpolartemp() const { return climate_.southpolartemp(); }
+inline void planet::setsouthpolartemp(int amount) { climate_.setsouthpolartemp(amount); }
 
-inline int planet::eqtemp() const { return itseqtemp; }
-inline void planet::seteqtemp(int amount) { itseqtemp = amount; }
+inline int planet::eqtemp() const { return climate_.eqtemp(); }
+inline void planet::seteqtemp(int amount) { climate_.seteqtemp(amount); }
 
-inline float planet::waterpickup() const { return itswaterpickup; }
-inline void planet::setwaterpickup(float amount) { itswaterpickup = amount; }
+inline float planet::waterpickup() const { UW_FIELD_READ(water_pickup); return atmosphere_.itswaterpickup; }
+inline void planet::setwaterpickup(float amount) { atmosphere_.itswaterpickup = amount; }
 
-inline float planet::riverfactor() const { return itsriverfactor; }
-inline void planet::setriverfactor(float amount) { itsriverfactor = amount; }
+inline float planet::riverfactor() const { UW_FIELD_READ(river_factor); return hydrosphere_.itsriverfactor; }
+inline void planet::setriverfactor(float amount) { hydrosphere_.itsriverfactor = amount; }
 
-inline int planet::riverlandreduce() const { return itsriverlandreduce; }
-inline void planet::setriverlandreduce(int amount) { itsriverlandreduce = amount; }
+inline int planet::riverlandreduce() const { UW_FIELD_READ(river_land_reduce); return hydrosphere_.itsriverlandreduce; }
+inline void planet::setriverlandreduce(int amount) { hydrosphere_.itsriverlandreduce = amount; }
 
-inline int planet::estuarylimit() const { return itsestuarylimit; }
-inline void planet::setestuarylimit(int amount) { itsestuarylimit = amount; }
+inline int planet::estuarylimit() const { UW_FIELD_READ(estuary_limit); return hydrosphere_.itsestuarylimit; }
+inline void planet::setestuarylimit(int amount) { hydrosphere_.itsestuarylimit = amount; }
 
-inline int planet::glacialtemp() const { return itsglacialtemp; }
-inline void planet::setglacialtemp(int amount) { itsglacialtemp = amount; }
+inline int planet::glacialtemp() const { UW_FIELD_READ(glacial_temperature); return cryosphere_.itsglacialtemp; }
+inline void planet::setglacialtemp(int amount) { cryosphere_.itsglacialtemp = amount; }
 
-inline int planet::glaciertemp() const { return itsglaciertemp; }
-inline void planet::setglaciertemp(int amount) { itsglaciertemp = amount; }
+inline int planet::glaciertemp() const { UW_FIELD_READ(glacier_temperature); return cryosphere_.itsglaciertemp; }
+inline void planet::setglaciertemp(int amount) { cryosphere_.itsglaciertemp = amount; }
 
-inline float planet::mountainreduce() const { return itsmountainreduce; }
-inline void planet::setmountainreduce(float amount) { itsmountainreduce = amount; }
+inline float planet::mountainreduce() const { UW_FIELD_READ(mountain_reduce); return geosphere_.itsmountainreduce; }
+inline void planet::setmountainreduce(float amount) { geosphere_.itsmountainreduce = amount; }
 
-inline int planet::climatenumber() const { return itsclimateno; }
-inline void planet::setclimatenumber(int amount) { itsclimateno = amount; }
+inline int planet::climatenumber() const { UW_FIELD_READ(climate_type_count); return atmosphere_.itsclimateno; }
+inline void planet::setclimatenumber(int amount) { atmosphere_.itsclimateno = amount; }
 
-inline int planet::maxelevation() const { return itsmaxheight; }
-inline void planet::setmaxelevation(int amount) { itsmaxheight = amount; }
+inline int planet::maxelevation() const { UW_FIELD_READ(max_elevation); return geosphere_.itsmaxheight; }
+inline void planet::setmaxelevation(int amount) { geosphere_.itsmaxheight = amount; }
 
-inline int planet::sealevel() const { return itssealevel; }
-inline void planet::setsealevel(int amount) { itssealevel = amount; }
+inline int planet::sealevel() const { UW_FIELD_READ(sea_level); return geosphere_.itssealevel; }
+inline void planet::setsealevel(int amount) { geosphere_.itssealevel = amount; }
 
-inline float planet::landshading() const { return itslandshading; };
-inline void planet::setlandshading(float amount) { itslandshading = amount; };
+inline float planet::landshading() const { return presentation_.itslandshading; };
+inline void planet::setlandshading(float amount) { presentation_.itslandshading = amount; };
 
-inline float planet::lakeshading() const { return itslakeshading; };
-inline void planet::setlakeshading(float amount) { itslakeshading = amount; };
+inline float planet::lakeshading() const { return presentation_.itslakeshading; };
+inline void planet::setlakeshading(float amount) { presentation_.itslakeshading = amount; };
 
-inline float planet::seashading() const { return itsseashading; };
-inline void planet::setseashading(float amount) { itsseashading = amount; };
+inline float planet::seashading() const { return presentation_.itsseashading; };
+inline void planet::setseashading(float amount) { presentation_.itsseashading = amount; };
 
-inline int planet::shadingdir() const { return (int)itsshadingdir; };
-inline void planet::setshadingdir(int amount) { itsshadingdir = (short)amount; };
+inline int planet::shadingdir() const { return (int)presentation_.itsshadingdir; };
+inline void planet::setshadingdir(int amount) { presentation_.itsshadingdir = (short)amount; };
 
-inline int planet::snowchange() const { return (int)itssnowchange; };
-inline void planet::setsnowchange(int amount) { itssnowchange = (short)amount; };
+inline int planet::snowchange() const { return (int)presentation_.itssnowchange; };
+inline void planet::setsnowchange(int amount) { presentation_.itssnowchange = (short)amount; };
 
-inline int planet::seaiceappearance() const { return (int)itsseaiceappearance; };
-inline void planet::setseaiceappearance(int amount) { itsseaiceappearance = (short)amount; };
+inline int planet::seaiceappearance() const { return (int)presentation_.itsseaiceappearance; };
+inline void planet::setseaiceappearance(int amount) { presentation_.itsseaiceappearance = (short)amount; };
 
-inline bool planet::colourcliffs() const { return itscolourcliffs; };
-inline void planet::setcolourcliffs(bool amount) { itscolourcliffs = amount; };
-inline bool planet::showmapoutline() const { return itsshowmapoutline; };
-inline void planet::setshowmapoutline(bool amount) { itsshowmapoutline = amount; };
+inline bool planet::colourcliffs() const { return presentation_.itscolourcliffs; };
+inline void planet::setcolourcliffs(bool amount) { presentation_.itscolourcliffs = amount; };
+inline bool planet::showmapoutline() const { return presentation_.itsshowmapoutline; };
+inline void planet::setshowmapoutline(bool amount) { presentation_.itsshowmapoutline = amount; };
 
-inline float planet::landmarbling() const { return itslandmarbling; };
-inline void planet::setlandmarbling(float amount) { itslandmarbling = amount; };
+inline float planet::landmarbling() const { return presentation_.itslandmarbling; };
+inline void planet::setlandmarbling(float amount) { presentation_.itslandmarbling = amount; };
 
-inline float planet::lakemarbling() const { return itslakemarbling; };
-inline void planet::setlakemarbling(float amount) { itslakemarbling = amount; };
+inline float planet::lakemarbling() const { return presentation_.itslakemarbling; };
+inline void planet::setlakemarbling(float amount) { presentation_.itslakemarbling = amount; };
 
-inline float planet::seamarbling() const { return itsseamarbling; };
-inline void planet::setseamarbling(float amount) { itsseamarbling = amount; };
+inline float planet::seamarbling() const { return presentation_.itsseamarbling; };
+inline void planet::setseamarbling(float amount) { presentation_.itsseamarbling = amount; };
 
-inline int planet::minriverflowglobal() const { return itsminriverflowglobal; };
-inline void planet::setminriverflowglobal(int amount) { itsminriverflowglobal = amount; };
+inline int planet::minriverflowglobal() const { return presentation_.itsminriverflowglobal; };
+inline void planet::setminriverflowglobal(int amount) { presentation_.itsminriverflowglobal = amount; };
 
-inline int planet::minriverflowregional() const { return itsminriverflowregional; };
-inline void planet::setminriverflowregional(int amount) { itsminriverflowregional = amount; };
+inline int planet::minriverflowregional() const { return presentation_.itsminriverflowregional; };
+inline void planet::setminriverflowregional(int amount) { presentation_.itsminriverflowregional = amount; };
 
-inline bool planet::showmangroves() const { return itsmangroves; };
-inline void planet::setshowmangroves(bool amount) { itsmangroves = amount; };
+inline bool planet::showmangroves() const { return presentation_.itsmangroves; };
+inline void planet::setshowmangroves(bool amount) { presentation_.itsmangroves = amount; };
 
 inline int planet::climatemapseacolour(int slot, int channel) const
 {
     if (slot < 0 || slot >= CLIMATEMAPSEACOLOURCOUNT || channel < 0 || channel > 2)
         return 0;
 
-    return itsclimatemapseacolours[slot][channel];
+    return presentation_.itsclimatemapseacolours[slot][channel];
 }
 
 inline void planet::setclimatemapseacolour(int slot, int channel, int amount)
@@ -1676,7 +1200,7 @@ inline void planet::setclimatemapseacolour(int slot, int channel, int amount)
     if (slot < 0 || slot >= CLIMATEMAPSEACOLOURCOUNT || channel < 0 || channel > 2)
         return;
 
-    itsclimatemapseacolours[slot][channel] = amount;
+    presentation_.itsclimatemapseacolours[slot][channel] = amount;
 }
 
 inline int planet::climatemapcolour(int slot, int channel) const
@@ -1684,7 +1208,7 @@ inline int planet::climatemapcolour(int slot, int channel) const
     if (slot < 0 || slot >= CLIMATEMAPCOLOURCOUNT || channel < 0 || channel > 2)
         return 0;
 
-    return itsclimatemapcolours[slot][channel];
+    return presentation_.itsclimatemapcolours[slot][channel];
 }
 
 inline void planet::setclimatemapcolour(int slot, int channel, int amount)
@@ -1692,7 +1216,7 @@ inline void planet::setclimatemapcolour(int slot, int channel, int amount)
     if (slot < 0 || slot >= CLIMATEMAPCOLOURCOUNT || channel < 0 || channel > 2)
         return;
 
-    itsclimatemapcolours[slot][channel] = amount;
+    presentation_.itsclimatemapcolours[slot][channel] = amount;
 }
 
 inline int planet::biomemapcolour(int slot, int channel) const
@@ -1700,7 +1224,7 @@ inline int planet::biomemapcolour(int slot, int channel) const
     if (slot < 0 || slot >= BIOMEMAPCOLOURCOUNT || channel < 0 || channel > 2)
         return 0;
 
-    return itsbiomemapcolours[slot][channel];
+    return presentation_.itsbiomemapcolours[slot][channel];
 }
 
 inline void planet::setbiomemapcolour(int slot, int channel, int amount)
@@ -1708,7 +1232,7 @@ inline void planet::setbiomemapcolour(int slot, int channel, int amount)
     if (slot < 0 || slot >= BIOMEMAPCOLOURCOUNT || channel < 0 || channel > 2)
         return;
 
-    itsbiomemapcolours[slot][channel] = amount;
+    presentation_.itsbiomemapcolours[slot][channel] = amount;
 }
 
 inline int planet::rivermapcolour(int slot, int channel) const
@@ -1716,7 +1240,7 @@ inline int planet::rivermapcolour(int slot, int channel) const
     if (slot < 0 || slot >= RIVERMAPCOLOURCOUNT || channel < 0 || channel > 2)
         return 0;
 
-    return itsrivermapcolours[slot][channel];
+    return presentation_.itsrivermapcolours[slot][channel];
 }
 
 inline void planet::setrivermapcolour(int slot, int channel, int amount)
@@ -1724,7 +1248,7 @@ inline void planet::setrivermapcolour(int slot, int channel, int amount)
     if (slot < 0 || slot >= RIVERMAPCOLOURCOUNT || channel < 0 || channel > 2)
         return;
 
-    itsrivermapcolours[slot][channel] = amount;
+    presentation_.itsrivermapcolours[slot][channel] = amount;
 }
 
 inline bool planet::showrivermapfeature(int slot) const
@@ -1732,7 +1256,7 @@ inline bool planet::showrivermapfeature(int slot) const
     if (slot < 0 || slot >= RIVERMAPFEATURECOUNT)
         return false;
 
-    return itsshowrivermapfeatures[slot];
+    return presentation_.itsshowrivermapfeatures[slot];
 }
 
 inline void planet::setshowrivermapfeature(int slot, bool amount)
@@ -1740,7 +1264,7 @@ inline void planet::setshowrivermapfeature(int slot, bool amount)
     if (slot < 0 || slot >= RIVERMAPFEATURECOUNT)
         return;
 
-    itsshowrivermapfeatures[slot] = amount;
+    presentation_.itsshowrivermapfeatures[slot] = amount;
 }
 
 inline int planet::mapgradientstopcount(int gradient) const
@@ -1748,7 +1272,7 @@ inline int planet::mapgradientstopcount(int gradient) const
     if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT)
         return 0;
 
-    return itsmapgradientstopcounts[gradient];
+    return presentation_.itsmapgradientstopcounts[gradient];
 }
 
 inline void planet::setmapgradientstopcount(int gradient, int count)
@@ -1761,7 +1285,7 @@ inline void planet::setmapgradientstopcount(int gradient, int count)
     if (count > MAPGRADIENTMAXSTOPS)
         count = MAPGRADIENTMAXSTOPS;
 
-    itsmapgradientstopcounts[gradient] = count;
+    presentation_.itsmapgradientstopcounts[gradient] = count;
 }
 
 inline bool planet::mapgradientdiscrete(int gradient) const
@@ -1769,7 +1293,7 @@ inline bool planet::mapgradientdiscrete(int gradient) const
     if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT)
         return false;
 
-    return itsmapgradientdiscrete[gradient];
+    return presentation_.itsmapgradientdiscrete[gradient];
 }
 
 inline void planet::setmapgradientdiscrete(int gradient, bool amount)
@@ -1777,7 +1301,7 @@ inline void planet::setmapgradientdiscrete(int gradient, bool amount)
     if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT)
         return;
 
-    itsmapgradientdiscrete[gradient] = amount;
+    presentation_.itsmapgradientdiscrete[gradient] = amount;
 }
 
 inline int planet::mapgradientposition(int gradient, int stop) const
@@ -1785,7 +1309,7 @@ inline int planet::mapgradientposition(int gradient, int stop) const
     if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT || stop < 0 || stop >= MAPGRADIENTMAXSTOPS)
         return 0;
 
-    return itsmapgradientpositions[gradient][stop];
+    return presentation_.itsmapgradientpositions[gradient][stop];
 }
 
 inline void planet::setmapgradientposition(int gradient, int stop, int amount)
@@ -1793,7 +1317,7 @@ inline void planet::setmapgradientposition(int gradient, int stop, int amount)
     if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT || stop < 0 || stop >= MAPGRADIENTMAXSTOPS)
         return;
 
-    itsmapgradientpositions[gradient][stop] = amount;
+    presentation_.itsmapgradientpositions[gradient][stop] = amount;
 }
 
 inline int planet::mapgradientcolour(int gradient, int stop, int channel) const
@@ -1801,7 +1325,7 @@ inline int planet::mapgradientcolour(int gradient, int stop, int channel) const
     if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT || stop < 0 || stop >= MAPGRADIENTMAXSTOPS || channel < 0 || channel > 2)
         return 0;
 
-    return itsmapgradientcolours[gradient][stop][channel];
+    return presentation_.itsmapgradientcolours[gradient][stop][channel];
 }
 
 inline void planet::setmapgradientcolour(int gradient, int stop, int channel, int amount)
@@ -1809,38 +1333,38 @@ inline void planet::setmapgradientcolour(int gradient, int stop, int channel, in
     if (gradient < 0 || gradient >= MAPGRADIENTTYPECOUNT || stop < 0 || stop >= MAPGRADIENTMAXSTOPS || channel < 0 || channel > 2)
         return;
 
-    itsmapgradientcolours[gradient][stop][channel] = amount;
+    presentation_.itsmapgradientcolours[gradient][stop][channel] = amount;
 }
 
-inline const int* planet::rawmapnom() const { return &mapnom[0][0]; }
-inline const int* planet::rawlakemap() const { return &lakemap[0][0]; }
-inline const short* planet::rawoceanridgeheightmap() const { return &oceanridgeheightmap[0][0]; }
-inline const short* planet::rawmountainheights() const { return &mountainheights[0][0]; }
-inline const short* planet::rawvolcanomap() const { return &volcanomap[0][0]; }
-inline const short* planet::rawextraelevmap() const { return &extraelevmap[0][0]; }
-inline const short* planet::rawcraterrims() const { return &craterrims[0][0]; }
-inline const short* planet::rawcratercentres() const { return &cratercentres[0][0]; }
-inline const short* planet::rawoceanridgemap() const { return &oceanridgemap[0][0]; }
-inline const short* planet::rawoceanriftmap() const { return &oceanriftmap[0][0]; }
-inline const short* planet::rawjantempmap() const { return &jantempmap[0][0]; }
-inline const short* planet::rawjultempmap() const { return &jultempmap[0][0]; }
-inline const short* planet::rawjanrainmap() const { return &janrainmap[0][0]; }
-inline const short* planet::rawjulrainmap() const { return &julrainmap[0][0]; }
-inline const short* planet::rawseaicemap() const { return &seaicemap[0][0]; }
-inline const short* planet::rawclimatemap() const { return &climatemap[0][0]; }
-inline const short* planet::rawbiomemap() const { return &biomemap[0][0]; }
-inline const int* planet::rawrivermapjan() const { return &rivermapjan[0][0]; }
-inline const int* planet::rawrivermapjul() const { return &rivermapjul[0][0]; }
-inline const short* planet::rawspecials() const { return &specials[0][0]; }
-inline const short* planet::rawdeltamapdir() const { return &deltamapdir[0][0]; }
-inline const int* planet::rawdeltamapjan() const { return &deltamapjan[0][0]; }
-inline const int* planet::rawdeltamapjul() const { return &deltamapjul[0][0]; }
-inline const int* planet::rawriftlakemapsurface() const { return &riftlakemapsurface[0][0]; }
-inline const bool* planet::rawnoshademap() const { return &noshademap[0][0]; }
+inline const int* planet::rawmapnom() const { UW_FIELD_READ(base_elevation); return &geosphere_.mapnom[0][0]; }
+inline const int* planet::rawlakemap() const { UW_FIELD_READ(lake_surface); return &hydrosphere_.lakemap[0][0]; }
+inline const short* planet::rawoceanridgeheightmap() const { UW_FIELD_READ(ocean_ridge_height); return &geosphere_.oceanridgeheightmap[0][0]; }
+inline const short* planet::rawmountainheights() const { UW_FIELD_READ(mountain_height); return &geosphere_.mountainheights[0][0]; }
+inline const short* planet::rawvolcanomap() const { UW_FIELD_READ(volcano); return &geosphere_.volcanomap[0][0]; }
+inline const short* planet::rawextraelevmap() const { UW_FIELD_READ(extra_elevation); return &geosphere_.extraelevmap[0][0]; }
+inline const short* planet::rawcraterrims() const { UW_FIELD_READ(crater_rims); return &geosphere_.craterrims[0][0]; }
+inline const short* planet::rawcratercentres() const { UW_FIELD_READ(crater_centres); return &geosphere_.cratercentres[0][0]; }
+inline const short* planet::rawoceanridgemap() const { UW_FIELD_READ(ocean_ridge); return &geosphere_.oceanridgemap[0][0]; }
+inline const short* planet::rawoceanriftmap() const { UW_FIELD_READ(ocean_rift); return &geosphere_.oceanriftmap[0][0]; }
+inline const short* planet::rawjantempmap() const { return climate_.rawjantempmap(); }
+inline const short* planet::rawjultempmap() const { return climate_.rawjultempmap(); }
+inline const short* planet::rawjanrainmap() const { return climate_.rawjanrainmap(); }
+inline const short* planet::rawjulrainmap() const { return climate_.rawjulrainmap(); }
+inline const short* planet::rawseaicemap() const { return climate_.rawseaicemap(); }
+inline const short* planet::rawclimatemap() const { return climate_.rawclimatemap(); }
+inline const short* planet::rawbiomemap() const { return climate_.rawbiomemap(); }
+inline const int* planet::rawrivermapjan() const { UW_FIELD_READ(river_flow_january); return &hydrosphere_.rivermapjan[0][0]; }
+inline const int* planet::rawrivermapjul() const { UW_FIELD_READ(river_flow_july); return &hydrosphere_.rivermapjul[0][0]; }
+inline const short* planet::rawspecials() const { UW_FIELD_READ(special_features); return &hydrosphere_.specials[0][0]; }
+inline const short* planet::rawdeltamapdir() const { UW_FIELD_READ(delta_direction); return &hydrosphere_.deltamapdir[0][0]; }
+inline const int* planet::rawdeltamapjan() const { UW_FIELD_READ(delta_flow_january); return &hydrosphere_.deltamapjan[0][0]; }
+inline const int* planet::rawdeltamapjul() const { UW_FIELD_READ(delta_flow_july); return &hydrosphere_.deltamapjul[0][0]; }
+inline const int* planet::rawriftlakemapsurface() const { UW_FIELD_READ(rift_lake_surface); return &hydrosphere_.riftlakemapsurface[0][0]; }
+inline const bool* planet::rawnoshademap() const { UW_FIELD_READ(no_shade); return &presentation_.noshademap[0][0]; }
 
 inline int planet::seasonalclimateindex(int x, int y) const
 {
-    return y * (itswidth + 1) + x;
+    return y * (body_.itswidth + 1) + x;
 }
 
 inline bool planet::validseasonindex(int season) const
@@ -1848,1019 +1372,529 @@ inline bool planet::validseasonindex(int season) const
     return season >= 0 && season < CLIMATESEASONCOUNT;
 }
 
-inline int planet::landtotal() const { return itslandtotal; };
-inline void planet::setlandtotal(int amount) { itslandtotal = amount; };
+inline int planet::landtotal() const { return geosphere_.itslandtotal; };
+inline void planet::setlandtotal(int amount) { geosphere_.itslandtotal = amount; };
 
-inline int planet::seatotal() const { return itsseatotal; };
-inline void planet::setseatotal(int amount) { itsseatotal = amount; };
+inline int planet::seatotal() const { return geosphere_.itsseatotal; };
+inline void planet::setseatotal(int amount) { geosphere_.itsseatotal = amount; };
 
-inline int planet::craterno() const { return itscraterno; };
-inline void planet::setcraterno(int amount) { itscraterno = amount; };
+inline int planet::craterno() const { return geosphere_.itscraterno; };
+inline void planet::setcraterno(int amount) { geosphere_.itscraterno = amount; };
 
-inline int planet::maxriverflow() const { return itsmaxriverflow; }
+inline int planet::maxriverflow() const { UW_FIELD_READ(max_river_flow); return hydrosphere_.itsmaxriverflow; }
 
 inline int planet::map(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(volcano);
+    UW_FIELD_READ(base_elevation);
+    UW_FIELD_READ(sea_level);
+    UW_FIELD_READ(ocean_ridge_height);
+    UW_FIELD_READ(mountain_height);
+    UW_FIELD_READ(extra_elevation);
+    UW_FIELD_READ(crater_rims);
+    UW_FIELD_READ(crater_centres);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    int thisvolcano = abs(volcanomap[x][y]);
+    int thisvolcano = abs(geosphere_.volcanomap[x][y]);
 
-    if (mapnom[x][y] <= itssealevel)
-        return mapnom[x][y] + oceanridgeheightmap[x][y] + thisvolcano;
+    if (geosphere_.mapnom[x][y] <= geosphere_.itssealevel)
+        return geosphere_.mapnom[x][y] + geosphere_.oceanridgeheightmap[x][y] + thisvolcano;
 
-    if (thisvolcano > mountainheights[x][y])
-        return mapnom[x][y] + thisvolcano + extraelevmap[x][y] + craterrims[x][y] + cratercentres[x][y];
+    if (thisvolcano > geosphere_.mountainheights[x][y])
+        return geosphere_.mapnom[x][y] + thisvolcano + geosphere_.extraelevmap[x][y] + geosphere_.craterrims[x][y] + geosphere_.cratercentres[x][y];
     else
-        return mapnom[x][y] + mountainheights[x][y] + extraelevmap[x][y] + craterrims[x][y] + cratercentres[x][y];
+        return geosphere_.mapnom[x][y] + geosphere_.mountainheights[x][y] + geosphere_.extraelevmap[x][y] + geosphere_.craterrims[x][y] + geosphere_.cratercentres[x][y];
 
     return 0;
 }
 
 inline int planet::nom(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(base_elevation);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return mapnom[x][y];
+    return geosphere_.mapnom[x][y];
 }
 
 inline void planet::setnom(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    mapnom[x][y] = amount;
+    geosphere_.mapnom[x][y] = amount;
 }
 
 inline int planet::oceanridges(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(ocean_ridge);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)oceanridgemap[x][y];
+    return (int)geosphere_.oceanridgemap[x][y];
 }
 
 inline void planet::setoceanridges(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    oceanridgemap[x][y] = (short)amount;
+    geosphere_.oceanridgemap[x][y] = (short)amount;
 }
 
 inline int planet::oceanridgeheights(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(ocean_ridge_height);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)oceanridgeheightmap[x][y];
+    return (int)geosphere_.oceanridgeheightmap[x][y];
 }
 
 inline void planet::setoceanridgeheights(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    oceanridgeheightmap[x][y] = (short)amount;
+    geosphere_.oceanridgeheightmap[x][y] = (short)amount;
 }
 
 inline int planet::oceanrifts(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(ocean_rift);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)oceanriftmap[x][y];
+    return (int)geosphere_.oceanriftmap[x][y];
 }
 
 inline void planet::setoceanrifts(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    oceanriftmap[x][y] = (short)amount;
+    geosphere_.oceanriftmap[x][y] = (short)amount;
 }
 
 inline int planet::oceanridgeoffset(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(ocean_ridge_offset);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)oceanridgeoffsetmap[x][y];
+    return (int)geosphere_.oceanridgeoffsetmap[x][y];
 }
 
 inline void planet::setoceanridgeoffset(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    oceanridgeoffsetmap[x][y] = (short)amount;
+    geosphere_.oceanridgeoffsetmap[x][y] = (short)amount;
 }
 
 inline int planet::oceanridgeangle(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(ocean_ridge_angle);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)oceanridgeanglemap[x][y];
+    return (int)geosphere_.oceanridgeanglemap[x][y];
 }
 
 inline void planet::setoceanridgeangle(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    oceanridgeanglemap[x][y] = (short)amount;
+    geosphere_.oceanridgeanglemap[x][y] = (short)amount;
 }
 
 inline int planet::volcano(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(volcano);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)volcanomap[x][y];
+    return (int)geosphere_.volcanomap[x][y];
 }
 
 inline void planet::setvolcano(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    volcanomap[x][y] = (short)amount;
+    geosphere_.volcanomap[x][y] = (short)amount;
 }
 
 inline bool planet::strato(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(stratovolcano);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return stratomap[x][y];
+    return geosphere_.stratomap[x][y];
 }
 
 inline void planet::setstrato(int x, int y, bool amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    stratomap[x][y] = amount;
+    geosphere_.stratomap[x][y] = amount;
 }
 
 inline int planet::extraelev(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(extra_elevation);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)extraelevmap[x][y];
+    return (int)geosphere_.extraelevmap[x][y];
 }
 
 inline void planet::setextraelev(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    extraelevmap[x][y] = (short)amount;
+    geosphere_.extraelevmap[x][y] = (short)amount;
 }
 
-inline int planet::jantemp(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::jantemp(int x, int y) const { return climate_.jantemp(x, y); }
 
-    return (int)jantempmap[x][y];
-}
-
-inline void planet::setjantemp(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    jantempmap[x][y] = (short)amount;
-}
-
-inline int planet::jultemp(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return (int)jultempmap[x][y];
-}
-
-inline void planet::setjultemp(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    jultempmap[x][y] = (short)amount;
-}
-
-inline int planet::seasonaltemp(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonaltempmaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonaltemp(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    seasonaltempmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
-
-inline int planet::aprtemp(int x, int y) const
-{
-    return seasonaltemp(seasonapril, x, y);
-}
-
-inline int planet::octtemp(int x, int y) const
-{
-    return seasonaltemp(seasonoctober, x, y);
-}
-
-
-inline int planet::avetemp(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    int total = 0;
-
-    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-        total = total + seasonaltemp(season, x, y);
-
-    return total / CLIMATESEASONCOUNT;
-}
-
-inline int planet::janrain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return (int)janrainmap[x][y];
-}
-
-inline void planet::setjanrain(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    janrainmap[x][y] = (short)amount;
-}
-
-inline int planet::julrain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return (int)julrainmap[x][y];
-}
-
-inline void planet::setjulrain(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    julrainmap[x][y] = (short)amount;
-}
-
-inline int planet::seasonalrain(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonalrainmaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonalrain(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    const int index = seasonalclimateindex(x, y);
-    seasonalrainmaps[season][index] = static_cast<short>(amount);
-    seasonalrainfloatmaps[season][index] = static_cast<float>(amount);
-}
-
-inline float planet::seasonalrainfloat(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0.0f;
-
-    return seasonalrainfloatmaps[season][seasonalclimateindex(x, y)];
-}
-
-inline void planet::setseasonalrainfloat(int season, int x, int y, float amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    const int index = seasonalclimateindex(x, y);
-    const float physicalamount = (std::max)(0.0f, amount);
-    seasonalrainfloatmaps[season][index] = physicalamount;
-    seasonalrainmaps[season][index] = static_cast<short>(std::round(
-        (std::min)(physicalamount, 32767.0f)));
-}
-
-inline int planet::aprrain(int x, int y) const
-{
-    return seasonalrain(seasonapril, x, y);
-}
-
-inline int planet::octrain(int x, int y) const
-{
-    return seasonalrain(seasonoctober, x, y);
-}
-
-inline int planet::averain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    int total = 0;
-
-    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-        total = total + seasonalrain(season, x, y);
-
-    return total / CLIMATESEASONCOUNT;
-}
-
-inline float planet::averainfloat(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0.0f;
-
-    float total = 0.0f;
-
-    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-        total += seasonalrainfloat(season, x, y);
-
-    return total / static_cast<float>(CLIMATESEASONCOUNT);
-}
-
-inline int planet::seasonalpressure(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonalpressuremaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonalpressure(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    seasonalpressuremaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
-
-inline int planet::seasonaluwind(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonaluwindmaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonaluwind(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    seasonaluwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
-
-inline int planet::seasonalvwind(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline void planet::setjantemp(int x, int y, int amount) { climate_.setjantemp(x, y, amount); }
 
-    return static_cast<int>(seasonalvwindmaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonalvwind(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    seasonalvwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
-
-inline int planet::seasonalupperheight(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonalupperheightmaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonalupperheight(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    seasonalupperheightmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
-
-inline int planet::seasonalupperuwind(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonalupperuwindmaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonalupperuwind(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    seasonalupperuwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
-
-inline int planet::seasonaluppervwind(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonaluppervwindmaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonaluppervwind(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    seasonaluppervwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
-
-inline int planet::seasonalverticalvelocity(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonalverticalvelocity(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
-
-inline int planet::seasonalcurrentu(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    return static_cast<int>(seasonalcurrentumaps[season][seasonalclimateindex(x, y)]);
-}
-
-inline void planet::setseasonalcurrentu(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::jultemp(int x, int y) const { return climate_.jultemp(x, y); }
 
-    seasonalcurrentumaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setjultemp(int x, int y, int amount) { climate_.setjultemp(x, y, amount); }
 
-inline int planet::seasonalcurrentv(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonaltemp(int season, int x, int y) const { return climate_.seasonaltemp(season, x, y); }
 
-    return static_cast<int>(seasonalcurrentvmaps[season][seasonalclimateindex(x, y)]);
-}
+inline void planet::setseasonaltemp(int season, int x, int y, int amount) { climate_.setseasonaltemp(season, x, y, amount); }
 
-inline void planet::setseasonalcurrentv(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::aprtemp(int x, int y) const { return climate_.aprtemp(x, y); }
 
-    seasonalcurrentvmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline int planet::octtemp(int x, int y) const { return climate_.octtemp(x, y); }
 
-inline int planet::seasonalsst(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
 
-    return static_cast<int>(seasonalsstmaps[season][seasonalclimateindex(x, y)]);
-}
+inline int planet::avetemp(int x, int y) const { return climate_.avetemp(x, y); }
 
-inline void planet::setseasonalsst(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::janrain(int x, int y) const { return climate_.janrain(x, y); }
 
-    seasonalsstmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setjanrain(int x, int y, int amount) { climate_.setjanrain(x, y, amount); }
 
-inline int planet::seasonalevaporation(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::julrain(int x, int y) const { return climate_.julrain(x, y); }
 
-    return static_cast<int>(seasonalevaporationmaps[season][seasonalclimateindex(x, y)]);
-}
+inline void planet::setjulrain(int x, int y, int amount) { climate_.setjulrain(x, y, amount); }
 
-inline void planet::setseasonalevaporation(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalrain(int season, int x, int y) const { return climate_.seasonalrain(season, x, y); }
 
-    seasonalevaporationmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setseasonalrain(int season, int x, int y, int amount) { climate_.setseasonalrain(season, x, y, amount); }
 
-inline int planet::seasonalmaritimeinfluence(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline float planet::seasonalrainfloat(int season, int x, int y) const { return climate_.seasonalrainfloat(season, x, y); }
 
-    return static_cast<int>(seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)]);
-}
+inline void planet::setseasonalrainfloat(int season, int x, int y, float amount) { climate_.setseasonalrainfloat(season, x, y, amount); }
 
-inline void planet::setseasonalmaritimeinfluence(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::aprrain(int x, int y) const { return climate_.aprrain(x, y); }
 
-    seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline int planet::octrain(int x, int y) const { return climate_.octrain(x, y); }
 
-inline int planet::seasonalmaritimethermalanomaly(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::averain(int x, int y) const { return climate_.averain(x, y); }
 
-    return static_cast<int>(seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)]);
-}
+inline float planet::averainfloat(int x, int y) const { return climate_.averainfloat(x, y); }
 
-inline void planet::setseasonalmaritimethermalanomaly(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalpressure(int season, int x, int y) const { return climate_.seasonalpressure(season, x, y); }
 
-    seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setseasonalpressure(int season, int x, int y, int amount) { climate_.setseasonalpressure(season, x, y, amount); }
 
-inline int planet::seasonalmaritimefetch(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonaluwind(int season, int x, int y) const { return climate_.seasonaluwind(season, x, y); }
 
-    return static_cast<int>(seasonalmaritimefetchmaps[season][seasonalclimateindex(x, y)]);
-}
+inline void planet::setseasonaluwind(int season, int x, int y, int amount) { climate_.setseasonaluwind(season, x, y, amount); }
 
-inline void planet::setseasonalmaritimefetch(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalvwind(int season, int x, int y) const { return climate_.seasonalvwind(season, x, y); }
 
-    seasonalmaritimefetchmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setseasonalvwind(int season, int x, int y, int amount) { climate_.setseasonalvwind(season, x, y, amount); }
 
-inline int planet::seasonalmoisture(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonalupperheight(int season, int x, int y) const { return climate_.seasonalupperheight(season, x, y); }
 
-    return static_cast<int>(seasonalmoisturemaps[season][seasonalclimateindex(x, y)]);
-}
+inline void planet::setseasonalupperheight(int season, int x, int y, int amount) { climate_.setseasonalupperheight(season, x, y, amount); }
 
-inline void planet::setseasonalmoisture(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalupperuwind(int season, int x, int y) const { return climate_.seasonalupperuwind(season, x, y); }
 
-    seasonalmoisturemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setseasonalupperuwind(int season, int x, int y, int amount) { climate_.setseasonalupperuwind(season, x, y, amount); }
 
-inline int planet::seasonalconvergence(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonaluppervwind(int season, int x, int y) const { return climate_.seasonaluppervwind(season, x, y); }
 
-    return static_cast<int>(seasonalconvergencemaps[season][seasonalclimateindex(x, y)]);
-}
+inline void planet::setseasonaluppervwind(int season, int x, int y, int amount) { climate_.setseasonaluppervwind(season, x, y, amount); }
 
-inline void planet::setseasonalconvergence(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalverticalvelocity(int season, int x, int y) const { return climate_.seasonalverticalvelocity(season, x, y); }
 
-    seasonalconvergencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setseasonalverticalvelocity(int season, int x, int y, int amount) { climate_.setseasonalverticalvelocity(season, x, y, amount); }
 
-inline int planet::seasonaluplift(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonalcurrentu(int season, int x, int y) const { return climate_.seasonalcurrentu(season, x, y); }
 
-    return static_cast<int>(seasonalupliftmaps[season][seasonalclimateindex(x, y)]);
-}
+inline void planet::setseasonalcurrentu(int season, int x, int y, int amount) { climate_.setseasonalcurrentu(season, x, y, amount); }
 
-inline void planet::setseasonaluplift(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalcurrentv(int season, int x, int y) const { return climate_.seasonalcurrentv(season, x, y); }
 
-    seasonalupliftmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setseasonalcurrentv(int season, int x, int y, int amount) { climate_.setseasonalcurrentv(season, x, y, amount); }
 
-inline int planet::seasonalsubsidence(int season, int x, int y) const
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonalsst(int season, int x, int y) const { return climate_.seasonalsst(season, x, y); }
 
-    return static_cast<int>(seasonalsubsidencemaps[season][seasonalclimateindex(x, y)]);
-}
+inline void planet::setseasonalsst(int season, int x, int y, int amount) { climate_.setseasonalsst(season, x, y, amount); }
 
-inline void planet::setseasonalsubsidence(int season, int x, int y, int amount)
-{
-    if (!validseasonindex(season) || y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalevaporation(int season, int x, int y) const { return climate_.seasonalevaporation(season, x, y); }
 
-    seasonalsubsidencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
-}
+inline void planet::setseasonalevaporation(int season, int x, int y, int amount) { climate_.setseasonalevaporation(season, x, y, amount); }
 
-inline int planet::janmountainrain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonalmaritimeinfluence(int season, int x, int y) const { return climate_.seasonalmaritimeinfluence(season, x, y); }
 
-    return (int)janmountainrainmap[x][y];
-}
+inline void planet::setseasonalmaritimeinfluence(int season, int x, int y, int amount) { climate_.setseasonalmaritimeinfluence(season, x, y, amount); }
 
-inline void planet::setjanmountainrain(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalmaritimethermalanomaly(int season, int x, int y) const { return climate_.seasonalmaritimethermalanomaly(season, x, y); }
 
-    janmountainrainmap[x][y] = (short)amount;
-}
+inline void planet::setseasonalmaritimethermalanomaly(int season, int x, int y, int amount) { climate_.setseasonalmaritimethermalanomaly(season, x, y, amount); }
 
-inline int planet::julmountainrain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonalmaritimefetch(int season, int x, int y) const { return climate_.seasonalmaritimefetch(season, x, y); }
 
-    return (int)julmountainrainmap[x][y];
-}
+inline void planet::setseasonalmaritimefetch(int season, int x, int y, int amount) { climate_.setseasonalmaritimefetch(season, x, y, amount); }
 
-inline void planet::setjulmountainrain(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seasonalmoisture(int season, int x, int y) const { return climate_.seasonalmoisture(season, x, y); }
 
-    julmountainrainmap[x][y] = (short)amount;
-}
+inline void planet::setseasonalmoisture(int season, int x, int y, int amount) { climate_.setseasonalmoisture(season, x, y, amount); }
 
-inline int planet::wintermountainrain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    if (jantempmap[x][y] < jultempmap[x][y])
-        return (short)janmountainrainmap[x][y];
-    else
-        return (short)julmountainrainmap[x][y];
-}
+inline int planet::seasonalconvergence(int season, int x, int y) const { return climate_.seasonalconvergence(season, x, y); }
 
-inline void planet::setwintermountainrain(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    if (jantempmap[x][y] < jultempmap[x][y])
-        janmountainrainmap[x][y] = (short)amount;
-    else
-        julmountainrainmap[x][y] = (short)amount;
-}
+inline void planet::setseasonalconvergence(int season, int x, int y, int amount) { climate_.setseasonalconvergence(season, x, y, amount); }
 
-inline int planet::summermountainrain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        return (int)janmountainrainmap[x][y];
-    else
-        return (int)julmountainrainmap[x][y];
-}
+inline int planet::seasonaluplift(int season, int x, int y) const { return climate_.seasonaluplift(season, x, y); }
 
-inline void planet::setsummermountainrain(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        janmountainrainmap[x][y] = (short)amount;
-    else
-        julmountainrainmap[x][y] = (short)amount;
-}
+inline void planet::setseasonaluplift(int season, int x, int y, int amount) { climate_.setseasonaluplift(season, x, y, amount); }
 
-inline int planet::janmountainraindir(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::seasonalsubsidence(int season, int x, int y) const { return climate_.seasonalsubsidence(season, x, y); }
 
-    return (int)janmountainraindirmap[x][y];
-}
+inline void planet::setseasonalsubsidence(int season, int x, int y, int amount) { climate_.setseasonalsubsidence(season, x, y, amount); }
 
-inline void planet::setjanmountainraindir(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::janmountainrain(int x, int y) const { return climate_.janmountainrain(x, y); }
 
-    janmountainraindirmap[x][y] = (short)amount;
-}
+inline void planet::setjanmountainrain(int x, int y, int amount) { climate_.setjanmountainrain(x, y, amount); }
 
-inline int planet::julmountainraindir(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::julmountainrain(int x, int y) const { return climate_.julmountainrain(x, y); }
 
-    return (int)julmountainraindirmap[x][y];
-}
+inline void planet::setjulmountainrain(int x, int y, int amount) { climate_.setjulmountainrain(x, y, amount); }
 
-inline void planet::setjulmountainraindir(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::wintermountainrain(int x, int y) const { return climate_.wintermountainrain(x, y); }
 
-    julmountainraindirmap[x][y] = (short)amount;
-}
+inline void planet::setwintermountainrain(int x, int y, int amount) { climate_.setwintermountainrain(x, y, amount); }
 
-inline int planet::wintermountainraindir(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    if (jantempmap[x][y] < jultempmap[x][y])
-        return (int)janmountainraindirmap[x][y];
-    else
-        return (int)julmountainraindirmap[x][y];
-}
+inline int planet::summermountainrain(int x, int y) const { return climate_.summermountainrain(x, y); }
 
-inline int planet::summermountainraindir(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        return (int)janmountainraindirmap[x][y];
-    else
-        return (int)julmountainraindirmap[x][y];
-}
+inline void planet::setsummermountainrain(int x, int y, int amount) { climate_.setsummermountainrain(x, y, amount); }
 
-inline void planet::setwintermountainraindir(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    if (jantempmap[x][y] < jultempmap[x][y])
-        janmountainraindirmap[x][y] = (short)amount;
-    else
-        julmountainraindirmap[x][y] = (short)amount;
-}
+inline int planet::janmountainraindir(int x, int y) const { return climate_.janmountainraindir(x, y); }
 
-inline void planet::setsummermountainraindir(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        janmountainraindirmap[x][y] = (short)amount;
-    else
-        julmountainraindirmap[x][y] = (short)amount;
-}
+inline void planet::setjanmountainraindir(int x, int y, int amount) { climate_.setjanmountainraindir(x, y, amount); }
 
-inline int planet::climate(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::julmountainraindir(int x, int y) const { return climate_.julmountainraindir(x, y); }
 
-    return (int)climatemap[x][y];
-}
+inline void planet::setjulmountainraindir(int x, int y, int amount) { climate_.setjulmountainraindir(x, y, amount); }
 
-inline void planet::setclimate(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::wintermountainraindir(int x, int y) const { return climate_.wintermountainraindir(x, y); }
 
-    climatemap[x][y] = (short)amount;
-}
+inline int planet::summermountainraindir(int x, int y) const { return climate_.summermountainraindir(x, y); }
 
-inline int planet::biome(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline void planet::setwintermountainraindir(int x, int y, int amount) { climate_.setwintermountainraindir(x, y, amount); }
 
-    return (int)biomemap[x][y];
-}
+inline void planet::setsummermountainraindir(int x, int y, int amount) { climate_.setsummermountainraindir(x, y, amount); }
 
-inline void planet::setbiome(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::climate(int x, int y) const { return climate_.climate(x, y); }
 
-    biomemap[x][y] = (short)amount;
-}
+inline void planet::setclimate(int x, int y, int amount) { climate_.setclimate(x, y, amount); }
 
-inline int planet::seaice(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::biome(int x, int y) const { return climate_.biome(x, y); }
 
-    return (int)seaicemap[x][y];
-}
+inline void planet::setbiome(int x, int y, int amount) { climate_.setbiome(x, y, amount); }
 
-inline void planet::setseaice(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::seaice(int x, int y) const { return climate_.seaice(x, y); }
 
-    seaicemap[x][y] = (short)amount;
-}
+inline void planet::setseaice(int x, int y, int amount) { climate_.setseaice(x, y, amount); }
 
 inline int planet::riverdir(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(river_direction);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (short)rivermapdir[x][y];
+    return (short)hydrosphere_.rivermapdir[x][y];
 }
 
 inline void planet::setriverdir(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    rivermapdir[x][y] = (short)amount;
+    hydrosphere_.rivermapdir[x][y] = (short)amount;
 }
 
 inline int planet::riverjan(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(river_flow_january);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return rivermapjan[x][y];
+    return hydrosphere_.rivermapjan[x][y];
 }
 
 inline void planet::setriverjan(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    rivermapjan[x][y] = amount;
+    hydrosphere_.rivermapjan[x][y] = amount;
 }
 
 inline int planet::riverjul(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(river_flow_july);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return rivermapjul[x][y];
+    return hydrosphere_.rivermapjul[x][y];
 }
 
 inline void planet::setriverjul(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    rivermapjul[x][y] = amount;
+    hydrosphere_.rivermapjul[x][y] = amount;
 }
 
 inline int planet::riveraveflow(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(river_flow_january);
+    UW_FIELD_READ(river_flow_july);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (rivermapjan[x][y] + rivermapjul[x][y]) / 2;
+    return (hydrosphere_.rivermapjan[x][y] + hydrosphere_.rivermapjul[x][y]) / 2;
 }
 
-inline int planet::wind(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::wind(int x, int y) const { return climate_.wind(x, y); }
 
-    return windmap[x][y];
-}
-
-inline void planet::setwind(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    windmap[x][y] = amount;
-}
+inline void planet::setwind(int x, int y, int amount) { climate_.setwind(x, y, amount); }
 
 inline int planet::lakesurface(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(lake_surface);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return lakemap[x][y];
+    return hydrosphere_.lakemap[x][y];
 }
 
 inline void planet::setlakesurface(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    lakemap[x][y] = amount;
+    hydrosphere_.lakemap[x][y] = amount;
 }
 
 inline float planet::roughness(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(roughness);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return roughnessmap[x][y];
+    return geosphere_.roughnessmap[x][y];
 }
 
 inline void planet::setroughness(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    roughnessmap[x][y] = amount;
+    geosphere_.roughnessmap[x][y] = amount;
 }
 
 inline int planet::mountainridge(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(mountain_ridges);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)mountainridges[x][y];
+    return (int)geosphere_.mountainridges[x][y];
 }
 
 inline void planet::setmountainridge(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    mountainridges[x][y] = (short)amount;
+    geosphere_.mountainridges[x][y] = (short)amount;
 }
 
 inline int planet::mountainheight(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(mountain_height);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)mountainheights[x][y];
+    return (int)geosphere_.mountainheights[x][y];
 }
 
 inline void planet::setmountainheight(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    mountainheights[x][y] = (short)amount;
+    geosphere_.mountainheights[x][y] = (short)amount;
 }
 
 inline int planet::craterrim(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(crater_rims);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)craterrims[x][y];
+    return (int)geosphere_.craterrims[x][y];
 }
 
 inline void planet::setcraterrim(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    craterrims[x][y] = (short)amount;
+    geosphere_.craterrims[x][y] = (short)amount;
 }
 
 inline int planet::cratercentre(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(crater_centres);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)cratercentres[x][y];
+    return (int)geosphere_.cratercentres[x][y];
 }
 
 inline void planet::setcratercentre(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    cratercentres[x][y] = (short)amount;
+    geosphere_.cratercentres[x][y] = (short)amount;
 }
 
 inline int planet::craterx(int n) const
 {
+    UW_TABLE_READ(craters);
     if (n<0 || n>=MAXCRATERS)
         return 0;
 
-    return (int)cratercentreslist[n].x;
+    return (int)geosphere_.cratercentreslist[n].x;
 }
 
 inline void planet::setcraterx(int n, int amount)
@@ -2868,15 +1902,16 @@ inline void planet::setcraterx(int n, int amount)
     if (n < 0 || n >= MAXCRATERS)
         return;
 
-    cratercentreslist[n].x=short(amount);
+    geosphere_.cratercentreslist[n].x=short(amount);
 }
 
 inline int planet::cratery(int n) const
 {
+    UW_TABLE_READ(craters);
     if (n < 0 || n >= MAXCRATERS)
         return 0;
 
-    return (int)cratercentreslist[n].y;
+    return (int)geosphere_.cratercentreslist[n].y;
 }
 
 inline void planet::setcratery(int n, int amount)
@@ -2884,15 +1919,16 @@ inline void planet::setcratery(int n, int amount)
     if (n < 0 || n >= MAXCRATERS)
         return;
 
-    cratercentreslist[n].y = short(amount);
+    geosphere_.cratercentreslist[n].y = short(amount);
 }
 
 inline int planet::craterelev(int n) const
 {
+    UW_TABLE_READ(craters);
     if (n < 0 || n >= MAXCRATERS)
         return 0;
 
-    return (int)cratercentreslist[n].w;
+    return (int)geosphere_.cratercentreslist[n].w;
 }
 
 inline void planet::setcraterelev(int n, int amount)
@@ -2900,15 +1936,16 @@ inline void planet::setcraterelev(int n, int amount)
     if (n < 0 || n >= MAXCRATERS)
         return;
 
-    cratercentreslist[n].w = short(amount);
+    geosphere_.cratercentreslist[n].w = short(amount);
 }
 
     inline int planet::craterradius(int n) const
 {
+    UW_TABLE_READ(craters);
     if (n<0 || n>=MAXCRATERS)
         return 0;
 
-    return (int)cratercentreslist[n].z;
+    return (int)geosphere_.cratercentreslist[n].z;
 }
 
 inline void planet::setcraterradius(int n, int amount)
@@ -2916,862 +1953,902 @@ inline void planet::setcraterradius(int n, int amount)
     if (n < 0 || n >= MAXCRATERS)
         return;
 
-    cratercentreslist[n].z=short(amount);
+    geosphere_.cratercentreslist[n].z=short(amount);
 }
 
 inline int planet::tide(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(tide);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)tidalmap[x][y];
+    return (int)hydrosphere_.tidalmap[x][y];
 }
 
 inline void planet::settide(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tidalmap[x][y] = (short)amount;
+    hydrosphere_.tidalmap[x][y] = (short)amount;
 }
 
 inline int planet::riftlakesurface(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(rift_lake_surface);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return riftlakemapsurface[x][y];
+    return hydrosphere_.riftlakemapsurface[x][y];
 }
 
 inline void planet::setriftlakesurface(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    riftlakemapsurface[x][y] = amount;
+    hydrosphere_.riftlakemapsurface[x][y] = amount;
 }
 
 inline int planet::riftlakebed(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(rift_lake_bed);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return riftlakemapbed[x][y];
+    return hydrosphere_.riftlakemapbed[x][y];
 }
 
 inline void planet::setriftlakebed(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    riftlakemapbed[x][y] = amount;
+    hydrosphere_.riftlakemapbed[x][y] = amount;
 }
 
 inline int planet::special(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(special_features);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return specials[x][y];
+    return hydrosphere_.specials[x][y];
 }
 
 inline void planet::setspecial(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    specials[x][y] = (short)amount;
+    hydrosphere_.specials[x][y] = (short)amount;
 }
 
 inline GeologicRegime planet::geologicregime(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(geologic_regime);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return GeologicRegime::stable;
 
-    return static_cast<GeologicRegime>(geologicregimemap[x][y]);
+    return static_cast<GeologicRegime>(geosphere_.geologicregimemap[x][y]);
 }
 
 inline void planet::setgeologicregime(int x, int y, GeologicRegime amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    geologicregimemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.geologicregimemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::tectonicconvergence(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(tectonic_convergence);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(tectonicconvergencemap[x][y]);
+    return static_cast<int>(geosphere_.tectonicconvergencemap[x][y]);
 }
 
 inline void planet::settectonicconvergence(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    tectonicconvergencemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.tectonicconvergencemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::tectonicdivergence(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(tectonic_divergence);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(tectonicdivergencemap[x][y]);
+    return static_cast<int>(geosphere_.tectonicdivergencemap[x][y]);
 }
 
 inline void planet::settectonicdivergence(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    tectonicdivergencemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.tectonicdivergencemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::tectonicshear(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(tectonic_shear);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(tectonicshearmap[x][y]);
+    return static_cast<int>(geosphere_.tectonicshearmap[x][y]);
 }
 
 inline void planet::settectonicshear(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    tectonicshearmap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.tectonicshearmap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline float planet::tectoniccrustagemyr(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(crust_age);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectoniccrustagemyrmap[x][y];
+    return geosphere_.tectoniccrustagemyrmap[x][y];
 }
 
 inline void planet::settectoniccrustagemyr(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectoniccrustagemyrmap[x][y] = (std::max)(0.0f, amount);
+    geosphere_.tectoniccrustagemyrmap[x][y] = (std::max)(0.0f, amount);
 }
 
 inline float planet::tectoniccrustthickness(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(crust_thickness);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectoniccrustthicknessmap[x][y];
+    return geosphere_.tectoniccrustthicknessmap[x][y];
 }
 
 inline void planet::settectoniccrustthickness(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectoniccrustthicknessmap[x][y] = (std::max)(0.0f, amount);
+    geosphere_.tectoniccrustthicknessmap[x][y] = (std::max)(0.0f, amount);
 }
 
 inline CrustClass planet::tectoniccrustclass(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(crust_class);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return CrustClass::none;
 
-    return static_cast<CrustClass>(tectoniccrustclassmap[x][y]);
+    return static_cast<CrustClass>(geosphere_.tectoniccrustclassmap[x][y]);
 }
 
 inline void planet::settectoniccrustclass(int x, int y, CrustClass amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectoniccrustclassmap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.tectoniccrustclassmap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline float planet::tectonicuplifttendency(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(uplift_tendency);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectonicuplifttendencymap[x][y];
+    return geosphere_.tectonicuplifttendencymap[x][y];
 }
 
 inline void planet::settectonicuplifttendency(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicuplifttendencymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+    geosphere_.tectonicuplifttendencymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
 }
 
 inline float planet::tectonicsubsidencetendency(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(subsidence_tendency);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectonicsubsidencetendencymap[x][y];
+    return geosphere_.tectonicsubsidencetendencymap[x][y];
 }
 
 inline void planet::settectonicsubsidencetendency(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicsubsidencetendencymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+    geosphere_.tectonicsubsidencetendencymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
 }
 
 inline float planet::tectonicaccumulatedstrain(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(accumulated_strain);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectonicaccumulatedstrainmap[x][y];
+    return geosphere_.tectonicaccumulatedstrainmap[x][y];
 }
 
 inline void planet::settectonicaccumulatedstrain(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicaccumulatedstrainmap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+    geosphere_.tectonicaccumulatedstrainmap[x][y] = std::clamp(amount, 0.0f, 1.0f);
 }
 
 inline BoundaryType planet::tectonicboundarytype(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(boundary_type);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return BoundaryType::none;
 
-    return static_cast<BoundaryType>(tectonicboundarytypemap[x][y]);
+    return static_cast<BoundaryType>(geosphere_.tectonicboundarytypemap[x][y]);
 }
 
 inline void planet::settectonicboundarytype(int x, int y, BoundaryType amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicboundarytypemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.tectonicboundarytypemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::tectonicboundarydistance(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(boundary_distance);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(tectonicboundarydistancemap[x][y]);
+    return static_cast<int>(geosphere_.tectonicboundarydistancemap[x][y]);
 }
 
 inline void planet::settectonicboundarydistance(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicboundarydistancemap[x][y] = static_cast<unsigned short>(std::clamp(amount, 0, 65535));
+    geosphere_.tectonicboundarydistancemap[x][y] = static_cast<unsigned short>(std::clamp(amount, 0, 65535));
 }
 
 inline int planet::tectonicboundarysegmentid(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(boundary_segment);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return tectonicboundarysegmentidmap[x][y];
+    return geosphere_.tectonicboundarysegmentidmap[x][y];
 }
 
 inline void planet::settectonicboundarysegmentid(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicboundarysegmentidmap[x][y] = (std::max)(0, amount);
+    geosphere_.tectonicboundarysegmentidmap[x][y] = (std::max)(0, amount);
 }
 
 inline int planet::tectonicnearestboundaryid(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(nearest_boundary);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return tectonicnearestboundaryidmap[x][y];
+    return geosphere_.tectonicnearestboundaryidmap[x][y];
 }
 
 inline void planet::settectonicnearestboundaryid(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicnearestboundaryidmap[x][y] = (std::max)(0, amount);
+    geosphere_.tectonicnearestboundaryidmap[x][y] = (std::max)(0, amount);
 }
 
 inline float planet::tectonicboundaryhistory(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(boundary_history);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectonicboundaryhistorymap[x][y];
+    return geosphere_.tectonicboundaryhistorymap[x][y];
 }
 
 inline void planet::settectonicboundaryhistory(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicboundaryhistorymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+    geosphere_.tectonicboundaryhistorymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
 }
 
 inline int planet::tectonicdeformingregionid(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(deforming_region);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return tectonicdeformingregionidmap[x][y];
+    return geosphere_.tectonicdeformingregionidmap[x][y];
 }
 
 inline void planet::settectonicdeformingregionid(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicdeformingregionidmap[x][y] = (std::max)(0, amount);
+    geosphere_.tectonicdeformingregionidmap[x][y] = (std::max)(0, amount);
 }
 
 inline DeformingRegionType planet::tectonicdeformingregiontype(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(deforming_region_type);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return DeformingRegionType::none;
 
-    return static_cast<DeformingRegionType>(tectonicdeformingregiontypemap[x][y]);
+    return static_cast<DeformingRegionType>(geosphere_.tectonicdeformingregiontypemap[x][y]);
 }
 
 inline void planet::settectonicdeformingregiontype(int x, int y, DeformingRegionType amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicdeformingregiontypemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.tectonicdeformingregiontypemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline float planet::tectonicdeformationrate(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(deformation_rate);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectonicdeformationratemap[x][y];
+    return geosphere_.tectonicdeformationratemap[x][y];
 }
 
 inline void planet::settectonicdeformationrate(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicdeformationratemap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+    geosphere_.tectonicdeformationratemap[x][y] = std::clamp(amount, 0.0f, 1.0f);
 }
 
 inline float planet::tectonicdeformationvelocityx(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(deformation_velocity_x);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectonicdeformationvelocityxmap[x][y];
+    return geosphere_.tectonicdeformationvelocityxmap[x][y];
 }
 
 inline void planet::settectonicdeformationvelocityx(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicdeformationvelocityxmap[x][y] = amount;
+    geosphere_.tectonicdeformationvelocityxmap[x][y] = amount;
 }
 
 inline float planet::tectonicdeformationvelocityy(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(deformation_velocity_y);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0.0f;
 
-    return tectonicdeformationvelocityymap[x][y];
+    return geosphere_.tectonicdeformationvelocityymap[x][y];
 }
 
 inline void planet::settectonicdeformationvelocityy(int x, int y, float amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    tectonicdeformationvelocityymap[x][y] = amount;
+    geosphere_.tectonicdeformationvelocityymap[x][y] = amount;
 }
 
 inline BasinClass planet::basinclass(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(basin_class);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return BasinClass::none;
 
-    return static_cast<BasinClass>(basinclassmap[x][y]);
+    return static_cast<BasinClass>(hydrosphere_.basinclassmap[x][y]);
 }
 
 inline void planet::setbasinclass(int x, int y, BasinClass amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    basinclassmap[x][y] = static_cast<std::uint8_t>(amount);
+    hydrosphere_.basinclassmap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::erosionpotential(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(erosion_potential);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(erosionpotentialmap[x][y]);
+    return static_cast<int>(geosphere_.erosionpotentialmap[x][y]);
 }
 
 inline void planet::seterosionpotential(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    erosionpotentialmap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.erosionpotentialmap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::depositionpotential(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(deposition_potential);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(depositionpotentialmap[x][y]);
+    return static_cast<int>(geosphere_.depositionpotentialmap[x][y]);
 }
 
 inline void planet::setdepositionpotential(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    depositionpotentialmap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.depositionpotentialmap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::floodplainfertility(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(floodplain_fertility);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(floodplainfertilitymap[x][y]);
+    return static_cast<int>(geosphere_.floodplainfertilitymap[x][y]);
 }
 
 inline void planet::setfloodplainfertility(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    floodplainfertilitymap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.floodplainfertilitymap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::metalorereserve(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(metal_ore_potential);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(metalorereservemap[x][y]);
+    return static_cast<int>(geosphere_.metalorereservemap[x][y]);
 }
 
 inline void planet::setmetalorereserve(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    metalorereservemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.metalorereservemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::placerreserve(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(placer_potential);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(placerreservemap[x][y]);
+    return static_cast<int>(geosphere_.placerreservemap[x][y]);
 }
 
 inline void planet::setplacerreserve(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    placerreservemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.placerreservemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::evaporitereserve(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(evaporite_potential);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(evaporitereservemap[x][y]);
+    return static_cast<int>(geosphere_.evaporitereservemap[x][y]);
 }
 
 inline void planet::setevaporitereserve(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    evaporitereservemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.evaporitereservemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::volcanicreserve(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(volcanic_potential);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(volcanicreservemap[x][y]);
+    return static_cast<int>(geosphere_.volcanicreservemap[x][y]);
 }
 
 inline void planet::setvolcanicreserve(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    volcanicreservemap[x][y] = static_cast<std::uint8_t>(amount);
+    geosphere_.volcanicreservemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::fisheryreserve(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(fishery_potential);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return static_cast<int>(fisheryreservemap[x][y]);
+    return static_cast<int>(biosphere_.fisheryreservemap[x][y]);
 }
 
 inline void planet::setfisheryreserve(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
     amount = std::clamp(amount, 0, 100);
-    fisheryreservemap[x][y] = static_cast<std::uint8_t>(amount);
+    biosphere_.fisheryreservemap[x][y] = static_cast<std::uint8_t>(amount);
 }
 
 inline int planet::settlementsuitability(int x, int y) const
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return 0;
 
-    return static_cast<int>(settlement_suitability[x][y]);
+    return static_cast<int>(anthroposphere_.settlement_suitability[x][y]);
 }
 
 inline void planet::setsettlementsuitability(int x, int y, int amount)
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return;
 
-    settlement_suitability[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+    anthroposphere_.settlement_suitability[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
 }
 
 inline int planet::infrastructure(int x, int y) const
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    UW_FIELD_READ(infrastructure);
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return 0;
 
-    return static_cast<int>(social_infrastructure[x][y]);
+    return static_cast<int>(anthroposphere_.social_infrastructure[x][y]);
 }
 
 inline void planet::setinfrastructure(int x, int y, int amount)
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return;
 
-    social_infrastructure[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+    anthroposphere_.social_infrastructure[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
 }
 
 inline int planet::agriculturalcapacity(int x, int y) const
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    UW_FIELD_READ(agricultural_capacity);
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return 0;
 
-    return static_cast<int>(agricultural_capacity[x][y]);
+    return static_cast<int>(anthroposphere_.agricultural_capacity[x][y]);
 }
 
 inline void planet::setagriculturalcapacity(int x, int y, int amount)
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return;
 
-    agricultural_capacity[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+    anthroposphere_.agricultural_capacity[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
 }
 
 inline int planet::routetraffic(int x, int y) const
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    UW_FIELD_READ(route_traffic);
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return 0;
 
-    return static_cast<int>(route_traffic[x][y]);
+    return static_cast<int>(anthroposphere_.route_traffic[x][y]);
 }
 
 inline void planet::setroutetraffic(int x, int y, int amount)
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return;
 
-    route_traffic[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+    anthroposphere_.route_traffic[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
 }
 
 inline int planet::riveraccess(int x, int y) const
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    UW_FIELD_READ(river_access);
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return 0;
 
-    return static_cast<int>(river_access[x][y]);
+    return static_cast<int>(anthroposphere_.river_access[x][y]);
 }
 
 inline void planet::setriveraccess(int x, int y, int amount)
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return;
 
-    river_access[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+    anthroposphere_.river_access[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
 }
 
 inline int planet::harborscore(int x, int y) const
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    UW_FIELD_READ(harbor_score);
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return 0;
 
-    return static_cast<int>(harbor_score[x][y]);
+    return static_cast<int>(anthroposphere_.harbor_score[x][y]);
 }
 
 inline void planet::setharborscore(int x, int y, int amount)
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return;
 
-    harbor_score[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
+    anthroposphere_.harbor_score[x][y] = static_cast<std::uint8_t>(std::clamp(amount, 0, 100));
 }
 
 inline int planet::ownersettlementid(int x, int y) const
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    UW_FIELD_READ(owner_settlement);
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return -1;
 
-    return owner_settlement_id[x][y];
+    return anthroposphere_.owner_settlement_id[x][y];
 }
 
 inline void planet::setownersettlementid(int x, int y, int amount)
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return;
 
-    owner_settlement_id[x][y] = amount;
+    anthroposphere_.owner_settlement_id[x][y] = amount;
 }
 
 inline int planet::ownerpolityid(int x, int y) const
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    UW_FIELD_READ(owner_polity);
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return -1;
 
-    return owner_polity_id[x][y];
+    return anthroposphere_.owner_polity_id[x][y];
 }
 
 inline void planet::setownerpolityid(int x, int y, int amount)
 {
-    if (y < 0 || y > itsheight || x < 0 || x > itswidth)
+    if (y < 0 || y > body_.itsheight || x < 0 || x > body_.itswidth)
         return;
 
-    owner_polity_id[x][y] = amount;
+    anthroposphere_.owner_polity_id[x][y] = amount;
 }
 
 inline int planet::deltadir(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(delta_direction);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)deltamapdir[x][y];
+    return (int)hydrosphere_.deltamapdir[x][y];
 }
 
 inline void planet::setdeltadir(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    deltamapdir[x][y] = (short)amount;
+    hydrosphere_.deltamapdir[x][y] = (short)amount;
 }
 
 inline int planet::deltajan(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(delta_flow_january);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return deltamapjan[x][y];
+    return hydrosphere_.deltamapjan[x][y];
 }
 
 inline void planet::setdeltajan(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    deltamapjan[x][y] = amount;
+    hydrosphere_.deltamapjan[x][y] = amount;
 }
 
 inline int planet::deltajul(int x, int y) const
 {
-    return deltamapjul[x][y];
+    UW_FIELD_READ(delta_flow_july);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0;
+
+    return hydrosphere_.deltamapjul[x][y];
 }
 
 inline void planet::setdeltajul(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    deltamapjul[x][y] = amount;
+    hydrosphere_.deltamapjul[x][y] = amount;
 }
 
 inline bool planet::lakestart(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(lake_start);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return lakestartmap[x][y];
+    return hydrosphere_.lakestartmap[x][y];
 }
 
 inline void planet::setlakestart(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    lakestartmap[x][y] = amount;
+    hydrosphere_.lakestartmap[x][y] = amount;
 }
 
 inline bool planet::island(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(island);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return islandmap[x][y];
+    return geosphere_.islandmap[x][y];
 }
 
 inline void planet::setisland(int x, int y, bool amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    islandmap[x][y] = amount;
+    geosphere_.islandmap[x][y] = amount;
 }
 
 inline bool planet::mountainisland(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(mountain_island);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return mountainislandmap[x][y];
+    return geosphere_.mountainislandmap[x][y];
 }
 
 inline void planet::setmountainisland(int x, int y, bool amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    mountainislandmap[x][y] = amount;
+    geosphere_.mountainislandmap[x][y] = amount;
 }
 
 inline bool planet::noshade(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(no_shade);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return noshademap[x][y];
+    return presentation_.noshademap[x][y];
 }
 
 inline void planet::setnoshade(int x, int y, bool amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    noshademap[x][y] = amount;
+    presentation_.noshademap[x][y] = amount;
 }
 
 inline int planet::noise(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(detail_noise);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return (int)noisemap[x][y];
+    return (int)geosphere_.noisemap[x][y];
 }
 
 inline void planet::setnoise(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    noisemap[x][y] = (short)amount;
+    geosphere_.noisemap[x][y] = (short)amount;
 }
 
-inline int planet::horse(int x, int y) const
-{
-    if (x<0 || x>itswidth)
-        return 0;
+inline int planet::horse(int x, int y) const { return climate_.horse(x, y); }
 
-    return horselats[x][y];
-}
-
-inline void planet::sethorse(int x, int y, int amount)
-{
-    if (x<0 || x>itswidth)
-        return;
-
-    horselats[x][y] = amount;
-}
+inline void planet::sethorse(int x, int y, int amount) { climate_.sethorse(x, y, amount); }
 
 inline int planet::test(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(debug_test);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return testmap[x][y];
+    return presentation_.testmap[x][y];
 }
 
 inline void planet::settest(int x, int y, int amount)
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
 
-    testmap[x][y] = amount;
+    presentation_.testmap[x][y] = amount;
 }
 
-inline const std::vector<Settlement>& planet::settlements() const { return settlementlist; }
-inline std::vector<Settlement>& planet::settlements() { return settlementlist; }
-inline const std::vector<Polity>& planet::polities() const { return politylist; }
-inline std::vector<Polity>& planet::polities() { return politylist; }
-inline const std::vector<RouteEdge>& planet::routeedges() const { return routeedgelist; }
-inline std::vector<RouteEdge>& planet::routeedges() { return routeedgelist; }
-inline const std::vector<HistoryEvent>& planet::historyevents() const { return historyeventlist; }
-inline std::vector<HistoryEvent>& planet::historyevents() { return historyeventlist; }
+inline const std::vector<Settlement>& planet::settlements() const { return anthroposphere_.settlementlist; }
+inline std::vector<Settlement>& planet::settlements() { return anthroposphere_.settlementlist; }
+inline const std::vector<Polity>& planet::polities() const { UW_TABLE_READ(polities); return anthroposphere_.politylist; }
+inline std::vector<Polity>& planet::polities() { UW_TABLE_READ(polities); return anthroposphere_.politylist; }
+inline const std::vector<RouteEdge>& planet::routeedges() const { UW_TABLE_READ(route_edges); return anthroposphere_.routeedgelist; }
+inline std::vector<RouteEdge>& planet::routeedges() { UW_TABLE_READ(route_edges); return anthroposphere_.routeedgelist; }
+inline const std::vector<HistoryEvent>& planet::historyevents() const { UW_TABLE_READ(history_events); return anthroposphere_.historyeventlist; }
+inline std::vector<HistoryEvent>& planet::historyevents() { UW_TABLE_READ(history_events); return anthroposphere_.historyeventlist; }
 
-inline const std::vector<mineralsystems::Deposit>& planet::mineraldeposits() const { return mineraldepositlist; }
-inline std::vector<mineralsystems::Deposit>& planet::mineraldeposits() { return mineraldepositlist; }
-inline void planet::setmineraldeposits(std::vector<mineralsystems::Deposit> deposits) { mineraldepositlist = std::move(deposits); }
-inline const mineralsystems::MineralBudget& planet::mineralbudget() const { return mineralbudgetstate; }
-inline void planet::setmineralbudget(const mineralsystems::MineralBudget& budget) { mineralbudgetstate = budget; }
+inline const std::vector<mineralsystems::Deposit>& planet::mineraldeposits() const { UW_TABLE_READ(mineral_deposits); return geosphere_.mineraldepositlist; }
+inline std::vector<mineralsystems::Deposit>& planet::mineraldeposits() { UW_TABLE_READ(mineral_deposits); return geosphere_.mineraldepositlist; }
+inline void planet::setmineraldeposits(std::vector<mineralsystems::Deposit> deposits) { geosphere_.mineraldepositlist = std::move(deposits); }
+inline const mineralsystems::MineralBudget& planet::mineralbudget() const { UW_TABLE_READ(mineral_budget); return geosphere_.mineralbudgetstate; }
+inline void planet::setmineralbudget(const mineralsystems::MineralBudget& budget) { geosphere_.mineralbudgetstate = budget; }
 
-inline const std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() const { return tectonicboundarysegmentlist; }
-inline std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() { return tectonicboundarysegmentlist; }
-inline int planet::tectonicboundarysegmentcount() const { return static_cast<int>(tectonicboundarysegmentlist.size()); }
-inline void planet::settectonicboundarysegments(std::vector<TectonicBoundarySegment> segments) { tectonicboundarysegmentlist = std::move(segments); }
+inline const std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() const { UW_TABLE_READ(tectonic_boundary_segments); return geosphere_.tectonicboundarysegmentlist; }
+inline std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() { UW_TABLE_READ(tectonic_boundary_segments); return geosphere_.tectonicboundarysegmentlist; }
+inline int planet::tectonicboundarysegmentcount() const { UW_TABLE_READ(tectonic_boundary_segments); return static_cast<int>(geosphere_.tectonicboundarysegmentlist.size()); }
+inline void planet::settectonicboundarysegments(std::vector<TectonicBoundarySegment> segments) { geosphere_.tectonicboundarysegmentlist = std::move(segments); }
 
 template<typename SegmentT>
 inline void planet::settectonicboundarysegments(const std::vector<SegmentT>& segments)
 {
-    tectonicboundarysegmentlist.resize(segments.size());
+    geosphere_.tectonicboundarysegmentlist.resize(segments.size());
 
     for (size_t i = 0; i < segments.size(); i++)
     {
         const SegmentT& src = segments[i];
-        TectonicBoundarySegment& dst = tectonicboundarysegmentlist[i];
+        TectonicBoundarySegment& dst = geosphere_.tectonicboundarysegmentlist[i];
         dst.id = static_cast<int>(src.id);
         dst.leftPlateId = static_cast<int>(src.left_plate_id);
         dst.rightPlateId = static_cast<int>(src.right_plate_id);
@@ -3791,20 +2868,20 @@ inline void planet::settectonicboundarysegments(const std::vector<SegmentT>& seg
     }
 }
 
-inline const std::vector<TectonicDeformingRegion>& planet::tectonicdeformingregions() const { return tectonicdeformingregionlist; }
-inline std::vector<TectonicDeformingRegion>& planet::tectonicdeformingregions() { return tectonicdeformingregionlist; }
-inline int planet::tectonicdeformingregioncount() const { return static_cast<int>(tectonicdeformingregionlist.size()); }
-inline void planet::settectonicdeformingregions(std::vector<TectonicDeformingRegion> regions) { tectonicdeformingregionlist = std::move(regions); }
+inline const std::vector<TectonicDeformingRegion>& planet::tectonicdeformingregions() const { UW_TABLE_READ(tectonic_deforming_regions); return geosphere_.tectonicdeformingregionlist; }
+inline std::vector<TectonicDeformingRegion>& planet::tectonicdeformingregions() { UW_TABLE_READ(tectonic_deforming_regions); return geosphere_.tectonicdeformingregionlist; }
+inline int planet::tectonicdeformingregioncount() const { UW_TABLE_READ(tectonic_deforming_regions); return static_cast<int>(geosphere_.tectonicdeformingregionlist.size()); }
+inline void planet::settectonicdeformingregions(std::vector<TectonicDeformingRegion> regions) { geosphere_.tectonicdeformingregionlist = std::move(regions); }
 
 template<typename RegionT>
 inline void planet::settectonicdeformingregions(const std::vector<RegionT>& regions)
 {
-    tectonicdeformingregionlist.resize(regions.size());
+    geosphere_.tectonicdeformingregionlist.resize(regions.size());
 
     for (size_t i = 0; i < regions.size(); i++)
     {
         const RegionT& src = regions[i];
-        TectonicDeformingRegion& dst = tectonicdeformingregionlist[i];
+        TectonicDeformingRegion& dst = geosphere_.tectonicdeformingregionlist[i];
         dst.id = static_cast<int>(src.id);
         dst.boundarySegmentId = static_cast<int>(src.boundary_segment_id);
         dst.primaryPlateId = static_cast<int>(src.primary_plate_id);
@@ -3825,10 +2902,11 @@ inline void planet::settectonicdeformingregions(const std::vector<RegionT>& regi
 
 inline const TectonicBoundarySegment* planet::findtectonicboundarysegment(int id) const
 {
+    UW_TABLE_READ(tectonic_boundary_segments);
     if (id <= 0)
         return nullptr;
 
-    for (const TectonicBoundarySegment& segment : tectonicboundarysegmentlist)
+    for (const TectonicBoundarySegment& segment : geosphere_.tectonicboundarysegmentlist)
     {
         if (segment.id == id)
             return &segment;
@@ -3839,10 +2917,11 @@ inline const TectonicBoundarySegment* planet::findtectonicboundarysegment(int id
 
 inline const TectonicDeformingRegion* planet::findtectonicdeformingregion(int id) const
 {
+    UW_TABLE_READ(tectonic_deforming_regions);
     if (id <= 0)
         return nullptr;
 
-    for (const TectonicDeformingRegion& region : tectonicdeformingregionlist)
+    for (const TectonicDeformingRegion& region : geosphere_.tectonicdeformingregionlist)
     {
         if (region.id == id)
             return &region;
@@ -3853,122 +2932,54 @@ inline const TectonicDeformingRegion* planet::findtectonicdeformingregion(int id
 
 inline void planet::clearsocialstate()
 {
-    settlementlist.clear();
-    politylist.clear();
-    routeedgelist.clear();
-    historyeventlist.clear();
+    anthroposphere_.settlementlist.clear();
+    anthroposphere_.politylist.clear();
+    anthroposphere_.routeedgelist.clear();
+    anthroposphere_.historyeventlist.clear();
 }
 
 inline bool planet::sea(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    UW_FIELD_READ(base_elevation);
+    UW_FIELD_READ(sea_level);
+    UW_FIELD_READ(lake_surface);
+    UW_FIELD_READ(volcano);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    if (mapnom[x][y] <= itssealevel && lakemap[x][y] == 0)
+    if (geosphere_.mapnom[x][y] <= geosphere_.itssealevel && hydrosphere_.lakemap[x][y] == 0)
         return 1;
 
-    if (volcanomap[x][y] == 0)
+    if (geosphere_.volcanomap[x][y] == 0)
         return 0;
 
-    int thisvolcano = abs(volcanomap[x][y]);
+    int thisvolcano = abs(geosphere_.volcanomap[x][y]);
 
-    if (mapnom[x][y] + thisvolcano <= itssealevel)
+    if (geosphere_.mapnom[x][y] + thisvolcano <= geosphere_.itssealevel)
         return 1;
     else
         return 0;
 }
 
-inline int planet::mintemp(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::mintemp(int x, int y) const { return climate_.mintemp(x, y); }
 
-    if (jantempmap[x][y] < jultempmap[x][y])
-        return (int)jantempmap[x][y];
-    else
-        return (int)jultempmap[x][y];
-}
+inline void planet::setmintemp(int x, int y, int amount) { climate_.setmintemp(x, y, amount); }
 
-inline void planet::setmintemp(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::maxtemp(int x, int y) const { return climate_.maxtemp(x, y); }
 
-    if (jantempmap[x][y] < jultempmap[x][y])
-        jantempmap[x][y] = (short)amount;
-    else
-        jultempmap[x][y] = (short)amount;
-}
+inline void planet::setmaxtemp(int x, int y, int amount) { climate_.setmaxtemp(x, y, amount); }
 
-inline int planet::maxtemp(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
+inline int planet::winterrain(int x, int y) const { return climate_.winterrain(x, y); }
 
-    if (jantempmap[x][y] > jultempmap[x][y])
-        return (int)jantempmap[x][y];
-    else
-        return (int)jultempmap[x][y];
-}
+inline void planet::setwinterrain(int x, int y, int amount) { climate_.setwinterrain(x, y, amount); }
 
-inline void planet::setmaxtemp(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
+inline int planet::summerrain(int x, int y) const { return climate_.summerrain(x, y); }
 
-    if (jantempmap[x][y] > jultempmap[x][y])
-        jantempmap[x][y] = (short)amount;
-    else
-        jultempmap[x][y] = (short)amount;
-}
-
-inline int planet::winterrain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    if (jantempmap[x][y] < jultempmap[x][y])
-        return (int)janrainmap[x][y];
-    else
-        return (int)julrainmap[x][y];
-}
-
-inline void planet::setwinterrain(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    if (jantempmap[x][y] < jultempmap[x][y])
-        janrainmap[x][y] = (short)amount;
-    else
-        julrainmap[x][y] = (short)amount;
-}
-
-inline int planet::summerrain(int x, int y) const
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return 0;
-
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        return (int)janrainmap[x][y];
-    else
-        return (int)julrainmap[x][y];
-}
-
-inline void planet::setsummerrain(int x, int y, int amount)
-{
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
-        return;
-
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        janrainmap[x][y] = (short)amount;
-    else
-        julrainmap[x][y] = (short)amount;
-}
+inline void planet::setsummerrain(int x, int y, int amount) { climate_.setsummerrain(x, y, amount); }
 
 inline int planet::truelake(int x, int y) const
 {
-    if (y<0 || y>itsheight || x<0 || x>itswidth)
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
     if (lakesurface(x, y) != 0 && special(x, y) < 110)

@@ -19,6 +19,25 @@
 #include "functions.hpp"
 //#include "profiler.h"
 
+// Climate class of a regional cell from its seasonal extremes (climate_classification.hpp).
+short getclimate(region& region, int x, int y)
+{
+    if (region.sea(x, y) == 1 || region.truelake(x, y) != 0)
+        return (0);
+
+    int elev = region.map(x, y);
+    int sealevel = region.sealevel();
+
+    float wrain = (float)region.winterrain(x, y);
+    float srain = (float)region.summerrain(x, y);
+    float mintemp = (float)region.mintemp(x, y);
+    float maxtemp = (float)region.maxtemp(x, y);
+
+    short climate = calculateclimate(elev, sealevel, wrain, srain, mintemp, maxtemp);
+
+    return climate;
+}
+
 #define REGIONALTILEWIDTH 32 // Height and width of the regional map measured in tiles
 #define REGIONALTILEHEIGHT 32
 

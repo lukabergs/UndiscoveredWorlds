@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
 #include <exception>
 #include <functional>
@@ -58,10 +59,18 @@ private:
     bool stopping = false;
 };
 
+// Worker count: hardware threads, or UW_THREADS when set (results must not
+// depend on it; the override exists to check that).
 inline unsigned concurrency()
 {
-    const unsigned available = std::thread::hardware_concurrency();
-    return (std::min)(32u, available ? available : 4u);
+    static const unsigned count = [] {
+        unsigned available = std::thread::hardware_concurrency();
+        if (const char* requested = std::getenv("UW_THREADS"))
+            if (const int value = std::atoi(requested); value > 0)
+                available = static_cast<unsigned>(value);
+        return (std::min)(32u, available ? available : 4u);
+    }();
+    return count;
 }
 inline Executor& executor()
 {

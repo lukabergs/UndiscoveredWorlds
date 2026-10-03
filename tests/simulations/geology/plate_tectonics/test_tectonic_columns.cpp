@@ -179,7 +179,6 @@ TEST(TectonicColumns, Integrated200MyrReplayClosesMassBudgetAndPreservesContinen
     for (int i = 0; i < 200; ++i) {
         a.update(); b.update();
         ASSERT_LT(std::abs(a.getColumnModel().budget().relative_mass_residual), 1e-10) << i;
-        ASSERT_EQ(a.getCycleCount(), 0U);
         for (const auto& c : a.getColumnModel().cells())
             ASSERT_LE(age_myr(c), initial_max_age + i + 1 + 1e-6) << "update " << i;
     }

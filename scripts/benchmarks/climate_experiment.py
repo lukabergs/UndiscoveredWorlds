@@ -16,14 +16,17 @@ import sys
 import time
 import zipfile
 import numpy as np
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import paths
 from climate_report_data import Archive, FIELDS, ROOT, magnitude, table, weights
 from climate_report_metrics import evaluate, rank
 from climate_report import mask_for
 from run_storage import ensure_archive_directory
+from climate_benchmark import from_legacy_command, set_option
 
 H = ROOT / 'runs/reports'
-BUILD = ROOT / 'out/build/x64-Debug'
-EXE = BUILD / 'bin/UndiscoveredWorlds.exe'
+BUILD = paths.build_directory()
+EXE = paths.executable('world_pipeline')
 
 def read(path):
     return json.loads(Path(path).read_text(encoding='utf-8-sig'))
@@ -57,7 +60,7 @@ def setup(archive, source_archive=None, baseline=None, count=10, skip_tests=Fals
         pre_batch_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         intent=f'{count} serial adaptive experiments; fixed global ranking, distribution and regional numeric review. Visual assessment reserved for user. No imposed observed climate fields.',
         grids=dict(world=[1024,512], atmosphere=[128,64], ocean=[128,64], hydrology=[256,128], render=[2048,1024]),
-        seed=20260906, coupling_updates=8, climate_reference_forcing=False))
+        seed=1, coupling_updates=8, climate_reference_forcing=False))
 
 def run(archive, run_id, plan):
     batch = read(archive/'batch.json'); expected = batch['expected_runs']; baseline = batch['baseline']
@@ -70,7 +73,7 @@ def run(archive, run_id, plan):
     registry = read(ROOT / 'runs/registry/climate.json')
     assert max(x['id'] for x in registry['runs']) + 1 == run_id
     with (archive / f'{run_id}-build.log').open('x') as stream:
-        targets = ['UndiscoveredWorlds'] if batch.get('skip_tests') else ['UndiscoveredWorlds',
+        targets = ['world_pipeline'] if batch.get('skip_tests') else ['world_pipeline',
             'climate_atmosphere_tests','climate_hydrology_tests','climate_ocean_dynamics_tests','climate_ocean_heat_tests']
         subprocess.run(['cmake','--build',str(BUILD),'--config','Release','--target',*targets,
             '--parallel','4'], cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, check=True)
@@ -114,19 +117,21 @@ def run(archive, run_id, plan):
         executable_sha256=sha(folder/EXE.name),runtime_sha256={p.name:sha(p) for p in folder.glob('*.dll')},
         inputs_sha256=inputs,input_file_stats=stats,input_hash_provenance='Reuse baseline/first-case hashes with matching size/mtime receipts; rehash changed or unrecorded inputs.',all_tuning_parameters=dict(re.findall(r'inline constexpr (?:float|double|bool|int) (\w+)\s*=\s*([^;]+);',tuning)),
         environment={'UW_CLIMATE_EXPERIMENT_INPUT':None,'UW_CLIMATE_SURFACE_DRAG_INPUT':env['UW_CLIMATE_SURFACE_DRAG_INPUT']},
-        seed=20260906,world=[1024,512],native_grids={'atmosphere':[128,64],'ocean':[128,64],'hydrology':[256,128]},
+        seed=batch['seed'],world=[1024,512],native_grids={'atmosphere':[128,64],'ocean':[128,64],'hydrology':[256,128]},
         coupling_updates=8,climate_reference_forcing=False,visual_review='User',tests_skipped=batch.get('skip_tests',False))
     write(folder/'manifest.json',manifest)
     write(archive/f'{run_id}-plan.json',dict(plan,case=str(run_id),parent=str(parent)))
-    command = read(archive/str(baseline)/'command.json')
-    if batch.get('skip_tests') and '-Maps' in command:
+    # Receipts from the retired PowerShell wrapper are converted to bench.py.
+    command = from_legacy_command(read(archive/str(baseline)/'command.json'))
+    if batch.get('skip_tests') and '--map' in command:
         # Flow textures are generated once by the shared report renderer.
-        index = command.index('-Maps')+1
+        index = command.index('--map')+1
         command[index] = ','.join(x for x in command[index].split(',') if not x.endswith(('-lic','-part')))
-    command[command.index('-Executable')+1] = str(folder/EXE.name)
-    command[command.index('-AtmosphereCapture')+1] = str(folder/'capture')
-    if '-OceanCapture' in command: command[command.index('-OceanCapture')+1] = str(folder/'ocean-capture')
-    else: command += ['-OceanCapture',str(folder/'ocean-capture')]
+    # Batches keep the seed recorded at setup; earlier batches retain 20260906.
+    set_option(command,'--seed',batch['seed'])
+    set_option(command,'--executable',folder/EXE.name)
+    set_option(command,'--climate-atmosphere-capture',folder/'capture')
+    set_option(command,'--climate-ocean-capture',folder/'ocean-capture')
     write(folder/'command.json',command)
     start=time.perf_counter()
     with (folder/'console.log').open('x') as stream:

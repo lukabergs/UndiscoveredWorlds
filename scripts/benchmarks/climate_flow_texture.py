@@ -3,10 +3,13 @@ import ctypes
 from pathlib import Path
 import numpy as np
 
-ROOT=Path(__file__).resolve().parents[2]
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import paths
+
 _library=None
-for directory in ('x64-Debug','x64-Release'):
-    path=ROOT/'out/build'/directory/'Release/climate_flow_texture.dll'
+for preset in ('headless','desktop'):
+    path=paths.binary_directory(preset)/'climate_flow_texture.dll'
     if path.exists():
         _library=ctypes.CDLL(str(path));break
 if _library is not None:

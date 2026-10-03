@@ -1,0 +1,37 @@
+{
+  "schema": "uw-evaluation-profile/v1",
+  "module": "world",
+  "description": "Procedural world from a seed (procedural-world recipe). Judged by the user's review; checks guard budgets and value ranges. Earth hypsometry is context for the review, not a target.",
+  "evidence": {"checks": "required", "validation": "context", "review": "primary"},
+  "run": {"tool": "world_pipeline", "resolution": 512,
+          "arguments": ["generate", "--resolution", "{width}", "--no-profile-log", "--save", "{directory}/world.uww"]},
+  "checks": [
+    {"check": "grid"},
+    {"check": "required",
+     "fields": ["geosphere.base_elevation", "geosphere.sea_level", "geosphere.crust_age", "geosphere.crust_class",
+                "atmosphere.temperature", "atmosphere.precipitation_exact", "hydrosphere.river_direction",
+                "hydrosphere.river_flow_january", "biosphere.biome"]},
+    {"check": "written", "fields": ["geosphere.base_elevation", "geosphere.crust_age", "atmosphere.temperature",
+                                    "atmosphere.precipitation_exact", "hydrosphere.river_direction", "biosphere.biome"]},
+    {"check": "finite", "fields": ["geosphere.*", "atmosphere.*", "hydrosphere.solver_*", "cryosphere.solver_*"]},
+    {"check": "range", "field": "atmosphere.solver_monthly_temperature", "min": -95, "max": 60},
+    {"check": "range", "field": "atmosphere.precipitation_exact", "min": 0, "max": 3000},
+    {"check": "range", "field": "cryosphere.solver_sea_ice", "min": 0, "max": 1, "tolerance": 1e-5},
+    {"check": "range", "field": "geosphere.crust_age", "min": 0},
+    {"check": "repeat"}
+  ],
+  "validation": [
+    {"id": "hypsometry", "kind": "hypsometry", "reference_width": 2048}
+  ],
+  "maps": [
+    {"name": "elevation", "title": "Surface elevation (m)", "derived": "surface_elevation", "palette": "tectonics:elevation"},
+    {"name": "crust-age", "title": "Crust age (Myr)", "field": "geosphere.crust_age", "palette": "tectonics:crust_age_myr"},
+    {"name": "crust-class", "title": "Crust class", "field": "geosphere.crust_class", "palette": "tectonics:crust_class"},
+    {"name": "regime", "title": "Geologic regime", "field": "geosphere.geologic_regime", "palette": "tectonics:geologic_regime"},
+    {"name": "boundaries", "title": "Plate boundary type", "field": "geosphere.boundary_type", "palette": "tectonics:boundary_type"},
+    {"name": "temperature", "title": "Air temperature (°C)", "field": "atmosphere.temperature", "palette": "climate:air_temperature", "seasons": [0, 2]},
+    {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation_exact", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"},
+    {"name": "surface-wind", "title": "10 m wind speed (m/s)", "vector": ["atmosphere.level_wind_east[0]", "atmosphere.level_wind_north[0]"], "palette": "climate:surface_wind", "seasons": [0, 2]},
+    {"name": "sst", "title": "Sea surface temperature (°C)", "field": "hydrosphere.solver_sea_surface_temperature", "mask": "sea", "palette": "climate:sst", "seasons": [0, 2]}
+  ]
+}

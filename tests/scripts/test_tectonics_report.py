@@ -20,7 +20,7 @@ from tectonics_report_data import plate_topology, local_relief, terrain_detail, 
 def fixture(folder):
     manifest = {"schema": "tectonic-snapshot-bundle/v1", "contract_schema_version": 6,
                 "width": 4, "height": 2, "sea_level_m": 31043, "plates": [{}, {}],
-                "time_myr": 0, "update_count": 0, "cycle_count": 0, "files": {}}
+                "time_myr": 0, "update_count": 0, "files": {}}
     for field, dtype in DTYPES.items():
         data = np.zeros((2, 4), dtype=dtype)
         if field == "heightmap":
@@ -153,7 +153,7 @@ class TectonicsReportTests(unittest.TestCase):
         self.assertEqual(m['interior_land_cells'], z.size)
         self.assertEqual(m['local_relief_rms_m'], m['interior_land_relief_rms_m'])
 
-    def test_disconnected_legacy_owners_fail_new_topology_check(self):
+    def test_disconnected_owners_fail_topology_check(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             fixture(folder)
@@ -174,7 +174,7 @@ class TectonicsReportTests(unittest.TestCase):
             fields['crust_age_myr'][0, 0] = 100
             self.assertEqual(diagnostics(manifest, fields)['checks']['crust_age_exceeds_elapsed_and_prehistory'], 1)
 
-    def test_mass_budget_checks_exported_columns_and_missing_legacy_fields(self):
+    def test_mass_budget_checks_exported_columns_and_missing_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             fixture(folder)

@@ -2,7 +2,7 @@
 
 #include <vector>
 
-class planet;
+class climateworld;
 
 namespace climateenergy
 {
@@ -75,7 +75,7 @@ MeridionalDiffusionResult implicitMeridionalDiffusion(
     const std::vector<double>& responseKPerWm2, double diffusivityWm2K);
 
 void createSurfaceEnergyBalanceTemperatureMap(
-    planet& world,
+    climateworld& world,
     const std::vector<std::vector<int>>& fractal);
 const AnnualEnergyBudget& lastAnnualEnergyBudget();
 }

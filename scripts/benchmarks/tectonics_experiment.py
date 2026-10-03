@@ -10,10 +10,14 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 import zipfile
 
-from run_storage import ensure_archive_directory
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import paths
+from run_storage import POWERSHELL, ensure_archive_directory
+import run_log
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -100,7 +104,7 @@ def run(args):
             if parent.is_junction():
                 (parent / "tectonics").mkdir(exist_ok=True)
                 continue
-            subprocess.run(["pwsh", "-NoProfile", "-File",
+            subprocess.run([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                             str(ROOT / "scripts/benchmarks/configure-run-storage.ps1"),
                             "-RelativePaths", f"runs/{kind}/tectonics"], cwd=ROOT, check=True)
     checkpoint_dir = ROOT / f"runs/checkpoints/tectonics/{run_id}"
@@ -147,7 +151,7 @@ def run(args):
     start = time.monotonic()
     try:
         with log_path.open("x", encoding="utf-8") as log:
-            log.write(subprocess.list2cmdline(native_command) + "\n")
+            log.write(run_log.header("tectonics", archived_executable, native_command))
             log.flush()
             subprocess.run(native_command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
         record["elapsed_seconds"] = time.monotonic() - start
@@ -168,7 +172,7 @@ def run(args):
             actual = field_hashes(replay)
             replay_manifest = json.loads((replay / "manifest.json").read_text())
             original = json.loads((checkpoint_dir / final["directory"] / "manifest.json").read_text())
-            metadata_keys = ("run_scenario", "time_myr", "update_count", "iteration_count", "cycle_count")
+            metadata_keys = ("run_scenario", "time_myr", "update_count", "iteration_count")
             if "motion_diagnostics" in original:
                 metadata_keys += ("motion_diagnostics",)
             if "column_budget" in original:
@@ -198,7 +202,7 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipe", type=Path, default=ROOT / "configs/tectonics-baseline.json")
-    parser.add_argument("--executable", type=Path, default=ROOT / "out/build/headless-modules/bin/tectonic_pipeline.exe")
+    parser.add_argument("--executable", type=Path, default=paths.executable("tectonic_pipeline"))
     parser.add_argument("--verify-replay", action=argparse.BooleanOptionalAction, default=False,
                         help="Opt in to a second simulation for exact replay verification (default: off)")
     parser.add_argument("--allow-seed-comparison", action="store_true")

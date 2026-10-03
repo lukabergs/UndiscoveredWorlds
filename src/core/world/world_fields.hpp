@@ -1,0 +1,263 @@
+#pragma once
+
+// Catalogue of world state. One X-macro list defines every field's id, owning
+// component, element type, layout, units and meaning; FieldId, bundle names and
+// declared process access all derive from it. Units describe the current
+// storage: several climate fields keep a legacy integer encoding until they
+// migrate to float32 physical units (docs/architecture/world-model.md).
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <string_view>
+
+namespace worldmodel
+{
+enum class Component : std::uint8_t
+{
+    planetbody,
+    geosphere,
+    hydrosphere,
+    cryosphere,
+    atmosphere,
+    biosphere,
+    anthroposphere,
+    presentation
+};
+
+enum class ElementType : std::uint8_t { b8, u8, i16, u16, i32, f32 };
+
+// grid: W x H surface cells. seasonal/monthly: 4 or 12 grids. zonalprofile:
+// six values per column. levelseasonal: levels x 4 x grid (atmosphere column).
+// scalar: one value. Solver grids may differ from the
+// surface grid; their shape is taken from the stored data.
+enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile, levelseasonal };
+
+// X(id, component, element, layout, units, description)
+#define UW_WORLD_FIELD_LIST(X) \
+    X(seed, planetbody, i32, scalar, "", "World seed") \
+    X(size_class, planetbody, i32, scalar, "", "Planet size class: 1 tiny, 2 small, 3 Earthlike") \
+    X(width_index, planetbody, i32, scalar, "cells", "Largest x index of the surface grid (width - 1)") \
+    X(height_index, planetbody, i32, scalar, "cells", "Largest y index of the surface grid (height - 1)") \
+    X(prograde_rotation, planetbody, b8, scalar, "", "True when the planet rotates like Earth") \
+    X(axial_tilt, planetbody, f32, scalar, "degrees", "Axial tilt") \
+    X(eccentricity, planetbody, f32, scalar, "", "Orbital eccentricity") \
+    X(perihelion, planetbody, i32, scalar, "month", "Month of perihelion, 0 = January") \
+    X(gravity, planetbody, f32, scalar, "g", "Surface gravity relative to Earth") \
+    X(lunar_strength, planetbody, f32, scalar, "", "Lunar tidal strength relative to Earth") \
+    X(lapse_rate, atmosphere, f32, scalar, "C/km", "Temperature decrease with elevation") \
+    X(north_polar_adjust, atmosphere, i32, scalar, "C", "Adjustment to north polar temperature") \
+    X(south_polar_adjust, atmosphere, i32, scalar, "C", "Adjustment to south polar temperature") \
+    X(average_temperature, atmosphere, i32, scalar, "C", "Average world temperature") \
+    X(north_polar_temperature, atmosphere, i32, scalar, "C", "Average north polar temperature") \
+    X(south_polar_temperature, atmosphere, i32, scalar, "C", "Average south polar temperature") \
+    X(equatorial_temperature, atmosphere, i32, scalar, "C", "Average equatorial temperature") \
+    X(water_pickup, atmosphere, f32, scalar, "", "Ocean moisture pickup factor") \
+    X(river_factor, hydrosphere, f32, scalar, "", "Divisor converting legacy river flow to m3/s") \
+    X(river_land_reduce, hydrosphere, i32, scalar, "m", "Depth of river channels below the cell base") \
+    X(estuary_limit, hydrosphere, i32, scalar, "legacy flow", "Minimum river flow for estuaries") \
+    X(glacial_temperature, cryosphere, i32, scalar, "C", "Maximum mean temperature for glacially carved terrain") \
+    X(glacier_temperature, cryosphere, i32, scalar, "C", "Maximum temperature for rivers to become glaciers") \
+    X(mountain_reduce, geosphere, f32, scalar, "", "Global/regional mountain height matching factor") \
+    X(climate_type_count, atmosphere, i32, scalar, "", "Number of climate types") \
+    X(max_elevation, geosphere, i32, scalar, "m", "Largest elevation value of the datum") \
+    X(sea_level, geosphere, i32, scalar, "m above datum", "Sea level on the elevation datum") \
+    X(max_river_flow, hydrosphere, i32, scalar, "legacy flow", "Largest river flow") \
+    X(land_cells, geosphere, i32, scalar, "cells", "Number of land cells") \
+    X(sea_cells, geosphere, i32, scalar, "cells", "Number of sea cells") \
+    X(crater_count, geosphere, i32, scalar, "", "Number of craters") \
+    X(tectonic_time_origin_step, geosphere, i32, scalar, "updates", "Tectonic time origin") \
+    X(tectonic_time, geosphere, f32, scalar, "Myr", "Tectonic time of the final state") \
+    X(tectonic_time_step, geosphere, f32, scalar, "Myr", "Tectonic update length") \
+    X(tectonic_plate_count, geosphere, i32, scalar, "", "Number of plates in the final state") \
+    X(tectonic_sea_level, geosphere, i32, scalar, "m", "Engine sea level on its uint16 datum") \
+    X(base_elevation, geosphere, i32, grid, "m above datum", "Terrain without mountains, volcanoes and craters (nom)") \
+    X(mountain_height, geosphere, i16, grid, "m", "Mountain elevation added to the base") \
+    X(mountain_ridges, geosphere, i16, grid, "direction bits", "Mountain ridge directions") \
+    X(extra_elevation, geosphere, i16, grid, "m", "Extra terrain elevation (canyon uplift)") \
+    X(crater_rims, geosphere, i16, grid, "m", "Crater rim elevation") \
+    X(crater_centres, geosphere, i16, grid, "m", "Crater centre elevation") \
+    X(volcano, geosphere, i16, grid, "m", "Isolated peaks; negative values are extinct volcanoes") \
+    X(continental_shelf, geosphere, b8, grid, "", "Continental shelf: shallow sea margins of land") \
+    X(stratovolcano, geosphere, b8, grid, "", "Stratovolcano flag") \
+    X(island, geosphere, b8, grid, "", "Island flag") \
+    X(mountain_island, geosphere, b8, grid, "", "Mountain island flag") \
+    X(ocean_ridge, geosphere, i16, grid, "code", "Ocean ridge mask") \
+    X(ocean_ridge_height, geosphere, i16, grid, "m", "Ocean ridge elevation") \
+    X(ocean_rift, geosphere, i16, grid, "code", "Ocean rift mask") \
+    X(ocean_ridge_offset, geosphere, i16, grid, "cells", "Ocean ridge offset") \
+    X(ocean_ridge_angle, geosphere, i16, grid, "degrees", "Ocean ridge angle") \
+    X(roughness, geosphere, f32, grid, "noise", "Seeded fractal roughness used by landforms and the regional map") \
+    X(detail_noise, geosphere, i16, grid, "noise", "Terracing noise for the regional map") \
+    X(geologic_regime, geosphere, u8, grid, "code", "Geologic regime from tectonic signals") \
+    X(tectonic_convergence, geosphere, u8, grid, "0..100", "Boundary convergence score") \
+    X(tectonic_divergence, geosphere, u8, grid, "0..100", "Boundary divergence score") \
+    X(tectonic_shear, geosphere, u8, grid, "0..100", "Boundary shear score") \
+    X(crust_age, geosphere, f32, grid, "Myr", "Crust age") \
+    X(crust_thickness, geosphere, f32, grid, "engine units", "Crust thickness proxy") \
+    X(crust_class, geosphere, u8, grid, "code", "Crust class: 0 none, 1 oceanic, 2 transitional, 3 continental") \
+    X(uplift_tendency, geosphere, f32, grid, "engine units", "Native uplift tendency") \
+    X(subsidence_tendency, geosphere, f32, grid, "engine units", "Native subsidence tendency") \
+    X(accumulated_strain, geosphere, f32, grid, "engine units", "Accumulated strain memory") \
+    X(boundary_type, geosphere, u8, grid, "code", "Plate boundary type") \
+    X(boundary_distance, geosphere, u16, grid, "cells", "Distance to the nearest boundary") \
+    X(boundary_segment, geosphere, i32, grid, "id", "Boundary segment id") \
+    X(nearest_boundary, geosphere, i32, grid, "id", "Nearest boundary segment id") \
+    X(boundary_history, geosphere, f32, grid, "engine units", "Boundary lifecycle history") \
+    X(deforming_region, geosphere, i32, grid, "id", "Deforming region id") \
+    X(deforming_region_type, geosphere, u8, grid, "code", "Deforming region type") \
+    X(deformation_rate, geosphere, f32, grid, "engine units", "Deformation rate") \
+    X(deformation_velocity_x, geosphere, f32, grid, "world cells/update", "Deformation velocity, eastward") \
+    X(deformation_velocity_y, geosphere, f32, grid, "world cells/update", "Deformation velocity, southward") \
+    X(erosion_potential, geosphere, u8, grid, "0..100", "Relative erosion potential") \
+    X(deposition_potential, geosphere, u8, grid, "0..100", "Relative deposition potential") \
+    X(floodplain_fertility, geosphere, u8, grid, "0..100", "Floodplain and lowland fertility proxy") \
+    X(metal_ore_potential, geosphere, u8, grid, "0..100", "Metal ore potential score") \
+    X(placer_potential, geosphere, u8, grid, "0..100", "Placer potential score") \
+    X(evaporite_potential, geosphere, u8, grid, "0..100", "Evaporite potential score") \
+    X(volcanic_potential, geosphere, u8, grid, "0..100", "Volcanic resource potential score") \
+    X(river_direction, hydrosphere, i16, grid, "direction code", "River flow direction") \
+    X(river_flow_january, hydrosphere, i32, grid, "legacy flow", "January river flow") \
+    X(river_flow_july, hydrosphere, i32, grid, "legacy flow", "July river flow") \
+    X(lake_surface, hydrosphere, i32, grid, "m above datum", "Lake surface elevation") \
+    X(rift_lake_surface, hydrosphere, i32, grid, "m above datum", "Rift lake surface elevation") \
+    X(rift_lake_bed, hydrosphere, i32, grid, "m above datum", "Rift lake bed elevation") \
+    X(lake_start, hydrosphere, b8, grid, "", "Lake seed cell") \
+    X(special_features, hydrosphere, i16, grid, "code", "100 salt lake, 110 salt pan, 120 dunes, 130/131/132 fresh/brackish/salt wetlands") \
+    X(tide, hydrosphere, i16, grid, "legacy", "Tidal strength") \
+    X(basin_class, hydrosphere, u8, grid, "code", "Drainage basin class") \
+    X(delta_direction, hydrosphere, i16, grid, "direction code", "Delta channel direction") \
+    X(delta_flow_january, hydrosphere, i32, grid, "legacy flow", "January delta flow") \
+    X(delta_flow_july, hydrosphere, i32, grid, "legacy flow", "July delta flow") \
+    X(sea_ice, cryosphere, i16, grid, "code", "Sea ice: 1 seasonal, 2 permanent") \
+    X(temperature_january, atmosphere, i16, grid, "C", "January temperature (legacy pair)") \
+    X(temperature_july, atmosphere, i16, grid, "C", "July temperature (legacy pair)") \
+    X(precipitation_january, atmosphere, i16, grid, "mm/month", "January precipitation (legacy pair)") \
+    X(precipitation_july, atmosphere, i16, grid, "mm/month", "July precipitation (legacy pair)") \
+    X(mountain_precipitation_january, atmosphere, i16, grid, "mm/month", "January orographic precipitation") \
+    X(mountain_precipitation_july, atmosphere, i16, grid, "mm/month", "July orographic precipitation") \
+    X(mountain_precipitation_direction_january, atmosphere, i16, grid, "direction code", "January orographic rain direction") \
+    X(mountain_precipitation_direction_july, atmosphere, i16, grid, "direction code", "July orographic rain direction") \
+    X(prevailing_wind, atmosphere, i32, grid, "legacy code", "Prevailing wind direction") \
+    X(climate_class, atmosphere, i16, grid, "code", "Climate classification") \
+    X(subtropical_high_latitudes, atmosphere, i32, zonalprofile, "rows", "Horse-latitude rows per column") \
+    X(temperature, atmosphere, i16, seasonal, "C", "Seasonal surface temperature") \
+    X(precipitation, atmosphere, i16, seasonal, "mm/month", "Seasonal precipitation, rounded") \
+    X(precipitation_exact, atmosphere, f32, seasonal, "mm/month", "Seasonal precipitation") \
+    X(pressure, atmosphere, i16, seasonal, "hPa", "Seasonal surface pressure, rounded") \
+    X(wind_east, atmosphere, i16, seasonal, "m/s", "Seasonal surface eastward wind, rounded") \
+    X(wind_south, atmosphere, i16, seasonal, "m/s", "Seasonal surface southward wind, rounded") \
+    X(upper_height, atmosphere, i16, seasonal, "m", "Seasonal 500 hPa height anomaly, rounded") \
+    X(upper_wind_east, atmosphere, i16, seasonal, "m/s", "Seasonal 500 hPa eastward wind, rounded") \
+    X(upper_wind_south, atmosphere, i16, seasonal, "m/s", "Seasonal 500 hPa southward wind, rounded") \
+    X(vertical_velocity, atmosphere, i16, seasonal, "hPa/day x 100", "Seasonal 500 hPa ascent (verticalVelocityStorageScale)") \
+    X(evaporation, atmosphere, i16, seasonal, "storage", "Seasonal evaporation (scaled)") \
+    X(maritime_influence, atmosphere, i16, seasonal, "storage", "Seasonal maritime influence (influenceStorageScale)") \
+    X(maritime_thermal_anomaly, atmosphere, i16, seasonal, "storage", "Seasonal maritime thermal anomaly (thermalAnomalyStorageScale)") \
+    X(maritime_fetch, atmosphere, i16, seasonal, "cells", "Seasonal maritime fetch distance") \
+    X(moisture, atmosphere, i16, seasonal, "storage", "Seasonal column moisture (scaled)") \
+    X(convergence, atmosphere, i16, seasonal, "storage", "Seasonal moisture convergence (scaled)") \
+    X(orographic_uplift, atmosphere, i16, seasonal, "storage", "Seasonal topographic uplift (scaled)") \
+    X(orographic_subsidence, atmosphere, i16, seasonal, "storage", "Seasonal topographic subsidence (scaled)") \
+    X(ocean_current_east, hydrosphere, i16, seasonal, "storage", "Seasonal eastward ocean current (scaled)") \
+    X(ocean_current_south, hydrosphere, i16, seasonal, "storage", "Seasonal southward ocean current (scaled)") \
+    X(sea_surface_temperature, hydrosphere, i16, seasonal, "C", "Seasonal sea surface temperature, rounded") \
+    X(solver_monthly_temperature, atmosphere, f32, monthly, "C", "Climate solver monthly temperature") \
+    X(solver_monthly_precipitation, atmosphere, f32, monthly, "mm/month", "Climate solver monthly precipitation") \
+    X(solver_surface_wind_east, atmosphere, f32, seasonal, "m/s", "Climate solver surface eastward wind") \
+    X(solver_surface_wind_south, atmosphere, f32, seasonal, "m/s", "Climate solver surface southward wind") \
+    X(solver_upper_wind_east, atmosphere, f32, seasonal, "m/s", "Climate solver 500 hPa eastward wind") \
+    X(solver_upper_wind_south, atmosphere, f32, seasonal, "m/s", "Climate solver 500 hPa southward wind") \
+    X(solver_low_wind_east, atmosphere, f32, seasonal, "m/s", "Climate solver 850 hPa eastward wind") \
+    X(solver_low_wind_south, atmosphere, f32, seasonal, "m/s", "Climate solver 850 hPa southward wind") \
+    X(solver_sea_surface_temperature, hydrosphere, f32, seasonal, "C", "Climate solver seasonal SST") \
+    X(solver_sea_ice, cryosphere, f32, seasonal, "fraction", "Climate solver seasonal sea ice") \
+    X(level_wind_east, atmosphere, f32, levelseasonal, "m/s", "Eastward wind per atmosphere level (table atmosphere.levels)") \
+    X(level_wind_north, atmosphere, f32, levelseasonal, "m/s", "Northward wind per atmosphere level") \
+    X(level_geopotential_height, atmosphere, f32, levelseasonal, "m", "Geopotential height per level; 500 hPa holds the model height anomaly") \
+    X(level_vertical_velocity, atmosphere, f32, levelseasonal, "hPa/day", "Ascent per level, positive upwards") \
+    X(level_available, atmosphere, u8, levelseasonal, "", "1 where the level is above ground and solved") \
+    X(column_water, atmosphere, f32, seasonal, "mm", "Column water vapour on the moisture-process grid; diagnostic of the last solve") \
+    X(moisture_transport_east, atmosphere, f32, seasonal, "kg/(m s)", "Eastward column moisture transport, process grid; diagnostic") \
+    X(moisture_transport_north, atmosphere, f32, seasonal, "kg/(m s)", "Northward column moisture transport, process grid; diagnostic") \
+    X(moisture_convergence, atmosphere, f32, seasonal, "mm/day", "Convergence of the column moisture transport, process grid; diagnostic") \
+    X(precipitation_rate, atmosphere, f32, seasonal, "mm/day", "Surface precipitation, stratiform + orographic + convective, process grid; diagnostic") \
+    X(ascent, atmosphere, f32, seasonal, "hPa/day", "Mean ascent, process grid; diagnostic") \
+    X(current_east, hydrosphere, f32, seasonal, "m/s", "Eastward mixed-layer current on the ocean grid; diagnostic") \
+    X(current_north, hydrosphere, f32, seasonal, "m/s", "Northward mixed-layer current on the ocean grid; diagnostic") \
+    X(mixed_layer_temperature, hydrosphere, f32, seasonal, "C", "Season-mean mixed-layer temperature on the ocean grid; diagnostic") \
+    X(storage_depth, hydrosphere, f32, seasonal, "m", "Season-mean thermal storage depth on the ocean grid; diagnostic") \
+    X(biome, biosphere, i16, grid, "code", "Holdridge biome slot") \
+    X(fishery_potential, biosphere, u8, grid, "0..100", "Fishery potential score") \
+    X(settlement_suitability, anthroposphere, u8, grid, "0..100", "Settlement suitability") \
+    X(infrastructure, anthroposphere, u8, grid, "0..100", "Infrastructure diffusion") \
+    X(agricultural_capacity, anthroposphere, u8, grid, "0..100", "Agricultural capacity") \
+    X(route_traffic, anthroposphere, u8, grid, "0..100", "Route traffic") \
+    X(river_access, anthroposphere, u8, grid, "0..100", "River access") \
+    X(harbor_score, anthroposphere, u8, grid, "0..100", "Harbour score") \
+    X(owner_settlement, anthroposphere, i32, grid, "id", "Owning settlement") \
+    X(owner_polity, anthroposphere, i32, grid, "id", "Owning polity") \
+    X(no_shade, presentation, b8, grid, "", "Cells excluded from relief shading") \
+    X(debug_test, presentation, i32, grid, "", "Debug scratch map")
+
+enum class FieldId : std::uint16_t
+{
+#define UW_WORLD_FIELD_ENUM(id, component, element, layout, units, description) id,
+    UW_WORLD_FIELD_LIST(UW_WORLD_FIELD_ENUM)
+#undef UW_WORLD_FIELD_ENUM
+};
+
+inline constexpr std::size_t kFieldCount = 0
+#define UW_WORLD_FIELD_COUNT(id, component, element, layout, units, description) + 1
+    UW_WORLD_FIELD_LIST(UW_WORLD_FIELD_COUNT)
+#undef UW_WORLD_FIELD_COUNT
+    ;
+
+// Entity tables are lists of records rather than grids.
+enum class TableId : std::uint8_t
+{
+    tectonic_boundary_segments,
+    tectonic_deforming_regions,
+    mineral_deposits,
+    mineral_budget,
+    craters,
+    settlements,
+    polities,
+    route_edges,
+    history_events,
+    weather_state,
+    atmosphere_levels
+};
+inline constexpr std::size_t kTableCount = 11;
+
+struct FieldSpec
+{
+    FieldId id;
+    Component component;
+    ElementType element;
+    Layout layout;
+    const char* name;        // e.g. "base_elevation"
+    const char* units;
+    const char* description;
+};
+
+struct TableSpec
+{
+    TableId id;
+    Component component;
+    const char* name;
+    const char* description;
+};
+
+const FieldSpec& fieldspec(FieldId id);
+const TableSpec& tablespec(TableId id);
+const char* componentname(Component component);
+const char* elementname(ElementType element);   // NumPy dtype string, e.g. "<i2"
+std::size_t elementsize(ElementType element);
+const char* layoutname(Layout layout);
+std::string qualifiedname(FieldId id);          // "geosphere.base_elevation"
+std::string qualifiedname(TableId id);
+bool findfield(std::string_view qualified, FieldId& id);
+bool findtable(std::string_view qualified, TableId& id);
+bool findcomponent(std::string_view name, Component& component);
+}

@@ -5,6 +5,7 @@
 
 #include "ui_charts.hpp"
 #include "functions.hpp"
+#include "map_views.hpp"
 #include "map_appearance.hpp"
 
 using namespace std;

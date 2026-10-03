@@ -42,8 +42,19 @@
 #include "climate_physics.hpp"
 #include "climate_weather.hpp"
 #include "generation_tuning.hpp"
-#include "planet.hpp"
-#include "functions.hpp"
+#include "climate_world.hpp"
+#include "climate_classification.hpp"
+#include "climate_fields.hpp"
+#include "classes.hpp"
+#include "climate_benchmark_outputs.hpp"
+#include "climate_elevation.hpp"
+#include "deterministic_random.hpp"
+#include "generation_progress.hpp"
+#include "grid_coordinates.hpp"
+#include "land_distance.hpp"
+#include "parallel_rows.hpp"
+#include "procedural_noise.hpp"
+#include "world_generation_debug.hpp"
 
 using namespace std;
 
@@ -66,7 +77,7 @@ const climateio::experiment::Inputs& referenceexperiment()
     return inputs;
 }
 
-float worldpermanentlandicefraction(const planet& world, int x, int y)
+float worldpermanentlandicefraction(const climateworld& world, int x, int y)
 {
     if (!tuning::climate::energybalance::couplePermanentLandIce || world.sea(x,y)) return 0.0f;
     int warmest = world.seasonaltemp(0,x,y);
@@ -457,9 +468,9 @@ void applyeddyexchange(
     applyzonal(true);
 }
 
-void smoothallfield(planet& world, floatgrid& field, int iterations);
+void smoothallfield(climateworld& world, floatgrid& field, int iterations);
 
-float samplewrappedfield(const floatgrid& field, planet& world, float x, float y)
+float samplewrappedfield(const floatgrid& field, climateworld& world, float x, float y)
 {
     const int width = world.width();
     const int height = world.height();
@@ -491,7 +502,7 @@ float samplewrappedfield(const floatgrid& field, planet& world, float x, float y
         v11 * fracx * fracy;
 }
 
-void storeterrainverticalmotion(planet& world, int season, const floatgrid& macroterrain, const floatgrid& windu, const floatgrid& windv)
+void storeterrainverticalmotion(climateworld& world, int season, const floatgrid& macroterrain, const floatgrid& windu, const floatgrid& windv)
 {
     const int width = world.width();
     const int height = world.height();
@@ -589,7 +600,7 @@ void storeterrainverticalmotion(planet& world, int season, const floatgrid& macr
 }
 }
 
-void createoceancurrentmap(planet& world)
+void createoceancurrentmap(climateworld& world)
 {
     auto& climate = world.climatesimulation();
     const int outputcolumns = world.width() + 1;
@@ -870,7 +881,7 @@ void createoceancurrentmap(planet& world)
             ocean.meanIceCover = ocean.iceThicknessMetres;
             for (auto& h : ocean.meanIceCover) h = std::clamp(h / 0.10f, 0.0f, 1.0f);
         }
-        climatevalidation::captureoceanfields(world, season, columns, rows, ocean);
+        world.recordoceandiagnostics(season, columns, rows, ocean);
         // Log the forcing actually used, before the next hydrology update.
         // Sequential groups of four seasons identify outer ocean calls.
         if (climate.oceanAccepted[season] && !surfaceRadiation[season].empty())
@@ -1001,7 +1012,7 @@ void createoceancurrentmap(planet& world)
             }
 }
 
-void createsurfacetemperaturemap(planet& world)
+void createsurfacetemperaturemap(climateworld& world)
 {
     auto& climate = world.climatesimulation();
     const int width = world.width();
@@ -1048,7 +1059,7 @@ void createsurfacetemperaturemap(planet& world)
 
 namespace
 {
-float pressuresurfacetemperature(planet& world, int season, int x, int y)
+float pressuresurfacetemperature(climateworld& world, int season, int x, int y)
 {
     auto& climate = world.climatesimulation();
     if (tuning::climate::oceancurrents::oneWayDiagnosticsOnly)
@@ -1062,7 +1073,7 @@ float pressuresurfacetemperature(planet& world, int season, int x, int y)
     return static_cast<float>(world.seasonaltemp(season, x, y));
 }
 
-void smoothallfield(planet& world, floatgrid& field, int iterations)
+void smoothallfield(climateworld& world, floatgrid& field, int iterations)
 {
     const int width = world.width();
     const int height = world.height();
@@ -1105,7 +1116,7 @@ void smoothallfield(planet& world, floatgrid& field, int iterations)
 }
 
 climateatmosphere::CirculationPrecisionStageDiagnostics measurecirculationprecision(
-    planet& world,
+    climateworld& world,
     const floatgrid& pressure,
     const floatgrid& upperheight,
     const floatgrid& continentality,
@@ -1282,7 +1293,7 @@ climateatmosphere::CirculationPrecisionStageDiagnostics measurecirculationprecis
 }
 }
 
-void createpressuremap(planet& world)
+void createpressuremap(climateworld& world)
 {
     auto& climate = world.climatesimulation();
     climate.resetDynamics();
@@ -1497,7 +1508,7 @@ void createpressuremap(planet& world)
     }
 }
 
-void updatehorsebeltsfrompressure(planet& world)
+void updatehorsebeltsfrompressure(climateworld& world)
 {
     const int width = world.width();
     const int height = world.height();
@@ -1645,7 +1656,7 @@ void updatehorsebeltsfrompressure(planet& world)
     }
 }
 
-void convergeclimatecoupling(planet& world, vector<vector<int>>& fractal)
+void convergeclimatecoupling(climateworld& world, vector<vector<int>>& fractal)
 {
     auto& climate = world.climatesimulation();
     using namespace tuning::climate::circulation;
@@ -1781,7 +1792,7 @@ void convergeclimatecoupling(planet& world, vector<vector<int>>& fractal)
             << " iterations; inspect the climate_coupling diagnostics.\n";
 }
 
-void createvectorwindmap(planet& world)
+void createvectorwindmap(climateworld& world)
 {
     auto& climate = world.climatesimulation();
     using namespace tuning::climate;
@@ -2496,6 +2507,75 @@ void createvectorwindmap(planet& world)
                 << " overturning_projection=" << circulation::auxiliary850OverturningProjection
                 << " exchange_rate_per_s=" << circulation::surface850ExchangeRatePerSecond << '\n';
         }
+        if (!climate.genericLevelPressuresHpa.empty() && !climate.transientWeather && config.enabled.surface)
+        {
+            // Experimental: every generic level uses the same rules, so that one level
+            // class serves any pressure between the boundary layer and 500 hPa:
+            //  - a troposphere-deep mode (the 850 hPa mode depth) and its diagnosed damping;
+            //  - the free-tropospheric drag of the 850 hPa mode;
+            //  - ideal-gas density at the level from the mean temperature and lapse rate;
+            //  - the surface pressure pattern projected with ln(p / p_r) / ln(p_s / p_r),
+            //    reversing at the heat-low depth p_r, plus the solver's own heating term.
+            // Diagnostic only: nothing below reads these winds.
+            const float reversalPa = 100.0f * climate.genericLevelReversalHpa;
+            climate.winds.genericlevels.resize(climate.genericLevelPressuresHpa.size());
+            const auto levelParameters = climateatmosphere::diagnoseStationaryParameters(stability,
+                circulation::auxiliary850ModeDepthMetres, config.gravityMetresPerSecondSquared,
+                config.planetRadiusMetres, config.rotationRatePerSecond, columns, rows,
+                circulation::stationaryWaveNondimensionalDamping, circulation::diagnosedForcingScaleMetres);
+            vector<float> levelHeating(columns * rows);
+            for (int cell = 0; cell < columns * rows; ++cell)
+                levelHeating[cell] = lowerheating[cell] + upperheating[cell];
+            double meanTemperature = 0.0, meanWeight = 0.0;
+            for (int y = 0; y < rows; ++y)
+                for (int x = 0; x < columns; ++x)
+                {
+                    meanTemperature += grid.cellAreasSquareMetres[y] * temperature[y * columns + x];
+                    meanWeight += grid.cellAreasSquareMetres[y];
+                }
+            meanTemperature /= std::max(1.0, meanWeight);
+            for (std::size_t index = 0; index < climate.genericLevelPressuresHpa.size(); ++index)
+            {
+                auto& stored = climate.winds.genericlevels[index];
+                const float levelPa = 100.0f * climate.genericLevelPressuresHpa[index];
+                stored.pressureHpa = climate.genericLevelPressuresHpa[index];
+                auto levelConfig = config;
+                levelConfig.surfaceEquivalentPressureDepthHpa = pressurepermetre * levelParameters.equivalentDepthMetres;
+                levelConfig.surfaceDampingTimeSeconds = levelParameters.dampingTimeSeconds;
+                levelConfig.boundaryLayer.enabled = true;
+                levelConfig.boundaryLayer.inversionPressurePa = levelPa;
+                const double levelHeight = 287.05 * (meanTemperature + 273.15) / config.gravityMetresPerSecondSquared *
+                    std::log(100000.0 / levelPa);
+                levelConfig.boundaryLayer.inversionDensityKgM3 = static_cast<float>(levelPa /
+                    (287.05 * (meanTemperature + 273.15 - 0.0065 * levelHeight)));
+                levelConfig.stationaryCaptureDirectory.clear();
+                const float projection = std::log(levelPa / reversalPa) / std::log(100000.0f / reversalPa);
+                levelConfig.inversionEquilibriumPressureHpa.assign(columns * rows, 0.0f);
+                for (int cell = 0; cell < columns * rows; ++cell)
+                    levelConfig.inversionEquilibriumPressureHpa[cell] = projection *
+                        (zonalpressure[cell / columns] + regionalPressure[cell] + continentalPressure[cell]);
+                const auto level = climateatmosphere::solveBoundaryLayer(columns, rows, temperature,
+                    levelHeating, mechanicalforcing, levelConfig);
+                std::cout << "Generic level " << stored.pressureHpa << " hPa season=" << season
+                    << " converged=" << level.inversionSolver.converged << " projection=" << projection
+                    << " density=" << levelConfig.boundaryLayer.inversionDensityKgM3 << '\n';
+                if (!level.inversionSolver.converged)
+                    continue;
+                vector<float> east(columns * rows), south(columns * rows), available(columns * rows);
+                for (int cell = 0; cell < columns * rows; ++cell)
+                {
+                    const float height = 287.05f * (temperature[cell] + 273.15f) / config.gravityMetresPerSecondSquared *
+                        std::log(100000.0f / levelPa);
+                    available[cell] = terrain[cell] < height ? 1.0f : 0.0f;
+                    east[cell] = available[cell] * level.inversionEastWindMps[cell];
+                    south[cell] = available[cell] * level.inversionSouthWindMps[cell];
+                }
+                stored.windu[season] = output(east);
+                stored.windv[season] = output(south);
+                stored.available[season] = output(available);
+                stored.solved[season] = true;
+            }
+        }
         vector<float> carrierEast, carrierSouth;
         const auto preDrainageEast = result.surfaceEastWindMps, preDrainageSouth = result.surfaceSouthWindMps;
         auto diagnosticSkin = temperature, diagnosticSnow = permanentice;
@@ -2890,7 +2970,7 @@ void createvectorwindmap(planet& world)
         world.setwind(0, y, world.wind(width, y));
 }
 
-void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<vector<int>>& fractal)
+void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, vector<vector<int>>& fractal)
 {
     auto& climate = world.climatesimulation();
     (void)inland;
@@ -5085,10 +5165,10 @@ void createadvectedrainfall(planet& world, vector<vector<int>>& inland, vector<v
         normalize(fields.permanentLandIceFraction);
         normalize(fields.surfaceRadiativeHeatingWm2); normalize(fields.surfaceLatentHeatLossWm2);
         normalize(fields.columnWaterMm); normalize(fields.ascentHpaPerDay); normalize(fields.columnEnergyResidualWm2);
-        climatevalidation::captureclimateprocessfields(world, season, fields);
+        world.recordprocessdiagnostics(season, fields);
         climate.processes[season] = std::move(fields);
         for (int layer = 0; layer < 2; ++layer)
-            climatevalidation::captureweatherstatistics(world, season, width + 1, height + 1,
+            world.recordweatherdiagnostics(season, width + 1, height + 1,
                 climateweather::calculateStatistics(seasonalweather[season], layer, seasonalweights[season]), layer);
     }
 }

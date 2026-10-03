@@ -1,0 +1,36 @@
+#ifndef TECTONIC_PLUMES_HPP
+#define TECTONIC_PLUMES_HPP
+#include <cstdint>
+#include <vector>
+namespace tectonics::plumes {
+// Mantle plumes fixed in the native (mantle) frame. A prescribed source, not a
+// convection solution: each plume adds basalt at a steady tail flux, optionally
+// a smooth head pulse at its birth, and reheats the oceanic lithosphere above it.
+// Plates carrying that rock away build age-progressive chains. count 0 is off.
+struct Parameters {
+    uint32_t count = 0;
+    double tail_flux_km3_yr = .05;     // basalt per plume and year after birth
+    double tail_radius_km = 150;       // Gaussian sigma of the tail source
+    double head_volume_km3 = 0;        // total head pulse per plume; 0 = no heads
+    double head_radius_km = 800;
+    double head_duration_myr = 10;     // smoothstep pulse from the birth time
+    double birth_window_myr = 0;       // births spread over [0, window] of model time
+    double swell_age_myr = 0;          // target thermal age of reheated ocean floor; 0 = no swell
+    double swell_radius_km = 400;
+    double weakening = 0;              // 0..1 strength reduction for progressive rifting
+    double min_spacing_km = 3000;
+};
+struct Plume { double x_km = 0, y_km = 0, birth_myr = 0; };
+struct Source {
+    std::vector<double> basalt_m;      // added basalt, volume per cell area over the step
+    std::vector<double> influence;     // 0..1 proximity to an active plume (swell, weakening, map)
+    double swell_age_myr = 0;
+};
+void validate(const Parameters& parameters);
+// Deterministic positions on the width_km x height_km torus from the seed alone.
+std::vector<Plume> place(double width_km, double height_km, long seed, const Parameters& parameters);
+// Source over [start_myr, end_myr]; volumes integrate exactly over any time step.
+Source source(uint32_t width, uint32_t height, double cell_m, long seed, double start_myr, double end_myr,
+              const Parameters& parameters);
+}
+#endif

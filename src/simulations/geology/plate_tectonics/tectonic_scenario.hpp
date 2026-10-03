@@ -4,6 +4,7 @@
 #include "topography_codec.hpp"
 #include "tectonic_margins.hpp"
 #include "tectonic_noise_pass.hpp"
+#include "tectonic_plumes.hpp"
 #include "tectonic_topology.hpp"
 
 #include <cstdint>
@@ -58,6 +59,7 @@ struct Scenario {
     margins::Parameters margin_processes;
     topology::Parameters topology_processes;
     noise_pass::Parameters experimental_noise;
+    plumes::Parameters plume_processes; // count 0 (default) leaves every run unchanged
     double delta_time_myr = kDefaultDeltaTimeMyr;
     float gravity_mps2 = kDefaultGravityMps2;
 };

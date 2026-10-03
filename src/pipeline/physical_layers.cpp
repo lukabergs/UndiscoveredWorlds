@@ -41,7 +41,7 @@ void reportgolddeposits(const planet& world)
 }
 }
 
-void generatephysicalworldlayers(planet& world, const std::vector<std::vector<bool>>& shelves)
+void generatephysicalworldlayers(planet& world, const worldgrid<bool>& shelves)
 {
     physical_layers::generate_drainage_basins(world);
     physical_layers::generate_surface_potentials(world);

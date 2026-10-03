@@ -1,6 +1,7 @@
 #pragma once
 
 #include "functions.hpp"
+#include "map_views.hpp"
 
 struct NavigationState
 {

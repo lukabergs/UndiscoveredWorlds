@@ -1,0 +1,43 @@
+# Verification commands
+
+Run these only when asked, or when a bug persists after a fix attempt (see `AGENTS.md`). A compile build is the default check for any edit. Two presets: `desktop` (`out/build/desktop`) and `headless` (`out/build/headless`); binaries land in `bin/<Config>/`, and scripts use the headless Release paths from `scripts/uwtools/paths.py`.
+
+## Build
+
+```powershell
+cmake --preset desktop                                   # configure (Visual Studio generator, multi-config)
+cmake --build out/build/desktop --config Release --parallel 4   # simulations: always Release
+cmake --build out/build/desktop --config Debug --target world_pipeline   # debugging only
+```
+
+Headless configuration without the desktop stack or CUDA discovery (tectonics tools and tests included):
+
+```powershell
+cmake --preset headless
+cmake --build out/build/headless --config Release --target world_pipeline tectonic_pipeline --parallel 4
+```
+
+## Tests
+
+```powershell
+ctest --test-dir out/build/desktop -C Release --output-on-failure -j 4          # all registered C++ tests
+ctest --test-dir out/build/desktop -C Release -R climate_hydrology_tests        # one test by name
+uv run --offline --with numpy --with pillow python -m unittest discover -s tests/scripts   # Python suite
+uv run --offline python scripts/check-layout.py                                   # layout and tectonics header boundary
+uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/tectonic_pipeline.exe
+```
+
+Test names are defined in `tests/CMakeLists.txt`, `tests/simulations/geology/plate_tectonics/CMakeLists.txt` and `tests/simulations/geology/mineral_systems/CMakeLists.txt`. `check_tectonics_cli.py` checks default/explicit recipe equality, column budgets and rejection of invalid options.
+
+## Equivalence and access checks
+
+```powershell
+out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --bundle out/scratch/before
+# ... change code, rebuild ...
+out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --bundle out/scratch/after
+uv run --offline python scripts/evaluation/compare_bundles.py out/scratch/before out/scratch/after
+out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --audit-access
+uv run --offline python scripts/evaluation/process_access.py --check
+```
+
+Headless checks do not establish GUI rendering, historical save compatibility, full Earth benchmark skill or high-resolution performance; verify that boundary when it is part of the requested outcome. Module benchmarks and evaluations: `docs/reference-guides/benchmark-commands.md`.

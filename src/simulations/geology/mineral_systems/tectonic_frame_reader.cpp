@@ -1,6 +1,5 @@
 #include "tectonic_frame_reader.hpp"
 
-#include "lithosphere.hpp"
 #include "tectonic_api.hpp"
 #include "tectonic_contract.hpp"
 #include "topography_codec.hpp"
@@ -33,8 +32,8 @@ static_assert(matches(regimecode::convergent_arc, GeologicRegime::ConvergentArc)
 
 const TectonicFrame& TectonicFrameReader::read(void* simulation)
 {
-    frame_.width = lithosphere_getMapWidth(simulation);
-    frame_.height = lithosphere_getMapHeight(simulation);
+    frame_.width = tectonics_get_map_width(simulation);
+    frame_.height = tectonics_get_map_height(simulation);
     frame_.timeMyr = tectonics_get_time_myr(simulation);
     frame_.deltaTimeMyr = tectonics_get_delta_time_myr(simulation);
     frame_.plateIndex = tectonics_get_platesmap(simulation);
@@ -51,12 +50,12 @@ const TectonicFrame& TectonicFrameReader::read(void* simulation)
         elevationM_[cell] = static_cast<float>(TopographyCodec::internal_to_meters(heightmap[cell], sealevel)) - sealevel;
     frame_.elevationM = elevationM_.data();
 
-    const auto& columns = static_cast<const lithosphere*>(simulation)->getColumnModel().cells();
+    const tectonics::columns::Cell* columns = tectonics_get_column_cells(simulation);
     continentalCrustM_.clear();
-    if (columns.size() == frame_.cellCount())
+    if (columns != nullptr)
     {
-        continentalCrustM_.resize(columns.size());
-        for (std::size_t cell = 0; cell < columns.size(); ++cell)
+        continentalCrustM_.resize(frame_.cellCount());
+        for (std::size_t cell = 0; cell < continentalCrustM_.size(); ++cell)
             continentalCrustM_[cell] = static_cast<float>(columns[cell].continent);
     }
     frame_.continentalCrustM = continentalCrustM_.empty() ? nullptr : continentalCrustM_.data();

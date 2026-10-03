@@ -27,7 +27,7 @@ Earth-climate accuracy.
   coupling comparisons, not as evidence of atmospheric skill.
 
 Run the retained alternatives with the normal build and
-`ctest --test-dir out/build/x64-Debug -C Debug -R "climate_(atmosphere|ocean_dynamics)_tests" --output-on-failure`.
+`ctest --test-dir out/build/desktop -C Debug -R "climate_(atmosphere|ocean_dynamics)_tests" --output-on-failure`.
 
 Uncalled latitude-temperature, prescribed-current/SST and directional rain/
 monsoon implementations were removed. The all-land rainfall fallback remains

@@ -10,10 +10,13 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 import zipfile
 import numpy as np
 from PIL import Image
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import paths
 from tectonics_experiment import write_json, digest
 from tectonics_report_data import load_bundle
 from tectonics_batch_analysis import distribution
@@ -81,14 +84,14 @@ def climate(folder,z,exe,seed):
         UW_REFERENCE_CLIMATE_DIR=str(folder/'no-observed-forcing'),
         UW_REFERENCE_PRECIP_GRID=str(folder/'no-observed-forcing/none.csv'))
     maps='koppen,temp,precip,precip-tif,'+','.join(f'{s}-{f}' for s in ['jan','apr','jul','oct'] for f in ['s-wind-speed','sst','ocean-current'])
-    command=[str(exe),'--generate-world','--climate-only','--seed',str(seed),'--resolution',str(w),
+    command=[str(exe),'generate','--climate-only','--seed',str(seed),'--resolution',str(w),
         '--import-land',str(folder/'land.tif'),'--import-sea',str(folder/'sea.tif'),
         '--climate-resolution','128','--climate-hydrology-resolution',str(w),
         '--climate-coupling-iterations','8','--climate-temperature-mode','calibrated',
         '--climate-mode','baseline','--climate-tropical-closure','legacy',
         '--climate-transport','ffsl','--climate-ocean-heat-workers','16',
         '--climate-ocean-circulation-solver','krylov','--climate-ocean-coastal-scheme','face-forcing',
-        '--climate-atmosphere-solver','zonal','--wind-map-resolution','512',
+        '--climate-atmosphere-solver','zonal',
         '--no-rivers','--no-lakes','--no-deltas','--no-profile-log','--map',maps,
         '--benchmark-info','Procedural tectonic world; climate-only feedback; no observed spatial forcing']
     start=time.monotonic()
@@ -166,8 +169,8 @@ def run(parent,run_id,cycles,duration):
     registry['runs'].append(dict(id=run_id,status='running',kind=manifest['kind'],manifest=manifest_path.relative_to(ROOT).as_posix()))
     write_json(registry_path,registry);write_json(manifest_path,manifest);write_json(archive/'recipe.json',record['recipe'])
     binaries=archive/'binaries';binaries.mkdir()
-    app=ROOT/'out/build/x64-Release/bin/UndiscoveredWorlds.exe'
-    for path in [app,*app.parent.glob('*.dll'),ROOT/'out/build/headless-modules/bin/tectonic_climate_erosion.exe']:
+    app=paths.executable('world_pipeline')
+    for path in [app,*app.parent.glob('*.dll'),paths.executable('tectonic_climate_erosion')]:
         shutil.copy2(path,binaries/path.name)
     manifest['binary_sha256']={p.name:digest(p) for p in binaries.iterdir()}
     with zipfile.ZipFile(archive/'source.zip','w',zipfile.ZIP_DEFLATED) as package:

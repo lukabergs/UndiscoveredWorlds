@@ -920,86 +920,7 @@ void createriftblob(vector<vector<float>>& riftblob, int size)
     }
 }
 
-// This function returns a random number from a to b inclusive.
 
-int random(int a, int b)
-{
-    int range = (b - a) + 1; // This is the range of possible numbers.
-
-    int r = a + (fast_rand() % range);
-
-    return r;
-}
-
-// This function randomises the sign of an integer (positive or negative).
-
-int randomsign(int a)
-{
-    if (random(0, 1) == 1)
-        a = 0 - a;
-
-    return a;
-}
-
-// This does the same thing, for floats.
-
-float randomsign(float a)
-{
-    if (random(0, 1) == 1)
-        a = 0.0f - a;
-
-    return a;
-}
-
-// These do the same thing but with the inbuilt randomiser.
-
-int altrandom(int a, int b)
-{
-    int range = (b - a) + 1; // This is the range of possible numbers.
-
-    int r = a + (rand() % range);
-
-    return r;
-}
-
-int altrandomsign(int a)
-{
-    if (altrandom(0, 1) == 1)
-        a = 0 - a;
-
-    return (a);
-}
-
-// This function finds the average of two values, wrapped around a maximum.
-
-int wrappedaverage(int x, int y, int max)
-{
-    int result = -1;
-
-    int diffa = abs(x - y);
-
-    int diffb = abs((x - max) - y);
-
-    int diffc = abs(x - (y - max));
-
-    if (diffa <= diffb && diffa <= diffc)
-        result = (x + y) / 2;
-    else
-    {
-        if (diffb <= diffa && diffb <= diffc)
-            result = ((x - max) + y) / 2;
-        else
-            result = (x + (y - max)) / 2;
-    }
-
-    if (result < 0)
-        result = result + max;
-
-    if (result > max)
-        result = result - max;
-
-    return result;
-}
 
 // This normalises one value to another, so they are as close as possible, given the wrapped maximum.
 
@@ -1014,242 +935,9 @@ int normalise(int x, int y, int max)
     return y;
 }
 
-// This function takes two values (a and b) and creates a new value that is tilted towards a by percentage %.
 
-int tilt(int a, int b, int percentage)
-{
-    int neg = 0;
-    int tilt = 0;
 
-    float diff = (float)(a - b);
 
-    if (diff < 1.0f)
-    {
-        diff = 0.0f - diff;
-        neg = 1;
-    }
-
-    if (diff != 0.0f)
-        tilt = (int)((diff / 100.0f) * (float)percentage);
-
-    if (neg == 1)
-        tilt = 0 - tilt;
-
-    int newval = b + tilt;
-
-    return newval ;
-}
-
-// This does the same thing, but for floats.
-
-float tilt(float a, float b, int percentage)
-{
-    int neg = 0;
-    float tilt = 0.0f;
-
-    float diff = a - b;
-
-    if (diff < 1.0f)
-    {
-        diff = 0.0f - diff;
-        neg = 1;
-    }
-
-    if (diff != 0.0f)
-        tilt = (diff / 100.0f) * (float)percentage;
-
-    if (neg == 1)
-        tilt = 0.0f - tilt;
-
-    float newval = b + tilt;
-
-    return newval;
-}
-
-// This function warps a vector by the specified amount, creating a more natural look.
-
-void warp(vector<vector<int>>& map, int width, int height, int maxelev, int warpfactor, bool vary)
-{
-    vector<vector<int>> dest(width+1, vector<int>(height+1, 0));
-    
-    int grain = 8; // Level of detail on this fractal map.
-    float valuemod = 0.2f;
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
-
-    vector<vector<int>> warpright(width + 1, vector<int>(height + 1, 0));
-    vector<vector<int>> warpdown(width + 1, vector<int>(height + 1, 0));
-
-    createfractal(warpright, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-    createfractal(warpdown, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    // Now create another one to vary the strength of this effect (if needed).
-
-    vector<vector<int>> broad(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    grain = 4;
-    valuemod = 0.002f;
-    valuemod2 = 0.002f;
-
-    if (vary)
-        createfractal(broad, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            int x = i;
-            int y = j;
-
-            float thiswarpright = (float)warpright[i][j] / (float)maxelev;
-            float thiswarpdown = (float)warpdown[i][j] / (float)maxelev;
-
-            thiswarpright = thiswarpright - 0.5f; // So they're in the range -0.5 - 0.5.
-            thiswarpdown = thiswarpdown - 0.5f;
-
-            thiswarpright = thiswarpright * warpfactor;
-            thiswarpdown = thiswarpdown * warpfactor;
-
-            if (vary)
-            {
-                float varyfactor = (float)broad[i][j] / (float)maxelev;
-
-                thiswarpright = thiswarpright * varyfactor;
-                thiswarpdown = thiswarpdown * varyfactor;
-            }
-
-            x = x + (int)thiswarpright;
-
-            if (x<0 || x>width)
-                x = wrap(x, width);
-
-            y = y + (int)thiswarpdown;
-
-            if (y < 0)
-                y = 0;
-
-            if (y > height)
-                y = height;
-
-            int val = map[x][y];
-
-            dest[i][j] = (int)val;
-        }
-    }
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            map[i][j] = dest[i][j];
-        }
-    }
-}
-
-// This does the same thing, but a "monstrous" warp - http://thingonitsown.blogspot.com/2018/11/monstrous-terrain.html
-
-void monstrouswarp(vector<vector<int>>& map, int width, int height, int maxelev, int warpfactor)
-{
-    vector<vector<int>> dest(width + 1, vector<int>(height + 1, 0));
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            float point = (float)map[i][j];
-
-            point = point / (float)maxelev; // Makes it into a value from 0.0 to 1.0
-
-            point = point * (float)warpfactor;
-
-            int val = map[(int)point][(int)point];
- 
-            dest[i][j] = val;
-        }
-    }
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            map[i][j] = dest[i][j];
-        }
-    }
-}
-
-// This function shifts everything in a vector to the left by a given number of pixels.
-
-void shift(vector<vector<int>>& map, int width, int height, int offset)
-{
-    vector<vector<int>> dummy(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-            dummy[i][j] = map[i][j];
-    }
-
-    for (int i = 0; i <= width; i++)
-    {
-        int ii = i + offset;
-
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = 0; j <= height; j++)
-            map[i][j] = dummy[ii][j];
-    }
-
-    // For some reason this leaves a vertical line of noise, so we remove that manually now.
-
-    int i = width - offset; // This is the x-coordinate of the problematic line.
-    int iminus = i - 1;
-    int iplus = i + 1;
-
-    if (iminus < 0)
-        iminus = width;
-
-    if (iplus > width)
-        iplus = 0;
-
-    for (int j = 0; j <= height; j++) // Make the line the average of its neighbours to left and right.
-    {
-        map[i][j] = (map[iminus][j] + map[iplus][j]) / 2;
-    }
-}
-
-// This function flips an array, vertically/horizontally.
-
-void flip(vector<vector<int>>& arr, int awidth, int aheight, bool vert, bool horiz)
-{
-    vector<vector<int>> dummy(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    for (int i = 0; i <= awidth; i++)
-    {
-        for (int j = 0; j <= aheight; j++)
-            dummy[i][j] = arr[i][j];
-    }
-
-    for (int i = 0; i <= awidth; i++)
-    {
-        for (int j = 0; j <= aheight; j++)
-        {
-            int ii, jj;
-
-            if (horiz == 0)
-                ii = 1;
-            else
-                ii = awidth - i;
-
-            if (vert == 0)
-                jj = j;
-            else
-                jj = aheight - j;
-
-            arr[i][j] = dummy[ii][jj];
-        }
-    }
-}
 
 // This function smoothes a vector.
 
@@ -1666,22 +1354,6 @@ void fillcontinent(vector<vector<bool>>& arr, vector<vector<short>>& mask, short
 
 // This function adds the elevation element to a temperature.
 
-int tempelevadd(planet& world, int temp, int i, int j)
-{
-    int elevation = world.map(i, j) - world.sealevel();
-
-    if (elevation < 0)
-        elevation = 0;
-
-    float elevationadjust = (float)elevation;
-    elevationadjust = elevationadjust / 1000.0f;
-    elevationadjust = elevationadjust * world.tempdecrease();
-
-    temp = temp - (int)elevationadjust;
-
-    return temp;
-}
-
 // Same thing, but at the regional level.
 
 int tempelevadd(planet& world, region& region, int temp, int i, int j)
@@ -1701,22 +1373,6 @@ int tempelevadd(planet& world, region& region, int temp, int i, int j)
 }
 
 // This function removes the elevation element of a temperature.
-
-int tempelevremove(planet& world, int temp, int i, int j)
-{
-    int elevation = world.map(i, j) - world.sealevel();
-
-    if (elevation < 0)
-        elevation = 0;
-
-    float elevationadjust = (float)elevation;
-    elevationadjust = elevationadjust / 1000.0f;
-    elevationadjust = elevationadjust * world.tempdecrease();
-
-    temp = temp + (int)elevationadjust;
-
-    return temp;
-}
 
 // Same thing, but at the regional level.
 
@@ -1781,35 +1437,6 @@ string getdirstring(int dir)
 }
 
 // This function returns the direction from one tile to another.
-
-int getdir(int x, int y, int xx, int yy)
-{
-    if (xx == x && yy < y)
-        return (1);
-
-    if (xx > x && yy < y)
-        return (2);
-
-    if (xx > x && yy == y)
-        return (3);
-
-    if (xx > x && yy > y)
-        return (4);
-
-    if (xx == x && yy > y)
-        return (5);
-
-    if (xx<x && yy>y)
-        return (6);
-
-    if (xx < x && yy == y)
-        return (7);
-
-    if (xx < x && yy < y)
-        return (8);
-
-    return (0);
-}
 
 // This function finds the direction of the lowest neighbouring tile.
 
@@ -3634,7 +3261,7 @@ void initialiseworld(planet& world)
 {
     world.clear();
 
-    int saveversion = 17;        // Only saves of this exact version can be loaded.
+    int saveversion = 18;        // Saves of this version (and version 17) can be loaded.
     int settingssaveversion = 5; // As above, but for settings files.
     int size = tuning::worlddefaults::size;
     int width = tuning::worlddefaults::width;
@@ -3661,7 +3288,6 @@ void initialiseworld(planet& world)
     int sealevel = tuning::worlddefaults::seaLevel;
     int craterno = tuning::worlddefaults::craterCount;
 
-
     world.setsaveversion(saveversion);
     world.setsettingssaveversion(settingssaveversion);
     world.setsize(size);
@@ -3686,7 +3312,6 @@ void initialiseworld(planet& world)
     world.setclimatenumber(climatenumber);
     world.setmaxelevation(maxelevation);
     world.setsealevel(sealevel);
-    world.settectoniccyclecount(0);
     world.settectonicplatecount(0);
     world.settectonicsealevelm(0);
     world.setlandtotal(0);
@@ -4376,5 +4001,3 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
         }
     }
 }
-
-

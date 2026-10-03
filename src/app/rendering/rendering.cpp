@@ -7,16 +7,13 @@
 #include "imgui.h"
 #include "cuda_renderers.hpp"
 #include "functions.hpp"
+#include "map_views.hpp"
 
 using namespace std;
 
 namespace
 {
     constexpr int rgbachannels = 4;
-    bool timedreportingenabled = false;
-    bool hastimedreport = false;
-    string timedreporttext;
-    chrono::steady_clock::time_point timedreportstart;
 
     template <typename T>
     void fillgrid(vector<vector<T>>& grid, const T& value)
@@ -767,25 +764,6 @@ namespace
         applyregionaloutlineoverlay(world, region, image);
     }
 
-    void flushtimedreport()
-    {
-        if (hastimedreport == false)
-            return;
-
-        const double elapsedms = chrono::duration<double, milli>(chrono::steady_clock::now() - timedreportstart).count();
-        const streamsize oldprecision = cout.precision();
-        const ios::fmtflags oldflags = cout.flags();
-
-        cout << '\r' << left << setw(48) << timedreporttext << " [" << fixed << setprecision(2) << elapsedms << "ms]" << endl;
-        cout.flags(oldflags);
-        cout.precision(oldprecision);
-
-        onworldgenstepcompleted(timedreporttext, elapsedms);
-
-        hastimedreport = false;
-        timedreporttext.clear();
-    }
-
     void setpixel(vector<sf::Uint8>& pixels, int width, int x, int y, sf::Uint8 r, sf::Uint8 g, sf::Uint8 b, sf::Uint8 a = 255)
     {
         const size_t offset = pixeloffset(width, x, y);
@@ -1342,44 +1320,6 @@ void drawhighlightobjects(planet& world, sf::Image& highlightimage, int highligh
         minihighlightimage.setPixel(0, j, currenthighlightcolour);
         minihighlightimage.setPixel(minihighlightsize - 1, j, currenthighlightcolour);
     }
-}
-
-// This prints out an update text.
-
-void updatereport(string text)
-{
-    if (timedreportingenabled == false)
-    {
-        cout << text << endl;
-        return;
-    }
-
-    flushtimedreport();
-
-    if (text.empty())
-    {
-        cout << endl;
-        return;
-    }
-
-    timedreporttext = text;
-    timedreportstart = chrono::steady_clock::now();
-    hastimedreport = true;
-
-    cout << text << "..." << flush;
-}
-
-void begintimedreporting()
-{
-    timedreportingenabled = true;
-    hastimedreport = false;
-    timedreporttext.clear();
-}
-
-void endtimedreporting()
-{
-    flushtimedreport();
-    timedreportingenabled = false;
 }
 
 // This makes a button in a standard size and indentation.

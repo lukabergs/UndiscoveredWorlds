@@ -87,9 +87,6 @@ class lithosphere {
      */
     void createPlates();
 
-    uint32_t getCycleCount() const noexcept {
-        return 0; // Reserved snapshot metadata; evolution never restarts.
-    }
     uint32_t getIterationCount() const noexcept {
         return iter_count;
     }
@@ -137,6 +134,8 @@ class lithosphere {
     uint32_t getTectonicJunctionCount() const noexcept;
     const uint8_t* getMaterialMap() const noexcept;
     float* getTopography() const noexcept;      ///< Return height map.
+    /// Proximity (0..1) to an active mantle plume over the last update; empty when plumes are off.
+    const std::vector<float>& getPlumeInfluenceMap() const noexcept { return plume_influence_map; }
     uint32_t* getPlatesMap() const noexcept;    ///< Return a map of the plates owning eaach point
     const uint8_t* getConvergenceMap() const noexcept;
     const uint8_t* getDivergenceMap() const noexcept;
@@ -261,6 +260,7 @@ class lithosphere {
     std::vector<float> rift_tension_x_map;
     std::vector<float> rift_tension_y_map;
     std::vector<float> rift_tension_map;
+    std::vector<float> plume_influence_map; // empty unless plumes are on
     std::vector<tectonics::contract::PlateKinematics> plate_kinematics;
     std::vector<tectonics::contract::BoundarySegment> boundary_segments;
     std::vector<tectonics::contract::DeformingRegion> deforming_regions;

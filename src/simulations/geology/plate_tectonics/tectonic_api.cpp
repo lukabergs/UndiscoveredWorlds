@@ -158,6 +158,11 @@ const uint8_t* tectonics_get_material_map(void* pointer) {
     return litho->getMaterialMap();
 }
 
+const float* tectonics_get_plume_influence_map(void* pointer) {
+    const auto& map = static_cast<lithosphere*>(pointer)->getPlumeInfluenceMap();
+    return map.empty() ? nullptr : map.data();
+}
+
 float* tectonics_get_heightmap(void* pointer) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
     float* res = litho->getTopography();
@@ -188,11 +193,6 @@ const uint8_t* tectonics_get_shear_map(void* pointer) {
 const uint8_t* tectonics_get_geologic_regime_map(void* pointer) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
     return litho->getGeologicRegimeMap();
-}
-
-uint32_t tectonics_get_cycle_count(void* pointer) {
-    lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getCycleCount();
 }
 
 uint32_t tectonics_get_iteration_count(void* pointer) {
@@ -259,12 +259,21 @@ uint8_t tectonics_is_oceanic_plate(void* pointer, uint32_t plate_index) {
     return litho->getPlate(plate_index)->isOceanicPlate() ? 1U : 0U;
 }
 
-uint32_t lithosphere_getMapWidth(void* object) {
-    return static_cast<lithosphere*>(object)->getWidth();
+uint32_t tectonics_get_map_width(void* pointer) {
+    return static_cast<lithosphere*>(pointer)->getWidth();
 }
 
-uint32_t lithosphere_getMapHeight(void* object) {
-    return static_cast<lithosphere*>(object)->getHeight();
+uint32_t tectonics_get_map_height(void* pointer) {
+    return static_cast<lithosphere*>(pointer)->getHeight();
+}
+
+const tectonics::columns::Cell* tectonics_get_column_cells(void* pointer) {
+    const auto& cells = static_cast<const lithosphere*>(pointer)->getColumnModel().cells();
+    return cells.empty() ? nullptr : cells.data();
+}
+
+tectonics::contract::Snapshot tectonics_capture_snapshot(void* pointer) {
+    return tectonics::contract::capture_snapshot(*static_cast<const lithosphere*>(pointer));
 }
 
 float tectonics_velocity_unity_vector_x(void* pointer, uint32_t plate_index) {
