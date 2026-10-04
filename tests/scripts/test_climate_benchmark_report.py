@@ -69,12 +69,12 @@ class HistoricalReportTests(unittest.TestCase):
             self.png_header(maps / f"{i}.png", width, height)
         self.png_header(REPORT.ROOT / "refs/processed/climate/maps/climate/rain/annual/s/4.png", 4, 2)
         REPORT.write_report(178, compare_run_id=174)
-        document = (REPORT.ROOT / "runs/reports/178.html").read_text(encoding="utf-8")
+        document = (REPORT.ROOT / "runs/reports/178-gallery.html").read_text(encoding="utf-8")
         self.assertEqual(document.count("<figure>"), 4)
         self.assertIn("Previous comparison run 174", document)
         self.assertIn("Historical run 145 · 512×257 original pixels", document)
         REPORT.write_report(178, compare_run_id=145)
-        document = (REPORT.ROOT / "runs/reports/178.html").read_text(encoding="utf-8")
+        document = (REPORT.ROOT / "runs/reports/178-gallery.html").read_text(encoding="utf-8")
         self.assertEqual(document.count("<figure>"), 3)
 
     def test_mixed_wind_resolution_uses_product_metadata_and_matching_reference(self):
@@ -91,7 +91,7 @@ class HistoricalReportTests(unittest.TestCase):
         self.png_header(REPORT.ROOT / "runs/maps/climate/rain/annual/s/273.png", 128, 64)
         self.png_header(REPORT.ROOT / "refs/processed/climate/maps/climate/wind/speed/3/u/2048.png", 2048, 1024)
         REPORT.write_report(273)
-        document = (REPORT.ROOT / "runs/reports/273.html").read_text(encoding='utf-8')
+        document = (REPORT.ROOT / "runs/reports/273-gallery.html").read_text(encoding='utf-8')
         self.assertIn('Run 273 · 2048×1024', document)
         self.assertIn('Reference · 2048×1024', document)
         self.assertIn('Run 273 · 128×64', document)
@@ -101,7 +101,7 @@ class HistoricalReportTests(unittest.TestCase):
             REPORT.write_report(273)
         data['rows'] = 1025
         metadata.write_text(json.dumps(data))
-        with self.assertRaisesRegex(ValueError, 'Invalid wind render geometry'):
+        with self.assertRaisesRegex(ValueError, 'Invalid map render geometry'):
             REPORT.write_report(273)
 
 

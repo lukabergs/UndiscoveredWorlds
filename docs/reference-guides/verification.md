@@ -22,12 +22,12 @@ cmake --build out/build/headless --config Release --target world_pipeline --para
 ```powershell
 ctest --test-dir out/build/desktop -C Release --output-on-failure -j 4          # all registered C++ tests
 ctest --test-dir out/build/desktop -C Release -R climate_hydrology_tests        # one test by name
-uv run --offline --with numpy --with pillow python -m unittest discover -s tests/scripts   # Python suite
+uv run --offline --with numpy --with pillow --with rasterio --with requests --with pandas --with cmocean --with matplotlib python -m unittest discover -s tests/scripts   # Python suite
 uv run --offline python scripts/check-layout.py                                   # layout and tectonics header boundary
 uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
 ```
 
-Test names are defined in `tests/CMakeLists.txt`, `tests/simulations/geology/plate_tectonics/CMakeLists.txt` and `tests/simulations/geology/mineral_systems/CMakeLists.txt`. `check_tectonics_cli.py` checks default/explicit recipe equality, column budgets and rejection of invalid options.
+Test names are defined in `tests/CMakeLists.txt`, `tests/simulations/geology/plate_tectonics/CMakeLists.txt` and `tests/simulations/geology/mineral_systems/CMakeLists.txt`. `check_tectonics_cli.py` checks default/explicit recipe equality, column budgets and rejection of invalid options. `tests/scripts/test_physical_reference_maps.py` also needs `pygplates` (add `--with pygplates`, online the first time); without it that module fails to import and the rest of the suite still runs.
 
 ## Equivalence and access checks
 

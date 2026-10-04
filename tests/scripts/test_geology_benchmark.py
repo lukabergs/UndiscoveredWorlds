@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
@@ -9,6 +10,7 @@ import rasterio
 from rasterio.transform import from_bounds
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/benchmarks"))
 spec = importlib.util.spec_from_file_location("geology_benchmark", ROOT / "scripts/benchmarks/benchmark-geology.py")
 benchmark = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(benchmark)
@@ -79,7 +81,7 @@ class GeologyBenchmarkTests(unittest.TestCase):
             self.assertFalse(run["invariants_pass"])
             self.assertEqual(run["oceanic_cells_with_continental_collision"], 32)
             (bundle / "crust_class.bin").write_bytes(b"\x01")
-            with self.assertRaisesRegex(ValueError, "Invalid shape"):
+            with self.assertRaisesRegex(ValueError, "Wrong field size"):
                 benchmark.read_bundle(bundle)
 
 

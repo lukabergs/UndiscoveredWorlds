@@ -337,7 +337,7 @@ class TectonicsReportTests(unittest.TestCase):
                 heights = np.ones((2, 4), dtype="<f4") * (1 + run * .01)
                 heights.tofile(bundle / "heightmap.bin")
                 _, _, hashes = load_bundle(bundle)
-                record = {"status": "complete", "recipe": {"seed": 12345}, "replay": {"exact_match": True},
+                record = {"id": run, "status": "complete", "recipe": {"seed": 12345}, "replay": {"exact_match": True},
                           "snapshots": [{"label": "final", "directory": "final"}], "field_sha256": {"final": hashes}}
                 path = root / f"runs/manifests/tectonics/{run}.json"
                 path.parent.mkdir(parents=True, exist_ok=True)
