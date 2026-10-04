@@ -182,8 +182,8 @@ final application terrain, so compare native snapshots when checking the engine.
 
 ```powershell
 cmake --preset headless
-cmake --build out/build/headless --config Release --target world_pipeline PlateTectonicsTests MineralSystemsTests --parallel 4
-ctest --test-dir out/build/headless -C Release -R '^(PlateTectonicsTests|MineralSystemsTests)$' --output-on-failure
+cmake --build out/build/headless --config Release --target world_pipeline tectonics_tests minerals_tests --parallel 4
+ctest --test-dir out/build/headless -C Release -L 'tectonics|geology' --output-on-failure
 uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
 uv run --offline scripts/benchmarks/bench.py tectonics inspect
 uv run --offline scripts/benchmarks/bench.py tectonics run

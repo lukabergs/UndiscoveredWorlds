@@ -42,4 +42,6 @@ if(TARGET uw_climate_world)
     # A deadlock of the row executor must fail quickly.
     gtest_discover_tests(world_tests TEST_FILTER "ParallelRows.*" PROPERTIES TIMEOUT 15)
     gtest_discover_tests(world_tests TEST_FILTER "-ParallelRows.*")
+else()
+    message(STATUS "world_tests is not built: it needs UW_BUILD_WORLD or UW_BUILD_APP")
 endif()
