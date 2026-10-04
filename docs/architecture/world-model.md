@@ -78,12 +78,22 @@ feeding plume positions to the app's volcano stage are later work.
 A field has a stable id (`component.name`), element type, layout, units and a
 description. Layouts are a surface grid, a seasonal stack (4 × grid) or a
 monthly stack (12 × grid). Grids are cell-centred, `W x W/2`, row-major in
-exports. Continuous quantities target float32 in physical units; the current
-`planet` encodings (temperatures in whole °C as `short`, elevation as `int`
-metres above the datum with a separate sea level, category codes in `specials`)
-are recorded as the field's encoding until each field migrates. Removing the
-intermediate rounding changes results, so each such migration needs a new
-baseline.
+exports. Continuous quantities target float32 in physical units. The fields the
+climate module owns (temperature, precipitation, pressure, winds, vertical
+motion, moisture, evaporation, ocean currents and sea surface temperature) are
+stored that way since the Phase 1 re-baseline: the climate processes and their
+validation read and write the floats, and the former `int16` encodings (whole
+°C, whole m/s, scaled "storage" values) survive only as the integer accessors
+of `climateworld` (`climatelegacyscale`), which the terrain, hydrology,
+resource and society code, the `.uww` save format and the renderers still read.
+Geosphere and land-hydrosphere fields keep their integer encodings (elevation as
+`int` metres above the datum with a separate sea level, river flow in legacy
+units, category codes as `int16`): every producer of them is integer today
+(`uint16` terrain imports, the tectonics engine's `uint16` datum, the legacy
+terrain and river algorithms), so changing their type changes no value and needs
+no new baseline until a producer emits fractions. A process that moves from an
+integer accessor to the float one changes its results and needs a new baseline
+for its module.
 
 The catalogue is `src/core/world/world_fields.hpp` (one X-macro list). Other
 code refers to fields by `worldmodel::FieldId`; bundles and reports use the

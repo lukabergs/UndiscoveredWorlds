@@ -950,10 +950,10 @@ public:
     const short* rawcratercentres() const;
     const short* rawoceanridgemap() const;
     const short* rawoceanriftmap() const;
-    const short* rawjantempmap() const;
-    const short* rawjultempmap() const;
-    const short* rawjanrainmap() const;
-    const short* rawjulrainmap() const;
+    std::vector<short> legacyjantempmap() const;
+    std::vector<short> legacyjultempmap() const;
+    std::vector<short> legacyjanrainmap() const;
+    std::vector<short> legacyjulrainmap() const;
     const short* rawseaicemap() const;
     const short* rawclimatemap() const;
     const short* rawbiomemap() const;
@@ -1019,6 +1019,9 @@ private:
     template<typename T> void readvariable(ifstream& infile, T& val);
     void writeshortvectordata(ofstream& outfile, const std::vector<short>& arr);
     void readshortvectordata(ifstream& infile, std::vector<short>& arr);
+    void readlegacyvectordata(ifstream& infile, std::vector<float>& arr, float scale = 1.0f);
+    void writelegacydata(ofstream& outfile, const worldgrid<float>& arr);
+    void readlegacydata(ifstream& infile, worldgrid<float>& arr);
     void writemineraldeposits(ofstream& outfile);
     bool readmineraldeposits(ifstream& infile);
     int seasonalclimateindex(int x, int y) const;
@@ -1346,10 +1349,10 @@ inline const short* planet::rawcraterrims() const { UW_FIELD_READ(crater_rims); 
 inline const short* planet::rawcratercentres() const { UW_FIELD_READ(crater_centres); return &geosphere_.cratercentres[0][0]; }
 inline const short* planet::rawoceanridgemap() const { UW_FIELD_READ(ocean_ridge); return &geosphere_.oceanridgemap[0][0]; }
 inline const short* planet::rawoceanriftmap() const { UW_FIELD_READ(ocean_rift); return &geosphere_.oceanriftmap[0][0]; }
-inline const short* planet::rawjantempmap() const { return climate_.rawjantempmap(); }
-inline const short* planet::rawjultempmap() const { return climate_.rawjultempmap(); }
-inline const short* planet::rawjanrainmap() const { return climate_.rawjanrainmap(); }
-inline const short* planet::rawjulrainmap() const { return climate_.rawjulrainmap(); }
+inline std::vector<short> planet::legacyjantempmap() const { return climate_.legacyjantempmap(); }
+inline std::vector<short> planet::legacyjultempmap() const { return climate_.legacyjultempmap(); }
+inline std::vector<short> planet::legacyjanrainmap() const { return climate_.legacyjanrainmap(); }
+inline std::vector<short> planet::legacyjulrainmap() const { return climate_.legacyjulrainmap(); }
 inline const short* planet::rawseaicemap() const { return climate_.rawseaicemap(); }
 inline const short* planet::rawclimatemap() const { return climate_.rawclimatemap(); }
 inline const short* planet::rawbiomemap() const { return climate_.rawbiomemap(); }

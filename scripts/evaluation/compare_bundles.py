@@ -9,6 +9,11 @@ A bundle is a directory written by `world_pipeline --bundle` (schema uw-run-bund
 Fields are compared exactly; for differing fields the report gives the number of
 differing values and the largest absolute difference. Tables are compared as text.
 Exit status: 0 when every compared field and table is identical, 1 otherwise.
+
+--legacy-encoding compares a bundle from before the float migration of the climate
+fields (int16, some scaled) with a later one: a float field is put back into the
+former encoding (scaled, rounded, clipped to int16) before the comparison, and the
+largest difference in physical units is reported as lost_precision.
 """
 import argparse
 import json
@@ -25,13 +30,39 @@ def load_manifest(bundle):
     return manifest
 
 
+# Factors of the former int16 encodings of climate fields (climatelegacyscale in climate_world.hpp).
+LEGACY_SCALES = {'atmosphere.vertical_velocity': 100, 'hydrosphere.ocean_current_east': 100,
+                 'hydrosphere.ocean_current_south': 100, 'atmosphere.maritime_influence': 1000,
+                 'atmosphere.maritime_thermal_anomaly': 10, 'atmosphere.convergence': 100,
+                 'atmosphere.orographic_uplift': 4, 'atmosphere.orographic_subsidence': 4}
+
+
+def legacy_encoded(values, identifier):
+    scale = LEGACY_SCALES.get(identifier, 1)
+    # The product is taken in float32 as the accessors do; half away from zero, as std::lround.
+    scaled = np.clip(values.astype(np.float32) * np.float32(scale), -32768, 32767).astype(np.float64)
+    return (np.sign(scaled) * np.floor(np.abs(scaled) + 0.5)).astype(np.int64)
+
+
 def selected(identifier, prefixes):
     return not prefixes or any(identifier.startswith(prefix) for prefix in prefixes)
 
 
-def compare_field(left, right, entry_left, entry_right):
+def compare_field(left, right, entry_left, entry_right, legacy=False):
     a = np.load(left / entry_left['file'])
     b = np.load(right / entry_right['file'])
+    if legacy and a.shape == b.shape and a.dtype.kind != b.dtype.kind and {a.dtype.kind, b.dtype.kind} == {'i', 'f'}:
+        integers, floats = (a, b) if a.dtype.kind == 'i' else (b, a)
+        encoded = legacy_encoded(floats, entry_left['id'])
+        differing = int(np.count_nonzero(encoded != integers))
+        scale = LEGACY_SCALES.get(entry_left['id'], 1)
+        lost = float(np.max(np.abs(floats.astype(np.float64) - integers / scale))) if floats.size else 0.0
+        if differing == 0:
+            return {'status': 'identical', 'legacy': True, 'lost_precision': lost}
+        first = np.unravel_index(int(np.argmax(encoded != integers)), integers.shape)
+        return {'status': 'different', 'differing': differing, 'total': int(integers.size), 'legacy': True,
+                'max_abs_difference': float(np.max(np.abs(encoded - integers))), 'lost_precision': lost,
+                'first_index': [int(i) for i in first]}
     if a.dtype != b.dtype or a.shape != b.shape:
         return {'status': 'shape', 'left': f'{a.dtype}{list(a.shape)}', 'right': f'{b.dtype}{list(b.shape)}'}
     if a.dtype.kind == 'f':
@@ -54,6 +85,8 @@ def main():
     parser.add_argument('right', type=Path)
     parser.add_argument('--fields', nargs='*', default=[], help='Only compare ids starting with these prefixes')
     parser.add_argument('--json', type=Path, help='Write the full comparison as JSON')
+    parser.add_argument('--legacy-encoding', action='store_true',
+                        help='Compare float fields with their former int16 encoding in the other bundle')
     args = parser.parse_args()
 
     left, right = load_manifest(args.left), load_manifest(args.right)
@@ -67,7 +100,8 @@ def main():
             if identifier not in lefts or identifier not in rights:
                 result[kind][identifier] = {'status': 'missing', 'side': 'left' if identifier not in lefts else 'right'}
             elif kind == 'fields':
-                result[kind][identifier] = compare_field(args.left, args.right, lefts[identifier], rights[identifier])
+                result[kind][identifier] = compare_field(args.left, args.right, lefts[identifier], rights[identifier],
+                                                         args.legacy_encoding)
             else:
                 same = (args.left / lefts[identifier]['file']).read_bytes() == (args.right / rights[identifier]['file']).read_bytes()
                 result[kind][identifier] = {'status': 'identical' if same else 'different'}
@@ -82,6 +116,11 @@ def main():
             print(f'{outcome["status"]:>9}  {identifier}  {details}')
     compared = len(result['fields']) + len(result['tables'])
     print(f'{compared - problems} of {compared} fields and tables identical')
+    legacy = {identifier: outcome for identifier, outcome in result['fields'].items() if outcome.get('legacy')}
+    if legacy:
+        refined = sum(1 for identifier, outcome in legacy.items()
+                      if outcome['lost_precision'] > 1e-3 / LEGACY_SCALES.get(identifier, 1))
+        print(f'{len(legacy)} fields compared in their former int16 encoding; {refined} now hold finer values')
     if args.json:
         args.json.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     sys.exit(1 if problems else 0)

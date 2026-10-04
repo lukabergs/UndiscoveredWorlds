@@ -130,38 +130,38 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(delta_flow_january, hydrosphere, i32, grid, "legacy flow", "January delta flow") \
     X(delta_flow_july, hydrosphere, i32, grid, "legacy flow", "July delta flow") \
     X(sea_ice, cryosphere, i16, grid, "code", "Sea ice: 1 seasonal, 2 permanent") \
-    X(temperature_january, atmosphere, i16, grid, "C", "January temperature (legacy pair)") \
-    X(temperature_july, atmosphere, i16, grid, "C", "July temperature (legacy pair)") \
-    X(precipitation_january, atmosphere, i16, grid, "mm/month", "January precipitation (legacy pair)") \
-    X(precipitation_july, atmosphere, i16, grid, "mm/month", "July precipitation (legacy pair)") \
-    X(mountain_precipitation_january, atmosphere, i16, grid, "mm/month", "January orographic precipitation") \
-    X(mountain_precipitation_july, atmosphere, i16, grid, "mm/month", "July orographic precipitation") \
+    X(temperature_january, atmosphere, f32, grid, "C", "January temperature (legacy pair)") \
+    X(temperature_july, atmosphere, f32, grid, "C", "July temperature (legacy pair)") \
+    X(precipitation_january, atmosphere, f32, grid, "mm/month", "January precipitation (legacy pair)") \
+    X(precipitation_july, atmosphere, f32, grid, "mm/month", "July precipitation (legacy pair)") \
+    X(mountain_precipitation_january, atmosphere, f32, grid, "mm/month", "January orographic precipitation") \
+    X(mountain_precipitation_july, atmosphere, f32, grid, "mm/month", "July orographic precipitation") \
     X(mountain_precipitation_direction_january, atmosphere, i16, grid, "direction code", "January orographic rain direction") \
     X(mountain_precipitation_direction_july, atmosphere, i16, grid, "direction code", "July orographic rain direction") \
     X(prevailing_wind, atmosphere, i32, grid, "legacy code", "Prevailing wind direction") \
     X(climate_class, atmosphere, i16, grid, "code", "Climate classification") \
     X(subtropical_high_latitudes, atmosphere, i32, zonalprofile, "rows", "Horse-latitude rows per column") \
-    X(temperature, atmosphere, i16, seasonal, "C", "Seasonal surface temperature") \
-    X(precipitation, atmosphere, i16, seasonal, "mm/month", "Seasonal precipitation, rounded") \
-    X(precipitation_exact, atmosphere, f32, seasonal, "mm/month", "Seasonal precipitation") \
-    X(pressure, atmosphere, i16, seasonal, "hPa", "Seasonal surface pressure, rounded") \
-    X(wind_east, atmosphere, i16, seasonal, "m/s", "Seasonal surface eastward wind, rounded") \
-    X(wind_south, atmosphere, i16, seasonal, "m/s", "Seasonal surface southward wind, rounded") \
-    X(upper_height, atmosphere, i16, seasonal, "m", "Seasonal 500 hPa height anomaly, rounded") \
-    X(upper_wind_east, atmosphere, i16, seasonal, "m/s", "Seasonal 500 hPa eastward wind, rounded") \
-    X(upper_wind_south, atmosphere, i16, seasonal, "m/s", "Seasonal 500 hPa southward wind, rounded") \
-    X(vertical_velocity, atmosphere, i16, seasonal, "hPa/day x 100", "Seasonal 500 hPa ascent (verticalVelocityStorageScale)") \
-    X(evaporation, atmosphere, i16, seasonal, "storage", "Seasonal evaporation (scaled)") \
-    X(maritime_influence, atmosphere, i16, seasonal, "storage", "Seasonal maritime influence (influenceStorageScale)") \
-    X(maritime_thermal_anomaly, atmosphere, i16, seasonal, "storage", "Seasonal maritime thermal anomaly (thermalAnomalyStorageScale)") \
+    X(temperature, atmosphere, f32, seasonal, "C", "Seasonal surface temperature") \
+    X(precipitation, atmosphere, f32, seasonal, "mm/month", "Seasonal precipitation after the legacy January/July adjustment passes") \
+    X(precipitation_exact, atmosphere, f32, seasonal, "mm/month", "Seasonal precipitation of the coupled solve") \
+    X(pressure, atmosphere, f32, seasonal, "hPa", "Seasonal surface pressure anomaly") \
+    X(wind_east, atmosphere, f32, seasonal, "m/s", "Seasonal surface eastward wind") \
+    X(wind_south, atmosphere, f32, seasonal, "m/s", "Seasonal surface southward wind") \
+    X(upper_height, atmosphere, f32, seasonal, "m", "Seasonal 500 hPa height anomaly") \
+    X(upper_wind_east, atmosphere, f32, seasonal, "m/s", "Seasonal 500 hPa eastward wind") \
+    X(upper_wind_south, atmosphere, f32, seasonal, "m/s", "Seasonal 500 hPa southward wind") \
+    X(vertical_velocity, atmosphere, f32, seasonal, "hPa/day", "Seasonal 500 hPa ascent") \
+    X(evaporation, atmosphere, f32, seasonal, "mm/day", "Seasonal ocean evaporation") \
+    X(maritime_influence, atmosphere, f32, seasonal, "0..1", "Seasonal maritime influence") \
+    X(maritime_thermal_anomaly, atmosphere, f32, seasonal, "C", "Seasonal maritime thermal anomaly") \
     X(maritime_fetch, atmosphere, i16, seasonal, "cells", "Seasonal maritime fetch distance") \
-    X(moisture, atmosphere, i16, seasonal, "storage", "Seasonal column moisture (scaled)") \
-    X(convergence, atmosphere, i16, seasonal, "storage", "Seasonal moisture convergence (scaled)") \
-    X(orographic_uplift, atmosphere, i16, seasonal, "storage", "Seasonal topographic uplift (scaled)") \
-    X(orographic_subsidence, atmosphere, i16, seasonal, "storage", "Seasonal topographic subsidence (scaled)") \
-    X(ocean_current_east, hydrosphere, i16, seasonal, "storage", "Seasonal eastward ocean current (scaled)") \
-    X(ocean_current_south, hydrosphere, i16, seasonal, "storage", "Seasonal southward ocean current (scaled)") \
-    X(sea_surface_temperature, hydrosphere, i16, seasonal, "C", "Seasonal sea surface temperature, rounded") \
+    X(moisture, atmosphere, f32, seasonal, "mm", "Seasonal column water vapour") \
+    X(convergence, atmosphere, f32, seasonal, "mm/month", "Seasonal moisture convergence") \
+    X(orographic_uplift, atmosphere, f32, seasonal, "m", "Seasonal orographic parcel uplift") \
+    X(orographic_subsidence, atmosphere, f32, seasonal, "m", "Seasonal orographic parcel subsidence") \
+    X(ocean_current_east, hydrosphere, f32, seasonal, "m/s", "Seasonal eastward ocean current") \
+    X(ocean_current_south, hydrosphere, f32, seasonal, "m/s", "Seasonal southward ocean current") \
+    X(sea_surface_temperature, hydrosphere, f32, seasonal, "C", "Seasonal sea surface temperature; 0 on land") \
     X(solver_monthly_temperature, atmosphere, f32, monthly, "C", "Climate solver monthly temperature") \
     X(solver_monthly_precipitation, atmosphere, f32, monthly, "mm/month", "Climate solver monthly precipitation") \
     X(solver_surface_wind_east, atmosphere, f32, seasonal, "m/s", "Climate solver surface eastward wind") \

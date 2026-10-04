@@ -50,7 +50,7 @@ seasonalclimatesummary summariseseasonalclimate(climateworld& world, int x, int 
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
-        summary.temps[season] = static_cast<float>(world.seasonaltemp(season, x, y));
+        summary.temps[season] = world.seasonaltempfloat(season, x, y);
         summary.rains[season] = world.seasonalrainfloat(season, x, y);
         summary.meanannualtemp += summary.temps[season];
         summary.annualrain += summary.rains[season];
@@ -122,7 +122,7 @@ short calculateplanetclimate(climateworld& world, int x, int y)
         {
             const auto calendar = climatehydrology::calendarMonth(month);
             const auto temperatureAdjustment = [&](int season)
-            { return world.seasonaltemp(season, x, y) - monthly.referenceTemperatureC[season][cell]; };
+            { return world.seasonaltempfloat(season, x, y) - monthly.referenceTemperatureC[season][cell]; };
             temperature[month] = monthly.temperatureC[month][cell] + climatehydrology::interpolateSeasonal(
                 temperatureAdjustment(calendar.firstSeason), temperatureAdjustment(calendar.secondSeason), calendar.interpolation);
             const int season = month / 3;

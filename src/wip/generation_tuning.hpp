@@ -101,7 +101,6 @@ inline constexpr double fractalTemperatureRangeC = 4.0;
 namespace oceancurrents
 {
 inline constexpr int internalHorizontalCells = 64;
-inline constexpr float currentStorageCentimetresPerSecond = 100.0f;
 inline constexpr float waterDensityKgM3 = 1025.0f;
 inline constexpr float mixedLayerDepthMetres = 30.0f;
 inline constexpr bool variableHeatStorage = true;
@@ -218,7 +217,6 @@ inline constexpr float topographyChannelFactor = 0.45f;
 inline constexpr float topographyDownslopeAcceleration = 0.15f;
 inline constexpr float topographySpeedReduction = 0.18f;
 inline constexpr float maximumOrographicParcelDisplacementMetres = 7000.0f;
-inline constexpr float topographyVerticalMotionStorageScale = 4.0f;
 }
 
 namespace circulation
@@ -361,7 +359,6 @@ inline constexpr float verticalRelaxation = 0.24f;
 inline constexpr float verticalDivergenceResponse = 0.32f;
 inline constexpr float surfacePressureDiffusion = 0.30f;
 inline constexpr float maximumVerticalVelocity = 100.0f;
-inline constexpr float verticalVelocityStorageScale = 100.0f;
 }
 
 namespace moistureadvection
@@ -496,13 +493,10 @@ inline constexpr float topographicDescentWarmingCPerMetre = 0.0049f;
 inline constexpr float maximumParcelTemperatureAdjustment = 8.0f;
 inline constexpr float rainfallScale = 1.0f;
 inline constexpr float seaIceFactor = 0.08f;
-inline constexpr float convergenceStorageScale = 100.0f;
 }
 
 namespace maritime
 {
-inline constexpr float influenceStorageScale = 1000.0f;
-inline constexpr float thermalAnomalyStorageScale = 10.0f;
 inline constexpr int maxSearchDistance = 48;
 inline constexpr int oceanSampleCount = 8;
 inline constexpr float minimumWindStrength = 1.5f;

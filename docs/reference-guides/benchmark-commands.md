@@ -106,10 +106,12 @@ point whose steps read such state from a skipped step and names the step that
 must be in the run; those fields and tables are copied into the new bundle from
 the source unless a step of the run writes them.
 
-`world_pipeline climate-benchmark` still runs the imported-world stage path, which
-edits the imported terrain (mountain bases, smoothing, depression fill, coastline
-adjustment) before climate, and is the only registered climate run until the
-benchmark switches to the earth-climate recipe (consolidation plan, Phase 1).
+`world_pipeline climate-benchmark` is the registered form of the same run: the
+earth-climate recipe on the Earth terrain, recorded with a run ID. Until run 384
+it ran the imported-world stage path, which edited the imported terrain (mountain
+bases, smoothing, depression fill, coastline adjustment) before climate, so runs
+up to 384 are not comparable with later ones; `--no-rivers`, `--no-lakes` and
+`--no-deltas` no longer have any effect on it.
 
 ## Recipes, run bundles and access audits
 
@@ -122,6 +124,8 @@ world_pipeline.exe generate --seed 1 --resolution 512 --bundle out/bench/bundle-
 world_pipeline.exe generate --seed 1 --resolution 512 --audit-access --access-report out/bench/access.json
 # Compare two bundles field by field; exit status 1 on any difference.
 python scripts/evaluation/compare_bundles.py out/bench/bundle-a out/bench/bundle-b
+# Against a bundle from before run 385 (climate fields as int16): compare in the former encoding.
+python scripts/evaluation/compare_bundles.py out/bench/old-bundle out/bench/bundle-b --legacy-encoding
 ```
 
 The bundle comparison is the equivalence check for refactors: unchanged code must give identical fields for the same seed and options. Access reports also hold the hash of every written field after each step (`write_hashes`); comparing the reports of two runs with the same options finds the first step where they diverge. A separate analysis build with `-DCMAKE_CXX_FLAGS_RELWITHDEBINFO="/O2 /Ob1 /Zi /DNDEBUG /DUW_CHECK_GRID_BOUNDS"` (for example in `out/build/grid-check`, `--config RelWithDebInfo`) aborts with a stack trace at the first world-grid index outside the grid. Declared process access is generated from access reports of an analysis build configured with `-DUW_TRACK_FIELD_READS=ON` (`scripts/evaluation/process_access.py`).

@@ -1040,10 +1040,15 @@ namespace
         inputs.cratercentres = world.rawcratercentres();
         inputs.oceanridgemap = world.rawoceanridgemap();
         inputs.oceanriftmap = world.rawoceanriftmap();
-        inputs.jantempmap = world.rawjantempmap();
-        inputs.jultempmap = world.rawjultempmap();
-        inputs.janrainmap = world.rawjanrainmap();
-        inputs.julrainmap = world.rawjulrainmap();
+        // The renderers read temperature and rain in whole degrees and millimetres.
+        inputs.jantempvalues = world.legacyjantempmap();
+        inputs.jultempvalues = world.legacyjultempmap();
+        inputs.janrainvalues = world.legacyjanrainmap();
+        inputs.julrainvalues = world.legacyjulrainmap();
+        inputs.jantempmap = inputs.jantempvalues.data();
+        inputs.jultempmap = inputs.jultempvalues.data();
+        inputs.janrainmap = inputs.janrainvalues.data();
+        inputs.julrainmap = inputs.julrainvalues.data();
         inputs.seaicemap = world.rawseaicemap();
         inputs.climatemap = world.rawclimatemap();
         inputs.rivermapjan = world.rawrivermapjan();

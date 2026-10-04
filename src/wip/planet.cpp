@@ -257,6 +257,31 @@ void planet::writeshortvectordata(ofstream& outfile, const std::vector<short>& a
     outfile.write(reinterpret_cast<const char*>(arr.data()), arr.size() * sizeof(short));
 }
 
+// The save format keeps the climate fields in their former int16 encodings.
+void planet::readlegacyvectordata(ifstream& infile, std::vector<float>& arr, float scale)
+{
+    std::vector<short> stored(arr.size());
+    readshortvectordata(infile, stored);
+    for (std::size_t index = 0; index < arr.size(); index++)
+        arr[index] = static_cast<float>(stored[index]) / scale;
+}
+
+void planet::writelegacydata(ofstream& outfile, const worldgrid<float>& arr)
+{
+    worldgrid<short> stored(arr.columns(), arr.rows());
+    const std::vector<short> encoded = climateworld::legacyfield(arr);
+    std::copy(encoded.begin(), encoded.end(), stored.data());
+    writedata(outfile, stored);
+}
+
+void planet::readlegacydata(ifstream& infile, worldgrid<float>& arr)
+{
+    worldgrid<short> stored(arr.columns(), arr.rows());
+    readdata(infile, stored);
+    for (std::size_t index = 0; index < arr.size(); index++)
+        arr.data()[index] = static_cast<float>(stored.data()[index]);
+}
+
 void planet::readshortvectordata(ifstream& infile, std::vector<short>& arr)
 {
     infile.read(reinterpret_cast<char*>(arr.data()), arr.size() * sizeof(short));
@@ -898,14 +923,14 @@ void planet::saveworld(string filename)
             writevariable(outfile, presentation_.itsbiomemapcolours[i][j]);
     }
 
-    writedata(outfile, climate_.jantempmap);
-    writedata(outfile, climate_.jultempmap);
+    writelegacydata(outfile, climate_.jantempmap);
+    writelegacydata(outfile, climate_.jultempmap);
     writedata(outfile, climate_.climatemap);
     writedata(outfile, climate_.biomemap);
-    writedata(outfile, climate_.janrainmap);
-    writedata(outfile, climate_.julrainmap);
-    writedata(outfile, climate_.janmountainrainmap);
-    writedata(outfile, climate_.julmountainrainmap);
+    writelegacydata(outfile, climate_.janrainmap);
+    writelegacydata(outfile, climate_.julrainmap);
+    writelegacydata(outfile, climate_.janmountainrainmap);
+    writelegacydata(outfile, climate_.julmountainrainmap);
     writedata(outfile, climate_.janmountainraindirmap);
     writedata(outfile, climate_.julmountainraindirmap);
     writedata(outfile, climate_.seaicemap);
@@ -1036,26 +1061,26 @@ void planet::saveworld(string filename)
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
-        writeshortvectordata(outfile, climate_.seasonaltempmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalrainmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalpressuremaps[season]);
-        writeshortvectordata(outfile, climate_.seasonaluwindmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalvwindmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalupperheightmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalupperuwindmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonaluppervwindmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalverticalvelocitymaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalcurrentumaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalcurrentvmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalsstmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalevaporationmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalmaritimeinfluencemaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalmaritimethermalanomalymaps[season]);
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonaltempmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalrainmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalpressuremaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonaluwindmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalvwindmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalupperheightmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalupperuwindmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonaluppervwindmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalverticalvelocitymaps[season], climatelegacyscale::verticalvelocity));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalcurrentumaps[season], climatelegacyscale::current));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalcurrentvmaps[season], climatelegacyscale::current));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalsstmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalevaporationmaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalmaritimeinfluencemaps[season], climatelegacyscale::maritimeinfluence));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalmaritimethermalanomalymaps[season], climatelegacyscale::maritimethermalanomaly));
         writeshortvectordata(outfile, climate_.seasonalmaritimefetchmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalmoisturemaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalconvergencemaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalupliftmaps[season]);
-        writeshortvectordata(outfile, climate_.seasonalsubsidencemaps[season]);
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalmoisturemaps[season]));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalconvergencemaps[season], climatelegacyscale::convergence));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalupliftmaps[season], climatelegacyscale::orographicmotion));
+        writeshortvectordata(outfile, climateworld::legacyfield(climate_.seasonalsubsidencemaps[season], climatelegacyscale::orographicmotion));
     }
 
     for (int i = 0; i < ARRAYWIDTH; i++)
@@ -1599,14 +1624,14 @@ bool planet::loadworld(string filename)
     else
         setdefaultnonreliefmapappearance(*this);
 
-    readdata(infile, climate_.jantempmap);
-    readdata(infile, climate_.jultempmap);
+    readlegacydata(infile, climate_.jantempmap);
+    readlegacydata(infile, climate_.jultempmap);
     readdata(infile, climate_.climatemap);
     readdata(infile, climate_.biomemap);
-    readdata(infile, climate_.janrainmap);
-    readdata(infile, climate_.julrainmap);
-    readdata(infile, climate_.janmountainrainmap);
-    readdata(infile, climate_.julmountainrainmap);
+    readlegacydata(infile, climate_.janrainmap);
+    readlegacydata(infile, climate_.julrainmap);
+    readlegacydata(infile, climate_.janmountainrainmap);
+    readlegacydata(infile, climate_.julmountainrainmap);
     readdata(infile, climate_.janmountainraindirmap);
     readdata(infile, climate_.julmountainraindirmap);
     readdata(infile, climate_.seaicemap);
@@ -1808,41 +1833,37 @@ bool planet::loadworld(string filename)
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
-        readshortvectordata(infile, climate_.seasonaltempmaps[season]);
-        readshortvectordata(infile, climate_.seasonalrainmaps[season]);
-        std::transform(
-            climate_.seasonalrainmaps[season].begin(),
-            climate_.seasonalrainmaps[season].end(),
-            climate_.seasonalrainfloatmaps[season].begin(),
-            [](short value) { return static_cast<float>(value); });
-        readshortvectordata(infile, climate_.seasonalpressuremaps[season]);
-        readshortvectordata(infile, climate_.seasonaluwindmaps[season]);
-        readshortvectordata(infile, climate_.seasonalvwindmaps[season]);
+        readlegacyvectordata(infile, climate_.seasonaltempmaps[season]);
+        readlegacyvectordata(infile, climate_.seasonalrainmaps[season]);
+        climate_.seasonalrainfloatmaps[season] = climate_.seasonalrainmaps[season];
+        readlegacyvectordata(infile, climate_.seasonalpressuremaps[season]);
+        readlegacyvectordata(infile, climate_.seasonaluwindmaps[season]);
+        readlegacyvectordata(infile, climate_.seasonalvwindmaps[season]);
         if (fileversion >= 13)
         {
-            readshortvectordata(infile, climate_.seasonalupperheightmaps[season]);
-            readshortvectordata(infile, climate_.seasonalupperuwindmaps[season]);
-            readshortvectordata(infile, climate_.seasonaluppervwindmaps[season]);
-            readshortvectordata(infile, climate_.seasonalverticalvelocitymaps[season]);
+            readlegacyvectordata(infile, climate_.seasonalupperheightmaps[season]);
+            readlegacyvectordata(infile, climate_.seasonalupperuwindmaps[season]);
+            readlegacyvectordata(infile, climate_.seasonaluppervwindmaps[season]);
+            readlegacyvectordata(infile, climate_.seasonalverticalvelocitymaps[season], climatelegacyscale::verticalvelocity);
         }
         else
         {
-            std::fill(climate_.seasonalupperheightmaps[season].begin(), climate_.seasonalupperheightmaps[season].end(), 0);
-            std::fill(climate_.seasonalupperuwindmaps[season].begin(), climate_.seasonalupperuwindmaps[season].end(), 0);
-            std::fill(climate_.seasonaluppervwindmaps[season].begin(), climate_.seasonaluppervwindmaps[season].end(), 0);
-            std::fill(climate_.seasonalverticalvelocitymaps[season].begin(), climate_.seasonalverticalvelocitymaps[season].end(), 0);
+            std::fill(climate_.seasonalupperheightmaps[season].begin(), climate_.seasonalupperheightmaps[season].end(), 0.0f);
+            std::fill(climate_.seasonalupperuwindmaps[season].begin(), climate_.seasonalupperuwindmaps[season].end(), 0.0f);
+            std::fill(climate_.seasonaluppervwindmaps[season].begin(), climate_.seasonaluppervwindmaps[season].end(), 0.0f);
+            std::fill(climate_.seasonalverticalvelocitymaps[season].begin(), climate_.seasonalverticalvelocitymaps[season].end(), 0.0f);
         }
-        readshortvectordata(infile, climate_.seasonalcurrentumaps[season]);
-        readshortvectordata(infile, climate_.seasonalcurrentvmaps[season]);
-        readshortvectordata(infile, climate_.seasonalsstmaps[season]);
-        readshortvectordata(infile, climate_.seasonalevaporationmaps[season]);
-        readshortvectordata(infile, climate_.seasonalmaritimeinfluencemaps[season]);
-        readshortvectordata(infile, climate_.seasonalmaritimethermalanomalymaps[season]);
+        readlegacyvectordata(infile, climate_.seasonalcurrentumaps[season], climatelegacyscale::current);
+        readlegacyvectordata(infile, climate_.seasonalcurrentvmaps[season], climatelegacyscale::current);
+        readlegacyvectordata(infile, climate_.seasonalsstmaps[season]);
+        readlegacyvectordata(infile, climate_.seasonalevaporationmaps[season]);
+        readlegacyvectordata(infile, climate_.seasonalmaritimeinfluencemaps[season], climatelegacyscale::maritimeinfluence);
+        readlegacyvectordata(infile, climate_.seasonalmaritimethermalanomalymaps[season], climatelegacyscale::maritimethermalanomaly);
         readshortvectordata(infile, climate_.seasonalmaritimefetchmaps[season]);
-        readshortvectordata(infile, climate_.seasonalmoisturemaps[season]);
-        readshortvectordata(infile, climate_.seasonalconvergencemaps[season]);
-        readshortvectordata(infile, climate_.seasonalupliftmaps[season]);
-        readshortvectordata(infile, climate_.seasonalsubsidencemaps[season]);
+        readlegacyvectordata(infile, climate_.seasonalmoisturemaps[season]);
+        readlegacyvectordata(infile, climate_.seasonalconvergencemaps[season], climatelegacyscale::convergence);
+        readlegacyvectordata(infile, climate_.seasonalupliftmaps[season], climatelegacyscale::orographicmotion);
+        readlegacyvectordata(infile, climate_.seasonalsubsidencemaps[season], climatelegacyscale::orographicmotion);
     }
 
     for (int i = 0; i < ARRAYWIDTH; i++)

@@ -64,6 +64,20 @@ struct climateinputs
     const short* special = nullptr;
 };
 
+// The climate fields were int16 arrays, some of them scaled. They are stored as
+// float in physical units; the integer accessors still return the former
+// encodings for code that has not moved to the float accessors, the .uww save
+// format and the renderers. These are the factors of the scaled encodings.
+namespace climatelegacyscale
+{
+inline constexpr float verticalvelocity = 100.0f;        // hPa/day
+inline constexpr float current = 100.0f;                 // m/s, stored as cm/s
+inline constexpr float maritimeinfluence = 1000.0f;      // 0..1
+inline constexpr float maritimethermalanomaly = 10.0f;   // C
+inline constexpr float convergence = 100.0f;             // mm/month
+inline constexpr float orographicmotion = 4.0f;          // m of parcel displacement
+}
+
 // One level of the atmosphere column (the 10 m surface or a pressure level):
 // seasonal fields on the world grid, row-major (y * (width + 1) + x), in
 // physical units. The current two-mode model fills 10 m, 850 hPa and 500 hPa
@@ -158,10 +172,14 @@ public:
     void setsouthpolartemp(int amount);
     int eqtemp() const;
     void seteqtemp(int amount);
-    const short* rawjantempmap() const;
-    const short* rawjultempmap() const;
-    const short* rawjanrainmap() const;
-    const short* rawjulrainmap() const;
+    // The former int16 encoding of a whole field, cell by cell in storage order:
+    // for the .uww save format and the renderers.
+    static std::vector<short> legacyfield(const std::vector<float>& values, float scale = 1.0f);
+    static std::vector<short> legacyfield(const worldgrid<float>& values);
+    std::vector<short> legacyjantempmap() const;
+    std::vector<short> legacyjultempmap() const;
+    std::vector<short> legacyjanrainmap() const;
+    std::vector<short> legacyjulrainmap() const;
     const short* rawseaicemap() const;
     const short* rawclimatemap() const;
     const short* rawbiomemap() const;
@@ -169,52 +187,96 @@ public:
     void setjantemp(int x, int y, int amount);
     int jultemp(int x, int y) const;
     void setjultemp(int x, int y, int amount);
+    float jantempfloat(int x, int y) const;
+    void setjantempfloat(int x, int y, float amount);
+    float jultempfloat(int x, int y) const;
+    void setjultempfloat(int x, int y, float amount);
     int seasonaltemp(int season, int x, int y) const;
     void setseasonaltemp(int season, int x, int y, int amount);
+    float seasonaltempfloat(int season, int x, int y) const;
+    void setseasonaltempfloat(int season, int x, int y, float amount);
     int janrain(int x, int y) const;
     void setjanrain(int x, int y, int amount);
     int julrain(int x, int y) const;
     void setjulrain(int x, int y, int amount);
+    float janrainfloat(int x, int y) const;
+    void setjanrainfloat(int x, int y, float amount);
+    float julrainfloat(int x, int y) const;
+    void setjulrainfloat(int x, int y, float amount);
     int seasonalrain(int season, int x, int y) const;
     void setseasonalrain(int season, int x, int y, int amount);
     float seasonalrainfloat(int season, int x, int y) const;
     void setseasonalrainfloat(int season, int x, int y, float amount);
     int seasonalpressure(int season, int x, int y) const;
     void setseasonalpressure(int season, int x, int y, int amount);
+    float seasonalpressurefloat(int season, int x, int y) const;
+    void setseasonalpressurefloat(int season, int x, int y, float amount);
     int seasonaluwind(int season, int x, int y) const;
     void setseasonaluwind(int season, int x, int y, int amount);
+    float seasonaluwindfloat(int season, int x, int y) const;
+    void setseasonaluwindfloat(int season, int x, int y, float amount);
     int seasonalvwind(int season, int x, int y) const;
     void setseasonalvwind(int season, int x, int y, int amount);
+    float seasonalvwindfloat(int season, int x, int y) const;
+    void setseasonalvwindfloat(int season, int x, int y, float amount);
     int seasonalupperheight(int season, int x, int y) const;
     void setseasonalupperheight(int season, int x, int y, int amount);
+    float seasonalupperheightfloat(int season, int x, int y) const;
+    void setseasonalupperheightfloat(int season, int x, int y, float amount);
     int seasonalupperuwind(int season, int x, int y) const;
     void setseasonalupperuwind(int season, int x, int y, int amount);
+    float seasonalupperuwindfloat(int season, int x, int y) const;
+    void setseasonalupperuwindfloat(int season, int x, int y, float amount);
     int seasonaluppervwind(int season, int x, int y) const;
     void setseasonaluppervwind(int season, int x, int y, int amount);
+    float seasonaluppervwindfloat(int season, int x, int y) const;
+    void setseasonaluppervwindfloat(int season, int x, int y, float amount);
     int seasonalverticalvelocity(int season, int x, int y) const;
     void setseasonalverticalvelocity(int season, int x, int y, int amount);
+    float seasonalverticalvelocityfloat(int season, int x, int y) const;
+    void setseasonalverticalvelocityfloat(int season, int x, int y, float amount);
     int seasonalcurrentu(int season, int x, int y) const;
     void setseasonalcurrentu(int season, int x, int y, int amount);
+    float seasonalcurrentufloat(int season, int x, int y) const;
+    void setseasonalcurrentufloat(int season, int x, int y, float amount);
     int seasonalcurrentv(int season, int x, int y) const;
     void setseasonalcurrentv(int season, int x, int y, int amount);
+    float seasonalcurrentvfloat(int season, int x, int y) const;
+    void setseasonalcurrentvfloat(int season, int x, int y, float amount);
     int seasonalsst(int season, int x, int y) const;
     void setseasonalsst(int season, int x, int y, int amount);
+    float seasonalsstfloat(int season, int x, int y) const;
+    void setseasonalsstfloat(int season, int x, int y, float amount);
     int seasonalevaporation(int season, int x, int y) const;
     void setseasonalevaporation(int season, int x, int y, int amount);
+    float seasonalevaporationfloat(int season, int x, int y) const;
+    void setseasonalevaporationfloat(int season, int x, int y, float amount);
     int seasonalmaritimeinfluence(int season, int x, int y) const;
     void setseasonalmaritimeinfluence(int season, int x, int y, int amount);
+    float seasonalmaritimeinfluencefloat(int season, int x, int y) const;
+    void setseasonalmaritimeinfluencefloat(int season, int x, int y, float amount);
     int seasonalmaritimethermalanomaly(int season, int x, int y) const;
     void setseasonalmaritimethermalanomaly(int season, int x, int y, int amount);
+    float seasonalmaritimethermalanomalyfloat(int season, int x, int y) const;
+    void setseasonalmaritimethermalanomalyfloat(int season, int x, int y, float amount);
     int seasonalmaritimefetch(int season, int x, int y) const;
     void setseasonalmaritimefetch(int season, int x, int y, int amount);
     int seasonalmoisture(int season, int x, int y) const;
     void setseasonalmoisture(int season, int x, int y, int amount);
+    float seasonalmoisturefloat(int season, int x, int y) const;
+    void setseasonalmoisturefloat(int season, int x, int y, float amount);
     int seasonalconvergence(int season, int x, int y) const;
     void setseasonalconvergence(int season, int x, int y, int amount);
+    float seasonalconvergencefloat(int season, int x, int y) const;
+    void setseasonalconvergencefloat(int season, int x, int y, float amount);
     int seasonaluplift(int season, int x, int y) const;
     void setseasonaluplift(int season, int x, int y, int amount);
+    float seasonalupliftfloat(int season, int x, int y) const;
+    void setseasonalupliftfloat(int season, int x, int y, float amount);
     int seasonalsubsidence(int season, int x, int y) const;
     void setseasonalsubsidence(int season, int x, int y, int amount);
+    float seasonalsubsidencefloat(int season, int x, int y) const;
+    void setseasonalsubsidencefloat(int season, int x, int y, float amount);
     int janmountainrain(int x, int y) const;
     void setjanmountainrain(int x, int y, int amount);
     int julmountainrain(int x, int y) const;
@@ -249,9 +311,19 @@ public:
     void setwinterrain(int x, int y, int amount);
     int summerrain(int x, int y) const;
     void setsummerrain(int x, int y, int amount);
+    // The same selections on the stored floats.
+    float mintempfloat(int x, int y) const;
+    void setmintempfloat(int x, int y, float amount);
+    float maxtempfloat(int x, int y) const;
+    void setmaxtempfloat(int x, int y, float amount);
+    float winterrainfloat(int x, int y) const;
+    void setwinterrainfloat(int x, int y, float amount);
+    float summerrainfloat(int x, int y) const;
+    void setsummerrainfloat(int x, int y, float amount);
 
     // Annual and transition-season views of the seasonal fields.
     int avetemp(int x, int y) const;
+    float avetempfloat(int x, int y) const;
     int averain(int x, int y) const;
     float averainfloat(int x, int y) const;
     int aprtemp(int x, int y) const;
@@ -282,35 +354,35 @@ private:
     mutable climateinputs inputs_;
     std::vector<atmospherelevel> levels_;
 
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalconvergencemaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalcurrentumaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalcurrentvmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalevaporationmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalconvergencemaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalcurrentumaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalcurrentvmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalevaporationmaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimefetchmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimeinfluencemaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimethermalanomalymaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmoisturemaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalpressuremaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalmaritimeinfluencemaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalmaritimethermalanomalymaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalmoisturemaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalpressuremaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalrainfloatmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalrainmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalsstmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalsubsidencemaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaltempmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupliftmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupperheightmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalupperuwindmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaluppervwindmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonaluwindmaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalverticalvelocitymaps;
-    std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalvwindmaps;
-    worldgrid<short> jantempmap;
-    worldgrid<short> jultempmap;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalrainmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalsstmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalsubsidencemaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonaltempmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalupliftmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalupperheightmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalupperuwindmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonaluppervwindmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonaluwindmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalverticalvelocitymaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalvwindmaps;
+    worldgrid<float> jantempmap;
+    worldgrid<float> jultempmap;
     worldgrid<short> climatemap;
     worldgrid<short> biomemap;
-    worldgrid<short> janrainmap;
-    worldgrid<short> julrainmap;
-    worldgrid<short> janmountainrainmap;
-    worldgrid<short> julmountainrainmap;
+    worldgrid<float> janrainmap;
+    worldgrid<float> julrainmap;
+    worldgrid<float> janmountainrainmap;
+    worldgrid<float> julmountainrainmap;
     worldgrid<short> janmountainraindirmap;
     worldgrid<short> julmountainraindirmap;
     worldgrid<short> seaicemap;
@@ -322,6 +394,12 @@ private:
     int itsnorthpolartemp = 0;
     int itssouthpolartemp = 0;
     int itseqtemp = 0;
+
+    // A value in its former int16 encoding: what the integer accessors return.
+    static int legacyvalue(float value, float scale = 1.0f)
+    {
+        return static_cast<int>(std::lround(std::clamp(value * scale, -32768.0f, 32767.0f)));
+    }
 
     int seasonalclimateindex(int x, int y) const { return y * (inputs_.width + 1) + x; }
     bool validseasonindex(int season) const { return season >= 0 && season < CLIMATESEASONCOUNT; }
@@ -507,13 +585,13 @@ inline int climateworld::eqtemp() const { UW_FIELD_READ(equatorial_temperature);
 
 inline void climateworld::seteqtemp(int amount) { itseqtemp = amount; }
 
-inline const short* climateworld::rawjantempmap() const { UW_FIELD_READ(temperature_january); return &jantempmap[0][0]; }
+inline std::vector<short> climateworld::legacyjantempmap() const { UW_FIELD_READ(temperature_january); return legacyfield(jantempmap); }
 
-inline const short* climateworld::rawjultempmap() const { UW_FIELD_READ(temperature_july); return &jultempmap[0][0]; }
+inline std::vector<short> climateworld::legacyjultempmap() const { UW_FIELD_READ(temperature_july); return legacyfield(jultempmap); }
 
-inline const short* climateworld::rawjanrainmap() const { UW_FIELD_READ(precipitation_january); return &janrainmap[0][0]; }
+inline std::vector<short> climateworld::legacyjanrainmap() const { UW_FIELD_READ(precipitation_january); return legacyfield(janrainmap); }
 
-inline const short* climateworld::rawjulrainmap() const { UW_FIELD_READ(precipitation_july); return &julrainmap[0][0]; }
+inline std::vector<short> climateworld::legacyjulrainmap() const { UW_FIELD_READ(precipitation_july); return legacyfield(julrainmap); }
 
 inline const short* climateworld::rawseaicemap() const { UW_FIELD_READ(sea_ice); return &seaicemap[0][0]; }
 
@@ -527,7 +605,7 @@ inline int climateworld::jantemp(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return (int)jantempmap[x][y];
+    return legacyvalue(jantempmap[x][y]);
 }
 
 inline void climateworld::setjantemp(int x, int y, int amount)
@@ -535,7 +613,7 @@ inline void climateworld::setjantemp(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    jantempmap[x][y] = (short)amount;
+    jantempmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::jultemp(int x, int y) const
@@ -544,7 +622,7 @@ inline int climateworld::jultemp(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return (int)jultempmap[x][y];
+    return legacyvalue(jultempmap[x][y]);
 }
 
 inline void climateworld::setjultemp(int x, int y, int amount)
@@ -552,7 +630,7 @@ inline void climateworld::setjultemp(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    jultempmap[x][y] = (short)amount;
+    jultempmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonaltemp(int season, int x, int y) const
@@ -561,7 +639,7 @@ inline int climateworld::seasonaltemp(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonaltempmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonaltempmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonaltemp(int season, int x, int y, int amount)
@@ -569,7 +647,7 @@ inline void climateworld::setseasonaltemp(int season, int x, int y, int amount)
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonaltempmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonaltempmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::janrain(int x, int y) const
@@ -578,7 +656,7 @@ inline int climateworld::janrain(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return (int)janrainmap[x][y];
+    return legacyvalue(janrainmap[x][y]);
 }
 
 inline void climateworld::setjanrain(int x, int y, int amount)
@@ -586,7 +664,7 @@ inline void climateworld::setjanrain(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    janrainmap[x][y] = (short)amount;
+    janrainmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::julrain(int x, int y) const
@@ -595,7 +673,7 @@ inline int climateworld::julrain(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return (int)julrainmap[x][y];
+    return legacyvalue(julrainmap[x][y]);
 }
 
 inline void climateworld::setjulrain(int x, int y, int amount)
@@ -603,7 +681,7 @@ inline void climateworld::setjulrain(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    julrainmap[x][y] = (short)amount;
+    julrainmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonalrain(int season, int x, int y) const
@@ -612,7 +690,7 @@ inline int climateworld::seasonalrain(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalrainmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalrainmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonalrain(int season, int x, int y, int amount)
@@ -621,7 +699,7 @@ inline void climateworld::setseasonalrain(int season, int x, int y, int amount)
         return;
 
     const int index = seasonalclimateindex(x, y);
-    seasonalrainmaps[season][index] = static_cast<short>(amount);
+    seasonalrainmaps[season][index] = static_cast<float>(amount);
     seasonalrainfloatmaps[season][index] = static_cast<float>(amount);
 }
 
@@ -642,8 +720,7 @@ inline void climateworld::setseasonalrainfloat(int season, int x, int y, float a
     const int index = seasonalclimateindex(x, y);
     const float physicalamount = (std::max)(0.0f, amount);
     seasonalrainfloatmaps[season][index] = physicalamount;
-    seasonalrainmaps[season][index] = static_cast<short>(std::round(
-        (std::min)(physicalamount, 32767.0f)));
+    seasonalrainmaps[season][index] = physicalamount;
 }
 
 inline int climateworld::seasonalpressure(int season, int x, int y) const
@@ -652,7 +729,7 @@ inline int climateworld::seasonalpressure(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalpressuremaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalpressuremaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonalpressure(int season, int x, int y, int amount)
@@ -660,7 +737,7 @@ inline void climateworld::setseasonalpressure(int season, int x, int y, int amou
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalpressuremaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalpressuremaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonaluwind(int season, int x, int y) const
@@ -669,7 +746,7 @@ inline int climateworld::seasonaluwind(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonaluwindmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonaluwindmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonaluwind(int season, int x, int y, int amount)
@@ -677,7 +754,7 @@ inline void climateworld::setseasonaluwind(int season, int x, int y, int amount)
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonaluwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonaluwindmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonalvwind(int season, int x, int y) const
@@ -686,7 +763,7 @@ inline int climateworld::seasonalvwind(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalvwindmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalvwindmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonalvwind(int season, int x, int y, int amount)
@@ -694,7 +771,7 @@ inline void climateworld::setseasonalvwind(int season, int x, int y, int amount)
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalvwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalvwindmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonalupperheight(int season, int x, int y) const
@@ -703,7 +780,7 @@ inline int climateworld::seasonalupperheight(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalupperheightmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalupperheightmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonalupperheight(int season, int x, int y, int amount)
@@ -711,7 +788,7 @@ inline void climateworld::setseasonalupperheight(int season, int x, int y, int a
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalupperheightmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalupperheightmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonalupperuwind(int season, int x, int y) const
@@ -720,7 +797,7 @@ inline int climateworld::seasonalupperuwind(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalupperuwindmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalupperuwindmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonalupperuwind(int season, int x, int y, int amount)
@@ -728,7 +805,7 @@ inline void climateworld::setseasonalupperuwind(int season, int x, int y, int am
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalupperuwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalupperuwindmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonaluppervwind(int season, int x, int y) const
@@ -737,7 +814,7 @@ inline int climateworld::seasonaluppervwind(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonaluppervwindmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonaluppervwindmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonaluppervwind(int season, int x, int y, int amount)
@@ -745,7 +822,7 @@ inline void climateworld::setseasonaluppervwind(int season, int x, int y, int am
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonaluppervwindmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonaluppervwindmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonalverticalvelocity(int season, int x, int y) const
@@ -754,7 +831,7 @@ inline int climateworld::seasonalverticalvelocity(int season, int x, int y) cons
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)], climatelegacyscale::verticalvelocity);
 }
 
 inline void climateworld::setseasonalverticalvelocity(int season, int x, int y, int amount)
@@ -762,7 +839,7 @@ inline void climateworld::setseasonalverticalvelocity(int season, int x, int y, 
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount) / climatelegacyscale::verticalvelocity;
 }
 
 inline int climateworld::seasonalcurrentu(int season, int x, int y) const
@@ -771,7 +848,7 @@ inline int climateworld::seasonalcurrentu(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalcurrentumaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalcurrentumaps[season][seasonalclimateindex(x, y)], climatelegacyscale::current);
 }
 
 inline void climateworld::setseasonalcurrentu(int season, int x, int y, int amount)
@@ -779,7 +856,7 @@ inline void climateworld::setseasonalcurrentu(int season, int x, int y, int amou
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalcurrentumaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalcurrentumaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount) / climatelegacyscale::current;
 }
 
 inline int climateworld::seasonalcurrentv(int season, int x, int y) const
@@ -788,7 +865,7 @@ inline int climateworld::seasonalcurrentv(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalcurrentvmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalcurrentvmaps[season][seasonalclimateindex(x, y)], climatelegacyscale::current);
 }
 
 inline void climateworld::setseasonalcurrentv(int season, int x, int y, int amount)
@@ -796,7 +873,7 @@ inline void climateworld::setseasonalcurrentv(int season, int x, int y, int amou
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalcurrentvmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalcurrentvmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount) / climatelegacyscale::current;
 }
 
 inline int climateworld::seasonalsst(int season, int x, int y) const
@@ -805,7 +882,7 @@ inline int climateworld::seasonalsst(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalsstmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalsstmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonalsst(int season, int x, int y, int amount)
@@ -813,7 +890,7 @@ inline void climateworld::setseasonalsst(int season, int x, int y, int amount)
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalsstmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalsstmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonalevaporation(int season, int x, int y) const
@@ -822,7 +899,7 @@ inline int climateworld::seasonalevaporation(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalevaporationmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalevaporationmaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonalevaporation(int season, int x, int y, int amount)
@@ -830,7 +907,7 @@ inline void climateworld::setseasonalevaporation(int season, int x, int y, int a
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalevaporationmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalevaporationmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonalmaritimeinfluence(int season, int x, int y) const
@@ -839,7 +916,7 @@ inline int climateworld::seasonalmaritimeinfluence(int season, int x, int y) con
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)], climatelegacyscale::maritimeinfluence);
 }
 
 inline void climateworld::setseasonalmaritimeinfluence(int season, int x, int y, int amount)
@@ -847,7 +924,7 @@ inline void climateworld::setseasonalmaritimeinfluence(int season, int x, int y,
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount) / climatelegacyscale::maritimeinfluence;
 }
 
 inline int climateworld::seasonalmaritimethermalanomaly(int season, int x, int y) const
@@ -856,7 +933,7 @@ inline int climateworld::seasonalmaritimethermalanomaly(int season, int x, int y
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)], climatelegacyscale::maritimethermalanomaly);
 }
 
 inline void climateworld::setseasonalmaritimethermalanomaly(int season, int x, int y, int amount)
@@ -864,7 +941,7 @@ inline void climateworld::setseasonalmaritimethermalanomaly(int season, int x, i
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount) / climatelegacyscale::maritimethermalanomaly;
 }
 
 inline int climateworld::seasonalmaritimefetch(int season, int x, int y) const
@@ -890,7 +967,7 @@ inline int climateworld::seasonalmoisture(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalmoisturemaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalmoisturemaps[season][seasonalclimateindex(x, y)]);
 }
 
 inline void climateworld::setseasonalmoisture(int season, int x, int y, int amount)
@@ -898,7 +975,7 @@ inline void climateworld::setseasonalmoisture(int season, int x, int y, int amou
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalmoisturemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalmoisturemaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount);
 }
 
 inline int climateworld::seasonalconvergence(int season, int x, int y) const
@@ -907,7 +984,7 @@ inline int climateworld::seasonalconvergence(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalconvergencemaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalconvergencemaps[season][seasonalclimateindex(x, y)], climatelegacyscale::convergence);
 }
 
 inline void climateworld::setseasonalconvergence(int season, int x, int y, int amount)
@@ -915,7 +992,7 @@ inline void climateworld::setseasonalconvergence(int season, int x, int y, int a
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalconvergencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalconvergencemaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount) / climatelegacyscale::convergence;
 }
 
 inline int climateworld::seasonaluplift(int season, int x, int y) const
@@ -924,7 +1001,7 @@ inline int climateworld::seasonaluplift(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalupliftmaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalupliftmaps[season][seasonalclimateindex(x, y)], climatelegacyscale::orographicmotion);
 }
 
 inline void climateworld::setseasonaluplift(int season, int x, int y, int amount)
@@ -932,7 +1009,7 @@ inline void climateworld::setseasonaluplift(int season, int x, int y, int amount
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalupliftmaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalupliftmaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount) / climatelegacyscale::orographicmotion;
 }
 
 inline int climateworld::seasonalsubsidence(int season, int x, int y) const
@@ -941,7 +1018,7 @@ inline int climateworld::seasonalsubsidence(int season, int x, int y) const
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return static_cast<int>(seasonalsubsidencemaps[season][seasonalclimateindex(x, y)]);
+    return legacyvalue(seasonalsubsidencemaps[season][seasonalclimateindex(x, y)], climatelegacyscale::orographicmotion);
 }
 
 inline void climateworld::setseasonalsubsidence(int season, int x, int y, int amount)
@@ -949,7 +1026,383 @@ inline void climateworld::setseasonalsubsidence(int season, int x, int y, int am
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    seasonalsubsidencemaps[season][seasonalclimateindex(x, y)] = static_cast<short>(amount);
+    seasonalsubsidencemaps[season][seasonalclimateindex(x, y)] = static_cast<float>(amount) / climatelegacyscale::orographicmotion;
+}
+
+// Float accessors: the stored values in physical units.
+
+inline float climateworld::seasonaltempfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(temperature);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonaltempmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonaltempfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonaltempmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalpressurefloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(pressure);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalpressuremaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalpressurefloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalpressuremaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonaluwindfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(wind_east);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonaluwindmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonaluwindfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonaluwindmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalvwindfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(wind_south);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalvwindmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalvwindfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalvwindmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalupperheightfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(upper_height);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalupperheightmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalupperheightfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalupperheightmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalupperuwindfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(upper_wind_east);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalupperuwindmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalupperuwindfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalupperuwindmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonaluppervwindfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(upper_wind_south);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonaluppervwindmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonaluppervwindfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonaluppervwindmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalverticalvelocityfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(vertical_velocity);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalverticalvelocityfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalverticalvelocitymaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalcurrentufloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(ocean_current_east);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalcurrentumaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalcurrentufloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalcurrentumaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalcurrentvfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(ocean_current_south);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalcurrentvmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalcurrentvfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalcurrentvmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalsstfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(sea_surface_temperature);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalsstmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalsstfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalsstmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalevaporationfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(evaporation);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalevaporationmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalevaporationfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalevaporationmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalmaritimeinfluencefloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(maritime_influence);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalmaritimeinfluencefloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalmaritimeinfluencemaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalmaritimethermalanomalyfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(maritime_thermal_anomaly);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalmaritimethermalanomalyfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalmaritimethermalanomalymaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalmoisturefloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(moisture);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalmoisturemaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalmoisturefloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalmoisturemaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalconvergencefloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(convergence);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalconvergencemaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalconvergencefloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalconvergencemaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalupliftfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(orographic_uplift);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalupliftmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalupliftfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalupliftmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalsubsidencefloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(orographic_subsidence);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalsubsidencemaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalsubsidencefloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalsubsidencemaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::jantempfloat(int x, int y) const
+{
+    UW_FIELD_READ(temperature_january);
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return jantempmap[x][y];
+}
+
+inline void climateworld::setjantempfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    jantempmap[x][y] = amount;
+}
+
+inline float climateworld::jultempfloat(int x, int y) const
+{
+    UW_FIELD_READ(temperature_july);
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return jultempmap[x][y];
+}
+
+inline void climateworld::setjultempfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    jultempmap[x][y] = amount;
+}
+
+inline float climateworld::janrainfloat(int x, int y) const
+{
+    UW_FIELD_READ(precipitation_january);
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return janrainmap[x][y];
+}
+
+inline void climateworld::setjanrainfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    janrainmap[x][y] = amount;
+}
+
+inline float climateworld::julrainfloat(int x, int y) const
+{
+    UW_FIELD_READ(precipitation_july);
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return julrainmap[x][y];
+}
+
+inline void climateworld::setjulrainfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    julrainmap[x][y] = amount;
 }
 
 inline int climateworld::janmountainrain(int x, int y) const
@@ -958,7 +1411,7 @@ inline int climateworld::janmountainrain(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return (int)janmountainrainmap[x][y];
+    return legacyvalue(janmountainrainmap[x][y]);
 }
 
 inline void climateworld::setjanmountainrain(int x, int y, int amount)
@@ -966,7 +1419,7 @@ inline void climateworld::setjanmountainrain(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    janmountainrainmap[x][y] = (short)amount;
+    janmountainrainmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::julmountainrain(int x, int y) const
@@ -975,7 +1428,7 @@ inline int climateworld::julmountainrain(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    return (int)julmountainrainmap[x][y];
+    return legacyvalue(julmountainrainmap[x][y]);
 }
 
 inline void climateworld::setjulmountainrain(int x, int y, int amount)
@@ -983,7 +1436,7 @@ inline void climateworld::setjulmountainrain(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    julmountainrainmap[x][y] = (short)amount;
+    julmountainrainmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::wintermountainrain(int x, int y) const
@@ -995,10 +1448,10 @@ inline int climateworld::wintermountainrain(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    if (jantempmap[x][y] < jultempmap[x][y])
-        return (short)janmountainrainmap[x][y];
+    if (legacyvalue(jantempmap[x][y]) < legacyvalue(jultempmap[x][y]))
+        return legacyvalue(janmountainrainmap[x][y]);
     else
-        return (short)julmountainrainmap[x][y];
+        return legacyvalue(julmountainrainmap[x][y]);
 }
 
 inline void climateworld::setwintermountainrain(int x, int y, int amount)
@@ -1006,10 +1459,10 @@ inline void climateworld::setwintermountainrain(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    if (jantempmap[x][y] < jultempmap[x][y])
-        janmountainrainmap[x][y] = (short)amount;
+    if (legacyvalue(jantempmap[x][y]) < legacyvalue(jultempmap[x][y]))
+        janmountainrainmap[x][y] = static_cast<float>(amount);
     else
-        julmountainrainmap[x][y] = (short)amount;
+        julmountainrainmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::summermountainrain(int x, int y) const
@@ -1021,10 +1474,10 @@ inline int climateworld::summermountainrain(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        return (int)janmountainrainmap[x][y];
+    if (legacyvalue(jantempmap[x][y]) >= legacyvalue(jultempmap[x][y]))
+        return legacyvalue(janmountainrainmap[x][y]);
     else
-        return (int)julmountainrainmap[x][y];
+        return legacyvalue(julmountainrainmap[x][y]);
 }
 
 inline void climateworld::setsummermountainrain(int x, int y, int amount)
@@ -1032,10 +1485,10 @@ inline void climateworld::setsummermountainrain(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        janmountainrainmap[x][y] = (short)amount;
+    if (legacyvalue(jantempmap[x][y]) >= legacyvalue(jultempmap[x][y]))
+        janmountainrainmap[x][y] = static_cast<float>(amount);
     else
-        julmountainrainmap[x][y] = (short)amount;
+        julmountainrainmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::janmountainraindir(int x, int y) const
@@ -1081,7 +1534,7 @@ inline int climateworld::wintermountainraindir(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    if (jantempmap[x][y] < jultempmap[x][y])
+    if (legacyvalue(jantempmap[x][y]) < legacyvalue(jultempmap[x][y]))
         return (int)janmountainraindirmap[x][y];
     else
         return (int)julmountainraindirmap[x][y];
@@ -1096,7 +1549,7 @@ inline int climateworld::summermountainraindir(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    if (jantempmap[x][y] >= jultempmap[x][y])
+    if (legacyvalue(jantempmap[x][y]) >= legacyvalue(jultempmap[x][y]))
         return (int)janmountainraindirmap[x][y];
     else
         return (int)julmountainraindirmap[x][y];
@@ -1107,7 +1560,7 @@ inline void climateworld::setwintermountainraindir(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    if (jantempmap[x][y] < jultempmap[x][y])
+    if (legacyvalue(jantempmap[x][y]) < legacyvalue(jultempmap[x][y]))
         janmountainraindirmap[x][y] = (short)amount;
     else
         julmountainraindirmap[x][y] = (short)amount;
@@ -1118,7 +1571,7 @@ inline void climateworld::setsummermountainraindir(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    if (jantempmap[x][y] >= jultempmap[x][y])
+    if (legacyvalue(jantempmap[x][y]) >= legacyvalue(jultempmap[x][y]))
         janmountainraindirmap[x][y] = (short)amount;
     else
         julmountainraindirmap[x][y] = (short)amount;
@@ -1216,10 +1669,10 @@ inline int climateworld::mintemp(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    if (jantempmap[x][y] < jultempmap[x][y])
-        return (int)jantempmap[x][y];
+    if (legacyvalue(jantempmap[x][y]) < legacyvalue(jultempmap[x][y]))
+        return legacyvalue(jantempmap[x][y]);
     else
-        return (int)jultempmap[x][y];
+        return legacyvalue(jultempmap[x][y]);
 }
 
 inline void climateworld::setmintemp(int x, int y, int amount)
@@ -1227,10 +1680,10 @@ inline void climateworld::setmintemp(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    if (jantempmap[x][y] < jultempmap[x][y])
-        jantempmap[x][y] = (short)amount;
+    if (legacyvalue(jantempmap[x][y]) < legacyvalue(jultempmap[x][y]))
+        jantempmap[x][y] = static_cast<float>(amount);
     else
-        jultempmap[x][y] = (short)amount;
+        jultempmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::maxtemp(int x, int y) const
@@ -1240,10 +1693,10 @@ inline int climateworld::maxtemp(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    if (jantempmap[x][y] > jultempmap[x][y])
-        return (int)jantempmap[x][y];
+    if (legacyvalue(jantempmap[x][y]) > legacyvalue(jultempmap[x][y]))
+        return legacyvalue(jantempmap[x][y]);
     else
-        return (int)jultempmap[x][y];
+        return legacyvalue(jultempmap[x][y]);
 }
 
 inline void climateworld::setmaxtemp(int x, int y, int amount)
@@ -1251,10 +1704,10 @@ inline void climateworld::setmaxtemp(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    if (jantempmap[x][y] > jultempmap[x][y])
-        jantempmap[x][y] = (short)amount;
+    if (legacyvalue(jantempmap[x][y]) > legacyvalue(jultempmap[x][y]))
+        jantempmap[x][y] = static_cast<float>(amount);
     else
-        jultempmap[x][y] = (short)amount;
+        jultempmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::winterrain(int x, int y) const
@@ -1266,10 +1719,10 @@ inline int climateworld::winterrain(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    if (jantempmap[x][y] < jultempmap[x][y])
-        return (int)janrainmap[x][y];
+    if (legacyvalue(jantempmap[x][y]) < legacyvalue(jultempmap[x][y]))
+        return legacyvalue(janrainmap[x][y]);
     else
-        return (int)julrainmap[x][y];
+        return legacyvalue(julrainmap[x][y]);
 }
 
 inline void climateworld::setwinterrain(int x, int y, int amount)
@@ -1277,10 +1730,10 @@ inline void climateworld::setwinterrain(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    if (jantempmap[x][y] < jultempmap[x][y])
-        janrainmap[x][y] = (short)amount;
+    if (legacyvalue(jantempmap[x][y]) < legacyvalue(jultempmap[x][y]))
+        janrainmap[x][y] = static_cast<float>(amount);
     else
-        julrainmap[x][y] = (short)amount;
+        julrainmap[x][y] = static_cast<float>(amount);
 }
 
 inline int climateworld::summerrain(int x, int y) const
@@ -1292,10 +1745,10 @@ inline int climateworld::summerrain(int x, int y) const
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0;
 
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        return (int)janrainmap[x][y];
+    if (legacyvalue(jantempmap[x][y]) >= legacyvalue(jultempmap[x][y]))
+        return legacyvalue(janrainmap[x][y]);
     else
-        return (int)julrainmap[x][y];
+        return legacyvalue(julrainmap[x][y]);
 }
 
 inline void climateworld::setsummerrain(int x, int y, int amount)
@@ -1303,10 +1756,94 @@ inline void climateworld::setsummerrain(int x, int y, int amount)
     if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return;
 
-    if (jantempmap[x][y] >= jultempmap[x][y])
-        janrainmap[x][y] = (short)amount;
+    if (legacyvalue(jantempmap[x][y]) >= legacyvalue(jultempmap[x][y]))
+        janrainmap[x][y] = static_cast<float>(amount);
     else
-        julrainmap[x][y] = (short)amount;
+        julrainmap[x][y] = static_cast<float>(amount);
+}
+
+inline float climateworld::mintempfloat(int x, int y) const
+{
+    UW_FIELD_READ(temperature_january);
+    UW_FIELD_READ(temperature_july);
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return jantempmap[x][y] < jultempmap[x][y] ? jantempmap[x][y] : jultempmap[x][y];
+}
+
+inline void climateworld::setmintempfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    (jantempmap[x][y] < jultempmap[x][y] ? jantempmap[x][y] : jultempmap[x][y]) = amount;
+}
+
+inline float climateworld::maxtempfloat(int x, int y) const
+{
+    UW_FIELD_READ(temperature_january);
+    UW_FIELD_READ(temperature_july);
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return jantempmap[x][y] > jultempmap[x][y] ? jantempmap[x][y] : jultempmap[x][y];
+}
+
+inline void climateworld::setmaxtempfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    (jantempmap[x][y] > jultempmap[x][y] ? jantempmap[x][y] : jultempmap[x][y]) = amount;
+}
+
+inline float climateworld::winterrainfloat(int x, int y) const
+{
+    UW_FIELD_READ(temperature_january);
+    UW_FIELD_READ(temperature_july);
+    UW_FIELD_READ(precipitation_january);
+    UW_FIELD_READ(precipitation_july);
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return jantempmap[x][y] < jultempmap[x][y] ? janrainmap[x][y] : julrainmap[x][y];
+}
+
+inline void climateworld::setwinterrainfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    (jantempmap[x][y] < jultempmap[x][y] ? janrainmap[x][y] : julrainmap[x][y]) = amount;
+}
+
+inline float climateworld::summerrainfloat(int x, int y) const
+{
+    UW_FIELD_READ(temperature_january);
+    UW_FIELD_READ(temperature_july);
+    UW_FIELD_READ(precipitation_january);
+    UW_FIELD_READ(precipitation_july);
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return jantempmap[x][y] >= jultempmap[x][y] ? janrainmap[x][y] : julrainmap[x][y];
+}
+
+inline void climateworld::setsummerrainfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    (jantempmap[x][y] >= jultempmap[x][y] ? janrainmap[x][y] : julrainmap[x][y]) = amount;
+}
+
+inline float climateworld::avetempfloat(int x, int y) const
+{
+    float total = 0.0f;
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        total += seasonaltempfloat(season, x, y);
+    return total / static_cast<float>(CLIMATESEASONCOUNT);
 }
 
 inline int climateworld::avetemp(int x, int y) const

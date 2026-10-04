@@ -781,8 +781,8 @@ seasonfields buildseasonfields(climateworld& world, int season)
                     fields.surfaceu[index],
                     fields.surfacev[index]))
             {
-                fields.surfaceu[index] = static_cast<float>(world.seasonaluwind(season, x, y));
-                fields.surfacev[index] = static_cast<float>(world.seasonalvwind(season, x, y));
+                fields.surfaceu[index] = world.seasonaluwindfloat(season, x, y);
+                fields.surfacev[index] = world.seasonalvwindfloat(season, x, y);
             }
 
             if (!capturedcirculationwind(
@@ -794,10 +794,10 @@ seasonfields buildseasonfields(climateworld& world, int season)
                     fields.upperu[index],
                     fields.upperv[index]))
             {
-                fields.upperu[index] = static_cast<float>(world.seasonalupperuwind(season, x, y));
-                fields.upperv[index] = static_cast<float>(world.seasonaluppervwind(season, x, y));
+                fields.upperu[index] = world.seasonalupperuwindfloat(season, x, y);
+                fields.upperv[index] = world.seasonaluppervwindfloat(season, x, y);
             }
-            fields.moisture[index] = world.seasonalmoisture(season, x, y);
+            fields.moisture[index] = world.seasonalmoisturefloat(season, x, y);
             fields.surfacespeed[index] = std::sqrt(
                 fields.surfaceu[index] * fields.surfaceu[index] +
                 fields.surfacev[index] * fields.surfacev[index]);

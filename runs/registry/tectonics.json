@@ -1,7 +1,7 @@
 {
   "schema": "tectonics-run-registry/v1",
   "seed": 1,
-  "baseline": 42,
+  "baseline": 75,
   "runs": [
     {
       "id": 1,

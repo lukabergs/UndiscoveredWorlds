@@ -747,7 +747,7 @@ bool temperatureallowsreferencemajorgroup(
 double simulatedmonthlyvalue(climateworld& world, monthlyreferencefield field, int season, int x, int y)
 {
     if (field == monthlyreferencefield::temperature)
-        return world.seasonaltemp(season, x, y);
+        return world.seasonaltempfloat(season, x, y);
 
     if (field == monthlyreferencefield::precipitation)
         return world.seasonalrainfloat(season, x, y);
@@ -758,13 +758,13 @@ double simulatedmonthlyvalue(climateworld& world, monthlyreferencefield field, i
         float capturedv = 0.0f;
         const bool captured = climatevalidation::capturedcirculationwind(
             world, season, x, y, false, capturedu, capturedv);
-        const double u = captured ? capturedu : world.seasonaluwind(season, x, y);
-        const double v = captured ? capturedv : world.seasonalvwind(season, x, y);
+        const double u = captured ? capturedu : world.seasonaluwindfloat(season, x, y);
+        const double v = captured ? capturedv : world.seasonalvwindfloat(season, x, y);
         return std::sqrt(u * u + v * v);
     }
 
     if (field == monthlyreferencefield::surfacepressure)
-        return world.seasonalpressure(season, x, y);
+        return world.seasonalpressurefloat(season, x, y);
 
     if (field == monthlyreferencefield::surfaceuwind)
     {
@@ -773,7 +773,7 @@ double simulatedmonthlyvalue(climateworld& world, monthlyreferencefield field, i
         return climatevalidation::capturedcirculationwind(
             world, season, x, y, false, capturedu, capturedv)
             ? capturedu
-            : world.seasonaluwind(season, x, y);
+            : world.seasonaluwindfloat(season, x, y);
     }
 
     if (field == monthlyreferencefield::surfacevwind)
@@ -783,7 +783,7 @@ double simulatedmonthlyvalue(climateworld& world, monthlyreferencefield field, i
         return climatevalidation::capturedcirculationwind(
             world, season, x, y, false, capturedu, capturedv)
             ? -capturedv
-            : -world.seasonalvwind(season, x, y);
+            : -world.seasonalvwindfloat(season, x, y);
     }
 
     if (field == monthlyreferencefield::upperuwind)
@@ -793,7 +793,7 @@ double simulatedmonthlyvalue(climateworld& world, monthlyreferencefield field, i
         return climatevalidation::capturedcirculationwind(
             world, season, x, y, true, capturedu, capturedv)
             ? capturedu
-            : world.seasonalupperuwind(season, x, y);
+            : world.seasonalupperuwindfloat(season, x, y);
     }
 
     if (field == monthlyreferencefield::uppervwind)
@@ -803,14 +803,13 @@ double simulatedmonthlyvalue(climateworld& world, monthlyreferencefield field, i
         return climatevalidation::capturedcirculationwind(
             world, season, x, y, true, capturedu, capturedv)
             ? -capturedv
-            : -world.seasonaluppervwind(season, x, y);
+            : -world.seasonaluppervwindfloat(season, x, y);
     }
 
     if (field == monthlyreferencefield::columnwater)
-        return world.seasonalmoisture(season, x, y);
+        return world.seasonalmoisturefloat(season, x, y);
 
-    return static_cast<double>(world.seasonalverticalvelocity(season, x, y)) /
-        tuning::climate::circulation::verticalVelocityStorageScale;
+    return world.seasonalverticalvelocityfloat(season, x, y);
 }
 
 comparisonmetrics comparemonthlyfield(
@@ -1383,7 +1382,7 @@ void writeipccregioncomparison(const filesystem::path& outputdir, climateworld& 
 
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             {
-                const double temperature = world.seasonaltemp(season, x, y);
+                const double temperature = world.seasonaltempfloat(season, x, y);
                 const double precipitation = world.seasonalrainfloat(season, x, y);
                 simulatedtemperature += temperature;
                 simulatedwarmest = max(simulatedwarmest, temperature);
@@ -1675,7 +1674,7 @@ void printreferencedfcdriverreport(climateworld& world)
 
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             {
-                temps[season] = static_cast<float>(world.seasonaltemp(season, x, y));
+                temps[season] = static_cast<float>(world.seasonaltempfloat(season, x, y));
                 rains[season] = world.seasonalrainfloat(season, x, y);
                 meanannualtemp += temps[season];
                 annualrain += rains[season];
@@ -2023,7 +2022,7 @@ void collectbenchmarktemperaturemetrics(climateworld& world, benchmarkphysicsmet
             array<float, CLIMATESEASONCOUNT> temperatures{};
 
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-                temperatures[season] = static_cast<float>(world.seasonaltemp(season, x, y));
+                temperatures[season] = static_cast<float>(world.seasonaltempfloat(season, x, y));
 
             const float maxtemp = *max_element(temperatures.begin(), temperatures.end());
             const bool grouplocked = !temperatureallowsreferencemajorgroup(expected, temperatures);
@@ -2213,7 +2212,7 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(climateworld& world)
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             {
                 griddedatmosphericstorage +=
-                    areaweight * world.seasonalmoisture(season, x, y);
+                    areaweight * world.seasonalmoisturefloat(season, x, y);
                 griddedprecipitation +=
                     areaweight * world.seasonalrainfloat(season, x, y);
             }
@@ -2891,7 +2890,7 @@ bool exportclimatebenchmarkimages(
                     world.riftlakesurface(x, y) != 0;
                 if (!water)
                     image.setPixel(x, y,
-                        benchmarktemperaturecolour(static_cast<float>(world.avetemp(x, y))));
+                        benchmarktemperaturecolour(world.avetempfloat(x, y)));
             }
         }
         if (!saveimage(image, climatebenchmarkmapkind::temperature))
@@ -3325,7 +3324,6 @@ comparisonmetrics compareannualprecipitation(const filesystem::path& outputdir, 
 void writeatmosphericbudget(const filesystem::path& outputdir, climateworld& world)
 {
     constexpr array<const char*, CLIMATESEASONCOUNT> seasonnames = { "january", "april", "july", "october" };
-    constexpr double verticalstoragescale = tuning::climate::circulation::verticalVelocityStorageScale;
     const int width = world.width();
     const int height = world.height();
     ofstream outfile(outputdir / "climate_atmosphere_budget.csv");
@@ -3364,7 +3362,7 @@ void writeatmosphericbudget(const filesystem::path& outputdir, climateworld& wor
         for (int y = 0; y <= height; y++)
         {
             for (int x = 0; x <= width; x++)
-                zonalpressure[y] += world.seasonalpressure(season, x, y);
+                zonalpressure[y] += world.seasonalpressurefloat(season, x, y);
 
             zonalpressure[y] /= static_cast<double>(width + 1);
         }
@@ -3394,41 +3392,37 @@ void writeatmosphericbudget(const filesystem::path& outputdir, climateworld& wor
             {
                 const int xwest = x > 0 ? x - 1 : width - 1;
                 const int xeast = x < width ? x + 1 : 1;
-                const double surfaceu = world.seasonaluwind(season, x, y);
-                const double surfacev = world.seasonalvwind(season, x, y);
-                const double upperu = world.seasonalupperuwind(season, x, y);
-                const double upperv = world.seasonaluppervwind(season, x, y);
+                const double surfaceu = world.seasonaluwindfloat(season, x, y);
+                const double surfacev = world.seasonalvwindfloat(season, x, y);
+                const double upperu = world.seasonalupperuwindfloat(season, x, y);
+                const double upperv = world.seasonaluppervwindfloat(season, x, y);
                 const double surfacedivergence =
-                    ((world.seasonaluwind(season, xeast, y) - world.seasonaluwind(season, xwest, y)) /
+                    ((world.seasonaluwindfloat(season, xeast, y) - world.seasonaluwindfloat(season, xwest, y)) /
                         (2.0 * spacing.zonalMetres) +
-                        (world.seasonalvwind(season, x, ysouth) * southcosine -
-                            world.seasonalvwind(season, x, ynorth) * northcosine) /
+                        (world.seasonalvwindfloat(season, x, ysouth) * southcosine -
+                            world.seasonalvwindfloat(season, x, ynorth) * northcosine) /
                         (2.0 * spacing.meridionalMetres * centrecosine)) *
                     tuning::climate::circulation::secondsPerDay;
                 const double upperdivergence =
-                    ((world.seasonalupperuwind(season, xeast, y) - world.seasonalupperuwind(season, xwest, y)) /
+                    ((world.seasonalupperuwindfloat(season, xeast, y) - world.seasonalupperuwindfloat(season, xwest, y)) /
                         (2.0 * spacing.zonalMetres) +
-                        (world.seasonaluppervwind(season, x, ysouth) * southcosine -
-                            world.seasonaluppervwind(season, x, ynorth) * northcosine) /
+                        (world.seasonaluppervwindfloat(season, x, ysouth) * southcosine -
+                            world.seasonaluppervwindfloat(season, x, ynorth) * northcosine) /
                         (2.0 * spacing.meridionalMetres * centrecosine)) *
                     tuning::climate::circulation::secondsPerDay;
                 const double verticalvelocity =
-                    static_cast<double>(world.seasonalverticalvelocity(season, x, y)) / verticalstoragescale;
+                    world.seasonalverticalvelocityfloat(season, x, y);
                 const double columndivergence = surfacedivergence + upperdivergence;
-                const double upliftmetres = static_cast<double>(
-                    world.seasonaluplift(season, x, y)) /
-                    tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
-                const double descentmetres = static_cast<double>(
-                    world.seasonalsubsidence(season, x, y)) /
-                    tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
+                const double upliftmetres = world.seasonalupliftfloat(season, x, y);
+                const double descentmetres = world.seasonalsubsidencefloat(season, x, y);
 
                 weighttotal += weight;
-                pressuretotal += weight * world.seasonalpressure(season, x, y);
-                pressuresquared += weight * world.seasonalpressure(season, x, y) *
-                    world.seasonalpressure(season, x, y);
+                pressuretotal += weight * world.seasonalpressurefloat(season, x, y);
+                pressuresquared += weight * world.seasonalpressurefloat(season, x, y) *
+                    world.seasonalpressurefloat(season, x, y);
                 zonalpressuresquared += weight * zonalpressure[y] * zonalpressure[y];
                 const double stationarypressure =
-                    world.seasonalpressure(season, x, y) - zonalpressure[y];
+                    world.seasonalpressurefloat(season, x, y) - zonalpressure[y];
                 stationarypressuresquared +=
                     weight * stationarypressure * stationarypressure;
                 surfacedivergencetotal += weight * surfacedivergence;
@@ -3445,7 +3439,7 @@ void writeatmosphericbudget(const filesystem::path& outputdir, climateworld& wor
                 upliftabove500weight += upliftmetres >= 500.0 ? weight : 0.0;
                 descentabove500weight += descentmetres >= 500.0 ? weight : 0.0;
 
-                if (std::abs(world.seasonalpressure(season, x, y)) >=
+                if (std::abs(world.seasonalpressurefloat(season, x, y)) >=
                     tuning::climate::circulation::maximumSurfacePressureAnomalyHpa - 1.0f)
                 {
                     pressurelimitedweight += weight;
@@ -3573,7 +3567,7 @@ void writepressuredecompositioncomparison(
 
             for (int x = 0; x <= width; x++)
             {
-                simulatedzonal[y] += world.seasonalpressure(season, x, y);
+                simulatedzonal[y] += world.seasonalpressurefloat(season, x, y);
                 const double referencevalue = samplemonthlyreference(
                     reference,
                     referencemonths[season],
@@ -3628,7 +3622,7 @@ void writepressuredecompositioncomparison(
                 if (!std::isfinite(referencevalue))
                     continue;
 
-                const double simulatedvalue = world.seasonalpressure(season, x, y);
+                const double simulatedvalue = world.seasonalpressurefloat(season, x, y);
                 const double simulatedstationary = simulatedvalue - simulatedzonal[y];
                 const double referencestationary = referencevalue - referencezonal[y];
                 cellweight += weight;
@@ -3736,7 +3730,7 @@ void writetemperaturethresholdcomparison(
 
                 for (int season = 0; season < CLIMATESEASONCOUNT; season++)
                 {
-                    const double value = world.seasonaltemp(season, x, y);
+                    const double value = world.seasonaltempfloat(season, x, y);
                     simulatedminimum = min(simulatedminimum, value);
                     simulatedmaximum = max(simulatedmaximum, value);
                 }
@@ -3882,7 +3876,7 @@ bool exportbenchmarkcomparisoncells(climateworld& world, int runid)
                     monthlyreferencefield::uppervwind, monthlyreferencefield::columnwater,
                     monthlyreferencefield::verticalascent })
                     output << ',' << simulatedmonthlyvalue(world, field, season, x, y);
-                output << ',' << world.seasonalevaporation(season, x, y) << '\n';
+                output << ',' << world.seasonalevaporationfloat(season, x, y) << '\n';
             }
     return output.good();
 }
@@ -4497,16 +4491,16 @@ void exportclimatevalidationreport(climateworld& world)
             row.annualrain = row.annualrain + annualrain;
             row.januaryrain = row.januaryrain + januaryrain;
             row.julyrain = row.julyrain + julyrain;
-            row.januarypressure = row.januarypressure + world.seasonalpressure(seasonjanuary, x, y);
-            row.julypressure = row.julypressure + world.seasonalpressure(seasonjuly, x, y);
-            row.januaryuwind = row.januaryuwind + world.seasonaluwind(seasonjanuary, x, y);
-            row.januaryvwind = row.januaryvwind + world.seasonalvwind(seasonjanuary, x, y);
-            row.julyuwind = row.julyuwind + world.seasonaluwind(seasonjuly, x, y);
-            row.julyvwind = row.julyvwind + world.seasonalvwind(seasonjuly, x, y);
-            row.januaryevaporation = row.januaryevaporation + world.seasonalevaporation(seasonjanuary, x, y);
-            row.julyevaporation = row.julyevaporation + world.seasonalevaporation(seasonjuly, x, y);
-            row.januarymoisture = row.januarymoisture + world.seasonalmoisture(seasonjanuary, x, y);
-            row.julymoisture = row.julymoisture + world.seasonalmoisture(seasonjuly, x, y);
+            row.januarypressure = row.januarypressure + world.seasonalpressurefloat(seasonjanuary, x, y);
+            row.julypressure = row.julypressure + world.seasonalpressurefloat(seasonjuly, x, y);
+            row.januaryuwind = row.januaryuwind + world.seasonaluwindfloat(seasonjanuary, x, y);
+            row.januaryvwind = row.januaryvwind + world.seasonalvwindfloat(seasonjanuary, x, y);
+            row.julyuwind = row.julyuwind + world.seasonaluwindfloat(seasonjuly, x, y);
+            row.julyvwind = row.julyvwind + world.seasonalvwindfloat(seasonjuly, x, y);
+            row.januaryevaporation = row.januaryevaporation + world.seasonalevaporationfloat(seasonjanuary, x, y);
+            row.julyevaporation = row.julyevaporation + world.seasonalevaporationfloat(seasonjuly, x, y);
+            row.januarymoisture = row.januarymoisture + world.seasonalmoisturefloat(seasonjanuary, x, y);
+            row.julymoisture = row.julymoisture + world.seasonalmoisturefloat(seasonjuly, x, y);
 
             globalcells++;
             globalannualrain = globalannualrain + annualrain;
@@ -4526,12 +4520,12 @@ void exportclimatevalidationreport(climateworld& world)
             {
                 row.oceancells++;
                 row.oceanannualrain = row.oceanannualrain + annualrain;
-                row.januarysst = row.januarysst + world.seasonalsst(seasonjanuary, x, y);
-                row.julysst = row.julysst + world.seasonalsst(seasonjuly, x, y);
-                row.januarycurrentu = row.januarycurrentu + world.seasonalcurrentu(seasonjanuary, x, y);
-                row.januarycurrentv = row.januarycurrentv + world.seasonalcurrentv(seasonjanuary, x, y);
-                row.julycurrentu = row.julycurrentu + world.seasonalcurrentu(seasonjuly, x, y);
-                row.julycurrentv = row.julycurrentv + world.seasonalcurrentv(seasonjuly, x, y);
+                row.januarysst = row.januarysst + world.seasonalsstfloat(seasonjanuary, x, y);
+                row.julysst = row.julysst + world.seasonalsstfloat(seasonjuly, x, y);
+                row.januarycurrentu = row.januarycurrentu + world.seasonalcurrentufloat(seasonjanuary, x, y) * climatelegacyscale::current;
+                row.januarycurrentv = row.januarycurrentv + world.seasonalcurrentvfloat(seasonjanuary, x, y) * climatelegacyscale::current;
+                row.julycurrentu = row.julycurrentu + world.seasonalcurrentufloat(seasonjuly, x, y) * climatelegacyscale::current;
+                row.julycurrentv = row.julycurrentv + world.seasonalcurrentvfloat(seasonjuly, x, y) * climatelegacyscale::current;
 
                 oceancells++;
                 oceanannualrain = oceanannualrain + annualrain;

@@ -879,8 +879,8 @@ void createSurfaceEnergyBalanceTemperatureMap(
                     simulation.localTemperatureCorrection[season][index] : 0.0;
                 const double temperature = simulation.profile.snapshots[season][surface][y] +
                     localTemperatureOffset[index] + localCorrection;
-                world.setseasonaltemp(season, x, y, static_cast<int>(std::round(temperature)));
-                monthly.referenceTemperatureC[season][index] = static_cast<float>(world.seasonaltemp(season, x, y));
+                world.setseasonaltempfloat(season, x, y, static_cast<float>(temperature));
+                monthly.referenceTemperatureC[season][index] = world.seasonaltempfloat(season, x, y);
             }
 
             for (int month = 0; month < 12; ++month)
@@ -893,18 +893,18 @@ void createSurfaceEnergyBalanceTemperatureMap(
                     localTemperatureOffset[index] + correction);
             }
 
-            world.setjantemp(x, y, world.seasonaltemp(seasonjanuary, x, y));
-            world.setjultemp(x, y, world.seasonaltemp(seasonjuly, x, y));
+            world.setjantempfloat(x, y, world.seasonaltempfloat(seasonjanuary, x, y));
+            world.setjultempfloat(x, y, world.seasonaltempfloat(seasonjuly, x, y));
 
             if (surface == 0)
             {
-                int warmestTemperature = world.seasonaltemp(0, x, y);
+                float warmestTemperature = world.seasonaltempfloat(0, x, y);
 
                 for (int season = 1; season < CLIMATESEASONCOUNT; season++)
                 {
                     warmestTemperature = std::max(
                         warmestTemperature,
-                        world.seasonaltemp(season, x, y));
+                        world.seasonaltempfloat(season, x, y));
                 }
 
                 const double latitude = latitudeDegreesForRow(y, height);

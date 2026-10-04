@@ -31,7 +31,7 @@ void printcommandlineusage()
     cout << "Commands:\n";
     cout << "  run                 Run a recipe (--recipe) or part of it; nothing is registered.\n";
     cout << "  generate            Generate a procedural world, or climate on imported terrain with --climate-only.\n";
-    cout << "  climate-benchmark   Run climate on the imported Earth benchmark terrain and record a numbered run.\n";
+    cout << "  climate-benchmark   Run the earth-climate recipe on the Earth terrain and record a numbered run.\n";
     cout << "Options of run:\n";
     cout << "  --recipe <name>         procedural-world, imported-world or earth-climate. Imported recipes use the\n";
     cout << "                           Earth terrain of configs/app.env at --resolution (default 512) unless\n";
@@ -621,7 +621,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     updatereport("");
 
     if (options.recipeName.empty())
-        recipe = importedworld ? (options.climateOnly ? earthclimaterecipe() : importedworldrecipe()) : proceduralworldrecipe();
+        recipe = importedworld ? (options.climateOnly || options.earthClimateBenchmark ? earthclimaterecipe() : importedworldrecipe()) : proceduralworldrecipe();
     if (!frombundle && importedworld == (recipe.name == "procedural-world"))
     {
         cerr << "Recipe " << recipe.name << (importedworld ? " cannot start from imported terrain.\n" : " requires imported terrain.\n");

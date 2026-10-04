@@ -47,27 +47,43 @@ void climateworld::resize(int width, int height)
             season.assign(cellcount, 0.0f);
     };
 
-    resizefield(seasonaltempmaps);
-    resizefield(seasonalrainmaps);
+    resizefloatfield(seasonaltempmaps);
+    resizefloatfield(seasonalrainmaps);
     resizefloatfield(seasonalrainfloatmaps);
-    resizefield(seasonalpressuremaps);
-    resizefield(seasonaluwindmaps);
-    resizefield(seasonalvwindmaps);
-    resizefield(seasonalupperheightmaps);
-    resizefield(seasonalupperuwindmaps);
-    resizefield(seasonaluppervwindmaps);
-    resizefield(seasonalverticalvelocitymaps);
-    resizefield(seasonalcurrentumaps);
-    resizefield(seasonalcurrentvmaps);
-    resizefield(seasonalsstmaps);
-    resizefield(seasonalevaporationmaps);
-    resizefield(seasonalmaritimeinfluencemaps);
-    resizefield(seasonalmaritimethermalanomalymaps);
+    resizefloatfield(seasonalpressuremaps);
+    resizefloatfield(seasonaluwindmaps);
+    resizefloatfield(seasonalvwindmaps);
+    resizefloatfield(seasonalupperheightmaps);
+    resizefloatfield(seasonalupperuwindmaps);
+    resizefloatfield(seasonaluppervwindmaps);
+    resizefloatfield(seasonalverticalvelocitymaps);
+    resizefloatfield(seasonalcurrentumaps);
+    resizefloatfield(seasonalcurrentvmaps);
+    resizefloatfield(seasonalsstmaps);
+    resizefloatfield(seasonalevaporationmaps);
+    resizefloatfield(seasonalmaritimeinfluencemaps);
+    resizefloatfield(seasonalmaritimethermalanomalymaps);
     resizefield(seasonalmaritimefetchmaps);
-    resizefield(seasonalmoisturemaps);
-    resizefield(seasonalconvergencemaps);
-    resizefield(seasonalupliftmaps);
-    resizefield(seasonalsubsidencemaps);
+    resizefloatfield(seasonalmoisturemaps);
+    resizefloatfield(seasonalconvergencemaps);
+    resizefloatfield(seasonalupliftmaps);
+    resizefloatfield(seasonalsubsidencemaps);
+}
+
+std::vector<short> climateworld::legacyfield(const std::vector<float>& values, float scale)
+{
+    std::vector<short> encoded(values.size());
+    for (std::size_t index = 0; index < values.size(); index++)
+        encoded[index] = static_cast<short>(legacyvalue(values[index], scale));
+    return encoded;
+}
+
+std::vector<short> climateworld::legacyfield(const worldgrid<float>& values)
+{
+    std::vector<short> encoded(values.size());
+    for (std::size_t index = 0; index < values.size(); index++)
+        encoded[index] = static_cast<short>(legacyvalue(values.data()[index]));
+    return encoded;
 }
 
 const std::vector<std::uint8_t>& climateworld::weatheranomalystate() const
@@ -86,9 +102,9 @@ void climateworld::syncseasonalclimatefromlegacy()
     bool hasexplicittransitiontemp = false;
     bool hasexplicittransitionrain = false;
 
-    for (const short value : seasonaltempmaps[seasonapril])
+    for (const float value : seasonaltempmaps[seasonapril])
     {
-        if (value != 0)
+        if (value != 0.0f)
         {
             hasexplicittransitiontemp = true;
             break;
@@ -97,9 +113,9 @@ void climateworld::syncseasonalclimatefromlegacy()
 
     if (hasexplicittransitiontemp == false)
     {
-        for (const short value : seasonaltempmaps[seasonoctober])
+        for (const float value : seasonaltempmaps[seasonoctober])
         {
-            if (value != 0)
+            if (value != 0.0f)
             {
                 hasexplicittransitiontemp = true;
                 break;
@@ -107,9 +123,9 @@ void climateworld::syncseasonalclimatefromlegacy()
         }
     }
 
-    for (const short value : seasonalrainmaps[seasonapril])
+    for (const float value : seasonalrainmaps[seasonapril])
     {
-        if (value != 0)
+        if (value != 0.0f)
         {
             hasexplicittransitionrain = true;
             break;
@@ -118,9 +134,9 @@ void climateworld::syncseasonalclimatefromlegacy()
 
     if (hasexplicittransitionrain == false)
     {
-        for (const short value : seasonalrainmaps[seasonoctober])
+        for (const float value : seasonalrainmaps[seasonoctober])
         {
-            if (value != 0)
+            if (value != 0.0f)
             {
                 hasexplicittransitionrain = true;
                 break;
@@ -134,15 +150,15 @@ void climateworld::syncseasonalclimatefromlegacy()
         {
             const int index = seasonalclimateindex(x, y);
 
-            const float januarytemp = static_cast<float>(jantempmap[x][y]);
-            const float julytemp = static_cast<float>(jultempmap[x][y]);
-            const float januaryrain = static_cast<float>(janrainmap[x][y]);
-            const float julyrain = static_cast<float>(julrainmap[x][y]);
+            const float januarytemp = jantempmap[x][y];
+            const float julytemp = jultempmap[x][y];
+            const float januaryrain = janrainmap[x][y];
+            const float julyrain = julrainmap[x][y];
 
-            seasonaltempmaps[seasonjanuary][index] = static_cast<short>(jantempmap[x][y]);
-            seasonaltempmaps[seasonjuly][index] = static_cast<short>(jultempmap[x][y]);
-            seasonalrainmaps[seasonjanuary][index] = static_cast<short>(janrainmap[x][y]);
-            seasonalrainmaps[seasonjuly][index] = static_cast<short>(julrainmap[x][y]);
+            seasonaltempmaps[seasonjanuary][index] = jantempmap[x][y];
+            seasonaltempmaps[seasonjuly][index] = jultempmap[x][y];
+            seasonalrainmaps[seasonjanuary][index] = janrainmap[x][y];
+            seasonalrainmaps[seasonjuly][index] = julrainmap[x][y];
 
             float summertemp = julytemp;
             float wintertemp = januarytemp;
@@ -168,8 +184,8 @@ void climateworld::syncseasonalclimatefromlegacy()
 
             if (hasexplicittransitiontemp == false)
             {
-                seasonaltempmaps[seasonapril][index] = static_cast<short>(transitiontemp + transitiontempdiff);
-                seasonaltempmaps[seasonoctober][index] = static_cast<short>(transitiontemp + transitiontempdiff);
+                seasonaltempmaps[seasonapril][index] = transitiontemp + transitiontempdiff;
+                seasonaltempmaps[seasonoctober][index] = transitiontemp + transitiontempdiff;
             }
 
             if (hasexplicittransitionrain == false)
@@ -177,40 +193,40 @@ void climateworld::syncseasonalclimatefromlegacy()
                 float apriljanfactor = 0.5f;
                 float apriljulfactor = 0.5f;
 
-                if (jultempmap[x][y] > jantempmap[x][y] && julrainmap[x][y] > janrainmap[x][y] && julyrain > 0.0f)
+                if (julytemp > januarytemp && julyrain > januaryrain && julyrain > 0.0f)
                 {
                     const float monsoonfactor = 1.0f - januaryrain / julyrain;
                     apriljanfactor = monsoonfactor * 0.9f;
                     apriljulfactor = 1.0f - apriljanfactor;
                 }
 
-                if (jultempmap[x][y] < jantempmap[x][y] && julrainmap[x][y] < janrainmap[x][y] && januaryrain > 0.0f)
+                if (julytemp < januarytemp && julyrain < januaryrain && januaryrain > 0.0f)
                 {
                     const float monsoonfactor = 1.0f - julyrain / januaryrain;
                     apriljanfactor = monsoonfactor * 0.7f;
                     apriljulfactor = 1.0f - apriljanfactor;
                 }
 
-                seasonalrainmaps[seasonapril][index] = static_cast<short>(januaryrain * apriljanfactor + julyrain * apriljulfactor);
+                seasonalrainmaps[seasonapril][index] = januaryrain * apriljanfactor + julyrain * apriljulfactor;
 
                 float octoberjanfactor = 0.5f;
                 float octoberjulfactor = 0.5f;
 
-                if (jultempmap[x][y] > jantempmap[x][y] && julrainmap[x][y] > janrainmap[x][y] && julyrain > 0.0f)
+                if (julytemp > januarytemp && julyrain > januaryrain && julyrain > 0.0f)
                 {
                     const float monsoonfactor = 1.0f - januaryrain / julyrain;
                     octoberjulfactor = monsoonfactor * 0.7f;
                     octoberjanfactor = 1.0f - octoberjulfactor;
                 }
 
-                if (jultempmap[x][y] < jantempmap[x][y] && julrainmap[x][y] < janrainmap[x][y] && januaryrain > 0.0f)
+                if (julytemp < januarytemp && julyrain < januaryrain && januaryrain > 0.0f)
                 {
                     const float monsoonfactor = 1.0f - julyrain / januaryrain;
                     octoberjulfactor = monsoonfactor * 0.9f;
                     octoberjanfactor = 1.0f - octoberjulfactor;
                 }
 
-                seasonalrainmaps[seasonoctober][index] = static_cast<short>(januaryrain * octoberjanfactor + julyrain * octoberjulfactor);
+                seasonalrainmaps[seasonoctober][index] = januaryrain * octoberjanfactor + julyrain * octoberjulfactor;
             }
         }
     }
@@ -248,8 +264,8 @@ bool climateworld::advanceweather(float elapsedSeconds, int horizontalCells)
             for (int y = 0; y <= height(); ++y)
                 for (int x = 0; x <= width(); ++x)
                 {
-                    const auto wind = [&](int s) { return upper ? (south ? seasonaluppervwind(s, x, y) : seasonalupperuwind(s, x, y)) :
-                        (south ? seasonalvwind(s, x, y) : seasonaluwind(s, x, y)); };
+                    const auto wind = [&](int s) { return upper ? (south ? seasonaluppervwindfloat(s, x, y) : seasonalupperuwindfloat(s, x, y)) :
+                        (south ? seasonalvwindfloat(s, x, y) : seasonaluwindfloat(s, x, y)); };
                     raster[y * (width() + 1) + x] = wind(first) * (1.0f - fraction) + wind(second) * fraction;
                 }
             return climategrid::remapField(
@@ -369,9 +385,8 @@ void climateworld::updatelevels()
                 levels_[2].available[season][cell] = 1;
                 if (seasonalfields)
                 {
-                    levels_[2].geopotentialheight[season][cell] = static_cast<float>(seasonalupperheightmaps[season][cell]);
-                    levels_[2].verticalvelocity[season][cell] = static_cast<float>(seasonalverticalvelocitymaps[season][cell]) /
-                        tuning::climate::circulation::verticalVelocityStorageScale;
+                    levels_[2].geopotentialheight[season][cell] = seasonalupperheightmaps[season][cell];
+                    levels_[2].verticalvelocity[season][cell] = seasonalverticalvelocitymaps[season][cell];
                 }
                 for (std::size_t index = 0; index < winds.genericlevels.size(); ++index)
                 {

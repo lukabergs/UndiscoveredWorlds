@@ -86,6 +86,9 @@ struct GlobalCudaRendererInputs
     const int* deltamapjul = nullptr;
     const int* riftlakemapsurface = nullptr;
     const bool* noshademap = nullptr;
+    // Whole-number copies of fields the world stores as float; the temperature
+    // and rain pointers above refer to them.
+    std::vector<short> jantempvalues, jultempvalues, janrainvalues, julrainvalues;
     GlobalReliefPalette relief;
 };
 

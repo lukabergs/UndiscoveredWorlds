@@ -81,8 +81,8 @@ maritimesample sampleupwindmaritimeinfluence(climateworld& world, int season, in
     const int oceansamplecount = tuning::climateresolution::scaleDistance(
         tuning::climate::maritime::oceanSampleCount, width, height);
 
-    const float u = static_cast<float>(world.seasonaluwind(season, x, y));
-    const float v = static_cast<float>(world.seasonalvwind(season, x, y));
+    const float u = world.seasonaluwindfloat(season, x, y);
+    const float v = world.seasonalvwindfloat(season, x, y);
     const float magnitude = std::sqrt(u * u + v * v);
 
     if (magnitude < tuning::climate::maritime::minimumWindStrength)
@@ -132,8 +132,8 @@ maritimesample sampleupwindmaritimeinfluence(climateworld& world, int season, in
         if (world.sea(xx, yy) == 0)
             break;
 
-        ssttotal = ssttotal + static_cast<float>(world.seasonalsst(season, xx, yy));
-        evaporationtotal = evaporationtotal + static_cast<float>(world.seasonalevaporation(season, xx, yy));
+        ssttotal = ssttotal + world.seasonalsstfloat(season, xx, yy);
+        evaporationtotal = evaporationtotal + world.seasonalevaporationfloat(season, xx, yy);
         seacells++;
 
         if (seacells >= oceansamplecount)
@@ -154,7 +154,7 @@ maritimesample sampleupwindmaritimeinfluence(climateworld& world, int season, in
     const float moisturefactor = 0.5f + std::clamp(averageevaporation / tuning::climate::maritime::evaporationScale, 0.0f, 0.5f);
 
     result.influence = fetchfactor * windfactor * continuityfactor * moisturefactor;
-    result.thermalanomaly = averagedsstonsea - static_cast<float>(world.seasonaltemp(season, x, y));
+    result.thermalanomaly = averagedsstonsea - world.seasonaltempfloat(season, x, y);
     result.thermalanomaly = std::clamp(result.thermalanomaly, -tuning::climate::maritime::maxThermalAnomaly, tuning::climate::maritime::maxThermalAnomaly);
 
     return result;
@@ -163,16 +163,16 @@ maritimesample sampleupwindmaritimeinfluence(climateworld& world, int season, in
 maritimesample storedmaritimeinfluence(climateworld& world, int season, int x, int y)
 {
     maritimesample result;
-    result.influence = static_cast<float>(world.seasonalmaritimeinfluence(season, x, y)) / tuning::climate::maritime::influenceStorageScale;
-    result.thermalanomaly = static_cast<float>(world.seasonalmaritimethermalanomaly(season, x, y)) / tuning::climate::maritime::thermalAnomalyStorageScale;
+    result.influence = world.seasonalmaritimeinfluencefloat(season, x, y);
+    result.thermalanomaly = world.seasonalmaritimethermalanomalyfloat(season, x, y);
     result.fetchdistance = world.seasonalmaritimefetch(season, x, y);
     return result;
 }
 
 void storescaledmaritimeinfluence(climateworld& world, int season, int x, int y, const maritimesample& sample)
 {
-    world.setseasonalmaritimeinfluence(season, x, y, static_cast<int>(roundf(sample.influence * tuning::climate::maritime::influenceStorageScale)));
-    world.setseasonalmaritimethermalanomaly(season, x, y, static_cast<int>(roundf(sample.thermalanomaly * tuning::climate::maritime::thermalAnomalyStorageScale)));
+    world.setseasonalmaritimeinfluencefloat(season, x, y, sample.influence);
+    world.setseasonalmaritimethermalanomalyfloat(season, x, y, sample.thermalanomaly);
     world.setseasonalmaritimefetch(season, x, y, sample.fetchdistance);
 }
 
@@ -1062,8 +1062,8 @@ void applycoastalclimates(climateworld& world)
                 if (world.sea(x, y) == 1)
                     continue;
 
-                const float januarytemp = static_cast<float>(world.jantemp(x, y));
-                const float julytemp = static_cast<float>(world.jultemp(x, y));
+                const float januarytemp = world.jantempfloat(x, y);
+                const float julytemp = world.jultempfloat(x, y);
                 const float meantemperature = (januarytemp + julytemp) / 2.0f;
                 const bool januaryiscold = januarytemp <= julytemp;
                 const maritimesample januarymaritime = storedmaritimeinfluence(world, seasonjanuary, x, y);
@@ -1076,8 +1076,8 @@ void applycoastalclimates(climateworld& world)
                     tuning::climate::coastalclimate::warmSeasonThermalFactor :
                     tuning::climate::coastalclimate::coldSeasonThermalFactor;
 
-                world.setjantemp(x, y, static_cast<int>(roundf(moderateseason(januarytemp, meantemperature, januarymaritime, januaryfactor))));
-                world.setjultemp(x, y, static_cast<int>(roundf(moderateseason(julytemp, meantemperature, julymaritime, julyfactor))));
+                world.setjantempfloat(x, y, moderateseason(januarytemp, meantemperature, januarymaritime, januaryfactor));
+                world.setjultempfloat(x, y, moderateseason(julytemp, meantemperature, julymaritime, julyfactor));
             }
         }
     });
@@ -1092,8 +1092,8 @@ void smoothtemperatures(climateworld& world)
     int width = world.width();
     int height = world.height();
 
-    vector<vector<int>> jantemp(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-    vector<vector<int>> jultemp(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    vector<vector<float>> jantemp(ARRAYWIDTH, vector<float>(ARRAYHEIGHT, 0.0f));
+    vector<vector<float>> jultemp(ARRAYWIDTH, vector<float>(ARRAYHEIGHT, 0.0f));
 
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
@@ -1103,8 +1103,8 @@ void smoothtemperatures(climateworld& world)
             {
                 if (world.sea(i, j) == 0)
                 {
-                    jantemp[i][j] = tempelevremove(world, world.jantemp(i, j), i, j);
-                    jultemp[i][j] = tempelevremove(world, world.jultemp(i, j), i, j);
+                    jantemp[i][j] = tempelevremove(world, world.jantempfloat(i, j), i, j);
+                    jultemp[i][j] = tempelevremove(world, world.jultempfloat(i, j), i, j);
                 }
             }
         }
@@ -1143,8 +1143,11 @@ void smoothtemperatures(climateworld& world)
             {
                 if (world.sea(i, j) == 0)
                 {
-                    world.setjantemp(i, j, tempelevadd(world, jantemp[i][j], i, j));
-                    world.setjultemp(i, j, tempelevadd(world, jultemp[i][j], i, j));
+                    // Only smoothed cells are written, so the others keep their exact values.
+                    if (jantemp[i][j] != tempelevremove(world, world.jantempfloat(i, j), i, j))
+                        world.setjantempfloat(i, j, tempelevadd(world, jantemp[i][j], i, j));
+                    if (jultemp[i][j] != tempelevremove(world, world.jultempfloat(i, j), i, j))
+                        world.setjultempfloat(i, j, tempelevadd(world, jultemp[i][j], i, j));
                 }
             }
         }
@@ -1668,13 +1671,13 @@ void checkpoleclimates(climateworld& world)
 
     for (int i = 0; i <= width; i++)
     {
-        world.setwinterrain(i, 0, world.winterrain(i, 1));
-        world.setsummerrain(i, 0, world.summerrain(i, 1));
-        world.setmaxtemp(i, 0, world.maxtemp(i, 1));
-        world.setmintemp(i, 0, world.mintemp(i, 1));
-        world.setwinterrain(i, height, world.winterrain(i, height - 1));
-        world.setsummerrain(i, height, world.summerrain(i, height - 1));
-        world.setmaxtemp(i, height, world.maxtemp(i, height - 1));
-        world.setmintemp(i, height, world.mintemp(i, height - 1));
+        world.setwinterrainfloat(i, 0, world.winterrainfloat(i, 1));
+        world.setsummerrainfloat(i, 0, world.summerrainfloat(i, 1));
+        world.setmaxtempfloat(i, 0, world.maxtempfloat(i, 1));
+        world.setmintempfloat(i, 0, world.mintempfloat(i, 1));
+        world.setwinterrainfloat(i, height, world.winterrainfloat(i, height - 1));
+        world.setsummerrainfloat(i, height, world.summerrainfloat(i, height - 1));
+        world.setmaxtempfloat(i, height, world.maxtempfloat(i, height - 1));
+        world.setmintempfloat(i, height, world.mintempfloat(i, height - 1));
     }
 }

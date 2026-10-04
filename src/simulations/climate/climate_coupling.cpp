@@ -80,10 +80,10 @@ const climateio::experiment::Inputs& referenceexperiment()
 float worldpermanentlandicefraction(const climateworld& world, int x, int y)
 {
     if (!tuning::climate::energybalance::couplePermanentLandIce || world.sea(x,y)) return 0.0f;
-    int warmest = world.seasonaltemp(0,x,y);
+    float warmest = world.seasonaltempfloat(0,x,y);
     for (int season = 1; season < CLIMATESEASONCOUNT; ++season)
-        warmest = std::max(warmest, world.seasonaltemp(season,x,y));
-    return climateenergy::permanentLandIceFraction(static_cast<float>(warmest));
+        warmest = std::max(warmest, world.seasonaltempfloat(season,x,y));
+    return climateenergy::permanentLandIceFraction(warmest);
 }
 
 int wrapx(int x, int width)
@@ -592,8 +592,8 @@ void storeterrainverticalmotion(climateworld& world, int season, const floatgrid
                 const float uplift = std::max(0.0f, parceldisplacement);
                 const float subsidence = std::max(0.0f, -parceldisplacement);
 
-                world.setseasonaluplift(season, x, y, static_cast<int>(std::round(uplift * tuning::climate::atmosphere::topographyVerticalMotionStorageScale)));
-                world.setseasonalsubsidence(season, x, y, static_cast<int>(std::round(subsidence * tuning::climate::atmosphere::topographyVerticalMotionStorageScale)));
+                world.setseasonalupliftfloat(season, x, y, uplift);
+                world.setseasonalsubsidencefloat(season, x, y, subsidence);
             }
         }
     });
@@ -648,9 +648,9 @@ void createoceancurrentmap(climateworld& world)
                     ? 0.0f
                     : static_cast<float>(std::max(50, sealevel - world.nom(x, y)));
                 const bool cached = climate.winds.populated[season];
-                outputeastwind[cell] = cached ? climate.winds.surfacewindu[season][x][y] : static_cast<float>(world.seasonaluwind(season, x, y));
-                outputsouthwind[cell] = cached ? climate.winds.surfacewindv[season][x][y] : static_cast<float>(world.seasonalvwind(season, x, y));
-                outputtemperature[cell] = static_cast<float>(world.seasonaltemp(season, x, y));
+                outputeastwind[cell] = cached ? climate.winds.surfacewindu[season][x][y] : world.seasonaluwindfloat(season, x, y);
+                outputsouthwind[cell] = cached ? climate.winds.surfacewindv[season][x][y] : world.seasonalvwindfloat(season, x, y);
+                outputtemperature[cell] = world.seasonaltempfloat(season, x, y);
                 // The base climate supplies ice-skin temperature, not supercooled
                 // liquid. Prescribe a seasonal 1 m ice reservoir where frozen.
                 const float freezing = config.freezingTemperatureC;
@@ -938,7 +938,7 @@ void createoceancurrentmap(climateworld& world)
             for (int x = 0; x < outputcolumns; ++x)
             {
                 const auto cell = y * outputcolumns + x;
-                const float base = static_cast<float>(world.seasonaltemp(season, x, y));
+                const float base = world.seasonaltempfloat(season, x, y);
                 fallbackSst[cell] = std::max(config.freezingTemperatureC, base);
                 fallbackSkin[cell] = base;
                 fallbackIce[cell] = base < config.freezingTemperatureC ? 1.0f : 0.0f;
@@ -975,13 +975,9 @@ void createoceancurrentmap(climateworld& world)
                     world.setseasonalsst(season, x, y, 0);
                     continue;
                 }
-                world.setseasonalcurrentu(season, x, y, static_cast<int>(std::round(
-                    eastcurrent[cell] * tuning::climate::oceancurrents::
-                        currentStorageCentimetresPerSecond)));
-                world.setseasonalcurrentv(season, x, y, static_cast<int>(std::round(
-                    southcurrent[cell] * tuning::climate::oceancurrents::
-                        currentStorageCentimetresPerSecond)));
-                world.setseasonalsst(season, x, y, static_cast<int>(std::round(sst[cell])));
+                world.setseasonalcurrentufloat(season, x, y, eastcurrent[cell]);
+                world.setseasonalcurrentvfloat(season, x, y, southcurrent[cell]);
+                world.setseasonalsstfloat(season, x, y, sst[cell]);
                 // This is a one-way ocean solve. Its coarser forcing is never
                 // written back over the accepted atmospheric wind/pressure.
             }
@@ -1034,12 +1030,10 @@ void createsurfacetemperaturemap(climateworld& world)
                         continue;
                     }
                     const float sst = tuning::climate::oceancurrents::oneWayDiagnosticsOnly
-                        ? static_cast<float>(world.seasonaltemp(season, x, y))
+                        ? world.seasonaltempfloat(season, x, y)
                         : climate.oceanSkin[season][x][y];
-                    const float eastwind = static_cast<float>(world.seasonaluwind(
-                        season, x, y));
-                    const float southwind = static_cast<float>(world.seasonalvwind(
-                        season, x, y));
+                    const float eastwind = world.seasonaluwindfloat(season, x, y);
+                    const float southwind = world.seasonalvwindfloat(season, x, y);
                     const float evaporation = climatephysics::bulkAerodynamicEvaporationMm(
                         sst,
                         0.0f,
@@ -1047,10 +1041,8 @@ void createsurfacetemperaturemap(climateworld& world)
                         0.75f,
                         tuning::climate::circulation::secondsPerDay,
                         tuning::climate::atmosphere::oceanMomentumDragCoefficient);
-                    world.setseasonalevaporation(
-                        season, x, y, static_cast<int>(std::round(evaporation)));
-                    world.setseasonalmoisture(
-                        season, x, y, static_cast<int>(std::round(evaporation)));
+                    world.setseasonalevaporationfloat(season, x, y, evaporation);
+                    world.setseasonalmoisturefloat(season, x, y, evaporation);
                 }
             }
         });
@@ -1063,14 +1055,14 @@ float pressuresurfacetemperature(climateworld& world, int season, int x, int y)
 {
     auto& climate = world.climatesimulation();
     if (tuning::climate::oceancurrents::oneWayDiagnosticsOnly)
-        return static_cast<float>(world.seasonaltemp(season, x, y));
+        return world.seasonaltempfloat(season, x, y);
     if (world.sea(x, y) == 1 && climate.hasOcean &&
         climate.oceanSst[season].size() == static_cast<std::size_t>(world.width() + 1))
         return climate.oceanSkin[season][x][y];
-    if (world.sea(x, y) == 1 && world.seasonalsst(season, x, y) != 0)
-        return static_cast<float>(world.seasonalsst(season, x, y));
+    if (world.sea(x, y) == 1 && world.seasonalsstfloat(season, x, y) != 0.0f)
+        return world.seasonalsstfloat(season, x, y);
 
-    return static_cast<float>(world.seasonaltemp(season, x, y));
+    return world.seasonaltempfloat(season, x, y);
 }
 
 void smoothallfield(climateworld& world, floatgrid& field, int iterations)
@@ -1499,8 +1491,8 @@ void createpressuremap(climateworld& world)
             {
                 for (int x = 0; x <= width; x++)
                 {
-                    world.setseasonalpressure(season, x, y, static_cast<int>(std::round(pressure[x][y])));
-                    world.setseasonalupperheight(season, x, y, static_cast<int>(std::round(upperheight[x][y])));
+                    world.setseasonalpressurefloat(season, x, y, pressure[x][y]);
+                    world.setseasonalupperheightfloat(season, x, y, upperheight[x][y]);
                 }
             }
         });
@@ -1556,7 +1548,7 @@ void updatehorsebeltsfrompressure(climateworld& world)
                 for (int dx = -1; dx <= 1; dx++)
                 {
                     const int xx = wrapx(x + dx, width);
-                    pressure += static_cast<float>(world.seasonalpressure(season, xx, y));
+                    pressure += world.seasonalpressurefloat(season, xx, y);
                 }
 
                 pressure = pressure / 3.0f;
@@ -2877,16 +2869,16 @@ void createvectorwindmap(climateworld& world)
         for (int y = 0; y <= height; ++y)
             for (int x = 0; x <= width; ++x)
             {
-                const auto windstorage = [](float value) { return static_cast<int>(std::round(std::clamp(value,
-                    -atmosphere::maxVectorWind, atmosphere::maxVectorWind))); };
-                world.setseasonalpressure(season, x, y, static_cast<int>(std::round(pressure[x][y])));
-                world.setseasonalupperheight(season, x, y, static_cast<int>(std::round(upperheight[x][y])));
-                world.setseasonaluwind(season, x, y, windstorage(windu[x][y]));
-                world.setseasonalvwind(season, x, y, windstorage(windv[x][y]));
-                world.setseasonalupperuwind(season, x, y, windstorage(upperu[x][y]));
-                world.setseasonaluppervwind(season, x, y, windstorage(upperv[x][y]));
-                world.setseasonalverticalvelocity(season, x, y, static_cast<int>(std::round(std::clamp(vertical[x][y],
-                    -circulation::maximumVerticalVelocity, circulation::maximumVerticalVelocity) * circulation::verticalVelocityStorageScale)));
+                const auto windstorage = [](float value) { return std::clamp(value,
+                    -atmosphere::maxVectorWind, atmosphere::maxVectorWind); };
+                world.setseasonalpressurefloat(season, x, y, pressure[x][y]);
+                world.setseasonalupperheightfloat(season, x, y, upperheight[x][y]);
+                world.setseasonaluwindfloat(season, x, y, windstorage(windu[x][y]));
+                world.setseasonalvwindfloat(season, x, y, windstorage(windv[x][y]));
+                world.setseasonalupperuwindfloat(season, x, y, windstorage(upperu[x][y]));
+                world.setseasonaluppervwindfloat(season, x, y, windstorage(upperv[x][y]));
+                world.setseasonalverticalvelocityfloat(season, x, y, std::clamp(vertical[x][y],
+                    -circulation::maximumVerticalVelocity, circulation::maximumVerticalVelocity));
             }
         std::cout << "Mode circulation season " << season << ": grid=" << columns << 'x' << rows
             << " surface_residual=" << result.surfaceStationarySolver.relativeResidual
@@ -2931,8 +2923,8 @@ void createvectorwindmap(climateworld& world)
 
                 for (int season = 0; season < CLIMATESEASONCOUNT; season++)
                 {
-                    averageu += static_cast<float>(world.seasonaluwind(season, x, y));
-                    averageupperu += static_cast<float>(world.seasonalupperuwind(season, x, y));
+                    averageu += world.seasonaluwindfloat(season, x, y);
+                    averageupperu += world.seasonalupperuwindfloat(season, x, y);
                 }
 
                 averageu = averageu / static_cast<float>(CLIMATESEASONCOUNT);
@@ -3163,7 +3155,7 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
             const double initial = aggregateworldfield(x, y, [&](int xx, int yy) {
                 double total = 0.0;
                 for (int season = 0; season < CLIMATESEASONCOUNT; ++season)
-                    total += world.seasonaltemp(season, xx, yy) / 4.0;
+                    total += world.seasonaltempfloat(season, xx, yy) / 4.0;
                 return total;
             });
             landSurface[x][y] = landDeep[x][y] = initial;
@@ -3377,28 +3369,28 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                         : interpolatefield(
                             [&](int season, int xx, int yy)
                             {
-                                return world.seasonaluwind(season, xx, yy);
+                                return world.seasonaluwindfloat(season, xx, yy);
                             });
                     const float v = hasfloatingwinds
                         ? interpolatecachedwind(climate.winds.surfacewindv)
                         : interpolatefield(
                             [&](int season, int xx, int yy)
                             {
-                                return world.seasonalvwind(season, xx, yy);
+                                return world.seasonalvwindfloat(season, xx, yy);
                             });
                     float upperu = hasfloatingwinds
                         ? interpolatecachedwind(climate.winds.upperwindu)
                         : interpolatefield(
                             [&](int season, int xx, int yy)
                             {
-                                return world.seasonalupperuwind(season, xx, yy);
+                                return world.seasonalupperuwindfloat(season, xx, yy);
                             });
                     float upperv = hasfloatingwinds
                         ? interpolatecachedwind(climate.winds.upperwindv)
                         : interpolatefield(
                             [&](int season, int xx, int yy)
                             {
-                                return world.seasonaluppervwind(season, xx, yy);
+                                return world.seasonaluppervwindfloat(season, xx, yy);
                             });
                     const float upperwinddeparturemultiplier = std::clamp(
                         (tuning::climate::moistureadvection::
@@ -3459,7 +3451,7 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                     const float pressureanomaly = interpolatefield(
                         [&](int season, int xx, int yy)
                         {
-                            return world.seasonalpressure(season, xx, yy);
+                            return world.seasonalpressurefloat(season, xx, yy);
                         });
 
                     temperature[x][y] = localtemperature;
@@ -3530,19 +3522,18 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                     uplift[x][y] = interpolateorographicextreme(
                         [&](int season, int xx, int yy)
                         {
-                            return world.seasonaluplift(season, xx, yy);
-                        }) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
+                            return world.seasonalupliftfloat(season, xx, yy);
+                        });
                     descent[x][y] = interpolateorographicextreme(
                         [&](int season, int xx, int yy)
                         {
-                            return world.seasonalsubsidence(season, xx, yy);
-                        }) / tuning::climate::atmosphere::topographyVerticalMotionStorageScale;
+                            return world.seasonalsubsidencefloat(season, xx, yy);
+                        });
                     dynamicvertical[x][y] = interpolatefield(
                         [&](int season, int xx, int yy)
                         {
-                            return world.seasonalverticalvelocity(season, xx, yy);
-                        }) /
-                        tuning::climate::circulation::verticalVelocityStorageScale;
+                            return world.seasonalverticalvelocityfloat(season, xx, yy);
+                        });
                 }
             }
         });
@@ -4581,9 +4572,7 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                         storedseasonalmoisture[quarter][x][y] =
                             seasonalprocess[quarter].columnWaterMm[y * (width + 1) + x] /
                             static_cast<float>(seasonalprocess[quarter].durationSeconds);
-                        storedseasonalconvergence[quarter][x][y] =
-                            quarterconvergence[x][y] / 3.0f *
-                            tuning::climate::moistureadvection::convergenceStorageScale;
+                        storedseasonalconvergence[quarter][x][y] = quarterconvergence[x][y] / 3.0f;
                     }
                 }
             }
@@ -4925,31 +4914,13 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                         storedseasonalconvergence[season], outputremap, x, y);
                     world.setseasonalrainfloat(season, x, y, seasonalrain);
                     monthly.referenceRainfallMm[season][y * (outputwidth + 1) + x] = seasonalrain;
-                    world.setseasonalmoisture(
-                        season,
-                        x,
-                        y,
-                        std::clamp(
-                            static_cast<int>(std::round(seasonalmoisture)),
-                            static_cast<int>(std::numeric_limits<short>::min()),
-                            static_cast<int>(std::numeric_limits<short>::max())));
-                    world.setseasonalconvergence(
-                        season,
-                        x,
-                        y,
-                        std::clamp(
-                            static_cast<int>(std::round(seasonalconvergence)),
-                            static_cast<int>(std::numeric_limits<short>::min()),
-                            static_cast<int>(std::numeric_limits<short>::max())));
+                    world.setseasonalmoisturefloat(season, x, y, seasonalmoisture);
+                    world.setseasonalconvergencefloat(season, x, y, seasonalconvergence);
 
-                    const int roundedrain = std::clamp(
-                        static_cast<int>(std::round(seasonalrain)),
-                        0,
-                        static_cast<int>(std::numeric_limits<short>::max()));
                     if (season == seasonjanuary)
-                        world.setjanrain(x, y, roundedrain);
+                        world.setjanrainfloat(x, y, seasonalrain);
                     else if (season == seasonjuly)
-                        world.setjulrain(x, y, roundedrain);
+                        world.setjulrainfloat(x, y, seasonalrain);
                 }
             }
         }
@@ -4983,10 +4954,10 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                 : landdistribution;
             const float meanmonthlyrain = outputrawannualrain[x][y] /
                 static_cast<float>(climatehydrology::monthCount);
-            int storedseasonalrain = 0;
+            float storedseasonalrain = 0.0f;
 
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-                storedseasonalrain += world.seasonalrain(season, x, y);
+                storedseasonalrain += world.seasonalrainfloat(season, x, y);
 
             distribution.metrics.cells++;
             distribution.metrics.areaWeight += areaweight;
@@ -5014,7 +4985,7 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                 distribution.areaweightedrawzeros += areaweight;
             }
 
-            if (storedseasonalrain == 0)
+            if (storedseasonalrain == 0.0f)
             {
                 distribution.storedzeros++;
                 distribution.areaweightedstoredzeros += areaweight;
