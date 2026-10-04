@@ -52,6 +52,12 @@ using namespace std;
 
 namespace
 {
+// A processed observed field, <root>/<dataset>/2048/fields/<field>.npy (refs/README.md).
+filesystem::path referencefield(const string& dataset, const string& field)
+{
+    return getappenvironment().referenceProcessedDirectory / dataset / "2048" / "fields" / (field + ".npy");
+}
+
 struct zonalstats
 {
     int cells = 0;
@@ -994,7 +1000,6 @@ comparisonmetrics comparemonthlyfield(
 
 void writemonthlyreferencecomparison(const filesystem::path& outputdir, climateworld& world)
 {
-    const filesystem::path referencedirectory = getappenvironment().referenceClimateDirectory;
     climatereference::MonthlyGrid temperature;
     climatereference::MonthlyGrid precipitation;
     climatereference::MonthlyGrid surfacewind;
@@ -1002,11 +1007,11 @@ void writemonthlyreferencecomparison(const filesystem::path& outputdir, climatew
     string precipitationerror;
     string surfacewinderror;
     const bool hastemperature = climatereference::loadMonthlyGrid(
-        referencedirectory / "worldclim_tavg_monthly.uwclim", "tavg", temperature, &temperatureerror);
+        referencefield("worldclim", "tavg_monthly"), "tavg", temperature, &temperatureerror);
     const bool hasprecipitation = climatereference::loadMonthlyGrid(
-        referencedirectory / "worldclim_prec_monthly.uwclim", "prec", precipitation, &precipitationerror);
+        referencefield("worldclim", "prec_monthly"), "prec", precipitation, &precipitationerror);
     const bool hassurfacewind = climatereference::loadMonthlyGrid(
-        referencedirectory / "worldclim_wind_monthly.uwclim", "wind", surfacewind, &surfacewinderror);
+        referencefield("worldclim", "wind_monthly"), "wind", surfacewind, &surfacewinderror);
     ofstream output(outputdir / "monthly_climate_reference_comparison.csv");
 
     if (!output.is_open())
@@ -1076,8 +1081,7 @@ void writeimergreferencecomparison(const filesystem::path& outputdir, climatewor
 {
     climatereference::MonthlyGrid precipitation;
     string error;
-    const filesystem::path referencepath =
-        getappenvironment().referenceClimateDirectory / "imerg_prec_annual.uwclim";
+    const filesystem::path referencepath = referencefield("imerg", "prec_annual");
     const bool hasprecipitation = climatereference::loadMonthlyGrid(
         referencepath, "prec_annual", precipitation, &error);
     ofstream output(outputdir / "annual_imerg_precipitation_comparison.csv");
@@ -1131,7 +1135,7 @@ void writeimergreferencecomparison(const filesystem::path& outputdir, climatewor
 
 struct physicalreferencespecification
 {
-    const char* filename;
+    const char* era5field;
     const char* referencevariable;
     const char* outputvariable;
     monthlyreferencefield simulatedfield;
@@ -1140,14 +1144,14 @@ struct physicalreferencespecification
 void writephysicalreferencecomparison(const filesystem::path& outputdir, climateworld& world)
 {
     constexpr array<physicalreferencespecification, 8> specifications = {
-        physicalreferencespecification{ "era5_slp_anom_monthly.uwclim", "slp_anom", "sea_level_pressure_anomaly_hpa", monthlyreferencefield::surfacepressure },
-        { "era5_u10m_monthly.uwclim", "u10m", "surface_eastward_wind_m_s", monthlyreferencefield::surfaceuwind },
-        { "era5_v10m_monthly.uwclim", "v10m", "surface_northward_wind_m_s", monthlyreferencefield::surfacevwind },
-        { "era5_u500_monthly.uwclim", "u500", "upper_500hpa_eastward_wind_m_s", monthlyreferencefield::upperuwind },
-        { "era5_v500_monthly.uwclim", "v500", "upper_500hpa_northward_wind_m_s", monthlyreferencefield::uppervwind },
-        { "era5_tcwv_monthly.uwclim", "tcwv", "column_water_kg_m2", monthlyreferencefield::columnwater },
-        { "era5_w500_ascent_monthly.uwclim", "w500_ascent", "midlevel_ascent_hpa_day", monthlyreferencefield::verticalascent },
-        { "era5_pr_monthly.uwclim", "pr", "precipitation_mm_month", monthlyreferencefield::precipitation }
+        physicalreferencespecification{ "slp_anom_monthly", "slp_anom", "sea_level_pressure_anomaly_hpa", monthlyreferencefield::surfacepressure },
+        { "u10m_monthly", "u10m", "surface_eastward_wind_m_s", monthlyreferencefield::surfaceuwind },
+        { "v10m_monthly", "v10m", "surface_northward_wind_m_s", monthlyreferencefield::surfacevwind },
+        { "u500_monthly", "u500", "upper_500hpa_eastward_wind_m_s", monthlyreferencefield::upperuwind },
+        { "v500_monthly", "v500", "upper_500hpa_northward_wind_m_s", monthlyreferencefield::uppervwind },
+        { "tcwv_monthly", "tcwv", "column_water_kg_m2", monthlyreferencefield::columnwater },
+        { "w500_ascent_monthly", "w500_ascent", "midlevel_ascent_hpa_day", monthlyreferencefield::verticalascent },
+        { "pr_monthly", "pr", "precipitation_mm_month", monthlyreferencefield::precipitation }
     };
     constexpr array<const char*, 3> scopeNames = { "global", "land", "ocean" };
     constexpr array<referencescope, 3> scopes = {
@@ -1162,7 +1166,6 @@ void writephysicalreferencecomparison(const filesystem::path& outputdir, climate
         "january-march", "april-june", "july-september", "october-december"
     };
     constexpr array<int, CLIMATESEASONCOUNT> referenceMonths = { 1, 4, 7, 10 };
-    const filesystem::path referencedirectory = getappenvironment().referenceClimateDirectory;
     ofstream output(outputdir / "monthly_physical_reference_comparison.csv");
 
     if (!output.is_open())
@@ -1177,7 +1180,7 @@ void writephysicalreferencecomparison(const filesystem::path& outputdir, climate
         string error;
 
         if (!climatereference::loadMonthlyGrid(
-            referencedirectory / specification.filename,
+            referencefield("era5", specification.era5field),
             specification.referencevariable,
             reference,
             &error))
@@ -1324,12 +1327,12 @@ void writeipccregioncomparison(const filesystem::path& outputdir, climateworld& 
         !regionmask.loadFromFile((referencedirectory / "ipcc_ar6_regions.png").string()) ||
         !koppenreference.loadFromFile(getappenvironment().earthKoppenImagePath.string()) ||
         !climatereference::loadMonthlyGrid(
-            referencedirectory / "worldclim_tavg_monthly.uwclim",
+            referencefield("worldclim", "tavg_monthly"),
             "tavg",
             temperaturereference,
             &temperatureerror) ||
         !climatereference::loadMonthlyGrid(
-            referencedirectory / "worldclim_prec_monthly.uwclim",
+            referencefield("worldclim", "prec_monthly"),
             "prec",
             precipitationreference,
             &precipitationerror))
@@ -1978,7 +1981,7 @@ void collectbenchmarktemperaturemetrics(climateworld& world, benchmarkphysicsmet
     climatereference::MonthlyGrid temperaturereference;
     string temperatureerror;
     const bool hastemperaturereference = climatereference::loadMonthlyGrid(
-        getappenvironment().referenceClimateDirectory / "worldclim_tavg_monthly.uwclim",
+        referencefield("worldclim", "tavg_monthly"),
         "tavg",
         temperaturereference,
         &temperatureerror);
@@ -2260,8 +2263,7 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(climateworld& world)
 
     climatereference::MonthlyGrid imergprecipitation;
     string error;
-    const filesystem::path referencepath =
-        getappenvironment().referenceClimateDirectory / "imerg_prec_annual.uwclim";
+    const filesystem::path referencepath = referencefield("imerg", "prec_annual");
 
     if (climatereference::loadMonthlyGrid(
         referencepath, "prec_annual", imergprecipitation, &error))
@@ -2318,7 +2320,7 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(climateworld& world)
         }
     }
 
-    auto compareera5 = [&](const char* filename,
+    auto compareera5 = [&](const char* era5field,
                            const char* variable,
                            monthlyreferencefield field,
                            referencescope scope)
@@ -2327,7 +2329,7 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(climateworld& world)
         string loaderror;
 
         if (!climatereference::loadMonthlyGrid(
-            getappenvironment().referenceClimateDirectory / filename,
+            referencefield("era5", era5field),
             variable,
             reference,
             &loaderror))
@@ -2339,48 +2341,48 @@ benchmarkphysicsmetrics collectbenchmarkphysicsmetrics(climateworld& world)
     };
 
     const comparisonmetrics pressurecomparison = compareera5(
-        "era5_slp_anom_monthly.uwclim",
+        "slp_anom_monthly",
         "slp_anom",
         monthlyreferencefield::surfacepressure,
         referencescope::global);
     metrics.era5globalpressurecorrelation = pressurecomparison.areaweightedcorrelation;
     metrics.era5globalpressurermsehpa = pressurecomparison.areaweightedrmse;
     metrics.era5surfaceeastwardwindcorrelation = compareera5(
-        "era5_u10m_monthly.uwclim",
+        "u10m_monthly",
         "u10m",
         monthlyreferencefield::surfaceuwind,
         referencescope::global).areaweightedcorrelation;
     metrics.era5surfacenorthwardwindcorrelation = compareera5(
-        "era5_v10m_monthly.uwclim",
+        "v10m_monthly",
         "v10m",
         monthlyreferencefield::surfacevwind,
         referencescope::global).areaweightedcorrelation;
     metrics.era5transporteastwardwindcorrelation = compareera5(
-        "era5_u500_monthly.uwclim",
+        "u500_monthly",
         "u500",
         monthlyreferencefield::upperuwind,
         referencescope::global).areaweightedcorrelation;
     metrics.era5transportnorthwardwindcorrelation = compareera5(
-        "era5_v500_monthly.uwclim",
+        "v500_monthly",
         "v500",
         monthlyreferencefield::uppervwind,
         referencescope::global).areaweightedcorrelation;
     const comparisonmetrics columnwatercomparison = compareera5(
-        "era5_tcwv_monthly.uwclim",
+        "tcwv_monthly",
         "tcwv",
         monthlyreferencefield::columnwater,
         referencescope::global);
     metrics.era5columnwatercorrelation = columnwatercomparison.areaweightedcorrelation;
     metrics.era5columnwatermeanbiaskgm2 = columnwatercomparison.areaweightedmeanbias;
     const comparisonmetrics ascentcomparison = compareera5(
-        "era5_w500_ascent_monthly.uwclim",
+        "w500_ascent_monthly",
         "w500_ascent",
         monthlyreferencefield::verticalascent,
         referencescope::global);
     metrics.era5verticalascentcorrelation = ascentcomparison.areaweightedcorrelation;
     metrics.era5verticalascentrmsehpaday = ascentcomparison.areaweightedrmse;
     metrics.era5landprecipitationcorrelation = compareera5(
-        "era5_pr_monthly.uwclim",
+        "pr_monthly",
         "pr",
         monthlyreferencefield::precipitation,
         referencescope::land).areaweightedcorrelation;
@@ -2769,10 +2771,8 @@ bool loadcirculationreferencewindfields(
     fields.columns = world.width() + 1;
     fields.rows = world.height() + 1;
     const size_t cellcount = static_cast<size_t>(fields.columns) * fields.rows;
-    const filesystem::path referencedirectory =
-        getappenvironment().referenceClimateDirectory;
 
-    auto loadcomponent = [&](const char* filename,
+    auto loadcomponent = [&](const char* era5field,
                              const char* variable,
                              array<vector<float>, CLIMATESEASONCOUNT>& destination,
                              float scale)
@@ -2780,7 +2780,7 @@ bool loadcirculationreferencewindfields(
         climatereference::MonthlyGrid reference;
         string error;
         if (!climatereference::loadMonthlyGrid(
-                referencedirectory / filename,
+                referencefield("era5", era5field),
                 variable,
                 reference,
                 &error))
@@ -2814,10 +2814,10 @@ bool loadcirculationreferencewindfields(
     };
 
     return
-        loadcomponent("era5_u10m_monthly.uwclim", "u10m", fields.surfaceu, 1.0f) &&
-        loadcomponent("era5_v10m_monthly.uwclim", "v10m", fields.surfacev, -1.0f) &&
-        loadcomponent("era5_u500_monthly.uwclim", "u500", fields.upperu, 1.0f) &&
-        loadcomponent("era5_v500_monthly.uwclim", "v500", fields.upperv, -1.0f);
+        loadcomponent("u10m_monthly", "u10m", fields.surfaceu, 1.0f) &&
+        loadcomponent("v10m_monthly", "v10m", fields.surfacev, -1.0f) &&
+        loadcomponent("u500_monthly", "u500", fields.upperu, 1.0f) &&
+        loadcomponent("v500_monthly", "v500", fields.upperv, -1.0f);
 }
 
 bool exportclimatebenchmarkimages(
@@ -3532,7 +3532,7 @@ void writepressuredecompositioncomparison(
     climatereference::MonthlyGrid reference;
     string error;
     const bool loaded = climatereference::loadMonthlyGrid(
-        getappenvironment().referenceClimateDirectory / "era5_slp_anom_monthly.uwclim",
+        referencefield("era5", "slp_anom_monthly"),
         "slp_anom",
         reference,
         &error);
@@ -3659,7 +3659,7 @@ void writetemperaturethresholdcomparison(
     climatereference::MonthlyGrid reference;
     string error;
     const bool loaded = climatereference::loadMonthlyGrid(
-        getappenvironment().referenceClimateDirectory / "worldclim_tavg_monthly.uwclim",
+        referencefield("worldclim", "tavg_monthly"),
         "tavg",
         reference,
         &error);

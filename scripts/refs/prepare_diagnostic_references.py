@@ -72,7 +72,7 @@ def remove_area_weighted_mean(values: np.ndarray) -> np.ndarray:
     return values
 
 
-def prepare_era5(source: Path, output: Path, width: int, height: int) -> list[dict[str, object]]:
+def prepare_era5(source: Path, root: Path, width: int, height: int) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for source_variable, output_variable in ERA5_VARIABLES.items():
         matches = sorted(source.glob(f"era5_{source_variable}_monthly_climatology_*.nc"))
@@ -103,14 +103,13 @@ def prepare_era5(source: Path, output: Path, width: int, height: int) -> list[di
             )
 
         dataset.close()
-        output_path = output / f"era5_{output_variable}_monthly.uwclim"
-        references.write(output_path, output_variable, months)
+        output_path = references.write("era5", f"{output_variable}_monthly", output_variable, months, root=root)
         records.append(
             {
                 "source_variable": source_variable,
                 "variable": output_variable,
                 "source": matches[0].as_posix(),
-                "bundle": output_path.name,
+                "bundle": output_path.relative_to(root).as_posix(),
                 "months": statistics,
             }
         )
@@ -190,7 +189,10 @@ def main() -> int:
         type=Path,
         default=Path("refs/source/ipcc-ar6-wgi-regions-v4/IPCC-WGI-reference-regions-v4.geojson"),
     )
-    parser.add_argument("--output", type=Path, default=Path("refs/processed/climate"))
+    parser.add_argument("--output", type=Path, default=Path("refs/processed/climate"),
+                        help="Directory for the region mask, its labels and the receipt.")
+    parser.add_argument("--reference-root", type=Path, default=Path("refs/processed"),
+                        help="Processed reference root; ERA5 fields go to <root>/era5/<width>/.")
     parser.add_argument("--width", type=int, default=2048)
     parser.add_argument("--height", type=int, help="Must equal width/2; derived when omitted.")
     args = parser.parse_args()
@@ -206,7 +208,7 @@ def main() -> int:
             "spherical-area conservative remapping from native ERA5 coordinates; "
             "raw endpoint samples are converted only while reading the source"
         ),
-        "era5": prepare_era5(args.era5, args.output, args.width, args.height),
+        "era5": prepare_era5(args.era5, args.reference_root, args.width, args.height),
         "ipcc_ar6_regions": prepare_regions(
             args.regions, args.output, args.width, args.height
         ),

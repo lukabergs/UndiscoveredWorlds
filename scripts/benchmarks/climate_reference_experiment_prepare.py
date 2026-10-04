@@ -1,4 +1,7 @@
-"""Prepare aligned, masked numerical fields for explicit benchmark interventions."""
+"""Prepare aligned, masked numerical fields for explicit benchmark interventions.
+
+Writes <OUT>/<width>/<role>.npy in the reference field format (uwtools.references),
+which climate_experiment_input.hpp reads."""
 import json
 from pathlib import Path
 import sys
@@ -10,14 +13,12 @@ from uwtools.hashing import sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 A = ROOT / 'runs/reports/climate-reference-experiments-20260915'
-REF = ROOT / 'refs/processed/climate'
 OUT = A / 'prepared-inputs'
 MISSING = np.float32(-9999.9)
 
 
 def read(name):
-    path = REF / f'{name}_monthly.uwclim'
-    header, values = references.read(path, memmap=True)
+    header, values = references.read(references.path(name), memmap=True)
     assert header.shape == (12, 1024, 2048)
     return values
 
@@ -74,19 +75,18 @@ def main():
             for width in widths:
                 outputs[width][month] = remap(field, width, mask)
         for width, values in outputs.items():
-            target = OUT / str(width) / f'{role}.uwclim'
-            target.parent.mkdir(exist_ok=True)
-            references.write(target, role, values, mode='xb')
+            target = OUT / str(width) / f'{role}.npy'
+            references.write_npy(target, values, mode='xb')
             receipts.append(dict(path=target.relative_to(ROOT).as_posix(), role=role,
                 units=units.get(role, 'm/s east' if role.startswith('u') else 'm/s north'),
                 sha256=sha256(target),
-                sources=[(REF / f'{name}_monthly.uwclim').relative_to(ROOT).as_posix() for name in sources],
+                sources=[references.path(name).relative_to(ROOT).as_posix() for name in sources],
                 width=width, height=width//2,
                 valid_fractions=[float(np.mean(m != MISSING)) for m in values]))
         print(f'Prepared {role}: widths {widths}', flush=True)
     source_hashes = {}
     for name in sorted({name for sources in source_names.values() for name in sources}):
-        path = REF / f'{name}_monthly.uwclim'
+        path = references.path(name)
         source_hashes[path.relative_to(ROOT).as_posix()] = sha256(path)
     (OUT / 'manifest.json').write_text(json.dumps(dict(
         period='ERA5 2001-2020 monthly climatology',

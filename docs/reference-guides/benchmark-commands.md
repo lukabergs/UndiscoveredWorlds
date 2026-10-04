@@ -233,7 +233,7 @@ uv run --offline scripts/uw.py climate report --runs 366 --compare 365
 
 The world grid (`--resolution`) sets the size of every exported map and field. Atmosphere/ocean (`--climate-resolution`, default 128) and moisture (`--climate-hydrology-resolution`, default 256) run on coarser grids and are remapped onto the world grid, as in run 373.
 
-Land surface drag: climate runs use the Earth vegetation drag contrast (`refs/processed/climate/vegetation-drag-20260914/`, prepared from ERA5 vegetation cover, as in runs up to 378). Other world widths get a version area-averaged from the 1024 file, cached beside it. `--surface-drag none` gives uniform land drag; `--surface-drag PATH` uses another file. The log records which input was used. Procedural worlds never use it.
+Land surface drag: climate runs use the Earth vegetation drag contrast (`refs/processed/era5-vegetation-drag/1024/`, prepared from ERA5 vegetation cover, as in runs up to 378). Other world widths get a version area-averaged from the 1024 file, cached beside it. `--surface-drag none` gives uniform land drag; `--surface-drag PATH` uses another file. The log records which input was used. Procedural worlds never use it.
 
 Benchmark defaults added by `uw.py` unless you pass them: `--resolution 1024 --climate-resolution 128 --climate-hydrology-resolution 256 --climate-coupling-iterations 8`, the standard map list, and no rivers, lakes or deltas. Other `world_pipeline` defaults apply as printed by `--help`.
 

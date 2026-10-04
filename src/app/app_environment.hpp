@@ -11,6 +11,8 @@ struct AppEnvironmentConfig
     std::filesystem::path profilingWorkbookPath = "runs/metrics/profiling.xlsx";
     std::filesystem::path referencePrecipitationGridPath = "refs/processed/climate/earth_precipitation_grid.csv";
     std::filesystem::path referenceClimateDirectory = "refs/processed/climate";
+    // Processed observed fields: <dataset>/<width>/fields/<name>.npy with manifest.json (refs/README.md).
+    std::filesystem::path referenceProcessedDirectory = "refs/processed";
     std::filesystem::path referenceClimatePreviewDirectory = "refs/processed/climate/previews";
     std::filesystem::path climateWorkbookPath = "runs/metrics/climate.xlsx";
     std::filesystem::path climateBenchmarkRunLogPath = "runs/registry/climate.json";

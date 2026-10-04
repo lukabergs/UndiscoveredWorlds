@@ -25,26 +25,24 @@ void writeValue(std::ofstream& output, const T& value)
     output.write(reinterpret_cast<const char*>(&value), sizeof(value));
 }
 
+// A version 1.0 .npy of little-endian float32 with shape (monthCount, height, width).
 void writeFixture(
     const std::filesystem::path& path,
-    const std::string& variable,
     bool truncateValues,
     uint32_t monthCount = 12,
     uint32_t width = 2,
     uint32_t height = 1)
 {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    const std::array<char, 8> magic = { 'U', 'W', 'C', 'L', 'I', 'M', '1', '\0' };
-    const uint32_t version = 1;
-    std::array<char, 16> variableField{};
-    std::copy_n(variable.c_str(), std::min(variable.size(), variableField.size() - 1), variableField.data());
+    std::string header = "{'descr': '<f4', 'fortran_order': False, 'shape': (" + std::to_string(monthCount) + ", " +
+        std::to_string(height) + ", " + std::to_string(width) + "), }";
+    header.append(63 - (10 + header.size()) % 64, ' ');
+    header += '\n';
+    const uint16_t headerLength = static_cast<uint16_t>(header.size());
 
-    output.write(magic.data(), static_cast<std::streamsize>(magic.size()));
-    writeValue(output, version);
-    writeValue(output, width);
-    writeValue(output, height);
-    writeValue(output, monthCount);
-    output.write(variableField.data(), static_cast<std::streamsize>(variableField.size()));
+    output.write("\x93NUMPY\x01\x00", 8);
+    writeValue(output, headerLength);
+    output.write(header.data(), static_cast<std::streamsize>(header.size()));
 
     const int valueCount = truncateValues ? 4 :
         static_cast<int>(width * height * monthCount);
@@ -59,24 +57,26 @@ void writeFixture(
 
 TEST(ClimateReference, MonthlyGrids)
 {
-    const std::filesystem::path fixture = std::filesystem::current_path() / "climate-reference-test.uwclim";
+    const std::filesystem::path fixture = std::filesystem::current_path() / "tavg_monthly.npy";
+    const std::filesystem::path annual = std::filesystem::current_path() / "prec_annual.npy";
     climatereference::MonthlyGrid grid;
     std::string error;
 
-    writeFixture(fixture, "tavg", false);
+    writeFixture(fixture, false);
     expect(climatereference::loadMonthlyGrid(fixture, "tavg", grid, &error), "valid monthly grid must load");
     expect(grid.width == 2 && grid.height == 1 && grid.monthCount == 12, "monthly grid dimensions must match its header");
     expect(grid.value(11, 1, 0) == 23.25f, "monthly grid values must preserve month-major ordering");
     expect(!climatereference::loadMonthlyGrid(fixture, "prec", grid, &error), "variable mismatch must be rejected");
+    expect(!climatereference::loadMonthlyGrid(fixture, "tav", grid, &error), "a partial variable name must be rejected");
 
-    writeFixture(fixture, "prec_annual", false, 1);
-    expect(climatereference::loadMonthlyGrid(fixture, "prec_annual", grid, &error), "annual grid must load");
+    writeFixture(annual, false, 1);
+    expect(climatereference::loadMonthlyGrid(annual, "prec_annual", grid, &error), "annual grid must load");
     expect(grid.monthCount == 1 && grid.value(0, 1, 0) == 1.25f, "annual grid values must be readable");
 
-    writeFixture(fixture, "tavg", true);
+    writeFixture(fixture, true);
     expect(!climatereference::loadMonthlyGrid(fixture, "tavg", grid, &error), "truncated grid data must be rejected");
 
-    writeFixture(fixture, "tavg", false, 12, 2, 2);
+    writeFixture(fixture, false, 12, 2, 2);
     expect(!climatereference::loadMonthlyGrid(fixture, "tavg", grid, &error),
         "a reference with an extra latitude row must be rejected");
 
@@ -101,11 +101,11 @@ TEST(ClimateReference, MonthlyGrids)
 
     const auto directory = std::filesystem::current_path() / "reference-experiment-test";
     std::filesystem::create_directories(directory / "2");
-    const auto input = directory / "2" / "qa.uwclim";
-    writeFixture(input, "qa", false);
+    const auto input = directory / "2" / "qa.npy";
+    writeFixture(input, false);
     expect(climateio::experiment::Inputs(directory).field(2, "qa") != nullptr,
         "explicit matching reference input must load");
-    writeFixture(input, "qa", false, 1);
+    writeFixture(input, false, 1);
     bool rejected = false;
     try { climateio::experiment::Inputs invalid(directory); }
     catch (const std::runtime_error&) { rejected = true; }
@@ -113,6 +113,7 @@ TEST(ClimateReference, MonthlyGrids)
 
     std::error_code ignored;
     std::filesystem::remove(fixture, ignored);
+    std::filesystem::remove(annual, ignored);
     std::filesystem::remove(input, ignored);
     std::filesystem::remove(directory / "2", ignored);
     std::filesystem::remove(directory, ignored);

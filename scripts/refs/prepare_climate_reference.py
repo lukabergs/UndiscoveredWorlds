@@ -36,12 +36,11 @@ def resize_masked(source: Path, width: int, height: int) -> np.ndarray:
 
 def write_bundle(
     grid_directory: Path,
-    output_directory: Path,
+    root: Path,
     variable: str,
     width: int,
     height: int,
 ) -> tuple[Path, np.ndarray, list[dict[str, float]]]:
-    output_path = output_directory / f"worldclim_{variable}_monthly.uwclim"
     climatology_sum = np.zeros((height, width), dtype=np.float64)
     valid_count = np.zeros((height, width), dtype=np.uint8)
     month_stats: list[dict[str, float]] = []
@@ -68,7 +67,7 @@ def write_bundle(
                 }
             )
 
-    references.write(output_path, variable, months(), shape=(12, height, width))
+    output_path = references.write("worldclim", f"{variable}_monthly", variable, months(), shape=(12, height, width), root=root)
     climatology = np.full((height, width), np.nan, dtype=np.float32)
     valid = valid_count > 0
     climatology[valid] = (climatology_sum[valid] / valid_count[valid]).astype(np.float32)
@@ -97,8 +96,14 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("refs/processed/climate"),
-        help="Directory for simulator-aligned validation artifacts.",
+        default=Path("refs/processed"),
+        help="Processed reference root; fields and the receipt go to <output>/worldclim/<width>/.",
+    )
+    parser.add_argument(
+        "--precipitation-csv",
+        type=Path,
+        default=Path("refs/processed/climate/earth_precipitation_grid.csv"),
+        help="Annual-mean precipitation table written with prec.",
     )
     parser.add_argument("--width", type=int, default=2048)
     parser.add_argument("--height", type=int, help="Must equal width/2; derived when omitted.")
@@ -112,8 +117,9 @@ def main() -> int:
     args = parser.parse_args()
     args.width, args.height = grid_dimensions(args.width, args.height)
 
-    args.output.mkdir(parents=True, exist_ok=True)
-    metadata_path = args.output / "worldclim-preparation.json"
+    dataset = references.directory("worldclim", args.width, args.output)
+    dataset.mkdir(parents=True, exist_ok=True)
+    metadata_path = dataset / "worldclim-preparation.json"
     all_stats: dict[str, object] = {
         "dataset": "worldclim-2.1-1970-2000-10m",
         "target_width": args.width,
@@ -138,14 +144,13 @@ def main() -> int:
             args.input, args.output, variable, args.width, args.height
         )
         all_stats["variables"][variable] = {
-            "bundle": bundle_path.name,
+            "bundle": bundle_path.relative_to(dataset).as_posix(),
             "months": stats,
         }
 
         if variable == "prec":
-            write_precipitation_csv(
-                args.output / "earth_precipitation_grid.csv", climatology
-            )
+            args.precipitation_csv.parent.mkdir(parents=True, exist_ok=True)
+            write_precipitation_csv(args.precipitation_csv, climatology)
 
     with metadata_path.open("w", encoding="utf-8") as output:
         json.dump(all_stats, output, indent=2, allow_nan=False)

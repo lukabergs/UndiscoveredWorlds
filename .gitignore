@@ -77,7 +77,6 @@ desktop.ini
 *.gz
 *.bz2
 *.xz
-*.uwclim
 *.nc
 *.hdf
 *.h5

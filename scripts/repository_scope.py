@@ -10,7 +10,7 @@ LOCAL_ROOTS = {'meta', 'refs', 'runs', 'extra', 'references', 'data',
 # The only tracked parts of runs/.
 TRACKED_RUN_DIRECTORIES = {'registry', 'ledger'}
 LOCAL_FILES = {'climate_benchmark_runs.json', 'climate_reference_data.json', 'UWinstaller.zip'}
-DATA_SUFFIXES = {'.zip', '.7z', '.tar', '.gz', '.bz2', '.xz', '.uwclim', '.nc',
+DATA_SUFFIXES = {'.zip', '.7z', '.tar', '.gz', '.bz2', '.xz', '.nc',
                  '.hdf', '.h5', '.tif', '.tiff', '.npz', '.npy', '.xlsx', '.xls',
                  '.exe', '.dll', '.lib', '.so', '.a', '.dylib', '.pdb'}
 MAX_BYTES = 5 * 1024 * 1024

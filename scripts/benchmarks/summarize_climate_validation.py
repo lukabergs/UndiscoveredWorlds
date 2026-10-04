@@ -22,7 +22,6 @@ from uwtools.grid import band_area, latitudes, longitudes, remap_area_mean as re
 from uwtools.hashing import sha256
 
 ROOT = Path(__file__).resolve().parents[2]
-REF = ROOT / "refs/processed/climate"
 RADIUS = 6371000.0
 DAYS = np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31.], float)
 QDAYS = DAYS.reshape(4, 3).sum(1)
@@ -55,7 +54,7 @@ def bounds(n):
 def reference(name, ny, nx):
     key = (name, ny, nx)
     if key not in REF_CACHE:
-        header, a = references.read(REF / name)
+        header, a = references.read(references.path(name))
         assert header.rows == header.columns // 2
         REF_CACHE[key] = remap(a, ny, nx)
     return REF_CACHE[key]
@@ -231,11 +230,11 @@ def main():
     assert nx % 2 == 0 and ny == nx // 2
     cell={k:np.array([float(r[k]) for r in data]).reshape(4,ny,nx) for k in data[0]}
     land=cell['land'][0]; reg=regions(ny,nx,land); masks,area,lat,lon=reg
-    wc_t=reference('worldclim_tavg_monthly.uwclim',ny,nx)
-    wc_p=reference('worldclim_prec_monthly.uwclim',ny,nx)
-    im_p=reference('imerg_prec_monthly.uwclim',ny,nx)
-    era_p=reference('era5_pr_monthly.uwclim',ny,nx)
-    pressure=reference('era5_slp_anom_monthly.uwclim',ny,nx)[[0,3,6,9]]
+    wc_t=reference('worldclim_tavg',ny,nx)
+    wc_p=reference('worldclim_prec',ny,nx)
+    im_p=reference('imerg_prec',ny,nx)
+    era_p=reference('era5_pr',ny,nx)
+    pressure=reference('era5_slp_anom',ny,nx)[[0,3,6,9]]
     simtemp=cell['temperature_c'];rain=cell['precipitation_mm_month']
     # Land-only WorldClim temperature and precipitation; native stored temperatures labelled.
     for s,name in enumerate(MONTHS):
@@ -308,7 +307,7 @@ def main():
     windpairs=[]
     for layer,reflevel,label in [(0,'10m','Surface / 10 m proxy'),(1,'500','Upper / 500 hPa proxy')]:
         u,v=weather[layer]['mean_u_mps'],-weather[layer]['mean_v_south_mps']
-        ru,rv=(quarter_means(reference(f'era5_{c}{reflevel}_monthly.uwclim',wy,wx)) for c in ['u','v'])
+        ru,rv=(quarter_means(reference(f'era5_{c}{reflevel}',wy,wx)) for c in ['u','v'])
         windpairs.append((u,v,ru,rv))
         for i,period in enumerate(QUARTERS+['Annual']):
             base=[a[i] if i<4 else np.average(a,axis=0,weights=QDAYS) for a in [u,v,ru,rv]]
@@ -332,7 +331,7 @@ def main():
             sd,sz=rotation(*base[:2],wlat);rd,rz=rotation(*base[2:],wlat)
             for variable,ss,rr in [('Horizontal divergence',sd,rd),('Relative vorticity',sz,rz)]:
                 add_field('Circulation',variable,'1/s',ss,rr,period,'ERA5_2001_2020',wreg,level=label,notes='Spherical common-grid derivative; exclude abs(latitude)>80.')
-        scalar_ref=np.average(reference('worldclim_wind_monthly.uwclim',wy,wx),axis=0,weights=DAYS) if layer==0 else None
+        scalar_ref=np.average(reference('worldclim_wind',wy,wx),axis=0,weights=DAYS) if layer==0 else None
         scalar_sim=np.average(weather[layer]['mean_speed_mps'],axis=0,weights=QDAYS)
         if layer==0:scalar_sim=np.where(wland>=.5,scalar_sim,np.nan)
         add_field('Circulation','Mean scalar wind speed','m/s',scalar_sim,scalar_ref,'Annual','WORLDCLIM_1970_2000' if layer==0 else 'NOT_AVAILABLE',wreg,level=label,notes='Time-mean scalar speed; WorldClim land reference for surface layer, with effective model-height caveat.',selected={'GLOBAL','LAND','OCEAN'})
@@ -345,8 +344,8 @@ def main():
     # Actual hydrology transport and heating. Mixing applied separately is not in advective fluxes.
     py,px,process=load_field_table(run_file('climate_process_fields.csv'));process=process[0]
     preg=regions(py,px,np.clip(remap(land,py,px),0,1))
-    tcwv=quarter_means(reference('era5_tcwv_monthly.uwclim',py,px))
-    ascent=quarter_means(reference('era5_w500_ascent_monthly.uwclim',py,px))
+    tcwv=quarter_means(reference('era5_tcwv',py,px))
+    ascent=quarter_means(reference('era5_w500_ascent',py,px))
     small={'GLOBAL','LAND','OCEAN','N_ATLANTIC','N_PACIFIC','INDIAN','SOUTHERN_OCEAN','EQUATOR_LAND','N_MIDLAT_LAND','S_MIDLAT_LAND'}
     for key,name,unit,domain,rr,refid in [
         ('mean_column_water_mm','Total column water vapour','mm','Moisture',tcwv,'ERA5_2001_2020'),
@@ -411,8 +410,10 @@ def main():
     registry=json.loads((ROOT/'runs/registry/climate.json').read_text())
     runs=registry['runs']; metadata=next(r for r in runs if int(r['id'])==args.run_id)
     refs=[]
-    for p in sorted(REF.glob('*.uwclim')):
-        refs.append(dict(file=p.name,path=str(p.relative_to(ROOT)),sha256=sha256(p)))
+    for folder,manifest in references.manifests():
+        for item in manifest['fields']:
+            p=folder/item['file']
+            refs.append(dict(file=item['id'],path=str(p.relative_to(ROOT)),sha256=sha256(p)))
     logpath=ROOT/'runs/logs/climate'/f'{args.run_id}.log'
     if not logpath.exists():logpath=args.output/'benchmark.log'
     detailed_coupling=[]

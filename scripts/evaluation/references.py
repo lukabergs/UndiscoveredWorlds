@@ -1,7 +1,8 @@
 """Observed reference fields for validation, reduced to model seasons and grids.
 
-References are processed .uwclim files under refs/processed/climate/ (cell-centred,
-north row first). They are validation inputs only: nothing here feeds a simulation.
+References are processed fields under refs/processed/<dataset>/ (uwtools.references;
+cell-centred, north row first). They are validation inputs only: nothing here feeds a
+simulation.
 Season rules and unit conversions follow the climate report (climate_report_data.py),
 so per-field losses use the same definitions as global-balanced-v1.
 """
@@ -11,7 +12,6 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-REFERENCE_DIRECTORY = ROOT / 'refs/processed/climate'
 sys.path.insert(0, str(ROOT / 'scripts'))
 sys.path.insert(0, str(ROOT / 'scripts/refs'))
 from cell_grid import conservative_remap  # noqa: E402
@@ -25,7 +25,7 @@ PER_DAY = {'era5_pr'}
 SEASON_RULES = ('month', 'quarter', 'annual')
 
 
-def read_uwclim(path):
+def read_field(path):
     """(variable, values[layers, rows, columns]) as float64 with missing values as NaN."""
     header, values = reference_files.read(path, missing=np.nan, dtype=float)
     return header.variable, values
@@ -41,13 +41,13 @@ def remap(values, width):
 class References:
     """Loads reference files once and returns season- and grid-reduced fields."""
 
-    def __init__(self, directory=REFERENCE_DIRECTORY):
-        self.directory = Path(directory)
+    def __init__(self, root=reference_files.PROCESSED):
+        self.root = Path(root)
         self.files = {}
         self.cache = {}
 
     def path(self, name, annual):
-        return self.directory / (f'{name}.uwclim' if annual else f'{name}_monthly.uwclim')
+        return reference_files.path(name, annual, root=self.root)
 
     def raw(self, name, annual):
         key = (name, annual)
@@ -55,7 +55,7 @@ class References:
             path = self.path(name, annual)
             if not path.is_file():
                 raise FileNotFoundError(f'Missing reference {path.relative_to(ROOT)}; see refs/README.md')
-            _, values = read_uwclim(path)
+            _, values = read_field(path)
             if annual and values.shape[0] != 1:
                 raise ValueError(f'{path}: annual reference has {values.shape[0]} layers')
             if not annual:

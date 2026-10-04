@@ -23,7 +23,6 @@ from reference_map_layout import product_path
 from climate_palettes import VERSION as PALETTE_VERSION
 
 DEFAULT_WIDTHS = (128, 256, 512, 1024, 2048)
-UWCLIM_MAGIC = references.MAGIC
 
 
 def load_single_channel(path: Path, dtype: np.dtype) -> np.ndarray:
@@ -135,9 +134,9 @@ def refresh_additional_maps(args, widths):
     receipt = json.loads(manifest_path.read_text(encoding="utf-8"))
     fields, sources = {}, {}
     for variable in ("viwve", "viwvn"):
-        path = args.diagnostics / f"era5_{variable}_monthly.uwclim"
+        path = references.path(f"era5_{variable}", root=args.diagnostics)
         if path.exists():
-            fields[variable] = load_uwclim(path, variable)
+            fields[variable] = load_field(path, variable)
             if fields[variable].shape[0] != 12:
                 raise ValueError(f"Expected twelve months: {path}")
             sources[variable] = path.as_posix()
@@ -157,7 +156,7 @@ def refresh_additional_maps(args, widths):
         def emit(*values, **metadata):
             products.append(write_reference_product(args.output_root, width, *values, **metadata))
 
-        additional = export_additional(args.diagnostics, width, mask, load_uwclim, emit,
+        additional = export_additional(args.diagnostics, width, mask, load_field, emit,
                                        families=args.additional_family)
         if len(fields) == 2:
             export_diagnostics(fields, sources, width, mask, emit, additional)
@@ -209,10 +208,10 @@ def load_precipitation(path: Path) -> np.ndarray:
     return values
 
 
-def load_uwclim(path: Path, expected_variable: str) -> np.ndarray:
+def load_field(path: Path, expected_variable: str) -> np.ndarray:
     header, values = references.read(path)
     if header.variable != expected_variable:
-        raise ValueError(f"Unexpected UWCLIM header in {path}: variable={header.variable}")
+        raise ValueError(f"Unexpected reference field in {path}: variable={header.variable}")
     grid_dimensions(header.columns, header.rows)
     return values
 
@@ -306,25 +305,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--precipitation",
         type=Path,
-        default=Path("refs/processed/climate/imerg_prec_annual.uwclim"),
-        help="Cell-centred annual IMERG precipitation UWCLIM bundle.",
+        default=references.path("imerg_prec_annual", annual=True).relative_to(references.ROOT),
+        help="Cell-centred annual IMERG precipitation field (.npy).",
     )
     parser.add_argument(
         "--temperature",
         type=Path,
-        default=Path("refs/processed/climate/worldclim_tavg_monthly.uwclim"),
-        help="Cell-centred monthly WorldClim temperature UWCLIM bundle.",
+        default=references.path("worldclim_tavg").relative_to(references.ROOT),
+        help="Cell-centred monthly WorldClim temperature field (.npy).",
     )
     parser.add_argument(
         "--diagnostics",
         type=Path,
-        default=Path("refs/processed/climate"),
-        help="Directory of monthly ERA5 UWCLIM bundles; missing products are reported in the manifest.",
+        default=references.PROCESSED.relative_to(references.ROOT),
+        help="Processed reference root holding era5/ and the ingested datasets; missing products are reported in the manifest.",
     )
     parser.add_argument(
         "--monthly-precipitation",
         type=Path,
-        default=Path("refs/processed/climate/imerg_prec_monthly.uwclim"),
+        default=references.path("imerg_prec").relative_to(references.ROOT),
         help="Monthly precipitation (prec, mm/month) for observed Koppen classification.",
     )
     parser.add_argument(
@@ -352,11 +351,11 @@ def main() -> None:
 
     elevation = load_single_channel(args.elevation, np.float32)
     land_mask = load_single_channel(args.land_mask, np.uint8) > 0
-    precipitation_layers = load_uwclim(args.precipitation, "prec_annual")
+    precipitation_layers = load_field(args.precipitation, "prec_annual")
     if precipitation_layers.shape[0] != 1:
         raise ValueError("Annual precipitation bundle must contain exactly one layer")
     precipitation = precipitation_layers[0]
-    temperature_layers = load_uwclim(args.temperature, "tavg")
+    temperature_layers = load_field(args.temperature, "tavg")
     if temperature_layers.shape[0] != 12:
         raise ValueError("Monthly temperature bundle must contain exactly twelve layers")
     sampled_temperature = temperature_layers[[0, 3, 6, 9]]
@@ -368,10 +367,10 @@ def main() -> None:
         out=np.full(sampled_temperature.shape[1:], np.nan, dtype=np.float32),
         where=temperature_count > 0,
     )
-    diagnostics, diagnostic_sources = load_diagnostics(args.diagnostics, load_uwclim)
+    diagnostics, diagnostic_sources = load_diagnostics(args.diagnostics, load_field)
     monthly_precipitation = None
     if args.monthly_precipitation.exists():
-        monthly_precipitation = load_uwclim(args.monthly_precipitation, "prec")
+        monthly_precipitation = load_field(args.monthly_precipitation, "prec")
         if monthly_precipitation.shape[0] != 12:
             raise ValueError("Monthly precipitation bundle must contain exactly twelve layers")
     args.output_root.mkdir(parents=True, exist_ok=True)
@@ -425,7 +424,7 @@ def main() -> None:
         if monthly_precipitation is not None:
             export_koppen(temperature_layers, monthly_precipitation, width, mask, emit)
             products[-1]["sources"] = [args.temperature.as_posix(), args.monthly_precipitation.as_posix()]
-        additional = export_additional(args.diagnostics, width, mask, load_uwclim, emit)
+        additional = export_additional(args.diagnostics, width, mask, load_field, emit)
         unavailable = export_diagnostics(diagnostics, diagnostic_sources, width, mask, emit, additional)
         if monthly_precipitation is None:
             unavailable.append({"product": "koppen", "reason": f"Missing monthly precipitation: {args.monthly_precipitation}"})

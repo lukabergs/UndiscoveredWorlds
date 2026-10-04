@@ -4,24 +4,56 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <sstream>
 
 namespace climatereference
 {
 namespace
 {
-constexpr std::array<char, 8> expectedMagic = { 'U', 'W', 'C', 'L', 'I', 'M', '1', '\0' };
-
-template <typename T>
-bool readValue(std::ifstream& input, T& value)
-{
-    input.read(reinterpret_cast<char*>(&value), sizeof(value));
-    return input.good();
-}
-
 void setError(std::string* errorMessage, const std::string& message)
 {
     if (errorMessage != nullptr)
         *errorMessage = message;
+}
+
+// Reads the (layers, rows, columns) shape of a version 1.0 little-endian float32 C-order .npy header.
+bool readNpyShape(std::ifstream& input, std::array<uint64_t, 3>& shape)
+{
+    std::array<unsigned char, 10> prefix{};
+    input.read(reinterpret_cast<char*>(prefix.data()), static_cast<std::streamsize>(prefix.size()));
+
+    if (!input.good() || std::string(reinterpret_cast<const char*>(prefix.data()), 6) != "\x93NUMPY" ||
+        prefix[6] != 1 || prefix[7] != 0)
+        return false;
+
+    std::string header(static_cast<size_t>(prefix[8]) | (static_cast<size_t>(prefix[9]) << 8), ' ');
+    input.read(header.data(), static_cast<std::streamsize>(header.size()));
+
+    if (!input.good() ||
+        header.find("'descr': '<f4'") == std::string::npos ||
+        header.find("'fortran_order': False") == std::string::npos)
+        return false;
+
+    const size_t open = header.find("'shape': (");
+    const size_t close = open == std::string::npos ? open : header.find(')', open);
+
+    if (close == std::string::npos)
+        return false;
+
+    std::string extents = header.substr(open + 10, close - open - 10);
+
+    for (char& character : extents)
+        if (character == ',')
+            character = ' ';
+
+    std::istringstream values(extents);
+
+    for (uint64_t& extent : shape)
+        if (!(values >> extent))
+            return false;
+
+    uint64_t extra = 0;
+    return !(values >> extra);
 }
 }
 
@@ -43,6 +75,16 @@ bool loadMonthlyGrid(
     std::string* errorMessage)
 {
     grid = {};
+
+    // Field names begin with their variable: u10m_monthly, prec_annual_2001_2022 (refs/README.md).
+    const std::string name = path.stem().string();
+
+    if (name != expectedVariable && name.rfind(expectedVariable + "_", 0) != 0)
+    {
+        setError(errorMessage, "unexpected variable in climate reference: " + name);
+        return false;
+    }
+
     std::ifstream input(path, std::ios::binary);
 
     if (!input.is_open())
@@ -51,45 +93,27 @@ bool loadMonthlyGrid(
         return false;
     }
 
-    std::array<char, 8> magic{};
-    input.read(magic.data(), static_cast<std::streamsize>(magic.size()));
+    std::array<uint64_t, 3> shape{};
 
-    uint32_t version = 0;
-    uint32_t width = 0;
-    uint32_t height = 0;
-    uint32_t monthCount = 0;
-    std::array<char, 16> variable{};
-
-    if (magic != expectedMagic ||
-        !readValue(input, version) ||
-        !readValue(input, width) ||
-        !readValue(input, height) ||
-        !readValue(input, monthCount))
+    if (!readNpyShape(input, shape))
     {
         setError(errorMessage, "invalid or truncated climate reference header: " + path.string());
         return false;
     }
 
-    input.read(variable.data(), static_cast<std::streamsize>(variable.size()));
+    const uint64_t monthCount = shape[0];
+    const uint64_t height = shape[1];
+    const uint64_t width = shape[2];
 
-    if (!input.good() || version != 1 || width < 2 || width % 2 != 0 ||
+    if (width < 2 || width % 2 != 0 || width > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
         height != width / 2 ||
         (monthCount != 1 && monthCount != 12))
     {
-        setError(errorMessage, "unsupported cell-centred climate reference header: " + path.string());
+        setError(errorMessage, "unsupported cell-centred climate reference shape: " + path.string());
         return false;
     }
 
-    variable.back() = '\0';
-    const std::string variableName(variable.data());
-
-    if (variableName != expectedVariable)
-    {
-        setError(errorMessage, "unexpected variable in climate reference: " + variableName);
-        return false;
-    }
-
-    const uint64_t valueCount = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * static_cast<uint64_t>(monthCount);
+    const uint64_t valueCount = width * height * monthCount;
 
     if (valueCount > static_cast<uint64_t>(std::numeric_limits<size_t>::max() / sizeof(float)))
     {
@@ -100,16 +124,16 @@ bool loadMonthlyGrid(
     grid.width = static_cast<int>(width);
     grid.height = static_cast<int>(height);
     grid.monthCount = static_cast<int>(monthCount);
-    grid.variable = variableName;
+    grid.variable = expectedVariable;
     grid.values.resize(static_cast<size_t>(valueCount));
     input.read(
         reinterpret_cast<char*>(grid.values.data()),
         static_cast<std::streamsize>(grid.values.size() * sizeof(float)));
 
-    if (!input.good())
+    if (!input.good() || input.peek() != std::ifstream::traits_type::eof())
     {
         grid = {};
-        setError(errorMessage, "truncated climate reference data: " + path.string());
+        setError(errorMessage, "climate reference data do not match the header shape: " + path.string());
         return false;
     }
 

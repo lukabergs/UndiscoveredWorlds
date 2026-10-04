@@ -1,7 +1,9 @@
 """Ingest downloaded monthly NetCDF sources onto the canonical W x W/2 grid.
 
 Reads original coordinates, including native pole samples, rather than resizing
-old UWCLIM bundles. Metadata records provenance, units, time coverage and hashes.
+older processed fields. Fields go to <output>/<dataset>/<width>/ through
+uwtools.references; the receipt beside them records provenance, units, time coverage
+and hashes.
 """
 
 import argparse
@@ -162,7 +164,11 @@ def prepare(directory, output, family, width, start, end):
     paths = netcdf_paths(directory)
     if not paths:
         raise ValueError(f"No downloaded NetCDF sources in {directory}")
-    output.mkdir(parents=True, exist_ok=True)
+    prefixes = {spec[0] for spec in catalog.values()}
+    if len(prefixes) != 1:
+        raise ValueError(f"Family {family} spans datasets {sorted(prefixes)}")
+    dataset = references.directory(prefixes.pop(), width, output)
+    dataset.mkdir(parents=True, exist_ok=True)
     from contextlib import ExitStack
     with ExitStack() as stack:
         datasets = [(p, stack.enter_context(xr.open_dataset(p))) for p in paths]
@@ -188,30 +194,24 @@ def prepare(directory, output, family, width, start, end):
             if not selected:
                 continue
             prefix, variable, unit, scale, offset, expected_units, limit, palette, ocean = spec
-            if len(variable.encode("ascii")) > 16:
-                raise ValueError(f"UWCLIM variable exceeds sixteen bytes: {variable}")
             for p, a in selected:
                 if a.attrs.get("units") not in expected_units:
                     raise ValueError(f"Unexpected units for {key} in {p}: {a.attrs.get('units')}; expected {expected_units}")
-            bundle = output / f"{prefix}_{variable}_monthly.uwclim"
-            temporary = bundle.with_suffix(".uwclim.part")
             months = (conservative_remap(values * scale + offset, width, source_latitudes=lat, source_longitudes=lon)
                       for month, values, lat, lon in monthly_climatology([a for _, a in selected], start, end))
-            references.write(temporary, variable, months, shape=(12, height, width))
-            if temporary.stat().st_size != references.file_size(12, height, width):
-                raise ValueError("Incomplete UWCLIM write")
-            temporary.replace(bundle)
-            records.append(dict(bundle=bundle.name, variable=variable, units=unit, source_variable=key,
+            bundle = references.write(prefix, f"{variable}_monthly", variable, months, shape=(12, height, width),
+                                      units=unit, root=output)
+            records.append(dict(bundle=bundle.relative_to(dataset).as_posix(), variable=variable, units=unit, source_variable=key,
                                 description=selected[0][1].attrs.get("long_name", key),
                                 source_depth_m=(selected[0][1].depth.values.tolist()
                                                 if "depth" in selected[0][1].coords else None),
                                 sources=[p.as_posix() for p, _ in selected], sha256=sha256(bundle),
                                 limit=limit, palette=palette, ocean_only=ocean, land_only=family == "land",
                                 period=f"{start}-{end} monthly climatology", width=width, height=height))
-            print(f"Prepared {bundle.name}: {width}x{height}, {unit}", flush=True)
+            print(f"Prepared {prefix}.{variable}_monthly: {width}x{height}, {unit}", flush=True)
     if not records:
         raise ValueError("No supported variables in the downloaded sources")
-    metadata = output / f"{family}-additional-preparation.json"
+    metadata = dataset / f"{family}-additional-preparation.json"
     temporary = metadata.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(dict(
         family=family, width=width, height=height,
@@ -225,7 +225,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--family", choices=("era5", "land", "oisst", "marine", "ceres"), required=True)
-    parser.add_argument("--output", type=Path, default=Path("refs/processed/climate"))
+    parser.add_argument("--output", type=Path, default=Path("refs/processed"), help="Processed reference root")
     parser.add_argument("--width", type=int, default=2048)
     parser.add_argument("--height", type=int)
     parser.add_argument("--start-year", type=int, default=2001)

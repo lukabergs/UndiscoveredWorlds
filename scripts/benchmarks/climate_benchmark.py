@@ -29,7 +29,7 @@ DEFAULTS = {'--seed': '1', '--resolution': '1024', '--climate-resolution': '128'
 FIXED = ['--no-rivers', '--no-lakes', '--no-deltas']
 # Earth benchmark input assist used by runs up to 378: ERA5 vegetation bulk
 # drag contrast (see its metadata.json). Not used for procedural worlds.
-DRAG_DIRECTORY = ROOT / 'refs/processed/climate/vegetation-drag-20260914'
+DRAG_DIRECTORY = ROOT / 'refs/processed/era5-vegetation-drag/1024'
 DRAG_SOURCE = DRAG_DIRECTORY / 'land-drag-contrast-1024.txt'
 DRAG_VARIABLE = 'UW_CLIMATE_SURFACE_DRAG_INPUT'
 # The console shows stage progress, warnings and the result; solver diagnostics

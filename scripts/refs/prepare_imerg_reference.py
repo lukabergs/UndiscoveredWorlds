@@ -27,13 +27,13 @@ def resize_masked(source: Path, width: int, height: int) -> np.ndarray:
     return conservative_remap(np.where(valid, values, np.nan), width, height)
 
 
-def write_bundle(path: Path, values: np.ndarray) -> None:
-    references.write(path, "prec_annual", [values])
+def write_bundle(root: Path, name: str, values: np.ndarray) -> Path:
+    return references.write("imerg", name, "prec_annual", [values], units="mm/year", root=root)
 
 
 def write_monthly_bundle(
     input_directory: Path,
-    path: Path,
+    root: Path,
     width: int,
     height: int,
 ) -> tuple[list[dict[str, float | int]], np.ndarray]:
@@ -68,7 +68,7 @@ def write_monthly_bundle(
                 }
             )
 
-    references.write(path, "prec", months(), shape=(12, height, width))
+    references.write("imerg", "prec_monthly", "prec", months(), shape=(12, height, width), units="mm/month", root=root)
     annual_total[~annual_valid] = np.nan
     return month_stats, annual_total
 
@@ -109,24 +109,26 @@ def main() -> int:
             "When supplied, writes a twelve-month bundle instead of the annual bundle."
         ),
     )
-    parser.add_argument("--output", type=Path, default=Path("refs/processed/climate"))
+    parser.add_argument("--output", type=Path, default=Path("refs/processed"),
+                        help="Processed reference root; fields and receipts go to <output>/imerg/<width>/.")
+    parser.add_argument("--geotiff", type=Path, default=Path("refs/processed/climate/imerg_precipitation_mm_year.tif"))
     parser.add_argument("--width", type=int, default=2048)
     parser.add_argument("--height", type=int, help="Must equal width/2; derived when omitted.")
     args = parser.parse_args()
     args.width, args.height = grid_dimensions(args.width, args.height)
 
-    args.output.mkdir(parents=True, exist_ok=True)
+    dataset = references.directory("imerg", args.width, args.output)
+    dataset.mkdir(parents=True, exist_ok=True)
+    annual_tiff_path = args.geotiff
+    annual_tiff_path.parent.mkdir(parents=True, exist_ok=True)
 
     if args.monthly_input is not None:
-        output_path = args.output / "imerg_prec_monthly.uwclim"
         month_stats, annual_total = write_monthly_bundle(
-            args.monthly_input, output_path, args.width, args.height
+            args.monthly_input, args.output, args.width, args.height
         )
-        annual_bundle_path = args.output / "imerg_prec_annual_2001_2022.uwclim"
-        validation_bundle_path = args.output / "imerg_prec_annual.uwclim"
-        annual_tiff_path = args.output / "imerg_precipitation_mm_year.tif"
-        write_bundle(annual_bundle_path, annual_total)
-        write_bundle(validation_bundle_path, annual_total)
+        output_path = references.field_path("imerg", "prec_monthly", args.width, args.output)
+        annual_bundle_path = write_bundle(args.output, "prec_annual_2001_2022", annual_total)
+        validation_bundle_path = write_bundle(args.output, "prec_annual", annual_total)
         write_float32_geotiff(annual_tiff_path, annual_total)
         metadata = {
             "dataset": "imerg-final-v07b-monthly-climatology-2001-2022",
@@ -141,23 +143,21 @@ def main() -> int:
             "alignment": "global_equirectangular_cell_centres_north_to_south",
             "latitude_formula": "90 - (y + 0.5) * 180 / height",
             "processing": "masked spherical-area conservative remapping from native GeoTIFF cells",
-            "bundle": output_path.name,
-            "annual_bundle": annual_bundle_path.name,
-            "validation_annual_bundle": validation_bundle_path.name,
-            "annual_geotiff": annual_tiff_path.name,
+            "bundle": output_path.relative_to(dataset).as_posix(),
+            "annual_bundle": annual_bundle_path.relative_to(dataset).as_posix(),
+            "validation_annual_bundle": validation_bundle_path.relative_to(dataset).as_posix(),
+            "annual_geotiff": annual_tiff_path.as_posix(),
             "annual_geotiff_sample": "single-band IEEE float32",
             "annual_geotiff_units": "mm/year",
             "annual_geotiff_nodata": -9999.9,
             "months": month_stats,
         }
-        metadata_path = args.output / "imerg-monthly-preparation.json"
+        metadata_path = dataset / "imerg-monthly-preparation.json"
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         return 0
 
     values = resize_masked(args.input, args.width, args.height)
-    output_path = args.output / "imerg_prec_annual.uwclim"
-    annual_tiff_path = args.output / "imerg_precipitation_mm_year.tif"
-    write_bundle(output_path, values)
+    output_path = write_bundle(args.output, "prec_annual", values)
     write_float32_geotiff(annual_tiff_path, values)
 
     finite = np.isfinite(values)
@@ -171,14 +171,14 @@ def main() -> int:
         "alignment": "global_equirectangular_cell_centres_north_to_south",
         "latitude_formula": "90 - (y + 0.5) * 180 / height",
         "processing": "masked spherical-area conservative remapping from native GeoTIFF cells",
-        "bundle": output_path.name,
-        "geotiff": annual_tiff_path.name,
+        "bundle": output_path.relative_to(dataset).as_posix(),
+        "geotiff": annual_tiff_path.as_posix(),
         "valid_cells": int(finite.sum()),
         "mean": float(np.nanmean(values)),
         "minimum": float(np.nanmin(values)),
         "maximum": float(np.nanmax(values)),
     }
-    metadata_path = args.output / "imerg-preparation.json"
+    metadata_path = dataset / "imerg-preparation.json"
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     return 0
 

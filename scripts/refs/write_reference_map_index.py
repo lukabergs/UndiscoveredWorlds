@@ -110,9 +110,9 @@ def write_index(root):
     generator = module_at(Path(__file__).with_name("prepare_reduced_earth_benchmark.py"))
     classifier = module_at(Path(__file__).parents[1] / "benchmarks/benchmark_observed_koppen.py")
     additional = {}
-    for receipt in (root / "climate").glob("*-additional-preparation.json"):
+    for receipt in root.glob("*/*/*-additional-preparation.json"):
         for record in json.loads(receipt.read_text(encoding="utf-8"))["products"]:
-            additional[record["bundle"].removesuffix("_monthly.uwclim")] = record
+            additional[f"{receipt.parent.parent.name}_{record['variable']}"] = record
     by_name = {}
     for resolution in manifest["outputs"]:
         for product in resolution["products"]:

@@ -5,7 +5,6 @@ from pathlib import Path
 import csv
 import hashlib
 import json
-import struct
 import sys
 import tempfile
 import unittest
@@ -137,22 +136,21 @@ class EarthBenchmarkMapTests(unittest.TestCase):
             Image.fromarray(elevation).save(sources / "height.tif")
             Image.fromarray((elevation > 0).astype(np.uint8)*255).save(sources / "mask.png")
 
-            def bundle(filename, variable, value, layers=12):
+            def bundle(dataset, name, variable, value, layers=12):
                 values = np.full((layers, 2, 4), value, dtype="<f4")
-                header = maps.UWCLIM_MAGIC + struct.pack("<IIII", 1, 4, 2, layers)
-                (sources / filename).write_bytes(header + variable.encode().ljust(16, b"\0") + values.tobytes())
+                return maps.references.write(dataset, name, variable, values, root=sources)
 
-            bundle("rain.uwclim", "prec_annual", 1200, 1)
-            bundle("temperature.uwclim", "tavg", 25)
-            bundle("monthly.uwclim", "prec", 100)
+            rain = bundle("imerg", "prec_annual", "prec_annual", 1200, 1)
+            temperature = bundle("worldclim", "tavg_monthly", "tavg", 25)
+            monthly = bundle("imerg", "prec_monthly", "prec", 100)
             for variable, value in (("u10m", 3), ("v10m", 4), ("u500", 0), ("v500", 5),
                                     ("u850", 5), ("v850", 0), ("tcwv", 30), ("slp_anom", -10),
                                     ("w500_ascent", -150), ("pr", 100), ("viwve", 300), ("viwvn", 400)):
-                bundle(f"era5_{variable}_monthly.uwclim", variable, value)
+                bundle("era5", f"{variable}_monthly", variable, value)
             argv = [str(path), "--width", "4", "6", "--elevation", str(sources / "height.tif"),
-                    "--land-mask", str(sources / "mask.png"), "--precipitation", str(sources / "rain.uwclim"),
-                    "--temperature", str(sources / "temperature.uwclim"), "--diagnostics", str(sources),
-                    "--monthly-precipitation", str(sources / "monthly.uwclim"), "--output-root", str(output)]
+                    "--land-mask", str(sources / "mask.png"), "--precipitation", str(rain),
+                    "--temperature", str(temperature), "--diagnostics", str(sources),
+                    "--monthly-precipitation", str(monthly), "--output-root", str(output)]
             with patch.object(sys, "argv", argv):
                 maps.main()
             receipt = json.loads((output / "metadata/reference-maps/manifest.json").read_text())
@@ -189,9 +187,9 @@ class EarthBenchmarkMapTests(unittest.TestCase):
                 maps.main()
             partial = json.loads((output / "metadata/reference-maps/manifest.json").read_text())
             self.assertEqual(partial["outputs"], receipt["outputs"])
-            bundle("oisst_sst_monthly.uwclim", "sst", 20)
-            (sources / "oisst-additional-preparation.json").write_text(json.dumps(dict(
-                family="oisst", width=4, height=2, products=[dict(bundle="oisst_sst_monthly.uwclim", variable="sst",
+            bundle("oisst", "sst_monthly", "sst", 20)
+            (sources / "oisst/4/oisst-additional-preparation.json").write_text(json.dumps(dict(
+                family="oisst", width=4, height=2, products=[dict(bundle="fields/sst_monthly.npy", variable="sst",
                 units="degrees C", ocean_only=True, limit=35, palette="divergence",
                 sources=["fixture"], period="2001-2020 monthly climatology")])) )
             with patch.object(sys, "argv", argv + ["--refresh-additional", "--additional-family", "oisst"]):

@@ -12,6 +12,7 @@ from climate_report_render import full_reference,save_map,save_ocean_flow,flow_c
 from climate_report import write_reference_index
 from climate_palettes import VERSION
 sys.path.insert(0,str(ROOT/'scripts'))
+from uwtools import references
 from uwtools.hashing import sha256
 
 def main():
@@ -33,10 +34,10 @@ def main():
                 if not args.reuse_maps or not flow_complete(prefix):save_ocean_flow(prefix,value,np.isfinite(magnitude(value)))
                 for style in ('lic','particles'):records[f'current_{style}/{s}']=Path(os.path.relpath(flow_path(prefix,style),parent)).as_posix()
         for name in SOURCES.get(field,()):
-            source=ROOT/f'refs/processed/climate/{name}_monthly.uwclim';inputs[source.relative_to(ROOT).as_posix()]=sha256(source)
+            source=references.path(name);inputs[source.relative_to(ROOT).as_posix()]=sha256(source)
         coverage[field]='GLORYS density-defined MLD; not a thermal storage observation.' if field=='storage_depth' else 'Available'
         print(field,flush=True)
-    source=ROOT/'refs/processed/climate/imerg_prec_annual.uwclim';inputs[source.relative_to(ROOT).as_posix()]=sha256(source)
+    source=references.path('imerg_prec_annual',annual=True);inputs[source.relative_to(ROOT).as_posix()]=sha256(source)
     manifest=dict(palette_version=VERSION,input_sha256=inputs,reference_maps=records,coverage=coverage,
         method='Monthly representative wind/SLP; day-weighted quarters for other seasonal quantities. Annual IMERG. Shared palettes, fixed ranges, black nodata. Ocean particles: 45 days, seed 20260906.',
         images_sha256={str((parent/path).relative_to(ROOT)):sha256(parent/path) for path in records.values()})

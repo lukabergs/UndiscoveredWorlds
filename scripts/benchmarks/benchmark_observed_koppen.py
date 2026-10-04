@@ -226,12 +226,12 @@ def main() -> int:
     parser.add_argument(
         "--temperature",
         type=Path,
-        default=Path("refs/processed/climate/worldclim_tavg_monthly.uwclim"),
+        default=references.path("worldclim_tavg").relative_to(references.ROOT),
     )
     parser.add_argument(
         "--precipitation",
         type=Path,
-        default=Path("refs/processed/climate/imerg_prec_monthly.uwclim"),
+        default=references.path("imerg_prec").relative_to(references.ROOT),
     )
     parser.add_argument(
         "--land-mask",

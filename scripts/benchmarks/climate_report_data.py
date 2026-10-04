@@ -58,7 +58,7 @@ def table(path):
     w=len(np.unique(x['longitude']));h=len(np.unique(x['latitude']))
     return {n:x[n].reshape(4,h,w) for n in x.dtype.names}
 def bundle(name):
-    path=ROOT/f'refs/processed/climate/{name}_monthly.uwclim'
+    path=references.path(name)
     header,a=references.read(path,missing=np.nan,dtype=float)
     assert header.rows*2==header.columns and header.layers==12,path
     if name=='era5_pr':a/=MONTH_DAYS[:,None,None]
@@ -92,7 +92,7 @@ class Archive:
     def reference(self,field,s,width):
         if field=='skin_sst':return None
         if field=='annual_rain':
-            p=ROOT/'refs/processed/climate/imerg_prec_annual.uwclim'
+            p=references.path('imerg_prec_annual',annual=True)
             return remap(references.read(p,missing=np.nan,dtype=float)[1][0],width)
         if field=='storage_depth':
             return remap(quarter(np.load(self.path/'mixed-layer-reference.npz')['metres'],s),width)

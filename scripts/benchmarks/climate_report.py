@@ -21,15 +21,15 @@ from climate_report_render import save_map,save_ocean_flow,save_wind_flow,save_c
 from climate_palettes import anchors,DEFINITION,VERSION
 from run_storage import ensure_archive_directory
 sys.path.insert(0,str(ROOT/'scripts'))
-from uwtools import grid
+from uwtools import grid, references
 from uwtools.hashing import sha256
 
 def dump(p,d):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(d,indent=2,allow_nan=False)+'\n',encoding='utf-8')
 def relative(path,parent):return Path(os.path.relpath(path,parent)).as_posix()
 def reference_input_hashes():
     names=sorted({name for group in SOURCES.values() for name in group})
-    paths=[ROOT/f'refs/processed/climate/{name}_monthly.uwclim' for name in names]
-    paths.append(ROOT/'refs/processed/climate/imerg_prec_annual.uwclim')
+    paths=[references.path(name) for name in names]
+    paths.append(references.path('imerg_prec_annual',annual=True))
     return {relative(path,ROOT):sha256(path) for path in paths}
 def mask_for(field,shape,land,masks,s):
     mask=np.ones(shape,bool)

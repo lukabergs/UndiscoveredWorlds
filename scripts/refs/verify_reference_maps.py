@@ -1,4 +1,4 @@
-"""Validate reference bundle grids, provenance hashes and PNG/float32 TIFF exports."""
+"""Validate processed reference fields, provenance hashes and PNG/float32 TIFF exports."""
 
 import argparse
 import json
@@ -14,20 +14,22 @@ from uwtools.hashing import sha256
 
 
 def verify(root, source_hashes=False):
-    climate = root / "climate"
-    bundles = list(climate.glob("*.uwclim"))
-    for path in bundles:
-        header = references.read_header(path)
-        if (header.columns != 2*header.rows or header.layers < 1
-                or path.stat().st_size != references.file_size(*header.shape)):
-            raise ValueError(f"Invalid bundle grid/payload: {path}")
+    bundles = []
+    for folder, dataset in references.manifests(root):
+        for field in dataset["fields"]:
+            path = folder / field["file"]
+            header = references.check(path)
+            if (header.columns != 2*header.rows or header.layers < 1 or list(header.shape) != field["shape"]
+                    or sha256(path) != field["sha256"]):
+                raise ValueError(f"Invalid field grid/payload/checksum: {path}")
+            bundles.append(path)
     checked_sources = set()
-    for metadata in climate.glob("*-additional-preparation.json"):
+    for metadata in root.glob("*/*/*-additional-preparation.json"):
         receipt = json.loads(metadata.read_text())
         for product in receipt["products"]:
-            path = climate / product["bundle"]
+            path = references.path(f"{metadata.parent.parent.name}_{product['variable']}", width=receipt["width"], root=root)
             if sha256(path) != product["sha256"]:
-                raise ValueError(f"Bundle checksum mismatch: {path}")
+                raise ValueError(f"Field checksum mismatch: {path}")
         if source_hashes:
             for source in receipt["sources"]:
                 path = Path(source["file"])
@@ -72,7 +74,7 @@ def verify(root, source_hashes=False):
                             raise ValueError(f"Land/ocean preview is not binary: {path}")
             count += 1
         print(f"Verified {len(names)} product sets at {width}x{height}", flush=True)
-    print(f"Verified {len(bundles)} bundles, {count*3} map artifacts, {len(checked_sources)} source hashes", flush=True)
+    print(f"Verified {len(bundles)} reference fields, {count*3} map artifacts, {len(checked_sources)} source hashes", flush=True)
 
 
 if __name__ == "__main__":

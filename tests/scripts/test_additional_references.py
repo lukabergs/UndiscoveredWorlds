@@ -3,7 +3,6 @@
 import importlib.util
 import json
 from pathlib import Path
-import struct
 import sys
 import tempfile
 import unittest
@@ -17,6 +16,11 @@ except ImportError:
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts/refs"
 sys.path.insert(0, str(SCRIPTS))
+
+
+def field(output, dataset, name, width=8):
+    """A prepared field read with plain NumPy: the format is standard .npy."""
+    return np.load(output / dataset / str(width) / "fields" / f"{name}.npy")
 
 
 def module(name):
@@ -47,13 +51,14 @@ class AdditionalReferenceTests(unittest.TestCase):
             source.mkdir()
             self.data().to_dataset().to_netcdf(source / "sst.nc")
             self.ingest.prepare(source, output, "oisst", 8, 2001, 2002)
-            bundle = output / "oisst_sst_monthly.uwclim"
-            raw = bundle.read_bytes()
-            self.assertEqual(struct.unpack("<IIII", raw[8:24]), (1, 8, 4, 12))
-            values = np.frombuffer(raw[40:], dtype="<f4").reshape(12, 4, 8)
+            values = field(output, "oisst", "sst_monthly")
+            self.assertEqual((values.dtype.str, values.shape), ("<f4", (12, 4, 8)))
             for month in range(12):
                 np.testing.assert_array_equal(values[month], month+6)
-            receipt = json.loads((output / "oisst-additional-preparation.json").read_text())
+            manifest = json.loads((output / "oisst/8/manifest.json").read_text())
+            self.assertEqual(manifest["fields"][0]["id"], "oisst.sst_monthly")
+            self.assertEqual(manifest["fields"][0]["units"], "degrees C")
+            receipt = json.loads((output / "oisst/8/oisst-additional-preparation.json").read_text())
             self.assertEqual(receipt["height"], 4)
             self.assertEqual(receipt["products"][0]["units"], "degrees C")
             import reference_climate_maps
@@ -62,7 +67,7 @@ class AdditionalReferenceTests(unittest.TestCase):
             land = np.zeros((2, 4), dtype=bool)
             land[:, 0] = True
             names = reference_climate_maps.export_additional(
-                output, 4, land, maps.load_uwclim,
+                output, 4, land, maps.load_field,
                 lambda *args, **kwargs: emitted.append((args, kwargs)))
             self.assertEqual(names, {"oisst_sst"})
             self.assertEqual(len(emitted), 4)
@@ -103,8 +108,7 @@ class AdditionalReferenceTests(unittest.TestCase):
             data.values[:, 1, 1] = np.nan
             data.to_dataset().to_netcdf(root / "flux.nc")
             self.ingest.prepare(root, root / "output", "era5", 8, 2001, 2002)
-            raw = (root / "output/era5_vimd_monthly.uwclim").read_bytes()
-            values = np.frombuffer(raw[40:], dtype="<f4")
+            values = field(root / "output", "era5", "vimd_monthly")
             np.testing.assert_allclose(values[np.isfinite(values)], -.864, rtol=1e-6)
             self.assertTrue(np.isnan(values).any())
 
@@ -115,9 +119,8 @@ class AdditionalReferenceTests(unittest.TestCase):
             data.values[:] = 2
             data.to_dataset().to_netcdf(root / "snow.nc")
             self.ingest.prepare(root, root / "output", "land", 8, 2001, 2002)
-            raw = (root / "output/era5land_snow_depth_monthly.uwclim").read_bytes()
-            np.testing.assert_array_equal(np.frombuffer(raw[40:], dtype="<f4"), 2)
-            receipt = json.loads((root / "output/land-additional-preparation.json").read_text())
+            np.testing.assert_array_equal(field(root / "output", "era5land", "snow_depth_monthly"), 2)
+            receipt = json.loads((root / "output/era5land/8/land-additional-preparation.json").read_text())
             self.assertEqual(receipt["products"][0]["units"], "m snow depth")
             self.assertTrue(receipt["products"][0]["land_only"])
             import reference_climate_maps
@@ -125,7 +128,7 @@ class AdditionalReferenceTests(unittest.TestCase):
             land = np.zeros((2, 4), dtype=bool)
             land[:, 0] = True
             emitted = []
-            reference_climate_maps.export_additional(root / "output", 4, land, maps.load_uwclim,
+            reference_climate_maps.export_additional(root / "output", 4, land, maps.load_field,
                 lambda name, values, *args, **kwargs: emitted.append(values))
             self.assertEqual(len(emitted), 4)
             for values in emitted:
@@ -139,8 +142,7 @@ class AdditionalReferenceTests(unittest.TestCase):
             data.values[:] = -1e-5
             data.to_dataset().to_netcdf(root / "energy.nc")
             self.ingest.prepare(root, root / "output", "era5", 8, 2001, 2002)
-            raw = (root / "output/era5_mer_monthly.uwclim").read_bytes()
-            np.testing.assert_allclose(np.frombuffer(raw[40:], dtype="<f4"), .864, rtol=1e-6)
+            np.testing.assert_allclose(field(root / "output", "era5", "mer_monthly"), .864, rtol=1e-6)
             ocean = self.data(variable="uo", units="m s-1").expand_dims(depth=[.494])
             self.assertEqual(self.ingest.normalize(ocean).shape, (24, 3, 4))
             with self.assertRaisesRegex(ValueError, "Ambiguous dimension depth"):
@@ -160,7 +162,7 @@ class AdditionalReferenceTests(unittest.TestCase):
             emitted = {}
             land = np.zeros((2, 4), dtype=bool)
             land[:, 0] = True
-            available = reference_climate_maps.export_additional(root / "output", 4, land, maps.load_uwclim,
+            available = reference_climate_maps.export_additional(root / "output", 4, land, maps.load_field,
                         lambda name, values, *args, **kwargs: emitted.update({name: values}))
             self.assertIn("ocean_currents", available)
             self.assertEqual(len(emitted), 12)

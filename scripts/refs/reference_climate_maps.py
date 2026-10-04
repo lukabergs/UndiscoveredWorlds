@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from cell_grid import conservative_remap
+from uwtools import references
 from reference_map_rendering import (
     divergence, lic_luminance, lic_preview, particle_intensity, particle_preview,
     scalar_rgb, vector_preview,
@@ -22,12 +23,13 @@ def quarter_mean(months, month):
 
 
 def load_diagnostics(directory, load_bundle):
+    """ERA5 diagnostic fields under the processed reference root `directory`."""
     variables = ("u10m", "v10m", "u500", "v500", "u850", "v850", "tcwv",
                  "slp_anom", "w500_ascent", "pr", "viwve", "viwvn")
     fields = {}
     sources = {}
     for variable in variables:
-        path = directory / f"era5_{variable}_monthly.uwclim"
+        path = references.path(f"era5_{variable}", root=directory)
         if path.exists():
             values = load_bundle(path, variable)
             if values.shape[0] != 12:
@@ -47,19 +49,19 @@ def paired_remap(east, north, width):
 
 
 def export_additional(directory, width, land, load_bundle, emit, families=None):
-    """Consume ingestion receipts, one bundle at a time to bound memory."""
+    """Consume ingestion receipts (in their dataset directories under the processed
+    reference root `directory`), one field at a time to bound memory."""
     written = set()
-    for metadata in sorted(directory.glob("*-additional-preparation.json")):
+    for metadata in sorted(directory.glob("*/*/*-additional-preparation.json")):
+        dataset = metadata.parent.parent.name
         receipt = json.loads(metadata.read_text(encoding="utf-8"))
         if families and receipt.get("family") not in families:
             continue
         for record in receipt["products"]:
             if record["variable"] in ("viwve", "viwvn"):
                 continue  # Existing vector exporter handles these together.
-            name = record["bundle"].removesuffix("_monthly.uwclim")
-            if Path(record["bundle"]).name != record["bundle"]:
-                raise ValueError(f"Bundle must be a filename: {metadata}")
-            bundle = directory / record["bundle"]
+            name = f"{dataset}_{record['variable']}"
+            bundle = references.path(name, width=receipt["width"], root=directory)
             values = load_bundle(bundle, record["variable"])
             if values.shape != (12, receipt["height"], receipt["width"]):
                 raise ValueError(f"Bundle dimensions do not match ingestion receipt: {bundle}")
@@ -75,8 +77,8 @@ def export_additional(directory, width, land, load_bundle, emit, families=None):
                      sources=record["sources"], period=record["period"] + f"; quarter starting {label}, day-weighted")
             written.add(name)
     if {"glorys_uo", "glorys_vo"}.issubset(written):
-        east = load_bundle(directory / "glorys_uo_monthly.uwclim", "uo")
-        north = load_bundle(directory / "glorys_vo_monthly.uwclim", "vo")
+        east = load_bundle(references.path("glorys_uo", root=directory), "uo")
+        north = load_bundle(references.path("glorys_vo", root=directory), "vo")
         if east.shape != north.shape:
             raise ValueError("Ocean-current component grids differ")
         for month, label in SEASONS:
@@ -85,7 +87,7 @@ def export_additional(directory, width, land, load_bundle, emit, families=None):
             speed = np.hypot(u, v)
             emit(f"{label}_ocean_current_speed", speed,
                  vector_preview(scalar_rgb(speed, 1), u, v), "m/s",
-                 sources=[str(directory / f"glorys_{key}_monthly.uwclim") for key in ("uo", "vo")],
+                 sources=[str(references.path(f"glorys_{key}", root=directory)) for key in ("uo", "vo")],
                  period=f"three months starting {label}, day-weighted",
                  comparison="Speed of mean GLORYS current vector at shallowest model depth, not mean instantaneous speed")
         written.add("ocean_currents")
@@ -170,7 +172,7 @@ def export_diagnostics(fields, sources, width, land, emit, additional=()):
                  numerical_method="Negative finite-volume divergence on target grid; benchmark uses time-integrated native face fluxes")
     else:
         unavailable.append({"product": "column_moisture_flux, moisture_flux_convergence",
-                            "reason": "Requires era5_viwve_monthly.uwclim and era5_viwvn_monthly.uwclim, east/north integrated vapour flux in kg m^-1 s^-1; tcwv and winds alone are insufficient"})
+                            "reason": "Requires era5.viwve_monthly and era5.viwvn_monthly, east/north integrated vapour flux in kg m^-1 s^-1; tcwv and winds alone are insufficient"})
     for product, reason in (
         ("boundary_moisture_flux, free_moisture_flux", "No layer-resolved humidity flux climatology; a column flux cannot determine the two layers"),
         ("surface_wind_consistency, upper_wind_consistency", "Monthly mean components cannot recover climate-sampled mean speed or directional consistency"),

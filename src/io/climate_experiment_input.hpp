@@ -11,7 +11,8 @@
 
 namespace climateio::experiment
 {
-// Explicit benchmark-only inputs. Reuses UWCLIM1; never changes saved worlds.
+// Explicit benchmark-only inputs: <directory>/<width>/<role>.npy in the reference
+// field format (climate_reference.hpp); never changes saved worlds.
 class Inputs
 {
 public:
@@ -28,13 +29,12 @@ public:
             const int width = std::stoi(label);
             for (const auto& entry : std::filesystem::directory_iterator(size.path()))
             {
-                if (entry.path().extension() != ".uwclim") continue;
+                if (entry.path().extension() != ".npy") continue;
                 const auto role = entry.path().stem().string();
                 climatereference::MonthlyGrid field;
                 std::string error;
                 if (!climatereference::loadMonthlyGrid(entry.path(), role, field, &error) ||
-                    field.width != width || field.monthCount != 12 ||
-                    std::filesystem::file_size(entry.path()) != 40 + field.values.size() * sizeof(float))
+                    field.width != width || field.monthCount != 12)
                     throw std::runtime_error("Invalid reference experiment input: " + entry.path().string() + ": " + error);
                 for (const float value : field.values)
                     if (std::isinf(value)) throw std::runtime_error("Infinite reference experiment input");

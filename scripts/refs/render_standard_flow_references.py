@@ -12,6 +12,7 @@ from climate_report_data import bundle
 from climate_palettes import DEFINITION,VERSION
 from climate_report_render import save_wind_flow,flow_path,flow_complete
 sys.path.insert(0,str(ROOT/'scripts'))
+from uwtools import references
 from uwtools.hashing import sha256
 
 def main():
@@ -21,7 +22,7 @@ def main():
     for field,layer,east_name,north_name in [('surface_wind','s','era5_u10m','era5_v10m'),('850_wind','850','era5_u850','era5_v850'),('500_wind','u','era5_u500','era5_v500')]:
         east,north=bundle(east_name),bundle(north_name)
         for name in (east_name,north_name):
-            p=base/f'{name}_monthly.uwclim';inputs[p.relative_to(ROOT).as_posix()]=sha256(p)
+            p=references.path(name);inputs[p.relative_to(ROOT).as_posix()]=sha256(p)
         for season in range(1,5):
             prefix=out/f'climate/wind/speed/{season}/{layer}/2048'
             value=np.array([east[(season-1)*3],north[(season-1)*3]])

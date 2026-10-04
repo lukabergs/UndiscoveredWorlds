@@ -94,7 +94,7 @@ def run(archive, run_id, plan):
     tuning = (ROOT / 'src/wip/generation_tuning.hpp').read_text()
     env = os.environ.copy()
     env.pop('UW_CLIMATE_EXPERIMENT_INPUT',None)
-    env['UW_CLIMATE_SURFACE_DRAG_INPUT'] = str(ROOT / 'refs/processed/climate/vegetation-drag-20260914/land-drag-contrast-1024.txt')
+    env['UW_CLIMATE_SURFACE_DRAG_INPUT'] = str(ROOT / 'refs/processed/era5-vegetation-drag/1024/land-drag-contrast-1024.txt')
     inputs = inherited['inputs_sha256']
     stats = {path:dict(bytes=(ROOT/path).stat().st_size,mtime_ns=(ROOT/path).stat().st_mtime_ns) for path in inputs}
     verified = read(archive/str(first)/'manifest.json') if run_id != first else inherited

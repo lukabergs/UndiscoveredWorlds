@@ -87,6 +87,7 @@ void loadappenvironmentinternal()
     applypathoverride(environmentconfig.profilingWorkbookPath, getenvoverride("UW_PROFILING_WORKBOOK", filevalues));
     applypathoverride(environmentconfig.referencePrecipitationGridPath, getenvoverride("UW_REFERENCE_PRECIP_GRID", filevalues));
     applypathoverride(environmentconfig.referenceClimateDirectory, getenvoverride("UW_REFERENCE_CLIMATE_DIR", filevalues));
+    applypathoverride(environmentconfig.referenceProcessedDirectory, getenvoverride("UW_REFERENCE_PROCESSED_DIR", filevalues));
     applypathoverride(environmentconfig.referenceClimatePreviewDirectory, getenvoverride("UW_REFERENCE_CLIMATE_PREVIEW_DIR", filevalues));
     applypathoverride(environmentconfig.climateWorkbookPath, getenvoverride("UW_CLIMATE_WORKBOOK", filevalues));
     applypathoverride(environmentconfig.climateBenchmarkRunLogPath, getenvoverride("UW_CLIMATE_BENCHMARK_RUN_LOG", filevalues));

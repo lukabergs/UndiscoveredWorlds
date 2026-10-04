@@ -55,6 +55,7 @@ Lessons:
 | `world-0012` | 2026-10-04 | tooling added | keep | consolidation phase 3, step 4: ledger tooling |
 | `world-0013` | 2026-10-04 | tooling added | keep | consolidation phase 3, step 5: verifier agent, review checklists, reported checks |
 | `world-0014` | 2026-10-04 | equivalent | keep | consolidation phase 3, step 6: configs/regions.json and the regional table |
+| `world-0015` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 7: observed references as .npy with a manifest per dataset |
 
 Lessons:
 
@@ -91,3 +92,7 @@ Lessons:
 - `world-0013`: A checklist 'good' text must agree with the reference maps: the first ITCZ text contradicted ERA5 in the eastern Pacific.
 - `world-0014`: evaluation.json grows from about 0.3 MB to 0.9 MB with the regional table.
 - `world-0014`: AR6 land regions are not restricted to land cells in the regional table: each entry's own mask applies.
+- `world-0015`: A .npy file carries no variable name: the C++ reader checks that the file name equals the expected variable or starts with it and an underscore.
+- `world-0015`: The sealed archive runs/reports/climate-reference-experiments-20260915/prepared-inputs still holds .uwclim inputs that the new binary cannot read; replaying those experiments means preparing the inputs again.
+- `world-0015`: The moved receipts still name the former .uwclim files; fields are found by dataset and variable.
+- `world-0015`: refs/source/physical and refs/processed/physical are junctions into D:/dev/undiscovered-worlds/refs/ since step 1.

@@ -3,7 +3,6 @@
 import argparse
 import json
 import re
-import struct
 import sys
 from pathlib import Path
 
@@ -15,6 +14,8 @@ sys.path.insert(0, str(ROOT / "scripts/benchmarks"))
 from climate_map_geometry import expected_map_size, load_wind_geometry
 sys.path.insert(0, str(ROOT / "scripts/refs"))
 from cell_grid import conservative_remap, latitude_edges
+sys.path.insert(0, str(ROOT / "scripts"))
+from uwtools import references
 
 
 def score(simulated, reference, mask):
@@ -32,15 +33,10 @@ def score(simulated, reference, mask):
 
 
 def reference_quarter(name, season, width):
-    path = ROOT / "refs/processed/climate" / f"{name}_monthly.uwclim"
-    with path.open("rb") as stream:
-        header = stream.read(40)
-    version, columns, rows, layers = struct.unpack("<IIII", header[8:24])
-    if header[:8] != b"UWCLIM1\0" or version != 1 or layers != 12 or columns != rows * 2:
+    path = references.path(name)
+    header, values = references.read(path, memmap=True)
+    if header.layers != 12 or header.columns != header.rows * 2:
         raise ValueError(f"Invalid monthly reference header: {path}")
-    if path.stat().st_size != 40 + columns * rows * layers * 4:
-        raise ValueError(f"Invalid monthly reference payload: {path}")
-    values = np.memmap(path, dtype="<f4", mode="r", offset=40, shape=(layers, rows, columns))
     days = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
     months = range(season * 3, season * 3 + 3)
     fields = np.stack([conservative_remap(values[m], width) for m in months])
