@@ -97,13 +97,15 @@ Phase 1 is complete (2026-10-04, ledgers `world-0002` to `world-0004`, `climate-
 
 **Phase 2 — tests.** Three GoogleTest binaries; one FetchContent at `tests/`; fix `test_plate.cpp`'s own `main`, empty `test_sqrdmd.cpp`, `PLATE_TECTONICS_FIXTURE_DIR`; `gtest_discover_tests`.
 
+Phase 2 is complete (2026-10-04, ledgers `world-0005` to `world-0007`). The first test run since before Phase 0 found no defect in the simulation or the CLI: ctest passed, and the Python failures were tests and a command that Phases 0 and 1 had left behind. `world_tests` (core, I/O, pipeline, climate, validation; `uw_climate_world` is the only project library on its link line), `tectonics_tests` and `minerals_tests` replace 22 test programs, and ctest lists 241 tests as `Suite.Name`. The climate files that were one `main()` are mostly one `TEST` each; they are split when a file is next edited. The replay and benchmark modes of four climate test programs are arguments of `world_tests` (listed in `docs/reference-guides/verification.md`). `src/pipeline/world_process_access.inc` is generated again, from ten seed-1 reports of the read-tracking build kept in `runs/reports/phase2-access/`; the report set is described in the header of `scripts/evaluation/process_access.py`. Decided in this phase: ctest runs the three GoogleTest binaries only; `check_tectonics_cli.py` stays a Python check until it becomes profile checks (Phase 3).
+
 **Phase 3 — tooling and data.** `uwtools`, `pyproject.toml`, templates, ledger, verifier agent, `regions.json`, reference migration to `.npy`, new run layout for new runs (old layout sealed under `runs/archive/`), palette sidecars and the check, PowerShell port, Excel removal, legacy climate chain retired after parity.
 
 **Phase 4 — source tree and CMake.** `src/cli`, `src/world`, `src/app` GUI-only, per-directory CMake, one standard, one include root (mechanical rewrite of ~700 includes), layering check. Split the giants: `assetdata.cpp` (data to `assets/`), `climate_coupling.cpp` by sub-model, `climate_validation.cpp` by concern (most of it moves to Python), `main.cpp` by screen; `misc.cpp` and `functions.hpp` dissolve under the world-model migration. The terrain, hydrology, resource and society code and the regional map still read the climate fields and the elevation through the whole-number accessors (`climatelegacyscale` in `climate_world.hpp`, `wholemetres` in `world_grid.hpp`); each module moves to the float accessors when it is split or rewritten in this phase, and that change of results is a new baseline for the module. The remaining integer elevation components (mountain height, canyon uplift, crater and volcano heights, ocean ridge height) and lake surfaces become float with the code that produces them.
 
 **Phase 5 — GUI as viewer.** Loads bundles; the "Generate elements" buttons call processes; `regionalmap` leaves the headless link line; parameters move from `generation_tuning.hpp` into recipes. The renderers and the `.uww` format take whole-number copies of the float fields; both go when the GUI draws from bundles.
 
-Each phase ends with: seed-1 bundle equivalence (`compare_bundles.py`) where results must not change, `--audit-access`, `check-layout.py`, a compile of both presets, and a ledger entry describing what changed. A phase also takes the open items that §11 assigns to it.
+Each phase ends with: seed-1 bundle equivalence (`compare_bundles.py`) where results must not change, `--audit-access`, `process_access.py --check` on the stored reports (it shows a hand edit; a phase that changes what a step reads or writes measures the affected recipes again with the read-tracking build and stores the new reports), `check-layout.py`, a compile of both presets, and a ledger entry describing what changed. A phase also takes the open items that §11 assigns to it.
 
 ## 6. Deletion and cleanup list (Phase 0)
 
@@ -177,13 +179,6 @@ Dashes or underscores, by kind:
 
 Found during earlier phases and not resolved there. A phase resolves its items or moves them to a later phase with the reason; a session adds its own findings here before it ends.
 
-Phase 2 (tests):
-
-- No test has run since before Phase 0 (ledgers `world-0001` to `world-0004`, `climate-0001`, `tectonics-0002`, each under `not_run`). The phase starts by running `ctest` on the headless preset and the Python suite once, before any restructuring, and treats failures as possible consequences of Phases 0 and 1: two executables removed, the tectonics support code moved to `src/validation/tectonics` and `src/io`, climate fields and the base elevation stored as float, the FastLEM stages out of the recipes.
-- Compiled and never run: `PlateTectonicsTests` against the moved libraries (`uw_tectonics_snapshots`, `uw_tectonics_heightmap_io`) and the new `climate_world_tests`. `tests/scripts/test_tectonics_report.py` and `test_geology_benchmark.py` exercise report readers that Phase 1 changed.
-- `tests/scripts/check_tectonics_cli.py` passes on `world_pipeline` but is run by hand; decide whether ctest runs it.
-- `src/pipeline/world_process_access.inc` is generated from a read-tracking build and was edited by hand in Phase 1 (writes of `geology.geosphere_initialization` and `geology.plate_tectonics`). Regenerate it (`scripts/evaluation/process_access.py`, the cases named in its header plus the tectonics recipe) and make `process_access.py --check` part of the phase-end checks.
-
 Phase 3 (tooling and data):
 
 - `bench.py climate run` exits with an error after a successful registration: `write-benchmark-report.py --legacy-layout` stops on the polar projection images that `run_report.py` has just written. Runs 384 and 385 have a run page and no gallery. It goes with the legacy climate chain; until then a registered climate run is complete when its run page exists.
@@ -191,10 +186,17 @@ Phase 3 (tooling and data):
 - `climate_benchmark.py` sets `UW_CLIMATE_SURFACE_DRAG_INPUT` (a vegetation drag contrast derived from observations) for registered runs; `scripts/evaluation/experiment.py` does not, so a profile experiment and a registered run differ by that input. Make it a recorded input of the run, or remove it.
 - Ported to run bundles in Phase 1 and not executed since: `bench.py geology run`, `tectonics_experiment.py --verify-replay` and `--sample-run`, and `tectonics_review.py`, `tectonics_batch_analysis.py`, `tectonics_boundary_review.py`, `tectonics_coastal_review.py` on a run in the bundle layout (run 76 is the first). Run each once when it moves under `uw.py`.
 - The `summary` of the tectonic snapshot record and the snapshot comparison are C++ (`src/validation/tectonics`); the rule of §1 puts statistics and comparison in Python.
+- `tests/scripts/check_tectonics_cli.py` is still run by hand (Phase 2 decided against ctest: ctest is the three GoogleTest binaries and needs no Python). It becomes profile checks of `configs/evaluation/tectonics.json` (`repeat`, recipe equality), run by `uw.py`.
+- The Python suite needs `numpy`, `pillow`, `rasterio`, `requests`, `pandas`, `cmocean`, `matplotlib` and, for `test_physical_reference_maps.py`, `pygplates`, which is not in the offline uv cache: that module has not run. `pyproject.toml` declares these once. Ten tests skip themselves; the reasons were not examined.
+- `climate_experiment.py` builds `world_tests` and runs four of its suites before a run; the changed test step was not executed.
+- The replay and benchmark modes of `world_tests` (`tests/world_tests_main.cpp`) are tools that live in a test binary; §2 gives `world_pipeline benchmark` as the place for registered standard runs. Move or drop them when `uw.py` exists.
+- `world_pipeline run --audit-access` exits 0 after an undeclared write; the violation is only in the log (`access violation(s)`) and in the access report. Whatever runs the phase-end checks must read one of them, or the exit status changes.
 - Two range checks of `configs/evaluation/climate.json` fail on every run, before and after the re-baseline, so every climate evaluation exits with an error: precipitation above 3000 mm/month in a few cells at the north pole and one column-water cell above 120 mm. Whether the limits or the model are wrong is climate work; the profile should not fail on it by default.
 
 Phase 4 (source tree and CMake):
 
+- Declared access is measured, so it holds only what the seed-1 report set exercised: with the FastLEM stages off no step reads or writes `mountain_height`, `mountain_ridges` or the mountain precipitation fields, and the two legacy stages have no declaration. A change that brings mountains back, or a scenario option outside the report set, needs new reports (`scripts/evaluation/process_access.py`).
+- `hydrology.deltas_and_wetlands` writes `atmosphere.temperature` and `atmosphere.temperature_july` at the default size (found by the audit of the default-size world in Phase 2; now declared). A hydrology step that changes temperature is a coupling to look at when hydrology is split.
 - `createfractal` does not terminate on a world grid under 32 columns (the shelf pass after tectonics hangs at 16 x 8); `world_pipeline run` refuses such grids. Fix when the terrain noise leaves `misc.cpp`, then drop the refusal.
 - `planet::smooth()` ignores the grid it is given and smooths the base elevation.
 - `atmosphere.precipitation` and `atmosphere.precipitation_exact` are both float and differ only where the legacy January/July passes adjust rain: `syncseasonalclimatefromlegacy` overwrites the first and not the second. Make it one field when `climate_fields.cpp` and `climate_coupling.cpp` are split.

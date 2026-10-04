@@ -9,9 +9,13 @@ Reports come from the read-tracking analysis build (`-DUW_TRACK_FIELD_READS=ON`)
 Each process's declared reads and writes become the union over all reports, and a
 process is marked stochastic when any report saw it draw from the shared random
 generator. The result is written to src/pipeline/world_process_access.inc. Reads are
-only as complete as the code paths the reports exercised; run cases that cover every
-stage (procedural with society, imported, earth-climate). `--check` exits 1 when the
-file would change instead of writing it.
+only as complete as the code paths the reports exercised, and a write is seen only
+when it changes a value: small or short worlds leave out lakes, deltas and scenario
+fields. Run seed 1 at the default size for procedural-world and imported-world (both
+with --social), earth-climate and tectonics, and a tectonics run with
+`--plume-count 4 --progressive-rifting on`; reports of smaller runs can be added.
+Stages that are in no recipe (the legacy FastLEM stages) get no declaration.
+`--check` exits 1 when the file would change instead of writing it.
 """
 import argparse
 import json

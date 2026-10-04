@@ -41,7 +41,7 @@ out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --audit-acce
 # Earth climate (the climate profile's run) and a start from a checkpoint bundle:
 out/build/headless/bin/Release/world_pipeline.exe run --recipe earth-climate --seed 1 --map none --bundle out/scratch/climate
 out/build/headless/bin/Release/world_pipeline.exe run --recipe procedural-world --from-bundle CHECKPOINT --steps a..b --bundle out/scratch/part
-uv run --offline python scripts/evaluation/process_access.py --check
+uv run --offline python scripts/evaluation/process_access.py (Get-ChildItem runs/reports/phase2-access/*.json) --check   # the access file equals what the stored reports give
 ```
 
 Headless checks do not establish GUI rendering, historical save compatibility, full Earth benchmark skill or high-resolution performance; verify that boundary when it is part of the requested outcome. Module benchmarks and evaluations: `docs/reference-guides/benchmark-commands.md`.
