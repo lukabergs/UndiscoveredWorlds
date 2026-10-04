@@ -28,6 +28,7 @@ const std::array<TableSpec, kTableCount> kTables =
     { TableId::history_events, Component::anthroposphere, "history_events", "Historical events" },
     { TableId::weather_state, Component::atmosphere, "weather_state", "Serialized transient weather anomaly state" },
     { TableId::atmosphere_levels, Component::atmosphere, "levels", "Atmosphere column levels: name and nominal pressure" },
+    { TableId::tectonic_snapshot, Component::geosphere, "tectonic_snapshot", "Record of the last tectonic update: time, scenario, engine diagnostics, statistics and plates" },
 } };
 
 constexpr std::array<const char*, 8> kComponents =

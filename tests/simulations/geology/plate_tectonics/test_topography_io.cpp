@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "heightmap_io.hpp"
+#include "tectonic_heightmap_io.hpp"
 
 #include <filesystem>
 #include <vector>

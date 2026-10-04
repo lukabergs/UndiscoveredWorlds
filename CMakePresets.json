@@ -16,7 +16,6 @@
             "binaryDir": "${sourceDir}/out/build/headless",
             "cacheVariables": {
                 "UW_BUILD_APP": "OFF",
-                "UW_BUILD_TECTONICS_TOOLS": "ON",
                 "BUILD_TESTING": "ON"
             }
         }

@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROOT_DIRECTORIES = {
     ".git", ".githooks", ".codex", ".agents", "assets", "configs", "refs",
     "definitions", "docs", "meta", "out", "references", "runs", "scripts", "src",
-    "tests", "tools", "vcpkg-ports", "saved_worlds",
+    "tests", "vcpkg-ports", "saved_worlds",
 }
 # Code outside the tectonics engine includes only these engine headers.
 TECTONICS_ENGINE = ROOT / "src/simulations/geology/plate_tectonics"
@@ -34,7 +34,7 @@ def main():
             issues.append(f"Unclassified dataset root item: {path.name}; generated metadata belongs in processed/metadata/")
 
     cmake_files = [ROOT / "CMakeLists.txt"]
-    for directory in ("src", "tests", "tools"):
+    for directory in ("src", "tests"):
         cmake_files.extend((ROOT / directory).rglob("CMakeLists.txt"))
         cmake_files.extend((ROOT / directory).rglob("*.cmake"))
     for cmake_file in cmake_files:
@@ -47,7 +47,7 @@ def main():
                 issues.append(f"Missing CMake source in {cmake_file.relative_to(ROOT)}: {path}")
 
     internal = {path.name for path in TECTONICS_ENGINE.glob("*.hpp")} - TECTONICS_PUBLIC_HEADERS
-    for directory in ("src", "tools"):
+    for directory in ("src",):
         for path in (ROOT / directory).rglob("*.[ch]pp"):
             relative = path.relative_to(ROOT).as_posix()
             if TECTONICS_ENGINE in path.parents:

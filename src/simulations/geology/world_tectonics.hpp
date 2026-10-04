@@ -1,9 +1,11 @@
 #pragma once
+#include <functional>
 #include <memory>
 #include <vector>
 
 #include "world/world_grid.hpp"
 class planet;
+namespace tectonics::scenario { struct Scenario; }
 
 // Overrides of configs/tectonics-baseline.json; zero selects its value.
 struct WorldTectonicsOptions {
@@ -11,6 +13,16 @@ struct WorldTectonicsOptions {
     int plateCount = 0;
     double deltaTimeMyr = 0;
     bool mineralHistory = true;
+    // The whole engine scenario in place of the baseline; the overrides above still apply.
+    std::shared_ptr<const tectonics::scenario::Scenario> scenario;
+    // The engine runs on the world grid instead of the scenario's own (the tectonics recipe).
+    bool worldGrid = false;
+    // Checkpoints of the evolver, in Myr of tectonic time and on whole updates: at
+    // each one the Geosphere is written as at the end and the callback runs. The
+    // end of the run is not a checkpoint.
+    double checkpointEveryMyr = 0;
+    std::vector<double> checkpointsMyr;
+    std::function<void(double timeMyr)> checkpoint;
 };
 
 // Tectonics engine and mineral history carried from the Geosphere initializer to
@@ -19,7 +31,7 @@ struct GeologySolverState;
 
 // Geosphere initializer: creates the engine (which seeds the starting topography)
 // and the mineral history's inherited provinces, clears tectonic provenance and
-// writes the starting elevation. Expects a cleared world.
+// writes the starting Geosphere. Expects a cleared world.
 std::shared_ptr<GeologySolverState> initializegeosphere(planet& world, worldgrid<bool>& shelves,
                                                         const WorldTectonicsOptions& options = {});
 

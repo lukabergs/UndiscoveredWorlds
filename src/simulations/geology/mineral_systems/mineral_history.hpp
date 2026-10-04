@@ -30,7 +30,7 @@ struct ErosionParameters
     double placerResidenceMyr = 5.0;
 };
 
-// History stream for a tectonic seed; the app and tectonic_pipeline share it,
+// History stream for a tectonic seed; the app and world_pipeline share it,
 // so the same seed and recipe give the same deposits.
 std::uint64_t mineralseed(long tectonicSeed);
 

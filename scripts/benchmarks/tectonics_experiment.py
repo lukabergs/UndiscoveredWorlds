@@ -33,7 +33,48 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
-def command(executable, recipe):
+# Catalogue fields of a run bundle (uw-run-bundle/v1) under the names the former
+# snapshot files had; the reports keep using those names.
+BUNDLE_FIELDS = {
+    "heightmap": "geosphere.tectonic_height", "plate_id": "geosphere.plate_id",
+    "crust_age_steps": "geosphere.crust_age_steps", "crust_age_myr": "geosphere.crust_age",
+    "crust_thickness": "geosphere.crust_thickness", "crust_class": "geosphere.crust_class",
+    "uplift_tendency": "geosphere.uplift_tendency", "subsidence_tendency": "geosphere.subsidence_tendency",
+    "accumulated_strain": "geosphere.accumulated_strain", "boundary_type": "geosphere.boundary_type",
+    "boundary_distance": "geosphere.boundary_distance", "boundary_segment_id": "geosphere.boundary_segment",
+    "nearest_boundary_id": "geosphere.nearest_boundary", "deforming_region_id": "geosphere.deforming_region",
+    "deforming_region_type": "geosphere.deforming_region_type", "deformation_rate": "geosphere.deformation_rate",
+    "deformation_velocity_x": "geosphere.deformation_velocity_x",
+    "deformation_velocity_y": "geosphere.deformation_velocity_y",
+    "convergence_score": "geosphere.tectonic_convergence", "divergence_score": "geosphere.tectonic_divergence",
+    "shear_score": "geosphere.tectonic_shear", "geologic_regime": "geosphere.geologic_regime",
+    "rift_damage": "geosphere.rift_damage", "plume_influence": "geosphere.plume_influence",
+    "continental_crust_m": "geosphere.continental_crust", "oceanic_crust_m": "geosphere.oceanic_crust",
+    "sediment_m": "geosphere.sediment",
+}
+SNAPSHOT_TABLE = "geosphere.tectonic_snapshot"
+RUN_BUNDLE_SCHEMA = "uw-run-bundle/v1"
+# world_pipeline needs these beside it when it runs from a run's archive.
+RUNTIME_LIBRARIES = ("libpng16.dll", "zlib1.dll")
+
+
+def command(executable, recipe, output):
+    """world_pipeline run --recipe tectonics: an initial bundle, one every checkpoint interval and the final one."""
+    if recipe["height"] * 2 != recipe["width"]:
+        raise ValueError("The world grid is W x W/2")
+    scenario = recipe["scenario"]
+    interval = recipe["checkpoint_every_updates"] * float(scenario.get("delta-time-myr", 1.0))
+    args = [str(executable), "run", "--recipe", "tectonics", "--seed", str(recipe["seed"]),
+            "--resolution", str(recipe["width"])]
+    for key, value in scenario.items():
+        args += ["--" + key, str(value)]
+    args += ["--checkpoint-at", "geology.geosphere_initialization", "--checkpoint-every", f"{interval:g}",
+             "--checkpoint-dir", str(Path(output) / "snapshots"), "--bundle", str(Path(output) / "final")]
+    return args
+
+
+def legacy_command(executable, recipe):
+    """tectonic_pipeline batch-export, for the archived executable of a run made before world_pipeline took over."""
     args = [str(executable), "batch-export"]
     for key in ("seed", "width", "height"):
         args += ["--" + key, str(recipe[key])]
@@ -43,9 +84,53 @@ def command(executable, recipe):
     return args
 
 
-def field_hashes(bundle):
+def is_run_bundle(bundle):
+    return json.loads((Path(bundle) / "manifest.json").read_text()).get("schema") == RUN_BUNDLE_SCHEMA
+
+
+def bundle_files(bundle):
+    """Field name -> file of a snapshot, for a run bundle or a former snapshot bundle."""
+    manifest = json.loads((Path(bundle) / "manifest.json").read_text())
+    if manifest.get("schema") != RUN_BUNDLE_SCHEMA:
+        return dict(manifest["files"])
+    entries = {entry["id"]: entry["file"] for entry in manifest["fields"]}
+    return {name: entries[identifier] for name, identifier in BUNDLE_FIELDS.items() if identifier in entries}
+
+
+def snapshot_manifest(bundle):
+    """The engine's snapshot record: label, time, scenario, diagnostics, plates."""
+    bundle = Path(bundle)
     manifest = json.loads((bundle / "manifest.json").read_text())
-    return {name: digest(bundle / filename) for name, filename in manifest["files"].items()}
+    if manifest.get("schema") != RUN_BUNDLE_SCHEMA:
+        return manifest
+    table = next(entry for entry in manifest["tables"] if entry["id"] == SNAPSHOT_TABLE)
+    return json.loads((bundle / table["file"]).read_text())
+
+
+def field_hashes(bundle):
+    return {name: digest(Path(bundle) / filename) for name, filename in bundle_files(bundle).items()}
+
+
+def run_snapshots(output):
+    """The bundles of one run in time order, described as the former batch manifest did."""
+    output = Path(output)
+    found = []
+    for directory in sorted((output / "snapshots").iterdir()) + [output / "final"]:
+        if not (directory / "manifest.json").is_file():
+            continue
+        record = snapshot_manifest(directory)
+        found.append({"update_count": record["update_count"], "iteration_count": record["iteration_count"],
+                      "time_myr": record["time_myr"], "directory": directory.relative_to(output).as_posix()})
+    found.sort(key=lambda item: (item["update_count"], item["directory"] == "final"))
+    snapshots = []
+    for item in found:
+        # The end of the run is both the last periodic checkpoint and the final bundle: keep the final one.
+        if snapshots and snapshots[-1]["update_count"] == item["update_count"]:
+            snapshots.pop()
+        label = "final" if item["directory"] == "final" else "initial" if item["update_count"] == 0 \
+            else f"update{item['update_count']:06d}"
+        snapshots.append(dict(label=label, **item))
+    return snapshots
 
 
 def sample_run(run_id, interval):
@@ -55,7 +140,8 @@ def sample_run(run_id, interval):
     manifest_path = ROOT / f"runs/manifests/tectonics/{run_id}.json"
     record = json.loads(manifest_path.read_text())
     archive = ROOT / f"runs/reports/tectonics/{run_id}"
-    executable = archive / "tectonic_pipeline.exe"
+    legacy = (archive / "tectonic_pipeline.exe").is_file()
+    executable = archive / ("tectonic_pipeline.exe" if legacy else "world_pipeline.exe")
     if digest(executable) != record["executable_sha256"]:
         raise ValueError("Archived executable hash mismatch")
     root = ROOT / f"runs/checkpoints/tectonics/{run_id}"
@@ -63,10 +149,10 @@ def sample_run(run_id, interval):
     if output.exists():
         raise ValueError("Sampling output already exists")
     recipe = dict(record["recipe"], checkpoint_every_updates=interval)
-    args = command(executable, recipe) + ["--output", str(output)]
+    args = legacy_command(executable, recipe) + ["--output", str(output)] if legacy else command(executable, recipe, output)
     with (archive / f"sampling-{interval}.log").open("x", encoding="utf-8") as log:
         subprocess.run(args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
-    batch = json.loads((output / "batch_manifest.json").read_text())
+    batch = json.loads((output / "batch_manifest.json").read_text()) if legacy else {"snapshots": run_snapshots(output)}
     for item in batch["snapshots"]:
         hashes = field_hashes(output / item["directory"])
         if item["label"] in ("initial", "final"):
@@ -88,7 +174,7 @@ def run(args):
     recipe = json.loads(args.recipe.read_text())
     executable = args.executable.absolute()
     if not executable.is_file():
-        raise ValueError(f"Build tectonic_pipeline first: {executable}")
+        raise ValueError(f"Build world_pipeline first: {executable}")
     if recipe["seed"] != 1 and not args.allow_seed_comparison:
         raise ValueError("Use --allow-seed-comparison for an explicitly requested seed experiment")
     registry_path = ROOT / "runs/registry/tectonics.json"
@@ -128,9 +214,12 @@ def run(args):
     write_json(registry_path, registry)
     write_json(archive / "recipe.json", recipe)
     shutil.copy2(executable, archive / executable.name)
+    for library in RUNTIME_LIBRARIES:
+        if (executable.parent / library).is_file():
+            shutil.copy2(executable.parent / library, archive / library)
     # Include the actual working files, including uncommitted task changes.
     inputs = [ROOT / "CMakeLists.txt", ROOT / "CMakePresets.json"]
-    for folder in ("src/simulations/geology", "tools/tectonics", "scripts/benchmarks",
+    for folder in ("src/simulations/geology", "src/validation/tectonics", "scripts/benchmarks",
                    "tests/simulations/geology", "configs"):
         inputs += [p for p in (ROOT / folder).rglob("*")
                    if p.is_file() and p.suffix in {".cpp", ".hpp", ".h", ".py", ".json", ".txt", ".html", ".js", ".cmake"}]
@@ -145,7 +234,7 @@ def run(args):
     # Always execute the archived binary, so later builds cannot change this run
     # or its replay after provenance has already been recorded.
     archived_executable = archive / executable.name
-    native_command = command(archived_executable, recipe) + ["--output", str(checkpoint_dir)]
+    native_command = command(archived_executable, recipe, checkpoint_dir)
     record["command"] = native_command
     write_json(manifest_path, record)
     start = time.monotonic()
@@ -155,23 +244,22 @@ def run(args):
             log.flush()
             subprocess.run(native_command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
         record["elapsed_seconds"] = time.monotonic() - start
-        batch = json.loads((checkpoint_dir / "batch_manifest.json").read_text())
-        record["snapshots"] = batch["snapshots"]
+        record["snapshots"] = run_snapshots(checkpoint_dir)
         record["field_sha256"] = {item["label"]: field_hashes(checkpoint_dir / item["directory"])
                                   for item in record["snapshots"]}
         if args.verify_replay:
             final = next(item for item in record["snapshots"] if item["label"] == "final")
             replay = archive / "replay-final"
-            replay_command = command(archived_executable, recipe)
-            # Replay is verification of this numbered run, not a second experiment.
-            replay_command[1] = "inspect"
-            replay_command = replay_command[:-2] + ["--final", "--bundle-output", str(replay)]
+            # Replay is verification of this numbered run, not a second experiment: the final bundle only.
+            replay_command = command(archived_executable, recipe, replay)
+            first = replay_command.index("--checkpoint-at")
+            replay_command = replay_command[:first] + ["--bundle", str(replay)]
             with (archive / "replay.log").open("x", encoding="utf-8") as log:
                 subprocess.run(replay_command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
             expected = record["field_sha256"][final["label"]]
             actual = field_hashes(replay)
-            replay_manifest = json.loads((replay / "manifest.json").read_text())
-            original = json.loads((checkpoint_dir / final["directory"] / "manifest.json").read_text())
+            replay_manifest = snapshot_manifest(replay)
+            original = snapshot_manifest(checkpoint_dir / final["directory"])
             metadata_keys = ("run_scenario", "time_myr", "update_count", "iteration_count")
             if "motion_diagnostics" in original:
                 metadata_keys += ("motion_diagnostics",)
@@ -202,7 +290,7 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipe", type=Path, default=ROOT / "configs/tectonics-baseline.json")
-    parser.add_argument("--executable", type=Path, default=paths.executable("tectonic_pipeline"))
+    parser.add_argument("--executable", type=Path, default=paths.executable("world_pipeline"))
     parser.add_argument("--verify-replay", action=argparse.BooleanOptionalAction, default=False,
                         help="Opt in to a second simulation for exact replay verification (default: off)")
     parser.add_argument("--allow-seed-comparison", action="store_true")

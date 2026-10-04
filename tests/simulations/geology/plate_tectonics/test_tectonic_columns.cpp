@@ -2,7 +2,7 @@
 #include "tectonic_columns.hpp"
 #include "tectonic_thermal.hpp"
 #include "lithosphere.hpp"
-#include "tectonic_pipeline_support.hpp"
+#include "tectonic_snapshots.hpp"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>

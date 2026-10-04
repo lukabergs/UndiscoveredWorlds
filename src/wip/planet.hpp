@@ -819,6 +819,10 @@ public:
     const std::vector<TectonicBoundarySegment>& tectonicboundarysegments() const;
     std::vector<TectonicBoundarySegment>& tectonicboundarysegments();
     int tectonicboundarysegmentcount() const;
+    // The engine's own fields of one cell and the record of its last update (geosphere.tectonic_snapshot).
+    void settectonicsnapshotcell(int x, int y, float height, int plate, int crustagesteps, float continentalcrust,
+        float oceaniccrust, float sediment, float riftdamage, float plumeinfluence);
+    void settectonicsnapshotrecord(std::string record);
     void settectonicboundarysegments(std::vector<TectonicBoundarySegment> segments);
     template<typename SegmentT> void settectonicboundarysegments(const std::vector<SegmentT>& segments);
 
@@ -2883,6 +2887,24 @@ inline void planet::setmineralbudget(const mineralsystems::MineralBudget& budget
 inline const std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() const { UW_TABLE_READ(tectonic_boundary_segments); return geosphere_.tectonicboundarysegmentlist; }
 inline std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() { UW_TABLE_READ(tectonic_boundary_segments); return geosphere_.tectonicboundarysegmentlist; }
 inline int planet::tectonicboundarysegmentcount() const { UW_TABLE_READ(tectonic_boundary_segments); return static_cast<int>(geosphere_.tectonicboundarysegmentlist.size()); }
+inline void planet::settectonicsnapshotcell(int x, int y, float height, int plate, int crustagesteps,
+    float continentalcrust, float oceaniccrust, float sediment, float riftdamage, float plumeinfluence)
+{
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return;
+
+    geosphere_.tectonicheightmap[x][y] = height;
+    geosphere_.tectonicplateidmap[x][y] = plate;
+    geosphere_.tectoniccrustagestepsmap[x][y] = crustagesteps;
+    geosphere_.tectoniccontinentalcrustmap[x][y] = continentalcrust;
+    geosphere_.tectonicoceaniccrustmap[x][y] = oceaniccrust;
+    geosphere_.tectonicsedimentmap[x][y] = sediment;
+    geosphere_.tectonicriftdamagemap[x][y] = riftdamage;
+    geosphere_.tectonicplumeinfluencemap[x][y] = plumeinfluence;
+}
+
+inline void planet::settectonicsnapshotrecord(std::string record) { geosphere_.tectonicsnapshotrecord = std::move(record); }
+
 inline void planet::settectonicboundarysegments(std::vector<TectonicBoundarySegment> segments) { geosphere_.tectonicboundarysegmentlist = std::move(segments); }
 
 template<typename SegmentT>

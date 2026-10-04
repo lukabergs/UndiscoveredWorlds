@@ -6,10 +6,12 @@
     uv run --offline scripts/benchmarks/bench.py <module> <command> [shared options] [native options]
 
 Modules and commands:
-    tectonics run      registered run (runs/registry/tectonics.json), archived with source and fields
-    tectonics inspect  unregistered final-state bundle in out/bench/
+    tectonics run      registered run (runs/registry/tectonics.json): world_pipeline recipe with checkpoints,
+                       archived under runs/reports|checkpoints/tectonics/<id>
+    tectonics inspect  unregistered final-state run bundle in out/bench/
     tectonics report   HTML comparison of registered runs (--runs A B ...)
-    geology   run      tectonics at each width, scored against Earth references
+    tectonics experiment|evaluate  run bundle + evaluation with configs/evaluation/tectonics.json
+    geology   run      tectonics bundles at each width, scored against Earth references
     climate   run      registered Earth climate benchmark (runs/registry/climate.json) with gallery
     climate   check    numerical checks of a run (--runs ID [--compare ID])
     climate   report   gallery of a run against another (--runs ID [--compare ID])
@@ -19,8 +21,8 @@ Modules and commands:
     climate|world evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR])
 
 Shared options: --seed (default 1), --resolution W (grid W x W/2), --executable, --output, --label.
-Any other --flag value pairs go to the module's native tool unchanged: tectonic_pipeline
-scenario flags for tectonics/geology, world_pipeline flags for climate/world.
+Any other --flag value pairs go to the module's native tool unchanged: world_pipeline
+flags for every module (tectonics: the scenario options of `run --recipe tectonics`).
 """
 import argparse
 import json
@@ -38,12 +40,11 @@ import climate_benchmark
 UV = os.environ.get('UV', 'uv')
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / 'scripts/benchmarks'
-TECTONICS_EXE = paths.executable('tectonic_pipeline')
 WORLD_EXE = paths.executable('world_pipeline')
 RECIPE = ROOT / 'configs/tectonics-baseline.json'
 SCRATCH = ROOT / 'out/bench'
 EVALUATION = ROOT / 'scripts/evaluation'
-COMMANDS = {'tectonics': ('run', 'inspect', 'report'), 'geology': ('run',),
+COMMANDS = {'tectonics': ('run', 'inspect', 'report', 'experiment', 'evaluate'), 'geology': ('run',),
             'climate': ('run', 'check', 'report', 'experiment', 'evaluate'),
             'world': ('run', 'experiment', 'evaluate')}
 
@@ -92,12 +93,17 @@ def flatten(pairs):
     return [part for flag, value in pairs for part in ((flag,) if value is None else (flag, value))]
 
 
-def grid(args):
-    return [] if args.resolution is None else ['--width', str(args.resolution), '--height', str(args.resolution // 2)]
+def tectonics_bundle(exe, seed, resolution, extra, output):
+    """Unregistered final state of the tectonics recipe as a run bundle."""
+    if output.exists() and any(output.iterdir()):
+        raise SystemExit(f'Output exists; bundles are never overwritten: {output}')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    grid = [] if resolution is None else ['--resolution', resolution]
+    call([exe, 'run', '--recipe', 'tectonics', '--seed', seed, *grid, *extra, '--bundle', output])
 
 
 def tectonics(args, extra):
-    exe = args.executable or TECTONICS_EXE
+    exe = args.executable or WORLD_EXE
     if args.command == 'report':
         if not args.runs:
             raise SystemExit('tectonics report requires --runs')
@@ -108,9 +114,7 @@ def tectonics(args, extra):
         return
     if args.command == 'inspect':
         output = Path(args.output or SCRATCH / f'tectonics-seed{args.seed}-{args.resolution or 256}')
-        output.mkdir(parents=True, exist_ok=True)
-        call([exe, 'inspect', '--final', '--seed', args.seed, *grid(args), *extra,
-              '--bundle-output', output, '--output', output / 'summary.json'])
+        tectonics_bundle(exe, args.seed, args.resolution, extra, output)
         return
     recipe = json.loads(RECIPE.read_text(encoding='utf-8'))
     recipe['seed'] = args.seed
@@ -144,15 +148,13 @@ def tectonics(args, extra):
 
 
 def geology(args, extra):
-    exe = args.executable or TECTONICS_EXE
+    exe = args.executable or WORLD_EXE
     output = Path(args.output or SCRATCH / 'geology')
     widths = [args.resolution] if args.resolution else [128, 256]
     bundles = []
     for width in widths:
         bundle = output / f'seed-{args.seed}-{width}'
-        bundle.mkdir(parents=True, exist_ok=True)
-        call([exe, 'inspect', '--final', '--seed', args.seed, '--width', width, '--height', width // 2, *extra,
-              '--bundle-output', bundle, '--output', bundle / 'summary.json'])
+        tectonics_bundle(exe, args.seed, width, extra, bundle)
         bundles.append(bundle)
     python_script('benchmark-geology.py', '--bundle', *bundles, '--width', str(args.reference_width),
                   '--output', output / 'report.json')

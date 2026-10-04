@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from tectonics_experiment import digest
+from tectonics_experiment import bundle_files, digest, is_run_bundle, snapshot_manifest
 
 DTYPES = {
     "heightmap": "<f4", "plate_id": "<u4", "crust_age_steps": "<u4",
@@ -37,11 +37,27 @@ def elevation_m(height, sea_level):
 SUPPORTED_SCHEMAS = {6, 7}
 
 
+def read_field(source, name, shape, run_bundle):
+    """One field as the array type of the former snapshot files (run bundles hold .npy, ids as int32)."""
+    dtype = np.dtype((DTYPES | OPTIONAL_DTYPES)[name])
+    if run_bundle:
+        values = np.load(source)
+        if values.shape != shape:
+            raise ValueError(f"Wrong field size: {name}")
+        return values.astype(dtype)
+    if source.stat().st_size != int(np.prod(shape)) * dtype.itemsize:
+        raise ValueError(f"Wrong field size: {name}")
+    return np.fromfile(source, dtype=dtype).reshape(shape)
+
+
 def load_bundle(path, expected_hashes=None):
+    """A tectonic snapshot: a run bundle of world_pipeline (uw-run-bundle/v1) or a former snapshot bundle."""
     path = Path(path)
-    manifest = json.loads((path / "manifest.json").read_text())
+    run_bundle = is_run_bundle(path)
+    manifest = snapshot_manifest(path)
     if manifest.get("schema") != "tectonic-snapshot-bundle/v1" or manifest.get("contract_schema_version") not in SUPPORTED_SCHEMAS:
         raise ValueError("Unsupported native snapshot schema")
+    manifest["files"] = bundle_files(path)
     shape = (int(manifest["height"]), int(manifest["width"]))
     if min(shape) <= 0:
         raise ValueError("Empty native grid")
@@ -55,12 +71,12 @@ def load_bundle(path, expected_hashes=None):
             raise ValueError(f"Archived field hash mismatch: {name}")
         if name not in DTYPES and name not in OPTIONAL_DTYPES:
             continue
-        dtype = np.dtype((DTYPES | OPTIONAL_DTYPES)[name])
-        if source.stat().st_size != int(np.prod(shape)) * dtype.itemsize:
-            raise ValueError(f"Wrong field size: {name}")
-        fields[name] = np.fromfile(source, dtype=dtype).reshape(shape)
+        fields[name] = read_field(source, name, shape, run_bundle)
         if not np.isfinite(fields[name]).all():
             raise ValueError(f"Nonfinite field: {name}")
+    # A run bundle always carries the plume field; the former files had it only with plumes on.
+    if run_bundle and "plume_influence" in fields and not fields["plume_influence"].any():
+        del fields["plume_influence"]
     if set(DTYPES) - fields.keys():
         raise ValueError("Incomplete native field stack")
     if manifest.get("column_budget", {}).get("enabled") and {"continental_crust_m", "oceanic_crust_m", "sediment_m"} - fields.keys():

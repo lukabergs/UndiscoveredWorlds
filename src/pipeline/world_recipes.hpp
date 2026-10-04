@@ -28,6 +28,10 @@ WorldRecipe proceduralworldrecipe();
 WorldRecipe importedworldrecipe();
 // earth-climate: climate processes only on imported terrain; Geosphere is frozen.
 WorldRecipe earthclimaterecipe();
+// tectonics: the Geosphere initializer and the tectonics evolver on the engine's grid.
+WorldRecipe tectonicsrecipe();
+// True for the recipes that start from imported terrain.
+bool recipeimportsterrain(const WorldRecipe& recipe);
 bool findworldrecipe(std::string_view name, WorldRecipe& recipe);
 std::vector<std::string> worldrecipenames();
 

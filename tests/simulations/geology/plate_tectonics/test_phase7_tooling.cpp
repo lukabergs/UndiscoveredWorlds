@@ -5,7 +5,7 @@
 #include "gtest/gtest.h"
 #include "lithosphere.hpp"
 #include "tectonic_api.hpp"
-#include "tectonic_pipeline_support.hpp"
+#include "tectonic_snapshots.hpp"
 
 #include <filesystem>
 #include <fstream>

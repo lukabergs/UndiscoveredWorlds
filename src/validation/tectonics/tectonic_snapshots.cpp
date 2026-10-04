@@ -1,4 +1,4 @@
-#include "tectonic_pipeline_support.hpp"
+#include "tectonic_snapshots.hpp"
 
 #include "topography_codec.hpp"
 
@@ -530,8 +530,10 @@ void append_summary_json(std::ostream& output, const SnapshotSummary& summary,
     output << indent << "}";
 }
 
-void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snapshot& snapshot,
-                           const SnapshotBundleOptions& options) {
+// The snapshot record. A snapshot bundle's manifest also lists its files and
+// their hashes; the record inside a run bundle (include_files false) does not.
+void write_snapshot_record(std::ostream& output, const tectonics::contract::Snapshot& snapshot,
+                           const SnapshotBundleOptions& options, bool include_files) {
     const SnapshotSummary summary = summarize_snapshot(snapshot);
     const std::vector<uint16_t> metric_heightmap = to_metric_heightmap(snapshot);
     const RangeStats<float> height_stats = compute_stats(snapshot.heightmap);
@@ -542,11 +544,6 @@ void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snap
     const std::string boundary_segments_json = build_boundary_segments_json(snapshot);
     const std::string deforming_regions_json = build_deforming_regions_json(snapshot);
     const std::string tectonic_junctions_json = build_tectonic_junctions_json(snapshot);
-
-    std::ofstream output(path);
-    if (!output) {
-        fail("failed to open " + path.string());
-    }
 
     output << std::setprecision(17);
     output << "{\n";
@@ -628,96 +625,98 @@ void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snap
         output << "]\n  }";
     }
     output << ",\n";
-    output << "  \"files\": {\n";
-    if (budget.enabled) {
-        output << "    \"continental_crust_m\": \"continental_crust_m.f32\",\n";
-        output << "    \"oceanic_crust_m\": \"oceanic_crust_m.f32\",\n";
-        output << "    \"sediment_m\": \"sediment_m.f32\",\n";
-        output << "    \"rift_damage\": \"rift_damage.f32\",\n";
+    if (include_files) {
+        output << "  \"files\": {\n";
+        if (budget.enabled) {
+            output << "    \"continental_crust_m\": \"continental_crust_m.f32\",\n";
+            output << "    \"oceanic_crust_m\": \"oceanic_crust_m.f32\",\n";
+            output << "    \"sediment_m\": \"sediment_m.f32\",\n";
+            output << "    \"rift_damage\": \"rift_damage.f32\",\n";
+        }
+        if (!snapshot.plume_influence.empty())
+            output << "    \"plume_influence\": \"plume_influence.f32\",\n";
+        output << "    \"heightmap\": \"heightmap.f32\",\n";
+        output << "    \"plate_id\": \"plate_id.u32\",\n";
+        output << "    \"crust_age_steps\": \"crust_age_steps.u32\",\n";
+        output << "    \"crust_age_myr\": \"crust_age_myr.f32\",\n";
+        output << "    \"crust_thickness\": \"crust_thickness.f32\",\n";
+        output << "    \"crust_class\": \"crust_class.u8\",\n";
+        output << "    \"uplift_tendency\": \"uplift_tendency.f32\",\n";
+        output << "    \"subsidence_tendency\": \"subsidence_tendency.f32\",\n";
+        output << "    \"accumulated_strain\": \"accumulated_strain.f32\",\n";
+        output << "    \"boundary_type\": \"boundary_type.u8\",\n";
+        output << "    \"boundary_distance\": \"boundary_distance.u16\",\n";
+        output << "    \"boundary_segment_id\": \"boundary_segment_id.u32\",\n";
+        output << "    \"nearest_boundary_id\": \"nearest_boundary_id.u32\",\n";
+        output << "    \"deforming_region_id\": \"deforming_region_id.u32\",\n";
+        output << "    \"deforming_region_type\": \"deforming_region_type.u8\",\n";
+        output << "    \"deformation_rate\": \"deformation_rate.f32\",\n";
+        output << "    \"deformation_velocity_x\": \"deformation_velocity_x.f32\",\n";
+        output << "    \"deformation_velocity_y\": \"deformation_velocity_y.f32\",\n";
+        output << "    \"convergence_score\": \"convergence_score.u8\",\n";
+        output << "    \"divergence_score\": \"divergence_score.u8\",\n";
+        output << "    \"shear_score\": \"shear_score.u8\",\n";
+        output << "    \"geologic_regime\": \"geologic_regime.u8\",\n";
+        output << "    \"boundary_segments\": \"boundary_segments.json\",\n";
+        output << "    \"deforming_regions\": \"deforming_regions.json\",\n";
+        output << "    \"tectonic_junctions\": \"tectonic_junctions.json\"\n";
+        output << "  },\n";
+        output << "  \"hashes\": {\n";
+        if (budget.enabled) {
+            output << "    \"continental_crust_m\": \"" << fnv1a_hash(snapshot.continental_crust_m) << "\",\n";
+            output << "    \"oceanic_crust_m\": \"" << fnv1a_hash(snapshot.oceanic_crust_m) << "\",\n";
+            output << "    \"sediment_m\": \"" << fnv1a_hash(snapshot.sediment_m) << "\",\n";
+            output << "    \"rift_damage\": \"" << fnv1a_hash(snapshot.rift_damage) << "\",\n";
+        }
+        if (!snapshot.plume_influence.empty())
+            output << "    \"plume_influence\": \"" << fnv1a_hash(snapshot.plume_influence) << "\",\n";
+        output << "    \"heightmap\": \"" << fnv1a_hash(snapshot.heightmap) << "\",\n";
+        output << "    \"plate_id\": \"" << fnv1a_hash(snapshot.plate_id) << "\",\n";
+        output << "    \"crust_age_steps\": \"" << fnv1a_hash(snapshot.crust_age_steps)
+               << "\",\n";
+        output << "    \"crust_age_myr\": \"" << fnv1a_hash(snapshot.crust_age_myr) << "\",\n";
+        output << "    \"crust_thickness\": \"" << fnv1a_hash(snapshot.crust_thickness)
+               << "\",\n";
+        output << "    \"crust_class\": \"" << fnv1a_hash(snapshot.crust_class) << "\",\n";
+        output << "    \"uplift_tendency\": \"" << fnv1a_hash(snapshot.uplift_tendency)
+               << "\",\n";
+        output << "    \"subsidence_tendency\": \""
+               << fnv1a_hash(snapshot.subsidence_tendency) << "\",\n";
+        output << "    \"accumulated_strain\": \"" << fnv1a_hash(snapshot.accumulated_strain)
+               << "\",\n";
+        output << "    \"boundary_type\": \"" << fnv1a_hash(snapshot.boundary_type)
+               << "\",\n";
+        output << "    \"boundary_distance\": \"" << fnv1a_hash(snapshot.boundary_distance)
+               << "\",\n";
+        output << "    \"boundary_segment_id\": \"" << fnv1a_hash(snapshot.boundary_segment_id)
+               << "\",\n";
+        output << "    \"nearest_boundary_id\": \"" << fnv1a_hash(snapshot.nearest_boundary_id)
+               << "\",\n";
+        output << "    \"deforming_region_id\": \"" << fnv1a_hash(snapshot.deforming_region_id)
+               << "\",\n";
+        output << "    \"deforming_region_type\": \""
+               << fnv1a_hash(snapshot.deforming_region_type) << "\",\n";
+        output << "    \"deformation_rate\": \"" << fnv1a_hash(snapshot.deformation_rate)
+               << "\",\n";
+        output << "    \"deformation_velocity_x\": \""
+               << fnv1a_hash(snapshot.deformation_velocity_x) << "\",\n";
+        output << "    \"deformation_velocity_y\": \""
+               << fnv1a_hash(snapshot.deformation_velocity_y) << "\",\n";
+        output << "    \"convergence_score\": \"" << fnv1a_hash(snapshot.convergence_score)
+               << "\",\n";
+        output << "    \"divergence_score\": \"" << fnv1a_hash(snapshot.divergence_score)
+               << "\",\n";
+        output << "    \"shear_score\": \"" << fnv1a_hash(snapshot.shear_score) << "\",\n";
+        output << "    \"geologic_regime\": \"" << fnv1a_hash(snapshot.geologic_regime)
+               << "\",\n";
+        output << "    \"boundary_segments\": \"" << fnv1a_hash(boundary_segments_json)
+               << "\",\n";
+        output << "    \"deforming_regions\": \"" << fnv1a_hash(deforming_regions_json)
+               << "\",\n";
+        output << "    \"tectonic_junctions\": \"" << fnv1a_hash(tectonic_junctions_json)
+               << "\"\n";
+        output << "  },\n";
     }
-    if (!snapshot.plume_influence.empty())
-        output << "    \"plume_influence\": \"plume_influence.f32\",\n";
-    output << "    \"heightmap\": \"heightmap.f32\",\n";
-    output << "    \"plate_id\": \"plate_id.u32\",\n";
-    output << "    \"crust_age_steps\": \"crust_age_steps.u32\",\n";
-    output << "    \"crust_age_myr\": \"crust_age_myr.f32\",\n";
-    output << "    \"crust_thickness\": \"crust_thickness.f32\",\n";
-    output << "    \"crust_class\": \"crust_class.u8\",\n";
-    output << "    \"uplift_tendency\": \"uplift_tendency.f32\",\n";
-    output << "    \"subsidence_tendency\": \"subsidence_tendency.f32\",\n";
-    output << "    \"accumulated_strain\": \"accumulated_strain.f32\",\n";
-    output << "    \"boundary_type\": \"boundary_type.u8\",\n";
-    output << "    \"boundary_distance\": \"boundary_distance.u16\",\n";
-    output << "    \"boundary_segment_id\": \"boundary_segment_id.u32\",\n";
-    output << "    \"nearest_boundary_id\": \"nearest_boundary_id.u32\",\n";
-    output << "    \"deforming_region_id\": \"deforming_region_id.u32\",\n";
-    output << "    \"deforming_region_type\": \"deforming_region_type.u8\",\n";
-    output << "    \"deformation_rate\": \"deformation_rate.f32\",\n";
-    output << "    \"deformation_velocity_x\": \"deformation_velocity_x.f32\",\n";
-    output << "    \"deformation_velocity_y\": \"deformation_velocity_y.f32\",\n";
-    output << "    \"convergence_score\": \"convergence_score.u8\",\n";
-    output << "    \"divergence_score\": \"divergence_score.u8\",\n";
-    output << "    \"shear_score\": \"shear_score.u8\",\n";
-    output << "    \"geologic_regime\": \"geologic_regime.u8\",\n";
-    output << "    \"boundary_segments\": \"boundary_segments.json\",\n";
-    output << "    \"deforming_regions\": \"deforming_regions.json\",\n";
-    output << "    \"tectonic_junctions\": \"tectonic_junctions.json\"\n";
-    output << "  },\n";
-    output << "  \"hashes\": {\n";
-    if (budget.enabled) {
-        output << "    \"continental_crust_m\": \"" << fnv1a_hash(snapshot.continental_crust_m) << "\",\n";
-        output << "    \"oceanic_crust_m\": \"" << fnv1a_hash(snapshot.oceanic_crust_m) << "\",\n";
-        output << "    \"sediment_m\": \"" << fnv1a_hash(snapshot.sediment_m) << "\",\n";
-        output << "    \"rift_damage\": \"" << fnv1a_hash(snapshot.rift_damage) << "\",\n";
-    }
-    if (!snapshot.plume_influence.empty())
-        output << "    \"plume_influence\": \"" << fnv1a_hash(snapshot.plume_influence) << "\",\n";
-    output << "    \"heightmap\": \"" << fnv1a_hash(snapshot.heightmap) << "\",\n";
-    output << "    \"plate_id\": \"" << fnv1a_hash(snapshot.plate_id) << "\",\n";
-    output << "    \"crust_age_steps\": \"" << fnv1a_hash(snapshot.crust_age_steps)
-           << "\",\n";
-    output << "    \"crust_age_myr\": \"" << fnv1a_hash(snapshot.crust_age_myr) << "\",\n";
-    output << "    \"crust_thickness\": \"" << fnv1a_hash(snapshot.crust_thickness)
-           << "\",\n";
-    output << "    \"crust_class\": \"" << fnv1a_hash(snapshot.crust_class) << "\",\n";
-    output << "    \"uplift_tendency\": \"" << fnv1a_hash(snapshot.uplift_tendency)
-           << "\",\n";
-    output << "    \"subsidence_tendency\": \""
-           << fnv1a_hash(snapshot.subsidence_tendency) << "\",\n";
-    output << "    \"accumulated_strain\": \"" << fnv1a_hash(snapshot.accumulated_strain)
-           << "\",\n";
-    output << "    \"boundary_type\": \"" << fnv1a_hash(snapshot.boundary_type)
-           << "\",\n";
-    output << "    \"boundary_distance\": \"" << fnv1a_hash(snapshot.boundary_distance)
-           << "\",\n";
-    output << "    \"boundary_segment_id\": \"" << fnv1a_hash(snapshot.boundary_segment_id)
-           << "\",\n";
-    output << "    \"nearest_boundary_id\": \"" << fnv1a_hash(snapshot.nearest_boundary_id)
-           << "\",\n";
-    output << "    \"deforming_region_id\": \"" << fnv1a_hash(snapshot.deforming_region_id)
-           << "\",\n";
-    output << "    \"deforming_region_type\": \""
-           << fnv1a_hash(snapshot.deforming_region_type) << "\",\n";
-    output << "    \"deformation_rate\": \"" << fnv1a_hash(snapshot.deformation_rate)
-           << "\",\n";
-    output << "    \"deformation_velocity_x\": \""
-           << fnv1a_hash(snapshot.deformation_velocity_x) << "\",\n";
-    output << "    \"deformation_velocity_y\": \""
-           << fnv1a_hash(snapshot.deformation_velocity_y) << "\",\n";
-    output << "    \"convergence_score\": \"" << fnv1a_hash(snapshot.convergence_score)
-           << "\",\n";
-    output << "    \"divergence_score\": \"" << fnv1a_hash(snapshot.divergence_score)
-           << "\",\n";
-    output << "    \"shear_score\": \"" << fnv1a_hash(snapshot.shear_score) << "\",\n";
-    output << "    \"geologic_regime\": \"" << fnv1a_hash(snapshot.geologic_regime)
-           << "\",\n";
-    output << "    \"boundary_segments\": \"" << fnv1a_hash(boundary_segments_json)
-           << "\",\n";
-    output << "    \"deforming_regions\": \"" << fnv1a_hash(deforming_regions_json)
-           << "\",\n";
-    output << "    \"tectonic_junctions\": \"" << fnv1a_hash(tectonic_junctions_json)
-           << "\"\n";
-    output << "  },\n";
     output << "  \"heightmap_stats\": {\n";
     output << "    \"internal_min\": " << height_stats.min << ",\n";
     output << "    \"internal_max\": " << height_stats.max << ",\n";
@@ -764,6 +763,15 @@ void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snap
     }
     output << "  ]\n";
     output << "}\n";
+}
+
+void write_bundle_manifest(const fs::path& path, const tectonics::contract::Snapshot& snapshot,
+                           const SnapshotBundleOptions& options) {
+    std::ofstream output(path);
+    if (!output) {
+        fail("failed to open " + path.string());
+    }
+    write_snapshot_record(output, snapshot, options, true);
     if (!output) {
         fail("failed to write " + path.string());
     }
@@ -929,6 +937,13 @@ bool all_numeric_zero(const NumericFieldDiff& diff) {
 }
 
 } // namespace
+
+std::string snapshot_record_json(const tectonics::contract::Snapshot& snapshot,
+                                 const SnapshotBundleOptions& options) {
+    std::ostringstream output;
+    write_snapshot_record(output, snapshot, options, false);
+    return output.str();
+}
 
 void write_snapshot_bundle(const fs::path& output_dir, const tectonics::contract::Snapshot& snapshot,
                            const SnapshotBundleOptions& options) {

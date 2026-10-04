@@ -3,7 +3,7 @@
 The implementation is `src/simulations/geology/plate_tectonics` in this working
 tree. `tectonic_contract.hpp` defines `tectonics::contract::Snapshot` and its
 objects. `capture_snapshot(lithosphere)` copies a state; `tectonic_api.hpp`
-exposes borrowed runtime arrays. The app and `tectonic_pipeline` use the same
+exposes borrowed runtime arrays. The app and the `tectonics` recipe of `world_pipeline` use the same
 engine and the compiled `configs/tectonics-baseline.json` recipe.
 
 ## Geometry and time

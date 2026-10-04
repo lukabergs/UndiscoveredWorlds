@@ -1,90 +1,106 @@
-"""Public CLI checks for the sole current tectonic engine; all worlds use seed 1."""
+"""Command-line checks of the tectonics recipe of world_pipeline; all worlds use seed 1.
+
+    uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
+
+Rejected options and the snapshot record are checked here; grid, value-range and
+repeat checks of a full run belong to the profile configs/evaluation/tectonics.json.
+"""
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 
+SNAPSHOT = "tables/geosphere/tectonic_snapshot.json"
+
 
 def main(executable):
     executable = str(Path(executable).absolute())
-    base = [executable, "inspect", "--seed", "1", "--width", "16", "--height", "8"]
+    root_directory = Path(__file__).resolve().parents[2]
+    base = [executable, "run", "--recipe", "tectonics", "--seed", "1", "--resolution", "32"]
 
-    def invoke(extra):
-        return subprocess.run(base + extra, capture_output=True, text=True, check=True)
+    def run(extra, **options):
+        return subprocess.run(base + extra, cwd=root_directory, capture_output=True, text=True, **options)
 
-    first = invoke(["--time-myr", ".5", "--delta-time-myr", ".5"])
-    second = invoke(["--delta-time-myr", ".5", "--time-myr", ".5"])
-    assert json.loads(first.stdout) == json.loads(second.stdout), "Argument order changed checkpoint"
-    for extra in (
-        ["--time-myr", ".25", "--delta-time-myr", ".5"],
-        ["--delta-time-myr", "0"], ["--time-myr", "1e20"], ["--time-myr", "-1"],
-        ["--evolution-duration-myr", "0"], ["--evolution-duration-myr", "nan"],
-        ["--evolution-duration-myr", "-1"], ["--evolution-duration-myr", "1e20"],
-        ["--unknown-option", "1"],
-        ["--world-width-km", "0"], ["--mantle-flow-speed-cm-yr", "-1"],
-        ["--coastal-gpe-strength", "1.01"], ["--boundary-force-ramp-cm-yr", "-1"],
-        ["--initial-margin-width-m", "4001"], ["--sediment-load-feedback", "maybe"],
-        ["--noise-pass-wavelength-km", "0"], ["--transport-subdivision", "3"],
-        ["--deformation-variation", ".6"], ["--subduction-coupling", "1.1"],
-        ["--submarine-erosion-ratio", "1.1"], ["--thermal-subsidence-strength", "-1"],
-        ["--initial-ocean-depth-m", "65535"], ["--initial-max-height-m", "30000"],
-        ["--plume-count", "65"], ["--plume-tail-radius-km", "0"], ["--plume-weakening", "1.5"],
-        ["--plume-count", "2", "--plume-weakening", ".5"],  # weakening needs progressive rifting
-    ):
-        result = subprocess.run(base + extra, capture_output=True, text=True)
-        assert result.returncode != 0, f"Invalid option accepted: {extra}"
+    def manifest(bundle):
+        return json.loads((bundle / "manifest.json").read_text())
 
-    recipe = json.loads((Path(__file__).resolve().parents[2] / "configs/tectonics-baseline.json").read_text())
-    explicit = [part for key, value in recipe["scenario"].items() for part in ("--" + key, str(value))]
+    def record(bundle):
+        return json.loads((bundle / SNAPSHOT).read_text())
+
+    def field_hashes(bundle):
+        return {entry["id"]: entry["hash"] for entry in manifest(bundle)["fields"]}
+
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
-        manifests = []
+
+        # A checkpoint on a half-Myr step, whatever the order of the options.
+        checkpoint = "01-geology.plate_tectonics-t0000.500"
+        orders = (["--checkpoint-at", ".5", "--delta-time-myr", ".5"], ["--delta-time-myr", ".5", "--checkpoint-at", ".5"])
+        for index, order in enumerate(orders):
+            run(order + ["--evolution-duration-myr", "2", "--checkpoint-dir", str(root / f"order{index}")], check=True)
+        first, second = root / "order0" / checkpoint, root / "order1" / checkpoint
+        assert record(first)["time_myr"] == .5 and record(first)["update_count"] == 1
+        assert field_hashes(first) == field_hashes(second), "Argument order changed checkpoint"
+
+        for extra in (
+            ["--checkpoint-at", ".25", "--delta-time-myr", ".5"], ["--checkpoint-at", "-1"],
+            ["--delta-time-myr", "0"],
+            ["--evolution-duration-myr", "0"], ["--evolution-duration-myr", "nan"],
+            ["--evolution-duration-myr", "-1"], ["--evolution-duration-myr", "1e20"],
+            ["--unknown-option", "1"],
+            ["--world-width-km", "0"], ["--mantle-flow-speed-cm-yr", "-1"],
+            ["--coastal-gpe-strength", "1.01"], ["--boundary-force-ramp-cm-yr", "-1"],
+            ["--initial-margin-width-m", "4001"], ["--sediment-load-feedback", "maybe"],
+            ["--noise-pass-wavelength-km", "0"], ["--transport-subdivision", "3"],
+            ["--deformation-variation", ".6"], ["--subduction-coupling", "1.1"],
+            ["--submarine-erosion-ratio", "1.1"], ["--thermal-subsidence-strength", "-1"],
+            ["--initial-ocean-depth-m", "65535"], ["--initial-max-height-m", "30000"],
+            ["--plume-count", "65"], ["--plume-tail-radius-km", "0"], ["--plume-weakening", "1.5"],
+            ["--plume-count", "2", "--plume-weakening", ".5"],  # weakening needs progressive rifting
+            ["--mineral-history", "maybe"],
+        ):
+            options = extra if "--evolution-duration-myr" in extra else extra + ["--evolution-duration-myr", "2"]
+            result = run(options + ["--checkpoint-dir", str(root / "rejected")])
+            assert result.returncode != 0, f"Invalid option accepted: {extra}"
+
+        recipe = json.loads((root_directory / "configs/tectonics-baseline.json").read_text())
+        explicit = [part for key, value in recipe["scenario"].items() for part in ("--" + key, str(value))]
+        records = []
         for name, options in (("defaults", []), ("explicit", explicit)):
             output = root / name
-            invoke(options + ["--evolution-duration-myr", "6", "--final", "--bundle-output", str(output)])
-            manifest = json.loads((output / "manifest.json").read_text())
-            manifests.append(manifest)
-            scenario = manifest["run_scenario"]
+            run(options + ["--evolution-duration-myr", "6", "--checkpoint-at", "3",
+                           "--checkpoint-dir", str(root / f"{name}-checkpoints"), "--bundle", str(output)], check=True)
+            snapshot = record(output)
+            records.append(snapshot)
+            scenario = snapshot["run_scenario"]
             assert scenario["motion_model"] == "force-balance"
             assert scenario["surface_model"] == "isostatic-columns"
             assert scenario["transport_subdivision"] == recipe["scenario"]["transport-subdivision"]
             assert scenario["margin_processes"] and scenario["boundary_conditioned_terrain"]
-            assert manifest["time_myr"] == 6
-            assert manifest["topology_diagnostics"]["enabled"]
-            assert manifest["column_budget"]["enabled"]
-            assert abs(manifest["column_budget"]["relative_mass_residual"]) < 1e-9
-            for field in ("continental_crust_m", "oceanic_crust_m", "sediment_m"):
-                assert (output / manifest["files"][field]).stat().st_size == 16 * 8 * 4
-        assert manifests[0]["run_scenario"] == manifests[1]["run_scenario"]
-        for field, filename in manifests[0]["files"].items():
-            assert (root / "defaults" / filename).read_bytes() == (
-                root / "explicit" / manifests[1]["files"][field]).read_bytes(), field
+            assert snapshot["time_myr"] == 6 and snapshot["update_count"] == 6 and snapshot["label"] == "final"
+            assert snapshot["topology_diagnostics"]["enabled"]
+            assert snapshot["column_budget"]["enabled"]
+            assert abs(snapshot["column_budget"]["relative_mass_residual"]) < 1e-9
+            fields = {entry["id"]: entry for entry in manifest(output)["fields"]}
+            for field in ("geosphere.continental_crust", "geosphere.oceanic_crust", "geosphere.sediment",
+                          "geosphere.tectonic_height", "geosphere.plate_id"):
+                assert fields[field]["shape"] == [16, 32], field
+            middle = record(root / f"{name}-checkpoints" / "01-geology.plate_tectonics-t0003.000")
+            assert middle["time_myr"] == 3 and middle["update_count"] == 3 and middle["label"] == "update000003"
+        assert records[0]["run_scenario"] == records[1]["run_scenario"]
+        assert field_hashes(root / "defaults") == field_hashes(root / "explicit"), "Explicit recipe values changed fields"
 
-        output = root / "batch"
-        subprocess.run([executable, "batch-export", "--seed", "1", "--width", "16", "--height", "8",
-                        "--evolution-duration-myr", "6", "--output", str(output),
-                        "--checkpoint-at-time-myr", "3", "--checkpoint-at-update", "3"],
-                       capture_output=True, text=True, check=True)
-        batch = json.loads((output / "batch_manifest.json").read_text())
-        for label in ("time3.000Myr", "update000003"):
-            item = next(s for s in batch["snapshots"] if s["label"] == label)
-            assert item["time_myr"] == 3 and item["update_count"] == 3
-        assert not (output / "mineral_budget.json").exists(), "Mineral history must be opt-in"
-
-        output = root / "minerals"
-        small = ["batch-export", "--seed", "1", "--width", "16", "--height", "8", "--evolution-duration-myr", "6"]
-        subprocess.run([executable, *small, "--output", str(output), "--mineral-history", "on"],
-                       capture_output=True, text=True, check=True)
-        budget = json.loads((output / "mineral_budget.json").read_text())
-        rows = (output / "mineral_deposits.csv").read_text().splitlines()
+        # Mineral history is recorded with the run and can be switched off.
+        budget = json.loads((root / "defaults/tables/geosphere/mineral_budget.json").read_text())
+        rows = (root / "defaults/tables/geosphere/mineral_deposits.csv").read_text().splitlines()
         assert budget["schema"] == "mineral-budget/v1"
         assert rows[0].startswith("id,system,origin,fate,")
         listed = budget["inherited"]["count"] + sum(item["count"] for item in budget["formed"].values())
         assert listed > 0 and len(rows) - 1 == listed, "Deposit list and budget disagree"
-        rejected = subprocess.run([executable, *small, "--output", str(root / "rejected"), "--mineral-history", "maybe"],
-                                  capture_output=True, text=True)
-        assert rejected.returncode != 0, "Invalid --mineral-history value accepted"
+        run(["--evolution-duration-myr", "6", "--mineral-history", "off", "--bundle", str(root / "no-minerals")], check=True)
+        assert len((root / "no-minerals/tables/geosphere/mineral_deposits.csv").read_text().splitlines()) == 1
+        assert field_hashes(root / "no-minerals") == field_hashes(root / "defaults"), "Mineral history changed tectonics"
     print("Tectonics CLI passed: shared recipe, native fields, budgets, continuous time, invalid-option rejection, "
           "mineral history")
 

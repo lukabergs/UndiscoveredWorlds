@@ -7,6 +7,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -78,6 +80,11 @@ struct WorldStageParameters
     double tectonicDurationMyr = 0;
     int tectonicPlateCount = 0;
     float tectonicDeltaTimeMyr = 0.0f;
+    std::shared_ptr<const tectonics::scenario::Scenario> tectonicScenario;   // null: configs/tectonics-baseline.json
+    bool tectonicWorldGrid = false;             // the engine runs on the world grid (tectonics recipe)
+    bool tectonicMineralHistory = true;
+    double tectonicCheckpointEveryMyr = 0;      // checkpoints inside the tectonics evolver, see evolverCheckpoint
+    std::vector<double> tectonicCheckpointsMyr;
     int seaLevel = 0;                           // terraforming target; tectonics writes the result back
     bool useHypsometricRemap = false;
     std::vector<WorldCurvePoint> hypsometricCurve;  // monotone target curve, sampled by the editor
@@ -97,6 +104,9 @@ struct GenerationExecutionContext
     std::vector<std::vector<bool>>* okmountains = nullptr;
     const ImportedClimateMaps* importedClimate = nullptr;
     bool climateOnly = false; // Recompute climate on an externally supplied, immutable terrain.
+    // Called at each checkpoint of an evolver with the world as of that time (Myr).
+    // An exception stops the step.
+    std::function<void(GenerationStageId stage, double timeMyr)> evolverCheckpoint;
 };
 
 inline constexpr int kHeightHistogramBins = 64;

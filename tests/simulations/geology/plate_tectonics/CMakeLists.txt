@@ -38,7 +38,7 @@ add_executable(PlateTectonicsTests
     test_topography_io.cpp
 )
 target_link_libraries(PlateTectonicsTests PRIVATE
-    plate_tectonics PlateTectonicsHeightmapIO PlateTectonicsPipelineSupport
+    plate_tectonics uw_tectonics_heightmap_io uw_tectonics_snapshots
     GTest::gtest GTest::gtest_main)
 target_compile_definitions(PlateTectonicsTests PRIVATE
     PLATE_TECTONICS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")

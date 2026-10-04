@@ -34,9 +34,10 @@ native ownership, topology identities, crust class/age, elevation, the
 continental crust of the isostatic columns, boundaries and the displacement
 supplied to the conservative column solver. `uw_mineral_tectonics` fills it
 through `tectonic_api.hpp` and the engine's column model. The app drives history
-from `generateworldtectonics`. `tectonic_pipeline batch-export --mineral-history on`
-runs the same history and writes `mineral_deposits.csv` (one row per deposit,
-enum codes and world fractions) and `mineral_budget.json` (`mineral-budget/v1`).
+from `generateworldtectonics`. `world_pipeline run --recipe tectonics` runs the same history (default;
+`--mineral-history off` disables it) and writes the tables
+`geosphere.mineral_deposits` (CSV: one row per deposit, enum codes and world
+fractions) and `geosphere.mineral_budget` (JSON, `mineral-budget/v1`) at the end of the run.
 Both use the same in-repo engine and baseline recipe, and the same seed stream.
 
 Markers approximate point movement in the native displacement field. Ownership

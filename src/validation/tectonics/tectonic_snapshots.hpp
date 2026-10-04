@@ -1,5 +1,5 @@
-#ifndef TECTONIC_PIPELINE_SUPPORT_HPP
-#define TECTONIC_PIPELINE_SUPPORT_HPP
+#ifndef TECTONIC_SNAPSHOTS_HPP
+#define TECTONIC_SNAPSHOTS_HPP
 
 #include "tectonic_contract.hpp"
 
@@ -140,6 +140,11 @@ void write_snapshot_bundle(const std::filesystem::path& output_dir,
                            const tectonics::contract::Snapshot& snapshot,
                            const SnapshotBundleOptions& options);
 LoadedSnapshotBundle load_snapshot_bundle(const std::filesystem::path& input_dir);
+// The record of a snapshot as JSON: label, time, scenario, engine diagnostics,
+// statistics and plates. It is the manifest of a snapshot bundle without the
+// file and hash tables, and the geosphere.tectonic_snapshot table of a run bundle.
+std::string snapshot_record_json(const tectonics::contract::Snapshot& snapshot,
+                                 const SnapshotBundleOptions& options);
 SnapshotSummary summarize_snapshot(const tectonics::contract::Snapshot& snapshot);
 SnapshotComparison compare_snapshots(const tectonics::contract::Snapshot& a,
                                      const tectonics::contract::Snapshot& b,

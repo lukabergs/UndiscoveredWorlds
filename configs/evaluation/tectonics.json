@@ -1,0 +1,39 @@
+{
+  "schema": "uw-evaluation-profile/v1",
+  "module": "tectonics",
+  "description": "The tectonics module alone (tectonics recipe: starting Geosphere, then plate tectonics on the engine's grid, default planet body). Judged by the user's review of the maps and animations of bench.py tectonics run and report; the checks guard the grid, value ranges and determinism. Earth hypsometry is context for the review, not a target.",
+  "evidence": {"checks": "required", "validation": "context", "review": "primary"},
+  "run": {"tool": "world_pipeline", "resolution": 256,
+          "arguments": ["run", "--recipe", "tectonics", "--resolution", "{width}"]},
+  "checks": [
+    {"check": "grid"},
+    {"check": "required",
+     "fields": ["geosphere.base_elevation", "geosphere.sea_level", "geosphere.tectonic_height", "geosphere.plate_id",
+                "geosphere.crust_age", "geosphere.crust_class", "geosphere.continental_crust", "geosphere.oceanic_crust",
+                "geosphere.sediment", "geosphere.boundary_type", "geosphere.geologic_regime"],
+     "tables": ["geosphere.tectonic_snapshot", "geosphere.tectonic_boundary_segments"]},
+    {"check": "written", "fields": ["geosphere.base_elevation", "geosphere.tectonic_height", "geosphere.plate_id",
+                                    "geosphere.crust_age", "geosphere.continental_crust"]},
+    {"check": "finite", "fields": ["geosphere.*"]},
+    {"check": "range", "field": "geosphere.crust_age", "min": 0},
+    {"check": "range", "field": "geosphere.continental_crust", "min": 0},
+    {"check": "range", "field": "geosphere.oceanic_crust", "min": 0},
+    {"check": "range", "field": "geosphere.sediment", "min": 0},
+    {"check": "range", "field": "geosphere.rift_damage", "min": 0, "max": 1},
+    {"check": "range", "field": "geosphere.plume_influence", "min": 0, "max": 1},
+    {"check": "repeat"}
+  ],
+  "validation": [
+    {"id": "hypsometry", "kind": "hypsometry", "reference_width": 2048}
+  ],
+  "maps": [
+    {"name": "elevation", "title": "Surface elevation (m)", "derived": "surface_elevation", "palette": "tectonics:elevation"},
+    {"name": "crust-age", "title": "Crust age (Myr)", "field": "geosphere.crust_age", "palette": "tectonics:crust_age_myr"},
+    {"name": "crust-class", "title": "Crust class", "field": "geosphere.crust_class", "palette": "tectonics:crust_class"},
+    {"name": "regime", "title": "Geologic regime", "field": "geosphere.geologic_regime", "palette": "tectonics:geologic_regime"},
+    {"name": "boundaries", "title": "Plate boundary type", "field": "geosphere.boundary_type", "palette": "tectonics:boundary_type"},
+    {"name": "plates", "title": "Plates", "field": "geosphere.plate_id", "palette": "tectonics:plate_id"},
+    {"name": "continental-crust", "title": "Continental crust (m)", "field": "geosphere.continental_crust", "palette": "tectonics:continental_crust_m"},
+    {"name": "sediment", "title": "Sediment (m)", "field": "geosphere.sediment", "palette": "tectonics:sediment_m"}
+  ]
+}

@@ -7,6 +7,7 @@
 #include "climate_options.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -33,16 +34,21 @@ void printcommandlineusage()
     cout << "  generate            Generate a procedural world, or climate on imported terrain with --climate-only.\n";
     cout << "  climate-benchmark   Run the earth-climate recipe on the Earth terrain and record a numbered run.\n";
     cout << "Options of run:\n";
-    cout << "  --recipe <name>         procedural-world, imported-world or earth-climate. Imported recipes use the\n";
+    cout << "  --recipe <name>         procedural-world, imported-world, earth-climate or tectonics. Imported recipes use the\n";
     cout << "                           Earth terrain of configs/app.env at --resolution (default 512) unless\n";
     cout << "                           --import-land and --import-sea or --from-bundle are given.\n";
     cout << "  --from-bundle <dir>     Start from the world of a run bundle or checkpoint. Its seed and grid apply;\n";
     cout << "                           other options are not inherited.\n";
     cout << "  --steps <a..b>          Run steps a to b of the recipe (indices or process ids; a.. and ..b allowed).\n";
     cout << "  --only <process>        Run one step.\n";
-    cout << "  --checkpoint-at <step[,step...]>  Write a bundle after these steps.\n";
-    cout << "  --checkpoint-every <N>  Write a bundle after every N steps of the run.\n";
-    cout << "  --checkpoint-dir <dir>  Checkpoint directory (default <bundle>-checkpoints); one bundle per step.\n";
+    cout << "  --checkpoint-at <step|Myr[,...]>  Write a bundle after these steps (process ids) and at these\n";
+    cout << "                           times of the tectonics step (numbers, in Myr).\n";
+    cout << "  --checkpoint-every <Myr>  Write a bundle at this interval of the tectonics step.\n";
+    cout << "  --checkpoint-dir <dir>  Checkpoint directory (default <bundle>-checkpoints); one bundle per checkpoint.\n";
+    cout << "  --duration <Myr>        Tectonic duration (as --tectonic-duration-myr).\n";
+    cout << "  --mineral-history <on|off>  Record mineral deposits during tectonics (default on).\n";
+    cout << "                           The tectonics recipe runs the engine on the world grid (--resolution, default\n";
+    cout << "                           from configs/tectonics-baseline.json) with the default planet body.\n";
     cout << "Options:\n";
     cout << "  --climate-only          With generate: recompute climate on imported terrain without modifying it.\n";
     cout << "  --seed <number>         Use a fixed world seed (default 1).\n";
@@ -56,6 +62,7 @@ void printcommandlineusage()
     cout << "  --world-width <pixels>  Set generated world width in pixels.\n";
     cout << "  --world-height <pixels> Set generated world height in pixels.\n";
     printclimateoptionsusage(cout);
+    printtectonicoptionsusage(cout);
     cout << "  --resolution <width>    Set an even global width and derive height as width/2.\n";
     cout << "  --reference-precip <csv> Compare against a precipitation reference grid.\n";
     cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
@@ -146,7 +153,7 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
         }
 
         if (isclimateoption(argument) ||
-            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
+            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--duration" || argument == "--mineral-history" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -199,15 +206,37 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                     {
                         const size_t comma = min(value.find(',', start), value.size());
                         if (comma > start)
-                            options.checkpointAt.push_back(value.substr(start, comma - start));
+                        {
+                            // A number is a time of the tectonics step, anything else a step.
+                            const string item = value.substr(start, comma - start);
+                            size_t parsed = 0;
+                            double timemyr = 0.0;
+                            try { timemyr = stod(item, &parsed); } catch (const exception&) { parsed = 0; }
+                            if (parsed == item.size())
+                                options.checkpointTimesMyr.push_back(timemyr);
+                            else
+                                options.checkpointAt.push_back(item);
+                        }
                         start = comma + 1;
                     }
                 }
                 else if (argument == "--checkpoint-every")
                 {
-                    options.checkpointEvery = stoi(value);
-                    if (options.checkpointEvery < 1)
+                    options.checkpointEveryMyr = stod(value);
+                    if (!(options.checkpointEveryMyr > 0.0))
                         throw invalid_argument("checkpoint-every");
+                }
+                else if (argument == "--duration")
+                {
+                    options.plateTectonicsDurationMyr = stod(value);
+                    if (!(options.plateTectonicsDurationMyr > 0.0))
+                        throw invalid_argument("duration");
+                }
+                else if (argument == "--mineral-history")
+                {
+                    if (value != "on" && value != "off")
+                        throw invalid_argument("mineral-history");
+                    options.mineralHistory = value == "on";
                 }
                 else if (argument == "--checkpoint-dir")
                 {
@@ -314,6 +343,26 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
             }
 
             continue;
+        }
+
+        // Every other --key value pair is a tectonic scenario option, or unknown.
+        if (index + 1 < argc)
+        {
+            try
+            {
+                if (parsetectonicoption(options.tectonicScenario, argument, arguments[index + 1]))
+                {
+                    options.tectonicScenarioGiven = true;
+                    index++;
+                    continue;
+                }
+            }
+            catch (const exception& error)
+            {
+                cerr << error.what() << '\n';
+                cleanup();
+                return false;
+            }
         }
 
         cerr << "Unknown argument: " << argument << '\n';
@@ -487,21 +536,27 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             cerr << "run requires --recipe (earth-climate replaces --climate-only).\n";
             return 1;
         }
-        if (hasimport && (frombundle || recipe.name == "procedural-world"))
+        if (hasimport && (frombundle || !recipeimportsterrain(recipe)))
         {
-            cerr << (frombundle ? "--from-bundle replaces imported terrain.\n" : "Recipe procedural-world cannot start from imported terrain.\n");
+            if (frombundle)
+                cerr << "--from-bundle replaces imported terrain.\n";
+            else
+                cerr << "Recipe " << recipe.name << " cannot start from imported terrain.\n";
             return 1;
         }
     }
-    else if (frombundle || !options.stepsText.empty() || !options.checkpointAt.empty() || options.checkpointEvery > 0)
+    else if (frombundle || !options.stepsText.empty() || !options.checkpointAt.empty() ||
+        !options.checkpointTimesMyr.empty() || options.checkpointEveryMyr > 0.0)
     {
         cerr << "--from-bundle, --steps, --only and checkpoints belong to the run command.\n";
         return 1;
     }
 
     // run: a recipe on imported terrain imports the Earth terrain unless told otherwise.
-    const bool importedworld = options.runCommand ? recipe.name != "procedural-world" && !frombundle
+    const bool importedworld = options.runCommand ? recipeimportsterrain(recipe) && !frombundle
         : options.earthClimateBenchmark || hasimport;
+    // The tectonics module runs alone: the engine's grid is the world grid.
+    const bool tectonicsmodule = recipe.name == "tectonics";
     if (options.climateOnly && !importedworld) {
         cerr << "--climate-only requires imported terrain.\n";
         return 1;
@@ -587,9 +642,12 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     }
     else if (!frombundle)
     {
-        changeworldproperties(*world);
+        // A world draws its planet body from the seed; the tectonics module keeps the default body.
+        if (!tectonicsmodule)
+            changeworldproperties(*world);
+        const int defaultwidth = tectonicsmodule ? static_cast<int>(options.tectonicScenario.width) : world->width() + 1;
         world->setwidth(std::clamp(options.hasResolution ? options.resolution :
-            (options.hasWorldWidth ? options.worldWidth : world->width() + 1), 2, ARRAYWIDTH) - 1);
+            (options.hasWorldWidth ? options.worldWidth : defaultwidth), 2, ARRAYWIDTH) - 1);
     }
 
     PlanetBundleSource source;
@@ -614,6 +672,13 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         fast_srand(world->seed());
     }
 
+    // The fractal noise of the terrain passes does not terminate on smaller grids.
+    if (options.runCommand && world->width() + 1 < 32)
+    {
+        cerr << "The world grid needs at least 32 columns.\n";
+        return 1;
+    }
+
     applyclimateoptions(options.climate, world->climatesimulation());
     const SocialGenerationOptions socialoptions = makesocialoptions(options.socialEnabled, options.socialMode, options.usePrehistory, options.historyYears);
 
@@ -622,7 +687,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     if (options.recipeName.empty())
         recipe = importedworld ? (options.climateOnly || options.earthClimateBenchmark ? earthclimaterecipe() : importedworldrecipe()) : proceduralworldrecipe();
-    if (!frombundle && importedworld == (recipe.name == "procedural-world"))
+    if (!frombundle && importedworld != recipeimportsterrain(recipe))
     {
         cerr << "Recipe " << recipe.name << (importedworld ? " cannot start from imported terrain.\n" : " requires imported terrain.\n");
         return 1;
@@ -693,7 +758,10 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         }
         checkpointsteps.push_back(index);
     }
-    if (!checkpointsteps.empty() || options.checkpointEvery > 0)
+    // Checkpoints inside an evolver see the run as of the last finished step.
+    RecipeRunResult finishedsteps;
+    std::function<void(GenerationStageId, double)> evolvercheckpoint;
+    if (!checkpointsteps.empty() || !options.checkpointTimesMyr.empty() || options.checkpointEveryMyr > 0.0)
     {
         if (options.checkpointDirectory.empty() && options.bundlePath.empty())
         {
@@ -702,11 +770,36 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         }
         const filesystem::path checkpointdirectory = options.checkpointDirectory.empty()
             ? filesystem::path(options.bundlePath + "-checkpoints") : filesystem::path(options.checkpointDirectory);
-        runoptions.afterstep = [&, checkpointdirectory, executed = 0](const RecipeRunResult& sofar, const RecipeStepRecord& step, string& error) mutable
+        evolvercheckpoint = [&, checkpointdirectory](GenerationStageId stage, double timemyr)
         {
-            executed++;
-            if (find(checkpointsteps.begin(), checkpointsteps.end(), static_cast<size_t>(step.index)) == checkpointsteps.end() &&
-                (options.checkpointEvery < 1 || executed % options.checkpointEvery != 0))
+            // The running step is listed with its declared writes: they are in the world as of this time.
+            const WorldProcessDefinition& process = getworldprocess(stage);
+            RecipeRunResult partial = finishedsteps;
+            RecipeStepRecord record;
+            record.index = static_cast<int>(find(recipe.steps.begin(), recipe.steps.end(), stage) - recipe.steps.begin());
+            record.stage = stage;
+            record.process = process.id;
+            record.label = getgenerationstage(stage).label;
+            record.writes = process.writes;
+            record.tablewrites = process.tablewrites;
+            for (worldmodel::FieldId write : record.writes)
+                partial.provenance.fields[write] = record.label;
+            for (worldmodel::TableId write : record.tablewrites)
+                partial.provenance.tables[write] = record.label;
+            partial.steps.push_back(record);
+
+            // One bundle per time: <recipe index>-<process id>-t<Myr>.
+            char time[32];
+            snprintf(time, sizeof(time), "-t%08.3f", timemyr);
+            const filesystem::path directory = checkpointdirectory /
+                ((record.index < 10 ? "0" : "") + to_string(record.index) + "-" + record.process + time);
+            writebundle(directory, partial);
+            updatereport("Checkpoint: " + directory.string());
+        };
+        runoptions.afterstep = [&, checkpointdirectory](const RecipeRunResult& sofar, const RecipeStepRecord& step, string& error)
+        {
+            finishedsteps = sofar;
+            if (find(checkpointsteps.begin(), checkpointsteps.end(), static_cast<size_t>(step.index)) == checkpointsteps.end())
                 return true;
             // One bundle per step: <recipe index>-<process id>.
             const filesystem::path directory = checkpointdirectory / ((step.index < 10 ? "0" : "") + to_string(step.index) + "-" + step.process);
@@ -779,8 +872,15 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         parameters.tectonicDurationMyr = options.plateTectonicsDurationMyr;
         parameters.tectonicPlateCount = options.plateTectonicsPlateCount;
         parameters.seaLevel = world->sealevel();
+        if (options.tectonicScenarioGiven)
+            parameters.tectonicScenario = std::make_shared<const tectonics::scenario::Scenario>(options.tectonicScenario);
+        parameters.tectonicWorldGrid = tectonicsmodule;
+        parameters.tectonicMineralHistory = options.mineralHistory;
+        parameters.tectonicCheckpointEveryMyr = options.checkpointEveryMyr;
+        parameters.tectonicCheckpointsMyr = options.checkpointTimesMyr;
 
         GenerationExecutionContext context;
+        context.evolverCheckpoint = evolvercheckpoint;
         context.dorivers = options.rivers;
         context.dolakes = options.lakes;
         context.dodeltas = options.deltas;

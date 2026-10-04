@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import numpy as np
 from PIL import Image
-from tectonics_experiment import write_json, digest
+from tectonics_experiment import write_json, digest, snapshot_manifest
 from tectonics_report_data import load_bundle
 from tectonics_review import review
 from tectonics_earth_reference import load_earth_reference
@@ -58,8 +58,7 @@ def analyze(run_id):
         if label == 'final': final_bundle = bundle
     fracture_history = []
     for snap in record['snapshots']:
-        path = ROOT/f'runs/checkpoints/tectonics/{run_id}'/snap['directory']/'manifest.json'
-        state = json.loads(path.read_text())
+        state = snapshot_manifest(ROOT/f'runs/checkpoints/tectonics/{run_id}'/snap['directory'])
         diagnostics = state.get('topology_diagnostics', {})
         fracture_history.append(dict(time_myr=state['time_myr'],
             **{key: diagnostics.get(key, 0) for key in

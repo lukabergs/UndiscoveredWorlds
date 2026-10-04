@@ -88,17 +88,17 @@ inline void applymeasuredaccess(WorldProcessDefinition& process)
     if (id == "geology.geosphere_initialization")
     {
         process.reads = { F::base_elevation, F::continental_shelf, F::max_elevation, F::sea_level, F::gravity, F::seed };
-        process.writes = { F::base_elevation, F::land_cells, F::max_elevation, F::sea_cells, F::sea_level };
+        process.writes = { F::accumulated_strain, F::base_elevation, F::boundary_distance, F::boundary_history, F::boundary_segment, F::boundary_type, F::continental_shelf, F::crust_age, F::crust_class, F::crust_thickness, F::deformation_rate, F::deformation_velocity_x, F::deformation_velocity_y, F::deforming_region, F::deforming_region_type, F::geologic_regime, F::land_cells, F::nearest_boundary, F::sea_cells, F::subsidence_tendency, F::tectonic_convergence, F::tectonic_divergence, F::tectonic_plate_count, F::tectonic_sea_level, F::tectonic_shear, F::tectonic_time, F::tectonic_time_origin_step, F::tectonic_time_step, F::uplift_tendency, F::tectonic_height, F::plate_id, F::crust_age_steps, F::continental_crust, F::oceanic_crust, F::sediment, F::rift_damage, F::plume_influence, F::max_elevation, F::sea_level };
         process.tablereads = {};
-        process.tablewrites = {};
+        process.tablewrites = { T::tectonic_boundary_segments, T::tectonic_deforming_regions, T::tectonic_snapshot };
         return;
     }
     if (id == "geology.plate_tectonics")
     {
         process.reads = { F::base_elevation, F::continental_shelf, F::max_elevation, F::sea_level, F::volcano, F::lake_surface, F::gravity, F::seed };
-        process.writes = { F::accumulated_strain, F::base_elevation, F::boundary_distance, F::boundary_history, F::boundary_segment, F::boundary_type, F::continental_shelf, F::crust_age, F::crust_class, F::crust_thickness, F::deformation_rate, F::deformation_velocity_x, F::deformation_velocity_y, F::deforming_region, F::deforming_region_type, F::geologic_regime, F::land_cells, F::nearest_boundary, F::sea_cells, F::subsidence_tendency, F::tectonic_convergence, F::tectonic_divergence, F::tectonic_plate_count, F::tectonic_sea_level, F::tectonic_shear, F::tectonic_time, F::tectonic_time_origin_step, F::tectonic_time_step, F::uplift_tendency };
+        process.writes = { F::accumulated_strain, F::base_elevation, F::boundary_distance, F::boundary_history, F::boundary_segment, F::boundary_type, F::continental_shelf, F::crust_age, F::crust_class, F::crust_thickness, F::deformation_rate, F::deformation_velocity_x, F::deformation_velocity_y, F::deforming_region, F::deforming_region_type, F::geologic_regime, F::land_cells, F::nearest_boundary, F::sea_cells, F::subsidence_tendency, F::tectonic_convergence, F::tectonic_divergence, F::tectonic_plate_count, F::tectonic_sea_level, F::tectonic_shear, F::tectonic_time, F::tectonic_time_origin_step, F::tectonic_time_step, F::uplift_tendency, F::tectonic_height, F::plate_id, F::crust_age_steps, F::continental_crust, F::oceanic_crust, F::sediment, F::rift_damage, F::plume_influence };
         process.tablereads = {};
-        process.tablewrites = { T::mineral_budget, T::mineral_deposits, T::tectonic_boundary_segments, T::tectonic_deforming_regions };
+        process.tablewrites = { T::mineral_budget, T::mineral_deposits, T::tectonic_boundary_segments, T::tectonic_deforming_regions, T::tectonic_snapshot };
         process.stochastic = true;
         return;
     }

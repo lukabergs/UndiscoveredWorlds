@@ -1,4 +1,5 @@
 #include "world_tectonics.hpp"
+#include "tectonic_snapshots.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -194,14 +195,20 @@ struct GeologySolverState
     int width = 0;
     int height = 0;
     WorldTectonicsOptions options;
+    std::uint32_t updates = 0;   // engine updates since the starting state
 };
 
 namespace
 {
 std::shared_ptr<GeologySolverState> createsolverstate(const planet& world, const WorldTectonicsOptions& options)
 {
-    auto scenario = tectonics::scenario::baseline();
+    auto scenario = options.scenario ? *options.scenario : tectonics::scenario::baseline();
     scenario.seed = world.seed();
+    if (options.worldGrid)
+    {
+        scenario.width = static_cast<uint32_t>(world.width() + 1);
+        scenario.height = static_cast<uint32_t>(world.height() + 1);
+    }
     if (options.durationMyr > 0) scenario.evolution_duration_myr = options.durationMyr;
     if (options.plateCount > 0) scenario.plate_count = static_cast<uint32_t>(options.plateCount);
     if (options.deltaTimeMyr > 0) scenario.delta_time_myr = options.deltaTimeMyr;
@@ -230,74 +237,22 @@ bool madefor(const GeologySolverState& state, const planet& world, const WorldTe
     return state.seed == world.seed() && state.gravity == world.gravity() && state.width == world.width() &&
         state.height == world.height() && state.options.durationMyr == options.durationMyr &&
         state.options.plateCount == options.plateCount && state.options.deltaTimeMyr == options.deltaTimeMyr &&
-        state.options.mineralHistory == options.mineralHistory;
-}
+        state.options.mineralHistory == options.mineralHistory && state.options.scenario == options.scenario &&
+        state.options.worldGrid == options.worldGrid;
 }
 
-std::shared_ptr<GeologySolverState> initializegeosphere(planet& world, worldgrid<bool>& shelves,
-                                                        const WorldTectonicsOptions& options)
+// The engine's current state as world state: elevation, the tectonic fields and
+// tables, the engine's own fields and the snapshot record. Used for the starting
+// Geosphere, at every checkpoint and at the end.
+void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState& state, const std::string& label)
 {
-    world.cleartectonicprovenance();
-    auto state = createsolverstate(world, options);
-    if (state == nullptr)
-        return nullptr;
-
-    // The starting elevation, for review; tectonics rewrites every cell at the end.
-    const int simwidth = static_cast<int>(state->scenario.width), simheight = static_cast<int>(state->scenario.height);
-    applynativeheightmap(world, shelves, tectonics_get_heightmap(state->simulation.pointer),
-        static_cast<std::size_t>(simwidth) * simheight, simwidth, simheight,
-        tectonics_get_sea_level_m(state->simulation.pointer));
-    return state;
-}
-
-void generateworldtectonics(planet& world, worldgrid<bool>& shelves, const WorldTectonicsOptions& options)
-{
-    evolvegeosphere(world, shelves, options, initializegeosphere(world, shelves, options));
-}
-
-void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectonicsOptions& options,
-                     std::shared_ptr<GeologySolverState> state)
-{
-    if (state == nullptr || !madefor(*state, world, options))
-    {
-        world.cleartectonicprovenance();
-        state = createsolverstate(world, options);
-        if (state == nullptr)
-            return;
-    }
-    const auto& scenario = state->scenario;
-    PlateTectonicsHandle& simulation = state->simulation;
-    mineralsystems::TectonicFrameReader& mineralframes = state->mineralframes;
-    std::optional<mineralsystems::MineralHistory>& minerals = state->minerals;
+    const auto& scenario = state.scenario;
+    PlateTectonicsHandle& simulation = state.simulation;
     const int width = world.width(), height = world.height();
     const int simwidth = static_cast<int>(scenario.width), simheight = static_cast<int>(scenario.height);
     const std::size_t cellcount = static_cast<std::size_t>(simwidth) * simheight;
     const tectonics::WorldGrid grid(simwidth, simheight, width + 1, height + 1);
     const auto scale = static_cast<float>(grid.scale());
-
-    const bool visualizeprogress = hasworldgenvisualizationcallback();
-    auto nextvisualization = std::chrono::steady_clock::now();
-
-    while (tectonics_is_finished(simulation.pointer) == 0)
-    {
-        tectonics_step(simulation.pointer);
-        if (minerals)
-            minerals->step(mineralframes.read(simulation.pointer));
-
-        if (visualizeprogress == false || std::chrono::steady_clock::now() < nextvisualization)
-            continue;
-
-        float* previewheightmap = tectonics_get_heightmap(simulation.pointer);
-
-        if (previewheightmap != nullptr)
-        {
-            applynativeheightmap(world, shelves, previewheightmap, cellcount, simwidth, simheight,
-                tectonics_get_sea_level_m(simulation.pointer));
-            requestworldgenvisualization();
-        }
-
-        nextvisualization = std::chrono::steady_clock::now() + kVisualizationInterval;
-    }
 
     float* outputheightmap = tectonics_get_heightmap(simulation.pointer);
 
@@ -306,9 +261,6 @@ void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectoni
 
     applynativeheightmap(world, shelves, outputheightmap, cellcount, simwidth, simheight,
         tectonics_get_sea_level_m(simulation.pointer));
-
-    if (visualizeprogress)
-        requestworldgenvisualization();
 
     const std::uint8_t* convergencemap = tectonics_get_convergence_map(simulation.pointer);
     const std::uint8_t* divergencemap = tectonics_get_divergence_map(simulation.pointer);
@@ -428,6 +380,131 @@ void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectoni
             world.settectonicdeformationvelocityy(x, y, deformationvelocityymap[index] * scale);
         }
     }
+
+    const tectonics::contract::Snapshot snapshot = tectonics_capture_snapshot(simulation.pointer);
+    // Column and plume fields exist only when the engine keeps them.
+    const auto cellvalue = [cellcount](const std::vector<float>& values, std::size_t index)
+    {
+        return values.size() == cellcount ? values[index] : 0.0f;
+    };
+    for (int y = 0; y <= height; y++)
+    {
+        for (int x = 0; x <= width; x++)
+        {
+            const std::size_t index = grid.nativeIndex(x, y);
+            world.settectonicsnapshotcell(x, y, snapshot.heightmap[index], static_cast<int>(snapshot.plate_id[index]),
+                static_cast<int>(snapshot.crust_age_steps[index]), cellvalue(snapshot.continental_crust_m, index),
+                cellvalue(snapshot.oceanic_crust_m, index), cellvalue(snapshot.sediment_m, index),
+                cellvalue(snapshot.rift_damage, index), cellvalue(snapshot.plume_influence, index));
+        }
+    }
+
+    tectonics::tooling::SnapshotBundleOptions record;
+    record.label = label;
+    record.source = "world_pipeline";
+    record.include_update_count = true;
+    record.update_count = state.updates;
+    world.settectonicsnapshotrecord(tectonics::tooling::snapshot_record_json(snapshot, record));
+}
+
+// A checkpoint time as a count of updates; it must fall on one.
+std::uint32_t checkpointupdate(double timemyr, double deltatimemyr)
+{
+    const double updates = timemyr / deltatimemyr;
+    const double whole = std::round(updates);
+    if (!(timemyr > 0.0) || std::fabs(updates - whole) > 1e-6)
+        throw std::runtime_error("Checkpoint time " + std::to_string(timemyr) +
+            " Myr is not a positive multiple of the tectonic time step (" + std::to_string(deltatimemyr) + " Myr)");
+    return static_cast<std::uint32_t>(whole);
+}
+
+std::string updatelabel(std::uint32_t updates)
+{
+    std::string digits = std::to_string(updates);
+    return "update" + std::string(digits.size() < 6 ? 6 - digits.size() : 0, '0') + digits;
+}
+}
+
+std::shared_ptr<GeologySolverState> initializegeosphere(planet& world, worldgrid<bool>& shelves,
+                                                        const WorldTectonicsOptions& options)
+{
+    world.cleartectonicprovenance();
+    auto state = createsolverstate(world, options);
+    if (state == nullptr)
+        return nullptr;
+
+    // The starting Geosphere, for review and as the first snapshot; tectonics rewrites it.
+    writegeosphere(world, shelves, *state, "initial");
+    return state;
+}
+
+void generateworldtectonics(planet& world, worldgrid<bool>& shelves, const WorldTectonicsOptions& options)
+{
+    evolvegeosphere(world, shelves, options, initializegeosphere(world, shelves, options));
+}
+
+void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectonicsOptions& options,
+                     std::shared_ptr<GeologySolverState> state)
+{
+    if (state == nullptr || !madefor(*state, world, options))
+    {
+        world.cleartectonicprovenance();
+        state = createsolverstate(world, options);
+        if (state == nullptr)
+            return;
+    }
+    const auto& scenario = state->scenario;
+    PlateTectonicsHandle& simulation = state->simulation;
+    mineralsystems::TectonicFrameReader& mineralframes = state->mineralframes;
+    std::optional<mineralsystems::MineralHistory>& minerals = state->minerals;
+    const int simwidth = static_cast<int>(scenario.width), simheight = static_cast<int>(scenario.height);
+    const std::size_t cellcount = static_cast<std::size_t>(simwidth) * simheight;
+
+    const double deltatimemyr = tectonics_get_delta_time_myr(simulation.pointer);
+    const std::uint32_t checkpointevery = options.checkpointEveryMyr > 0.0 ?
+        checkpointupdate(options.checkpointEveryMyr, deltatimemyr) : 0;
+    std::vector<std::uint32_t> checkpoints;
+    for (const double timemyr : options.checkpointsMyr)
+        checkpoints.push_back(checkpointupdate(timemyr, deltatimemyr));
+
+    const bool visualizeprogress = hasworldgenvisualizationcallback();
+    auto nextvisualization = std::chrono::steady_clock::now();
+
+    while (tectonics_is_finished(simulation.pointer) == 0)
+    {
+        tectonics_step(simulation.pointer);
+        state->updates++;
+        if (minerals)
+            minerals->step(mineralframes.read(simulation.pointer));
+
+        // The end of the run is the step's result, not a checkpoint.
+        if (options.checkpoint && tectonics_is_finished(simulation.pointer) == 0 &&
+            ((checkpointevery != 0 && state->updates % checkpointevery == 0) ||
+                std::find(checkpoints.begin(), checkpoints.end(), state->updates) != checkpoints.end()))
+        {
+            writegeosphere(world, shelves, *state, updatelabel(state->updates));
+            options.checkpoint(tectonics_get_time_myr(simulation.pointer));
+        }
+
+        if (visualizeprogress == false || std::chrono::steady_clock::now() < nextvisualization)
+            continue;
+
+        float* previewheightmap = tectonics_get_heightmap(simulation.pointer);
+
+        if (previewheightmap != nullptr)
+        {
+            applynativeheightmap(world, shelves, previewheightmap, cellcount, simwidth, simheight,
+                tectonics_get_sea_level_m(simulation.pointer));
+            requestworldgenvisualization();
+        }
+
+        nextvisualization = std::chrono::steady_clock::now() + kVisualizationInterval;
+    }
+
+    writegeosphere(world, shelves, *state, "final");
+
+    if (visualizeprogress)
+        requestworldgenvisualization();
 
     if (minerals)
     {

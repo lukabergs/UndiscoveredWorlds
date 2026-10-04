@@ -7,7 +7,7 @@ function(uw_world_module name)
 endfunction()
 
 uw_world_module(uw_geology src/simulations/geology/world_tectonics.cpp)
-target_link_libraries(uw_geology PRIVATE plate_tectonics uw_mineral_tectonics)
+target_link_libraries(uw_geology PRIVATE plate_tectonics uw_mineral_tectonics uw_tectonics_snapshots)
 
 uw_world_module(uw_terrain
     src/simulations/terrain/assetdata.cpp

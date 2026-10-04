@@ -109,9 +109,24 @@ WorldRecipe earthclimaterecipe()
     return recipe;
 }
 
+WorldRecipe tectonicsrecipe()
+{
+    WorldRecipe recipe;
+    recipe.name = "tectonics";
+    recipe.description = "The tectonics module alone: starting Geosphere, then plate tectonics; the engine runs on the world grid";
+    recipe.steps = { GenerationStageId::geosphere_initialization, GenerationStageId::plate_tectonics };
+    recipe.inputs = worldpropertyinputs();
+    return recipe;
+}
+
+bool recipeimportsterrain(const WorldRecipe& recipe)
+{
+    return recipe.name == "imported-world" || recipe.name == "earth-climate";
+}
+
 std::vector<std::string> worldrecipenames()
 {
-    return { "procedural-world", "imported-world", "earth-climate" };
+    return { "procedural-world", "imported-world", "earth-climate", "tectonics" };
 }
 
 bool findworldrecipe(std::string_view name, WorldRecipe& recipe)
@@ -122,6 +137,8 @@ bool findworldrecipe(std::string_view name, WorldRecipe& recipe)
         recipe = importedworldrecipe();
     else if (name == "earth-climate")
         recipe = earthclimaterecipe();
+    else if (name == "tectonics")
+        recipe = tectonicsrecipe();
     else
         return false;
     return true;
@@ -325,7 +342,16 @@ RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationSc
         worldmodel::access::resetreads();
         std::string message;
         const auto start = std::chrono::steady_clock::now();
-        const bool executed = executegenerationstage(stage, world, scratch, parameters, context, &message);
+        bool executed = false;
+        try
+        {
+            executed = executegenerationstage(stage, world, scratch, parameters, context, &message);
+        }
+        catch (const std::exception& error)
+        {
+            // A process rejects its parameters or a checkpoint fails: the run stops here.
+            message = error.what();
+        }
         record.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         if (!executed)
         {

@@ -12,6 +12,9 @@ from pathlib import Path
 import numpy as np
 import rasterio
 
+from tectonics_experiment import bundle_files, is_run_bundle, snapshot_manifest
+from tectonics_report_data import read_field
+
 REPO = Path(__file__).resolve().parents[2]
 REFERENCES = {
     "tectonics/seafloor_age": ("Ma", "Oceanic crust age", "comparable"),
@@ -83,25 +86,27 @@ def read_reference(root, key, width, units, products):
 
 
 def read_bundle(path):
-    manifest_path = path / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema") != "tectonic-snapshot-bundle/v1" or manifest.get("contract_schema_version") != 6:
+    """A tectonic snapshot: a run bundle of world_pipeline or a former snapshot bundle."""
+    manifest = snapshot_manifest(path)
+    # Contract 6 carried an always-zero cycle counter that 7 removed; the fields are the same.
+    if manifest.get("schema") != "tectonic-snapshot-bundle/v1" or manifest.get("contract_schema_version") not in (6, 7):
         raise ValueError(f"Unsupported native bundle contract: {path}")
     width, height = int(manifest["width"]), int(manifest["height"])
     if width != height * 2 or height < 1:
         raise ValueError("Reference comparison requires a 2:1 planetary interpretation")
+    files = bundle_files(path)
+    native = is_run_bundle(path)
     fields = {}
     hashes = {}
-    for name, dtype in {"heightmap": "<f4", "crust_age_myr": "<f4", "crust_class": "u1",
-                        "geologic_regime": "u1", "convergence_score": "u1",
-                        "divergence_score": "u1", "shear_score": "u1"}.items():
-        field_path = (path / manifest["files"][name]).resolve()
+    for name in ("heightmap", "crust_age_myr", "crust_class", "geologic_regime", "convergence_score",
+                 "divergence_score", "shear_score"):
+        field_path = (path / files[name]).resolve()
         if not field_path.is_relative_to(path.resolve()):
             raise ValueError("Bundle field lies outside the bundle")
-        field = np.fromfile(field_path, dtype=dtype)
-        if field.size != width * height or not np.isfinite(field).all():
+        field = read_field(field_path, name, (height, width), native)
+        if not np.isfinite(field).all():
             raise ValueError(f"Invalid shape or nonfinite values: {field_path}")
-        fields[name] = field.reshape(height, width)
+        fields[name] = field
         hashes[name] = digest(field_path)
     if (np.any(fields["crust_age_myr"] < 0) or np.any(fields["crust_class"] > 3) or
             np.any(fields["geologic_regime"] > 7) or

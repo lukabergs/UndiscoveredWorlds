@@ -11,8 +11,8 @@ uv run --offline scripts/benchmarks/bench.py <module> <command> [shared options]
 
 | Module | Commands | Native tool |
 | --- | --- | --- |
-| `tectonics` | `run` (registered), `inspect` (scratch), `report` | `tectonic_pipeline.exe` |
-| `geology` | `run` | `tectonic_pipeline.exe` + `benchmark-geology.py` |
+| `tectonics` | `run` (registered), `inspect` (scratch), `report`, `experiment`, `evaluate` | `world_pipeline.exe run --recipe tectonics` |
+| `geology` | `run` | `world_pipeline.exe run --recipe tectonics` + `benchmark-geology.py` |
 | `climate` | `run` (registered), `check`, `report`, `experiment`, `evaluate` | `world_pipeline.exe climate-benchmark`; `world_pipeline.exe run --recipe earth-climate` for experiments |
 | `world` | `run`, `experiment`, `evaluate` | `world_pipeline.exe generate` |
 
@@ -28,10 +28,9 @@ Shared options, same meaning everywhere:
 | `--runs ID [ID...]` | run IDs for `report`/`check` | none |
 | `--compare ID` | climate run to compare against | none |
 
-Any other `--flag value` goes to the native tool unchanged. Tectonics takes `tectonic_pipeline` scenario flags (`--plates 14`, `--evolution-duration-myr 300`, ...). Climate and world take `world_pipeline` flags (`--climate-resolution 128`, `--climate-tropical-closure mixed-layer`, ...). List them with the native tool's help:
+Any other `--flag value` goes to the native tool unchanged. Every module's native tool is `world_pipeline`. Tectonics takes the scenario options of `run --recipe tectonics` (`--plates 14`, `--duration 300`, ...); climate and world take `--climate-resolution 128`, `--climate-tropical-closure mixed-layer`, ... List them with the native tool's help:
 
 ```powershell
-out/build/headless/bin/Release/tectonic_pipeline.exe inspect --help
 out/build/headless/bin/Release/world_pipeline.exe --help
 ```
 
@@ -63,9 +62,9 @@ Climate runs registered up to run 365 used seed **20260906**. Use it only to rep
 Rebuild after every source change; the tools never pick up edits on their own. Configure only the first time, or after changing a `CMakeLists.txt`, a preset, `configs/tectonics-baseline.json`, or the Visual Studio toolset.
 
 ```powershell
-# Tectonics, geology and world_pipeline: headless build (no SFML, ImGui or CUDA); bench.py uses it by default
+# Tectonics, geology, climate and world (world_pipeline): headless build (no SFML, ImGui or CUDA); bench.py uses it by default
 cmake --preset headless
-cmake --build out/build/headless --config Release --target tectonic_pipeline world_pipeline --parallel 4
+cmake --build out/build/headless --config Release --target world_pipeline --parallel 4
 
 # Desktop app
 cmake --preset desktop
@@ -153,20 +152,20 @@ Climate comparisons reuse the climate report's per-field metrics, so every field
 ## Tectonics
 
 ```powershell
-# Scratch: final state of the baseline recipe (seed 1, 256×128, 10 plates, 600 Myr) → out/bench/tectonics-seed1-256
+# Scratch: final-state run bundle of the baseline recipe (seed 1, 256×128, 10 plates, 600 Myr) → out/bench/tectonics-seed1-256
 uv run --offline scripts/benchmarks/bench.py tectonics inspect
 uv run --offline scripts/benchmarks/bench.py tectonics inspect --resolution 512 --plates 14 --output out/bench/p14
 
-# Registered run: next ID in runs/registry/tectonics.json, archived under runs/reports/tectonics/<id>
+# Registered run: next ID in runs/registry/tectonics.json; checkpoints in runs/checkpoints/tectonics/<id>/snapshots/, final bundle in runs/checkpoints/tectonics/<id>/final
 uv run --offline scripts/benchmarks/bench.py tectonics run
-uv run --offline scripts/benchmarks/bench.py tectonics run --plates 14 --evolution-duration-myr 300
+uv run --offline scripts/benchmarks/bench.py tectonics run --plates 14 --duration 300
 
 # Maps, animations, comparison report and run page for registered runs (last ID is the run page)
 uv run --offline scripts/benchmarks/bench.py tectonics report --runs 74 75
 uv run --offline scripts/benchmarks/bench.py tectonics report --runs 13 --maps-only
 ```
 
-Flags on `run` change a copy of `configs/tectonics-baseline.json` saved in `out/bench/`; the baseline file is not modified.
+`run` copies `world_pipeline.exe` into `runs/reports/tectonics/<id>/` and runs it from there with a checkpoint for the starting Geosphere and one every `checkpoint_every_updates` updates. Scenario flags change only that run; the baseline file is not modified. Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot and a `batch_manifest.json`); the report scripts read both layouts. `bench.py tectonics experiment|evaluate` run and evaluate a bundle with `configs/evaluation/tectonics.json` (grid, required fields, finite values, ranges, repeat; Earth hypsometry as context; review maps).
 
 Mantle plumes are off by default (`--plume-count 0`). They are scenario flags like any other, so `run`, `inspect` and `report` take them unchanged:
 
@@ -175,16 +174,20 @@ uv run --offline scripts/benchmarks/bench.py tectonics inspect --plume-count 6 -
 uv run --offline scripts/benchmarks/bench.py tectonics run --plume-count 6 --plume-head-volume-km3 2000000 --plume-birth-window-myr 400
 ```
 
-`out/build/headless/bin/Release/tectonic_pipeline.exe inspect --help` lists every `--plume-*` flag. Bundles of runs with plumes carry `plume_influence` (palette entry in `configs/tectonics-palettes.json`); the column budget reports `generated_plume_kg` as a subset of `generated_ocean_kg`.
+`world_pipeline.exe --help` lists every `--plume-*` flag. Bundles of runs with plumes carry `plume_influence` (palette entry in `configs/tectonics-palettes.json`); the column budget reports `generated_plume_kg` as a subset of `generated_ocean_kg`.
 
-Native tool, for snapshots at other times or boundary statistics:
+Native tool, for other durations, checkpoints and mineral history (see `docs/architecture/tectonics/pipeline-tooling.md`):
 
 ```powershell
-$tp = "out/build/headless/bin/Release/tectonic_pipeline.exe"
-& $tp inspect --time-myr 300 --bundle-output out/bench/tectonics-300myr
-& $tp batch-export --output out/bench/tectonics-batch --checkpoint-every-updates 50 --mineral-history on
-& $tp boundary-stats --final --output out/bench/boundaries.json
-& $tp compare --bundle-a out/bench/a --bundle-b out/bench/b --output out/bench/compare.json
+$wp = "out/build/headless/bin/Release/world_pipeline.exe"
+# Scratch bundle of 300 Myr
+& $wp run --recipe tectonics --seed 1 --duration 300 --bundle out/bench/tectonics-300myr
+# Checkpoints every 50 Myr -> out/bench/tectonics-ck-checkpoints/01-geology.plate_tectonics-t0050.000, ...
+& $wp run --recipe tectonics --seed 1 --checkpoint-every 50 --bundle out/bench/tectonics-ck
+# Mineral history off (on by default; tables are written at the end of the run)
+& $wp run --recipe tectonics --seed 1 --mineral-history off --bundle out/bench/tectonics-nomin
+# Compare two bundles field by field
+uv run --offline scripts/evaluation/compare_bundles.py out/bench/a out/bench/b
 ```
 
 The climate/erosion feedback experiment (run 63) has no runner at present; it returns as a recipe once `terrain.climate_erosion` is an evolver (`docs/architecture/consolidation-plan.md` §6). `bench.py tectonics report` still renders run 63.

@@ -1,4 +1,4 @@
-#include "heightmap_io.hpp"
+#include "tectonic_heightmap_io.hpp"
 #include "material.hpp"
 #include "tectonic_contract.hpp"
 #include "topography_tiff.hpp"

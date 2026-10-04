@@ -125,6 +125,9 @@ WorldTectonicsOptions tectonicoptions(const WorldStageParameters& parameters)
     options.durationMyr = parameters.tectonicDurationMyr;
     options.plateCount = parameters.tectonicPlateCount;
     options.deltaTimeMyr = parameters.tectonicDeltaTimeMyr;
+    options.scenario = parameters.tectonicScenario;
+    options.worldGrid = parameters.tectonicWorldGrid;
+    options.mineralHistory = parameters.tectonicMineralHistory;
     return options;
 }
 
@@ -964,7 +967,20 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         std::shared_ptr<GeologySolverState> solver = scratch.geologySolver.take();
         if (solver == nullptr)
             world.clear();
-        evolvegeosphere(world, world.continentalshelves(), tectonicoptions(parameters), std::move(solver));
+        const WorldTectonicsOptions options = tectonicoptions(parameters);
+        // Checkpoints are not part of what the solver state was made for.
+        WorldTectonicsOptions evolveroptions = options;
+        if (context.evolverCheckpoint)
+        {
+            evolveroptions.checkpointEveryMyr = parameters.tectonicCheckpointEveryMyr;
+            evolveroptions.checkpointsMyr = parameters.tectonicCheckpointsMyr;
+            evolveroptions.checkpoint = [&](double timemyr)
+            {
+                rebuildshelves(world, scratch);
+                context.evolverCheckpoint(stageId, timemyr);
+            };
+        }
+        evolvegeosphere(world, world.continentalshelves(), evolveroptions, std::move(solver));
         rebuildshelves(world, scratch);
         parameters.seaLevel = world.sealevel();
         rebuildheightdistribution(world, scratch);

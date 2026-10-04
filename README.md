@@ -40,6 +40,7 @@ src/
     society/               Settlement, routes, trade, polities, history
   io/                      Map imports, raster/reference readers, export selection
   validation/climate/      Reference comparisons and climate diagnostics
+  validation/tectonics/    Tectonic snapshot statistics and records
   app/                     Desktop entry point, windows, controls
     rendering/             Map appearance and CPU/CUDA rendering
     diagnostics/           Profiling and generation debug integration
@@ -57,7 +58,6 @@ scripts/
   benchmarks/              Benchmark analysis and workbook input preparation
   evaluation/              Run bundles: checks, validation, review verdicts, experiments
 docs/                      Architecture, reference guides, and current climate notes
-tools/tectonics/           Simulation and snapshot/export tools
 vcpkg-ports/               Dependency overlay ports
 out/                       Build products, editor caches, scratch work
 ```
@@ -79,7 +79,7 @@ Keep headers beside their implementations. Organize by the responsibility of a m
 
 `src/wip/` still holds `planet`, `region`, `regionalmap`, `classes`, `misc`, `functions`, `generation_tuning`, and the workbench UI (`generation_workbench`). World storage/persistence, regional generation and shared utilities remain coupled there; stage execution lives in `pipeline/world_stages`. `functions.hpp` is a compatibility umbrella without SFML; map views and drawing live in `app/rendering/map_views.hpp`. New callers should include the owning module's header. The target structure (data-only sphere components, processes, recipes, evaluation) and its migration status are in [world model](docs/architecture/world-model.md).
 
-Further land-surface hydrology and ecology belong under `src/simulations/hydrology/` and `src/simulations/ecology/`. Existing climate moisture/storage physics remains in `climate/`. Gold deposits form during tectonics in `geology/mineral_systems/`, travel with their host crust and erode as they are exhumed; `resources/` routes liberated gold into placers on the final drainage. Other mineral and marine scores remain derived heuristics in `resources/`. Biological production belongs in ecology, with society consuming both. `tectonic_pipeline batch-export --mineral-history on` writes the deposit list and gold budget of a native run.
+Further land-surface hydrology and ecology belong under `src/simulations/hydrology/` and `src/simulations/ecology/`. Existing climate moisture/storage physics remains in `climate/`. Gold deposits form during tectonics in `geology/mineral_systems/`, travel with their host crust and erode as they are exhumed; `resources/` routes liberated gold into placers on the final drainage. Other mineral and marine scores remain derived heuristics in `resources/`. Biological production belongs in ecology, with society consuming both. `world_pipeline run --recipe tectonics` writes the deposit list and gold budget of a native run (mineral history is on by default; `--mineral-history off` disables it).
 
 ### Assets, definitions, configurations, and references
 
@@ -138,7 +138,7 @@ For future runs, record the seed, recipe and stage parameters, code revision, in
 
 There is one tectonics implementation: `src/simulations/geology/plate_tectonics`,
 built as the internal `plate_tectonics` target from the current working tree.
-The desktop generator, workbench, mineral history and `tectonic_pipeline` CLI
+The desktop generator, workbench, mineral history and the `tectonics` recipe of `world_pipeline`
 all use it. No external tectonics checkout or library is needed or supported.
 Existing uncommitted work on `main` is part of that implementation.
 
@@ -148,8 +148,8 @@ The current recipe uses seed 1, a 256×128 native grid, 10 initial plates and
 600 Myr at 1 Myr per update. Application generation uses the world's seed;
 new benchmark runs use seed 1. The app's duration, initial plate count and
 timestep overrides use 0 to select the recipe value. `--tectonic-duration-myr`
-is the application's duration override; the native CLI uses
-`--evolution-duration-myr`.
+is the application's duration override; the `tectonics`
+recipe uses `--duration`.
 
 Every physical update uses reduced force-balance motion and conservative
 isostatic columns. Evolution continues until the positive duration is
@@ -182,15 +182,16 @@ final application terrain, so compare native snapshots when checking the engine.
 
 ```powershell
 cmake --preset headless
-cmake --build out/build/headless --config Release --target tectonic_pipeline PlateTectonicsTests MineralSystemsTests --parallel 4
+cmake --build out/build/headless --config Release --target world_pipeline PlateTectonicsTests MineralSystemsTests --parallel 4
 ctest --test-dir out/build/headless -C Release -R '^(PlateTectonicsTests|MineralSystemsTests)$' --output-on-failure
-uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/tectonic_pipeline.exe
+uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
 uv run --offline scripts/benchmarks/bench.py tectonics inspect
 uv run --offline scripts/benchmarks/bench.py tectonics run
 ```
 
-`tectonic_pipeline` is the tectonics CLI; `world_pipeline` is the headless CLI for recipe runs, full-world generation and the Earth climate benchmark (`run`, `generate`, `climate-benchmark`). It runs recipes or parts of them (`run --recipe`, `--from-bundle`, `--steps`, `--only`, checkpoints), can write a run bundle (`--bundle`) and audit each step's field access (`--audit-access`), and links no SFML or ImGui. Climate alone on imported terrain is `run --recipe earth-climate`. The desktop `UndiscoveredWorlds.exe` takes no arguments. The `tectonic_pipeline` `inspect`, `batch-export`,
-`boundary-stats` and `compare` commands share the same engine and recipe.
+`world_pipeline` is the only headless executable: recipe runs, full-world generation and the Earth climate benchmark (`run`, `generate`, `climate-benchmark`). It runs recipes or parts of them (`run --recipe`, `--from-bundle`, `--steps`, `--only`, checkpoints), can write a run bundle (`--bundle`) and audit each step's field access (`--audit-access`), and links no SFML or ImGui. Climate alone on imported terrain is `run --recipe earth-climate`. The desktop `UndiscoveredWorlds.exe` takes no arguments.
+
+Tectonics alone is the `tectonics` recipe: `world_pipeline run --recipe tectonics [--seed N] [--resolution W] [--<scenario-key> value ...] [--duration Myr] [--mineral-history on|off] [--checkpoint-every Myr] --bundle DIR`. It runs the engine on the world grid W x W/2 (default 256) and writes an ordinary run bundle; `world_pipeline --help` lists the scenario options. Two bundles are compared with `scripts/evaluation/compare_bundles.py A B`. See [tectonics runs](docs/architecture/tectonics/pipeline-tooling.md).
 
 Numbered experiments use `runs/registry/tectonics.json` and refuse existing
 output directories. They preserve the actual working source, recipe, executable
@@ -235,14 +236,14 @@ Tests mirror the code domains. Prefer deterministic headless checks of state, bu
 
 Climate generation accepts `--climate-resolution` (default 128) independently of `--resolution`, the world width that also sets the size of every exported map. The default sets atmosphere/ocean width to 128, moisture/energy width to 256, and weather width to 64, capped by the world grid. Use multiples of four, at least eight. `--climate-temperature-mode calibrated` retains the requested global mean; `radiative` fixes the longwave intercept so the mean emerges from the energy balance. The default uses conservative latitude diffusion, continuous land/soil and ocean/ice heat stores, and monthly Köppen classification. Climate working state belongs to each world; monthly fields and spin-up reservoirs are transient and are not added to the save format.
 
-There are two configure presets: `desktop` (everything, in `out/build/desktop`) and `headless` (`out/build/headless`: no SFML/ImGui or CUDA discovery, with the tectonics tools and tests). The configuration is chosen at build time: `--config Release` for every simulation and benchmark, `--config Debug` only to debug. Binaries land in `bin/<Config>/`; scripts take the headless Release paths from `scripts/uwtools/paths.py`.
+There are two configure presets: `desktop` (everything, in `out/build/desktop`) and `headless` (`out/build/headless`: no SFML/ImGui or CUDA discovery, with the tests). The configuration is chosen at build time: `--config Release` for every simulation and benchmark, `--config Debug` only to debug. Binaries land in `bin/<Config>/`; scripts take the headless Release paths from `scripts/uwtools/paths.py`.
 
 ```powershell
 cmake --preset headless
-cmake --build out/build/headless --config Release --target world_pipeline tectonic_pipeline --parallel 4
+cmake --build out/build/headless --config Release --target world_pipeline --parallel 4
 ```
 
-`BUILD_TESTING` also builds the tectonics regression suite using GoogleTest v1.15.2 (downloaded on first configuration). `UW_BUILD_TECTONICS_TOOLS` (on in the `headless` preset) builds `tectonic_pipeline`. Tool PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The public CLI regression command above checks the shared defaults and rejects retired controls.
+`BUILD_TESTING` also builds the tectonics regression suite using GoogleTest v1.15.2 (downloaded on first configuration). The `headless` preset builds `world_pipeline` and the tests. PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The public CLI regression command above checks the shared defaults and rejects retired controls.
 
 Git tracks application code, tooling, configuration, small runtime assets and deterministic test fixtures. `docs/`, `runs/registry/` and `runs/ledger/` are tracked; `meta/`, `refs/` and the rest of `runs/` are local-only. Historical `extra/`, research copies, downloads and generated artifacts are also excluded. Local links into these directories require the local workspace data. Keep preparation and reporting code in `scripts/`; the Earth-map entry point is `uv run scripts/refs/prepare-earth-maps.py`.
 

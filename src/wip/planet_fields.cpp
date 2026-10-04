@@ -123,6 +123,14 @@ struct planetfieldaccess
         case FieldId::deformation_rate: return op.grid(id, world.geosphere_.tectonicdeformationratemap);
         case FieldId::deformation_velocity_x: return op.grid(id, world.geosphere_.tectonicdeformationvelocityxmap);
         case FieldId::deformation_velocity_y: return op.grid(id, world.geosphere_.tectonicdeformationvelocityymap);
+        case FieldId::tectonic_height: return op.grid(id, world.geosphere_.tectonicheightmap);
+        case FieldId::plate_id: return op.grid(id, world.geosphere_.tectonicplateidmap);
+        case FieldId::crust_age_steps: return op.grid(id, world.geosphere_.tectoniccrustagestepsmap);
+        case FieldId::continental_crust: return op.grid(id, world.geosphere_.tectoniccontinentalcrustmap);
+        case FieldId::oceanic_crust: return op.grid(id, world.geosphere_.tectonicoceaniccrustmap);
+        case FieldId::sediment: return op.grid(id, world.geosphere_.tectonicsedimentmap);
+        case FieldId::rift_damage: return op.grid(id, world.geosphere_.tectonicriftdamagemap);
+        case FieldId::plume_influence: return op.grid(id, world.geosphere_.tectonicplumeinfluencemap);
         case FieldId::erosion_potential: return op.grid(id, world.geosphere_.erosionpotentialmap);
         case FieldId::deposition_potential: return op.grid(id, world.geosphere_.depositionpotentialmap);
         case FieldId::floodplain_fertility: return op.grid(id, world.geosphere_.floodplainfertilitymap);
@@ -231,6 +239,10 @@ struct planetfieldaccess
         case TableId::mineral_budget:
             extension = ".json";
             out << mineralsystems::mineralbudgetjson(world.geosphere_.mineralbudgetstate);
+            break;
+        case TableId::tectonic_snapshot:
+            extension = ".json";
+            out << world.geosphere_.tectonicsnapshotrecord;
             break;
         case TableId::craters:
             out << "w,x,y,z\n";

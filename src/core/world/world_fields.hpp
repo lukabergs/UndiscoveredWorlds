@@ -109,6 +109,14 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(deformation_rate, geosphere, f32, grid, "engine units", "Deformation rate") \
     X(deformation_velocity_x, geosphere, f32, grid, "world cells/update", "Deformation velocity, eastward") \
     X(deformation_velocity_y, geosphere, f32, grid, "world cells/update", "Deformation velocity, southward") \
+    X(tectonic_height, geosphere, f32, grid, "engine units", "Engine height of the last tectonic update: 0.1 at the ocean floor datum, 1 at sea level on continental crust") \
+    X(plate_id, geosphere, i32, grid, "id", "Plate index of the last tectonic update") \
+    X(crust_age_steps, geosphere, i32, grid, "updates", "Crust age in tectonic updates") \
+    X(continental_crust, geosphere, f32, grid, "m", "Continental crust of the isostatic column") \
+    X(oceanic_crust, geosphere, f32, grid, "m", "Oceanic crust of the isostatic column") \
+    X(sediment, geosphere, f32, grid, "m", "Sediment of the isostatic column") \
+    X(rift_damage, geosphere, f32, grid, "0..1", "Advected rift damage") \
+    X(plume_influence, geosphere, f32, grid, "0..1", "Proximity to an active mantle plume; 0 without plumes") \
     X(erosion_potential, geosphere, u8, grid, "0..100", "Relative erosion potential") \
     X(deposition_potential, geosphere, u8, grid, "0..100", "Relative deposition potential") \
     X(floodplain_fertility, geosphere, u8, grid, "0..100", "Floodplain and lowland fertility proxy") \
@@ -226,9 +234,10 @@ enum class TableId : std::uint8_t
     route_edges,
     history_events,
     weather_state,
-    atmosphere_levels
+    atmosphere_levels,
+    tectonic_snapshot
 };
-inline constexpr std::size_t kTableCount = 11;
+inline constexpr std::size_t kTableCount = 12;
 
 struct FieldSpec
 {

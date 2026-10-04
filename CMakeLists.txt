@@ -12,7 +12,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 include(CTest)
 option(UW_BUILD_APP "Build the SFML/ImGui desktop application" ON)
 option(UW_BUILD_WORLD "Build the headless world core and world_pipeline" ON)
-option(UW_BUILD_TECTONICS_TOOLS "Build tectonics simulation, export, and inspection tools" OFF)
 # Analysis builds only: world accessors record which fields each step reads.
 option(UW_TRACK_FIELD_READS "Record world field reads per generation step" OFF)
 if(UW_TRACK_FIELD_READS)
@@ -21,8 +20,21 @@ endif()
 
 add_subdirectory(src/simulations)
 add_subdirectory(src/simulations/geology/plate_tectonics)
-if(BUILD_TESTING OR UW_BUILD_TECTONICS_TOOLS)
-    add_subdirectory(tools/tectonics)
+
+# Statistics, comparison and the snapshot record of tectonic snapshots: the
+# world writes the record into its bundles; the engine tests use the rest.
+add_library(uw_tectonics_snapshots STATIC src/validation/tectonics/tectonic_snapshots.cpp)
+target_include_directories(uw_tectonics_snapshots PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/tectonics")
+target_link_libraries(uw_tectonics_snapshots PUBLIC plate_tectonics)
+uw_tectonics_target_defaults(uw_tectonics_snapshots)
+
+if(BUILD_TESTING)
+    # Heightmap images and metric TIFFs of the engine tests.
+    find_package(PNG REQUIRED)
+    add_library(uw_tectonics_heightmap_io STATIC src/io/tectonic_heightmap_io.cpp)
+    target_include_directories(uw_tectonics_heightmap_io PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/io")
+    target_link_libraries(uw_tectonics_heightmap_io PUBLIC plate_tectonics uw_topography_io PNG::PNG)
+    uw_tectonics_target_defaults(uw_tectonics_heightmap_io)
 endif()
 
 if(UW_BUILD_WORLD OR UW_BUILD_APP)
@@ -33,6 +45,7 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
     # validation. No SFML or ImGui; shared by world_pipeline and the desktop.
     set(UW_WORLD_CORE_SOURCES
         src/app/command_line_generation.cpp
+        src/app/tectonic_options.cpp
         src/app/diagnostics/profiler.cpp
         src/core/grid_coordinates.cpp
         src/io/map_imports.cpp
@@ -108,6 +121,7 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
         PNG::PNG
         plate_tectonics
         uw_mineral_tectonics
+        uw_tectonics_snapshots
         uw_climate
         uw_climate_io
         uw_topography_io

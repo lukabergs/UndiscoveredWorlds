@@ -378,6 +378,11 @@
       "id": 75,
       "status": "complete",
       "manifest": "runs/manifests/tectonics/75.json"
+    },
+    {
+      "id": 76,
+      "status": "complete",
+      "manifest": "runs/manifests/tectonics/76.json"
     }
   ]
 }

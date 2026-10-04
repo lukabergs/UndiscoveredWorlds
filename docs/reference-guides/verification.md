@@ -14,7 +14,7 @@ Headless configuration without the desktop stack or CUDA discovery (tectonics to
 
 ```powershell
 cmake --preset headless
-cmake --build out/build/headless --config Release --target world_pipeline tectonic_pipeline --parallel 4
+cmake --build out/build/headless --config Release --target world_pipeline --parallel 4
 ```
 
 ## Tests
@@ -24,7 +24,7 @@ ctest --test-dir out/build/desktop -C Release --output-on-failure -j 4          
 ctest --test-dir out/build/desktop -C Release -R climate_hydrology_tests        # one test by name
 uv run --offline --with numpy --with pillow python -m unittest discover -s tests/scripts   # Python suite
 uv run --offline python scripts/check-layout.py                                   # layout and tectonics header boundary
-uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/tectonic_pipeline.exe
+uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
 ```
 
 Test names are defined in `tests/CMakeLists.txt`, `tests/simulations/geology/plate_tectonics/CMakeLists.txt` and `tests/simulations/geology/mineral_systems/CMakeLists.txt`. `check_tectonics_cli.py` checks default/explicit recipe equality, column budgets and rejection of invalid options.

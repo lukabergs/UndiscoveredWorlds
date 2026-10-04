@@ -9,6 +9,7 @@
 
 #include "climate_benchmark_outputs.hpp"
 #include "climate_options.hpp"
+#include "tectonic_options.hpp"
 #include "planet.hpp"
 #include "social_generation.hpp"
 
@@ -54,8 +55,12 @@ struct CommandLineGenerationOptions
     bool runCommand = false;     // run: the recipe is named, nothing is registered.
     std::string fromBundlePath;  // --from-bundle: the world of this bundle instead of a seed or imported terrain.
     std::string stepsText;       // --steps a..b, or --only p as p..p; empty runs the whole recipe.
-    std::vector<std::string> checkpointAt;   // --checkpoint-at: steps after which a bundle is written.
-    int checkpointEvery = 0;                 // --checkpoint-every: also after every N steps of the run.
+    std::vector<std::string> checkpointAt;   // --checkpoint-at: steps (process ids) after which a bundle is written.
+    std::vector<double> checkpointTimesMyr;  // --checkpoint-at with numbers: times inside the tectonics evolver.
+    double checkpointEveryMyr = 0;           // --checkpoint-every: interval inside the tectonics evolver.
+    tectonics::scenario::Scenario tectonicScenario = tectonics::scenario::baseline();   // with the --<scenario key> overrides
+    bool tectonicScenarioGiven = false;
+    bool mineralHistory = true;              // --mineral-history on|off
     std::string checkpointDirectory;         // --checkpoint-dir; default <bundle>-checkpoints.
     std::string accessReportPath;
     std::vector<std::string> commandArguments;

@@ -208,6 +208,16 @@ struct geospherestate
     worldgrid<float> tectonicdeformationratemap;
     worldgrid<float> tectonicdeformationvelocityxmap;
     worldgrid<float> tectonicdeformationvelocityymap;
+    // The engine's own fields of its last update, for the tectonic reports; no later process reads them.
+    worldgrid<float> tectonicheightmap;
+    worldgrid<int> tectonicplateidmap;
+    worldgrid<int> tectoniccrustagestepsmap;
+    worldgrid<float> tectoniccontinentalcrustmap;
+    worldgrid<float> tectonicoceaniccrustmap;
+    worldgrid<float> tectonicsedimentmap;
+    worldgrid<float> tectonicriftdamagemap;
+    worldgrid<float> tectonicplumeinfluencemap;
+    std::string tectonicsnapshotrecord;   // JSON: time, scenario, diagnostics, statistics, plates
     worldgrid<std::uint8_t> erosionpotentialmap;
     worldgrid<std::uint8_t> depositionpotentialmap;
     worldgrid<std::uint8_t> floodplainfertilitymap;
