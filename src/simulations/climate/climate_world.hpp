@@ -52,7 +52,7 @@ struct climateinputs
     int landtotal = 0;
     int seatotal = 0;
     int rows = ARRAYHEIGHT;
-    const int* nom = nullptr;
+    const float* nom = nullptr;   // base elevation, metres above the datum
     const short* mountainheights = nullptr;
     const short* extraelev = nullptr;
     const short* craterrims = nullptr;
@@ -152,8 +152,10 @@ public:
     int sealevel() const { UW_FIELD_READ(sea_level); return inputs_.sealevel; }
     int landtotal() const { UW_FIELD_READ(land_cells); return inputs_.landtotal; }
     int seatotal() const { UW_FIELD_READ(sea_cells); return inputs_.seatotal; }
-    int nom(int x, int y) const;
-    int map(int x, int y) const;
+    int nom(int x, int y) const;    // whole metres
+    int map(int x, int y) const;    // whole metres
+    float nomfloat(int x, int y) const;
+    float mapfloat(int x, int y) const;
     bool sea(int x, int y) const;
     bool seawrap(int x, int y) const;
     bool outline(int x, int y) const;
@@ -435,7 +437,22 @@ inline void climateworld::noteclimatesolverread() const
 inline int climateworld::nom(int x, int y) const
 {
     UW_FIELD_READ(base_elevation);
-    return inside(x, y) ? inputs_.nom[inputindex(x, y)] : 0;
+    return inside(x, y) ? wholemetres(inputs_.nom[inputindex(x, y)]) : 0;
+}
+
+inline float climateworld::nomfloat(int x, int y) const
+{
+    UW_FIELD_READ(base_elevation);
+    return inside(x, y) ? inputs_.nom[inputindex(x, y)] : 0.0f;
+}
+
+// The base elevation plus what map() adds to it; the land/sea test stays on whole metres.
+inline float climateworld::mapfloat(int x, int y) const
+{
+    if (!inside(x, y))
+        return 0.0f;
+    const float base = inputs_.nom[inputindex(x, y)];
+    return base + static_cast<float>(map(x, y) - wholemetres(base));
 }
 
 inline int climateworld::map(int x, int y) const
@@ -452,7 +469,7 @@ inline int climateworld::map(int x, int y) const
         return 0;
 
     const std::size_t cell = inputindex(x, y);
-    const int nomvalue = inputs_.nom[cell];
+    const int nomvalue = wholemetres(inputs_.nom[cell]);
     const int thisvolcano = std::abs(inputs_.volcano[cell]);
 
     if (nomvalue <= inputs_.sealevel)
@@ -474,7 +491,7 @@ inline bool climateworld::sea(int x, int y) const
         return 0;
 
     const std::size_t cell = inputindex(x, y);
-    if (inputs_.nom[cell] <= inputs_.sealevel && inputs_.lakesurface[cell] == 0)
+    if (wholemetres(inputs_.nom[cell]) <= inputs_.sealevel && inputs_.lakesurface[cell] == 0)
         return 1;
 
     if (inputs_.volcano[cell] == 0)
@@ -482,7 +499,7 @@ inline bool climateworld::sea(int x, int y) const
 
     const int thisvolcano = std::abs(inputs_.volcano[cell]);
 
-    if (inputs_.nom[cell] + thisvolcano <= inputs_.sealevel)
+    if (wholemetres(inputs_.nom[cell]) + thisvolcano <= inputs_.sealevel)
         return 1;
     else
         return 0;
@@ -497,7 +514,7 @@ inline bool climateworld::seawrap(int x, int y) const
     y = clipy(y);
 
     const std::size_t cell = inputindex(x, y);
-    if (inputs_.nom[cell] <= inputs_.sealevel && inputs_.lakesurface[cell] == 0)
+    if (wholemetres(inputs_.nom[cell]) <= inputs_.sealevel && inputs_.lakesurface[cell] == 0)
         return 1;
     else
         return 0;

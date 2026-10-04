@@ -187,7 +187,7 @@ struct geospherestate
     worldgrid<short> mountainheights;
     worldgrid<short> craterrims;
     worldgrid<short> cratercentres;
-    worldgrid<int> mapnom;
+    worldgrid<float> mapnom;   // metres above the datum
     worldgrid<std::uint8_t> geologicregimemap;
     worldgrid<std::uint8_t> tectonicconvergencemap;
     worldgrid<std::uint8_t> tectonicdivergencemap;

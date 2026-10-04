@@ -11,8 +11,8 @@ differing values and the largest absolute difference. Tables are compared as tex
 Exit status: 0 when every compared field and table is identical, 1 otherwise.
 
 --legacy-encoding compares a bundle from before the float migration of the climate
-fields (int16, some scaled) with a later one: a float field is put back into the
-former encoding (scaled, rounded, clipped to int16) before the comparison, and the
+fields and base elevation (integers, some scaled) with a later one: a float field is put
+back into the former encoding (scaled, rounded, clipped to the integer type) and the
 largest difference in physical units is reported as lost_precision.
 """
 import argparse
@@ -37,10 +37,11 @@ LEGACY_SCALES = {'atmosphere.vertical_velocity': 100, 'hydrosphere.ocean_current
                  'atmosphere.orographic_uplift': 4, 'atmosphere.orographic_subsidence': 4}
 
 
-def legacy_encoded(values, identifier):
+def legacy_encoded(values, identifier, integer_type):
     scale = LEGACY_SCALES.get(identifier, 1)
+    limits = np.iinfo(integer_type)
     # The product is taken in float32 as the accessors do; half away from zero, as std::lround.
-    scaled = np.clip(values.astype(np.float32) * np.float32(scale), -32768, 32767).astype(np.float64)
+    scaled = np.clip(values.astype(np.float32) * np.float32(scale), limits.min, limits.max).astype(np.float64)
     return (np.sign(scaled) * np.floor(np.abs(scaled) + 0.5)).astype(np.int64)
 
 
@@ -53,7 +54,7 @@ def compare_field(left, right, entry_left, entry_right, legacy=False):
     b = np.load(right / entry_right['file'])
     if legacy and a.shape == b.shape and a.dtype.kind != b.dtype.kind and {a.dtype.kind, b.dtype.kind} == {'i', 'f'}:
         integers, floats = (a, b) if a.dtype.kind == 'i' else (b, a)
-        encoded = legacy_encoded(floats, entry_left['id'])
+        encoded = legacy_encoded(floats, entry_left['id'], integers.dtype)
         differing = int(np.count_nonzero(encoded != integers))
         scale = LEGACY_SCALES.get(entry_left['id'], 1)
         lost = float(np.max(np.abs(floats.astype(np.float64) - integers / scale))) if floats.size else 0.0
@@ -120,7 +121,7 @@ def main():
     if legacy:
         refined = sum(1 for identifier, outcome in legacy.items()
                       if outcome['lost_precision'] > 1e-3 / LEGACY_SCALES.get(identifier, 1))
-        print(f'{len(legacy)} fields compared in their former int16 encoding; {refined} now hold finer values')
+        print(f'{len(legacy)} fields compared in their former integer encoding; {refined} now hold finer values')
     if args.json:
         args.json.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     sys.exit(1 if problems else 0)

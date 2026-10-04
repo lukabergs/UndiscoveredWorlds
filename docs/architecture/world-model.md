@@ -86,14 +86,16 @@ validation read and write the floats, and the former `int16` encodings (whole
 °C, whole m/s, scaled "storage" values) survive only as the integer accessors
 of `climateworld` (`climatelegacyscale`), which the terrain, hydrology,
 resource and society code, the `.uww` save format and the renderers still read.
-Geosphere and land-hydrosphere fields keep their integer encodings (elevation as
-`int` metres above the datum with a separate sea level, river flow in legacy
-units, category codes as `int16`): every producer of them is integer today
-(`uint16` terrain imports, the tectonics engine's `uint16` datum, the legacy
-terrain and river algorithms), so changing their type changes no value and needs
-no new baseline until a producer emits fractions. A process that moves from an
-integer accessor to the float one changes its results and needs a new baseline
-for its module.
+The base elevation is float32 metres above the datum (with a separate sea
+level): tectonics stores unrounded heights and the climate module reads them
+exactly, while the terrain and hydrology passes still read and write whole metres
+(`wholemetres`), and the land/sea mask is taken from the whole-metre value so that
+every consumer sees the same coast. The elevation added on top of the base
+(mountains, canyon uplift, craters, volcanoes, ocean ridges), lake surfaces and
+river flow keep their integer types until the code that produces them is
+reworked; category codes and masks are discrete and stay integer or boolean. A
+process that moves from an integer accessor to the float one changes its results
+and needs a new baseline for its module.
 
 The catalogue is `src/core/world/world_fields.hpp` (one X-macro list). Other
 code refers to fields by `worldmodel::FieldId`; bundles and reports use the

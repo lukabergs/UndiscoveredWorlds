@@ -143,3 +143,11 @@ out/build/headless-modules/bin/tectonic_pipeline.exe inspect --final --seed 1 `
   to select hosts.
 - Formation rates, maturity (5-20 Myr; 50-75% of convergent length is older
   than 20 Myr) and the erosion proxy are unchanged.
+
+## Engine changes
+
+- 2026-10-04: `TopographyCodec::internal_to_meters_exact` returns the height of
+  `internal_to_meters` without rounding (same branches and clamps; the integer
+  function is its nearest whole metre and is unchanged). `world_tectonics.cpp`
+  stores it as the world's base elevation, which is float since consolidation
+  phase 1; code that reads whole metres sees the same values as before.

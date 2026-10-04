@@ -1030,7 +1030,8 @@ namespace
         inputs.eccentricity = world.eccentricity();
         inputs.tilt = world.tilt();
 
-        inputs.mapnom = world.rawmapnom();
+        inputs.mapnomvalues = world.wholemapnom();
+        inputs.mapnom = inputs.mapnomvalues.data();
         inputs.lakemap = world.rawlakemap();
         inputs.oceanridgeheightmap = world.rawoceanridgeheightmap();
         inputs.mountainheights = world.rawmountainheights();

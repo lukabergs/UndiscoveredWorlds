@@ -519,7 +519,8 @@ public:
     // These accessor functions are for location-specific information.
     // They don't check that x and y are valid coordinates.
 
-    int map(int x, int y) const; // total terrain elevation
+    int map(int x, int y) const; // total terrain elevation, whole metres
+    float mapfloat(int x, int y) const; // total terrain elevation
 
     bool sea(int x, int y) const; // whether this is sea or not
 
@@ -536,8 +537,10 @@ public:
 
     int reverselatitude(int lat) const; // returns the y coordinate of a latitude
 
-    int nom(int x, int y) const; // no-mountains terrain elevation
+    int nom(int x, int y) const; // no-mountains terrain elevation, whole metres
     void setnom(int x, int y, int amount);
+    float nomfloat(int x, int y) const; // no-mountains terrain elevation
+    void setnomfloat(int x, int y, float amount);
 
     //int nomridge(int x, int y) const; // no-mountains, with undersea ridge terrain elevation
 
@@ -940,7 +943,7 @@ public:
     int mountainheightwrap(int x, int y) const;
 
     // Raw grid access for accelerated renderer backends.
-    const int* rawmapnom() const;
+    std::vector<int> wholemapnom() const;   // base elevation in whole metres, storage order
     const int* rawlakemap() const;
     const short* rawoceanridgeheightmap() const;
     const short* rawmountainheights() const;
@@ -1022,6 +1025,8 @@ private:
     void readlegacyvectordata(ifstream& infile, std::vector<float>& arr, float scale = 1.0f);
     void writelegacydata(ofstream& outfile, const worldgrid<float>& arr);
     void readlegacydata(ifstream& infile, worldgrid<float>& arr);
+    void readwholedata(ifstream& infile, worldgrid<float>& arr);
+    int addedelevation(int x, int y) const;
     void writemineraldeposits(ofstream& outfile);
     bool readmineraldeposits(ifstream& infile);
     int seasonalclimateindex(int x, int y) const;
@@ -1339,7 +1344,6 @@ inline void planet::setmapgradientcolour(int gradient, int stop, int channel, in
     presentation_.itsmapgradientcolours[gradient][stop][channel] = amount;
 }
 
-inline const int* planet::rawmapnom() const { UW_FIELD_READ(base_elevation); return &geosphere_.mapnom[0][0]; }
 inline const int* planet::rawlakemap() const { UW_FIELD_READ(lake_surface); return &hydrosphere_.lakemap[0][0]; }
 inline const short* planet::rawoceanridgeheightmap() const { UW_FIELD_READ(ocean_ridge_height); return &geosphere_.oceanridgeheightmap[0][0]; }
 inline const short* planet::rawmountainheights() const { UW_FIELD_READ(mountain_height); return &geosphere_.mountainheights[0][0]; }
@@ -1399,17 +1403,38 @@ inline int planet::map(int x, int y) const
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    int thisvolcano = abs(geosphere_.volcanomap[x][y]);
+    return wholemetres(geosphere_.mapnom[x][y]) + addedelevation(x, y);
+}
 
-    if (geosphere_.mapnom[x][y] <= geosphere_.itssealevel)
-        return geosphere_.mapnom[x][y] + geosphere_.oceanridgeheightmap[x][y] + thisvolcano;
+inline float planet::mapfloat(int x, int y) const
+{
+    UW_FIELD_READ(volcano);
+    UW_FIELD_READ(base_elevation);
+    UW_FIELD_READ(sea_level);
+    UW_FIELD_READ(ocean_ridge_height);
+    UW_FIELD_READ(mountain_height);
+    UW_FIELD_READ(extra_elevation);
+    UW_FIELD_READ(crater_rims);
+    UW_FIELD_READ(crater_centres);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
+    return geosphere_.mapnom[x][y] + static_cast<float>(addedelevation(x, y));
+}
+
+// Ridges, volcanoes, mountains, canyon uplift and craters on top of the base
+// elevation. Land and sea follow the base elevation in whole metres.
+inline int planet::addedelevation(int x, int y) const
+{
+    const int thisvolcano = abs(geosphere_.volcanomap[x][y]);
+
+    if (wholemetres(geosphere_.mapnom[x][y]) <= geosphere_.itssealevel)
+        return geosphere_.oceanridgeheightmap[x][y] + thisvolcano;
 
     if (thisvolcano > geosphere_.mountainheights[x][y])
-        return geosphere_.mapnom[x][y] + thisvolcano + geosphere_.extraelevmap[x][y] + geosphere_.craterrims[x][y] + geosphere_.cratercentres[x][y];
+        return thisvolcano + geosphere_.extraelevmap[x][y] + geosphere_.craterrims[x][y] + geosphere_.cratercentres[x][y];
     else
-        return geosphere_.mapnom[x][y] + geosphere_.mountainheights[x][y] + geosphere_.extraelevmap[x][y] + geosphere_.craterrims[x][y] + geosphere_.cratercentres[x][y];
-
-    return 0;
+        return geosphere_.mountainheights[x][y] + geosphere_.extraelevmap[x][y] + geosphere_.craterrims[x][y] + geosphere_.cratercentres[x][y];
 }
 
 inline int planet::nom(int x, int y) const
@@ -1418,10 +1443,27 @@ inline int planet::nom(int x, int y) const
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    return geosphere_.mapnom[x][y];
+    return wholemetres(geosphere_.mapnom[x][y]);
 }
 
 inline void planet::setnom(int x, int y, int amount)
+{
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return;
+
+    geosphere_.mapnom[x][y] = static_cast<float>(amount);
+}
+
+inline float planet::nomfloat(int x, int y) const
+{
+    UW_FIELD_READ(base_elevation);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
+    return geosphere_.mapnom[x][y];
+}
+
+inline void planet::setnomfloat(int x, int y, float amount)
 {
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
@@ -2950,7 +2992,7 @@ inline bool planet::sea(int x, int y) const
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
-    if (geosphere_.mapnom[x][y] <= geosphere_.itssealevel && hydrosphere_.lakemap[x][y] == 0)
+    if (wholemetres(geosphere_.mapnom[x][y]) <= geosphere_.itssealevel && hydrosphere_.lakemap[x][y] == 0)
         return 1;
 
     if (geosphere_.volcanomap[x][y] == 0)
@@ -2958,7 +3000,7 @@ inline bool planet::sea(int x, int y) const
 
     int thisvolcano = abs(geosphere_.volcanomap[x][y]);
 
-    if (geosphere_.mapnom[x][y] + thisvolcano <= geosphere_.itssealevel)
+    if (wholemetres(geosphere_.mapnom[x][y]) + thisvolcano <= geosphere_.itssealevel)
         return 1;
     else
         return 0;

@@ -1,7 +1,7 @@
 #pragma once
 
 // Lapse-rate adjustment of a temperature by the cell's elevation above sea level.
-// World is any type with map(x, y), sealevel() and tempdecrease() (C/km):
+// World is any type with map(x, y), mapfloat(x, y), sealevel() and tempdecrease() (C/km):
 // planet or climateworld. The integer overloads truncate as the original helpers
 // did; the float overloads apply the lapse rate exactly.
 
@@ -45,8 +45,8 @@ int tempelevremove(const World& world, int temp, int i, int j)
 template<typename World>
 float elevationlapse(const World& world, int i, int j)
 {
-    const int elevation = (std::max)(0, world.map(i, j) - world.sealevel());
-    return static_cast<float>(elevation) / 1000.0f * world.tempdecrease();
+    const float elevation = (std::max)(0.0f, world.mapfloat(i, j) - static_cast<float>(world.sealevel()));
+    return elevation / 1000.0f * world.tempdecrease();
 }
 
 template<typename World>

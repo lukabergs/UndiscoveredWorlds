@@ -646,7 +646,7 @@ void createoceancurrentmap(climateworld& world)
                 hydrologyland[cell] = world.sea(x, y) ? 0.0f : 1.0f;
                 outputdepth[cell] = land
                     ? 0.0f
-                    : static_cast<float>(std::max(50, sealevel - world.nom(x, y)));
+                    : std::max(50.0f, static_cast<float>(sealevel) - world.nomfloat(x, y));
                 const bool cached = climate.winds.populated[season];
                 outputeastwind[cell] = cached ? climate.winds.surfacewindu[season][x][y] : world.seasonaluwindfloat(season, x, y);
                 outputsouthwind[cell] = cached ? climate.winds.surfacewindv[season][x][y] : world.seasonalvwindfloat(season, x, y);
@@ -1838,7 +1838,7 @@ void createvectorwindmap(climateworld& world)
     });
     for (std::size_t cell = 0; cell < nativevegetation.size(); ++cell)
         nativevegetation[cell] = land[cell] > 0 ? nativevegetation[cell] / land[cell] : 1.0f;
-    const auto terrain = sample([&](int x, int y) { return std::max(0, world.nom(x, y) - world.sealevel()); });
+    const auto terrain = sample([&](int x, int y) { return std::max(0.0f, world.nomfloat(x, y) - static_cast<float>(world.sealevel())); });
     const auto slopes = climateatmosphere::detail::terrainSlopes(grid, terrain,
         atmosphere::katabaticReflectedPolarGradient);
     const auto permanentice = sample([&](int x, int y) { return worldpermanentlandicefraction(world,x,y); });
@@ -1868,7 +1868,7 @@ void createvectorwindmap(climateworld& world)
     const auto pressurelapseoffset = sample([&](int x, int y)
     {
         return world.sea(x,y) ? 0.0f : circulation::thermalPressureElevationCorrectionFraction *
-            world.tempdecrease() * std::max(0, world.map(x,y) - world.sealevel()) / 1000.0f;
+            world.tempdecrease() * std::max(0.0f, world.mapfloat(x,y) - static_cast<float>(world.sealevel())) / 1000.0f;
     });
     const auto terrainoutput = output(terrain);
     const auto landoutput = output(land);
@@ -1877,7 +1877,7 @@ void createvectorwindmap(climateworld& world)
     floatgrid orographicterrain(width + 1, vector<float>(height + 1));
     for (int y = 0; y <= height; ++y)
         for (int x = 0; x <= width; ++x)
-            orographicterrain[x][y] = static_cast<float>(std::max(0, world.nom(x, y) - world.sealevel()));
+            orographicterrain[x][y] = std::max(0.0f, world.nomfloat(x, y) - static_cast<float>(world.sealevel()));
     const auto surfacedrag = [](float landFraction, float elevationMetres, float frozenLandFraction, float vegetationContrast)
     {
         return climateatmosphere::detail::vegetationSurfaceDragCoefficient(landFraction, elevationMetres,
@@ -1894,7 +1894,7 @@ void createvectorwindmap(climateworld& world)
             {
                 const int cell = y * (width + 1) + x;
                 localDrag[cell] = surfacedrag(world.nom(x, y) > world.sealevel() ? 1.0f : 0.0f,
-                    static_cast<float>(std::max(0, world.nom(x, y) - world.sealevel())),
+                    std::max(0.0f, world.nomfloat(x, y) - static_cast<float>(world.sealevel())),
                     std::max(worldpermanentlandicefraction(world, x, y),
                         atmosphere::persistentSnowDragFraction * persistentsnowoutput[cell]), vegetationcontrast[cell]);
             }
@@ -2789,7 +2789,7 @@ void createvectorwindmap(climateworld& world)
                 for (int x = 0; x <= width; ++x)
                 {
                     const float drag = surfacedrag(world.nom(x, y) > world.sealevel() ? 1.0f : 0.0f,
-                        static_cast<float>(std::max(0, world.nom(x, y) - world.sealevel())),
+                        std::max(0.0f, world.nomfloat(x, y) - static_cast<float>(world.sealevel())),
                         std::max(worldpermanentlandicefraction(world,x,y), atmosphere::persistentSnowDragFraction *
                             persistentsnowoutput[y * (width + 1) + x]), vegetationcontrast[y * (width + 1) + x]);
                     auto corrected = climateatmosphere::steadyQuadraticDragCoriolisWind(
@@ -3077,14 +3077,14 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                     y,
                     [&](int xx, int yy)
                     {
-                        return static_cast<float>(std::max(0, world.map(xx, yy) - sealevel));
+                        return std::max(0.0f, world.mapfloat(xx, yy) - static_cast<float>(sealevel));
                     });
                 peakelevation[x][y] = aggregateworldmaximum(
                     x,
                     y,
                     [&](int xx, int yy)
                     {
-                        return static_cast<float>(std::max(0, world.map(xx, yy) - sealevel));
+                        return std::max(0.0f, world.mapfloat(xx, yy) - static_cast<float>(sealevel));
                     });
                 icefraction[x][y] = aggregateworldfield(
                     x,

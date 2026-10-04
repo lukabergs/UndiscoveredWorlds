@@ -71,7 +71,7 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(tectonic_time_step, geosphere, f32, scalar, "Myr", "Tectonic update length") \
     X(tectonic_plate_count, geosphere, i32, scalar, "", "Number of plates in the final state") \
     X(tectonic_sea_level, geosphere, i32, scalar, "m", "Engine sea level on its uint16 datum") \
-    X(base_elevation, geosphere, i32, grid, "m above datum", "Terrain without mountains, volcanoes and craters (nom)") \
+    X(base_elevation, geosphere, f32, grid, "m above datum", "Terrain without mountains, volcanoes and craters (nom)") \
     X(mountain_height, geosphere, i16, grid, "m", "Mountain elevation added to the base") \
     X(mountain_ridges, geosphere, i16, grid, "direction bits", "Mountain ridge directions") \
     X(extra_elevation, geosphere, i16, grid, "m", "Extra terrain elevation (canyon uplift)") \

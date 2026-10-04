@@ -144,7 +144,7 @@ ProfileSimulation simulateProfiles(
         for (int x = 0; x <= world.width(); x++)
         {
             if (world.sea(x, y) == 0)
-                outputElevationCooling[y] += std::max(0, world.map(x, y) - world.sealevel()) *
+                outputElevationCooling[y] += std::max(0.0f, world.mapfloat(x, y) - static_cast<float>(world.sealevel())) *
                     static_cast<double>(world.tempdecrease()) / 1000.0;
         }
     }
@@ -814,7 +814,7 @@ void createSurfaceEnergyBalanceTemperatureMap(
                 (static_cast<double>(fractal[x][y]) / fractalScale - 0.5) *
                 tuning::climate::energybalance::fractalTemperatureRangeC;
             const double elevationKm = static_cast<double>(
-                std::max(0, world.map(x, y) - seaLevel)) / 1000.0;
+                std::max(0.0f, world.mapfloat(x, y) - static_cast<float>(seaLevel))) / 1000.0;
             const double elevationCooling = world.sea(x, y) == 0 ?
                 elevationKm * static_cast<double>(world.tempdecrease()) : 0.0;
             localTemperatureOffset[index] = fractalAnomaly - elevationCooling;
@@ -860,7 +860,7 @@ void createSurfaceEnergyBalanceTemperatureMap(
                 static_cast<std::size_t>(y) * static_cast<std::size_t>(rowWidth) +
                 static_cast<std::size_t>(x);
             const int surface = world.sea(x, y) == 1 ? 1 : 0;
-            const double elevationKm = static_cast<double>(std::max(0, world.map(x, y) - seaLevel)) / 1000.0;
+            const double elevationKm = static_cast<double>(std::max(0.0f, world.mapfloat(x, y) - static_cast<float>(seaLevel))) / 1000.0;
             const double elevationCooling = surface == 0 ?
                 elevationKm * static_cast<double>(world.tempdecrease()) : 0.0;
 

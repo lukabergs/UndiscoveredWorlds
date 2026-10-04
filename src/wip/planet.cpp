@@ -257,6 +257,33 @@ void planet::writeshortvectordata(ofstream& outfile, const std::vector<short>& a
     outfile.write(reinterpret_cast<const char*>(arr.data()), arr.size() * sizeof(short));
 }
 
+// The save format keeps elevation in whole metres.
+namespace
+{
+worldgrid<int> wholegrid(const worldgrid<float>& values)
+{
+    worldgrid<int> whole(values.columns(), values.rows());
+    for (std::size_t index = 0; index < values.size(); index++)
+        whole.data()[index] = wholemetres(values.data()[index]);
+    return whole;
+}
+}
+
+void planet::readwholedata(ifstream& infile, worldgrid<float>& arr)
+{
+    worldgrid<int> stored(arr.columns(), arr.rows());
+    readdata(infile, stored);
+    for (std::size_t index = 0; index < arr.size(); index++)
+        arr.data()[index] = static_cast<float>(stored.data()[index]);
+}
+
+std::vector<int> planet::wholemapnom() const
+{
+    UW_FIELD_READ(base_elevation);
+    const worldgrid<int> whole = wholegrid(geosphere_.mapnom);
+    return std::vector<int>(whole.data(), whole.data() + whole.size());
+}
+
 // The save format keeps the climate fields in their former int16 encodings.
 void planet::readlegacyvectordata(ifstream& infile, std::vector<float>& arr, float scale)
 {
@@ -446,7 +473,7 @@ bool planet::seawrap(int x, int y) const
     x = wrapx(x);
     y = clipy(y);
 
-    if (geosphere_.mapnom[x][y] <= geosphere_.itssealevel && hydrosphere_.lakemap[x][y] == 0)
+    if (wholemetres(geosphere_.mapnom[x][y]) <= geosphere_.itssealevel && hydrosphere_.lakemap[x][y] == 0)
         return 1;
 
     else
@@ -607,7 +634,9 @@ void planet::clear()
 
 void planet::smoothnom(int amount)
 {
-    smooth(geosphere_.mapnom, amount, 1, 1);
+    // smooth() works on the base elevation, in whole metres, whatever grid it is given.
+    worldgrid<int> unused;
+    smooth(unused, amount, 1, 1);
 }
 
 void planet::smoothextraelev(int amount)
@@ -944,7 +973,7 @@ void planet::saveworld(string filename)
     writedata(outfile, geosphere_.mountainheights);
     writedata(outfile, geosphere_.craterrims);
     writedata(outfile, geosphere_.cratercentres);
-    writedata(outfile, geosphere_.mapnom);
+    writedata(outfile, wholegrid(geosphere_.mapnom));
     writedata(outfile, hydrosphere_.tidalmap);
     writedata(outfile, hydrosphere_.riftlakemapsurface);
     writedata(outfile, hydrosphere_.riftlakemapbed);
@@ -1645,7 +1674,7 @@ bool planet::loadworld(string filename)
     readdata(infile, geosphere_.mountainheights);
     readdata(infile, geosphere_.craterrims);
     readdata(infile, geosphere_.cratercentres);
-    readdata(infile, geosphere_.mapnom);
+    readwholedata(infile, geosphere_.mapnom);
     readdata(infile, hydrosphere_.tidalmap);
     readdata(infile, hydrosphere_.riftlakemapsurface);
     readdata(infile, hydrosphere_.riftlakemapbed);
@@ -2118,14 +2147,14 @@ void planet::smooth(worldgrid<int>& arr, int amount, bool vary, bool avoidmounta
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + smoothingcell(geosphere_.mapnom, kk, l);
+                        ave = ave + wholemetres(smoothingcell(geosphere_.mapnom, kk, l));
                         crount++;
                     }
                 }
                 ave = ave / crount;
 
                 if (ave > 0 && ave < geosphere_.itsmaxheight)
-                    geosphere_.mapnom[i][j] = ave;
+                    geosphere_.mapnom[i][j] = static_cast<float>(ave);
             }
         }
     }
@@ -2154,14 +2183,14 @@ void planet::smooth(worldgrid<short>& arr, int amount, bool vary, bool avoidmoun
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + smoothingcell(geosphere_.mapnom, kk, l);
+                        ave = ave + wholemetres(smoothingcell(geosphere_.mapnom, kk, l));
                         crount++;
                     }
                 }
                 ave = ave / crount;
 
                 if (ave > 0 && ave < geosphere_.itsmaxheight)
-                    geosphere_.mapnom[i][j] = ave;
+                    geosphere_.mapnom[i][j] = static_cast<float>(ave);
             }
         }
     }

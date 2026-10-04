@@ -48,9 +48,10 @@ float clamp01(float value)
     return std::clamp(value, 0.0f, 1.0f);
 }
 
-int encodenativeheight(float value, uint16_t sealevelmeters)
+// Metres on the engine's datum, unrounded: the world stores elevation as float.
+float nativeheightmetres(float value, uint16_t sealevelmeters)
 {
-    return TopographyCodec::internal_to_meters(value, sealevelmeters);
+    return TopographyCodec::internal_to_meters_exact(value, sealevelmeters);
 }
 
 void applynativeheightmap(planet& world, worldgrid<bool>& shelves, const float* outputheightmap, std::size_t cellcount, int simwidth, int simheight, uint16_t sealevelmeters)
@@ -73,7 +74,7 @@ void applynativeheightmap(planet& world, worldgrid<bool>& shelves, const float* 
         {
             for (int x = 0; x <= width; x++)
             {
-                world.setnom(x, y, encodenativeheight(grid.height(outputheightmap, x, y), sealevelmeters));
+                world.setnomfloat(x, y, nativeheightmetres(grid.height(outputheightmap, x, y), sealevelmeters));
                 shelves[x][y] = false;
             }
         }

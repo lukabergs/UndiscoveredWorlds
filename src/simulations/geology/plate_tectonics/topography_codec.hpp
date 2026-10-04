@@ -34,6 +34,8 @@ struct Metadata {
 
 float meters_to_internal(uint16_t meters, uint16_t sea_level_m);
 uint16_t internal_to_meters(float internal, uint16_t sea_level_m);
+// The same mapping without rounding; internal_to_meters is its nearest whole metre.
+float internal_to_meters_exact(float internal, uint16_t sea_level_m);
 float normalized_to_internal(float normalized, float sea_threshold);
 bool is_oceanic_internal(float value);
 

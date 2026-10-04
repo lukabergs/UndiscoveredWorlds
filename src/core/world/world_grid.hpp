@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -100,3 +101,10 @@ private:
     int rows_ = 0;
     std::unique_ptr<T[]> values_;
 };
+
+// Elevation is stored in metres as float. Code written for whole metres, the
+// .uww save format, the renderers and the land/sea mask read it rounded.
+inline int wholemetres(float value)
+{
+    return static_cast<int>(std::lround(value));
+}

@@ -91,6 +91,36 @@ uint16_t internal_to_meters(float internal, uint16_t sea_level_m)
     return static_cast<uint16_t>(clamp_value<uint32_t>(meters, sea_level_m, kMaxHeightMeters));
 }
 
+float internal_to_meters_exact(float internal, uint16_t sea_level_m)
+{
+    if (internal <= kOceanicBase) {
+        return 0.0f;
+    }
+
+    if (is_oceanic_internal(internal)) {
+        if (sea_level_m <= 1) {
+            return 0.0f;
+        }
+
+        const float ratio =
+            (clamp_value(internal, kOceanicBase, oceanic_internal_ceiling()) - kOceanicBase) /
+            oceanic_internal_range();
+        return ratio * static_cast<float>(sea_level_m - 1);
+    }
+
+    if (sea_level_m >= kMaxHeightMeters) {
+        return static_cast<float>(kMaxHeightMeters);
+    }
+
+    const float ratio =
+        (clamp_value(internal, kContinentalBase, kContinentalBase + kInternalLandReliefRange) -
+         kContinentalBase) /
+        kInternalLandReliefRange;
+    return clamp_value(
+        static_cast<float>(sea_level_m) + ratio * static_cast<float>(kMaxHeightMeters - sea_level_m),
+        static_cast<float>(sea_level_m), static_cast<float>(kMaxHeightMeters));
+}
+
 float normalized_to_internal(float normalized, float sea_threshold)
 {
     const float clamped = clamp_normalized(normalized);
