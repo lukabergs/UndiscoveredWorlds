@@ -4,7 +4,7 @@
   "description": "Procedural world from a seed (procedural-world recipe). Judged by the user's review; checks guard budgets and value ranges. Earth hypsometry is context for the review, not a target.",
   "evidence": {"checks": "required", "validation": "context", "review": "primary"},
   "run": {"tool": "world_pipeline", "resolution": 512,
-          "arguments": ["generate", "--resolution", "{width}", "--no-profile-log", "--save", "{directory}/world.uww"]},
+          "arguments": ["generate", "--resolution", "{width}", "--save", "{directory}/world.uww"]},
   "checks": [
     {"check": "grid"},
     {"check": "required",

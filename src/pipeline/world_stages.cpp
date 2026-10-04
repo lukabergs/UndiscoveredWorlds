@@ -1201,7 +1201,7 @@ void finalizegeneratedworld(planet& world, GenerationScratch& scratch, const Gen
     generatephysicalworldlayers(world, world.continentalshelves());
     generatesocialworld(world, context.socialoptions);
 
-    if (context.appendclimateworkbook && recordclimatebenchmarkrun(
+    if (context.recordclimatebenchmark && recordclimatebenchmarkrun(
             world.climate(),
             "",
             climatebenchmarkmapselection::defaultselection()) == false)

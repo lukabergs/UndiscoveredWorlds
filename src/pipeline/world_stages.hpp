@@ -95,7 +95,7 @@ struct GenerationExecutionContext
     bool dorivers = true;
     bool dolakes = true;
     bool dodeltas = true;
-    bool appendclimateworkbook = false;
+    bool recordclimatebenchmark = false;
     SocialGenerationOptions socialoptions;
     boolshapetemplate* landshape = nullptr;
     boolshapetemplate* chainland = nullptr;
@@ -121,5 +121,5 @@ void detectbasincomponents(planet& world, GenerationScratch& scratch);
 bool executegenerationstage(GenerationStageId stageId, planet& world, GenerationScratch& scratch,
     WorldStageParameters& parameters, const GenerationExecutionContext& context, std::string* errormessage = nullptr);
 
-// Physical layers, optional society and the optional climate workbook record.
+// Physical layers, optional society and the optional climate benchmark record.
 void finalizegeneratedworld(planet& world, GenerationScratch& scratch, const GenerationExecutionContext& context);

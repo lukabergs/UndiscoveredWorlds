@@ -40,7 +40,6 @@ struct ScopedWorkbenchDebugRun
         if (isworldgendebugrunactive())
             return;
 
-        options.logToProfilingWorkbook = false;
         options.visualizePlateTectonicsRealtime = false;
         options.plateTectonicsDurationMyr = max(0.0, durationMyr);
         options.plateTectonicsPlateCount = max(0, platecount);

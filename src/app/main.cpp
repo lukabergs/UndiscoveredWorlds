@@ -664,7 +664,7 @@ int main()
     int& seedentry = customworldui.seedentry; // The value currently entered into the seed box in the create world screen.
     int& newx = customworldui.newx;
     int& newy = customworldui.newy; // These are used to locate the new region.
-    bool& compareclimateworkbook = customworldui.compareClimateWorkbook;
+    bool& recordclimatebenchmark = customworldui.recordClimateBenchmark;
 
     short regionmargin = 17; // The centre of the regional map can't be closer than this to the northern/southern edges of the global map.
 
@@ -1085,7 +1085,7 @@ int main()
         context.dorivers = currentrivers;
         context.dolakes = currentlakes;
         context.dodeltas = currentdeltas;
-        context.appendclimateworkbook = compareclimateworkbook;
+        context.recordclimatebenchmark = recordclimatebenchmark;
         context.socialoptions = socialoptionsfromworldcontrols();
         context.landshape = landshape;
         context.chainland = chainland;
@@ -1994,7 +1994,7 @@ int main()
                 workbenchcontext.dorivers = currentrivers;
                 workbenchcontext.dolakes = currentlakes;
                 workbenchcontext.dodeltas = currentdeltas;
-                workbenchcontext.appendclimateworkbook = compareclimateworkbook;
+                workbenchcontext.recordclimatebenchmark = recordclimatebenchmark;
                 workbenchcontext.socialoptions = socialoptionsfromworldcontrols();
                 workbenchcontext.landshape = landshape;
                 workbenchcontext.chainland = chainland;
@@ -2678,7 +2678,7 @@ int main()
             if (standardbutton("Workbench"))
             {
                 initializeimportedworkbenchsession(generationworkbench, *world, importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation);
-                previewcurrentgenerationstage(generationworkbench, *world, GenerationExecutionContext{ currentrivers, currentlakes, currentdeltas, compareclimateworkbook, socialoptionsfromworldcontrols(), landshape, chainland, smalllake, largelake, &OKmountains, (importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation) ? &importedclimatemaps : nullptr }, nullptr);
+                previewcurrentgenerationstage(generationworkbench, *world, GenerationExecutionContext{ currentrivers, currentlakes, currentdeltas, recordclimatebenchmark, socialoptionsfromworldcontrols(), landshape, chainland, smalllake, largelake, &OKmountains, (importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation) ? &importedclimatemaps : nullptr }, nullptr);
                 invalidateGlobalMaps();
                 showGlobalMapView(preferredworkbenchmapview(getcurrentgenerationstage(generationworkbench).id));
             }
@@ -2694,10 +2694,10 @@ int main()
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Calculate climates, lakes, and rivers, and finish the world.");
 
-            ImGui::Checkbox("Record climate benchmark (updates workbook)", &compareclimateworkbook);
+            ImGui::Checkbox("Record climate benchmark", &recordclimatebenchmark);
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Appends this world's land-climate counts to the RAW_PIXELS sheet in climate.xlsx.");
+                ImGui::SetTooltip("Registers this world as a climate benchmark run with its diagnostics and maps.");
 
             if (standardbutton("Cancel"))
             {
@@ -2740,7 +2740,7 @@ int main()
                 // Plug in the world settings.
 
                 applyworldpropertycontrols(*world, worldpropertycontrols);
-                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, compareclimateworkbook, socialoptionsfromworldcontrols(), smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
+                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, recordclimatebenchmark, socialoptionsfromworldcontrols(), smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
 
                 // Now draw a new map
 

@@ -2580,187 +2580,6 @@ double saferelativeerror(long long simulated, long long reference)
     return fabs(static_cast<double>(simulated - reference)) / fabs(static_cast<double>(reference));
 }
 
-bool runhiddenprocessandwait(const wstring& commandline)
-{
-    STARTUPINFOW startupinfo{};
-    PROCESS_INFORMATION processinfo{};
-    startupinfo.cb = sizeof(startupinfo);
-    startupinfo.dwFlags = STARTF_USESHOWWINDOW;
-    startupinfo.wShowWindow = SW_HIDE;
-
-    vector<wchar_t> mutablecommand(commandline.begin(), commandline.end());
-    mutablecommand.push_back(L'\0');
-
-    if (CreateProcessW(nullptr, mutablecommand.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startupinfo, &processinfo) == FALSE)
-        return false;
-
-    WaitForSingleObject(processinfo.hProcess, INFINITE);
-
-    DWORD exitcode = 1;
-    GetExitCodeProcess(processinfo.hProcess, &exitcode);
-
-    CloseHandle(processinfo.hThread);
-    CloseHandle(processinfo.hProcess);
-
-    return exitcode == 0;
-}
-
-bool updateclimatebenchmarkworkbook(
-    int runid,
-    int horizontalresolution,
-    const vector<string>& codes,
-    const vector<long long>& simulationcounts,
-    string* failuremessage)
-{
-    const filesystem::path workbookpath = filesystem::absolute(getappenvironment().climateWorkbookPath).lexically_normal();
-
-    if (filesystem::exists(workbookpath) == false || simulationcounts.size() != codes.size() || horizontalresolution <= 0)
-    {
-        if (failuremessage != nullptr)
-            *failuremessage = "Climate benchmark workbook is missing or the climate columns do not match";
-        return false;
-    }
-
-    const filesystem::path temproot = filesystem::temp_directory_path();
-    const filesystem::path datapath = temproot / "uw_climate_benchmark_input.txt";
-    const filesystem::path scriptpath = temproot / "uw_climate_benchmark_excel.ps1";
-    const filesystem::path errorpath = temproot / "uw_climate_benchmark_excel_error.txt";
-
-    {
-        ofstream datafile(datapath);
-
-        if (!datafile.is_open())
-            return false;
-
-        datafile << "ID";
-
-        for (const string& code : codes)
-            datafile << ',' << code;
-
-        datafile << ",TOTAL,HRES";
-        datafile << '\n';
-        datafile << runid;
-
-        for (const long long count : simulationcounts)
-            datafile << ',' << count;
-
-        datafile << ',' << accumulate(simulationcounts.begin(), simulationcounts.end(), 0LL);
-        datafile << ',' << horizontalresolution;
-        datafile << '\n';
-    }
-
-    {
-        ofstream scriptfile(scriptpath);
-
-        if (!scriptfile.is_open())
-            return false;
-
-        scriptfile << "param([string]$WorkbookPath, [string]$DataPath, [string]$ErrorPath)\n";
-        scriptfile << "$ErrorActionPreference = 'Stop'\n";
-        scriptfile << "Remove-Item -LiteralPath $ErrorPath -ErrorAction SilentlyContinue\n";
-        scriptfile << "$excel = $null\n";
-        scriptfile << "$workbook = $null\n";
-        scriptfile << "$sheet = $null\n";
-        scriptfile << "$percentageSheet = $null\n";
-        scriptfile << "$differenceSheet = $null\n";
-        scriptfile << "try {\n";
-        scriptfile << "$lines = Get-Content -Path $DataPath\n";
-        scriptfile << "if ($lines.Count -lt 2) { throw 'Benchmark input is incomplete' }\n";
-        scriptfile << "$headers = $lines[0].Split(',')\n";
-        scriptfile << "$simulation = $lines[1].Split(',')\n";
-        scriptfile << "$excel = New-Object -ComObject Excel.Application\n";
-        scriptfile << "$excel.Visible = $false\n";
-        scriptfile << "$excel.DisplayAlerts = $false\n";
-        scriptfile << "$workbook = $excel.Workbooks.Open($WorkbookPath)\n";
-        scriptfile << "if ($workbook.ReadOnly) { throw 'Climate benchmark workbook is open read-only; close it in Excel and retry' }\n";
-        scriptfile << "$sheet = $workbook.Worksheets.Item('RAW_PIXELS')\n";
-        scriptfile << "$percentageSheet = $workbook.Worksheets.Item('PERCENTAGES')\n";
-        scriptfile << "$differenceSheet = $workbook.Worksheets.Item('DIFFERENCE')\n";
-        scriptfile << "for ($index = 0; $index -lt $headers.Count; $index++) {\n";
-        scriptfile << "    $actual = [string]$sheet.Cells.Item(1, $index + 1).Text\n";
-        scriptfile << "    if ($actual -ne $headers[$index]) { throw \"Workbook header mismatch at column $($index + 1): expected '$($headers[$index])', found '$actual'\" }\n";
-        scriptfile << "}\n";
-        scriptfile << "$runId = [int]$simulation[0]\n";
-        scriptfile << "if ($runId -lt 2) { throw 'Benchmark run ID must be at least 2' }\n";
-        scriptfile << "$row = $runId + 1\n";
-        scriptfile << "$existingId = $sheet.Cells.Item($row, 1).Value2\n";
-        scriptfile << "if ($null -ne $existingId -and -not [string]::IsNullOrWhiteSpace([string]$existingId) -and [int]$existingId -ne $runId) { throw \"Workbook row $row already belongs to run $existingId\" }\n";
-        scriptfile << "$rawFormulaSourceRow = $row - 1\n";
-        scriptfile << "while ($rawFormulaSourceRow -ge 2 -and -not $sheet.Cells.Item($rawFormulaSourceRow, 35).HasFormula) { $rawFormulaSourceRow-- }\n";
-        scriptfile << "if ($rawFormulaSourceRow -lt 2) { throw 'No RAW_PIXELS formula template row found' }\n";
-        scriptfile << "$sheet.Range(\"A$rawFormulaSourceRow:AI$rawFormulaSourceRow\").Copy($sheet.Range(\"A$row:AI$row\"))\n";
-        scriptfile << "$percentageRow = $row + 1\n";
-        scriptfile << "$percentageSourceRow = $percentageRow - 1\n";
-        scriptfile << "while ($percentageSourceRow -ge 2 -and -not $percentageSheet.Cells.Item($percentageSourceRow, 1).HasFormula) { $percentageSourceRow-- }\n";
-        scriptfile << "if ($percentageSourceRow -lt 2) { throw 'No PERCENTAGES formula template row found' }\n";
-        scriptfile << "$percentageSheet.Range(\"A$percentageSourceRow:AG$percentageSourceRow\").Copy($percentageSheet.Range(\"A$percentageRow:AG$percentageRow\"))\n";
-        scriptfile << "$differenceSourceRow = $row - 1\n";
-        scriptfile << "while ($differenceSourceRow -ge 2 -and -not $differenceSheet.Cells.Item($differenceSourceRow, 1).HasFormula) { $differenceSourceRow-- }\n";
-        scriptfile << "if ($differenceSourceRow -lt 2) { throw 'No DIFFERENCE formula template row found' }\n";
-        scriptfile << "$differenceSheet.Range(\"A$differenceSourceRow:AG$differenceSourceRow\").Copy($differenceSheet.Range(\"A$row:AG$row\"))\n";
-        scriptfile << "for ($index = 0; $index -lt $simulation.Count; $index++) {\n";
-        scriptfile << "    $sheet.Cells.Item($row, $index + 1).Value2 = [double]$simulation[$index]\n";
-        scriptfile << "}\n";
-        scriptfile << "$wreTerms = @()\n";
-        scriptfile << "for ($column = 2; $column -le 32; $column++) {\n";
-        scriptfile << "    $columnName = $sheet.Cells.Item(1, $column).Address($false, $false) -replace '[0-9]', ''\n";
-        scriptfile << "    $wreTerms += \"ABS(${columnName}${row}-REFERENCE_3600!`$${columnName}`$2/POWER(3600/AH${row},2))\"\n";
-        scriptfile << "}\n";
-        scriptfile << "$wreFormula = '=IF(A{0}=\"\",\"\",({1})/SUM(B{0}:AF{0}))' -f $row,($wreTerms -join '+')\n";
-        scriptfile << "$sheet.Cells.Item($row, 35).Formula = $wreFormula\n";
-        scriptfile << "$excel.CalculateFull()\n";
-        scriptfile << "if (-not $sheet.Cells.Item($row, 35).HasFormula) { throw \"RAW_PIXELS WRE formula missing at row $row\" }\n";
-        scriptfile << "if (-not $percentageSheet.Cells.Item($percentageRow, 1).HasFormula) { throw \"PERCENTAGES formula missing at row $percentageRow\" }\n";
-        scriptfile << "if (-not $differenceSheet.Cells.Item($row, 1).HasFormula) { throw \"DIFFERENCE formula missing at row $row\" }\n";
-        scriptfile << "$workbook.Save()\n";
-        scriptfile << "}\n";
-        scriptfile << "catch {\n";
-        scriptfile << "    Set-Content -LiteralPath $ErrorPath -Value $_.Exception.Message\n";
-        scriptfile << "    exit 1\n";
-        scriptfile << "}\n";
-        scriptfile << "finally {\n";
-        scriptfile << "    if ($null -ne $differenceSheet) { [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($differenceSheet) }\n";
-        scriptfile << "    if ($null -ne $percentageSheet) { [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($percentageSheet) }\n";
-        scriptfile << "    if ($null -ne $sheet) { [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($sheet) }\n";
-        scriptfile << "    if ($null -ne $workbook) { try { $workbook.Close($false) } catch {}; [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($workbook) }\n";
-        scriptfile << "    if ($null -ne $excel) { try { $excel.Quit() } catch {}; [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) }\n";
-        scriptfile << "    [GC]::Collect()\n";
-        scriptfile << "    [GC]::WaitForPendingFinalizers()\n";
-        scriptfile << "}\n";
-    }
-
-    wstring commandline = L"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"";
-    commandline += scriptpath.wstring();
-    commandline += L"\" -WorkbookPath \"";
-    commandline += workbookpath.wstring();
-    commandline += L"\" -DataPath \"";
-    commandline += datapath.wstring();
-    commandline += L"\" -ErrorPath \"";
-    commandline += errorpath.wstring();
-    commandline += L"\"";
-
-    const bool succeeded = runhiddenprocessandwait(commandline);
-
-    if (!succeeded)
-    {
-        ifstream errorfile(errorpath);
-        string errormessage;
-
-        if (getline(errorfile, errormessage) && !errormessage.empty())
-        {
-            cerr << "Climate benchmark workbook error: " << errormessage << '\n';
-            if (failuremessage != nullptr)
-                *failuremessage = errormessage;
-        }
-        else if (failuremessage != nullptr)
-        {
-            *failuremessage = "Excel benchmark update failed without a detailed error";
-        }
-    }
-
-    return succeeded;
-}
-
 bool loadcirculationreferencewindfields(
     climateworld& world,
     climatevalidation::circulationreferencewindfields& fields,
@@ -3028,7 +2847,7 @@ bool exportclimatebenchmarkimages(
         << "All maps are global equirectangular grids with north at the top and periodic longitude.\n\n"
         << "Every PNG map and GeoTIFF field has the world grid's size (--resolution); coarser climate grids are remapped onto it.\n"
         << "These native wind maps show coarse seasonal circulation; W2/Q3 terrain refinement is a separate diagnostic pass.\n\n"
-        << "{ID}_koppen.png: categorical land climate class; colors follow the workbook's Koeppen-Geiger legend; water is black.\n"
+        << "{ID}_koppen.png: categorical land climate class; colors follow the Koeppen-Geiger legend; water is black.\n"
         << "Shared colours and fixed scales: configs/climate-palettes.json (climate-colour-v2).\n"
         << "Positive magnitudes: blue/cyan/green/yellow/orange/red. Signed fields: white/magenta/blue/cyan/green/yellow/red; zero cyan. Black is masked/missing.\n"
         << "{ID}_temp.png: four-season mean land surface-air temperature, signed scale -54 to +40 C; water black.\n"
@@ -3835,7 +3654,7 @@ void writeprecipitationgrid(const filesystem::path& filepath, climateworld& worl
     }
 }
 
-// Numeric validation input: independent of image palettes and workbook layout.
+// Numeric validation input: independent of image palettes.
 bool exportbenchmarkcomparisoncells(climateworld& world, int runid)
 {
     const filesystem::path directory = getappenvironment().climateBenchmarkRunDirectory / to_string(runid);
@@ -4060,24 +3879,6 @@ bool recordclimatebenchmarkrun(
         world.seed(), nextrunid, horizontalresolution, timestamp, information, codes, simulationcounts) == false)
     {
         cerr << "Failed to persist climate benchmark diagnostics.\n";
-        return false;
-    }
-
-    string workbookfailure;
-
-    if (updateclimatebenchmarkworkbook(
-        nextrunid, horizontalresolution, codes, simulationcounts, &workbookfailure) == false)
-    {
-        const filesystem::path statuspath =
-            getappenvironment().climateBenchmarkRunDirectory /
-            to_string(nextrunid) / "workbook_update_error.txt";
-        ofstream statusfile(statuspath);
-
-        if (statusfile.is_open())
-            statusfile << workbookfailure << '\n';
-
-        cerr << "Climate benchmark workbook update failed for run "
-            << nextrunid << ".\n";
         return false;
     }
 

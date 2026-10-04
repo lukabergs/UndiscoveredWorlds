@@ -259,4 +259,4 @@ uv run --offline scripts/uw.py world run --resolution 512 --plates 12 --tectonic
 uv run --offline scripts/uw.py world run --resolution 256 --social --social-mode historical --history-years 500
 ```
 
-`--no-rivers`, `--no-lakes`, `--no-deltas` and `--no-profile-log` shorten runs.
+`--no-rivers`, `--no-lakes` and `--no-deltas` shorten runs.

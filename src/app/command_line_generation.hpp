@@ -30,7 +30,6 @@ struct CommandLineGenerationOptions
     SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
     bool usePrehistory = true;
     int historyYears = 1200;
-    bool logToProfilingWorkbook = true;
     bool climateOnly = false;
     bool hasSeed = false;
     bool hasSavePath = false;
@@ -83,7 +82,7 @@ struct GenerationExecutionContext;
 // Runs a recipe on an imported world (imported-world or earth-climate).
 RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe, const GenerationExecutionContext& context,
     const RecipeRunOptions& runoptions);
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook,
+void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool recordclimatebenchmark,
     const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[],
     boolshapetemplate landshape[], std::vector<std::vector<bool>>& okmountains,
     const ImportedClimateMaps* importedclimate = nullptr, bool climateOnly = false);

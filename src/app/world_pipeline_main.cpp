@@ -35,12 +35,10 @@ int main()
     if (command == "climate-benchmark")
     {
         options.earthClimateBenchmark = true;
-        options.logToProfilingWorkbook = false;
     }
     else if (command == "run")
     {
         options.runCommand = true;
-        options.logToProfilingWorkbook = false;
     }
     else if (command != "generate")
     {

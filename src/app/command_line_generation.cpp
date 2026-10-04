@@ -79,7 +79,6 @@ void printcommandlineusage()
     cout << "  --social-mode <mode>    static or historical.\n";
     cout << "  --no-prehistory         Disable prehistory pass in historical mode.\n";
     cout << "  --history-years <years> Historical simulation span.\n";
-    cout << "  --no-profile-log        Skip profiling workbook logging.\n";
     cout << "  --help                  Show this message.\n";
 }
 
@@ -143,12 +142,6 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
         if (argument == "--no-prehistory")
         {
             options.usePrehistory = false;
-            continue;
-        }
-
-        if (argument == "--no-profile-log")
-        {
-            options.logToProfilingWorkbook = false;
             continue;
         }
 
@@ -491,14 +484,14 @@ RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe,
     return runrecipeonterrain(world, recipe, scratch, parameters, context, runoptions);
 }
 
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate, bool climateOnly)
+void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool recordclimatebenchmark, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate, bool climateOnly)
 {
     GenerationExecutionContext context;
     context.dorivers = dorivers;
     context.climateOnly = climateOnly;
     context.dolakes = dolakes;
     context.dodeltas = dodeltas;
-    context.appendclimateworkbook = appendclimateworkbook;
+    context.recordclimatebenchmark = recordclimatebenchmark;
     context.socialoptions = socialoptions;
     context.landshape = landshape;
     context.smalllake = smalllake;
@@ -617,7 +610,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     WorldGenerationDebugOptions debugoptions;
     debugoptions.visualizePlateTectonicsRealtime = false;
-    debugoptions.logToProfilingWorkbook = options.logToProfilingWorkbook;
     debugoptions.plateTectonicsDurationMyr = options.plateTectonicsDurationMyr;
     debugoptions.plateTectonicsPlateCount = options.plateTectonicsPlateCount;
 
@@ -884,7 +876,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         context.dorivers = options.rivers;
         context.dolakes = options.lakes;
         context.dodeltas = options.deltas;
-        context.appendclimateworkbook = false;
+        context.recordclimatebenchmark = false;
         context.socialoptions = socialoptions;
         context.landshape = landshape;
         context.chainland = chainland;

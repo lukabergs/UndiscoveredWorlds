@@ -60,6 +60,7 @@ Lessons:
 | `world-0013` | 2026-10-04 | tooling added | keep | consolidation phase 3, step 5: verifier agent, review checklists, reported checks |
 | `world-0014` | 2026-10-04 | equivalent | keep | consolidation phase 3, step 6: configs/regions.json and the regional table |
 | `world-0015` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 7: observed references as .npy with a manifest per dataset |
+| `world-0016` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 12 (done before steps 8 to 11): Excel automation removed |
 
 Lessons:
 
@@ -100,3 +101,4 @@ Lessons:
 - `world-0015`: The sealed archive runs/reports/climate-reference-experiments-20260915/prepared-inputs still holds .uwclim inputs that the new binary cannot read; replaying those experiments means preparing the inputs again.
 - `world-0015`: The moved receipts still name the former .uwclim files; fields are found by dataset and variable.
 - `world-0015`: refs/source/physical and refs/processed/physical are junctions into D:/dev/undiscovered-worlds/refs/ since step 1.
+- `world-0016`: Stored commands that pass --no-profile-log (registry records, old run manifests) are rejected by the current binary.

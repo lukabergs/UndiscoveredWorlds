@@ -31,7 +31,6 @@ ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_VARIABLES = {
     'UW_CLIMATE_VALIDATION_DIR': 'validation', 'UW_CLIMATE_BENCHMARK_IMAGE_DIR': 'maps',
     'UW_CLIMATE_BENCHMARK_RUN_DIR': 'diagnostics', 'UW_CLIMATE_BENCHMARK_RUN_LOG': 'registry.json',
-    'UW_PROFILING_WORKBOOK': 'profiling.xlsx', 'UW_CLIMATE_WORKBOOK': 'climate.xlsx',
     'UW_DEFAULT_IMAGE_DIR': 'images', 'UW_DEFAULT_WORLD_DIR': 'worlds', 'UW_DEFAULT_UWS_DIR': 'worlds'}
 
 

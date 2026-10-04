@@ -87,7 +87,6 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
     add_library(uw_climate_world STATIC
         src/app/app_environment.cpp
         src/app/climate_options.cpp
-        src/io/profiling_workbook.cpp
         src/io/raster_image.cpp
         src/io/raster_imports.cpp
         src/pipeline/climate_stages.cpp

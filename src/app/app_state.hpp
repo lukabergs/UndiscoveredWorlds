@@ -55,7 +55,7 @@ struct CustomWorldUiState
     int seedentry = 0;
     int newx = -1;
     int newy = -1;
-    bool compareClimateWorkbook = true;
+    bool recordClimateBenchmark = true;
 };
 
 struct ProgressPassState

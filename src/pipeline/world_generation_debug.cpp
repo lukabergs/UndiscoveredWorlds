@@ -7,7 +7,6 @@
 
 #include "app_environment.hpp"
 #include "generation_progress.hpp"
-#include "profiling_workbook.hpp"
 #include "world_generation_debug.hpp"
 
 using namespace std;
@@ -16,7 +15,6 @@ namespace
 {
 const WorldGenerationDebugOptions* activeworldgenerationoptions = nullptr;
 long activeworldgenerationseed = 0;
-vector<pair<string, double>> activeworldgenerationtimings;
 function<void()> worldgenerationvisualizationcallback;
 }
 
@@ -30,26 +28,13 @@ void beginworldgendebugrun(long seed, const WorldGenerationDebugOptions* options
 {
     activeworldgenerationseed = seed;
     activeworldgenerationoptions = options;
-    activeworldgenerationtimings.clear();
 }
 
 void endworldgendebugrun()
 {
-    if (activeworldgenerationoptions != nullptr && activeworldgenerationoptions->logToProfilingWorkbook)
-        appendprofilingworkbookrow(getappenvironment().profilingWorkbookPath, activeworldgenerationseed, activeworldgenerationtimings);
-
-    activeworldgenerationtimings.clear();
     activeworldgenerationoptions = nullptr;
     activeworldgenerationseed = 0;
     worldgenerationvisualizationcallback = nullptr;
-}
-
-void onworldgenstepcompleted(const string& label, double elapsedms)
-{
-    if (activeworldgenerationoptions == nullptr)
-        return;
-
-    activeworldgenerationtimings.emplace_back(label, elapsedms);
 }
 
 void setworldgenvisualizationcallback(function<void()> callback)

@@ -28,8 +28,6 @@ void flushtimedreport()
     cout.flags(oldflags);
     cout.precision(oldprecision);
 
-    onworldgenstepcompleted(timedreporttext, elapsedms);
-
     hastimedreport = false;
     timedreporttext.clear();
 }
