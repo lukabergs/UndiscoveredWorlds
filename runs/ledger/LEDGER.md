@@ -12,6 +12,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 | Id | Date | Verdict | Decision | What |
 |---|---|---|---|---|
 | `climate-0001` | 2026-10-04 | pending user review | keep | consolidation phase 1: the re-baseline |
+| `climate-0002` | 2026-10-05 | parity shown | keep | consolidation phase 3: parity of global-balanced-v1 between the legacy chain and the bundle evaluation; repeat of run 385 |
 
 Lessons:
 
@@ -21,6 +22,9 @@ Lessons:
 - `climate-0001`: Seen in pre-switch and baseline alike: a precipitation hotspot at the north pole near 87 E, a one-row line along the equator in January column water and convergence, staircase blocks in 850 hPa wind over high terrain, a sharp line along the Antarctic coast in surface wind.
 - `climate-0001`: A run started with --from-bundle from a bundle written before this commit fails on the element type of the climate fields.
 - `climate-0001`: bench.py climate run swallows --bundle (it is its own option), so a registered run has no bundle; the bundles here come from the same binaries and settings run by hand with the same surface drag input.
+- `climate-0002`: A repeat of the climate baseline is bit-identical; any score difference between two runs of one binary comes from the options.
+- `climate-0002`: --climate-transport mpdata takes about five times as long as ffsl at the registered settings and changes global-balanced-v1 by +0.025.
+- `climate-0002`: weighted_relative_error (registry) and global-balanced-v1 can order a pair of runs differently.
 
 ## tectonics
 
