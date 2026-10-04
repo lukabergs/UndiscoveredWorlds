@@ -117,6 +117,8 @@ def evaluate(profile, profile_path, bundle, output, baseline=None, repeat=None, 
         'checks': checks, 'validation': validation, 'references': references.provenance(), 'maps': rendered}
     document['verdict'] = verdict(profile, checks, validation, review.latest(output))
     (output / 'evaluation.json').write_text(json.dumps(document, indent=2, allow_nan=False) + '\n', encoding='utf-8')
+    if profile.get('review'):
+        (output / 'review-request.json').write_text(json.dumps(review.request(profile, document), indent=2) + '\n', encoding='utf-8')
     report.run_page(output)
     return document
 

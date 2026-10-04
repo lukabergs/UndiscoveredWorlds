@@ -57,7 +57,7 @@ function delta(v, lowerIsBetter = true) {
   return h('td', {class: 'num ' + cls}, (v > 0 ? '+' : '') + fmt(v));
 }
 function status(value) {
-  const cls = {pass: 'pass', fail: 'fail', improved: 'pass', approved: 'pass', worse: 'fail', rejected: 'fail', revise: 'warn', pending: 'warn'}[value] || '';
+  const cls = {pass: 'pass', fail: 'fail', improved: 'pass', approved: 'pass', worse: 'fail', rejected: 'fail', revise: 'warn', pending: 'warn', reported: 'warn'}[value] || '';
   return h('b', {class: cls}, value);
 }
 function table(headers, rows, numericFrom = Infinity) {
@@ -81,7 +81,7 @@ page.append(h('p', {class: 'files'}, D.files.map(f => h('a', {href: f.path}, f.t
 page.append(h('h2', {}, 'Checks'));
 page.append(table(['Check', 'Status', 'Summary'], D.checks.map(c => h('tr', {},
   h('td', {}, c.check), h('td', {class: c.status}, c.status),
-  h('td', {}, c.summary, c.details && c.details.length && c.status === 'fail'
+  h('td', {}, c.summary, c.details && c.details.length && (c.status === 'fail' || c.status === 'reported')
     ? h('details', {}, h('summary', {}, `${c.details.length} details`), h('ul', {}, c.details.slice(0, 50).map(x => h('li', {}, x)))) : null)))));
 
 if (D.scores.length || D.rows.length || D.distributions.length) {

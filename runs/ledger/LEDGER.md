@@ -53,6 +53,7 @@ Lessons:
 | `world-0010` | 2026-10-04 | equivalent | keep | consolidation phase 3, step 2: pyproject.toml, scripts/uw.py, snake_case script names, audit exit status |
 | `world-0011` | 2026-10-04 | equivalent | keep | consolidation phase 3, step 3: report templates |
 | `world-0012` | 2026-10-04 | tooling added | keep | consolidation phase 3, step 4: ledger tooling |
+| `world-0013` | 2026-10-04 | tooling added | keep | consolidation phase 3, step 5: verifier agent, review checklists, reported checks |
 
 Lessons:
 
@@ -83,3 +84,7 @@ Lessons:
 - `world-0010`: runs/registry records keep the former script paths in their stored commands; they are history.
 - `world-0011`: The climate registry holds no global-balanced-v1 score for runs 379 to 385, so the dashboard's score column is empty for them.
 - `world-0011`: The elevation animation of a 61-snapshot tectonics run is 5.3 MB.
+- `world-0013`: The review maps have no legend and no graticule, and most are 256 x 128 or smaller (solver grids); the verifier read values by matching colours to the palette file.
+- `world-0013`: Wind and transport maps show speed only, so checklist entries about direction (trades, westerlies, monsoon reversal) cannot be answered from them.
+- `world-0013`: The request carries the parent's losses but no parent maps; better and worse against the parent is judged from numbers only.
+- `world-0013`: A checklist 'good' text must agree with the reference maps: the first ITCZ text contradicted ERA5 in the eastern Pacific.

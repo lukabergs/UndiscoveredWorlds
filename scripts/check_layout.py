@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROOT_DIRECTORIES = {
     ".git", ".githooks", ".codex", ".agents", "assets", "configs", "refs",
     "definitions", "docs", "meta", "out", "references", "runs", "scripts", "src",
-    "tests", "vcpkg-ports", "saved_worlds", ".venv",
+    "tests", "vcpkg-ports", "saved_worlds", ".venv", ".claude",
 }
 # Code outside the tectonics engine includes only these engine headers.
 TECTONICS_ENGINE = ROOT / "src/simulations/geology/plate_tectonics"

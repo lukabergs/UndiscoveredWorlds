@@ -22,13 +22,13 @@
                                     "atmosphere.level_wind_east", "hydrosphere.solver_sea_surface_temperature"]},
     {"check": "finite", "fields": ["atmosphere.*", "hydrosphere.solver_*", "cryosphere.solver_*"]},
     {"check": "range", "field": "atmosphere.solver_monthly_temperature", "min": -95, "max": 60},
-    {"check": "range", "field": "atmosphere.precipitation_exact", "min": 0, "max": 3000},
+    {"check": "range", "field": "atmosphere.precipitation_exact", "min": 0, "max": 3000, "report": true},
     {"check": "range", "field": "atmosphere.pressure", "min": -80, "max": 80},
     {"check": "range", "field": "atmosphere.level_wind_east", "min": -120, "max": 120},
     {"check": "range", "field": "atmosphere.level_wind_north", "min": -120, "max": 120},
     {"check": "range", "field": "hydrosphere.solver_sea_surface_temperature", "mask": "sea", "min": -2, "max": 36},
     {"check": "range", "field": "cryosphere.solver_sea_ice", "min": 0, "max": 1, "tolerance": 1e-5},
-    {"check": "range", "field": "atmosphere.column_water", "min": 0, "max": 120},
+    {"check": "range", "field": "atmosphere.column_water", "min": 0, "max": 120, "report": true},
     {"check": "range", "field": "atmosphere.precipitation_rate", "min": 0, "max": 200},
     {"check": "range", "field": "hydrosphere.current_east", "min": -5, "max": 5},
     {"check": "range", "field": "hydrosphere.current_north", "min": -5, "max": 5},
@@ -78,5 +78,19 @@
     {"name": "moisture-flux", "validation": "moisture_flux", "title": "Column moisture transport (kg/(m s)), process grid", "vector": ["atmosphere.moisture_transport_east", "atmosphere.moisture_transport_north"], "palette": "climate:moisture_flux", "seasons": [0, 2]},
     {"name": "convergence", "validation": "convergence", "title": "Moisture convergence (mm/day), process grid", "field": "atmosphere.moisture_convergence", "palette": "climate:convergence", "seasons": [0, 2]},
     {"name": "currents", "validation": "current", "title": "Ocean current speed (m/s), ocean grid", "vector": ["hydrosphere.current_east", "hydrosphere.current_north"], "mask": "sea", "palette": "climate:current", "seasons": [0, 2]}
+  ],
+  "review": [
+    {"id": "itcz-single-band", "question": "Is the tropical rain maximum a single band in each ocean, placed as in the reference in both seasons?", "maps": ["rain", "convergence"], "seasons": "all", "region": "tropics", "good": "one band 5 to 10 degrees wide; north of the equator all year in the eastern Pacific and the Atlantic, moving south of it in January over the Indian Ocean and the western Pacific; no second band across the whole Pacific that the reference lacks", "severity": "blocker"},
+    {"id": "subtropical-dry-belts", "question": "Are the subtropical deserts dry and in the right places?", "maps": ["annual-rain"], "seasons": "all", "region": "subtropics", "good": "under 250 mm/yr over the Sahara, Arabia, central Australia, the Kalahari and Namib, the Atacama and the south-west of North America", "severity": "major"},
+    {"id": "monsoon-reversal", "question": "Do South Asia and West Africa get their rain in the northern summer, with onshore surface wind then and offshore wind in January?", "maps": ["rain", "surface-wind", "moisture-flux"], "seasons": "all", "region": "monsoon regions", "good": "wet July and dry January over India, the Bay of Bengal coast and the Sahel; wind direction reverses over the Arabian Sea", "severity": "major"},
+    {"id": "orographic-rain", "question": "Is rain heavier on the windward side of the large ranges and lighter in their lee?", "maps": ["annual-rain", "rain"], "seasons": "all", "region": "mountains", "good": "wet western slopes of the southern Andes and the Pacific Northwest, wet southern slope of the Himalaya, dry Patagonia and Tibetan Plateau", "severity": "major"},
+    {"id": "surface-wind-belts", "question": "Are there easterly trades in the tropics and westerlies at 40 to 60 degrees in both hemispheres, strongest over the Southern Ocean?", "maps": ["surface-wind"], "seasons": "all", "region": "global", "good": "speed maxima over the Southern Ocean and the winter North Atlantic and North Pacific; weak wind along the equator and under the subtropical highs", "severity": "blocker"},
+    {"id": "jets-500", "question": "Is there one 500 hPa westerly maximum per hemisphere at 30 to 50 degrees, stronger in the winter hemisphere?", "maps": ["wind-500", "wind-850"], "seasons": "all", "region": "mid-latitudes", "good": "continuous band around each hemisphere; no blocks at the size of solver cells over high terrain", "severity": "major"},
+    {"id": "pressure-centres", "question": "Are the semi-permanent pressure centres present and placed as observed?", "maps": ["pressure"], "seasons": "all", "region": "global", "good": "January: Aleutian and Icelandic lows, Siberian high. July: North Pacific and Azores highs, low over South Asia. Southern subtropical highs over each ocean all year", "severity": "major"},
+    {"id": "sst-pattern", "question": "Does sea surface temperature show the warm pool, the eastern cold tongues and the poleward gradient without land-shaped or blocky patches?", "maps": ["sst"], "seasons": "all", "region": "oceans", "good": "warmest water in the western Pacific and Indian Ocean; cooler eastern equatorial Pacific and Atlantic; cold currents along the west coasts of the Americas and Africa", "severity": "major"},
+    {"id": "ocean-gyres", "question": "Do the currents form subtropical gyres with fast western boundary currents and a continuous circumpolar current?", "maps": ["currents"], "seasons": "all", "region": "oceans", "good": "Gulf Stream and Kuroshio visible as narrow fast bands; Antarctic Circumpolar Current unbroken through Drake Passage; equatorial currents westward", "severity": "major"},
+    {"id": "temperature-seasons", "question": "Is the seasonal temperature range larger over the northern continents than over the oceans, with smooth gradients?", "maps": ["temperature"], "seasons": "all", "region": "global", "good": "Siberia and Canada far colder in January than the oceans at the same latitude; no steps of one unit, no coast-following lines", "severity": "major"},
+    {"id": "moisture", "question": "Is column water highest over the warm pool and the rain band and lowest over the poles, deserts and high plateaus?", "maps": ["column-water", "moisture-flux"], "seasons": "all", "region": "global", "good": "smooth tropical maximum following the rain band; dry Sahara, Tibet, Antarctica and Greenland", "severity": "minor"},
+    {"id": "grid-artefacts", "question": "Are all maps free of structures that follow the grid?", "maps": ["rain", "annual-rain", "column-water", "convergence", "surface-wind", "wind-850", "temperature", "pressure"], "seasons": "all", "region": "global", "good": "no straight line along a latitude row or a meridian, no single-cell hotspot at a pole, no staircase blocks at solver-cell size, no sharp line along a coast (Antarctica)", "severity": "major"}
   ]
 }

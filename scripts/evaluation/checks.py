@@ -1,6 +1,7 @@
 """Automatic pass/fail checks on run bundles, configured by evaluation profiles.
 
-Each check returns {'check', 'status' ('pass' | 'fail' | 'skip'), 'summary', 'details'}.
+Each check returns {'check', 'status' ('pass' | 'fail' | 'skip' | 'reported'), 'summary', 'details'}.
+A check with "report": true in the profile is 'reported' where it would fail: shown, not failing.
 A check is skipped, not failed, when its input is absent (for example no repeat run).
 """
 import fnmatch
@@ -155,5 +156,8 @@ def run_checks(bundle, specs, context):
         kind = spec['check']
         if kind not in CHECKS:
             raise ValueError(f'Unknown check {kind!r}; known: {", ".join(CHECKS)}')
-        results.append(CHECKS[kind](bundle, spec, context))
+        outcome = CHECKS[kind](bundle, spec, context)
+        if spec.get('report') and outcome['status'] == 'fail':
+            outcome['status'] = 'reported'
+        results.append(outcome)
     return results

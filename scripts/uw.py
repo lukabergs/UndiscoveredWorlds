@@ -20,6 +20,8 @@ Modules and commands:
                        pages from evaluation.json (scripts/evaluation/report.py): one DIR rewrites its run
                        page (index.html, report.md); several give a comparison page, the first DIR being the
                        baseline, in --output (default out/evaluation/<module>/comparison)
+    <module>  review   review.json of an evaluation: review --evaluation DIR [--verdict approved|rejected|revise
+                       --notes TEXT --reviewer user|agent --answers FILE.json]; the user's verdict overrides
     <module>  ledger   experiment ledger (runs/ledger/<module>.jsonl; also module `world`):
                        ledger [--topic TEXT]   entries naming the topic, or the last five
                        ledger --draft          a new entry with every key, printed for filling in
@@ -52,9 +54,9 @@ WORLD_EXE = paths.executable('world_pipeline')
 RECIPE = ROOT / 'configs/tectonics-baseline.json'
 SCRATCH = ROOT / 'out/bench'
 EVALUATION = ROOT / 'scripts/evaluation'
-COMMANDS = {'tectonics': ('run', 'inspect', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger'), 'geology': ('run',),
-            'climate': ('run', 'check', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger'),
-            'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger')}
+COMMANDS = {'tectonics': ('run', 'inspect', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'), 'geology': ('run',),
+            'climate': ('run', 'check', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
+            'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review')}
 
 
 def call(command):
@@ -264,6 +266,11 @@ def main():
         return
     if args.command in ('experiment', 'evaluate'):
         evaluation(args, extra)
+        return
+    if args.command == 'review':
+        if not args.evaluation or len(args.evaluation) != 1:
+            parser.error('review requires --evaluation DIR')
+        call([UV, 'run', '--offline', EVALUATION / 'review.py', args.evaluation[0], *extra])
         return
     if args.command == 'dashboard' or args.evaluation:
         if args.command not in ('report', 'dashboard'):
