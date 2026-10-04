@@ -12,7 +12,7 @@ Each input run has an `*-analysis.json` containing its registered `run` ID and c
 
 ## Artifact roles
 
-- **HTML comparison:** selectors, baseline/selected/reference maps, global tables, distributions and latitude profiles. Regional crops are visual only and do not change global measurements. Dateline-crossing regions wrap correctly. Download links point at the exact full-size image used by the gallery.
+- **HTML comparison:** selectors, baseline/selected/reference maps, global tables, distributions and latitude profiles. Regional crops are visual only and do not change global measurements; they are the project boxes of `configs/regions.json`. Dateline-crossing regions wrap correctly. Download links point at the exact full-size image used by the gallery.
 - **Markdown report:** hypotheses, source changes, findings, decisions, numerical recommendation, score definition and limitations. Generated from the run's recorded decision data.
 - **Execution log:** raw stdout/stderr, solver output, warnings, timings and failures. It is evidence for debugging, not a second narrative report.
 - **JSON receipts:** exact metrics, ranking inputs, source provenance, palette version and hashes. These support later retrieval and rebuilding.

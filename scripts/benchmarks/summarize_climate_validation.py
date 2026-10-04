@@ -15,11 +15,10 @@ import re
 import sys
 from pathlib import Path
 import numpy as np
-from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import references
-from uwtools.grid import band_area, latitudes, longitudes
+from uwtools import references, regions as region_sets
+from uwtools.grid import band_area, latitudes, longitudes, remap_area_mean as remap
 from uwtools.hashing import sha256
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -52,26 +51,6 @@ def previous_report(run_id, directory=ROOT/'runs/reports'):
 
 def bounds(n):
     return np.linspace(90, -90, n + 1)
-
-def remap(a, ny, nx):
-    sy, sx = a.shape[-2:]
-    sb, tb = np.sin(np.deg2rad(bounds(sy))), np.sin(np.deg2rad(bounds(ny)))
-    lat = np.maximum(0, np.minimum(tb[:-1, None], sb[None, :-1]) - np.maximum(tb[1:, None], sb[None, 1:]))
-    tx, ss = np.linspace(0, 1, nx + 1), np.linspace(0, 1, sx + 1)
-    lon = np.maximum(0, np.minimum(tx[1:, None], ss[None, 1:]) - np.maximum(tx[:-1, None], ss[None, :-1]))
-    def one(v):
-        finite = np.isfinite(v)
-        if sx % nx == 0:
-            k = sx // nx
-            num = np.where(finite, v, 0).reshape(sy, nx, k).sum(2)
-            den = finite.reshape(sy, nx, k).sum(2)
-            num, den = lat @ num, lat @ den
-        else:
-            num, den = lat @ np.where(finite, v, 0) @ lon.T, lat @ finite.astype(float) @ lon.T
-        return np.divide(num, den, out=np.full((ny, nx), np.nan), where=den > 0)
-    if a.ndim == 2:
-        return one(a)
-    return np.stack([one(v) for v in a])
 
 def reference(name, ny, nx):
     key = (name, ny, nx)
@@ -112,9 +91,9 @@ def regions(ny, nx, land, mask_key='output'):
         masks[label+'_LAND'] = m*land
     for name, west, east, south, north in [('N_ATLANTIC',-80,20,10,65),('S_ATLANTIC',-70,20,-60,0),('N_PACIFIC',120,-70,10,65),('S_PACIFIC',150,-70,-60,0),('INDIAN',20,120,-60,30),('SOUTHERN_OCEAN',-180,180,-90,-50),('ARCTIC_OCEAN',-180,180,65,90),('TROPICAL_ATLANTIC',-70,20,-20,20),('TROPICAL_PACIFIC',120,-70,-20,20),('TROPICAL_INDIAN',20,120,-20,20)]:
         masks[name] = ocean*latitude_fraction(south,north)*longitude_fraction(west,east)[None,:]
-    source = np.asarray(Image.open(REF/'ipcc_ar6_regions.png').convert('RGB'))[:,:,0].astype(int)-1
+    fractions = region_sets.ar6_fractions(ny,nx)
     for item in AR6:
-        fraction=np.clip(remap((source==int(item['id'])).astype(float),ny,nx),0,1)
+        fraction=fractions[int(item['id'])]
         if item['type']=='Land':fraction*=land
         elif item['type']=='Ocean':fraction*=ocean
         masks['AR6_'+item['acronym']] = fraction
@@ -245,8 +224,8 @@ def main():
     def run_file(name):
         return benchmark_file(args.run_id, name)
 
-    with (REF/'ipcc_ar6_regions.tsv').open(encoding='utf-8-sig',newline='') as f:
-        AR6=list(csv.DictReader(f,delimiter='\t'))
+    # AR6 labels as text, as the payload has always recorded them.
+    AR6=[{key:str(item[key]) for key in ('id','acronym','name','continent','type')} for item in region_sets.ar6()]
     data=read_csv(run_file('climate_comparison_cells.csv'))
     ny=max(int(r['y']) for r in data)+1;nx=max(int(r['x']) for r in data)+1
     assert nx % 2 == 0 and ny == nx // 2

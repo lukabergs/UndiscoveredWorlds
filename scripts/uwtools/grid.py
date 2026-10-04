@@ -4,6 +4,7 @@ Rows run north to south, columns east from -180 degrees (docs/architecture/world
 Two weight forms are in use and are not numerically identical: the exact band area
 sin(north) - sin(south) and the cosine of the centre latitude. The band edges are computed
 in radians or in degrees by different callers; the two differ in the last bits.
+remap_area_mean is the validation summary's conservative reduction (also used for region masks).
 """
 import numpy as np
 
@@ -37,3 +38,29 @@ def band_area(rows, degree_edges=False):
 def area_weights(rows, columns):
     """Band areas broadcast to rows x columns (read-only view, not normalised)."""
     return np.broadcast_to(band_area(rows)[:, None], (rows, columns))
+
+
+def remap_area_mean(a, ny, nx):
+    """Area mean of the finite source values over each target cell of a cell-centred ny x nx grid.
+
+    Latitude overlaps are exact band areas with degree edges, longitude overlaps periodic
+    fractions; target cells without finite source values are NaN. a is 2-D or a stack of 2-D fields.
+    """
+    sy, sx = a.shape[-2:]
+    sb, tb = np.sin(np.deg2rad(np.linspace(90, -90, sy + 1))), np.sin(np.deg2rad(np.linspace(90, -90, ny + 1)))
+    lat = np.maximum(0, np.minimum(tb[:-1, None], sb[None, :-1]) - np.maximum(tb[1:, None], sb[None, 1:]))
+    tx, ss = np.linspace(0, 1, nx + 1), np.linspace(0, 1, sx + 1)
+    lon = np.maximum(0, np.minimum(tx[1:, None], ss[None, 1:]) - np.maximum(tx[:-1, None], ss[None, :-1]))
+    def one(v):
+        finite = np.isfinite(v)
+        if sx % nx == 0:
+            k = sx // nx
+            num = np.where(finite, v, 0).reshape(sy, nx, k).sum(2)
+            den = finite.reshape(sy, nx, k).sum(2)
+            num, den = lat @ num, lat @ den
+        else:
+            num, den = lat @ np.where(finite, v, 0) @ lon.T, lat @ finite.astype(float) @ lon.T
+        return np.divide(num, den, out=np.full((ny, nx), np.nan), where=den > 0)
+    if a.ndim == 2:
+        return one(a)
+    return np.stack([one(v) for v in a])

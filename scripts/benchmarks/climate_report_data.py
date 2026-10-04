@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'scripts'))
 sys.path.insert(0,str(ROOT/'scripts/refs'))
 from cell_grid import conservative_remap
-from uwtools import grid,references
+from uwtools import grid,references,regions
 
 FIELDS={
  'surface_wind':('Surface wind', 'm/s', 'vector', .10, 'wind/speed/{s}/s'),
@@ -28,13 +28,8 @@ FIELDS={
  'skin_sst':('Ocean / ice skin temperature', '°C', 'scalar', 0, 'ocean/skin_temperature/{s}/s'),
  'evaporation':('Ocean latent heat loss', 'W/m²', 'scalar', 0, 'energy/latent_upward/{s}/s'),
  'surface_radiation':('Net surface radiation', 'W/m²', 'scalar', 0, 'energy/net_radiation/{s}/s')}
-REGIONS={
- 'Global':[-90,90,-180,180], 'South Asian monsoon':[-10,35,35,110],
- 'Central / eastern Pacific':[-25,25,-160,-80], 'Western Pacific':[-25,25,120,180],
- 'North Atlantic / Greenland':[30,90,-85,45], 'North Pacific':[15,70,120,-110],
- 'Central Asia':[15,65,35,120], 'Southern Ocean / Antarctica':[-90,-35,-180,180],
- 'Tropical Atlantic / Africa':[-25,30,-65,55], 'Kuroshio':[15,45,115,160],
- 'Agulhas':[-50,-15,10,50], 'South America':[-60,15,-95,-25]}
+# Map crops of the report: display name -> [south, north, west, east], the project boxes of configs/regions.json.
+REGIONS={box['name']:[box['south'],box['north'],box['west'],box['east']] for box in regions.boxes()}
 MONTH_DAYS=np.array([31,28.25,31,30,31,30,31,31,30,31,30,31])
 SOURCES={
  'surface_wind':('era5_u10m','era5_v10m'), '850_wind':('era5_u850','era5_v850'),

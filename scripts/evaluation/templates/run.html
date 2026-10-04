@@ -103,6 +103,28 @@ if (D.scores.length || D.rows.length || D.distributions.length) {
   if (D.skipped.length) page.append(h('ul', {class: 'muted'}, D.skipped.map(s => h('li', {}, `skipped ${s.id}: ${s.reason}`))));
 }
 
+if (D.regions && D.regions.options.length) {
+  const R = D.regions;
+  page.append(h('h3', {}, 'Regional errors'));
+  page.append(h('p', {class: 'muted'}, `${R.note} ${R.method}`));
+  const option = h('select', {'aria-label': 'Field and season'}, R.options.map((o, i) => h('option', {value: i}, `${o.field} · ${o.season}`)));
+  const sets = Object.keys(R.options[0].sets);
+  const set = h('select', {'aria-label': 'Region set'}, sets.map(s => h('option', {value: s}, R.set_names[s] || s)));
+  const holder = h('div', {});
+  const draw = () => {
+    const rows = R.options[option.value].sets[set.value] || [];
+    const headers = ['Region', 'Cells', 'Bias', 'RMSE'].concat(D.has_baseline ? ['Baseline bias', 'Baseline RMSE', 'Δ RMSE'] : []);
+    const names = R.names[set.value] || {};
+    holder.replaceChildren(table(headers, rows.map(r => h('tr', {}, h('td', {}, set.value === 'ar6' ? `${r[0]} · ${names[r[0]]}` : names[r[0]] || r[0]),
+      [r[1], r[2], r[3]].map(x => h('td', {class: 'num'}, fmt(x))),
+      D.has_baseline ? [h('td', {class: 'num'}, fmt(r[4])), h('td', {class: 'num'}, fmt(r[5])), delta(r[5] === null ? null : r[3] - r[5])] : [])), 1));
+  };
+  option.addEventListener('change', draw);
+  set.addEventListener('change', draw);
+  page.append(h('p', {}, option, ' ', set), holder);
+  draw();
+}
+
 page.append(h('h2', {}, 'Review'));
 if (!D.reviews.length) page.append(h('p', {class: 'muted'}, 'No review recorded (scripts/evaluation/review.py).'));
 for (const r of D.reviews.slice().reverse()) page.append(h('div', {class: 'review'},

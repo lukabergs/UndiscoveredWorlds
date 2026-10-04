@@ -131,6 +131,25 @@ def distribution_tables(validation):
     return tables
 
 
+def regional_tables(validation):
+    """Regional errors (validation.regions) per field and season: rows [region, cells, run bias, run RMSE,
+    baseline bias, baseline RMSE] for each region set (values to four significant digits, as displayed),
+    or None without a regional table."""
+    entry = validation.get('regions')
+    if not entry:
+        return None
+    short = lambda value: None if value is None else float(f'{value:.4g}')
+    options = []
+    for field, seasons in entry['fields'].items():
+        for season, sets in seasons.items():
+            tables = {name: [[region, row['cells'], *[short(row.get(key, {}).get(metric)) for key in ('run', 'baseline')
+                                                      for metric in ('bias', 'rmse')]] for region, row in rows.items()]
+                      for name, rows in sets.items()}
+            options.append({'field': field, 'season': season_label(seasons, season), 'sets': tables})
+    return {'note': entry['note'], 'method': entry['method'], 'set_names': {'project': 'Project boxes', 'ar6': 'IPCC AR6'},
+            'names': entry['sets'], 'options': options}
+
+
 def map_groups(maps):
     """Static images grouped by map and season ({model, reference, difference}), and the animations."""
     groups, index, animations = [], {}, []
@@ -201,7 +220,8 @@ def run_data(evaluation_dir):
             'name': run_identity(directory, run), 'facts': run_facts(document, run), 'verdict': verdict,
             'evidence': document['evidence'], 'checks': document['checks'], 'scores': score_lines(validation),
             'rows': validation_rows(validation), 'has_baseline': document.get('baseline') is not None,
-            'distributions': distribution_tables(validation), 'skipped': validation['skipped'], 'reviews': reviews,
+            'distributions': distribution_tables(validation), 'regions': regional_tables(validation),
+            'skipped': validation['skipped'], 'reviews': reviews,
             'groups': groups, 'animations': animations, 'files': files,
             'provenance': {'profile': document['profile'], 'code': document['code'], 'references': document['references']}}
 
@@ -234,6 +254,20 @@ def markdown(data):
                       '|---|' + '---|' * len(table['columns'])]
             lines += [f"| {row['metric']} | " + ' | '.join(fmt(row.get(key)) for key in table['columns']) + ' |' for row in table['rows']]
         lines += [f"- skipped {item['id']}: {item['reason']}" for item in data['skipped']]
+    if data.get('regions'):
+        lines += ['', '### Regional errors (project boxes)', '',
+                  f"{data['regions']['note']} Run bias / RMSE of model minus reference; AR6 regions and the baseline "
+                  'are in evaluation.json and on the run page.']
+        fields = {}
+        for option in data['regions']['options']:
+            fields.setdefault(option['field'], []).append(option)
+        for field, options in fields.items():
+            regions = list(dict.fromkeys(row[0] for option in options for row in option['sets'].get('project', [])))
+            values = [{row[0]: f'{fmt(row[2], 3)} / {fmt(row[3], 3)}' for row in option['sets'].get('project', [])} for option in options]
+            lines += ['', f'| {field} | ' + ' | '.join(option['season'] for option in options) + ' |',
+                      '|---|' + '---|' * len(options)]
+            lines += [f"| {data['regions']['names']['project'].get(region, region)} | " +
+                      ' | '.join(value.get(region, '–') for value in values) + ' |' for region in regions]
     if data['reviews']:
         lines += ['', '## Review', '']
         lines += [f"- {entry['recorded']} {entry['reviewer']}: **{entry['verdict']}**" +

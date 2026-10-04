@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/benchmarks'))
 from climate_report_data import FIELDS, magnitude, weights  # noqa: E402
 from climate_report_metrics import DEFINITION as PALETTE, VERSION as SCORE_VERSION, evaluate  # noqa: E402
+from uwtools import regions  # noqa: E402
+from uwtools.hashing import sha256  # noqa: E402
 
 SELECTOR = re.compile(r'^([a-z]+\.[a-z0-9_]+)(?:\[(\d+|@[A-Za-z0-9_.-]+)\])?$')
 
@@ -139,8 +141,66 @@ def available(bundle, spec):
     return all(available_selector(bundle, selector) for selector in spec['model'])
 
 
-def compare_maps(bundle, spec, references, baseline=None):
-    """Per-season evaluation rows for the run and, with a common mask, for the baseline."""
+class RegionalTable:
+    """Area-weighted bias and RMSE of model minus reference per region of configs/regions.json.
+
+    Reported, never part of a score. Project boxes select cells by centre; AR6 regions weight
+    cells by their overlap fraction with the rasterised mask on the field's grid.
+    """
+
+    def __init__(self):
+        self.config = regions.load()
+        self.labels = None
+        self.grids = {}
+        self.fields = {}
+
+    def weights(self, shape):
+        if shape not in self.grids:
+            if self.labels is None:
+                self.labels = regions.ar6_labels(self.config)
+            ar6 = regions.ar6_fractions(*shape, config=self.config, labels=self.labels)
+            self.grids[shape] = {'project': regions.box_masks(*shape, config=self.config),
+                                 'ar6': {item['acronym']: ar6[item['id']] for item in regions.ar6(self.config)}}
+        return self.grids[shape]
+
+    def add(self, field, season, values, reference, mask):
+        cell_weights = weights(reference.shape)
+        entry = {}
+        for name, members in self.weights(reference.shape).items():
+            rows = {}
+            for region, fraction in members.items():
+                inside = mask & (fraction > 0)
+                if not inside.any():
+                    continue
+                w = (cell_weights * fraction)[inside]
+                row = {'cells': int(inside.sum())}
+                for key, value in values.items():
+                    difference = (value - reference)[inside]
+                    row[key] = {'bias': float(np.average(difference, weights=w)),
+                                'rmse': float(np.sqrt(np.average(difference * difference, weights=w)))}
+                rows[region] = row
+            entry[name] = rows
+        self.fields.setdefault(field, {})[str(season)] = entry
+
+    def result(self):
+        sets = self.config['sets']
+        mask = regions.ar6_mask_path(self.config)
+        return {'note': 'Reported, never part of a score.',
+                'method': ('Per scalar entry and season: area-weighted mean (bias) and root mean square (rmse) of model '
+                           'minus reference over the cells of the entry\'s common mask in each region. Project boxes take '
+                           'the cells whose centre lies in the box; AR6 regions weight cells by their overlap fraction with '
+                           'the rasterised mask. Regions without valid cells are omitted.'),
+                'config': regions.PATH.relative_to(ROOT).as_posix(), 'config_sha256': sha256(regions.PATH),
+                'ar6_mask': mask.relative_to(ROOT).as_posix(), 'ar6_mask_sha256': sha256(mask),
+                'sets': {'project': {box['id']: box['name'] for box in sets['project']['regions']},
+                         'ar6': {item['acronym']: item['name'] for item in sets['ar6']['regions']}},
+                'fields': self.fields}
+
+
+def compare_maps(bundle, spec, references, baseline=None, regional=None):
+    """Per-season evaluation rows for the run and, with a common mask, for the baseline.
+
+    With a RegionalTable, scalar entries also add their regional errors on the same mask."""
     # A comparison may borrow another field's scale (e.g. a second 850 hPa wind).
     scale = spec.get('metric_scale', spec['id'])
     if scale not in PALETTE['scales']:
@@ -157,6 +217,8 @@ def compare_maps(bundle, spec, references, baseline=None):
         for key, source in runs.items():
             mask &= field_mask(source, spec, season, shape) & np.isfinite(magnitude(values[key]))
         seasons[str(season)] = {key: evaluate(value, reference, mask, scale) for key, value in values.items()}
+        if regional is not None and spec['kind'] == 'scalar':
+            regional.add(spec['id'], season, values, reference, mask)
     return seasons
 
 
@@ -208,16 +270,22 @@ def score(comparisons, key):
 
 def run_validation(bundle, specs, references, baseline=None):
     comparisons, skipped, distributions = {}, [], {}
+    regional = None
     for spec in specs:
         if spec['kind'] == 'hypsometry':
             distributions[spec['id']] = compare_hypsometry(bundle, spec, baseline)
         elif not available(bundle, spec) or (baseline is not None and not available(baseline, spec)):
             skipped.append({'id': spec['id'], 'reason': 'model fields absent: ' + ', '.join(spec['model'])})
         else:
-            comparisons[spec['id']] = compare_maps(bundle, spec, references, baseline)
+            if regional is None and spec['kind'] == 'scalar':
+                regional = RegionalTable()
+            comparisons[spec['id']] = compare_maps(bundle, spec, references, baseline, regional)
     scores = {}
     if comparisons:
         scores['run'] = score(comparisons, 'run')
         if baseline is not None:
             scores['baseline'] = score(comparisons, 'baseline')
-    return {'maps': comparisons, 'distributions': distributions, 'skipped': skipped, 'scores': scores}
+    result = {'maps': comparisons, 'distributions': distributions, 'skipped': skipped, 'scores': scores}
+    if regional is not None and regional.fields:
+        result['regions'] = regional.result()
+    return result

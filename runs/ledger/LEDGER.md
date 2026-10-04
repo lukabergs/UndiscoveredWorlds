@@ -54,6 +54,7 @@ Lessons:
 | `world-0011` | 2026-10-04 | equivalent | keep | consolidation phase 3, step 3: report templates |
 | `world-0012` | 2026-10-04 | tooling added | keep | consolidation phase 3, step 4: ledger tooling |
 | `world-0013` | 2026-10-04 | tooling added | keep | consolidation phase 3, step 5: verifier agent, review checklists, reported checks |
+| `world-0014` | 2026-10-04 | equivalent | keep | consolidation phase 3, step 6: configs/regions.json and the regional table |
 
 Lessons:
 
@@ -88,3 +89,5 @@ Lessons:
 - `world-0013`: Wind and transport maps show speed only, so checklist entries about direction (trades, westerlies, monsoon reversal) cannot be answered from them.
 - `world-0013`: The request carries the parent's losses but no parent maps; better and worse against the parent is judged from numbers only.
 - `world-0013`: A checklist 'good' text must agree with the reference maps: the first ITCZ text contradicted ERA5 in the eastern Pacific.
+- `world-0014`: evaluation.json grows from about 0.3 MB to 0.9 MB with the regional table.
+- `world-0014`: AR6 land regions are not restricted to land cells in the regional table: each entry's own mask applies.
