@@ -292,7 +292,7 @@ equivalence check for refactors.
 |---|---|---|
 | 1 | Field catalogue, run bundles, process registry with declared access and kinds, recipes and scheduler with audit; stage code out of the workbench; headless core without ImGui/SFML | done |
 | 2 | Climate inputs and outputs; climate code off `planet`; level-based atmosphere storage; `climate_pipeline` | done |
-| 3 | Evaluation module on bundles (climate and world profiles); `bench.py` delegates to it | done |
+| 3 | Evaluation module on bundles (climate and world profiles); `uw.py` delegates to it | done |
 | 4 | Components behind the `planet` facade, resolution-sized grids, Geosphere initializer; copy-on-write snapshots deferred | done |
 | 5 | Climate diagnostics in the world (done); per-step random streams, `GenerationScratch` contents into fields, save format; regional map stays on the facade | in progress |
 | A | Mantle plumes in the engine (opt-in, off by default; awaiting visual review) | done |

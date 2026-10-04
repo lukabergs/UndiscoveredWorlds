@@ -1,4 +1,4 @@
-"""Opt-in global barrier checks: uv run --with numpy --with scipy --with pyamg ..."""
+"""Global barrier checks of terrain_wind_barrier (scipy and pyamg, declared in pyproject.toml)."""
 import sys
 import unittest
 from pathlib import Path

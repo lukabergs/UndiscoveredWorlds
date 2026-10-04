@@ -1,7 +1,3 @@
-# /// script
-# requires-python = ">=3.13"
-# dependencies = ["numpy==2.5.2", "pillow==12.3.0"]
-# ///
 """Build a portable HTML comparison from numbered, verified native tectonics runs."""
 import argparse
 import base64

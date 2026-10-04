@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Standard per-run page for every simulation module.
 
 Each module supplies facts, links, exported maps and optional animations; this

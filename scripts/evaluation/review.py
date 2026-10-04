@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Record and show review verdicts: the user's judgement of an evaluated run.
 
     uv run --offline python scripts/evaluation/review.py <evaluation-dir> --verdict approved --notes "..."

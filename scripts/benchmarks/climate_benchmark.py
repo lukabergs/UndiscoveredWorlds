@@ -2,7 +2,7 @@
 
 The native flags are those of `world_pipeline climate-benchmark`. This module
 adds the benchmark defaults, captures the log under runs/logs/climate/<id>.log
-and calls write-benchmark-report.py for the new run.
+and calls write_benchmark_report.py for the new run.
 """
 import hashlib
 import os
@@ -62,12 +62,12 @@ LEGACY_PARAMETERS = {
 
 
 def bench_command(arguments):
-    """Return the bench.py command list for native climate arguments."""
-    return [sys.executable, str(ROOT / 'scripts/benchmarks/bench.py'), 'climate', 'run', *arguments]
+    """Return the uw.py command list for native climate arguments."""
+    return [sys.executable, str(ROOT / 'scripts/uw.py'), 'climate', 'run', *arguments]
 
 
 def from_legacy_command(command):
-    """Convert a run-climate-benchmark.ps1 receipt to bench.py arguments; pass others through."""
+    """Convert a run-climate-benchmark.ps1 receipt to uw.py arguments; pass others through."""
     if not any(str(part).endswith('run-climate-benchmark.ps1') for part in command):
         return command
     start = next(i for i, part in enumerate(command) if str(part).endswith('run-climate-benchmark.ps1')) + 1
@@ -83,7 +83,7 @@ def from_legacy_command(command):
 
 
 def set_option(command, flag, value):
-    """Set or append one flag value in a bench.py command list."""
+    """Set or append one flag value in a uw.py command list."""
     if flag in command:
         command[command.index(flag) + 1] = str(value)
     else:
@@ -178,7 +178,7 @@ def run(arguments, executable=EXECUTABLE, label='', surface_drag='earth'):
     if final.exists():
         raise SystemExit(f'Refusing to replace existing log: {final}')
     pending.rename(final)
-    subprocess.run([UV, 'run', '--offline', 'python', str(ROOT / 'scripts/benchmarks/write-benchmark-report.py'), '--run-id', str(run_id),
+    subprocess.run([UV, 'run', '--offline', 'python', str(ROOT / 'scripts/benchmarks/write_benchmark_report.py'), '--run-id', str(run_id),
                     '--elapsed-seconds', f'{elapsed:.7f}'], cwd=ROOT, check=True)
     print(f'Run {run_id} completed in {elapsed:.1f} s. Log: {final}', flush=True)
     return run_id

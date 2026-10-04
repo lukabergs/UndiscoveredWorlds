@@ -187,7 +187,7 @@ def export_diagnostics(fields, sources, width, land, emit, additional=()):
 
 def export_koppen(temperature, precipitation, width, land, emit):
     # Reuse the observed control's classifier and category colours.
-    path = Path(__file__).resolve().parents[1] / "benchmarks/benchmark-observed-koppen.py"
+    path = Path(__file__).resolve().parents[1] / "benchmarks/benchmark_observed_koppen.py"
     spec = importlib.util.spec_from_file_location("observed_koppen", path)
     classifier = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(classifier)

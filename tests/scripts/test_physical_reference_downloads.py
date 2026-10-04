@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 SPEC = importlib.util.spec_from_file_location('physical_download',
-    Path(__file__).resolve().parents[2] / 'scripts/refs/download-physical-reference-sources.py')
+    Path(__file__).resolve().parents[2] / 'scripts/refs/download_physical_reference_sources.py')
 DOWNLOAD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(DOWNLOAD)
 

@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy"]
-# ///
 """Compare two run bundles field by field.
 
     uv run --offline scripts/evaluation/compare_bundles.py BUNDLE_A BUNDLE_B [--fields PREFIX ...] [--json OUT]

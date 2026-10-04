@@ -1,7 +1,3 @@
-# /// script
-# requires-python = ">=3.13"
-# dependencies = ["numpy==2.5.2", "pillow==12.3.0", "rasterio==1.5.1", "netcdf4==1.7.4", "cmocean==4.0.3", "matplotlib==3.11.1", "pyhdf==0.11.7", "openpyxl==3.1.5", "pyshp==3.1.6", "geopandas==1.1.4", "pyshtools==4.14.1", "pygplates==1.0.0"]
-# ///
 """Prepare physical reference maps at 128–2048 px from retained, verified sources."""
 import argparse
 import json

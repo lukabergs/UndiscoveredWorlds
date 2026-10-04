@@ -5,7 +5,7 @@ import unittest
 import tempfile
 import numpy as np
 
-path = Path(__file__).resolve().parents[2]/'scripts/benchmarks/summarize-climate-validation.py'
+path = Path(__file__).resolve().parents[2]/'scripts/benchmarks/summarize_climate_validation.py'
 spec = importlib.util.spec_from_file_location('validation_summary',path)
 summary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(summary)

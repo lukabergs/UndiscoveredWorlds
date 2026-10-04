@@ -1,7 +1,3 @@
-# /// script
-# requires-python = ">=3.13"
-# dependencies = ["numpy==2.5.2", "rasterio==1.5.1"]
-# ///
 """Compare native tectonic bundles with physical reference distributions (no downloads)."""
 import argparse
 import html

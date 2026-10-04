@@ -17,7 +17,7 @@ from PIL import Image
 
 path = (
     Path(__file__).resolve().parents[2]
-    / "scripts/refs/prepare-reduced-earth-benchmark.py"
+    / "scripts/refs/prepare_reduced_earth_benchmark.py"
 )
 sys.path.insert(0, str(path.parent))
 spec = importlib.util.spec_from_file_location("earth_benchmark_maps", path)

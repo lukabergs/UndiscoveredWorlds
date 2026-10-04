@@ -16,11 +16,11 @@ except ImportError:
     requests = None
 
 
-@unittest.skipIf(requests is None, "Run with --with requests")
+@unittest.skipIf(requests is None, "Needs requests (pyproject.toml)")
 class ReferenceDownloadTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = Path(__file__).resolve().parents[2] / "scripts/refs/download-reference-sources.py"
+        path = Path(__file__).resolve().parents[2] / "scripts/refs/download_reference_sources.py"
         spec = importlib.util.spec_from_file_location("reference_download", path)
         cls.download = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.download)
@@ -64,7 +64,7 @@ class ReferenceDownloadTests(unittest.TestCase):
     def test_download_preparation_runs_ingestion_before_family_refresh(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            script = root / "scripts/refs/download-reference-sources.py"
+            script = root / "scripts/refs/download_reference_sources.py"
             argv = [str(script), "--source", "moisture", "--output", str(root / "sources"), "--prepare"]
             with patch.object(sys, "argv", argv), patch.object(self.download, "__file__", str(script)), \
                  patch.object(self.download, "cds_download") as download, \
@@ -77,7 +77,7 @@ class ReferenceDownloadTests(unittest.TestCase):
             ingest, refresh = [call.args[0] for call in run.call_args_list]
             self.assertEqual(ingest[0], str(root / "uv.exe"))
             self.assertEqual(refresh[0], str(root / "uv.exe"))
-            self.assertIn("scripts/refs/prepare-additional-references.py", ingest)
+            self.assertIn("scripts/refs/prepare_additional_references.py", ingest)
             self.assertIn(str(root / "sources/era5-cds-2001-2020"), ingest)
             self.assertEqual(refresh[-2:], ["--additional-family", "era5"])
             self.assertTrue(all(call.kwargs["check"] and call.kwargs["cwd"] == root for call in run.call_args_list))

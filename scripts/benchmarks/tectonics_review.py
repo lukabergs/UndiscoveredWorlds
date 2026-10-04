@@ -1,7 +1,3 @@
-# /// script
-# requires-python = ">=3.13"
-# dependencies = ["numpy==2.5.2", "pillow==12.3.0"]
-# ///
 """Review archived tectonic runs before selecting the next experiment."""
 import argparse
 import base64

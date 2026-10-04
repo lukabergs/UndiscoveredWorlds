@@ -23,12 +23,12 @@ cmake --build out/build/headless --config Release --target world_pipeline --para
 ctest --test-dir out/build/desktop -C Release --output-on-failure -j 4          # all registered C++ tests
 ctest --test-dir out/build/desktop -C Release -R "^ClimateHydrology\."         # one suite; -R "^Suite\.Name$" for one test
 ctest --test-dir out/build/headless -C Release -L tectonics                      # tectonics_tests (label geology: minerals_tests)
-uv run --offline --with numpy --with pillow --with rasterio --with requests --with pandas --with cmocean --with matplotlib python -m unittest discover -s tests/scripts   # Python suite
-uv run --offline python scripts/check-layout.py                                   # layout and tectonics header boundary
+uv run --offline python -m unittest discover -s tests/scripts                    # Python suite
+uv run --offline python scripts/check_layout.py                                   # layout and tectonics header boundary
 uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
 ```
 
-Three GoogleTest binaries: `world_tests` (`tests/CMakeLists.txt`: core, I/O, pipeline, climate, validation; it links `uw_climate_world` alone), `tectonics_tests` and `minerals_tests` (`tests/simulations/geology/*/CMakeLists.txt`). ctest discovers every `TEST` as `Suite.Name`. `world_tests` also has explicit replay and benchmark modes that ctest never runs (`--atmosphere-replay`, `--atmosphere-benchmark`, `--momentum-replay`, `--coastal-replay`, `--heat-kernels`, `--accuracy`, `--ocean-heat-benchmark`, `--transport-benchmark`). `check_tectonics_cli.py` checks default/explicit recipe equality, column budgets and rejection of invalid options. `tests/scripts/test_physical_reference_maps.py` also needs `pygplates` (add `--with pygplates`, online the first time); without it that module fails to import and the rest of the suite still runs.
+Three GoogleTest binaries: `world_tests` (`tests/CMakeLists.txt`: core, I/O, pipeline, climate, validation; it links `uw_climate_world` alone), `tectonics_tests` and `minerals_tests` (`tests/simulations/geology/*/CMakeLists.txt`). ctest discovers every `TEST` as `Suite.Name`. `world_tests` also has explicit replay and benchmark modes that ctest never runs (`--atmosphere-replay`, `--atmosphere-benchmark`, `--momentum-replay`, `--coastal-replay`, `--heat-kernels`, `--accuracy`, `--ocean-heat-benchmark`, `--transport-benchmark`). `check_tectonics_cli.py` checks default/explicit recipe equality, column budgets and rejection of invalid options. The Python dependencies are declared once in `pyproject.toml` and pinned in `uv.lock`; `uv sync` installs them into `.venv/` (online the first time).
 
 ## Equivalence and access checks
 
@@ -37,7 +37,7 @@ out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --bundle out
 # ... change code, rebuild ...
 out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --bundle out/scratch/after
 uv run --offline python scripts/evaluation/compare_bundles.py out/scratch/before out/scratch/after
-out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --audit-access
+out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --audit-access   # exit status 1 after an undeclared or frozen write (outputs are still written)
 # Earth climate (the climate profile's run) and a start from a checkpoint bundle:
 out/build/headless/bin/Release/world_pipeline.exe run --recipe earth-climate --seed 1 --map none --bundle out/scratch/climate
 out/build/headless/bin/Release/world_pipeline.exe run --recipe procedural-world --from-bundle CHECKPOINT --steps a..b --bundle out/scratch/part

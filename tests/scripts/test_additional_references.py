@@ -26,11 +26,11 @@ def module(name):
     return result
 
 
-@unittest.skipIf(xr is None, "Run with --with xarray --with netcdf4 for source ingestion tests")
+@unittest.skipIf(xr is None, "Needs xarray and netcdf4 (pyproject.toml) for source ingestion tests")
 class AdditionalReferenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.ingest = module("prepare-additional-references")
+        cls.ingest = module("prepare_additional_references")
 
     def data(self, variable="sst", units="degC"):
         # Native pole-inclusive source, reversed latitude and shifted longitude.
@@ -57,7 +57,7 @@ class AdditionalReferenceTests(unittest.TestCase):
             self.assertEqual(receipt["height"], 4)
             self.assertEqual(receipt["products"][0]["units"], "degrees C")
             import reference_climate_maps
-            maps = module("prepare-reduced-earth-benchmark")
+            maps = module("prepare_reduced_earth_benchmark")
             emitted = []
             land = np.zeros((2, 4), dtype=bool)
             land[:, 0] = True
@@ -121,7 +121,7 @@ class AdditionalReferenceTests(unittest.TestCase):
             self.assertEqual(receipt["products"][0]["units"], "m snow depth")
             self.assertTrue(receipt["products"][0]["land_only"])
             import reference_climate_maps
-            maps = module("prepare-reduced-earth-benchmark")
+            maps = module("prepare_reduced_earth_benchmark")
             land = np.zeros((2, 4), dtype=bool)
             land[:, 0] = True
             emitted = []
@@ -155,7 +155,7 @@ class AdditionalReferenceTests(unittest.TestCase):
             v = xr.full_like(v, 4)
             xr.Dataset(dict(uo=u, vo=v)).to_netcdf(root / "ocean.nc")
             self.ingest.prepare(root, root / "output", "marine", 8, 2001, 2002)
-            maps = module("prepare-reduced-earth-benchmark")
+            maps = module("prepare_reduced_earth_benchmark")
             import reference_climate_maps
             emitted = {}
             land = np.zeros((2, 4), dtype=bool)

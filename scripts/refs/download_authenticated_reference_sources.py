@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["copernicusmarine>=2.4", "earthaccess", "xarray", "netcdf4"]
-# ///
 """Download GLORYS surface ocean fields or CERES EBAF using local provider logins."""
 
 import argparse

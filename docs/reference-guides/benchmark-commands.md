@@ -6,13 +6,13 @@ Every benchmark is headless. The desktop app `UndiscoveredWorlds.exe` takes no a
 ## One syntax for every module
 
 ```powershell
-uv run --offline scripts/benchmarks/bench.py <module> <command> [shared options] [native options]
+uv run --offline scripts/uw.py <module> <command> [shared options] [native options]
 ```
 
 | Module | Commands | Native tool |
 | --- | --- | --- |
 | `tectonics` | `run` (registered), `inspect` (scratch), `report`, `experiment`, `evaluate` | `world_pipeline.exe run --recipe tectonics` |
-| `geology` | `run` | `world_pipeline.exe run --recipe tectonics` + `benchmark-geology.py` |
+| `geology` | `run` | `world_pipeline.exe run --recipe tectonics` + `benchmark_geology.py` |
 | `climate` | `run` (registered), `check`, `report`, `experiment`, `evaluate` | `world_pipeline.exe climate-benchmark`; `world_pipeline.exe run --recipe earth-climate` for experiments |
 | `world` | `run`, `experiment`, `evaluate` | `world_pipeline.exe generate` |
 
@@ -36,7 +36,7 @@ out/build/headless/bin/Release/world_pipeline.exe --help
 
 ## What every registered run produces
 
-`bench.py <module> run` and `bench.py <module> report --runs ...` produce the same set of outputs for each module:
+`uw.py <module> run` and `uw.py <module> report --runs ...` produce the same set of outputs for each module:
 
 | Output | Climate | Tectonics |
 | --- | --- | --- |
@@ -62,7 +62,7 @@ Climate runs registered up to run 365 used seed **20260906**. Use it only to rep
 Rebuild after every source change; the tools never pick up edits on their own. Configure only the first time, or after changing a `CMakeLists.txt`, a preset, `configs/tectonics-baseline.json`, or the Visual Studio toolset.
 
 ```powershell
-# Tectonics, geology, climate and world (world_pipeline): headless build (no SFML, ImGui or CUDA); bench.py uses it by default
+# Tectonics, geology, climate and world (world_pipeline): headless build (no SFML, ImGui or CUDA); uw.py uses it by default
 cmake --preset headless
 cmake --build out/build/headless --config Release --target world_pipeline --parallel 4
 
@@ -73,7 +73,7 @@ cmake --build out/build/desktop --config Release --target UndiscoveredWorlds --p
 
 Binaries land in `bin/<Config>/` (`bin/Release`, `bin/Debug`). Simulations and benchmarks always use Release; scripts take the paths from `scripts/uwtools/paths.py`.
 
-`world_pipeline` links the headless world core (`uw_world_core`) and the simulation modules; it depends on libpng but not on SFML or ImGui. `bench.py` defaults to `out/build/headless/bin/Release/world_pipeline.exe`; pass `--executable` for another build.
+`world_pipeline` links the headless world core (`uw_world_core`) and the simulation modules; it depends on libpng but not on SFML or ImGui. `uw.py` defaults to `out/build/headless/bin/Release/world_pipeline.exe`; pass `--executable` for another build.
 
 ## Recipe runs: `world_pipeline run`
 
@@ -137,10 +137,10 @@ If configure fails with "is not a full path to an existing compiler tool", Visua
 
 ```powershell
 # Scratch experiment: run the profile's tool (seed 1), write bundle/, then evaluation/ → out/evaluation/<module>/<name>/
-uv run --offline scripts/benchmarks/bench.py world experiment --resolution 256 --repeat
-uv run --offline scripts/benchmarks/bench.py climate experiment --climate-resolution 64
+uv run --offline scripts/uw.py world experiment --resolution 256 --repeat
+uv run --offline scripts/uw.py climate experiment --climate-resolution 64
 # Evaluate an existing bundle, optionally against a baseline bundle on common masks.
-uv run --offline scripts/benchmarks/bench.py climate evaluate --bundle out/bench/climate-1024 --baseline out/bench/climate-1024-before
+uv run --offline scripts/uw.py climate evaluate --bundle out/bench/climate-1024 --baseline out/bench/climate-1024-before
 # Record the user's verdict with the evaluation (approved, rejected or revise).
 uv run --offline scripts/evaluation/review.py out/evaluation/world/<name>/evaluation --verdict approved --notes "coastlines"
 ```
@@ -153,25 +153,25 @@ Climate comparisons reuse the climate report's per-field metrics, so every field
 
 ```powershell
 # Scratch: final-state run bundle of the baseline recipe (seed 1, 256×128, 10 plates, 600 Myr) → out/bench/tectonics-seed1-256
-uv run --offline scripts/benchmarks/bench.py tectonics inspect
-uv run --offline scripts/benchmarks/bench.py tectonics inspect --resolution 512 --plates 14 --output out/bench/p14
+uv run --offline scripts/uw.py tectonics inspect
+uv run --offline scripts/uw.py tectonics inspect --resolution 512 --plates 14 --output out/bench/p14
 
 # Registered run: next ID in runs/registry/tectonics.json; checkpoints in runs/checkpoints/tectonics/<id>/snapshots/, final bundle in runs/checkpoints/tectonics/<id>/final
-uv run --offline scripts/benchmarks/bench.py tectonics run
-uv run --offline scripts/benchmarks/bench.py tectonics run --plates 14 --duration 300
+uv run --offline scripts/uw.py tectonics run
+uv run --offline scripts/uw.py tectonics run --plates 14 --duration 300
 
 # Maps, animations, comparison report and run page for registered runs (last ID is the run page)
-uv run --offline scripts/benchmarks/bench.py tectonics report --runs 74 75
-uv run --offline scripts/benchmarks/bench.py tectonics report --runs 13 --maps-only
+uv run --offline scripts/uw.py tectonics report --runs 74 75
+uv run --offline scripts/uw.py tectonics report --runs 13 --maps-only
 ```
 
-`run` copies `world_pipeline.exe` into `runs/reports/tectonics/<id>/` and runs it from there with a checkpoint for the starting Geosphere and one every `checkpoint_every_updates` updates. Scenario flags change only that run; the baseline file is not modified. Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot and a `batch_manifest.json`); the report scripts read both layouts. `bench.py tectonics experiment|evaluate` run and evaluate a bundle with `configs/evaluation/tectonics.json` (grid, required fields, finite values, ranges, repeat; Earth hypsometry as context; review maps).
+`run` copies `world_pipeline.exe` into `runs/reports/tectonics/<id>/` and runs it from there with a checkpoint for the starting Geosphere and one every `checkpoint_every_updates` updates. Scenario flags change only that run; the baseline file is not modified. Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot and a `batch_manifest.json`); the report scripts read both layouts. `uw.py tectonics experiment|evaluate` run and evaluate a bundle with `configs/evaluation/tectonics.json` (grid, required fields, finite values, ranges, repeat; Earth hypsometry as context; review maps).
 
 Mantle plumes are off by default (`--plume-count 0`). They are scenario flags like any other, so `run`, `inspect` and `report` take them unchanged:
 
 ```powershell
-uv run --offline scripts/benchmarks/bench.py tectonics inspect --plume-count 6 --plume-tail-flux-km3-yr 0.25 --plume-swell-age-myr 10
-uv run --offline scripts/benchmarks/bench.py tectonics run --plume-count 6 --plume-head-volume-km3 2000000 --plume-birth-window-myr 400
+uv run --offline scripts/uw.py tectonics inspect --plume-count 6 --plume-tail-flux-km3-yr 0.25 --plume-swell-age-myr 10
+uv run --offline scripts/uw.py tectonics run --plume-count 6 --plume-head-volume-km3 2000000 --plume-birth-window-myr 400
 ```
 
 `world_pipeline.exe --help` lists every `--plume-*` flag. Bundles of runs with plumes carry `plume_influence` (palette entry in `configs/tectonics-palettes.json`); the column budget reports `generated_plume_kg` as a subset of `generated_ocean_kg`.
@@ -190,15 +190,15 @@ $wp = "out/build/headless/bin/Release/world_pipeline.exe"
 uv run --offline scripts/evaluation/compare_bundles.py out/bench/a out/bench/b
 ```
 
-The climate/erosion feedback experiment (run 63) has no runner at present; it returns as a recipe once `terrain.climate_erosion` is an evolver (`docs/architecture/consolidation-plan.md` §6). `bench.py tectonics report` still renders run 63.
+The climate/erosion feedback experiment (run 63) has no runner at present; it returns as a recipe once `terrain.climate_erosion` is an evolver (`docs/architecture/consolidation-plan.md` §6). `uw.py tectonics report` still renders run 63.
 
 ## Geology
 
 Tectonics at each width, scored for seafloor age and collisions against Earth references. Output: `out/bench/geology/report.json`.
 
 ```powershell
-uv run --offline scripts/benchmarks/bench.py geology run
-uv run --offline scripts/benchmarks/bench.py geology run --resolution 512 --reference-width 1024
+uv run --offline scripts/uw.py geology run
+uv run --offline scripts/uw.py geology run --resolution 512 --reference-width 1024
 ```
 
 ## Climate
@@ -207,25 +207,25 @@ Earth terrain, simulated climate, compared with observations. `run` takes the ne
 
 ```powershell
 # Standard benchmark (run 373 grids): seed 1, 1024×512 world, 128-wide atmosphere/ocean, 256-wide moisture, 8 coupling updates
-uv run --offline scripts/benchmarks/bench.py climate run --label "what changed"
+uv run --offline scripts/uw.py climate run --label "what changed"
 
 # Quick smoke run on a small world (about 2 minutes)
-uv run --offline scripts/benchmarks/bench.py climate run --resolution 128 --climate-resolution 64 --climate-hydrology-resolution 128
+uv run --offline scripts/uw.py climate run --resolution 128 --climate-resolution 64 --climate-hydrology-resolution 128
 
 # Model switches
-uv run --offline scripts/benchmarks/bench.py climate run --climate-tropical-closure mixed-layer
-uv run --offline scripts/benchmarks/bench.py climate run --map "koppen,temp,precip"
+uv run --offline scripts/uw.py climate run --climate-tropical-closure mixed-layer
+uv run --offline scripts/uw.py climate run --map "koppen,temp,precip"
 
 # Checks and gallery for an existing run, no new simulation
-uv run --offline scripts/benchmarks/bench.py climate check --runs 366 --compare 365
-uv run --offline scripts/benchmarks/bench.py climate report --runs 366 --compare 365
+uv run --offline scripts/uw.py climate check --runs 366 --compare 365
+uv run --offline scripts/uw.py climate report --runs 366 --compare 365
 ```
 
 The world grid (`--resolution`) sets the size of every exported map and field. Atmosphere/ocean (`--climate-resolution`, default 128) and moisture (`--climate-hydrology-resolution`, default 256) run on coarser grids and are remapped onto the world grid, as in run 373.
 
 Land surface drag: climate runs use the Earth vegetation drag contrast (`refs/processed/climate/vegetation-drag-20260914/`, prepared from ERA5 vegetation cover, as in runs up to 378). Other world widths get a version area-averaged from the 1024 file, cached beside it. `--surface-drag none` gives uniform land drag; `--surface-drag PATH` uses another file. The log records which input was used. Procedural worlds never use it.
 
-Benchmark defaults added by `bench.py` unless you pass them: `--resolution 1024 --climate-resolution 128 --climate-hydrology-resolution 256 --climate-coupling-iterations 8`, the standard map list, and no rivers, lakes or deltas. Other `world_pipeline` defaults apply as printed by `--help`.
+Benchmark defaults added by `uw.py` unless you pass them: `--resolution 1024 --climate-resolution 128 --climate-hydrology-resolution 256 --climate-coupling-iterations 8`, the standard map list, and no rivers, lakes or deltas. Other `world_pipeline` defaults apply as printed by `--help`.
 
 Multi-run comparison report and adaptive experiments keep their own scripts:
 
@@ -244,9 +244,9 @@ Each experiment run must be analyzed and given a decision before the next one st
 
 ```powershell
 # Saved to out/bench/world-seed1-512.uww
-uv run --offline scripts/benchmarks/bench.py world run --resolution 512
-uv run --offline scripts/benchmarks/bench.py world run --resolution 512 --plates 12 --tectonic-duration-myr 300
-uv run --offline scripts/benchmarks/bench.py world run --resolution 256 --social --social-mode historical --history-years 500
+uv run --offline scripts/uw.py world run --resolution 512
+uv run --offline scripts/uw.py world run --resolution 512 --plates 12 --tectonic-duration-myr 300
+uv run --offline scripts/uw.py world run --resolution 256 --social --social-mode historical --history-years 500
 ```
 
 `--no-rivers`, `--no-lakes`, `--no-deltas` and `--no-profile-log` shorten runs.

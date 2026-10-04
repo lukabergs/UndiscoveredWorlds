@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["requests", "earthaccess"]
-# ///
 """Download the bounded physical-reference catalog; retain hashes and provenance."""
 
 import argparse

@@ -160,7 +160,7 @@ Code outside the engine uses only its public headers: `tectonic_api.hpp`,
 `tectonic_contract.hpp`, `tectonic_recipe.hpp`, `tectonic_scenario.hpp`,
 `tectonic_world_grid.hpp`, `topography_codec.hpp`, plus `material.hpp` (material
 codes) and `utils.hpp`. Engine tests may use internal headers;
-`scripts/check-layout.py` enforces this.
+`scripts/check_layout.py` enforces this.
 
 The solver includes continental/oceanic rock and sediment transport, thermal
 subsidence, distributed deformation, root-pressure forces, active margins,
@@ -185,8 +185,8 @@ cmake --preset headless
 cmake --build out/build/headless --config Release --target world_pipeline tectonics_tests minerals_tests --parallel 4
 ctest --test-dir out/build/headless -C Release -L 'tectonics|geology' --output-on-failure
 uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
-uv run --offline scripts/benchmarks/bench.py tectonics inspect
-uv run --offline scripts/benchmarks/bench.py tectonics run
+uv run --offline scripts/uw.py tectonics inspect
+uv run --offline scripts/uw.py tectonics run
 ```
 
 `world_pipeline` is the only headless executable: recipe runs, full-world generation and the Earth climate benchmark (`run`, `generate`, `climate-benchmark`). It runs recipes or parts of them (`run --recipe`, `--from-bundle`, `--steps`, `--only`, checkpoints), can write a run bundle (`--bundle`) and audit each step's field access (`--audit-access`), and links no SFML or ImGui. Climate alone on imported terrain is `run --recipe earth-climate`. The desktop `UndiscoveredWorlds.exe` takes no arguments.
@@ -221,8 +221,8 @@ The active JSON registry still supplies benchmark IDs; replacing it requires pre
 cmake --preset desktop
 cmake --build out/build/desktop --config Release --parallel 4
 ctest --test-dir out/build/desktop -C Release --output-on-failure -j 4
-uv run --offline --with numpy --with pillow python -m unittest discover -s tests/scripts
-uv run --offline python scripts/check-layout.py
+uv run --offline python -m unittest discover -s tests/scripts
+uv run --offline python scripts/check_layout.py
 ```
 
 Tests mirror the code domains. Prefer deterministic headless checks of state, budgets, and data contracts before visual comparisons. Fixed seeds, explicit inputs, and recorded units/resolutions should accompany benchmark results.
@@ -238,7 +238,7 @@ cmake --build out/build/headless --config Release --target world_pipeline --para
 
 `BUILD_TESTING` builds three GoogleTest v1.15.2 binaries (downloaded on first configuration): `world_tests` (core, I/O, pipeline, climate, validation), `tectonics_tests` and `minerals_tests`; ctest lists every `TEST` as `Suite.Name`. The `headless` preset builds `world_pipeline` and the tests. PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The public CLI regression command above checks the shared defaults and rejects retired controls.
 
-Git tracks application code, tooling, configuration, small runtime assets and deterministic test fixtures. `docs/`, `runs/registry/` and `runs/ledger/` are tracked; `meta/`, `refs/` and the rest of `runs/` are local-only. Historical `extra/`, research copies, downloads and generated artifacts are also excluded. Local links into these directories require the local workspace data. Keep preparation and reporting code in `scripts/`; the Earth-map entry point is `uv run scripts/refs/prepare-earth-maps.py`.
+Git tracks application code, tooling, configuration, small runtime assets and deterministic test fixtures. `docs/`, `runs/registry/` and `runs/ledger/` are tracked; `meta/`, `refs/` and the rest of `runs/` are local-only. Historical `extra/`, research copies, downloads and generated artifacts are also excluded. Local links into these directories require the local workspace data. Keep preparation and reporting code in `scripts/`; the Earth-map entry point is `uv run scripts/refs/prepare_earth_maps.py`.
 
 Enable the repository guards with `git config core.hooksPath .githooks`. They reject local-only paths and files larger than 5 MiB before commits and inspect reachable history before pushes. Run `uv run --offline python scripts/repository_scope.py --staged` or `--history HEAD` manually. After the data-removal history rewrite, use a fresh clone or rebase work onto the cleaned history; merging an old branch would reintroduce the discarded data. The run registry (`runs/registry/`) supplies IDs and is tracked.
 
@@ -250,13 +250,13 @@ Appearance edits affect rendering, not simulated fields. Gradient controls suppo
 
 Map imports must match the current world dimensions. Numeric imports accept supported grayscale uint16 TIFFs; PNG imports use field-specific channel scales or a one-pixel gradient strip with an explicit minimum and increment. The signed float32 Earth master is converted into the unsigned land/sea import pair during reference processing. See `src/io/map_imports.cpp` for the current decoding rules.
 
-Run `uv run --offline scripts/benchmarks/bench.py climate run` (1024×512 world, 128-wide atmosphere/ocean, 256-wide moisture) for a complete benchmark with logs and a side-by-side map gallery. `bench.py` is the common entry point for tectonics, geology, climate and full-world runs; see `docs/reference-guides/benchmark-commands.md`. See [benchmark commands and outputs](runs/maps/climate/README.md) and the [reference map/palette guide](refs/processed/climate/maps/README.md). Builds stay in `out/`; benchmark artifacts default to `runs/`.
+Run `uv run --offline scripts/uw.py climate run` (1024×512 world, 128-wide atmosphere/ocean, 256-wide moisture) for a complete benchmark with logs and a side-by-side map gallery. `uw.py` is the common entry point for tectonics, geology, climate and full-world runs; see `docs/reference-guides/benchmark-commands.md`. See [benchmark commands and outputs](runs/maps/climate/README.md) and the [reference map/palette guide](refs/processed/climate/maps/README.md). Builds stay in `out/`; benchmark artifacts default to `runs/`.
 
 The [experimental tropical boundary-layer replacement](runs/maps/climate/README.md#experimental-tropical-boundary-layer) is selectable with `--climate-tropical-closure mixed-layer`. The default remains `legacy`: the new wind balance improves tropical wind error but currently regresses rainfall, so it has not passed promotion checks.
 
-The simulator, Earth benchmark imports and exports, and every processed reference use cell-centred `W x W/2` grids. Raw sources keep their native registration until the preparation script performs the ingestion-boundary remap. The default benchmark selection is Koppen, January surface LIC and particles, and precipitation PNG/TIFF. Repeat `--map` (or use a comma-separated list) to select outputs; `all` and `none` are supported. [Map guides](docs/reference-guides/) explain quantity, units, scales, and seasonal meaning. The summary command `uv run --offline --with numpy --with pillow python scripts/benchmarks/summarize-climate-validation.py --run-id ID --output DIR` prepares workbook input tables from category-organized diagnostics and carries the latest earlier report as context. It does not append to `metrics.xlsx` automatically.
+The simulator, Earth benchmark imports and exports, and every processed reference use cell-centred `W x W/2` grids. Raw sources keep their native registration until the preparation script performs the ingestion-boundary remap. The default benchmark selection is Koppen, January surface LIC and particles, and precipitation PNG/TIFF. Repeat `--map` (or use a comma-separated list) to select outputs; `all` and `none` are supported. [Map guides](docs/reference-guides/) explain quantity, units, scales, and seasonal meaning. The summary command `uv run --offline python scripts/benchmarks/summarize_climate_validation.py --run-id ID --output DIR` prepares workbook input tables from category-organized diagnostics and carries the latest earlier report as context. It does not append to `metrics.xlsx` automatically.
 
-Generate compatible topography and climate reference maps for one or more widths with `uv run --offline --with numpy --with pillow python scripts/refs/prepare-reduced-earth-benchmark.py --width 128 256 512 1024 2048`. PNG previews, float32 GeoTIFF fields, and CSVs go to category-specific `refs/processed/<category>/maps/`, `fields/`, and `csv/` folders. Products include the binary land/ocean mask, rain, temperature, observed Köppen classes, seasonal winds/LIC/particles, and available ERA5 diagnostics. The manifest reports missing reference fields; see [reference preparation](refs/README.md) for coverage, units, and moisture-flux input requirements. Existing uint16 land/sea import TIFFs remain in `maps/`; `configs/app.env` names their base paths, and the executable selects the matching `_WIDTHxHEIGHT` variant.
+Generate compatible topography and climate reference maps for one or more widths with `uv run --offline python scripts/refs/prepare_reduced_earth_benchmark.py --width 128 256 512 1024 2048`. PNG previews, float32 GeoTIFF fields, and CSVs go to category-specific `refs/processed/<category>/maps/`, `fields/`, and `csv/` folders. Products include the binary land/ocean mask, rain, temperature, observed Köppen classes, seasonal winds/LIC/particles, and available ERA5 diagnostics. The manifest reports missing reference fields; see [reference preparation](refs/README.md) for coverage, units, and moisture-flux input requirements. Existing uint16 land/sea import TIFFs remain in `maps/`; `configs/app.env` names their base paths, and the executable selects the matching `_WIDTHxHEIGHT` variant.
 
 ## Credits and license
 

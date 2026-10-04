@@ -1,7 +1,4 @@
-# /// script
-# dependencies = ["rasterio==1.5.1", "fiona==1.10.1", "numpy==2.5.2", "pillow==12.3.0"]
-# ///
-"""Rebuild Earth maps: uv run scripts/refs/prepare-earth-maps.py [--width 2048] [--verify-only]."""
+"""Rebuild Earth maps: uv run scripts/refs/prepare_earth_maps.py [--width 2048] [--verify-only]."""
 from __future__ import annotations
 
 import argparse

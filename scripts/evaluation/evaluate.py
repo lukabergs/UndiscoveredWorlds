@@ -1,9 +1,6 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Evaluate a run bundle with a module profile: checks, validation and review maps.
 
-    uv run --offline --with numpy --with pillow python scripts/evaluation/evaluate.py \\
+    uv run --offline python scripts/evaluation/evaluate.py \\
         --profile climate --bundle <run>/bundle --output <run>/evaluation \\
         [--baseline <bundle>] [--repeat <bundle>] [--input <bundle>] [--no-maps]
 

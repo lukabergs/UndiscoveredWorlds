@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["cdsapi>=0.7.7", "requests", "xarray", "netcdf4", "filelock"]
-# ///
 """Download original monthly climate sources, with resumable CDS request receipts."""
 
 import argparse
@@ -206,12 +203,12 @@ def main():
         lock = repository / "refs/processed/metadata/reference-maps/refresh.lock"
         lock.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(lock):
-            subprocess.run([uv, "run", "scripts/refs/prepare-additional-references.py",
+            subprocess.run([uv, "run", "scripts/refs/prepare_additional_references.py",
                             "--input", str(source), "--family", family,
                             "--start-year", str(args.start_year), "--end-year", str(args.end_year)],
                            cwd=repository, check=True)
-            subprocess.run([uv, "run", "--with", "numpy", "--with", "pillow", "python",
-                            "scripts/refs/prepare-reduced-earth-benchmark.py", "--refresh-additional",
+            subprocess.run([uv, "run", "python",
+                            "scripts/refs/prepare_reduced_earth_benchmark.py", "--refresh-additional",
                             "--additional-family", family], cwd=repository, check=True)
 
 

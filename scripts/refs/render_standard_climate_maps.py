@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Generate standalone standard climate reference PNGs without running a simulation."""
 import argparse
 import json

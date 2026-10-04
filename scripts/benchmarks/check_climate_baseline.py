@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Check a completed climate run and score seasonal ocean fields without rerunning it."""
 
 import argparse

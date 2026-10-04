@@ -17,15 +17,15 @@ Each input run has an `*-analysis.json` containing its registered `run` ID and c
 - **Execution log:** raw stdout/stderr, solver output, warnings, timings and failures. It is evidence for debugging, not a second narrative report.
 - **JSON receipts:** exact metrics, ranking inputs, source provenance, palette version and hashes. These support later retrieval and rebuilding.
 
-The benchmark wrapper writes a compact per-run record using `climate_run_record.py`; after analysis, the shared batch generator links pending run pages to the appropriate comparison with that run selected. The old layout is available only through `write-benchmark-report.py --legacy-layout` for historical reproduction. Sealed old reports/maps are retained unchanged.
+The benchmark wrapper writes a compact per-run record using `climate_run_record.py`; after analysis, the shared batch generator links pending run pages to the appropriate comparison with that run selected. The old layout is available only through `write_benchmark_report.py --legacy-layout` for historical reproduction. Sealed old reports/maps are retained unchanged.
 
 ## Palettes
 
 `configs/climate-palettes.json` is the single source for colours and scales. `climate_palettes.py` serves Python exporters and plots. Generate the C++ header after changing the definition:
 
 ```powershell
-uv run --offline python scripts/benchmarks/generate-climate-palette-header.py
-uv run --offline python scripts/benchmarks/generate-climate-palette-header.py --check
+uv run --offline python scripts/benchmarks/generate_climate_palette_header.py
+uv run --offline python scripts/benchmarks/generate_climate_palette_header.py --check
 ```
 
 Positive magnitudes use blue–cyan–green–yellow–orange–red. Signed quantities use white–magenta–blue–cyan–green–yellow–red, with **zero always cyan**, even on asymmetric temperature ranges. Black means missing or masked data. Display endpoints saturate; statistics use unclipped physical values and include overflow/underflow bins. Categorical Köppen colours are unchanged.
@@ -61,8 +61,8 @@ To record that choice, add `--override-baseline ID --override-reason "User's rea
 Standalone reference regeneration, independent of any experiment batch:
 
 ```powershell
-uv run --offline scripts/refs/render-standard-climate-maps.py
-uv run --offline scripts/refs/render-standard-flow-references.py
+uv run --offline scripts/refs/render_standard_climate_maps.py
+uv run --offline scripts/refs/render_standard_flow_references.py
 ```
 
 In the table, **bold** marks the closer of baseline and selected run to the reference target. **Green** additionally means best across all displayed batch runs and the baseline. Ties share highlighting. Percentiles and histogram proportions compare values with the reference; error rows compare with zero, correlations with one and agreement fractions with 100%.

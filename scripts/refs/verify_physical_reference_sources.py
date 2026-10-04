@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "netcdf4", "rasterio", "pyhdf", "openpyxl"]
-# ///
 """Read bounded samples of physical sources and check archive integrity, without extraction."""
 
 import argparse

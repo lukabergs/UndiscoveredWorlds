@@ -50,6 +50,7 @@ vcpkg-manifest-install.log
 *.a
 *.dylib
 __pycache__/
+.venv/
 *.py[cod]
 
 # ==========================================

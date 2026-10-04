@@ -11,7 +11,7 @@ from rasterio.transform import from_bounds
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/benchmarks"))
-spec = importlib.util.spec_from_file_location("geology_benchmark", ROOT / "scripts/benchmarks/benchmark-geology.py")
+spec = importlib.util.spec_from_file_location("geology_benchmark", ROOT / "scripts/benchmarks/benchmark_geology.py")
 benchmark = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(benchmark)
 

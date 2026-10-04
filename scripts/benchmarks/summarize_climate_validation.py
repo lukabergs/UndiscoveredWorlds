@@ -1,6 +1,6 @@
 """Aggregate one benchmark for the validation workbook.
 
-Usage: python scripts/benchmarks/summarize-climate-validation.py --run-id 159 --output DIR
+Usage: python scripts/benchmarks/summarize_climate_validation.py --run-id 159 --output DIR
 Numeric references are area-averaged onto each diagnostic grid. Excel receives
 weighted moments, quantiles and paired reference values, not rendered map colours
 (except the source categorical Koppen/AR6 masks).

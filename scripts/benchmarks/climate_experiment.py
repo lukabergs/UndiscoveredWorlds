@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow", "openpyxl"]
-# ///
 """Run one archived climate experiment, analyze it, then require a decision before the next."""
 import argparse
 import datetime
@@ -116,7 +113,7 @@ def run(archive, run_id, plan):
         coupling_updates=8,climate_reference_forcing=False,visual_review='User',tests_skipped=batch.get('skip_tests',False))
     write(folder/'manifest.json',manifest)
     write(archive/f'{run_id}-plan.json',dict(plan,case=str(run_id),parent=str(parent)))
-    # Receipts from the retired PowerShell wrapper are converted to bench.py.
+    # Receipts from the retired PowerShell wrapper are converted to uw.py.
     command = from_legacy_command(read(archive/str(baseline)/'command.json'))
     if batch.get('skip_tests') and '--map' in command:
         # Flow textures are generated once by the shared report renderer.
@@ -138,7 +135,7 @@ def run(archive, run_id, plan):
     check_code = None
     if not batch.get('skip_tests'):
         with (folder/'checks.log').open('x') as stream:
-            check=subprocess.run([sys.executable,'scripts/benchmarks/check-climate-baseline.py','--run-id',str(run_id)],cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT)
+            check=subprocess.run([sys.executable,'scripts/benchmarks/check_climate_baseline.py','--run-id',str(run_id)],cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT)
         check_code = check.returncode
     receipt['checks_exit']=check_code
     outputs=list((ROOT/f'runs/diagnostics/climate/{run_id}').rglob('*'))+[ROOT/f'runs/logs/climate/{run_id}.log']

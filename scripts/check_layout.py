@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROOT_DIRECTORIES = {
     ".git", ".githooks", ".codex", ".agents", "assets", "configs", "refs",
     "definitions", "docs", "meta", "out", "references", "runs", "scripts", "src",
-    "tests", "vcpkg-ports", "saved_worlds",
+    "tests", "vcpkg-ports", "saved_worlds", ".venv",
 }
 # Code outside the tectonics engine includes only these engine headers.
 TECTONICS_ENGINE = ROOT / "src/simulations/geology/plate_tectonics"
@@ -18,7 +18,7 @@ TECTONICS_PUBLIC_HEADERS = {
 ROOT_FILES = {
     ".gitignore", ".gitattributes", "AGENTS.md", "AGENTS.override.md",
     "README.md", "CMakeLists.txt", "CMakePresets.json", "vcpkg.json",
-    "LICENSE", "version.txt",
+    "LICENSE", "version.txt", "pyproject.toml", "uv.lock",
 }
 
 

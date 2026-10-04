@@ -1,9 +1,6 @@
-# /// script
-# dependencies = ["numpy"]
-# ///
 """Common entry point for module benchmarks.
 
-    uv run --offline scripts/benchmarks/bench.py <module> <command> [shared options] [native options]
+    uv run --offline scripts/uw.py <module> <command> [shared options] [native options]
 
 Modules and commands:
     tectonics run      registered run (runs/registry/tectonics.json): world_pipeline recipe with checkpoints,
@@ -32,13 +29,14 @@ import subprocess
 import sys
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'benchmarks'))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from uwtools import paths
 import climate_benchmark
 
 # `uv run` exports its own path; subprocesses may not find uv on PATH.
 UV = os.environ.get('UV', 'uv')
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'scripts/benchmarks'
 WORLD_EXE = paths.executable('world_pipeline')
 RECIPE = ROOT / 'configs/tectonics-baseline.json'
@@ -156,7 +154,7 @@ def geology(args, extra):
         bundle = output / f'seed-{args.seed}-{width}'
         tectonics_bundle(exe, args.seed, width, extra, bundle)
         bundles.append(bundle)
-    python_script('benchmark-geology.py', '--bundle', *bundles, '--width', str(args.reference_width),
+    python_script('benchmark_geology.py', '--bundle', *bundles, '--width', str(args.reference_width),
                   '--output', output / 'report.json')
 
 
@@ -166,7 +164,7 @@ def climate(args, extra):
             raise SystemExit(f'climate {args.command} requires --runs ID')
         compare = ['--compare-run-id', str(args.compare)] if args.compare else []
         if args.command == 'check':
-            python_script('check-climate-baseline.py', '--run-id', str(args.runs[0]), *compare, *extra)
+            python_script('check_climate_baseline.py', '--run-id', str(args.runs[0]), *compare, *extra)
             return
         climate_pages(args.runs[0], args.compare)
         return
@@ -182,7 +180,7 @@ def climate_pages(run_id, compare=None):
     """Standard run page plus the side-by-side gallery against observed references."""
     python_script('run_report.py', 'climate', '--run', str(run_id), *(['--compare', str(compare)] if compare else []))
     gallery_compare = compare or run_id - 1
-    python_script('write-benchmark-report.py', '--run-id', str(run_id), '--legacy-layout',
+    python_script('write_benchmark_report.py', '--run-id', str(run_id), '--legacy-layout',
                   '--compare-run-id', str(gallery_compare))
     # The gallery refreshes the record; rewrite the run page so its links include the gallery.
     python_script('run_report.py', 'climate', '--run', str(run_id), *(['--compare', str(compare)] if compare else []))

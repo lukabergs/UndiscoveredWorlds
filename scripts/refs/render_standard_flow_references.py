@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Render reference wind textures with the same kernels as standard comparisons."""
 import argparse
 import json

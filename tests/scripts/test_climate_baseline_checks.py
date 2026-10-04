@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 compare = runpy.run_path(str(Path(__file__).resolve().parents[2] /
-    "scripts/benchmarks/check-climate-baseline.py"))["compare_reference_skill"]
+    "scripts/benchmarks/check_climate_baseline.py"))["compare_reference_skill"]
 
 
 class ReferenceGateTests(unittest.TestCase):

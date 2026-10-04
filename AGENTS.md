@@ -6,8 +6,8 @@ Procedural planetary simulation (terrain, tectonics, climate, hydrology, early s
 
 - Work directly on `main`; uncommitted changes in the working tree are current work, so build on them and never reset, stash or revert them.
 - A compile build is the default check. Run tests, benchmarks, `check_tectonics_cli.py` or the Python suite only when asked or when a bug persists after a fix; say which checks were skipped. Commands are in `docs/reference-guides/verification.md`.
-- Seed 1 for every new run; another seed only when the user asks for a seed comparison (20260906 only to reproduce climate runs up to 365). Module checks go through `scripts/benchmarks/bench.py <module> <command>` and the headless CLIs; never launch `UndiscoveredWorlds.exe` for a check.
-- Tectonics has exactly one implementation, `src/simulations/geology/plate_tectonics` (namespace `tectonics::`, baseline from `configs/tectonics-baseline.json`). Do not reference or describe any other or former tectonics code. `scripts/check-layout.py` enforces its public-header boundary.
+- Seed 1 for every new run; another seed only when the user asks for a seed comparison (20260906 only to reproduce climate runs up to 365). Module checks go through `scripts/uw.py <module> <command>` and the headless CLIs; never launch `UndiscoveredWorlds.exe` for a check.
+- Tectonics has exactly one implementation, `src/simulations/geology/plate_tectonics` (namespace `tectonics::`, baseline from `configs/tectonics-baseline.json`). Do not reference or describe any other or former tectonics code. `scripts/check_layout.py` enforces its public-header boundary.
 - Delegate read-only surveys to subagents and keep working. Before claiming a run improved anything, have a fresh-context reviewer check the evaluation. Never write per-run HTML or scripts: reports are rendered from JSON by `scripts/evaluation/`.
 
 ## Where things go

@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 SPEC = importlib.util.spec_from_file_location("benchmark_report", Path(__file__).resolve().parents[2] /
-    "scripts/benchmarks/write-benchmark-report.py")
+    "scripts/benchmarks/write_benchmark_report.py")
 REPORT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(REPORT)
 

@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow", "xarray", "netcdf4"]
-# ///
 """Ingest downloaded monthly NetCDF sources onto the canonical W x W/2 grid.
 
 Reads original coordinates, including native pole samples, rather than resizing

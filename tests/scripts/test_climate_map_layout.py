@@ -12,7 +12,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts/refs"
 sys.path.insert(0, str(SCRIPTS))
 from reference_map_layout import product_directory, product_path
 
-spec = importlib.util.spec_from_file_location("organize", SCRIPTS / "organize-climate-maps.py")
+spec = importlib.util.spec_from_file_location("organize", SCRIPTS / "organize_climate_maps.py")
 organize = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(organize)
 

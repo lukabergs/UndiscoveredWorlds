@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Validate reference bundle grids, provenance hashes and PNG/float32 TIFF exports."""
 
 import argparse

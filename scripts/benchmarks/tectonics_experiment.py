@@ -1,7 +1,3 @@
-# /// script
-# requires-python = ">=3.13"
-# dependencies = ["numpy==2.5.2", "pillow==12.3.0"]
-# ///
 """Run one numbered tectonics experiment; preserve its recipe, binary and native fields."""
 import argparse
 from datetime import datetime, timezone

@@ -909,8 +909,10 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         cerr << "Failed to write access report: " << options.accessReportPath << '\n';
         return 1;
     }
-    if (options.auditAccess && runresult.violations > 0)
-        cerr << "Access audit found " << runresult.violations << " undeclared or frozen write(s).\n";
+    // An audited run with a violation still writes its outputs and then fails.
+    const bool auditfailed = options.auditAccess && runresult.violations > 0;
+    if (auditfailed)
+        cerr <<"Access audit found " << runresult.violations << " undeclared or frozen write(s).\n";
 
     if (options.earthClimateBenchmark || options.climateOnly)
     {
@@ -977,6 +979,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         updatereport("Run bundle: " + options.bundlePath);
     }
 
-    return 0;
+    return auditfailed ? 1 : 0;
 }
 

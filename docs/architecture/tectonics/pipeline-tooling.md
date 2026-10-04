@@ -49,9 +49,9 @@ Statistics are in the `summary` block of the snapshot record. Two bundles are co
 
 ## Registered runs
 
-`bench.py tectonics run` (through `scripts/benchmarks/tectonics_experiment.py`) copies `world_pipeline.exe` into `runs/reports/tectonics/<id>/` and runs it from there with a checkpoint for the starting Geosphere and one every `checkpoint_every_updates` updates. Checkpoints land in `runs/checkpoints/tectonics/<id>/snapshots/`, the final bundle in `runs/checkpoints/tectonics/<id>/final`. `bench.py tectonics inspect` writes an unregistered final-state bundle to `out/bench/`. `bench.py tectonics experiment|evaluate` use `configs/evaluation/tectonics.json`. The baseline run is registered run 75.
+`uw.py tectonics run` (through `scripts/benchmarks/tectonics_experiment.py`) copies `world_pipeline.exe` into `runs/reports/tectonics/<id>/` and runs it from there with a checkpoint for the starting Geosphere and one every `checkpoint_every_updates` updates. Checkpoints land in `runs/checkpoints/tectonics/<id>/snapshots/`, the final bundle in `runs/checkpoints/tectonics/<id>/final`. `uw.py tectonics inspect` writes an unregistered final-state bundle to `out/bench/`. `uw.py tectonics experiment|evaluate` use `configs/evaluation/tectonics.json`. The baseline run is registered run 75.
 
-Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot and a `batch_manifest.json`); `bench.py tectonics report` and the report scripts read both layouts.
+Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot and a `batch_manifest.json`); `uw.py tectonics report` and the report scripts read both layouts.
 
 ## Checks
 

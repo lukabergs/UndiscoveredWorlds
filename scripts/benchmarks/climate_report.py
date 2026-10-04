@@ -1,6 +1,3 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Build the standard visual gallery, numerical ranking and durable decision report.
 
 uv run --offline scripts/benchmarks/climate_report.py --archive runs/reports/<archive> --baseline 353 --runs 353 354 355 --apply-selection

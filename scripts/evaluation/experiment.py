@@ -1,9 +1,6 @@
-# /// script
-# dependencies = ["numpy", "pillow"]
-# ///
 """Run a module experiment: write a run bundle with a headless tool, then evaluate it.
 
-    uv run --offline --with numpy --with pillow python scripts/evaluation/experiment.py <module> \\
+    uv run --offline python scripts/evaluation/experiment.py <module> \\
         [--name NAME] [--archive runs/reports/<experiment>] [--seed 1] [--resolution W] \\
         [--baseline BUNDLE] [--repeat] [--executable EXE] [-- native options]
 
@@ -12,7 +9,7 @@ arguments. Runs go to out/evaluation/<module>/<name>/ (scratch) unless --archive
 runs/reports/<experiment> archive, which is routed to the data drive first. A run
 directory holds run.json (command, seed, timing, code state), run.log, outputs/ (every
 file the tool would otherwise write under runs/), bundle/ and evaluation/. Modules with
-their own registry (climate, tectonics) register runs through bench.py, not here.
+their own registry (climate, tectonics) register runs through uw.py, not here.
 """
 import argparse
 import datetime
