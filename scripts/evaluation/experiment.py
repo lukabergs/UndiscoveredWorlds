@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import paths
+from uwtools import ledger, paths
 from uwtools.bundle import Bundle
 from evaluate import code_state, evaluate, load_profile
 import report
@@ -79,6 +79,7 @@ def main():
     parser.add_argument('--repeat', action='store_true', help='Run twice and check the bundles are identical')
     parser.add_argument('--executable', type=Path)
     parser.add_argument('--label', help='Change summary stored with the run')
+    parser.add_argument('--topic', help='Print the ledger entries naming this text before the run (default: the last five)')
     args, native = parser.parse_known_args()
     native = [argument for argument in native if argument != '--']
     profile, profile_path = load_profile(args.module)
@@ -88,6 +89,10 @@ def main():
     resolution = args.resolution or spec['resolution']
     if resolution < 2 or resolution % 2:
         raise SystemExit('--resolution must be an even width')
+    # What was already tried is shown before anything runs, so it does not depend on an instruction to read the ledger.
+    previous = ledger.relevant(args.module, args.topic)
+    if previous:
+        print(f'Ledger ({ledger.path(args.module).relative_to(ROOT).as_posix()}):', *map(ledger.brief, previous), sep='\n', flush=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     name = args.name or f'{stamp}-seed{args.seed}-{resolution}'
     directory = run_directory(args.module, name, args.archive)
@@ -119,6 +124,11 @@ def main():
     (directory / 'run.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
     if succeeded:
         report.run_page(directory / 'evaluation')  # again, now with run.json
+    # The entry to complete (hypothesis, expected, assessment, decision) and append with `uw.py <module> ledger --add`.
+    draft = ledger.template(args.module, change={'code': record['code'], 'label': args.label, 'native_options': native},
+                            observed={'run': directory.relative_to(ROOT).as_posix() if directory.is_relative_to(ROOT) else str(directory),
+                                      'seed': args.seed, 'resolution': record['resolution'], 'verdict': record.get('verdict')})
+    (directory / 'ledger-entry.json').write_text(json.dumps(draft, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
     if args.archive:
         record_in_archive(args.archive, args.module, name, record)
     print(f'Run directory: {directory}')

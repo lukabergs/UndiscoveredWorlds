@@ -20,6 +20,10 @@ Modules and commands:
                        pages from evaluation.json (scripts/evaluation/report.py): one DIR rewrites its run
                        page (index.html, report.md); several give a comparison page, the first DIR being the
                        baseline, in --output (default out/evaluation/<module>/comparison)
+    <module>  ledger   experiment ledger (runs/ledger/<module>.jsonl; also module `world`):
+                       ledger [--topic TEXT]   entries naming the topic, or the last five
+                       ledger --draft          a new entry with every key, printed for filling in
+                       ledger --add FILE.json  validate and append one entry; LEDGER.md is regenerated
     climate|tectonics|world dashboard [--output DIR]
                        registry runs and ledger entries (default out/evaluation/<module>/dashboard)
 
@@ -37,7 +41,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'benchmarks'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from uwtools import paths
+from uwtools import ledger, paths
 import climate_benchmark
 
 # `uv run` exports its own path; subprocesses may not find uv on PATH.
@@ -48,9 +52,9 @@ WORLD_EXE = paths.executable('world_pipeline')
 RECIPE = ROOT / 'configs/tectonics-baseline.json'
 SCRATCH = ROOT / 'out/bench'
 EVALUATION = ROOT / 'scripts/evaluation'
-COMMANDS = {'tectonics': ('run', 'inspect', 'report', 'experiment', 'evaluate', 'dashboard'), 'geology': ('run',),
-            'climate': ('run', 'check', 'report', 'experiment', 'evaluate', 'dashboard'),
-            'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard')}
+COMMANDS = {'tectonics': ('run', 'inspect', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger'), 'geology': ('run',),
+            'climate': ('run', 'check', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger'),
+            'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger')}
 
 
 def call(command):
@@ -77,7 +81,22 @@ def evaluation(args, extra):
     options += ['--resolution', args.resolution] if args.resolution is not None else []
     options += ['--executable', args.executable] if args.executable else []
     options += ['--label', args.label] if args.label else []
+    options += ['--topic', args.topic] if args.topic else []
     call([UV, 'run', '--offline', EVALUATION / 'experiment.py', args.module, *options, *extra])
+
+
+def ledger_command(args, extra):
+    """Show, draft or append entries of runs/ledger/<module>.jsonl."""
+    if extra:
+        raise SystemExit(f"Unexpected arguments: {' '.join(extra)}")
+    if args.add:
+        entry = ledger.append(json.loads(args.add.read_text(encoding='utf-8')))
+        print(f"Appended {entry['id']} to {ledger.path(entry['module']).relative_to(ROOT)}")
+    elif args.draft:
+        print(json.dumps(ledger.template(args.module), indent=1, ensure_ascii=False))
+    else:
+        found = ledger.relevant(args.module, args.topic)
+        print('\n'.join(map(ledger.brief, found)) or f'No {args.module} ledger entry' + (f' names {args.topic!r}' if args.topic else ''))
 
 
 def pages(args, extra):
@@ -229,6 +248,9 @@ def main():
     parser.add_argument('--bundle', type=Path, help='Run bundle to evaluate (evaluate)')
     parser.add_argument('--evaluation', type=Path, nargs='+',
                         help='Evaluation directories for report pages (report); the first is the baseline')
+    parser.add_argument('--topic', help='Ledger entries naming this text (ledger; printed before an experiment)')
+    parser.add_argument('--draft', action='store_true', help='ledger: print a new entry to fill in')
+    parser.add_argument('--add', type=Path, help='ledger: JSON file of one entry to append')
     parser.add_argument('--reference-width', type=int, default=512, help='Earth reference width (geology)')
     parser.add_argument('--surface-drag', default='earth',
                         help="climate: 'earth' vegetation drag contrast (default), 'none', or a UWROUGH1 file")
@@ -237,6 +259,9 @@ def main():
         parser.error(f'{args.module} commands: {", ".join(COMMANDS[args.module])}')
     if args.resolution is not None and (args.resolution < 2 or args.resolution % 2):
         parser.error('--resolution must be an even width')
+    if args.command == 'ledger':
+        ledger_command(args, extra)
+        return
     if args.command in ('experiment', 'evaluate'):
         evaluation(args, extra)
         return
