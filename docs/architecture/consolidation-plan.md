@@ -103,7 +103,7 @@ Phase 1 is complete (2026-10-04, ledgers `world-0002` to `world-0004`, `climate-
 
 **Phase 5 — GUI as viewer.** Loads bundles; the "Generate elements" buttons call processes; `regionalmap` leaves the headless link line; parameters move from `generation_tuning.hpp` into recipes. The renderers and the `.uww` format take whole-number copies of the float fields; both go when the GUI draws from bundles.
 
-Each phase ends with: seed-1 bundle equivalence (`compare_bundles.py`) where results must not change, `--audit-access`, `check-layout.py`, a compile of both presets, and a ledger entry describing what changed.
+Each phase ends with: seed-1 bundle equivalence (`compare_bundles.py`) where results must not change, `--audit-access`, `check-layout.py`, a compile of both presets, and a ledger entry describing what changed. A phase also takes the open items that §11 assigns to it.
 
 ## 6. Deletion and cleanup list (Phase 0)
 
@@ -141,6 +141,7 @@ Local-only (not in git):
 - Models and effort (Claude): the lead on Fable 5.1 at `high`; implementation of agreed phases on Opus 5.5 at `high` (or Fable at `medium`); surveys on lower-power subagents; the verifier on Opus at `high` with fresh context. `xhigh` only after a failed attempt at `high`. Codex: `~/.codex/config.toml` already sets its model and effort.
 - Instruction files: `AGENTS.md` (repo, provider-neutral) is the only project file; `~/.codex/AGENTS.md` is the global operating contract, imported by `~/.claude/CLAUDE.md`. Do not add a repo `CLAUDE.md` or `CLAUDE.local.md`: by default they would stop `AGENTS.md` from loading.
 - A session ends with a ledger entry or a handoff note (`docs/tasks/main/handoff-<date>.md`: what was done, what was verified and what was not, open items), not with a summary only in chat.
+- Before a phase's session ends, everything the next phase needs is written where its agent will read it: unresolved findings in §11, results in the ledger, decisions in §1 or in the phase's status note. The session's last message then gives the user the prompt that starts the next session, in the style of the prompt that started Phase 1: the phase; the sections of this document and the ledger entries to read first; the order of work and the commit granularity; where to stop and wait for the user; what every step ends with. The prompt points to documents instead of repeating them and adds only what exists nowhere but in the ending session; nothing the next agent can read or derive belongs in it.
 
 ## 9. Visual checklist format and sources
 
@@ -171,3 +172,38 @@ Dashes or underscores, by kind:
 - kebab-case: recipe names, CLI subcommands and flags, directories, and data, config and document file names (`earth-climate`, `--from-bundle`, `tectonics-baseline.json`, `consolidation-plan.md`).
 - snake_case: everything a compiler or interpreter names: C++ and Python source files, CMake targets and executables, Python packages, JSON keys, field and process ids (`world_pipeline`, `uw_core`, `compare_bundles.py`, `atmosphere.precipitation_rate`).
 - Existing violations are renamed in the phase that already touches them, not separately: dashed Python scripts (`check-layout.py`, `write-benchmark-report.py`, `scripts/refs/prepare-*.py`, …) in Phase 3; the dashed keys of `configs/tectonics-baseline.json` when parameters move into recipes (a flag `--trench-depth` maps to the key `trench_depth`); run and reference directory names with the Phase 3 layout.
+
+## 11. Open items by phase
+
+Found during earlier phases and not resolved there. A phase resolves its items or moves them to a later phase with the reason; a session adds its own findings here before it ends.
+
+Phase 2 (tests):
+
+- No test has run since before Phase 0 (ledgers `world-0001` to `world-0004`, `climate-0001`, `tectonics-0002`, each under `not_run`). The phase starts by running `ctest` on the headless preset and the Python suite once, before any restructuring, and treats failures as possible consequences of Phases 0 and 1: two executables removed, the tectonics support code moved to `src/validation/tectonics` and `src/io`, climate fields and the base elevation stored as float, the FastLEM stages out of the recipes.
+- Compiled and never run: `PlateTectonicsTests` against the moved libraries (`uw_tectonics_snapshots`, `uw_tectonics_heightmap_io`) and the new `climate_world_tests`. `tests/scripts/test_tectonics_report.py` and `test_geology_benchmark.py` exercise report readers that Phase 1 changed.
+- `tests/scripts/check_tectonics_cli.py` passes on `world_pipeline` but is run by hand; decide whether ctest runs it.
+- `src/pipeline/world_process_access.inc` is generated from a read-tracking build and was edited by hand in Phase 1 (writes of `geology.geosphere_initialization` and `geology.plate_tectonics`). Regenerate it (`scripts/evaluation/process_access.py`, the cases named in its header plus the tectonics recipe) and make `process_access.py --check` part of the phase-end checks.
+
+Phase 3 (tooling and data):
+
+- `bench.py climate run` exits with an error after a successful registration: `write-benchmark-report.py --legacy-layout` stops on the polar projection images that `run_report.py` has just written. Runs 384 and 385 have a run page and no gallery. It goes with the legacy climate chain; until then a registered climate run is complete when its run page exists.
+- A registered climate run has no bundle (`bench.py` takes `--bundle` for itself). The bundles of the Phase 1 re-baseline were made by hand with the same binary, settings and surface-drag input and are kept in `runs/reports/phase1-climate-rebaseline/`. The run layout of §4 writes the bundle with the run.
+- `climate_benchmark.py` sets `UW_CLIMATE_SURFACE_DRAG_INPUT` (a vegetation drag contrast derived from observations) for registered runs; `scripts/evaluation/experiment.py` does not, so a profile experiment and a registered run differ by that input. Make it a recorded input of the run, or remove it.
+- Ported to run bundles in Phase 1 and not executed since: `bench.py geology run`, `tectonics_experiment.py --verify-replay` and `--sample-run`, and `tectonics_review.py`, `tectonics_batch_analysis.py`, `tectonics_boundary_review.py`, `tectonics_coastal_review.py` on a run in the bundle layout (run 76 is the first). Run each once when it moves under `uw.py`.
+- The `summary` of the tectonic snapshot record and the snapshot comparison are C++ (`src/validation/tectonics`); the rule of §1 puts statistics and comparison in Python.
+- Two range checks of `configs/evaluation/climate.json` fail on every run, before and after the re-baseline, so every climate evaluation exits with an error: precipitation above 3000 mm/month in a few cells at the north pole and one column-water cell above 120 mm. Whether the limits or the model are wrong is climate work; the profile should not fail on it by default.
+
+Phase 4 (source tree and CMake):
+
+- `createfractal` does not terminate on a world grid under 32 columns (the shelf pass after tectonics hangs at 16 x 8); `world_pipeline run` refuses such grids. Fix when the terrain noise leaves `misc.cpp`, then drop the refusal.
+- `planet::smooth()` ignores the grid it is given and smooths the base elevation.
+- `atmosphere.precipitation` and `atmosphere.precipitation_exact` are both float and differ only where the legacy January/July passes adjust rain: `syncseasonalclimatefromlegacy` overwrites the first and not the second. Make it one field when `climate_fields.cpp` and `climate_coupling.cpp` are split.
+- The FastLEM stages are legacy (`islegacygenerationstage`): `terrain.fastlem_mountains` does not terminate at seed 1 and 256 columns. Repair them or replace them with another erosion and drainage model, then remove the legacy mechanism.
+- A procedural world cannot be finished from a bundle: tables, the climate solver's state and `GenerationScratch` state are not world fields (`kInRunState` in `world_recipes.cpp`, world-model migration step 5).
+- `readclimateworldfield(..., includeinputs = true)` and `climateworldfields(true)` have had no caller since `climate_pipeline` went.
+
+Phase 5 (GUI as viewer):
+
+- The desktop application has not been launched since before Phase 0 (agents never launch it); everything in `src/app` was only compiled. Before or at the start of this phase the user checks by hand: map rendering (temperature, rain and elevation now reach the renderers as whole-number copies of float fields), `.uww` save and load, and the workbench stepping past the FastLEM stages.
+- The tectonics recipe keeps the default planet body while `procedural-world` draws the body from the seed, so for seeds whose gravity is not 1 the module run and the world's tectonics step differ. When parameters move into recipes the body becomes a recipe parameter and the two agree.
+- `--checkpoint-every` and `--checkpoint-at` in Myr apply to the tectonics step only; other evolvers get them when they declare a duration (time model of §1).

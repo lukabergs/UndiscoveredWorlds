@@ -211,13 +211,6 @@ erosion and climate coupling remain future work. Final drainage routes liberated
 gold into placers. Wood, livestock and a full biology module are not implemented
 by the tectonics cleanup.
 
-For climate/erosion experiments, `tectonics_climate_feedback.py --parent <id>
---run <next-id>` reuses a completed endpoint and alternates climate solves and
-surface erosion. It conserves rock-equivalent volume but freezes plates, omits
-isostatic rebound and interprets the native raster on a spherical climate grid.
-Treat its terrain response as experimental; a lower global curve error alone
-does not establish better physical realism.
-
 ## Development and remaining integration
 
 The project uses C++ with CMake and vcpkg, SFML, Dear ImGui, ImGui-SFML, and ImGuiFileDialog. CUDA rendering is optional in the existing build configuration. Tectonics is built from `src/simulations/geology/plate_tectonics` as the internal `plate_tectonics` target; no standalone checkout is required. Every target is built as C++17. See the [tectonics integration and checks](docs/architecture/tectonic-contract-validation.md) and [native output contract](docs/architecture/tectonics/tectonic-output-contract.md).
