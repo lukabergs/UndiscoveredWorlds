@@ -10,5 +10,17 @@
     "sst": [-35, 35], "skin_sst": [-35, 35], "sst_oisst": [-35, 35],
     "air_temperature": [-54, 40], "current": [0, 1], "storage_depth": [0, 200],
     "evaporation": [0, 250], "surface_radiation": [-250, 250]
+  },
+  "difference": {
+    "note": "Model minus reference maps: blue where the model is lower, red where it is higher, white at zero; the scale of each field spans -half_range to +half_range in the field's display units (vector fields: speed).",
+    "stops": [[0, [33, 102, 172]], [0.25, [103, 169, 207]], [0.50, [247, 247, 247]], [0.75, [239, 138, 98]], [1, [178, 24, 43]]],
+    "half_ranges": {
+      "surface_wind": 8, "850_wind": 10, "500_wind": 15,
+      "pressure": 10, "rain": 10, "annual_rain": 2000,
+      "water": 20, "moisture_flux": 300, "convergence": 10,
+      "sst": 8, "skin_sst": 8, "sst_oisst": 8,
+      "air_temperature": 12, "current": 0.5, "storage_depth": 100,
+      "evaporation": 100, "surface_radiation": 100
+    }
   }
 }

@@ -11,10 +11,10 @@ uv run --offline scripts/uw.py <module> <command> [shared options] [native optio
 
 | Module | Commands | Native tool |
 | --- | --- | --- |
-| `tectonics` | `run` (registered), `inspect` (scratch), `report`, `experiment`, `evaluate` | `world_pipeline.exe run --recipe tectonics` |
+| `tectonics` | `run` (registered), `inspect` (scratch), `report`, `experiment`, `evaluate`, `dashboard` | `world_pipeline.exe run --recipe tectonics` |
 | `geology` | `run` | `world_pipeline.exe run --recipe tectonics` + `benchmark_geology.py` |
-| `climate` | `run` (registered), `check`, `report`, `experiment`, `evaluate` | `world_pipeline.exe climate-benchmark`; `world_pipeline.exe run --recipe earth-climate` for experiments |
-| `world` | `run`, `experiment`, `evaluate` | `world_pipeline.exe generate` |
+| `climate` | `run` (registered), `check`, `report`, `experiment`, `evaluate`, `dashboard` | `world_pipeline.exe climate-benchmark`; `world_pipeline.exe run --recipe earth-climate` for experiments |
+| `world` | `run`, `report`, `experiment`, `evaluate`, `dashboard` | `world_pipeline.exe generate` |
 
 Shared options, same meaning everywhere:
 
@@ -27,6 +27,7 @@ Shared options, same meaning everywhere:
 | `--label TEXT` | change summary stored with a climate run | none |
 | `--runs ID [ID...]` | run IDs for `report`/`check` | none |
 | `--compare ID` | climate run to compare against | none |
+| `--evaluation DIR [DIR...]` | evaluation directories for `report` pages; the first is the baseline | none |
 
 Any other `--flag value` goes to the native tool unchanged. Every module's native tool is `world_pipeline`. Tectonics takes the scenario options of `run --recipe tectonics` (`--plates 14`, `--duration 300`, ...); climate and world take `--climate-resolution 128`, `--climate-tropical-closure mixed-layer`, ... List them with the native tool's help:
 
@@ -141,11 +142,20 @@ uv run --offline scripts/uw.py world experiment --resolution 256 --repeat
 uv run --offline scripts/uw.py climate experiment --climate-resolution 64
 # Evaluate an existing bundle, optionally against a baseline bundle on common masks.
 uv run --offline scripts/uw.py climate evaluate --bundle out/bench/climate-1024 --baseline out/bench/climate-1024-before
-# Record the user's verdict with the evaluation (approved, rejected or revise).
+# Tectonics: checkpoint bundles give one APNG per map (default <bundle>/../checkpoints).
+uv run --offline scripts/uw.py tectonics evaluate --bundle runs/checkpoints/tectonics/76/final --checkpoints runs/checkpoints/tectonics/76/snapshots --output out/evaluation/tectonics/76
+# Record the user's verdict with the evaluation (approved, rejected or revise); the run page is rendered again.
 uv run --offline scripts/evaluation/review.py out/evaluation/world/<name>/evaluation --verdict approved --notes "coastlines"
+# Pages from JSON (scripts/evaluation/report.py and templates/): one directory rewrites its run page,
+# several give a comparison page (first = baseline) in --output (default out/evaluation/<module>/comparison).
+uv run --offline scripts/uw.py climate report --evaluation <baseline>/evaluation <candidate>/evaluation --output out/evaluation/climate/comparison
+# Module dashboard: registry runs (score, status, links to run pages) and ledger entries.
+uv run --offline scripts/uw.py tectonics dashboard --output out/evaluation/tectonics/dashboard
 ```
 
-Each evaluation directory holds `evaluation.json` (inputs with hashes, check results, validation metrics, verdict), `report.md`, `index.html` and `maps/`; it is never overwritten. `experiment.py --archive runs/reports/<experiment>` keeps the runs in an experiment archive routed to the data drive. Tool outputs that would normally go under `runs/` are redirected into the run directory.
+Every report page is one of three templates in `scripts/evaluation/templates/` (`run.html`, `comparison.html`, `dashboard.html`) with the page's data embedded as JSON; nobody writes per-run HTML. The run page shows the run facts (from `run.json` when present), the verdict, checks, scores and the per-field validation table (loss, baseline loss, delta, RMSE, bias, correlation), the entries of `review.json` and the maps. A profile map with `"validation": "<id>"` (`configs/evaluation/climate.json`) is drawn from that validation entry with its season rule, unit conversion and remap: model, reference in the same palette and grid, and model minus reference on the score's mask, on the diverging `difference` scale of `configs/climate-palettes.json` (vector fields as speed). Quarter seasons are shown as Jan–Mar, Jul–Sep, monthly ones as January, July. `evaluation.json`'s `maps` lists every image with title, path, palette, season and kind (`model`, `reference`, `difference`, `animation`). `report.md` is generated from the same data.
+
+Each evaluation directory holds `evaluation.json` (inputs with hashes, check results, validation metrics, verdict), `report.md`, `index.html` and `maps/`; it is never overwritten (pages are re-rendered from it). `experiment.py --archive runs/reports/<experiment>` keeps the runs in an experiment archive routed to the data drive. Tool outputs that would normally go under `runs/` are redirected into the run directory.
 
 Climate comparisons reuse the climate report's per-field metrics, so every field loss is defined as in global-balanced-v1. Bundles do not yet contain column water, moisture transport, moisture convergence or currents in m/s, so a bundle evaluation reports a partial score over the remaining 70 % of the weight with its coverage; it is not a global-balanced-v1 value and does not replace the registered climate ranking. Air temperature against ERA5 2 m temperature is reported with zero weight. The `world` profile reports Earth hypsometry as context for review, not as a target.
 

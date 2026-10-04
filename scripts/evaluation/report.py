@@ -1,0 +1,470 @@
+"""Report pages rendered from JSON: run page, comparison page and module dashboard.
+
+    uv run --offline python scripts/evaluation/report.py run <evaluation-dir>
+    uv run --offline python scripts/evaluation/report.py compare <evaluation-dir> <evaluation-dir>... --output DIR
+    uv run --offline python scripts/evaluation/report.py dashboard <module> --output DIR
+
+Each page is a template of scripts/evaluation/templates/ (run.html, comparison.html,
+dashboard.html) with the page's data embedded as JSON; the template's script builds the
+page. Data come from a run's evaluation/evaluation.json, evaluation/review.json and
+run.json, the module registry (runs/registry/<module>.json) and the ledger
+(runs/ledger/<module>.jsonl). Images are linked by relative path. The run page writes
+report.md from the same data, the comparison page a Markdown metric table.
+"""
+import argparse
+import datetime
+import json
+import math
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import ledger
+from uwtools.bundle import SEASONS
+import review
+
+ROOT = Path(__file__).resolve().parents[2]
+TEMPLATES = Path(__file__).with_name('templates')
+PLACEHOLDER = '__PAGE_DATA__'
+PROFILES = ROOT / 'configs/evaluation'
+METRIC_NAMES = {'rmse': ('RMSE', 'Vector RMSE'), 'bias': ('Bias', 'Speed bias'),
+                'correlation': ('Spatial correlation', 'Speed spatial correlation')}
+KINDS = ('model', 'reference', 'difference')
+
+
+def fmt(value, digits=4):
+    if value is None:
+        return '–'
+    if isinstance(value, float):
+        return f'{value:.{digits}g}'
+    return str(value)
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+
+
+def read_json(path):
+    path = Path(path)
+    return json.loads(path.read_text(encoding='utf-8-sig')) if path.is_file() else None
+
+
+def clean(value):
+    """JSON-safe copy: non-finite floats become null."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): clean(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [clean(item) for item in value]
+    return value
+
+
+def link(path, start):
+    """Relative link from directory start to path (a file URI across drives)."""
+    try:
+        return Path(os.path.relpath(Path(path).absolute(), Path(start).absolute())).as_posix()
+    except ValueError:
+        return Path(path).absolute().as_uri()
+
+
+def write_page(template, data, path):
+    text = (TEMPLATES / template).read_text(encoding='utf-8')
+    if text.count(PLACEHOLDER) != 1:
+        raise ValueError(f'{template}: expected one {PLACEHOLDER}')
+    payload = json.dumps(clean(data), ensure_ascii=False, allow_nan=False).replace('<', '\\u003c')
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.replace(PLACEHOLDER, payload), encoding='utf-8')
+    return path
+
+
+def score_value(entry):
+    return entry.get('score', entry.get('partial_score')) if entry else None
+
+
+def season_label(seasons, season):
+    return 'annual' if len(seasons) == 1 else SEASONS[int(season)]
+
+
+def validation_rows(validation):
+    """Per field and season: run loss, baseline loss, delta and the key metrics of the run."""
+    rows = []
+    for field, seasons in validation['maps'].items():
+        for season, entries in seasons.items():
+            metrics = {name: value for name, value, _ in entries['run']['rows']}
+            loss, base = entries['run']['loss'], entries.get('baseline', {}).get('loss')
+            row = {'field': field, 'season': season_label(seasons, season), 'loss': loss, 'baseline': base,
+                   'delta': None if base is None else loss - base}
+            for key, names in METRIC_NAMES.items():
+                row[key] = next((metrics[name] for name in names if name in metrics), None)
+            rows.append(row)
+    return rows
+
+
+def field_loss(validation, field, key='run'):
+    seasons = validation['maps'].get(field)
+    if not seasons or any(key not in entry for entry in seasons.values()):
+        return None
+    return sum(entry[key]['loss'] for entry in seasons.values()) / len(seasons)
+
+
+def score_lines(validation):
+    lines = []
+    for key, entry in validation['scores'].items():
+        lines.append({'key': key, 'version': entry['version'], 'inputs': entry['inputs'], 'score': entry.get('score'),
+                      'partial_score': entry.get('partial_score'), 'covered_weight': entry['covered_weight'],
+                      'missing_fields': entry.get('missing_fields', []), 'note': entry['note']})
+    return lines
+
+
+def distribution_tables(validation):
+    tables = []
+    for name, entry in validation['distributions'].items():
+        keys = [key for key in ('run', 'baseline') if key in entry]
+        rows = []
+        for group in ('earth_comparison', 'metrics'):
+            names = [metric for metric, value in entry[keys[0]][group].items() if not isinstance(value, dict)] if keys else []
+            rows += [{'metric': metric, **{key: entry[key][group].get(metric) for key in keys}} for metric in names]
+        tables.append({'name': name, 'reference': entry.get('reference'), 'columns': keys, 'rows': rows})
+    return tables
+
+
+def map_groups(maps):
+    """Static images grouped by map and season ({model, reference, difference}), and the animations."""
+    groups, index, animations = [], {}, []
+    for item in maps:
+        kind = item.get('kind', 'model')
+        record = {'title': item['title'], 'path': item['path'], 'half_range': item.get('half_range')}
+        if kind == 'animation':
+            animations.append(dict(record, map=item.get('map'), season=item.get('season'), frames=item.get('frames', [])))
+            continue
+        key = (item.get('map', item['title']), item.get('season'))
+        if key not in index:
+            index[key] = {'map': key[0], 'season': key[1], 'title': item['title'], 'validation': item.get('validation'),
+                          'images': {}}
+            groups.append(index[key])
+        if kind == 'model':
+            index[key]['title'] = item['title']
+        index[key]['images'][kind] = record
+    return groups, animations
+
+
+def run_identity(directory, run):
+    if run:
+        return str(run.get('id', run.get('name')))
+    return directory.parent.name if directory.name == 'evaluation' else directory.name
+
+
+def run_facts(document, run):
+    bundle = document['run']
+    facts = [['Module', document['profile']['module']]]
+    if run and run.get('label'):
+        facts.append(['Label', run['label']])
+    facts += [['Seed', bundle['seed']], ['Recipe', bundle['recipe']], ['Grid', f"{bundle['grid'][0]} × {bundle['grid'][1]}"],
+              ['Bundle', bundle['bundle']]]
+    if document.get('baseline'):
+        facts.append(['Baseline bundle', document['baseline']['bundle']])
+    code = (run or {}).get('code') or document['code']
+    revision = (code.get('revision') or 'unknown')[:12]
+    facts.append(['Code', revision + (f" + diff {code['diff_sha256'][:12]}" if code.get('dirty') else '')])
+    steps = (run or {}).get('runs') or []
+    command = steps[0]['command'] if steps else bundle.get('command', [])
+    facts.append(['Command', ' '.join(map(str, command))])
+    if run:
+        facts += [[label, run[key]] for label, key in (('Started', 'started'), ('Finished', 'finished')) if run.get(key)]
+        facts += [[f"{Path(step.get('log', 'run')).stem} time", f"{step['seconds']:.1f} s, exit {step['exit_code']}"]
+                  for step in steps if 'seconds' in step]
+    facts.append(['Evaluated', document['evaluated']])
+    return facts
+
+
+def run_data(evaluation_dir):
+    directory = Path(evaluation_dir).absolute()
+    document = read_json(directory / 'evaluation.json')
+    if document is None:
+        raise SystemExit(f'{directory} has no evaluation.json')
+    run = read_json(directory.parent / 'run.json') if directory.name == 'evaluation' else None
+    reviews = review.load(directory)['entries']
+    verdict = dict(document['verdict'])
+    if reviews:
+        verdict['review'] = reviews[-1]['verdict']
+    groups, animations = map_groups(document['maps'])
+    files = [{'title': 'evaluation.json', 'path': 'evaluation.json'}, {'title': 'report.md', 'path': 'report.md'}]
+    files += [{'title': name, 'path': name} for name in ('review.json',) if (directory / name).is_file()]
+    if directory.name == 'evaluation':
+        files += [{'title': name, 'path': f'../{name}'} for name in ('run.json', 'log.txt', 'run.log', 'repeat.log')
+                  if (directory.parent / name).is_file()]
+    validation = document['validation']
+    return {'schema': 'uw-run-page/v1', 'generated': now(), 'module': document['profile']['module'],
+            'name': run_identity(directory, run), 'facts': run_facts(document, run), 'verdict': verdict,
+            'evidence': document['evidence'], 'checks': document['checks'], 'scores': score_lines(validation),
+            'rows': validation_rows(validation), 'has_baseline': document.get('baseline') is not None,
+            'distributions': distribution_tables(validation), 'skipped': validation['skipped'], 'reviews': reviews,
+            'groups': groups, 'animations': animations, 'files': files,
+            'provenance': {'profile': document['profile'], 'code': document['code'], 'references': document['references']}}
+
+
+def markdown(data):
+    v = data['verdict']
+    lines = [f"# Evaluation · {data['module']} · {data['name']}", '', *[f'- {label}: {value}' for label, value in data['facts']],
+             '', f"- Checks: {v['checks']}" + (f" ({', '.join(v['failed_checks'])})" if v['failed_checks'] else ''),
+             f"- Validation: {v['validation']}", f"- Review: {v['review']}", '',
+             f"Evidence weighting: {json.dumps(data['evidence'])}", '', '## Checks', '',
+             '| Check | Status | Summary |', '|---|---|---|']
+    lines += [f"| {item['check']} | {item['status']} | {item['summary']} |" for item in data['checks']]
+    for item in data['checks']:
+        if item['details'] and item['status'] == 'fail':
+            lines += ['', f"{item['check']}:", *[f'- {detail}' for detail in item['details'][:20]]]
+    if data['rows'] or data['distributions']:
+        lines += ['', '## Validation', '']
+        for entry in data['scores']:
+            if entry['score'] is not None:
+                lines.append(f"- {entry['key']}: {entry['version']} on {entry['inputs']} = {entry['score']:.4f} (lower is better). {entry['note']}")
+            else:
+                lines.append(f"- {entry['key']}: partial score {fmt(entry['partial_score'])} over weight "
+                             f"{entry['covered_weight']:.2f}; {entry['note']}")
+        if data['rows']:
+            lines += ['', '| Field | Season | Loss | Baseline loss | Delta | RMSE | Bias | Correlation |', '|---|---|---|---|---|---|---|---|']
+            lines += [f"| {row['field']} | {row['season']} | {fmt(row['loss'])} | {fmt(row['baseline'])} | {fmt(row['delta'])} | "
+                      f"{fmt(row['rmse'])} | {fmt(row['bias'])} | {fmt(row['correlation'])} |" for row in data['rows']]
+        for table in data['distributions']:
+            lines += ['', f"### {table['name']} ({table['reference']})", '', '| Metric | ' + ' | '.join(table['columns']) + ' |',
+                      '|---|' + '---|' * len(table['columns'])]
+            lines += [f"| {row['metric']} | " + ' | '.join(fmt(row.get(key)) for key in table['columns']) + ' |' for row in table['rows']]
+        lines += [f"- skipped {item['id']}: {item['reason']}" for item in data['skipped']]
+    if data['reviews']:
+        lines += ['', '## Review', '']
+        lines += [f"- {entry['recorded']} {entry['reviewer']}: **{entry['verdict']}**" +
+                  (f" against {entry['against']}" if entry.get('against') else '') + (f". {entry['notes']}" if entry.get('notes') else '')
+                  for entry in data['reviews']]
+    if data['groups'] or data['animations']:
+        lines += ['', '## Maps', '']
+        for group in data['groups']:
+            lines.append(f"- {group['title']}: " + ' · '.join(f"[{kind}]({group['images'][kind]['path']})" for kind in KINDS
+                                                              if kind in group['images']))
+        lines += [f"- {item['title']}: [APNG]({item['path']})" for item in data['animations']]
+    provenance = data['provenance']
+    lines += ['', '## Provenance', '', f"- Profile: `{provenance['profile']['path']}` ({provenance['profile']['sha256'][:16]})",
+              f"- Code: {provenance['code']['revision']} (dirty: {provenance['code']['dirty']})",
+              *[f'- Reference `{name}`: {digest[:16]}' for name, digest in provenance['references'].items()]]
+    return '\n'.join(lines) + '\n'
+
+
+def run_page(evaluation_dir):
+    """Write index.html and report.md of an evaluation directory from its JSON files."""
+    directory = Path(evaluation_dir)
+    data = run_data(directory)
+    (directory / 'report.md').write_text(markdown(data), encoding='utf-8')
+    return write_page('run.html', data, directory / 'index.html')
+
+
+def load_profile_maps(module):
+    profile = read_json(PROFILES / f'{module}.json') or {}
+    return {spec['name']: spec for spec in profile.get('maps', [])}
+
+
+def season_order(season):
+    return -1 if season is None else SEASONS.index(season) if season in SEASONS else len(SEASONS)
+
+
+def comparison_data(evaluation_dirs, output_dir):
+    if len(evaluation_dirs) < 2:
+        raise SystemExit('A comparison needs at least two evaluation directories (the first is the baseline)')
+    output = Path(output_dir).absolute()
+    runs = []
+    for item in evaluation_dirs:
+        directory = Path(item).absolute()
+        document = read_json(directory / 'evaluation.json')
+        if document is None:
+            raise SystemExit(f'{directory} has no evaluation.json')
+        run = read_json(directory.parent / 'run.json') if directory.name == 'evaluation' else None
+        runs.append((directory, document, run))
+    modules = {document['profile']['module'] for _, document, _ in runs}
+    if len(modules) != 1:
+        raise SystemExit(f"Evaluations of different modules: {', '.join(sorted(modules))}")
+    module = modules.pop()
+    names, header = [], []
+    for directory, document, run in runs:
+        name = run_identity(directory, run)
+        name = name if name not in names else f'{name} ({len(names) + 1})'
+        names.append(name)
+        reviews = review.load(directory)['entries']
+        verdict = dict(document['verdict'], review=reviews[-1]['verdict'] if reviews else document['verdict']['review'])
+        page = directory / 'index.html'
+        header.append({'name': name, 'bundle': document['run']['bundle'], 'seed': document['run']['seed'],
+                       'grid': document['run']['grid'], 'revision': (document['code'].get('revision') or '')[:12],
+                       'dirty': document['code'].get('dirty'), 'verdict': verdict,
+                       'page': link(page, output) if page.is_file() else None})
+
+    def row(metric, values, lower_is_better=True):
+        base = values[0]
+        deltas = [None if value is None or base is None or not isinstance(value, (int, float)) else value - base for value in values]
+        return {'metric': metric, 'values': values, 'deltas': [None, *deltas[1:]], 'lower_is_better': lower_is_better}
+
+    metrics = [row('failed checks', [len(document['verdict']['failed_checks']) for _, document, _ in runs])]
+    if any(document['validation']['scores'] for _, document, _ in runs):
+        versions = {entry['version'] for _, document, _ in runs for entry in document['validation']['scores'].values()}
+        metrics.append(row(f"score ({', '.join(sorted(versions))}; partial where coverage < 1)",
+                           [score_value(document['validation']['scores'].get('run')) for _, document, _ in runs]))
+        metrics.append(row('covered weight', [document['validation']['scores'].get('run', {}).get('covered_weight')
+                                              for _, document, _ in runs], None))
+    fields = list(dict.fromkeys(field for _, document, _ in runs for field in document['validation']['maps']))
+    metrics += [row(f'{field} loss', [field_loss(document['validation'], field) for _, document, _ in runs]) for field in fields]
+    for name in dict.fromkeys(name for _, document, _ in runs for name in document['validation']['distributions']):
+        entries = [document['validation']['distributions'].get(name, {}).get('run', {}) for _, document, _ in runs]
+        for group in ('earth_comparison', 'metrics'):
+            keys = list(dict.fromkeys(key for entry in entries for key, value in entry.get(group, {}).items()
+                                      if not isinstance(value, dict)))
+            metrics += [row(f'{name}: {key}', [entry.get(group, {}).get(key) for entry in entries], None) for key in keys]
+
+    specs = load_profile_maps(module)
+    order = list(specs)
+    options, index = [], {}
+    for position, (directory, document, _) in enumerate(runs):
+        for item in document['maps']:
+            key = (item.get('map', item['title']), item.get('season'))
+            if key not in index:
+                spec = specs.get(key[0], {})
+                index[key] = {'map': key[0], 'season': key[1], 'season_label': item.get('season_label', key[1]),
+                              'title': spec.get('title', item['title']),
+                              'runs': [{} for _ in runs], 'reference': None}
+                options.append(index[key])
+            kind = item.get('kind', 'model')
+            path = link(directory / item['path'], output)
+            if kind == 'reference':
+                if index[key]['reference'] is None:
+                    index[key]['reference'] = {'path': path, 'title': item['title'], 'run': names[position]}
+            else:
+                index[key]['runs'][position][kind] = {'path': path, 'title': item['title'], 'half_range': item.get('half_range'),
+                                                      'frames': len(item.get('frames', []))}
+    options.sort(key=lambda item: (order.index(item['map']) if item['map'] in order else len(order), season_order(item['season'])))
+    return {'schema': 'uw-comparison-page/v1', 'generated': now(), 'module': module, 'runs': header, 'metrics': metrics,
+            'options': options, 'note': 'The first run is the baseline; deltas are against it (lower loss is better).'}
+
+
+def comparison_markdown(data):
+    names = [run['name'] for run in data['runs']]
+    lines = [f"# Comparison · {data['module']}", '', data['note'], '',
+             '| Metric | ' + ' | '.join(names) + ' |', '|---|' + '---|' * len(names)]
+    for row in data['metrics']:
+        cells = [fmt(row['values'][0])] + [f"{fmt(value)} ({'+' if (delta or 0) > 0 else ''}{fmt(delta)})" if delta is not None else fmt(value)
+                                           for value, delta in zip(row['values'][1:], row['deltas'][1:])]
+        lines.append(f"| {row['metric']} | " + ' | '.join(cells) + ' |')
+    lines += ['', '## Runs', '', *[f"- {run['name']}: `{run['bundle']}` (seed {run['seed']}, {run['grid'][0]} x {run['grid'][1]}, "
+                                   f"code {run['revision']}{' dirty' if run['dirty'] else ''}); checks {run['verdict']['checks']}, "
+                                   f"review {run['verdict']['review']}" for run in data['runs']]]
+    return '\n'.join(lines) + '\n'
+
+
+def comparison_page(evaluation_dirs, output_dir):
+    """Write index.html and report.md comparing evaluations (the first is the baseline) into output_dir."""
+    output = Path(output_dir)
+    data = comparison_data(evaluation_dirs, output)
+    output.mkdir(parents=True, exist_ok=True)
+    (output / 'report.md').write_text(comparison_markdown(data), encoding='utf-8')
+    return write_page('comparison.html', data, output / 'index.html')
+
+
+def climate_rankings():
+    """Run id -> (global-balanced-v1 score, report directory) from the registered ranking batches, latest last."""
+    scores = {}
+    for path in sorted(ROOT.glob('runs/reports/*/ranking.json'), key=lambda item: item.stat().st_mtime):
+        ranking = read_json(path)
+        for identifier, value in ranking.get('scores', {}).items():
+            scores[int(identifier)] = (value, path.parent)
+    return scores
+
+
+def climate_run(record, rankings):
+    identifier, metrics = record['id'], record.get('metrics') or {}
+    stamp = str(record.get('datetime', ''))
+    date = f'{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]} {stamp[8:10]}:{stamp[10:12]}' if len(stamp) >= 12 else stamp
+    score, source = rankings.get(identifier, (None, None))
+    links = [('run page', ROOT / f'runs/reports/{identifier}.html'), ('record', ROOT / f'runs/reports/{identifier}.md'),
+             ('gallery', ROOT / f'runs/reports/{identifier}-gallery.html')]
+    if source is not None:
+        links += [('ranking', next(iter(sorted(source.parent.glob(f'{source.name}*.html'))), source / 'ranking.json'))]
+    grid = record.get('horizontal_resolution')
+    return {'id': identifier, 'date': date, 'status': 'registered' if metrics else 'no metrics', 'label': record.get('information', ''),
+            'grid': f'{grid} × {grid // 2}' if grid else None, 'score': score,
+            'metrics': {'weighted_relative_error': metrics.get('weighted_relative_error'),
+                        'land_precipitation_correlation': metrics.get('area_weighted_land_precipitation_correlation')},
+            'links': links}
+
+
+def tectonics_run(record):
+    identifier = record['id']
+    manifest = read_json(ROOT / record['manifest']) if record.get('manifest') else None
+    manifest = manifest or {}
+    recipe = manifest.get('recipe', {})
+    final = (read_json(ROOT / f'runs/diagnostics/tectonics/{identifier}/metrics.json') or {}).get('final', {})
+    comparison = final.get('earth_comparison', {})
+    links = [('run page', ROOT / f'runs/reports/tectonics/{identifier}.html'), ('record', ROOT / f'runs/reports/tectonics/{identifier}.md'),
+             ('manifest', ROOT / f'runs/manifests/tectonics/{identifier}.json')]
+    label = recipe.get('name', '') + (f" ({record['kind']})" if record.get('kind') else '')
+    return {'id': identifier, 'date': (manifest.get('started_utc') or '')[:16].replace('T', ' '), 'status': record.get('status'),
+            'label': label, 'grid': f"{recipe['width']} × {recipe['height']}" if 'width' in recipe else None, 'score': None,
+            'metrics': {'land_fraction': final.get('land_fraction'),
+                        'hypsometry_gap_m': comparison.get('hypsography_mean_absolute_quantile_gap_m'),
+                        'elapsed_s': manifest.get('elapsed_seconds')},
+            'links': links}
+
+
+def dashboard_data(module, output_dir):
+    output = Path(output_dir).absolute()
+    registry = read_json(ROOT / f'runs/registry/{module}.json') or {'runs': []}
+    rankings = climate_rankings() if module == 'climate' else {}
+    runs = []
+    for record in registry['runs']:
+        entry = climate_run(record, rankings) if module == 'climate' else tectonics_run(record) if module == 'tectonics' else \
+            {'id': record['id'], 'date': None, 'status': record.get('status'), 'label': '', 'grid': None, 'score': None,
+             'metrics': {}, 'links': []}
+        evaluation = ROOT / f"runs/{module}/{record['id']}/evaluation"
+        document = read_json(evaluation / 'evaluation.json')
+        entry['evaluation_score'] = score_value(document['validation']['scores'].get('run')) if document else None
+        links = [('evaluation', evaluation / 'index.html')] + entry['links']
+        entry['links'] = [{'title': title, 'href': link(path, output)} for title, path in links if Path(path).exists()]
+        runs.append(entry)
+    runs.sort(key=lambda item: item['id'], reverse=True)
+    columns = list(dict.fromkeys(key for entry in runs for key in entry['metrics']))
+    entries = [{'id': entry['id'], 'date': entry['date'], 'verdict': entry['verdict'], 'decision': entry['decision'],
+                'what': entry.get('phase') or entry['hypothesis'], 'hypothesis': entry['hypothesis'],
+                'do_not_retry': entry['do_not_retry'], 'lessons': entry['lessons']} for entry in ledger.entries(module)]
+    score_note = {'climate': 'Score: global-balanced-v1 of the latest registered ranking batch that contains the run '
+                             '(runs/reports/*/ranking.json). Evaluation score: bundle evaluation; the two are not interchangeable.',
+                  'tectonics': 'Tectonics runs are judged by visual review; Earth hypsometry is context, not a target.'}
+    return {'schema': 'uw-dashboard-page/v1', 'generated': now(), 'module': module, 'baseline': registry.get('baseline'),
+            'registry': f'runs/registry/{module}.json', 'columns': columns, 'runs': runs, 'ledger': entries,
+            'note': score_note.get(module, '')}
+
+
+def dashboard(module, output_dir):
+    """Write the module dashboard (registry runs and ledger entries) to output_dir/index.html."""
+    return write_page('dashboard.html', dashboard_data(module, output_dir), Path(output_dir) / 'index.html')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest='command', required=True)
+    run = commands.add_parser('run', help='Rewrite index.html and report.md of an evaluation directory')
+    run.add_argument('evaluation', type=Path)
+    compare = commands.add_parser('compare', help='Comparison page; the first evaluation is the baseline')
+    compare.add_argument('evaluations', type=Path, nargs='+')
+    compare.add_argument('--output', type=Path, required=True)
+    board = commands.add_parser('dashboard', help='Module dashboard over the registry and the ledger')
+    board.add_argument('module')
+    board.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    if args.command == 'run':
+        path = run_page(args.evaluation)
+    elif args.command == 'compare':
+        path = comparison_page(args.evaluations, args.output)
+    else:
+        path = dashboard(args.module, args.output)
+    print(f'Page: {path}')
+
+
+if __name__ == '__main__':
+    main()

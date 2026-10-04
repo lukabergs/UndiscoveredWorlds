@@ -66,16 +66,17 @@
      "reference": ["era5_u850", "era5_v850"]}
   ],
   "maps": [
-    {"name": "temperature", "title": "Air temperature (°C)", "field": "atmosphere.temperature", "palette": "climate:air_temperature", "seasons": [0, 2]},
-    {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation_exact", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"},
-    {"name": "pressure", "title": "Surface pressure anomaly (hPa)", "field": "atmosphere.pressure", "palette": "climate:pressure", "seasons": [0, 2]},
-    {"name": "surface-wind", "title": "10 m wind speed (m/s)", "vector": ["atmosphere.level_wind_east[0]", "atmosphere.level_wind_north[0]"], "palette": "climate:surface_wind", "seasons": [0, 2]},
-    {"name": "wind-850", "title": "850 hPa wind speed (m/s)", "vector": ["atmosphere.level_wind_east[1]", "atmosphere.level_wind_north[1]"], "palette": "climate:850_wind", "seasons": [0, 2]},
-    {"name": "wind-500", "title": "500 hPa wind speed (m/s)", "vector": ["atmosphere.level_wind_east[2]", "atmosphere.level_wind_north[2]"], "palette": "climate:500_wind", "seasons": [0, 2]},
-    {"name": "sst", "title": "Sea surface temperature (°C)", "field": "hydrosphere.solver_sea_surface_temperature", "mask": "sea", "palette": "climate:sst", "seasons": [0, 2]},
-    {"name": "column-water", "title": "Column water (mm), process grid", "field": "atmosphere.column_water", "palette": "climate:water", "seasons": [0, 2]},
-    {"name": "moisture-flux", "title": "Column moisture transport (kg/(m s)), process grid", "vector": ["atmosphere.moisture_transport_east", "atmosphere.moisture_transport_north"], "palette": "climate:moisture_flux", "seasons": [0, 2]},
-    {"name": "convergence", "title": "Moisture convergence (mm/day), process grid", "field": "atmosphere.moisture_convergence", "palette": "climate:convergence", "seasons": [0, 2]},
-    {"name": "currents", "title": "Ocean current speed (m/s), ocean grid", "vector": ["hydrosphere.current_east", "hydrosphere.current_north"], "mask": "sea", "palette": "climate:current", "seasons": [0, 2]}
+    {"name": "temperature", "validation": "air_temperature", "title": "Air temperature (°C)", "field": "atmosphere.temperature", "palette": "climate:air_temperature", "seasons": [0, 2]},
+    {"name": "annual-rain", "validation": "annual_rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation_exact", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"},
+    {"name": "pressure", "validation": "pressure", "title": "Surface pressure anomaly (hPa)", "field": "atmosphere.pressure", "palette": "climate:pressure", "seasons": [0, 2]},
+    {"name": "surface-wind", "validation": "surface_wind", "title": "10 m wind speed (m/s)", "vector": ["atmosphere.level_wind_east[0]", "atmosphere.level_wind_north[0]"], "palette": "climate:surface_wind", "seasons": [0, 2]},
+    {"name": "wind-850", "validation": "850_wind", "title": "850 hPa wind speed (m/s)", "vector": ["atmosphere.level_wind_east[1]", "atmosphere.level_wind_north[1]"], "palette": "climate:850_wind", "seasons": [0, 2]},
+    {"name": "wind-500", "validation": "500_wind", "title": "500 hPa wind speed (m/s)", "vector": ["atmosphere.level_wind_east[2]", "atmosphere.level_wind_north[2]"], "palette": "climate:500_wind", "seasons": [0, 2]},
+    {"name": "sst", "validation": "sst_oisst", "title": "Sea surface temperature (°C)", "field": "hydrosphere.solver_sea_surface_temperature", "mask": "sea", "palette": "climate:sst", "seasons": [0, 2]},
+    {"name": "rain", "validation": "rain", "title": "Precipitation rate (mm/day)", "field": "atmosphere.precipitation_rate", "palette": "climate:rain", "seasons": [0, 2]},
+    {"name": "column-water", "validation": "water", "title": "Column water (mm), process grid", "field": "atmosphere.column_water", "palette": "climate:water", "seasons": [0, 2]},
+    {"name": "moisture-flux", "validation": "moisture_flux", "title": "Column moisture transport (kg/(m s)), process grid", "vector": ["atmosphere.moisture_transport_east", "atmosphere.moisture_transport_north"], "palette": "climate:moisture_flux", "seasons": [0, 2]},
+    {"name": "convergence", "validation": "convergence", "title": "Moisture convergence (mm/day), process grid", "field": "atmosphere.moisture_convergence", "palette": "climate:convergence", "seasons": [0, 2]},
+    {"name": "currents", "validation": "current", "title": "Ocean current speed (m/s), ocean grid", "vector": ["hydrosphere.current_east", "hydrosphere.current_north"], "mask": "sea", "palette": "climate:current", "seasons": [0, 2]}
   ]
 }

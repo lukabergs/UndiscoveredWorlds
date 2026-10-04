@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Run evaluation</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1f2328;--muted:#5d6670;--line:#d9d6cf;--panel:#f2f0ea;--fail:#b3261e;--pass:#1e6b3a;--warn:#8a5a00;--accent:#2f5d8a}
+@media (prefers-color-scheme: dark){:root{--bg:#16181c;--fg:#e8e6e1;--muted:#a3a9b1;--line:#363a40;--panel:#1e2126;--fail:#ff8a80;--pass:#7fd49b;--warn:#f0c36b;--accent:#8ab4e0}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:1400px;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+a{color:var(--accent)}
+h1{margin:0 0 4px;font-size:1.5rem}h2{margin:28px 0 8px;font-size:1.15rem;border-bottom:1px solid var(--line);padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px}td,th{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+.fail{color:var(--fail);font-weight:600}.pass{color:var(--pass)}.warn{color:var(--warn)}
+.better{color:var(--pass)}.worse{color:var(--fail)}
+.muted,figcaption{color:var(--muted)}
+dl.facts{display:grid;grid-template-columns:max-content 1fr;gap:2px 16px;margin:12px 0}
+dl.facts dt{color:var(--muted)}dl.facts dd{margin:0;overflow-wrap:anywhere}
+.verdict{display:flex;flex-wrap:wrap;gap:8px 20px;padding:8px 12px;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.files a{margin-right:12px}
+details{margin:2px 0}summary{cursor:pointer;color:var(--muted)}
+.group{margin:0 0 20px}.group h3{margin:0 0 6px;font-size:1rem;font-weight:600}
+.triple{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.maps{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
+figure{margin:0}img{width:100%;image-rendering:pixelated;border:1px solid var(--line);display:block}
+.review{border-left:3px solid var(--line);padding:4px 10px;margin:8px 0}
+@media (max-width:760px){.triple{grid-template-columns:1fr}.maps{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main id="page"></main>
+<script type="application/json" id="page-data">__PAGE_DATA__</script>
+<script>
+'use strict';
+const D = JSON.parse(document.getElementById('page-data').textContent);
+const page = document.getElementById('page');
+function h(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'class') node.className = value; else node.setAttribute(key, value);
+  }
+  for (const child of children.flat(Infinity)) if (child !== null && child !== undefined) node.append(child instanceof Node ? child : String(child));
+  return node;
+}
+function fmt(v, digits = 4) {
+  if (v === null || v === undefined) return '–';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(digits)));
+  return String(v);
+}
+function delta(v, lowerIsBetter = true) {
+  if (v === null || v === undefined) return h('td', {class: 'num'}, '–');
+  const cls = Math.abs(v) < 1e-12 ? '' : (v < 0) === lowerIsBetter ? 'better' : 'worse';
+  return h('td', {class: 'num ' + cls}, (v > 0 ? '+' : '') + fmt(v));
+}
+function status(value) {
+  const cls = {pass: 'pass', fail: 'fail', improved: 'pass', approved: 'pass', worse: 'fail', rejected: 'fail', revise: 'warn', pending: 'warn'}[value] || '';
+  return h('b', {class: cls}, value);
+}
+function table(headers, rows, numericFrom = Infinity) {
+  return h('div', {class: 'scroll'}, h('table', {}, h('thead', {}, h('tr', {}, headers.map((x, i) => h('th', {class: i >= numericFrom ? 'num' : null}, x)))), h('tbody', {}, rows)));
+}
+function figure(image, caption) {
+  return h('figure', {}, h('a', {href: image.path}, h('img', {src: image.path, alt: image.title, loading: 'lazy'})), h('figcaption', {}, caption || image.title));
+}
+
+document.title = `${D.module} · ${D.name} · evaluation`;
+page.append(h('h1', {}, `Evaluation · ${D.module} · ${D.name}`));
+page.append(h('dl', {class: 'facts'}, D.facts.map(([label, value]) => [h('dt', {}, label), h('dd', {}, fmt(value))])));
+const v = D.verdict;
+page.append(h('div', {class: 'verdict'},
+  h('span', {}, 'Checks: ', status(v.checks), v.failed_checks.length ? h('span', {class: 'muted'}, ` (${v.failed_checks.join(', ')})`) : null),
+  h('span', {}, 'Validation: ', status(v.validation)),
+  h('span', {}, 'Review: ', status(v.review)),
+  h('span', {class: 'muted'}, 'Evidence: ' + Object.entries(D.evidence).map(([k, x]) => `${k} ${x}`).join(', '))));
+page.append(h('p', {class: 'files'}, D.files.map(f => h('a', {href: f.path}, f.title))));
+
+page.append(h('h2', {}, 'Checks'));
+page.append(table(['Check', 'Status', 'Summary'], D.checks.map(c => h('tr', {},
+  h('td', {}, c.check), h('td', {class: c.status}, c.status),
+  h('td', {}, c.summary, c.details && c.details.length && c.status === 'fail'
+    ? h('details', {}, h('summary', {}, `${c.details.length} details`), h('ul', {}, c.details.slice(0, 50).map(x => h('li', {}, x)))) : null)))));
+
+if (D.scores.length || D.rows.length || D.distributions.length) {
+  page.append(h('h2', {}, 'Validation'));
+  if (D.scores.length) page.append(h('ul', {}, D.scores.map(s => h('li', {},
+    h('b', {}, s.key), `: ${s.version} = `, h('b', {}, fmt(s.score !== null ? s.score : s.partial_score)),
+    s.score === null ? ` (partial, covered weight ${fmt(s.covered_weight, 3)})` : ' (lower is better)',
+    h('div', {class: 'muted'}, s.note)))));
+  if (D.rows.length) {
+    const headers = ['Field', 'Season', 'Loss'].concat(D.has_baseline ? ['Baseline loss', 'Δ'] : [], ['RMSE', 'Bias', 'Correlation']);
+    page.append(table(headers, D.rows.map(r => h('tr', {}, h('td', {}, r.field), h('td', {}, r.season), h('td', {class: 'num'}, fmt(r.loss)),
+      D.has_baseline ? [h('td', {class: 'num'}, fmt(r.baseline)), delta(r.delta)] : [],
+      h('td', {class: 'num'}, fmt(r.rmse)), h('td', {class: 'num'}, fmt(r.bias)), h('td', {class: 'num'}, fmt(r.correlation)))), 2));
+  }
+  for (const t of D.distributions) {
+    page.append(h('h3', {}, `${t.name} · ${t.reference || ''}`));
+    page.append(table(['Metric'].concat(t.columns), t.rows.map(r => h('tr', {}, h('td', {}, r.metric), t.columns.map(c => h('td', {class: 'num'}, fmt(r[c]))))), 1));
+  }
+  if (D.skipped.length) page.append(h('ul', {class: 'muted'}, D.skipped.map(s => h('li', {}, `skipped ${s.id}: ${s.reason}`))));
+}
+
+page.append(h('h2', {}, 'Review'));
+if (!D.reviews.length) page.append(h('p', {class: 'muted'}, 'No review recorded (scripts/evaluation/review.py).'));
+for (const r of D.reviews.slice().reverse()) page.append(h('div', {class: 'review'},
+  status(r.verdict), ` · ${r.reviewer} · ${r.recorded}`, r.against ? ` · against ${r.against}` : '', r.notes ? h('div', {}, r.notes) : null));
+
+if (D.groups.length || D.animations.length) {
+  page.append(h('h2', {}, 'Maps'));
+  const linked = D.groups.filter(g => g.images.reference || g.images.difference);
+  const plain = D.groups.filter(g => !(g.images.reference || g.images.difference));
+  for (const g of linked) page.append(h('div', {class: 'group'}, h('h3', {}, g.title, g.validation ? h('span', {class: 'muted'}, ` · validation ${g.validation}`) : null),
+    h('div', {class: 'triple'}, ['model', 'reference', 'difference'].map(kind => g.images[kind] ? figure(g.images[kind], kind === 'difference' ? `model − reference (blue lower, red higher; ±${fmt(g.images[kind].half_range)})` : kind) : h('div', {})))));
+  if (plain.length) page.append(h('div', {class: 'maps'}, plain.map(g => figure(g.images.model || Object.values(g.images)[0], g.title))));
+  if (D.animations.length) {
+    page.append(h('h3', {}, 'Animations'));
+    page.append(h('div', {class: 'maps'}, D.animations.map(a => figure(a, `${a.title} · ${a.frames.length} frames`))));
+  }
+}
+page.append(h('h2', {}, 'Provenance'));
+page.append(h('ul', {class: 'muted'},
+  h('li', {}, `Profile ${D.provenance.profile.path} (${D.provenance.profile.sha256.slice(0, 16)})`),
+  h('li', {}, `Code ${D.provenance.code.revision} (dirty: ${D.provenance.code.dirty})`),
+  Object.entries(D.provenance.references).map(([name, digest]) => h('li', {}, `${name}: ${digest.slice(0, 16)}`)),
+  h('li', {}, `Page generated ${D.generated}`)));
+</script>
+</body>
+</html>

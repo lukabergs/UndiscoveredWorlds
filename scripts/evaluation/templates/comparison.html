@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Run comparison</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1f2328;--muted:#5d6670;--line:#d9d6cf;--panel:#f2f0ea;--fail:#b3261e;--pass:#1e6b3a;--warn:#8a5a00;--accent:#2f5d8a}
+@media (prefers-color-scheme: dark){:root{--bg:#16181c;--fg:#e8e6e1;--muted:#a3a9b1;--line:#363a40;--panel:#1e2126;--fail:#ff8a80;--pass:#7fd49b;--warn:#f0c36b;--accent:#8ab4e0}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:1600px;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+a{color:var(--accent)}
+h1{margin:0 0 4px;font-size:1.5rem}h2{margin:28px 0 8px;font-size:1.15rem;border-bottom:1px solid var(--line);padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px}td,th{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+.fail{color:var(--fail);font-weight:600}.pass{color:var(--pass)}.warn{color:var(--warn)}
+.better{color:var(--pass)}.worse{color:var(--fail)}
+.muted,figcaption,small{color:var(--muted)}
+.controls{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:8px 12px;background:var(--panel);border:1px solid var(--line);border-radius:6px;position:sticky;top:0;z-index:1}
+select,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 6px}
+.row{display:grid;gap:8px;margin:8px 0}
+figure{margin:0}img{width:100%;image-rendering:pixelated;border:1px solid var(--line);display:block}
+.empty{border:1px dashed var(--line);min-height:80px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.label{font-weight:600;margin-top:12px}
+@media (max-width:760px){.row{grid-template-columns:1fr !important}}
+</style>
+</head>
+<body>
+<main id="page"></main>
+<script type="application/json" id="page-data">__PAGE_DATA__</script>
+<script>
+'use strict';
+const D = JSON.parse(document.getElementById('page-data').textContent);
+const page = document.getElementById('page');
+function h(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'class') node.className = value; else if (key.startsWith('on')) node.addEventListener(key.slice(2), value); else node.setAttribute(key, value);
+  }
+  for (const child of children.flat(Infinity)) if (child !== null && child !== undefined) node.append(child instanceof Node ? child : String(child));
+  return node;
+}
+function fmt(v, digits = 4) {
+  if (v === null || v === undefined) return '–';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(digits)));
+  return String(v);
+}
+function status(value) {
+  const cls = {pass: 'pass', fail: 'fail', improved: 'pass', approved: 'pass', worse: 'fail', rejected: 'fail', revise: 'warn', pending: 'warn'}[value] || '';
+  return h('b', {class: cls}, value);
+}
+function figure(image, caption) {
+  if (!image) return h('div', {class: 'empty'}, caption + ': none');
+  return h('figure', {}, h('a', {href: image.path}, h('img', {src: image.path, alt: image.title, loading: 'lazy'})), h('figcaption', {}, caption));
+}
+
+const names = D.runs.map(r => r.name);
+document.title = `${D.module} · ${names.join(' vs ')}`;
+page.append(h('h1', {}, `Comparison · ${D.module}`));
+page.append(h('p', {class: 'muted'}, D.note));
+page.append(h('div', {class: 'scroll'}, h('table', {},
+  h('thead', {}, h('tr', {}, ['Run', 'Bundle', 'Seed', 'Grid', 'Code', 'Checks', 'Validation', 'Review'].map(x => h('th', {}, x)))),
+  h('tbody', {}, D.runs.map((r, i) => h('tr', {},
+    h('td', {}, r.page ? h('a', {href: r.page}, r.name) : r.name, i === 0 ? h('small', {}, ' baseline') : null),
+    h('td', {}, r.bundle), h('td', {}, r.seed), h('td', {}, `${r.grid[0]} × ${r.grid[1]}`),
+    h('td', {}, r.revision + (r.dirty ? ' (dirty)' : '')),
+    h('td', {}, status(r.verdict.checks)), h('td', {}, status(r.verdict.validation)), h('td', {}, status(r.verdict.review))))))));
+
+page.append(h('h2', {}, 'Metrics'));
+page.append(h('div', {class: 'scroll'}, h('table', {},
+  h('thead', {}, h('tr', {}, h('th', {}, 'Metric'), names.map((n, i) => h('th', {class: 'num'}, i ? `${n} (Δ)` : `${n} (baseline)`)))),
+  h('tbody', {}, D.metrics.map(m => h('tr', {}, h('td', {}, m.metric), m.values.map((value, i) => {
+    const d = m.deltas[i];
+    let cls = '';
+    if (d !== null && m.lower_is_better !== null && Math.abs(d) > 1e-12) cls = (d < 0) === m.lower_is_better ? 'better' : 'worse';
+    return h('td', {class: 'num ' + cls}, fmt(value), d === null ? '' : ` (${d > 0 ? '+' : ''}${fmt(d)})`);
+  })))))));
+
+if (D.options.length) {
+  page.append(h('h2', {}, 'Maps'));
+  const mapNames = [...new Set(D.options.map(o => o.map))];
+  const mapSelect = h('select', {id: 'map'}, mapNames.map(m => h('option', {value: m}, D.options.find(o => o.map === m).title)));
+  const seasonSelect = h('select', {id: 'season'});
+  const view = h('div', {});
+  page.append(h('div', {class: 'controls'}, h('label', {}, 'Map ', mapSelect), h('label', {}, 'Season ', seasonSelect),
+    h('span', {class: 'muted'}, 'Keys: ←/→ map, ↑/↓ season')));
+  page.append(view);
+  function seasons() { return D.options.filter(o => o.map === mapSelect.value); }
+  let currentSeason = null;
+  function fillSeasons(keep) {
+    const list = seasons();
+    seasonSelect.replaceChildren(...list.map((o, i) => h('option', {value: String(i)}, o.season_label || o.season || 'annual')));
+    const index = list.findIndex(o => o.season === keep);
+    seasonSelect.value = String(index >= 0 ? index : 0);
+  }
+  function draw() {
+    const option = seasons()[Number(seasonSelect.value)] || seasons()[0];
+    currentSeason = option.season;
+    const columns = names.length + (option.reference ? 1 : 0);
+    const grid = `repeat(${columns}, minmax(0, 1fr))`;
+    const models = option.runs.map((r, i) => figure(r.model, `${names[i]}${i === 0 ? ' (baseline)' : ''}`));
+    if (option.reference) models.push(figure(option.reference, `reference (grid of ${option.reference.run})`));
+    const rows = [h('div', {class: 'label'}, option.title + (option.season_label ? ` · ${option.season_label}` : '')), h('div', {class: 'row', style: `grid-template-columns:${grid}`}, models)];
+    if (option.runs.some(r => r.difference)) {
+      const first = option.runs.find(r => r.difference).difference;
+      rows.push(h('div', {class: 'label'}, `Model − reference (blue lower, red higher; ±${fmt(first.half_range)})`));
+      rows.push(h('div', {class: 'row', style: `grid-template-columns:${grid}`}, option.runs.map((r, i) => figure(r.difference, names[i]))));
+    }
+    if (option.runs.some(r => r.animation)) {
+      rows.push(h('div', {class: 'label'}, 'Animation over the checkpoints'));
+      rows.push(h('div', {class: 'row', style: `grid-template-columns:${grid}`}, option.runs.map((r, i) => figure(r.animation, r.animation ? `${names[i]} · ${r.animation.frames} frames` : names[i]))));
+    }
+    view.replaceChildren(...rows);
+  }
+  mapSelect.addEventListener('change', () => { fillSeasons(currentSeason); draw(); });
+  seasonSelect.addEventListener('change', draw);
+  document.addEventListener('keydown', event => {
+    if (event.target.tagName === 'SELECT' || event.altKey || event.ctrlKey || event.metaKey) return;
+    const step = {ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1]}[event.key];
+    if (!step) return;
+    event.preventDefault();
+    if (step[0]) {
+      mapSelect.selectedIndex = (mapSelect.selectedIndex + step[0] + mapNames.length) % mapNames.length;
+      fillSeasons(currentSeason);
+    } else {
+      const n = seasonSelect.options.length;
+      seasonSelect.selectedIndex = (seasonSelect.selectedIndex + step[1] + n) % n;
+    }
+    draw();
+  });
+  fillSeasons(null);
+  draw();
+}
+page.append(h('p', {class: 'muted'}, `Page generated ${D.generated}`));
+</script>
+</body>
+</html>

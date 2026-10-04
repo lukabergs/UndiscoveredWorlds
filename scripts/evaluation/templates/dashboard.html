@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Module dashboard</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1f2328;--muted:#5d6670;--line:#d9d6cf;--panel:#f2f0ea;--fail:#b3261e;--pass:#1e6b3a;--warn:#8a5a00;--accent:#2f5d8a}
+@media (prefers-color-scheme: dark){:root{--bg:#16181c;--fg:#e8e6e1;--muted:#a3a9b1;--line:#363a40;--panel:#1e2126;--fail:#ff8a80;--pass:#7fd49b;--warn:#f0c36b;--accent:#8ab4e0}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:1600px;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+a{color:var(--accent)}
+h1{margin:0 0 4px;font-size:1.5rem}h2{margin:28px 0 8px;font-size:1.15rem;border-bottom:1px solid var(--line);padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px}td,th{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+.muted{color:var(--muted)}.fail{color:var(--fail);font-weight:600}.pass{color:var(--pass)}.warn{color:var(--warn)}
+table.runs td{white-space:nowrap}span.label{display:block;max-width:440px;overflow:hidden;text-overflow:ellipsis}
+tr.baseline td{background:var(--panel)}
+.controls{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:8px 0}
+input{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 6px;min-width:260px}
+td.links a{margin-right:8px;white-space:nowrap}
+ul.tight{margin:0;padding-left:18px}
+</style>
+</head>
+<body>
+<main id="page"></main>
+<script type="application/json" id="page-data">__PAGE_DATA__</script>
+<script>
+'use strict';
+const D = JSON.parse(document.getElementById('page-data').textContent);
+const page = document.getElementById('page');
+function h(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'class') node.className = value; else node.setAttribute(key, value);
+  }
+  for (const child of children.flat(Infinity)) if (child !== null && child !== undefined) node.append(child instanceof Node ? child : String(child));
+  return node;
+}
+function fmt(v, digits = 4) {
+  if (v === null || v === undefined) return '–';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(digits)));
+  return String(v);
+}
+function verdictClass(value) {
+  return {baseline: 'pass', keep: 'pass', improved: 'pass', approved: 'pass', revert: 'fail', rejected: 'fail', park: 'warn', revise: 'warn'}[value] || '';
+}
+
+document.title = `${D.module} · dashboard`;
+page.append(h('h1', {}, `Dashboard · ${D.module}`));
+page.append(h('p', {class: 'muted'}, `${D.runs.length} registered runs (${D.registry})`, D.baseline !== null && D.baseline !== undefined ? ` · baseline run ${D.baseline}` : '',
+  ` · ${D.ledger.length} ledger entries · generated ${D.generated}`));
+if (D.note) page.append(h('p', {class: 'muted'}, D.note));
+
+page.append(h('h2', {}, 'Ledger'));
+if (!D.ledger.length) page.append(h('p', {class: 'muted'}, 'No ledger entries.'));
+else page.append(h('div', {class: 'scroll'}, h('table', {},
+  h('thead', {}, h('tr', {}, ['Id', 'Date', 'Verdict', 'Decision', 'Phase / hypothesis', 'Do not retry'].map(x => h('th', {}, x)))),
+  h('tbody', {}, D.ledger.slice().reverse().map(e => h('tr', {},
+    h('td', {}, e.id), h('td', {}, e.date), h('td', {class: verdictClass(e.verdict)}, e.verdict), h('td', {class: verdictClass(e.decision)}, e.decision),
+    h('td', {title: e.hypothesis}, e.what), h('td', {}, e.do_not_retry.length ? h('ul', {class: 'tight'}, e.do_not_retry.map(x => h('li', {}, x))) : '–')))))));
+
+page.append(h('h2', {}, 'Runs'));
+const columns = [
+  {key: 'id', title: 'Run', num: true}, {key: 'date', title: 'Date'}, {key: 'status', title: 'Status'},
+  {key: 'score', title: 'Score', num: true}, {key: 'evaluation_score', title: 'Evaluation score', num: true},
+  ...D.columns.map(c => ({key: c, title: c.replace(/_/g, ' '), num: true, metric: true})),
+  {key: 'grid', title: 'Grid'}, {key: 'label', title: 'Label'}, {key: 'links', title: 'Links'}];
+const filter = h('input', {type: 'search', placeholder: 'Filter by id, label or status'});
+page.append(h('div', {class: 'controls'}, filter, h('span', {class: 'muted'}, 'Click a column header to sort.')));
+const body = h('tbody', {});
+let sortKey = 'id', sortDescending = true;
+function value(run, column) { return column.metric ? run.metrics[column.key] : run[column.key]; }
+function draw() {
+  const needle = filter.value.trim().toLowerCase();
+  const rows = D.runs.filter(r => !needle || `${r.id} ${r.label} ${r.status}`.toLowerCase().includes(needle));
+  const column = columns.find(c => c.key === sortKey);
+  rows.sort((a, b) => {
+    const x = value(a, column), y = value(b, column);
+    if (x === y) return 0;
+    if (x === null || x === undefined) return 1;
+    if (y === null || y === undefined) return -1;
+    return (x < y ? -1 : 1) * (sortDescending ? -1 : 1);
+  });
+  body.replaceChildren(...rows.map(r => h('tr', {class: r.id === D.baseline ? 'baseline' : null}, columns.map(c => {
+    if (c.key === 'links') return h('td', {class: 'links'}, r.links.map(l => h('a', {href: l.href}, l.title)));
+    if (c.key === 'label') return h('td', {}, h('span', {class: 'label', title: r.label}, r.label));
+    if (c.key === 'id') return h('td', {class: 'num'}, r.id, r.id === D.baseline ? h('span', {class: 'muted'}, ' baseline') : null);
+    return h('td', {class: c.num ? 'num' : null}, fmt(value(r, c)));
+  }))));
+}
+const head = h('tr', {}, columns.map(c => {
+  const th = h('th', {class: c.num ? 'num' : null}, c.title);
+  if (c.key !== 'links') th.addEventListener('click', () => { sortDescending = sortKey === c.key ? !sortDescending : true; sortKey = c.key; draw(); });
+  return th;
+}));
+page.append(h('div', {class: 'scroll'}, h('table', {class: 'runs'}, h('thead', {}, head), body)));
+filter.addEventListener('input', draw);
+draw();
+</script>
+</body>
+</html>

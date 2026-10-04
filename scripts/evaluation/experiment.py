@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import paths
 from uwtools.bundle import Bundle
 from evaluate import code_state, evaluate, load_profile
+import report
 
 ROOT = Path(__file__).resolve().parents[2]
 # Environment overrides that keep a tool's own outputs inside the run directory.
@@ -116,6 +117,8 @@ def main():
         record['verdict'] = document['verdict']
         print(json.dumps(document['verdict'], indent=2))
     (directory / 'run.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+    if succeeded:
+        report.run_page(directory / 'evaluation')  # again, now with run.json
     if args.archive:
         record_in_archive(args.archive, args.module, name, record)
     print(f'Run directory: {directory}')

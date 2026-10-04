@@ -5,6 +5,7 @@
 
 Verdicts are appended to <evaluation-dir>/review.json with the evaluated bundle's
 manifest hash, so a verdict stays attached to the exact fields that were reviewed.
+The run page (index.html, report.md) is rendered again with the new entry.
 """
 import argparse
 import datetime
@@ -35,6 +36,8 @@ def record(directory, verdict, notes, reviewer, against):
         'verdict': verdict, 'reviewer': reviewer, 'notes': notes, 'against': against,
         'bundle_manifest_sha256': evaluation['run']['manifest_sha256']})
     (directory / 'review.json').write_text(json.dumps(document, indent=2) + '\n', encoding='utf-8')
+    import report  # report imports this module
+    report.run_page(directory)
     return document['entries'][-1]
 
 

@@ -15,7 +15,13 @@ Modules and commands:
     world     run      full procedural world (terrain, climate, optional society) in out/bench/
     climate|world experiment  run bundle + evaluation with configs/evaluation/<module>.json
                        (scripts/evaluation/experiment.py; out/evaluation/ unless --archive)
-    climate|world evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR])
+    climate|world evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR] [--checkpoints DIR])
+    climate|tectonics|world report --evaluation DIR [DIR ...] [--output DIR]
+                       pages from evaluation.json (scripts/evaluation/report.py): one DIR rewrites its run
+                       page (index.html, report.md); several give a comparison page, the first DIR being the
+                       baseline, in --output (default out/evaluation/<module>/comparison)
+    climate|tectonics|world dashboard [--output DIR]
+                       registry runs and ledger entries (default out/evaluation/<module>/dashboard)
 
 Shared options: --seed (default 1), --resolution W (grid W x W/2), --executable, --output, --label.
 Any other --flag value pairs go to the module's native tool unchanged: world_pipeline
@@ -42,9 +48,9 @@ WORLD_EXE = paths.executable('world_pipeline')
 RECIPE = ROOT / 'configs/tectonics-baseline.json'
 SCRATCH = ROOT / 'out/bench'
 EVALUATION = ROOT / 'scripts/evaluation'
-COMMANDS = {'tectonics': ('run', 'inspect', 'report', 'experiment', 'evaluate'), 'geology': ('run',),
-            'climate': ('run', 'check', 'report', 'experiment', 'evaluate'),
-            'world': ('run', 'experiment', 'evaluate')}
+COMMANDS = {'tectonics': ('run', 'inspect', 'report', 'experiment', 'evaluate', 'dashboard'), 'geology': ('run',),
+            'climate': ('run', 'check', 'report', 'experiment', 'evaluate', 'dashboard'),
+            'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard')}
 
 
 def call(command):
@@ -72,6 +78,21 @@ def evaluation(args, extra):
     options += ['--executable', args.executable] if args.executable else []
     options += ['--label', args.label] if args.label else []
     call([UV, 'run', '--offline', EVALUATION / 'experiment.py', args.module, *options, *extra])
+
+
+def pages(args, extra):
+    """Run, comparison and dashboard pages rendered from JSON by scripts/evaluation/report.py."""
+    if extra:
+        raise SystemExit(f"Unexpected arguments: {' '.join(extra)}")
+    script = EVALUATION / 'report.py'
+    if args.command == 'dashboard':
+        output = args.output or ROOT / 'out/evaluation' / args.module / 'dashboard'
+        call([UV, 'run', '--offline', script, 'dashboard', args.module, '--output', output])
+    elif len(args.evaluation) == 1:
+        call([UV, 'run', '--offline', script, 'run', args.evaluation[0]])
+    else:
+        output = args.output or ROOT / 'out/evaluation' / args.module / 'comparison'
+        call([UV, 'run', '--offline', script, 'compare', *args.evaluation, '--output', output])
 
 
 def native_pairs(extra):
@@ -206,6 +227,8 @@ def main():
     parser.add_argument('--runs', type=int, nargs='+')
     parser.add_argument('--compare', type=int, help='Run ID to compare against (climate check/report)')
     parser.add_argument('--bundle', type=Path, help='Run bundle to evaluate (evaluate)')
+    parser.add_argument('--evaluation', type=Path, nargs='+',
+                        help='Evaluation directories for report pages (report); the first is the baseline')
     parser.add_argument('--reference-width', type=int, default=512, help='Earth reference width (geology)')
     parser.add_argument('--surface-drag', default='earth',
                         help="climate: 'earth' vegetation drag contrast (default), 'none', or a UWROUGH1 file")
@@ -217,6 +240,13 @@ def main():
     if args.command in ('experiment', 'evaluate'):
         evaluation(args, extra)
         return
+    if args.command == 'dashboard' or args.evaluation:
+        if args.command not in ('report', 'dashboard'):
+            parser.error('--evaluation belongs to report')
+        pages(args, extra)
+        return
+    if args.module == 'world' and args.command == 'report':
+        parser.error('world report requires --evaluation DIR [DIR ...]')
     {'tectonics': tectonics, 'geology': geology, 'climate': climate, 'world': world}[args.module](args, extra)
 
 
