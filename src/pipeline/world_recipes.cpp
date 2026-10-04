@@ -169,11 +169,132 @@ std::vector<RecipeIssue> validaterecipe(const WorldRecipe& recipe)
     return issues;
 }
 
+bool findrecipestep(const WorldRecipe& recipe, std::string_view text, std::size_t& index)
+{
+    if (!text.empty() && text.find_first_not_of("0123456789") == std::string_view::npos)
+    {
+        index = static_cast<std::size_t>(std::stoul(std::string(text)));
+        return index < recipe.steps.size();
+    }
+    for (std::size_t step = 0; step < recipe.steps.size(); step++)
+        if (text == getworldprocess(recipe.steps[step]).id)
+        {
+            index = step;
+            return true;
+        }
+    return false;
+}
+
+bool parserecipesteps(const WorldRecipe& recipe, std::string_view text, RecipeSteps& steps, std::string* reason)
+{
+    const auto fail = [&](const std::string& message)
+    {
+        if (reason != nullptr)
+            *reason = message;
+        return false;
+    };
+    if (recipe.steps.empty())
+        return fail("recipe " + recipe.name + " has no steps");
+    const std::size_t separator = text.find("..");
+    const std::string_view first = text.substr(0, separator);
+    const std::string_view last = separator == std::string_view::npos ? first : text.substr(separator + 2);
+    steps.first = 0;
+    steps.last = recipe.steps.size() - 1;
+    if (!first.empty() && !findrecipestep(recipe, first, steps.first))
+        return fail("recipe " + recipe.name + " has no step " + std::string(first));
+    if (!last.empty() && !findrecipestep(recipe, last, steps.last))
+        return fail("recipe " + recipe.name + " has no step " + std::string(last));
+    if (steps.last < steps.first)
+        return fail("step " + std::string(last) + " comes before " + std::string(first));
+    return true;
+}
+
+namespace
+{
+// State a stage leaves for a later one in GenerationScratch, outside the world
+// fields. Until it becomes world state (world-model migration step 5), a run
+// cannot start between the two.
+struct InRunState
+{
+    GenerationStageId from;
+    GenerationStageId to;
+    const char* what;
+};
+
+constexpr InRunState kInRunState[] =
+{
+    { GenerationStageId::mountain_bases, GenerationStageId::rivers_and_basins, "mountain drainage" },
+    { GenerationStageId::mountain_bases, GenerationStageId::basin_editor, "mountain drainage" },
+    { GenerationStageId::rivers_and_basins, GenerationStageId::lakes, "salt-lake and no-lake masks" },
+};
+}
+
+std::vector<RecipeIssue> validaterecipesteps(const WorldRecipe& recipe, const RecipeRunOptions& options)
+{
+    std::vector<RecipeIssue> issues;
+    if (recipe.steps.empty())
+        return issues;
+    const std::size_t first = options.selectSteps ? options.steps.first : 0;
+    const std::size_t last = options.selectSteps ? options.steps.last : recipe.steps.size() - 1;
+
+    // What the full recipe has before each step, and what this run has.
+    std::set<FieldId> expected(recipe.inputs.begin(), recipe.inputs.end());
+    std::set<TableId> expectedtables(recipe.inputtables.begin(), recipe.inputtables.end());
+    std::set<FieldId> present = options.fromBundle ? std::set<FieldId>(options.loadedfields.begin(), options.loadedfields.end()) : expected;
+    std::set<TableId> presenttables = options.fromBundle ? std::set<TableId>(options.loadedtables.begin(), options.loadedtables.end()) : expectedtables;
+    if (options.fromBundle)
+    {
+        // A bundle is a whole world: whatever it supplied was written before.
+        expected.insert(present.begin(), present.end());
+        expectedtables.insert(presenttables.begin(), presenttables.end());
+    }
+
+    for (std::size_t index = 0; index <= last && index < recipe.steps.size(); index++)
+    {
+        const WorldProcessDefinition& process = getworldprocess(recipe.steps[index]);
+        const int step = static_cast<int>(index);
+        if (index >= first)
+        {
+            for (FieldId read : process.reads)
+                if (expected.count(read) != 0 && present.count(read) == 0)
+                    issues.push_back({ step, true, std::string(process.id) + " reads " + worldmodel::qualifiedname(read) +
+                        ", which an earlier step outside this run provides and a bundle cannot load" });
+            for (TableId read : process.tablereads)
+                if (expectedtables.count(read) != 0 && presenttables.count(read) == 0)
+                    issues.push_back({ step, true, std::string(process.id) + " reads table " + worldmodel::qualifiedname(read) +
+                        ", which an earlier step outside this run provides and a bundle cannot load" });
+            for (const InRunState& state : kInRunState)
+            {
+                if (state.to != recipe.steps[index])
+                    continue;
+                for (std::size_t earlier = 0; earlier < first; earlier++)
+                    if (recipe.steps[earlier] == state.from)
+                        issues.push_back({ step, true, std::string(process.id) + " needs the " + state.what + " of " +
+                            getworldprocess(state.from).id + " from the same run" });
+            }
+        }
+        expected.insert(process.writes.begin(), process.writes.end());
+        expectedtables.insert(process.tablewrites.begin(), process.tablewrites.end());
+        if (index >= first)
+        {
+            present.insert(process.writes.begin(), process.writes.end());
+            presenttables.insert(process.tablewrites.begin(), process.tablewrites.end());
+        }
+    }
+    return issues;
+}
+
 RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationScratch& scratch,
     WorldStageParameters& parameters, const GenerationExecutionContext& context, const RecipeRunOptions& options)
 {
     RecipeRunResult result;
-    for (const RecipeIssue& issue : validaterecipe(recipe))
+    std::vector<RecipeIssue> issues = validaterecipe(recipe);
+    if (options.selectSteps || options.fromBundle)
+    {
+        const std::vector<RecipeIssue> stepissues = validaterecipesteps(recipe, options);
+        issues.insert(issues.end(), stepissues.begin(), stepissues.end());
+    }
+    for (const RecipeIssue& issue : issues)
     {
         if (issue.error)
         {
@@ -181,12 +302,16 @@ RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationSc
             return result;
         }
     }
+    result.provenance.fields = options.sourceprovenance.fields;
+    result.provenance.tables = options.sourceprovenance.tables;
 
     WorldHashes before;
     if (options.auditAccess)
         before = hashworld(world);
 
-    for (std::size_t index = 0; index < recipe.steps.size(); index++)
+    const std::size_t firststep = options.selectSteps ? options.steps.first : 0;
+    const std::size_t laststep = options.selectSteps ? options.steps.last + 1 : recipe.steps.size();
+    for (std::size_t index = firststep; index < laststep && index < recipe.steps.size(); index++)
     {
         const GenerationStageId stage = recipe.steps[index];
         const WorldProcessDefinition& process = getworldprocess(stage);
@@ -262,6 +387,8 @@ RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationSc
             if (violation.rfind("note: ", 0) != 0)
                 result.violations++;
         result.steps.push_back(std::move(record));
+        if (options.afterstep && !options.afterstep(result, result.steps.back(), result.error))
+            return result;
     }
 
     result.completed = true;

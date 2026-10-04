@@ -12,6 +12,10 @@ uw_add_test(climate_palette_tests validation/climate_palette_tests.cpp uw_climat
 uw_add_test(parallel_rows_tests core/parallel_rows_tests.cpp uw_grid)
 set_tests_properties(parallel_rows_tests PROPERTIES TIMEOUT 15)
 uw_add_test(climate_pipeline_tests pipeline/climate_pipeline_tests.cpp uw_generation_stages)
+if(TARGET uw_climate_world)
+    # The only library on its link line: climate must not need the world class.
+    uw_add_test(climate_world_tests pipeline/climate_world_tests.cpp uw_climate_world)
+endif()
 
 foreach(component atmosphere boundary_layer context energy flow hydrology transport koppen ocean_dynamics ocean_heat physics weather)
     uw_add_test(climate_${component}_tests

@@ -1,8 +1,8 @@
 #pragma once
 
 // Climate stages on the climate world alone, without planet. world_stages runs
-// them on a planet's climate state; climate_pipeline runs them on imported
-// terrain. Seeded noise streams follow the world seed and stage salts.
+// them on a planet's climate state. Seeded noise streams follow the world seed
+// and stage salts.
 
 #include "generation_stage_registry.hpp"
 

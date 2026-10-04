@@ -61,7 +61,7 @@ whose seeded noise climate never reads; land and sea counts are computed when th
 imported terrain is prepared.
 
 `uw_climate_world` (climate processes on `climateworld`, climate validation, map
-imports, progress) builds without planet; `climate_pipeline` links only it.
+imports, progress) builds without planet; the test `climate_world_tests` links only it.
 `uw_grid`, `uw_climate`, `uw_climate_io`, and `uw_generation_stages` are shared
 libraries used by the desktop and tests. Planet-level domains are separate object
 targets listed in `src/simulations/world_modules.cmake`; they still rely on world

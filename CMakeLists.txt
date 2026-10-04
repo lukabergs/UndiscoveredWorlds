@@ -69,8 +69,8 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
     include(src/simulations/world_modules.cmake)
 
     # Climate on a climateworld, without planet: the climate processes and their
-    # stage runner, validation, map imports, progress and environment. Shared by
-    # uw_world_core and climate_pipeline.
+    # stage runner, validation, map imports, progress and environment. Linked by
+    # uw_world_core; climate_world_tests links it alone to keep it planet-free.
     add_library(uw_climate_world STATIC
         src/app/app_environment.cpp
         src/app/climate_options.cpp
@@ -132,10 +132,6 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
     endfunction()
 
     uw_add_world_executable(world_pipeline src/app/world_pipeline_main.cpp)
-
-    # Climate on imported terrain without the world class.
-    add_executable(climate_pipeline src/app/climate_pipeline_main.cpp)
-    target_link_libraries(climate_pipeline PRIVATE uw_climate_world)
 endif()
 
 if(UW_BUILD_APP)

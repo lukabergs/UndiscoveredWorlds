@@ -189,7 +189,7 @@ uv run --offline scripts/benchmarks/bench.py tectonics inspect
 uv run --offline scripts/benchmarks/bench.py tectonics run
 ```
 
-`tectonic_pipeline` is the tectonics CLI; `world_pipeline` is the headless CLI for full-world generation and the Earth climate benchmark (`generate`, `climate-benchmark`). It runs recipes, can write a run bundle (`--bundle`) and audit each step's field access (`--audit-access`), and links no SFML or ImGui. `climate_pipeline` runs climate alone on imported terrain: it uses the climate module's own world (`climateworld`) and links no planet, terrain, hydrology or tectonics code. The desktop `UndiscoveredWorlds.exe` takes no arguments. The `tectonic_pipeline` `inspect`, `batch-export`,
+`tectonic_pipeline` is the tectonics CLI; `world_pipeline` is the headless CLI for recipe runs, full-world generation and the Earth climate benchmark (`run`, `generate`, `climate-benchmark`). It runs recipes or parts of them (`run --recipe`, `--from-bundle`, `--steps`, `--only`, checkpoints), can write a run bundle (`--bundle`) and audit each step's field access (`--audit-access`), and links no SFML or ImGui. Climate alone on imported terrain is `run --recipe earth-climate`. The desktop `UndiscoveredWorlds.exe` takes no arguments. The `tectonic_pipeline` `inspect`, `batch-export`,
 `boundary-stats` and `compare` commands share the same engine and recipe.
 
 Numbered experiments use `runs/registry/tectonics.json` and refuse existing

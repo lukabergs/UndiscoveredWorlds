@@ -28,6 +28,53 @@ struct inputview
 // Friend of climateworld: maps catalogue ids onto the climate state.
 struct climateworldfieldaccess
 {
+    // Climate state stored on the world grid, for either direction (field_encoding.hpp).
+    template<typename World, typename Operation>
+    static bool state(World& world, FieldId id, Operation& op)
+    {
+        switch (id)
+        {
+        case FieldId::north_polar_temperature: return op.scalar(id, world.itsnorthpolartemp);
+        case FieldId::south_polar_temperature: return op.scalar(id, world.itssouthpolartemp);
+        case FieldId::equatorial_temperature: return op.scalar(id, world.itseqtemp);
+        case FieldId::sea_ice: return op.grid(id, world.seaicemap);
+        case FieldId::temperature_january: return op.grid(id, world.jantempmap);
+        case FieldId::temperature_july: return op.grid(id, world.jultempmap);
+        case FieldId::precipitation_january: return op.grid(id, world.janrainmap);
+        case FieldId::precipitation_july: return op.grid(id, world.julrainmap);
+        case FieldId::mountain_precipitation_january: return op.grid(id, world.janmountainrainmap);
+        case FieldId::mountain_precipitation_july: return op.grid(id, world.julmountainrainmap);
+        case FieldId::mountain_precipitation_direction_january: return op.grid(id, world.janmountainraindirmap);
+        case FieldId::mountain_precipitation_direction_july: return op.grid(id, world.julmountainraindirmap);
+        case FieldId::prevailing_wind: return op.grid(id, world.windmap);
+        case FieldId::climate_class: return op.grid(id, world.climatemap);
+        case FieldId::biome: return op.grid(id, world.biomemap);
+        case FieldId::subtropical_high_latitudes: return op.zonalprofile(id, world.horselats);
+        case FieldId::temperature: return op.seasonal(id, world.seasonaltempmaps);
+        case FieldId::precipitation: return op.seasonal(id, world.seasonalrainmaps);
+        case FieldId::precipitation_exact: return op.seasonal(id, world.seasonalrainfloatmaps);
+        case FieldId::pressure: return op.seasonal(id, world.seasonalpressuremaps);
+        case FieldId::wind_east: return op.seasonal(id, world.seasonaluwindmaps);
+        case FieldId::wind_south: return op.seasonal(id, world.seasonalvwindmaps);
+        case FieldId::upper_height: return op.seasonal(id, world.seasonalupperheightmaps);
+        case FieldId::upper_wind_east: return op.seasonal(id, world.seasonalupperuwindmaps);
+        case FieldId::upper_wind_south: return op.seasonal(id, world.seasonaluppervwindmaps);
+        case FieldId::vertical_velocity: return op.seasonal(id, world.seasonalverticalvelocitymaps);
+        case FieldId::evaporation: return op.seasonal(id, world.seasonalevaporationmaps);
+        case FieldId::maritime_influence: return op.seasonal(id, world.seasonalmaritimeinfluencemaps);
+        case FieldId::maritime_thermal_anomaly: return op.seasonal(id, world.seasonalmaritimethermalanomalymaps);
+        case FieldId::maritime_fetch: return op.seasonal(id, world.seasonalmaritimefetchmaps);
+        case FieldId::moisture: return op.seasonal(id, world.seasonalmoisturemaps);
+        case FieldId::convergence: return op.seasonal(id, world.seasonalconvergencemaps);
+        case FieldId::orographic_uplift: return op.seasonal(id, world.seasonalupliftmaps);
+        case FieldId::orographic_subsidence: return op.seasonal(id, world.seasonalsubsidencemaps);
+        case FieldId::ocean_current_east: return op.seasonal(id, world.seasonalcurrentumaps);
+        case FieldId::ocean_current_south: return op.seasonal(id, world.seasonalcurrentvmaps);
+        case FieldId::sea_surface_temperature: return op.seasonal(id, world.seasonalsstmaps);
+        default: return false;
+        }
+    }
+
     static bool read(const climateworld& world, FieldId id, FieldData& data, bool includeinputs)
     {
         namespace encode = worldmodel::encoding;
@@ -35,45 +82,17 @@ struct climateworldfieldaccess
         const std::size_t rows = static_cast<std::size_t>(world.inputs_.height) + 1;
         const auto& context = world.climatecontext_;
 
+        encode::ReadOperation op;
+        op.columns = columns;
+        op.rows = rows;
+        if (state(world, id, op))
+        {
+            data = std::move(op.data);
+            return true;
+        }
+
         switch (id)
         {
-        case FieldId::north_polar_temperature: data = encode::scalar(id, world.itsnorthpolartemp); return true;
-        case FieldId::south_polar_temperature: data = encode::scalar(id, world.itssouthpolartemp); return true;
-        case FieldId::equatorial_temperature: data = encode::scalar(id, world.itseqtemp); return true;
-        case FieldId::sea_ice: data = encode::grid(id, columns, rows, world.seaicemap); return true;
-        case FieldId::temperature_january: data = encode::grid(id, columns, rows, world.jantempmap); return true;
-        case FieldId::temperature_july: data = encode::grid(id, columns, rows, world.jultempmap); return true;
-        case FieldId::precipitation_january: data = encode::grid(id, columns, rows, world.janrainmap); return true;
-        case FieldId::precipitation_july: data = encode::grid(id, columns, rows, world.julrainmap); return true;
-        case FieldId::mountain_precipitation_january: data = encode::grid(id, columns, rows, world.janmountainrainmap); return true;
-        case FieldId::mountain_precipitation_july: data = encode::grid(id, columns, rows, world.julmountainrainmap); return true;
-        case FieldId::mountain_precipitation_direction_january: data = encode::grid(id, columns, rows, world.janmountainraindirmap); return true;
-        case FieldId::mountain_precipitation_direction_july: data = encode::grid(id, columns, rows, world.julmountainraindirmap); return true;
-        case FieldId::prevailing_wind: data = encode::grid(id, columns, rows, world.windmap); return true;
-        case FieldId::climate_class: data = encode::grid(id, columns, rows, world.climatemap); return true;
-        case FieldId::biome: data = encode::grid(id, columns, rows, world.biomemap); return true;
-        case FieldId::subtropical_high_latitudes: data = encode::zonalprofile(id, columns, world.horselats); return true;
-        case FieldId::temperature: data = encode::seasonal(id, columns, rows, world.seasonaltempmaps); return true;
-        case FieldId::precipitation: data = encode::seasonal(id, columns, rows, world.seasonalrainmaps); return true;
-        case FieldId::precipitation_exact: data = encode::seasonal(id, columns, rows, world.seasonalrainfloatmaps); return true;
-        case FieldId::pressure: data = encode::seasonal(id, columns, rows, world.seasonalpressuremaps); return true;
-        case FieldId::wind_east: data = encode::seasonal(id, columns, rows, world.seasonaluwindmaps); return true;
-        case FieldId::wind_south: data = encode::seasonal(id, columns, rows, world.seasonalvwindmaps); return true;
-        case FieldId::upper_height: data = encode::seasonal(id, columns, rows, world.seasonalupperheightmaps); return true;
-        case FieldId::upper_wind_east: data = encode::seasonal(id, columns, rows, world.seasonalupperuwindmaps); return true;
-        case FieldId::upper_wind_south: data = encode::seasonal(id, columns, rows, world.seasonaluppervwindmaps); return true;
-        case FieldId::vertical_velocity: data = encode::seasonal(id, columns, rows, world.seasonalverticalvelocitymaps); return true;
-        case FieldId::evaporation: data = encode::seasonal(id, columns, rows, world.seasonalevaporationmaps); return true;
-        case FieldId::maritime_influence: data = encode::seasonal(id, columns, rows, world.seasonalmaritimeinfluencemaps); return true;
-        case FieldId::maritime_thermal_anomaly: data = encode::seasonal(id, columns, rows, world.seasonalmaritimethermalanomalymaps); return true;
-        case FieldId::maritime_fetch: data = encode::seasonal(id, columns, rows, world.seasonalmaritimefetchmaps); return true;
-        case FieldId::moisture: data = encode::seasonal(id, columns, rows, world.seasonalmoisturemaps); return true;
-        case FieldId::convergence: data = encode::seasonal(id, columns, rows, world.seasonalconvergencemaps); return true;
-        case FieldId::orographic_uplift: data = encode::seasonal(id, columns, rows, world.seasonalupliftmaps); return true;
-        case FieldId::orographic_subsidence: data = encode::seasonal(id, columns, rows, world.seasonalsubsidencemaps); return true;
-        case FieldId::ocean_current_east: data = encode::seasonal(id, columns, rows, world.seasonalcurrentumaps); return true;
-        case FieldId::ocean_current_south: data = encode::seasonal(id, columns, rows, world.seasonalcurrentvmaps); return true;
-        case FieldId::sea_surface_temperature: data = encode::seasonal(id, columns, rows, world.seasonalsstmaps); return true;
         case FieldId::solver_monthly_temperature:
             data = encode::monthly(id, static_cast<std::size_t>(context.monthly.columns), static_cast<std::size_t>(context.monthly.rows), context.monthly.temperatureC);
             return true;
@@ -317,6 +336,15 @@ struct climateworldfieldaccess
 bool readclimateworldfield(const climateworld& world, FieldId id, FieldData& data, bool includeinputs)
 {
     return climateworldfieldaccess::read(world, id, data, includeinputs);
+}
+
+bool loadclimateworldfield(climateworld& world, const FieldData& data)
+{
+    worldmodel::encoding::LoadOperation op;
+    op.columns = static_cast<std::size_t>(world.width()) + 1;
+    op.rows = static_cast<std::size_t>(world.height()) + 1;
+    op.data = &data;
+    return climateworldfieldaccess::state(world, data.id, op);
 }
 
 bool readclimateworldtable(const climateworld& world, TableId id, std::string& text, std::string& extension)

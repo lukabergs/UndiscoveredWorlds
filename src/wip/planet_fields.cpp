@@ -46,9 +46,121 @@ std::string csvtext(const std::string& value)
 // owned by the climate module are read through climate_world_fields.
 struct planetfieldaccess
 {
+    // The planet's own storage of each field, for either direction (field_encoding.hpp).
+    template<typename World, typename Operation>
+    static bool visit(World& world, FieldId id, Operation& op)
+    {
+        switch (id)
+        {
+        case FieldId::seed: return op.scalar(id, world.body_.itsseed);
+        case FieldId::size_class: return op.scalar(id, world.body_.itssize);
+        case FieldId::width_index: return op.scalar(id, world.body_.itswidth);
+        case FieldId::height_index: return op.scalar(id, world.body_.itsheight);
+        case FieldId::prograde_rotation: return op.scalar(id, world.body_.itsrotation);
+        case FieldId::axial_tilt: return op.scalar(id, world.body_.itstilt);
+        case FieldId::eccentricity: return op.scalar(id, world.body_.itseccentricity);
+        case FieldId::perihelion: return op.scalar(id, world.body_.itsperihelion);
+        case FieldId::gravity: return op.scalar(id, world.body_.itsgravity);
+        case FieldId::lunar_strength: return op.scalar(id, world.body_.itslunar);
+        case FieldId::lapse_rate: return op.scalar(id, world.atmosphere_.itstempdecrease);
+        case FieldId::north_polar_adjust: return op.scalar(id, world.atmosphere_.itsnorthpolaradjust);
+        case FieldId::south_polar_adjust: return op.scalar(id, world.atmosphere_.itssouthpolaradjust);
+        case FieldId::average_temperature: return op.scalar(id, world.atmosphere_.itsaveragetemp);
+        case FieldId::water_pickup: return op.scalar(id, world.atmosphere_.itswaterpickup);
+        case FieldId::river_factor: return op.scalar(id, world.hydrosphere_.itsriverfactor);
+        case FieldId::river_land_reduce: return op.scalar(id, world.hydrosphere_.itsriverlandreduce);
+        case FieldId::estuary_limit: return op.scalar(id, world.hydrosphere_.itsestuarylimit);
+        case FieldId::glacial_temperature: return op.scalar(id, world.cryosphere_.itsglacialtemp);
+        case FieldId::glacier_temperature: return op.scalar(id, world.cryosphere_.itsglaciertemp);
+        case FieldId::mountain_reduce: return op.scalar(id, world.geosphere_.itsmountainreduce);
+        case FieldId::climate_type_count: return op.scalar(id, world.atmosphere_.itsclimateno);
+        case FieldId::max_elevation: return op.scalar(id, world.geosphere_.itsmaxheight);
+        case FieldId::sea_level: return op.scalar(id, world.geosphere_.itssealevel);
+        case FieldId::max_river_flow: return op.scalar(id, world.hydrosphere_.itsmaxriverflow);
+        case FieldId::land_cells: return op.scalar(id, world.geosphere_.itslandtotal);
+        case FieldId::sea_cells: return op.scalar(id, world.geosphere_.itsseatotal);
+        case FieldId::crater_count: return op.scalar(id, world.geosphere_.itscraterno);
+        case FieldId::tectonic_time_origin_step: return op.scalar(id, world.geosphere_.itstectonictimeoriginstep);
+        case FieldId::tectonic_time: return op.scalar(id, world.geosphere_.itstectonictimemyr);
+        case FieldId::tectonic_time_step: return op.scalar(id, world.geosphere_.itstectonicdeltatimemyr);
+        case FieldId::tectonic_plate_count: return op.scalar(id, world.geosphere_.itstectonicplatecount);
+        case FieldId::tectonic_sea_level: return op.scalar(id, world.geosphere_.itstectonicsealevelm);
+        case FieldId::base_elevation: return op.grid(id, world.geosphere_.mapnom);
+        case FieldId::continental_shelf: return op.grid(id, world.geosphere_.shelfmap);
+        case FieldId::mountain_height: return op.grid(id, world.geosphere_.mountainheights);
+        case FieldId::mountain_ridges: return op.grid(id, world.geosphere_.mountainridges);
+        case FieldId::extra_elevation: return op.grid(id, world.geosphere_.extraelevmap);
+        case FieldId::crater_rims: return op.grid(id, world.geosphere_.craterrims);
+        case FieldId::crater_centres: return op.grid(id, world.geosphere_.cratercentres);
+        case FieldId::volcano: return op.grid(id, world.geosphere_.volcanomap);
+        case FieldId::stratovolcano: return op.grid(id, world.geosphere_.stratomap);
+        case FieldId::island: return op.grid(id, world.geosphere_.islandmap);
+        case FieldId::mountain_island: return op.grid(id, world.geosphere_.mountainislandmap);
+        case FieldId::ocean_ridge: return op.grid(id, world.geosphere_.oceanridgemap);
+        case FieldId::ocean_ridge_height: return op.grid(id, world.geosphere_.oceanridgeheightmap);
+        case FieldId::ocean_rift: return op.grid(id, world.geosphere_.oceanriftmap);
+        case FieldId::ocean_ridge_offset: return op.grid(id, world.geosphere_.oceanridgeoffsetmap);
+        case FieldId::ocean_ridge_angle: return op.grid(id, world.geosphere_.oceanridgeanglemap);
+        case FieldId::roughness: return op.grid(id, world.geosphere_.roughnessmap);
+        case FieldId::detail_noise: return op.grid(id, world.geosphere_.noisemap);
+        case FieldId::geologic_regime: return op.grid(id, world.geosphere_.geologicregimemap);
+        case FieldId::tectonic_convergence: return op.grid(id, world.geosphere_.tectonicconvergencemap);
+        case FieldId::tectonic_divergence: return op.grid(id, world.geosphere_.tectonicdivergencemap);
+        case FieldId::tectonic_shear: return op.grid(id, world.geosphere_.tectonicshearmap);
+        case FieldId::crust_age: return op.grid(id, world.geosphere_.tectoniccrustagemyrmap);
+        case FieldId::crust_thickness: return op.grid(id, world.geosphere_.tectoniccrustthicknessmap);
+        case FieldId::crust_class: return op.grid(id, world.geosphere_.tectoniccrustclassmap);
+        case FieldId::uplift_tendency: return op.grid(id, world.geosphere_.tectonicuplifttendencymap);
+        case FieldId::subsidence_tendency: return op.grid(id, world.geosphere_.tectonicsubsidencetendencymap);
+        case FieldId::accumulated_strain: return op.grid(id, world.geosphere_.tectonicaccumulatedstrainmap);
+        case FieldId::boundary_type: return op.grid(id, world.geosphere_.tectonicboundarytypemap);
+        case FieldId::boundary_distance: return op.grid(id, world.geosphere_.tectonicboundarydistancemap);
+        case FieldId::boundary_segment: return op.grid(id, world.geosphere_.tectonicboundarysegmentidmap);
+        case FieldId::nearest_boundary: return op.grid(id, world.geosphere_.tectonicnearestboundaryidmap);
+        case FieldId::boundary_history: return op.grid(id, world.geosphere_.tectonicboundaryhistorymap);
+        case FieldId::deforming_region: return op.grid(id, world.geosphere_.tectonicdeformingregionidmap);
+        case FieldId::deforming_region_type: return op.grid(id, world.geosphere_.tectonicdeformingregiontypemap);
+        case FieldId::deformation_rate: return op.grid(id, world.geosphere_.tectonicdeformationratemap);
+        case FieldId::deformation_velocity_x: return op.grid(id, world.geosphere_.tectonicdeformationvelocityxmap);
+        case FieldId::deformation_velocity_y: return op.grid(id, world.geosphere_.tectonicdeformationvelocityymap);
+        case FieldId::erosion_potential: return op.grid(id, world.geosphere_.erosionpotentialmap);
+        case FieldId::deposition_potential: return op.grid(id, world.geosphere_.depositionpotentialmap);
+        case FieldId::floodplain_fertility: return op.grid(id, world.geosphere_.floodplainfertilitymap);
+        case FieldId::metal_ore_potential: return op.grid(id, world.geosphere_.metalorereservemap);
+        case FieldId::placer_potential: return op.grid(id, world.geosphere_.placerreservemap);
+        case FieldId::evaporite_potential: return op.grid(id, world.geosphere_.evaporitereservemap);
+        case FieldId::volcanic_potential: return op.grid(id, world.geosphere_.volcanicreservemap);
+        case FieldId::river_direction: return op.grid(id, world.hydrosphere_.rivermapdir);
+        case FieldId::river_flow_january: return op.grid(id, world.hydrosphere_.rivermapjan);
+        case FieldId::river_flow_july: return op.grid(id, world.hydrosphere_.rivermapjul);
+        case FieldId::lake_surface: return op.grid(id, world.hydrosphere_.lakemap);
+        case FieldId::rift_lake_surface: return op.grid(id, world.hydrosphere_.riftlakemapsurface);
+        case FieldId::rift_lake_bed: return op.grid(id, world.hydrosphere_.riftlakemapbed);
+        case FieldId::lake_start: return op.grid(id, world.hydrosphere_.lakestartmap);
+        case FieldId::special_features: return op.grid(id, world.hydrosphere_.specials);
+        case FieldId::tide: return op.grid(id, world.hydrosphere_.tidalmap);
+        case FieldId::basin_class: return op.grid(id, world.hydrosphere_.basinclassmap);
+        case FieldId::delta_direction: return op.grid(id, world.hydrosphere_.deltamapdir);
+        case FieldId::delta_flow_january: return op.grid(id, world.hydrosphere_.deltamapjan);
+        case FieldId::delta_flow_july: return op.grid(id, world.hydrosphere_.deltamapjul);
+        case FieldId::fishery_potential: return op.grid(id, world.biosphere_.fisheryreservemap);
+        case FieldId::settlement_suitability: return op.grid(id, world.anthroposphere_.settlement_suitability);
+        case FieldId::infrastructure: return op.grid(id, world.anthroposphere_.social_infrastructure);
+        case FieldId::agricultural_capacity: return op.grid(id, world.anthroposphere_.agricultural_capacity);
+        case FieldId::route_traffic: return op.grid(id, world.anthroposphere_.route_traffic);
+        case FieldId::river_access: return op.grid(id, world.anthroposphere_.river_access);
+        case FieldId::harbor_score: return op.grid(id, world.anthroposphere_.harbor_score);
+        case FieldId::owner_settlement: return op.grid(id, world.anthroposphere_.owner_settlement_id);
+        case FieldId::owner_polity: return op.grid(id, world.anthroposphere_.owner_polity_id);
+        case FieldId::no_shade: return op.grid(id, world.presentation_.noshademap);
+        case FieldId::debug_test: return op.grid(id, world.presentation_.testmap);
+        default:
+            return false;
+        }
+    }
+
     static PlanetFieldData read(const planet& world, FieldId id)
     {
-        namespace encode = worldmodel::encoding;
         PlanetFieldData data;
         if (readclimateworldfield(world.climate_, id, data, false))
             return data;
@@ -59,115 +171,32 @@ struct planetfieldaccess
             return data;
         }
 
-        const std::size_t columns = static_cast<std::size_t>(world.body_.itswidth) + 1;
-        const std::size_t rows = static_cast<std::size_t>(world.body_.itsheight) + 1;
-        switch (id)
-        {
-        case FieldId::seed: return encode::scalar(id, world.body_.itsseed);
-        case FieldId::size_class: return encode::scalar(id, world.body_.itssize);
-        case FieldId::width_index: return encode::scalar(id, world.body_.itswidth);
-        case FieldId::height_index: return encode::scalar(id, world.body_.itsheight);
-        case FieldId::prograde_rotation: return encode::scalar(id, world.body_.itsrotation);
-        case FieldId::axial_tilt: return encode::scalar(id, world.body_.itstilt);
-        case FieldId::eccentricity: return encode::scalar(id, world.body_.itseccentricity);
-        case FieldId::perihelion: return encode::scalar(id, world.body_.itsperihelion);
-        case FieldId::gravity: return encode::scalar(id, world.body_.itsgravity);
-        case FieldId::lunar_strength: return encode::scalar(id, world.body_.itslunar);
-        case FieldId::lapse_rate: return encode::scalar(id, world.atmosphere_.itstempdecrease);
-        case FieldId::north_polar_adjust: return encode::scalar(id, world.atmosphere_.itsnorthpolaradjust);
-        case FieldId::south_polar_adjust: return encode::scalar(id, world.atmosphere_.itssouthpolaradjust);
-        case FieldId::average_temperature: return encode::scalar(id, world.atmosphere_.itsaveragetemp);
-        case FieldId::water_pickup: return encode::scalar(id, world.atmosphere_.itswaterpickup);
-        case FieldId::river_factor: return encode::scalar(id, world.hydrosphere_.itsriverfactor);
-        case FieldId::river_land_reduce: return encode::scalar(id, world.hydrosphere_.itsriverlandreduce);
-        case FieldId::estuary_limit: return encode::scalar(id, world.hydrosphere_.itsestuarylimit);
-        case FieldId::glacial_temperature: return encode::scalar(id, world.cryosphere_.itsglacialtemp);
-        case FieldId::glacier_temperature: return encode::scalar(id, world.cryosphere_.itsglaciertemp);
-        case FieldId::mountain_reduce: return encode::scalar(id, world.geosphere_.itsmountainreduce);
-        case FieldId::climate_type_count: return encode::scalar(id, world.atmosphere_.itsclimateno);
-        case FieldId::max_elevation: return encode::scalar(id, world.geosphere_.itsmaxheight);
-        case FieldId::sea_level: return encode::scalar(id, world.geosphere_.itssealevel);
-        case FieldId::max_river_flow: return encode::scalar(id, world.hydrosphere_.itsmaxriverflow);
-        case FieldId::land_cells: return encode::scalar(id, world.geosphere_.itslandtotal);
-        case FieldId::sea_cells: return encode::scalar(id, world.geosphere_.itsseatotal);
-        case FieldId::crater_count: return encode::scalar(id, world.geosphere_.itscraterno);
-        case FieldId::tectonic_time_origin_step: return encode::scalar(id, world.geosphere_.itstectonictimeoriginstep);
-        case FieldId::tectonic_time: return encode::scalar(id, world.geosphere_.itstectonictimemyr);
-        case FieldId::tectonic_time_step: return encode::scalar(id, world.geosphere_.itstectonicdeltatimemyr);
-        case FieldId::tectonic_plate_count: return encode::scalar(id, world.geosphere_.itstectonicplatecount);
-        case FieldId::tectonic_sea_level: return encode::scalar(id, world.geosphere_.itstectonicsealevelm);
-        case FieldId::base_elevation: return encode::grid(id, columns, rows, world.geosphere_.mapnom);
-        case FieldId::continental_shelf: return encode::grid(id, columns, rows, world.geosphere_.shelfmap);
-        case FieldId::mountain_height: return encode::grid(id, columns, rows, world.geosphere_.mountainheights);
-        case FieldId::mountain_ridges: return encode::grid(id, columns, rows, world.geosphere_.mountainridges);
-        case FieldId::extra_elevation: return encode::grid(id, columns, rows, world.geosphere_.extraelevmap);
-        case FieldId::crater_rims: return encode::grid(id, columns, rows, world.geosphere_.craterrims);
-        case FieldId::crater_centres: return encode::grid(id, columns, rows, world.geosphere_.cratercentres);
-        case FieldId::volcano: return encode::grid(id, columns, rows, world.geosphere_.volcanomap);
-        case FieldId::stratovolcano: return encode::grid(id, columns, rows, world.geosphere_.stratomap);
-        case FieldId::island: return encode::grid(id, columns, rows, world.geosphere_.islandmap);
-        case FieldId::mountain_island: return encode::grid(id, columns, rows, world.geosphere_.mountainislandmap);
-        case FieldId::ocean_ridge: return encode::grid(id, columns, rows, world.geosphere_.oceanridgemap);
-        case FieldId::ocean_ridge_height: return encode::grid(id, columns, rows, world.geosphere_.oceanridgeheightmap);
-        case FieldId::ocean_rift: return encode::grid(id, columns, rows, world.geosphere_.oceanriftmap);
-        case FieldId::ocean_ridge_offset: return encode::grid(id, columns, rows, world.geosphere_.oceanridgeoffsetmap);
-        case FieldId::ocean_ridge_angle: return encode::grid(id, columns, rows, world.geosphere_.oceanridgeanglemap);
-        case FieldId::roughness: return encode::grid(id, columns, rows, world.geosphere_.roughnessmap);
-        case FieldId::detail_noise: return encode::grid(id, columns, rows, world.geosphere_.noisemap);
-        case FieldId::geologic_regime: return encode::grid(id, columns, rows, world.geosphere_.geologicregimemap);
-        case FieldId::tectonic_convergence: return encode::grid(id, columns, rows, world.geosphere_.tectonicconvergencemap);
-        case FieldId::tectonic_divergence: return encode::grid(id, columns, rows, world.geosphere_.tectonicdivergencemap);
-        case FieldId::tectonic_shear: return encode::grid(id, columns, rows, world.geosphere_.tectonicshearmap);
-        case FieldId::crust_age: return encode::grid(id, columns, rows, world.geosphere_.tectoniccrustagemyrmap);
-        case FieldId::crust_thickness: return encode::grid(id, columns, rows, world.geosphere_.tectoniccrustthicknessmap);
-        case FieldId::crust_class: return encode::grid(id, columns, rows, world.geosphere_.tectoniccrustclassmap);
-        case FieldId::uplift_tendency: return encode::grid(id, columns, rows, world.geosphere_.tectonicuplifttendencymap);
-        case FieldId::subsidence_tendency: return encode::grid(id, columns, rows, world.geosphere_.tectonicsubsidencetendencymap);
-        case FieldId::accumulated_strain: return encode::grid(id, columns, rows, world.geosphere_.tectonicaccumulatedstrainmap);
-        case FieldId::boundary_type: return encode::grid(id, columns, rows, world.geosphere_.tectonicboundarytypemap);
-        case FieldId::boundary_distance: return encode::grid(id, columns, rows, world.geosphere_.tectonicboundarydistancemap);
-        case FieldId::boundary_segment: return encode::grid(id, columns, rows, world.geosphere_.tectonicboundarysegmentidmap);
-        case FieldId::nearest_boundary: return encode::grid(id, columns, rows, world.geosphere_.tectonicnearestboundaryidmap);
-        case FieldId::boundary_history: return encode::grid(id, columns, rows, world.geosphere_.tectonicboundaryhistorymap);
-        case FieldId::deforming_region: return encode::grid(id, columns, rows, world.geosphere_.tectonicdeformingregionidmap);
-        case FieldId::deforming_region_type: return encode::grid(id, columns, rows, world.geosphere_.tectonicdeformingregiontypemap);
-        case FieldId::deformation_rate: return encode::grid(id, columns, rows, world.geosphere_.tectonicdeformationratemap);
-        case FieldId::deformation_velocity_x: return encode::grid(id, columns, rows, world.geosphere_.tectonicdeformationvelocityxmap);
-        case FieldId::deformation_velocity_y: return encode::grid(id, columns, rows, world.geosphere_.tectonicdeformationvelocityymap);
-        case FieldId::erosion_potential: return encode::grid(id, columns, rows, world.geosphere_.erosionpotentialmap);
-        case FieldId::deposition_potential: return encode::grid(id, columns, rows, world.geosphere_.depositionpotentialmap);
-        case FieldId::floodplain_fertility: return encode::grid(id, columns, rows, world.geosphere_.floodplainfertilitymap);
-        case FieldId::metal_ore_potential: return encode::grid(id, columns, rows, world.geosphere_.metalorereservemap);
-        case FieldId::placer_potential: return encode::grid(id, columns, rows, world.geosphere_.placerreservemap);
-        case FieldId::evaporite_potential: return encode::grid(id, columns, rows, world.geosphere_.evaporitereservemap);
-        case FieldId::volcanic_potential: return encode::grid(id, columns, rows, world.geosphere_.volcanicreservemap);
-        case FieldId::river_direction: return encode::grid(id, columns, rows, world.hydrosphere_.rivermapdir);
-        case FieldId::river_flow_january: return encode::grid(id, columns, rows, world.hydrosphere_.rivermapjan);
-        case FieldId::river_flow_july: return encode::grid(id, columns, rows, world.hydrosphere_.rivermapjul);
-        case FieldId::lake_surface: return encode::grid(id, columns, rows, world.hydrosphere_.lakemap);
-        case FieldId::rift_lake_surface: return encode::grid(id, columns, rows, world.hydrosphere_.riftlakemapsurface);
-        case FieldId::rift_lake_bed: return encode::grid(id, columns, rows, world.hydrosphere_.riftlakemapbed);
-        case FieldId::lake_start: return encode::grid(id, columns, rows, world.hydrosphere_.lakestartmap);
-        case FieldId::special_features: return encode::grid(id, columns, rows, world.hydrosphere_.specials);
-        case FieldId::tide: return encode::grid(id, columns, rows, world.hydrosphere_.tidalmap);
-        case FieldId::basin_class: return encode::grid(id, columns, rows, world.hydrosphere_.basinclassmap);
-        case FieldId::delta_direction: return encode::grid(id, columns, rows, world.hydrosphere_.deltamapdir);
-        case FieldId::delta_flow_january: return encode::grid(id, columns, rows, world.hydrosphere_.deltamapjan);
-        case FieldId::delta_flow_july: return encode::grid(id, columns, rows, world.hydrosphere_.deltamapjul);
-        case FieldId::fishery_potential: return encode::grid(id, columns, rows, world.biosphere_.fisheryreservemap);
-        case FieldId::settlement_suitability: return encode::grid(id, columns, rows, world.anthroposphere_.settlement_suitability);
-        case FieldId::infrastructure: return encode::grid(id, columns, rows, world.anthroposphere_.social_infrastructure);
-        case FieldId::agricultural_capacity: return encode::grid(id, columns, rows, world.anthroposphere_.agricultural_capacity);
-        case FieldId::route_traffic: return encode::grid(id, columns, rows, world.anthroposphere_.route_traffic);
-        case FieldId::river_access: return encode::grid(id, columns, rows, world.anthroposphere_.river_access);
-        case FieldId::harbor_score: return encode::grid(id, columns, rows, world.anthroposphere_.harbor_score);
-        case FieldId::owner_settlement: return encode::grid(id, columns, rows, world.anthroposphere_.owner_settlement_id);
-        case FieldId::owner_polity: return encode::grid(id, columns, rows, world.anthroposphere_.owner_polity_id);
-        case FieldId::no_shade: return encode::grid(id, columns, rows, world.presentation_.noshademap);
-        case FieldId::debug_test: return encode::grid(id, columns, rows, world.presentation_.testmap);
-        default:
+        worldmodel::encoding::ReadOperation op;
+        op.columns = static_cast<std::size_t>(world.body_.itswidth) + 1;
+        op.rows = static_cast<std::size_t>(world.body_.itsheight) + 1;
+        if (!visit(world, id, op))
             throw std::logic_error("World field has no storage: " + worldmodel::qualifiedname(id));
+        return std::move(op.data);
+    }
+
+    static bool load(planet& world, const PlanetFieldData& data)
+    {
+        // The grid is sized before any field loads; the indices only confirm it.
+        if (data.id == FieldId::width_index || data.id == FieldId::height_index)
+        {
+            int index = 0;
+            worldmodel::encoding::loadscalar(data, index);
+            if (index != (data.id == FieldId::width_index ? world.body_.itswidth : world.body_.itsheight))
+                throw std::runtime_error("Field does not match the world grid: " + worldmodel::qualifiedname(data.id));
+            return true;
         }
+        if (loadclimateworldfield(world.climate_, data))
+            return true;
+        worldmodel::encoding::LoadOperation op;
+        op.columns = static_cast<std::size_t>(world.body_.itswidth) + 1;
+        op.rows = static_cast<std::size_t>(world.body_.itsheight) + 1;
+        op.data = &data;
+        return visit(world, data.id, op);
     }
 
     static std::string table(const planet& world, TableId id, std::string& extension)
@@ -252,6 +281,11 @@ struct planetfieldaccess
 PlanetFieldData readplanetfield(const planet& world, FieldId id)
 {
     return planetfieldaccess::read(world, id);
+}
+
+bool loadplanetfield(planet& world, const PlanetFieldData& data)
+{
+    return planetfieldaccess::load(world, data);
 }
 
 std::uint64_t hashplanetfield(const planet& world, FieldId id)

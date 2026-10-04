@@ -51,6 +51,12 @@ struct CommandLineGenerationOptions
     std::string bundlePath;      // Run bundle directory (--bundle); empty writes none.
     std::string recipeName;      // --recipe; empty selects the recipe from the command and imports.
     bool auditAccess = false;    // --audit-access: hash fields around each step and check declared writes.
+    bool runCommand = false;     // run: the recipe is named, nothing is registered.
+    std::string fromBundlePath;  // --from-bundle: the world of this bundle instead of a seed or imported terrain.
+    std::string stepsText;       // --steps a..b, or --only p as p..p; empty runs the whole recipe.
+    std::vector<std::string> checkpointAt;   // --checkpoint-at: steps after which a bundle is written.
+    int checkpointEvery = 0;                 // --checkpoint-every: also after every N steps of the run.
+    std::string checkpointDirectory;         // --checkpoint-dir; default <bundle>-checkpoints.
     std::string accessReportPath;
     std::vector<std::string> commandArguments;
     std::string referencePath;

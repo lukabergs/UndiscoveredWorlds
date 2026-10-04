@@ -1,10 +1,10 @@
 {
   "schema": "uw-evaluation-profile/v1",
   "module": "climate",
-  "description": "Earth climate on imported terrain (earth-climate recipe or climate_pipeline). Validation against ERA5, IMERG, OISST and GLORYS is the primary evidence; the user's visual review overrides the numerical recommendation. Moisture, precipitation-rate and ocean fields are diagnostics of the run on the solvers' own grids, so a bundle needs the run that made it in the same process (a copied or reloaded world has none).",
+  "description": "Earth climate on imported terrain (earth-climate recipe). Validation against ERA5, IMERG, OISST and GLORYS is the primary evidence; the user's visual review overrides the numerical recommendation. Moisture, precipitation-rate and ocean fields are diagnostics of the run on the solvers' own grids, so a bundle needs the run that made it in the same process (a copied or reloaded world has none).",
   "evidence": {"checks": "required", "validation": "primary", "review": "override"},
-  "run": {"tool": "climate_pipeline", "resolution": 512,
-          "arguments": ["run", "--import-land", "refs/processed/land_ocean/maps/earth_land_{width}x{height}.tif",
+  "run": {"tool": "world_pipeline", "resolution": 512,
+          "arguments": ["run", "--recipe", "earth-climate", "--import-land", "refs/processed/land_ocean/maps/earth_land_{width}x{height}.tif",
                         "--import-sea", "refs/processed/land_ocean/maps/earth_sea_{width}x{height}.tif",
                         "--resolution", "{width}", "--map", "none"]},
   "checks": [

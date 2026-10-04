@@ -1,8 +1,8 @@
 #pragma once
 
-// Run bundle writer: one NumPy .npy file per field, tables as text and a
-// manifest.json (schema uw-run-bundle/v1). Independent of the world class;
-// see docs/architecture/world-model.md.
+// Run bundles: one NumPy .npy file per field, tables as text and a
+// manifest.json (schema uw-run-bundle/v1). The writer and the reader are
+// independent of the world class; see docs/architecture/world-model.md.
 
 #include <cstddef>
 #include <cstdint>
@@ -76,6 +76,47 @@ private:
     std::filesystem::path directory_;
     std::vector<WrittenField> fields_;
     std::vector<WrittenTable> tables_;
+};
+
+// A field or table as the manifest lists it.
+struct ManifestEntry
+{
+    std::string id;
+    std::string component;
+    std::string layout;       // fields only
+    std::string dtype;        // fields only
+    std::vector<std::size_t> shape;
+    std::string units;
+    std::string description;
+    std::string file;         // relative to the bundle directory
+    std::string writtenby;
+};
+
+// Reads a bundle's manifest; field data and table text are read on request.
+class Reader
+{
+public:
+    // Throws when the directory holds no manifest of this schema.
+    explicit Reader(std::filesystem::path directory);
+    const std::filesystem::path& directory() const { return directory_; }
+    long seed() const { return seed_; }
+    int columns() const { return columns_; }
+    int rows() const { return rows_; }
+    const std::string& recipe() const { return recipe_; }
+    const std::vector<ManifestEntry>& fields() const { return fields_; }
+    const std::vector<ManifestEntry>& tables() const { return tables_; }
+    // The field's elements, checked against the manifest's dtype and shape.
+    std::vector<unsigned char> fielddata(const ManifestEntry& field) const;
+    std::string tabletext(const ManifestEntry& table) const;
+
+private:
+    std::filesystem::path directory_;
+    long seed_ = 0;
+    int columns_ = 0;
+    int rows_ = 0;
+    std::string recipe_;
+    std::vector<ManifestEntry> fields_;
+    std::vector<ManifestEntry> tables_;
 };
 
 void writenpy(const std::filesystem::path& path, const std::string& dtype,

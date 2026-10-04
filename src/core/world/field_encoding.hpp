@@ -1,11 +1,12 @@
 #pragma once
 
 // Encodes stored world fields as row-major arrays with their catalogue element
-// type, for run bundles and access audits. Header-only; shared by the planet
+// type, for run bundles and access audits, and loads them back from a bundle. Header-only; shared by the planet
 // facade (planet_fields.cpp) and the climate module (climate_world_fields.cpp).
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -178,5 +179,100 @@ FieldData scalar(FieldId id, In value)
     }
     return data;
 }
+
+// Loading is the inverse of encoding: row-major data back into the storage. Data
+// whose type or shape does not match the storage is an error, never a partial load.
+inline void checkloadsize(const FieldData& data, std::size_t elements, std::size_t elementbytes)
+{
+    if (data.bytes.size() != elements * elementbytes)
+        throw std::runtime_error("Field data does not match its storage: " + qualifiedname(data.id));
+}
+
+template<typename Grid>
+void loadgrid(const FieldData& data, std::size_t columns, std::size_t rows, Grid& target)
+{
+    using T = std::remove_reference_t<decltype(target[0][0])>;
+    checkelement<T>(data.id);
+    if (data.shape != std::vector<std::size_t>{ rows, columns })
+        throw std::runtime_error("Field shape does not match the world grid: " + qualifiedname(data.id));
+    checkloadsize(data, rows * columns, sizeof(T));
+    const auto* in = reinterpret_cast<const T*>(data.bytes.data());
+    for (std::size_t y = 0; y < rows; y++)
+        for (std::size_t x = 0; x < columns; x++)
+            target[x][y] = in[y * columns + x];
+}
+
+template<typename Layers>
+void loadseasonal(const FieldData& data, Layers& layers)
+{
+    using T = typename std::remove_reference_t<decltype(layers[0])>::value_type;
+    checkelement<T>(data.id);
+    if (data.shape.size() < 2 || data.shape[0] != layers.size())
+        throw std::runtime_error("Field shape does not match its seasons: " + qualifiedname(data.id));
+    std::size_t cells = 1;
+    for (std::size_t axis = 1; axis < data.shape.size(); axis++)
+        cells *= data.shape[axis];
+    checkloadsize(data, layers.size() * cells, sizeof(T));
+    const auto* in = reinterpret_cast<const T*>(data.bytes.data());
+    for (std::size_t layer = 0; layer < layers.size(); layer++)
+        layers[layer].assign(in + layer * cells, in + (layer + 1) * cells);
+}
+
+template<typename Profile>
+void loadzonalprofile(const FieldData& data, std::size_t columns, Profile& target)
+{
+    using T = std::remove_reference_t<decltype(target[0][0])>;
+    checkelement<T>(data.id);
+    if (data.shape != std::vector<std::size_t>{ 6, columns })
+        throw std::runtime_error("Field shape does not match the world grid: " + qualifiedname(data.id));
+    checkloadsize(data, 6 * columns, sizeof(T));
+    const auto* in = reinterpret_cast<const T*>(data.bytes.data());
+    for (std::size_t band = 0; band < 6; band++)
+        for (std::size_t x = 0; x < columns; x++)
+            target[x][band] = in[band * columns + x];
+}
+
+template<typename In, typename Out>
+void loadvalue(const FieldData& data, Out& value)
+{
+    checkloadsize(data, 1, sizeof(In));
+    In stored;
+    std::memcpy(&stored, data.bytes.data(), sizeof(In));
+    value = static_cast<Out>(stored);
+}
+
+template<typename Out>
+void loadscalar(const FieldData& data, Out& value)
+{
+    switch (fieldspec(data.id).element)
+    {
+    case ElementType::b8: loadvalue<bool>(data, value); break;
+    case ElementType::i32: loadvalue<int>(data, value); break;
+    case ElementType::f32: loadvalue<float>(data, value); break;
+    default: throw std::logic_error("Unsupported scalar type: " + qualifiedname(data.id));
+    }
+}
+
+// One mapping from field ids to storage serves both directions: the mapping
+// calls scalar, grid, seasonal or zonalprofile on the operation with the storage.
+struct ReadOperation
+{
+    std::size_t columns = 0, rows = 0;
+    FieldData data;
+    template<typename T> bool scalar(FieldId id, const T& value) { data = encoding::scalar(id, value); return true; }
+    template<typename Grid> bool grid(FieldId id, const Grid& source) { data = encoding::grid(id, columns, rows, source); return true; }
+    template<typename Layers> bool seasonal(FieldId id, const Layers& layers) { data = encoding::seasonal(id, columns, rows, layers); return true; }
+    template<typename Profile> bool zonalprofile(FieldId id, const Profile& source) { data = encoding::zonalprofile(id, columns, source); return true; }
+};
+
+struct LoadOperation
+{
+    std::size_t columns = 0, rows = 0;
+    const FieldData* data = nullptr;
+    template<typename T> bool scalar(FieldId, T& value) { loadscalar(*data, value); return true; }
+    template<typename Grid> bool grid(FieldId, Grid& target) { loadgrid(*data, columns, rows, target); return true; }
+    template<typename Layers> bool seasonal(FieldId, Layers& layers) { loadseasonal(*data, layers); return true; }
+    template<typename Profile> bool zonalprofile(FieldId, Profile& target) { loadzonalprofile(*data, columns, target); return true; }
+};
 }
 }

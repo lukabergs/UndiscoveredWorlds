@@ -13,7 +13,7 @@ uv run --offline scripts/benchmarks/bench.py <module> <command> [shared options]
 | --- | --- | --- |
 | `tectonics` | `run` (registered), `inspect` (scratch), `report` | `tectonic_pipeline.exe` |
 | `geology` | `run` | `tectonic_pipeline.exe` + `benchmark-geology.py` |
-| `climate` | `run` (registered), `check`, `report`, `experiment`, `evaluate` | `world_pipeline.exe climate-benchmark`; `climate_pipeline.exe run` for experiments |
+| `climate` | `run` (registered), `check`, `report`, `experiment`, `evaluate` | `world_pipeline.exe climate-benchmark`; `world_pipeline.exe run --recipe earth-climate` for experiments |
 | `world` | `run`, `experiment`, `evaluate` | `world_pipeline.exe generate` |
 
 Shared options, same meaning everywhere:
@@ -76,30 +76,44 @@ Binaries land in `bin/<Config>/` (`bin/Release`, `bin/Debug`). Simulations and b
 
 `world_pipeline` links the headless world core (`uw_world_core`) and the simulation modules; it depends on libpng but not on SFML or ImGui. `bench.py` defaults to `out/build/headless/bin/Release/world_pipeline.exe`; pass `--executable` for another build.
 
-## Climate without the world class
+## Recipe runs: `world_pipeline run`
 
-`climate_pipeline` runs the earth-climate recipe on imported terrain without
-`planet`; it links only the climate library, validation and I/O. It takes the
-same `--climate-*` options as `world_pipeline` and gives identical climate fields.
+`run` executes a named recipe, or part of one, and registers nothing. A recipe on
+imported terrain (`earth-climate`, `imported-world`) imports the Earth terrain of
+`configs/app.env` for the width unless `--import-land/--import-sea` or
+`--from-bundle` are given.
 
 ```powershell
-# Unregistered run with a bundle (default terrain: the Earth benchmark imports for this width).
-climate_pipeline.exe run --seed 1 --resolution 1024 --climate-resolution 128 --bundle out/bench/climate-1024
-# Registered Earth climate benchmark run (registry, maps, diagnostics), climate stages only.
-climate_pipeline.exe benchmark --seed 1 --resolution 1024 --map all --benchmark-info "change summary"
+# Climate on Earth terrain, Geosphere frozen (default 512 wide).
+world_pipeline.exe run --recipe earth-climate --seed 1 --resolution 1024 --climate-resolution 128 --bundle out/bench/climate-1024
 # Experimental: extra diagnostic levels from one rule set, stored as generic-<p>hPa levels in the bundle.
-climate_pipeline.exe run --seed 1 --resolution 512 --climate-generic-levels 925,850,700 --bundle out/bench/climate-levels
+world_pipeline.exe run --recipe earth-climate --seed 1 --climate-generic-levels 925,850,700 --bundle out/bench/climate-levels
+# A full world with a checkpoint bundle after the last terrain step -> out/bench/world-checkpoints/18-terrain.roughness
+world_pipeline.exe run --recipe procedural-world --seed 1 --checkpoint-at terrain.roughness --bundle out/bench/world
+# One part of the recipe on that checkpoint: the climate steps only.
+world_pipeline.exe run --recipe procedural-world --from-bundle out/bench/world-checkpoints/18-terrain.roughness --steps climate.temperature..climate.rainfall_and_coupling --bundle out/bench/world-climate
 ```
+
+`--steps a..b` and `--only <process>` take step indices or process ids (the `steps`
+of any bundle manifest list both); `--checkpoint-at`, `--checkpoint-every N` and
+`--checkpoint-dir` write one bundle per chosen step. `--from-bundle` loads the
+world of a bundle: its seed and grid apply, command-line options (`--climate-*`,
+`--no-lakes`, ...) are not inherited and must be repeated. A bundle carries the
+world's stored fields. It does not carry tables, the climate solver's own grids,
+levels and diagnostics, or state kept between steps outside the world fields
+(mountain drainage, the salt-lake masks). The scheduler therefore refuses a start
+point whose steps read such state from a skipped step and names the step that
+must be in the run; those fields and tables are copied into the new bundle from
+the source unless a step of the run writes them.
 
 `world_pipeline climate-benchmark` still runs the imported-world stage path, which
 edits the imported terrain (mountain bases, smoothing, depression fill, coastline
-adjustment) before climate. Runs from `climate_pipeline benchmark` do not, so they
-are not directly comparable with earlier registered runs; the first one is the new
-baseline.
+adjustment) before climate, and is the only registered climate run until the
+benchmark switches to the earth-climate recipe (consolidation plan, Phase 1).
 
 ## Recipes, run bundles and access audits
 
-`world_pipeline generate` runs a recipe: `procedural-world` by default, `imported-world` with `--import-land/--import-sea`, and `earth-climate` with `--climate-only` (climate processes only; Geosphere frozen). `--recipe NAME` selects one explicitly. Recipes and the process registry are described in `docs/architecture/world-model.md`.
+`world_pipeline generate` also runs a recipe: `procedural-world` by default, `imported-world` with `--import-land/--import-sea`, and `earth-climate` with `--climate-only` (climate processes only; Geosphere frozen). `--recipe NAME` selects one explicitly. Recipes and the process registry are described in `docs/architecture/world-model.md`.
 
 ```powershell
 # Write every world field and table at full precision (NumPy files + manifest.json).

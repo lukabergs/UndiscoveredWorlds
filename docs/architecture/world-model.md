@@ -130,6 +130,14 @@ declares a write into a frozen component. With `--audit-access` it also hashes
 every field before and after each step and fails on undeclared writes. Each run
 records provenance per field.
 
+A run can cover part of a recipe (`world_pipeline run --steps a..b` or `--only`)
+and start from the world of a bundle (`--from-bundle`); checkpoints write a bundle
+after chosen steps. The same read check then decides whether the start point is
+valid: a field or table that an earlier, skipped step provides must have been
+loaded from the bundle. Tables, the climate solver's grids, levels and
+diagnostics, and `GenerationScratch` state passed between steps cannot be loaded
+yet, so a run cannot start between their writer and a reader (migration step 5).
+
 Built-in recipes (`src/pipeline/world_recipes.*`):
 
 | Recipe | Purpose |
@@ -187,11 +195,11 @@ module's world: the climate state (seasonal and legacy climate fields, sea ice,
 biomes, subtropical highs, weather state, solver context, levels) plus a bound
 `climateinputs` view of terrain and planet parameters. planet holds one and
 forwards its climate accessors; `planet::climate()` binds the planet's terrain.
-`pipeline/climate_stages` runs every climate stage on a climateworld, so
-`world_pipeline` and `climate_pipeline` share one implementation.
-`climate_pipeline` imports Earth terrain straight into the inputs and links
-only `uw_climate_world` (climate, validation, imports, progress): no planet,
-terrain, hydrology or tectonics code. Tides are hydrology and stay with planet.
+`pipeline/climate_stages` runs every climate stage on a climateworld. The
+library `uw_climate_world` (climate, validation, imports, progress) holds no
+planet, terrain, hydrology or tectonics code; the test `climate_world_tests`
+links only it. `world_pipeline run --recipe earth-climate` is the one way to run
+climate on imported terrain. Tides are hydrology and stay with planet.
 
 ## Geosphere initialization and minerals
 
@@ -261,7 +269,8 @@ dtype, shape, file and provenance) and one NumPy `.npy` file per field under
 `fields/<component>/`. Diagnostic fields of the climate solve (column water,
 moisture transport and convergence, precipitation rate, ascent, currents,
 mixed-layer temperature, storage depth) are on the solvers' own grids and appear
-only when the run that recorded them writes the bundle. `world_pipeline --bundle <dir>` writes one;
+only when the run that recorded them writes the bundle (a run started from a
+bundle copies them from it unless it solves climate itself). `world_pipeline --bundle <dir>` writes one;
 `scripts/evaluation/compare_bundles.py` compares two field by field and is the
 equivalence check for refactors.
 

@@ -1,6 +1,6 @@
 #pragma once
 
-// Climate solver options shared by world_pipeline and climate_pipeline.
+// Climate solver options of world_pipeline.
 
 #include <ostream>
 #include <string>

@@ -1,4 +1,4 @@
-// Console entry point for headless world generation and the Earth climate
+// The headless entry point: recipe runs, world generation and the Earth climate
 // benchmark. It never opens a window; the desktop application is separate.
 
 #include <windows.h>
@@ -35,6 +35,11 @@ int main()
     if (command == "climate-benchmark")
     {
         options.earthClimateBenchmark = true;
+        options.logToProfilingWorkbook = false;
+    }
+    else if (command == "run")
+    {
+        options.runCommand = true;
         options.logToProfilingWorkbook = false;
     }
     else if (command != "generate")

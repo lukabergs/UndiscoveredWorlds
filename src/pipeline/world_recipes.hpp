@@ -3,6 +3,7 @@
 // Recipes order processes; the scheduler checks them before running and can
 // audit what each step actually writes (docs/architecture/world-model.md).
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,14 +40,45 @@ struct RecipeIssue
 
 std::vector<RecipeIssue> validaterecipe(const WorldRecipe& recipe);
 
+// A contiguous part of a recipe, by step index (inclusive).
+struct RecipeSteps
+{
+    std::size_t first = 0;
+    std::size_t last = 0;
+};
+
+// One step as an index or a process id ("climate.winds").
+bool findrecipestep(const WorldRecipe& recipe, std::string_view text, std::size_t& index);
+// "a..b", "a..", "..b" or one step.
+bool parserecipesteps(const WorldRecipe& recipe, std::string_view text, RecipeSteps& steps, std::string* reason = nullptr);
+
+struct RecipeStepRecord;
+struct RecipeRunResult;
+
 struct RecipeRunOptions
 {
     bool auditAccess = false;    // hash every field around each step and check declared writes
+    bool selectSteps = false;    // run only `steps`; otherwise the whole recipe
+    RecipeSteps steps;
+    // World state loaded from a bundle: the fields and tables it supplied stand
+    // in for the recipe's inputs and the steps before the selection.
+    bool fromBundle = false;
+    std::vector<worldmodel::FieldId> loadedfields;
+    std::vector<worldmodel::TableId> loadedtables;
+    BundleProvenance sourceprovenance;              // last writers recorded by that bundle
+    // Called after each completed step (checkpoints); false stops the run.
+    std::function<bool(const RecipeRunResult& sofar, const RecipeStepRecord& step, std::string& error)> afterstep;
 };
+
+// Checks that a run of part of a recipe has what its steps read: a field or
+// table the full recipe would have provided must come from the bundle or from a
+// step of this run, and no step may depend on state that an earlier, skipped
+// step leaves outside the world fields.
+std::vector<RecipeIssue> validaterecipesteps(const WorldRecipe& recipe, const RecipeRunOptions& options);
 
 struct RecipeStepRecord
 {
-    int index = 0;
+    int index = 0;                                  // position in the recipe
     GenerationStageId stage{};
     std::string process;
     std::string label;

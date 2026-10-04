@@ -29,8 +29,20 @@ void printcommandlineusage()
 {
     cout << "world_pipeline <command> [options]\n";
     cout << "Commands:\n";
+    cout << "  run                 Run a recipe (--recipe) or part of it; nothing is registered.\n";
     cout << "  generate            Generate a procedural world, or climate on imported terrain with --climate-only.\n";
     cout << "  climate-benchmark   Run climate on the imported Earth benchmark terrain and record a numbered run.\n";
+    cout << "Options of run:\n";
+    cout << "  --recipe <name>         procedural-world, imported-world or earth-climate. Imported recipes use the\n";
+    cout << "                           Earth terrain of configs/app.env at --resolution (default 512) unless\n";
+    cout << "                           --import-land and --import-sea or --from-bundle are given.\n";
+    cout << "  --from-bundle <dir>     Start from the world of a run bundle or checkpoint. Its seed and grid apply;\n";
+    cout << "                           other options are not inherited.\n";
+    cout << "  --steps <a..b>          Run steps a to b of the recipe (indices or process ids; a.. and ..b allowed).\n";
+    cout << "  --only <process>        Run one step.\n";
+    cout << "  --checkpoint-at <step[,step...]>  Write a bundle after these steps.\n";
+    cout << "  --checkpoint-every <N>  Write a bundle after every N steps of the run.\n";
+    cout << "  --checkpoint-dir <dir>  Checkpoint directory (default <bundle>-checkpoints); one bundle per step.\n";
     cout << "Options:\n";
     cout << "  --climate-only          With generate: recompute climate on imported terrain without modifying it.\n";
     cout << "  --seed <number>         Use a fixed world seed (default 1).\n";
@@ -134,7 +146,7 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
         }
 
         if (isclimateoption(argument) ||
-            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
+            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -169,6 +181,37 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                     if (!findworldrecipe(value, recipe))
                         throw invalid_argument("recipe");
                     options.recipeName = value;
+                }
+                else if (argument == "--from-bundle")
+                {
+                    options.fromBundlePath = value;
+                }
+                else if (argument == "--steps" || argument == "--only")
+                {
+                    if (!options.stepsText.empty() || value.empty())
+                        throw invalid_argument("steps");
+                    options.stepsText = argument == "--only" ? value + ".." + value : value;
+                }
+                else if (argument == "--checkpoint-at")
+                {
+                    size_t start = 0;
+                    while (start <= value.size())
+                    {
+                        const size_t comma = min(value.find(',', start), value.size());
+                        if (comma > start)
+                            options.checkpointAt.push_back(value.substr(start, comma - start));
+                        start = comma + 1;
+                    }
+                }
+                else if (argument == "--checkpoint-every")
+                {
+                    options.checkpointEvery = stoi(value);
+                    if (options.checkpointEvery < 1)
+                        throw invalid_argument("checkpoint-every");
+                }
+                else if (argument == "--checkpoint-dir")
+                {
+                    options.checkpointDirectory = value;
                 }
                 else if (argument == "--access-report")
                 {
@@ -351,6 +394,36 @@ bool reportrecipe(const WorldRecipe& recipe, const RecipeRunResult& result, cons
 }
 }
 
+namespace
+{
+// Runs a recipe on terrain already in the world (generated, imported or loaded
+// from a bundle). A run through the last step of a climate recipe writes the
+// climate validation report.
+RecipeRunResult runrecipeonterrain(planet& world, const WorldRecipe& recipe, GenerationScratch& scratch,
+    WorldStageParameters& parameters, const GenerationExecutionContext& context, const RecipeRunOptions& runoptions)
+{
+    // Geosphere is frozen in climate recipes; keep the explicit elevation check.
+    const bool frozenterrain = find(recipe.frozen.begin(), recipe.frozen.end(), worldmodel::Component::geosphere) != recipe.frozen.end();
+    vector<int> inputterrain;
+    if (frozenterrain) for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
+        inputterrain.push_back(world.nom(x,y));
+
+    RecipeRunResult result = runrecipe(recipe, world, scratch, parameters, context, runoptions);
+    if (!result.completed)
+        return result;
+
+    if (frozenterrain) {
+        if (!runoptions.selectSteps || runoptions.steps.last + 1 == recipe.steps.size())
+            exportclimatevalidationreport(world.climate());
+        size_t cell=0;
+        for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
+            if (world.nom(x,y)!=inputterrain[cell++]) throw runtime_error("Climate-only stage modified terrain");
+        updatereport("Climate-only input terrain preserved exactly after import.");
+    }
+    return result;
+}
+}
+
 RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe, const GenerationExecutionContext& context,
     const RecipeRunOptions& runoptions)
 {
@@ -366,24 +439,7 @@ RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe,
     parameters.tectonicDurationMyr = tectonicdurationmyr();
     parameters.seaLevel = world.sealevel();
 
-    // Geosphere is frozen in climate recipes; keep the explicit elevation check.
-    const bool frozenterrain = find(recipe.frozen.begin(), recipe.frozen.end(), worldmodel::Component::geosphere) != recipe.frozen.end();
-    vector<int> inputterrain;
-    if (frozenterrain) for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
-        inputterrain.push_back(world.nom(x,y));
-
-    RecipeRunResult result = runrecipe(recipe, world, scratch, parameters, context, runoptions);
-    if (!result.completed)
-        return result;
-
-    if (frozenterrain) {
-        exportclimatevalidationreport(world.climate());
-        size_t cell=0;
-        for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
-            if (world.nom(x,y)!=inputterrain[cell++]) throw runtime_error("Climate-only stage modified terrain");
-        updatereport("Climate-only input terrain preserved exactly after import.");
-    }
-    return result;
+    return runrecipeonterrain(world, recipe, scratch, parameters, context, runoptions);
 }
 
 void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool appendclimateworkbook, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate, bool climateOnly)
@@ -419,7 +475,33 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     initialisemapcolours(*world);
     world->clear();
 
-    const bool importedworld = options.earthClimateBenchmark || options.hasImportLandPath || options.hasImportSeaPath;
+    const bool frombundle = !options.fromBundlePath.empty();
+    const bool hasimport = options.hasImportLandPath || options.hasImportSeaPath;
+    WorldRecipe recipe;
+    if (!options.recipeName.empty())
+        findworldrecipe(options.recipeName, recipe);
+    if (options.runCommand)
+    {
+        if (options.recipeName.empty() || options.climateOnly)
+        {
+            cerr << "run requires --recipe (earth-climate replaces --climate-only).\n";
+            return 1;
+        }
+        if (hasimport && (frombundle || recipe.name == "procedural-world"))
+        {
+            cerr << (frombundle ? "--from-bundle replaces imported terrain.\n" : "Recipe procedural-world cannot start from imported terrain.\n");
+            return 1;
+        }
+    }
+    else if (frombundle || !options.stepsText.empty() || !options.checkpointAt.empty() || options.checkpointEvery > 0)
+    {
+        cerr << "--from-bundle, --steps, --only and checkpoints belong to the run command.\n";
+        return 1;
+    }
+
+    // run: a recipe on imported terrain imports the Earth terrain unless told otherwise.
+    const bool importedworld = options.runCommand ? recipe.name != "procedural-world" && !frombundle
+        : options.earthClimateBenchmark || hasimport;
     if (options.climateOnly && !importedworld) {
         cerr << "--climate-only requires imported terrain.\n";
         return 1;
@@ -458,9 +540,9 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         return 1;
     }
 
-    if (options.benchmarkMapsSpecified && !options.earthClimateBenchmark && !options.climateOnly)
+    if (options.benchmarkMapsSpecified && !options.earthClimateBenchmark && !options.climateOnly && !options.runCommand)
     {
-        cerr << "--map requires climate-benchmark or generate --climate-only.\n";
+        cerr << "--map requires run, climate-benchmark or generate --climate-only.\n";
         return 1;
     }
 
@@ -484,7 +566,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     debugoptions.plateTectonicsDurationMyr = options.plateTectonicsDurationMyr;
     debugoptions.plateTectonicsPlateCount = options.plateTectonicsPlateCount;
 
-    if (options.earthClimateBenchmark)
+    if (options.earthClimateBenchmark || (options.runCommand && importedworld))
     {
         world->setwidth(std::clamp(
             options.hasResolution ? options.resolution :
@@ -503,11 +585,33 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             world->setwidth(std::clamp(options.worldWidth, 2, ARRAYWIDTH) - 1);
         }
     }
-    else if (importedworld == false)
+    else if (!frombundle)
     {
         changeworldproperties(*world);
         world->setwidth(std::clamp(options.hasResolution ? options.resolution :
             (options.hasWorldWidth ? options.worldWidth : world->width() + 1), 2, ARRAYWIDTH) - 1);
+    }
+
+    PlanetBundleSource source;
+    if (frombundle)
+    {
+        try
+        {
+            source = loadplanetbundle(*world, options.fromBundlePath);
+        }
+        catch (const exception& error)
+        {
+            cerr << "Failed to load run bundle: " << error.what() << '\n';
+            return 1;
+        }
+        if (options.hasWorldWidth || (options.hasResolution && options.resolution != world->width() + 1))
+        {
+            cerr << "--from-bundle fixes the grid at " << world->width() + 1 << " columns.\n";
+            return 1;
+        }
+        if (options.hasSeed)
+            world->setseed(options.seed);
+        fast_srand(world->seed());
     }
 
     applyclimateoptions(options.climate, world->climatesimulation());
@@ -516,18 +620,109 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     updatereport((importedworld ? "Generating imported world from seed: " : "Generating world from seed: ") + to_string(world->seed()) + ":");
     updatereport("");
 
-    WorldRecipe recipe;
-    if (!options.recipeName.empty())
-        findworldrecipe(options.recipeName, recipe);
-    else
+    if (options.recipeName.empty())
         recipe = importedworld ? (options.climateOnly ? earthclimaterecipe() : importedworldrecipe()) : proceduralworldrecipe();
-    if (importedworld == (recipe.name == "procedural-world"))
+    if (!frombundle && importedworld == (recipe.name == "procedural-world"))
     {
         cerr << "Recipe " << recipe.name << (importedworld ? " cannot start from imported terrain.\n" : " requires imported terrain.\n");
         return 1;
     }
     RecipeRunOptions runoptions;
     runoptions.auditAccess = options.auditAccess;
+    if (!options.stepsText.empty())
+    {
+        string reason;
+        if (!parserecipesteps(recipe, options.stepsText, runoptions.steps, &reason))
+        {
+            cerr << "Invalid step selection: " << reason << '\n';
+            return 1;
+        }
+        runoptions.selectSteps = true;
+        if (runoptions.steps.first > 0 && !frombundle)
+        {
+            cerr << "A run that starts after the first step needs --from-bundle.\n";
+            return 1;
+        }
+    }
+    if (frombundle)
+    {
+        runoptions.fromBundle = true;
+        runoptions.loadedfields = source.loadedfields;
+        runoptions.loadedtables = source.loadedtables;
+        runoptions.sourceprovenance = source.provenance;
+    }
+
+    // Every bundle of the run, final or checkpoint, is written the same way.
+    const auto writebundle = [&](const filesystem::path& directory, const RecipeRunResult& result)
+    {
+        runbundle::Metadata metadata;
+        metadata.seed = world->seed();
+        metadata.columns = world->width() + 1;
+        metadata.rows = world->height() + 1;
+        metadata.recipe = recipe.name;
+        metadata.command = options.commandArguments;
+        metadata.steps = bundlesteps(result);
+        metadata.properties.push_back({ "executable_built", string(__DATE__) + " " + __TIME__ });
+        metadata.properties.push_back({ "command", options.runCommand ? "run" : options.earthClimateBenchmark ? "climate-benchmark" : "generate" });
+        metadata.properties.push_back({ "access", options.auditAccess ? "measured" : "declared" });
+        if (frombundle)
+            metadata.properties.push_back({ "from_bundle", options.fromBundlePath });
+
+        // What this run wrote replaces what the source bundle carried.
+        vector<worldmodel::FieldId> writtenfields;
+        vector<worldmodel::TableId> writtentables;
+        for (const RecipeStepRecord& step : result.steps)
+        {
+            const WorldProcessDefinition& process = getworldprocess(step.stage);
+            writtenfields.insert(writtenfields.end(), process.writes.begin(), process.writes.end());
+            writtenfields.insert(writtenfields.end(), step.writes.begin(), step.writes.end());
+            writtentables.insert(writtentables.end(), process.tablewrites.begin(), process.tablewrites.end());
+            writtentables.insert(writtentables.end(), step.tablewrites.begin(), step.tablewrites.end());
+        }
+        writeplanetbundle(*world, directory, metadata, result.provenance, frombundle ? &source : nullptr, writtenfields, writtentables);
+    };
+
+    vector<size_t> checkpointsteps;
+    for (const string& step : options.checkpointAt)
+    {
+        size_t index = 0;
+        if (!findrecipestep(recipe, step, index))
+        {
+            cerr << "Recipe " << recipe.name << " has no step " << step << " to checkpoint.\n";
+            return 1;
+        }
+        checkpointsteps.push_back(index);
+    }
+    if (!checkpointsteps.empty() || options.checkpointEvery > 0)
+    {
+        if (options.checkpointDirectory.empty() && options.bundlePath.empty())
+        {
+            cerr << "Checkpoints need --checkpoint-dir or --bundle.\n";
+            return 1;
+        }
+        const filesystem::path checkpointdirectory = options.checkpointDirectory.empty()
+            ? filesystem::path(options.bundlePath + "-checkpoints") : filesystem::path(options.checkpointDirectory);
+        runoptions.afterstep = [&, checkpointdirectory, executed = 0](const RecipeRunResult& sofar, const RecipeStepRecord& step, string& error) mutable
+        {
+            executed++;
+            if (find(checkpointsteps.begin(), checkpointsteps.end(), static_cast<size_t>(step.index)) == checkpointsteps.end() &&
+                (options.checkpointEvery < 1 || executed % options.checkpointEvery != 0))
+                return true;
+            // One bundle per step: <recipe index>-<process id>.
+            const filesystem::path directory = checkpointdirectory / ((step.index < 10 ? "0" : "") + to_string(step.index) + "-" + step.process);
+            try
+            {
+                writebundle(directory, sofar);
+            }
+            catch (const exception& failure)
+            {
+                error = string("checkpoint failed: ") + failure.what();
+                return false;
+            }
+            updatereport("Checkpoint: " + directory.string());
+            return true;
+        };
+    }
     RecipeRunResult runresult;
 
     beginworldgendebugrun(world->seed(), &debugoptions);
@@ -595,8 +790,9 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         context.chainland = chainland;
         context.smalllake = smalllake;
         context.largelake = largelake;
+        context.climateOnly = recipe.name == "earth-climate";
 
-        runresult = runrecipe(recipe, *world, scratch, parameters, context, runoptions);
+        runresult = runrecipeonterrain(*world, recipe, scratch, parameters, context, runoptions);
     }
 
     endtimedreporting();
@@ -605,7 +801,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     if (!runresult.completed)
     {
         cerr << "Recipe " << recipe.name << " failed: " << runresult.error << '\n';
-        if (recipe.name == "earth-climate")
+        if (recipe.name == "earth-climate" || options.runCommand)
             return 1;
     }
     if (!reportrecipe(recipe, runresult, options.accessReportPath))
@@ -647,6 +843,12 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         updatereport("Climate benchmark map guide: " +
             (appenv.climateBenchmarkImageDirectory / "benchmark_map_guide.txt").string());
     }
+    else if (options.runCommand && options.benchmarkMapsSpecified &&
+        !exportproceduralclimateartifacts(world->climate(), options.benchmarkMaps))
+    {
+        cerr << "Failed to write climate maps.\n";
+        return 1;
+    }
 
     if (options.printClimateRelativeError)
         printclimaterelativeerrorreport(world->climate());
@@ -663,19 +865,9 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     if (!options.bundlePath.empty())
     {
-        runbundle::Metadata metadata;
-        metadata.seed = world->seed();
-        metadata.columns = world->width() + 1;
-        metadata.rows = world->height() + 1;
-        metadata.recipe = recipe.name;
-        metadata.command = options.commandArguments;
-        metadata.steps = bundlesteps(runresult);
-        metadata.properties.push_back({ "executable_built", string(__DATE__) + " " + __TIME__ });
-        metadata.properties.push_back({ "command", options.earthClimateBenchmark ? "climate-benchmark" : "generate" });
-        metadata.properties.push_back({ "access", options.auditAccess ? "measured" : "declared" });
         try
         {
-            writeplanetbundle(*world, options.bundlePath, metadata, runresult.provenance);
+            writebundle(options.bundlePath, runresult);
         }
         catch (const exception& error)
         {

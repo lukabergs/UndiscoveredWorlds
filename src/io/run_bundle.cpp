@@ -1,9 +1,12 @@
 #include "run_bundle.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 
@@ -193,5 +196,230 @@ void Writer::finish(const Metadata& metadata)
     out << (tables_.empty() ? "]\n" : "\n  ]\n");
     out << "}\n";
     writetext(directory_ / "manifest.json", out.str());
+}
+
+namespace
+{
+// The JSON a manifest uses, parsed into a tree.
+struct JsonValue
+{
+    double number = 0.0;
+    std::string text;
+    std::vector<JsonValue> items;
+    std::map<std::string, JsonValue> members;
+
+    const JsonValue& at(const std::string& key) const
+    {
+        static const JsonValue missing;
+        const auto found = members.find(key);
+        return found == members.end() ? missing : found->second;
+    }
+};
+
+class JsonParser
+{
+public:
+    explicit JsonParser(const std::string& text) : text_(text) {}
+
+    JsonValue parse()
+    {
+        JsonValue value = parsevalue();
+        skipspace();
+        if (position_ != text_.size())
+            fail();
+        return value;
+    }
+
+private:
+    [[noreturn]] void fail() const
+    {
+        throw std::runtime_error("malformed JSON at offset " + std::to_string(position_));
+    }
+
+    void skipspace()
+    {
+        while (position_ < text_.size() && std::string_view(" \n\r\t").find(text_[position_]) != std::string_view::npos)
+            position_++;
+    }
+
+    bool consume(char character)
+    {
+        skipspace();
+        if (position_ >= text_.size() || text_[position_] != character)
+            return false;
+        position_++;
+        return true;
+    }
+
+    std::string parsestring()
+    {
+        if (!consume('"'))
+            fail();
+        std::string out;
+        while (position_ < text_.size() && text_[position_] != '"')
+        {
+            char character = text_[position_++];
+            if (character == '\\')
+            {
+                if (position_ >= text_.size())
+                    fail();
+                const char escaped = text_[position_++];
+                switch (escaped)
+                {
+                case 'n': character = '\n'; break;
+                case 'r': character = '\r'; break;
+                case 't': character = '\t'; break;
+                case 'u':
+                    // jsonstring escapes only control characters this way.
+                    if (position_ + 4 > text_.size())
+                        fail();
+                    character = static_cast<char>(std::strtol(text_.substr(position_, 4).c_str(), nullptr, 16));
+                    position_ += 4;
+                    break;
+                default: character = escaped; break;
+                }
+            }
+            out += character;
+        }
+        if (position_ >= text_.size())
+            fail();
+        position_++;
+        return out;
+    }
+
+    JsonValue parsevalue()
+    {
+        skipspace();
+        if (position_ >= text_.size())
+            fail();
+        JsonValue value;
+        const char first = text_[position_];
+        if (first == '{')
+        {
+            position_++;
+            if (consume('}'))
+                return value;
+            do
+            {
+                std::string key = parsestring();
+                if (!consume(':'))
+                    fail();
+                value.members[std::move(key)] = parsevalue();
+            } while (consume(','));
+            if (!consume('}'))
+                fail();
+        }
+        else if (first == '[')
+        {
+            position_++;
+            if (consume(']'))
+                return value;
+            do
+                value.items.push_back(parsevalue());
+            while (consume(','));
+            if (!consume(']'))
+                fail();
+        }
+        else if (first == '"')
+            value.text = parsestring();
+        else if (text_.compare(position_, 4, "true") == 0 || text_.compare(position_, 4, "null") == 0)
+            position_ += 4;
+        else if (text_.compare(position_, 5, "false") == 0)
+            position_ += 5;
+        else
+        {
+            char* end = nullptr;
+            value.number = std::strtod(text_.c_str() + position_, &end);
+            if (end == text_.c_str() + position_)
+                fail();
+            position_ = static_cast<std::size_t>(end - text_.c_str());
+        }
+        return value;
+    }
+
+    const std::string& text_;
+    std::size_t position_ = 0;
+};
+
+std::string readtext(const std::filesystem::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        throw std::runtime_error("Failed to read " + path.string());
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+ManifestEntry manifestentry(const JsonValue& value)
+{
+    ManifestEntry entry;
+    entry.id = value.at("id").text;
+    entry.component = value.at("component").text;
+    entry.layout = value.at("layout").text;
+    entry.dtype = value.at("dtype").text;
+    for (const JsonValue& extent : value.at("shape").items)
+        entry.shape.push_back(static_cast<std::size_t>(extent.number));
+    entry.units = value.at("units").text;
+    entry.description = value.at("description").text;
+    entry.file = value.at("file").text;
+    entry.writtenby = value.at("written_by").text;
+    return entry;
+}
+}
+
+Reader::Reader(std::filesystem::path directory) : directory_(std::move(directory))
+{
+    const std::filesystem::path manifestpath = directory_ / "manifest.json";
+    const std::string text = readtext(manifestpath);
+    JsonValue manifest;
+    try
+    {
+        manifest = JsonParser(text).parse();
+    }
+    catch (const std::exception& error)
+    {
+        throw std::runtime_error(manifestpath.string() + ": " + error.what());
+    }
+    if (manifest.at("schema").text != kSchema)
+        throw std::runtime_error(manifestpath.string() + ": not a " + kSchema + " manifest");
+    seed_ = static_cast<long>(manifest.at("seed").number);
+    columns_ = static_cast<int>(manifest.at("grid").at("columns").number);
+    rows_ = static_cast<int>(manifest.at("grid").at("rows").number);
+    recipe_ = manifest.at("recipe").text;
+    for (const JsonValue& field : manifest.at("fields").items)
+        fields_.push_back(manifestentry(field));
+    for (const JsonValue& table : manifest.at("tables").items)
+        tables_.push_back(manifestentry(table));
+}
+
+std::vector<unsigned char> Reader::fielddata(const ManifestEntry& field) const
+{
+    const std::filesystem::path path = directory_ / field.file;
+    std::ifstream in(path, std::ios::binary);
+    unsigned char prefix[10] = {};
+    in.read(reinterpret_cast<char*>(prefix), sizeof(prefix));
+    if (!in || std::string(reinterpret_cast<const char*>(prefix), 6) != "\x93NUMPY" || prefix[6] != 1)
+        throw std::runtime_error("Not a version 1 .npy file: " + path.string());
+    std::string header(static_cast<std::size_t>(prefix[8]) | (static_cast<std::size_t>(prefix[9]) << 8), ' ');
+    in.read(header.data(), static_cast<std::streamsize>(header.size()));
+    // The header must be the one writenpy produces for the manifest's dtype and shape.
+    const std::string expected = "{'descr': '" + field.dtype + "', 'fortran_order': False, 'shape': " + shapetext(field.shape, false) + ", }";
+    if (!in || header.compare(0, expected.size(), expected) != 0)
+        throw std::runtime_error("Field file does not match its manifest entry: " + path.string());
+
+    // Every dtype of the catalogue ends in its element size: "<i2", "<f4", "|u1".
+    std::size_t bytes = field.dtype.empty() ? 0 : static_cast<std::size_t>(field.dtype.back() - '0');
+    for (const std::size_t extent : field.shape)
+        bytes *= extent;
+    std::vector<unsigned char> data(bytes);
+    if (bytes)
+        in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(bytes));
+    if (!in || in.peek() != std::ifstream::traits_type::eof())
+        throw std::runtime_error("Field file does not hold its declared shape: " + path.string());
+    return data;
+}
+
+std::string Reader::tabletext(const ManifestEntry& table) const
+{
+    return readtext(directory_ / table.file);
 }
 }

@@ -1,8 +1,8 @@
 #pragma once
 
-// Read access to the world catalogue (world_fields.hpp) over planet's current
-// storage. Used by run bundles and by the scheduler's access audit; it never
-// changes the world.
+// Access to the world catalogue (world_fields.hpp) over planet's current
+// storage. Run bundles and the scheduler's access audit read through it; only
+// loadplanetfield, for a world loaded from a bundle, changes the world.
 
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +17,11 @@ using PlanetFieldData = worldmodel::FieldData;
 
 // Copies one field in row-major order with its catalogue element type.
 PlanetFieldData readplanetfield(const planet& world, worldmodel::FieldId id);
+
+// Loads one field from row-major data of its catalogue type into a world already
+// sized to the data's grid. False for fields a bundle cannot load: the climate
+// solver's grids, atmosphere levels and solve diagnostics.
+bool loadplanetfield(planet& world, const PlanetFieldData& data);
 
 // Order-sensitive 64-bit hash of a field's shape and contents.
 std::uint64_t hashplanetfield(const planet& world, worldmodel::FieldId id);

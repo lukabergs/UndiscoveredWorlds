@@ -1,4 +1,4 @@
-"""Read run bundles written by world_pipeline and climate_pipeline (uw-run-bundle/v1).
+"""Read run bundles written by world_pipeline (uw-run-bundle/v1).
 
 A bundle is a directory with manifest.json, one NumPy file per field under fields/
 and text tables under tables/. Grids are cell-centred, W x W/2, row-major with the
