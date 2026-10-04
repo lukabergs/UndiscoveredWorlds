@@ -761,7 +761,10 @@ namespace
 {
 void advanceworkbenchstage(GenerationSessionState& session)
 {
-    if (session.currentStageIndex < getgenerationstages().size())
+    const vector<GenerationStageDefinition>& stages = getgenerationstages();
+    if (session.currentStageIndex < stages.size())
+        session.currentStageIndex++;
+    while (session.currentStageIndex < stages.size() && islegacygenerationstage(stages[session.currentStageIndex].id))
         session.currentStageIndex++;
 
     if (workbenchfinished(session) == false && getcurrentgenerationstage(session).id == GenerationStageId::terraforming)
@@ -951,6 +954,7 @@ bool runremaininggenerationstages(planet& world, GenerationScratch& scratch, Gen
     for (size_t index = startStageIndex; index < stages.size(); index++)
     {
         if (context.climateOnly && !isclimatefeedbackstage(stages[index].id)) continue;
+        if (islegacygenerationstage(stages[index].id)) continue;
         if (executeworkbenchstage(stages[index].id, world, scratch, ui, context, errormessage) == false)
             return false;
     }

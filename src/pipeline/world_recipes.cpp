@@ -47,7 +47,8 @@ std::vector<GenerationStageId> stagesfrom(GenerationStageId first)
     std::vector<GenerationStageId> steps;
     const auto& stages = getgenerationstages();
     for (std::size_t index = getgenerationstageindex(first); index < stages.size(); index++)
-        steps.push_back(stages[index].id);
+        if (!islegacygenerationstage(stages[index].id))
+            steps.push_back(stages[index].id);
     return steps;
 }
 

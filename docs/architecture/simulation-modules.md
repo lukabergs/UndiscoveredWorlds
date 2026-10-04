@@ -8,7 +8,7 @@ own headers. Module-local helpers are private rather than declared globally.
 | Responsibility | Owner |
 | --- | --- |
 | Fractal fields, coasts, ridges, elevation, shelves, volcanoes, craters | `simulations/terrain/terrain_*.cpp` |
-| Imported/FastLEM mountain masks and climate-shaped landforms | `simulations/terrain/` |
+| Imported mountain masks and climate-shaped landforms; FastLEM mountains (legacy: the two FastLEM stages are in no recipe and the workbench skips them, `islegacygenerationstage`) | `simulations/terrain/` |
 | Energy, circulation, ocean dynamics, moisture and weather kernels | `simulations/climate/`, target `uw_climate` |
 | Planet climate fields, classification and solver coupling | `climate_fields`, `climate_classification`, `climate_coupling` |
 | River routing, drainage basins, lakes, lake effects, deltas, wetlands, tides | `simulations/hydrology/` |

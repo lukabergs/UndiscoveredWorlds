@@ -88,10 +88,10 @@ imported terrain (`earth-climate`, `imported-world`) imports the Earth terrain o
 world_pipeline.exe run --recipe earth-climate --seed 1 --resolution 1024 --climate-resolution 128 --bundle out/bench/climate-1024
 # Experimental: extra diagnostic levels from one rule set, stored as generic-<p>hPa levels in the bundle.
 world_pipeline.exe run --recipe earth-climate --seed 1 --climate-generic-levels 925,850,700 --bundle out/bench/climate-levels
-# A full world with a checkpoint bundle after the last terrain step -> out/bench/world-checkpoints/18-terrain.roughness
+# A full world with a checkpoint bundle after the last terrain step -> out/bench/world-checkpoints/17-terrain.roughness
 world_pipeline.exe run --recipe procedural-world --seed 1 --checkpoint-at terrain.roughness --bundle out/bench/world
 # One part of the recipe on that checkpoint: the climate steps only.
-world_pipeline.exe run --recipe procedural-world --from-bundle out/bench/world-checkpoints/18-terrain.roughness --steps climate.temperature..climate.rainfall_and_coupling --bundle out/bench/world-climate
+world_pipeline.exe run --recipe procedural-world --from-bundle out/bench/world-checkpoints/17-terrain.roughness --steps climate.temperature..climate.rainfall_and_coupling --bundle out/bench/world-climate
 ```
 
 `--steps a..b` and `--only <process>` take step indices or process ids (the `steps`

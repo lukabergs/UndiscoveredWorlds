@@ -2276,7 +2276,7 @@ int main()
                 toggle(showterrainchooser);
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Create global terrain with the tectonic pipeline, continental shelves, and FastLEM mountain generation.");
+                ImGui::SetTooltip("Create global terrain with the tectonic pipeline and continental shelves.");
 
             ImGui::Dummy(ImVec2(0.0f, linespace));
 

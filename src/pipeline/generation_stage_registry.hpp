@@ -69,3 +69,7 @@ std::size_t getgenerationstageindex(GenerationStageId id);
 bool isterraingenerationstage(GenerationStageId id);
 bool isclimategenerationstage(GenerationStageId id);
 bool isclimatefeedbackstage(GenerationStageId id);
+// Legacy stages keep their code and registry entry, but no recipe and no
+// workbench session runs them. The FastLEM passes are legacy until they are
+// repaired or replaced by another erosion and drainage model.
+bool islegacygenerationstage(GenerationStageId id);

@@ -21,6 +21,11 @@ bool isclimatefeedbackstage(GenerationStageId id)
     }
 }
 
+bool islegacygenerationstage(GenerationStageId id)
+{
+    return id == GenerationStageId::fastlem_mountains || id == GenerationStageId::post_river_fastlem;
+}
+
 const vector<GenerationStageDefinition>& getgenerationstages()
 {
     static const vector<GenerationStageDefinition> generationstages =
