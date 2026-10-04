@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 import icechunk as ic
 import xarray as xr
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.hashing import sha256
 
 
 DEFAULT_VARIABLES = (
@@ -36,14 +39,6 @@ def store_prefix(variable: str) -> str:
     )
 
 
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def prepare_variable(variable: str, start_year: int, end_year: int, output: Path) -> dict[str, object]:
     prefix = store_prefix(variable)
     output_path = output / f"era5_{variable}_monthly_climatology_{start_year}-{end_year}.nc"
@@ -52,7 +47,7 @@ def prepare_variable(variable: str, start_year: int, end_year: int, output: Path
             "variable": variable,
             "file": output_path.name,
             "bytes": output_path.stat().st_size,
-            "sha256": file_sha256(output_path),
+            "sha256": sha256(output_path),
             "source_store": f"s3://{BUCKET}/{prefix}",
         }
 
@@ -126,7 +121,7 @@ def prepare_variable(variable: str, start_year: int, end_year: int, output: Path
         "variable": variable,
         "file": output_path.name,
         "bytes": output_path.stat().st_size,
-        "sha256": file_sha256(output_path),
+        "sha256": sha256(output_path),
         "source_store": f"s3://{BUCKET}/{prefix}",
     }
 

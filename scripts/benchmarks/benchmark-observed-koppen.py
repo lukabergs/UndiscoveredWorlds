@@ -6,14 +6,16 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import struct
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import references
 
-MAGIC = b"UWCLIM1\0"
+
 CLIMATE_CODES = (
     "Af", "Am", "Aw", "As", "BWh", "BWk", "BSh", "BSk",
     "Csa", "Csb", "Csc", "Cwa", "Cwb", "Cwc", "Cfa", "Cfb", "Cfc",
@@ -37,25 +39,13 @@ COLOUR_DISTANCE_LIMIT_SQUARED = 65 * 65
 
 
 def load_bundle(path: Path, expected_variable: str) -> np.ndarray:
-    with path.open("rb") as source:
-        if source.read(8) != MAGIC:
-            raise ValueError(f"Invalid climate bundle magic: {path}")
-        version, width, height, months = struct.unpack("<IIII", source.read(16))
-        variable = source.read(16).split(b"\0", 1)[0].decode("ascii")
-        values = np.fromfile(source, dtype="<f4")
-
-    if version != 1 or variable != expected_variable or months != 12:
+    header, values = references.read(path)
+    if header.variable != expected_variable or header.layers != 12:
         raise ValueError(
-            f"Unexpected bundle header in {path}: version={version}, "
-            f"variable={variable!r}, months={months}"
+            f"Unexpected bundle header in {path}: "
+            f"variable={header.variable!r}, months={header.layers}"
         )
-    expected_values = width * height * months
-    if values.size != expected_values:
-        raise ValueError(
-            f"Truncated climate bundle {path}: expected {expected_values} values, "
-            f"found {values.size}"
-        )
-    return values.reshape((months, height, width))
+    return values
 
 
 def set_where(target: np.ndarray, mask: np.ndarray, value: int) -> None:

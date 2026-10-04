@@ -6,20 +6,23 @@
 import argparse
 import base64
 import colorsys
-import hashlib
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import palettes
+from uwtools.hashing import sha256, sha256_bytes
 import map_rendering
-from tectonics_experiment import ROOT, digest, write_json
+from tectonics_experiment import ROOT, write_json
 from tectonics_report_data import load_bundle, diagnostics, compare_fields
 from tectonics_earth_reference import load_earth_reference, compare_to_earth
 from tectonics_feedback_report import feedback_snapshots, feedback_controls, climate_field_specs
 
-PALETTE_PATH = ROOT / "configs/tectonics-palettes.json"
+PALETTE_PATH = palettes.TECTONICS_PATH
 
 
 def report_template():
@@ -44,11 +47,11 @@ def external_asset(data, suffix, output):
     """Immutable shared assets keep report size linear in recorded snapshots."""
     directory = Path(output).parent / "assets"
     directory.mkdir(parents=True, exist_ok=True)
-    checksum = hashlib.sha256(data).hexdigest()
+    checksum = sha256_bytes(data)
     name = checksum + suffix
     target = directory / name
     if target.exists():
-        if digest(target) != checksum:
+        if sha256(target) != checksum:
             raise ValueError(f"Report asset changed: {target}")
     else:
         target.write_bytes(data)
@@ -71,10 +74,10 @@ def externalize_report_assets(path):
             return [convert(item) for item in value]
         if isinstance(value, str) and value.startswith("data:image/png;base64,"):
             pixels = base64.b64decode(value.split(",", 1)[1], validate=True)
-            name = hashlib.sha256(pixels).hexdigest() + ".png"
+            name = sha256_bytes(pixels) + ".png"
             target = asset_directory / name
             if target.exists():
-                if digest(target) != name[:-4]:
+                if sha256(target) != name[:-4]:
                     raise ValueError(f"Report image asset changed: {target}")
             else:
                 target.write_bytes(pixels)
@@ -84,7 +87,7 @@ def externalize_report_assets(path):
             name = value.removeprefix("assets/")
             if len(name) != 68 or any(c not in "0123456789abcdef" for c in name[:-4]):
                 raise ValueError("Invalid content-addressed report image")
-            if digest(asset_directory / name) != name[:-4]:
+            if sha256(asset_directory / name) != name[:-4]:
                 raise ValueError("Report image checksum mismatch")
             assets.add(name)
         return value
@@ -97,9 +100,9 @@ def externalize_report_assets(path):
     metadata_path = path.with_suffix(".json")
     metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
     metadata["asset_conversion"] = {"mode": "external-content-addressed-png", "directory": "assets",
-        "images": sorted(assets), "externalizer_sha256": digest(Path(__file__)),
-        "template_sha256": digest(template_path), "animation_player_sha256": digest(Path(__file__).with_name("map_animation.js")),
-        "html_sha256": digest(path)}
+        "images": sorted(assets), "externalizer_sha256": sha256(Path(__file__)),
+        "template_sha256": sha256(template_path), "animation_player_sha256": sha256(Path(__file__).with_name("map_animation.js")),
+        "html_sha256": sha256(path)}
     write_json(metadata_path, metadata)
     print(f"External assets: {path.name}, {len(assets)} images, HTML {len(original):,} -> {len(rendered):,} characters")
 
@@ -122,14 +125,14 @@ def run_animations(run_id, states, fieldspec, image_link=image_uri):
         # APNG coalescing those separately recorded observations.
         labels = [f"Run {run_id} | {s['time']:g} Myr | {s['label']} | {spec['title']} ({spec['units']})" for s in selected]
         output = ROOT / f"runs/maps/tectonics/{field}/animation/{run_id}.png"
-        signature = hashlib.sha256(json.dumps({"frames": [digest(path) for path in paths],
+        signature = sha256_bytes(json.dumps({"frames": [sha256(path) for path in paths],
             "labels": labels, "durations": durations,
-            "renderer_sha256": digest(Path(map_rendering.__file__))}, sort_keys=True).encode()).hexdigest()
+            "renderer_sha256": sha256(Path(map_rendering.__file__))}, sort_keys=True).encode())
         metadata = previous.get(field, {})
         if (metadata.get("render_signature") != signature or not output.exists()
-                or digest(output) != metadata.get("sha256")):
+                or sha256(output) != metadata.get("sha256")):
             metadata = map_rendering.save_animation(output, paths, labels, durations)
-        metadata.update(path=output.relative_to(ROOT).as_posix(), sha256=digest(output),
+        metadata.update(path=output.relative_to(ROOT).as_posix(), sha256=sha256(output),
                         times_myr=times, durations_ms=durations, render_signature=signature)
         result[field] = dict(metadata, image=image_link(output))
     write_json(metadata_path,
@@ -213,8 +216,8 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
             'highland_above_2000_m': 1-cdf(2000)}))
         if thresholds:
             earth_reference['metrics']['fraction_below'] = thresholds['fraction_below']
-            earth_reference['threshold_cache'] = dict(path=thresholds_path.relative_to(ROOT).as_posix(), sha256=digest(thresholds_path))
-    definition = json.loads(PALETTE_PATH.read_text())
+            earth_reference['threshold_cache'] = dict(path=thresholds_path.relative_to(ROOT).as_posix(), sha256=sha256(thresholds_path))
+    definition = palettes.tectonics()
     fieldspec = definition["fields"]
     records = [json.loads((ROOT / f"runs/manifests/tectonics/{run_id}.json").read_text())
                for run_id in run_ids]
@@ -327,7 +330,7 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
     probe = None
     probe_path = ROOT / f"runs/diagnostics/tectonics/{run_ids[-1]}/surface-process-probe.json"
     if probe_path.is_file():
-        probe = {"data": json.loads(probe_path.read_text()), "sha256": digest(probe_path),
+        probe = {"data": json.loads(probe_path.read_text()), "sha256": sha256(probe_path),
                  "path": probe_path.relative_to(ROOT).as_posix()}
     regional_reviews = {}
     for run_id in run_ids:
@@ -355,8 +358,8 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
     output.write_text(template.replace("__REPORT_DATA__", json.dumps(payload, allow_nan=False).replace("<", "\\u003c")), encoding="utf-8")
     write_json(output.with_suffix(".json"), {
         "schema": "tectonics-visual-report/v1", "runs": run_ids,
-        "renderer": map_rendering.VERSION, "palette_sha256": digest(PALETTE_PATH),
-        "source_sha256": {p.name: digest(p) for p in (Path(__file__), Path(__file__).with_name("map_rendering.py"),
+        "renderer": map_rendering.VERSION, "palette_sha256": sha256(PALETTE_PATH),
+        "source_sha256": {p.name: sha256(p) for p in (Path(__file__), Path(__file__).with_name("map_rendering.py"),
                           Path(__file__).with_name("tectonics_report_data.py"), Path(__file__).with_name("tectonics_earth_reference.py"),
                           Path(__file__).with_name("map_animation.js"), Path(__file__).with_name("map_comparison.js"),
                           Path(__file__).with_name("map_report_selection.js"),

@@ -8,15 +8,17 @@ old UWCLIM bundles. Metadata records provenance, units, time coverage and hashes
 """
 
 import argparse
-import hashlib
 import json
-import struct
+import sys
 import zipfile
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import references
+from uwtools.hashing import sha256
 from cell_grid import conservative_remap, grid_dimensions
 
 # source variable: (bundle prefix, stored variable, units, scale, offset,
@@ -80,14 +82,6 @@ CERES = {
     "cldtemp_total_daynight_mon": ("ceres", "cloud_temp", "degrees C", 1, -273.15, ("K",), 60, "divergence", False),
     "cldtau_total_day_mon": ("ceres", "cloud_tau", "dimensionless", 1, 0, ("dimensionless",), 30, "speed", False),
 }
-
-
-def digest(path):
-    result = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(8*1024*1024), b""):
-            result.update(block)
-    return result.hexdigest()
 
 
 def normalize(data):
@@ -204,21 +198,17 @@ def prepare(directory, output, family, width, start, end):
                     raise ValueError(f"Unexpected units for {key} in {p}: {a.attrs.get('units')}; expected {expected_units}")
             bundle = output / f"{prefix}_{variable}_monthly.uwclim"
             temporary = bundle.with_suffix(".uwclim.part")
-            with temporary.open("wb") as stream:
-                stream.write(b"UWCLIM1\0" + struct.pack("<IIII", 1, width, height, 12))
-                stream.write(variable.encode("ascii").ljust(16, b"\0"))
-                for month, values, lat, lon in monthly_climatology([a for _, a in selected], start, end):
-                    values = conservative_remap(values * scale + offset, width,
-                                                source_latitudes=lat, source_longitudes=lon)
-                    stream.write(values.astype("<f4").tobytes())
-            if temporary.stat().st_size != 40 + width * height * 12 * 4:
+            months = (conservative_remap(values * scale + offset, width, source_latitudes=lat, source_longitudes=lon)
+                      for month, values, lat, lon in monthly_climatology([a for _, a in selected], start, end))
+            references.write(temporary, variable, months, shape=(12, height, width))
+            if temporary.stat().st_size != references.file_size(12, height, width):
                 raise ValueError("Incomplete UWCLIM write")
             temporary.replace(bundle)
             records.append(dict(bundle=bundle.name, variable=variable, units=unit, source_variable=key,
                                 description=selected[0][1].attrs.get("long_name", key),
                                 source_depth_m=(selected[0][1].depth.values.tolist()
                                                 if "depth" in selected[0][1].coords else None),
-                                sources=[p.as_posix() for p, _ in selected], sha256=digest(bundle),
+                                sources=[p.as_posix() for p, _ in selected], sha256=sha256(bundle),
                                 limit=limit, palette=palette, ocean_only=ocean, land_only=family == "land",
                                 period=f"{start}-{end} monthly climatology", width=width, height=height))
             print(f"Prepared {bundle.name}: {width}x{height}, {unit}", flush=True)
@@ -229,7 +219,7 @@ def prepare(directory, output, family, width, start, end):
     temporary.write_text(json.dumps(dict(
         family=family, width=width, height=height,
         grid="cell-centred W x W/2; north to south; no stored pole rows",
-        sources=[dict(file=p.as_posix(), sha256=digest(p)) for p in paths],
+        sources=[dict(file=p.as_posix(), sha256=sha256(p)) for p in paths],
         products=records), indent=2) + "\n", encoding="utf-8")
     temporary.replace(metadata)
 

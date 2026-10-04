@@ -5,14 +5,17 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import struct
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import references
+from uwtools.hashing import sha256
 from cell_grid import conservative_remap, grid_dimensions, latitude_centres
 from reference_climate_maps import export_additional, export_diagnostics, export_koppen, load_diagnostics
 from reference_map_rendering import write_float32_geotiff
@@ -20,7 +23,7 @@ from reference_map_layout import product_path
 from climate_palettes import VERSION as PALETTE_VERSION
 
 DEFAULT_WIDTHS = (128, 256, 512, 1024, 2048)
-UWCLIM_MAGIC = b"UWCLIM1\0"
+UWCLIM_MAGIC = references.MAGIC
 
 
 def load_single_channel(path: Path, dtype: np.dtype) -> np.ndarray:
@@ -100,14 +103,10 @@ def write_tiff16(path: Path, values: np.ndarray) -> None:
 
 
 def file_record(path: Path, root: Path) -> dict[str, object]:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(8 * 1024 * 1024), b""):
-            digest.update(block)
     return {
         "file": path.relative_to(root).as_posix(),
         "bytes": path.stat().st_size,
-        "sha256": digest.hexdigest(),
+        "sha256": sha256(path),
     }
 
 
@@ -211,21 +210,11 @@ def load_precipitation(path: Path) -> np.ndarray:
 
 
 def load_uwclim(path: Path, expected_variable: str) -> np.ndarray:
-    with path.open("rb") as source:
-        if source.read(8) != UWCLIM_MAGIC:
-            raise ValueError(f"Invalid UWCLIM magic: {path}")
-        version, width, height, layers = struct.unpack("<IIII", source.read(16))
-        variable = source.read(16).rstrip(b"\0").decode("ascii")
-        if version != 1 or variable != expected_variable:
-            raise ValueError(
-                f"Unexpected UWCLIM header in {path}: version={version}, variable={variable}"
-            )
-        grid_dimensions(width, height)
-        values = np.frombuffer(source.read(), dtype="<f4")
-    expected = width * height * layers
-    if values.size != expected:
-        raise ValueError(f"Invalid UWCLIM payload size in {path}: {values.size} != {expected}")
-    return values.reshape((layers, height, width))
+    header, values = references.read(path)
+    if header.variable != expected_variable:
+        raise ValueError(f"Unexpected UWCLIM header in {path}: variable={header.variable}")
+    grid_dimensions(header.columns, header.rows)
+    return values
 
 
 def prepare_precipitation(values: np.ndarray, width: int) -> np.ndarray:

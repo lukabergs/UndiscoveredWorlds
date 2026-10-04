@@ -1,10 +1,12 @@
 """One palette contract for numerical exports, reference maps and comparisons."""
-import json
+import sys
 from pathlib import Path
 from map_rendering import colourize
 
-ROOT = Path(__file__).resolve().parents[2]
-DEFINITION = json.loads((ROOT / 'configs/climate-palettes.json').read_text())
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import palettes
+
+DEFINITION = palettes.climate()
 VERSION = DEFINITION['version']
 
 def anchors(low, high, signed=False):

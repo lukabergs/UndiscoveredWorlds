@@ -5,16 +5,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import struct
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, TiffImagePlugin
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import references
 from cell_grid import conservative_remap, grid_dimensions
 
 
-MAGIC = b"UWCLIM1\0"
 CLIMATOLOGICAL_MONTH_DAYS = (31.0, 28.25, 31.0, 30.0, 31.0, 30.0, 31.0, 31.0, 30.0, 31.0, 30.0, 31.0)
 
 
@@ -27,13 +28,7 @@ def resize_masked(source: Path, width: int, height: int) -> np.ndarray:
 
 
 def write_bundle(path: Path, values: np.ndarray) -> None:
-    height, width = values.shape
-
-    with path.open("wb") as output:
-        output.write(MAGIC)
-        output.write(struct.pack("<IIII", 1, width, height, 1))
-        output.write(b"prec_annual".ljust(16, b"\0"))
-        output.write(values.astype("<f4", copy=False).tobytes(order="C"))
+    references.write(path, "prec_annual", [values])
 
 
 def write_monthly_bundle(
@@ -46,11 +41,8 @@ def write_monthly_bundle(
     annual_total = np.zeros((height, width), dtype=np.float32)
     annual_valid = np.ones((height, width), dtype=bool)
 
-    with path.open("wb") as output:
-        output.write(MAGIC)
-        output.write(struct.pack("<IIII", 1, width, height, 12))
-        output.write(b"prec".ljust(16, b"\0"))
-
+    def months():
+        nonlocal annual_valid
         for month, days in enumerate(CLIMATOLOGICAL_MONTH_DAYS, start=1):
             source = input_directory / f"IMERG-Final.CLIM.2001-2022.{month:02d}.V07B.tif"
 
@@ -62,7 +54,7 @@ def write_monthly_bundle(
             finite = np.isfinite(monthly_total)
             annual_total[finite] += monthly_total[finite]
             annual_valid &= finite
-            output.write(monthly_total.astype("<f4", copy=False).tobytes(order="C"))
+            yield monthly_total
             month_stats.append(
                 {
                     "month": month,
@@ -76,6 +68,7 @@ def write_monthly_bundle(
                 }
             )
 
+    references.write(path, "prec", months(), shape=(12, height, width))
     annual_total[~annual_valid] = np.nan
     return month_stats, annual_total
 

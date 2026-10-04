@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import grid
 
 
 def grid_dimensions(width: int, height: int | None = None) -> tuple[int, int]:
@@ -20,7 +26,7 @@ def grid_dimensions(width: int, height: int | None = None) -> tuple[int, int]:
 def latitude_centres(height: int) -> np.ndarray:
     if height < 1:
         raise ValueError("Height must be positive")
-    return 90.0 - (np.arange(height, dtype=np.float64) + 0.5) * 180.0 / height
+    return grid.latitudes(height)
 
 
 def latitude_edges(height: int) -> np.ndarray:
@@ -180,6 +186,5 @@ def conservative_remap(
 
 def spherical_area_weights(width: int, height: int | None = None) -> np.ndarray:
     width, height = grid_dimensions(width, height)
-    edges = np.sin(np.deg2rad(latitude_edges(height)))
-    bands = edges[:-1] - edges[1:]
+    bands = grid.band_area(height, degree_edges=True)
     return np.broadcast_to((bands * 2.0 * np.pi / width)[:, None], (height, width)).copy()

@@ -1,14 +1,15 @@
 """Numerical input adapter. Historical archive aliases never become UI identifiers."""
 import json
 from pathlib import Path
-import struct
 import sys
 import numpy as np
 from PIL import Image
 
 ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'scripts'))
 sys.path.insert(0,str(ROOT/'scripts/refs'))
 from cell_grid import conservative_remap
+from uwtools import grid,references
 
 FIELDS={
  'surface_wind':('Surface wind', 'm/s', 'vector', .10, 'wind/speed/{s}/s'),
@@ -52,9 +53,7 @@ def quarter(values, season):
     indices=np.arange(season*3,season*3+3)%12
     return np.average(values[indices],axis=0,weights=MONTH_DAYS[indices])
 def magnitude(a):return np.hypot(*a) if a.ndim==3 else a
-def weights(shape):
-    lat=np.linspace(np.pi/2,-np.pi/2,shape[0]+1)
-    return np.broadcast_to((np.sin(lat[:-1])-np.sin(lat[1:]))[:,None],shape)
+def weights(shape):return grid.area_weights(*shape)
 def remap(a,width):
     if a.shape[-1]==width:return np.asarray(a,dtype=float)
     if a.ndim==3:return np.stack([remap(x,width) for x in a])
@@ -65,11 +64,8 @@ def table(path):
     return {n:x[n].reshape(4,h,w) for n in x.dtype.names}
 def bundle(name):
     path=ROOT/f'refs/processed/climate/{name}_monthly.uwclim'
-    with path.open('rb') as stream:
-        magic=stream.read(8);version,w,h,n=struct.unpack('<IIII',stream.read(16))
-    assert version==1 and h*2==w and n==12,(path,magic)
-    a=np.array(np.memmap(path,dtype='<f4',mode='r',offset=40,shape=(n,h,w)),dtype=float)
-    a[a < -9000]=np.nan
+    header,a=references.read(path,missing=np.nan,dtype=float)
+    assert header.rows*2==header.columns and header.layers==12,path
     if name=='era5_pr':a/=MONTH_DAYS[:,None,None]
     return a
 
@@ -102,9 +98,7 @@ class Archive:
         if field=='skin_sst':return None
         if field=='annual_rain':
             p=ROOT/'refs/processed/climate/imerg_prec_annual.uwclim'
-            with p.open('rb') as stream:stream.seek(12);w,h=struct.unpack('<II',stream.read(8))
-            a=np.array(np.memmap(p,dtype='<f4',mode='r',offset=40,shape=(h,w)),dtype=float);a[a < -9000]=np.nan
-            return remap(a,width)
+            return remap(references.read(p,missing=np.nan,dtype=float)[1][0],width)
         if field=='storage_depth':
             return remap(quarter(np.load(self.path/'mixed-layer-reference.npz')['metres'],s),width)
         result=[]

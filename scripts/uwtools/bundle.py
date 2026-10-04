@@ -12,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
+from . import grid
+
 SCHEMA = 'uw-run-bundle/v1'
 SEASONS = ('January', 'April', 'July', 'October')
 
@@ -30,6 +32,11 @@ class FieldInfo:
     description: str
 
 
+def read_manifest(path):
+    """manifest.json of a bundle directory, whatever its schema."""
+    return json.loads((Path(path) / 'manifest.json').read_text(encoding='utf-8'))
+
+
 @dataclass
 class Bundle:
     path: Path
@@ -40,7 +47,7 @@ class Bundle:
     @classmethod
     def open(cls, path):
         path = Path(path)
-        manifest = json.loads((path / 'manifest.json').read_text(encoding='utf-8'))
+        manifest = read_manifest(path)
         if manifest.get('schema') != SCHEMA:
             raise ValueError(f'{path}: unsupported bundle schema {manifest.get("schema")!r}')
         bundle = cls(path, manifest)
@@ -87,14 +94,14 @@ class Bundle:
 
     def latitudes(self):
         """Cell-centre latitudes in degrees, north row first."""
-        return 90.0 - (np.arange(self.rows) + 0.5) * 180.0 / self.rows
+        return grid.latitudes(self.rows)
 
     def longitudes(self):
-        return -180.0 + (np.arange(self.columns) + 0.5) * 360.0 / self.columns
+        return grid.longitudes(self.columns)
 
     def area_weights(self):
         """Cell area weights (rows x columns), proportional to the cosine of latitude, summing to one."""
-        weights = np.cos(np.deg2rad(self.latitudes()))[:, None] * np.ones((1, self.columns))
+        weights = grid.cosine_latitude(self.rows)[:, None] * np.ones((1, self.columns))
         return weights / weights.sum()
 
     def sea_mask(self):
@@ -113,6 +120,6 @@ class Bundle:
         if self.rows % rows or self.columns % columns:
             raise ValueError(f'{columns} x {rows} does not divide the {self.columns} x {self.rows} surface grid')
         fy, fx = self.rows // rows, self.columns // columns
-        weights = np.cos(np.deg2rad(self.latitudes()))[:, None] * np.ones((1, self.columns))
+        weights = grid.cosine_latitude(self.rows)[:, None] * np.ones((1, self.columns))
         total = (weights * sea).reshape(rows, fy, columns, fx).sum(axis=(1, 3))
         return total / weights.reshape(rows, fy, columns, fx).sum(axis=(1, 3))

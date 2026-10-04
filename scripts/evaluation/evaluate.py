@@ -13,14 +13,15 @@ and are never overwritten. Exit code 1 when a check fails.
 """
 import argparse
 import datetime
-import hashlib
 import html
 import json
 import subprocess
 import sys
 from pathlib import Path
 
-from bundle import SEASONS, Bundle
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.bundle import SEASONS, Bundle
+from uwtools.hashing import sha256_bytes
 from checks import run_checks
 from references import References
 from validation import run_validation
@@ -30,10 +31,6 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIRECTORY = ROOT / 'configs/evaluation'
 PROFILE_SCHEMA = 'uw-evaluation-profile/v1'
 SCHEMA = 'uw-evaluation/v1'
-
-
-def sha256_bytes(data):
-    return hashlib.sha256(data).hexdigest()
 
 
 def load_profile(name):

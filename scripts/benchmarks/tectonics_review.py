@@ -8,11 +8,15 @@ import base64
 import html
 import json
 from pathlib import Path
+import sys
 import numpy as np
 from PIL import Image, ImageDraw
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import palettes
+from uwtools.hashing import sha256
 from tectonics_report_data import load_bundle, diagnostics
 from tectonics_earth_reference import load_earth_reference, compare_to_earth
-from tectonics_experiment import write_json, digest
+from tectonics_experiment import write_json
 from map_rendering import colourize
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,14 +99,14 @@ def review(run_id, earth):
               'exact_replay': record.get('replay', {}).get('exact_match'),
               'all_checkpoints_pass': all(s['invariants_pass'] for s in states),
               'states': states, 'final': m,
-              'review_source_sha256': {p.name: digest(p) for p in [Path(__file__),
-                  ROOT / 'scripts/benchmarks/tectonics_report_data.py', ROOT / 'configs/tectonics-palettes.json']}}
+              'review_source_sha256': {p.name: sha256(p) for p in [Path(__file__),
+                  ROOT / 'scripts/benchmarks/tectonics_report_data.py', palettes.TECTONICS_PATH]}}
     output = ROOT / f'runs/diagnostics/tectonics/{run_id}'
     write_json(output / 'iteration-review.json', result)
-    palettes = json.loads((ROOT / 'configs/tectonics-palettes.json').read_text())['fields']
+    field_palettes = palettes.tectonics()['fields']
     panels = []
     for field in ['elevation', 'local_relief']:
-        pixels = colourize(fields[field], palettes[field]['stops'])
+        pixels = colourize(fields[field], field_palettes[field]['stops'])
         im = Image.fromarray(pixels).resize((1024,512), Image.Resampling.NEAREST)
         panels.append(im)
     preview = Image.new('RGB',(1024,1084),'#101b28')

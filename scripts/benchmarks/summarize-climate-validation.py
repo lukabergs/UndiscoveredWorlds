@@ -9,14 +9,18 @@ The most recent earlier report accompanies the output as narrative context.
 from __future__ import annotations
 import argparse
 import csv
-import hashlib
 import json
 import math
 import re
-import struct
+import sys
 from pathlib import Path
 import numpy as np
 from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import references
+from uwtools.grid import band_area, latitudes, longitudes
+from uwtools.hashing import sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 REF = ROOT / "refs/processed/climate"
@@ -72,22 +76,16 @@ def remap(a, ny, nx):
 def reference(name, ny, nx):
     key = (name, ny, nx)
     if key not in REF_CACHE:
-        with (REF / name).open('rb') as f:
-            assert f.read(8) == b'UWCLIM1\0'
-            version, w, h, months = struct.unpack('<IIII', f.read(16))
-            assert version == 1
-            f.read(16)
-            a = np.fromfile(f, '<f4').reshape(months, h, w)
-        assert h == w // 2
+        header, a = references.read(REF / name)
+        assert header.rows == header.columns // 2
         REF_CACHE[key] = remap(a, ny, nx)
     return REF_CACHE[key]
 
 def grid(ny, nx):
     assert ny == nx // 2
-    b = bounds(ny)
-    lat = 90 - (np.arange(ny) + .5) * 180 / ny
-    lon = -180 + (np.arange(nx) + .5) * 360 / nx
-    area = np.broadcast_to((np.sin(np.deg2rad(b[:-1])) - np.sin(np.deg2rad(b[1:])))[:, None] * 2 * np.pi * RADIUS**2 / nx / 1e6, (ny, nx)).copy()
+    lat = latitudes(ny)
+    lon = longitudes(nx)
+    area = np.broadcast_to(band_area(ny, degree_edges=True)[:, None] * 2 * np.pi * RADIUS**2 / nx / 1e6, (ny, nx)).copy()
     assert abs(area.sum() / (4*np.pi*RADIUS**2/1e6) - 1) < 1e-12
     return lat, lon, area
 
@@ -98,7 +96,7 @@ def regions(ny, nx, land, mask_key='output'):
     lat, lon, area = grid(ny, nx)
     ocean = 1-land
     b = bounds(ny)
-    band = np.sin(np.deg2rad(b[:-1]))-np.sin(np.deg2rad(b[1:]))
+    band = band_area(ny, degree_edges=True)
     def latitude_fraction(south, north):
         overlap = np.maximum(0,np.sin(np.deg2rad(np.minimum(b[:-1],north)))-np.sin(np.deg2rad(np.maximum(b[1:],south))))
         return np.broadcast_to((overlap/band)[:,None],land.shape)
@@ -435,7 +433,7 @@ def main():
     runs=registry['runs']; metadata=next(r for r in runs if int(r['id'])==args.run_id)
     refs=[]
     for p in sorted(REF.glob('*.uwclim')):
-        refs.append(dict(file=p.name,path=str(p.relative_to(ROOT)),sha256=hashlib.sha256(p.read_bytes()).hexdigest()))
+        refs.append(dict(file=p.name,path=str(p.relative_to(ROOT)),sha256=sha256(p)))
     logpath=ROOT/'runs/logs/climate'/f'{args.run_id}.log'
     if not logpath.exists():logpath=args.output/'benchmark.log'
     detailed_coupling=[]

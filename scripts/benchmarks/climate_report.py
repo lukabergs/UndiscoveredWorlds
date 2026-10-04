@@ -8,7 +8,6 @@ No simulations run. Existing sealed experiment evidence is read-only.
 """
 import argparse
 import datetime
-import hashlib
 import html
 import json
 import os
@@ -24,16 +23,17 @@ from climate_report_metrics import evaluate,bins,rank,quantile
 from climate_report_render import save_map,save_ocean_flow,save_wind_flow,save_continent_outlines,nearest_path,full_reference,flow_path,flow_complete
 from climate_palettes import anchors,DEFINITION,VERSION
 from run_storage import ensure_archive_directory
+sys.path.insert(0,str(ROOT/'scripts'))
+from uwtools import grid
+from uwtools.hashing import sha256
 
-def sha(path):
-    with Path(path).open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 def dump(p,d):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(d,indent=2,allow_nan=False)+'\n',encoding='utf-8')
 def relative(path,parent):return Path(os.path.relpath(path,parent)).as_posix()
 def reference_input_hashes():
     names=sorted({name for group in SOURCES.values() for name in group})
     paths=[ROOT/f'refs/processed/climate/{name}_monthly.uwclim' for name in names]
     paths.append(ROOT/'refs/processed/climate/imerg_prec_annual.uwclim')
-    return {relative(path,ROOT):sha(path) for path in paths}
+    return {relative(path,ROOT):sha256(path) for path in paths}
 def mask_for(field,shape,land,masks,s):
     mask=np.ones(shape,bool)
     if field in ('sst','sst_oisst','current','storage_depth'):
@@ -46,8 +46,8 @@ def clean_text(text,aliases):
         text=re.sub(r'\b'+re.escape(token)+r'\b',str(run),text)
     return re.sub(r'\b(\d+)\s*/\s*\1\b',r'\1',text)
 def profiles(a,ref,mask):
-    a=magnitude(a);ref=magnitude(ref);lat=90-(np.arange(a.shape[0])+.5)*180/a.shape[0]
-    lon=-180+(np.arange(a.shape[1])+.5)*360/a.shape[1]
+    a=magnitude(a);ref=magnitude(ref);lat=grid.latitudes(a.shape[0])
+    lon=grid.longitudes(a.shape[1])
     result={}
     for sector,(lo,hi) in {'Global':(-180,180),'Central / eastern Pacific':(-160,-90),'Western Pacific':(125,175)}.items():
         valid=mask&(lon[None,:]>=lo)&(lon[None,:]<=hi)
@@ -135,7 +135,7 @@ def build(args):
             prefix=(parent/refrecords[f'{field}/{s}']).resolve().with_suffix('')
             for style in ('lic','particles'):
                 path=flow_path(prefix,style);texture=flow_path(prefix,style,'.tif')
-                wind_products[f'{field}_{style}/{s}']=dict(path=relative(path,ROOT),sha256=sha(path),numeric_texture=relative(texture,ROOT),numeric_texture_sha256=sha(texture))
+                wind_products[f'{field}_{style}/{s}']=dict(path=relative(path,ROOT),sha256=sha256(path),numeric_texture=relative(texture,ROOT),numeric_texture_sha256=sha256(texture))
     dump(refroot/'wind-flow-manifest.json',dict(palette_version=VERSION,products=wind_products,seed=20260906,particle_days=4.5,method='Same spherical LIC and 4.5-day particle kernels and seed for model and reference. Wind layer limits 25/30/40 m/s.'))
     ranking=rank(metrics,args.baseline,ids)
     payload=dict(schema=1,title=title,baseline=args.baseline,runs=ids,fields=fieldinfo,regions=REGIONS,
@@ -144,12 +144,12 @@ def build(args):
     dump(out/'data.json',payload)
     dump(out/'ranking.json',ranking)
     dump(out/'reference-coverage.json',reference_audit)
-    provenance=dict(palette_version=VERSION,palette_sha256=sha(ROOT/'configs/climate-palettes.json'),
+    provenance=dict(palette_version=VERSION,palette_sha256=sha256(ROOT/'configs/climate-palettes.json'),
         native_sources=archive.provenance(),input_sha256=reference_input_hashes(),reference_maps=refrecords,
         method='Wind and pressure: January/April/July/October monthly means. Other seasonal fields: day-weighted quarters beginning in those months. Native annual rainfall: IMERG. Full-reference images use retained bundles at 2048; numerical tables conservatively match each model grid. Ocean current LIC/particles use identical 45-day spherical kernels, seed 20260906, 0–1 m/s.',
-        unavailable=reference_audit,images_sha256={relative(parent/p,ROOT):sha(parent/p) for p in refrecords.values()},
+        unavailable=reference_audit,images_sha256={relative(parent/p,ROOT):sha256(parent/p) for p in refrecords.values()},
         ocean_texture_meaning='LIC TIFF: dimensionless texture intensity. Particle TIFF: dimensionless trail intensity. Neither is speed or concentration.',
-        ocean_texture_sha256={relative(flow_path(refroot/'climate/ocean/current'/str(s)/'s'/str(args.width),style,'.tif'),ROOT):sha(flow_path(refroot/'climate/ocean/current'/str(s)/'s'/str(args.width),style,'.tif')) for s in range(1,5) for style in ('lic','particles')})
+        ocean_texture_sha256={relative(flow_path(refroot/'climate/ocean/current'/str(s)/'s'/str(args.width),style,'.tif'),ROOT):sha256(flow_path(refroot/'climate/ocean/current'/str(s)/'s'/str(args.width),style,'.tif')) for s in range(1,5) for style in ('lic','particles')})
     dump(refroot/'manifest.json',provenance)
     write_reference_index(refroot,refrecords,reference_audit,parent)
     template=(ROOT/'scripts/benchmarks/climate_report_template.html').read_text(encoding='utf-8')
@@ -166,11 +166,11 @@ def build(args):
     (parent/'climate-latest-comparison.html').write_text(f'<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={name}.html"><a href="{name}.html">{title}</a>',encoding='utf-8')
     dump(out/'generation.json',dict(command=sys.argv,utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         simulations_executed=0,source_archive=str(archive.path),run_ids=ids,baseline=args.baseline,
-        input_sha256={str(run):sha(archive.path/f'{archive.entries[run][0]}-fields.npz') for run in ids},
-        scripts_sha256={p.name:sha(p) for p in (ROOT/'scripts/benchmarks').glob('climate_report*')},
-        texture_kernel_sha256=sha(ROOT/'src/validation/climate/flow_texture_kernel.cpp'),
-        texture_wrapper_sha256=sha(ROOT/'scripts/benchmarks/climate_flow_texture.py'),
-        data_sha256=sha(out/'data.json'),html_sha256=sha(parent/f'{name}.html')))
+        input_sha256={str(run):sha256(archive.path/f'{archive.entries[run][0]}-fields.npz') for run in ids},
+        scripts_sha256={p.name:sha256(p) for p in (ROOT/'scripts/benchmarks').glob('climate_report*')},
+        texture_kernel_sha256=sha256(ROOT/'src/validation/climate/flow_texture_kernel.cpp'),
+        texture_wrapper_sha256=sha256(ROOT/'scripts/benchmarks/climate_flow_texture.py'),
+        data_sha256=sha256(out/'data.json'),html_sha256=sha256(parent/f'{name}.html')))
     print(json.dumps(ranking,indent=2),flush=True)
 
 def write_reference_index(root,records,audit,parent):

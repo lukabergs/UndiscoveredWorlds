@@ -4,11 +4,14 @@
 """Download original monthly climate sources, with resumable CDS request receipts."""
 
 import argparse
-import hashlib
 import json
+import sys
 from pathlib import Path
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.hashing import sha256
 
 MONTHLY = "reanalysis-era5-single-levels-monthly-means"
 GROUPS = {
@@ -46,11 +49,7 @@ def write_json(path, value):
 
 
 def file_record(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-            digest.update(block)
-    return dict(file=path.name, bytes=path.stat().st_size, sha256=digest.hexdigest())
+    return dict(file=path.name, bytes=path.stat().st_size, sha256=sha256(path))
 
 
 def http_download(url, params, partial):

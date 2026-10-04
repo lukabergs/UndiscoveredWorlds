@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 import xarray as xr
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.hashing import sha256
 
 
 SOURCE = "https://nsidc.org/data/g02202/versions/6"
@@ -17,19 +20,11 @@ ERDDAP = "https://coastwatch.pfeg.noaa.gov/erddap/"
 VARIABLE = "cdr_seaice_conc_monthly"
 
 
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def describe(path: Path) -> dict[str, object]:
     return {
         "file": path.name,
         "bytes": path.stat().st_size,
-        "sha256": file_sha256(path),
+        "sha256": sha256(path),
     }
 
 

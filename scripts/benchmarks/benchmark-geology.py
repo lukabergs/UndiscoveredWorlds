@@ -4,14 +4,17 @@
 # ///
 """Compare native tectonic bundles with physical reference distributions (no downloads)."""
 import argparse
-import hashlib
 import html
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import rasterio
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import grid
+from uwtools.hashing import sha256
 from tectonics_experiment import bundle_files, is_run_bundle, snapshot_manifest
 from tectonics_report_data import read_field
 
@@ -25,16 +28,9 @@ REFERENCES = {
 }
 
 
-def digest(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
 def area_weights(height, width):
     # Exact relative cell areas on a regular global latitude-longitude raster.
-    edges = np.linspace(np.pi / 2, -np.pi / 2, height + 1)
-    rows = np.sin(edges[:-1]) - np.sin(edges[1:])
-    return np.broadcast_to(rows[:, None], (height, width))
+    return grid.area_weights(height, width)
 
 
 def distribution(values, weights):
@@ -78,7 +74,7 @@ def read_reference(root, key, width, units, products):
     valid = ~np.ma.getmaskarray(field) & np.isfinite(field.data)
     weights = area_weights(*field.shape)
     return field.data, valid, weights, {
-        "path": str(path.resolve()), "sha256": digest(path), "units": units,
+        "path": str(path.resolve()), "sha256": sha256(path), "units": units,
         "dataset": products[key]["dataset"],
         "valid_area_fraction": float(weights[valid].sum() / weights.sum()),
         "statistics_over_valid_cells": distribution(field.data[valid], weights[valid]),
@@ -107,7 +103,7 @@ def read_bundle(path):
         if not np.isfinite(field).all():
             raise ValueError(f"Invalid shape or nonfinite values: {field_path}")
         fields[name] = field
-        hashes[name] = digest(field_path)
+        hashes[name] = sha256(field_path)
     if (np.any(fields["crust_age_myr"] < 0) or np.any(fields["crust_class"] > 3) or
             np.any(fields["geologic_regime"] > 7) or
             any(np.any(fields[name] > 100) for name in ("convergence_score", "divergence_score", "shear_score"))):
@@ -139,7 +135,7 @@ def benchmark(bundles, reference_root, width):
         oceanic = fields["crust_class"] == 1
         seafloor = oceanic & (fields["heightmap"] < 1.0)
         invalid = oceanic & (fields["geologic_regime"] == 2)
-        run = {"bundle": str(path.resolve()), "manifest_sha256": digest(path / "manifest.json"),
+        run = {"bundle": str(path.resolve()), "manifest_sha256": sha256(path / "manifest.json"),
                "field_sha256": hashes, "seed": manifest["seed"], "width": manifest["width"],
                "height": manifest["height"], "time_myr": manifest["time_myr"],
                "scenario": manifest["run_scenario"],

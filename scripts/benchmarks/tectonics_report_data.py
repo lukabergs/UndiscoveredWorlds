@@ -2,10 +2,13 @@
 import json
 from collections import deque
 from pathlib import Path
+import sys
 
 import numpy as np
 
-from tectonics_experiment import bundle_files, digest, is_run_bundle, snapshot_manifest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.hashing import sha256
+from tectonics_experiment import bundle_files, is_run_bundle, snapshot_manifest
 
 DTYPES = {
     "heightmap": "<f4", "plate_id": "<u4", "crust_age_steps": "<u4",
@@ -66,7 +69,7 @@ def load_bundle(path, expected_hashes=None):
         source = path / filename
         if not source.resolve().is_relative_to(path.resolve()):
             raise ValueError("Field path escapes bundle")
-        hashes[name] = digest(source)
+        hashes[name] = sha256(source)
         if expected_hashes is not None and expected_hashes.get(name) != hashes[name]:
             raise ValueError(f"Archived field hash mismatch: {name}")
         if name not in DTYPES and name not in OPTIONAL_DTYPES:

@@ -7,16 +7,17 @@ import argparse
 import csv
 import json
 import math
-import struct
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import references
 from cell_grid import conservative_remap, grid_dimensions, latitude_centres
 
 
-MAGIC = b"UWCLIM1\0"
 NODATA_LIMIT = -1.0e30
 
 
@@ -45,11 +46,7 @@ def write_bundle(
     valid_count = np.zeros((height, width), dtype=np.uint8)
     month_stats: list[dict[str, float]] = []
 
-    with output_path.open("wb") as output:
-        output.write(MAGIC)
-        output.write(struct.pack("<IIII", 1, width, height, 12))
-        output.write(variable.encode("ascii").ljust(16, b"\0"))
-
+    def months():
         for month in range(1, 13):
             source = grid_directory / f"wc2.1_10m_{variable}_{month:02d}.tif"
             if not source.exists():
@@ -59,7 +56,7 @@ def write_bundle(
             finite = np.isfinite(values)
             climatology_sum[finite] += values[finite]
             valid_count[finite] += 1
-            output.write(values.astype("<f4", copy=False).tobytes(order="C"))
+            yield values
 
             month_stats.append(
                 {
@@ -71,6 +68,7 @@ def write_bundle(
                 }
             )
 
+    references.write(output_path, variable, months(), shape=(12, height, width))
     climatology = np.full((height, width), np.nan, dtype=np.float32)
     valid = valid_count > 0
     climatology[valid] = (climatology_sum[valid] / valid_count[valid]).astype(np.float32)

@@ -5,8 +5,6 @@ north row first). They are validation inputs only: nothing here feeds a simulati
 Season rules and unit conversions follow the climate report (climate_report_data.py),
 so per-field losses use the same definitions as global-balanced-v1.
 """
-import hashlib
-import struct
 import sys
 from pathlib import Path
 
@@ -14,10 +12,12 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 REFERENCE_DIRECTORY = ROOT / 'refs/processed/climate'
+sys.path.insert(0, str(ROOT / 'scripts'))
 sys.path.insert(0, str(ROOT / 'scripts/refs'))
 from cell_grid import conservative_remap  # noqa: E402
+from uwtools import references as reference_files  # noqa: E402
+from uwtools.hashing import sha256  # noqa: E402
 
-MAGIC = b'UWCLIM1\0'
 # Mean month lengths used by the climate report for day-weighted quarters and mm/day.
 MONTH_DAYS = np.array([31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
 # Monthly references stored per month that the report converts to per day.
@@ -26,22 +26,9 @@ SEASON_RULES = ('month', 'quarter', 'annual')
 
 
 def read_uwclim(path):
-    """(variable, values[layers, rows, columns]) with missing values as NaN."""
-    path = Path(path)
-    with path.open('rb') as stream:
-        magic = stream.read(8)
-        version, columns, rows, layers = struct.unpack('<IIII', stream.read(16))
-        variable = stream.read(16).rstrip(b'\0').decode('ascii')
-    if magic != MAGIC or version != 1:
-        raise ValueError(f'{path}: not a UWCLIM1 file')
-    values = np.array(np.memmap(path, dtype='<f4', mode='r', offset=40, shape=(layers, rows, columns)), dtype=float)
-    values[values < -9000] = np.nan
-    return variable, values
-
-
-def sha256(path):
-    with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+    """(variable, values[layers, rows, columns]) as float64 with missing values as NaN."""
+    header, values = reference_files.read(path, missing=np.nan, dtype=float)
+    return header.variable, values
 
 
 def remap(values, width):

@@ -22,10 +22,13 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.bundle import SCHEMA, read_manifest
+
 
 def load_manifest(bundle):
-    manifest = json.loads((bundle / 'manifest.json').read_text(encoding='utf-8'))
-    if manifest.get('schema') != 'uw-run-bundle/v1':
+    manifest = read_manifest(bundle)
+    if manifest.get('schema') != SCHEMA:
         raise SystemExit(f'{bundle}: unsupported schema {manifest.get("schema")!r}')
     return manifest
 

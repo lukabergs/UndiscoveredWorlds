@@ -1,17 +1,21 @@
 """Adapt archived surface-feedback experiments without inventing native crust state."""
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 
-from tectonics_experiment import ROOT, digest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import palettes
+from uwtools.hashing import sha256
+from tectonics_experiment import ROOT
 from tectonics_report_data import (load_bundle, stats, local_relief, coast_distance,
                                    coastal_terrain, terrain_detail, island_sizes,
                                    hypsography_shape)
 
 
 def climate_field_specs():
-    palette = json.loads((ROOT / 'configs/climate-palettes.json').read_text())
+    palette = palettes.climate()
     result = {}
     for key, title, units, scale, colours in [
         ('rain', 'Annual rainfall', 'mm/year', 'annual_rain', 'positive'),
@@ -58,7 +62,7 @@ def surface_metrics(native, parent_fields, z):
 def feedback_snapshots(record):
     archive = ROOT / f'runs/reports/tectonics/{record["id"]}'
     field_path = archive / 'comparison-fields.npz'
-    if digest(field_path) != record['fields_sha256']:
+    if sha256(field_path) != record['fields_sha256']:
         raise ValueError('Feedback comparison field hash mismatch')
     with np.load(field_path) as source:
         endpoints = {key: source[key] for key in ('initial', 'final')}
@@ -91,7 +95,7 @@ def feedback_snapshots(record):
                         run_scenario={'surface_model': 'climate-feedback; frozen plates'},
                         phase=f'{index * record["surface_interval_myr"]} Myr surface erosion after run {record["parent"]}',
                         boundary_note=f'Frozen run {record["parent"]} boundary overlay; no plate motion in this phase.')
-        hashes = dict(comparison_npz=record['fields_sha256'], climate_npz=digest(climate_path))
+        hashes = dict(comparison_npz=record['fields_sha256'], climate_npz=sha256(climate_path))
         yield metadata, fields, hashes, metrics
 
 
@@ -100,9 +104,9 @@ def feedback_controls(record):
     archive = ROOT / f'runs/reports/tectonics/{record["id"]}'
     paths = {'comparison': archive / 'comparison-fields.npz',
              'matched': archive / 'matched-comparison-fields.npz'}
-    if digest(paths['comparison']) != record['fields_sha256']:
+    if sha256(paths['comparison']) != record['fields_sha256']:
         raise ValueError('Feedback comparison hash mismatch')
-    if digest(paths['matched']) != record['matched_control']['fields_sha256']:
+    if sha256(paths['matched']) != record['matched_control']['fields_sha256']:
         raise ValueError('Matched-control hash mismatch')
     with np.load(paths['comparison']) as source:
         data = dict(source)

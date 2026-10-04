@@ -4,45 +4,37 @@
 """Validate reference bundle grids, provenance hashes and PNG/float32 TIFF exports."""
 
 import argparse
-import hashlib
 import json
-import struct
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-
-def digest(path):
-    result = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(8 * 1024**2), b""):
-            result.update(block)
-    return result.hexdigest()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import references
+from uwtools.hashing import sha256
 
 
 def verify(root, source_hashes=False):
     climate = root / "climate"
     bundles = list(climate.glob("*.uwclim"))
     for path in bundles:
-        with path.open("rb") as stream:
-            header = stream.read(40)
-        if header[:8] != b"UWCLIM1\0":
-            raise ValueError(f"Invalid bundle magic: {path}")
-        version, width, height, layers = struct.unpack("<IIII", header[8:24])
-        if version != 1 or width != 2*height or layers < 1 or path.stat().st_size != 40+width*height*layers*4:
+        header = references.read_header(path)
+        if (header.columns != 2*header.rows or header.layers < 1
+                or path.stat().st_size != references.file_size(*header.shape)):
             raise ValueError(f"Invalid bundle grid/payload: {path}")
     checked_sources = set()
     for metadata in climate.glob("*-additional-preparation.json"):
         receipt = json.loads(metadata.read_text())
         for product in receipt["products"]:
             path = climate / product["bundle"]
-            if digest(path) != product["sha256"]:
+            if sha256(path) != product["sha256"]:
                 raise ValueError(f"Bundle checksum mismatch: {path}")
         if source_hashes:
             for source in receipt["sources"]:
                 path = Path(source["file"])
-                if path not in checked_sources and digest(path) != source["sha256"]:
+                if path not in checked_sources and sha256(path) != source["sha256"]:
                     raise ValueError(f"Source checksum mismatch: {path}")
                 checked_sources.add(path)
     manifest = json.loads((root / "metadata/reference-maps/manifest.json").read_text())
@@ -53,7 +45,7 @@ def verify(root, source_hashes=False):
             raise ValueError("Manifest has a noncanonical grid")
         for record in (*resolution.get("land_maps", []), *resolution.get("sea_maps", [])):
             path = root / record["file"]
-            if path.stat().st_size != record["bytes"] or digest(path) != record["sha256"]:
+            if path.stat().st_size != record["bytes"] or sha256(path) != record["sha256"]:
                 raise ValueError(f"Import/preview checksum mismatch: {path}")
         names = set()
         for product in resolution["products"]:
@@ -62,7 +54,7 @@ def verify(root, source_hashes=False):
             names.add(product["name"])
             for record in (*product["maps"], product["csv"]):
                 path = root / record["file"]
-                if path.stat().st_size != record["bytes"] or digest(path) != record["sha256"]:
+                if path.stat().st_size != record["bytes"] or sha256(path) != record["sha256"]:
                     raise ValueError(f"Artifact checksum mismatch: {path}")
                 if path.suffix not in (".png", ".tif"):
                     continue

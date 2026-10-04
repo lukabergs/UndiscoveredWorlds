@@ -6,21 +6,21 @@ from __future__ import annotations
 import argparse
 import calendar
 import json
-import struct
+import sys
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
 from PIL import Image, ImageDraw
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import grid, references
 from cell_grid import (
     conservative_remap,
     grid_dimensions,
-    latitude_edges,
 )
 
 
-MAGIC = b"UWCLIM1\0"
 ERA5_VARIABLES = {
     "slp": "slp_anom",
     "tcwv": "tcwv",
@@ -64,23 +64,12 @@ def transform_era5(variable: str, values: np.ndarray, month: int) -> np.ndarray:
 
 
 def remove_area_weighted_mean(values: np.ndarray) -> np.ndarray:
-    edges = np.sin(np.deg2rad(latitude_edges(values.shape[0])))
-    weights = (edges[:-1] - edges[1:])[:, None]
+    weights = grid.band_area(values.shape[0], degree_edges=True)[:, None]
     finite = np.isfinite(values)
     total_weight = np.sum(weights * finite)
     if total_weight > 0.0:
         values = values - np.sum(np.where(finite, values, 0.0) * weights) / total_weight
     return values
-
-
-def write_monthly_grid(path: Path, variable: str, months: list[np.ndarray]) -> None:
-    height, width = months[0].shape
-    with path.open("wb") as output:
-        output.write(MAGIC)
-        output.write(struct.pack("<IIII", 1, width, height, len(months)))
-        output.write(variable.encode("ascii").ljust(16, b"\0"))
-        for values in months:
-            output.write(values.astype("<f4", copy=False).tobytes(order="C"))
 
 
 def prepare_era5(source: Path, output: Path, width: int, height: int) -> list[dict[str, object]]:
@@ -115,7 +104,7 @@ def prepare_era5(source: Path, output: Path, width: int, height: int) -> list[di
 
         dataset.close()
         output_path = output / f"era5_{output_variable}_monthly.uwclim"
-        write_monthly_grid(output_path, output_variable, months)
+        references.write(output_path, output_variable, months)
         records.append(
             {
                 "source_variable": source_variable,

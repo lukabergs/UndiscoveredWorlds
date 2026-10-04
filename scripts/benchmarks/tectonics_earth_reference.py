@@ -2,11 +2,14 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 from PIL import Image
 
-from tectonics_experiment import digest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import grid
+from uwtools.hashing import sha256
 from tectonics_report_data import hypsography_shape
 
 
@@ -23,7 +26,7 @@ def reference_inputs(root, width):
 
 
 def input_hashes(root, width):
-    return {p.relative_to(root).as_posix(): digest(p) if p.is_file() else None
+    return {p.relative_to(root).as_posix(): sha256(p) if p.is_file() else None
             for p in reference_inputs(root, width)}
 
 
@@ -54,8 +57,7 @@ def measure_earth(elevation, non_ocean):
         raise ValueError("Earth reference must share a cell-centred global 2:1 grid")
     height = elevation.shape[0]
     # Exact spherical row areas; longitude width and R^2 cancel when normalized.
-    edges = np.linspace(np.pi / 2, -np.pi / 2, height + 1)
-    area = np.broadcast_to((np.sin(edges[:-1]) - np.sin(edges[1:]))[:, None], elevation.shape)
+    area = grid.area_weights(*elevation.shape)
     metrics, curve = weighted_distribution(elevation, area)
     return {"elevation_m": metrics, "hypsography": curve,
             "land_fraction": float(np.sum(area[non_ocean]) / area.sum()),
@@ -115,7 +117,7 @@ def load_earth_reference(root, width=2048, *, refresh=False):
     # Cheap derived curve checks use only the cached 201 points.
     reference["metrics"]["hypsography_shape"] = hypsography_shape(reference["metrics"]["hypsography"])
     return {**reference, "cache": {"path": cache.relative_to(root).as_posix(),
-                                   "sha256": digest(cache), "schema": CACHE_SCHEMA}}
+                                   "sha256": sha256(cache), "schema": CACHE_SCHEMA}}
 
 
 def compare_to_earth(metrics, reference):

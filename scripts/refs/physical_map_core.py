@@ -3,12 +3,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from contextlib import contextmanager
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import sys
 import textwrap
 import zlib
 import zipfile
@@ -21,6 +21,8 @@ import rasterio
 from rasterio.transform import from_bounds
 from rasterio.warp import reproject, Resampling
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.hashing import sha256
 from cell_grid import conservative_remap, grid_dimensions
 
 REPO = Path(__file__).resolve().parents[2]
@@ -40,11 +42,6 @@ WORLD_COVER = {
 
 def slug(value):
     return re.sub(r'[^a-z0-9]+', '_', str(value).lower()).strip('_')
-
-
-def sha256(path):
-    with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 @contextmanager

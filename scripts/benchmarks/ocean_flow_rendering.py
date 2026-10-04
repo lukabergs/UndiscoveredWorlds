@@ -5,7 +5,6 @@ Rendering interpolates the available fields; it does not resolve new dynamics.
 Both panels use the same mask, seed, speed scale and integration duration.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -13,7 +12,9 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'refs'))
+from uwtools.hashing import sha256
 from reference_map_rendering import grid_velocity, lic_luminance, sample, scalar_rgb
 
 
@@ -136,7 +137,7 @@ def render_pair(east,north,reference_east,reference_north,wet,output_prefix,
     receipt=dict(native_grid=[east.shape[1],east.shape[0]],render_panel=[width,width//2],seed=seed,
                  particle_days=days,scale_mps=[0,speed_limit],common_wet_native_cells=int(common.sum()),panels=stats,
                  caveat='GLORYS near-surface current versus model effective mixed-layer transport velocity; interpolation adds no resolved structure.',
-                 output_sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in files})
+                 output_sha256={p.name:sha256(p) for p in files})
     Path(str(prefix)+'-render.json').write_text(json.dumps(receipt,indent=2)+'\n')
     return receipt
 

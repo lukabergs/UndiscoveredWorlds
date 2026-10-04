@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import paths
-from bundle import Bundle
+from uwtools.bundle import Bundle
 from evaluate import code_state, evaluate, load_profile
 
 ROOT = Path(__file__).resolve().parents[2]

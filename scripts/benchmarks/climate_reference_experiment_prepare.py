@@ -1,9 +1,12 @@
 """Prepare aligned, masked numerical fields for explicit benchmark interventions."""
-import hashlib
 import json
 from pathlib import Path
-import struct
+import sys
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import grid, references
+from uwtools.hashing import sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 A = ROOT / 'runs/reports/climate-reference-experiments-20260915'
@@ -14,10 +17,9 @@ MISSING = np.float32(-9999.9)
 
 def read(name):
     path = REF / f'{name}_monthly.uwclim'
-    with path.open('rb') as f:
-        magic, version, width, height, months, variable = struct.unpack('<8sIIII16s', f.read(40))
-    assert magic == b'UWCLIM1\0' and (version, width, height, months) == (1, 2048, 1024, 12)
-    return np.memmap(path, mode='r', dtype='<f4', offset=40, shape=(12, height, width))
+    header, values = references.read(path, memmap=True)
+    assert header.shape == (12, 1024, 2048)
+    return values
 
 
 def qsat(temperature, pressure):
@@ -35,8 +37,7 @@ def remap(field, width, extra_mask=None):
     valid = np.isfinite(field) & (field != MISSING)
     if extra_mask is not None:
         valid &= extra_mask
-    edges = np.sin(np.linspace(np.pi / 2, -np.pi / 2, ny + 1))
-    weights = (edges[:-1] - edges[1:])[:, None]
+    weights = grid.band_area(ny)[:, None]
     numerator = (np.where(valid, field, 0) * weights).reshape(height, factor, width, factor).sum(axis=(1, 3))
     denominator = (valid * weights).reshape(height, factor, width, factor).sum(axis=(1, 3))
     total = np.broadcast_to(weights, field.shape).reshape(height, factor, width, factor).sum(axis=(1, 3))
@@ -75,12 +76,10 @@ def main():
         for width, values in outputs.items():
             target = OUT / str(width) / f'{role}.uwclim'
             target.parent.mkdir(exist_ok=True)
-            with target.open('xb') as f:
-                f.write(struct.pack('<8sIIII16s', b'UWCLIM1\0', 1, width, width // 2, 12, role.encode()))
-                f.write(values.tobytes())
+            references.write(target, role, values, mode='xb')
             receipts.append(dict(path=target.relative_to(ROOT).as_posix(), role=role,
                 units=units.get(role, 'm/s east' if role.startswith('u') else 'm/s north'),
-                sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+                sha256=sha256(target),
                 sources=[(REF / f'{name}_monthly.uwclim').relative_to(ROOT).as_posix() for name in sources],
                 width=width, height=width//2,
                 valid_fractions=[float(np.mean(m != MISSING)) for m in values]))
@@ -88,8 +87,7 @@ def main():
     source_hashes = {}
     for name in sorted({name for sources in source_names.values() for name in sources}):
         path = REF / f'{name}_monthly.uwclim'
-        with path.open('rb') as f:
-            source_hashes[path.relative_to(ROOT).as_posix()] = hashlib.file_digest(f, 'sha256').hexdigest()
+        source_hashes[path.relative_to(ROOT).as_posix()] = sha256(path)
     (OUT / 'manifest.json').write_text(json.dumps(dict(
         period='ERA5 2001-2020 monthly climatology',
         remap='Spherical-area conservative restriction of valid cells; minimum 5% source coverage; qa and evaporation use ERA5 SST coverage.',

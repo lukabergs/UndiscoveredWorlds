@@ -2,9 +2,13 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 import numpy as np
 from PIL import Image
-from tectonics_experiment import write_json, digest, snapshot_manifest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import grid, palettes
+from uwtools.hashing import sha256
+from tectonics_experiment import write_json, snapshot_manifest
 from tectonics_report_data import load_bundle
 from tectonics_review import review
 from tectonics_earth_reference import load_earth_reference
@@ -24,15 +28,14 @@ def distribution(z, weights=None):
 def earth_thresholds():
     cache = ROOT/'refs/processed/metadata/2048/tectonics-shelf-thresholds.json'
     source = ROOT/'refs/processed/heightmap/2048.tif'
-    source_hash = digest(source)
+    source_hash = sha256(source)
     if cache.exists():
         data = json.loads(cache.read_text())
         if data['input_sha256'] != source_hash:
             raise ValueError('Earth threshold source changed')
         return data
     z = np.array(Image.open(source))
-    edges = np.linspace(np.pi/2, -np.pi/2, z.shape[0]+1)
-    weights = np.broadcast_to((np.sin(edges[:-1])-np.sin(edges[1:]))[:,None],z.shape)
+    weights = grid.area_weights(*z.shape)
     data = dict(schema='tectonics-shelf-thresholds/v1', input_sha256=source_hash,
         weighting='spherical cell area', fraction_below=distribution(z,weights),
         shelf_proxy='Signed elevation -200 to 0 m; bathymetric proxy, not a geomorphological shelf mask',
@@ -67,7 +70,7 @@ def analyze(run_id):
     if fracture_history[peak_index]['damaged_rift_cells'] > 0:
         snap = record['snapshots'][peak_index]
         _, damaged, _ = load_bundle(ROOT/f'runs/checkpoints/tectonics/{run_id}'/snap['directory'])
-        palette = json.loads((ROOT/'configs/tectonics-palettes.json').read_text())
+        palette = palettes.tectonics()
         for name, field in [('rift-damage-peak', 'rift_damage'), ('rift-terrain-peak', 'elevation')]:
             stops = palette['fields'][field].get('stops', palette['sequential'])
             Image.fromarray(colourize(damaged[field], stops)).resize(

@@ -5,10 +5,10 @@
 
 import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
 import re
+import sys
 import tarfile
 import zipfile
 
@@ -17,6 +17,9 @@ import numpy as np
 import openpyxl
 from pyhdf.SD import SD, SDC
 import rasterio
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.hashing import sha256
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -140,8 +143,7 @@ def main():
         result = dict(dataset=entry['dataset'], file=entry['file'])
         try:
             receipt = json.loads(path.with_name(path.name + '.receipt.json').read_text())
-            with path.open('rb') as stream:
-                checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+            checksum = sha256(path)
             if receipt['sha256'] != checksum or receipt['request'] != entry:
                 raise ValueError('Receipt does not match source or catalog')
             result.update(status='passed', sha256=checksum, details=inspect(path, entry['kind']))

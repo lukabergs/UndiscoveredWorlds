@@ -2,8 +2,11 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 import numpy as np
 from PIL import Image, ImageDraw
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import palettes
 from map_rendering import colourize
 from tectonics_report_data import load_bundle
 
@@ -12,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def review(run):
     record = json.loads((ROOT/f'runs/manifests/tectonics/{run}.json').read_text())
-    palette = json.loads((ROOT/'configs/tectonics-palettes.json').read_text())['fields']['elevation']['stops']
+    palette = palettes.tectonics()['fields']['elevation']['stops']
     canvas = Image.new('RGB', (1280, 930), '#101b28')
     draw = ImageDraw.Draw(canvas)
     draw.text((15, 10), f'Run {run}: fixed location x=150..190, y=50..90; yellow box is x=160..180, y=60..80. Native cells = 156.25 km.', fill='white')

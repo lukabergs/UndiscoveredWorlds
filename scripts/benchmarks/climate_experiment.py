@@ -5,7 +5,6 @@
 import argparse
 import datetime
 import difflib
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +17,7 @@ import zipfile
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import paths
+from uwtools.hashing import sha256
 from climate_report_data import Archive, FIELDS, ROOT, magnitude, table, weights
 from climate_report_metrics import evaluate, rank
 from climate_report import mask_for
@@ -33,10 +33,6 @@ def read(path):
 
 def write(path, data):
     Path(path).write_text(json.dumps(data, indent=2, allow_nan=False) + '\n', encoding='utf-8')
-
-def sha(path):
-    with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 def setup(archive, source_archive=None, baseline=None, count=10, skip_tests=False):
     selected = read(H/'climate-global-current-selection.json')
@@ -109,11 +105,11 @@ def run(archive, run_id, plan):
     # Reuse baseline/first-case hashes only while both size and modification
     # time match the archived receipt; hash changed or unrecorded inputs.
     inputs = {path:(verified['inputs_sha256'][path] if verified and previous_stats.get(path)==stats[path]
-                   else sha(ROOT/path)) for path in inputs}
+                   else sha256(ROOT/path)) for path in inputs}
     manifest = dict(case=str(run_id),parent=str(parent),reason=plan['hypothesis'],utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         git_head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
-        source_sha256={path:sha(ROOT / path) for path in paths},source_zip_sha256=sha(folder/'source.zip'),
-        executable_sha256=sha(folder/EXE.name),runtime_sha256={p.name:sha(p) for p in folder.glob('*.dll')},
+        source_sha256={path:sha256(ROOT / path) for path in paths},source_zip_sha256=sha256(folder/'source.zip'),
+        executable_sha256=sha256(folder/EXE.name),runtime_sha256={p.name:sha256(p) for p in folder.glob('*.dll')},
         inputs_sha256=inputs,input_file_stats=stats,input_hash_provenance='Reuse baseline/first-case hashes with matching size/mtime receipts; rehash changed or unrecorded inputs.',all_tuning_parameters=dict(re.findall(r'inline constexpr (?:float|double|bool|int) (\w+)\s*=\s*([^;]+);',tuning)),
         environment={'UW_CLIMATE_EXPERIMENT_INPUT':None,'UW_CLIMATE_SURFACE_DRAG_INPUT':env['UW_CLIMATE_SURFACE_DRAG_INPUT']},
         seed=batch['seed'],world=[1024,512],native_grids={'atmosphere':[128,64],'ocean':[128,64],'hydrology':[256,128]},
@@ -146,7 +142,7 @@ def run(archive, run_id, plan):
         check_code = check.returncode
     receipt['checks_exit']=check_code
     outputs=list((ROOT/f'runs/diagnostics/climate/{run_id}').rglob('*'))+[ROOT/f'runs/logs/climate/{run_id}.log']
-    receipt['artifact_sha256']={p.relative_to(ROOT).as_posix():sha(p) for p in outputs if p.is_file()}
+    receipt['artifact_sha256']={p.relative_to(ROOT).as_posix():sha256(p) for p in outputs if p.is_file()}
     write(folder/'execution.json',receipt)
     assert check_code in (None,0), 'See preserved checks.log'
     analyze(archive,run_id)

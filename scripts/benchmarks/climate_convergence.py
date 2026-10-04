@@ -1,5 +1,9 @@
 """Wind-only tropical convergence indicator; not a complete convective ITCZ diagnosis."""
+from pathlib import Path
+import sys
 import numpy as np
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from uwtools import grid
 
 def surface_convergence(east, north, radius_m=6371000.0):
     """Closed spherical finite-volume -div(u), s^-1, cell-centred 2:1 grid."""
@@ -10,7 +14,7 @@ def surface_convergence(east, north, radius_m=6371000.0):
         raise ValueError('Vectors and positive radius must be finite')
     ny,nx=east.shape;dphi=np.pi/ny;dlambda=2*np.pi/nx
     edges=np.linspace(np.pi/2,-np.pi/2,ny+1)
-    area=radius_m**2*dlambda*(np.sin(edges[:-1])-np.sin(edges[1:]))
+    area=radius_m**2*dlambda*grid.band_area(ny)
     zonal=(np.roll(east,-1,1)-np.roll(east,1,1))*.5*radius_m*dphi
     faces=np.zeros((ny+1,nx));faces[1:-1]=(north[:-1]+north[1:])*.5*radius_m*dlambda*np.cos(edges[1:-1,None])
     return -(zonal+faces[:-1]-faces[1:])/area[:,None]
@@ -31,7 +35,7 @@ def tropical_band(convergence_per_second,latitude_limit=30.0,minimum_per_day=.10
     c=np.asarray(convergence_per_second,dtype=float)*86400
     if c.ndim!=2 or not np.isfinite(c).all() or not 0<latitude_limit<90 or minimum_per_day<=0 or not 0<peak_fraction<=1:
         raise ValueError('Invalid convergence-band input or threshold')
-    lat=90-(np.arange(c.shape[0])+.5)*180/c.shape[0];tropics=np.abs(lat[:,None])<=latitude_limit
+    lat=grid.latitudes(c.shape[0]);tropics=np.abs(lat[:,None])<=latitude_limit
     peaks=np.maximum(0,np.max(np.where(tropics,c,0),axis=0))
     threshold=np.maximum(minimum_per_day,peak_fraction*peaks)
     return tropics&(c>=threshold),threshold

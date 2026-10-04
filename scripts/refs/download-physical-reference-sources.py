@@ -6,15 +6,18 @@
 import argparse
 from functools import lru_cache
 from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
 import shutil
+import sys
 import tarfile
 from urllib.parse import urlsplit, urlunsplit
 import zipfile
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.hashing import sha256
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -27,11 +30,6 @@ def session(authenticated):
             raise ValueError("Earthdata local login is not configured")
         return earthaccess.get_requests_https_session()
     return requests.Session()
-
-
-def digest(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def validate(path, kind):
@@ -74,7 +72,7 @@ def fetch(entry, root, budget, minimum_free, verify_only):
         if not receipt.exists():
             raise ValueError("Existing file has no receipt; refusing to overwrite")
         saved = json.loads(receipt.read_text())
-        if saved["request"] != entry or saved["sha256"] != digest(path):
+        if saved["request"] != entry or saved["sha256"] != sha256(path):
             raise ValueError("Cached source or catalog changed")
         validate(path, entry["kind"])
         print(f"Verified {entry['dataset']}/{path.name}", flush=True)
@@ -104,7 +102,7 @@ def fetch(entry, root, budget, minimum_free, verify_only):
             if expected and not response.headers.get("Content-Encoding") and size != expected:
                 raise ValueError("Incomplete response body")
             validate(partial, entry["kind"])
-            checksum = digest(partial)
+            checksum = sha256(partial)
             if entry.get("sha256") and entry["sha256"] != checksum:
                 raise ValueError("Provider checksum mismatch")
             partial.replace(path)

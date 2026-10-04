@@ -1,12 +1,13 @@
 """Review maps of bundle fields in the project palettes (climate and tectonics)."""
 import colorsys
-import json
 import sys
 from pathlib import Path
 
 import numpy as np
 
-from bundle import SEASONS
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import palettes
+from uwtools.bundle import SEASONS
 from validation import load_selected, surface_elevation
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,7 +15,7 @@ sys.path.insert(0, str(ROOT / 'scripts/benchmarks'))
 import map_rendering  # noqa: E402
 from climate_palettes import field_rgb  # noqa: E402
 
-TECTONICS = json.loads((ROOT / 'configs/tectonics-palettes.json').read_text(encoding='utf-8'))
+TECTONICS = palettes.tectonics()
 DERIVED = {'surface_elevation': surface_elevation}
 
 

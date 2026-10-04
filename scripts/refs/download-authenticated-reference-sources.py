@@ -4,19 +4,18 @@
 """Download GLORYS surface ocean fields or CERES EBAF using local provider logins."""
 
 import argparse
-import hashlib
 import json
+import sys
 from pathlib import Path
 
 import xarray as xr
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.hashing import sha256
+
 
 def record(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(8 * 1024**2), b""):
-            digest.update(block)
-    return dict(file=path.name, bytes=path.stat().st_size, sha256=digest.hexdigest())
+    return dict(file=path.name, bytes=path.stat().st_size, sha256=sha256(path))
 
 
 def marine(root, start, end):

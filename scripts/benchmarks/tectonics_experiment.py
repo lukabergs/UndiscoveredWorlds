@@ -5,7 +5,6 @@
 """Run one numbered tectonics experiment; preserve its recipe, binary and native fields."""
 import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -16,15 +15,12 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import paths
+from uwtools.bundle import SCHEMA as RUN_BUNDLE_SCHEMA, read_manifest
+from uwtools.hashing import sha256
 from run_storage import POWERSHELL, ensure_archive_directory
 import run_log
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def digest(path):
-    with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def write_json(path, value):
@@ -53,7 +49,6 @@ BUNDLE_FIELDS = {
     "sediment_m": "geosphere.sediment",
 }
 SNAPSHOT_TABLE = "geosphere.tectonic_snapshot"
-RUN_BUNDLE_SCHEMA = "uw-run-bundle/v1"
 # world_pipeline needs these beside it when it runs from a run's archive.
 RUNTIME_LIBRARIES = ("libpng16.dll", "zlib1.dll")
 
@@ -85,12 +80,12 @@ def legacy_command(executable, recipe):
 
 
 def is_run_bundle(bundle):
-    return json.loads((Path(bundle) / "manifest.json").read_text()).get("schema") == RUN_BUNDLE_SCHEMA
+    return read_manifest(bundle).get("schema") == RUN_BUNDLE_SCHEMA
 
 
 def bundle_files(bundle):
     """Field name -> file of a snapshot, for a run bundle or a former snapshot bundle."""
-    manifest = json.loads((Path(bundle) / "manifest.json").read_text())
+    manifest = read_manifest(bundle)
     if manifest.get("schema") != RUN_BUNDLE_SCHEMA:
         return dict(manifest["files"])
     entries = {entry["id"]: entry["file"] for entry in manifest["fields"]}
@@ -100,7 +95,7 @@ def bundle_files(bundle):
 def snapshot_manifest(bundle):
     """The engine's snapshot record: label, time, scenario, diagnostics, plates."""
     bundle = Path(bundle)
-    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest = read_manifest(bundle)
     if manifest.get("schema") != RUN_BUNDLE_SCHEMA:
         return manifest
     table = next(entry for entry in manifest["tables"] if entry["id"] == SNAPSHOT_TABLE)
@@ -108,7 +103,7 @@ def snapshot_manifest(bundle):
 
 
 def field_hashes(bundle):
-    return {name: digest(Path(bundle) / filename) for name, filename in bundle_files(bundle).items()}
+    return {name: sha256(Path(bundle) / filename) for name, filename in bundle_files(bundle).items()}
 
 
 def run_snapshots(output):
@@ -142,7 +137,7 @@ def sample_run(run_id, interval):
     archive = ROOT / f"runs/reports/tectonics/{run_id}"
     legacy = (archive / "tectonic_pipeline.exe").is_file()
     executable = archive / ("tectonic_pipeline.exe" if legacy else "world_pipeline.exe")
-    if digest(executable) != record["executable_sha256"]:
+    if sha256(executable) != record["executable_sha256"]:
         raise ValueError("Archived executable hash mismatch")
     root = ROOT / f"runs/checkpoints/tectonics/{run_id}"
     output = root / f"sampling-{interval}"
@@ -203,7 +198,7 @@ def run(args):
               "started_utc": datetime.now(timezone.utc).isoformat(),
               "git_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "git_status": subprocess.check_output(["git", "status", "--short"], cwd=ROOT, text=True),
-              "executable_sha256": digest(executable),
+              "executable_sha256": sha256(executable),
               "geometry": {"registration": "cell-centred", "layout": "row-major",
                            "topology": "planar torus", "wrap_x": True, "wrap_y": True,
                            "statistics_weighting": "equal native cell areas"},
@@ -226,7 +221,7 @@ def run(args):
     with zipfile.ZipFile(archive / "source.zip", "w", zipfile.ZIP_DEFLATED) as package:
         for path in sorted(set(inputs)):
             package.write(path, path.relative_to(ROOT).as_posix())
-    record["source_zip_sha256"] = digest(archive / "source.zip")
+    record["source_zip_sha256"] = sha256(archive / "source.zip")
     build_dir = executable.parent.parent
     cache = build_dir / "CMakeCache.txt"
     if cache.exists():

@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import sys
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +18,10 @@ from PIL import Image
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import grid
+from uwtools.hashing import sha256
 
 ROOT = Path(__file__).resolve().parents[2] / "refs"
 SOURCES = ROOT / "source"
@@ -51,12 +55,8 @@ def configure_grid(width):
 
 
 def describe(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-            digest.update(block)
     return {"file": path.relative_to(ROOT).as_posix(), "bytes": path.stat().st_size,
-            "sha256": digest.hexdigest()}
+            "sha256": sha256(path)}
 
 
 def shp(member):
@@ -115,8 +115,7 @@ def prepare_masks():
          lambda f: 1 if f["properties"]["area"] < 0 else 2)
     burn("GSHHS_shp/f/GSHHS_f_L3.shp", classes, SOURCE_TRANSFORM, 1)
     burn("GSHHS_shp/f/GSHHS_f_L4.shp", classes, SOURCE_TRANSFORM, 2)
-    latitude = 90 - (np.arange(SH, dtype=np.float64) + 0.5) * 180 / SH
-    weights = np.cos(np.deg2rad(latitude)).astype(np.float32)[:, None]
+    weights = grid.cosine_latitude(SH).astype(np.float32)[:, None]
     total_weight = downsample(np.broadcast_to(weights, (SH, SW)).copy())
     shares = []
     for category in range(3):
@@ -200,7 +199,7 @@ def verify():
     assert not np.any(lakes & ~land) and not np.any(rivers & ~land)
     assert land[-1].all(), "Antarctic polar cap must cover every longitude"
     assert not land[0].any(), "Northernmost row must be Arctic Ocean"
-    row_weight = np.cos(np.deg2rad(90 - (np.arange(HEIGHT) + 0.5) * 180 / HEIGHT))[:, None]
+    row_weight = grid.cosine_latitude(HEIGHT)[:, None]
     non_ocean_area = float((land * row_weight).sum() / (WIDTH * row_weight.sum()))
     assert 0.27 < non_ocean_area < 0.33
     samples = []
