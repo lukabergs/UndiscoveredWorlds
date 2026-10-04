@@ -14,20 +14,20 @@ Earth-climate accuracy.
   `climateatmosphere::nonlocalThermalResponse` entry points remain available
   through `climate_atmosphere.hpp`. An experiment can call them when constructing
   thermal forcing; the production mode-separated circulation uses local
-  hypsometric forcing. `climate_atmosphere_tests` checks pressure sign, rotation
+  hypsometric forcing. The `ClimateAtmosphere` tests of `world_tests` check pressure sign, rotation
   reversal and spatial response.
 - `ocean_feedback.*` isolates the empirical SST-to-pressure/wind closure from
   the wind-driven ocean's transport and heat budgets. It is selected by
   `OceanConfig::oneWay = false` in `solveWindDrivenOcean`; the production adapter
   explicitly sets `oneWay = true` and couples SST through the atmospheric solver
   instead. The replacement is documented under “Wind-driven ocean and SST” in
-  `docs/tasks/climate-physics/FUTURE_WORK.md`. `climate_ocean_dynamics_tests`
-  retains coupled determinism and convergence checks alongside one-way ocean,
+  `docs/tasks/climate-physics/FUTURE_WORK.md`. The `ClimateOceanDynamics` tests
+  retain coupled determinism and convergence checks alongside one-way ocean,
   coastal transport, heat-budget and sea-ice tests. It is useful for isolated
   coupling comparisons, not as evidence of atmospheric skill.
 
 Run the retained alternatives with the normal build and
-`ctest --test-dir out/build/desktop -C Debug -R "climate_(atmosphere|ocean_dynamics)_tests" --output-on-failure`.
+`ctest --test-dir out/build/desktop -C Debug -R "Climate(Atmosphere|OceanDynamics)" --output-on-failure`.
 
 Uncalled latitude-temperature, prescribed-current/SST and directional rain/
 monsoon implementations were removed. The all-land rainfall fallback remains

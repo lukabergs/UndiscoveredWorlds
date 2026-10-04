@@ -3,22 +3,18 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (!condition)
-    {
-        std::cerr << "FAIL: " << message << '\n';
-        failures++;
-    }
+    EXPECT_TRUE(condition) << message;
 }
 }
 
-int main()
+TEST(ClimateFlow, Model)
 {
     constexpr int columns = 32;
     constexpr int rows = 16;
@@ -111,5 +107,4 @@ int main()
     expect(!polar.remainedInDomain && polar.points.front().y == 0.0f,
         "particle integration must stop cleanly at a polar boundary");
 
-    return failures == 0 ? 0 : 1;
 }

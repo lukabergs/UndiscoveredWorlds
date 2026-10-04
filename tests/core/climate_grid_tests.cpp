@@ -5,22 +5,18 @@
 #include <iostream>
 #include <numeric>
 #include <vector>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (!condition)
-    {
-        std::cerr << "FAIL: " << message << '\n';
-        failures++;
-    }
+    EXPECT_TRUE(condition) << message;
 }
 }
 
-int main()
+TEST(ClimateGrid, Geometry)
 {
     constexpr double pi = 3.14159265358979323846;
     const auto grid = climategrid::makeSphericalGrid(128, 64, 6371000.0);
@@ -168,5 +164,4 @@ int main()
     expect(std::abs(climategrid::areaWeightedIntegral(1, 128, fineProfile) /
         climategrid::areaWeightedIntegral(1, 8, latitudeProfile) - 1.0) < 1.0e-7,
         "one-dimensional energy profiles conserve polar integrals during reconstruction");
-    return failures == 0 ? 0 : 1;
 }

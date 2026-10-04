@@ -7,18 +7,14 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (condition)
-        return;
-
-    std::cerr << "FAIL: " << message << '\n';
-    failures++;
+    EXPECT_TRUE(condition) << message;
 }
 
 bool near(float first, float second, float tolerance = 1.0e-5f)
@@ -178,7 +174,7 @@ void testVariableFlow()
 void testExchangeTimeRefinement();
 void testSubgridHumidityConservation();
 
-int main()
+TEST(ClimateHydrology, Model)
 {
     const auto phaseAt = [](double time, float longitude = 0.0f)
     { return climatehydrology::weatherPhaseAtTime(time, longitude, 0.0f, 2.0f, -2.0f, 0.35f, -0.35f); };
@@ -201,8 +197,6 @@ int main()
             0.0f, 0.0f, 3.0f, -1.0f, 0.0f, 0.0f).landTemperatureAnomalyC / 4096;
     expect(std::abs(asymmetricMean - climatehydrology::dailyMeanCycle(3.0f, -1.0f)) < 1.0e-6,
         "daily-mean baseline must retain the mean of asymmetric coastal cycles");
-    testExchangeTimeRefinement();
-    testSubgridHumidityConservation();
     {
         using climatehydrology::detail::liftedParcelTemperatureC;
         expect(liftedParcelTemperatureC(30.0f,.6f,1000.0f,1000.0f)==30.0f,
@@ -228,13 +222,11 @@ int main()
             }
         }
     }
-    testSeasonalFluxDiagnostic();
     const double coarseRotationError = rotationError(24, 1);
     const double fineRotationError = rotationError(48, 1);
     expect(fineRotationError < coarseRotationError * 0.75 &&
             fineRotationError < rotationError(48, 0),
         "MPDATA must converge under grid refinement and sharpen full rotations versus donor cell");
-    testVariableFlow();
     const auto january = climatehydrology::calendarMonth(0);
     const auto march = climatehydrology::calendarMonth(2);
     const auto december = climatehydrology::calendarMonth(11);
@@ -631,10 +623,6 @@ int main()
             "precipitation must never remove more water than the column contains");
     }
 
-    if (failures == 0)
-        std::cout << "All climate hydrology tests passed\n";
-
-    return failures == 0 ? 0 : 1;
 }
 
 void testExchangeTimeRefinement()
@@ -693,3 +681,11 @@ void testSubgridHumidityConservation()
     expect(subgridCondensableWater(1.0f, 10.0f, 0.2f) == 0.0f,
         "dry cells must not acquire an artificial precipitation floor");
 }
+
+TEST(ClimateHydrology, ExchangeTimeRefinement) { testExchangeTimeRefinement(); }
+
+TEST(ClimateHydrology, SubgridHumidityConservation) { testSubgridHumidityConservation(); }
+
+TEST(ClimateHydrology, SeasonalFluxDiagnostic) { testSeasonalFluxDiagnostic(); }
+
+TEST(ClimateHydrology, VariableFlow) { testVariableFlow(); }

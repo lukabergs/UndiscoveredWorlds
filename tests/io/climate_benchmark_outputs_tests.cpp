@@ -7,11 +7,13 @@
 #include <vector>
 #include <set>
 #include <stdexcept>
+#include <gtest/gtest.h>
 
 // Keep behavior checks active in Release, too.
-#define assert(condition) do { if (!(condition)) { std::cerr << "FAIL line " << __LINE__ << ": " #condition << '\n'; std::exit(1); } } while (false)
+#undef assert
+#define assert(condition) ASSERT_TRUE(condition)
 
-int main()
+TEST(ClimateBenchmarkOutputs, Products)
 {
     const climatebenchmarkmapselection defaults =
         climatebenchmarkmapselection::defaultselection();
@@ -108,5 +110,4 @@ int main()
     assert(std::abs(climatebenchmarkweightedrelativeerror(
         run145counts, workbookreferencecounts, 512) -
         0.40125772177493896) < 1e-12);
-    return 0;
 }

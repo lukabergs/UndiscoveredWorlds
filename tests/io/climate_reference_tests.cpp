@@ -9,18 +9,14 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (condition)
-        return;
-
-    std::cerr << "FAIL: " << message << '\n';
-    failures++;
+    EXPECT_TRUE(condition) << message;
 }
 
 template <typename T>
@@ -61,7 +57,7 @@ void writeFixture(
 }
 }
 
-int main()
+TEST(ClimateReference, MonthlyGrids)
 {
     const std::filesystem::path fixture = std::filesystem::current_path() / "climate-reference-test.uwclim";
     climatereference::MonthlyGrid grid;
@@ -120,5 +116,4 @@ int main()
     std::filesystem::remove(input, ignored);
     std::filesystem::remove(directory / "2", ignored);
     std::filesystem::remove(directory, ignored);
-    return failures == 0 ? 0 : 1;
 }

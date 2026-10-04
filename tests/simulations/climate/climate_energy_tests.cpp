@@ -4,22 +4,18 @@
 
 #include <cmath>
 #include <iostream>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (condition)
-        return;
-
-    std::cerr << "FAIL: " << message << '\n';
-    failures++;
+    EXPECT_TRUE(condition) << message;
 }
 }
 
-int main()
+TEST(ClimateEnergy, Model)
 {
     for (double latitude : {0.0, 12.0, 30.0, 60.0, 90.0})
     {
@@ -143,5 +139,4 @@ int main()
         climateenergy::detail::seasonalPermanentLandIceFraction({-12.0, 4.0, 23.5, 0.0}, highlandOffset),
         "the local lapse correction must enter permanent ice diagnosis exactly once");
 
-    return failures == 0 ? 0 : 1;
 }

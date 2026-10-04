@@ -10,14 +10,14 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <gtest/gtest.h>
 
 namespace
 {
 constexpr double pi = 3.14159265358979323846;
-int failures = 0;
 void expect(bool value, const char* message)
 {
-    if (!value) { std::cerr << "FAIL: " << message << '\n'; ++failures; }
+    EXPECT_TRUE(value) << message;
 }
 
 void checkFluxes(int columns, double radius, const std::vector<float>& initial,
@@ -116,14 +116,19 @@ int benchmark(const char* path)
             std::cout << (ffsl ? "ffsl," : "mpdata,") << field / 2 << ',' << field % 2 << ',' << repetitions << ',' << ms << ','
                 << d.substeps << ',' << d.cellSubsteps << ',' << d.finalAreaWeightedMass / d.initialAreaWeightedMass - 1.0 << '\n';
         }
-    return failures ? 1 : 0;
+    return ::testing::Test::HasFailure() ? 1 : 0;
 }
 }
 
-int main(int argc, char** argv)
+// Explicit tier-4 microbenchmark of world_tests; -1 when the arguments do not name it.
+int climatetransporttool(int argc, char** argv)
 {
-    // Explicit tier-4 microbenchmark; never run from default CTest.
-    if (argc == 3 && std::string(argv[1]) == "--benchmark") return benchmark(argv[2]);
+    if (argc == 3 && std::string(argv[1]) == "--transport-benchmark") return benchmark(argv[2]);
+    return -1;
+}
+
+TEST(ClimateTransport, Model)
+{
     const auto workspaceCheck = [](int phase)
     {
         // Grow/shrink and change radius/forcing while two callers share the row
@@ -228,5 +233,4 @@ int main(int argc, char** argv)
     for (auto& value : ffsl.endMeridionalWindMps) value = -value;
     d = climatehydrology::advectSphericalTracerFfsl(columns, rows, q, u, v, 10.0f, 1000.0f, ffsl, result);
     checkFluxes(columns, 1000.0, q, result, d);
-    return failures ? 1 : 0;
 }

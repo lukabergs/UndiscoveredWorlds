@@ -9,6 +9,7 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <gtest/gtest.h>
 
 namespace
 {
@@ -47,13 +48,12 @@ float readfloat(std::istream& input)
 
 bool expect(bool condition, const std::string& message)
 {
-    if (!condition)
-        std::cerr << message << '\n';
+    EXPECT_TRUE(condition) << message;
     return condition;
 }
 }
 
-int main()
+TEST(ClimateTiff, Float32GeoTiff)
 {
     const char* path = "climate_tiff_test.tif";
     const float samples[] = {
@@ -70,7 +70,7 @@ int main()
     if (!expect(climateio::writefloat32geotiff(path, 4, 2, samples),
             "GeoTIFF writer returned failure"))
     {
-        return 1;
+        return;
     }
 
     std::ifstream input(path, std::ios::binary);
@@ -88,27 +88,25 @@ int main()
         entries[tag] = {readu16(input), readu32(input), readu32(input)};
     }
 
-    bool passed = true;
-    passed &= expect(byteorder[0] == 'I' && byteorder[1] == 'I', "GeoTIFF is not little-endian");
-    passed &= expect(version == 42, "GeoTIFF version is not 42");
-    passed &= expect(entries[256].valueoroffset == 4, "GeoTIFF width is incorrect");
-    passed &= expect(entries[257].valueoroffset == 2, "GeoTIFF height is incorrect");
-    passed &= expect((entries[258].valueoroffset & 0xffffu) == 32, "GeoTIFF is not 32-bit");
-    passed &= expect((entries[339].valueoroffset & 0xffffu) == 3, "GeoTIFF samples are not IEEE float");
-    passed &= expect(entries.count(33550) == 1 && entries.count(33922) == 1,
+    expect(byteorder[0] == 'I' && byteorder[1] == 'I', "GeoTIFF is not little-endian");
+    expect(version == 42, "GeoTIFF version is not 42");
+    expect(entries[256].valueoroffset == 4, "GeoTIFF width is incorrect");
+    expect(entries[257].valueoroffset == 2, "GeoTIFF height is incorrect");
+    expect((entries[258].valueoroffset & 0xffffu) == 32, "GeoTIFF is not 32-bit");
+    expect((entries[339].valueoroffset & 0xffffu) == 3, "GeoTIFF samples are not IEEE float");
+    expect(entries.count(33550) == 1 && entries.count(33922) == 1,
         "GeoTIFF georeferencing tags are missing");
-    passed &= expect(entries.count(34735) == 1, "GeoTIFF WGS84 key is missing");
-    passed &= expect(entries.count(42113) == 1, "GeoTIFF no-data tag is missing");
-    passed &= expect(!climateio::writefloat32geotiff(path, 4, 3, samples),
+    expect(entries.count(34735) == 1, "GeoTIFF WGS84 key is missing");
+    expect(entries.count(42113) == 1, "GeoTIFF no-data tag is missing");
+    expect(!climateio::writefloat32geotiff(path, 4, 3, samples),
         "GeoTIFF writer accepted an extra latitude row");
 
     input.seekg(entries[273].valueoroffset, std::ios::beg);
-    passed &= expect(std::fabs(readfloat(input) - 1.25f) < 0.0001f, "First sample changed");
-    passed &= expect(std::fabs(readfloat(input) - 2.5f) < 0.0001f, "Second sample changed");
-    passed &= expect(std::fabs(readfloat(input) - (-9999.9f)) < 0.01f, "NaN was not written as no-data");
-    passed &= expect(std::fabs(readfloat(input) - 4.0f) < 0.0001f, "Fourth sample changed");
+    expect(std::fabs(readfloat(input) - 1.25f) < 0.0001f, "First sample changed");
+    expect(std::fabs(readfloat(input) - 2.5f) < 0.0001f, "Second sample changed");
+    expect(std::fabs(readfloat(input) - (-9999.9f)) < 0.01f, "NaN was not written as no-data");
+    expect(std::fabs(readfloat(input) - 4.0f) < 0.0001f, "Fourth sample changed");
 
     input.close();
     std::remove(path);
-    return passed ? 0 : 1;
 }

@@ -136,7 +136,3 @@ TEST(Plate, OceanicBuoyancyTracksRelativeLightness)
 }
 
 // TODO test also when plate is large as world
-int main(int argc, char **argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}

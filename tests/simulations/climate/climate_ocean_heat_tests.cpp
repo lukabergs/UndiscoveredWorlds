@@ -9,13 +9,13 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 void expect(bool condition, const char* message)
 {
-    if (!condition) { std::cerr << "FAIL: " << message << '\n'; ++failures; }
+    EXPECT_TRUE(condition) << message;
 }
 
 climateocean::OceanConfig config()
@@ -218,8 +218,6 @@ void variableStorageTests()
 
 void runTests()
 {
-    variableStorageTests();
-    heatKernelTests();
     auto momentum = fixture(64, false);
     for (int y = 0; y < 32; ++y)
         for (int x = 0; x < 64; ++x)
@@ -619,7 +617,8 @@ int benchmark(int columns, int days)
 }
 }
 
-int main(int argc, char** argv)
+// Kernel, accuracy and benchmark modes of world_tests; -1 when the arguments name none.
+int climateoceanheattool(int argc, char** argv)
 {
     if (argc == 4 && std::string(argv[1]) == "--heat-kernels")
     {
@@ -631,12 +630,17 @@ int main(int argc, char** argv)
         try { return accuracy(std::stoi(argv[2])); }
         catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
     }
-    if (argc == 4 && std::string(argv[1]) == "--benchmark")
+    if (argc == 4 && std::string(argv[1]) == "--ocean-heat-benchmark")
     {
         try { return benchmark(std::stoi(argv[2]), std::stoi(argv[3])); }
         catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
     }
-    if (argc != 1) { std::cerr << "Usage: climate_ocean_heat_tests [--heat-kernels WIDTH DAYS | --benchmark WIDTH DAYS | --accuracy WIDTH]\n"; return 2; }
-    runTests();
-    return failures ? 1 : 0;
+    return -1;
 }
+
+
+TEST(ClimateOceanHeat, Model) { runTests(); }
+
+TEST(ClimateOceanHeat, VariableStorage) { variableStorageTests(); }
+
+TEST(ClimateOceanHeat, HeatKernels) { heatKernelTests(); }

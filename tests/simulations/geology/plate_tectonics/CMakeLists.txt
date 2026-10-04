@@ -1,14 +1,4 @@
-include(FetchContent)
-FetchContent_Declare(googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.15.2
-    GIT_SHALLOW TRUE
-)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
-
-add_executable(PlateTectonicsTests
+add_executable(tectonics_tests
     test_world_grid.cpp
     test_bounds.cpp
     test_boundary_motion.cpp
@@ -37,14 +27,12 @@ add_executable(PlateTectonicsTests
     test_topography_codec.cpp
     test_topography_io.cpp
 )
-target_link_libraries(PlateTectonicsTests PRIVATE
+target_link_libraries(tectonics_tests PRIVATE
     plate_tectonics uw_tectonics_heightmap_io uw_tectonics_snapshots
     GTest::gtest GTest::gtest_main)
-target_compile_definitions(PlateTectonicsTests PRIVATE
-    PLATE_TECTONICS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-uw_tectonics_target_defaults(PlateTectonicsTests)
+uw_tectonics_target_defaults(tectonics_tests)
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/artifacts")
-add_test(NAME PlateTectonicsTests COMMAND PlateTectonicsTests)
-set_tests_properties(PlateTectonicsTests PROPERTIES LABELS "tectonics"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/artifacts")
+gtest_discover_tests(tectonics_tests
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/artifacts"
+    PROPERTIES LABELS "tectonics")

@@ -3,22 +3,18 @@
 
 #include <cmath>
 #include <iostream>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (condition)
-        return;
-
-    std::cerr << "FAIL: " << message << '\n';
-    failures++;
+    EXPECT_TRUE(condition) << message;
 }
 }
 
-int main()
+TEST(ClimatePhysics, Model)
 {
     const float uniformlyMixed = climatephysics::detail::boundarySurfaceRelativeHumidity(18.0f, 50.0f, 0.45f);
     expect(std::abs(uniformlyMixed - 0.8f) < 1.0e-6f,
@@ -164,5 +160,4 @@ int main()
     expect(climatephysics::adaptiveCouplingRelaxation(0.3, {2.0}, {2.0}, 0.1, 0.5) == 0.3 &&
         climatephysics::adaptiveCouplingRelaxation(0.5, {2.0}, {3.0}, 0.1, 0.5) == 0.1,
         "unchanged residuals must preserve relaxation and growing feedback must respect its lower bound");
-    return failures == 0 ? 0 : 1;
 }

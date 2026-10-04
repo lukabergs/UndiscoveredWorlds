@@ -4,17 +4,17 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 void expect(bool condition, const char* message)
 {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
+    EXPECT_TRUE(condition) << message;
 }
 }
 
-int main()
+TEST(ClimateBoundaryLayer, Model)
 {
     using namespace climateatmosphere;
     constexpr float pi = 3.14159265358979323846f;
@@ -143,5 +143,4 @@ int main()
     temperature[0] = std::numeric_limits<float>::quiet_NaN();
     expect(!solveBoundaryLayer(columns, rows, temperature, heating, mechanical, config).inversionSolver.converged,
         "nonfinite boundary inputs must be rejected");
-    return failures ? 1 : 0;
 }

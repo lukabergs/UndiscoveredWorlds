@@ -6,8 +6,9 @@
 #include <atomic>
 #include <iostream>
 #include <stdexcept>
+#include <gtest/gtest.h>
 
-int main()
+TEST(ParallelRows, NestedConcurrentAndFailingCallers)
 {
     std::atomic<bool> correct{true};
     const auto exercise = [&] {
@@ -38,10 +39,6 @@ int main()
     catch (const std::runtime_error&) { caught = true; }
     exercise(); // A failed callback must leave the executor reusable.
     parallelforrows(1, 0, [&](int, int) { correct = false; });
-    if (!correct || !caught || finishedRows != 128)
-    {
-        std::cerr << "row workers must cover disjoint ranges, join before rethrow, and support nested/concurrent calls\n";
-        return 1;
-    }
-    return 0;
+    EXPECT_TRUE(correct && caught && finishedRows == 128)
+        <<"row workers must cover disjoint ranges, join before rethrow, and support nested/concurrent calls";
 }

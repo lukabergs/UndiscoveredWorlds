@@ -9,18 +9,14 @@
 #include <iostream>
 #include <limits>
 #include <vector>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (!condition)
-    {
-        std::cerr << "FAIL: " << message << '\n';
-        failures++;
-    }
+    EXPECT_TRUE(condition) << message;
 }
 
 struct FaceWork { double wind = 0.0, drag = 0.0, maximumSpeed = 0.0; };
@@ -116,7 +112,8 @@ int replay(const std::string& path, int days, int stepHours)
 }
 }
 
-int main(int argc, char** argv)
+// Replay modes of world_tests; -1 when the arguments name neither.
+int climateoceandynamicstool(int argc, char** argv)
 {
     if (argc == 6 && std::string(argv[1]) == "--momentum-replay")
     {
@@ -150,6 +147,11 @@ int main(int argc, char** argv)
     }
     if (argc >= 4 && std::string(argv[1]) == "--coastal-replay")
         return replay(argv[2], std::stoi(argv[3]), argc > 4 ? std::stoi(argv[4]) : 24);
+    return -1;
+}
+
+TEST(ClimateOceanDynamics, Model)
+{
     {
         constexpr double r=2e-6;
         for (const auto bounds : {std::pair<double,double>{-8e-6,0.0}, {0.0,8e-6},
@@ -789,5 +791,4 @@ int main(int argc, char** argv)
         uniformStress.streamfunctionM3S[(annulusRows / 4) * annulusColumns] > 0.0f &&
         uniformStress.streamfunctionM3S[(3 * annulusRows / 4) * annulusColumns] < 0.0f,
         "uniform zonal stress must reproduce the spherical annulus solution and opposite hemisphere curl signs");
-    return failures == 0 ? 0 : 1;
 }

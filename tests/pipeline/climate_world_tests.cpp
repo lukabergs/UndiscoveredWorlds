@@ -4,20 +4,16 @@
 #include <iostream>
 
 #include "climate_stages.hpp"
+#include <gtest/gtest.h>
 
 class climateworld;
 void exportclimatevalidationreport(climateworld& world);
 
-int main()
+TEST(ClimateWorld, BuildsWithoutPlanet)
 {
     void (*const runstage)(GenerationStageId, climateworld&, const ClimateStageContext&) = &executeclimatestage;
     void (*const report)(climateworld&) = &exportclimatevalidationreport;
-    if (runstage == nullptr || report == nullptr)
-        return 1;
-    if (!isclimateonlystage(GenerationStageId::rainfall) || isclimateonlystage(GenerationStageId::terrain_roughness))
-    {
-        std::cerr << "The climate-only stages are the climate feedback stages without terrain roughness\n";
-        return 1;
-    }
-    return 0;
+    ASSERT_TRUE(runstage != nullptr && report != nullptr);
+    EXPECT_TRUE(isclimateonlystage(GenerationStageId::rainfall) && !isclimateonlystage(GenerationStageId::terrain_roughness))
+        <<"The climate-only stages are the climate feedback stages without terrain roughness";
 }

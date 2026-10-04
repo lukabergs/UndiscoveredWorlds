@@ -22,18 +22,14 @@
 #include <chrono>
 #include <iomanip>
 #include <string>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (condition)
-        return;
-
-    std::cerr << "FAIL: " << message << '\n';
-    failures++;
+    EXPECT_TRUE(condition) << message;
 }
 
 void testSurface850Exchange()
@@ -812,39 +808,10 @@ void testStationaryPreconditioning()
             }
 }
 
-int main(int argc, char** argv)
+// Replay and benchmark modes of world_tests; -1 when the arguments name neither.
+int climateatmospheretool(int argc, char** argv)
 {
-    testSurfaceMomentumAdvection();
-    testSurface850Exchange();
-    {
-        constexpr int columns = 32, rows = 16;
-        std::vector<float> forcing(columns * rows), zero(columns * rows, 0.0f), zonal(rows, 0.0f);
-        for (int y = 0; y < rows; ++y)
-            for (int x = 0; x < columns; ++x)
-                forcing[y * columns + x] = static_cast<float>(std::cos(2.0 * 3.141592653589793 * 2 * x / columns) *
-                    std::cos(3.141592653589793 * 3 * (y + 0.5) / rows));
-        climateatmosphere::ModeSeparatedCirculationConfig config;
-        config.enabled = {false, true, true, false};
-        config.maximumZonalWavenumber = 7;
-        config.maximumMeridionalWavenumber = 7;
-        const auto result = climateatmosphere::solveModeSeparatedCirculation(columns, rows, zonal, zero, forcing, config);
-        double error = 0.0;
-        for (int cell = 0; cell < columns * rows; ++cell)
-            error = std::max(error, std::abs(static_cast<double>(result.surfaceStationarySolver.equilibriumPressureAnomalyHpa[cell]) - 0.46875 * forcing[cell]));
-        expect(error < 1.0e-4, "stationary forcing must preserve modal phase and apply its documented spectral gain");
-        if (true)
-        {
-            for (int y = 0; y < rows; ++y)
-                for (int x = 0; x < columns; ++x) forcing[y * columns + x] = x < columns / 4 ? 1.0f : 0.0f;
-            const auto step = climateatmosphere::solveModeSeparatedCirculation(columns, rows, zonal, zero, forcing, config);
-            const auto& values = step.surfaceStationarySolver.equilibriumPressureAnomalyHpa;
-            expect(*std::min_element(values.begin(), values.end()) >= -0.25001f &&
-                *std::max_element(values.begin(), values.end()) <= 0.75001f,
-                "Fejer filtering must not overshoot a sharp forcing step after removal of its zonal mean");
-        }
-    }
-
-    if ((argc == 3 || argc == 4) && std::string(argv[1]) == "--replay")
+    if ((argc == 3 || argc == 4) && std::string(argv[1]) == "--atmosphere-replay")
     {
         auto f = climateatmosphere::detail::StationaryReplay::read(argv[2]);
         if (argc == 4) f.tolerance = std::stof(argv[3]);
@@ -870,7 +837,7 @@ int main(int argc, char** argv)
         std::cout << "],\"projected_pressure_difference_hpa\":" << difference << "}\n";
         return results[2].converged ? 0 : 1;
     }
-    if (argc == 3 && std::string(argv[1]) == "--benchmark")
+    if (argc == 3 && std::string(argv[1]) == "--atmosphere-benchmark")
     {
         const int columns = std::stoi(argv[2]), rows = columns / 2;
         if (!climategrid::validGlobalGridDimensions(columns, rows) || columns > 512) return 2;
@@ -902,17 +869,39 @@ int main(int argc, char** argv)
         std::cout << "]}\n";
         return 0;
     }
-    if (argc != 1) return 2;
-    testStationaryPreconditioning();
-    testSubpolarDeepening();
-    testUpperThermalProjection();
-    testReceiverSurfaceDrag();
-    testKatabaticDrainage();
-    testFrozenSurfaceDrag();
-    testConstantForceAcrossCoast();
-    testParallelSurfaceDrag();
-    testRegionalThermalTrough();
-    testReceiverAscentCorrection();
+    return -1;
+}
+
+TEST(ClimateAtmosphere, Circulation)
+{
+    {
+        constexpr int columns = 32, rows = 16;
+        std::vector<float> forcing(columns * rows), zero(columns * rows, 0.0f), zonal(rows, 0.0f);
+        for (int y = 0; y < rows; ++y)
+            for (int x = 0; x < columns; ++x)
+                forcing[y * columns + x] = static_cast<float>(std::cos(2.0 * 3.141592653589793 * 2 * x / columns) *
+                    std::cos(3.141592653589793 * 3 * (y + 0.5) / rows));
+        climateatmosphere::ModeSeparatedCirculationConfig config;
+        config.enabled = {false, true, true, false};
+        config.maximumZonalWavenumber = 7;
+        config.maximumMeridionalWavenumber = 7;
+        const auto result = climateatmosphere::solveModeSeparatedCirculation(columns, rows, zonal, zero, forcing, config);
+        double error = 0.0;
+        for (int cell = 0; cell < columns * rows; ++cell)
+            error = std::max(error, std::abs(static_cast<double>(result.surfaceStationarySolver.equilibriumPressureAnomalyHpa[cell]) - 0.46875 * forcing[cell]));
+        expect(error < 1.0e-4, "stationary forcing must preserve modal phase and apply its documented spectral gain");
+        if (true)
+        {
+            for (int y = 0; y < rows; ++y)
+                for (int x = 0; x < columns; ++x) forcing[y * columns + x] = x < columns / 4 ? 1.0f : 0.0f;
+            const auto step = climateatmosphere::solveModeSeparatedCirculation(columns, rows, zonal, zero, forcing, config);
+            const auto& values = step.surfaceStationarySolver.equilibriumPressureAnomalyHpa;
+            expect(*std::min_element(values.begin(), values.end()) >= -0.25001f &&
+                *std::max_element(values.begin(), values.end()) <= 0.75001f,
+                "Fejer filtering must not overshoot a sharp forcing step after removal of its zonal mean");
+        }
+    }
+
     constexpr float pi = 3.14159265358979323846f;
     constexpr float earthRotation = 7.2921159e-5f;
     expect(
@@ -1592,5 +1581,28 @@ int main(int argc, char** argv)
         std::all_of(upperFiltered.upperHeightAnomalyMetres.begin(), upperFiltered.upperHeightAnomalyMetres.end(),
             [](float v) { return std::abs(v) < 1.0e-4f; }),
         "upper bandwidth must filter upper forcing independently of surface pressure");
-    return failures == 0 ? 0 : 1;
 }
+
+TEST(ClimateAtmosphere, SurfaceMomentumAdvection) { testSurfaceMomentumAdvection(); }
+
+TEST(ClimateAtmosphere, Surface850Exchange) { testSurface850Exchange(); }
+
+TEST(ClimateAtmosphere, StationaryPreconditioning) { testStationaryPreconditioning(); }
+
+TEST(ClimateAtmosphere, SubpolarDeepening) { testSubpolarDeepening(); }
+
+TEST(ClimateAtmosphere, UpperThermalProjection) { testUpperThermalProjection(); }
+
+TEST(ClimateAtmosphere, ReceiverSurfaceDrag) { testReceiverSurfaceDrag(); }
+
+TEST(ClimateAtmosphere, KatabaticDrainage) { testKatabaticDrainage(); }
+
+TEST(ClimateAtmosphere, FrozenSurfaceDrag) { testFrozenSurfaceDrag(); }
+
+TEST(ClimateAtmosphere, ConstantForceAcrossCoast) { testConstantForceAcrossCoast(); }
+
+TEST(ClimateAtmosphere, ParallelSurfaceDrag) { testParallelSurfaceDrag(); }
+
+TEST(ClimateAtmosphere, RegionalThermalTrough) { testRegionalThermalTrough(); }
+
+TEST(ClimateAtmosphere, ReceiverAscentCorrection) { testReceiverAscentCorrection(); }

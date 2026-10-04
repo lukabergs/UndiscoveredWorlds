@@ -73,14 +73,13 @@ def run(archive, run_id, plan):
     registry = read(ROOT / 'runs/registry/climate.json')
     assert max(x['id'] for x in registry['runs']) + 1 == run_id
     with (archive / f'{run_id}-build.log').open('x') as stream:
-        targets = ['world_pipeline'] if batch.get('skip_tests') else ['world_pipeline',
-            'climate_atmosphere_tests','climate_hydrology_tests','climate_ocean_dynamics_tests','climate_ocean_heat_tests']
+        targets = ['world_pipeline'] if batch.get('skip_tests') else ['world_pipeline', 'world_tests']
         subprocess.run(['cmake','--build',str(BUILD),'--config','Release','--target',*targets,
             '--parallel','4'], cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, check=True)
     if not batch.get('skip_tests'):
         with (archive / f'{run_id}-tests.log').open('x') as stream:
             subprocess.run(['ctest','--test-dir',str(BUILD),'-C','Release','--output-on-failure','-R',
-                '^climate_(atmosphere|hydrology|ocean_dynamics|ocean_heat)_tests$'],
+                r'^Climate(Atmosphere|Hydrology|OceanDynamics|OceanHeat)\.'],
                 cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, check=True)
     folder.mkdir()
     paths = subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','src','tests','CMakeLists.txt','CMakePresets.json','configs','scripts/benchmarks'], cwd=ROOT, text=True).splitlines()

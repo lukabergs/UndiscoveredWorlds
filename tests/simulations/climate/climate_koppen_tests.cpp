@@ -2,20 +2,17 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <gtest/gtest.h>
 
 namespace
 {
 void expect(bool condition, const char* message)
 {
-    if (!condition)
-    {
-        std::cerr << "FAILED: " << message << '\n';
-        std::exit(1);
-    }
+    EXPECT_TRUE(condition) << message;
 }
 }
 
-int main()
+TEST(ClimateKoppen, Classification)
 {
     std::array<float, 12> temperature = {5, 6, 9, 12, 16, 20, 24, 23, 19, 14, 9, 6};
     std::array<float, 12> rain;
@@ -55,5 +52,4 @@ int main()
     expect(
         !climatekoppen::isWinterDry(25.0f, 100.0f),
         "the obsolete one-quarter temperate rule must not classify dry-winter");
-    return 0;
 }

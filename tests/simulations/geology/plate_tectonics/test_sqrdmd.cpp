@@ -20,3 +20,19 @@
 #include "sqrdmd.hpp"
 #include <cstdio>
 #include "gtest/gtest.h"
+
+#include <cmath>
+#include <vector>
+
+TEST(SquareDiamond, SameSeedGivesTheSameFiniteMap)
+{
+    constexpr int side = 17;
+    std::vector<float> first(side * side, 0.0f), second(first), other(first);
+    ASSERT_EQ(sqrdmd(1, first.data(), side, 0.5f), 0);
+    ASSERT_EQ(sqrdmd(1, second.data(), side, 0.5f), 0);
+    ASSERT_EQ(sqrdmd(2, other.data(), side, 0.5f), 0);
+    EXPECT_EQ(first, second);
+    EXPECT_NE(first, other);
+    for (float value : first)
+        EXPECT_TRUE(std::isfinite(value));
+}

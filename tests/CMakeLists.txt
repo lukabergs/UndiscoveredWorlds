@@ -1,27 +1,45 @@
+include(FetchContent)
+FetchContent_Declare(googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.15.2
+    GIT_SHALLOW TRUE
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+include(GoogleTest)
+
 add_subdirectory(simulations/geology/plate_tectonics)
 add_subdirectory(simulations/geology/mineral_systems)
 
-function(uw_add_test name source module)
-    add_executable(${name} ${source})
-    target_link_libraries(${name} PRIVATE ${module})
-    add_test(NAME ${name} COMMAND ${name})
-endfunction()
-
-uw_add_test(climate_grid_tests core/climate_grid_tests.cpp uw_grid)
-uw_add_test(climate_palette_tests validation/climate_palette_tests.cpp uw_climate_io)
-uw_add_test(parallel_rows_tests core/parallel_rows_tests.cpp uw_grid)
-set_tests_properties(parallel_rows_tests PROPERTIES TIMEOUT 15)
-uw_add_test(climate_pipeline_tests pipeline/climate_pipeline_tests.cpp uw_generation_stages)
 if(TARGET uw_climate_world)
-    # The only library on its link line: climate must not need the world class.
-    uw_add_test(climate_world_tests pipeline/climate_world_tests.cpp uw_climate_world)
+    add_executable(world_tests
+        world_tests_main.cpp
+        core/climate_grid_tests.cpp
+        core/parallel_rows_tests.cpp
+        io/climate_benchmark_outputs_tests.cpp
+        io/climate_reference_tests.cpp
+        io/climate_tiff_tests.cpp
+        pipeline/climate_pipeline_tests.cpp
+        pipeline/climate_world_tests.cpp
+        simulations/climate/climate_atmosphere_tests.cpp
+        simulations/climate/climate_boundary_layer_tests.cpp
+        simulations/climate/climate_context_tests.cpp
+        simulations/climate/climate_energy_tests.cpp
+        simulations/climate/climate_flow_tests.cpp
+        simulations/climate/climate_hydrology_tests.cpp
+        simulations/climate/climate_koppen_tests.cpp
+        simulations/climate/climate_ocean_dynamics_tests.cpp
+        simulations/climate/climate_ocean_heat_tests.cpp
+        simulations/climate/climate_physics_tests.cpp
+        simulations/climate/climate_transport_tests.cpp
+        simulations/climate/climate_weather_tests.cpp
+        validation/climate_palette_tests.cpp
+    )
+    # The only project library on its link line: climate, its stage runner and
+    # its validation must not need the world class.
+    target_link_libraries(world_tests PRIVATE uw_climate_world GTest::gtest)
+    # A deadlock of the row executor must fail quickly.
+    gtest_discover_tests(world_tests TEST_FILTER "ParallelRows.*" PROPERTIES TIMEOUT 15)
+    gtest_discover_tests(world_tests TEST_FILTER "-ParallelRows.*")
 endif()
-
-foreach(component atmosphere boundary_layer context energy flow hydrology transport koppen ocean_dynamics ocean_heat physics weather)
-    uw_add_test(climate_${component}_tests
-        simulations/climate/climate_${component}_tests.cpp uw_climate)
-endforeach()
-
-foreach(component benchmark_outputs reference tiff)
-    uw_add_test(climate_${component}_tests io/climate_${component}_tests.cpp uw_climate_io)
-endforeach()

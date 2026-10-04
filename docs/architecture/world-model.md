@@ -209,7 +209,7 @@ biomes, subtropical highs, weather state, solver context, levels) plus a bound
 forwards its climate accessors; `planet::climate()` binds the planet's terrain.
 `pipeline/climate_stages` runs every climate stage on a climateworld. The
 library `uw_climate_world` (climate, validation, imports, progress) holds no
-planet, terrain, hydrology or tectonics code; the test `climate_world_tests`
+planet, terrain, hydrology or tectonics code; the test binary `world_tests`
 links only it. `world_pipeline run --recipe earth-climate` is the one way to run
 climate on imported terrain. Tides are hydrology and stay with planet.
 

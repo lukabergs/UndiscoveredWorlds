@@ -7,22 +7,18 @@
 #include <iostream>
 #include <limits>
 #include <vector>
+#include <gtest/gtest.h>
 
 namespace
 {
-int failures = 0;
 
 void expect(bool condition, const char* message)
 {
-    if (!condition)
-    {
-        std::cerr << "FAIL: " << message << '\n';
-        failures++;
-    }
+    EXPECT_TRUE(condition) << message;
 }
 }
 
-int main()
+TEST(ClimateWeather, Model)
 {
     constexpr int columns = 16;
     constexpr int rows = 8;
@@ -194,5 +190,4 @@ int main()
     const auto climateSamples = climateweather::generateWeatherSequence(seasonal, seasonalConfig, seasonalForcing, 30, 21600.0f);
     expect(climateSamples.size() == 30 && climateweather::calculateStatistics(climateSamples, 1).sampleCount == 30,
         "prognostic climatology must retain thirty evolving states after spin-up");
-    return failures == 0 ? 0 : 1;
 }

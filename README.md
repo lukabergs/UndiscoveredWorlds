@@ -236,7 +236,7 @@ cmake --preset headless
 cmake --build out/build/headless --config Release --target world_pipeline --parallel 4
 ```
 
-`BUILD_TESTING` also builds the tectonics regression suite using GoogleTest v1.15.2 (downloaded on first configuration). The `headless` preset builds `world_pipeline` and the tests. PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The public CLI regression command above checks the shared defaults and rejects retired controls.
+`BUILD_TESTING` builds three GoogleTest v1.15.2 binaries (downloaded on first configuration): `world_tests` (core, I/O, pipeline, climate, validation), `tectonics_tests` and `minerals_tests`; ctest lists every `TEST` as `Suite.Name`. The `headless` preset builds `world_pipeline` and the tests. PNG/APNG support uses the PNG/ZLIB packages already supplied with SFML. The public CLI regression command above checks the shared defaults and rejects retired controls.
 
 Git tracks application code, tooling, configuration, small runtime assets and deterministic test fixtures. `docs/`, `runs/registry/` and `runs/ledger/` are tracked; `meta/`, `refs/` and the rest of `runs/` are local-only. Historical `extra/`, research copies, downloads and generated artifacts are also excluded. Local links into these directories require the local workspace data. Keep preparation and reporting code in `scripts/`; the Earth-map entry point is `uv run scripts/refs/prepare-earth-maps.py`.
 
