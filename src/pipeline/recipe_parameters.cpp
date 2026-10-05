@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "simulations/climate/climate_parameters.hpp"
 #include "simulations/hydrology/hydrology_parameters.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
 
@@ -113,7 +114,7 @@ const std::vector<parameters::Entry>& recipeparameters()
     static const std::vector<parameters::Entry> entries = []
     {
         std::vector<parameters::Entry> all;
-        for (const std::vector<parameters::Entry>* module : { &tuning::terrain::parameterentries(), &tuning::hydrology::parameterentries() })
+        for (const std::vector<parameters::Entry>* module : { &tuning::terrain::parameterentries(), &tuning::hydrology::parameterentries(), &tuning::climate::parameterentries() })
             all.insert(all.end(), module->begin(), module->end());
         return all;
     }();
@@ -148,6 +149,21 @@ bool loadrecipeparameters(const std::filesystem::path& path, std::string* error)
         error->clear();
     ValueReader reader{ text, 0, error };
     return reader.readobject("");
+}
+
+bool validaterecipeparameters(std::string* error)
+{
+    namespace atmosphere = tuning::climate::atmosphere;
+    const char* problem = nullptr;
+    if (atmosphere::katabaticShallowTenMetreDiagnostic && !atmosphere::separateKatabaticTransport)
+        problem = "climate.atmosphere.katabatic_shallow_ten_metre_diagnostic requires separate_katabatic_transport";
+    else if (atmosphere::katabaticShallowTenMetreDiagnostic &&
+        !(atmosphere::katabaticShallowDepthMetres > 20.0f &&
+            atmosphere::katabaticShallowDepthMetres <= atmosphere::surfaceBoundaryLayerMomentumDepthMetres))
+        problem = "climate.atmosphere.katabatic_shallow_depth_metres must contain 10 m and fit within surface_boundary_layer_momentum_depth_metres";
+    if (problem != nullptr && error != nullptr)
+        *error = problem;
+    return problem == nullptr;
 }
 
 std::string recipeparametersjson()

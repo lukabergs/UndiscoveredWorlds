@@ -8,6 +8,7 @@
 #include "simulations/climate/climate_world.hpp"
 #include "core/deterministic_random.hpp"
 #include "world/generation_tuning.hpp"
+#include "simulations/climate/climate_parameters.hpp"
 #include "core/procedural_noise.hpp"
 #include "pipeline/world_processes.hpp"
 

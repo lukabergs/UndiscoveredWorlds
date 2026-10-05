@@ -20,5 +20,8 @@ bool setrecipeparameter(std::string_view assignment, std::string* error = nullpt
 // ({"terrain": {"oceanridges": {"grid_size": 16}}}), or the "parameters" object of a bundle manifest.
 bool loadrecipeparameters(const std::filesystem::path& path, std::string* error = nullptr);
 
+// Conditions between values that the code relies on; checked once the overrides are in.
+bool validaterecipeparameters(std::string* error = nullptr);
+
 // Every value as one JSON object keyed by full name, for the bundle manifest.
 std::string recipeparametersjson();

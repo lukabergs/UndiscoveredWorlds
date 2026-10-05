@@ -7,6 +7,7 @@
 #include "world/planet.hpp"
 #include "world/functions.hpp"
 #include "world/generation_tuning.hpp"
+#include "simulations/climate/climate_parameters.hpp"
 #include "pipeline/world_generation_debug.hpp"
 #include "pipeline/climate_generation.hpp"
 #include "simulations/climate/climate_coupling.hpp"

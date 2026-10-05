@@ -4,6 +4,7 @@
 #include "simulations/climate/detail/land_ice.hpp"
 #include "simulations/climate/detail/tropical_cloud_albedo.hpp"
 #include "world/generation_tuning.hpp"
+#include "simulations/climate/climate_parameters.hpp"
 #include "simulations/climate/climate_world.hpp"
 
 #include <algorithm>

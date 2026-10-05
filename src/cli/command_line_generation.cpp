@@ -499,6 +499,13 @@ void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes,
 
 int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 {
+    string parameterproblem;
+    if (!validaterecipeparameters(&parameterproblem))
+    {
+        cerr << "Parameters: " << parameterproblem << '\n';
+        return 1;
+    }
+
     auto world = std::make_unique<planet>();
     initialiseworld(*world);
     initialisemapcolours(*world);

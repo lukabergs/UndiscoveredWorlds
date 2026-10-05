@@ -17,6 +17,7 @@
 #include "simulations/climate/climate_physics.hpp"
 #include "simulations/climate/climate_world.hpp"
 #include "world/generation_tuning.hpp"
+#include "simulations/climate/climate_parameters.hpp"
 
 #include <array>
 #include <cmath>

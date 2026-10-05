@@ -98,6 +98,7 @@ Lessons:
 | `world-0043` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 5: the regional map leaves the headless link line |
 | `world-0044` | 2026-10-05 | equivalent | keep | consolidation phase 5, steps 6 and 7: parameter mechanism; terrain parameters |
 | `world-0045` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 8: hydrology parameters |
+| `world-0046` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 9: climate parameters |
 
 Lessons:
 
@@ -204,3 +205,5 @@ Lessons:
 - `world-0044`: Keeping the C++ names and making the values variables moves a module in minutes; only uses that need a compile-time constant (an array size here) have to be edited.
 - `world-0044`: Reference bundles of the next step: out/scratch/phase5/step06-*.
 - `world-0045`: Reference bundles of the next step: out/scratch/phase5/step08-*.
+- `world-0046`: The first registered climate run after this step should compare its solver times with run 388 before any tuning starts.
+- `world-0046`: Reference bundles of the next step: out/scratch/phase5/step09-*.
