@@ -434,9 +434,9 @@ RecipeRunResult runrecipeonterrain(planet& world, const WorldRecipe& recipe, Gen
 {
     // Geosphere is frozen in climate recipes; keep the explicit elevation check.
     const bool frozenterrain = find(recipe.frozen.begin(), recipe.frozen.end(), worldmodel::Component::geosphere) != recipe.frozen.end();
-    vector<int> inputterrain;
+    vector<float> inputterrain;
     if (frozenterrain) for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
-        inputterrain.push_back(world.nom(x,y));
+        inputterrain.push_back(world.nomfloat(x,y));
 
     RecipeRunResult result = runrecipe(recipe, world, scratch, parameters, context, runoptions);
     if (!result.completed)
@@ -447,7 +447,7 @@ RecipeRunResult runrecipeonterrain(planet& world, const WorldRecipe& recipe, Gen
             writeclimatediagnostics(world.climate());
         size_t cell=0;
         for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
-            if (world.nom(x,y)!=inputterrain[cell++]) throw runtime_error("Climate-only stage modified terrain");
+            if (world.nomfloat(x,y)!=inputterrain[cell++]) throw runtime_error("Climate-only stage modified terrain");
         updatereport("Climate-only input terrain preserved exactly after import.");
     }
     return result;

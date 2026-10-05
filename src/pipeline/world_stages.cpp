@@ -55,9 +55,9 @@ int wrapx(const planet& world, int x)
     return wrap(x, world.width());
 }
 
-float normalizeterrainvalue(int current, int minimum, int maximum)
+float normalizeterrainvalue(float current, int minimum, int maximum)
 {
-    return clamp01(static_cast<float>(current - minimum) / static_cast<float>(max(1, maximum - minimum)));
+    return clamp01((current - static_cast<float>(minimum)) / static_cast<float>(max(1, maximum - minimum)));
 }
 
 float samplecurveaxis(const vector<WorldCurvePoint>& points, float input, bool samplexfromy)
@@ -162,11 +162,11 @@ void applyhypsometricremap(planet& world, GenerationScratch& scratch, const Worl
         {
             for (int x = 0; x <= width; x++)
             {
-                const float normalized = normalizeterrainvalue(world.nom(x, y), minimum, maximum);
+                const float normalized = normalizeterrainvalue(world.nomfloat(x, y), minimum, maximum);
                 const float quantile = sampleheightcdf(sourcecdf, normalized);
                 const float remapped = samplecurveaxis(targetcurve, quantile, false);
-                const int newvalue = minimum + static_cast<int>(roundf(remapped * static_cast<float>(maximum - minimum)));
-                world.setnom(x, y, clamp(newvalue, minimum, maximum));
+                const float newvalue = static_cast<float>(minimum) + remapped * static_cast<float>(maximum - minimum);
+                world.setnomfloat(x, y, clamp(newvalue, static_cast<float>(minimum), static_cast<float>(maximum)));
             }
         }
     });
@@ -219,9 +219,9 @@ void metadataoceanrefinement(planet& world, GenerationScratch& scratch)
             if (world.continentalshelves()[x][y])
             {
                 const float var = static_cast<float>(seafractal[x][y] - maxelev / 2) / coastalvarreduce;
-                int newvalue = sealevel - 200 + static_cast<int>(var);
-                newvalue = min(newvalue, sealevel - 10);
-                world.setnom(x, y, max(1, newvalue));
+                float newvalue = static_cast<float>(sealevel - 200) + var;
+                newvalue = min(newvalue, static_cast<float>(sealevel - 10));
+                world.setnomfloat(x, y, max(1.0f, newvalue));
             }
             else
             {
@@ -230,9 +230,9 @@ void metadataoceanrefinement(planet& world, GenerationScratch& scratch)
                     xx -= width;
 
                 const float var = static_cast<float>(seafractal[xx][y] - maxelev / 2) / oceanvarreduce;
-                int newvalue = sealevel - 5000 + static_cast<int>(var);
-                newvalue = min(newvalue, sealevel - 3000);
-                world.setnom(x, y, max(1, newvalue));
+                float newvalue = static_cast<float>(sealevel - 5000) + var;
+                newvalue = min(newvalue, static_cast<float>(sealevel - 3000));
+                world.setnomfloat(x, y, max(1.0f, newvalue));
             }
         }
     }
@@ -346,11 +346,11 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
                         if (trenchdepth <= 0)
                             continue;
 
-                        const int target = max(1, min(world.nom(nx, ny), sealevel - 450 - trenchdepth));
-                        if (target >= world.nom(nx, ny))
+                        const float target = max(1.0f, min(world.nomfloat(nx, ny), static_cast<float>(sealevel - 450 - trenchdepth)));
+                        if (target >= world.nomfloat(nx, ny))
                             continue;
 
-                        world.setnom(nx, ny, target);
+                        world.setnomfloat(nx, ny, target);
                         world.setgeologicregime(nx, ny, GeologicRegime::trench_adjacent);
                         markfeaturecell(scratch, nx, ny);
                     }
@@ -381,11 +381,11 @@ void applyvolcanicupliftkernel(planet& world, GenerationScratch& scratch, int ce
             if (uplift <= 0)
                 continue;
 
-            const int target = min(world.maxelevation() - 1, world.nom(nx, ny) + uplift);
-            if (target <= world.nom(nx, ny))
+            const float target = min(static_cast<float>(world.maxelevation() - 1), world.nomfloat(nx, ny) + static_cast<float>(uplift));
+            if (target <= world.nomfloat(nx, ny))
                 continue;
 
-            world.setnom(nx, ny, target);
+            world.setnomfloat(nx, ny, target);
             if (regime != GeologicRegime::stable)
                 world.setgeologicregime(nx, ny, regime);
             markfeaturecell(scratch, nx, ny);
@@ -608,7 +608,7 @@ void applyinlandseapolicies(planet& world, GenerationScratch& scratch)
                 for (int y = 0; y <= world.height(); y++)
                 {
                     if (scratch.inlandSeaComponentIds[x][y] == component.id)
-                        world.setnom(x, y, max(world.sealevel() + 1, world.nom(x, y)));
+                        world.setnomfloat(x, y, max(static_cast<float>(world.sealevel() + 1), world.nomfloat(x, y)));
                 }
             }
         }
@@ -637,14 +637,14 @@ void applybasinpolicies(planet& world, GenerationScratch& scratch)
 
         if (component.policy == GenerationComponentPolicy::fill)
         {
-            int targetelevation = 0;
+            float targetelevation = 0.0f;
 
             for (int x = 0; x <= world.width(); x++)
             {
                 for (int y = 0; y <= world.height(); y++)
                 {
                     if (scratch.basinComponentIds[x][y] == component.id)
-                        targetelevation = max(targetelevation, world.nom(x, y));
+                        targetelevation = max(targetelevation, world.nomfloat(x, y));
                 }
             }
 
@@ -653,7 +653,7 @@ void applybasinpolicies(planet& world, GenerationScratch& scratch)
                 for (int y = 0; y <= world.height(); y++)
                 {
                     if (scratch.basinComponentIds[x][y] == component.id)
-                        world.setnom(x, y, targetelevation);
+                        world.setnomfloat(x, y, targetelevation);
                 }
             }
         }
@@ -683,22 +683,22 @@ void applyterraintexturing(planet& world, GenerationScratch& scratch)
     {
         for (int y = 0; y <= world.height(); y++)
         {
-            const int oldvalue = world.nom(x, y);
+            const float oldvalue = world.nomfloat(x, y);
             const int noise = fractal[x][y] - midpoint;
             const float strength = world.sea(x, y) ? 0.14f : 0.10f;
-            int newvalue = oldvalue + static_cast<int>(roundf(static_cast<float>(noise) * strength));
+            float newvalue = oldvalue + static_cast<float>(noise) * strength;
 
             if (world.sea(x, y))
-                newvalue = min(newvalue, sealevel - 10);
+                newvalue = min(newvalue, static_cast<float>(sealevel - 10));
             else
-                newvalue = max(newvalue, sealevel + 5);
+                newvalue = max(newvalue, static_cast<float>(sealevel + 5));
 
-            newvalue = clamp(newvalue, 1, world.maxelevation() - 1);
+            newvalue = clamp(newvalue, 1.0f, static_cast<float>(world.maxelevation() - 1));
 
             if (newvalue == oldvalue)
                 continue;
 
-            world.setnom(x, y, newvalue);
+            world.setnomfloat(x, y, newvalue);
             markfeaturecell(scratch, x, y);
         }
     }
@@ -1155,7 +1155,7 @@ void rebuildheightdistribution(const planet& world, GenerationScratch& scratch)
     {
         for (int y = 0; y <= height; y++)
         {
-            const float normalized = normalizeterrainvalue(world.nom(x, y), minimum, maximum);
+            const float normalized = normalizeterrainvalue(world.nomfloat(x, y), minimum, maximum);
             int bin = static_cast<int>(floorf(normalized * static_cast<float>(kHeightHistogramBins)));
             bin = clamp(bin, 0, kHeightHistogramBins - 1);
             scratch.heightHistogram[bin]++;

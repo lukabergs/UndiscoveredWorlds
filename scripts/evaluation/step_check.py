@@ -54,6 +54,9 @@ def main():
     directory = ROOT / arguments.directory
     directory.mkdir(parents=True, exist_ok=True)
     label = arguments.label
+    if any(directory.glob(f'{label}-*')):
+        print(f'{arguments.directory}/{label}-* exists: a label is used once, so that bundles are never overwritten')
+        return 1
 
     if not build('headless', directory / f'{label}-build-headless.log'):
         return 1

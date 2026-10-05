@@ -103,6 +103,7 @@ Lessons:
 | `world-0048` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 10b: snake_case keys in configs/tectonics-baseline.json |
 | `world-0049` | 2026-10-05 | equivalent | keep | consolidation phase 5, end of the first session: status note and open steps |
 | `world-0050` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 12: procedural worlds keep the default body |
+| `world-0051` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 4a: the stage bodies of src/pipeline on the float accessors (module terrain) |
 
 Lessons:
 
@@ -216,3 +217,5 @@ Lessons:
 - `world-0049`: Whole-number reads were still in src/pipeline after Phase 4: its float steps went through src/simulations module by module and the stage bodies written directly in world_stages.cpp and climate_generation.cpp were not a module.
 - `world-0049`: A survey by a subagent of who calls what (regional map, tuning constants, GUI buttons) took four minutes and decided the order of the steps; the conversions themselves were scripts over line ranges and names.
 - `world-0050`: World run 9 is the parent of the next world-changing step; reference bundles out/scratch/phase5/step12-*.
+- `world-0051`: A step-check label is used once: world_pipeline refuses a non-empty bundle directory, and the comparison then reads the old bundles.
+- `world-0051`: World run 10 is the parent of the next world-changing step; reference bundles out/scratch/phase5/step4a2-*.

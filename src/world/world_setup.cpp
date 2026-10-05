@@ -537,7 +537,7 @@ void getlandandseatotals(planet& world)
     {
         for (int j = 1; j < height; j++)
         {
-            if (world.nom(i, j) > sealevel)
+            if (!world.basebelowsea(i, j))
                 landtotal++;
             else
                 seatotal++;

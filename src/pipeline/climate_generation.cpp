@@ -72,8 +72,8 @@ void synclegacyrainfallfromseasonal(planet& world)
         {
             for (int x = 0; x <= width; x++)
             {
-                world.setjanrain(x, y, world.seasonalrain(seasonjanuary, x, y));
-                world.setjulrain(x, y, world.seasonalrain(seasonjuly, x, y));
+                world.setjanrainfloat(x, y, world.seasonalrainfloat(seasonjanuary, x, y));
+                world.setjulrainfloat(x, y, world.seasonalrainfloat(seasonjuly, x, y));
             }
         }
     });
@@ -90,8 +90,8 @@ void synclegacytemperaturesfromseasonal(planet& world)
         {
             for (int x = 0; x <= width; x++)
             {
-                world.setjantemp(x, y, world.seasonaltemp(seasonjanuary, x, y));
-                world.setjultemp(x, y, world.seasonaltemp(seasonjuly, x, y));
+                world.setjantempfloat(x, y, world.seasonaltempfloat(seasonjanuary, x, y));
+                world.setjultempfloat(x, y, world.seasonaltempfloat(seasonjuly, x, y));
             }
         }
     });
@@ -113,15 +113,15 @@ void applyimportedtemperaturemap(planet& world, const ImportedClimateMaps& impor
                 float currentmean = 0.0f;
 
                 for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-                    currentmean += static_cast<float>(world.seasonaltemp(season, x, y));
+                    currentmean += world.seasonaltempfloat(season, x, y);
 
                 currentmean = currentmean / static_cast<float>(CLIMATESEASONCOUNT);
                 const float delta = targetmean - currentmean;
 
                 for (int season = 0; season < CLIMATESEASONCOUNT; season++)
                 {
-                    const float adjusted = static_cast<float>(world.seasonaltemp(season, x, y)) + delta;
-                    world.setseasonaltemp(season, x, y, static_cast<int>(roundf(adjusted)));
+                    const float adjusted = world.seasonaltempfloat(season, x, y) + delta;
+                    world.setseasonaltempfloat(season, x, y, adjusted);
                 }
             }
         }
@@ -146,7 +146,7 @@ void applyimportedprecipitationmap(planet& world, const ImportedClimateMaps& imp
                 float currentmean = 0.0f;
 
                 for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-                    currentmean += static_cast<float>(world.seasonalrain(season, x, y));
+                    currentmean += world.seasonalrainfloat(season, x, y);
 
                 currentmean = currentmean / static_cast<float>(CLIMATESEASONCOUNT);
 
@@ -156,16 +156,14 @@ void applyimportedprecipitationmap(planet& world, const ImportedClimateMaps& imp
 
                     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
                     {
-                        const float adjusted = max(0.0f, static_cast<float>(world.seasonalrain(season, x, y)) * factor);
-                        world.setseasonalrain(season, x, y, static_cast<int>(roundf(adjusted)));
+                        const float adjusted = max(0.0f, world.seasonalrainfloat(season, x, y) * factor);
+                        world.setseasonalrainfloat(season, x, y, adjusted);
                     }
                 }
                 else
                 {
-                    const int fallbackrain = static_cast<int>(roundf(targetmean));
-
                     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-                        world.setseasonalrain(season, x, y, fallbackrain);
+                        world.setseasonalrainfloat(season, x, y, targetmean);
                 }
             }
         }
@@ -192,7 +190,7 @@ int preparelandworldsealevel(planet& world)
         {
             for (int j = 0; j <= height; j++)
             {
-                int thiselev = world.nom(i, j);
+                int thiselev = wholemetres(world.nomfloat(i, j));
 
                 if (thiselev < lowest)
                     lowest = thiselev;
@@ -263,14 +261,14 @@ bool seeddesertworldlakes(planet& world, int lakeattempts,
     const int height = world.height();
     const int maxelev = world.maxelevation();
     const int sealevel = world.sealevel();
-    int highestelev = 0;
-    int lowestelev = maxelev;
+    float highestelev = 0.0f;
+    float lowestelev = static_cast<float>(maxelev);
 
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
         {
-            int thiselev = world.nom(i, j);
+            float thiselev = world.nomfloat(i, j);
 
             if (thiselev < lowestelev)
                 lowestelev = thiselev;
@@ -280,9 +278,9 @@ bool seeddesertworldlakes(planet& world, int lakeattempts,
         }
     }
 
-    int elevdiff = highestelev - lowestelev;
+    float elevdiff = highestelev - lowestelev;
 
-    int maxlakeelev = lowestelev + elevdiff / 4;
+    float maxlakeelev = lowestelev + elevdiff / 4.0f;
 
     vector<vector<int>> avoid(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0)); // This is for cells *not* to alter. This will remain empty (it's just here so we can use the depression-creating routine for normal lakes as well, where we don't want to mess with the path of the outflowing river.)
 
@@ -293,7 +291,7 @@ bool seeddesertworldlakes(planet& world, int lakeattempts,
 
         for (int m = 0; m < 1000; m++)
         {
-            if (world.nom(x, y) > maxlakeelev)
+            if (world.nomfloat(x, y) > maxlakeelev)
             {
                 x = random(1, width);
                 y = random(10, height - 10);
@@ -309,7 +307,7 @@ bool seeddesertworldlakes(planet& world, int lakeattempts,
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) <= sealevel)
+            if (world.basebelowsea(i, j))
             {
                 return true;
             }

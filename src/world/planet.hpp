@@ -634,6 +634,8 @@ public:
     int seasonalrain(int season, int x, int y) const;
     void setseasonalrain(int season, int x, int y, int amount);
     float seasonalrainfloat(int season, int x, int y) const;
+    float seasonaltempfloat(int season, int x, int y) const;
+    void setseasonaltempfloat(int season, int x, int y, float amount);
     void setseasonalrainfloat(int season, int x, int y, float amount);
 
     int seasonalpressure(int season, int x, int y) const;
@@ -1711,6 +1713,10 @@ inline int planet::seasonalrain(int season, int x, int y) const { return climate
 inline void planet::setseasonalrain(int season, int x, int y, int amount) { climate_.setseasonalrain(season, x, y, amount); }
 
 inline float planet::seasonalrainfloat(int season, int x, int y) const { return climate_.seasonalrainfloat(season, x, y); }
+
+inline float planet::seasonaltempfloat(int season, int x, int y) const { return climate_.seasonaltempfloat(season, x, y); }
+
+inline void planet::setseasonaltempfloat(int season, int x, int y, float amount) { climate_.setseasonaltempfloat(season, x, y, amount); }
 
 inline void planet::setseasonalrainfloat(int season, int x, int y, float amount) { climate_.setseasonalrainfloat(season, x, y, amount); }
 
