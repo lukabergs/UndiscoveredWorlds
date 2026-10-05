@@ -20,7 +20,6 @@
 #include "io/map_imports.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "world/planet_bundle.hpp"
-#include "world/region.hpp"
 #include "pipeline/world_recipes.hpp"
 #include "pipeline/world_generation_debug.hpp"
 

@@ -9,6 +9,7 @@
 #include <SFML/Graphics.hpp>
 
 #include "world/functions.hpp"
+#include "app/regional/regional_map.hpp"
 
 constexpr int GLOBALMAPTYPES = 22;
 constexpr int DISPLAYMAPSIZEX = 1024;

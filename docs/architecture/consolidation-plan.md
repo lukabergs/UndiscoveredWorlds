@@ -43,13 +43,13 @@ Source tree:
 
 ```
 src/core          grids, noise, random, field catalogue, world grid, environment (paths), profiler
-src/world         planet components + facade, region, regionalmap (GUI-only reachability), tuning until parameters move to recipes
+src/world         planet components + facade, tuning until parameters move to recipes
 src/simulations/<module>/   processes; one .cpp per process id; tectonics engine inside geology/
 src/pipeline      process registry, recipes, scheduler, stages, checkpoints
 src/io            bundles (read and write), imports, TIFF/PNG, saves
 src/validation/{climate,tectonics}   comparisons with observed data; tectonic snapshot statistics (ex tools/tectonics support)
 src/cli           world_pipeline main, command_line_generation, climate_options
-src/app           GUI only: main, windows, panels, rendering, workbench
+src/app           GUI only: main, application state and screens, windows, panels, rendering, workbench, regional map
 tests/            world_tests (core, io, pipeline, climate, validation), tectonics_tests, minerals_tests
 tools/            removed
 ```

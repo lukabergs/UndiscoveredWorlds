@@ -6,8 +6,8 @@
 //
 //  Please see functions.hpp for notes.
 
-#include "world/region.hpp"
-#include "world/functions.hpp"
+#include "app/regional/region.hpp"
+#include "app/regional/regional_map.hpp"
 
 region::region() //constructor
 {
@@ -80,5 +80,19 @@ void region::clear()
     }
 }
 
+// This function sets up the always-used variables in the region.
 
+void initialiseregion(planet& world, region& region)
+{
+    int tilewidth = REGIONALTILEWIDTH + 4;//34;
+    int tileheight = REGIONALTILEHEIGHT + 4; //34;
 
+    int rstart = 16;          // Amount to ignore on the edge of the regional map for most purposes.
+    int pixelmetres = 2500;   // number of metres each pixel represents
+
+    region.settilewidth(tilewidth);
+    region.settileheight(tileheight);
+    region.setrstart(rstart);
+    region.setsealevel(world.sealevel());
+    region.setpixelmetres(pixelmetres);
+}

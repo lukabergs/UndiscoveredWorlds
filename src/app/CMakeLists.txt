@@ -22,6 +22,9 @@ add_library(uw_app STATIC
     appearance_files.cpp
     create_world_screen.cpp
     generation_workbench.cpp
+    regional/region.cpp
+    regional/region_queries.cpp
+    regional/regional_map.cpp
     rendering/appearance_settings.cpp
     rendering/cuda_renderers_stub.cpp
     rendering/map_appearance.cpp

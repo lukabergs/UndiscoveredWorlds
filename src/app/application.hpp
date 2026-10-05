@@ -42,7 +42,7 @@
 #include "world/planet.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "simulations/society/social_generation.hpp"
-#include "world/region.hpp"
+#include "app/regional/regional_map.hpp"
 #include "app/app_dialogs.hpp"
 #include "core/app_environment.hpp"
 #include "app/app_state.hpp"

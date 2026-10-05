@@ -8,7 +8,6 @@
 #include "core/classes.hpp"
 
 class planet;
-class region;
 
 int landdistance(planet& world, int x, int y);
 twointegers nearestsea(planet& world, int i, int j, bool land, int limit, int grain);

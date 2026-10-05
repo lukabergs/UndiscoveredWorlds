@@ -15,8 +15,8 @@
 #include "core/classes.hpp"
 #include "world/generation_tuning.hpp"
 #include "world/planet.hpp"
-#include "world/region.hpp"
-#include "world/functions.hpp"
+#include "app/regional/region.hpp"
+#include "app/regional/regional_map.hpp"
 //#include "profiler.h"
 
 // Climate class of a regional cell from its seasonal extremes (climate_classification.hpp).

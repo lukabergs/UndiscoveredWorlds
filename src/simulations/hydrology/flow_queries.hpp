@@ -8,7 +8,6 @@
 #include "core/classes.hpp"
 
 class planet;
-class region;
 
 int findlowestdir(planet& world, int neighbours[8][2], int x, int y);
 int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, std::vector<std::vector<int>>& mountaindrainage);

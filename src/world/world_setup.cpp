@@ -12,7 +12,6 @@
 #include "core/classes.hpp"
 #include "world/generation_tuning.hpp"
 #include "world/planet.hpp"
-#include "world/region.hpp"
 #include "world/functions.hpp"
 
 using namespace std;
@@ -408,23 +407,6 @@ void initialisemapcolours(planet& world)
     world.sethighlight3(255); // Colours of highlights on the map.
 
     setdefaultnonreliefmapappearance(world);
-}
-
-// This function sets up the always-used variables in the region.
-
-void initialiseregion(planet& world, region& region)
-{
-    int tilewidth = REGIONALTILEWIDTH + 4;//34;
-    int tileheight = REGIONALTILEHEIGHT + 4; //34;
-
-    int rstart = 16;          // Amount to ignore on the edge of the regional map for most purposes.
-    int pixelmetres = 2500;   // number of metres each pixel represents
-
-    region.settilewidth(tilewidth);
-    region.settileheight(tileheight);
-    region.setrstart(rstart);
-    region.setsealevel(world.sealevel());
-    region.setpixelmetres(pixelmetres);
 }
 
 // This randomises some of the world's properties. (Note: the possible changes are fairly modest.)

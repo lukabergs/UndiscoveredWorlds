@@ -12,7 +12,7 @@
 #include "core/classes.hpp"
 #include "world/generation_tuning.hpp"
 #include "world/planet.hpp"
-#include "world/region.hpp"
+#include "app/regional/regional_map.hpp"
 #include "world/functions.hpp"
 
 using namespace std;
