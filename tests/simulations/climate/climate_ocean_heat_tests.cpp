@@ -217,263 +217,6 @@ void variableStorageTests()
     expect(!climateocean::solveWindDrivenOcean(32, 16, f, c).finite, "negative carried storage depths must be rejected");
 }
 
-void runTests()
-{
-    auto momentum = fixture(64, false);
-    for (int y = 0; y < 32; ++y)
-        for (int x = 0; x < 64; ++x)
-        {
-            const int i = y * 64 + x;
-            momentum.landMask[i] = (x > 24 && x < 30 && y > 8 && y < 24);
-            momentum.bathymetryMetres[i] = 200.0f + 50.0f * x;
-            momentum.initialSstC[i] = 5.0f + 0.1f * x;
-            momentum.eastWindMps[i] = static_cast<float>(3.0 * std::sin(0.15 * y));
-            momentum.southWindMps[i] = static_cast<float>(std::cos(0.1 * x));
-        }
-    auto precise = config();
-    precise.streamfunctionIterations = 16000;
-    precise.streamfunctionTolerance = 1.0e-8f;
-    precise.krylovCirculation = false;
-    const auto relaxation = climateocean::solveWindDrivenOcean(64, 32, momentum, precise);
-    precise.krylovCirculation = true;
-    const auto krylov = climateocean::solveWindDrivenOcean(64, 32, momentum, precise);
-    expect(relaxation.converged && krylov.converged &&
-        difference(relaxation.eastCurrentMps, krylov.eastCurrentMps) < 1.0e-6 &&
-        difference(relaxation.southCurrentMps, krylov.southCurrentMps) < 1.0e-6 &&
-        difference(relaxation.sstC, krylov.sstC) < 2.0e-6 &&
-        krylov.maximumTransportDivergenceMps < 1.0e-12 && budgetError(krylov) < 1.0e-5,
-        "Krylov circulation must match tightly converged relaxation with bathymetry, island coasts and a periodic seam");
-    // Seasonal circulation reuse must reproduce recomputation exactly through
-    // changing thermal/ice state, and must not survive changed outer forcing.
-    std::array<climateocean::OceanForcing, 4> seasons;
-    std::array<climateocean::OceanConfig, 4> configs;
-    for (int season = 0; season < 4; ++season)
-    {
-        seasons[season] = fixture(32, false);
-        auto& forcing = seasons[season];
-        forcing.initialIceThicknessMetres.assign(32 * 16, 0.0f);
-        for (int i = 0; i < 32 * 16; ++i)
-        {
-            forcing.eastWindMps[i] = static_cast<float>((season + 1) * std::sin(0.2 * (i / 32)));
-            forcing.bathymetryMetres[i] = 1000.0f + 10.0f * (i % 32);
-            if (i < 32) { forcing.initialSstC[i] = -1.8f; forcing.initialIceThicknessMetres[i] = 0.5f; }
-        }
-        configs[season] = config();
-        configs[season].heatStepsPerIteration = 3;
-        configs[season].surfaceHeatExchangeWm2K = 18.0f;
-    }
-    for (int trial = 0; trial < 3; ++trial)
-    {
-        for (auto& cfg : configs) cfg.variableHeatStorage = trial == 2;
-        for (auto& cfg : configs) cfg.reuseSeasonalCirculation = true;
-        const auto cached = climateocean::solvePeriodicOcean(32, 16, seasons, configs, 3, 0.0);
-        for (auto& cfg : configs) cfg.reuseSeasonalCirculation = false;
-        const auto uncached = climateocean::solvePeriodicOcean(32, 16, seasons, configs, 3, 0.0);
-        bool equal = cached.accepted && uncached.accepted && cached.years == 3 &&
-            cached.annualEnthalpyDriftK == uncached.annualEnthalpyDriftK && cached.heatSubsteps == uncached.heatSubsteps;
-        for (int season = 0; season < 4; ++season)
-        {
-            const auto& a = cached.seasons[season]; const auto& b = uncached.seasons[season];
-            equal = equal && a.sstC == b.sstC && a.meanSstC == b.meanSstC &&
-                a.iceThicknessMetres == b.iceThicknessMetres && a.meanIceCover == b.meanIceCover &&
-                a.surfaceSkinTemperatureC == b.surfaceSkinTemperatureC &&
-                a.meanSurfaceSkinTemperatureC == b.meanSurfaceSkinTemperatureC &&
-                a.streamfunctionM3S == b.streamfunctionM3S &&
-                a.eastVolumeTransportM3S == b.eastVolumeTransportM3S &&
-                a.southVolumeTransportM3S == b.southVolumeTransportM3S && a.heatBudget.size() == b.heatBudget.size();
-            equal = equal && a.storageDepthMetres == b.storageDepthMetres && a.reservoirTemperatureC == b.reservoirTemperatureC;
-            for (std::size_t i = 0; i < a.heatBudget.size() && i < b.heatBudget.size(); ++i)
-                equal = equal && a.heatBudget[i].horizontalWm2 == b.heatBudget[i].horizontalWm2 &&
-                    a.heatBudget[i].surfaceWm2 == b.heatBudget[i].surfaceWm2 &&
-                    a.heatBudget[i].verticalWm2 == b.heatBudget[i].verticalWm2 &&
-                    a.heatBudget[i].storageWm2 == b.heatBudget[i].storageWm2;
-        }
-        expect(equal && cached.circulationSolves == 4 && uncached.circulationSolves == 12,
-            "seasonal reuse must match recomputation bitwise and solve circulation only once per season");
-        if (!equal || cached.circulationSolves != 4 || uncached.circulationSolves != 12)
-        {
-            std::cerr << std::setprecision(17) << "Reuse trial=" << trial
-                << " solves=" << cached.circulationSolves << '/' << uncached.circulationSolves
-                << " accepted=" << cached.accepted << '/' << uncached.accepted
-                << " years=" << cached.years << '/' << uncached.years
-                << " drift=" << cached.annualEnthalpyDriftK << '/' << uncached.annualEnthalpyDriftK
-                << " steps=" << cached.heatSubsteps << '/' << uncached.heatSubsteps << '\n';
-            for (int season=0;season<4;++season)
-            {
-                const auto& a=cached.seasons[season];const auto& b=uncached.seasons[season];
-                double budget=0.0;std::size_t worst=0;
-                for (std::size_t i=0;i<a.heatBudget.size();++i)
-                    if (std::abs(a.heatBudget[i].horizontalWm2-b.heatBudget[i].horizontalWm2)>budget)
-                    { budget=std::abs(a.heatBudget[i].horizontalWm2-b.heatBudget[i].horizontalWm2);worst=i; }
-                std::cerr << " season=" << season << " sst_delta=" << difference(a.sstC,b.sstC)
-                    << " mean_sst_delta=" << difference(a.meanSstC,b.meanSstC)
-                    << " same_psi=" << (a.streamfunctionM3S==b.streamfunctionM3S)
-                    << " horizontal_delta=" << budget << " cell=" << worst
-                    << " east_delta=" << difference(a.eastCurrentMps,b.eastCurrentMps)
-                    << " south_delta=" << difference(a.southCurrentMps,b.southCurrentMps)
-                    << " ice_delta=" << difference(a.iceThicknessMetres,b.iceThicknessMetres)
-                    << " budget=" << a.heatBudget[worst].horizontalWm2 << '/' << b.heatBudget[worst].horizontalWm2
-                    << " vertical=" << a.heatBudget[worst].verticalWm2 << '/' << b.heatBudget[worst].verticalWm2 << '\n';
-            }
-        }
-        for (auto& forcing : seasons) for (auto& wind : forcing.eastWindMps) wind *= -1.5f;
-        for (auto& cfg : configs) cfg.linearBottomDragMps = 0.002f;
-    }
-    constexpr int n = 64, rows = n / 2;
-    auto c = config();
-    auto f = fixture(n, true);
-    const auto grid = climategrid::makeSphericalGrid(n, rows, c.planetRadiusMetres);
-    const double area = grid.cellAreasSquareMetres[0], face = grid.zonalFaceLengthsMetres[0];
-    for (int y : {0, rows - 1})
-        for (int x = 0; x < n; ++x) f.initialSstC[y * n + x] = x % 2 ? 10.0f : 0.0f;
-    const auto implicit = climateocean::solveWindDrivenOcean(n, rows, f, c);
-    const double ratio = c.oceanTimeStepSeconds * c.heatDiffusivityM2S * face * face / (area * area);
-    double analyticError = 0.0;
-    for (int y : {0, rows - 1})
-        for (int x = 0; x < n; ++x)
-            analyticError = std::max(analyticError, std::abs(implicit.sstC[y * n + x] -
-                (5.0 + (x % 2 ? 5.0 : -5.0) / (1.0 + 4.0 * ratio))));
-    expect(implicit.converged && analyticError < 1.0e-6 && budgetError(implicit) < 1.0e-7,
-        "both polar rings must reproduce backward-Euler eigenmode damping and close every cell heat budget");
-    expect(std::abs(implicit.heatBudgetResidualJ) / (2.0 * n * area * 2.5e8 * 10.0) < 1.0e-13,
-        "closed zonal exchange must conserve globally integrated heat");
-
-    // Time refinement against the retained explicit implementation at the SAME
-    // spatial resolution. End states and interval means must both approach it.
-    auto referenceConfig = c;
-    referenceConfig.implicitZonalHeatDiffusion = false;
-    referenceConfig.heatStepsPerIteration = 2048;
-    referenceConfig.oceanTimeStepSeconds /= 2048;
-    const auto reference = climateocean::solveWindDrivenOcean(n, rows, f, referenceConfig);
-    auto coarseConfig = c;
-    coarseConfig.heatStepsPerIteration = 8; coarseConfig.oceanTimeStepSeconds /= 8;
-    const auto coarse = climateocean::solveWindDrivenOcean(n, rows, f, coarseConfig);
-    coarseConfig.heatStepsPerIteration = 16; coarseConfig.oceanTimeStepSeconds /= 2;
-    const auto fine = climateocean::solveWindDrivenOcean(n, rows, f, coarseConfig);
-    expect(reference.converged && coarse.converged && fine.converged &&
-        difference(fine.sstC, reference.sstC) < 0.6 * difference(coarse.sstC, reference.sstC) &&
-        difference(fine.meanSstC, reference.meanSstC) < 0.6 * difference(coarse.meanSstC, reference.meanSstC),
-        "implicit end states and seasonal means must approach a fine-step explicit reference under time refinement");
-
-    auto basins = fixture(n, true);
-    for (int y : {0, rows - 1})
-        for (int x = 0; x < n; ++x)
-        {
-            const int i = y * n + x;
-            basins.landMask[i] = x == 0 || x == n / 2;
-            basins.initialSstC[i] = x < n / 2 ? 20.0f : 2.0f;
-        }
-    const auto isolated = climateocean::solveWindDrivenOcean(n, rows, basins, c);
-    expect(isolated.converged && difference(isolated.sstC, basins.initialSstC) < 1.0e-6,
-        "land barriers must keep disconnected constant-temperature basins unchanged, including at the longitude seam");
-
-    // Only two wet cells straddle the seam. Their latent deficit is one K of
-    // mixed-layer heat; low conductance partly melts ice, high conductance warms
-    // both cells after melting. A temperature clamp cannot satisfy this test.
-    auto ice = fixture(n, true);
-    std::fill(ice.landMask.begin(), ice.landMask.end(), 1);
-    ice.landMask[0] = ice.landMask[n - 1] = 0;
-    std::fill(ice.initialSstC.begin(), ice.initialSstC.end(), c.freezingTemperatureC);
-    ice.initialSstC[n - 1] = c.freezingTemperatureC + 2.0f;
-    ice.initialIceThicknessMetres.assign(n * rows, 0.0f);
-    const double capacity = c.waterDensityKgM3 * c.waterHeatCapacityJkgK * c.mixedLayerDepthMetres;
-    const double latent = c.iceDensityKgM3 * c.latentHeatFusionJkg;
-    ice.initialIceThicknessMetres[0] = static_cast<float>(capacity / latent);
-    for (double r : {0.25, 4.0})
-    {
-        auto iceConfig = c;
-        iceConfig.heatDiffusivityM2S = static_cast<float>(r * area * area / (c.oceanTimeStepSeconds * face * face));
-        const auto result = climateocean::solveWindDrivenOcean(n, rows, ice, iceConfig);
-        const double warm = r < 1.0 ? 2.0 / (1.0 + r) : (2.0 + r) / (1.0 + 2.0 * r);
-        const double cold = r < 1.0 ? 0.0 : (r - 1.0) / (1.0 + 2.0 * r);
-        const double thickness = r < 1.0 ? (1.0 - r * warm) * capacity / latent : 0.0;
-        expect(result.converged && std::abs(result.sstC[n - 1] - c.freezingTemperatureC - warm) < 2.0e-6 &&
-            std::abs(result.sstC[0] - c.freezingTemperatureC - cold) < 2.0e-6 &&
-            std::abs(result.iceThicknessMetres[0] - thickness) < 1.0e-6 && budgetError(result) < 1.0e-6,
-            "implicit seam exchange must reproduce analytic partial and complete melting with conserved latent heat");
-        if (r > 1.0) expect(result.maximumZonalDiffusionIterations > 1,
-            "melting must activate the newly liquid cell in the nonlinear solve");
-    }
-
-    auto zero = c; zero.heatDiffusivityM2S = 0.0f;
-    const auto zeroImplicit = climateocean::solveWindDrivenOcean(n, rows, f, zero);
-    zero.implicitZonalHeatDiffusion = false;
-    const auto zeroExplicit = climateocean::solveWindDrivenOcean(n, rows, f, zero);
-    expect(zeroImplicit.sstC == zeroExplicit.sstC && zeroImplicit.meanSstC == zeroExplicit.meanSstC,
-        "zero diffusion must preserve the explicit integration results exactly");
-
-    // Fixed-seed heterogeneous wet/land/ice rows stress repeated activation and
-    // closed faces, rather than only the all-liquid cyclic matrix.
-    std::mt19937 rng(20260907);
-    for (int trial = 0; trial < 8; ++trial)
-    {
-        auto mixed = fixture(n, true);
-        mixed.initialIceThicknessMetres.assign(n * rows, 0.0f);
-        for (int y : {0, rows - 1})
-            for (int x = 0; x < n; ++x)
-            {
-                const int i = y * n + x;
-                mixed.landMask[i] = rng() % 13 == 0;
-                const double h = (static_cast<int>(rng() % 1201) - 200) / 100.0;
-                mixed.initialSstC[i] = static_cast<float>(c.freezingTemperatureC + std::max(0.0, h));
-                mixed.initialIceThicknessMetres[i] = static_cast<float>(std::max(0.0, -h) * capacity / latent);
-            }
-        auto stiff = c;
-        stiff.heatDiffusivityM2S *= static_cast<float>(std::pow(2.0, trial));
-        const auto result = climateocean::solveWindDrivenOcean(n, rows, mixed, stiff);
-        bool bounded = true;
-        for (std::size_t i = 0; i < result.sstC.size(); ++i)
-            if (!mixed.landMask[i]) bounded = bounded && result.sstC[i] >= c.freezingTemperatureC &&
-                result.sstC[i] <= c.freezingTemperatureC + 10.00001f;
-        if (!result.converged || !bounded || budgetError(result) >= 1.0e-5)
-            std::cerr << "Mixed polar fixture seed=20260907 trial=" << trial << " residual_k="
-                << result.maximumZonalDiffusionResidualK << " iterations=" << result.maximumZonalDiffusionIterations << '\n';
-        expect(result.converged && bounded && budgetError(result) < 1.0e-5,
-            "mixed polar basins must remain bounded and conserve local energy through freezing/melting");
-    }
-
-    // Large meridional diffusion still needs explicit substeps after removing
-    // the zonal restriction. Constant fields must survive those substeps.
-    auto meridional = c; meridional.heatDiffusivityM2S = 1.0e8f;
-    const auto meridionalState = climateocean::solveWindDrivenOcean(n, rows, fixture(n, false), meridional);
-    expect(meridionalState.converged && meridionalState.heatSubsteps > 1 &&
-        meridionalState.explicitHeatSubsteps > meridionalState.heatSubsteps &&
-        difference(meridionalState.sstC, fixture(n, false).initialSstC) < 1.0e-6,
-        "implicit zonal diffusion must retain the meridional explicit stability restriction");
-
-    auto high = fixture(512, true);
-    const auto highState = climateocean::solveWindDrivenOcean(512, 256, high, c);
-    const auto& limiter = meridionalState.stabilityLimit;
-    expect(limiter.cell >= 0 && limiter.meridionalDiffusionRate > 0.0 &&
-        limiter.zonalAdvectionRate == 0.0 && limiter.meridionalAdvectionRate == 0.0 &&
-        std::abs(limiter.totalRate - limiter.meridionalDiffusionRate - limiter.verticalRate - limiter.surfaceRate) < 1.0e-14 &&
-        meridionalState.actualHeatStepSeconds <= 0.7 / limiter.totalRate,
-        "ocean limiter diagnostics must identify and reconstruct the retained explicit stability bound");
-    expect(highState.converged && highState.heatSubsteps == 1 && highState.explicitHeatSubsteps >= 800 &&
-        difference(highState.sstC, high.initialSstC) < 1.0e-6,
-        "512x256 open polar rings must preserve constants in one implicit step despite the explicit polar restriction");
-    auto threaded = fixture(256, false);
-    threaded.initialIceThicknessMetres.assign(threaded.initialSstC.size(), 0.0f);
-    for (std::size_t i = 0; i < threaded.initialSstC.size(); ++i)
-    {
-        threaded.landMask[i] = i % 19 == 0;
-        threaded.initialSstC[i] = i % 7 ? static_cast<float>(i % 11) : c.freezingTemperatureC;
-        threaded.initialIceThicknessMetres[i] = i % 7 ? 0.0f : 0.05f;
-    }
-    auto serialConfig = c; serialConfig.parallelZonalHeatDiffusion = false;
-    const auto serial = climateocean::solveWindDrivenOcean(256, 128, threaded, serialConfig);
-    const auto parallel = climateocean::solveWindDrivenOcean(256, 128, threaded, c);
-    bool same = serial.converged && parallel.converged && serial.sstC == parallel.sstC &&
-        serial.meanSstC == parallel.meanSstC && serial.iceThicknessMetres == parallel.iceThicknessMetres &&
-        serial.meanIceCover == parallel.meanIceCover && serial.meanSurfaceSkinTemperatureC == parallel.meanSurfaceSkinTemperatureC &&
-        serial.maximumZonalDiffusionResidualK == parallel.maximumZonalDiffusionResidualK &&
-        serial.maximumZonalDiffusionIterations == parallel.maximumZonalDiffusionIterations;
-    for (std::size_t i = 0; i < serial.heatBudget.size(); ++i)
-        same = same && serial.heatBudget[i].horizontalWm2 == parallel.heatBudget[i].horizontalWm2 &&
-            serial.heatBudget[i].storageWm2 == parallel.heatBudget[i].storageWm2;
-    expect(same, "parallel zonal rows preserve serial enthalpy, means, budgets and diagnostics bitwise through coastal melting");
-}
-
 int accuracy(int columns)
 {
     if (columns < 16 || columns > 512 || columns % 4 != 0) return 2;
@@ -640,14 +383,318 @@ int climateoceanheattool(int argc, char** argv)
 }
 
 
-TEST(ClimateOceanHeat, Model) { runTests(); }
+namespace
+{
 
-TEST(ClimateOceanHeat, VariableStorage) { variableStorageTests(); }
+// The 64-column polar-ring fixture of the heat diffusion tests: only the two
+// polar rows are wet, alternating 10 C and 0 C cells.
+class ClimateOceanHeat : public ::testing::Test
+{
+protected:
+    static constexpr int n = 64, rows = n / 2;
+    climateocean::OceanConfig c = config();
+    climateocean::OceanForcing f = fixture(n, true);
+    const climategrid::SphericalGrid grid = climategrid::makeSphericalGrid(n, rows, c.planetRadiusMetres);
+    const double area = grid.cellAreasSquareMetres[0], face = grid.zonalFaceLengthsMetres[0];
+    const double capacity = c.waterDensityKgM3 * c.waterHeatCapacityJkgK * c.mixedLayerDepthMetres;
+    const double latent = c.iceDensityKgM3 * c.latentHeatFusionJkg;
 
-TEST(ClimateOceanHeat, HeatKernels) { heatKernelTests(); }
+    ClimateOceanHeat()
+    {
+        for (int y : {0, rows - 1})
+            for (int x = 0; x < n; ++x) f.initialSstC[y * n + x] = x % 2 ? 10.0f : 0.0f;
+    }
+};
+
+}
+
+TEST_F(ClimateOceanHeat, KrylovMatchesRelaxation)
+{
+    auto momentum = fixture(64, false);
+    for (int y = 0; y < 32; ++y)
+        for (int x = 0; x < 64; ++x)
+        {
+            const int i = y * 64 + x;
+            momentum.landMask[i] = (x > 24 && x < 30 && y > 8 && y < 24);
+            momentum.bathymetryMetres[i] = 200.0f + 50.0f * x;
+            momentum.initialSstC[i] = 5.0f + 0.1f * x;
+            momentum.eastWindMps[i] = static_cast<float>(3.0 * std::sin(0.15 * y));
+            momentum.southWindMps[i] = static_cast<float>(std::cos(0.1 * x));
+        }
+    auto precise = config();
+    precise.streamfunctionIterations = 16000;
+    precise.streamfunctionTolerance = 1.0e-8f;
+    precise.krylovCirculation = false;
+    const auto relaxation = climateocean::solveWindDrivenOcean(64, 32, momentum, precise);
+    precise.krylovCirculation = true;
+    const auto krylov = climateocean::solveWindDrivenOcean(64, 32, momentum, precise);
+    expect(relaxation.converged && krylov.converged &&
+        difference(relaxation.eastCurrentMps, krylov.eastCurrentMps) < 1.0e-6 &&
+        difference(relaxation.southCurrentMps, krylov.southCurrentMps) < 1.0e-6 &&
+        difference(relaxation.sstC, krylov.sstC) < 2.0e-6 &&
+        krylov.maximumTransportDivergenceMps < 1.0e-12 && budgetError(krylov) < 1.0e-5,
+        "Krylov circulation must match tightly converged relaxation with bathymetry, island coasts and a periodic seam");
+}
+
+TEST_F(ClimateOceanHeat, SeasonalCirculationReuse)
+{
+    // Seasonal circulation reuse must reproduce recomputation exactly through
+    // changing thermal/ice state, and must not survive changed outer forcing.
+    std::array<climateocean::OceanForcing, 4> seasons;
+    std::array<climateocean::OceanConfig, 4> configs;
+    for (int season = 0; season < 4; ++season)
+    {
+        seasons[season] = fixture(32, false);
+        auto& forcing = seasons[season];
+        forcing.initialIceThicknessMetres.assign(32 * 16, 0.0f);
+        for (int i = 0; i < 32 * 16; ++i)
+        {
+            forcing.eastWindMps[i] = static_cast<float>((season + 1) * std::sin(0.2 * (i / 32)));
+            forcing.bathymetryMetres[i] = 1000.0f + 10.0f * (i % 32);
+            if (i < 32) { forcing.initialSstC[i] = -1.8f; forcing.initialIceThicknessMetres[i] = 0.5f; }
+        }
+        configs[season] = config();
+        configs[season].heatStepsPerIteration = 3;
+        configs[season].surfaceHeatExchangeWm2K = 18.0f;
+    }
+    for (int trial = 0; trial < 3; ++trial)
+    {
+        for (auto& cfg : configs) cfg.variableHeatStorage = trial == 2;
+        for (auto& cfg : configs) cfg.reuseSeasonalCirculation = true;
+        const auto cached = climateocean::solvePeriodicOcean(32, 16, seasons, configs, 3, 0.0);
+        for (auto& cfg : configs) cfg.reuseSeasonalCirculation = false;
+        const auto uncached = climateocean::solvePeriodicOcean(32, 16, seasons, configs, 3, 0.0);
+        bool equal = cached.accepted && uncached.accepted && cached.years == 3 &&
+            cached.annualEnthalpyDriftK == uncached.annualEnthalpyDriftK && cached.heatSubsteps == uncached.heatSubsteps;
+        for (int season = 0; season < 4; ++season)
+        {
+            const auto& a = cached.seasons[season]; const auto& b = uncached.seasons[season];
+            equal = equal && a.sstC == b.sstC && a.meanSstC == b.meanSstC &&
+                a.iceThicknessMetres == b.iceThicknessMetres && a.meanIceCover == b.meanIceCover &&
+                a.surfaceSkinTemperatureC == b.surfaceSkinTemperatureC &&
+                a.meanSurfaceSkinTemperatureC == b.meanSurfaceSkinTemperatureC &&
+                a.streamfunctionM3S == b.streamfunctionM3S &&
+                a.eastVolumeTransportM3S == b.eastVolumeTransportM3S &&
+                a.southVolumeTransportM3S == b.southVolumeTransportM3S && a.heatBudget.size() == b.heatBudget.size();
+            equal = equal && a.storageDepthMetres == b.storageDepthMetres && a.reservoirTemperatureC == b.reservoirTemperatureC;
+            for (std::size_t i = 0; i < a.heatBudget.size() && i < b.heatBudget.size(); ++i)
+                equal = equal && a.heatBudget[i].horizontalWm2 == b.heatBudget[i].horizontalWm2 &&
+                    a.heatBudget[i].surfaceWm2 == b.heatBudget[i].surfaceWm2 &&
+                    a.heatBudget[i].verticalWm2 == b.heatBudget[i].verticalWm2 &&
+                    a.heatBudget[i].storageWm2 == b.heatBudget[i].storageWm2;
+        }
+        expect(equal && cached.circulationSolves == 4 && uncached.circulationSolves == 12,
+            "seasonal reuse must match recomputation bitwise and solve circulation only once per season");
+        if (!equal || cached.circulationSolves != 4 || uncached.circulationSolves != 12)
+        {
+            std::cerr << std::setprecision(17) << "Reuse trial=" << trial
+                << " solves=" << cached.circulationSolves << '/' << uncached.circulationSolves
+                << " accepted=" << cached.accepted << '/' << uncached.accepted
+                << " years=" << cached.years << '/' << uncached.years
+                << " drift=" << cached.annualEnthalpyDriftK << '/' << uncached.annualEnthalpyDriftK
+                << " steps=" << cached.heatSubsteps << '/' << uncached.heatSubsteps << '\n';
+            for (int season=0;season<4;++season)
+            {
+                const auto& a=cached.seasons[season];const auto& b=uncached.seasons[season];
+                double budget=0.0;std::size_t worst=0;
+                for (std::size_t i=0;i<a.heatBudget.size();++i)
+                    if (std::abs(a.heatBudget[i].horizontalWm2-b.heatBudget[i].horizontalWm2)>budget)
+                    { budget=std::abs(a.heatBudget[i].horizontalWm2-b.heatBudget[i].horizontalWm2);worst=i; }
+                std::cerr << " season=" << season << " sst_delta=" << difference(a.sstC,b.sstC)
+                    << " mean_sst_delta=" << difference(a.meanSstC,b.meanSstC)
+                    << " same_psi=" << (a.streamfunctionM3S==b.streamfunctionM3S)
+                    << " horizontal_delta=" << budget << " cell=" << worst
+                    << " east_delta=" << difference(a.eastCurrentMps,b.eastCurrentMps)
+                    << " south_delta=" << difference(a.southCurrentMps,b.southCurrentMps)
+                    << " ice_delta=" << difference(a.iceThicknessMetres,b.iceThicknessMetres)
+                    << " budget=" << a.heatBudget[worst].horizontalWm2 << '/' << b.heatBudget[worst].horizontalWm2
+                    << " vertical=" << a.heatBudget[worst].verticalWm2 << '/' << b.heatBudget[worst].verticalWm2 << '\n';
+            }
+        }
+        for (auto& forcing : seasons) for (auto& wind : forcing.eastWindMps) wind *= -1.5f;
+        for (auto& cfg : configs) cfg.linearBottomDragMps = 0.002f;
+    }
+}
+
+TEST_F(ClimateOceanHeat, PolarRingImplicitDiffusion)
+{
+    const auto implicit = climateocean::solveWindDrivenOcean(n, rows, f, c);
+    const double ratio = c.oceanTimeStepSeconds * c.heatDiffusivityM2S * face * face / (area * area);
+    double analyticError = 0.0;
+    for (int y : {0, rows - 1})
+        for (int x = 0; x < n; ++x)
+            analyticError = std::max(analyticError, std::abs(implicit.sstC[y * n + x] -
+                (5.0 + (x % 2 ? 5.0 : -5.0) / (1.0 + 4.0 * ratio))));
+    expect(implicit.converged && analyticError < 1.0e-6 && budgetError(implicit) < 1.0e-7,
+        "both polar rings must reproduce backward-Euler eigenmode damping and close every cell heat budget");
+    expect(std::abs(implicit.heatBudgetResidualJ) / (2.0 * n * area * 2.5e8 * 10.0) < 1.0e-13,
+        "closed zonal exchange must conserve globally integrated heat");
+}
+
+TEST_F(ClimateOceanHeat, TimeRefinement)
+{
+    // Time refinement against the retained explicit implementation at the SAME
+    // spatial resolution. End states and interval means must both approach it.
+    auto referenceConfig = c;
+    referenceConfig.implicitZonalHeatDiffusion = false;
+    referenceConfig.heatStepsPerIteration = 2048;
+    referenceConfig.oceanTimeStepSeconds /= 2048;
+    const auto reference = climateocean::solveWindDrivenOcean(n, rows, f, referenceConfig);
+    auto coarseConfig = c;
+    coarseConfig.heatStepsPerIteration = 8; coarseConfig.oceanTimeStepSeconds /= 8;
+    const auto coarse = climateocean::solveWindDrivenOcean(n, rows, f, coarseConfig);
+    coarseConfig.heatStepsPerIteration = 16; coarseConfig.oceanTimeStepSeconds /= 2;
+    const auto fine = climateocean::solveWindDrivenOcean(n, rows, f, coarseConfig);
+    expect(reference.converged && coarse.converged && fine.converged &&
+        difference(fine.sstC, reference.sstC) < 0.6 * difference(coarse.sstC, reference.sstC) &&
+        difference(fine.meanSstC, reference.meanSstC) < 0.6 * difference(coarse.meanSstC, reference.meanSstC),
+        "implicit end states and seasonal means must approach a fine-step explicit reference under time refinement");
+}
+
+TEST_F(ClimateOceanHeat, IsolatedBasins)
+{
+    auto basins = fixture(n, true);
+    for (int y : {0, rows - 1})
+        for (int x = 0; x < n; ++x)
+        {
+            const int i = y * n + x;
+            basins.landMask[i] = x == 0 || x == n / 2;
+            basins.initialSstC[i] = x < n / 2 ? 20.0f : 2.0f;
+        }
+    const auto isolated = climateocean::solveWindDrivenOcean(n, rows, basins, c);
+    expect(isolated.converged && difference(isolated.sstC, basins.initialSstC) < 1.0e-6,
+        "land barriers must keep disconnected constant-temperature basins unchanged, including at the longitude seam");
+}
+
+TEST_F(ClimateOceanHeat, SeamMelting)
+{
+    // Only two wet cells straddle the seam. Their latent deficit is one K of
+    // mixed-layer heat; low conductance partly melts ice, high conductance warms
+    // both cells after melting. A temperature clamp cannot satisfy this test.
+    auto ice = fixture(n, true);
+    std::fill(ice.landMask.begin(), ice.landMask.end(), 1);
+    ice.landMask[0] = ice.landMask[n - 1] = 0;
+    std::fill(ice.initialSstC.begin(), ice.initialSstC.end(), c.freezingTemperatureC);
+    ice.initialSstC[n - 1] = c.freezingTemperatureC + 2.0f;
+    ice.initialIceThicknessMetres.assign(n * rows, 0.0f);
+    ice.initialIceThicknessMetres[0] = static_cast<float>(capacity / latent);
+    for (double r : {0.25, 4.0})
+    {
+        auto iceConfig = c;
+        iceConfig.heatDiffusivityM2S = static_cast<float>(r * area * area / (c.oceanTimeStepSeconds * face * face));
+        const auto result = climateocean::solveWindDrivenOcean(n, rows, ice, iceConfig);
+        const double warm = r < 1.0 ? 2.0 / (1.0 + r) : (2.0 + r) / (1.0 + 2.0 * r);
+        const double cold = r < 1.0 ? 0.0 : (r - 1.0) / (1.0 + 2.0 * r);
+        const double thickness = r < 1.0 ? (1.0 - r * warm) * capacity / latent : 0.0;
+        expect(result.converged && std::abs(result.sstC[n - 1] - c.freezingTemperatureC - warm) < 2.0e-6 &&
+            std::abs(result.sstC[0] - c.freezingTemperatureC - cold) < 2.0e-6 &&
+            std::abs(result.iceThicknessMetres[0] - thickness) < 1.0e-6 && budgetError(result) < 1.0e-6,
+            "implicit seam exchange must reproduce analytic partial and complete melting with conserved latent heat");
+        if (r > 1.0) expect(result.maximumZonalDiffusionIterations > 1,
+            "melting must activate the newly liquid cell in the nonlinear solve");
+    }
+}
+
+TEST_F(ClimateOceanHeat, ZeroDiffusion)
+{
+    auto zero = c; zero.heatDiffusivityM2S = 0.0f;
+    const auto zeroImplicit = climateocean::solveWindDrivenOcean(n, rows, f, zero);
+    zero.implicitZonalHeatDiffusion = false;
+    const auto zeroExplicit = climateocean::solveWindDrivenOcean(n, rows, f, zero);
+    expect(zeroImplicit.sstC == zeroExplicit.sstC && zeroImplicit.meanSstC == zeroExplicit.meanSstC,
+        "zero diffusion must preserve the explicit integration results exactly");
+}
+
+TEST_F(ClimateOceanHeat, MixedPolarBasins)
+{
+    // Fixed-seed heterogeneous wet/land/ice rows stress repeated activation and
+    // closed faces, rather than only the all-liquid cyclic matrix.
+    std::mt19937 rng(20260907);
+    for (int trial = 0; trial < 8; ++trial)
+    {
+        auto mixed = fixture(n, true);
+        mixed.initialIceThicknessMetres.assign(n * rows, 0.0f);
+        for (int y : {0, rows - 1})
+            for (int x = 0; x < n; ++x)
+            {
+                const int i = y * n + x;
+                mixed.landMask[i] = rng() % 13 == 0;
+                const double h = (static_cast<int>(rng() % 1201) - 200) / 100.0;
+                mixed.initialSstC[i] = static_cast<float>(c.freezingTemperatureC + std::max(0.0, h));
+                mixed.initialIceThicknessMetres[i] = static_cast<float>(std::max(0.0, -h) * capacity / latent);
+            }
+        auto stiff = c;
+        stiff.heatDiffusivityM2S *= static_cast<float>(std::pow(2.0, trial));
+        const auto result = climateocean::solveWindDrivenOcean(n, rows, mixed, stiff);
+        bool bounded = true;
+        for (std::size_t i = 0; i < result.sstC.size(); ++i)
+            if (!mixed.landMask[i]) bounded = bounded && result.sstC[i] >= c.freezingTemperatureC &&
+                result.sstC[i] <= c.freezingTemperatureC + 10.00001f;
+        if (!result.converged || !bounded || budgetError(result) >= 1.0e-5)
+            std::cerr << "Mixed polar fixture seed=20260907 trial=" << trial << " residual_k="
+                << result.maximumZonalDiffusionResidualK << " iterations=" << result.maximumZonalDiffusionIterations << '\n';
+        expect(result.converged && bounded && budgetError(result) < 1.0e-5,
+            "mixed polar basins must remain bounded and conserve local energy through freezing/melting");
+    }
+}
+
+TEST_F(ClimateOceanHeat, MeridionalRestrictionAndLimiter)
+{
+    // Large meridional diffusion still needs explicit substeps after removing
+    // the zonal restriction. Constant fields must survive those substeps.
+    auto meridional = c; meridional.heatDiffusivityM2S = 1.0e8f;
+    const auto meridionalState = climateocean::solveWindDrivenOcean(n, rows, fixture(n, false), meridional);
+    expect(meridionalState.converged && meridionalState.heatSubsteps > 1 &&
+        meridionalState.explicitHeatSubsteps > meridionalState.heatSubsteps &&
+        difference(meridionalState.sstC, fixture(n, false).initialSstC) < 1.0e-6,
+        "implicit zonal diffusion must retain the meridional explicit stability restriction");
+    const auto& limiter = meridionalState.stabilityLimit;
+    expect(limiter.cell >= 0 && limiter.meridionalDiffusionRate > 0.0 &&
+        limiter.zonalAdvectionRate == 0.0 && limiter.meridionalAdvectionRate == 0.0 &&
+        std::abs(limiter.totalRate - limiter.meridionalDiffusionRate - limiter.verticalRate - limiter.surfaceRate) < 1.0e-14 &&
+        meridionalState.actualHeatStepSeconds <= 0.7 / limiter.totalRate,
+        "ocean limiter diagnostics must identify and reconstruct the retained explicit stability bound");
+}
+
+TEST_F(ClimateOceanHeat, HighResolutionPolarRings)
+{
+    auto high = fixture(512, true);
+    const auto highState = climateocean::solveWindDrivenOcean(512, 256, high, c);
+    expect(highState.converged && highState.heatSubsteps == 1 && highState.explicitHeatSubsteps >= 800 &&
+        difference(highState.sstC, high.initialSstC) < 1.0e-6,
+        "512x256 open polar rings must preserve constants in one implicit step despite the explicit polar restriction");
+}
+
+TEST_F(ClimateOceanHeat, ParallelZonalRows)
+{
+    auto threaded = fixture(256, false);
+    threaded.initialIceThicknessMetres.assign(threaded.initialSstC.size(), 0.0f);
+    for (std::size_t i = 0; i < threaded.initialSstC.size(); ++i)
+    {
+        threaded.landMask[i] = i % 19 == 0;
+        threaded.initialSstC[i] = i % 7 ? static_cast<float>(i % 11) : c.freezingTemperatureC;
+        threaded.initialIceThicknessMetres[i] = i % 7 ? 0.0f : 0.05f;
+    }
+    auto serialConfig = c; serialConfig.parallelZonalHeatDiffusion = false;
+    const auto serial = climateocean::solveWindDrivenOcean(256, 128, threaded, serialConfig);
+    const auto parallel = climateocean::solveWindDrivenOcean(256, 128, threaded, c);
+    bool same = serial.converged && parallel.converged && serial.sstC == parallel.sstC &&
+        serial.meanSstC == parallel.meanSstC && serial.iceThicknessMetres == parallel.iceThicknessMetres &&
+        serial.meanIceCover == parallel.meanIceCover && serial.meanSurfaceSkinTemperatureC == parallel.meanSurfaceSkinTemperatureC &&
+        serial.maximumZonalDiffusionResidualK == parallel.maximumZonalDiffusionResidualK &&
+        serial.maximumZonalDiffusionIterations == parallel.maximumZonalDiffusionIterations;
+    for (std::size_t i = 0; i < serial.heatBudget.size(); ++i)
+        same = same && serial.heatBudget[i].horizontalWm2 == parallel.heatBudget[i].horizontalWm2 &&
+            serial.heatBudget[i].storageWm2 == parallel.heatBudget[i].storageWm2;
+    expect(same, "parallel zonal rows preserve serial enthalpy, means, budgets and diagnostics bitwise through coastal melting");
+}
+
+TEST_F(ClimateOceanHeat, VariableStorage) { variableStorageTests(); }
+
+TEST_F(ClimateOceanHeat, HeatKernels) { heatKernelTests(); }
 
 // Not run by ctest: see tests/test_modes.hpp.
-TEST(ClimateOceanHeat, DISABLED_Modes)
+TEST_F(ClimateOceanHeat, DISABLED_Modes)
 {
     EXPECT_EQ(0, runtestmode(&climateoceanheattool)) << "UW_TEST_ARGUMENTS: --heat-kernels WIDTH DAYS | --accuracy WIDTH | --ocean-heat-benchmark WIDTH DAYS";
 }
