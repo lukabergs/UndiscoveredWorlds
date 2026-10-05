@@ -111,6 +111,7 @@ Lessons:
 | `world-0055` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 0: baseline test run and the split list |
 | `world-0056` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 1: climate_atmosphere_tests.cpp split |
 | `world-0057` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 2: climate_ocean_dynamics_tests.cpp split |
+| `world-0058` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 3: climate_hydrology_tests.cpp split |
 
 Lessons:
 

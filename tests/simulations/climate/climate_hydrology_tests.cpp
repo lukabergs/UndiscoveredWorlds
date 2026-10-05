@@ -174,7 +174,44 @@ void testVariableFlow()
 void testExchangeTimeRefinement();
 void testSubgridHumidityConservation();
 
-TEST(ClimateHydrology, Model)
+namespace
+{
+
+// The 16 x 8 tracer grid of the transport sections and the shared helpers.
+class ClimateHydrology : public ::testing::Test
+{
+protected:
+    static constexpr int tracerColumns = 16;
+    static constexpr int tracerRows = tracerColumns / 2;
+    static constexpr float tracerRadius = 1000.0f;
+    static constexpr float tracerTimeStep = 1.0f;
+    static constexpr float pi = 3.14159265358979323846f;
+    static constexpr size_t tracerCellCount = static_cast<size_t>(tracerColumns * tracerRows);
+    static size_t tracerIndex(int x, int y)
+    {
+        return static_cast<size_t>(y * tracerColumns + x);
+    }
+    static double tracerMass(const std::vector<float>& field)
+    {
+        double mass = 0.0;
+        for (int y = 0; y < tracerRows; y++)
+        {
+            const double area = climatehydrology::climateCellAreaWeight(y, tracerRows);
+            for (int x = 0; x < tracerColumns; x++)
+                mass += area * field[tracerIndex(x, y)];
+        }
+        return mass;
+    }
+
+    std::vector<float> tracer = std::vector<float>(tracerCellCount, 0.0f);
+    std::vector<float> zonalWind = std::vector<float>(tracerCellCount, 0.0f);
+    std::vector<float> meridionalWind = std::vector<float>(tracerCellCount, 0.0f);
+    std::vector<float> transportedTracer;
+};
+
+}
+
+TEST_F(ClimateHydrology, WeatherPhaseAtTime)
 {
     const auto phaseAt = [](double time, float longitude = 0.0f)
     { return climatehydrology::weatherPhaseAtTime(time, longitude, 0.0f, 2.0f, -2.0f, 0.35f, -0.35f); };
@@ -197,36 +234,46 @@ TEST(ClimateHydrology, Model)
             0.0f, 0.0f, 3.0f, -1.0f, 0.0f, 0.0f).landTemperatureAnomalyC / 4096;
     expect(std::abs(asymmetricMean - climatehydrology::dailyMeanCycle(3.0f, -1.0f)) < 1.0e-6,
         "daily-mean baseline must retain the mean of asymmetric coastal cycles");
+}
+
+TEST_F(ClimateHydrology, LiftedParcel)
+{
+    using climatehydrology::detail::liftedParcelTemperatureC;
+    expect(liftedParcelTemperatureC(30.0f,.6f,1000.0f,1000.0f)==30.0f,
+        "zero parcel lift must preserve its temperature exactly");
+    const float dry=liftedParcelTemperatureC(30.0f,1.0e-6f,1000.0f,850.0f);
+    const float potential=static_cast<float>(303.15*std::pow(.85,287.05/1004.0)-273.15);
+    expect(near(dry,potential,2.0e-5f),
+        "an unsaturated lifted parcel must conserve dry potential temperature");
+    // Published MetPy moist_lapse example: saturated 5 C at 925 hPa is
+    // 0.99635104 C at 850 hPa. Constant coefficients/our saturation curve
+    // are approximations, hence 0.1 C tolerance rather than a pixel golden.
+    expect(near(liftedParcelTemperatureC(5.0f,1.0f,925.0f,850.0f),.99635104f,.1f),
+        "saturated lifting must agree with an independent published moist adiabat");
+    for (float temperature : {-40.0f,0.0f,20.0f,35.0f})
     {
-        using climatehydrology::detail::liftedParcelTemperatureC;
-        expect(liftedParcelTemperatureC(30.0f,.6f,1000.0f,1000.0f)==30.0f,
-            "zero parcel lift must preserve its temperature exactly");
-        const float dry=liftedParcelTemperatureC(30.0f,1.0e-6f,1000.0f,850.0f);
-        const float potential=static_cast<float>(303.15*std::pow(.85,287.05/1004.0)-273.15);
-        expect(near(dry,potential,2.0e-5f),
-            "an unsaturated lifted parcel must conserve dry potential temperature");
-        // Published MetPy moist_lapse example: saturated 5 C at 925 hPa is
-        // 0.99635104 C at 850 hPa. Constant coefficients/our saturation curve
-        // are approximations, hence 0.1 C tolerance rather than a pixel golden.
-        expect(near(liftedParcelTemperatureC(5.0f,1.0f,925.0f,850.0f),.99635104f,.1f),
-            "saturated lifting must agree with an independent published moist adiabat");
-        for (float temperature : {-40.0f,0.0f,20.0f,35.0f})
+        float previous=liftedParcelTemperatureC(temperature,.01f,1000.0f,800.0f);
+        for (float rh : {.1f,.3f,.5f,.7f,.9f,1.0f})
         {
-            float previous=liftedParcelTemperatureC(temperature,.01f,1000.0f,800.0f);
-            for (float rh : {.1f,.3f,.5f,.7f,.9f,1.0f})
-            {
-                const float lifted=liftedParcelTemperatureC(temperature,rh,1000.0f,800.0f);
-                expect(std::isfinite(lifted) && lifted<=temperature && lifted>=previous-.001f,
-                    "humidity must reduce parcel cooling continuously without heating it above launch temperature");
-                previous=lifted;
-            }
+            const float lifted=liftedParcelTemperatureC(temperature,rh,1000.0f,800.0f);
+            expect(std::isfinite(lifted) && lifted<=temperature && lifted>=previous-.001f,
+                "humidity must reduce parcel cooling continuously without heating it above launch temperature");
+            previous=lifted;
         }
     }
+}
+
+TEST_F(ClimateHydrology, MpdataRotationConvergence)
+{
     const double coarseRotationError = rotationError(24, 1);
     const double fineRotationError = rotationError(48, 1);
     expect(fineRotationError < coarseRotationError * 0.75 &&
             fineRotationError < rotationError(48, 0),
         "MPDATA must converge under grid refinement and sharpen full rotations versus donor cell");
+}
+
+TEST_F(ClimateHydrology, Calendar)
+{
     const auto january = climatehydrology::calendarMonth(0);
     const auto march = climatehydrology::calendarMonth(2);
     const auto december = climatehydrology::calendarMonth(11);
@@ -248,6 +295,10 @@ TEST(ClimateHydrology, Model)
     expect(annualDays == 365, "hydrology calendar must span 365 days");
     expect(near(climatehydrology::interpolateSeasonal(10.0f, 16.0f, 1.0f / 3.0f), 12.0f),
         "seasonal interpolation is wrong");
+}
+
+TEST_F(ClimateHydrology, ClimateGridDimensions)
+{
     const auto climategrid = climatehydrology::climateGridDimensions(512, 256, 128);
     const auto oddRaster = climatehydrology::climateGridDimensions(63, 24, 128);
     expect(oddRaster.columns == 62 && oddRaster.rows == 31,
@@ -278,33 +329,12 @@ TEST(ClimateHydrology, Model)
     expect(climatehydrology::adjacentMeridionalTransportTargetRow(0, -2.0f, 64) == 0 &&
             climatehydrology::adjacentMeridionalTransportTargetRow(64, 2.0f, 64) == 64,
         "meridional flux must remain inside the polar boundaries");
+}
 
-    constexpr int tracerColumns = 16;
-    constexpr int tracerRows = tracerColumns / 2;
-    constexpr float tracerRadius = 1000.0f;
-    constexpr float tracerTimeStep = 1.0f;
-    constexpr float pi = 3.14159265358979323846f;
-    const size_t tracerCellCount = static_cast<size_t>(tracerColumns * tracerRows);
-    const auto tracerIndex = [=](int x, int y)
-    {
-        return static_cast<size_t>(y * tracerColumns + x);
-    };
-    const auto tracerMass = [&](const std::vector<float>& field)
-    {
-        double mass = 0.0;
-        for (int y = 0; y < tracerRows; y++)
-        {
-            const double area = climatehydrology::climateCellAreaWeight(y, tracerRows);
-            for (int x = 0; x < tracerColumns; x++)
-                mass += area * field[tracerIndex(x, y)];
-        }
-        return mass;
-    };
-
-    std::vector<float> tracer(tracerCellCount, 1.0f);
-    std::vector<float> zonalWind(tracerCellCount, 8.0f);
-    std::vector<float> meridionalWind(tracerCellCount, 0.0f);
-    std::vector<float> transportedTracer;
+TEST_F(ClimateHydrology, UniformZonalTransport)
+{
+    tracer.assign(tracerCellCount, 1.0f);
+    zonalWind.assign(tracerCellCount, 8.0f);
     auto transportDiagnostics = climatehydrology::advectSphericalTracer(
         tracerColumns,
         tracerRows,
@@ -325,9 +355,10 @@ TEST(ClimateHydrology, Model)
             transportDiagnostics.finalAreaWeightedMass -
                 transportDiagnostics.initialAreaWeightedMass) < 1.0e-4,
         "zonal tracer transport must conserve area-weighted mass");
+}
 
-    tracer.assign(tracerCellCount, 0.0f);
-    zonalWind.assign(tracerCellCount, 0.0f);
+TEST_F(ClimateHydrology, SuperCflZonalPulse)
+{
     const int zonalSourceX = 4;
     const int equatorRow = tracerRows / 2;
     tracer[tracerIndex(zonalSourceX, equatorRow)] = 1.0f;
@@ -353,7 +384,7 @@ TEST(ClimateHydrology, Model)
         donorTracer);
     climatehydrology::MpdataOptions mpdataOptions = donorOptions;
     mpdataOptions.correctivePasses = 1;
-    transportDiagnostics = climatehydrology::advectSphericalTracerMpdata(
+    const auto transportDiagnostics = climatehydrology::advectSphericalTracerMpdata(
         tracerColumns,
         tracerRows,
         tracer,
@@ -401,17 +432,17 @@ TEST(ClimateHydrology, Model)
             transportDiagnostics.finalAreaWeightedMass /
                 transportDiagnostics.initialAreaWeightedMass - 1.0) < 1.0e-6,
         "multi-cell zonal flux transport must conserve tracer mass");
+}
 
-    tracer.assign(tracerCellCount, 0.0f);
-    zonalWind.assign(tracerCellCount, 0.0f);
-    meridionalWind.assign(tracerCellCount, 0.0f);
+TEST_F(ClimateHydrology, SuperCflMeridionalTransport)
+{
     for (int y = 1; y < tracerRows - 1; y++)
         meridionalWind[tracerIndex(5, y)] = 2.2f * pi * tracerRadius /
             static_cast<float>(tracerRows);
     const int meridionalSourceRow = 2;
     tracer[tracerIndex(5, meridionalSourceRow)] = 1.0f /
         climatehydrology::climateCellAreaWeight(meridionalSourceRow, tracerRows);
-    transportDiagnostics = climatehydrology::advectSphericalTracer(
+    const auto transportDiagnostics = climatehydrology::advectSphericalTracer(
         tracerColumns,
         tracerRows,
         tracer,
@@ -453,8 +484,10 @@ TEST(ClimateHydrology, Model)
     for (float value : transportedTracer)
         positiveTracer = positiveTracer && value >= 0.0f;
     expect(positiveTracer, "tracer transport must remain positive");
+}
 
-    tracer.assign(tracerCellCount, 0.0f);
+TEST_F(ClimateHydrology, OutwardPolarTransport)
+{
     meridionalWind.assign(tracerCellCount, -4.0f * pi * tracerRadius /
         static_cast<float>(tracerRows));
     tracer[tracerIndex(3, 0)] = 1.0f;
@@ -472,7 +505,10 @@ TEST(ClimateHydrology, Model)
     expect(near(transportedTracer[tracerIndex(3, 0)], 1.0f) &&
             std::abs(tracerMass(transportedTracer) - tracerMass(tracer)) < 1.0e-6,
         "outward polar transport must neither leak nor jump across the cap");
+}
 
+TEST_F(ClimateHydrology, DeterministicWeatherPhases)
+{
     const auto daytime = climatehydrology::deterministicWeatherPhase(
         0, 3, 7.0f, 2.0f, -2.0f, 0.35f, -0.35f);
     const auto neutral = climatehydrology::deterministicWeatherPhase(
@@ -487,7 +523,10 @@ TEST(ClimateHydrology, Model)
                 nighttime.landTemperatureAnomalyC,
             0.0f),
         "weather-phase land temperature anomalies must not bias the monthly mean");
+}
 
+TEST_F(ClimateHydrology, ConvectionAndSurfaceClosures)
+{
     expect(near(climatehydrology::kuoPrecipitationEfficiency(0.0f, 0.0f, 3.0f), 0.0f),
         "a dry column must have zero Kuo precipitation efficiency");
     expect(climatehydrology::kuoPrecipitationEfficiency(0.8f, 0.0f, 3.0f) >
@@ -518,7 +557,10 @@ TEST(ClimateHydrology, Model)
         "sub-cloud humidity must not create cloud cover");
     expect(climatehydrology::diagnosticCloudFraction(0.90f, 0.75f) > 0.0f,
         "humid sub-saturated air must be able to form cloud without raining");
+}
 
+TEST_F(ClimateHydrology, MoistAdjustmentAndExchange)
+{
     const auto adjustment = climatehydrology::moistSaturationAdjustment(
         30.0f, 20.0f, 10.0f, 86400.0f, 172800.0f, 2, 0.35f, 0.065f);
     expect(adjustment.condensedMm > 0.0f && adjustment.condensedMm < 10.0f,
@@ -535,7 +577,10 @@ TEST(ClimateHydrology, Model)
         "vertical exchange must apply simultaneous up- and downward transfers");
     expect(near(exchange.boundaryLayerMm + exchange.freeTroposphereMm, 30.0f),
         "vertical exchange must conserve atmospheric water");
+}
 
+TEST_F(ClimateHydrology, FallingPrecipitationAndSnow)
+{
     const auto falling = climatehydrology::processFallingPrecipitation(
         10.0f, -5.0f, 0.25f, 0.4f, 8.0f, -1.0f, 2.0f);
     expect(falling.reevaporatedMm > 0.0f && near(falling.rainMm, 0.0f),
@@ -551,7 +596,10 @@ TEST(ClimateHydrology, Model)
         "snow above the finite glacier store must become runoff");
     expect(near(snowaccumulation.storageMm + snowaccumulation.overflowMm, 5007.0f),
         "snow accumulation and overflow must conserve water");
+}
 
+TEST_F(ClimateHydrology, PrecipitationPartition)
+{
     const auto dry = climatehydrology::partitionPrecipitation(
         20.0f, 50.0f, 50.0f, -2.0f, 0.0f, 25.0f, 86400.0f,
         0.8f, 172800.0f, 0.6f, 0.75f, 8.0f, 24.0f);
@@ -591,7 +639,10 @@ TEST(ClimateHydrology, Model)
         0.8f, 172800.0f, 0.6f, 0.75f, 8.0f, 24.0f);
     expect(evaporationFed.convectiveMm > 0.0f,
         "surface evaporation plus net moisture supply must feed warm convection");
+}
 
+TEST_F(ClimateHydrology, TwoLayerPrecipitation)
+{
     const auto layered = climatehydrology::partitionTwoLayerPrecipitation(
         24.0f, 18.0f, 30.0f, 15.0f, 12.0f, 4.0f, 1.0f,
         28.0f, 12.0f, 86400.0f, 172800.0f, 0.6f, 0.75f,
@@ -610,7 +661,10 @@ TEST(ClimateHydrology, Model)
         0.0f, 6.0f, 2, 0.35f, 0.065f, 6.0f, 0.5f, 3.0f);
     expect(elevatedFed.convectiveMm > 0.0f,
         "elevated free-tropospheric moisture accession must be able to feed convection");
+}
 
+TEST_F(ClimateHydrology, PrecipitationNeverExceedsColumnWater)
+{
     for (int water = 0; water <= 100; water += 5)
     {
         const auto partition = climatehydrology::partitionPrecipitation(
@@ -622,7 +676,6 @@ TEST(ClimateHydrology, Model)
         expect(partition.totalMm() <= static_cast<float>(water) + 1.0e-5f,
             "precipitation must never remove more water than the column contains");
     }
-
 }
 
 void testExchangeTimeRefinement()
@@ -682,10 +735,10 @@ void testSubgridHumidityConservation()
         "dry cells must not acquire an artificial precipitation floor");
 }
 
-TEST(ClimateHydrology, ExchangeTimeRefinement) { testExchangeTimeRefinement(); }
+TEST_F(ClimateHydrology, ExchangeTimeRefinement) { testExchangeTimeRefinement(); }
 
-TEST(ClimateHydrology, SubgridHumidityConservation) { testSubgridHumidityConservation(); }
+TEST_F(ClimateHydrology, SubgridHumidityConservation) { testSubgridHumidityConservation(); }
 
-TEST(ClimateHydrology, SeasonalFluxDiagnostic) { testSeasonalFluxDiagnostic(); }
+TEST_F(ClimateHydrology, SeasonalFluxDiagnostic) { testSeasonalFluxDiagnostic(); }
 
-TEST(ClimateHydrology, VariableFlow) { testVariableFlow(); }
+TEST_F(ClimateHydrology, VariableFlow) { testVariableFlow(); }
