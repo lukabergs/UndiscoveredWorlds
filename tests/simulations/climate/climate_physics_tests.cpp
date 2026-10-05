@@ -14,7 +14,17 @@ void expect(bool condition, const char* message)
 }
 }
 
-TEST(ClimatePhysics, Model)
+namespace
+{
+
+// The physics sections share no state: the fixture only names the suite.
+class ClimatePhysics : public ::testing::Test
+{
+};
+
+}
+
+TEST_F(ClimatePhysics, BoundarySurfaceHumidity)
 {
     const float uniformlyMixed = climatephysics::detail::boundarySurfaceRelativeHumidity(18.0f, 50.0f, 0.45f);
     expect(std::abs(uniformlyMixed - 0.8f) < 1.0e-6f,
@@ -26,6 +36,10 @@ TEST(ClimatePhysics, Model)
     expect(climatephysics::detail::boundarySurfaceRelativeHumidity(30.0f, 50.0f, 0.45f) == 1.0f &&
            climatephysics::detail::boundarySurfaceRelativeHumidity(-1.0f, 50.0f, 0.45f) == 0.0f,
         "lower-reservoir humidity must respect saturation and empty-storage bounds");
+}
+
+TEST_F(ClimatePhysics, SaturationAndPressure)
+{
     expect(
         climatephysics::saturationVapourPressureHpa(30.0f) >
             climatephysics::saturationVapourPressureHpa(20.0f),
@@ -55,7 +69,10 @@ TEST(ClimatePhysics, Model)
         climatephysics::saturationColumnWaterAtPressure(20.0f, 1013.25f, 2.0f) <
             climatephysics::saturationColumnWaterAtPressure(20.0f, 1013.25f, 1.0f),
         "stronger gravity must reduce column water capacity");
+}
 
+TEST_F(ClimatePhysics, SurfaceExchange)
+{
     const float oceanDrag = climatephysics::neutralDragCoefficient(0.0002f, 10.0f);
     const float landDrag = climatephysics::neutralDragCoefficient(0.05f, 10.0f);
     expect(landDrag > oceanDrag,
@@ -77,6 +94,10 @@ TEST(ClimatePhysics, Model)
     expect(climatephysics::surfaceExchangeWindSpeedMps(3.0f, 4.0f, 1.0f, 0.0f) == 5.0f &&
         climatephysics::surfaceExchangeWindSpeedMps(0.0f, 0.0f, 1.0f, 0.0f) == 1.0f,
         "zero unresolved variance must recover the resolved wind and existing calm-wind floor");
+}
+
+TEST_F(ClimatePhysics, BulkEvaporation)
+{
     const float dryEvaporation = climatephysics::bulkAerodynamicEvaporationMm(
         20.0f, 0.0f, 5.0f, 0.0f, 86400.0f, 0.0013f);
     const float humidEvaporation = climatephysics::bulkAerodynamicEvaporationMm(
@@ -86,7 +107,10 @@ TEST(ClimatePhysics, Model)
     expect(
         climatephysics::bulkAerodynamicEvaporationMm(20.0f, 0.0f, 5.0f, 1.0f, 86400.0f, 0.0013f) == 0.0f,
         "saturated air must suppress evaporation");
+}
 
+TEST_F(ClimatePhysics, TransientEddyDiffusivity)
+{
     const float equatorialDiffusivity = climatephysics::transientEddyDiffusivityM2S(
         0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 25000.0f, 250000.0f, 20.0f, 45.0f);
     const float midlatitudeDiffusivity = climatephysics::transientEddyDiffusivityM2S(
@@ -101,7 +125,10 @@ TEST(ClimatePhysics, Model)
         climatephysics::transientEddyDiffusivityM2S(
             5.0f, -2.0f, 5.0f, -2.0f, 45.0f, 25000.0f, 250000.0f, 20.0f, 45.0f) == 0.0f,
         "eddy mixing must vanish without vertical wind shear");
+}
 
+TEST_F(ClimatePhysics, RelaxedExcessCondensation)
+{
     const float belowCriticalCondensation = climatephysics::relaxedExcessCondensationAmount(
         10.0f, 12.0f, 86400.0f, 172800.0f);
     const float excessCondensation = climatephysics::relaxedExcessCondensationAmount(
@@ -112,7 +139,10 @@ TEST(ClimatePhysics, Model)
     expect(
         std::abs(excessCondensation - 3.93469f) < 0.0001f,
         "excess atmospheric water must relax on the configured two-day e-folding timescale");
+}
 
+TEST_F(ClimatePhysics, WaterBudget)
+{
     climatephysics::WaterBudget closed;
     closed.oceanEvaporation = 100.0;
     closed.oceanPrecipitation = 40.0;
@@ -136,7 +166,10 @@ TEST(ClimatePhysics, Model)
     persistent.snowStorage = 10.0;
     expect(std::abs(persistent.residual()) < 1e-9,
         "persistent water budget must include initial atmospheric and soil storage");
+}
 
+TEST_F(ClimatePhysics, CouplingConvergence)
+{
     climatephysics::ClimateCouplingDiagnostics coupling;
     coupling.iteration = 6;
     expect(!climatephysics::climateCouplingConverged(coupling, 2, 0.02),
@@ -146,6 +179,10 @@ TEST(ClimatePhysics, Model)
     expect(!climatephysics::climateCouplingConverged(coupling, 2, 0.02), "heating must converge along with winds/SST/rainfall");
     coupling.heatingChange = 0.01;
     expect(climatephysics::climateCouplingConverged(coupling, 2, 0.02), "all bounded coupled residuals must permit convergence");
+}
+
+TEST_F(ClimatePhysics, AdaptiveCouplingRelaxation)
+{
     double fixedPoint = 0.0, relaxation = 0.5;
     std::vector<double> previousResidual;
     for (int step = 0; step < 5; ++step)
