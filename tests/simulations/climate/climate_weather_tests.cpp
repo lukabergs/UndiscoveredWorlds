@@ -18,28 +18,69 @@ void expect(bool condition, const char* message)
 }
 }
 
-TEST(ClimateWeather, Model)
+namespace
 {
-    constexpr int columns = 16;
-    constexpr int rows = 8;
-    constexpr std::size_t cellCount = columns * rows;
+
+// The 16 x 8 two-layer shallow-water grid of the weather tests.
+class ClimateWeather : public ::testing::Test
+{
+protected:
+    static constexpr int columns = 16;
+    static constexpr int rows = 8;
+    static constexpr std::size_t cellCount = columns * rows;
     climateweather::ShallowWaterConfig config;
-    config.layerCount = 2;
+    climateweather::ShallowWaterForcing zeroForcing;
+
+    ClimateWeather()
+    {
+        config.layerCount = 2;
+    }
+
+    // Seed 91 with a centre height anomaly, advanced six hours under zero forcing.
+    climateweather::ShallowWaterState perturbed(climateweather::ShallowWaterDiagnostics* diagnostics = nullptr) const
+    {
+        auto perturbed = climateweather::makeState(columns, rows, 2, 91);
+        const std::size_t centre = static_cast<std::size_t>(rows / 2) * columns + columns / 2;
+        perturbed.layers[0].heightAnomalyMetres[centre] = 12.0f;
+        perturbed.layers[1].heightAnomalyMetres[centre] = -6.0f;
+        const auto result = climateweather::advance(perturbed, config, zeroForcing, 21600.0f);
+        if (diagnostics) *diagnostics = result;
+        return perturbed;
+    }
+
+    // The perturbed state restored from its serialized bytes, as the replay sections used it.
+    climateweather::ShallowWaterState restored() const
+    {
+        climateweather::ShallowWaterState restored;
+        climateweather::deserializeState(climateweather::serializeState(perturbed()), restored);
+        return restored;
+    }
+
+    // The replay sections ran with stochastic height forcing switched on.
+    void stochastic()
+    {
+        config.stochasticHeightForcingMetresPerSecond = 2.0e-5f;
+    }
+};
+
+}
+
+TEST_F(ClimateWeather, RestingState)
+{
     expect(climateweather::makeState(columns, rows + 1, 2, 42).layers.empty(),
         "weather state construction must reject an extra latitude row");
     auto resting = climateweather::makeState(columns, rows, 2, 42);
-    climateweather::ShallowWaterForcing zeroForcing;
     auto diagnostics = climateweather::advance(resting, config, zeroForcing, 3600.0f);
     expect(diagnostics.finite && diagnostics.bounded &&
             std::abs(diagnostics.areaWeightedMassAnomaly) < 1.0e-9 &&
             diagnostics.areaWeightedEnergy == 0.0,
         "zero forcing must preserve the exact resting shallow-water state");
+}
 
-    auto perturbed = climateweather::makeState(columns, rows, 2, 91);
-    const std::size_t centre = static_cast<std::size_t>(rows / 2) * columns + columns / 2;
-    perturbed.layers[0].heightAnomalyMetres[centre] = 12.0f;
-    perturbed.layers[1].heightAnomalyMetres[centre] = -6.0f;
-    diagnostics = climateweather::advance(perturbed, config, zeroForcing, 21600.0f);
+TEST_F(ClimateWeather, PerturbationResponse)
+{
+    climateweather::ShallowWaterDiagnostics diagnostics;
+    const auto perturbed = this->perturbed(&diagnostics);
     const double lowerSpeed = [&]
     {
         double total = 0.0;
@@ -54,21 +95,33 @@ TEST(ClimateWeather, Model)
         "the prognostic atmosphere must subcycle stably and conserve layer mass");
     expect(lowerSpeed > 0.0 && diagnostics.areaWeightedEnergy > 0.0,
         "an idealized height anomaly must launch a resolved dynamical response");
+}
 
-    const auto bytes = climateweather::serializeState(perturbed);
+TEST_F(ClimateWeather, SerializationRoundTrip)
+{
+    const auto bytes = climateweather::serializeState(perturbed());
     climateweather::ShallowWaterState restored;
     expect(climateweather::deserializeState(bytes, restored) &&
             climateweather::serializeState(restored) == bytes,
         "weather state serialization must round-trip bit-exactly");
+}
+
+TEST_F(ClimateWeather, SeededReplay)
+{
+    const auto restored = this->restored();
     auto replayFirst = restored;
     auto replaySecond = restored;
-    config.stochasticHeightForcingMetresPerSecond = 2.0e-5f;
+    stochastic();
     climateweather::advance(replayFirst, config, zeroForcing, 10800.0f);
     climateweather::advance(replaySecond, config, zeroForcing, 10800.0f);
     expect(climateweather::serializeState(replayFirst) ==
             climateweather::serializeState(replaySecond),
         "fixed seed and serialized RNG state must replay the same weather step");
+}
 
+TEST_F(ClimateWeather, WeatherSequenceStatistics)
+{
+    stochastic();
     auto weatherInitial = climateweather::makeState(columns, rows, 2, 123456);
     const auto sequence = climateweather::generateWeatherSequence(
         weatherInitial, config, zeroForcing, 24, 10800.0f);
@@ -88,7 +141,10 @@ TEST(ClimateWeather, Model)
             statistics.directionalConsistency.end(),
             [](float value) { return value >= 0.0f && value <= 1.0f; }),
         "directional consistency must remain a bounded temporal statistic");
+}
 
+TEST_F(ClimateWeather, IrregularSampling)
+{
     std::vector<climateweather::ShallowWaterState> irregular(3,
         climateweather::makeState(columns, rows, 1, 7));
     irregular[0].elapsedSeconds = 0.0;
@@ -104,6 +160,10 @@ TEST(ClimateWeather, Model)
     irregular[2].layers[0].southWindMps.clear();
     expect(climateweather::calculateStatistics(irregular).sampleCount == 0,
         "malformed sampled states must not produce misleading statistics");
+}
+
+TEST_F(ClimateWeather, DailyStatistics)
+{
     std::vector<climateweather::ShallowWaterState> daily(90, climateweather::makeState(4, 2, 1, 9));
     for (int day = 0; day < 90; ++day)
     {
@@ -119,7 +179,13 @@ TEST(ClimateWeather, Model)
         dailyStatistics.decorrelatedSampleCount[0] < dailyStatistics.effectiveSampleCount &&
         dailyStatistics.correlatedSpeedStandardErrorMps[0] >= dailyStatistics.speedStandardErrorMps[0],
         "daily midpoint samples must cover the full quarter without claiming correlated states are independent");
+}
 
+TEST_F(ClimateWeather, ConservativeResample)
+{
+    auto replayFirst = restored();
+    stochastic();
+    climateweather::advance(replayFirst, config, zeroForcing, 10800.0f);
     const auto coarse = climateweather::resampleState(replayFirst, columns / 2);
     const double originalMass = climategrid::areaWeightedIntegral(
         columns, rows, replayFirst.layers[0].heightAnomalyMetres);
@@ -130,7 +196,12 @@ TEST(ClimateWeather, Model)
             coarse.elapsedSeconds == replayFirst.elapsedSeconds &&
             std::abs(coarseMass - originalMass) < 1.0e-5,
         "weather LOD changes must conservatively remap state without resetting time or randomness");
+}
 
+TEST_F(ClimateWeather, JetAdvection)
+{
+    const auto restored = this->restored();
+    stochastic();
     auto advected = restored;
     auto unadvected = restored;
     climateweather::ShallowWaterForcing jets;
@@ -139,7 +210,13 @@ TEST(ClimateWeather, Model)
     climateweather::advance(unadvected, config, zeroForcing, 10800.0f);
     expect(advected.layers[0].heightAnomalyMetres != unadvected.layers[0].heightAnomalyMetres,
         "the evolving weather must propagate along its parent seasonal jets");
+}
 
+TEST_F(ClimateWeather, InvalidReplayAndConfigFailAtomically)
+{
+    const auto bytes = climateweather::serializeState(perturbed());
+    auto restored = this->restored();
+    stochastic();
     auto truncated = bytes;
     truncated.resize(48);
     const auto savedRestored = climateweather::serializeState(restored);
@@ -147,10 +224,13 @@ TEST(ClimateWeather, Model)
             climateweather::serializeState(restored) == savedRestored,
         "truncated replay data must fail atomically without mutating the previous state");
     config.lowerMeanDepthMetres = -1.0f;
-    diagnostics = climateweather::advance(restored, config, zeroForcing, 3600.0f);
+    const auto diagnostics = climateweather::advance(restored, config, zeroForcing, 3600.0f);
     expect(!diagnostics.bounded && climateweather::serializeState(restored) == savedRestored,
         "invalid weather configurations must fail without mutating replay state");
+}
 
+TEST_F(ClimateWeather, InterlayerMomentumConservation)
+{
     auto momentumState = climateweather::makeState(columns, rows, 2, 8);
     climateweather::ShallowWaterConfig momentumConfig;
     momentumConfig.layerCount = 2;
@@ -163,7 +243,10 @@ TEST(ClimateWeather, Model)
     climateweather::advance(momentumState, momentumConfig, {}, 3600.0f);
     expect(std::abs(200.0f * momentumState.layers[0].eastWindMps[0] + 100.0f * momentumState.layers[1].eastWindMps[0] - 600.0f) < 0.001f,
         "interlayer exchange must conserve depth-weighted momentum for unequal equivalent depths");
+}
 
+TEST_F(ClimateWeather, SeasonalSpinUp)
+{
     climateweather::ShallowWaterConfig seasonalConfig;
     seasonalConfig.layerCount = 2;
     seasonalConfig.lowerMeanDepthMetres = 120.0f;

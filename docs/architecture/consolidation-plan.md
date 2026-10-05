@@ -244,7 +244,7 @@ Phase 6 steps (listed 2026-10-06 at the start of the phase; one commit and one l
 | `climate_ocean_heat_tests.cpp` (`Model` = `runTests()`, 250 lines; `VariableStorage`, `HeatKernels` stay) | 64-column polar-ring fixture: `c`, `f`, grid, cap area and face length, `capacity`, `latent` | done, `world-0059` | 3 min (00:21 to 00:24) |
 | `climate_transport_tests.cpp` (`Model`, 110 lines) | 32 x 16 block tracer `q` with `u`, `v`, `result`, grid | done, `world-0060` | 0 min (00:24 to 00:24) |
 | `climate_boundary_layer_tests.cpp` (`Model`, 130 lines) | 32 x 16 config with the boundary layer enabled; uniform temperature, zero heating and mechanical forcing; `warmPatch()` and the applied `flow` | done, `world-0061` | 4 min (00:24 to 00:29) |
-| `climate_weather_tests.cpp` (`Model`, 170 lines) | 16 x 8 two-layer config, zero forcing; `perturbed()` advanced 6 h, its bytes and the restored state; the stochastic config of the replay sections |  |  |
+| `climate_weather_tests.cpp` (`Model`, 170 lines) | 16 x 8 two-layer config, zero forcing; `perturbed()` advanced 6 h, its bytes and the restored state; the stochastic config of the replay sections | done, `world-0062` | 0 min (00:29 to 00:29) |
 | `climate_flow_tests.cpp` (`Model`, 95 lines) | 32 x 16 particle grid: radius, equator row and cell width, zero `east`/`south`, trace config |  |  |
 | `climate_energy_tests.cpp` (`Model`, 125 lines) | none shared (independent scalar sections): the fixture holds only `expect` |  |  |
 | `climate_physics_tests.cpp` (`Model`, 145 lines) | none shared: the fixture holds only `expect` |  |  |
