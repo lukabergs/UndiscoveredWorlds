@@ -2,12 +2,16 @@
 
     uv run --offline python scripts/evaluation/experiment.py <module> [--register] \\
         [--name NAME] [--archive runs/reports/<experiment>] [--seed 1] [--resolution W] \\
-        [--baseline BUNDLE] [--repeat] [--executable EXE] [--label TEXT] [--topic TEXT] [-- native options]
+        [--baseline BUNDLE] [--repeat] [--explicit-recipe] [--executable EXE] [--label TEXT] [--topic TEXT] \\
+        [-- native options]
 
 The module's profile (configs/evaluation/<module>.json, "run" section) holds the tool,
 its arguments and its declared inputs (inputs.py); "registered" adds the settings of a
 registered run (more arguments, a resolution, a recipe file whose scenario becomes flags).
-Native options come last, so they override.
+Native options come last, so they override. --repeat runs the same command again
+(bundle-repeat, check `repeat`); --explicit-recipe runs it again with every value of the
+recipe file as an option (bundle-explicit, check `recipe-equality`). Both second runs
+write no checkpoints.
 
 Without --register the run is scratch, in out/evaluation/<module>/<name>/, or in a
 runs/reports/<experiment> archive (routed to the storage drive) with --archive. With
@@ -54,6 +58,11 @@ def relative(path):
     return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
 
 
+def recipe_options(recipe):
+    """The scenario of a recipe file as --key value options."""
+    return [part for key, value in recipe['scenario'].items() for part in ('--' + key, str(value))]
+
+
 def settings(spec, register, resolution):
     """Arguments (with placeholders), grid width, recipe and recipe file of a run."""
     arguments, recipe, recipe_path = list(spec['arguments']), None, None
@@ -64,7 +73,7 @@ def settings(spec, register, resolution):
         recipe = json.loads(recipe_path.read_text(encoding='utf-8'))
         if recipe['height'] * 2 != recipe['width']:
             raise SystemExit('The world grid is W x W/2')
-        arguments += [part for key, value in recipe['scenario'].items() for part in ('--' + key, str(value))]
+        arguments += recipe_options(recipe)
         interval = recipe['checkpoint_every_updates'] * float(recipe['scenario'].get('delta-time-myr', 1.0))
         values['checkpoint_every'] = f'{interval:g}'
     arguments += registered.get('arguments', [])
@@ -129,6 +138,8 @@ def main():
     parser.add_argument('--resolution', type=int, help='Grid width W (default from the profile)')
     parser.add_argument('--baseline', type=Path, help='Bundle compared with the run')
     parser.add_argument('--repeat', action='store_true', help='Run twice and check the bundles are identical')
+    parser.add_argument('--explicit-recipe', action='store_true',
+                        help="Run again with the profile's recipe file as options and check the bundles are identical")
     parser.add_argument('--executable', type=Path)
     parser.add_argument('--label', help='Change summary stored with the run')
     parser.add_argument('--topic', help='Print the ledger entries naming this text before the run (default: the last five)')
@@ -166,6 +177,15 @@ def main():
         directory.mkdir(parents=True, exist_ok=False)
     base = [str(executable), *expand(arguments, resolution, directory, values), '--seed', str(args.seed), *native]
     files = [part for part in base[1:] if not part.startswith('-') and (ROOT / part).is_file()]
+    commands = {'run': base, 'repeat': without_checkpoints(base)}
+    if args.explicit_recipe:
+        # Every value of the recipe file, then the same native options as the first run.
+        recipe_path = recipe_path or ROOT / spec.get('registered', {}).get('recipe', '')
+        if not recipe_path.is_file():
+            raise SystemExit(f'Profile {args.module} names no recipe file for --explicit-recipe')
+        explicit = recipe_options(json.loads(recipe_path.read_text(encoding='utf-8')))
+        commands['explicit'] = without_checkpoints([str(executable), *expand(arguments, resolution, directory, values),
+                                                    *explicit, '--seed', str(args.seed), *native])
     files += [relative(recipe_path)] if recipe_path else []
     declared += [{'path': relative(ROOT / part), 'sha256': sha256(ROOT / part)} for part in files]
 
@@ -179,13 +199,13 @@ def main():
     if recipe is not None:
         record['recipe'] = recipe
     print(f"{'Run ' + args.module + ' ' + name if args.register else 'Scratch run ' + name}: {' '.join(record['command'])}", flush=True)
-    labels = ['run', 'repeat'] if args.repeat else ['run']
+    labels = ['run'] + ['repeat'] * args.repeat + ['explicit'] * args.explicit_recipe
     outputs = ROOT / 'out/evaluation/outputs' / args.module / name
     start = time.time()
     for label in labels:
-        bundle = directory / ('bundle' if label == 'run' else 'bundle-repeat')
-        # The repeat checks the final state only; checkpoints are not written twice.
-        command = [*(base if label == 'run' else without_checkpoints(base)), '--bundle', str(bundle)]
+        bundle = directory / ('bundle' if label == 'run' else f'bundle-{label}')
+        # The second runs check the final state only; checkpoints are not written twice.
+        command = [*commands[label], '--bundle', str(bundle)]
         outcome = run_tool(command, directory, label, environment, outputs)
         record['runs'].append(outcome)
         print(f"{label}: exit {outcome['exit_code']} in {outcome['seconds']} s", flush=True)
@@ -200,18 +220,19 @@ def main():
         record['steps'] = bundle_steps(directory / 'bundle')
         try:
             repeat = Bundle.open(directory / 'bundle-repeat') if args.repeat else None
+            explicit = Bundle.open(directory / 'bundle-explicit') if args.explicit_recipe else None
             baseline = Bundle.open(args.baseline) if args.baseline else None
             document = evaluate(profile, profile_path, Bundle.open(directory / 'bundle'), directory / 'evaluation',
-                                baseline=baseline, repeat=repeat)
+                                baseline=baseline, repeat=repeat, explicit=explicit)
         except Exception as error:  # the run stays recorded; the evaluation can be made again with `evaluate`
             failure = error
             record['evaluation_error'] = f'{type(error).__name__}: {error}'
     if document:
         record['verdict'] = document['verdict']
-        if args.repeat:
-            check = next((item for item in document['checks'] if item['check'] == 'repeat'), None)
+        for name, key, wanted in (('repeat', 'repeat', args.repeat), ('recipe-equality', 'recipe_equality', args.explicit_recipe)):
+            check = next((item for item in document['checks'] if item['check'] == name), None) if wanted else None
             if check:
-                record['repeat'] = {'identical': check['status'] == 'pass', 'summary': check['summary']}
+                record[key] = {'identical': check['status'] == 'pass', 'summary': check['summary']}
         print(json.dumps(document['verdict'], indent=2))
     (directory / 'run.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
     if document:

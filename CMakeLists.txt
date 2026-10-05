@@ -21,8 +21,9 @@ endif()
 add_subdirectory(src/simulations)
 add_subdirectory(src/simulations/geology/plate_tectonics)
 
-# Statistics, comparison and the snapshot record of tectonic snapshots: the
-# world writes the record into its bundles; the engine tests use the rest.
+# The snapshot record and snapshot bundles of the tectonics engine: the world
+# writes the record into its bundles; the engine tests use the bundles.
+# Statistics and comparisons of snapshots are Python (scripts/evaluation/).
 add_library(uw_tectonics_snapshots STATIC src/validation/tectonics/tectonic_snapshots.cpp)
 target_include_directories(uw_tectonics_snapshots PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/tectonics")
 target_link_libraries(uw_tectonics_snapshots PUBLIC plate_tectonics)

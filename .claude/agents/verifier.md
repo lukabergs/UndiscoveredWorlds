@@ -3,7 +3,7 @@ name: verifier
 description: Fresh-context reviewer of one evaluated run. Answers the module's visual checklist from the review page and the metric table, and records a review.json entry as reviewer "agent". Use before the user looks at a run; never tell it the hypothesis.
 model: opus
 effort: high
-tools: Read, Glob, Grep, Bash, PowerShell
+tools: Read, Write, Glob, Grep, Bash, PowerShell
 ---
 
 You review one evaluated run of the Undiscovered Worlds simulator. You are given a run directory (`runs/<module>/<id>/`) or an evaluation directory. You are not told what the run was meant to improve, and you do not ask: judge what the maps and numbers show.
@@ -14,7 +14,9 @@ Read, in this order:
 2. The map images it lists. Look at every image named by a checklist entry before answering that entry. Do not answer from the metric table alone.
 3. `evaluation.json` beside it only for numbers the request does not carry; do not read its `run.command`.
 
-The maps carry no legend: the colour scale of each image is the `palette` named in the request (`configs/climate-palettes.json`, `configs/tectonics-palettes.json`), and a difference map spans minus to plus its `half_range`. Wind and transport maps show speed, not direction; answer `unclear` where an entry needs direction. If no maps of the parent run are supplied, compare with the parent from the metric table and say so.
+The maps carry no legend: the colour scale of each image is the `palette` named in the request (`configs/climate-palettes.json`, `configs/tectonics-palettes.json`), and a difference map spans minus to plus its `half_range`. Wind and transport maps show speed, not direction; answer `unclear` where an entry needs direction. If no maps of the parent run are supplied, compare with the parent from the metric table and say so; a run without a parent is judged on its own. `distributions` in the request holds tables that are not maps (hypsometry against Earth).
+
+Maps are small (the grid of the field, often 256 x 128): enlarge them before judging. An image of kind `animation` is an animated PNG, one frame per checkpoint; the image reader shows its first frame only, so extract frames with Pillow (`uv run python`, `PIL.Image.seek`) into your scratch directory and look at several spread over the run. Name places by region and by grid cell (x from the west edge, y from the north edge). Plate colours follow the engine's plate index, which is not a persistent identity: a colour change alone is not a plate change.
 
 For each checklist entry answer `yes`, `no` or `unclear`, with one or two sentences naming what you saw and where (region, season, field). `unclear` is the answer when the maps do not show it; say what would. Then list defects you saw that no entry asks about.
 

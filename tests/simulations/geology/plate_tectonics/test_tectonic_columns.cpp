@@ -230,6 +230,22 @@ TEST(TectonicColumns, ExcessMountainForceMatchesAiryColumnUnitsAndVanishesOnUnth
     EXPECT_GT(mountain_force_n_m(seed(10000,true,100)),mountain_force_n_m(mountain));
 }
 
+// Every field of two snapshots is equal.
+static bool same_fields(const tectonics::contract::Snapshot& a, const tectonics::contract::Snapshot& b) {
+    return a.continental_crust_m == b.continental_crust_m && a.oceanic_crust_m == b.oceanic_crust_m &&
+        a.sediment_m == b.sediment_m && a.rift_damage == b.rift_damage && a.plume_influence == b.plume_influence &&
+        a.heightmap == b.heightmap && a.plate_id == b.plate_id && a.crust_age_steps == b.crust_age_steps &&
+        a.crust_age_myr == b.crust_age_myr && a.crust_thickness == b.crust_thickness && a.crust_class == b.crust_class &&
+        a.uplift_tendency == b.uplift_tendency && a.subsidence_tendency == b.subsidence_tendency &&
+        a.accumulated_strain == b.accumulated_strain && a.boundary_type == b.boundary_type &&
+        a.boundary_distance == b.boundary_distance && a.boundary_segment_id == b.boundary_segment_id &&
+        a.nearest_boundary_id == b.nearest_boundary_id && a.deforming_region_id == b.deforming_region_id &&
+        a.deforming_region_type == b.deforming_region_type && a.deformation_rate == b.deformation_rate &&
+        a.deformation_velocity_x == b.deformation_velocity_x && a.deformation_velocity_y == b.deformation_velocity_y &&
+        a.convergence_score == b.convergence_score && a.divergence_score == b.divergence_score &&
+        a.shear_score == b.shear_score && a.geologic_regime == b.geologic_regime;
+}
+
 TEST(TectonicColumns, PhysicalLayersSurviveBundleReadAndAffectComparison) {
     tectonics::scenario::Scenario s;
     s.seed = 1; s.width = 32; s.height = 16; s.plate_count = 4;
@@ -258,11 +274,9 @@ TEST(TectonicColumns, PhysicalLayersSurviveBundleReadAndAffectComparison) {
     EXPECT_EQ(loaded.topology_diagnostics.events[1].kind,tectonics::topology::EventKind::Fusion);
     EXPECT_EQ(loaded.topology_diagnostics.events[1].result,5U);
     EXPECT_DOUBLE_EQ(loaded.topology_diagnostics.events[1].time_myr,2);
+    EXPECT_TRUE(same_fields(snapshot, loaded));
     loaded.continental_crust_m[0] += 10;
-    const auto comparison = tectonics::tooling::compare_snapshots(snapshot, loaded);
-    EXPECT_FALSE(comparison.exact_match);
-    EXPECT_TRUE(comparison.physical_columns_comparable);
-    EXPECT_EQ(comparison.continental_crust_m.changed_cells, 1U);
+    EXPECT_FALSE(same_fields(snapshot, loaded));
 }
 
 TEST(TectonicColumns, SedimentLoadContributesToLayeredGpeAndConservativeRootFlow) {

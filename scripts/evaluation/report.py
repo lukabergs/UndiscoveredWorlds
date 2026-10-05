@@ -213,7 +213,7 @@ def run_data(evaluation_dir):
     files = [{'title': 'evaluation.json', 'path': 'evaluation.json'}, {'title': 'report.md', 'path': 'report.md'}]
     files += [{'title': name, 'path': name} for name in ('review.json',) if (directory / name).is_file()]
     if directory.name == 'evaluation':
-        files += [{'title': name, 'path': f'../{name}'} for name in ('run.json', 'log.txt', 'log-repeat.txt', 'run.log', 'repeat.log')
+        files += [{'title': name, 'path': f'../{name}'} for name in ('run.json', 'log.txt', 'log-repeat.txt', 'log-explicit.txt', 'run.log', 'repeat.log')
                   if (directory.parent / name).is_file()]
     validation = document['validation']
     return {'schema': 'uw-run-page/v1', 'generated': now(), 'module': document['profile']['module'],

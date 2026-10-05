@@ -22,11 +22,15 @@ add_executable(tectonics_tests
     test_tectonic_ocean_relief.cpp
     test_tectonic_noise_pass.cpp
     test_tectonic_margins.cpp
+    test_tectonic_options.cpp
     test_sqrdmd.cpp
     test_tectonic_junctions.cpp
     test_topography_codec.cpp
     test_topography_io.cpp
+    # The scenario options of world_pipeline need only the engine.
+    ${PROJECT_SOURCE_DIR}/src/app/tectonic_options.cpp
 )
+target_include_directories(tectonics_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/app")
 target_link_libraries(tectonics_tests PRIVATE
     plate_tectonics uw_tectonics_heightmap_io uw_tectonics_snapshots
     GTest::gtest GTest::gtest_main)

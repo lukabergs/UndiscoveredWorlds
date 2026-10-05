@@ -224,29 +224,6 @@ TEST(Phase7Tooling, TectonicJunctionJsonIncludesDiagnostics) {
     fs::remove_all(output_dir, ec);
 }
 
-TEST(Phase7Tooling, SummaryExposesBoundaryAndDeformingStats) {
-    const tectonics::contract::Snapshot snapshot = run_snapshot(12345, 6);
-    const tectonics::tooling::SnapshotSummary summary =
-        tectonics::tooling::summarize_snapshot(snapshot);
-
-    EXPECT_EQ(summary.contract_schema_version, tectonics::contract::kSchemaVersion);
-    EXPECT_EQ(summary.width, snapshot.width);
-    EXPECT_EQ(summary.height, snapshot.height);
-    EXPECT_GT(summary.active_convergence_cells, 0U);
-    EXPECT_GT(summary.boundary.segment_count, 0U);
-    EXPECT_GT(summary.boundary.active_cell_count, 0U);
-    EXPECT_GT(summary.boundary.nearest_mapped_cell_count, 0U);
-    EXPECT_GT(summary.deforming.region_count, 0U);
-    EXPECT_GT(summary.deforming.active_cell_count, 0U);
-
-    const std::string summary_json = tectonics::tooling::snapshot_summary_json(summary);
-    const std::string boundary_json = tectonics::tooling::boundary_stats_json(summary);
-    EXPECT_NE(summary_json.find("\"tectonic-snapshot-summary/v1\""), std::string::npos);
-    EXPECT_NE(summary_json.find("\"segment_count\""), std::string::npos);
-    EXPECT_NE(boundary_json.find("\"tectonic-boundary-stats/v1\""), std::string::npos);
-    EXPECT_NE(boundary_json.find("\"deforming\""), std::string::npos);
-}
-
 TEST(Phase7Tooling, CApiTectonicJunctionsMatchCapturedSnapshot) {
     const tectonics::scenario::Scenario scenario = make_phase7_scenario(12345);
     void* simulation = tectonics_create_from_scenario(&scenario);
@@ -286,41 +263,11 @@ TEST(Phase7Tooling, CApiTectonicJunctionsMatchCapturedSnapshot) {
     tectonics_destroy(simulation);
 }
 
-TEST(Phase7Tooling, ComparisonDetectsSameAndDifferentSnapshots) {
-    const tectonics::contract::Snapshot snapshot_a = run_snapshot(12345, 6);
-    const tectonics::contract::Snapshot snapshot_b = run_snapshot(67890, 6);
-
-    const tectonics::tooling::SnapshotComparison identical =
-        tectonics::tooling::compare_snapshots(snapshot_a, snapshot_a);
-    EXPECT_TRUE(identical.dimensions_match);
-    EXPECT_TRUE(identical.exact_match);
-    EXPECT_EQ(identical.heightmap.changed_cells, 0U);
-    EXPECT_EQ(identical.plate_id.changed_cells, 0U);
-    EXPECT_EQ(identical.geologic_regime.changed_cells, 0U);
-
-    const tectonics::tooling::SnapshotComparison different =
-        tectonics::tooling::compare_snapshots(snapshot_a, snapshot_b);
-    EXPECT_TRUE(different.dimensions_match);
-    EXPECT_FALSE(different.exact_match);
-    EXPECT_GT(different.heightmap.changed_cells, 0U);
-    EXPECT_GT(different.plate_id.changed_cells, 0U);
-    EXPECT_GT(different.geologic_regime.changed_cells, 0U);
-
-    const std::string comparison_json =
-        tectonics::tooling::snapshot_comparison_json(different);
-    EXPECT_NE(comparison_json.find("\"tectonic-snapshot-comparison/v1\""), std::string::npos);
-    EXPECT_NE(comparison_json.find("\"heightmap\""), std::string::npos);
-}
-
-TEST(Phase7Tooling, ContinuousSnapshotsKeepWholeRunTimeInBundlesAndSummaries) {
+TEST(Phase7Tooling, ContinuousSnapshotsKeepWholeRunTimeInBundles) {
     const tectonics::contract::Snapshot snapshot =
         run_snapshot(make_phase7_continuous_scenario(12345), 3);
 
     EXPECT_DOUBLE_EQ(snapshot.time_myr, 3.0);
-
-    const tectonics::tooling::SnapshotSummary summary =
-        tectonics::tooling::summarize_snapshot(snapshot);
-    EXPECT_DOUBLE_EQ(summary.time_myr, 3.0);
 
     const fs::path output_dir = temp_root() / "continuous-time";
     std::error_code ec;

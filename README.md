@@ -165,7 +165,7 @@ cmake --preset headless
 cmake --build out/build/headless --config Release --target world_pipeline tectonics_tests minerals_tests --parallel 4
 ctest --test-dir out/build/headless -C Release -L 'tectonics|geology' --output-on-failure
 uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
-uv run --offline scripts/uw.py tectonics experiment
+uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe
 uv run --offline scripts/uw.py tectonics run
 ```
 

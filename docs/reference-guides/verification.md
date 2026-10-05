@@ -28,7 +28,7 @@ uv run --offline python scripts/check_layout.py                                 
 uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
 ```
 
-Three GoogleTest binaries: `world_tests` (`tests/CMakeLists.txt`: core, I/O, pipeline, climate, validation; it links `uw_climate_world` alone), `tectonics_tests` and `minerals_tests` (`tests/simulations/geology/*/CMakeLists.txt`). ctest discovers every `TEST` as `Suite.Name`. `world_tests` also has explicit replay and benchmark modes that ctest never runs (`--atmosphere-replay`, `--atmosphere-benchmark`, `--momentum-replay`, `--coastal-replay`, `--heat-kernels`, `--accuracy`, `--ocean-heat-benchmark`, `--transport-benchmark`). `check_tectonics_cli.py` checks default/explicit recipe equality, column budgets and rejection of invalid options. The Python dependencies are declared once in `pyproject.toml` and pinned in `uv.lock`; `uv sync` installs them into `.venv/` (online the first time).
+Three GoogleTest binaries: `world_tests` (`tests/CMakeLists.txt`: core, I/O, pipeline, climate, validation; it links `uw_climate_world` alone), `tectonics_tests` and `minerals_tests` (`tests/simulations/geology/*/CMakeLists.txt`). ctest discovers every `TEST` as `Suite.Name`. `world_tests` also has explicit replay and benchmark modes that ctest never runs (`--atmosphere-replay`, `--atmosphere-benchmark`, `--momentum-replay`, `--coastal-replay`, `--heat-kernels`, `--accuracy`, `--ocean-heat-benchmark`, `--transport-benchmark`). `check_tectonics_cli.py` checks what only the command line can show: options it refuses, checkpoint times independent of the order of the options, checkpoint labels and update counts, and `--mineral-history off` leaving the tectonic fields unchanged. Values the scenario options or the engine refuse are `TectonicOptions.*` in `tectonics_tests`; recipe equality (a run with no scenario options equals one given every value of `configs/tectonics-baseline.json`), the column and mineral budgets and the snapshot record are checks of the tectonics profile (below). The Python dependencies are declared once in `pyproject.toml` and pinned in `uv.lock`; `uv sync` installs them into `.venv/` (online the first time).
 
 ## Equivalence and access checks
 
@@ -42,8 +42,9 @@ out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --audit-acce
 out/build/headless/bin/Release/world_pipeline.exe run --recipe earth-climate --seed 1 --map none --bundle out/scratch/climate
 out/build/headless/bin/Release/world_pipeline.exe run --recipe procedural-world --from-bundle CHECKPOINT --steps a..b --bundle out/scratch/part
 uv run --offline python scripts/evaluation/process_access.py (Get-ChildItem runs/reports/phase2-access/*.json) --check   # the access file equals what the stored reports give
-# Determinism of a profile run: two runs, bundles compared by the profile's repeat check (out/evaluation/<module>/)
-uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat
+# Determinism of a profile run: two runs, bundles compared by the profile's repeat check (out/evaluation/<module>/);
+# --explicit-recipe adds a run given the recipe file explicitly (the profile's recipe-equality check)
+uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe
 ```
 
 A registered run (`uw.py <module> run`) reproduces an earlier one when `compare_bundles.py` finds its `bundle/` identical to the earlier run's final bundle (sealed runs: `runs/archive/checkpoints/<module>/<id>/final`).

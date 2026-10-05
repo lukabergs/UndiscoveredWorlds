@@ -60,7 +60,7 @@ def request(profile, document):
     return {'schema': 'uw-review-request/v1', 'module': profile['module'], 'run': blind(document['run']), 'parent': blind(document['baseline']),
             'palettes': 'configs/climate-palettes.json and configs/tectonics-palettes.json hold the colour scales; a difference map spans -half_range to +half_range',
             'checks_not_passed': [item for item in document['checks'] if item['status'] in ('fail', 'reported')],
-            'scores': document['validation']['scores'], 'metrics': metrics, 'checklist': checklist}
+            'scores': document['validation']['scores'], 'metrics': metrics, 'distributions': document['validation']['distributions'], 'checklist': checklist}
 
 
 def record(directory, verdict, notes, reviewer, against, answers=None):

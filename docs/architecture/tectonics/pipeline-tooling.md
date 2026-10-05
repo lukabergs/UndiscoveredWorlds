@@ -45,7 +45,7 @@ Tables under `geosphere.`:
 
 ## Comparing and analysing
 
-Statistics are in the `summary` block of the snapshot record. Two bundles are compared with `uv run --offline scripts/evaluation/compare_bundles.py A B`.
+Statistics of a snapshot (counts per geologic regime, crust class and boundary type, active convergence, divergence and shear cells, boundary segment, deforming region and junction statistics) are computed from its bundle by `uv run --offline scripts/evaluation/tectonics_statistics.py BUNDLE`; the snapshot record keeps only what the bundle cannot give, the junction count and junction stability counts. Two bundles are compared with `uv run --offline scripts/evaluation/compare_bundles.py A B`.
 
 ## Registered runs
 
@@ -55,6 +55,6 @@ Registered runs up to 75 keep the former snapshot layout (raw arrays plus a mani
 
 ## Checks
 
-`uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe`
+`uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe` (options the command line refuses, checkpoint times and labels, the mineral history switch); `ctest ... -L tectonics` (`TectonicOptions.*`: values the scenario options or the engine refuse); `uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe` (the profile's checks, among them repeat, recipe equality and the column budget).
 
 Other code locations: `src/io/tectonic_heightmap_io.*` (heightmap images and metric TIFFs of the engine tests), `src/app/tectonic_options.*` (scenario options of `world_pipeline`).

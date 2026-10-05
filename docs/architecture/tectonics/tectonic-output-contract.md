@@ -89,14 +89,15 @@ the application's terrain independently of the native export.
 
 The current numeric field schema is 7 (6 carried an always-zero cycle counter);
 optional fields (`rift_damage`, `plume_influence`) do not change it. The existing serialized `phase6` name is
-a format identifier, not a selectable implementation. Snapshot, batch, summary
-and comparison JSON use their existing `tectonic-*/v1` container schemas. New
+a format identifier, not a selectable implementation. Snapshot and batch JSON use
+their existing `tectonic-*/v1` container schemas; snapshot statistics and comparisons
+are computed in Python from run bundles. New
 scenario metadata is version 3 and reports `force-balance` / `isostatic-columns`
 with explicit parameters. Deprecated scenario knobs and old snapshot generators
 are removed. Previously archived bundles remain evidence and readable comparison
 inputs, not a source of defaults for new worlds.
 
 See [pipeline tooling](pipeline-tooling.md) for commands. Run the C++ module
-tests and `tests/scripts/check_tectonics_cli.py` from the root README. Native
+tests, `tests/scripts/check_tectonics_cli.py` and the profile checks from the root README. Native
 budget and repeatability checks establish numerical correctness only; climate
 skill, geological realism and resolution convergence require separate evidence.

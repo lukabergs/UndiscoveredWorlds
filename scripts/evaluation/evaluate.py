@@ -2,7 +2,7 @@
 
     uv run --offline python scripts/evaluation/evaluate.py \\
         --profile climate --bundle <run>/bundle --output <run>/evaluation \\
-        [--baseline <bundle>] [--repeat <bundle>] [--input <bundle>] [--checkpoints DIR] [--no-maps]
+        [--baseline <bundle>] [--repeat <bundle>] [--explicit <bundle>] [--input <bundle>] [--checkpoints DIR] [--no-maps]
 
 Profiles are configs/evaluation/<module>.json. Writes evaluation.json and maps/ to a new
 or empty output directory, then the run page (index.html) and report.md from it with
@@ -92,11 +92,11 @@ def checkpoint_bundles(directory):
 
 
 def evaluate(profile, profile_path, bundle, output, baseline=None, repeat=None, input_bundle=None, maps=True,
-             checkpoints=None):
+             checkpoints=None, explicit=None):
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise SystemExit(f'{output} is not empty; evaluations are never overwritten')
-    context = {'input': input_bundle, 'repeat': repeat}
+    context = {'input': input_bundle, 'repeat': repeat, 'explicit': explicit}
     checks = run_checks(bundle, profile.get('checks', []), context)
     references = References()
     validation = run_validation(bundle, profile.get('validation', []), references, baseline)
@@ -113,7 +113,7 @@ def evaluate(profile, profile_path, bundle, output, baseline=None, repeat=None, 
         'profile': {'module': profile['module'], 'path': profile_path.relative_to(ROOT).as_posix() if profile_path.is_relative_to(ROOT) else str(profile_path),
                     'sha256': sha256_bytes(profile_path.read_bytes())},
         'evidence': profile['evidence'], 'run': describe(bundle), 'baseline': describe(baseline),
-        'repeat': describe(repeat), 'input': describe(input_bundle), 'code': code_state(),
+        'repeat': describe(repeat), 'explicit': describe(explicit), 'input': describe(input_bundle), 'code': code_state(),
         'checks': checks, 'validation': validation, 'references': references.provenance(), 'maps': rendered}
     document['verdict'] = verdict(profile, checks, validation, review.latest(output))
     (output / 'evaluation.json').write_text(json.dumps(document, indent=2, allow_nan=False) + '\n', encoding='utf-8')
@@ -130,6 +130,7 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--baseline', type=Path, help='Bundle compared with the run on common masks')
     parser.add_argument('--repeat', type=Path, help='Second run of the same seed and code (determinism check)')
+    parser.add_argument('--explicit', type=Path, help='Run given the recipe file explicitly (recipe-equality check)')
     parser.add_argument('--input', type=Path, help='Bundle holding the inputs of frozen components')
     parser.add_argument('--checkpoints', type=Path, help='Directory of checkpoint bundles (default <bundle>/../checkpoints)')
     parser.add_argument('--no-maps', action='store_true')
@@ -137,7 +138,8 @@ def main():
     profile, path = load_profile(args.profile)
     open_bundle = lambda p: Bundle.open(p) if p else None
     document = evaluate(profile, path, Bundle.open(args.bundle), args.output.absolute(), open_bundle(args.baseline),
-                        open_bundle(args.repeat), open_bundle(args.input), not args.no_maps, args.checkpoints)
+                        open_bundle(args.repeat), open_bundle(args.input), not args.no_maps, args.checkpoints,
+                        open_bundle(args.explicit))
     print(json.dumps(document['verdict'], indent=2))
     for key, entry in document['validation']['scores'].items():
         if 'score' in entry:

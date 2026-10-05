@@ -5,6 +5,7 @@ A check with "report": true in the profile is 'reported' where it would fail: sh
 A check is skipped, not failed, when its input is absent (for example no repeat run).
 """
 import fnmatch
+import json
 
 import numpy as np
 
@@ -146,8 +147,95 @@ def check_repeat(bundle, spec, context):
                   f'{len(bundle.fields) - len(changed)} of {len(bundle.fields)} fields identical', changed)
 
 
+def check_recipe_equality(bundle, spec, context):
+    """A run given every value of the module's recipe file as an option equals the run given none:
+    the compiled defaults are the recipe (experiment.py --explicit-recipe makes the second run)."""
+    other = context.get('explicit')
+    if other is None:
+        return result('recipe-equality', 'skip', 'no explicit-recipe bundle given')
+    if other.seed != bundle.seed or other.recipe != bundle.recipe:
+        return result('recipe-equality', 'fail', 'explicit-recipe run used a different seed or recipe')
+    changed = compare_hashes(bundle, other, list(bundle.fields))
+    for identifier, entry in bundle.tables.items():
+        if identifier not in other.tables:
+            changed.append(f'{identifier} absent from comparison bundle')
+        elif entry['hash'] != other.tables[identifier]['hash']:
+            changed.append(f'{identifier} differs')
+    total = len(bundle.fields) + len(bundle.tables)
+    return result('recipe-equality', 'fail' if changed else 'pass',
+                  f'{total - len(changed)} of {total} fields and tables identical', changed)
+
+
+def json_table(bundle, identifier):
+    return json.loads(bundle.table_text(identifier))
+
+
+def lookup(document, key):
+    """A value of a JSON document by dotted key (run_scenario.margin_processes)."""
+    for part in key.split('.'):
+        document = document[part]
+    return document
+
+
+def check_record(bundle, spec, context):
+    """Values of a JSON table: dotted keys equal to given values ("equals") or to each other ("same")."""
+    table = spec['table']
+    if table not in bundle.tables:
+        return result('record', 'skip', f'{table} absent')
+    document = json_table(bundle, table)
+    problems = []
+
+    def value(key):
+        try:
+            return lookup(document, key)
+        except (KeyError, TypeError):
+            problems.append(f'{key} missing')
+            return None
+
+    for key, expected in spec.get('equals', {}).items():
+        found = value(key)
+        if found is not None and found != expected:
+            problems.append(f'{key} is {found!r}, expected {expected!r}')
+    for left, right in spec.get('same', []):
+        a, b = value(left), value(right)
+        if a is not None and b is not None and a != b:
+            problems.append(f'{left} is {a!r}, {right} is {b!r}')
+    count = len(spec.get('equals', {})) + len(spec.get('same', []))
+    return result('record', 'fail' if problems else 'pass', f'{count - len(problems)} of {count} values of {table} as expected',
+                  problems)
+
+
+def check_budget(bundle, spec, context):
+    """The column budget of the tectonic snapshot record closes: |relative mass residual| <= the limit."""
+    table = spec.get('table', 'geosphere.tectonic_snapshot')
+    if table not in bundle.tables:
+        return result('budget', 'skip', f'{table} absent')
+    budget = json_table(bundle, table).get('column_budget', {})
+    if not budget.get('enabled'):
+        return result('budget', 'fail', 'no column budget recorded')
+    residual, limit = budget['relative_mass_residual'], spec['max_relative_residual']
+    closed = np.isfinite(residual) and abs(residual) <= limit
+    return result('budget', 'pass' if closed else 'fail', f'relative mass residual {residual:.3g}; allowed {limit:g}')
+
+
+def check_minerals(bundle, spec, context):
+    """The mineral budget counts as many deposits (inherited and formed) as the deposit table lists."""
+    tables = ('geosphere.mineral_budget', 'geosphere.mineral_deposits')
+    if any(table not in bundle.tables for table in tables):
+        return result('minerals', 'skip', 'mineral tables absent')
+    budget = json_table(bundle, tables[0])
+    if budget.get('schema') != 'mineral-budget/v1':
+        return result('minerals', 'fail', f"budget schema is {budget.get('schema')!r}")
+    counted = budget['inherited']['count'] + sum(item['count'] for item in budget['formed'].values())
+    listed = len(bundle.table_rows(tables[1]))
+    return result('minerals', 'pass' if counted == listed else 'fail',
+                  f'budget counts {counted} deposits; the table lists {listed}')
+
+
 CHECKS = {'grid': check_grid, 'required': check_required, 'finite': check_finite, 'range': check_range,
-          'written': check_written, 'frozen': check_frozen, 'repeat': check_repeat}
+          'written': check_written, 'frozen': check_frozen, 'repeat': check_repeat,
+          'recipe-equality': check_recipe_equality, 'record': check_record, 'budget': check_budget,
+          'minerals': check_minerals}
 
 
 def run_checks(bundle, specs, context):

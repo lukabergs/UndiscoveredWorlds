@@ -136,7 +136,7 @@ If configure fails with "is not a full path to an existing compiler tool", Visua
 
 ## Evaluation: checks, validation and review
 
-`scripts/evaluation/` evaluates run bundles with a per-module profile in `configs/evaluation/<module>.json` (`climate`, `world`). A profile lists checks (grid registration, required and written fields, finite values, ranges, frozen components, repeat determinism), validation comparisons with observed references, review maps in the project palettes, and how the module weights the three kinds of evidence. A new module needs a profile, not new scripts.
+`scripts/evaluation/` evaluates run bundles with a per-module profile in `configs/evaluation/<module>.json` (`climate`, `world`). A profile lists checks (grid registration, required and written fields, finite values, ranges, frozen components, repeat determinism, recipe equality, values of a JSON table, column and mineral budgets), validation comparisons with observed references, review maps in the project palettes, and how the module weights the three kinds of evidence. A new module needs a profile, not new scripts.
 
 ```powershell
 # Scratch experiment: run the profile's tool (seed 1), write bundle/, then evaluation/ → out/evaluation/<module>/<name>/
@@ -167,8 +167,11 @@ Climate comparisons use the per-field metrics of global-balanced-v1 (`scripts/ev
 # Registered run: next ID in runs/registry/tectonics.json -> runs/tectonics/<id>/ (checkpoints/, bundle/, evaluation/)
 uv run --offline scripts/uw.py tectonics run --label "what changed"
 uv run --offline scripts/uw.py tectonics run --plates 14 --duration 300 --label "14 plates, 300 Myr"
-# Scratch run + evaluation (compiled defaults, final state only) -> out/evaluation/tectonics/<name>/; --repeat checks determinism
-uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat
+# Scratch run + evaluation (compiled defaults, final state only) -> out/evaluation/tectonics/<name>/; --repeat checks determinism,
+# --explicit-recipe that the compiled defaults equal configs/tectonics-baseline.json given as options
+uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe
+# Snapshot statistics (counts per regime, crust class and boundary type; segments, deforming regions, junctions) of a bundle
+uv run --offline scripts/evaluation/tectonics_statistics.py runs/tectonics/77/bundle
 # Maps, animations and comparison page of registered runs, sealed or not -> runs/reports/tectonics/<A>-<B>.html
 uv run --offline scripts/uw.py tectonics report --runs 76 77
 uv run --offline scripts/uw.py tectonics report --runs 13 --maps-only
@@ -179,7 +182,7 @@ uv run --offline scripts/benchmarks/tectonics_boundary_review.py 77
 uv run --offline scripts/benchmarks/tectonics_coastal_review.py 77
 ```
 
-Scenario flags change only that run; the baseline file is not modified. A denser sampling of a run is a new run with another `--checkpoint-every`. Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot); the report scripts read both layouts. The tectonics profile (`configs/evaluation/tectonics.json`) checks the grid, required fields, finite values, ranges and repeat, gives Earth hypsometry as context and renders the review maps with one animation per map from the checkpoints.
+Scenario flags change only that run; the baseline file is not modified. A denser sampling of a run is a new run with another `--checkpoint-every`. Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot); the report scripts read both layouts. The tectonics profile (`configs/evaluation/tectonics.json`) checks the grid, required fields, finite values, ranges, the snapshot record, the column and mineral budgets, repeat and recipe equality, gives Earth hypsometry as context and renders the review maps with one animation per map from the checkpoints.
 
 Mantle plumes are off by default (`--plume-count 0`). They are scenario flags like any other, so `run` and `experiment` take them unchanged:
 
