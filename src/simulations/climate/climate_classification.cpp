@@ -40,7 +40,7 @@ short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimate
 
 bool isclassificationwater(climateworld& world, int x, int y)
 {
-    return world.sea(x, y) == 1 || world.truelake(x, y) != 0 || world.riftlakesurface(x, y) != 0;
+    return world.sea(x, y) == 1 || world.truelake(x, y) != 0 || world.riftlakesurfacefloat(x, y) != 0;
 }
 
 seasonalclimatesummary summariseseasonalclimate(climateworld& world, int x, int y)

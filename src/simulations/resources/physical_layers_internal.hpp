@@ -40,7 +40,7 @@ inline int clampscore(float value)
 
 inline bool islakecell(const planet& world, int x, int y)
 {
-    return world.truelake(x, y) != 0 || world.riftlakesurface(x, y) != 0;
+    return world.truelake(x, y) != 0 || world.riftlakesurfacefloat(x, y) != 0;
 }
 
 inline bool issaltfeature(const planet& world, int x, int y)

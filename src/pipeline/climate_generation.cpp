@@ -256,7 +256,7 @@ void markcoastallakeexclusions(planet& world, vector<vector<int>>& nolake)
 
 // Seed endorheic sinks before river planning on an all-land world.
 bool seeddesertworldlakes(planet& world, int lakeattempts,
-    vector<vector<vector<int>>>& saltlakemap, vector<vector<int>>& basins,
+    vector<vector<vector<float>>>& saltlakemap, vector<vector<int>>& basins,
     vector<vector<int>>& nolake, boolshapetemplate smalllake[])
 {
     const int width = world.width();
@@ -377,7 +377,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
 
     // First we need to prepare a no-lake template, marking out areas too close to the coasts, where lakes can't go. (We'll use this later whether or not the world has sea, so may as well do it now.)
 
-    vector<vector<vector<int>>> saltlakemap(ARRAYWIDTH, vector<vector<int>>(ARRAYHEIGHT, vector<int>(2)));
+    vector<vector<vector<float>>> saltlakemap(ARRAYWIDTH, vector<vector<float>>(ARRAYHEIGHT, vector<float>(2)));
     vector<vector<int>> nolake(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
     vector<vector<int>> basins(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0)); // This will store where endorheic basins have already been carved.
 
@@ -637,7 +637,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
     {
         for (int j = 0; j < ARRAYHEIGHT; j++)
         {
-            if (world.lakestart(i, j) == 1 && world.riftlakesurface(i, j) == 0 && world.lakesurface(i, j) == 0)
+            if (world.lakestart(i, j) == 1 && world.riftlakesurfacefloat(i, j) == 0 && world.lakesurfacefloat(i, j) == 0)
                 world.setlakestart(i, j, 0);
         }
     }
@@ -691,7 +691,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
             
             if (special == 110 || special == 120)
             {
-                int level = world.lakesurface(i, j);
+                float level = world.lakesurfacefloat(i, j);
 
                 if (level <= sealevel)
                 {
@@ -699,7 +699,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
                     world.setlakesurface(i, j, level);
                 }
 
-                world.setnom(i, j, level);
+                world.setnomfloat(i, j, level);
             }
         }
     }

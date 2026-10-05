@@ -268,7 +268,7 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
                                             if (thislake[xxxx][yyy] != 0 && thislake[xxxx][yyy] != lakeno && canoverlap == 0) // There's another lake here already!
                                                 tooclose = 1;
 
-                                            if (world.lakesurface(xxxx, yyy) != 0 && thislake[xxxx][yyy] != lakeno && (canoverlap == 0 || (special != 120 || world.special(xxxx, yyy) != 120))) // There's another kind of lake here already! (Doesn't apply when both are ergs.)
+                                            if (world.lakesurfacefloat(xxxx, yyy) != 0 && thislake[xxxx][yyy] != lakeno && (canoverlap == 0 || (special != 120 || world.special(xxxx, yyy) != 120))) // There's another kind of lake here already! (Doesn't apply when both are ergs.)
                                                 tooclose = 1;
 
                                             if (world.sea(xxxx, yyy) == 1) // && special != 120) // Sea here (doesn't apply to ergs).
@@ -369,7 +369,7 @@ void broadenfastlemterrainfromrivers(planet& world)
 
     const bool hasrivers = terraindetail::buildlanddistancefield(world, riverdistance, maxriverdistance, [&](int x, int y)
     {
-        return world.riverdir(x, y) != 0 || world.riverjan(x, y) != 0 || world.riverjul(x, y) != 0 || world.lakesurface(x, y) != 0 || world.riftlakesurface(x, y) != 0;
+        return world.riverdir(x, y) != 0 || world.riverjan(x, y) != 0 || world.riverjul(x, y) != 0 || world.lakesurfacefloat(x, y) != 0 || world.riftlakesurfacefloat(x, y) != 0;
     });
 
     const bool hasmountains = terraindetail::buildlanddistancefield(world, mountaindistance, maxmountaindistance, [&](int x, int y)
@@ -389,7 +389,7 @@ void broadenfastlemterrainfromrivers(planet& world)
                 if (world.sea(i, j) == 1 || world.outline(i, j) == 1)
                     continue;
 
-                if (world.lakesurface(i, j) != 0 || world.riftlakesurface(i, j) != 0)
+                if (world.lakesurfacefloat(i, j) != 0 || world.riftlakesurfacefloat(i, j) != 0)
                     continue;
 
                 const int thisriverdistance = riverdistance[i][j];
@@ -666,7 +666,7 @@ void createsaltpans(planet& world, boolshapetemplate smalllake[], boolshapetempl
                         {
                             if (l >= 0 && l <= height)
                             {
-                                if (world.lakesurface(kk, l) != 0)
+                                if (world.lakesurfacefloat(kk, l) != 0)
                                     goahead = 0;
                             }
                         }

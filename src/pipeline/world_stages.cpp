@@ -36,9 +36,9 @@ vector<vector<std::uint8_t>> makefeaturegrid(std::uint8_t value = 0)
     return vector<vector<std::uint8_t>>(ARRAYWIDTH, vector<std::uint8_t>(ARRAYHEIGHT, value));
 }
 
-vector<vector<vector<int>>> makethreeintgrid()
+vector<vector<vector<float>>> makesaltlakegrid()
 {
-    return vector<vector<vector<int>>>(ARRAYWIDTH, vector<vector<int>>(ARRAYHEIGHT, vector<int>(2, 0)));
+    return vector<vector<vector<float>>>(ARRAYWIDTH, vector<vector<float>>(ARRAYHEIGHT, vector<float>(2, 0.0f)));
 }
 
 void reseedterrainpass(planet& world, int salt)
@@ -730,7 +730,7 @@ void applyriverandbasinstage(planet& world, GenerationScratch& scratch, const Ge
     const int width = world.width();
     const int height = world.height();
     int saltlakesplaced = 0;
-    scratch.saltLakeMap = makethreeintgrid();
+    scratch.saltLakeMap = makesaltlakegrid();
     scratch.noLake = makeintgrid();
     scratch.basinSeeds = makeintgrid();
 
@@ -1184,7 +1184,7 @@ void initializegenerationscratch(GenerationScratch& scratch)
     for (size_t index = 1; index < scratch.squareroot.size(); index++)
         scratch.squareroot[index] = static_cast<int>(sqrt(static_cast<float>(index)));
 
-    scratch.saltLakeMap = makethreeintgrid();
+    scratch.saltLakeMap = makesaltlakegrid();
     scratch.noLake = makeintgrid();
     scratch.basinSeeds = makeintgrid();
     scratch.inlandSeaComponentIds = makeintgrid(0);

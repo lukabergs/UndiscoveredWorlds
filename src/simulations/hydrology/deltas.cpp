@@ -322,8 +322,8 @@ void placedelta(planet& world, int centrex, int centrey, int upriver, vector<vec
                 world.setdeltajan(x, y, world.deltajan(x, y) + (int)branchjanflow);
                 world.setdeltajul(x, y, world.deltajul(x, y) + (int)branchjulflow);
 
-                if (world.nom(x, y) > sealevel)
-                    world.setnom(x, y, sealevel + 1);
+                if (!world.basebelowsea(x, y))
+                    world.setnomfloat(x, y, sealevel + 1);
 
                 if (x < leftx)
                     leftx = x;
@@ -867,7 +867,7 @@ void createriverdeltas(planet& world)
             int riverjan = world.riverjan(i, j);
             int riverjul = world.riverjul(i, j);
 
-            if ((riverjan != 0 || riverjul != 0) && world.avetemp(i, j) > glaciertemp) // There's a river here and it's not too cold
+            if ((riverjan != 0 || riverjul != 0) && world.avetempfloat(i, j) > glaciertemp) // There's a river here and it's not too cold
             {
                 int flowtotal = riverjan + riverjul;
 
@@ -956,7 +956,7 @@ void createriverdeltas(planet& world)
                         {
                             if (world.sea(kk, l) == 0)
                             {
-                                world.setnom(kk, l, sealevel + 1);
+                                world.setnomfloat(kk, l, sealevel + 1);
 
                                 if (world.deltadir(kk, l) == 0)
                                     world.setdeltadir(kk, l, -1);
@@ -976,7 +976,7 @@ void createriverdeltas(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) == sealevel + 1)
+            if (world.nomfloat(i, j) == sealevel + 1)
             {
                 for (int k = i - 1; k <= i + 1; k++)
                 {
@@ -989,12 +989,12 @@ void createriverdeltas(planet& world)
                     {
                         if (l >= 0 && l <= height)
                         {
-                            if (donethese[kk][l] == 0 && world.nom(kk, l) > sealevel + 1)
+                            if (donethese[kk][l] == 0 && world.nomfloat(kk, l) > sealevel + 1)
                             {
-                                int elev = world.nom(kk, l) - sealevel;
+                                float elev = world.nomfloat(kk, l) - sealevel;
                                 elev = elev / 2;
 
-                                world.setnom(kk, l, sealevel + elev);
+                                world.setnomfloat(kk, l, sealevel + elev);
 
                                 donethese[kk][l] = 1;
                             }

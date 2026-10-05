@@ -624,6 +624,8 @@ public:
     float julrainfloat(int x, int y) const;
     void setsummerrainfloat(int x, int y, float amount);
     void setwinterrainfloat(int x, int y, float amount);
+    void setmintempfloat(int x, int y, float amount);
+    void setmaxtempfloat(int x, int y, float amount);
     void setjantempfloat(int x, int y, float amount);
     void setjultempfloat(int x, int y, float amount);
     void setjanrainfloat(int x, int y, float amount);
@@ -736,7 +738,8 @@ public:
     void setwind(int x, int y, int amount);
 
     int lakesurface(int x, int y) const; // lake surface elevation
-    void setlakesurface(int x, int y, int amount);
+    float lakesurfacefloat(int x, int y) const;
+    void setlakesurface(int x, int y, float amount);
 
     int truelake(int x, int y) const; // whether this is a true lake
 
@@ -774,10 +777,12 @@ public:
     void settide(int x, int y, int amount);
 
     int riftlakesurface(int x, int y) const; // rift lake surface elevation
-    void setriftlakesurface(int x, int y, int amount);
+    float riftlakesurfacefloat(int x, int y) const;
+    void setriftlakesurface(int x, int y, float amount);
 
     int riftlakebed(int x, int y) const; // rift lake bed elevation
-    void setriftlakebed(int x, int y, int amount);
+    float riftlakebedfloat(int x, int y) const;
+    void setriftlakebed(int x, int y, float amount);
 
     int special(int x, int y) const; // special features. 100: salt lake. 110: salt pan. 120: dunes. 130: fresh wetlands. 131: brackish wetlands. 132: salt wetlands.
     void setspecial(int x, int y, int amount);
@@ -974,7 +979,7 @@ public:
 
     // Raw grid access for accelerated renderer backends.
     std::vector<int> wholemapnom() const;   // base elevation in whole metres, storage order
-    const int* rawlakemap() const;
+    const float* rawlakemap() const;
     const float* rawoceanridgeheightmap() const;
     const float* rawmountainheights() const;
     const float* rawvolcanomap() const;
@@ -996,7 +1001,7 @@ public:
     const short* rawdeltamapdir() const;
     const int* rawdeltamapjan() const;
     const int* rawdeltamapjul() const;
-    const int* rawriftlakemapsurface() const;
+    const float* rawriftlakemapsurface() const;
     const bool* rawnoshademap() const;
 
     // Other public functions.
@@ -1373,7 +1378,7 @@ inline void planet::setmapgradientcolour(int gradient, int stop, int channel, in
     presentation_.itsmapgradientcolours[gradient][stop][channel] = amount;
 }
 
-inline const int* planet::rawlakemap() const { UW_FIELD_READ(lake_surface); return &hydrosphere_.lakemap[0][0]; }
+inline const float* planet::rawlakemap() const { UW_FIELD_READ(lake_surface); return &hydrosphere_.lakemap[0][0]; }
 inline const float* planet::rawoceanridgeheightmap() const { UW_FIELD_READ(ocean_ridge_height); return &geosphere_.oceanridgeheightmap[0][0]; }
 inline const float* planet::rawmountainheights() const { UW_FIELD_READ(mountain_height); return &geosphere_.mountainheights[0][0]; }
 inline const float* planet::rawvolcanomap() const { UW_FIELD_READ(volcano); return &geosphere_.volcanomap[0][0]; }
@@ -1395,7 +1400,7 @@ inline const short* planet::rawspecials() const { UW_FIELD_READ(special_features
 inline const short* planet::rawdeltamapdir() const { UW_FIELD_READ(delta_direction); return &hydrosphere_.deltamapdir[0][0]; }
 inline const int* planet::rawdeltamapjan() const { UW_FIELD_READ(delta_flow_january); return &hydrosphere_.deltamapjan[0][0]; }
 inline const int* planet::rawdeltamapjul() const { UW_FIELD_READ(delta_flow_july); return &hydrosphere_.deltamapjul[0][0]; }
-inline const int* planet::rawriftlakemapsurface() const { UW_FIELD_READ(rift_lake_surface); return &hydrosphere_.riftlakemapsurface[0][0]; }
+inline const float* planet::rawriftlakemapsurface() const { UW_FIELD_READ(rift_lake_surface); return &hydrosphere_.riftlakemapsurface[0][0]; }
 inline const bool* planet::rawnoshademap() const { UW_FIELD_READ(no_shade); return &presentation_.noshademap[0][0]; }
 
 inline int planet::seasonalclimateindex(int x, int y) const
@@ -1904,10 +1909,19 @@ inline int planet::lakesurface(int x, int y) const
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
+    return wholemetres(hydrosphere_.lakemap[x][y]);
+}
+
+inline float planet::lakesurfacefloat(int x, int y) const
+{
+    UW_FIELD_READ(lake_surface);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
     return hydrosphere_.lakemap[x][y];
 }
 
-inline void planet::setlakesurface(int x, int y, int amount)
+inline void planet::setlakesurface(int x, int y, float amount)
 {
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
@@ -2118,10 +2132,19 @@ inline int planet::riftlakesurface(int x, int y) const
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
+    return wholemetres(hydrosphere_.riftlakemapsurface[x][y]);
+}
+
+inline float planet::riftlakesurfacefloat(int x, int y) const
+{
+    UW_FIELD_READ(rift_lake_surface);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
     return hydrosphere_.riftlakemapsurface[x][y];
 }
 
-inline void planet::setriftlakesurface(int x, int y, int amount)
+inline void planet::setriftlakesurface(int x, int y, float amount)
 {
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
@@ -2135,10 +2158,19 @@ inline int planet::riftlakebed(int x, int y) const
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return 0;
 
+    return wholemetres(hydrosphere_.riftlakemapbed[x][y]);
+}
+
+inline float planet::riftlakebedfloat(int x, int y) const
+{
+    UW_FIELD_READ(rift_lake_bed);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
     return hydrosphere_.riftlakemapbed[x][y];
 }
 
-inline void planet::setriftlakebed(int x, int y, int amount)
+inline void planet::setriftlakebed(int x, int y, float amount)
 {
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
@@ -3133,6 +3165,8 @@ inline float planet::janrainfloat(int x, int y) const { return climate_.janrainf
 inline float planet::julrainfloat(int x, int y) const { return climate_.julrainfloat(x, y); }
 inline void planet::setsummerrainfloat(int x, int y, float amount) { climate_.setsummerrainfloat(x, y, amount); }
 inline void planet::setwinterrainfloat(int x, int y, float amount) { climate_.setwinterrainfloat(x, y, amount); }
+inline void planet::setmintempfloat(int x, int y, float amount) { climate_.setmintempfloat(x, y, amount); }
+inline void planet::setmaxtempfloat(int x, int y, float amount) { climate_.setmaxtempfloat(x, y, amount); }
 inline void planet::setjantempfloat(int x, int y, float amount) { climate_.setjantempfloat(x, y, amount); }
 inline void planet::setjultempfloat(int x, int y, float amount) { climate_.setjultempfloat(x, y, amount); }
 inline void planet::setjanrainfloat(int x, int y, float amount) { climate_.setjanrainfloat(x, y, amount); }

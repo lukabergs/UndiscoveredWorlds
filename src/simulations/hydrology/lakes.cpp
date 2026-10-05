@@ -15,7 +15,7 @@ using namespace std;
 
 namespace
 {
-void createlakedepression(planet& world, int centrex, int centrey, int origlevel, int steepness, vector<vector<int>>& basins, int limit, bool up, vector<vector<int>>& avoid);
+void createlakedepression(planet& world, int centrex, int centrey, float origlevel, int steepness, vector<vector<int>>& basins, int limit, bool up, vector<vector<int>>& avoid);
 void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<vector<int>>& thislake, int lakeno, vector<vector<int>>& checked, vector<vector<int>>& nolake, int templatesize, int minrain, int maxtemp, boolshapetemplate smalllake[], boolshapetemplate largelake[]);
 int lakeoutline(planet& world, vector<vector<int>>& thislake, int lakeno, int x, int y);
 void sortlakerivers(planet& world, int leftx, int lefty, int rightx, int righty, int centrex, int centrey, int outflowx, int outflowy, vector<vector<int>>& thislake, int lakeno);
@@ -24,7 +24,7 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
 
 // This function lowers land around a given point to put it at the centre of a large depression.
 
-void createlakedepression(planet& world, int centrex, int centrey, int origlevel, int steepness, vector<vector<int>>& basins, int limit, bool up, vector<vector<int>>& avoid)
+void createlakedepression(planet& world, int centrex, int centrey, float origlevel, int steepness, vector<vector<int>>& basins, int limit, bool up, vector<vector<int>>& avoid)
 {
     int width = world.width();
     int height = world.height();
@@ -38,7 +38,7 @@ void createlakedepression(planet& world, int centrex, int centrey, int origlevel
     {
         int numberchanged = 0;
 
-        int currentlevel = origlevel + (steepness * (radius - 1)); // Cells checked on this round must be no higher than this.
+        float currentlevel = origlevel + static_cast<float>(steepness * (radius - 1)); // Cells checked on this round must be no higher than this.
 
         for (int i = centrex - radius; i <= centrex + radius; i++)
         {
@@ -51,18 +51,18 @@ void createlakedepression(planet& world, int centrex, int centrey, int origlevel
             {
                 if (j >= 0 && j <= height)
                 {
-                    if (up == 1 || world.nom(ii, j) > currentlevel) // If this cell is higher than the current limit (or if we're raising cells as well as lowering them)
+                    if (up == 1 || world.nomfloat(ii, j) > currentlevel) // If this cell is higher than the current limit (or if we're raising cells as well as lowering them)
                     {
                         if (basins[ii][j] == 0 && avoid[ii][j] == 0 && world.sea(ii, j) == 0 && world.truelake(ii, j) == 0 && world.mountainheightfloat(ii, j) < maxmountains)
                         {
                             if ((ii - centrex) * (ii - centrex) + (j - centrey) * (j - centrey) <= radius * radius) // If this cell is within the current radius
                             {
-                                int thislevel = currentlevel; // The level of this particular cell, which will be a variation on the current level of the whole radius.
+                                float thislevel = currentlevel; // The level of this particular cell, which will be a variation on the current level of the whole radius.
 
                                 if (radius > 1 && up == 0) // Add a bit of variation to the slope.
                                     thislevel = thislevel - random(0, steepness);
 
-                                world.setnom(ii, j, thislevel);
+                                world.setnomfloat(ii, j, thislevel);
                                 numberchanged++;
                                 basins[ii][j] = 1;
                             }
@@ -306,7 +306,7 @@ void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<v
 
     // Now we find out what the lowest point on the edge of the lake is. This will be the point from which the outflowing river emerges, and it will determine the surface level of the whole lake.
 
-    int smallest = world.maxelevation();
+    float smallest = static_cast<float>(world.maxelevation());
     int outflowx = -1;
     int outflowy = -1;
 
@@ -341,9 +341,9 @@ void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<v
 
                 if (border == 1)
                 {
-                    if (world.nom(i, j) < smallest)
+                    if (world.nomfloat(i, j) < smallest)
                     {
-                        smallest = world.nom(i, j);
+                        smallest = world.nomfloat(i, j);
                         outflowx = i;
                         outflowy = j;
                     }
@@ -352,7 +352,7 @@ void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<v
         }
     }
 
-    int surfaceheight = smallest - riverlandreduce;
+    float surfaceheight = smallest - riverlandreduce;
 
     // Now make the lake itself that height.
 
@@ -385,7 +385,7 @@ void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<v
         {
             if (thislake[i][j] == lakeno)
             {
-                float nom = (float)world.nom(i, j);
+                float nom = (float)world.nomfloat(i, j);
 
                 float depth = nom - (float)surfaceheight;
 
@@ -398,12 +398,12 @@ void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<v
                 if (depth < mindepth)
                     depth = mindepth;
 
-                int newnom = surfaceheight - (int)depth;
+                float newnom = surfaceheight - depth;
 
                 if (newnom < 1)
                     newnom = 1;
 
-                world.setnom(i, j, newnom);
+                world.setnomfloat(i, j, newnom);
             }
         }
     }
@@ -567,7 +567,7 @@ void sortlakerivers(planet& world, int leftx, int lefty, int rightx, int righty,
                         {
                             bool mustdivert = 0;
 
-                            if (world.lakesurface(kk, l) != 0)
+                            if (world.lakesurfacefloat(kk, l) != 0)
                                 mustdivert = 1;
                             else
                             {
@@ -744,7 +744,7 @@ void cleanlakes(planet& world)
         {
             for (int i = 0; i <= width; i++)
             {
-                if (world.lakesurface(i, j) > maxelev)
+                if (world.lakesurfacefloat(i, j) > maxelev)
                     world.setlakesurface(i, j, 0);
 
                 if (world.truelake(i, j) == 1)
@@ -797,7 +797,7 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
             n = lakelength;
     }
 
-    int surfacelevel = world.nom(x, y) - riverlandreduce;
+    float surfacelevel = world.nomfloat(x, y) - riverlandreduce;
 
     world.setlakestart(startx, starty, 1); // This marks this as the beginning of a rift lake, which we'll need to know when it comes to the regional map.
 
@@ -830,7 +830,7 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
 
             for (int j = y - 2; j <= y + 2; j++)
             {
-                if (j >= 0 && j <= height && world.lakesurface(ii, j) != 0)
+                if (j >= 0 && j <= height && world.lakesurfacefloat(ii, j) != 0)
                 {
                     keepgoing = 0;
                     i = x + 2;
@@ -839,7 +839,7 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
                 }
                 if (j > 0 && j <= height)
                 {
-                    if (world.riftlakesurface(ii, j) != 0 && world.riftlakesurface(ii, j) != surfacelevel)
+                    if (world.riftlakesurfacefloat(ii, j) != 0 && world.riftlakesurfacefloat(ii, j) != surfacelevel)
                     {
                         keepgoing = 0;
                         i = x + 2;
@@ -893,7 +893,7 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
 
         done++;
 
-        int thislevel = surfacelevel - depth + randomsign(random(0, 200));
+        float thislevel = surfacelevel - depth + randomsign(random(0, 200));
 
         if (thislevel > surfacelevel - 50)
             thislevel = surfacelevel - 50;
@@ -982,11 +982,11 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
             {
                 if (j >= 0 && j <= height)
                 {
-                    if (world.riftlakesurface(ii, j) == 0) // If this is not in the rift lake
+                    if (world.riftlakesurfacefloat(ii, j) == 0) // If this is not in the rift lake
                     {
                         if (currentriver[i][j] == 0)
                         {
-                            int lowest = maxelev;
+                            float lowest = static_cast<float>(maxelev);
 
                             int newdestx = -1;
                             int newdesty = -1;
@@ -1002,11 +1002,11 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
                                 {
                                     if (l >= 0 && l <= height)
                                     {
-                                        if (world.riftlakesurface(kk, l) == surfacelevel)
+                                        if (world.riftlakesurfacefloat(kk, l) == surfacelevel)
                                         {
-                                            if (world.riftlakesurface(kk, l) < lowest)
+                                            if (world.riftlakesurfacefloat(kk, l) < lowest)
                                             {
-                                                lowest = world.riftlakesurface(kk, l);
+                                                lowest = world.riftlakesurfacefloat(kk, l);
 
                                                 newdestx = kk;
                                                 newdesty = l;
@@ -1058,7 +1058,7 @@ twointegers createriftlake(planet& world, int startx, int starty, int lakelength
 
 // This function creates areas of sea that will later become salt lakes.
 
-void createsaltlakes(planet& world, int& lakesplaced, vector<vector<vector<int>>>& saltlakemap, vector<vector<int>>& nolake, vector<vector<int>>& basins, boolshapetemplate smalllake[])
+void createsaltlakes(planet& world, int& lakesplaced, vector<vector<vector<float>>>& saltlakemap, vector<vector<int>>& nolake, vector<vector<int>>& basins, boolshapetemplate smalllake[])
 {
     fast_srand(static_cast<long>(deterministiccontextseed(world.seed(), 0x3001) & 0x7fffffffull));
 
@@ -1086,8 +1086,8 @@ void createsaltlakes(planet& world, int& lakesplaced, vector<vector<vector<int>>
             {
                 if (random(1, saltlakechance) == 1)
                 {
-                    int averain = (world.winterrain(i, j) + world.summerrain(i, j)) / 2;
-                    int avetemp = (world.maxtemp(i, j) + world.mintemp(i, j)) / 2;
+                    float averain = (world.winterrainfloat(i, j) + world.summerrainfloat(i, j)) / 2;
+                    float avetemp = (world.maxtempfloat(i, j) + world.mintempfloat(i, j)) / 2;
 
                     if (averain<maxsaltrain && avetemp>minsalttemp)
                     {
@@ -1102,7 +1102,7 @@ void createsaltlakes(planet& world, int& lakesplaced, vector<vector<vector<int>>
 
 // This function puts a patch of sea on the map that will later be turned into a salt lake.
 
-void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dodepressions, vector<vector<vector<int>>>& saltlakemap, vector<vector<int>>& basins, vector<vector<int>>& avoid, vector<vector<int>>& nolake, boolshapetemplate smalllake[])
+void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dodepressions, vector<vector<vector<float>>>& saltlakemap, vector<vector<int>>& basins, vector<vector<int>>& avoid, vector<vector<int>>& nolake, boolshapetemplate smalllake[])
 {
     int width = world.width();
     int height = world.height();
@@ -1120,8 +1120,8 @@ void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dod
 
     // The surfaceheight will be a lot lower than this point originally is.
 
-    int origheight = world.nom(centrex, centrey);
-    int surfaceheight = (sealevel + (origheight - sealevel) / 2) - riverlandreduce;
+    float origheight = world.nomfloat(centrex, centrey);
+    float surfaceheight = (sealevel + (origheight - sealevel) / 2) - riverlandreduce;
 
     if (surfaceheight <= sealevel)
         surfaceheight = sealevel + 1;
@@ -1185,11 +1185,11 @@ void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dod
                     if (xx<0 || xx>width)
                         xx = wrap(xx, width);
 
-                    if (nolake[xx][yy] == 1 || world.nom(xx, yy) <= sealevel) // Don't try to put lakes on top of sea...
+                    if (nolake[xx][yy] == 1 || world.basebelowsea(xx, yy)) // Don't try to put lakes on top of sea...
                         tooclose = 1;
                     else
                     {
-                        if (surfaceheight > world.nom(xx, yy) - riverlandreduce) // Lakes can't extend onto areas where local rivers will be lower than the surface of the lake.
+                        if (surfaceheight > world.nomfloat(xx, yy) - riverlandreduce) // Lakes can't extend onto areas where local rivers will be lower than the surface of the lake.
                             tooclose = 1;
                         else
                         {
@@ -1208,7 +1208,7 @@ void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dod
                                         if (saltlakemap[kk][l][0] != 0 && saltlakemap[kk][l][0] != surfaceheight)
                                             tooclose = 1;
 
-                                        if (world.nom(kk, l) <= sealevel && saltlakemap[kk][l][0] != surfaceheight)
+                                        if (world.basebelowsea(kk, l) && saltlakemap[kk][l][0] != surfaceheight)
                                             tooclose = 1;
                                     }
                                 }
@@ -1250,7 +1250,7 @@ void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dod
                         xx = wrap(xx, width);
                     }
 
-                    world.setnom(xx, yy, sealevel - 1);
+                    world.setnomfloat(xx, yy, sealevel - 1);
                     saltlakemap[xx][yy][0] = surfaceheight;
                     saltlakemap[xx][yy][1] = surfaceheight - (depth + randomsign(random(0, 4)));
 
@@ -1334,7 +1334,7 @@ void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dod
 
 // This function turns the inland seas into proper salt lakes.
 
-void convertsaltlakes(planet& world, vector<vector<vector<int>>>& saltlakemap)
+void convertsaltlakes(planet& world, vector<vector<vector<float>>>& saltlakemap)
 {
     int width = world.width();
     int height = world.height();
@@ -1346,7 +1346,7 @@ void convertsaltlakes(planet& world, vector<vector<vector<int>>>& saltlakemap)
             if (saltlakemap[i][j][0] != 0)
             {
                 world.setlakesurface(i, j, saltlakemap[i][j][0]);
-                world.setnom(i, j, saltlakemap[i][j][1]);
+                world.setnomfloat(i, j, saltlakemap[i][j][1]);
 
                 world.setspecial(i, j, 100);
             }
@@ -1434,7 +1434,7 @@ void createlakemap(planet& world, vector<vector<int>>& nolake, boolshapetemplate
             int flow = world.riveraveflow(i, j);
 
             if (world.averainfloat(i, j) >= static_cast<float>(minrain) ||
-                world.avetemp(i, j) <= maxtemp)
+                world.avetempfloat(i, j) <= maxtemp)
             {
                 if (flow >= minlake && flow <= maxlake && lakeprobability[i][j] == 1 && random(1, lakechance) == 1)
                 {
@@ -1445,7 +1445,7 @@ void createlakemap(planet& world, vector<vector<int>>& nolake, boolshapetemplate
                         int templatesize = 1;
                         int shapenumber;
 
-                        if (world.avetemp(i, j) <= glacialtemp)
+                        if (world.avetempfloat(i, j) <= glacialtemp)
                             shapenumber = random(0, 3);
                         else
                         {
@@ -1508,7 +1508,7 @@ void createriftlakemap(planet& world, vector<vector<int>>& nolake)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) >= sealevel && world.lakesurface(i, j) == 0 && nolake[i][j] == 0 && world.riftlakesurface(i, j) == 0)
+            if (world.nomfloat(i, j) >= sealevel && world.lakesurfacefloat(i, j) == 0 && nolake[i][j] == 0 && world.riftlakesurfacefloat(i, j) == 0)
             {
                 if (world.riveraveflow(i, j) > minlake && world.riveraveflow(i, j) < maxlake && random(1, riftlakechance) == 1)
                 {
@@ -1549,7 +1549,7 @@ void createriftlakemap(planet& world, vector<vector<int>>& nolake)
                         if (dir == 0 || world.sea(x, y) == 1)
                             keepgoing = 0;
 
-                        if (world.riftlakesurface(x, y) != 0 || world.lakesurface(x, y) != 0)
+                        if (world.riftlakesurfacefloat(x, y) != 0 || world.lakesurfacefloat(x, y) != 0)
                         {
                             found = 1;
                             keepgoing = 0;
@@ -1614,13 +1614,13 @@ void createriftlakemap(planet& world, vector<vector<int>>& nolake)
                                         {
                                             if (y >= 0 && y <= height)
                                             {
-                                                if (world.lakesurface(x, y) != 0)
+                                                if (world.lakesurfacefloat(x, y) != 0)
                                                 {
                                                     keepgoing = 0;
                                                     n = gaplength;
                                                 }
 
-                                                if (world.nom(x, y) <= sealevel)
+                                                if (world.basebelowsea(x, y))
                                                 {
                                                     keepgoing = 0;
                                                     n = gaplength;
@@ -1676,7 +1676,7 @@ int nexttolake(planet& world, int x, int y)
 
         for (int j = y - dist; j <= y + dist; j++)
         {
-            if (j >= 0 && j <= height && world.lakesurface(ii, j) != 0)
+            if (j >= 0 && j <= height && world.lakesurfacefloat(ii, j) != 0)
                 return (world.lakesurface(ii, j));
         }
     }
@@ -1695,7 +1695,7 @@ void removesealakes(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            int surface = world.lakesurface(i, j);
+            float surface = world.lakesurfacefloat(i, j);
 
             if (surface != 0)
             {
@@ -1703,7 +1703,7 @@ void removesealakes(planet& world)
                 {
                     for (int l = j - 1; l <= j + 1; l++)
                     {
-                        if (world.nom(k, l) <= sealevel && world.lakesurface(k, l) == 0)
+                        if (world.basebelowsea(k, l) && world.lakesurfacefloat(k, l) == 0)
                             world.setlakesurface(k, l, surface);
                     }
                 }
@@ -1723,7 +1723,7 @@ void connectlakes(planet& world)
     {
         for (int j = 2; j < height - 1; j++)
         {
-            if (world.lakesurface(i, j) != 0)
+            if (world.lakesurfacefloat(i, j) != 0)
             {
                 int left = i - 1;
                 int right = i + 1;
@@ -1747,34 +1747,34 @@ void connectlakes(planet& world)
                 if (rright > width)
                     rright = 0;
 
-                int surface = world.lakesurface(i, j);
-                int elev = world.nom(i, j);
+                float surface = world.lakesurfacefloat(i, j);
+                float elev = world.nomfloat(i, j);
                 int special = world.special(i, j);
 
-                if (world.lakesurface(right, j) == 0 && world.lakesurface(rright, j) == surface)
+                if (world.lakesurfacefloat(right, j) == 0 && world.lakesurfacefloat(rright, j) == surface)
                 {
-                    world.setnom(right, j, elev);
+                    world.setnomfloat(right, j, elev);
                     world.setspecial(right, j, special);
                     world.setlakesurface(right, j, surface);
                 }
 
-                if (world.lakesurface(left, j) == 0 && world.lakesurface(lleft, j) == surface)
+                if (world.lakesurfacefloat(left, j) == 0 && world.lakesurfacefloat(lleft, j) == surface)
                 {
-                    world.setnom(left, j, elev);
+                    world.setnomfloat(left, j, elev);
                     world.setspecial(left, j, special);
                     world.setlakesurface(left, j, surface);
                 }
 
-                if (world.lakesurface(i, up) == 0 && world.lakesurface(i, uup) == surface)
+                if (world.lakesurfacefloat(i, up) == 0 && world.lakesurfacefloat(i, uup) == surface)
                 {
-                    world.setnom(i, up, elev);
+                    world.setnomfloat(i, up, elev);
                     world.setspecial(i, up, special);
                     world.setlakesurface(i, uup, surface);
                 }
 
-                if (world.lakesurface(i, down) == 0 && world.lakesurface(i, ddown) == surface)
+                if (world.lakesurfacefloat(i, down) == 0 && world.lakesurfacefloat(i, ddown) == surface)
                 {
-                    world.setnom(i, down, elev);
+                    world.setnomfloat(i, down, elev);
                     world.setspecial(i, up, special);
                     world.setlakesurface(i, ddown, surface);
                 }

@@ -27,7 +27,7 @@ int findlowestdir(planet& world, int neighbours[8][2], int x, int y)
     int height = world.height();
     const std::uint64_t directionseed = deterministiccontextseed(world.seed(), 0x6101);
 
-    int lowest = world.maxelevation() * 2;
+    float lowest = static_cast<float>(world.maxelevation() * 2);
     int nnn = -1;
 
     int start = deterministicrandom(directionseed, 0, 7, x, y);
@@ -45,7 +45,7 @@ int findlowestdir(planet& world, int neighbours[8][2], int x, int y)
 
         if (j >= 0 && j <= height)
         {
-            int pointelev = world.nom(i, j);
+            float pointelev = world.nomfloat(i, j);
 
             if (pointelev < lowest)
             {
@@ -68,7 +68,7 @@ int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, vector
     int height = world.height();
     const std::uint64_t directionseed = deterministiccontextseed(world.seed(), 0x6102);
 
-    int lowest = world.maxelevation() * 2;
+    float lowest = static_cast<float>(world.maxelevation() * 2);
     int nnn = -1;
 
     const int start = deterministicrandom(directionseed, 0, 7, x, y, 1);
@@ -86,7 +86,7 @@ int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, vector
 
         if (j >= 0 && j <= height)
         {
-            int pointelev = world.nom(i, j);
+            float pointelev = world.nomfloat(i, j);
 
             if (pointelev < lowest)
             {
@@ -103,7 +103,7 @@ int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, vector
 
 // This gets the amount the land is sloping between two points.
 
-int getslope(planet& world, int x, int y, int xx, int yy)
+float getslope(planet& world, int x, int y, int xx, int yy)
 {
     int width = world.width();
     int height = world.height();
@@ -115,12 +115,12 @@ int getslope(planet& world, int x, int y, int xx, int yy)
         xx = wrap(xx, width);
 
     if (y<0 || y>height)
-        return (-1);
+        return (-1.0f);
 
     if (yy<0 || yy>height)
-        return (-1);
+        return (-1.0f);
 
-    int slope = world.map(xx, yy) - world.map(x, y);
+    float slope = world.mapfloat(xx, yy) - world.mapfloat(x, y);
 
     return (slope);
 }
@@ -142,25 +142,25 @@ int getflatness(planet& world, int x, int y)
     if (xplus > width)
         xplus = 0;
 
-    int thiselev = getflatelevation(world, x, y);
+    const float thiselev = getflatelevation(world, x, y);
 
     float flatness = 0.0f;
 
-    int thatelev = getflatelevation(world, xminus, y);
-    flatness = flatness + (float)abs(thiselev - thatelev);
+    float thatelev = getflatelevation(world, xminus, y);
+    flatness = flatness + std::fabs(thiselev - thatelev);
 
     float crount = 2.0f;
 
     if (y > 0)
     {
         thatelev = getflatelevation(world, xminus, y - 1);
-        flatness = flatness + (float)abs(thiselev - thatelev);
+        flatness = flatness + std::fabs(thiselev - thatelev);
 
         thatelev = getflatelevation(world, x, y - 1);
-        flatness = flatness + (float)abs(thiselev - thatelev);
+        flatness = flatness + std::fabs(thiselev - thatelev);
 
         thatelev = getflatelevation(world, xplus, y - 1);
-        flatness = flatness + (float)abs(thiselev - thatelev);
+        flatness = flatness + std::fabs(thiselev - thatelev);
 
         crount = crount + 3.0f;
     }
@@ -168,13 +168,13 @@ int getflatness(planet& world, int x, int y)
     if (y < height)
     {
         thatelev = getflatelevation(world, xminus, y + 1);
-        flatness = flatness + (float)abs(thiselev - thatelev);
+        flatness = flatness + std::fabs(thiselev - thatelev);
 
         thatelev = getflatelevation(world, x, y + 1);
-        flatness = flatness + (float)abs(thiselev - thatelev);
+        flatness = flatness + std::fabs(thiselev - thatelev);
 
         thatelev = getflatelevation(world, xplus, y + 1);
-        flatness = flatness + (float)abs(thiselev - thatelev);
+        flatness = flatness + std::fabs(thiselev - thatelev);
 
         crount = crount + 3.0f;
     }
@@ -186,20 +186,20 @@ int getflatness(planet& world, int x, int y)
 
 // This function gets the elevation of a point, incorporating water level.
 
-int getflatelevation(planet& world, int x, int y)
+float getflatelevation(planet& world, int x, int y)
 {
-    int elev;
+    float elev;
 
-    int surface = world.lakesurface(x, y);
+    float surface = world.lakesurfacefloat(x, y);
 
     if (surface > 0)
         elev = surface;
     else
     {
         if (world.sea(x, y) == 1)
-            elev = world.sealevel();
+            elev = static_cast<float>(world.sealevel());
         else
-            elev = world.nom(x, y);
+            elev = world.nomfloat(x, y);
     }
 
     return (elev);
@@ -237,7 +237,7 @@ twointegers findseatile(planet& world, int x, int y, int dir)
 
     // oldx and oldy are the coordinates of where we are coming to this tile from. We want to avoid going back there!
 
-    int lowest = world.map(x, y);
+    float lowest = world.mapfloat(x, y);
 
     for (int i = x - 1; i <= x + 1; i++)
     {
@@ -248,11 +248,11 @@ twointegers findseatile(planet& world, int x, int y, int dir)
 
         for (int j = y - 1; j <= y + 1; j++)
         {
-            if (ii != x && j != y && ii != oldx && j != oldy && j >= 0 && j <= height && world.sea(ii, j) == 1 && world.map(ii, j) < lowest)
+            if (ii != x && j != y && ii != oldx && j != oldy && j >= 0 && j <= height && world.sea(ii, j) == 1 && world.mapfloat(ii, j) < lowest)
             {
                 newtile.x = ii;
                 newtile.y = j;
-                lowest = world.map(ii, j);
+                lowest = world.mapfloat(ii, j);
             }
         }
     }
@@ -512,10 +512,10 @@ int nearlake(planet& world, int x, int y, int dist, bool rift)
         {
             if (j >= 0 && j <= height)
             {
-                if (world.lakesurface(ii, j) != 0)
+                if (world.lakesurfacefloat(ii, j) != 0)
                     return world.lakesurface(ii, j);
 
-                if (rift == 1 && world.riftlakesurface(ii, j) != 0)
+                if (rift == 1 && world.riftlakesurfacefloat(ii, j) != 0)
                     return world.riftlakesurface(ii, j);
             }
         }
@@ -527,7 +527,7 @@ int nearlake(planet& world, int x, int y, int dist, bool rift)
 
 int getlakeedge(planet& world, int x, int y)
 {
-    if (world.lakesurface(x, y) == 0)
+    if (world.lakesurfacefloat(x, y) == 0)
         return 0;
 
     int width = world.width();
@@ -544,7 +544,7 @@ int getlakeedge(planet& world, int x, int y)
         {
             if (j >= 0 && j <= height)
             {
-                if (world.lakesurface(ii, j) == 0)
+                if (world.lakesurfacefloat(ii, j) == 0)
                     return 1;
             }
         }

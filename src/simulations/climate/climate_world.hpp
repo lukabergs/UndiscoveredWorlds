@@ -59,8 +59,8 @@ struct climateinputs
     const float* cratercentres = nullptr;
     const float* volcano = nullptr;
     const float* oceanridgeheight = nullptr;
-    const int* lakesurface = nullptr;
-    const int* riftlakesurface = nullptr;
+    const float* lakesurface = nullptr;
+    const float* riftlakesurface = nullptr;
     const short* special = nullptr;
 };
 
@@ -166,7 +166,9 @@ public:
     int volcano(int x, int y) const;
     float volcanofloat(int x, int y) const;
     int lakesurface(int x, int y) const;
+    float lakesurfacefloat(int x, int y) const;
     int riftlakesurface(int x, int y) const;
+    float riftlakesurfacefloat(int x, int y) const;
     int special(int x, int y) const;
     int truelake(int x, int y) const;
 
@@ -582,13 +584,25 @@ inline float climateworld::volcanofloat(int x, int y) const
 inline int climateworld::lakesurface(int x, int y) const
 {
     UW_FIELD_READ(lake_surface);
-    return inside(x, y) ? inputs_.lakesurface[inputindex(x, y)] : 0;
+    return inside(x, y) ? wholemetres(inputs_.lakesurface[inputindex(x, y)]) : 0;
+}
+
+inline float climateworld::lakesurfacefloat(int x, int y) const
+{
+    UW_FIELD_READ(lake_surface);
+    return inside(x, y) ? inputs_.lakesurface[inputindex(x, y)] : 0.0f;
 }
 
 inline int climateworld::riftlakesurface(int x, int y) const
 {
     UW_FIELD_READ(rift_lake_surface);
-    return inside(x, y) ? inputs_.riftlakesurface[inputindex(x, y)] : 0;
+    return inside(x, y) ? wholemetres(inputs_.riftlakesurface[inputindex(x, y)]) : 0;
+}
+
+inline float climateworld::riftlakesurfacefloat(int x, int y) const
+{
+    UW_FIELD_READ(rift_lake_surface);
+    return inside(x, y) ? inputs_.riftlakesurface[inputindex(x, y)] : 0.0f;
 }
 
 inline int climateworld::special(int x, int y) const

@@ -89,7 +89,7 @@ void tracedropparallel(planet& world, int x, int y, int minimum, vector<mutex>& 
 
     float amount = 10.0f;
 
-    if (world.mintemp(startx, starty) < 0)
+    if (world.mintempfloat(startx, starty) < 0)
         amount = 3.0f;
 
     if (starty < height / 2)
@@ -214,7 +214,8 @@ void removediagonalrivers(planet& world)
 
     int adjustchance = 1; // Probability of adjusting these bits. The higher it is, the less likely.
 
-    int desti, destj, adji, adjj, newdir1, newdir2, newheight;
+    int desti, destj, adji, adjj, newdir1, newdir2;
+    float newheight;
 
     for (int i = 0; i <= width; i++)
     {
@@ -261,14 +262,14 @@ void removediagonalrivers(planet& world)
 
                     }
 
-                    newheight = (world.nom(i, j) + world.nom(desti, destj)) / 2;
+                    newheight = (world.nomfloat(i, j) + world.nomfloat(desti, destj)) / 2;
 
-                    if (newheight > world.nom(adji, adjj))
+                    if (newheight > world.nomfloat(adji, adjj))
                         candoit = 0;
 
                     if (candoit == 1)
                     {
-                        world.setnom(adji, adjj, newheight);
+                        world.setnomfloat(adji, adjj, newheight);
                         world.setriverdir(i, j, newdir1);
                         world.setriverdir(adji, adjj, newdir2);
                     }
@@ -311,14 +312,14 @@ void removediagonalrivers(planet& world)
 
                     }
 
-                    newheight = (world.nom(i, j) + world.nom(desti, destj)) / 2;
+                    newheight = (world.nomfloat(i, j) + world.nomfloat(desti, destj)) / 2;
 
-                    if (newheight > world.nom(adji, adjj))
+                    if (newheight > world.nomfloat(adji, adjj))
                         candoit = 0;
 
                     if (candoit == 1)
                     {
-                        world.setnom(adji, adjj, newheight);
+                        world.setnomfloat(adji, adjj, newheight);
                         world.setriverdir(i, j, newdir1);
                         world.setriverdir(adji, adjj, newdir2);
                     }
@@ -361,14 +362,14 @@ void removediagonalrivers(planet& world)
 
                     }
 
-                    newheight = (world.nom(i, j) + world.nom(desti, destj)) / 2;
+                    newheight = (world.nomfloat(i, j) + world.nomfloat(desti, destj)) / 2;
 
-                    if (newheight > world.nom(adji, adjj))
+                    if (newheight > world.nomfloat(adji, adjj))
                         candoit = 0;
 
                     if (candoit == 1)
                     {
-                        world.setnom(adji, adjj, newheight);
+                        world.setnomfloat(adji, adjj, newheight);
                         world.setriverdir(i, j, newdir1);
                         world.setriverdir(adji, adjj, newdir2);
                     }
@@ -411,14 +412,14 @@ void removediagonalrivers(planet& world)
 
                     }
 
-                    newheight = (world.nom(i, j) + world.nom(desti, destj)) / 2;
+                    newheight = (world.nomfloat(i, j) + world.nomfloat(desti, destj)) / 2;
 
-                    if (newheight > world.nom(adji, adjj))
+                    if (newheight > world.nomfloat(adji, adjj))
                         candoit = 0;
 
                     if (candoit == 1)
                     {
-                        world.setnom(adji, adjj, newheight);
+                        world.setnomfloat(adji, adjj, newheight);
                         world.setriverdir(i, j, newdir1);
                         world.setriverdir(adji, adjj, newdir2);
                     }
@@ -485,25 +486,25 @@ void adddiagonalriverjunctions(planet& world)
 
             if (world.riverdir(i, j) == 4 && world.riverdir(i + 1, j + 1) == 2)
             {
-                if (world.nom(i + 1, j) > world.nom(i + 2, j))
+                if (world.nomfloat(i + 1, j) > world.nomfloat(i + 2, j))
                 {
                     world.setriverdir(i, j, 3);
                     world.setriverdir(i + 1, j, 3);
 
-                    if (world.nom(i + 1, j) > world.nom(i, j))
-                        world.setnom(i + 1, j, world.nom(i, j) - 1);
+                    if (world.nomfloat(i + 1, j) > world.nomfloat(i, j))
+                        world.setnomfloat(i + 1, j, world.nomfloat(i, j) - 1);
                 }
             }
 
             if (world.riverdir(i, j + 1) == 2 && world.riverdir(i + 1, j + 2) == 8)
             {
-                if (world.nom(i + 1, j + 1) > world.nom(i + 1, j))
+                if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j))
                 {
                     world.setriverdir(i + 1, j + 2, 1);
                     world.setriverdir(i + 1, j + 1, 1);
 
-                    if (world.nom(i + 1, j + 1) > world.nom(i + 1, j + 2))
-                        world.setnom(i + 1, j + 1, world.nom(i + 1, j + 1) - 1);
+                    if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j + 2))
+                        world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 1, j + 1) - 1);
                 }
             }
 
@@ -511,25 +512,25 @@ void adddiagonalriverjunctions(planet& world)
 
             if (world.riverdir(i, j) == 4 && world.riverdir(i + 1, j + 1) == 6)
             {
-                if (world.nom(i, j + 1) > world.nom(i, j + 1))
+                if (world.nomfloat(i, j + 1) > world.nomfloat(i, j + 1))
                 {
                     world.setriverdir(i, j, 5);
                     world.setriverdir(i, j + 1, 5);
 
-                    if (world.nom(i, j + 1) > world.nom(i, j))
-                        world.setnom(i, j + 1, world.nom(i, j) - 1);
+                    if (world.nomfloat(i, j + 1) > world.nomfloat(i, j))
+                        world.setnomfloat(i, j + 1, world.nomfloat(i, j) - 1);
                 }
             }
 
             if (world.riverdir(i + 1, j) == 6 && world.riverdir(i + 2, j + 1) == 8)
             {
-                if (world.nom(i + 1, j + 1) > world.nom(i, j + 1))
+                if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i, j + 1))
                 {
                     world.setriverdir(i + 2, j + 1, 7);
                     world.setriverdir(i + 1, j + 1, 7);
 
-                    if (world.nom(i + 1, j + 1) > world.nom(i + 2, j + 1))
-                        world.setnom(i + 1, j + 1, world.nom(i + 1, j + 1) - 1);
+                    if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 2, j + 1))
+                        world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 1, j + 1) - 1);
                 }
             }
 
@@ -537,25 +538,25 @@ void adddiagonalriverjunctions(planet& world)
 
             if (world.riverdir(i + 1, j) == 4 && world.riverdir(i, j + 1) == 2)
             {
-                if (world.nom(i + 1, j + 1) > world.nom(i + 2, j + 1))
+                if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 2, j + 1))
                 {
                     world.setriverdir(i, j + 1, 3);
                     world.setriverdir(i + 1, j + 1, 3);
 
-                    if (world.nom(i + 1, j + 1) > world.nom(i, j + 1))
-                        world.setnom(i + 1, j + 1, world.nom(i, j + 1) - 1);
+                    if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i, j + 1))
+                        world.setnomfloat(i + 1, j + 1, world.nomfloat(i, j + 1) - 1);
                 }
             }
 
             if (world.riverdir(i, j + 1) == 4 && world.riverdir(i + 1, j) == 6)
             {
-                if (world.nom(i + 1, j + 1) > world.nom(i + 1, j + 2))
+                if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j + 2))
                 {
                     world.setriverdir(i + 1, j, 5);
                     world.setriverdir(i + 1, j + 1, 5);
 
-                    if (world.nom(i + 1, j + 1) > world.nom(i + 1, j))
-                        world.setnom(i + 1, j + 1, world.nom(i + 1, j) - 1);
+                    if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j))
+                        world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 1, j) - 1);
                 }
             }
 
@@ -563,25 +564,25 @@ void adddiagonalriverjunctions(planet& world)
 
             if (world.riverdir(i + 1, j + 1) == 8 && world.riverdir(i + 2, j) == 6)
             {
-                if (world.nom(i + 1, j) > world.nom(i, j))
+                if (world.nomfloat(i + 1, j) > world.nomfloat(i, j))
                 {
                     world.setriverdir(i + 2, j, 7);
                     world.setriverdir(i + 1, j, 7);
 
-                    if (world.nom(i + 1, j) > world.nom(i + 2, j))
-                        world.setnom(i + 1, j, world.nom(i + 2, j) - 1);
+                    if (world.nomfloat(i + 1, j) > world.nomfloat(i + 2, j))
+                        world.setnomfloat(i + 1, j, world.nomfloat(i + 2, j) - 1);
                 }
             }
 
             if (world.riverdir(i + 1, j + 1) == 8 && world.riverdir(i, j + 2) == 2)
             {
-                if (world.nom(i, j + 1) > world.nom(i, j))
+                if (world.nomfloat(i, j + 1) > world.nomfloat(i, j))
                 {
                     world.setriverdir(i, j + 2, 1);
                     world.setriverdir(i, j + 1, 1);
 
-                    if (world.nom(i, j + 1) > world.nom(i, j + 2))
-                        world.setnom(i, j + 1, world.nom(i, j + 2) - 1);
+                    if (world.nomfloat(i, j + 1) > world.nomfloat(i, j + 2))
+                        world.setnomfloat(i, j + 1, world.nomfloat(i, j + 2) - 1);
                 }
             }
         }
@@ -613,9 +614,9 @@ void avoidvolcanoes(planet& world)
 
                 if (world.volcanofloat(dest.x, dest.y) != 0)
                 {
-                    int currentelev = world.nom(i, j);
+                    float currentelev = world.nomfloat(i, j);
 
-                    int lowest = maxelev;
+                    float lowest = static_cast<float>(maxelev);
                     int newx = dest.x;
                     int newy = dest.y;
 
@@ -630,7 +631,7 @@ void avoidvolcanoes(planet& world)
                         {
                             if (l >= 0 && l <= height && (kk != i || l != j) && world.volcanofloat(kk, l) == 0)
                             {
-                                int nom = world.nom(kk, l);
+                                float nom = world.nomfloat(kk, l);
 
                                 if (nom < currentelev && nom < lowest)
                                 {
@@ -684,7 +685,7 @@ void removeparallelrivers(planet& world)
 
                 if (world.riverdir(i, j) == 3 && world.riverdir(i + 1, j) == 3 && world.riverdir(i, j + 1) == 3 && world.riverdir(i + 1, j + 1) == 3)
                 {
-                    if (world.nom(i, j) > world.nom(i + 1, j + 1) && altered[i][j] == 0)
+                    if (world.nomfloat(i, j) > world.nomfloat(i + 1, j + 1) && altered[i][j] == 0)
                     {
                         world.setriverdir(i, j, 4);
 
@@ -695,7 +696,7 @@ void removeparallelrivers(planet& world)
                     }
                     else
                     {
-                        if (world.nom(i, j + 1) > world.nom(i + 1, j) && altered[i][j + 1] == 0)
+                        if (world.nomfloat(i, j + 1) > world.nomfloat(i + 1, j) && altered[i][j + 1] == 0)
                         {
                             world.setriverdir(i, j + 1, 2);
 
@@ -711,7 +712,7 @@ void removeparallelrivers(planet& world)
 
                 if (world.riverdir(i, j) == 7 && world.riverdir(i + 1, j) == 7 && world.riverdir(i, j + 1) == 7 && world.riverdir(i + 1, j + 1) == 7)
                 {
-                    if (world.nom(i + 1, j) > world.nom(i, j + 1) && altered[i + 1][j] == 0)
+                    if (world.nomfloat(i + 1, j) > world.nomfloat(i, j + 1) && altered[i + 1][j] == 0)
                     {
                         world.setriverdir(i + 1, j, 6);
 
@@ -722,7 +723,7 @@ void removeparallelrivers(planet& world)
                     }
                     else
                     {
-                        if (world.nom(i + 1, j + 1) > world.nom(i, j) && altered[i + 1][j + 1] == 0)
+                        if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i, j) && altered[i + 1][j + 1] == 0)
                         {
                             world.setriverdir(i + 1, j + 1, 8);
 
@@ -738,7 +739,7 @@ void removeparallelrivers(planet& world)
 
                 if (world.riverdir(i, j) == 1 && world.riverdir(i, j + 1) == 1 && world.riverdir(i + 1, j) == 1 && world.riverdir(i + 1, j + 1) == 7)
                 {
-                    if (world.nom(i, j + 1) > world.nom(i + 1, j) && altered[i][j + 1] == 0)
+                    if (world.nomfloat(i, j + 1) > world.nomfloat(i + 1, j) && altered[i][j + 1] == 0)
                     {
                         world.setriverdir(i, j + 1, 2);
 
@@ -749,7 +750,7 @@ void removeparallelrivers(planet& world)
                     }
                     else
                     {
-                        if (world.nom(i + 1, j + 1) > world.nom(i, j) && altered[i + 1][j + 1] == 0)
+                        if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i, j) && altered[i + 1][j + 1] == 0)
                         {
                             world.setriverdir(i + 1, j + 1, 8);
 
@@ -765,7 +766,7 @@ void removeparallelrivers(planet& world)
 
                 if (world.riverdir(i, j) == 5 && world.riverdir(i, j + 1) == 5 && world.riverdir(i + 1, j) == 5 && world.riverdir(i + 1, j + 1) == 5)
                 {
-                    if (world.nom(i, j) > world.nom(i + 1, j + 1) && altered[i][j] == 0)
+                    if (world.nomfloat(i, j) > world.nomfloat(i + 1, j + 1) && altered[i][j] == 0)
                     {
                         world.setriverdir(i, j, 4);
 
@@ -776,7 +777,7 @@ void removeparallelrivers(planet& world)
                     }
                     else
                     {
-                        if (world.nom(i + 1, j) > world.nom(i, j + 1) && altered[i + 1][j] == 0)
+                        if (world.nomfloat(i + 1, j) > world.nomfloat(i, j + 1) && altered[i + 1][j] == 0)
                         {
                             world.setriverdir(i + 1, j, 6);
 
@@ -803,7 +804,7 @@ void removeparallelrivers(planet& world)
 
                 if (world.riverdir(i, j + 1) == 2 && world.riverdir(i + 1, j) == 2 && world.riverdir(i + 1, j + 2) == 2 && world.riverdir(i + 2, j + 1) == 2)
                 {
-                    if (world.nom(i, j + 1) > world.nom(i + 2, j + 1) && world.nom(i + 1, j + 1) > world.nom(i + 2, j + 1) && altered[i][j + 1] == 0)
+                    if (world.nomfloat(i, j + 1) > world.nomfloat(i + 2, j + 1) && world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 2, j + 1) && altered[i][j + 1] == 0)
                     {
                         world.setriverdir(i, j + 1, 3);
                         world.setriverdir(i + 1, j + 1, 3);
@@ -813,13 +814,13 @@ void removeparallelrivers(planet& world)
                         altered[i + 2][j + 1] = 1;
                         altered[i + 1][j + 1] = 1;
 
-                        if (world.nom(i + 1, j + 1) > world.nom(i, j + 1))
-                            world.setnom(i + 1, j + 1, world.nom(i, j + 1) - 1);
+                        if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i, j + 1))
+                            world.setnomfloat(i + 1, j + 1, world.nomfloat(i, j + 1) - 1);
 
                     }
                     else
                     {
-                        if (world.nom(i + 1, j + 2) > world.nom(i + 1, j) && world.nom(i + 1, j + 1) > world.nom(i + 1, j) && altered[i + 1][j + 2] == 0)
+                        if (world.nomfloat(i + 1, j + 2) > world.nomfloat(i + 1, j) && world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j) && altered[i + 1][j + 2] == 0)
                         {
                             world.setriverdir(i + 1, j + 2, 1);
                             world.setriverdir(i + 1, j + 1, 1);
@@ -829,8 +830,8 @@ void removeparallelrivers(planet& world)
                             altered[i + 2][j + 1] = 1;
                             altered[i + 1][j + 1] = 1;
 
-                            if (world.nom(i + 1, j + 1) > world.nom(i + 1, j + 2))
-                                world.setnom(i + 1, j + 1, world.nom(i + 1, j + 2) - 1);
+                            if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j + 2))
+                                world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 1, j + 2) - 1);
                         }
                     }
                 }
@@ -839,7 +840,7 @@ void removeparallelrivers(planet& world)
 
                 if (world.riverdir(i, j + 1) == 6 && world.riverdir(i + 1, j) == 6 && world.riverdir(i + 1, j + 2) == 6 && world.riverdir(i + 2, j + 1) == 6)
                 {
-                    if (world.nom(i + 1, j) > world.nom(i + 1, j + 2) && world.nom(i + 1, j + 1) > world.nom(i + 1, j + 2) && altered[i + 1][j] == 0)
+                    if (world.nomfloat(i + 1, j) > world.nomfloat(i + 1, j + 2) && world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j + 2) && altered[i + 1][j] == 0)
                     {
                         world.setriverdir(i + 1, j, 5);
                         world.setriverdir(i + 1, j + 1, 5);
@@ -849,13 +850,13 @@ void removeparallelrivers(planet& world)
                         altered[i + 2][j + 1] = 1;
                         altered[i + 1][j + 1] = 1;
 
-                        if (world.nom(i + 1, j + 1) > world.nom(i + 1, j))
-                            world.setnom(i + 1, j + 1, world.nom(i + 1, j) - 1);
+                        if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j))
+                            world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 1, j) - 1);
 
                     }
                     else
                     {
-                        if (world.nom(i + 2, j + 1) > world.nom(i, j + 1) && world.nom(i + 1, j + 1) > world.nom(i, j + 1) && altered[i + 2][j + 1] == 0)
+                        if (world.nomfloat(i + 2, j + 1) > world.nomfloat(i, j + 1) && world.nomfloat(i + 1, j + 1) > world.nomfloat(i, j + 1) && altered[i + 2][j + 1] == 0)
                         {
                             world.setriverdir(i + 2, j + 1, 7);
                             world.setriverdir(i + 1, j + 1, 7);
@@ -865,8 +866,8 @@ void removeparallelrivers(planet& world)
                             altered[i + 2][j + 1] = 1;
                             altered[i + 1][j + 1] = 1;
 
-                            if (world.nom(i + 1, j + 1) > world.nom(i + 2, j + 1))
-                                world.setnom(i + 1, j + 1, world.nom(i + 2, j + 1) - 1);
+                            if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 2, j + 1))
+                                world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 2, j + 1) - 1);
                         }
                     }
                 }
@@ -875,7 +876,7 @@ void removeparallelrivers(planet& world)
 
                 if (world.riverdir(i, j + 1) == 4 && world.riverdir(i + 1, j) == 4 && world.riverdir(i + 1, j + 2) == 4 && world.riverdir(i + 2, j + 1) == 4)
                 {
-                    if (world.nom(i + 1, j) > world.nom(i + 1, j + 2) && world.nom(i + 1, j + 1) > world.nom(i + 1, j + 2) && altered[i + 1][j] == 0)
+                    if (world.nomfloat(i + 1, j) > world.nomfloat(i + 1, j + 2) && world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j + 2) && altered[i + 1][j] == 0)
                     {
                         world.setriverdir(i + 1, j, 5);
                         world.setriverdir(i + 1, j + 1, 5);
@@ -885,13 +886,13 @@ void removeparallelrivers(planet& world)
                         altered[i + 2][j + 1] = 1;
                         altered[i + 1][j + 1] = 1;
 
-                        if (world.nom(i + 1, j + 1) > world.nom(i + 1, j))
-                            world.setnom(i + 1, j + 1, world.nom(i + 1, j) - 1);
+                        if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j))
+                            world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 1, j) - 1);
 
                     }
                     else
                     {
-                        if (world.nom(i, j + 1) > world.nom(i + 2, j + 1) && world.nom(i + 1, j + 1) > world.nom(i + 2, j + 1) && altered[i][j + 1] == 0)
+                        if (world.nomfloat(i, j + 1) > world.nomfloat(i + 2, j + 1) && world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 2, j + 1) && altered[i][j + 1] == 0)
                         {
                             world.setriverdir(i, j + 1, 3);
                             world.setriverdir(i + 1, j + 1, 3);
@@ -901,8 +902,8 @@ void removeparallelrivers(planet& world)
                             altered[i + 2][j + 1] = 1;
                             altered[i + 1][j + 1] = 1;
 
-                            if (world.nom(i + 1, j + 1) > world.nom(i, j + 1))
-                                world.setnom(i + 1, j + 1, world.nom(i, j + 1) - 1);
+                            if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i, j + 1))
+                                world.setnomfloat(i + 1, j + 1, world.nomfloat(i, j + 1) - 1);
                         }
                     }
                 }
@@ -911,7 +912,7 @@ void removeparallelrivers(planet& world)
 
                 if (world.riverdir(i, j + 1) == 8 && world.riverdir(i + 1, j) == 8 && world.riverdir(i + 1, j + 2) == 8 && world.riverdir(i + 2, j + 1) == 8)
                 {
-                    if (world.nom(i + 2, j + 1) > world.nom(i, j + 1) && world.nom(i + 1, j + 1) > world.nom(i, j + 1) && altered[i + 2][j + 1] == 0)
+                    if (world.nomfloat(i + 2, j + 1) > world.nomfloat(i, j + 1) && world.nomfloat(i + 1, j + 1) > world.nomfloat(i, j + 1) && altered[i + 2][j + 1] == 0)
                     {
                         world.setriverdir(i + 2, j + 1, 7);
                         world.setriverdir(i + 1, j + 1, 7);
@@ -921,13 +922,13 @@ void removeparallelrivers(planet& world)
                         altered[i + 2][j + 1] = 1;
                         altered[i + 1][j + 1] = 1;
 
-                        if (world.nom(i + 1, j + 1) > world.nom(i + 2, j + 1))
-                            world.setnom(i + 1, j + 1, world.nom(i + 2, j + 1) - 1);
+                        if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 2, j + 1))
+                            world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 2, j + 1) - 1);
 
                     }
                     else
                     {
-                        if (world.nom(i + 1, j + 2) > world.nom(i + 1, j) && world.nom(i + 1, j + 1) > world.nom(i + 1, j) && altered[i + 1][j + 2] == 0)
+                        if (world.nomfloat(i + 1, j + 2) > world.nomfloat(i + 1, j) && world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j) && altered[i + 1][j + 2] == 0)
                         {
                             world.setriverdir(i + 1, j + 2, 1);
                             world.setriverdir(i + 1, j + 1, 1);
@@ -937,8 +938,8 @@ void removeparallelrivers(planet& world)
                             altered[i + 2][j + 1] = 1;
                             altered[i + 1][j + 1] = 1;
 
-                            if (world.nom(i + 1, j + 1) > world.nom(i + 1, j + 2))
-                                world.setnom(i + 1, j + 1, world.nom(i + 1, j + 2) - 1);
+                            if (world.nomfloat(i + 1, j + 1) > world.nomfloat(i + 1, j + 2))
+                                world.setnomfloat(i + 1, j + 1, world.nomfloat(i + 1, j + 2) - 1);
                         }
                     }
                 }
@@ -969,7 +970,7 @@ void removecrossingrivers(planet& world)
                     int ii = i;
                     int jj = j - 1;
 
-                    if (jj >= 0 && jj <= height && world.riverdir(ii, jj) == 4 && world.nom(ii, jj) <= world.nom(i, j))
+                    if (jj >= 0 && jj <= height && world.riverdir(ii, jj) == 4 && world.nomfloat(ii, jj) <= world.nomfloat(i, j))
                         newdirs[i][j] = 1;
 
                     ii = i + 1;
@@ -978,7 +979,7 @@ void removecrossingrivers(planet& world)
                     if (ii > width)
                         ii = 0;
 
-                    if (world.riverdir(ii, jj) == 8 && world.nom(ii, jj) <= world.nom(i, j))
+                    if (world.riverdir(ii, jj) == 8 && world.nomfloat(ii, jj) <= world.nomfloat(i, j))
                         newdirs[i][j] = 3;
                 }
 
@@ -987,7 +988,7 @@ void removecrossingrivers(planet& world)
                     int ii = i;
                     int jj = j + 1;
 
-                    if (jj >= 0 && jj <= height && world.riverdir(ii, jj) == 2 && world.nom(ii, jj) <= world.nom(i, j))
+                    if (jj >= 0 && jj <= height && world.riverdir(ii, jj) == 2 && world.nomfloat(ii, jj) <= world.nomfloat(i, j))
                         newdirs[i][j] = 5;
 
                     ii = i + 1;
@@ -996,7 +997,7 @@ void removecrossingrivers(planet& world)
                     if (ii > width)
                         ii = 0;
 
-                    if (world.riverdir(ii, jj) == 6 && world.nom(ii, jj) <= world.nom(i, j))
+                    if (world.riverdir(ii, jj) == 6 && world.nomfloat(ii, jj) <= world.nomfloat(i, j))
                         newdirs[i][j] = 3;
                 }
 
@@ -1005,7 +1006,7 @@ void removecrossingrivers(planet& world)
                     int ii = i;
                     int jj = j + 1;
 
-                    if (jj >= 0 && jj <= height && world.riverdir(ii, jj) == 8 && world.nom(ii, jj) <= world.nom(i, j))
+                    if (jj >= 0 && jj <= height && world.riverdir(ii, jj) == 8 && world.nomfloat(ii, jj) <= world.nomfloat(i, j))
                         newdirs[i][j] = 5;
 
                     ii = i - 1;
@@ -1014,7 +1015,7 @@ void removecrossingrivers(planet& world)
                     if (ii < 0)
                         ii = width;
 
-                    if (world.riverdir(ii, jj) == 4 && world.nom(ii, jj) <= world.nom(i, j))
+                    if (world.riverdir(ii, jj) == 4 && world.nomfloat(ii, jj) <= world.nomfloat(i, j))
                         newdirs[i][j] = 7;
                 }
 
@@ -1023,7 +1024,7 @@ void removecrossingrivers(planet& world)
                     int ii = i;
                     int jj = j - 1;
 
-                    if (jj >= 0 && jj <= height && world.riverdir(ii, jj) == 6 && world.nom(ii, jj) <= world.nom(i, j))
+                    if (jj >= 0 && jj <= height && world.riverdir(ii, jj) == 6 && world.nomfloat(ii, jj) <= world.nomfloat(i, j))
                         newdirs[i][j] = 1;
 
                     ii = i - 1;
@@ -1032,7 +1033,7 @@ void removecrossingrivers(planet& world)
                     if (ii < 0)
                         ii = width;
 
-                    if (world.riverdir(ii, jj) == 2 && world.nom(ii, jj) <= world.nom(i, j))
+                    if (world.riverdir(ii, jj) == 2 && world.nomfloat(ii, jj) <= world.nomfloat(i, j))
                         newdirs[i][j] = 7;
                 }
             }
@@ -1314,15 +1315,15 @@ void removerivermountains(planet& world)
         {
             if (toremove[i][j] == 1 && world.sea(i, j) == 0)
             {
-                world.setmintemp(i, j, tempelevremove(world, world.mintemp(i, j), i, j));
-                world.setmaxtemp(i, j, tempelevremove(world, world.maxtemp(i, j), i, j));
+                world.setmintempfloat(i, j, tempelevremove(world, world.mintempfloat(i, j), i, j));
+                world.setmaxtempfloat(i, j, tempelevremove(world, world.maxtempfloat(i, j), i, j));
 
-                int totalrain = world.winterrain(i, j) + world.summerrain(i, j);
+                float totalrain = world.winterrainfloat(i, j) + world.summerrainfloat(i, j);
 
                 short crount = 0;
 
-                int winterraintotal = 0;
-                int summerraintotal = 0;
+                float winterraintotal = 0.0f;
+                float summerraintotal = 0.0f;
 
                 for (int x = i - 1; x <= i + 1; x++)
                 {
@@ -1341,8 +1342,8 @@ void removerivermountains(planet& world)
                                 {
                                     crount++;
 
-                                    winterraintotal = winterraintotal + world.winterrain(xx, y);
-                                    summerraintotal = summerraintotal + world.summerrain(xx, y);
+                                    winterraintotal = winterraintotal + world.winterrainfloat(xx, y);
+                                    summerraintotal = summerraintotal + world.summerrainfloat(xx, y);
                                 }
                             }
                         }
@@ -1351,8 +1352,8 @@ void removerivermountains(planet& world)
 
                 if (crount > 0)
                 {
-                    world.setwinterrain(i, j, winterraintotal / crount);
-                    world.setsummerrain(i, j, summerraintotal / crount);
+                    world.setwinterrainfloat(i, j, winterraintotal / crount);
+                    world.setsummerrainfloat(i, j, summerraintotal / crount);
                 }
 
                 world.setmountainridge(i, j, 0);
@@ -1593,7 +1594,7 @@ int divertlakeriver(planet& world, int x, int y, int destx, int desty, vector<ve
 
         int newdir = 0;
 
-        if (world.lakesurface(destpoint.x, destpoint.y) == 0)
+        if (world.lakesurfacefloat(destpoint.x, destpoint.y) == 0)
         {
             // First, see if we can swerve right.
 
@@ -1604,7 +1605,7 @@ int divertlakeriver(planet& world, int x, int y, int destx, int desty, vector<ve
 
             destpoint = getflowdestination(world, x, y, newdir);
 
-            if (world.lakesurface(destpoint.x, destpoint.y) == 0)
+            if (world.lakesurfacefloat(destpoint.x, destpoint.y) == 0)
             {
 
                 // now see if we can swerve left.
@@ -1616,7 +1617,7 @@ int divertlakeriver(planet& world, int x, int y, int destx, int desty, vector<ve
 
                 destpoint = getflowdestination(world, x, y, newdir);
 
-                if (world.lakesurface(destpoint.x, destpoint.y) == 0)
+                if (world.lakesurfacefloat(destpoint.x, destpoint.y) == 0)
                 {
 
                     // If we can't, then we will have to stop.
@@ -1767,7 +1768,7 @@ void reduceriver(planet& world, int janreduce, int julreduce, vector<vector<int>
         else
             return;
 
-        world.setnom(x, y, sealevel + 1);
+        world.setnomfloat(x, y, sealevel + 1);
 
         if (world.deltadir(x, y) == 0)
             world.setdeltadir(x, y, -1);

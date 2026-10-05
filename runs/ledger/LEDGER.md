@@ -89,6 +89,7 @@ Lessons:
 | `world-0034` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 12: terrain on the float accessors (module terrain) |
 | `world-0035` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 12 corrected: a comparison the float pass had rewritten wrongly (module terrain) |
 | `world-0036` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 12c: the six elevation components stored as float (module terrain) |
+| `world-0037` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 13: hydrology on the float accessors; lake surfaces stored as float (module hydrology) |
 
 Lessons:
 
@@ -181,3 +182,6 @@ Lessons:
 - `world-0035`: A rewrite by pattern needs a search for what it must never produce, run every time.
 - `world-0036`: The minimal world (128 x 64, 50 Myr) has zero mountain height, crater and ocean ridge fields: a parity run at that size says nothing about code that only acts on them.
 - `world-0036`: The reference bundles of the next step are out/scratch/phase4/step12c-*; world run 5 is the parent of the hydrology run.
+- `world-0037`: A float move in a module that routes water changes the routing wherever whole metres were tied; expect a different world, not a rounding-sized difference.
+- `world-0037`: The minimal world has no lakes and, before this step, no deltas; it cannot show a defect in either.
+- `world-0037`: The reference bundles of the next step are out/scratch/phase4/step13-*; world run 6 is the parent.

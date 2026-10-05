@@ -63,7 +63,7 @@ struct GlobalCudaRendererInputs
     float tilt = 0.0f;
 
     const int* mapnom = nullptr;
-    const int* lakemap = nullptr;
+    const float* lakemap = nullptr;
     const float* oceanridgeheightmap = nullptr;
     const float* mountainheights = nullptr;
     const float* volcanomap = nullptr;
@@ -84,7 +84,7 @@ struct GlobalCudaRendererInputs
     const short* deltamapdir = nullptr;
     const int* deltamapjan = nullptr;
     const int* deltamapjul = nullptr;
-    const int* riftlakemapsurface = nullptr;
+    const float* riftlakemapsurface = nullptr;
     const bool* noshademap = nullptr;
     // Whole-number copies of fields the world stores as float; the elevation,
     // temperature and rain pointers above refer to them.

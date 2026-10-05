@@ -139,7 +139,7 @@ void createwetlands(planet& world, boolshapetemplate smalllake[])
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.sea(i, j) == 0 && world.special(i, j) == 0 && world.lakesurface(i, j) == 0 && world.climate(i, j) != 31 && world.climate(i, j) != 5)
+            if (world.sea(i, j) == 0 && world.special(i, j) == 0 && world.lakesurfacefloat(i, j) == 0 && world.climate(i, j) != 31 && world.climate(i, j) != 5)
             {
                 if (world.deltadir(i, j) != 0)
                 {
@@ -178,7 +178,7 @@ void createwetlands(planet& world, boolshapetemplate smalllake[])
                                 {
                                     if (l >= 0 && l <= height)
                                     {
-                                        if (world.lakesurface(kk, l) != 0)
+                                        if (world.lakesurfacefloat(kk, l) != 0)
                                             prob = prob - 3;
 
                                         if (world.sea(kk, l) == 1)
@@ -187,11 +187,11 @@ void createwetlands(planet& world, boolshapetemplate smalllake[])
                                 }
                             }
 
-                            //prob=prob+(7-(world.averain(i,j)/60));
+                            //prob=prob+(7-(world.averainfloat(i,j)/60));
                             prob = prob + static_cast<int>(
                                 40.0f - world.averainfloat(i, j) / 10.0f);
 
-                            if (world.climate(i, j) == 30 && world.maxtemp(i, j) >= 5) // Much likelier in tundra with warmish summers
+                            if (world.climate(i, j) == 30 && world.maxtempfloat(i, j) >= 5) // Much likelier in tundra with warmish summers
                                 prob = prob / 4;
 
                             if (prob < 1)

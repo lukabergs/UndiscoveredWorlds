@@ -12,9 +12,9 @@ class region;
 
 int findlowestdir(planet& world, int neighbours[8][2], int x, int y);
 int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, std::vector<std::vector<int>>& mountaindrainage);
-int getslope(planet& world, int x, int y, int xx, int yy);
+float getslope(planet& world, int x, int y, int xx, int yy);
 int getflatness(planet& world, int x, int y);
-int getflatelevation(planet& world, int x, int y);
+float getflatelevation(planet& world, int x, int y);
 twointegers findseatile(planet& world, int x, int y, int dir);
 twointegers getflowdestination(planet& world, int x, int y, int dir);
 twointegers getupstreamcell(planet& world, int x, int y);

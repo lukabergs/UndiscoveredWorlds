@@ -1011,7 +1011,7 @@ void planet::saveworld(string filename)
     writedata(outfile, hydrosphere_.rivermapjan);
     writedata(outfile, hydrosphere_.rivermapjul);
     writedata(outfile, climate_.windmap);
-    writedata(outfile, hydrosphere_.lakemap);
+    writedata(outfile, wholegrid(hydrosphere_.lakemap));
     writedata(outfile, geosphere_.roughnessmap);
     writedata(outfile, geosphere_.mountainridges);
     writedata(outfile, wholeshortgrid(geosphere_.mountainheights));
@@ -1019,8 +1019,8 @@ void planet::saveworld(string filename)
     writedata(outfile, wholeshortgrid(geosphere_.cratercentres));
     writedata(outfile, wholegrid(geosphere_.mapnom));
     writedata(outfile, hydrosphere_.tidalmap);
-    writedata(outfile, hydrosphere_.riftlakemapsurface);
-    writedata(outfile, hydrosphere_.riftlakemapbed);
+    writedata(outfile, wholegrid(hydrosphere_.riftlakemapsurface));
+    writedata(outfile, wholegrid(hydrosphere_.riftlakemapbed));
     writedata(outfile, hydrosphere_.lakestartmap);
     writedata(outfile, hydrosphere_.specials);
     writedata(outfile, geosphere_.geologicregimemap);
@@ -1712,7 +1712,7 @@ bool planet::loadworld(string filename)
     readdata(infile, hydrosphere_.rivermapjan);
     readdata(infile, hydrosphere_.rivermapjul);
     readdata(infile, climate_.windmap);
-    readdata(infile, hydrosphere_.lakemap);
+    readwholedata(infile, hydrosphere_.lakemap);
     readdata(infile, geosphere_.roughnessmap);
     readdata(infile, geosphere_.mountainridges);
     readwholeshortdata(infile, geosphere_.mountainheights);
@@ -1720,8 +1720,8 @@ bool planet::loadworld(string filename)
     readwholeshortdata(infile, geosphere_.cratercentres);
     readwholedata(infile, geosphere_.mapnom);
     readdata(infile, hydrosphere_.tidalmap);
-    readdata(infile, hydrosphere_.riftlakemapsurface);
-    readdata(infile, hydrosphere_.riftlakemapbed);
+    readwholedata(infile, hydrosphere_.riftlakemapsurface);
+    readwholedata(infile, hydrosphere_.riftlakemapbed);
     readdata(infile, hydrosphere_.lakestartmap);
     readdata(infile, hydrosphere_.specials);
     if (fileversion >= 12)

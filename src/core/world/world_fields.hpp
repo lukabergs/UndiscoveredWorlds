@@ -127,9 +127,9 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(river_direction, hydrosphere, i16, grid, "direction code", "River flow direction") \
     X(river_flow_january, hydrosphere, i32, grid, "legacy flow", "January river flow") \
     X(river_flow_july, hydrosphere, i32, grid, "legacy flow", "July river flow") \
-    X(lake_surface, hydrosphere, i32, grid, "m above datum", "Lake surface elevation") \
-    X(rift_lake_surface, hydrosphere, i32, grid, "m above datum", "Rift lake surface elevation") \
-    X(rift_lake_bed, hydrosphere, i32, grid, "m above datum", "Rift lake bed elevation") \
+    X(lake_surface, hydrosphere, f32, grid, "m above datum", "Lake surface elevation") \
+    X(rift_lake_surface, hydrosphere, f32, grid, "m above datum", "Rift lake surface elevation") \
+    X(rift_lake_bed, hydrosphere, f32, grid, "m above datum", "Rift lake bed elevation") \
     X(lake_start, hydrosphere, b8, grid, "", "Lake seed cell") \
     X(special_features, hydrosphere, i16, grid, "code", "100 salt lake, 110 salt pan, 120 dunes, 130/131/132 fresh/brackish/salt wetlands") \
     X(tide, hydrosphere, i16, grid, "legacy", "Tidal strength") \

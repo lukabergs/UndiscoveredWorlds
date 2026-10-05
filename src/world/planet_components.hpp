@@ -253,10 +253,10 @@ struct hydrospherestate
     worldgrid<short> rivermapdir;
     worldgrid<int> rivermapjan;
     worldgrid<int> rivermapjul;
-    worldgrid<int> lakemap;
+    worldgrid<float> lakemap;
     worldgrid<short> tidalmap;
-    worldgrid<int> riftlakemapsurface;
-    worldgrid<int> riftlakemapbed;
+    worldgrid<float> riftlakemapsurface;
+    worldgrid<float> riftlakemapbed;
     worldgrid<bool> lakestartmap;
     worldgrid<short> specials;
     worldgrid<std::uint8_t> basinclassmap;

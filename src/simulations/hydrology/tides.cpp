@@ -53,7 +53,7 @@ int gettidalrange(planet& world, int startx, int starty)
             hitland = 1;
         else
         {
-            if (world.nom(x, y) > sealevel)
+            if (!world.basebelowsea(x, y))
                 hitland = 1;
             else
                 north++;
@@ -77,7 +77,7 @@ int gettidalrange(planet& world, int startx, int starty)
             hitland = 1;
         else
         {
-            if (world.nom(x, y) > sealevel)
+            if (!world.basebelowsea(x, y))
                 hitland = 1;
             else
                 south++;
@@ -101,7 +101,7 @@ int gettidalrange(planet& world, int startx, int starty)
             x = 0;
         else
         {
-            if (world.nom(x, y) > sealevel)
+            if (!world.basebelowsea(x, y))
                 hitland = 1;
             else
                 east++;
@@ -125,7 +125,7 @@ int gettidalrange(planet& world, int startx, int starty)
             x = width;
         else
         {
-            if (world.nom(x, y) > sealevel)
+            if (!world.basebelowsea(x, y))
                 hitland = 1;
             else
                 west++;
@@ -154,7 +154,7 @@ int gettidalrange(planet& world, int startx, int starty)
             hitland = 1;
         else
         {
-            if (world.nom(x, y) > sealevel)
+            if (!world.basebelowsea(x, y))
                 hitland = 1;
             else
                 northeast++;
@@ -183,7 +183,7 @@ int gettidalrange(planet& world, int startx, int starty)
             hitland = 1;
         else
         {
-            if (world.nom(x, y) > sealevel)
+            if (!world.basebelowsea(x, y))
                 hitland = 1;
             else
                 southeast++;
@@ -212,7 +212,7 @@ int gettidalrange(planet& world, int startx, int starty)
             hitland = 1;
         else
         {
-            if (world.nom(x, y) > sealevel)
+            if (!world.basebelowsea(x, y))
                 hitland = 1;
             else
                 southwest++;
@@ -241,7 +241,7 @@ int gettidalrange(planet& world, int startx, int starty)
             hitland = 1;
         else
         {
-            if (world.nom(x, y) > sealevel)
+            if (!world.basebelowsea(x, y))
                 hitland = 1;
             else
                 northwest++;

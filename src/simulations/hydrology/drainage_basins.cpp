@@ -54,7 +54,7 @@ bool strictdownhilldestination(const planet& world, int x, int y, twointegers& d
 {
     const int width = world.width();
     const int height = world.height();
-    const int currentelevation = world.nom(x, y);
+    const float currentelevation = world.nomfloat(x, y);
     int bestelevation = currentelevation;
     bool bestiswater = false;
     bool found = false;
@@ -67,7 +67,7 @@ bool strictdownhilldestination(const planet& world, int x, int y, twointegers& d
             continue;
 
         const int nx = wrap(x + offset[0], width);
-        const int candidateelevation = world.nom(nx, ny);
+        const float candidateelevation = world.nomfloat(nx, ny);
         const bool candidatewater = iswatercell(world, nx, ny);
 
         if (candidateelevation < bestelevation
@@ -230,7 +230,7 @@ void generate_drainage_basins(planet& world)
 
                 const DrainageTerminal terminal = static_cast<DrainageTerminal>(drainage[physicalindex(x, y, cellwidth)]);
                 const bool coastal = terminal == DrainageTerminal::exorheic
-                    && world.map(x, y) <= world.sealevel() + 250
+                    && world.mapfloat(x, y) <= world.sealevel() + 250
                     && (world.outline(x, y) || reachesseaquickly(world, x, y, 3));
 
                 if (coastal)

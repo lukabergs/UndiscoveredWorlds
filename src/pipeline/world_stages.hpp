@@ -54,7 +54,7 @@ struct GenerationScratch
 {
     std::vector<std::vector<int>> mountaindrainage;
     std::vector<int> squareroot;
-    std::vector<std::vector<std::vector<int>>> saltLakeMap;
+    std::vector<std::vector<std::vector<float>>> saltLakeMap;
     std::vector<std::vector<int>> noLake;
     std::vector<std::vector<int>> basinSeeds;
     std::vector<std::vector<int>> inlandSeaComponentIds;

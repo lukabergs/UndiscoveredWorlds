@@ -15,7 +15,7 @@ namespace
 {
 void tracelakedrop(planet& world, int x, int y, int minimum, int dropno, vector<vector<int>>& thisdrop, int maxrepeat, int neighbours[8][2], vector<vector<int>>& lakesummerrainmap, vector<vector<int>>& lakewinterrainmap);
 int findnearbyriver(planet& world, int x, int y, int dropno, vector<vector<int>>& thisdrop, int neighbours[8][2]);
-bool swervecheck(planet& world, int x, int y, int origx, int origy, int lowered, int neighbours[8][2]);
+bool swervecheck(planet& world, int x, int y, int origx, int origy, float lowered, int neighbours[8][2]);
 
 // This function traces a drop from lake rainfall downhill to the sea (or a lake), depositing water as it goes.
 
@@ -49,7 +49,7 @@ void tracelakedrop(planet& world, int x, int y, int minimum, int dropno, vector<
 
     float amount = 10.0f;
 
-    if (world.mintemp(x, y) < 0) // In cold areas, more winter water gets held over until summer because it's snow.
+    if (world.mintempfloat(x, y) < 0) // In cold areas, more winter water gets held over until summer because it's snow.
         amount = 3.0f;
 
     if (y < height / 2) // Northern hemisphere
@@ -146,7 +146,7 @@ void tracelakedrop(planet& world, int x, int y, int minimum, int dropno, vector<
 
             // Now we have the coordinates of the two possible alternative points to go to.
 
-            int lowered = world.nom(x, y) - 1; // This is what we would lower the alternative point to.
+            float lowered = world.nomfloat(x, y) - 1; // This is what we would lower the alternative point to.
 
             bool leftposs = swervecheck(world, lx, ly, x, y, lowered, neighbours);
             bool rightposs = swervecheck(world, rx, ry, x, y, lowered, neighbours);
@@ -155,19 +155,19 @@ void tracelakedrop(planet& world, int x, int y, int minimum, int dropno, vector<
 
             bool swerved = 0;
 
-            if (leftposs == 1 && world.nom(lx, ly) < world.nom(rx, ry))
+            if (leftposs == 1 && world.nomfloat(lx, ly) < world.nomfloat(rx, ry))
             {
                 world.setriverdir(x, y, leftdir);
                 newdir = leftdir;
-                world.setnom(lx, ly, lowered);
+                world.setnomfloat(lx, ly, lowered);
                 swerved = 1;
             }
 
-            if (rightposs == 1 && world.nom(rx, ry) < world.nom(lx, ly))
+            if (rightposs == 1 && world.nomfloat(rx, ry) < world.nomfloat(lx, ly))
             {
                 world.setriverdir(x, y, rightdir);
                 newdir = rightdir;
-                world.setnom(rx, ry, lowered);
+                world.setnomfloat(rx, ry, lowered);
                 swerved = 1;
             }
 
@@ -175,7 +175,7 @@ void tracelakedrop(planet& world, int x, int y, int minimum, int dropno, vector<
             {
                 world.setriverdir(x, y, leftdir);
                 newdir = leftdir;
-                world.setnom(lx, ly, lowered);
+                world.setnomfloat(lx, ly, lowered);
                 swerved = 1;
             }
 
@@ -183,7 +183,7 @@ void tracelakedrop(planet& world, int x, int y, int minimum, int dropno, vector<
             {
                 world.setriverdir(x, y, rightdir);
                 newdir = rightdir;
-                world.setnom(rx, ry, lowered);
+                world.setnomfloat(rx, ry, lowered);
                 swerved = 1;
             }
         }
@@ -271,7 +271,7 @@ void tracelakedrop(planet& world, int x, int y, int minimum, int dropno, vector<
         if (world.truelake(x, y) == 1) // These rivers will stop at lakes.
             keepgoing = 0;
 
-        if (world.riftlakesurface(x, y) != 0)
+        if (world.riftlakesurfacefloat(x, y) != 0)
             keepgoing = 0;
 
         if (y == 0 || y == height)
@@ -309,7 +309,7 @@ int findnearbyriver(planet& world, int x, int y, int dropno, vector<vector<int>>
         {
             if (thisdrop[i][j] != 0 && thisdrop[i][j] != dropno) // If theres a river there, and it's not the current one
             {
-                if (world.nom(i, j) < world.nom(x, y))
+                if (world.nomfloat(i, j) < world.nomfloat(x, y))
                     return (nn + 1);
             }
         }
@@ -319,7 +319,7 @@ int findnearbyriver(planet& world, int x, int y, int dropno, vector<vector<int>>
 
 // This function works out whether a river could divert into the given square if its height were lowered.
 
-bool swervecheck(planet& world, int x, int y, int origx, int origy, int lowered, int neighbours[8][2])
+bool swervecheck(planet& world, int x, int y, int origx, int origy, float lowered, int neighbours[8][2])
 {
     if (world.riverjan(x, y) != 0 || world.riverjul(x, y) != 0)
         return (0);
@@ -353,10 +353,10 @@ bool swervecheck(planet& world, int x, int y, int origx, int origy, int lowered,
     if (newx == origx && newy == origy) // If it's just pointing back to the original tile
         return (0);
 
-    if (world.nom(newx, newy) >= lowered) // If it would be higher than this tile when lowered
+    if (world.nomfloat(newx, newy) >= lowered) // If it would be higher than this tile when lowered
         return (0);
 
-    if (world.lakesurface(newx, newy) != 0) // If there's a lake here
+    if (world.lakesurfacefloat(newx, newy) != 0) // If there's a lake here
         return (0);
 
     return (1);
@@ -399,7 +399,7 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
                 if (currentwind == 101)
                     currentwind = 4;
 
-                if (world.map(i, j) > sealevel && world.lakesurface(i, j) == 0 && world.lakesurface(i - 1, j) != 0)// If this is next to a lake
+                if (!world.surfacebelowsea(i, j) && world.lakesurfacefloat(i, j) == 0 && world.lakesurfacefloat(i - 1, j) != 0)// If this is next to a lake
                 {
                     int crount = currentwind * lakemult;
                     int waterlog = 0; // This will hold the amount of water being carried onto this land
@@ -414,12 +414,12 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
                         if (ii < 0)
                             ii = wrap(ii, width);
 
-                        if (world.lakesurface(ii, j) != 0 && world.maxtemp(ii, j) > 0) // It picks up water from unfrozen lake
+                        if (world.lakesurfacefloat(ii, j) != 0 && world.maxtempfloat(ii, j) > 0) // It picks up water from unfrozen lake
                         {
-                            if (world.mintemp(ii, j) < 5)
+                            if (world.mintempfloat(ii, j) < 5)
                                 lakeice = 1;
 
-                            float temp = world.avetemp(ii, j) / tempfactor; // Less water is picked up from colder lakes.
+                            float temp = world.avetempfloat(ii, j) / tempfactor; // Less water is picked up from colder lakes.
 
                             if (temp < mintemp)
                                 temp = mintemp;
@@ -460,9 +460,9 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
 
                         float waterdumped = (float)waterlog / (float)dumprate;
 
-                        if (world.map(ii, j) - sealevel > slopemin)
+                        if (world.mapfloat(ii, j) - sealevel > slopemin)
                         {
-                            float slope = (float)getslope(world, ii - 1, j, ii, j);
+                            float slope = getslope(world, ii - 1, j, ii, j);
 
                             slope = slope / slopefactor;
 
@@ -470,7 +470,7 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
                             {
                                 waterdumped = waterdumped * slope;
 
-                                float elevation = (float(world.map(ii, j) - sealevel));
+                                float elevation = (float(world.mapfloat(ii, j) - sealevel));
 
                                 waterdumped = waterdumped * elevationfactor * elevation;
 
@@ -481,7 +481,7 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
 
                         waterlog = waterlog - (int)waterdumped;
 
-                        if (world.map(ii, jj) > sealevel && world.wind(ii, jj) < 50 && world.lakesurface(ii, jj) == 0)
+                        if (!world.surfacebelowsea(ii, jj) && world.wind(ii, jj) < 50 && world.lakesurfacefloat(ii, jj) == 0)
                         {
                             for (int iii = ii - splashsize; iii <= ii + splashsize; iii++)
                             {
@@ -540,7 +540,7 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
                 if (currentwind == 99)
                     currentwind = -4;
 
-                if (world.map(i, j) > sealevel && world.lakesurface(i, j) == 0 && world.lakesurface(i + 1, j) != 0)// If this is next to a lake
+                if (!world.surfacebelowsea(i, j) && world.lakesurfacefloat(i, j) == 0 && world.lakesurfacefloat(i + 1, j) != 0)// If this is next to a lake
                 {
                     int crount = 0 - (currentwind * lakemult);
                     int waterlog = 0; // This will hold the amount of water being carried onto this land
@@ -555,12 +555,12 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
                         if (ii > width)
                             ii = wrap(ii, width);
 
-                        if (world.lakesurface(ii, j) != 0 && world.maxtemp(ii, j) > 0) // It picks up water from unfrozen lake
+                        if (world.lakesurfacefloat(ii, j) != 0 && world.maxtempfloat(ii, j) > 0) // It picks up water from unfrozen lake
                         {
-                            if (world.mintemp(ii, j) < 5)
+                            if (world.mintempfloat(ii, j) < 5)
                                 lakeice = 1;
 
-                            float temp = world.avetemp(ii, j) / tempfactor; // Less water is picked up from colder lakes.
+                            float temp = world.avetempfloat(ii, j) / tempfactor; // Less water is picked up from colder lakes.
 
                             if (temp < mintemp)
                                 temp = mintemp;
@@ -601,9 +601,9 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
 
                         float waterdumped = (float)waterlog / (float)dumprate;
 
-                        if (world.map(ii, j) - sealevel > slopemin)
+                        if (world.mapfloat(ii, j) - sealevel > slopemin)
                         {
-                            float slope = (float)getslope(world, ii - 1, j, ii, j);
+                            float slope = getslope(world, ii - 1, j, ii, j);
 
                             slope = slope / slopefactor;
 
@@ -611,7 +611,7 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
                             {
                                 waterdumped = waterdumped * slope;
 
-                                float elevation = (float(world.map(ii, j) - sealevel));
+                                float elevation = (float(world.mapfloat(ii, j) - sealevel));
 
                                 waterdumped = waterdumped * elevationfactor * elevation;
 
@@ -622,7 +622,7 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
 
                         waterlog = waterlog - (int)waterdumped;
 
-                        if (world.map(ii, jj) > sealevel && world.wind(ii, jj) < 50 && world.lakesurface(ii, jj) == 0)
+                        if (!world.surfacebelowsea(ii, jj) && world.wind(ii, jj) < 50 && world.lakesurfacefloat(ii, jj) == 0)
                         {
                             for (int iii = ii - splashsize; iii <= ii + splashsize; iii++)
                             {
@@ -674,9 +674,9 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
         {
             for (int i = 0; i <= width; i++)
             {
-                if (world.map(i, j) > sealevel)
+                if (!world.surfacebelowsea(i, j))
                 {
-                    float tempdiff = (float)(world.maxtemp(i, j) - world.mintemp(i, j));
+                    float tempdiff = (float)(world.maxtempfloat(i, j) - world.mintempfloat(i, j));
 
                     if (tempdiff < 0.0f)
                         tempdiff = 0.0f;
@@ -735,8 +735,8 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
         {
             for (int i = 0; i <= width; i++)
             {
-                world.setwinterrain(i, j, world.winterrain(i, j) + lakewinterrainmap[i][j]);
-                world.setsummerrain(i, j, world.summerrain(i, j) + lakesummerrainmap[i][j]);
+                world.setwinterrainfloat(i, j, world.winterrainfloat(i, j) + lakewinterrainmap[i][j]);
+                world.setsummerrainfloat(i, j, world.summerrainfloat(i, j) + lakesummerrainmap[i][j]);
             }
         }
     });
@@ -778,7 +778,7 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
                 if (currentwind == 101)
                     currentwind = 4;
 
-                if (world.map(i, j) > sealevel && world.riftlakesurface(i, j) == 0 && world.riftlakesurface(i - 1, j) != 0)// If this is next to a lake
+                if (!world.surfacebelowsea(i, j) && world.riftlakesurfacefloat(i, j) == 0 && world.riftlakesurfacefloat(i - 1, j) != 0)// If this is next to a lake
                 {
                     int crount = currentwind * lakemult;
                     int waterlog = 0; // This will hold the amount of water being carried onto this land
@@ -793,12 +793,12 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
                         if (ii < 0)
                             ii = wrap(ii, width);
 
-                        if (world.riftlakesurface(ii, j) != 0 && world.maxtemp(ii, j) > 0) // It picks up water from unfrozen lake
+                        if (world.riftlakesurfacefloat(ii, j) != 0 && world.maxtempfloat(ii, j) > 0) // It picks up water from unfrozen lake
                         {
-                            if (world.mintemp(ii, j) < 5)
+                            if (world.mintempfloat(ii, j) < 5)
                                 lakeice = 1;
 
-                            float temp = world.avetemp(ii, j) / tempfactor; // Less water is picked up from colder lakes.
+                            float temp = world.avetempfloat(ii, j) / tempfactor; // Less water is picked up from colder lakes.
 
                             if (temp < mintemp)
                                 temp = mintemp;
@@ -839,9 +839,9 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
 
                         float waterdumped = (float)waterlog / (float)dumprate;
 
-                        if (world.map(ii, j) - sealevel > slopemin)
+                        if (world.mapfloat(ii, j) - sealevel > slopemin)
                         {
-                            float slope = (float)getslope(world, ii - 1, j, ii, j);
+                            float slope = getslope(world, ii - 1, j, ii, j);
 
                             slope = slope / slopefactor;
 
@@ -849,7 +849,7 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
                             {
                                 waterdumped = waterdumped * slope;
 
-                                float elevation = (float)(world.map(ii, j) - sealevel);
+                                float elevation = (float)(world.mapfloat(ii, j) - sealevel);
 
                                 waterdumped = waterdumped * elevationfactor * elevation;
 
@@ -860,7 +860,7 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
 
                         waterlog = waterlog - (int)waterdumped;
 
-                        if (world.map(ii, jj) > sealevel && world.wind(ii, jj) < 50 && world.riftlakesurface(ii, jj) == 0)
+                        if (!world.surfacebelowsea(ii, jj) && world.wind(ii, jj) < 50 && world.riftlakesurfacefloat(ii, jj) == 0)
                         {
                             for (int iii = ii - splashsize; iii <= ii + splashsize; iii++)
                             {
@@ -920,7 +920,7 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
                 if (currentwind == 99)
                     currentwind = -4;
 
-                if (world.map(i, j) > sealevel && world.riftlakesurface(i, j) == 0 && world.riftlakesurface(i + 1, j) != 0)// If this is next to a lake
+                if (!world.surfacebelowsea(i, j) && world.riftlakesurfacefloat(i, j) == 0 && world.riftlakesurfacefloat(i + 1, j) != 0)// If this is next to a lake
                 {
                     int crount = 0 - (currentwind * lakemult);
                     int waterlog = 0; // This will hold the amount of water being carried onto this land
@@ -935,12 +935,12 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
                         if (ii > width)
                             ii = wrap(ii, width);
 
-                        if (world.riftlakesurface(ii, j) != 0 && world.maxtemp(ii, j) > 0) // It picks up water from unfrozen lake
+                        if (world.riftlakesurfacefloat(ii, j) != 0 && world.maxtempfloat(ii, j) > 0) // It picks up water from unfrozen lake
                         {
-                            if (world.mintemp(ii, j) < 5)
+                            if (world.mintempfloat(ii, j) < 5)
                                 lakeice = 1;
 
-                            float temp = world.avetemp(ii, j) / tempfactor; // Less water is picked up from colder lakes.
+                            float temp = world.avetempfloat(ii, j) / tempfactor; // Less water is picked up from colder lakes.
 
                             if (temp < mintemp)
                                 temp = mintemp;
@@ -981,9 +981,9 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
 
                         float waterdumped = (float)waterlog / (float)dumprate;
 
-                        if (world.map(ii, j) - sealevel > slopemin)
+                        if (world.mapfloat(ii, j) - sealevel > slopemin)
                         {
-                            float slope = (float)getslope(world, ii - 1, j, ii, j);
+                            float slope = getslope(world, ii - 1, j, ii, j);
 
                             slope = slope / slopefactor;
 
@@ -991,7 +991,7 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
                             {
                                 waterdumped = waterdumped * slope;
 
-                                float elevation = (float)(world.map(ii, j) - sealevel);
+                                float elevation = (float)(world.mapfloat(ii, j) - sealevel);
 
                                 waterdumped = waterdumped * elevationfactor * elevation;
 
@@ -1002,7 +1002,7 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
 
                         waterlog = waterlog - (int)waterdumped;
 
-                        if (world.map(ii, jj) > sealevel && world.wind(ii, jj) < 50 && world.riftlakesurface(ii, jj) == 0)
+                        if (!world.surfacebelowsea(ii, jj) && world.wind(ii, jj) < 50 && world.riftlakesurfacefloat(ii, jj) == 0)
                         {
                             for (int iii = ii - splashsize; iii <= ii + splashsize; iii++)
                             {
@@ -1054,9 +1054,9 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
         {
             for (int i = 0; i <= width; i++)
             {
-                if (world.map(i, j) > sealevel)
+                if (!world.surfacebelowsea(i, j))
                 {
-                    float tempdiff = (float)(world.maxtemp(i, j) - world.mintemp(i, j));
+                    float tempdiff = (float)(world.maxtempfloat(i, j) - world.mintempfloat(i, j));
 
                     if (tempdiff < 0.0f)
                         tempdiff = 0.0f;
@@ -1115,8 +1115,8 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
         {
             for (int i = 0; i <= width; i++)
             {
-                world.setwinterrain(i, j, world.winterrain(i, j) + lakewinterrainmap[i][j]);
-                world.setsummerrain(i, j, world.summerrain(i, j) + lakesummerrainmap[i][j]);
+                world.setwinterrainfloat(i, j, world.winterrainfloat(i, j) + lakewinterrainmap[i][j]);
+                world.setsummerrainfloat(i, j, world.summerrainfloat(i, j) + lakesummerrainmap[i][j]);
             }
         }
     });
@@ -1169,7 +1169,7 @@ void lakerivers(planet& world, vector<vector<int>>& lakewinterrainmap, vector<ve
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.map(i, j) > sealevel)
+            if (!world.surfacebelowsea(i, j))
             {
                 tracelakedrop(world, i, j, minimum, dropno, thisdrop, maxrepeat, neighbours, lakesummerrainmap, lakewinterrainmap);
                 dropno++;

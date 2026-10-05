@@ -28,7 +28,7 @@ namespace
         float tilt;
 
         const int* mapnom;
-        const int* lakemap;
+        const float* lakemap;
         const float* oceanridgeheightmap;
         const float* mountainheights;
         const float* volcanomap;
@@ -49,7 +49,7 @@ namespace
         const short* deltamapdir;
         const int* deltamapjan;
         const int* deltamapjul;
-        const int* riftlakemapsurface;
+        const float* riftlakemapsurface;
         const bool* noshademap;
         GlobalReliefPalette relief;
     };
@@ -2402,7 +2402,7 @@ namespace
     struct GlobalCudaDeviceBuffers
     {
         DeviceBuffer<int> mapnom;
-        DeviceBuffer<int> lakemap;
+        DeviceBuffer<float> lakemap;
         DeviceBuffer<float> oceanridgeheightmap;
         DeviceBuffer<float> mountainheights;
         DeviceBuffer<float> volcanomap;
@@ -2423,7 +2423,7 @@ namespace
         DeviceBuffer<short> deltamapdir;
         DeviceBuffer<int> deltamapjan;
         DeviceBuffer<int> deltamapjul;
-        DeviceBuffer<int> riftlakemapsurface;
+        DeviceBuffer<float> riftlakemapsurface;
         DeviceBuffer<bool> noshademap;
         DeviceBuffer<std::uint8_t> fullpixels;
         DeviceBuffer<std::uint8_t> displaypixels;
