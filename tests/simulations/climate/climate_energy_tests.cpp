@@ -15,7 +15,17 @@ void expect(bool condition, const char* message)
 }
 }
 
-TEST(ClimateEnergy, Model)
+namespace
+{
+
+// The energy sections share no state: the fixture only names the suite.
+class ClimateEnergy : public ::testing::Test
+{
+};
+
+}
+
+TEST_F(ClimateEnergy, TropicalCloudAlbedo)
 {
     for (double latitude : {0.0, 12.0, 30.0, 60.0, 90.0})
     {
@@ -30,6 +40,10 @@ TEST(ClimateEnergy, Model)
         "tropical cloud shading must become small in the subtropics");
     expect(climateenergy::detail::tropicalCloudAlbedo(60.0, 0.04, 12.0) < 1e-6,
         "tropical cloud shading must not directly cool polar regions");
+}
+
+TEST_F(ClimateEnergy, LandThermalReservoirs)
+{
     for (double dt : {3600.0, 28800.0, 86400.0, 365.0 * 86400.0})
     {
         const climateenergy::LandThermalState initial{25.0, -5.0};
@@ -41,6 +55,10 @@ TEST(ClimateEnergy, Model)
         expect(isolated.surfaceC < initial.surfaceC && isolated.deepC > initial.deepC && isolated.surfaceC >= isolated.deepC,
             "implicit soil exchange must relax a temperature contrast without overshooting");
     }
+}
+
+TEST_F(ClimateEnergy, ImplicitMeridionalDiffusion)
+{
     for (int rows : {16, 64, 128})
     {
         std::vector<double> source(rows), response(rows, 0.5);
@@ -58,6 +76,10 @@ TEST(ClimateEnergy, Model)
         expect(std::abs(heat) < 1.0e-10, "polar-closed diffusion must exchange zero net global heat");
         expect(error < 1.0 / (rows * rows), "spherical dipole diffusion must approach its analytic decay rate");
     }
+}
+
+TEST_F(ClimateEnergy, EccentricOrbits)
+{
     for (float eccentricity : {0.0f, 0.3f, 0.8f, 0.95f})
     {
         double distanceMean = 0.0;
@@ -74,6 +96,10 @@ TEST(ClimateEnergy, Model)
             std::abs(first.declinationRadians - next.declinationRadians) < 1.0e-6f,
             "orbital forcing must be periodic across years");
     }
+}
+
+TEST_F(ClimateEnergy, Insolation)
+{
     const float equinoxDeclination = climateenergy::solarDeclinationRadians(80.0f, 23.44f);
     expect(std::abs(equinoxDeclination) < 1.0e-5f, "day 80 must be an equinox in the orbital convention");
 
@@ -94,7 +120,10 @@ TEST(ClimateEnergy, Model)
         climateenergy::orbitalDistanceFactor(3.0f, 0.1f, 0) >
             climateenergy::orbitalDistanceFactor(186.0f, 0.1f, 0),
         "solar flux must be greater at perihelion than aphelion");
+}
 
+TEST_F(ClimateEnergy, ImplicitSlabStep)
+{
     constexpr float previous = 14.0f;
     constexpr float absorbed = 300.0f;
     constexpr float intercept = 210.0f;
@@ -110,7 +139,10 @@ TEST(ClimateEnergy, Model)
     const float storage = 2.0e7f * (land - previous) / seconds;
     const float netFlux = absorbed - intercept - slope * land + transport * (14.0f - land);
     expect(std::abs(storage - netFlux) < 0.001f, "implicit slab step must close its energy equation");
+}
 
+TEST_F(ClimateEnergy, PermanentLandIce)
+{
     expect(
         climateenergy::permanentLandIceFraction(-14.0f) == 1.0f,
         "land whose warmest season reaches the cold transition must retain full ice cover");
@@ -138,5 +170,4 @@ TEST(ClimateEnergy, Model)
             {-44.5, -28.5, -9.0, -32.5}, 0.0) ==
         climateenergy::detail::seasonalPermanentLandIceFraction({-12.0, 4.0, 23.5, 0.0}, highlandOffset),
         "the local lapse correction must enter permanent ice diagnosis exactly once");
-
 }

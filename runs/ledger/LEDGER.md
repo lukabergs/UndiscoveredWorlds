@@ -117,6 +117,7 @@ Lessons:
 | `world-0061` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 6: climate_boundary_layer_tests.cpp split |
 | `world-0062` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 7: climate_weather_tests.cpp split |
 | `world-0063` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 8: climate_flow_tests.cpp split |
+| `world-0064` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 9: climate_energy_tests.cpp split |
 
 Lessons:
 
