@@ -94,6 +94,7 @@ Lessons:
 | `world-0039` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 15: society on the float accessors (module society) |
 | `world-0040` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 16: phase close |
 | `world-0041` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 0: step list and the step check |
+| `world-0042` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 1: screens as member functions of an application state |
 
 Lessons:
 
@@ -195,3 +196,4 @@ Lessons:
 - `world-0040`: A change of number type did not change any declared read or write: the rule of measuring access only when reads or writes change held.
 - `world-0040`: The estimate was wrong by a factor of five because it counted reading every call site by hand; a rename script, a compile with conversion warnings and reading only the flagged lines did the same work.
 - `world-0041`: Reference bundles of Phase 5 are out/scratch/phase5/<label>-<recipe>; step_check.py LABEL --reference PREVIOUS is the whole step check.
+- `world-0042`: Member functions named after the former lambdas let fifteen fragments compile unchanged except where a lambda was passed as a value (two places).

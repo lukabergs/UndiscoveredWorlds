@@ -18,6 +18,7 @@ endforeach()
 
 add_library(uw_app STATIC
     app_windows.cpp
+    application.cpp
     appearance_files.cpp
     create_world_screen.cpp
     generation_workbench.cpp
@@ -25,6 +26,21 @@ add_library(uw_app STATIC
     rendering/cuda_renderers_stub.cpp
     rendering/map_appearance.cpp
     rendering/rendering.cpp
+    screens/appearance_panel.cpp
+    screens/completing_import_screen.cpp
+    screens/create_world_screen.cpp
+    screens/creating_world_screen.cpp
+    screens/export_area_screen.cpp
+    screens/exporting_area_screen.cpp
+    screens/generating_region_screen.cpp
+    screens/global_map_screen.cpp
+    screens/import_screen.cpp
+    screens/load_failure_screen.cpp
+    screens/loading_world_screen.cpp
+    screens/regional_map_screen.cpp
+    screens/saving_world_screen.cpp
+    screens/settings_load_failure_screen.cpp
+    screens/world_properties_panel.cpp
     ui_charts.cpp
     ui_panels.cpp
     world_property_controls.cpp
