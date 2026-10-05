@@ -5,7 +5,7 @@
 
 #include "imgui.h"
 
-#include "map_appearance.hpp"
+#include "app/rendering/map_appearance.hpp"
 
 using namespace std;
 

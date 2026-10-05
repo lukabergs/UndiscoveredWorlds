@@ -17,8 +17,8 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "world_point.hpp"
-#include "rectangle.hpp"
+#include "simulations/geology/plate_tectonics/world_point.hpp"
+#include "simulations/geology/plate_tectonics/rectangle.hpp"
 
 WorldPoint::WorldPoint(uint32_t x, uint32_t y, const WorldDimension& dim) : _x(x), _y(y) {
     ASSERT(_x < dim.getWidth() && _y < dim.getHeight(), "Point outside of world!");

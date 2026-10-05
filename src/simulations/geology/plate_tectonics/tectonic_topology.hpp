@@ -1,7 +1,7 @@
 #ifndef TECTONIC_TOPOLOGY_HPP
 #define TECTONIC_TOPOLOGY_HPP
-#include "tectonic_transport.hpp"
-#include "tectonic_dynamics.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
 #include <cstdint>
 #include <map>
 #include <vector>

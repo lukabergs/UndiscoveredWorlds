@@ -1,4 +1,4 @@
-#include "thermal_response.hpp"
+#include "simulations/climate/legacy/thermal_response.hpp"
 
 #include <algorithm>
 #include <cmath>

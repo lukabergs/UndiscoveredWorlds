@@ -1,10 +1,10 @@
 #pragma once
 
-#include "climate_benchmark_outputs.hpp"
-#include "raster_image.hpp"
-#include "climate_weather.hpp"
-#include "climate_hydrology.hpp"
-#include "climate_ocean_dynamics.hpp"
+#include "io/climate_benchmark_outputs.hpp"
+#include "io/raster_image.hpp"
+#include "simulations/climate/climate_weather.hpp"
+#include "simulations/climate/climate_hydrology.hpp"
+#include "simulations/climate/climate_ocean_dynamics.hpp"
 
 #include <array>
 #include <filesystem>

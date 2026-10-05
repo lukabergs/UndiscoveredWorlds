@@ -1,4 +1,4 @@
-#include "climate_erosion.hpp"
+#include "simulations/terrain/climate_erosion.hpp"
 #include <algorithm>
 #include <cmath>
 #include <numeric>

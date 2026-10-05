@@ -1,7 +1,7 @@
 #ifndef TECTONIC_JUNCTION_COUPLING_HPP
 #define TECTONIC_JUNCTION_COUPLING_HPP
 
-#include "tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 
 #include <cstdint>
 #include <vector>

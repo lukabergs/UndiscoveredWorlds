@@ -7,7 +7,7 @@
 #include <cstring>
 #include <vector>
 
-#include "topography_codec.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
 
 // This function actually writes out the PNG image file. The string 'title' is
 // also written into the image file

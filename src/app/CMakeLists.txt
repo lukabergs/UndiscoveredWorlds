@@ -28,7 +28,6 @@ add_library(uw_app STATIC
     ui_panels.cpp
     world_property_controls.cpp
 )
-target_include_directories(uw_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/rendering")
 target_link_libraries(uw_app PUBLIC
     uw_includes
     sfml-graphics

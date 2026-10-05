@@ -17,9 +17,9 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "movement.hpp"
-#include "mass.hpp"
-#include "plate.hpp"
+#include "simulations/geology/plate_tectonics/movement.hpp"
+#include "simulations/geology/plate_tectonics/mass.hpp"
+#include "simulations/geology/plate_tectonics/plate.hpp"
 #include "gtest/gtest.h"
 
 using namespace Tectonics;

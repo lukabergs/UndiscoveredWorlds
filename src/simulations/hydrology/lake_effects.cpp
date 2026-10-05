@@ -3,11 +3,11 @@
 #include <mutex>
 #include <vector>
 
-#include "classes.hpp"
-#include "planet.hpp"
-#include "functions.hpp"
-#include "generation_tuning.hpp"
-#include "lake_effects.hpp"
+#include "core/classes.hpp"
+#include "world/planet.hpp"
+#include "world/functions.hpp"
+#include "world/generation_tuning.hpp"
+#include "simulations/hydrology/lake_effects.hpp"
 
 using namespace std;
 

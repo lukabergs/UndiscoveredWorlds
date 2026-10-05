@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "topography_codec.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
 
 TEST(TopographyCodec, MetricRoundTripAroundSeaLevel)
 {

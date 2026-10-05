@@ -1,10 +1,10 @@
-#include "planet_bundle.hpp"
+#include "world/planet_bundle.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 
-#include "planet.hpp"
-#include "planet_fields.hpp"
+#include "world/planet.hpp"
+#include "world/planet_fields.hpp"
 
 namespace
 {

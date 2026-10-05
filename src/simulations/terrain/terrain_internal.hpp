@@ -1,6 +1,6 @@
 #pragma once
 
-#include "terrain.hpp"
+#include "simulations/terrain/terrain.hpp"
 
 // Shared implementation details; callers outside terrain use terrain.hpp.
 namespace terrain::detail

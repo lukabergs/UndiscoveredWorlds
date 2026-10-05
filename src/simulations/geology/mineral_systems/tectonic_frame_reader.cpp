@@ -1,8 +1,8 @@
-#include "tectonic_frame_reader.hpp"
+#include "simulations/geology/mineral_systems/tectonic_frame_reader.hpp"
 
-#include "tectonic_api.hpp"
-#include "tectonic_contract.hpp"
-#include "topography_codec.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_api.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
 
 #include <algorithm>
 

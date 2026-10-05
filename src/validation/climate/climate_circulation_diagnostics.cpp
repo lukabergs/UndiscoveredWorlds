@@ -1,14 +1,14 @@
-#include "climate_circulation_diagnostics.hpp"
-#include "climate_palette.hpp"
+#include "validation/climate/climate_circulation_diagnostics.hpp"
+#include "validation/climate/climate_palette.hpp"
 
-#include "climate_atmosphere.hpp"
-#include "climate_flow.hpp"
-#include "climate_grid.hpp"
-#include "climate_tiff.hpp"
-#include "generation_tuning.hpp"
-#include "climate_world.hpp"
+#include "simulations/climate/climate_atmosphere.hpp"
+#include "simulations/climate/climate_flow.hpp"
+#include "core/climate_grid.hpp"
+#include "io/climate_tiff.hpp"
+#include "world/generation_tuning.hpp"
+#include "simulations/climate/climate_world.hpp"
 
-#include "raster_image.hpp"
+#include "io/raster_image.hpp"
 
 #include <algorithm>
 #include <array>

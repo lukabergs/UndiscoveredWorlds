@@ -1,7 +1,7 @@
 #include <algorithm>
 
-#include "generation_tuning.hpp"
-#include "world_property_controls.hpp"
+#include "world/generation_tuning.hpp"
+#include "app/world_property_controls.hpp"
 
 WorldPropertyControls makeworldpropertycontrols(const planet& world)
 {

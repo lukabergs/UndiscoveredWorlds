@@ -4,8 +4,8 @@
 #include <vector>
 #include <string>
 
-#include "climate_seasons.hpp"
-#include "legacy/thermal_response.hpp"
+#include "core/climate_seasons.hpp"
+#include "simulations/climate/legacy/thermal_response.hpp"
 
 namespace climateatmosphere
 {

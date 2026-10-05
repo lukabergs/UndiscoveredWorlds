@@ -23,7 +23,7 @@
 #ifndef SIMPLE_RANDOM_HPP
 #define SIMPLE_RANDOM_HPP
 
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 
 typedef struct {
     uint32_t cong;

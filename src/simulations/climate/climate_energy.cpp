@@ -1,10 +1,10 @@
-#include "climate_energy.hpp"
+#include "simulations/climate/climate_energy.hpp"
 
-#include "climate_grid.hpp"
-#include "detail/land_ice.hpp"
-#include "detail/tropical_cloud_albedo.hpp"
-#include "generation_tuning.hpp"
-#include "climate_world.hpp"
+#include "core/climate_grid.hpp"
+#include "simulations/climate/detail/land_ice.hpp"
+#include "simulations/climate/detail/tropical_cloud_albedo.hpp"
+#include "world/generation_tuning.hpp"
+#include "simulations/climate/climate_world.hpp"
 
 #include <algorithm>
 #include <array>

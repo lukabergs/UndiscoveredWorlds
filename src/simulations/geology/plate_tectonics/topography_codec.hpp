@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string>
 
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 
 namespace TopographyCodec {
 

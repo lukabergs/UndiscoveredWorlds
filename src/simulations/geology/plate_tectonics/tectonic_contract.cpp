@@ -1,7 +1,7 @@
-#include "tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 
-#include "lithosphere.hpp"
-#include "tectonic_provenance.hpp"
+#include "simulations/geology/plate_tectonics/lithosphere.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 
 #include <cstring>
 

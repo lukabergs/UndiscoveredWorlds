@@ -1,5 +1,5 @@
-#include "tectonic_junctions.hpp"
-#include "tectonic_kinematics.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_junctions.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_kinematics.hpp"
 
 #include <algorithm>
 #include <array>

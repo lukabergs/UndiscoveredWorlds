@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
-#include "tectonic_columns.hpp"
-#include "tectonic_noise_pass.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_noise_pass.hpp"
 #include <cmath>
 #include <limits>
 #include <stdexcept>

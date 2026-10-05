@@ -1,4 +1,4 @@
-#include "planet_fields.hpp"
+#include "world/planet_fields.hpp"
 
 #include <array>
 #include <cstring>
@@ -7,8 +7,8 @@
 #include <stdexcept>
 #include <type_traits>
 
-#include "climate_world_fields.hpp"
-#include "planet.hpp"
+#include "simulations/climate/climate_world_fields.hpp"
+#include "world/planet.hpp"
 
 using worldmodel::ElementType;
 using worldmodel::FieldId;

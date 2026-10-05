@@ -1,4 +1,4 @@
-#include "../../src/validation/climate/climate_palette.hpp"
+#include "validation/climate/climate_palette.hpp"
 #include <iostream>
 #include <limits>
 #include <gtest/gtest.h>

@@ -1,4 +1,4 @@
-#include "cuda_renderers.hpp"
+#include "app/rendering/cuda_renderers.hpp"
 
 #ifndef UW_ENABLE_CUDA_RENDERERS
 

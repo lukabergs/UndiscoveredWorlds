@@ -1,5 +1,5 @@
-#include "climate_physics.hpp"
-#include "detail/surface_evaporation_humidity.hpp"
+#include "simulations/climate/climate_physics.hpp"
+#include "simulations/climate/detail/surface_evaporation_humidity.hpp"
 
 #include <cmath>
 #include <iostream>

@@ -1,9 +1,9 @@
 #include <filesystem>
 
-#include "deterministic_random.hpp"
-#include "generation_progress.hpp"
-#include "planet.hpp"
-#include "social_definitions.hpp"
+#include "core/deterministic_random.hpp"
+#include "pipeline/generation_progress.hpp"
+#include "world/planet.hpp"
+#include "io/social_definitions.hpp"
 
 using namespace std;
 

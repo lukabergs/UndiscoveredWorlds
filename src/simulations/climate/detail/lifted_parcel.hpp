@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../climate_physics.hpp"
+#include "simulations/climate/climate_physics.hpp"
 #include <algorithm>
 #include <cmath>
 

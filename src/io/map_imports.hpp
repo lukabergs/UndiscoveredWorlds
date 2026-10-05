@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "planet.hpp"
+#include "world/planet.hpp"
 
 enum class MapImportValueMode
 {

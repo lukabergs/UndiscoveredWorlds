@@ -1,7 +1,7 @@
 #ifndef TECTONIC_KINEMATICS_HPP
 #define TECTONIC_KINEMATICS_HPP
 
-#include "tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 #include <cmath>
 
 namespace tectonics::kinematics {

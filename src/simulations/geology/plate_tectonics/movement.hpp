@@ -20,11 +20,11 @@
 #ifndef MOVEMENT_HPP
 #define MOVEMENT_HPP
 
-#include "bounds.hpp"
-#include "heightmap.hpp"
-#include "rectangle.hpp"
-#include "simplerandom.hpp"
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/bounds.hpp"
+#include "simulations/geology/plate_tectonics/heightmap.hpp"
+#include "simulations/geology/plate_tectonics/rectangle.hpp"
+#include "simulations/geology/plate_tectonics/simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 #include <cmath> // sin, cos
 #include <vector>
 

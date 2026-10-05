@@ -3,10 +3,10 @@
 #include <mutex>
 #include <vector>
 
-#include "classes.hpp"
-#include "planet.hpp"
-#include "functions.hpp"
-#include "tides.hpp"
+#include "core/classes.hpp"
+#include "world/planet.hpp"
+#include "world/functions.hpp"
+#include "simulations/hydrology/tides.hpp"
 
 using namespace std;
 

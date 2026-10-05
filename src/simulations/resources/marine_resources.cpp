@@ -1,5 +1,5 @@
-#include "marine_resources.hpp"
-#include "physical_layers_internal.hpp"
+#include "simulations/resources/marine_resources.hpp"
+#include "simulations/resources/physical_layers_internal.hpp"
 
 namespace physical_layers
 {

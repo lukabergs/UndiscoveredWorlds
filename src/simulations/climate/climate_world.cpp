@@ -1,12 +1,12 @@
-#include "climate_world.hpp"
+#include "simulations/climate/climate_world.hpp"
 
 #include <cmath>
 #include <utility>
 
-#include "climate_grid.hpp"
-#include "climate_hydrology.hpp"
-#include "climate_weather.hpp"
-#include "generation_tuning.hpp"
+#include "core/climate_grid.hpp"
+#include "simulations/climate/climate_hydrology.hpp"
+#include "simulations/climate/climate_weather.hpp"
+#include "world/generation_tuning.hpp"
 
 void climateworld::resize(int width, int height)
 {

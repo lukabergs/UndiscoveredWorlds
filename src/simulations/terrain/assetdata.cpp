@@ -15,10 +15,10 @@
 //#include <SFML/Graphics.hpp>
 //#include <nanogui/nanogui.h>
 
-#include "classes.hpp"
-#include "planet.hpp"
-#include "region.hpp"
-#include "functions.hpp"
+#include "core/classes.hpp"
+#include "world/planet.hpp"
+#include "world/region.hpp"
+#include "world/functions.hpp"
 
 using namespace std;
 

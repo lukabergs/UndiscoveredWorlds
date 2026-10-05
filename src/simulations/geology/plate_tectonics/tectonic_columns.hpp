@@ -3,11 +3,11 @@
 
 #include <cstdint>
 #include <vector>
-#include "tectonic_transport.hpp"
-#include "tectonic_ocean_relief.hpp"
-#include "tectonic_margins.hpp"
-#include "tectonic_noise_pass.hpp"
-#include "tectonic_plumes.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_margins.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_noise_pass.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_plumes.hpp"
 
 namespace tectonics::columns {
 inline constexpr double mantle_density = 3300;

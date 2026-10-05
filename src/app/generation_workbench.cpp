@@ -10,13 +10,13 @@
 #include <stdexcept>
 #include <string>
 
-#include "generation_workbench.hpp"
-#include "generation_tuning.hpp"
+#include "app/generation_workbench.hpp"
+#include "world/generation_tuning.hpp"
 
-#include "fastlem_mountains.hpp"
-#include "map_appearance.hpp"
-#include "physical_layers.hpp"
-#include "ui_charts.hpp"
+#include "simulations/terrain/fastlem_mountains.hpp"
+#include "app/rendering/map_appearance.hpp"
+#include "pipeline/physical_layers.hpp"
+#include "app/ui_charts.hpp"
 
 using namespace std;
 

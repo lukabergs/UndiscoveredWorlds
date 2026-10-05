@@ -5,9 +5,9 @@
 #include <iostream>
 
 #include "imgui.h"
-#include "cuda_renderers.hpp"
-#include "functions.hpp"
-#include "map_views.hpp"
+#include "app/rendering/cuda_renderers.hpp"
+#include "world/functions.hpp"
+#include "app/rendering/map_views.hpp"
 
 using namespace std;
 

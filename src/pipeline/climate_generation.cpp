@@ -3,22 +3,22 @@
 #include <mutex>
 #include <vector>
 
-#include "classes.hpp"
-#include "planet.hpp"
-#include "functions.hpp"
-#include "generation_tuning.hpp"
-#include "world_generation_debug.hpp"
-#include "climate_generation.hpp"
-#include "climate_coupling.hpp"
-#include "climate_fields.hpp"
-#include "climate_classification.hpp"
-#include "drainage.hpp"
-#include "lakes.hpp"
-#include "deltas.hpp"
-#include "wetlands.hpp"
-#include "tides.hpp"
-#include "climate_landforms.hpp"
-#include "map_imports.hpp"
+#include "core/classes.hpp"
+#include "world/planet.hpp"
+#include "world/functions.hpp"
+#include "world/generation_tuning.hpp"
+#include "pipeline/world_generation_debug.hpp"
+#include "pipeline/climate_generation.hpp"
+#include "simulations/climate/climate_coupling.hpp"
+#include "simulations/climate/climate_fields.hpp"
+#include "simulations/climate/climate_classification.hpp"
+#include "simulations/hydrology/drainage.hpp"
+#include "simulations/hydrology/lakes.hpp"
+#include "simulations/hydrology/deltas.hpp"
+#include "simulations/hydrology/wetlands.hpp"
+#include "simulations/hydrology/tides.hpp"
+#include "simulations/terrain/climate_landforms.hpp"
+#include "io/map_imports.hpp"
 
 using namespace std;
 

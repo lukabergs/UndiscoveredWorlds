@@ -1,11 +1,11 @@
-#include "procedural_noise.hpp"
+#include "core/procedural_noise.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <vector>
 
-#include "world/field_access.hpp"
+#include "core/world/field_access.hpp"
 
 #ifndef ARRAYWIDTH
 #define ARRAYWIDTH 2048

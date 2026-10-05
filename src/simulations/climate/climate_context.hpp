@@ -1,8 +1,8 @@
 #pragma once
 
-#include "climate_hydrology.hpp"
-#include "climate_atmosphere.hpp"
-#include "climate_ocean_dynamics.hpp"
+#include "simulations/climate/climate_hydrology.hpp"
+#include "simulations/climate/climate_atmosphere.hpp"
+#include "simulations/climate/climate_ocean_dynamics.hpp"
 #include <algorithm>
 #include <array>
 #include <vector>

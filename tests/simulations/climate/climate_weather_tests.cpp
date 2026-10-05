@@ -1,5 +1,5 @@
-#include "climate_weather.hpp"
-#include "climate_grid.hpp"
+#include "simulations/climate/climate_weather.hpp"
+#include "core/climate_grid.hpp"
 
 #include <algorithm>
 #include <cmath>

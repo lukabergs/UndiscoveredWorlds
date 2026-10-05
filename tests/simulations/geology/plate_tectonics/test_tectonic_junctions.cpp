@@ -3,8 +3,8 @@
 #endif
 
 #include "gtest/gtest.h"
-#include "tectonic_junction_coupling.hpp"
-#include "tectonic_junctions.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_junction_coupling.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_junctions.hpp"
 
 #include <array>
 #include <cmath>

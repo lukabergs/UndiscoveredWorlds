@@ -1,5 +1,5 @@
-#include "tectonic_ocean_relief.hpp"
-#include "tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>

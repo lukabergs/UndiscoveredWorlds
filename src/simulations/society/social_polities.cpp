@@ -5,8 +5,8 @@
 #include <utility>
 #include <vector>
 
-#include "planet.hpp"
-#include "social_generation_internal.hpp"
+#include "world/planet.hpp"
+#include "simulations/society/social_generation_internal.hpp"
 
 using namespace std;
 

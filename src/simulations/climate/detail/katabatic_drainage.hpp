@@ -1,6 +1,6 @@
 #pragma once
 
-#include "surface_wind_remap.hpp"
+#include "simulations/climate/detail/surface_wind_remap.hpp"
 
 #include <algorithm>
 #include <cmath>

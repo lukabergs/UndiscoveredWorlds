@@ -4,7 +4,7 @@
 
 #include "imgui.h"
 
-#include "world_property_controls.hpp"
+#include "app/world_property_controls.hpp"
 
 bool drawcustomworldsizewindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, bool brandnew, WorldPropertyControls& controls);
 bool drawworldgenerationoptionswindow(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, bool& show, WorldPropertyControls& controls);

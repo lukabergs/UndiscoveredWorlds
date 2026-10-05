@@ -1,4 +1,4 @@
-#include "tectonic_plumes.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_plumes.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>

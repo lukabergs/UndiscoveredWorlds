@@ -1,4 +1,4 @@
-#include "tectonic_transport.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>

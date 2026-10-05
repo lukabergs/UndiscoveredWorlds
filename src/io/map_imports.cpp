@@ -6,12 +6,12 @@
 #include <unordered_map>
 #include <vector>
 
-#include "raster_image.hpp"
-#include "raster_imports.hpp"
+#include "io/raster_image.hpp"
+#include "io/raster_imports.hpp"
 
-#include "map_imports.hpp"
-#include "functions.hpp"
-#include "topography_tiff.hpp"
+#include "io/map_imports.hpp"
+#include "world/functions.hpp"
+#include "io/topography_tiff.hpp"
 
 using namespace std;
 

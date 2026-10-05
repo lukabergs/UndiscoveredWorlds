@@ -6,9 +6,9 @@
 #include <cmath>
 #include <cstdint>
 #include <vector>
-#include "grid_coordinates.hpp"
-#include "parallel_rows.hpp"
-#include "planet.hpp"
+#include "core/grid_coordinates.hpp"
+#include "core/parallel_rows.hpp"
+#include "world/planet.hpp"
 
 // Shared planet-grid queries for derived physical layers. Coordinates use the
 // planet's inclusive bounds; longitude wraps and latitude never wraps.

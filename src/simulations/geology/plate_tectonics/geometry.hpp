@@ -20,8 +20,8 @@
 #ifndef GEOMETRY_HPP
 #define GEOMETRY_HPP
 
-#include "utils.hpp"
-#include "world_point.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
+#include "simulations/geology/plate_tectonics/world_point.hpp"
 #include <math.h>
 #include <stdexcept>
 

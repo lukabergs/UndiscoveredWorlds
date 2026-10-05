@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "world_fields.hpp"
+#include "core/world/world_fields.hpp"
 
 namespace worldmodel
 {

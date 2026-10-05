@@ -1,9 +1,9 @@
 #pragma once
 
-#include "gold_formation.hpp"
-#include "mineral_deposit.hpp"
-#include "plate_markers.hpp"
-#include "tectonic_frame.hpp"
+#include "simulations/geology/mineral_systems/gold_formation.hpp"
+#include "simulations/geology/mineral_systems/mineral_deposit.hpp"
+#include "simulations/geology/mineral_systems/plate_markers.hpp"
+#include "simulations/geology/mineral_systems/tectonic_frame.hpp"
 
 #include <cstdint>
 #include <utility>

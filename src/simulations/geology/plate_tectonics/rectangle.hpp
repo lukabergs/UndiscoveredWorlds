@@ -20,8 +20,8 @@
 #ifndef RECTANGLE_HPP
 #define RECTANGLE_HPP
 
-#include "geometry.hpp"
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/geometry.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 #include <cstring> // for size_t
 #include <stdexcept>
 

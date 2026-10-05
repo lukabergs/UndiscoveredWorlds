@@ -1,6 +1,6 @@
-#include "climate_energy.hpp"
-#include "detail/land_ice.hpp"
-#include "detail/tropical_cloud_albedo.hpp"
+#include "simulations/climate/climate_energy.hpp"
+#include "simulations/climate/detail/land_ice.hpp"
+#include "simulations/climate/detail/tropical_cloud_albedo.hpp"
 
 #include <cmath>
 #include <iostream>

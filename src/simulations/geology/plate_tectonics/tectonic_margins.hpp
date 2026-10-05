@@ -1,6 +1,6 @@
 #ifndef TECTONIC_MARGINS_HPP
 #define TECTONIC_MARGINS_HPP
-#include "tectonic_transport.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
 #include <cstdint>
 #include <vector>
 #include <map>

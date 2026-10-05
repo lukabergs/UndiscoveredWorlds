@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "tectonic_world_grid.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_world_grid.hpp"
 
 TEST(TectonicWorldGrid, IdentityPreservesFieldsAndRegistration) {
     tectonics::WorldGrid grid(4, 2, 4, 2);

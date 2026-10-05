@@ -24,8 +24,8 @@
                    // Python...
     #undef __STRICT_ANSI__
 #endif
-#include "rectangle.hpp"
-#include "simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/rectangle.hpp"
+#include "simulations/geology/plate_tectonics/simplerandom.hpp"
 
 void createNoise(float* tmp, const WorldDimension& tmpDim, SimpleRandom _randsource,
                  bool useSimplex = false);

@@ -1,15 +1,15 @@
-#include "climate_stages.hpp"
+#include "pipeline/climate_stages.hpp"
 
 #include <vector>
 
-#include "climate_classification.hpp"
-#include "climate_coupling.hpp"
-#include "climate_fields.hpp"
-#include "climate_world.hpp"
-#include "deterministic_random.hpp"
-#include "generation_tuning.hpp"
-#include "procedural_noise.hpp"
-#include "world_processes.hpp"
+#include "simulations/climate/climate_classification.hpp"
+#include "simulations/climate/climate_coupling.hpp"
+#include "simulations/climate/climate_fields.hpp"
+#include "simulations/climate/climate_world.hpp"
+#include "core/deterministic_random.hpp"
+#include "world/generation_tuning.hpp"
+#include "core/procedural_noise.hpp"
+#include "pipeline/world_processes.hpp"
 
 using namespace std;
 

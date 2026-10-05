@@ -30,9 +30,9 @@
                    // Python...
     #undef __STRICT_ANSI__
 #endif
-#include "simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/simplerandom.hpp"
 
-#include "sqrdmd.hpp"
+#include "simulations/geology/plate_tectonics/sqrdmd.hpp"
 
 using namespace std;
 

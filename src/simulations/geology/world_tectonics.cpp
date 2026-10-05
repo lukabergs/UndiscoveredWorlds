@@ -1,5 +1,5 @@
-#include "world_tectonics.hpp"
-#include "tectonic_snapshots.hpp"
+#include "simulations/geology/world_tectonics.hpp"
+#include "validation/tectonics/tectonic_snapshots.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -10,21 +10,21 @@
 #include <utility>
 #include <vector>
 
-#include "mineral_systems/mineral_history.hpp"
-#include "mineral_systems/tectonic_frame_reader.hpp"
-#include "tectonic_api.hpp"
-#include "tectonic_contract.hpp"
-#include "tectonic_recipe.hpp"
-#include "tectonic_world_grid.hpp"
-#include "topography_codec.hpp"
+#include "simulations/geology/mineral_systems/mineral_history.hpp"
+#include "simulations/geology/mineral_systems/tectonic_frame_reader.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_api.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_recipe.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_world_grid.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
 #ifdef max
 #undef max
 #endif
 #ifdef min
 #undef min
 #endif
-#include "functions.hpp"
-#include "planet.hpp"
+#include "world/functions.hpp"
+#include "world/planet.hpp"
 
 namespace
 {

@@ -1,8 +1,8 @@
 #include <string>
 
-#include "ui_panels.hpp"
-#include "functions.hpp"
-#include "map_views.hpp"
+#include "app/ui_panels.hpp"
+#include "world/functions.hpp"
+#include "app/rendering/map_views.hpp"
 
 using namespace std;
 

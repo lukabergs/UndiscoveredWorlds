@@ -1,6 +1,6 @@
-#include "tectonic_snapshots.hpp"
+#include "validation/tectonics/tectonic_snapshots.hpp"
 
-#include "topography_codec.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
 
 #include <algorithm>
 #include <cmath>

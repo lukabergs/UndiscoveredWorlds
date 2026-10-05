@@ -27,8 +27,8 @@
 #include <cstdlib>
 #include <math.h>
 
-#include "simplexnoise.hpp"
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/simplexnoise.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 
 /* 2D, 3D and 4D Simplex Noise functions return 'random' values in (-1, 1).
 

@@ -1,6 +1,6 @@
-#include "climate_ocean_dynamics.hpp"
-#include "climate_grid.hpp"
-#include "detail/ocean_mixed_layer.hpp"
+#include "simulations/climate/climate_ocean_dynamics.hpp"
+#include "core/climate_grid.hpp"
+#include "simulations/climate/detail/ocean_mixed_layer.hpp"
 
 #include <algorithm>
 #include <chrono>

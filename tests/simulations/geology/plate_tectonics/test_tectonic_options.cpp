@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
-#include "lithosphere.hpp"
-#include "tectonic_options.hpp"
+#include "simulations/geology/plate_tectonics/lithosphere.hpp"
+#include "cli/tectonic_options.hpp"
 
 #include <stdexcept>
 #include <string>

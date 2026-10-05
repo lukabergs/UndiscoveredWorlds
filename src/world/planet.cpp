@@ -12,12 +12,12 @@
 #include <stdio.h>
 #include <utility>
 
-#include "planet.hpp"
-#include "climate_weather.hpp"
-#include "climate_grid.hpp"
-#include "climate_hydrology.hpp"
-#include "generation_tuning.hpp"
-#include "functions.hpp"
+#include "world/planet.hpp"
+#include "simulations/climate/climate_weather.hpp"
+#include "core/climate_grid.hpp"
+#include "simulations/climate/climate_hydrology.hpp"
+#include "world/generation_tuning.hpp"
+#include "world/functions.hpp"
 
 namespace
 {
@@ -80,7 +80,7 @@ DeformingRegionType decodedeformingregiontype(std::uint8_t value)
 
 //#define ENABLE_PROFILER
 #ifdef ENABLE_PROFILER
-#include "profiler.h"
+#include "core/profiler.h"
 #endif
 
 planet::planet() //constructor

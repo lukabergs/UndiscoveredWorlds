@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "raster_image.hpp"
+#include "io/raster_image.hpp"
 
 struct MapImportSettings;
 

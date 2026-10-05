@@ -1,6 +1,6 @@
 #pragma once
-#include "climate_atmosphere.hpp"
-#include "climate_grid.hpp"
+#include "simulations/climate/climate_atmosphere.hpp"
+#include "core/climate_grid.hpp"
 #include <algorithm>
 #include <cmath>
 #include <vector>

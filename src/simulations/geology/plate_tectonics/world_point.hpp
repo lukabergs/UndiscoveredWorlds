@@ -20,7 +20,7 @@
 #ifndef WORLD_POINT_HPP
 #define WORLD_POINT_HPP
 
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 
 class WorldDimension;
 

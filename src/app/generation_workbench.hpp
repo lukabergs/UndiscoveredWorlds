@@ -6,12 +6,12 @@
 
 #include "imgui.h"
 
-#include "appearance_settings.hpp"
-#include "functions.hpp"
-#include "map_views.hpp"
-#include "generation_stage_registry.hpp"
-#include "map_imports.hpp"
-#include "world_stages.hpp"
+#include "app/rendering/appearance_settings.hpp"
+#include "world/functions.hpp"
+#include "app/rendering/map_views.hpp"
+#include "pipeline/generation_stage_registry.hpp"
+#include "io/map_imports.hpp"
+#include "pipeline/world_stages.hpp"
 
 struct GenerationCommittedSnapshot
 {

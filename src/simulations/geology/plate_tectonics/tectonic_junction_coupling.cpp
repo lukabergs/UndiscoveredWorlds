@@ -1,4 +1,4 @@
-#include "tectonic_junction_coupling.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_junction_coupling.hpp"
 
 #include <algorithm>
 #include <cmath>

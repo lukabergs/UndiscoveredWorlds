@@ -1,10 +1,10 @@
 #ifndef TECTONIC_CONTRACT_HPP
 #define TECTONIC_CONTRACT_HPP
 
-#include "tectonic_scenario.hpp"
-#include "tectonic_dynamics.hpp"
-#include "tectonic_columns.hpp"
-#include "tectonic_topology.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_scenario.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_topology.hpp"
 
 #include <cstddef>
 #include <cstdint>

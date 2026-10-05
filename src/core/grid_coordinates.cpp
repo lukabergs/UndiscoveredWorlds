@@ -1,4 +1,4 @@
-#include "grid_coordinates.hpp"
+#include "core/grid_coordinates.hpp"
 
 twointegers getdestination(int x, int y, int dir)
 {

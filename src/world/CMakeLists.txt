@@ -1,6 +1,5 @@
 # The world class (planet components and facade), regions and shared utilities.
 add_library(uw_world STATIC
-    classes.cpp
     misc.cpp
     planet.cpp
     planet_bundle.cpp

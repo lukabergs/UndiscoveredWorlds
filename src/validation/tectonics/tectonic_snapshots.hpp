@@ -1,7 +1,7 @@
 #ifndef TECTONIC_SNAPSHOTS_HPP
 #define TECTONIC_SNAPSHOTS_HPP
 
-#include "tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 
 #include <cstdint>
 #include <filesystem>

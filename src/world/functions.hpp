@@ -37,14 +37,14 @@
 #include <thread>
 #include <vector>
 
-#include "climate_benchmark_outputs.hpp"
-#include "climate_elevation.hpp"
+#include "io/climate_benchmark_outputs.hpp"
+#include "simulations/climate/climate_elevation.hpp"
 
-#include "world_generation_debug.hpp"
+#include "pipeline/world_generation_debug.hpp"
 
-#include "classes.hpp"
-#include "planet.hpp"
-#include "region.hpp"
+#include "core/classes.hpp"
+#include "world/planet.hpp"
+#include "world/region.hpp"
 
 #define ARRAYWIDTH 2048
 #define ARRAYHEIGHT 1024
@@ -161,14 +161,14 @@ constexpr std::array<std::array<int, 3>, BIOMEMAPCOLOURCOUNT> defaultbiomemapcol
 } };
 
 
-#include "parallel_rows.hpp"
-#include "grid_coordinates.hpp"
+#include "core/parallel_rows.hpp"
+#include "core/grid_coordinates.hpp"
 
-#include "deterministic_random.hpp"
-#include "procedural_noise.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/procedural_noise.hpp"
 
 
-#include "generation_progress.hpp"
+#include "pipeline/generation_progress.hpp"
 
 // Declare functions that are in misc.cpp
 
@@ -248,22 +248,22 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
 
 // Simulation entry points live with their implementations. This header
 // remains a compatibility umbrella for the desktop and regional generator.
-#include "terrain.hpp"
-#include "world_tectonics.hpp"
+#include "simulations/terrain/terrain.hpp"
+#include "simulations/geology/world_tectonics.hpp"
 
-#include "climate_generation.hpp"
-#include "climate_fields.hpp"
-#include "climate_classification.hpp"
-#include "drainage.hpp"
-#include "lakes.hpp"
-#include "lake_effects.hpp"
-#include "deltas.hpp"
-#include "wetlands.hpp"
-#include "tides.hpp"
-#include "climate_landforms.hpp"
+#include "pipeline/climate_generation.hpp"
+#include "simulations/climate/climate_fields.hpp"
+#include "simulations/climate/climate_classification.hpp"
+#include "simulations/hydrology/drainage.hpp"
+#include "simulations/hydrology/lakes.hpp"
+#include "simulations/hydrology/lake_effects.hpp"
+#include "simulations/hydrology/deltas.hpp"
+#include "simulations/hydrology/wetlands.hpp"
+#include "simulations/hydrology/tides.hpp"
+#include "simulations/terrain/climate_landforms.hpp"
 
 // Coupled ocean/atmosphere and validation integration.
-#include "climate_coupling.hpp"
+#include "simulations/climate/climate_coupling.hpp"
 void exportclimatevalidationreport(climateworld& world);
 bool recordclimatebenchmarkrun(
     climateworld& world,

@@ -1,10 +1,10 @@
-#include "generation_progress.hpp"
+#include "pipeline/generation_progress.hpp"
 
 #include <chrono>
 #include <iomanip>
 #include <iostream>
 
-#include "world_generation_debug.hpp"
+#include "pipeline/world_generation_debug.hpp"
 
 using namespace std;
 

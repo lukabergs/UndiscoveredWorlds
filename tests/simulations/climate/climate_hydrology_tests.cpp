@@ -1,8 +1,8 @@
-#include "climate_hydrology.hpp"
-#include "climate_grid.hpp"
-#include "detail/process_time_step.hpp"
-#include "detail/subgrid_humidity.hpp"
-#include "detail/lifted_parcel.hpp"
+#include "simulations/climate/climate_hydrology.hpp"
+#include "core/climate_grid.hpp"
+#include "simulations/climate/detail/process_time_step.hpp"
+#include "simulations/climate/detail/subgrid_humidity.hpp"
+#include "simulations/climate/detail/lifted_parcel.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -17,7 +17,7 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "geometry.hpp"
+#include "simulations/geology/plate_tectonics/geometry.hpp"
 
 #include <cmath>
 

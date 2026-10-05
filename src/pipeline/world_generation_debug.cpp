@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "app_environment.hpp"
-#include "generation_progress.hpp"
-#include "world_generation_debug.hpp"
+#include "core/app_environment.hpp"
+#include "pipeline/generation_progress.hpp"
+#include "pipeline/world_generation_debug.hpp"
 
 using namespace std;
 

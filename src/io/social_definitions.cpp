@@ -5,7 +5,7 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "social_definitions.hpp"
+#include "io/social_definitions.hpp"
 
 using namespace std;
 

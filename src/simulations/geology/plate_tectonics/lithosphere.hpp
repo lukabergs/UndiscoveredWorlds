@@ -27,16 +27,16 @@
                    // Python...
     #undef __STRICT_ANSI__
 #endif
-#include "heightmap.hpp"
-#include "material.hpp"
-#include "rectangle.hpp"
-#include "simplerandom.hpp"
-#include "tectonic_contract.hpp"
-#include "tectonic_scenario.hpp"
-#include "tectonic_dynamics.hpp"
-#include "tectonic_columns.hpp"
-#include "tectonic_topology.hpp"
-#include "topography_codec.hpp"
+#include "simulations/geology/plate_tectonics/heightmap.hpp"
+#include "simulations/geology/plate_tectonics/material.hpp"
+#include "simulations/geology/plate_tectonics/rectangle.hpp"
+#include "simulations/geology/plate_tectonics/simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_scenario.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_topology.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
 #include <cmath>
 
 using namespace std;

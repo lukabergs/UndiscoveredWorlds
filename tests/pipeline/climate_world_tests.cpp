@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-#include "climate_stages.hpp"
+#include "pipeline/climate_stages.hpp"
 #include <gtest/gtest.h>
 
 class climateworld;

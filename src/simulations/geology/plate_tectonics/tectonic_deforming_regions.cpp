@@ -1,4 +1,4 @@
-#include "tectonic_deforming_regions.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_deforming_regions.hpp"
 
 #include <algorithm>
 #include <cmath>

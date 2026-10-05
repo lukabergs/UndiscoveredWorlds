@@ -1,12 +1,12 @@
-#include "raster_imports.hpp"
+#include "io/raster_imports.hpp"
 
 #include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <limits>
 
-#include "map_imports.hpp"
-#include "topography_tiff.hpp"
+#include "io/map_imports.hpp"
+#include "io/topography_tiff.hpp"
 
 using namespace std;
 namespace rasterimports

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "climate_energy.hpp"
-#include "climate_seasons.hpp"
+#include "simulations/climate/climate_energy.hpp"
+#include "core/climate_seasons.hpp"
 
 #include <algorithm>
 #include <array>

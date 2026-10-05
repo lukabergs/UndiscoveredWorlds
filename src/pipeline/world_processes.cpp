@@ -1,12 +1,12 @@
-#include "world_processes.hpp"
+#include "pipeline/world_processes.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 
-#include "deterministic_random.hpp"
-#include "procedural_noise.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/procedural_noise.hpp"
 
-#include "world_process_access.inc"
+#include "pipeline/world_process_access.inc"
 
 namespace
 {

@@ -6,8 +6,8 @@
 //
 //  Please see functions.hpp for notes.
 
-#include "region.hpp"
-#include "functions.hpp"
+#include "world/region.hpp"
+#include "world/functions.hpp"
 
 region::region() //constructor
 {

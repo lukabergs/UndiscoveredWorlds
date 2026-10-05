@@ -20,10 +20,10 @@
 #ifndef TECTONIC_API_HPP
 #define TECTONIC_API_HPP
 
-#include "tectonic_contract.hpp"
-#include "tectonic_scenario.hpp"
-#include "topography_codec.hpp"
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_scenario.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 #include <string.h> // For size_t.
 
 void* tectonics_create_from_scenario(const tectonics::scenario::Scenario* scenario);

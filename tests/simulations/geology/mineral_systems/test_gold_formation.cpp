@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "frame_fixture.hpp"
-#include "gold_formation.hpp"
+#include "simulations/geology/mineral_systems/gold_formation.hpp"
 
 #include <cmath>
 #include <cstdlib>

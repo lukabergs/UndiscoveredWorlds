@@ -18,16 +18,16 @@
 #include <utility>
 #include <vector>
 
-#include "classes.hpp"
-#include "climate_seasons.hpp"
-#include "../simulations/climate/climate_context.hpp"
-#include "../simulations/geology/mineral_systems/mineral_deposit.hpp"
-#include "social_generation.hpp"
-#include "world/field_access.hpp"
-#include "climate_biomes.hpp"
-#include "climate_world.hpp"
+#include "core/classes.hpp"
+#include "core/climate_seasons.hpp"
+#include "simulations/climate/climate_context.hpp"
+#include "simulations/geology/mineral_systems/mineral_deposit.hpp"
+#include "simulations/society/social_generation.hpp"
+#include "core/world/field_access.hpp"
+#include "simulations/climate/climate_biomes.hpp"
+#include "simulations/climate/climate_world.hpp"
 
-#include "planet_components.hpp"
+#include "world/planet_components.hpp"
 
 class planet
 {

@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "classes.hpp"
-#include "climate_biomes.hpp"
-#include "../simulations/geology/mineral_systems/mineral_deposit.hpp"
-#include "social_generation.hpp"
-#include "world/world_grid.hpp"
+#include "core/classes.hpp"
+#include "simulations/climate/climate_biomes.hpp"
+#include "simulations/geology/mineral_systems/mineral_deposit.hpp"
+#include "simulations/society/social_generation.hpp"
+#include "core/world/world_grid.hpp"
 
 #define ARRAYWIDTH 2048
 #define ARRAYHEIGHT 1024

@@ -1,8 +1,8 @@
-#include "climate_ocean_dynamics.hpp"
-#include "detail/ocean_thermal_remap.hpp"
-#include "detail/ocean_replay.hpp"
-#include "detail/ekman_cell_mobility.hpp"
-#include "climate_grid.hpp"
+#include "simulations/climate/climate_ocean_dynamics.hpp"
+#include "simulations/climate/detail/ocean_thermal_remap.hpp"
+#include "simulations/climate/detail/ocean_replay.hpp"
+#include "simulations/climate/detail/ekman_cell_mobility.hpp"
+#include "core/climate_grid.hpp"
 
 #include <algorithm>
 #include <cmath>

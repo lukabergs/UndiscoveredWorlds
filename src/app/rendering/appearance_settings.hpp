@@ -4,7 +4,7 @@
 
 #include "imgui.h"
 
-#include "planet.hpp"
+#include "world/planet.hpp"
 
 struct GradientStopSettings
 {

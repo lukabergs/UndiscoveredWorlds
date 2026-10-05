@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
-#include "tectonic_deformation.hpp"
-#include "tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_deformation.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
 #include <algorithm>
 #include <cmath>
 

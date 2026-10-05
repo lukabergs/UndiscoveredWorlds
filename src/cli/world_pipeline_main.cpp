@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "app_environment.hpp"
-#include "command_line_generation.hpp"
+#include "core/app_environment.hpp"
+#include "cli/command_line_generation.hpp"
 
 using namespace std;
 

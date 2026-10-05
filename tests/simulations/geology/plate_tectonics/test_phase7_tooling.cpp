@@ -3,9 +3,9 @@
 #endif
 
 #include "gtest/gtest.h"
-#include "lithosphere.hpp"
-#include "tectonic_api.hpp"
-#include "tectonic_snapshots.hpp"
+#include "simulations/geology/plate_tectonics/lithosphere.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_api.hpp"
+#include "validation/tectonics/tectonic_snapshots.hpp"
 
 #include <filesystem>
 #include <fstream>

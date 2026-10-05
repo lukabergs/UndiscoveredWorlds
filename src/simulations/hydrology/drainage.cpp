@@ -5,11 +5,11 @@
 #include <unordered_set>
 #include <vector>
 
-#include "classes.hpp"
-#include "planet.hpp"
-#include "functions.hpp"
-#include "generation_tuning.hpp"
-#include "drainage.hpp"
+#include "core/classes.hpp"
+#include "world/planet.hpp"
+#include "world/functions.hpp"
+#include "world/generation_tuning.hpp"
+#include "simulations/hydrology/drainage.hpp"
 
 using namespace std;
 

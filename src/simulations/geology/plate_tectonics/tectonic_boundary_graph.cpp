@@ -1,4 +1,4 @@
-#include "tectonic_boundary_graph.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_boundary_graph.hpp"
 
 #include <algorithm>
 #include <array>

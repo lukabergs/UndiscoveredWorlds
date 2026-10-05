@@ -1,4 +1,4 @@
-#include "raster_image.hpp"
+#include "io/raster_image.hpp"
 
 #include <cstdio>
 #include <iostream>

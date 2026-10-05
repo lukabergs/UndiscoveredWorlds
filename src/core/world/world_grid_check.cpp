@@ -1,6 +1,6 @@
 // Bounds failures of worldgrid in analysis builds (-DUW_CHECK_GRID_BOUNDS).
 #ifdef UW_CHECK_GRID_BOUNDS
-#include "world_grid.hpp"
+#include "core/world/world_grid.hpp"
 
 #include <cstdio>
 #include <cstdlib>

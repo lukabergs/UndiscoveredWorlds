@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "../../../../src/simulations/resources/placer_transport.hpp"
+#include "simulations/resources/placer_transport.hpp"
 
 using physical_layers::detail::route_ore_potential;
 

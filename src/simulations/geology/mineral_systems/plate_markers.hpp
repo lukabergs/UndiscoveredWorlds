@@ -1,6 +1,6 @@
 #pragma once
 
-#include "tectonic_frame.hpp"
+#include "simulations/geology/mineral_systems/tectonic_frame.hpp"
 
 #include <cstddef>
 #include <cstdint>

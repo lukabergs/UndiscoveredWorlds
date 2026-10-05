@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "climate_context.hpp"
+#include "simulations/climate/climate_context.hpp"
 
 struct ClimateRunOptions
 {

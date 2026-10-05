@@ -1,4 +1,4 @@
-#include "tectonic_recipe.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_recipe.hpp"
 
 namespace tectonics::scenario {
 Scenario baseline() {

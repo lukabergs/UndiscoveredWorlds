@@ -12,11 +12,11 @@
 #include <stdio.h>
 #include <queue>
 
-#include "classes.hpp"
-#include "generation_tuning.hpp"
-#include "planet.hpp"
-#include "region.hpp"
-#include "functions.hpp"
+#include "core/classes.hpp"
+#include "world/generation_tuning.hpp"
+#include "world/planet.hpp"
+#include "world/region.hpp"
+#include "world/functions.hpp"
 //#include "profiler.h"
 
 // Climate class of a regional cell from its seasonal extremes (climate_classification.hpp).

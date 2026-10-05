@@ -1,16 +1,16 @@
 // Ridge connectivity, mountain bases, and fjord relief.
 // Algorithms by Jonathan Hill, extracted from globalterrain.cpp.
 
-#include "terrain_internal.hpp"
+#include "simulations/terrain/terrain_internal.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <queue>
 
-#include "classes.hpp"
-#include "functions.hpp"
-#include "planet.hpp"
+#include "core/classes.hpp"
+#include "world/functions.hpp"
+#include "world/planet.hpp"
 
 using namespace std;
 

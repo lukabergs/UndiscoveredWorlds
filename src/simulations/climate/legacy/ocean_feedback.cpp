@@ -1,6 +1,6 @@
-#include "ocean_feedback.hpp"
-#include "climate_ocean_dynamics.hpp"
-#include "climate_grid.hpp"
+#include "simulations/climate/legacy/ocean_feedback.hpp"
+#include "simulations/climate/climate_ocean_dynamics.hpp"
+#include "core/climate_grid.hpp"
 
 #include <algorithm>
 #include <cmath>

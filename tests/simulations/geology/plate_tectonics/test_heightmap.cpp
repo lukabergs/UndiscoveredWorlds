@@ -17,7 +17,7 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "heightmap.hpp"
+#include "simulations/geology/plate_tectonics/heightmap.hpp"
 #include "gtest/gtest.h"
 
 TEST(HeightMap, ConstructorWidthHeight)

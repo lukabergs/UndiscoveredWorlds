@@ -1,6 +1,6 @@
-#include "climate_transport.hpp"
-#include "climate_grid.hpp"
-#include "parallel_rows.hpp"
+#include "simulations/climate/climate_transport.hpp"
+#include "core/climate_grid.hpp"
+#include "core/parallel_rows.hpp"
 
 #include <algorithm>
 #include <cmath>

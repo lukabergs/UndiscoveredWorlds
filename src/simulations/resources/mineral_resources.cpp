@@ -1,6 +1,6 @@
-#include "mineral_resources.hpp"
-#include "physical_layers_internal.hpp"
-#include "placer_transport.hpp"
+#include "simulations/resources/mineral_resources.hpp"
+#include "simulations/resources/physical_layers_internal.hpp"
+#include "simulations/resources/placer_transport.hpp"
 #include <functional>
 
 namespace physical_layers

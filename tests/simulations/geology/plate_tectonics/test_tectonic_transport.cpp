@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
-#include "tectonic_transport.hpp"
-#include "tectonic_topology.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_topology.hpp"
 #include <algorithm>
 #include <cmath>
 #include <numeric>

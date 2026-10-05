@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
-#include "tectonic_boundary_graph.hpp"
-#include "tectonic_provenance.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_boundary_graph.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>

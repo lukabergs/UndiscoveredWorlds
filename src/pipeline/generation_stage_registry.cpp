@@ -1,6 +1,6 @@
 #include <stdexcept>
 
-#include "generation_stage_registry.hpp"
+#include "pipeline/generation_stage_registry.hpp"
 
 using namespace std;
 

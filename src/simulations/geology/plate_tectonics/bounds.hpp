@@ -22,10 +22,10 @@
 
 #include <stdio.h>
 
-#include "heightmap.hpp"
-#include "rectangle.hpp"
-#include "simplerandom.hpp"
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/heightmap.hpp"
+#include "simulations/geology/plate_tectonics/rectangle.hpp"
+#include "simulations/geology/plate_tectonics/simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 
 /// Represent the bounds of a Plate.
 class IBounds {

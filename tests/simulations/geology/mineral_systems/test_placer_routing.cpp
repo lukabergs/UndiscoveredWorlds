@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include "placer_routing.hpp"
+#include "simulations/geology/mineral_systems/placer_routing.hpp"
 
 #include <cmath>
 

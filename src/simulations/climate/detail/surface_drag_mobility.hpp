@@ -1,6 +1,6 @@
 #pragma once
 
-#include "climate_grid.hpp"
+#include "core/climate_grid.hpp"
 
 #include <algorithm>
 #include <cmath>

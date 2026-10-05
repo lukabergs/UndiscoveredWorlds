@@ -23,7 +23,7 @@
 #ifndef SIMPLEX_H_
 #define SIMPLEX_H_
 
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 
 /* 2D, 3D and 4D Simplex Noise functions return 'random' values in (-1, 1).
 

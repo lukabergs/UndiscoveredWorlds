@@ -1,6 +1,6 @@
-#include "mineral_history.hpp"
+#include "simulations/geology/mineral_systems/mineral_history.hpp"
 
-#include "deterministic_random.hpp"
+#include "core/deterministic_random.hpp"
 
 #include <algorithm>
 #include <cmath>

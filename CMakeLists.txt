@@ -25,23 +25,9 @@ find_package(Threads REQUIRED)
 # the CMakeLists.txt of its directory. The libraries do not link each other,
 # because world, pipeline and the simulation modules refer to each other; an
 # executable links one of the two sets below.
-# Include directories of every library, until the sources include from src/ alone.
+# Every source includes project headers by their path from src/.
 add_library(uw_includes INTERFACE)
-target_include_directories(uw_includes INTERFACE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/app"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/cli"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/core"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/io"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/climate"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/geology"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/hydrology"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/society"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/terrain"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/climate"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/tectonics"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/world"
-)
+target_include_directories(uw_includes INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 add_subdirectory(src)
 

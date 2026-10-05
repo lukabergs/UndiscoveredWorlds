@@ -1,7 +1,7 @@
 #ifndef TECTONIC_DEFORMING_REGIONS_HPP
 #define TECTONIC_DEFORMING_REGIONS_HPP
 
-#include "tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 
 #include <cstdint>
 #include <vector>

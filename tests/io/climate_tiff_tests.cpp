@@ -1,4 +1,4 @@
-#include "climate_tiff.hpp"
+#include "io/climate_tiff.hpp"
 
 #include <cmath>
 #include <cstdint>

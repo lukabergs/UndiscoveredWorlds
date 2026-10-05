@@ -1,6 +1,6 @@
-#include "climate_hydrology.hpp"
-#include "climate_transport.hpp"
-#include "climate_grid.hpp"
+#include "simulations/climate/climate_hydrology.hpp"
+#include "simulations/climate/climate_transport.hpp"
+#include "core/climate_grid.hpp"
 
 #include <algorithm>
 #include <chrono>

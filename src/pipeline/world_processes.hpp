@@ -9,8 +9,8 @@
 #include <string_view>
 #include <vector>
 
-#include "generation_stage_registry.hpp"
-#include "world/world_fields.hpp"
+#include "pipeline/generation_stage_registry.hpp"
+#include "core/world/world_fields.hpp"
 
 enum class ProcessKind : std::uint8_t
 {

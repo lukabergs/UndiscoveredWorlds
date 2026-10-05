@@ -1,5 +1,5 @@
-#include "drainage_basins.hpp"
-#include "../resources/physical_layers_internal.hpp"
+#include "simulations/hydrology/drainage_basins.hpp"
+#include "simulations/resources/physical_layers_internal.hpp"
 #include <cstdint>
 
 namespace physical_layers

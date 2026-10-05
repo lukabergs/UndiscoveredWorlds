@@ -1,6 +1,6 @@
-#include "mineral_deposit.hpp"
+#include "simulations/geology/mineral_systems/mineral_deposit.hpp"
 
-#include "tectonic_frame.hpp"
+#include "simulations/geology/mineral_systems/tectonic_frame.hpp"
 
 #include <algorithm>
 #include <cstdio>

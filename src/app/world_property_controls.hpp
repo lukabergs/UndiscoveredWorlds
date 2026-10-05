@@ -1,6 +1,6 @@
 #pragma once
 
-#include "planet.hpp"
+#include "world/planet.hpp"
 
 struct WorldPropertyControls
 {

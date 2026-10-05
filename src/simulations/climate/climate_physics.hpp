@@ -3,7 +3,7 @@
 #include <array>
 #include <vector>
 
-#include "climate_seasons.hpp"
+#include "core/climate_seasons.hpp"
 
 namespace climatephysics
 {

@@ -1,5 +1,5 @@
 #pragma once
-#include "frozen_surface_drag.hpp"
+#include "simulations/climate/detail/frozen_surface_drag.hpp"
 
 namespace climateatmosphere::detail
 {

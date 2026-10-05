@@ -1,8 +1,8 @@
-#include "gold_deposits.hpp"
+#include "simulations/resources/gold_deposits.hpp"
 
-#include "deterministic_random.hpp"
-#include "mineral_systems/placer_routing.hpp"
-#include "physical_layers_internal.hpp"
+#include "core/deterministic_random.hpp"
+#include "simulations/geology/mineral_systems/placer_routing.hpp"
+#include "simulations/resources/physical_layers_internal.hpp"
 
 #include <algorithm>
 #include <cmath>

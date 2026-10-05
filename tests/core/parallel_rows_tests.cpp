@@ -1,7 +1,7 @@
 #ifdef _WIN32
 #include <Windows.h>
 #endif
-#include "parallel_rows.hpp"
+#include "core/parallel_rows.hpp"
 #include <array>
 #include <atomic>
 #include <iostream>

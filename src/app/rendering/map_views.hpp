@@ -8,7 +8,7 @@
 
 #include <SFML/Graphics.hpp>
 
-#include "functions.hpp"
+#include "world/functions.hpp"
 
 constexpr int GLOBALMAPTYPES = 22;
 constexpr int DISPLAYMAPSIZEX = 1024;

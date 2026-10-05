@@ -3,22 +3,22 @@
 #include <mutex>
 #include <vector>
 
-#include "classes.hpp"
-#include "climate_world.hpp"
-#include "climate_classification.hpp"
-#include "climate_benchmark_outputs.hpp"
-#include "climate_elevation.hpp"
-#include "deterministic_random.hpp"
-#include "generation_progress.hpp"
-#include "grid_coordinates.hpp"
-#include "parallel_rows.hpp"
-#include "procedural_noise.hpp"
-#include "generation_tuning.hpp"
-#include "world_generation_debug.hpp"
-#include "climate_fields.hpp"
-#include "climate_coupling.hpp"
-#include "climate_energy.hpp"
-#include "land_distance.hpp"
+#include "core/classes.hpp"
+#include "simulations/climate/climate_world.hpp"
+#include "simulations/climate/climate_classification.hpp"
+#include "io/climate_benchmark_outputs.hpp"
+#include "simulations/climate/climate_elevation.hpp"
+#include "core/deterministic_random.hpp"
+#include "pipeline/generation_progress.hpp"
+#include "core/grid_coordinates.hpp"
+#include "core/parallel_rows.hpp"
+#include "core/procedural_noise.hpp"
+#include "world/generation_tuning.hpp"
+#include "pipeline/world_generation_debug.hpp"
+#include "simulations/climate/climate_fields.hpp"
+#include "simulations/climate/climate_coupling.hpp"
+#include "simulations/climate/climate_energy.hpp"
+#include "simulations/terrain/land_distance.hpp"
 
 using namespace std;
 

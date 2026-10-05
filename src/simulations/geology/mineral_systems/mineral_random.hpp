@@ -1,6 +1,6 @@
 #pragma once
 
-#include "deterministic_random.hpp"
+#include "core/deterministic_random.hpp"
 
 #include <cmath>
 #include <cstdint>

@@ -6,7 +6,7 @@
 #include <functional>
 #include <string>
 
-#include "social_generation.hpp"
+#include "simulations/society/social_generation.hpp"
 
 struct WorldGenerationDebugOptions
 {

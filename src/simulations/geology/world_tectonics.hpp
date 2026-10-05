@@ -3,7 +3,7 @@
 #include <memory>
 #include <vector>
 
-#include "world/world_grid.hpp"
+#include "core/world/world_grid.hpp"
 class planet;
 namespace tectonics::scenario { struct Scenario; }
 

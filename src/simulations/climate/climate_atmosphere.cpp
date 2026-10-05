@@ -1,7 +1,7 @@
-#include "climate_atmosphere.hpp"
-#include "climate_grid.hpp"
-#include "detail/stationary_preconditioner.hpp"
-#include "detail/stationary_replay.hpp"
+#include "simulations/climate/climate_atmosphere.hpp"
+#include "core/climate_grid.hpp"
+#include "simulations/climate/detail/stationary_preconditioner.hpp"
+#include "simulations/climate/detail/stationary_replay.hpp"
 
 #include <algorithm>
 #include <cmath>

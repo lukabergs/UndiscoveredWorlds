@@ -20,8 +20,8 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "simplerandom.hpp"
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 #include <stddef.h>
 
 void simplerandom_cong_seed(SimpleRandomCong_t* p_cong, uint32_t seed);

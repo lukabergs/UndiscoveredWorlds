@@ -1,4 +1,4 @@
-#include "fastlem_mountains.hpp"
+#include "simulations/terrain/fastlem_mountains.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,9 +7,9 @@
 #include <queue>
 #include <vector>
 
-#include "functions.hpp"
-#include "generation_tuning.hpp"
-#include "planet.hpp"
+#include "world/functions.hpp"
+#include "world/generation_tuning.hpp"
+#include "world/planet.hpp"
 
 using namespace std;
 

@@ -1,7 +1,7 @@
 #ifndef grid_coordinates_hpp
 #define grid_coordinates_hpp
 
-#include "classes.hpp"
+#include "core/classes.hpp"
 
 // Wrap an integer into [0, max], where max is the final valid index.
 inline int wrap(int value, int max)

@@ -1,6 +1,6 @@
-#include "tectonic_margins.hpp"
-#include "tectonic_columns.hpp"
-#include "tectonic_variation.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_margins.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_variation.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>

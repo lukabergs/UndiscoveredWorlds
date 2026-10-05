@@ -1,7 +1,7 @@
 #pragma once
 
-#include "gold_formation.hpp"
-#include "mineral_deposit.hpp"
+#include "simulations/geology/mineral_systems/gold_formation.hpp"
+#include "simulations/geology/mineral_systems/mineral_deposit.hpp"
 
 #include <cstdint>
 #include <vector>

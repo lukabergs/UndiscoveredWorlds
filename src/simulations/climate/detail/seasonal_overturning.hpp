@@ -1,7 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
-#include "../climate_atmosphere.hpp"
+#include "simulations/climate/climate_atmosphere.hpp"
 
 namespace climateatmosphere::detail
 {

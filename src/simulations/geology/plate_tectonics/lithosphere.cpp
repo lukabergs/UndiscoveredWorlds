@@ -17,19 +17,19 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "lithosphere.hpp"
-#include "noise.hpp"
-#include "plate.hpp"
-#include "simplexnoise.hpp"
-#include "sqrdmd.hpp"
-#include "tectonic_boundary_graph.hpp"
-#include "tectonic_deforming_regions.hpp"
-#include "tectonic_junction_coupling.hpp"
-#include "tectonic_junctions.hpp"
-#include "tectonic_provenance.hpp"
-#include "tectonic_thermal.hpp"
-#include "tectonic_initialization.hpp"
-#include "tectonic_deformation.hpp"
+#include "simulations/geology/plate_tectonics/lithosphere.hpp"
+#include "simulations/geology/plate_tectonics/noise.hpp"
+#include "simulations/geology/plate_tectonics/plate.hpp"
+#include "simulations/geology/plate_tectonics/simplexnoise.hpp"
+#include "simulations/geology/plate_tectonics/sqrdmd.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_boundary_graph.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_deforming_regions.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_junction_coupling.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_junctions.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_initialization.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_deformation.hpp"
 
 #include <algorithm>
 #include <array>

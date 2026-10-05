@@ -1,5 +1,5 @@
 #pragma once
-#include "tectonic_scenario.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_scenario.hpp"
 
 namespace tectonics::scenario {
 // Compiled from configs/tectonics-baseline.json. Every production entry point

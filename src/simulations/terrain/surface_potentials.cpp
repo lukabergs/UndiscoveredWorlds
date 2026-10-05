@@ -1,5 +1,5 @@
-#include "surface_potentials.hpp"
-#include "../resources/physical_layers_internal.hpp"
+#include "simulations/terrain/surface_potentials.hpp"
+#include "simulations/resources/physical_layers_internal.hpp"
 
 namespace physical_layers
 {

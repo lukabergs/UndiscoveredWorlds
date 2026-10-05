@@ -74,6 +74,7 @@ Lessons:
 | `world-0020` | 2026-10-05 | defects fixed | keep | consolidation phase 3: fresh-context review of the new tooling and its fixes |
 | `world-0021` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 1: directory moves (src/world, src/cli, profiler and environment in src/core, workbench in src/app); the step list of the phase |
 | `world-0022` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 2: per-directory CMake, one static library per directory, engine target uw_tectonics |
+| `world-0023` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 3: one include root (src/) and the layering rules in check_layout.py |
 
 Lessons:
 
@@ -130,3 +131,5 @@ Lessons:
 - `world-0021`: out/scratch/phase4/include_graph.py prints which source directory includes which.
 - `world-0022`: The reference bundles of the next step are out/scratch/phase4/step02-*.
 - `world-0022`: PNG is now found for every configuration, because uw_io always contains the heightmap I/O of the engine tests.
+- `world-0023`: A quoted include is searched beside the including file first, so the compiler accepts a bare sibling name; only check_layout.py keeps the include root.
+- `world-0023`: The reference bundles of the next compiled step are out/scratch/phase4/step03-*.

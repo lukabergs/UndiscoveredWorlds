@@ -29,11 +29,11 @@
 #include <stdexcept> // std::invalid_argument
 #include <vector>
 
-#include "heightmap.hpp"
-#include "material.hpp"
-#include "plate.hpp"
-#include "rectangle.hpp"
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/heightmap.hpp"
+#include "simulations/geology/plate_tectonics/material.hpp"
+#include "simulations/geology/plate_tectonics/plate.hpp"
+#include "simulations/geology/plate_tectonics/rectangle.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 
 using namespace std;
 

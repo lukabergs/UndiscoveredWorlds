@@ -1,8 +1,8 @@
 #include "gtest/gtest.h"
-#include "tectonic_columns.hpp"
-#include "tectonic_thermal.hpp"
-#include "lithosphere.hpp"
-#include "tectonic_snapshots.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
+#include "simulations/geology/plate_tectonics/lithosphere.hpp"
+#include "validation/tectonics/tectonic_snapshots.hpp"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>

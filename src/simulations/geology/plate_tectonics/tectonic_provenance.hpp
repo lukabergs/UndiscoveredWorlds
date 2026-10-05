@@ -1,7 +1,7 @@
 #ifndef TECTONIC_PROVENANCE_HPP
 #define TECTONIC_PROVENANCE_HPP
 
-#include "tectonic_contract.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 
 #include <cstdint>
 

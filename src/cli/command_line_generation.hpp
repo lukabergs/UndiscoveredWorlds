@@ -7,11 +7,11 @@
 #include <string>
 #include <vector>
 
-#include "climate_benchmark_outputs.hpp"
-#include "climate_options.hpp"
-#include "tectonic_options.hpp"
-#include "planet.hpp"
-#include "social_generation.hpp"
+#include "io/climate_benchmark_outputs.hpp"
+#include "cli/climate_options.hpp"
+#include "cli/tectonic_options.hpp"
+#include "world/planet.hpp"
+#include "simulations/society/social_generation.hpp"
 
 struct ImportedClimateMaps;
 

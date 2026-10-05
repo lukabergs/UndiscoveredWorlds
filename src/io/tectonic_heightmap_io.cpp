@@ -1,8 +1,8 @@
-#include "tectonic_heightmap_io.hpp"
-#include "material.hpp"
-#include "tectonic_contract.hpp"
-#include "topography_tiff.hpp"
-#include "utils.hpp"
+#include "io/tectonic_heightmap_io.hpp"
+#include "simulations/geology/plate_tectonics/material.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
+#include "io/topography_tiff.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cctype>

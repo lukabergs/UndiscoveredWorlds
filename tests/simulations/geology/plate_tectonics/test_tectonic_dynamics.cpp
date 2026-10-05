@@ -1,9 +1,9 @@
 #include "gtest/gtest.h"
-#include "tectonic_dynamics.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
 
-#include "tectonic_provenance.hpp"
-#include "lithosphere.hpp"
-#include "plate.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
+#include "simulations/geology/plate_tectonics/lithosphere.hpp"
+#include "simulations/geology/plate_tectonics/plate.hpp"
 
 #include <algorithm>
 #include <cmath>

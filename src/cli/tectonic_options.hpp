@@ -6,7 +6,7 @@
 #include <ostream>
 #include <string>
 
-#include "tectonic_recipe.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_recipe.hpp"
 
 // False when the argument is not a scenario option; throws std::runtime_error
 // on a value the option cannot take.

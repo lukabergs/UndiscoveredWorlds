@@ -1,4 +1,4 @@
-#include "generation_stage_registry.hpp"
+#include "pipeline/generation_stage_registry.hpp"
 #include <iostream>
 #include <gtest/gtest.h>
 

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "world/field_encoding.hpp"
+#include "core/world/field_encoding.hpp"
 
 class planet;
 

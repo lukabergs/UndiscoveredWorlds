@@ -16,12 +16,12 @@
 #include <string>
 #include <vector>
 
-#include "climate_context.hpp"
-#include "climate_seasons.hpp"
-#include "climate_weather.hpp"
-#include "world/field_access.hpp"
-#include "world/transient_state.hpp"
-#include "world/world_grid.hpp"
+#include "simulations/climate/climate_context.hpp"
+#include "core/climate_seasons.hpp"
+#include "simulations/climate/climate_weather.hpp"
+#include "core/world/field_access.hpp"
+#include "core/world/transient_state.hpp"
+#include "core/world/world_grid.hpp"
 
 #ifndef ARRAYWIDTH
 #define ARRAYWIDTH 2048

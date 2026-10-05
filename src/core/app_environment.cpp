@@ -3,7 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include "app_environment.hpp"
+#include "core/app_environment.hpp"
 
 #include <algorithm>
 #include <cctype>

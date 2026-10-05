@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "frame_fixture.hpp"
-#include "mineral_history.hpp"
+#include "simulations/geology/mineral_systems/mineral_history.hpp"
 
 #include <cmath>
 #include <map>

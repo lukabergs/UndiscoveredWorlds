@@ -17,10 +17,10 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "tectonic_api.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_api.hpp"
 #include "gtest/gtest.h"
 #include <cstdlib>
-#include "simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/simplerandom.hpp"
 
 using namespace std;
 

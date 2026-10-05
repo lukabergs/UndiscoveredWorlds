@@ -1,6 +1,6 @@
 #ifndef TECTONIC_INITIALIZATION_HPP
 #define TECTONIC_INITIALIZATION_HPP
-#include "tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
 
 namespace tectonics::initialization {
 // Detailed seeded terrain conditioned on opening contacts. This is a plausible

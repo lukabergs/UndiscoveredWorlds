@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "run_bundle.hpp"
-#include "world/world_fields.hpp"
+#include "io/run_bundle.hpp"
+#include "core/world/world_fields.hpp"
 
 class planet;
 

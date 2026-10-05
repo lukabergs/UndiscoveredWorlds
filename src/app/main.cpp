@@ -2,7 +2,7 @@
 #include "imgui.h"
 #include "imgui-SFML.h"
 #include "ImGuiFileDialog.h"
-#include "create_world_screen.hpp"
+#include "app/create_world_screen.hpp"
 
 #include <cstdio>
 
@@ -32,27 +32,27 @@
 #include <SFML/System/Clock.hpp>
 #include <SFML/Window/Event.hpp>
 
-#include "classes.hpp"
-#include "climate_benchmark_outputs.hpp"
-#include "climate_artifacts.hpp"
-#include "planet.hpp"
-#include "physical_layers.hpp"
-#include "social_generation.hpp"
-#include "region.hpp"
-#include "app_dialogs.hpp"
-#include "app_environment.hpp"
-#include "app_state.hpp"
-#include "app_windows.hpp"
-#include "appearance_settings.hpp"
-#include "functions.hpp"
-#include "map_views.hpp"
-#include "generation_workbench.hpp"
-#include "map_appearance.hpp"
-#include "map_imports.hpp"
-#include "ui_charts.hpp"
-#include "ui_panels.hpp"
-#include "world_property_controls.hpp"
-#include "command_line_generation.hpp"
+#include "core/classes.hpp"
+#include "io/climate_benchmark_outputs.hpp"
+#include "validation/climate/climate_artifacts.hpp"
+#include "world/planet.hpp"
+#include "pipeline/physical_layers.hpp"
+#include "simulations/society/social_generation.hpp"
+#include "world/region.hpp"
+#include "app/app_dialogs.hpp"
+#include "core/app_environment.hpp"
+#include "app/app_state.hpp"
+#include "app/app_windows.hpp"
+#include "app/rendering/appearance_settings.hpp"
+#include "world/functions.hpp"
+#include "app/rendering/map_views.hpp"
+#include "app/generation_workbench.hpp"
+#include "app/rendering/map_appearance.hpp"
+#include "io/map_imports.hpp"
+#include "app/ui_charts.hpp"
+#include "app/ui_panels.hpp"
+#include "app/world_property_controls.hpp"
+#include "cli/command_line_generation.hpp"
 
 // nodiscard attribute
 #pragma warning (disable: 4834)

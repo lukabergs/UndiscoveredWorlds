@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "grid_coordinates.hpp"
-#include "planet.hpp"
-#include "social_generation_internal.hpp"
+#include "core/grid_coordinates.hpp"
+#include "world/planet.hpp"
+#include "simulations/society/social_generation_internal.hpp"
 
 using namespace std;
 

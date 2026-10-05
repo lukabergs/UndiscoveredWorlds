@@ -17,9 +17,9 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "tectonic_api.hpp"
-#include "lithosphere.hpp"
-#include "plate.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_api.hpp"
+#include "simulations/geology/plate_tectonics/lithosphere.hpp"
+#include "simulations/geology/plate_tectonics/plate.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 

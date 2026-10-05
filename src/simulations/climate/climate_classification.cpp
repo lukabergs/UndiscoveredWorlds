@@ -1,10 +1,10 @@
-#include "climate_biomes.hpp"
+#include "simulations/climate/climate_biomes.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include "climate_world.hpp"
-#include "climate_koppen.hpp"
-#include "climate_classification.hpp"
+#include "simulations/climate/climate_world.hpp"
+#include "simulations/climate/climate_koppen.hpp"
+#include "simulations/climate/climate_classification.hpp"
 
 using namespace std;
 

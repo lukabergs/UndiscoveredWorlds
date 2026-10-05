@@ -8,9 +8,9 @@
 #include <string_view>
 #include <vector>
 
-#include "planet_bundle.hpp"
-#include "world_processes.hpp"
-#include "world_stages.hpp"
+#include "world/planet_bundle.hpp"
+#include "pipeline/world_processes.hpp"
+#include "pipeline/world_stages.hpp"
 
 struct WorldRecipe
 {

@@ -5,7 +5,7 @@
 
 #include <cuda_runtime.h>
 
-#include "cuda_renderers.hpp"
+#include "app/rendering/cuda_renderers.hpp"
 
 namespace
 {

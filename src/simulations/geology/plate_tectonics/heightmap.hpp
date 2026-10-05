@@ -20,9 +20,9 @@
 #ifndef HEIGHTMAP_HPP
 #define HEIGHTMAP_HPP
 
-#include "rectangle.hpp"
-#include "utils.hpp"
-#include "world_point.hpp"
+#include "simulations/geology/plate_tectonics/rectangle.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
+#include "simulations/geology/plate_tectonics/world_point.hpp"
 #include <cstdint>
 #include <cstring>
 #include <stdexcept> // std::invalid_argument

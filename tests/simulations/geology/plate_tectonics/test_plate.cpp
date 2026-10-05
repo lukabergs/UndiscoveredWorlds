@@ -17,11 +17,11 @@
  *  License along with this library; if not, see http://www.gnu.org/licenses/
  *****************************************************************************/
 
-#include "plate.hpp"
-#include "material.hpp"
+#include "simulations/geology/plate_tectonics/plate.hpp"
+#include "simulations/geology/plate_tectonics/material.hpp"
 #include "gtest/gtest.h"
-#include "noise.hpp"
-#include "simplexnoise.hpp"
+#include "simulations/geology/plate_tectonics/noise.hpp"
+#include "simulations/geology/plate_tectonics/simplexnoise.hpp"
 
 void initializeHeightmapWithNoise(long seed, float *heightmap, const WorldDimension& wd)
 {

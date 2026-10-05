@@ -3,8 +3,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include "command_line_generation.hpp"
-#include "climate_options.hpp"
+#include "cli/command_line_generation.hpp"
+#include "cli/climate_options.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -12,17 +12,17 @@
 #include <iostream>
 #include <memory>
 
-#include "app_environment.hpp"
-#include "classes.hpp"
-#include "climate_artifacts.hpp"
-#include "functions.hpp"
-#include "world_stages.hpp"
-#include "map_imports.hpp"
-#include "physical_layers.hpp"
-#include "planet_bundle.hpp"
-#include "region.hpp"
-#include "world_recipes.hpp"
-#include "world_generation_debug.hpp"
+#include "core/app_environment.hpp"
+#include "core/classes.hpp"
+#include "validation/climate/climate_artifacts.hpp"
+#include "world/functions.hpp"
+#include "pipeline/world_stages.hpp"
+#include "io/map_imports.hpp"
+#include "pipeline/physical_layers.hpp"
+#include "world/planet_bundle.hpp"
+#include "world/region.hpp"
+#include "pipeline/world_recipes.hpp"
+#include "pipeline/world_generation_debug.hpp"
 
 using namespace std;
 

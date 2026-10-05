@@ -1,7 +1,7 @@
-#include "placer_routing.hpp"
+#include "simulations/geology/mineral_systems/placer_routing.hpp"
 
-#include "deterministic_random.hpp"
-#include "mineral_random.hpp"
+#include "core/deterministic_random.hpp"
+#include "simulations/geology/mineral_systems/mineral_random.hpp"
 
 #include <algorithm>
 #include <cmath>

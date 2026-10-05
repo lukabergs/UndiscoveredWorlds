@@ -18,12 +18,57 @@ TECTONICS_PUBLIC_HEADERS = {
     "tectonic_api.hpp", "tectonic_contract.hpp", "tectonic_recipe.hpp", "tectonic_scenario.hpp",
     "tectonic_world_grid.hpp", "topography_codec.hpp", "material.hpp", "utils.hpp",
 }
-RUNS_RESERVED = {"archive", "ledger", "registry", "reports", "work"}
+SOURCE_SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cu"}
+# Written into the build directory by tectonic_recipe.cmake.
+GENERATED_HEADERS = {"tectonic_baseline.inc"}
+DESKTOP_HEADERS = ("SFML/", "imgui", "ImGui")
+RUNS_RESERVED ={"archive", "ledger", "registry", "reports", "work"}
 ROOT_FILES = {
     ".gitignore", ".gitattributes", "AGENTS.md", "AGENTS.override.md",
     "README.md", "CMakeLists.txt", "CMakePresets.json", "vcpkg.json",
     "LICENSE", "version.txt", "pyproject.toml", "uv.lock",
 }
+
+
+def include_issues(root=ROOT):
+    """Includes: one root (src/), the layering of the source directories, the engine boundary.
+
+    A project header is included by its path from src/. core includes only core;
+    simulations and pipeline include neither app nor cli; SFML and ImGui are
+    included in app alone; code outside the tectonics engine includes only its
+    public headers. Tests may also include a header beside themselves.
+    """
+    issues = []
+    source = root / "src"
+    engine = TECTONICS_ENGINE.relative_to(ROOT).as_posix().removeprefix("src/") + "/"
+    for directory in ("src", "tests"):
+        for path in sorted((root / directory).rglob("*")):
+            if path.suffix not in SOURCE_SUFFIXES:
+                continue
+            relative = path.relative_to(root).as_posix()
+            owner = path.relative_to(source).parts[0] if directory == "src" else "tests"
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for bracket, header in re.findall(r'^\s*#\s*include\s+(["<])([^">]+)[">]', text, re.M):
+                if header.startswith(DESKTOP_HEADERS):
+                    if owner != "app":
+                        issues.append(f"{relative}: {header} belongs to the desktop application (src/app)")
+                    continue
+                if bracket == "<" or header in GENERATED_HEADERS or header.startswith("gtest/"):
+                    continue
+                if not (source / header).is_file():
+                    if directory == "tests" and (path.parent / header).is_file():
+                        continue
+                    issues.append(f"{relative}: include \"{header}\" is not a path from src/")
+                    continue
+                target = header.split("/")[0]
+                if owner == "core" and target != "core":
+                    issues.append(f"{relative}: core includes nothing above it ({header})")
+                if owner in ("simulations", "pipeline") and target in ("app", "cli"):
+                    issues.append(f"{relative}: {owner} does not include {target} ({header})")
+                if (directory == "src" and header.startswith(engine) and not relative.startswith("src/" + engine)
+                        and header.removeprefix(engine) not in TECTONICS_PUBLIC_HEADERS):
+                    issues.append(f"Internal tectonics header {header} used outside the engine: {relative}")
+    return issues
 
 
 def main():
@@ -50,15 +95,7 @@ def main():
             if not (base / path).is_file():
                 issues.append(f"Missing CMake source in {cmake_file.relative_to(ROOT)}: {path}")
 
-    internal = {path.name for path in TECTONICS_ENGINE.glob("*.hpp")} - TECTONICS_PUBLIC_HEADERS
-    for directory in ("src",):
-        for path in (ROOT / directory).rglob("*.[ch]pp"):
-            relative = path.relative_to(ROOT).as_posix()
-            if TECTONICS_ENGINE in path.parents:
-                continue
-            for header in re.findall(r'#include\s+"([^"]+)"', path.read_text(encoding="utf-8", errors="replace")):
-                if header in internal:
-                    issues.append(f"Internal tectonics header {header} used outside the engine: {relative}")
+    issues.extend(include_issues())
 
     for path in (ROOT / "refs/processed").rglob("*.xml"):
         if path.name.endswith(".png.aux.xml"):
@@ -97,7 +134,7 @@ def main():
     if issues:
         print("\n".join(issues))
         return 1
-    print("Layout checks passed: root items, CMake sources, tectonics boundary, reference sidecars, run directories, palette sidecars.")
+    print("Layout checks passed: root items, CMake sources, include root and layering, tectonics boundary, reference sidecars, run directories, palette sidecars.")
     return 0
 
 

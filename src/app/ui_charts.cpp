@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <string>
 
-#include "ui_charts.hpp"
-#include "functions.hpp"
-#include "map_views.hpp"
-#include "map_appearance.hpp"
+#include "app/ui_charts.hpp"
+#include "world/functions.hpp"
+#include "app/rendering/map_views.hpp"
+#include "app/rendering/map_appearance.hpp"
 
 using namespace std;
 

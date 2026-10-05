@@ -1,7 +1,7 @@
-#include "tectonic_provenance.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 
-#include "topography_codec.hpp"
-#include "tectonic_kinematics.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_kinematics.hpp"
 
 #include <algorithm>
 #include <cmath>

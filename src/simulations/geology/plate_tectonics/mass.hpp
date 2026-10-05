@@ -20,12 +20,12 @@
 #ifndef MASS_HPP
 #define MASS_HPP
 
-#include "bounds.hpp"
-#include "heightmap.hpp"
-#include "movement.hpp"
-#include "rectangle.hpp"
-#include "simplerandom.hpp"
-#include "utils.hpp"
+#include "simulations/geology/plate_tectonics/bounds.hpp"
+#include "simulations/geology/plate_tectonics/heightmap.hpp"
+#include "simulations/geology/plate_tectonics/movement.hpp"
+#include "simulations/geology/plate_tectonics/rectangle.hpp"
+#include "simulations/geology/plate_tectonics/simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/utils.hpp"
 #include <cmath> // sin, cos
 #include <vector>
 

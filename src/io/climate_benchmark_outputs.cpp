@@ -1,4 +1,4 @@
-#include "climate_benchmark_outputs.hpp"
+#include "io/climate_benchmark_outputs.hpp"
 
 #include <algorithm>
 #include <array>

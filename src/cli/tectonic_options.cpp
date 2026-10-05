@@ -2,7 +2,7 @@
 // (and the engine's other scenario members) as --key value for world_pipeline;
 // range checks stay in the engine.
 
-#include "tectonic_options.hpp"
+#include "cli/tectonic_options.hpp"
 
 #include <cmath>
 #include <cstdint>

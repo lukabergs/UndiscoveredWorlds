@@ -1,11 +1,11 @@
 #ifndef TECTONIC_SCENARIO_HPP
 #define TECTONIC_SCENARIO_HPP
 
-#include "topography_codec.hpp"
-#include "tectonic_margins.hpp"
-#include "tectonic_noise_pass.hpp"
-#include "tectonic_plumes.hpp"
-#include "tectonic_topology.hpp"
+#include "simulations/geology/plate_tectonics/topography_codec.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_margins.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_noise_pass.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_plumes.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_topology.hpp"
 
 #include <cstdint>
 

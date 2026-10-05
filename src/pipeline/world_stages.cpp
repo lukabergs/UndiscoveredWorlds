@@ -6,16 +6,16 @@
 #include <stdexcept>
 #include <string>
 
-#include "world_stages.hpp"
-#include "climate_stages.hpp"
+#include "pipeline/world_stages.hpp"
+#include "pipeline/climate_stages.hpp"
 
-#include "classes.hpp"
-#include "fastlem_mountains.hpp"
-#include "functions.hpp"
-#include "generation_tuning.hpp"
-#include "physical_layers.hpp"
-#include "world_generation_debug.hpp"
-#include "world_processes.hpp"
+#include "core/classes.hpp"
+#include "simulations/terrain/fastlem_mountains.hpp"
+#include "world/functions.hpp"
+#include "world/generation_tuning.hpp"
+#include "pipeline/physical_layers.hpp"
+#include "pipeline/world_generation_debug.hpp"
+#include "pipeline/world_processes.hpp"
 
 using namespace std;
 

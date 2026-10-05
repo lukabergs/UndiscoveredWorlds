@@ -1,5 +1,5 @@
-#include "climate_reference.hpp"
-#include "climate_experiment_input.hpp"
+#include "io/climate_reference.hpp"
+#include "io/climate_experiment_input.hpp"
 
 #include <algorithm>
 #include <array>

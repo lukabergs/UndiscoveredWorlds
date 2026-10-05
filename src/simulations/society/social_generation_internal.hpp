@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "social_generation.hpp"
+#include "simulations/society/social_generation.hpp"
 
 class planet;
 

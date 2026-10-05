@@ -1,11 +1,11 @@
-#include "physical_layers.hpp"
-#include "generation_progress.hpp"
-#include "planet.hpp"
-#include "../simulations/hydrology/drainage_basins.hpp"
-#include "../simulations/terrain/surface_potentials.hpp"
-#include "../simulations/resources/gold_deposits.hpp"
-#include "../simulations/resources/mineral_resources.hpp"
-#include "../simulations/resources/marine_resources.hpp"
+#include "pipeline/physical_layers.hpp"
+#include "pipeline/generation_progress.hpp"
+#include "world/planet.hpp"
+#include "simulations/hydrology/drainage_basins.hpp"
+#include "simulations/terrain/surface_potentials.hpp"
+#include "simulations/resources/gold_deposits.hpp"
+#include "simulations/resources/mineral_resources.hpp"
+#include "simulations/resources/marine_resources.hpp"
 
 #include <cstdio>
 

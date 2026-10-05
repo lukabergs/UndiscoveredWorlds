@@ -1,12 +1,12 @@
-#include "world_recipes.hpp"
+#include "pipeline/world_recipes.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <set>
 #include <stdexcept>
 
-#include "planet_fields.hpp"
-#include "world/field_access.hpp"
+#include "world/planet_fields.hpp"
+#include "core/world/field_access.hpp"
 
 using worldmodel::Component;
 using worldmodel::FieldId;

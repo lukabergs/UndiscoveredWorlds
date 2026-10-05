@@ -1,4 +1,4 @@
-#include "climate_world_fields.hpp"
+#include "simulations/climate/climate_world_fields.hpp"
 
 #include <algorithm>
 #include <iomanip>
@@ -6,8 +6,8 @@
 #include <limits>
 #include <sstream>
 
-#include "climate_world.hpp"
-#include "generation_tuning.hpp"
+#include "simulations/climate/climate_world.hpp"
+#include "world/generation_tuning.hpp"
 
 using worldmodel::FieldData;
 using worldmodel::FieldId;

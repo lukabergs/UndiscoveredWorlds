@@ -4,7 +4,7 @@
 // them on a planet's climate state. Seeded noise streams follow the world seed
 // and stage salts.
 
-#include "generation_stage_registry.hpp"
+#include "pipeline/generation_stage_registry.hpp"
 
 class boolshapetemplate;
 class climateworld;

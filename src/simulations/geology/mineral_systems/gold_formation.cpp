@@ -1,6 +1,6 @@
-#include "gold_formation.hpp"
+#include "simulations/geology/mineral_systems/gold_formation.hpp"
 
-#include "mineral_random.hpp"
+#include "simulations/geology/mineral_systems/mineral_random.hpp"
 
 #include <algorithm>
 #include <array>

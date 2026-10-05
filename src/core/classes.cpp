@@ -6,8 +6,7 @@
 //
 //  Please see functions.hpp for notes.
 
-#include "classes.hpp"
-#include "functions.hpp"
+#include "core/classes.hpp"
 #include <list>
 
 // Multiple value classes

@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
-#include "tectonic_columns.hpp"
-#include "tectonic_ocean_relief.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_ocean_relief.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>

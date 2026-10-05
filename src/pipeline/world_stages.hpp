@@ -12,11 +12,11 @@
 #include <string>
 #include <vector>
 
-#include "generation_stage_registry.hpp"
-#include "planet.hpp"
-#include "social_generation.hpp"
-#include "world/transient_state.hpp"
-#include "world_tectonics.hpp"
+#include "pipeline/generation_stage_registry.hpp"
+#include "world/planet.hpp"
+#include "simulations/society/social_generation.hpp"
+#include "core/world/transient_state.hpp"
+#include "simulations/geology/world_tectonics.hpp"
 
 class boolshapetemplate;
 struct ImportedClimateMaps;

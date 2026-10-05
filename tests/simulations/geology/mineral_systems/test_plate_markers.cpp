@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "frame_fixture.hpp"
-#include "plate_markers.hpp"
+#include "simulations/geology/mineral_systems/plate_markers.hpp"
 
 using namespace mineralsystems;
 

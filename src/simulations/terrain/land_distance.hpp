@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-#include "grid_coordinates.hpp"
+#include "core/grid_coordinates.hpp"
 
 namespace terraindetail
 {

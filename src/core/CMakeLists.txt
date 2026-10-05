@@ -1,6 +1,7 @@
 # Grids, noise, random numbers, the field catalogue, environment paths, profiler.
 add_library(uw_core STATIC
     app_environment.cpp
+    classes.cpp
     climate_grid.cpp
     grid_coordinates.cpp
     procedural_noise.cpp

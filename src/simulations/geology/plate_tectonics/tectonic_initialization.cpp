@@ -1,5 +1,5 @@
-#include "tectonic_initialization.hpp"
-#include "tectonic_thermal.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_initialization.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
