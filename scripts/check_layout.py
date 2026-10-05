@@ -15,6 +15,7 @@ TECTONICS_PUBLIC_HEADERS = {
     "tectonic_api.hpp", "tectonic_contract.hpp", "tectonic_recipe.hpp", "tectonic_scenario.hpp",
     "tectonic_world_grid.hpp", "topography_codec.hpp", "material.hpp", "utils.hpp",
 }
+RUNS_RESERVED = {"archive", "ledger", "registry", "reports", "work"}
 ROOT_FILES = {
     ".gitignore", ".gitattributes", "AGENTS.md", "AGENTS.override.md",
     "README.md", "CMakeLists.txt", "CMakePresets.json", "vcpkg.json",
@@ -63,15 +64,16 @@ def main():
         elif "<PAMDataset>" in path.read_text(encoding="utf-8", errors="replace"):
             issues.append(f"GDAL sidecar must retain the image filename and .aux.xml: {path.relative_to(ROOT)}")
 
-    for category in ("maps", "fields"):
-        directory = ROOT / "runs" / category
-        for path in (directory.iterdir() if directory.exists() else ()):
-            if path.is_dir() and path.name not in {"climate", "tectonics"}:
-                issues.append(f"Unclassified run category: {path.relative_to(ROOT)}")
-        for path in (ROOT / "runs" / category / "climate").rglob("*"):
-            if path.is_file() and path.suffix in {".png", ".tif"}:
-                if not path.stem.isdigit() or "0" in path.relative_to(ROOT / "runs" / category).parts[:-1]:
-                    issues.append(f"Run maps require numeric IDs and 1-based seasons: {path.relative_to(ROOT)}")
+    # Run layout (docs/architecture/consolidation-plan.md, section 4): runs/<module>/<id>/run.json;
+    # the sealed layout under runs/archive/ is not checked.
+    for module in ((ROOT / "runs").iterdir() if (ROOT / "runs").exists() else ()):
+        if not module.is_dir() or module.name in RUNS_RESERVED:
+            continue
+        for path in module.iterdir():
+            if not path.name.isdigit() or not path.is_dir():
+                issues.append(f"Run directories are numeric ids: {path.relative_to(ROOT).as_posix()}")
+            elif not (path / "run.json").is_file():
+                issues.append(f"Run directory without run.json: {path.relative_to(ROOT).as_posix()}")
 
     reference_maps = ROOT / "refs/processed/climate/maps"
     for path in reference_maps.rglob("*.png"):
@@ -81,7 +83,7 @@ def main():
     if issues:
         print("\n".join(issues))
         return 1
-    print("Layout checks passed: root items, CMake sources, tectonics boundary, reference sidecars, run categories.")
+    print("Layout checks passed: root items, CMake sources, tectonics boundary, reference sidecars, run directories.")
     return 0
 
 

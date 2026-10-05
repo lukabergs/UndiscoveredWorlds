@@ -383,6 +383,13 @@
       "id": 76,
       "status": "complete",
       "manifest": "runs/manifests/tectonics/76.json"
+    },
+    {
+      "id": 77,
+      "status": "complete",
+      "run": "runs/tectonics/77",
+      "date": "2026-10-05T08:38:23+00:00",
+      "label": "phase 3 step 8: first registered run of the run layout (settings of run 76)"
     }
   ]
 }

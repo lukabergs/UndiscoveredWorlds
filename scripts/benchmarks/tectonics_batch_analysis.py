@@ -6,10 +6,10 @@ import sys
 import numpy as np
 from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import grid, palettes
+from uwtools import grid, palettes, runs
 from uwtools.hashing import sha256
-from tectonics_experiment import write_json, snapshot_manifest
-from tectonics_report_data import load_bundle
+from uwtools.tectonics import snapshot_manifest
+from tectonics_report_data import load_bundle, write_json
 from tectonics_review import review
 from tectonics_earth_reference import load_earth_reference
 from map_rendering import colourize
@@ -46,8 +46,8 @@ def earth_thresholds():
 
 
 def analyze(run_id):
-    record = json.loads((ROOT/f'runs/manifests/tectonics/{run_id}.json').read_text())
-    output = ROOT/f'runs/diagnostics/tectonics/{run_id}'
+    record = runs.tectonics(run_id)
+    output = runs.output_directory('tectonics', run_id)
     cached = output/'iteration-review.json'
     result = json.loads(cached.read_text()) if cached.exists() else review(run_id,load_earth_reference(ROOT))
     m = result['final']
@@ -55,13 +55,12 @@ def analyze(run_id):
     final_bundle = None
     for label in ['initial','final']:
         snap = next(s for s in record['snapshots'] if s['label']==label)
-        bundle, fields, _ = load_bundle(ROOT/f'runs/checkpoints/tectonics/{run_id}'/snap['directory'],
-                                       record['field_sha256'][label])
+        bundle, fields, _ = load_bundle(snap['path'], record.get('field_sha256', {}).get(label))
         thresholds[label] = distribution(fields['elevation'])
         if label == 'final': final_bundle = bundle
     fracture_history = []
     for snap in record['snapshots']:
-        state = snapshot_manifest(ROOT/f'runs/checkpoints/tectonics/{run_id}'/snap['directory'])
+        state = snapshot_manifest(snap['path'])
         diagnostics = state.get('topology_diagnostics', {})
         fracture_history.append(dict(time_myr=state['time_myr'],
             **{key: diagnostics.get(key, 0) for key in
@@ -69,14 +68,14 @@ def analyze(run_id):
     peak_index = max(range(len(fracture_history)), key=lambda i: fracture_history[i]['damaged_rift_cells'])
     if fracture_history[peak_index]['damaged_rift_cells'] > 0:
         snap = record['snapshots'][peak_index]
-        _, damaged, _ = load_bundle(ROOT/f'runs/checkpoints/tectonics/{run_id}'/snap['directory'])
+        _, damaged, _ = load_bundle(snap['path'])
         palette = palettes.tectonics()
         for name, field in [('rift-damage-peak', 'rift_damage'), ('rift-terrain-peak', 'elevation')]:
             stops = palette['fields'][field].get('stops', palette['sequential'])
             Image.fromarray(colourize(damaged[field], stops)).resize(
                 (1024, 512), Image.Resampling.NEAREST).save(output/f'{name}.png')
     c = m['coastal_terrain']
-    summary = dict(run=run_id, seed=record['recipe']['seed'], elapsed_seconds=record['elapsed_seconds'],
+    summary = dict(run=run_id, seed=record['recipe']['seed'], elapsed_seconds=record.get('elapsed_seconds'),
         land_percent=100*m['land_fraction'], peak_m=m['elevation_m']['max'],
         mean_depth_m=m['ocean_depth_m']['mean'], coast_p95_m=c['coastal_land_m']['p95'],
         coast_jump_p95_m=c['coastal_face_jump_m']['p95'],

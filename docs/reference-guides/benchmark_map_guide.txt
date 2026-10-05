@@ -1,3 +1,5 @@
+Describes the sealed pre-consolidation layout: a path runs/<kind>/... below is now runs/archive/<kind>/... (runs/archive/README.md); the C++ climate-benchmark command now writes these paths under out/climate-benchmark/.
+
 BENCHMARK MAP GUIDE
 
 Current palette contract: configs/climate-palettes.json (climate-colour-v2).

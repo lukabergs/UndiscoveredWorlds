@@ -3,6 +3,7 @@ import argparse
 import base64
 import colorsys
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -10,15 +11,25 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import palettes
+from uwtools import palettes, runs
 from uwtools.hashing import sha256, sha256_bytes
+from uwtools.paths import ROOT
 import map_rendering
-from tectonics_experiment import ROOT, write_json
-from tectonics_report_data import load_bundle, diagnostics, compare_fields
+from tectonics_report_data import load_bundle, diagnostics, compare_fields, write_json
 from tectonics_earth_reference import load_earth_reference, compare_to_earth
 from tectonics_feedback_report import feedback_snapshots, feedback_controls, climate_field_specs
 
 PALETTE_PATH = palettes.TECTONICS_PATH
+
+
+def outputs(run_id):
+    """Maps, fields, animations and metrics derived from one run: never inside runs/archive."""
+    return runs.output_directory("tectonics", run_id)
+
+
+def relative(path):
+    path = Path(path)
+    return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
 
 
 def report_template():
@@ -109,18 +120,19 @@ def run_animations(run_id, states, fieldspec, image_link=image_uri):
     # 120 ms/Myr, plus a brief final pause. Zero-time administrative steps
     # remain visible for 120 ms; these are observations, not invented in-betweens.
     durations = [max(120, round((b - a) * 120)) for a, b in zip(times, times[1:])] + [1200]
-    metadata_path = ROOT / f"runs/diagnostics/tectonics/{run_id}/animations.json"
+    directory = outputs(run_id)
+    metadata_path = directory / "animations.json"
     previous = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
     result = {}
     for field, spec in fieldspec.items():
         if any(field in state.get("missing_fields", []) for state in selected):
             continue
-        paths = [ROOT / f"runs/maps/tectonics/{field}/{s['label']}/{run_id}.png" for s in selected]
+        paths = [directory / f"maps/{field}/{s['label']}.png" for s in selected]
         # Finalization can share model time and pixels with a preceding
         # observation, even at the same update count. Checkpoint labels prevent
         # APNG coalescing those separately recorded observations.
         labels = [f"Run {run_id} | {s['time']:g} Myr | {s['label']} | {spec['title']} ({spec['units']})" for s in selected]
-        output = ROOT / f"runs/maps/tectonics/{field}/animation/{run_id}.png"
+        output = directory / f"maps/{field}/animation.png"
         signature = sha256_bytes(json.dumps({"frames": [sha256(path) for path in paths],
             "labels": labels, "durations": durations,
             "renderer_sha256": sha256(Path(map_rendering.__file__))}, sort_keys=True).encode())
@@ -128,7 +140,7 @@ def run_animations(run_id, states, fieldspec, image_link=image_uri):
         if (metadata.get("render_signature") != signature or not output.exists()
                 or sha256(output) != metadata.get("sha256")):
             metadata = map_rendering.save_animation(output, paths, labels, durations)
-        metadata.update(path=output.relative_to(ROOT).as_posix(), sha256=sha256(output),
+        metadata.update(path=relative(output), sha256=sha256(output),
                         times_myr=times, durations_ms=durations, render_signature=signature)
         result[field] = dict(metadata, image=image_link(output))
     write_json(metadata_path,
@@ -137,9 +149,11 @@ def run_animations(run_id, states, fieldspec, image_link=image_uri):
 
 
 def write_run_note(run_id, record, states):
-    """Create the run's review stub once; preserve subsequent human findings/decisions."""
+    """Create a sealed run's review stub once; preserve subsequent human findings/decisions.
+
+    A run of the current layout has its run page and ledger draft instead."""
     path = ROOT / f"runs/reports/tectonics/{run_id}.md"
-    if path.exists():
+    if path.exists() or runs.directory("tectonics", run_id) is not None:
         return
     final = next(s for s in states if s["run"] == run_id and s["label"] == "final")
     m = final["metrics"]
@@ -159,9 +173,9 @@ Inspect the configured procedural tectonics scenario against the established fix
 - Land fraction: {m['land_fraction']:.3%}; maximum land elevation: {peak} m.
 - Native field invariants: {m['invariants_pass']}; codec range preserved: {m['codec_range_preserved']}.
 - Exact final replay: {record.get('replay', {}).get('exact_match', 'not checked')}.
-- Source, executable, recipe and field hashes: `runs/manifests/tectonics/{run_id}.json`.
-- Numerical metrics: `runs/diagnostics/tectonics/{run_id}/metrics.json`.
-- Raw execution output: `runs/logs/tectonics/{run_id}.log`.
+- Source, executable, recipe and field hashes: `runs/archive/manifests/tectonics/{run_id}.json`.
+- Numerical metrics: `{relative(outputs(run_id) / 'metrics.json')}`.
+- Raw execution output: `runs/archive/logs/tectonics/{run_id}.log`.
 
 ## Interpretation and decision
 
@@ -171,14 +185,20 @@ Record visual findings and the next controlled experiment here. Numerical correc
     path.write_text(text, encoding="utf-8")
 
 
+def findings(run_id, output):
+    """Link from the report to the run's findings: its run page, or a sealed run's note."""
+    run = runs.directory("tectonics", run_id)
+    note = run / "evaluation/index.html" if run else ROOT / f"runs/reports/tectonics/{run_id}.md"
+    return Path(os.path.relpath(note, Path(output).absolute().parent)).as_posix()
+
+
 def report_snapshots(run_id, record):
     if record.get('kind') == 'tectonics-climate-feedback/v1':
         yield from feedback_snapshots(record)
         return
     for checkpoint in record['snapshots']:
         label = checkpoint['label']
-        path = ROOT / f'runs/checkpoints/tectonics/{run_id}' / checkpoint['directory']
-        manifest, fields, hashes = load_bundle(path, record['field_sha256'][label])
+        manifest, fields, hashes = load_bundle(checkpoint['path'], record.get('field_sha256', {}).get(label))
         metrics = diagnostics(manifest, fields)
         metrics['fraction_below'] = {str(level): float((fields['elevation'] < level).mean())
             for level in (-6000, -4000, -2000, -1000, -258, -200, -160, 0, 1000, 2000, 4000)}
@@ -215,8 +235,7 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
             earth_reference['threshold_cache'] = dict(path=thresholds_path.relative_to(ROOT).as_posix(), sha256=sha256(thresholds_path))
     definition = palettes.tectonics()
     fieldspec = definition["fields"]
-    records = [json.loads((ROOT / f"runs/manifests/tectonics/{run_id}.json").read_text())
-               for run_id in run_ids]
+    records = [runs.tectonics(run_id) for run_id in run_ids]
     if not records or any(r["status"] != "complete" for r in records):
         raise ValueError("Report requires complete runs")
     if any(r.get('kind') == 'tectonics-climate-feedback/v1' for r in records):
@@ -247,8 +266,8 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
                     state["missing_fields"].append(field)
                     continue
                 data = fields[field]
-                map_path = ROOT / f"runs/maps/tectonics/{field}/{label}/{run_id}.png"
-                numeric = ROOT / f"runs/fields/tectonics/{field}/{label}/{run_id}.npy"
+                map_path = outputs(run_id) / f"maps/{field}/{label}.png"
+                numeric = outputs(run_id) / f"fields/{field}/{label}.npy"
                 numeric.parent.mkdir(parents=True, exist_ok=True)
                 np.save(numeric, data, allow_pickle=False)
                 if external_assets and not maps_only:
@@ -275,11 +294,11 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
             rgba[..., :3] = map_rendering.categories(boundary,
                                                     dict(enumerate(fieldspec["boundary_type"]["colours"])))
             rgba[..., 3] = np.where(boundary > 0, 230, 0)
-            overlay = ROOT / f"runs/maps/tectonics/boundary_overlay/{label}/{run_id}.png"
+            overlay = outputs(run_id) / f"maps/boundary_overlay/{label}.png"
             overlay.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(rgba).save(overlay)
             state["overlay"] = image_link(overlay)
-            coastline = ROOT / f"runs/maps/tectonics/coastline_overlay/{label}/{run_id}.png"
+            coastline = outputs(run_id) / f"maps/coastline_overlay/{label}.png"
             coastline.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(map_rendering.outline(fields["elevation"] >= 0)).save(coastline)
             state["coastline"] = image_link(coastline)
@@ -287,7 +306,7 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
             states.append(state)
             if not external_assets and not maps_only:
                 arrays.append(fields)
-        write_json(ROOT / f"runs/diagnostics/tectonics/{run_id}/metrics.json",
+        write_json(outputs(run_id) / "metrics.json",
                    {state["label"]: state["metrics"] for state in states if state["run"] == run_id})
         animations[str(run_id)] = run_animations(run_id, states, fieldspec, image_link)
         if record.get('kind') == 'tectonics-climate-feedback/v1':
@@ -302,7 +321,7 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
                 data = control_fields[key]
                 is_difference = key not in review['distributions']
                 stops = difference_stops if is_difference else fieldspec['elevation']['stops']
-                map_path = ROOT / f'runs/maps/tectonics/feedback/{key}/{run_id}.png'
+                map_path = outputs(run_id) / f'maps/feedback/{key}.png'
                 map_rendering.save_rgb(map_path, map_rendering.colourize(data, stops, definition['missing']))
                 controls[key] = dict(title=title, image=image_link(map_path), stops=stops,
                     units='m difference' if is_difference else 'm relative to sea level',
@@ -324,14 +343,14 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
             if states[i]["seed"] == states[j]["seed"] and first["heightmap"].shape == second["heightmap"].shape:
                 comparisons[f"{i}:{j}"] = compare_fields(first, second)
     probe = None
-    probe_path = ROOT / f"runs/diagnostics/tectonics/{run_ids[-1]}/surface-process-probe.json"
-    if probe_path.is_file():
+    probe_path = runs.derived("tectonics", run_ids[-1], "surface-process-probe.json")
+    if probe_path:
         probe = {"data": json.loads(probe_path.read_text()), "sha256": sha256(probe_path),
-                 "path": probe_path.relative_to(ROOT).as_posix()}
+                 "path": relative(probe_path)}
     regional_reviews = {}
     for run_id in run_ids:
-        regional_path = ROOT / f'runs/diagnostics/tectonics/{run_id}/coastal-window.png'
-        if regional_path.is_file():
+        regional_path = runs.derived("tectonics", run_id, "coastal-window.png")
+        if regional_path:
             regional_reviews[str(run_id)] = image_link(regional_path)
     payload = {"states": states, "fields": fieldspec, "sequential": definition["sequential"],
                "regional_reviews": regional_reviews,
@@ -345,7 +364,7 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
                     'seconds': record.get('elapsed_seconds'), 'kind': record.get('kind', 'native tectonics')}
                     for run_id, record in zip(run_ids, records)},
                "recipes": {str(run_id): record["recipe"] for run_id, record in zip(run_ids, records)},
-               "findings_url": Path(output).with_suffix(".md").name if Path(output).with_suffix(".md").exists() else f"{run_ids[-1]}.md",
+               "findings_url": Path(output).with_suffix(".md").name if Path(output).with_suffix(".md").exists() else findings(run_ids[-1], output),
                "surface_probe": probe,
                "replay_exact": all(r.get("replay", {}).get("exact_match", False) for r in records)}
     template = report_template()

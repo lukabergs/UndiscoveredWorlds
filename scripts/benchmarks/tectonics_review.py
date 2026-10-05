@@ -8,11 +8,10 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import palettes
+from uwtools import palettes, runs
 from uwtools.hashing import sha256
-from tectonics_report_data import load_bundle, diagnostics
+from tectonics_report_data import load_bundle, diagnostics, write_json
 from tectonics_earth_reference import load_earth_reference, compare_to_earth
-from tectonics_experiment import write_json
 from map_rendering import colourize
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,7 +39,7 @@ def write_overview(results, output):
             f'<td>{islands["islands_2_to_64_cells"]}</td><td>{islands["single_cell_islands"]}</td>'
             f'<td>{m["land_fraction"]*100:.2f}%</td><td>{m["ocean_depth_m"]["mean"]:.0f}</td>'
             f'<td>{m["earth_comparison"]["hypsography_mean_absolute_quantile_gap_m"]:.0f}</td></tr>')
-        png = ROOT / f'runs/diagnostics/tectonics/{run}/iteration-preview.png'
+        png = runs.derived('tectonics', run, 'iteration-preview.png')
         image = base64.b64encode(png.read_bytes()).decode('ascii')
         cards.append(f'<article id="run{run}"><h2>Run {run}</h2><p>{html.escape(result["recipe"])}</p>'
             f'<p>{" · ".join(links)}</p><img alt="Run {run}: final elevation and terrain detail" '
@@ -65,13 +64,12 @@ All maps use the same elevation and detail palettes. The terrain-detail image is
 
 
 def review(run_id, earth):
-    record = json.loads((ROOT / f'runs/manifests/tectonics/{run_id}.json').read_text())
+    record = runs.tectonics(run_id)
     if record['status'] != 'complete':
         raise ValueError('Review requires a completed run; preserve pending replay evidence')
     states, previous = [], None
     for snap in record['snapshots']:
-        manifest, fields, _ = load_bundle(ROOT / f'runs/checkpoints/tectonics/{run_id}' / snap['directory'],
-                                          record['field_sha256'][snap['label']])
+        manifest, fields, _ = load_bundle(snap['path'], record.get('field_sha256', {}).get(snap['label']))
         m = diagnostics(manifest, fields)
         temporal = None
         if previous is not None and manifest['time_myr'] > previous[0]:
@@ -97,7 +95,7 @@ def review(run_id, earth):
               'states': states, 'final': m,
               'review_source_sha256': {p.name: sha256(p) for p in [Path(__file__),
                   ROOT / 'scripts/benchmarks/tectonics_report_data.py', palettes.TECTONICS_PATH]}}
-    output = ROOT / f'runs/diagnostics/tectonics/{run_id}'
+    output = runs.output_directory('tectonics', run_id)
     write_json(output / 'iteration-review.json', result)
     field_palettes = palettes.tectonics()['fields']
     panels = []

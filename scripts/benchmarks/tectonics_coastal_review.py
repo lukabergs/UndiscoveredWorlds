@@ -6,15 +6,13 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import palettes
+from uwtools import palettes, runs
 from map_rendering import colourize
 from tectonics_report_data import load_bundle
 
-ROOT = Path(__file__).resolve().parents[2]
-
 
 def review(run):
-    record = json.loads((ROOT/f'runs/manifests/tectonics/{run}.json').read_text())
+    record = runs.tectonics(run)
     palette = palettes.tectonics()['fields']['elevation']['stops']
     canvas = Image.new('RGB', (1280, 930), '#101b28')
     draw = ImageDraw.Draw(canvas)
@@ -22,7 +20,7 @@ def review(run):
     results = []
     for panel, time in enumerate([0, 100, 300, 600]):
         snap = next(s for s in record['snapshots'] if s['time_myr'] == time)
-        m, f, _ = load_bundle(ROOT/f'runs/checkpoints/tectonics/{run}'/snap['directory'])
+        m, f, _ = load_bundle(snap['path'])
         z = f['elevation']
         x0, y0 = (panel % 2)*640, 40+(panel//2)*440
         im = Image.fromarray(colourize(z[50:91, 150:191], palette)).resize((410, 410), Image.Resampling.NEAREST)
@@ -43,7 +41,7 @@ def review(run):
             lowland_cells=int(((roi>=0)&(roi<300)).sum()), shallow_cells=int(((roi<0)&(roi>=-200)).sum()),
             row70={name:np.round(f[name][70,150:191],2).tolist() for name in
                 ['elevation','continental_crust_m','oceanic_crust_m','sediment_m','plate_identity']}))
-    out=ROOT/f'runs/diagnostics/tectonics/{run}'
+    out=runs.output_directory('tectonics',run)
     out.mkdir(parents=True,exist_ok=True)
     canvas.save(out/'coastal-window.png')
     (out/'coastal-window.json').write_text(json.dumps(dict(run=run, coordinate_convention='zero-based, top-left; fixed location, not material tracking',states=results),indent=2))

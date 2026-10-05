@@ -13,6 +13,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts/benchmarks"))
 import map_rendering
 import tectonics_report
+from uwtools import runs
 from tectonics_report_data import DTYPES, compare_fields, diagnostics, elevation_m, load_bundle, hypsography_shape, largest_connected_patch, near_convergence
 from tectonics_report_data import plate_topology, local_relief, terrain_detail, plate_events, coast_distance, coastal_terrain, island_sizes
 
@@ -241,9 +242,9 @@ class TectonicsReportTests(unittest.TestCase):
             states = [{"run": 2, "label": label, "time": 1, "updates": update}
                       for label, update in (("update000001", 1), ("final", 1))]
             for state in states:
-                path = root / f"runs/maps/tectonics/elevation/{state['label']}/2.png"
+                path = root / f"maps/elevation/{state['label']}.png"
                 map_rendering.save_rgb(path, np.zeros((2, 4, 3), dtype=np.uint8))
-            with patch.object(tectonics_report, "ROOT", root):
+            with patch.object(tectonics_report, "outputs", lambda run: root):
                 metadata = tectonics_report.run_animations(2, states,
                     {"elevation": {"title": "Elevation", "units": "m"}})["elevation"]
             with Image.open(root / metadata["path"]) as animation:
@@ -330,8 +331,12 @@ class TectonicsReportTests(unittest.TestCase):
     def test_two_run_report_has_real_comparison_and_rejects_tampered_archive(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            # Two sealed runs: registry records without a run directory, manifests and bundles in the archive.
+            registry = root / "runs/registry/tectonics.json"
+            registry.parent.mkdir(parents=True)
+            registry.write_text(json.dumps({"runs": [{"id": run, "status": "complete"} for run in (1, 2)]}))
             for run in (1, 2):
-                bundle = root / f"runs/checkpoints/tectonics/{run}/final"
+                bundle = root / f"runs/archive/checkpoints/tectonics/{run}/final"
                 bundle.mkdir(parents=True)
                 fixture(bundle)
                 heights = np.ones((2, 4), dtype="<f4") * (1 + run * .01)
@@ -339,10 +344,12 @@ class TectonicsReportTests(unittest.TestCase):
                 _, _, hashes = load_bundle(bundle)
                 record = {"id": run, "status": "complete", "recipe": {"seed": 12345}, "replay": {"exact_match": True},
                           "snapshots": [{"label": "final", "directory": "final"}], "field_sha256": {"final": hashes}}
-                path = root / f"runs/manifests/tectonics/{run}.json"
+                path = root / f"runs/archive/manifests/tectonics/{run}.json"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(json.dumps(record))
-            with patch.object(tectonics_report, "ROOT", root):
+            outputs = root / "runs/reports/tectonics"
+            with patch.object(tectonics_report, "ROOT", root), patch.object(runs, "ROOT", root), \
+                    patch.object(runs, "ARCHIVE", root / "runs/archive"):
                 output = root / "comparison.html"
                 states = tectonics_report.build_report([1, 2], output)
                 report = json.loads(output.with_suffix(".json").read_text())
@@ -350,12 +357,12 @@ class TectonicsReportTests(unittest.TestCase):
                 self.assertGreater(report["comparisons"]["0:1"]["elevation"]["mae"], 300)
                 with patch.object(map_rendering, 'save_animation', side_effect=AssertionError('Unchanged animation rerendered')):
                     tectonics_report.run_animations(1, states, json.loads(tectonics_report.PALETTE_PATH.read_text())['fields'])
-                changed_frame=root/'runs/maps/tectonics/elevation/final/1.png'
+                changed_frame=outputs/'1/analysis/maps/elevation/final.png'
                 Image.new('RGB',(4,2),(0,0,0)).save(changed_frame)
                 with patch.object(map_rendering, 'save_animation', wraps=map_rendering.save_animation) as render:
                     tectonics_report.run_animations(1, states, json.loads(tectonics_report.PALETTE_PATH.read_text())['fields'])
                     self.assertEqual(render.call_count,1)
-                saved = np.load(root / "runs/fields/tectonics/elevation/final/2.npy")
+                saved = np.load(outputs / "2/analysis/fields/elevation/final.npy")
                 self.assertGreater(saved.min(), 600)
                 self.assertNotIn("__REPORT_DATA__", output.read_text(encoding="utf-8"))
                 maps_only = root / "must-not-exist.html"
@@ -363,7 +370,8 @@ class TectonicsReportTests(unittest.TestCase):
                     tectonics_report.build_report([1, 2], maps_only, maps_only=True)
                 self.assertFalse(maps_only.exists())
                 self.assertFalse(maps_only.with_suffix(".json").exists())
-                self.assertTrue((root / "runs/maps/tectonics/elevation/animation/2.png").exists())
+                self.assertTrue((outputs / "2/analysis/maps/elevation/animation.png").exists())
+                self.assertFalse(any((root / "runs/archive").rglob("*.png")))
                 with patch.object(tectonics_report, "compare_fields", side_effect=AssertionError("Quadratic comparisons requested")):
                     lazy = tectonics_report.build_report([1, 2], output, external_assets=True)
                 metadata = json.loads(output.with_suffix('.json').read_text())

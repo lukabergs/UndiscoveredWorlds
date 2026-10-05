@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import ledger
+from uwtools import ledger, runs
 from uwtools.bundle import SEASONS
 import review
 
@@ -172,7 +172,7 @@ def map_groups(maps):
 
 def run_identity(directory, run):
     if run:
-        return str(run.get('id', run.get('name')))
+        return str(run.get('id') or run.get('name'))
     return directory.parent.name if directory.name == 'evaluation' else directory.name
 
 
@@ -193,7 +193,7 @@ def run_facts(document, run):
     facts.append(['Command', ' '.join(map(str, command))])
     if run:
         facts += [[label, run[key]] for label, key in (('Started', 'started'), ('Finished', 'finished')) if run.get(key)]
-        facts += [[f"{Path(step.get('log', 'run')).stem} time", f"{step['seconds']:.1f} s, exit {step['exit_code']}"]
+        facts += [[f"{step.get('label') or Path(step.get('log', 'run')).stem} time", f"{step['seconds']:.1f} s, exit {step['exit_code']}"]
                   for step in steps if 'seconds' in step]
     facts.append(['Evaluated', document['evaluated']])
     return facts
@@ -213,7 +213,7 @@ def run_data(evaluation_dir):
     files = [{'title': 'evaluation.json', 'path': 'evaluation.json'}, {'title': 'report.md', 'path': 'report.md'}]
     files += [{'title': name, 'path': name} for name in ('review.json',) if (directory / name).is_file()]
     if directory.name == 'evaluation':
-        files += [{'title': name, 'path': f'../{name}'} for name in ('run.json', 'log.txt', 'run.log', 'repeat.log')
+        files += [{'title': name, 'path': f'../{name}'} for name in ('run.json', 'log.txt', 'log-repeat.txt', 'run.log', 'repeat.log')
                   if (directory.parent / name).is_file()]
     validation = document['validation']
     return {'schema': 'uw-run-page/v1', 'generated': now(), 'module': document['profile']['module'],
@@ -411,7 +411,19 @@ def climate_rankings():
     return scores
 
 
+def registered_run(record):
+    """A record of the current layout (it names its run directory): run.json and the registry entry."""
+    run = read_json(ROOT / record['run'] / 'run.json') or {}
+    grid = run.get('grid')
+    return {'id': record['id'], 'date': (record.get('date') or '')[:16].replace('T', ' '), 'status': record.get('status'),
+            'label': record.get('label', ''), 'grid': f'{grid[0]} × {grid[1]}' if grid else None,
+            'score': record.get('score'), 'metrics': {'elapsed_s': run.get('seconds')},
+            'links': [('run.json', ROOT / record['run'] / 'run.json'), ('log', ROOT / record['run'] / 'log.txt')]}
+
+
 def climate_run(record, rankings):
+    if record.get('run'):
+        return registered_run(record)
     identifier, metrics = record['id'], record.get('metrics') or {}
     stamp = str(record.get('datetime', ''))
     date = f'{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]} {stamp[8:10]}:{stamp[10:12]}' if len(stamp) >= 12 else stamp
@@ -430,13 +442,19 @@ def climate_run(record, rankings):
 
 def tectonics_run(record):
     identifier = record['id']
-    manifest = read_json(ROOT / record['manifest']) if record.get('manifest') else None
+    metrics_path = runs.derived('tectonics', identifier, 'metrics.json')
+    final = (read_json(metrics_path) or {}).get('final', {}) if metrics_path else {}
+    comparison = final.get('earth_comparison', {})
+    if record.get('run'):
+        entry = registered_run(record)
+        entry['metrics'] = {'land_fraction': final.get('land_fraction'),
+                            'hypsometry_gap_m': comparison.get('hypsography_mean_absolute_quantile_gap_m'), **entry['metrics']}
+        return entry
+    manifest = read_json(runs.archived(record['manifest'])) if record.get('manifest') else None
     manifest = manifest or {}
     recipe = manifest.get('recipe', {})
-    final = (read_json(ROOT / f'runs/diagnostics/tectonics/{identifier}/metrics.json') or {}).get('final', {})
-    comparison = final.get('earth_comparison', {})
     links = [('run page', ROOT / f'runs/reports/tectonics/{identifier}.html'), ('record', ROOT / f'runs/reports/tectonics/{identifier}.md'),
-             ('manifest', ROOT / f'runs/manifests/tectonics/{identifier}.json')]
+             ('manifest', runs.archived(record['manifest']) if record.get('manifest') else ROOT / 'missing')]
     label = recipe.get('name', '') + (f" ({record['kind']})" if record.get('kind') else '')
     return {'id': identifier, 'date': (manifest.get('started_utc') or '')[:16].replace('T', ' '), 'status': record.get('status'),
             'label': label, 'grid': f"{recipe['width']} × {recipe['height']}" if 'width' in recipe else None, 'score': None,

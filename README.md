@@ -20,7 +20,7 @@ These are lifecycle stages, not mandatory one-time function calls. The coarse an
 
 The repository contains terrain generation and import support, an internal plate-tectonics module with world-grid ingestion, a generation workbench and stage registry, a reduced climate simulator, physical-resource heuristics, gold deposits recorded through tectonic history, and initial settlement/trade/polity generation. Climate is the current development focus. Terrain refinement remains work in progress; the full ecological and staged civilizational lifecycle above is a design goal.
 
-The September 2026 cleanup aligns CMake sources, includes, configuration, and preparation/analysis scripts with the new layout. Historical and new benchmark maps use category/season/layer paths under `runs/maps/climate/`, with registered run IDs as filenames. Season folders are 1=January, 2=April, 3=July and 4=October. Earth benchmark land/sea imports can be regenerated at arbitrary even resolutions from the retained signed Earth master.
+The September 2026 cleanup aligns CMake sources, includes, configuration, and preparation/analysis scripts with the new layout. Earth benchmark land/sea imports can be regenerated at arbitrary even resolutions from the retained signed Earth master.
 
 ## Repository layout
 
@@ -51,7 +51,7 @@ configs/                   Application configuration and saved UI layout
 refs/
   source/                  Original downloads, receipts, and licenses
   processed/               Prepared grids grouped by physical quantity
-runs/                      Simulation artifacts, organized by artifact category
+runs/                      Simulation runs, one directory per registered run (see Runs and comparisons)
 tests/                     Core, pipeline, I/O, simulation, and script tests
 scripts/
   refs/                    Reference download and preparation
@@ -96,41 +96,21 @@ Keep downloads and their receipts/licenses under `refs/source/<dataset>/`. Prepa
 
 ## Runs and comparisons
 
-Artifact category comes before run identity. Map filenames contain only the run ID and extension:
+Each registered run is one directory; the registry supplies its ID:
 
 ```text
 runs/
-  maps/
-    climate/koppen/
-      145.png
-      146.png
-    climate/wind/lic/1/s/
-      145.png
-      146.png
-    climate/rain/annual/s/
-      145.png
-      146.png
-  fields/climate/<quantity>/<season>/<layer>/<run_id>.tif
-  diagnostics/climate/<run_id>/   # new durable diagnostic batches
-  diagnostics/<topic>/<run_id>.csv # historical diagnostics
-  parameters/<run_id>.txt
-  manifests/<manifest_type>/<run_id>.<ext>
-  metrics/
-    climate.xlsx
-    metrics.xlsx
-    profiling.xlsx
-    run_history.xlsx
-  registry/climate.json
-  checkpoints/
-  logs/
-  reports/
+  registry/<module>.json      IDs, status, run directory, label, score; `baseline` names the module's baseline run
+  ledger/<module>.jsonl       experiment ledger
+  <module>/<id>/              run.json  log.txt  bundle/  checkpoints/  outputs/  evaluation/  ledger-entry.json
+  reports/<name>/             cross-run comparison pages
+  archive/                    sealed layout of runs registered before 2026-10-05 (maps, fields, diagnostics, manifests,
+                              parameters, checkpoints, metrics, logs); read-only evidence, see runs/archive/README.md
 ```
 
-Open a category to compare successive runs. Seasons `1/2/3/4` mean January/April/July/October; `s/u` mean surface/upper winds. Raw fields mirror map folders and retain their numerical values and units. Annual temperature and rain use `annual/s/`; Koppen omits season/layer folders. `climate/air_temp/annual/s/` contains land surface-air temperature, not land skin temperature.
+`uv run --offline scripts/uw.py <module> run` makes a registered run (climate and tectonics); `run.json` holds the command, executable hash, code revision and diff hash, inputs with hashes, timings per step and the verdict, and the `evaluation/` page shows checks, validation and review maps. Commands and the directory contents: [benchmark commands](docs/reference-guides/benchmark-commands.md).
 
-Unregistered map experiments retain their descriptive identifiers under `runs/work/legacy-maps/`.
-
-**Excel workbooks hold comparable metrics.** `runs/metrics/run_history.xlsx` preserves 304 records from both historical registries and 89 parameter files, including the distinct verification run 147. The main `runs/registry/climate.json` remains required by the executable's run-ID allocator and writer. Numerical CSV diagnostics remain reusable calculation inputs. Reports summarize findings; logs retain verbatim execution output. See the [run 159 report](runs/reports/159.md) for the reporting format.
+Runs registered before 2026-10-05 keep their former paths in their records: a path `runs/<kind>/...` is now `runs/archive/<kind>/...`. That includes the climate map folders (category/season/layer, run ID as file name) and the former Excel workbooks (`runs/archive/metrics/`, with the 304 historical records of `run_history.xlsx`); the climate registry records of those runs keep the C++ benchmark's metrics.
 
 For future runs, record the seed, recipe and stage parameters, code revision, input versions, grid geometry, simulation duration, convergence criteria, and output provenance. Preserve numerical fields as well as previews when they are needed to reproduce a comparison. Changes in palettes, units, grids, or renderer versions should remain visible in the run metadata.
 
@@ -185,7 +165,7 @@ cmake --preset headless
 cmake --build out/build/headless --config Release --target world_pipeline tectonics_tests minerals_tests --parallel 4
 ctest --test-dir out/build/headless -C Release -L 'tectonics|geology' --output-on-failure
 uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe
-uv run --offline scripts/uw.py tectonics inspect
+uv run --offline scripts/uw.py tectonics experiment
 uv run --offline scripts/uw.py tectonics run
 ```
 
@@ -193,13 +173,12 @@ uv run --offline scripts/uw.py tectonics run
 
 Tectonics alone is the `tectonics` recipe: `world_pipeline run --recipe tectonics [--seed N] [--resolution W] [--<scenario-key> value ...] [--duration Myr] [--mineral-history on|off] [--checkpoint-every Myr] --bundle DIR`. It runs the engine on the world grid W x W/2 (default 256) and writes an ordinary run bundle; `world_pipeline --help` lists the scenario options. Two bundles are compared with `scripts/evaluation/compare_bundles.py A B`. See [tectonics runs](docs/architecture/tectonics/pipeline-tooling.md).
 
-Numbered experiments use `runs/registry/tectonics.json` and refuse existing
-output directories. They preserve the actual working source, recipe, executable
-and native fields for provenance. Archived sources and binaries under `runs/`
-are evidence, never development dependencies or defaults for new runs.
-`--sample-run` explicitly reproduces an archived experiment; it does not select
-the implementation for new worlds. For normal development, rebuild the current
-tree before generating. `tectonics_report.py --runs <ids>` uses the shared
+Registered runs (`uw.py tectonics run`) take their ID from `runs/registry/tectonics.json`
+and never reuse a run directory. They record the git revision and diff hash, the
+recipe, the executable's hash and the native fields; executables and sources are
+not copied. Archived sources and binaries of earlier runs are evidence, never
+development dependencies or defaults for new runs. For normal development, rebuild
+the current tree before generating. `tectonics_report.py --runs <ids>` uses the shared
 `configs/tectonics-palettes.json` palette and exports maps and APNG animations.
 
 Gold history consumes the native column displacement and deterministic topology
@@ -250,9 +229,9 @@ Appearance edits affect rendering, not simulated fields. Gradient controls suppo
 
 Map imports must match the current world dimensions. Numeric imports accept supported grayscale uint16 TIFFs; PNG imports use field-specific channel scales or a one-pixel gradient strip with an explicit minimum and increment. The signed float32 Earth master is converted into the unsigned land/sea import pair during reference processing. See `src/io/map_imports.cpp` for the current decoding rules.
 
-Run `uv run --offline scripts/uw.py climate run` (1024×512 world, 128-wide atmosphere/ocean, 256-wide moisture) for a complete benchmark with logs and a side-by-side map gallery. `uw.py` is the common entry point for tectonics, geology, climate and full-world runs; see `docs/reference-guides/benchmark-commands.md`. See [benchmark commands and outputs](runs/maps/climate/README.md) and the [reference map/palette guide](refs/processed/climate/maps/README.md). Builds stay in `out/`; benchmark artifacts default to `runs/`.
+Run `uv run --offline scripts/uw.py climate run` (1024×512 world, 128-wide atmosphere/ocean, 256-wide moisture) for a registered run with its bundle, evaluation and run page in `runs/climate/<id>/`. `uw.py` is the common entry point for tectonics, geology, climate and full-world runs; see `docs/reference-guides/benchmark-commands.md` and the [reference map/palette guide](refs/processed/climate/maps/README.md). Builds and scratch output stay in `out/`; the C++ `climate-benchmark` command writes its maps and run log to `out/climate-benchmark/`.
 
-The [experimental tropical boundary-layer replacement](runs/maps/climate/README.md#experimental-tropical-boundary-layer) is selectable with `--climate-tropical-closure mixed-layer`. The default remains `legacy`: the new wind balance improves tropical wind error but currently regresses rainfall, so it has not passed promotion checks.
+The [experimental tropical boundary-layer replacement](runs/archive/maps/climate/README.md#experimental-tropical-boundary-layer) is selectable with `--climate-tropical-closure mixed-layer`. The default remains `legacy`: the new wind balance improves tropical wind error but currently regresses rainfall, so it has not passed promotion checks.
 
 The simulator, Earth benchmark imports and exports, and every processed reference use cell-centred `W x W/2` grids. Raw sources keep their native registration until the preparation script performs the ingestion-boundary remap. The default benchmark selection is Koppen, January surface LIC and particles, and precipitation PNG/TIFF. Repeat `--map` (or use a comma-separated list) to select outputs; `all` and `none` are supported. [Map guides](docs/reference-guides/) explain quantity, units, scales, and seasonal meaning. The summary command `uv run --offline python scripts/benchmarks/summarize_climate_validation.py --run-id ID --output DIR` prepares workbook input tables from category-organized diagnostics and carries the latest earlier report as context. It does not append to `metrics.xlsx` automatically.
 

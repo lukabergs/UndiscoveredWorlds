@@ -1,8 +1,7 @@
 """Validation: comparisons of bundle fields with observed Earth references.
 
-Map comparisons use the climate report's per-field evaluation
-(scripts/benchmarks/climate_report_metrics.py), so each field's loss is defined as
-in global-balanced-v1. Distribution comparisons (hypsometry) use the tectonics Earth
+Map comparisons use the per-field evaluation of score.py, so each field's loss is
+defined as in global-balanced-v1. Distribution comparisons (hypsometry) use the tectonics Earth
 reference measurements. References are never inputs to a simulation.
 """
 import re
@@ -12,11 +11,10 @@ from pathlib import Path
 import numpy as np
 
 from references import MONTH_DAYS
+from score import DEFINITION as PALETTE, VERSION as SCORE_VERSION, WEIGHTS, evaluate, magnitude, weights
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'scripts/benchmarks'))
-from climate_report_data import FIELDS, magnitude, weights  # noqa: E402
-from climate_report_metrics import DEFINITION as PALETTE, VERSION as SCORE_VERSION, evaluate  # noqa: E402
+sys.path.insert(0, str(ROOT / 'scripts'))
 from uwtools import regions  # noqa: E402
 from uwtools.hashing import sha256  # noqa: E402
 
@@ -223,6 +221,7 @@ def compare_maps(bundle, spec, references, baseline=None, regional=None):
 
 
 def compare_hypsometry(bundle, spec, baseline=None):
+    sys.path.append(str(ROOT / 'scripts/benchmarks'))
     from tectonics_earth_reference import compare_to_earth, load_earth_reference, measure_earth
     reference = load_earth_reference(ROOT, spec.get('reference_width', 2048))
     result = {'reference': reference['title'], 'reference_cache': reference['cache']}
@@ -247,7 +246,7 @@ def field_losses(comparison, key):
 def score(comparisons, key):
     """global-balanced-v1 when every weighted field was compared; otherwise the same
     formula over the compared fields, renormalized and reported with its coverage."""
-    weighted = {field: info[3] for field, info in FIELDS.items() if info[3]}
+    weighted = dict(WEIGHTS)
     losses = {field: field_losses(comparisons[field], key) for field in weighted if field in comparisons}
     covered = sum(weighted[field] for field in losses)
     missing = sorted(set(weighted) - set(losses))

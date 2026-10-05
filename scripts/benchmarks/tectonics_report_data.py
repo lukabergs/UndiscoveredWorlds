@@ -8,7 +8,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.hashing import sha256
-from tectonics_experiment import bundle_files, is_run_bundle, snapshot_manifest
+from uwtools.tectonics import bundle_files, is_run_bundle, snapshot_manifest
+
+
+def write_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 DTYPES = {
     "heightmap": "<f4", "plate_id": "<u4", "crust_age_steps": "<u4",

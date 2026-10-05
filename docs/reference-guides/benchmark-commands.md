@@ -11,9 +11,9 @@ uv run --offline scripts/uw.py <module> <command> [shared options] [native optio
 
 | Module | Commands | Native tool |
 | --- | --- | --- |
-| `tectonics` | `run` (registered), `inspect` (scratch), `report`, `experiment`, `evaluate`, `dashboard` | `world_pipeline.exe run --recipe tectonics` |
+| `tectonics` | `run` (registered), `experiment` (scratch), `evaluate`, `report`, `dashboard` | `world_pipeline.exe run --recipe tectonics` |
 | `geology` | `run` | `world_pipeline.exe run --recipe tectonics` + `benchmark_geology.py` |
-| `climate` | `run` (registered), `check`, `report`, `experiment`, `evaluate`, `dashboard` | `world_pipeline.exe climate-benchmark`; `world_pipeline.exe run --recipe earth-climate` for experiments |
+| `climate` | `run` (registered), `experiment` (scratch), `evaluate`, `report --evaluation`, `dashboard` | `world_pipeline.exe run --recipe earth-climate` |
 | `world` | `run`, `report`, `experiment`, `evaluate`, `dashboard` | `world_pipeline.exe generate` |
 
 Shared options, same meaning everywhere:
@@ -24,9 +24,8 @@ Shared options, same meaning everywhere:
 | `--resolution W` | world grid width; height is W/2. Every exported map has this size | tectonics 256, geology 128 and 256, climate 1024, world app default |
 | `--executable PATH` | native tool to run | see Builds |
 | `--output PATH` | output folder or file (scratch commands) | `out/bench/...` |
-| `--label TEXT` | change summary stored with a climate run | none |
-| `--runs ID [ID...]` | run IDs for `report`/`check` | none |
-| `--compare ID` | climate run to compare against | none |
+| `--label TEXT` | change summary stored with a run (run.json and the registry record) | none |
+| `--runs ID [ID...]` | run IDs for `tectonics report` | none |
 | `--evaluation DIR [DIR...]` | evaluation directories for `report` pages; the first is the baseline | none |
 
 Any other `--flag value` goes to the native tool unchanged. Every module's native tool is `world_pipeline`. Tectonics takes the scenario options of `run --recipe tectonics` (`--plates 14`, `--duration 300`, ...); climate and world take `--climate-resolution 128`, `--climate-tropical-closure mixed-layer`, ... List them with the native tool's help:
@@ -37,20 +36,21 @@ out/build/headless/bin/Release/world_pipeline.exe --help
 
 ## What every registered run produces
 
-`uw.py <module> run` and `uw.py <module> report --runs ...` produce the same set of outputs for each module:
+`uw.py climate run` and `uw.py tectonics run` are one path (`scripts/evaluation/experiment.py --register`). The settings of a registered run are data in the module's profile (`configs/evaluation/<module>.json`, `run` section): `arguments` and declared `inputs` apply to every run of the profile, `registered` adds what a registered run uses (climate: 1024 columns, `--climate-resolution 128 --climate-hydrology-resolution 256 --climate-coupling-iterations 8`; tectonics: the scenario and checkpoint interval of `configs/tectonics-baseline.json`, a checkpoint at `geology.geosphere_initialization` and every `checkpoint_every_updates` × `delta-time-myr` Myr). Native options come last and override them. The run takes the next ID of `runs/registry/<module>.json` and lives in one directory (a junction into the storage drive per module, `scripts/uwtools/storage.py`):
 
-| Output | Climate | Tectonics |
-| --- | --- | --- |
-| Raw log (standard header: module, UTC start, executable hash, git state, command) | `runs/logs/climate/<id>.log` | `runs/logs/tectonics/<id>.log` |
-| Maps (world-grid PNGs) | `runs/maps/climate/<quantity>/.../<id>.png` | `runs/maps/tectonics/<field>/<checkpoint>/<id>.png` |
-| Projected views (Mollweide, north/south polar) | `runs/maps/climate/projections/<projection>/...` | `runs/maps/tectonics/projections/<projection>/...` |
-| Animations | not yet | `runs/maps/tectonics/<field>/animation/<id>.png` (APNG) |
-| Numerical fields | `runs/fields/climate/...` (GeoTIFF) | `runs/fields/tectonics/...` (`.npy`) |
-| Run page (standard template, map + projection selector, side by side with the previous run) | `runs/reports/<id>.html` | `runs/reports/tectonics/<id>.html` |
-| Record / findings (Markdown) | `runs/reports/<id>.md` | `runs/reports/tectonics/<id>.md` |
-| Detailed comparison | `runs/reports/<id>-gallery.html` (against observations) | `runs/reports/tectonics/<previous>-<id>.html` |
+```
+runs/<module>/<id>/
+  run.json            command, executable path and SHA-256, configuration, code state (git revision, dirty, diff hash),
+                      inputs (path, SHA-256), seed, grid, start, finish, seconds, per-step seconds, exit codes, verdict
+  log.txt             the tool's output
+  bundle/             final run bundle
+  checkpoints/        checkpoint bundles (tectonics)
+  evaluation/         evaluation.json, review-request.json, index.html (run page), report.md, maps/;
+                      analysis/ holds what the tectonics report and review scripts derive from the run
+  ledger-entry.json   draft ledger entry: complete it and append it with `uw.py <module> ledger --add`
+```
 
-The run page is built by `scripts/benchmarks/run_report.py` from `run_report_template.html`; projections come from `map_projection.py` and colouring from `map_rendering.py`, shared by all modules. To rebuild a page: `uv run --offline scripts/benchmarks/run_report.py <module> --run <id> [--compare <id>]`.
+When the run ends a record `{"id", "status", "run": "runs/<module>/<id>", "date", "label", "score"}` is appended to the registry; earlier records stay as they are. Runs registered before 2026-10-05 are sealed under `runs/archive/` (`runs/archive/README.md`): a path `runs/<kind>/...` in their records is now `runs/archive/<kind>/...`. `scripts/uwtools/runs.py` resolves both layouts; nothing writes into the archive (derived outputs of a sealed run go to `runs/reports/<module>/<id>/analysis/`). Cross-run pages live in `runs/reports/<name>/`.
 
 ## Default seed
 
@@ -106,12 +106,14 @@ point whose steps read such state from a skipped step and names the step that
 must be in the run; those fields and tables are copied into the new bundle from
 the source unless a step of the run writes them.
 
-`world_pipeline climate-benchmark` is the registered form of the same run: the
-earth-climate recipe on the Earth terrain, recorded with a run ID. Until run 384
-it ran the imported-world stage path, which edited the imported terrain (mountain
-bases, smoothing, depression fill, coastline adjustment) before climate, so runs
-up to 384 are not comparable with later ones; `--no-rivers`, `--no-lakes` and
-`--no-deltas` no longer have any effect on it.
+`world_pipeline climate-benchmark` runs the same earth-climate recipe on the Earth
+terrain (a seed-1 bundle at 256 columns is identical to `run --recipe earth-climate`
+with the same options) and records it with the C++ validation tables and maps. It is
+a scratch tool, as is the desktop app's "Record climate benchmark": their outputs and
+their run log go to `out/climate-benchmark/` (`configs/app.env`); registered runs
+are made only by `uw.py climate run`. Until run 384 it ran the imported-world stage
+path, which edited the imported terrain before climate, so runs up to 384 are not
+comparable with later ones.
 
 ## Recipes, run bundles and access audits
 
@@ -143,7 +145,7 @@ uv run --offline scripts/uw.py climate experiment --climate-resolution 64
 # Evaluate an existing bundle, optionally against a baseline bundle on common masks.
 uv run --offline scripts/uw.py climate evaluate --bundle out/bench/climate-1024 --baseline out/bench/climate-1024-before
 # Tectonics: checkpoint bundles give one APNG per map (default <bundle>/../checkpoints).
-uv run --offline scripts/uw.py tectonics evaluate --bundle runs/checkpoints/tectonics/76/final --checkpoints runs/checkpoints/tectonics/76/snapshots --output out/evaluation/tectonics/76
+uv run --offline scripts/uw.py tectonics evaluate --bundle runs/archive/checkpoints/tectonics/76/final --checkpoints runs/archive/checkpoints/tectonics/76/snapshots --output out/evaluation/tectonics/76
 # Record the user's verdict with the evaluation (approved, rejected or revise); the run page is rendered again.
 uv run --offline scripts/evaluation/review.py out/evaluation/world/<name>/evaluation --verdict approved --notes "coastlines"
 # Pages from JSON (scripts/evaluation/report.py and templates/): one directory rewrites its run page,
@@ -155,32 +157,34 @@ uv run --offline scripts/uw.py tectonics dashboard --output out/evaluation/tecto
 
 Every report page is one of three templates in `scripts/evaluation/templates/` (`run.html`, `comparison.html`, `dashboard.html`) with the page's data embedded as JSON; nobody writes per-run HTML. The run page shows the run facts (from `run.json` when present), the verdict, checks, scores and the per-field validation table (loss, baseline loss, delta, RMSE, bias, correlation), the entries of `review.json` and the maps. A profile map with `"validation": "<id>"` (`configs/evaluation/climate.json`) is drawn from that validation entry with its season rule, unit conversion and remap: model, reference in the same palette and grid, and model minus reference on the score's mask, on the diverging `difference` scale of `configs/climate-palettes.json` (vector fields as speed). Quarter seasons are shown as Jan–Mar, Jul–Sep, monthly ones as January, July. `evaluation.json`'s `maps` lists every image with title, path, palette, season and kind (`model`, `reference`, `difference`, `animation`). `report.md` is generated from the same data. Regions come from `configs/regions.json` (the project's latitude/longitude boxes and the 58 IPCC AR6 WGI reference regions, whose rasterised mask is `refs/processed/climate/ipcc_ar6_regions.png`); `scripts/uwtools/regions.py` gives their masks on any grid. `evaluation.json`'s `validation.regions` holds, for every scalar validation entry and season, the area-weighted bias and RMSE of model minus reference per region on the entry's mask; it is reported on the run page (project boxes also in `report.md`) and never enters a score.
 
-Each evaluation directory holds `evaluation.json` (inputs with hashes, check results, validation metrics, verdict), `report.md`, `index.html` and `maps/`; it is never overwritten (pages are re-rendered from it). `experiment.py --archive runs/reports/<experiment>` keeps the runs in an experiment archive routed to the data drive. Tool outputs that would normally go under `runs/` are redirected into the run directory.
+Each evaluation directory holds `evaluation.json` (inputs with hashes, check results, validation metrics, verdict), `report.md`, `index.html` and `maps/`; it is never overwritten (pages are re-rendered from it). `experiment.py --archive runs/reports/<experiment>` keeps scratch runs in an experiment archive routed to the data drive. Files the tool writes on its own (C++ climate validation tables, images) are scratch and go to `out/evaluation/outputs/<module>/<name>/`.
 
-Climate comparisons reuse the climate report's per-field metrics, so every field loss is defined as in global-balanced-v1. Bundles do not yet contain column water, moisture transport, moisture convergence or currents in m/s, so a bundle evaluation reports a partial score over the remaining 70 % of the weight with its coverage; it is not a global-balanced-v1 value and does not replace the registered climate ranking. Air temperature against ERA5 2 m temperature is reported with zero weight. The `world` profile reports Earth hypsometry as context for review, not as a target.
+Climate comparisons use the per-field metrics of global-balanced-v1 (`scripts/evaluation/score.py`). A bundle that lacks a weighted field gets a partial score over the covered weight, reported with its coverage; a registered climate run carries every weighted field and gets the full score on bundle fields (ledger `climate-0002` compares it with the legacy chain's values). Air temperature against ERA5 2 m temperature is reported with zero weight. The `world` profile reports Earth hypsometry as context for review, not as a target.
 
 ## Tectonics
 
 ```powershell
-# Scratch: final-state run bundle of the baseline recipe (seed 1, 256×128, 10 plates, 600 Myr) → out/bench/tectonics-seed1-256
-uv run --offline scripts/uw.py tectonics inspect
-uv run --offline scripts/uw.py tectonics inspect --resolution 512 --plates 14 --output out/bench/p14
-
-# Registered run: next ID in runs/registry/tectonics.json; checkpoints in runs/checkpoints/tectonics/<id>/snapshots/, final bundle in runs/checkpoints/tectonics/<id>/final
-uv run --offline scripts/uw.py tectonics run
-uv run --offline scripts/uw.py tectonics run --plates 14 --duration 300
-
-# Maps, animations, comparison report and run page for registered runs (last ID is the run page)
-uv run --offline scripts/uw.py tectonics report --runs 74 75
+# Registered run: next ID in runs/registry/tectonics.json -> runs/tectonics/<id>/ (checkpoints/, bundle/, evaluation/)
+uv run --offline scripts/uw.py tectonics run --label "what changed"
+uv run --offline scripts/uw.py tectonics run --plates 14 --duration 300 --label "14 plates, 300 Myr"
+# Scratch run + evaluation (compiled defaults, final state only) -> out/evaluation/tectonics/<name>/; --repeat checks determinism
+uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat
+# Maps, animations and comparison page of registered runs, sealed or not -> runs/reports/tectonics/<A>-<B>.html
+uv run --offline scripts/uw.py tectonics report --runs 76 77
 uv run --offline scripts/uw.py tectonics report --runs 13 --maps-only
+# Reviews of a run's snapshots -> its evaluation/analysis/ (sealed runs: runs/reports/tectonics/<id>/analysis/)
+uv run --offline scripts/benchmarks/tectonics_review.py 77
+uv run --offline scripts/benchmarks/tectonics_batch_analysis.py 77
+uv run --offline scripts/benchmarks/tectonics_boundary_review.py 77
+uv run --offline scripts/benchmarks/tectonics_coastal_review.py 77
 ```
 
-`run` copies `world_pipeline.exe` into `runs/reports/tectonics/<id>/` and runs it from there with a checkpoint for the starting Geosphere and one every `checkpoint_every_updates` updates. Scenario flags change only that run; the baseline file is not modified. Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot and a `batch_manifest.json`); the report scripts read both layouts. `uw.py tectonics experiment|evaluate` run and evaluate a bundle with `configs/evaluation/tectonics.json` (grid, required fields, finite values, ranges, repeat; Earth hypsometry as context; review maps).
+Scenario flags change only that run; the baseline file is not modified. A denser sampling of a run is a new run with another `--checkpoint-every`. Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot); the report scripts read both layouts. The tectonics profile (`configs/evaluation/tectonics.json`) checks the grid, required fields, finite values, ranges and repeat, gives Earth hypsometry as context and renders the review maps with one animation per map from the checkpoints.
 
-Mantle plumes are off by default (`--plume-count 0`). They are scenario flags like any other, so `run`, `inspect` and `report` take them unchanged:
+Mantle plumes are off by default (`--plume-count 0`). They are scenario flags like any other, so `run` and `experiment` take them unchanged:
 
 ```powershell
-uv run --offline scripts/uw.py tectonics inspect --plume-count 6 --plume-tail-flux-km3-yr 0.25 --plume-swell-age-myr 10
+uv run --offline scripts/uw.py tectonics experiment --plume-count 6 --plume-tail-flux-km3-yr 0.25 --plume-swell-age-myr 10
 uv run --offline scripts/uw.py tectonics run --plume-count 6 --plume-head-volume-km3 2000000 --plume-birth-window-myr 400
 ```
 
@@ -213,42 +217,24 @@ uv run --offline scripts/uw.py geology run --resolution 512 --reference-width 10
 
 ## Climate
 
-Earth terrain, simulated climate, compared with observations. `run` takes the next ID from `runs/registry/climate.json`, writes maps and fields under `runs/`, the log to `runs/logs/climate/<id>.log`, and a gallery report.
+Earth terrain, simulated climate, compared with observations. `run` takes the next ID from `runs/registry/climate.json` and writes `runs/climate/<id>/` (see above); its evaluation gives the global-balanced-v1 score, stored in the registry record. The registry's `baseline` names the run the module's experiments are compared with.
 
 ```powershell
-# Standard benchmark (run 373 grids): seed 1, 1024×512 world, 128-wide atmosphere/ocean, 256-wide moisture, 8 coupling updates
+# Registered run: seed 1, 1024x512 world, 128-wide atmosphere/ocean, 256-wide moisture, 8 coupling updates (about 8 minutes)
 uv run --offline scripts/uw.py climate run --label "what changed"
-
-# Quick smoke run on a small world (about 2 minutes)
-uv run --offline scripts/uw.py climate run --resolution 128 --climate-resolution 64 --climate-hydrology-resolution 128
-
+# Scratch run with the profile's experiment settings (512 wide) or smaller -> out/evaluation/climate/<name>/
+uv run --offline scripts/uw.py climate experiment --resolution 128 --climate-resolution 64 --climate-hydrology-resolution 128
 # Model switches
-uv run --offline scripts/uw.py climate run --climate-tropical-closure mixed-layer
-uv run --offline scripts/uw.py climate run --map "koppen,temp,precip"
-
-# Checks and gallery for an existing run, no new simulation
-uv run --offline scripts/uw.py climate check --runs 366 --compare 365
-uv run --offline scripts/uw.py climate report --runs 366 --compare 365
+uv run --offline scripts/uw.py climate run --climate-tropical-closure mixed-layer --label "mixed-layer closure"
+# Comparison page of two evaluations (the first is the baseline)
+uv run --offline scripts/uw.py climate report --evaluation runs/climate/<baseline>/evaluation runs/climate/<id>/evaluation --output runs/reports/<name>
 ```
 
-The world grid (`--resolution`) sets the size of every exported map and field. Atmosphere/ocean (`--climate-resolution`, default 128) and moisture (`--climate-hydrology-resolution`, default 256) run on coarser grids and are remapped onto the world grid, as in run 373.
+The world grid (`--resolution`) sets the size of every field. Atmosphere/ocean (`--climate-resolution`, default 128) and moisture (`--climate-hydrology-resolution`, default 256) run on coarser grids and are remapped onto the world grid.
 
-Land surface drag: climate runs use the Earth vegetation drag contrast (`refs/processed/era5-vegetation-drag/1024/`, prepared from ERA5 vegetation cover, as in runs up to 378). Other world widths get a version area-averaged from the 1024 file, cached beside it. `--surface-drag none` gives uniform land drag; `--surface-drag PATH` uses another file. The log records which input was used. Procedural worlds never use it.
+Land surface drag is a declared input of the climate profile, applied to `run` and `experiment` alike: `UW_CLIMATE_SURFACE_DRAG_INPUT` names the Earth vegetation drag contrast (`refs/processed/era5-vegetation-drag/1024/land-drag-contrast-1024.txt`, prepared from ERA5 vegetation cover). Other world widths get a version area-averaged from the 1024 file once, in `out/inputs/`. `run.json` records the file and its SHA-256. Procedural worlds never use it.
 
-Benchmark defaults added by `uw.py` unless you pass them: `--resolution 1024 --climate-resolution 128 --climate-hydrology-resolution 256 --climate-coupling-iterations 8`, the standard map list, and no rivers, lakes or deltas. Other `world_pipeline` defaults apply as printed by `--help`.
-
-Multi-run comparison report and adaptive experiments keep their own scripts:
-
-```powershell
-uv run --offline scripts/benchmarks/climate_report.py --archive runs/reports/<experiment> --baseline 365 --runs 365 366
-uv run --offline scripts/benchmarks/climate_experiment.py setup --archive runs/reports/<experiment> --count 10
-uv run --offline scripts/benchmarks/climate_experiment.py run --archive runs/reports/<experiment> --run <id> --plan plan.json
-uv run --offline scripts/benchmarks/climate_experiment.py analyze --archive runs/reports/<experiment> --run <id>
-uv run --offline scripts/benchmarks/climate_experiment.py decision --archive runs/reports/<experiment> --run <id> --plan decision.json
-uv run --offline scripts/benchmarks/climate_experiment.py score --archive runs/reports/<experiment>
-```
-
-Each experiment run must be analyzed and given a decision before the next one starts. See `docs/reference-guides/climate-reporting.md` for report controls and `runs/maps/climate/README.md` for workflow details.
+The legacy climate chain (`climate_benchmark.py`, `write_benchmark_report.py`, `climate_report.py`, `climate_experiment.py`, `check_climate_baseline.py`, `run_report.py`) reads the sealed run layout and is being retired; its runs and reports are in `runs/archive/` and `runs/reports/`.
 
 ## Full world
 

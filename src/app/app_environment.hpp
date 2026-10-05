@@ -7,17 +7,17 @@ struct AppEnvironmentConfig
 {
     std::filesystem::path defaultWorldDirectory = ".";
     std::filesystem::path defaultAppearanceDirectory = "assets/appearance";
-    std::filesystem::path defaultImageDirectory = "runs/maps";
+    std::filesystem::path defaultImageDirectory = "out/images";
     std::filesystem::path referencePrecipitationGridPath = "refs/processed/climate/earth_precipitation_grid.csv";
     std::filesystem::path referenceClimateDirectory = "refs/processed/climate";
     // Processed observed fields: <dataset>/<width>/fields/<name>.npy with manifest.json (refs/README.md).
     std::filesystem::path referenceProcessedDirectory = "refs/processed";
     std::filesystem::path referenceClimatePreviewDirectory = "refs/processed/climate/previews";
-    std::filesystem::path climateBenchmarkRunLogPath = "runs/registry/climate.json";
+    std::filesystem::path climateBenchmarkRunLogPath = "out/climate-benchmark/registry.json";
     // Organized previews and durable run diagnostics; seed-scoped working files are separate.
-    std::filesystem::path climateBenchmarkImageDirectory = "runs/maps";
-    std::filesystem::path climateBenchmarkRunDirectory = "runs/diagnostics/climate";
-    std::filesystem::path climateValidationDirectory = "runs/work/climate";
+    std::filesystem::path climateBenchmarkImageDirectory = "out/climate-benchmark/maps";
+    std::filesystem::path climateBenchmarkRunDirectory = "out/climate-benchmark/diagnostics";
+    std::filesystem::path climateValidationDirectory = "out/climate-benchmark/validation";
     // The old unsigned benchmark terrain and categorical reference were removed.
     // Supply compatible inputs through configs/app.env or environment overrides.
     std::filesystem::path earthKoppenImagePath;

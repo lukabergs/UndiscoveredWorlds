@@ -2839,10 +2839,10 @@ bool exportclimatebenchmarkimages(
     }
     guide
         << "BENCHMARK MAP GUIDE\n\n"
-        << "Canonical maps: runs/maps/climate/<quantity>/<style>/<season>/<layer>/<ID>.png.\n"
+        << "Canonical maps: <image directory>/climate/<quantity>/<style>/<season>/<layer>/<ID>.png.\n"
         << "Season folders are 1=Jan, 2=Apr, 3=Jul, 4=Oct; annual products use annual.\n"
-        << "Rain GeoTIFFs are in runs/fields/climate/rain/annual/s/<ID>.tif.\n"
-        << "See runs/maps/climate/README.md and refs/processed/climate/maps/README.md for paths and palettes.\n"
+        << "Rain GeoTIFFs are in <image directory>/../fields/climate/rain/annual/s/<ID>.tif.\n"
+        << "See refs/processed/climate/maps/README.md for paths and palettes.\n"
         << "The legacy names below identify diagnostic staging files only.\n\n"
         << "All maps are global equirectangular grids with north at the top and periodic longitude.\n\n"
         << "Every PNG map and GeoTIFF field has the world grid's size (--resolution); coarser climate grids are remapped onto it.\n"

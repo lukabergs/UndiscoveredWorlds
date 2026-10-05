@@ -29,8 +29,7 @@ DEFAULTS = {'--seed': '1', '--resolution': '1024', '--climate-resolution': '128'
 FIXED = ['--no-rivers', '--no-lakes', '--no-deltas']
 # Earth benchmark input assist used by runs up to 378: ERA5 vegetation bulk
 # drag contrast (see its metadata.json). Not used for procedural worlds.
-DRAG_DIRECTORY = ROOT / 'refs/processed/era5-vegetation-drag/1024'
-DRAG_SOURCE = DRAG_DIRECTORY / 'land-drag-contrast-1024.txt'
+DRAG_SOURCE = ROOT / 'refs/processed/era5-vegetation-drag/1024/land-drag-contrast-1024.txt'
 DRAG_VARIABLE = 'UW_CLIMATE_SURFACE_DRAG_INPUT'
 # The console shows stage progress, warnings and the result; solver diagnostics
 # (and everything else) stay in runs/logs/climate/<id>.log, which reports parse.
@@ -92,28 +91,10 @@ def set_option(command, flag, value):
 
 
 def surface_drag_input(width):
-    """Return the vegetation drag contrast for a `width` world, area-averaging the 1024 source once if needed."""
-    path = DRAG_DIRECTORY / f'land-drag-contrast-{width}.txt'
-    if path.exists():
-        return path
-    import numpy as np
-    sys.path.insert(0, str(ROOT / 'scripts/refs'))
-    from cell_grid import conservative_remap
-    values = DRAG_SOURCE.read_text(encoding='utf-8').split()
-    if values[0] != 'UWROUGH1':
-        raise SystemExit(f'Unexpected drag input header: {DRAG_SOURCE}')
-    columns, rows = int(values[1]), int(values[2])
-    source = np.asarray(values[3:], dtype=np.float64).reshape(rows, columns)
-    # Stress factors are remapped by area, as in the 1024 preparation.
-    field = np.clip(conservative_remap(source, width), 0.25, 4.0)
-    temporary = path.with_suffix('.tmp')
-    with temporary.open('w', encoding='utf-8') as stream:
-        stream.write(f'UWROUGH1 {width} {width // 2}\n')
-        for row in field:
-            stream.write(' '.join(f'{value:.6g}' for value in row) + '\n')
-    temporary.replace(path)
-    print(f'Derived {path.name} from {DRAG_SOURCE.name} by conservative area remap.', flush=True)
-    return path
+    """The vegetation drag contrast for a `width` world (scripts/evaluation/inputs.py)."""
+    sys.path.append(str(ROOT / 'scripts/evaluation'))
+    from inputs import drag_contrast
+    return drag_contrast(DRAG_SOURCE, width)
 
 
 def native_arguments(arguments, label=''):

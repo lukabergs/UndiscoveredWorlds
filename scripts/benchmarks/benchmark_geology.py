@@ -11,7 +11,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import grid
 from uwtools.hashing import sha256
-from tectonics_experiment import bundle_files, is_run_bundle, snapshot_manifest
+from uwtools.tectonics import bundle_files, is_run_bundle, snapshot_manifest
 from tectonics_report_data import read_field
 
 REPO = Path(__file__).resolve().parents[2]

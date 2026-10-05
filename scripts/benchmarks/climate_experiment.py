@@ -18,7 +18,7 @@ from uwtools.hashing import sha256
 from climate_report_data import Archive, FIELDS, ROOT, magnitude, table, weights
 from climate_report_metrics import evaluate, rank
 from climate_report import mask_for
-from run_storage import ensure_archive_directory
+from uwtools.storage import route as ensure_archive_directory
 from climate_benchmark import from_legacy_command, set_option
 
 H = ROOT / 'runs/reports'

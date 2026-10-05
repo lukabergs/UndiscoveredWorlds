@@ -13,6 +13,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 |---|---|---|---|---|
 | `climate-0001` | 2026-10-04 | pending user review | keep | consolidation phase 1: the re-baseline |
 | `climate-0002` | 2026-10-05 | parity shown | keep | consolidation phase 3: parity of global-balanced-v1 between the legacy chain and the bundle evaluation; repeat of run 385 |
+| `climate-0003` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 8: first registered run in runs/climate/<id>/; baseline 388 |
 
 Lessons:
 
@@ -25,6 +26,7 @@ Lessons:
 - `climate-0002`: A repeat of the climate baseline is bit-identical; any score difference between two runs of one binary comes from the options.
 - `climate-0002`: --climate-transport mpdata takes about five times as long as ffsl at the registered settings and changes global-balanced-v1 by +0.025.
 - `climate-0002`: weighted_relative_error (registry) and global-balanced-v1 can order a pair of runs differently.
+- `climate-0003`: Registered climate runs no longer carry weighted_relative_error or the other C++ benchmark metrics; the registry record holds global-balanced-v1 only.
 
 ## tectonics
 
@@ -32,6 +34,7 @@ Lessons:
 |---|---|---|---|---|
 | `tectonics-0001` | 2026-10-04 | baseline | keep | consolidation phase 1: module baseline |
 | `tectonics-0002` | 2026-10-04 | equivalent | keep | consolidation phase 1: tectonics into world_pipeline |
+| `tectonics-0003` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 8: first registered run in runs/tectonics/<id>/ |
 
 Lessons:
 
@@ -61,6 +64,7 @@ Lessons:
 | `world-0014` | 2026-10-04 | equivalent | keep | consolidation phase 3, step 6: configs/regions.json and the regional table |
 | `world-0015` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 7: observed references as .npy with a manifest per dataset |
 | `world-0016` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 12 (done before steps 8 to 11): Excel automation removed |
+| `world-0017` | 2026-10-05 | equivalent | keep | consolidation phase 3, steps 8 and 11: run layout runs/<module>/<id>/, old layout sealed, storage script ported |
 
 Lessons:
 
@@ -102,3 +106,7 @@ Lessons:
 - `world-0015`: The moved receipts still name the former .uwclim files; fields are found by dataset and variable.
 - `world-0015`: refs/source/physical and refs/processed/physical are junctions into D:/dev/undiscovered-worlds/refs/ since step 1.
 - `world-0016`: Stored commands that pass --no-profile-log (registry records, old run manifests) are rejected by the current binary.
+- `world-0017`: A registered tectonics run is 1.4 GB (60 checkpoint bundles 1.1 GB, evaluation with animations and analysis 0.25 GB); a registered climate run is 0.5 GB.
+- `world-0017`: The registry files are stored with CRLF in the working tree and LF in git; records are inserted as text.
+- `world-0017`: scripts/evaluation still imports map_rendering, climate_palettes and tectonics_earth_reference from scripts/benchmarks and cell_grid from scripts/refs.
+- `world-0017`: Old-layout paths are still named in map_projection.py, summarize_climate_validation.py, scripts/refs/organize_climate_maps.py and the map guides under docs/reference-guides.

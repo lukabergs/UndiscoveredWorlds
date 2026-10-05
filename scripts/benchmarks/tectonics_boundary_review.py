@@ -2,18 +2,19 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 import numpy as np
-from tectonics_experiment import bundle_files, is_run_bundle, snapshot_manifest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import runs
+from uwtools.tectonics import bundle_files, is_run_bundle, snapshot_manifest
 from tectonics_report_data import elevation_m, read_field
-
-ROOT=Path(__file__).resolve().parents[2]
 
 
 def review(run):
-    record=json.loads((ROOT/f'runs/manifests/tectonics/{run}.json').read_text())
+    record=runs.tectonics(run)
     frames=[]
     for snap in record['snapshots']:
-        path=ROOT/f'runs/checkpoints/tectonics/{run}'/snap['directory']
+        path=snap['path']
         m=snapshot_manifest(path);files=bundle_files(path);native=is_run_bundle(path)
         if frames and frames[-1]['time']==m['time_myr']:continue
         owner=read_field(path/files['plate_id'],'plate_id',(m['height'],m['width']),native)
@@ -43,7 +44,7 @@ def review(run):
             reversal_fraction=flips/max(1,persistent),triplets=triplets,roundtrips=roundtrips))
     result=dict(run=run,initial=initial,sampled=sampled,step_diagnostics=m['motion_diagnostics'],
         method='Same fixed raster face with the same stable owner on each side; not material-boundary tracking. Sampled intervals are 10 Myr. Step counters, where available, use 1 Myr.')
-    out=ROOT/f'runs/diagnostics/tectonics/{run}/boundary-review.json'
+    out=runs.output_directory('tectonics',run)/'boundary-review.json'
     out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(result,indent=2))
     print(json.dumps(result))
 

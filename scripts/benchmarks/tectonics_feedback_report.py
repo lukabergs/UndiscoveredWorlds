@@ -6,9 +6,9 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import palettes
+from uwtools import palettes, runs
 from uwtools.hashing import sha256
-from tectonics_experiment import ROOT
+from uwtools.paths import ROOT
 from tectonics_report_data import (load_bundle, stats, local_relief, coast_distance,
                                    coastal_terrain, terrain_detail, island_sizes,
                                    hypsography_shape)
@@ -66,11 +66,9 @@ def feedback_snapshots(record):
         raise ValueError('Feedback comparison field hash mismatch')
     with np.load(field_path) as source:
         endpoints = {key: source[key] for key in ('initial', 'final')}
-    parent = json.loads((ROOT / f'runs/manifests/tectonics/{record["parent"]}.json').read_text())
+    parent = runs.tectonics(record['parent'])
     final = next(s for s in parent['snapshots'] if s['label'] == 'final')
-    native, parent_fields, _ = load_bundle(
-        ROOT / f'runs/checkpoints/tectonics/{record["parent"]}' / final['directory'],
-        record['parent_final_hashes'])
+    native, parent_fields, _ = load_bundle(final['path'], record['parent_final_hashes'])
     if not np.array_equal(endpoints['initial'], parent_fields['elevation']):
         raise ValueError('Feedback initial terrain does not match archived parent')
     for index in range(record['cycles'] + 1):

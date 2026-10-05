@@ -19,7 +19,7 @@ from climate_report_data import Archive,FIELDS,REGIONS,ROOT,SOURCES,read_json,ma
 from climate_report_metrics import evaluate,bins,rank,quantile
 from climate_report_render import save_map,save_ocean_flow,save_wind_flow,save_continent_outlines,nearest_path,full_reference,flow_path,flow_complete
 from climate_palettes import anchors,DEFINITION,VERSION
-from run_storage import ensure_archive_directory
+from uwtools.storage import route as ensure_archive_directory
 sys.path.insert(0,str(ROOT/'scripts'))
 from uwtools import grid, references
 from uwtools.hashing import sha256

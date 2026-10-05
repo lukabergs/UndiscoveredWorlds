@@ -42,6 +42,10 @@ out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --audit-acce
 out/build/headless/bin/Release/world_pipeline.exe run --recipe earth-climate --seed 1 --map none --bundle out/scratch/climate
 out/build/headless/bin/Release/world_pipeline.exe run --recipe procedural-world --from-bundle CHECKPOINT --steps a..b --bundle out/scratch/part
 uv run --offline python scripts/evaluation/process_access.py (Get-ChildItem runs/reports/phase2-access/*.json) --check   # the access file equals what the stored reports give
+# Determinism of a profile run: two runs, bundles compared by the profile's repeat check (out/evaluation/<module>/)
+uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat
 ```
+
+A registered run (`uw.py <module> run`) reproduces an earlier one when `compare_bundles.py` finds its `bundle/` identical to the earlier run's final bundle (sealed runs: `runs/archive/checkpoints/<module>/<id>/final`).
 
 Headless checks do not establish GUI rendering, historical save compatibility, full Earth benchmark skill or high-resolution performance; verify that boundary when it is part of the requested outcome. Module benchmarks and evaluations: `docs/reference-guides/benchmark-commands.md`.
