@@ -6,6 +6,7 @@ add_library(uw_climate STATIC
     climate_boundary_layer.cpp
     climate_classification.cpp
     climate_coupling.cpp
+    climate_diagnostics.cpp
     climate_energy.cpp
     climate_fields.cpp
     climate_flow.cpp

@@ -85,15 +85,7 @@ void loadappenvironmentinternal()
     applypathoverride(environmentconfig.defaultAppearanceDirectory, getenvoverride("UW_DEFAULT_UWS_DIR", filevalues));
     applypathoverride(environmentconfig.defaultImageDirectory, getenvoverride("UW_DEFAULT_IMAGE_DIR", filevalues));
     applypathoverride(environmentconfig.terrainTemplatePath, getenvoverride("UW_TERRAIN_TEMPLATES", filevalues));
-    applypathoverride(environmentconfig.referencePrecipitationGridPath, getenvoverride("UW_REFERENCE_PRECIP_GRID", filevalues));
-    applypathoverride(environmentconfig.referenceClimateDirectory, getenvoverride("UW_REFERENCE_CLIMATE_DIR", filevalues));
-    applypathoverride(environmentconfig.referenceProcessedDirectory, getenvoverride("UW_REFERENCE_PROCESSED_DIR", filevalues));
-    applypathoverride(environmentconfig.referenceClimatePreviewDirectory, getenvoverride("UW_REFERENCE_CLIMATE_PREVIEW_DIR", filevalues));
-    applypathoverride(environmentconfig.climateBenchmarkRunLogPath, getenvoverride("UW_CLIMATE_BENCHMARK_RUN_LOG", filevalues));
-    applypathoverride(environmentconfig.climateBenchmarkImageDirectory, getenvoverride("UW_CLIMATE_BENCHMARK_IMAGE_DIR", filevalues));
-    applypathoverride(environmentconfig.climateBenchmarkRunDirectory, getenvoverride("UW_CLIMATE_BENCHMARK_RUN_DIR", filevalues));
-    applypathoverride(environmentconfig.climateValidationDirectory, getenvoverride("UW_CLIMATE_VALIDATION_DIR", filevalues));
-    applypathoverride(environmentconfig.earthKoppenImagePath, getenvoverride("UW_EARTH_KOPPEN_IMAGE", filevalues));
+    applypathoverride(environmentconfig.climateDiagnosticsDirectory, getenvoverride("UW_CLIMATE_DIAGNOSTICS_DIR", filevalues));
     applypathoverride(environmentconfig.earthBenchmarkLandPath, getenvoverride("UW_EARTH_BENCHMARK_LAND", filevalues));
     applypathoverride(environmentconfig.earthBenchmarkSeaPath, getenvoverride("UW_EARTH_BENCHMARK_SEA", filevalues));
 
@@ -101,20 +93,8 @@ void loadappenvironmentinternal()
         filesystem::create_directories(environmentconfig.defaultAppearanceDirectory);
     if (!environmentconfig.defaultImageDirectory.empty() && environmentconfig.defaultImageDirectory != ".")
         filesystem::create_directories(environmentconfig.defaultImageDirectory);
-    if (!environmentconfig.referencePrecipitationGridPath.empty() && environmentconfig.referencePrecipitationGridPath.has_parent_path())
-        filesystem::create_directories(environmentconfig.referencePrecipitationGridPath.parent_path());
-    if (!environmentconfig.referenceClimateDirectory.empty())
-        filesystem::create_directories(environmentconfig.referenceClimateDirectory);
-    if (!environmentconfig.referenceClimatePreviewDirectory.empty())
-        filesystem::create_directories(environmentconfig.referenceClimatePreviewDirectory);
-    if (!environmentconfig.climateBenchmarkRunLogPath.empty() && environmentconfig.climateBenchmarkRunLogPath.has_parent_path())
-        filesystem::create_directories(environmentconfig.climateBenchmarkRunLogPath.parent_path());
-    if (!environmentconfig.climateBenchmarkImageDirectory.empty())
-        filesystem::create_directories(environmentconfig.climateBenchmarkImageDirectory);
-    if (!environmentconfig.climateBenchmarkRunDirectory.empty())
-        filesystem::create_directories(environmentconfig.climateBenchmarkRunDirectory);
-    if (!environmentconfig.climateValidationDirectory.empty())
-        filesystem::create_directories(environmentconfig.climateValidationDirectory);
+    if (!environmentconfig.climateDiagnosticsDirectory.empty())
+        filesystem::create_directories(environmentconfig.climateDiagnosticsDirectory);
 
     environmentloaded = true;
 }
@@ -131,17 +111,6 @@ const AppEnvironmentConfig& getappenvironment()
 void reloadappenvironment()
 {
     loadappenvironmentinternal();
-}
-
-void setreferenceprecipitationgridpath(const filesystem::path& path)
-{
-    if (environmentloaded == false)
-        loadappenvironmentinternal();
-
-    environmentconfig.referencePrecipitationGridPath = path;
-
-    if (!environmentconfig.referencePrecipitationGridPath.empty() && environmentconfig.referencePrecipitationGridPath.has_parent_path())
-        filesystem::create_directories(environmentconfig.referencePrecipitationGridPath.parent_path());
 }
 
 filesystem::path resolutionvariant(

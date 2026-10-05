@@ -1,6 +1,5 @@
 # Run bundles, imports, TIFF and PNG, climate references, definitions.
 add_library(uw_io STATIC
-    climate_benchmark_outputs.cpp
     climate_reference.cpp
     climate_tiff.cpp
     map_imports.cpp

@@ -39,12 +39,7 @@ Multiply the weighted mean loss by 100 to obtain the displayed cost. Compare run
 
 ## Palettes
 
-`configs/climate-palettes.json` is the single source for colours and scales. `scripts/benchmarks/climate_palettes.py` serves Python renderers. Generate the C++ header after changing the definition:
-
-```powershell
-uv run --offline python scripts/benchmarks/generate_climate_palette_header.py
-uv run --offline python scripts/benchmarks/generate_climate_palette_header.py --check
-```
+`configs/climate-palettes.json` is the single source for colours and scales; `scripts/uwtools/palettes.py` serves every renderer. No C++ code draws maps.
 
 Positive magnitudes use blue–cyan–green–yellow–orange–red. Signed quantities use white–magenta–blue–cyan–green–yellow–red, with **zero always cyan**, even on asymmetric temperature ranges. Black means missing or masked data. Display endpoints saturate; statistics use unclipped physical values and include overflow/underflow bins. Categorical Köppen colours are unchanged.
 

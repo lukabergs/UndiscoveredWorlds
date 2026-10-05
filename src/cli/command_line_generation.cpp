@@ -14,7 +14,7 @@
 
 #include "core/app_environment.hpp"
 #include "core/classes.hpp"
-#include "validation/climate/climate_artifacts.hpp"
+#include "simulations/climate/climate_diagnostics.hpp"
 #include "world/functions.hpp"
 #include "pipeline/world_stages.hpp"
 #include "io/map_imports.hpp"
@@ -32,7 +32,6 @@ void printcommandlineusage()
     cout << "Commands:\n";
     cout << "  run                 Run a recipe (--recipe) or part of it; nothing is registered.\n";
     cout << "  generate            Generate a procedural world, or climate on imported terrain with --climate-only.\n";
-    cout << "  climate-benchmark   Run the earth-climate recipe on the Earth terrain and record a numbered run.\n";
     cout << "Options of run:\n";
     cout << "  --recipe <name>         procedural-world, imported-world, earth-climate or tectonics. Imported recipes use the\n";
     cout << "                           Earth terrain of configs/app.env at --resolution (default 512) unless\n";
@@ -64,14 +63,8 @@ void printcommandlineusage()
     printclimateoptionsusage(cout);
     printtectonicoptionsusage(cout);
     cout << "  --resolution <width>    Set an even global width and derive height as width/2.\n";
-    cout << "  --reference-precip <csv> Compare against a precipitation reference grid.\n";
     cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
     cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
-    cout << "  --benchmark-info <text> Store a change summary in the benchmark run log.\n";
-    cout << "  --map <id[,id...]>      Replace default benchmark maps; repeat to add maps.\n";
-    cout << "                           Default: koppen,temp,precip,precip-tif; Jan/Jul surface/upper speed, LIC, particles; SST, ocean currents.\n";
-    cout << "                           Seasons: jan, apr, jul, oct. Use --map all or --map none.\n";
-    cout << "  --print-climate-relative-error Print per-climate relative error against the Earth benchmark counts.\n";
     cout << "  --no-rivers             Disable river generation.\n";
     cout << "  --no-lakes              Disable lake generation.\n";
     cout << "  --no-deltas             Disable delta generation.\n";
@@ -100,7 +93,7 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
 
         if (argument == "--print-climate-relative-error")
         {
-            options.printClimateRelativeError = true;
+            cerr << "Ignoring " << argument << ": comparisons are made from run bundles (scripts/uw.py).\n";
             continue;
         }
 
@@ -270,26 +263,11 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                     // so archived experiment commands still replay.
                     cerr << "Ignoring " << argument << ": exported maps use the world grid (--resolution).\n";
                 }
-                else if (argument == "--map" || argument == "--maps")
+                else if (argument == "--map" || argument == "--maps" || argument == "--reference-precip" ||
+                    argument == "--benchmark-info")
                 {
-                    if (!options.benchmarkMapsSpecified)
-                    {
-                        options.benchmarkMaps.clear();
-                        options.benchmarkMapsSpecified = true;
-                    }
-                    string failure;
-                    if (!addclimatebenchmarkmapargument(
-                            options.benchmarkMaps, value, &failure))
-                    {
-                        cerr << failure << '\n';
-                        cleanup();
-                        return false;
-                    }
-                }
-                else if (argument == "--reference-precip")
-                {
-                    options.referencePath = value;
-                    options.hasReferencePath = true;
+                    // Retired with the C++ benchmark outputs. Accepted so stored commands still replay.
+                    cerr << "Ignoring " << argument << ": maps and comparisons are made from run bundles (scripts/uw.py).\n";
                 }
                 else if (argument == "--import-land")
                 {
@@ -300,10 +278,6 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                 {
                     options.importSeaPath = value;
                     options.hasImportSeaPath = true;
-                }
-                else if (argument == "--benchmark-info")
-                {
-                    options.benchmarkInformation = value;
                 }
                 else if (argument == "--social-mode")
                 {
@@ -367,9 +341,9 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
     return true;
 }
 
-filesystem::path commandlinevalidationdirectory(long seed)
+filesystem::path commandlinediagnosticsdirectory(long seed)
 {
-    filesystem::path outputroot = getappenvironment().climateValidationDirectory;
+    filesystem::path outputroot = getappenvironment().climateDiagnosticsDirectory;
 
     if (outputroot.empty())
         outputroot = filesystem::current_path();
@@ -440,7 +414,7 @@ namespace
 {
 // Runs a recipe on terrain already in the world (generated, imported or loaded
 // from a bundle). A run through the last step of a climate recipe writes the
-// climate validation report.
+// climate diagnostics.
 RecipeRunResult runrecipeonterrain(planet& world, const WorldRecipe& recipe, GenerationScratch& scratch,
     WorldStageParameters& parameters, const GenerationExecutionContext& context, const RecipeRunOptions& runoptions)
 {
@@ -456,7 +430,7 @@ RecipeRunResult runrecipeonterrain(planet& world, const WorldRecipe& recipe, Gen
 
     if (frozenterrain) {
         if (!runoptions.selectSteps || runoptions.steps.last + 1 == recipe.steps.size())
-            exportclimatevalidationreport(world.climate());
+            writeclimatediagnostics(world.climate());
         size_t cell=0;
         for (int y=0;y<=world.height();++y) for (int x=0;x<=world.width();++x)
             if (world.nom(x,y)!=inputterrain[cell++]) throw runtime_error("Climate-only stage modified terrain");
@@ -484,14 +458,13 @@ RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe,
     return runrecipeonterrain(world, recipe, scratch, parameters, context, runoptions);
 }
 
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool recordclimatebenchmark, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate, bool climateOnly)
+void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate, bool climateOnly)
 {
     GenerationExecutionContext context;
     context.dorivers = dorivers;
     context.climateOnly = climateOnly;
     context.dolakes = dolakes;
     context.dodeltas = dodeltas;
-    context.recordclimatebenchmark = recordclimatebenchmark;
     context.socialoptions = socialoptions;
     context.landshape = landshape;
     context.smalllake = smalllake;
@@ -547,7 +520,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     // run: a recipe on imported terrain imports the Earth terrain unless told otherwise.
     const bool importedworld = options.runCommand ? recipeimportsterrain(recipe) && !frombundle
-        : options.earthClimateBenchmark || hasimport;
+        : hasimport;
     // The tectonics module runs alone: the engine's grid is the world grid.
     const bool tectonicsmodule = recipe.name == "tectonics";
     if (options.climateOnly && !importedworld) {
@@ -559,10 +532,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     fast_srand(world->seed());
 
-    if (options.hasReferencePath)
-        setreferenceprecipitationgridpath(options.referencePath);
-
-    if (options.earthClimateBenchmark == false && (options.hasImportLandPath != options.hasImportSeaPath))
+    if (options.hasImportLandPath != options.hasImportSeaPath)
     {
         cerr << "Imported runs require both --import-land and --import-sea for generate.\n";
         return 1;
@@ -588,12 +558,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         return 1;
     }
 
-    if (options.benchmarkMapsSpecified && !options.earthClimateBenchmark && !options.climateOnly && !options.runCommand)
-    {
-        cerr << "--map requires run, climate-benchmark or generate --climate-only.\n";
-        return 1;
-    }
-
     boolshapetemplate landshape[12];
     createlandshapetemplates(landshape);
     boolshapetemplate chainland[2];
@@ -613,7 +577,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     debugoptions.plateTectonicsDurationMyr = options.plateTectonicsDurationMyr;
     debugoptions.plateTectonicsPlateCount = options.plateTectonicsPlateCount;
 
-    if (options.earthClimateBenchmark || (options.runCommand && importedworld))
+    if (options.runCommand && importedworld)
     {
         world->setwidth(std::clamp(
             options.hasResolution ? options.resolution :
@@ -678,7 +642,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     updatereport("");
 
     if (options.recipeName.empty())
-        recipe = importedworld ? (options.climateOnly || options.earthClimateBenchmark ? earthclimaterecipe() : importedworldrecipe()) : proceduralworldrecipe();
+        recipe = importedworld ? (options.climateOnly ? earthclimaterecipe() : importedworldrecipe()) : proceduralworldrecipe();
     if (!frombundle && importedworld != recipeimportsterrain(recipe))
     {
         cerr << "Recipe " << recipe.name << (importedworld ? " cannot start from imported terrain.\n" : " requires imported terrain.\n");
@@ -720,7 +684,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         metadata.command = options.commandArguments;
         metadata.steps = bundlesteps(result);
         metadata.properties.push_back({ "executable_built", string(__DATE__) + " " + __TIME__ });
-        metadata.properties.push_back({ "command", options.runCommand ? "run" : options.earthClimateBenchmark ? "climate-benchmark" : "generate" });
+        metadata.properties.push_back({ "command", options.runCommand ? "run" : "generate" });
         metadata.properties.push_back({ "access", options.auditAccess ? "measured" : "declared" });
         if (frombundle)
             metadata.properties.push_back({ "from_bundle", options.fromBundlePath });
@@ -876,7 +840,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         context.dorivers = options.rivers;
         context.dolakes = options.lakes;
         context.dodeltas = options.deltas;
-        context.recordclimatebenchmark = false;
         context.socialoptions = socialoptions;
         context.landshape = landshape;
         context.chainland = chainland;
@@ -906,50 +869,9 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     if (auditfailed)
         cerr <<"Access audit found " << runresult.violations << " undeclared or frozen write(s).\n";
 
-    if (options.earthClimateBenchmark || options.climateOnly)
-    {
-        int benchmarkrunid = options.climateOnly ? 1 : 0;
-
-        if ((options.climateOnly ? exportproceduralclimateartifacts(world->climate(), options.benchmarkMaps) : recordclimatebenchmarkrun(
-                world->climate(),
-                options.benchmarkInformation,
-                options.benchmarkMaps,
-                &benchmarkrunid)) == false)
-        {
-            cerr << "Failed to record climate benchmark artifacts.\n";
-            return 1;
-        }
-
-        const AppEnvironmentConfig& appenv = getappenvironment();
-        updatereport("Climate benchmark run ID: " + to_string(benchmarkrunid));
-        if (!options.climateOnly) updatereport("Climate benchmark log: " + appenv.climateBenchmarkRunLogPath.string());
-        for (const climatebenchmarkmaprequest& request : options.benchmarkMaps.requests())
-        {
-            if (!climatebenchmarkmapisreference(request.kind))
-            {
-                updatereport("Climate benchmark map: " +
-                    ((request.kind == climatebenchmarkmapkind::precipitationtiff
-                        ? appenv.climateBenchmarkImageDirectory.parent_path() / "fields"
-                        : appenv.climateBenchmarkImageDirectory) /
-                        climatebenchmarkmaprelativepath(request, benchmarkrunid)).string());
-            }
-        }
-        updatereport("Climate benchmark map guide: " +
-            (appenv.climateBenchmarkImageDirectory / "benchmark_map_guide.txt").string());
-    }
-    else if (options.runCommand && options.benchmarkMapsSpecified &&
-        !exportproceduralclimateartifacts(world->climate(), options.benchmarkMaps))
-    {
-        cerr << "Failed to write climate maps.\n";
-        return 1;
-    }
-
-    if (options.printClimateRelativeError)
-        printclimaterelativeerrorreport(world->climate());
-
     updatereport("");
     updatereport("World generation completed.");
-    updatereport("Validation output: " + commandlinevalidationdirectory(world->seed()).string());
+    updatereport("Climate diagnostics: " + commandlinediagnosticsdirectory(world->seed()).string());
 
     if (options.hasSavePath)
     {

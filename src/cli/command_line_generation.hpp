@@ -1,13 +1,12 @@
 #pragma once
 
-// Headless world generation and Earth climate benchmark entry points shared
+// Headless world generation entry points shared
 // by world_pipeline and the desktop application.
 
 #include <filesystem>
 #include <string>
 #include <vector>
 
-#include "io/climate_benchmark_outputs.hpp"
 #include "cli/climate_options.hpp"
 #include "cli/tectonic_options.hpp"
 #include "world/planet.hpp"
@@ -21,8 +20,6 @@ struct CommandLineGenerationOptions
 {
     bool run = false;
     bool showHelp = false;
-    bool earthClimateBenchmark = false;
-    bool printClimateRelativeError = false;
     bool rivers = true;
     bool lakes = true;
     bool deltas = true;
@@ -33,13 +30,11 @@ struct CommandLineGenerationOptions
     bool climateOnly = false;
     bool hasSeed = false;
     bool hasSavePath = false;
-    bool hasReferencePath = false;
     bool hasImportLandPath = false;
     bool hasImportSeaPath = false;
     bool hasWorldWidth = false;
     bool hasWorldHeight = false;
     bool hasResolution = false;
-    bool benchmarkMapsSpecified = false;
     long seed = 0;
     double plateTectonicsDurationMyr = 0;
     int plateTectonicsPlateCount = 0;
@@ -63,12 +58,8 @@ struct CommandLineGenerationOptions
     std::string checkpointDirectory;         // --checkpoint-dir; default <bundle>-checkpoints.
     std::string accessReportPath;
     std::vector<std::string> commandArguments;
-    std::string referencePath;
     std::string importLandPath;
     std::string importSeaPath;
-    std::string benchmarkInformation;
-    climatebenchmarkmapselection benchmarkMaps =
-        climatebenchmarkmapselection::defaultselection();
 };
 
 void printcommandlineusage();
@@ -82,7 +73,7 @@ struct GenerationExecutionContext;
 // Runs a recipe on an imported world (imported-world or earth-climate).
 RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe, const GenerationExecutionContext& context,
     const RecipeRunOptions& runoptions);
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, bool recordclimatebenchmark,
+void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas,
     const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[],
     boolshapetemplate landshape[], std::vector<std::vector<bool>>& okmountains,
     const ImportedClimateMaps* importedclimate = nullptr, bool climateOnly = false);

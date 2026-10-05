@@ -6,7 +6,7 @@
   "run": {"tool": "world_pipeline", "resolution": 512,
           "arguments": ["run", "--recipe", "earth-climate", "--import-land", "refs/processed/land_ocean/maps/earth_land_{width}x{height}.tif",
                         "--import-sea", "refs/processed/land_ocean/maps/earth_sea_{width}x{height}.tif",
-                        "--resolution", "{width}", "--map", "none"],
+                        "--resolution", "{width}"],
           "inputs": [{"environment": "UW_CLIMATE_SURFACE_DRAG_INPUT", "derive": "drag-contrast",
                       "source": "refs/processed/era5-vegetation-drag/1024/land-drag-contrast-1024.txt"}],
           "registered": {"resolution": 1024,

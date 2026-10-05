@@ -13,7 +13,6 @@
 
 #include "simulations/climate/climate_atmosphere.hpp"
 #include "simulations/climate/climate_coupling.hpp"
-#include "validation/climate/climate_circulation_diagnostics.hpp"
 #include "simulations/climate/climate_energy.hpp"
 #include "core/climate_grid.hpp"
 #include "simulations/climate/climate_hydrology.hpp"
@@ -46,7 +45,6 @@
 #include "simulations/climate/climate_classification.hpp"
 #include "simulations/climate/climate_fields.hpp"
 #include "core/classes.hpp"
-#include "io/climate_benchmark_outputs.hpp"
 #include "simulations/climate/climate_elevation.hpp"
 #include "core/deterministic_random.hpp"
 #include "pipeline/generation_progress.hpp"
@@ -982,10 +980,6 @@ void createoceancurrentmap(climateworld& world)
                 // written back over the accepted atmospheric wind/pressure.
             }
         }
-        if (isworldgendebugrunactive() && climate.winds.populated[season])
-            climatevalidation::capturecirculationwindfields(world, season,
-                climate.winds.surfacewindu[season], climate.winds.surfacewindv[season],
-                climate.winds.upperwindu[season], climate.winds.upperwindv[season]);
         std::cout
             << "Coupled ocean season " << season
             << ": iterations=" << ocean.couplingIterations
@@ -2864,8 +2858,6 @@ void createvectorwindmap(climateworld& world)
         precision.base = measurecirculationprecision(world, pressure, upperheight, landoutput, terrainoutput);
         precision.final = precision.base;
         climateatmosphere::setLastCirculationPrecisionDiagnostics(season, precision);
-        if (isworldgendebugrunactive())
-            climatevalidation::capturecirculationwindfields(world, season, windu, windv, upperu, upperv);
         for (int y = 0; y <= height; ++y)
             for (int x = 0; x <= width; ++x)
             {

@@ -37,7 +37,7 @@
 #include <thread>
 #include <vector>
 
-#include "io/climate_benchmark_outputs.hpp"
+#include "simulations/climate/climate_diagnostics.hpp"
 #include "simulations/climate/climate_elevation.hpp"
 
 #include "pipeline/world_generation_debug.hpp"
@@ -264,13 +264,6 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
 
 // Coupled ocean/atmosphere and validation integration.
 #include "simulations/climate/climate_coupling.hpp"
-void exportclimatevalidationreport(climateworld& world);
-bool recordclimatebenchmarkrun(
-    climateworld& world,
-    const string& information,
-    const climatebenchmarkmapselection& maps,
-    int* runid = nullptr);
-void printclimaterelativeerrorreport(climateworld& world);
 
 // Declare functions that are in regionalmap.cpp
 

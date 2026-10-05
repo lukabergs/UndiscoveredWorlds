@@ -32,11 +32,7 @@ int main()
 
     CommandLineGenerationOptions options;
     const string command = arguments[0];
-    if (command == "climate-benchmark")
-    {
-        options.earthClimateBenchmark = true;
-    }
-    else if (command == "run")
+    if (command == "run")
     {
         options.runCommand = true;
     }

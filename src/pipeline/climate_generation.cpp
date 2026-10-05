@@ -660,7 +660,7 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
 
     createclimatemap(world.climate());
     createbiomemap(world.climate());
-    exportclimatevalidationreport(world.climate());
+    writeclimatediagnostics(world.climate());
 
     if (dolakes == 0)
     {

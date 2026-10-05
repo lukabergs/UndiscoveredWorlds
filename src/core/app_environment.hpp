@@ -10,26 +10,15 @@ struct AppEnvironmentConfig
     std::filesystem::path defaultImageDirectory = "out/images";
     // Shape templates of the terrain module (simulations/terrain/shape_templates.cpp).
     std::filesystem::path terrainTemplatePath = "assets/terrain/shape-templates.txt";
-    std::filesystem::path referencePrecipitationGridPath = "refs/processed/climate/earth_precipitation_grid.csv";
-    std::filesystem::path referenceClimateDirectory = "refs/processed/climate";
-    // Processed observed fields: <dataset>/<width>/fields/<name>.npy with manifest.json (refs/README.md).
-    std::filesystem::path referenceProcessedDirectory = "refs/processed";
-    std::filesystem::path referenceClimatePreviewDirectory = "refs/processed/climate/previews";
-    std::filesystem::path climateBenchmarkRunLogPath = "out/climate-benchmark/registry.json";
-    // Organized previews and durable run diagnostics; seed-scoped working files are separate.
-    std::filesystem::path climateBenchmarkImageDirectory = "out/climate-benchmark/maps";
-    std::filesystem::path climateBenchmarkRunDirectory = "out/climate-benchmark/diagnostics";
-    std::filesystem::path climateValidationDirectory = "out/climate-benchmark/validation";
-    // The old unsigned benchmark terrain and categorical reference were removed.
-    // Supply compatible inputs through configs/app.env or environment overrides.
-    std::filesystem::path earthKoppenImagePath;
+    // Tables of the climate solvers written by a run (simulations/climate/climate_diagnostics.cpp).
+    std::filesystem::path climateDiagnosticsDirectory = "out/climate-diagnostics";
+    // Earth terrain of the imported recipes; resolution variants are resolved beside these files.
     std::filesystem::path earthBenchmarkLandPath;
     std::filesystem::path earthBenchmarkSeaPath;
 };
 
 const AppEnvironmentConfig& getappenvironment();
 void reloadappenvironment();
-void setreferenceprecipitationgridpath(const std::filesystem::path& path);
 
 // Moves the working directory to the repository root (the folder with version.txt)
 // when started elsewhere, searching upwards from the executable.

@@ -95,7 +95,6 @@ struct GenerationExecutionContext
     bool dorivers = true;
     bool dolakes = true;
     bool dodeltas = true;
-    bool recordclimatebenchmark = false;
     SocialGenerationOptions socialoptions;
     boolshapetemplate* landshape = nullptr;
     boolshapetemplate* chainland = nullptr;

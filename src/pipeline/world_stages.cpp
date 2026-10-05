@@ -798,7 +798,7 @@ void applydeltawetlandstage(planet& world, const GenerationExecutionContext& con
     world.syncseasonalclimatefromlegacy();
     createclimatemap(world.climate());
     createbiomemap(world.climate());
-    exportclimatevalidationreport(world.climate());
+    writeclimatediagnostics(world.climate());
 }
 
 }
@@ -1200,10 +1200,4 @@ void finalizegeneratedworld(planet& world, GenerationScratch& scratch, const Gen
 {
     generatephysicalworldlayers(world, world.continentalshelves());
     generatesocialworld(world, context.socialoptions);
-
-    if (context.recordclimatebenchmark && recordclimatebenchmarkrun(
-            world.climate(),
-            "",
-            climatebenchmarkmapselection::defaultselection()) == false)
-        updatereport("Climate benchmark artifact update failed");
 }

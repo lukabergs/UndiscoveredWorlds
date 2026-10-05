@@ -106,14 +106,16 @@ point whose steps read such state from a skipped step and names the step that
 must be in the run; those fields and tables are copied into the new bundle from
 the source unless a step of the run writes them.
 
-`world_pipeline climate-benchmark` runs the same earth-climate recipe on the Earth
-terrain (a seed-1 bundle at 256 columns is identical to `run --recipe earth-climate`
-with the same options) and records it with the C++ validation tables and maps. It is
-a scratch tool, as is the desktop app's "Record climate benchmark": their outputs and
-their run log go to `out/climate-benchmark/` (`configs/app.env`); registered runs
-are made only by `uw.py climate run`. Until run 384 it ran the imported-world stage
-path, which edited the imported terrain before climate, so runs up to 384 are not
-comparable with later ones.
+The `climate-benchmark` command, the desktop app's "Record climate benchmark" and the
+C++ maps and reference comparisons were removed in consolidation Phase 4 (`world-0026`):
+maps and comparisons are made from run bundles by `uw.py`, and registered runs only by
+`uw.py climate run`. The options `--map`, `--benchmark-info`, `--reference-precip` and
+`--print-climate-relative-error` are accepted and ignored, so stored commands replay. A
+climate run still writes the tables of its solvers (energy and water budgets, coupling
+iterations, precipitation statistics, atmospheric budget, circulation precision) to
+`UW_CLIMATE_DIAGNOSTICS_DIR` (`configs/app.env`; `out/evaluation/outputs/` under `uw.py`).
+Until run 384 the benchmark ran the imported-world stage path, which edited the imported
+terrain before climate, so runs up to 384 are not comparable with later ones.
 
 ## Recipes, run bundles and access audits
 

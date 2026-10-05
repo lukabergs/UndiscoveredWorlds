@@ -958,7 +958,7 @@ bool runremaininggenerationstages(planet& world, GenerationScratch& scratch, Gen
             return false;
     }
 
-    if (context.climateOnly) exportclimatevalidationreport(world.climate());
+    if (context.climateOnly) writeclimatediagnostics(world.climate());
 
     return true;
 }

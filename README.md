@@ -169,7 +169,7 @@ uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --exp
 uv run --offline scripts/uw.py tectonics run
 ```
 
-`world_pipeline` is the only headless executable: recipe runs, full-world generation and the Earth climate benchmark (`run`, `generate`, `climate-benchmark`). It runs recipes or parts of them (`run --recipe`, `--from-bundle`, `--steps`, `--only`, checkpoints), can write a run bundle (`--bundle`) and audit each step's field access (`--audit-access`), and links no SFML or ImGui. Climate alone on imported terrain is `run --recipe earth-climate`. The desktop `UndiscoveredWorlds.exe` takes no arguments.
+`world_pipeline` is the only headless executable: recipe runs and full-world generation (`run`, `generate`). It runs recipes or parts of them (`run --recipe`, `--from-bundle`, `--steps`, `--only`, checkpoints), can write a run bundle (`--bundle`) and audit each step's field access (`--audit-access`), and links no SFML or ImGui. Climate alone on imported terrain is `run --recipe earth-climate`. The desktop `UndiscoveredWorlds.exe` takes no arguments.
 
 Tectonics alone is the `tectonics` recipe: `world_pipeline run --recipe tectonics [--seed N] [--resolution W] [--<scenario-key> value ...] [--duration Myr] [--mineral-history on|off] [--checkpoint-every Myr] --bundle DIR`. It runs the engine on the world grid W x W/2 (default 256) and writes an ordinary run bundle; `world_pipeline --help` lists the scenario options. Two bundles are compared with `scripts/evaluation/compare_bundles.py A B`. See [tectonics runs](docs/architecture/tectonics/pipeline-tooling.md).
 

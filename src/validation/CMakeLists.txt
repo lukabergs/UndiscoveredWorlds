@@ -1,8 +1,7 @@
-# Comparisons with observed data, and the snapshot record of the tectonics
-# engine (the world writes it into its bundles; the engine tests read bundles).
+# The snapshot record of the tectonics engine (the world writes it into its
+# bundles; the engine tests read bundles). Comparisons with observed data are
+# made from run bundles by scripts/evaluation.
 add_library(uw_validation STATIC
-    climate/climate_circulation_diagnostics.cpp
-    climate/climate_validation.cpp
     tectonics/tectonic_snapshots.cpp
 )
 target_link_libraries(uw_validation PUBLIC uw_includes uw_tectonics)

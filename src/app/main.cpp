@@ -33,8 +33,6 @@
 #include <SFML/Window/Event.hpp>
 
 #include "core/classes.hpp"
-#include "io/climate_benchmark_outputs.hpp"
-#include "validation/climate/climate_artifacts.hpp"
 #include "world/planet.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "simulations/society/social_generation.hpp"
@@ -664,7 +662,6 @@ int main()
     int& seedentry = customworldui.seedentry; // The value currently entered into the seed box in the create world screen.
     int& newx = customworldui.newx;
     int& newy = customworldui.newy; // These are used to locate the new region.
-    bool& recordclimatebenchmark = customworldui.recordClimateBenchmark;
 
     short regionmargin = 17; // The centre of the regional map can't be closer than this to the northern/southern edges of the global map.
 
@@ -1085,7 +1082,6 @@ int main()
         context.dorivers = currentrivers;
         context.dolakes = currentlakes;
         context.dodeltas = currentdeltas;
-        context.recordclimatebenchmark = recordclimatebenchmark;
         context.socialoptions = socialoptionsfromworldcontrols();
         context.landshape = landshape;
         context.chainland = chainland;
@@ -1994,7 +1990,6 @@ int main()
                 workbenchcontext.dorivers = currentrivers;
                 workbenchcontext.dolakes = currentlakes;
                 workbenchcontext.dodeltas = currentdeltas;
-                workbenchcontext.recordclimatebenchmark = recordclimatebenchmark;
                 workbenchcontext.socialoptions = socialoptionsfromworldcontrols();
                 workbenchcontext.landshape = landshape;
                 workbenchcontext.chainland = chainland;
@@ -2678,7 +2673,7 @@ int main()
             if (standardbutton("Workbench"))
             {
                 initializeimportedworkbenchsession(generationworkbench, *world, importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation);
-                previewcurrentgenerationstage(generationworkbench, *world, GenerationExecutionContext{ currentrivers, currentlakes, currentdeltas, recordclimatebenchmark, socialoptionsfromworldcontrols(), landshape, chainland, smalllake, largelake, &OKmountains, (importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation) ? &importedclimatemaps : nullptr }, nullptr);
+                previewcurrentgenerationstage(generationworkbench, *world, GenerationExecutionContext{ currentrivers, currentlakes, currentdeltas, socialoptionsfromworldcontrols(), landshape, chainland, smalllake, largelake, &OKmountains, (importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation) ? &importedclimatemaps : nullptr }, nullptr);
                 invalidateGlobalMaps();
                 showGlobalMapView(preferredworkbenchmapview(getcurrentgenerationstage(generationworkbench).id));
             }
@@ -2694,7 +2689,6 @@ int main()
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Calculate climates, lakes, and rivers, and finish the world.");
 
-            ImGui::Checkbox("Record climate benchmark", &recordclimatebenchmark);
 
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Registers this world as a climate benchmark run with its diagnostics and maps.");
@@ -2740,7 +2734,7 @@ int main()
                 // Plug in the world settings.
 
                 applyworldpropertycontrols(*world, worldpropertycontrols);
-                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, recordclimatebenchmark, socialoptionsfromworldcontrols(), smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
+                completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, socialoptionsfromworldcontrols(), smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
 
                 // Now draw a new map
 

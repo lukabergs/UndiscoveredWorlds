@@ -17,7 +17,6 @@ if(TARGET uw_climate_world)
         world_tests_main.cpp
         core/climate_grid_tests.cpp
         core/parallel_rows_tests.cpp
-        io/climate_benchmark_outputs_tests.cpp
         io/climate_reference_tests.cpp
         io/climate_tiff_tests.cpp
         pipeline/climate_pipeline_tests.cpp
@@ -34,7 +33,6 @@ if(TARGET uw_climate_world)
         simulations/climate/climate_physics_tests.cpp
         simulations/climate/climate_transport_tests.cpp
         simulations/climate/climate_weather_tests.cpp
-        validation/climate_palette_tests.cpp
     )
     # The only project library on its link line: climate, its stage runner and
     # its validation must not need the world class.

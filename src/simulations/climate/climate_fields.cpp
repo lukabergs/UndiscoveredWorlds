@@ -6,7 +6,6 @@
 #include "core/classes.hpp"
 #include "simulations/climate/climate_world.hpp"
 #include "simulations/climate/climate_classification.hpp"
-#include "io/climate_benchmark_outputs.hpp"
 #include "simulations/climate/climate_elevation.hpp"
 #include "core/deterministic_random.hpp"
 #include "pipeline/generation_progress.hpp"
