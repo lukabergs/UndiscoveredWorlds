@@ -1,22 +1,17 @@
 {
   "schema": "uw-evaluation-profile/v1",
   "module": "world",
-  "description": "Procedural world from a seed (procedural-world recipe). Judged by the user's review; checks guard budgets and value ranges. Earth hypsometry is context for the review, not a target.",
+  "description": "Procedural world from a seed (procedural-world recipe): terrain, climate, hydrology and resources after the tectonics step. Judged by the user's review; checks guard budgets and value ranges. Earth hypsometry is context for the review, not a target. Phase 4 registers one run per module that moves to the float accessors in this series; the ledger entry names the module.",
   "evidence": {"checks": "required", "validation": "context", "review": "primary"},
-  "run": {"tool": "world_pipeline", "resolution": 512,
-          "arguments": ["generate", "--resolution", "{width}", "--save", "{directory}/world.uww"]},
+  "run": {"tool": "world_pipeline", "resolution": 256, "arguments": ["run", "--recipe", "procedural-world", "--resolution", "{width}"], "registered": {"resolution": 512, "arguments": ["--climate-resolution", "64", "--climate-coupling-iterations", "2"]}},
   "checks": [
     {"check": "grid"},
-    {"check": "required",
-     "fields": ["geosphere.base_elevation", "geosphere.sea_level", "geosphere.crust_age", "geosphere.crust_class",
-                "atmosphere.temperature", "atmosphere.precipitation_exact", "hydrosphere.river_direction",
-                "hydrosphere.river_flow_january", "biosphere.biome"]},
-    {"check": "written", "fields": ["geosphere.base_elevation", "geosphere.crust_age", "atmosphere.temperature",
-                                    "atmosphere.precipitation_exact", "hydrosphere.river_direction", "biosphere.biome"]},
+    {"check": "required", "fields": ["geosphere.base_elevation", "geosphere.sea_level", "geosphere.crust_age", "geosphere.crust_class", "atmosphere.temperature", "atmosphere.precipitation_exact", "hydrosphere.river_direction", "hydrosphere.river_flow_january", "biosphere.biome"]},
+    {"check": "written", "fields": ["geosphere.base_elevation", "geosphere.crust_age", "atmosphere.temperature", "atmosphere.precipitation_exact", "hydrosphere.river_direction", "biosphere.biome"]},
     {"check": "finite", "fields": ["geosphere.*", "atmosphere.*", "hydrosphere.solver_*", "cryosphere.solver_*"]},
     {"check": "range", "field": "atmosphere.solver_monthly_temperature", "min": -95, "max": 60},
     {"check": "range", "field": "atmosphere.precipitation_exact", "min": 0, "max": 3000},
-    {"check": "range", "field": "cryosphere.solver_sea_ice", "min": 0, "max": 1, "tolerance": 1e-5},
+    {"check": "range", "field": "cryosphere.solver_sea_ice", "min": 0, "max": 1, "tolerance": 1e-05},
     {"check": "range", "field": "geosphere.crust_age", "min": 0},
     {"check": "repeat"}
   ],
@@ -32,6 +27,20 @@
     {"name": "temperature", "title": "Air temperature (°C)", "field": "atmosphere.temperature", "palette": "climate:air_temperature", "seasons": [0, 2]},
     {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation_exact", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"},
     {"name": "surface-wind", "title": "10 m wind speed (m/s)", "vector": ["atmosphere.level_wind_east[0]", "atmosphere.level_wind_north[0]"], "palette": "climate:surface_wind", "seasons": [0, 2]},
-    {"name": "sst", "title": "Sea surface temperature (°C)", "field": "hydrosphere.solver_sea_surface_temperature", "mask": "sea", "palette": "climate:sst", "seasons": [0, 2]}
+    {"name": "sst", "title": "Sea surface temperature (°C)", "field": "hydrosphere.solver_sea_surface_temperature", "mask": "sea", "palette": "climate:sst", "seasons": [0, 2]},
+    {"name": "river-flow", "title": "River flow in January (legacy flow units)", "field": "hydrosphere.river_flow_january", "palette": "tectonics:river_flow"},
+    {"name": "lakes", "title": "Lake surface elevation (m above sea level; dark where there is no lake)", "derived": "lake_elevation", "palette": "tectonics:lake_surface_m"}
+  ],
+  "review_status": "Draft written by an agent on 2026-10-05 for terrain and hydrology (consolidation Phase 4, step 10). The user rewrites it; until then a verdict on it is a reading aid, not a judgement of the world.",
+  "review": [
+    {"id": "relief-follows-tectonics", "question": "Does the high ground of the finished world lie where the tectonic step left convergent boundaries and collision zones?", "maps": ["elevation", "boundaries", "regime"], "seasons": "all", "region": "global", "good": "ranges and plateaus along convergent margins and sutures; plate interiors lower and smoother; the terrain passes after tectonics have not moved or erased the ranges", "severity": "blocker"},
+    {"id": "coastlines", "question": "Do coastlines look like coasts at the scale of the grid?", "maps": ["elevation", "crust-class"], "seasons": "all", "region": "global", "good": "irregular coasts with bays and peninsulas; no long straight edges along rows or columns, no checkerboard, no speckle of one-cell islands or one-cell seas across whole regions", "severity": "major"},
+    {"id": "ocean-floor", "question": "Does the sea floor have shelves around the continents, deep basins and raised ridges?", "maps": ["elevation", "crust-age", "boundaries"], "seasons": "all", "region": "oceans", "good": "a shallow shelf of varying width at the coasts, basins several kilometres deep, ridges or rises along divergent boundaries; no flat floor at one depth everywhere", "severity": "major"},
+    {"id": "rivers-reach-water", "question": "Do rivers run from high ground to the sea or to a lake?", "maps": ["river-flow", "elevation", "lakes"], "seasons": "all", "region": "land", "good": "connected courses that gain flow downstream and end at a coast or a lake; no river that stops in the middle of dry land, crosses a range or runs along a row or column for a long distance", "severity": "blocker"},
+    {"id": "rivers-follow-rain", "question": "Are the large rivers where the rain is?", "maps": ["river-flow", "annual-rain"], "seasons": "all", "region": "land", "good": "dense networks and the largest flows in and downstream of wet regions; deserts with few or no rivers except those fed from wet highlands", "severity": "major"},
+    {"id": "lakes", "question": "Where there are lakes, do they sit in plausible places?", "maps": ["lakes", "elevation", "river-flow"], "seasons": "all", "region": "land", "good": "lakes in basins and along rivers, with surfaces between the surrounding ground and sea level; none on slopes or summits. A world without lakes at this size is answered as unclear, not as no", "severity": "minor"},
+    {"id": "climate-on-terrain", "question": "Do temperature and rain respond to the terrain?", "maps": ["temperature", "annual-rain", "elevation", "surface-wind"], "seasons": "all", "region": "land", "good": "colder high ground in both seasons; wetter windward slopes and drier lee sides of the main ranges; dry belts in the subtropics and wet tropics", "severity": "major"},
+    {"id": "sea-surface", "question": "Is the sea surface temperature smooth and zonal where it should be, with warm tropics and cold poles in both seasons?", "maps": ["sst", "temperature"], "seasons": "all", "region": "oceans", "good": "a broad warm band in the tropics that follows the season, gradients towards the poles, no isolated cells far from their neighbours", "severity": "minor"},
+    {"id": "grid-artefacts", "question": "Is any field free of patterns that follow the grid rather than the world?", "maps": ["elevation", "river-flow", "annual-rain", "temperature", "crust-class"], "seasons": "all", "region": "global", "good": "no stripes along rows or columns, no seams at the date line or the poles, no blocks at the size of a coarser solver grid, no values that jump between neighbouring cells without a cause in the terrain", "severity": "major"}
   ]
 }

@@ -3,16 +3,15 @@
     uv run --offline scripts/uw.py <module> <command> [shared options] [native options]
 
 Modules and commands:
-    climate|tectonics run  registered run: the next id of runs/registry/<module>.json, run in runs/<module>/<id>/
+    climate|tectonics|world run  registered run: the next id of runs/registry/<module>.json, run in runs/<module>/<id>/
                        with the registered settings of configs/evaluation/<module>.json (run.json, log.txt,
                        bundle/, checkpoints/, evaluation/, ledger-entry.json; scripts/evaluation/experiment.py)
     climate|tectonics|world experiment  unregistered scratch run + evaluation with the profile's settings
                        (out/evaluation/<module>/ unless --archive runs/reports/<name>); --repeat runs twice
                        and checks that the bundles are identical
     climate|tectonics|world evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR] [--checkpoints DIR])
-    tectonics report   HTML comparison of registered runs, sealed or not (--runs A B ...), in runs/reports/tectonics/
+    tectonics report   comparison page of the evaluations of registered runs (--runs A B ...), in runs/reports/tectonics/
     geology   run      tectonics bundles at each width, scored against Earth references (out/bench/geology)
-    world     run      full procedural world (terrain, climate, optional society) in out/bench/
     climate|tectonics|world report --evaluation DIR [DIR ...] [--output DIR]
                        pages from evaluation.json (scripts/evaluation/report.py): one DIR rewrites its run
                        page (index.html, report.md); several give a comparison page, the first DIR being the
@@ -166,13 +165,6 @@ def geology(args, extra):
                   '--output', output / 'report.json')
 
 
-def world(args, extra):
-    output = Path(args.output or SCRATCH / f'world-seed{args.seed}-{args.resolution or "default"}.uww')
-    output.parent.mkdir(parents=True, exist_ok=True)
-    resolution = ['--resolution', str(args.resolution)] if args.resolution is not None else []
-    call([args.executable or WORLD_EXE, 'generate', '--seed', args.seed, *resolution, *extra, '--save', output])
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                      allow_abbrev=False)
@@ -201,7 +193,7 @@ def main():
     if args.command == 'ledger':
         ledger_command(args, extra)
         return
-    if args.command in ('experiment', 'evaluate') or (args.command == 'run' and args.module in ('climate', 'tectonics')):
+    if args.command in ('experiment', 'evaluate') or (args.command == 'run' and args.module in ('climate', 'tectonics', 'world')):
         evaluation(args, extra)
         return
     if args.command == 'review':
@@ -216,7 +208,7 @@ def main():
         return
     if args.module in ('world', 'climate') and args.command == 'report':
         parser.error(f'{args.module} report requires --evaluation DIR [DIR ...]')
-    {'tectonics': tectonics, 'geology': geology, 'world': world}[args.module](args, extra)
+    {'tectonics': tectonics, 'geology': geology}[args.module](args, extra)
 
 
 if __name__ == '__main__':

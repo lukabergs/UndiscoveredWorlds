@@ -26,7 +26,18 @@ from validation import field_mask, load_selected, model_field, reference_field, 
 
 CLIMATE = palettes.climate()
 TECTONICS = palettes.tectonics()
-DERIVED = {'surface_elevation': surface_elevation}
+
+
+def lake_elevation(bundle):
+    """Lake surfaces relative to sea level (m); NaN where there is no lake."""
+    surface = bundle.load('hydrosphere.lake_surface').astype(float)
+    return np.where(surface > 0, surface - float(bundle.scalar('geosphere.sea_level')), np.nan)
+
+
+# Derived maps: the function and the fields it reads.
+DERIVED = {'surface_elevation': surface_elevation, 'lake_elevation': lake_elevation}
+DERIVED_FIELDS = {'surface_elevation': ['geosphere.base_elevation', 'geosphere.mountain_height', 'geosphere.volcano'],
+                  'lake_elevation': ['hydrosphere.lake_surface', 'geosphere.sea_level']}
 QUARTERS = ('Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec')
 SNAPSHOT_TABLE = 'geosphere.tectonic_snapshot'
 TRACKED = 'colours follow plate identities tracked by cell overlap between consecutive frames, not the engine index'
@@ -90,8 +101,8 @@ def legend(palette, note=None):
 
 def available(bundle, spec):
     selectors = spec.get('vector', [spec['field']] if 'field' in spec else [])
-    if spec.get('derived') == 'surface_elevation':
-        selectors = ['geosphere.base_elevation', 'geosphere.mountain_height', 'geosphere.volcano']
+    if 'derived' in spec:
+        selectors = DERIVED_FIELDS[spec['derived']]
     return all(selector.split('[')[0] in bundle.fields for selector in selectors)
 
 

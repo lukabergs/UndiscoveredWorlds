@@ -1,0 +1,12 @@
+{
+  "schema": "world-run-registry/v1",
+  "runs": [
+    {
+      "id": 1,
+      "status": "complete",
+      "run": "runs/world/1",
+      "date": "2026-10-05T14:14:19+00:00",
+      "label": "phase 4 reference before the float steps"
+    }
+  ]
+}

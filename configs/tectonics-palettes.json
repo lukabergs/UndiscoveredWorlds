@@ -1,5 +1,5 @@
 {
-  "version": "tectonics-v3-long-age",
+  "version": "tectonics-v4-hydrology",
   "missing": [15, 19, 27],
   "sequential": [[0, [22, 25, 67]], [0.25, [50, 91, 140]], [0.5, [38, 154, 149]], [0.75, [136, 204, 92]], [1, [250, 232, 96]]],
   "fields": {
@@ -25,6 +25,8 @@
     "deformation_rate": {"title": "Deformation intensity", "units": "normalized signal", "range": [0, 1]},
     "convergence_score": {"title": "Convergence", "units": "score", "range": [0, 100]},
     "divergence_score": {"title": "Divergence", "units": "score", "range": [0, 100]},
-    "shear_score": {"title": "Shear", "units": "score", "range": [0, 100]}
+    "shear_score": {"title": "Shear", "units": "score", "range": [0, 100]},
+    "river_flow": {"title": "River flow", "units": "legacy flow units", "stops": [[0, [15, 19, 27]], [1, [28, 54, 124]], [100, [40, 90, 170]], [1000, [60, 140, 210]], [10000, [120, 200, 235]], [200000, [250, 250, 255]]]},
+    "lake_surface_m": {"title": "Lake surface elevation", "units": "m above sea level", "stops": [[0, [30, 80, 160]], [1500, [90, 186, 220]], [6000, [250, 250, 255]]]}
   }
 }

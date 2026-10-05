@@ -245,10 +245,16 @@ Climate runs registered before run 388 were made and reported by a former script
 ## Full world
 
 ```powershell
-# Saved to out/bench/world-seed1-512.uww
-uv run --offline scripts/uw.py world run --resolution 512
-uv run --offline scripts/uw.py world run --resolution 512 --plates 12 --tectonic-duration-myr 300
-uv run --offline scripts/uw.py world run --resolution 256 --social --social-mode historical --history-years 500
+# Registered run of the world series -> runs/world/<id>/ (512 columns, climate on 64 columns with 2 coupling
+# iterations: the registered settings of configs/evaluation/world.json; about 11 minutes)
+uv run --offline scripts/uw.py world run --label "what changed"
+# Scratch run and evaluation -> out/evaluation/world/ (256 columns unless --resolution is given)
+uv run --offline scripts/uw.py world experiment --plates 12 --tectonic-duration-myr 300
+uv run --offline scripts/uw.py world experiment --social --social-mode historical --history-years 500 --save out/bench/world.uww
 ```
+
+The world series is where consolidation Phase 4 records the modules without a profile of their own (terrain, hydrology,
+resources, society): run 1 is the reference before they moved to the float accessors, and each later run names its
+module in its ledger entry. The review checklist of the world profile is a draft by an agent (`review_status`).
 
 `--no-rivers`, `--no-lakes` and `--no-deltas` shorten runs.

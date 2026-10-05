@@ -82,6 +82,7 @@ Lessons:
 | `world-0028` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 8: main.cpp split by screen |
 | `world-0029` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 9: misc.cpp dissolved into owner sources; fractal noise on small grids; planet::smooth() |
 | `world-0030` | 2026-10-05 | tooling added | keep | consolidation phase 4, step 9b: validation guards (features, variance ratio, footprint); the tectonics report through the shared templates |
+| `world-0031` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 10: the world series; run 1 is the reference before the float steps |
 
 Lessons:
 
@@ -156,3 +157,6 @@ Lessons:
 - `world-0029`: A function moved upwards in planet.cpp needed a helper template defined further down: the build, not the script, found it.
 - `world-0030`: runs/reports/tectonics/76/evaluation now exists (written by the check of this step).
 - `world-0030`: The monsoon reversal criterion (120 degrees, 1 m/s in both seasons) gives 24 % of the tropics for ERA5 10 m winds, more than the monsoon regions proper: it also counts cells where weak winds turn.
+- `world-0031`: A 512-column procedural world takes 11 minutes; the tectonics step takes the same 6 minutes at 256 and 512 columns.
+- `world-0031`: The verifier traced river courses and measured boundaries from the bundle fields with its own scripts (out/scratch/phase4/verifier/world-1); the maps alone would not have answered rivers-reach-water.
+- `world-0031`: Lake surfaces are stored in metres above the engine datum (sea level is about 31,000), not above sea level.
