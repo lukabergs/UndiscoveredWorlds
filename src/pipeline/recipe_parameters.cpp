@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "simulations/hydrology/hydrology_parameters.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
 
 namespace
@@ -112,7 +113,7 @@ const std::vector<parameters::Entry>& recipeparameters()
     static const std::vector<parameters::Entry> entries = []
     {
         std::vector<parameters::Entry> all;
-        for (const std::vector<parameters::Entry>* module : { &tuning::terrain::parameterentries() })
+        for (const std::vector<parameters::Entry>* module : { &tuning::terrain::parameterentries(), &tuning::hydrology::parameterentries() })
             all.insert(all.end(), module->begin(), module->end());
         return all;
     }();

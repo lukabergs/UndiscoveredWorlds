@@ -6,7 +6,7 @@
 #include "core/classes.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
-#include "world/generation_tuning.hpp"
+#include "simulations/hydrology/hydrology_parameters.hpp"
 #include "simulations/hydrology/lakes.hpp"
 #include "simulations/hydrology/drainage.hpp"
 #include "simulations/hydrology/lake_effects.hpp"
@@ -1065,20 +1065,20 @@ void createsaltlakes(planet& world, int& lakesplaced, vector<vector<vector<float
     int width = world.width();
     int height = world.height();
 
-    int maxsaltrain = tuning::climate::saltlakes::maxRain;
-    int minsalttemp = tuning::climate::saltlakes::minimumTemperature;
-    int minflow = tuning::climate::saltlakes::minimumRiverFlow;
+    int maxsaltrain = tuning::hydrology::saltlakes::maxRain;
+    int minsalttemp = tuning::hydrology::saltlakes::minimumTemperature;
+    int minflow = tuning::hydrology::saltlakes::minimumRiverFlow;
 
-    int saltlakechance = tuning::climate::saltlakes::lakeChance;
+    int saltlakechance = tuning::hydrology::saltlakes::lakeChance;
 
     bool dodepressions = 0;
 
-    if (random(1, tuning::climate::saltlakes::depressionChance) == 1)
+    if (random(1, tuning::hydrology::saltlakes::depressionChance) == 1)
         dodepressions = 1;
 
     vector<vector<int>> avoid(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0)); // This is for cells *not* to alter. This will remain empty (it's just here so we can use the depression-creating routine for normal lakes as well, where we don't want to mess with the path of the outflowing river.)
 
-    for (int i = tuning::climate::saltlakes::edgeMargin; i <= width - tuning::climate::saltlakes::edgeMargin; i++)
+    for (int i = tuning::hydrology::saltlakes::edgeMargin; i <= width - tuning::hydrology::saltlakes::edgeMargin; i++)
     {
         for (int j = 0; j <= height; j++)
         {
@@ -1111,12 +1111,12 @@ void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dod
 
     int shapenumber;
 
-    if (large || random(1, tuning::climate::saltlakes::largeShapeChance) == 1)
-        shapenumber = random(tuning::climate::saltlakes::largeShapeMin, tuning::climate::saltlakes::largeShapeMax);
+    if (large || random(1, tuning::hydrology::saltlakes::largeShapeChance) == 1)
+        shapenumber = random(tuning::hydrology::saltlakes::largeShapeMin, tuning::hydrology::saltlakes::largeShapeMax);
     else
-        shapenumber = random(tuning::climate::saltlakes::smallShapeMin, tuning::climate::saltlakes::smallShapeMax);
+        shapenumber = random(tuning::hydrology::saltlakes::smallShapeMin, tuning::hydrology::saltlakes::smallShapeMax);
 
-    int depth = random(tuning::climate::saltlakes::depthMin, tuning::climate::saltlakes::depthMax);
+    int depth = random(tuning::hydrology::saltlakes::depthMin, tuning::hydrology::saltlakes::depthMax);
 
     // The surfaceheight will be a lot lower than this point originally is.
 

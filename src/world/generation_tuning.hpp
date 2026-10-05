@@ -568,40 +568,6 @@ inline constexpr float tropicalRainReduction = 0.4f;
 inline constexpr float slopeBase = 160.0f;
 }
 
-namespace lakerain
-{
-inline constexpr int lakeMultiplier = 15;
-inline constexpr float temperatureFactor = 20.0f;
-inline constexpr float minimumTemperatureMultiplier = 0.15f;
-inline constexpr int dumpRate = 5;
-inline constexpr int pickupRate = 60;
-inline constexpr int swerveChance = 3;
-inline constexpr int splashSize = 1;
-inline constexpr float slopeFactor = 5.0f;
-inline constexpr float elevationFactor = 0.002f;
-inline constexpr int slopeMinimum = 200;
-inline constexpr float seasonalVariation = 0.02f;
-inline constexpr int maxRain = 800;
-inline constexpr float capFactor = 0.1f;
-}
-
-namespace riftlakerain
-{
-inline constexpr int lakeMultiplier = 15;
-inline constexpr float temperatureFactor = 20.0f;
-inline constexpr float minimumTemperatureMultiplier = 0.15f;
-inline constexpr int dumpRate = 5;
-inline constexpr int pickupRate = 300;
-inline constexpr int swerveChance = 3;
-inline constexpr int splashSize = 1;
-inline constexpr int slopeFactor = 50;
-inline constexpr float elevationFactor = 0.002f;
-inline constexpr int slopeMinimum = 200;
-inline constexpr float seasonalVariation = 0.02f;
-inline constexpr int maxRain = 800;
-inline constexpr float capFactor = 0.1f;
-}
-
 namespace desertworld
 {
 inline constexpr float slopeFactor = 130.0f;
@@ -705,29 +671,6 @@ inline constexpr float tundraElevationDivisor = 400.0f;
 inline constexpr int tundraClampedMaxTemperature = 13;
 }
 
-namespace saltlakes
-{
-inline constexpr int maxRain = 30;
-inline constexpr int minimumTemperature = 15;
-inline constexpr int minimumRiverFlow = 200;
-inline constexpr int lakeChance = 100;
-inline constexpr int depressionChance = 100;
-inline constexpr int edgeMargin = 20;
-inline constexpr int largeShapeChance = 8;
-inline constexpr int largeShapeMin = 5;
-inline constexpr int largeShapeMax = 11;
-inline constexpr int smallShapeMin = 2;
-inline constexpr int smallShapeMax = 5;
-inline constexpr int depthMin = 5;
-inline constexpr int depthMax = 30;
-}
-
-namespace rivers
-{
-inline constexpr int mountainHeightLimit = 600;
-inline constexpr int minimumFlow = 40;
-inline constexpr int maxRepeatDirection = 2;
-}
 }
 
 namespace terrain

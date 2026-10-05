@@ -97,6 +97,7 @@ Lessons:
 | `world-0042` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 1: screens as member functions of an application state |
 | `world-0043` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 5: the regional map leaves the headless link line |
 | `world-0044` | 2026-10-05 | equivalent | keep | consolidation phase 5, steps 6 and 7: parameter mechanism; terrain parameters |
+| `world-0045` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 8: hydrology parameters |
 
 Lessons:
 
@@ -202,3 +203,4 @@ Lessons:
 - `world-0043`: Reference bundles of the next step: out/scratch/phase5/step05-*.
 - `world-0044`: Keeping the C++ names and making the values variables moves a module in minutes; only uses that need a compile-time constant (an array size here) have to be edited.
 - `world-0044`: Reference bundles of the next step: out/scratch/phase5/step06-*.
+- `world-0045`: Reference bundles of the next step: out/scratch/phase5/step08-*.

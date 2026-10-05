@@ -8,7 +8,7 @@
 #include "core/classes.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
-#include "world/generation_tuning.hpp"
+#include "simulations/hydrology/hydrology_parameters.hpp"
 #include "simulations/hydrology/drainage.hpp"
 
 using namespace std;
@@ -1221,8 +1221,8 @@ void createrivermap(planet& world, vector<vector<int>>& mountaindrainage)
     avoidvolcanoes(world);
     removecrossingrivers(world);
 
-    accumulaterivercatchments(world, tuning::climate::rivers::minimumFlow,
-        tuning::climate::rivers::mountainHeightLimit);
+    accumulaterivercatchments(world, tuning::hydrology::rivers::minimumFlow,
+        tuning::hydrology::rivers::mountainHeightLimit);
     reduceseasonalrivercontrast(world);
 }
 

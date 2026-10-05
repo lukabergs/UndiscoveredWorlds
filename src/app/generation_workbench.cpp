@@ -11,7 +11,6 @@
 #include <string>
 
 #include "app/generation_workbench.hpp"
-#include "world/generation_tuning.hpp"
 
 #include "simulations/terrain/fastlem_mountains.hpp"
 #include "app/rendering/map_appearance.hpp"

@@ -6,7 +6,7 @@
 #include "core/classes.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
-#include "world/generation_tuning.hpp"
+#include "simulations/hydrology/hydrology_parameters.hpp"
 #include "simulations/hydrology/lake_effects.hpp"
 
 using namespace std;
@@ -372,19 +372,19 @@ void lakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<vect
     int sealevel = world.sealevel();
     int maxelev = world.maxelevation();
 
-    int lakemult = tuning::climate::lakerain::lakeMultiplier;
-    float tempfactor = tuning::climate::lakerain::temperatureFactor;
-    float mintemp = tuning::climate::lakerain::minimumTemperatureMultiplier;
-    int dumprate = tuning::climate::lakerain::dumpRate;
-    int pickuprate = tuning::climate::lakerain::pickupRate;
-    int swervechance = tuning::climate::lakerain::swerveChance;
-    int splashsize = tuning::climate::lakerain::splashSize;
-    float slopefactor = tuning::climate::lakerain::slopeFactor;
-    float elevationfactor = tuning::climate::lakerain::elevationFactor;
-    int slopemin = tuning::climate::lakerain::slopeMinimum;
-    float seasonalvar = tuning::climate::lakerain::seasonalVariation;
-    int maxrain = tuning::climate::lakerain::maxRain;
-    float capfactor = tuning::climate::lakerain::capFactor;
+    int lakemult = tuning::hydrology::lakerain::lakeMultiplier;
+    float tempfactor = tuning::hydrology::lakerain::temperatureFactor;
+    float mintemp = tuning::hydrology::lakerain::minimumTemperatureMultiplier;
+    int dumprate = tuning::hydrology::lakerain::dumpRate;
+    int pickuprate = tuning::hydrology::lakerain::pickupRate;
+    int swervechance = tuning::hydrology::lakerain::swerveChance;
+    int splashsize = tuning::hydrology::lakerain::splashSize;
+    float slopefactor = tuning::hydrology::lakerain::slopeFactor;
+    float elevationfactor = tuning::hydrology::lakerain::elevationFactor;
+    int slopemin = tuning::hydrology::lakerain::slopeMinimum;
+    float seasonalvar = tuning::hydrology::lakerain::seasonalVariation;
+    int maxrain = tuning::hydrology::lakerain::maxRain;
+    float capfactor = tuning::hydrology::lakerain::capFactor;
 
     // First the westerly winds.
 
@@ -751,19 +751,19 @@ void riftlakerain(planet& world, vector<vector<int>>& lakewinterrainmap, vector<
     int sealevel = world.sealevel();
     int maxelev = world.maxelevation();
 
-    int lakemult = tuning::climate::riftlakerain::lakeMultiplier;
-    float tempfactor = tuning::climate::riftlakerain::temperatureFactor;
-    float mintemp = tuning::climate::riftlakerain::minimumTemperatureMultiplier;
-    int dumprate = tuning::climate::riftlakerain::dumpRate;
-    int pickuprate = tuning::climate::riftlakerain::pickupRate;
-    int swervechance = tuning::climate::riftlakerain::swerveChance;
-    int splashsize = tuning::climate::riftlakerain::splashSize;
-    int slopefactor = tuning::climate::riftlakerain::slopeFactor;
-    float elevationfactor = tuning::climate::riftlakerain::elevationFactor;
-    int slopemin = tuning::climate::riftlakerain::slopeMinimum;
-    float seasonalvar = tuning::climate::riftlakerain::seasonalVariation;
-    int maxrain = tuning::climate::riftlakerain::maxRain;
-    float capfactor = tuning::climate::riftlakerain::capFactor;
+    int lakemult = tuning::hydrology::riftlakerain::lakeMultiplier;
+    float tempfactor = tuning::hydrology::riftlakerain::temperatureFactor;
+    float mintemp = tuning::hydrology::riftlakerain::minimumTemperatureMultiplier;
+    int dumprate = tuning::hydrology::riftlakerain::dumpRate;
+    int pickuprate = tuning::hydrology::riftlakerain::pickupRate;
+    int swervechance = tuning::hydrology::riftlakerain::swerveChance;
+    int splashsize = tuning::hydrology::riftlakerain::splashSize;
+    int slopefactor = tuning::hydrology::riftlakerain::slopeFactor;
+    float elevationfactor = tuning::hydrology::riftlakerain::elevationFactor;
+    int slopemin = tuning::hydrology::riftlakerain::slopeMinimum;
+    float seasonalvar = tuning::hydrology::riftlakerain::seasonalVariation;
+    int maxrain = tuning::hydrology::riftlakerain::maxRain;
+    float capfactor = tuning::hydrology::riftlakerain::capFactor;
 
     // First the westerly winds.
 

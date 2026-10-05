@@ -16,7 +16,6 @@
 #include "simulations/climate/climate_weather.hpp"
 #include "core/climate_grid.hpp"
 #include "simulations/climate/climate_hydrology.hpp"
-#include "world/generation_tuning.hpp"
 #include "world/functions.hpp"
 
 namespace
