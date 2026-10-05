@@ -234,6 +234,26 @@ Not done, not exercised, or known to be weak:
 
 **Phase 6 — test structure.** The climate test files that are one `TEST` each (`ClimateAtmosphere.Circulation` is 700 lines, `ClimateOceanDynamics.Model` 640) are split into named tests with a fixture per file, so a failure names what broke. Their sections reuse state built earlier in the same body, so each file is read and reorganised; no behaviour changes. Queued here by the user on 2026-10-05 instead of an undated "later".
 
+Phase 6 steps (listed 2026-10-06 at the start of the phase; one commit and one ledger entry per file). Baseline at `85c3e16`, before any change: headless ctest 239 of 239 pass (the four `DISABLED_Modes` listed as not run), Python suite 118 of 118 (`world-0055`); nothing from Phases 4 and 5 fails. Rules of the split: `TEST_F` on one fixture class per file; every assertion and its message literal is kept (`out/scratch/phase6/messages.py` compares the literal multiset and the assertion counts of the old and new file); a section that reused state built by an earlier section recomputes it in the fixture or inside its test, and a config that the old body mutated between sections is reproduced at the state the section saw; no simulation source changes. Each file ends with the `world_tests` build and `ctest -R "^<Suite>\."`; the full ctest and the Python suite close the phase.
+
+| File (the one `TEST`) | Fixture | Status |
+| --- | --- | --- |
+| `simulations/climate/climate_atmosphere_tests.cpp` (`Circulation`, 710 lines; the 12 wrapper tests stay) | 16 x 8 mode grid: `earthRotation`, diagnosed heating, zonal pressure, orographic and zero fields, a `solve(config)` helper; the sections that compared with `separated` recompute it | |
+| `climate_ocean_dynamics_tests.cpp` (`Model`, 640 lines) | 32 x 16 walled basin forcing with `index`; `oneWayConfig` in its three states (initial; closed vertical exchange; daily freezing steps), `coupledConfig`; `aquaplanet()`, `uniform()`, `shelf()` builders | |
+| `climate_hydrology_tests.cpp` (`Model`, 510 lines; the 4 wrapper tests stay) | 16 x 8 tracer grid: `tracerIndex`, `tracerMass`, zero tracer and wind fields; `near` | |
+| `climate_ocean_heat_tests.cpp` (`Model` = `runTests()`, 250 lines; `VariableStorage`, `HeatKernels` stay) | 64-column polar-ring fixture: `c`, `f`, grid, cap area and face length, `capacity`, `latent` | |
+| `climate_transport_tests.cpp` (`Model`, 110 lines) | 32 x 16 block tracer `q` with `u`, `v`, `result`, grid | |
+| `climate_boundary_layer_tests.cpp` (`Model`, 130 lines) | 32 x 16 config with the boundary layer enabled; uniform temperature, zero heating and mechanical forcing; `warmPatch()` and the applied `flow` | |
+| `climate_weather_tests.cpp` (`Model`, 170 lines) | 16 x 8 two-layer config, zero forcing; `perturbed()` advanced 6 h, its bytes and the restored state; the stochastic config of the replay sections | |
+| `climate_flow_tests.cpp` (`Model`, 95 lines) | 32 x 16 particle grid: radius, equator row and cell width, zero `east`/`south`, trace config | |
+| `climate_energy_tests.cpp` (`Model`, 125 lines) | none shared (independent scalar sections): the fixture holds only `expect` | |
+| `climate_physics_tests.cpp` (`Model`, 145 lines) | none shared: the fixture holds only `expect` | |
+| `climate_koppen_tests.cpp` (`Classification`, 40 lines) | the temperate monthly temperature and 80 mm rain arrays | |
+| `core/climate_grid_tests.cpp` (`Geometry`, 150 lines) | the 128 x 64 Earth grid and `pi` | |
+| `io/climate_reference_tests.cpp` (`MonthlyGrids`, 60 lines) | the fixture paths in the working directory, removed in `TearDown` | |
+
+Not split, each one scenario whose later assertions depend on the earlier steps: `climate_context_tests.cpp` (snapshot, then restart), `core/parallel_rows_tests.cpp`, `io/climate_tiff_tests.cpp` (one file written and read back), `pipeline/climate_pipeline_tests.cpp` and `climate_world_tests.cpp` (one assertion each). The `testXxx` wrapper tests of the atmosphere, hydrology and ocean heat files are already named and keep their bodies.
+
 Each phase ends with: seed-1 bundle equivalence (`compare_bundles.py`) where results must not change, `--audit-access`, `process_access.py --check` on the stored reports (it shows a hand edit; a phase that changes what a step reads or writes measures the affected recipes again with the read-tracking build and stores the new reports), `check_layout.py`, a compile of both presets, and a ledger entry describing what changed. A phase also takes the open items that §11 assigns to it.
 
 ## 6. Deletion and cleanup list (Phase 0)

@@ -108,6 +108,7 @@ Lessons:
 | `world-0052` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 2: the desktop application loads a run bundle (compile-only) |
 | `world-0053` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 3: the Generate elements buttons call a process or a terrain function (compile-only) |
 | `world-0054` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 11: phase close |
+| `world-0055` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 0: baseline test run and the split list |
 
 Lessons:
 
@@ -225,3 +226,4 @@ Lessons:
 - `world-0051`: World run 10 is the parent of the next world-changing step; reference bundles out/scratch/phase5/step4a2-*.
 - `world-0054`: Phase 6 reorganises tests that have not been run since Phase 4 step 7: run ctest once before touching them, so that a failure caused by Phases 4 and 5 is not blamed on the split.
 - `world-0054`: A claim that a module is on the float accessors needs a count of the remaining whole-number calls by receiver type (planet and climateworld have getters of the same names), not a search for one spelling.
+- `world-0055`: A test file whose sections mutate a shared config between them (ocean dynamics: oneWayConfig in three states; weather: the stochastic forcing set midway) needs the config reproduced at the state each section saw, or the split changes what is tested.
