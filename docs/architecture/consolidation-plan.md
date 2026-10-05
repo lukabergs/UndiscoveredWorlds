@@ -254,6 +254,17 @@ Phase 6 steps (listed 2026-10-06 at the start of the phase; one commit and one l
 
 Not split, each one scenario whose later assertions depend on the earlier steps: `climate_context_tests.cpp` (snapshot, then restart), `core/parallel_rows_tests.cpp`, `io/climate_tiff_tests.cpp` (one file written and read back), `pipeline/climate_pipeline_tests.cpp` and `climate_world_tests.cpp` (one assertion each). The `testXxx` wrapper tests of the atmosphere, hydrology and ocean heat files are already named and keep their bodies.
 
+Phase 6 is complete (2026-10-06, ledgers `world-0055` to `world-0069`, 15 commits from `131c1ba` to the close, 00:03 to 00:31 for the thirteen splits plus 17 min for the baseline and the close):
+
+- The thirteen files are fixtures named after their suites (`class ClimateOceanDynamics : public ::testing::Test`) with one `TEST_F` per section; the one-line wrapper tests and the four `DISABLED_Modes` tests became `TEST_F` on the same fixtures, so every suite kept its name and the `-R "^Suite\."` patterns and `UW_TEST_ARGUMENTS` instructions still hold. `world_tests` went from 40 to 174 tests (36 to 170 run, plus the four disabled); ctest from 239 to 373 passing tests (377 with the four disabled).
+- Checked per file: `messages.py` found no difference in the multiset of string literals or in the counts of `expect(`, `EXPECT_` and `ASSERT_` between the committed and the split file; the suite passed after the `world_tests` build. At the close: full headless ctest 373 of 373 in 25 s, Python suite 118 of 118 in 11 s, `check_layout.py` passed. Steps 4 and 5, 6 and 7, and 8 to 13 shared one build and test run each (every suite still ran before its commit).
+- No simulation source changed; no test showed a defect. Durations: the four large files took 6, 9, 3 and 3 min; the nine small ones 2 to 5 min in pairs or batches; the whole phase under an hour against the undated "later" it had been.
+- Not split, as listed above: `climate_context_tests.cpp`, `parallel_rows_tests.cpp`, `climate_tiff_tests.cpp`, the two pipeline files. Not touched: `tectonics_tests` and `minerals_tests` (already one test per subject).
+- The user asked mid-phase (2026-10-06) that every step record its duration: rule in `AGENTS.md` (working conventions), Duration column above, `duration` field in the entries from `world-0056` on.
+- Local tools of the session in `out/scratch/phase6/`: `messages.py` (literal and count comparison), `splice.py` (replace a line range by a file), `mark.py` (fill a table row), `commit_step.ps1` (mark, ledger, commit with the measured duration), the `*_tail.cpp` replacement texts and the `ledger-step*.json` entries.
+
+No consolidation phase follows Phase 6. What remains is in §11: the items waiting for the user, and "Later" (the climate rules' whole-number reads, the regional map, FastLEM), each a task of its own started from this document.
+
 Each phase ends with: seed-1 bundle equivalence (`compare_bundles.py`) where results must not change, `--audit-access`, `process_access.py --check` on the stored reports (it shows a hand edit; a phase that changes what a step reads or writes measures the affected recipes again with the read-tracking build and stores the new reports), `check_layout.py`, a compile of both presets, and a ledger entry describing what changed. A phase also takes the open items that §11 assigns to it.
 
 ## 6. Deletion and cleanup list (Phase 0)
@@ -366,7 +377,12 @@ Phase 5 (GUI as viewer):
 - Step 12c (`world-0036`) made the six elevation components float in storage, catalogue and every global reader. Still whole numbers, as temporary bridges: the regional map and the GUI read them through the rounding getters (`mountainheight()` and the like), the CUDA renderer casts them, and the `.uww` layout stores 16-bit whole metres. Whole on purpose: ocean ridge heights and ridge volcanoes (integer templates and a hash of the integer height), imported mountain heights, the crater centre height. Not exercised: the minimal world has no mountains, craters or ocean ridges, so the edited mountain, crater and ridge writers are compile-checked only; look at those fields in the first run at a size that has them (256 columns and the default duration).
 - Step 13 (`world-0037`) moved hydrology to the float accessors and made the three lake fields float. Rivers now tell apart neighbours that were tied in whole metres, so 22 % of the cells drain another way in the minimal world, and deltas and wetlands, which are placed by random draws against river flow, appear where there were none. Not exercised: the minimal world has no lake, so the lake, salt lake and rift lake code is compile-checked only; the user accepted this on 2026-10-05 (lakes are revisited later and their algorithm will probably change). When lakes are next worked on, start with a 512-column run and compare it with world run 1. The only temperature write in hydrology is `removerivermountains` in `drainage.cpp` (a removed mountain gives its cell the temperature of the lower ground); it is declared and now writes float. The coupling noted in §11 stays as it is until hydrology is split.
 
-Phase 6 (test structure): see §5.
+Phase 6 (test structure, closed 2026-10-06): see the status note in §5. Left as found, no action needed:
+
+- The four `DISABLED_Modes` tests and their fixture readers were not exercised (no replay fixture is checked in); `world-0027` ran the atmosphere benchmark mode once.
+- `ClimateTransport.MpdataReversingWinds` has no assertion of its own: it keeps the `checkFluxes` call the old body made with reversed end winds.
+- `tests/test_modes.hpp` and the mode functions (`climateatmospheretool` and the like) are unchanged; a test added to a split file is a `TEST_F` on its fixture (`docs/reference-guides/verification.md`).
+- Test timings for later comparison: the slowest tests are `ClimateWeather.SeasonalSpinUp` (3.5 s), `ClimateOceanHeat.HeatKernels` (0.13 s) and `ClimateGrid.ConstantFieldRemap` (0.10 s); the tectonics suite is 89 s of process time over 175 tests.
 
 Later (a task of its own, no consolidation phase):
 

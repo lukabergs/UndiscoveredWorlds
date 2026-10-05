@@ -122,6 +122,7 @@ Lessons:
 | `world-0066` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 11: climate_koppen_tests.cpp split |
 | `world-0067` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 12: core/climate_grid_tests.cpp split |
 | `world-0068` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 13: io/climate_reference_tests.cpp split |
+| `world-0069` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 14: phase close |
 
 Lessons:
 
@@ -243,3 +244,4 @@ Lessons:
 - `world-0056`: GoogleTest refuses one suite with both TEST and TEST_F; naming the fixture class after the suite and converting the existing one-liners keeps suite names, ctest -R patterns and the Modes test names stable.
 - `world-0056`: A step's duration is measured commit to commit (git log --format='%h %ci').
 - `world-0057`: When a split recomputes a config state, write down which of the old body's states each section saw (initial, closed exchange, daily freezing steps) before writing the tests; the replay sections and the bottom-stress sections would otherwise have taken the wrong one.
+- `world-0069`: Splitting a long test body is fastest when the sections' shared state is listed first (which variables, which config state each section saw) and the assertion literals are compared by script afterwards; reading the body once and writing all tests in one pass took 3 to 9 minutes per file.
