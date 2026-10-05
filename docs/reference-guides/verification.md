@@ -47,6 +47,15 @@ uv run --offline python scripts/evaluation/process_access.py (Get-ChildItem runs
 uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe
 ```
 
+The check of one refactoring step (headless build, the three minimal seed-1 bundles with `--audit-access`, comparison with the previous step's, `parameters.py --check`, `check_layout.py`, `process_access.py --check`):
+
+```
+uv run --offline python scripts/evaluation/step_check.py <label> --reference <previous label> [--desktop] [--social]
+```
+
+Parameters: edit `configs/parameters/<module>.json`, then `uv run --offline python scripts/parameters.py` writes the headers (`--check` fails on a stale one). One run with another value: `world_pipeline run ... --set hydrology.rivers.minimum_flow=80`, or `--parameters FILE.json`; the bundle's `manifest.json` lists every value under `parameters`.
+
+
 A registered run (`uw.py <module> run`) reproduces an earlier one when `compare_bundles.py` finds its `bundle/` identical to the earlier run's final bundle (sealed runs: `runs/archive/checkpoints/<module>/<id>/final`).
 
 Headless checks do not establish GUI rendering, historical save compatibility, full Earth benchmark skill or high-resolution performance; verify that boundary when it is part of the requested outcome. Module benchmarks and evaluations: `docs/reference-guides/benchmark-commands.md`.
