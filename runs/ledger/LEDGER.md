@@ -83,6 +83,7 @@ Lessons:
 | `world-0029` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 9: misc.cpp dissolved into owner sources; fractal noise on small grids; planet::smooth() |
 | `world-0030` | 2026-10-05 | tooling added | keep | consolidation phase 4, step 9b: validation guards (features, variance ratio, footprint); the tectonics report through the shared templates |
 | `world-0031` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 10: the world series; run 1 is the reference before the float steps |
+| `world-0032` | 2026-10-05 | equivalent on Earth terrain; procedural worlds shifted as listed | keep | consolidation phase 4, step 11: atmosphere.precipitation and atmosphere.precipitation_exact become one field (module climate) |
 
 Lessons:
 
@@ -160,3 +161,6 @@ Lessons:
 - `world-0031`: A 512-column procedural world takes 11 minutes; the tectonics step takes the same 6 minutes at 256 and 512 columns.
 - `world-0031`: The verifier traced river courses and measured boundaries from the bundle fields with its own scripts (out/scratch/phase4/verifier/world-1); the maps alone would not have answered rivers-reach-water.
 - `world-0031`: Lake surfaces are stored in metres above the engine datum (sea level is about 31,000), not above sea level.
+- `world-0032`: --climate-coupling-iterations has no effect in a procedural world: climateworld::resize() resets the climate options, and the coupled loop ran 21 iterations with a limit of 2. Every 'climate 64, 2 iterations' procedural run of this phase, including world run 1, ran to convergence. Step 11b fixes it.
+- `world-0032`: Of the ten access runs only the default-size procedural world contributes declarations that no other run does.
+- `world-0032`: runs/reports/phase4-access holds the report set and the script that produced nine of its runs.

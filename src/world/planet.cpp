@@ -1891,7 +1891,6 @@ bool planet::loadworld(string filename)
     {
         readlegacyvectordata(infile, climate_.seasonaltempmaps[season]);
         readlegacyvectordata(infile, climate_.seasonalrainmaps[season]);
-        climate_.seasonalrainfloatmaps[season] = climate_.seasonalrainmaps[season];
         readlegacyvectordata(infile, climate_.seasonalpressuremaps[season]);
         readlegacyvectordata(infile, climate_.seasonaluwindmaps[season]);
         readlegacyvectordata(infile, climate_.seasonalvwindmaps[season]);

@@ -40,7 +40,6 @@ struct climateworldfieldaccess
         case FieldId::subtropical_high_latitudes: return op.zonalprofile(id, world.horselats);
         case FieldId::temperature: return op.seasonal(id, world.seasonaltempmaps);
         case FieldId::precipitation: return op.seasonal(id, world.seasonalrainmaps);
-        case FieldId::precipitation_exact: return op.seasonal(id, world.seasonalrainfloatmaps);
         case FieldId::pressure: return op.seasonal(id, world.seasonalpressuremaps);
         case FieldId::wind_east: return op.seasonal(id, world.seasonaluwindmaps);
         case FieldId::wind_south: return op.seasonal(id, world.seasonalvwindmaps);

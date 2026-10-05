@@ -150,8 +150,7 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(climate_class, atmosphere, i16, grid, "code", "Climate classification") \
     X(subtropical_high_latitudes, atmosphere, i32, zonalprofile, "rows", "Horse-latitude rows per column") \
     X(temperature, atmosphere, f32, seasonal, "C", "Seasonal surface temperature") \
-    X(precipitation, atmosphere, f32, seasonal, "mm/month", "Seasonal precipitation after the legacy January/July adjustment passes") \
-    X(precipitation_exact, atmosphere, f32, seasonal, "mm/month", "Seasonal precipitation of the coupled solve") \
+    X(precipitation, atmosphere, f32, seasonal, "mm/month", "Seasonal precipitation: the coupled solve, with the January and July adjustment passes of a procedural world") \
     X(pressure, atmosphere, f32, seasonal, "hPa", "Seasonal surface pressure anomaly") \
     X(wind_east, atmosphere, f32, seasonal, "m/s", "Seasonal surface eastward wind") \
     X(wind_south, atmosphere, f32, seasonal, "m/s", "Seasonal surface southward wind") \

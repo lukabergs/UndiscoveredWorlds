@@ -49,7 +49,6 @@ void climateworld::resize(int width, int height)
 
     resizefloatfield(seasonaltempmaps);
     resizefloatfield(seasonalrainmaps);
-    resizefloatfield(seasonalrainfloatmaps);
     resizefloatfield(seasonalpressuremaps);
     resizefloatfield(seasonaluwindmaps);
     resizefloatfield(seasonalvwindmaps);

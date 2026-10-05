@@ -6,11 +6,11 @@
   "run": {"tool": "world_pipeline", "resolution": 256, "arguments": ["run", "--recipe", "procedural-world", "--resolution", "{width}"], "registered": {"resolution": 512, "arguments": ["--climate-resolution", "64", "--climate-coupling-iterations", "2"]}},
   "checks": [
     {"check": "grid"},
-    {"check": "required", "fields": ["geosphere.base_elevation", "geosphere.sea_level", "geosphere.crust_age", "geosphere.crust_class", "atmosphere.temperature", "atmosphere.precipitation_exact", "hydrosphere.river_direction", "hydrosphere.river_flow_january", "biosphere.biome"]},
-    {"check": "written", "fields": ["geosphere.base_elevation", "geosphere.crust_age", "atmosphere.temperature", "atmosphere.precipitation_exact", "hydrosphere.river_direction", "biosphere.biome"]},
+    {"check": "required", "fields": ["geosphere.base_elevation", "geosphere.sea_level", "geosphere.crust_age", "geosphere.crust_class", "atmosphere.temperature", "atmosphere.precipitation", "hydrosphere.river_direction", "hydrosphere.river_flow_january", "biosphere.biome"]},
+    {"check": "written", "fields": ["geosphere.base_elevation", "geosphere.crust_age", "atmosphere.temperature", "atmosphere.precipitation", "hydrosphere.river_direction", "biosphere.biome"]},
     {"check": "finite", "fields": ["geosphere.*", "atmosphere.*", "hydrosphere.solver_*", "cryosphere.solver_*"]},
     {"check": "range", "field": "atmosphere.solver_monthly_temperature", "min": -95, "max": 60},
-    {"check": "range", "field": "atmosphere.precipitation_exact", "min": 0, "max": 3000},
+    {"check": "range", "field": "atmosphere.precipitation", "min": 0, "max": 3000},
     {"check": "range", "field": "cryosphere.solver_sea_ice", "min": 0, "max": 1, "tolerance": 1e-05},
     {"check": "range", "field": "geosphere.crust_age", "min": 0},
     {"check": "repeat"}
@@ -25,7 +25,7 @@
     {"name": "regime", "title": "Geologic regime", "field": "geosphere.geologic_regime", "palette": "tectonics:geologic_regime"},
     {"name": "boundaries", "title": "Plate boundary type", "field": "geosphere.boundary_type", "palette": "tectonics:boundary_type"},
     {"name": "temperature", "title": "Air temperature (°C)", "field": "atmosphere.temperature", "palette": "climate:air_temperature", "seasons": [0, 2]},
-    {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation_exact", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"},
+    {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"},
     {"name": "surface-wind", "title": "10 m wind speed (m/s)", "vector": ["atmosphere.level_wind_east[0]", "atmosphere.level_wind_north[0]"], "palette": "climate:surface_wind", "seasons": [0, 2]},
     {"name": "sst", "title": "Sea surface temperature (°C)", "field": "hydrosphere.solver_sea_surface_temperature", "mask": "sea", "palette": "climate:sst", "seasons": [0, 2]},
     {"name": "river-flow", "title": "River flow in January (legacy flow units)", "field": "hydrosphere.river_flow_january", "palette": "tectonics:river_flow"},

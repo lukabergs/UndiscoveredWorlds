@@ -365,7 +365,6 @@ private:
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalmaritimethermalanomalymaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalmoisturemaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalpressuremaps;
-    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalrainfloatmaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalrainmaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalsstmaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalsubsidencemaps;
@@ -717,16 +716,15 @@ inline void climateworld::setseasonalrain(int season, int x, int y, int amount)
 
     const int index = seasonalclimateindex(x, y);
     seasonalrainmaps[season][index] = static_cast<float>(amount);
-    seasonalrainfloatmaps[season][index] = static_cast<float>(amount);
 }
 
 inline float climateworld::seasonalrainfloat(int season, int x, int y) const
 {
-    UW_FIELD_READ(precipitation_exact);
+    UW_FIELD_READ(precipitation);
     if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
         return 0.0f;
 
-    return seasonalrainfloatmaps[season][seasonalclimateindex(x, y)];
+    return seasonalrainmaps[season][seasonalclimateindex(x, y)];
 }
 
 inline void climateworld::setseasonalrainfloat(int season, int x, int y, float amount)
@@ -736,7 +734,6 @@ inline void climateworld::setseasonalrainfloat(int season, int x, int y, float a
 
     const int index = seasonalclimateindex(x, y);
     const float physicalamount = (std::max)(0.0f, amount);
-    seasonalrainfloatmaps[season][index] = physicalamount;
     seasonalrainmaps[season][index] = physicalamount;
 }
 
