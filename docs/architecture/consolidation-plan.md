@@ -242,7 +242,7 @@ Phase 6 steps (listed 2026-10-06 at the start of the phase; one commit and one l
 | `climate_ocean_dynamics_tests.cpp` (`Model`, 640 lines) | 32 x 16 walled basin forcing with `index`; `oneWayConfig` in its three states (initial; closed vertical exchange; daily freezing steps), `coupledConfig`; `aquaplanet()`, `uniform()`, `shelf()` builders | done, `world-0057` | 9 min (00:09 to 00:18) |
 | `climate_hydrology_tests.cpp` (`Model`, 510 lines; the 4 wrapper tests stay) | 16 x 8 tracer grid: `tracerIndex`, `tracerMass`, zero tracer and wind fields; `near` | done, `world-0058` | 3 min (00:18 to 00:21) |
 | `climate_ocean_heat_tests.cpp` (`Model` = `runTests()`, 250 lines; `VariableStorage`, `HeatKernels` stay) | 64-column polar-ring fixture: `c`, `f`, grid, cap area and face length, `capacity`, `latent` | done, `world-0059` | 3 min (00:21 to 00:24) |
-| `climate_transport_tests.cpp` (`Model`, 110 lines) | 32 x 16 block tracer `q` with `u`, `v`, `result`, grid |  |  |
+| `climate_transport_tests.cpp` (`Model`, 110 lines) | 32 x 16 block tracer `q` with `u`, `v`, `result`, grid | done, `world-0060` | 0 min (00:24 to 00:24) |
 | `climate_boundary_layer_tests.cpp` (`Model`, 130 lines) | 32 x 16 config with the boundary layer enabled; uniform temperature, zero heating and mechanical forcing; `warmPatch()` and the applied `flow` |  |  |
 | `climate_weather_tests.cpp` (`Model`, 170 lines) | 16 x 8 two-layer config, zero forcing; `perturbed()` advanced 6 h, its bytes and the restored state; the stochastic config of the replay sections |  |  |
 | `climate_flow_tests.cpp` (`Model`, 95 lines) | 32 x 16 particle grid: radius, equator row and cell width, zero `east`/`south`, trace config |  |  |

@@ -128,7 +128,39 @@ int climatetransporttool(int argc, char** argv)
     return -1;
 }
 
-TEST(ClimateTransport, Model)
+namespace
+{
+
+// The 32 x 16 block tracer of the transport tests with its sinusoidal winds.
+class ClimateTransport : public ::testing::Test
+{
+protected:
+    static constexpr int columns = 32, rows = 16;
+    std::vector<float> q = std::vector<float>(columns * rows), u = std::vector<float>(q.size()), v = std::vector<float>(q.size()), result;
+    const climategrid::SphericalGrid grid = climategrid::makeSphericalGrid(columns, rows, 1000.0);
+
+    ClimateTransport()
+    {
+        for (int y = 0; y < rows; ++y)
+            for (int x = 0; x < columns; ++x)
+                q[y * columns + x] = (x >= 8 && x < 16 && y > 3 && y < 12) ? 10.0f : 0.0f;
+        sinusoidalWinds();
+    }
+
+    void sinusoidalWinds()
+    {
+        for (int y = 0; y < rows; ++y)
+            for (int x = 0; x < columns; ++x)
+            {
+                u[y * columns + x] = static_cast<float>(40.0 * std::sin(2.0 * pi * x / columns));
+                v[y * columns + x] = static_cast<float>(10.0 * std::sin(2.0 * pi * y / rows));
+            }
+    }
+};
+
+}
+
+TEST_F(ClimateTransport, WorkspaceReuse)
 {
     const auto workspaceCheck = [](int phase)
     {
@@ -162,12 +194,24 @@ TEST(ClimateTransport, Model)
     auto concurrent = std::async(std::launch::async, workspaceCheck, 1);
     const bool local = workspaceCheck(2);
     expect(local && concurrent.get(), "workspace reuse matches fresh storage bitwise across resizing and concurrent callers");
+}
+
+TEST_F(ClimateTransport, MpdataTiltedRotation)
+{
     const double coarse = rotationError(16), fine = rotationError(32);
     std::cout << "Tilted rotation RMS: " << coarse << " -> " << fine << '\n';
     expect(fine < 0.5 * coarse && fine < 0.008, "tilted rotation retains the original solver's accuracy under refinement");
+}
+
+TEST_F(ClimateTransport, FfslTiltedRotation)
+{
     const double ffslCoarse = rotationError(16, true), ffslFine = rotationError(32, true);
     std::cout << "FFSL tilted rotation RMS: " << ffslCoarse << " -> " << ffslFine << '\n';
     expect(ffslFine < 0.5 * ffslCoarse && ffslFine < 0.008, "FFSL resolves tilted rotation under refinement");
+}
+
+TEST_F(ClimateTransport, FfslZonalAndPolarRotation)
+{
     for (double tilt : {0.0, pi / 2.0})
     {
         // Keep the tracer perpendicular to the rotation axis so the polar
@@ -179,16 +223,10 @@ TEST(ClimateTransport, Model)
         expect(fineAxis < 0.6 * coarseAxis && fineAxis < 0.015,
             "both zonal and pole-crossing FFSL transport converge under refinement");
     }
-    constexpr int columns = 32, rows = 16;
-    std::vector<float> q(columns * rows), u(q.size()), v(q.size()), result;
-    for (int y = 0; y < rows; ++y)
-        for (int x = 0; x < columns; ++x)
-        {
-            const auto i = y * columns + x;
-            q[i] = (x >= 8 && x < 16 && y > 3 && y < 12) ? 10.0f : 0.0f;
-            u[i] = static_cast<float>(40.0 * std::sin(2.0 * pi * x / columns));
-            v[i] = static_cast<float>(10.0 * std::sin(2.0 * pi * y / rows));
-        }
+}
+
+TEST_F(ClimateTransport, MpdataReversingWinds)
+{
     climatehydrology::MpdataOptions options;
     options.endZonalWindMps = u;
     options.endMeridionalWindMps = v;
@@ -196,20 +234,28 @@ TEST(ClimateTransport, Model)
     for (auto& value : options.endMeridionalWindMps) value = -value;
     auto d = climatehydrology::advectSphericalTracerMpdata(columns, rows, q, u, v, 10.0f, 1000.0f, options, result);
     checkFluxes(columns, 1000.0, q, result, d);
-    options.endZonalWindMps.clear(); options.endMeridionalWindMps.clear();
+}
+
+TEST_F(ClimateTransport, MpdataUniformWind)
+{
+    climatehydrology::MpdataOptions options;
     std::fill(u.begin(), u.end(), 20.0f); std::fill(v.begin(), v.end(), 0.0f);
-    d = climatehydrology::advectSphericalTracerMpdata(columns, rows, q, u, v, 10.0f, 1000.0f, options, result);
+    auto d = climatehydrology::advectSphericalTracerMpdata(columns, rows, q, u, v, 10.0f, 1000.0f, options, result);
     checkFluxes(columns, 1000.0, q, result, d);
     expect(*std::max_element(result.begin(), result.end()) <= 10.00001f, "nondivergent transport creates no new extrema");
     expect(d.cellSubsteps == q.size() * d.substeps, "transport profiling records the actual CFL work");
+}
+
+TEST_F(ClimateTransport, FfslLargeCourantTranslation)
+{
     // Exact integer-cell translation at Courant 7: cost must not scale with
     // distance crossed, and the seam must preserve sharp fronts and dry cells.
-    const auto grid = climategrid::makeSphericalGrid(columns, rows, 1000.0);
+    std::fill(v.begin(), v.end(), 0.0f);
     for (int y = 0; y < rows; ++y)
         for (int x = 0; x < columns; ++x)
             u[y * columns + x] = static_cast<float>(7.0 * grid.cellAreasSquareMetres[y] /
                 grid.zonalFaceLengthsMetres[y]);
-    d = climatehydrology::advectSphericalTracerFfsl(columns, rows, q, u, v, 1.0f, 1000.0f, {}, result);
+    auto d = climatehydrology::advectSphericalTracerFfsl(columns, rows, q, u, v, 1.0f, 1000.0f, {}, result);
     checkFluxes(columns, 1000.0, q, result, d);
     expect(d.substeps == 1, "FFSL crosses many cells without advective CFL subdivision");
     double shiftError = 0.0;
@@ -218,16 +264,14 @@ TEST(ClimateTransport, Model)
             shiftError = std::max(shiftError, static_cast<double>(std::abs(result[grid.index(x, y)] - q[grid.index(x - 7, y)])));
     expect(shiftError < 1.0e-5, "large-Courant translation preserves the front at the correct longitude");
     expect(*std::max_element(result.begin(), result.end()) <= 10.00001f, "FFSL nondivergent transport creates no new extrema");
+}
+
+TEST_F(ClimateTransport, FfslCompressingFlow)
+{
     // Compressing flow can exceed initial density extrema, but must remain
     // positive and locally conservative, including a reversal during the step.
     climatehydrology::FfslOptions ffsl;
-    for (int y = 0; y < rows; ++y)
-        for (int x = 0; x < columns; ++x)
-        {
-            u[y * columns + x] = static_cast<float>(40.0 * std::sin(2.0 * pi * x / columns));
-            v[y * columns + x] = static_cast<float>(10.0 * std::sin(2.0 * pi * y / rows));
-        }
-    d = climatehydrology::advectSphericalTracerFfsl(columns, rows, q, u, v, 10.0f, 1000.0f, ffsl, result);
+    auto d = climatehydrology::advectSphericalTracerFfsl(columns, rows, q, u, v, 10.0f, 1000.0f, ffsl, result);
     checkFluxes(columns, 1000.0, q, result, d);
     ffsl.endZonalWindMps = u; ffsl.endMeridionalWindMps = v;
     for (auto& value : ffsl.endZonalWindMps) value = -value;
@@ -237,7 +281,7 @@ TEST(ClimateTransport, Model)
 }
 
 // Not run by ctest: see tests/test_modes.hpp.
-TEST(ClimateTransport, DISABLED_Modes)
+TEST_F(ClimateTransport, DISABLED_Modes)
 {
     EXPECT_EQ(0, runtestmode(&climatetransporttool)) << "UW_TEST_ARGUMENTS: --transport-benchmark CSV";
 }
