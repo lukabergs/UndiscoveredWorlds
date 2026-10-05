@@ -19,7 +19,6 @@
 #include "simulations/climate/climate_context.hpp"
 #include "simulations/climate/climate_energy.hpp"
 #include "simulations/climate/climate_world.hpp"
-#include "world/generation_tuning.hpp"
 #include "simulations/climate/climate_parameters.hpp"
 
 using floatgrid = std::vector<std::vector<float>>;

@@ -6,7 +6,6 @@
 #include "core/climate_grid.hpp"
 #include "simulations/climate/climate_hydrology.hpp"
 #include "simulations/climate/climate_weather.hpp"
-#include "world/generation_tuning.hpp"
 #include "simulations/climate/climate_parameters.hpp"
 
 void climateworld::resize(int width, int height)

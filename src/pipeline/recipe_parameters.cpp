@@ -7,6 +7,7 @@
 #include "simulations/climate/climate_parameters.hpp"
 #include "simulations/hydrology/hydrology_parameters.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
+#include "world/world_parameters.hpp"
 
 namespace
 {
@@ -114,7 +115,7 @@ const std::vector<parameters::Entry>& recipeparameters()
     static const std::vector<parameters::Entry> entries = []
     {
         std::vector<parameters::Entry> all;
-        for (const std::vector<parameters::Entry>* module : { &tuning::terrain::parameterentries(), &tuning::hydrology::parameterentries(), &tuning::climate::parameterentries() })
+        for (const std::vector<parameters::Entry>* module : { &tuning::world::parameterentries(), &tuning::terrain::parameterentries(), &tuning::hydrology::parameterentries(), &tuning::climate::parameterentries() })
             all.insert(all.end(), module->begin(), module->end());
         return all;
     }();

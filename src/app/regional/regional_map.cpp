@@ -13,7 +13,7 @@
 #include <queue>
 
 #include "core/classes.hpp"
-#include "world/generation_tuning.hpp"
+#include "app/regional/regional_parameters.hpp"
 #include "world/planet.hpp"
 #include "app/regional/region.hpp"
 #include "app/regional/regional_map.hpp"

@@ -99,6 +99,7 @@ Lessons:
 | `world-0044` | 2026-10-05 | equivalent | keep | consolidation phase 5, steps 6 and 7: parameter mechanism; terrain parameters |
 | `world-0045` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 8: hydrology parameters |
 | `world-0046` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 9: climate parameters |
+| `world-0047` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 10: world defaults and the planet body as parameters; generation_tuning.hpp removed |
 
 Lessons:
 
@@ -207,3 +208,4 @@ Lessons:
 - `world-0045`: Reference bundles of the next step: out/scratch/phase5/step08-*.
 - `world-0046`: The first registered climate run after this step should compare its solver times with run 388 before any tuning starts.
 - `world-0046`: Reference bundles of the next step: out/scratch/phase5/step09-*.
+- `world-0047`: Reference bundles of the next step: out/scratch/phase5/step10-*.

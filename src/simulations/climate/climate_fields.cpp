@@ -12,7 +12,7 @@
 #include "core/grid_coordinates.hpp"
 #include "core/parallel_rows.hpp"
 #include "core/procedural_noise.hpp"
-#include "world/generation_tuning.hpp"
+#include "simulations/climate/climate_resolution.hpp"
 #include "simulations/climate/climate_parameters.hpp"
 #include "pipeline/world_generation_debug.hpp"
 #include "simulations/climate/climate_fields.hpp"

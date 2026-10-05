@@ -1,6 +1,6 @@
 #include <algorithm>
 
-#include "world/generation_tuning.hpp"
+#include "world/world_parameters.hpp"
 #include "app/world_property_controls.hpp"
 
 WorldPropertyControls makeworldpropertycontrols(const planet& world)
@@ -96,21 +96,21 @@ float getdefaultgravityforsize(int size)
 int getdefaultmapwidthforsize(int size)
 {
     if (size == 0)
-        return (tuning::worlddefaults::width + 1) / 4;
+        return (tuning::world::defaults::width + 1) / 4;
 
     if (size == 1)
-        return (tuning::worlddefaults::width + 1) / 2;
+        return (tuning::world::defaults::width + 1) / 2;
 
-    return tuning::worlddefaults::width + 1;
+    return tuning::world::defaults::width + 1;
 }
 
 int getdefaultmapheightforsize(int size)
 {
     if (size == 0)
-        return (tuning::worlddefaults::height + 1) / 4;
+        return (tuning::world::defaults::height + 1) / 4;
 
     if (size == 1)
-        return (tuning::worlddefaults::height + 1) / 2;
+        return (tuning::world::defaults::height + 1) / 2;
 
-    return tuning::worlddefaults::height + 1;
+    return tuning::world::defaults::height + 1;
 }

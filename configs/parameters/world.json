@@ -1,0 +1,35 @@
+{
+ "module": "world",
+ "namespace": "tuning::world",
+ "header": "src/world/world_parameters.hpp",
+ "types": {"defaults.perihelion": "short"},
+ "parameters": {
+  "defaults": {
+   "body_from_seed": true,
+   "size": 2,
+   "width": 599,
+   "height": 299,
+   "rotation": true,
+   "tilt": 22.5,
+   "eccentricity": 0.0167,
+   "perihelion": 0,
+   "gravity": 1.0,
+   "lunar": 1.0,
+   "temp_decrease": 4.54,
+   "north_polar_adjust": -4,
+   "south_polar_adjust": -4,
+   "average_temp": 14,
+   "water_pickup": 1.0,
+   "river_factor": 15.0,
+   "river_land_reduce": 20,
+   "estuary_limit": 20,
+   "glacial_temp": 4,
+   "glacier_temp": -1,
+   "mountain_reduce": 0.75,
+   "climate_count": 31,
+   "max_elevation": 48000,
+   "sea_level": 24000,
+   "crater_count": 0
+  }
+ }
+}

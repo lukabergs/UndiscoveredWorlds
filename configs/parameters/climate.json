@@ -4,6 +4,10 @@
  "header": "src/simulations/climate/climate_parameters.hpp",
  "types": {"energybalance.earth_longwave_intercept_wm2": "double", "energybalance.longwave_slope_wm2_k": "double", "energybalance.meridional_transport_wm2_k": "double", "energybalance.meridional_diffusivity_wm2_k": "double", "energybalance.zonal_land_ocean_exchange_wm2_k": "double", "energybalance.tropical_cloud_albedo_amplitude": "double", "energybalance.tropical_cloud_albedo_width_degrees": "double", "energybalance.land_heat_capacity_jm2_k": "double", "energybalance.land_deep_layer_heat_capacity_jm2_k": "double", "energybalance.land_deep_layer_coupling_wm2_k": "double", "energybalance.ocean_mixed_layer_heat_capacity_jm2_k": "double", "energybalance.land_albedo": "double", "energybalance.ocean_albedo": "double", "energybalance.snow_albedo": "double", "energybalance.permanent_ice_albedo": "double", "energybalance.permanent_ice_warm_transition_c": "double", "energybalance.permanent_ice_cold_transition_c": "double", "energybalance.local_ice_coupling_relaxation": "double", "energybalance.local_ice_coupling_tolerance": "double", "energybalance.temperature_calibration_relaxation": "double", "energybalance.temperature_calibration_tolerance_c": "double", "energybalance.sea_ice_albedo": "double", "energybalance.fractal_temperature_range_c": "double"},
  "parameters": {
+  "resolution": {
+   "reference_width": 599,
+   "reference_height": 299
+  },
   "energybalance": {
    "earth_longwave_intercept_wm2": 210.0,
    "longwave_slope_wm2_k": 2.0,

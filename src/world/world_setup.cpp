@@ -10,7 +10,7 @@
 #include <queue>
 
 #include "core/classes.hpp"
-#include "world/generation_tuning.hpp"
+#include "world/world_parameters.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
 
@@ -24,30 +24,30 @@ void initialiseworld(planet& world)
 
     int saveversion = 18;        // Saves of this version (and version 17) can be loaded.
     int settingssaveversion = 5; // As above, but for settings files.
-    int size = tuning::worlddefaults::size;
-    int width = tuning::worlddefaults::width;
-    int height = tuning::worlddefaults::height;
-    bool rotation = tuning::worlddefaults::rotation;
-    float tilt = tuning::worlddefaults::tilt;
-    float eccentricity = tuning::worlddefaults::eccentricity;
-    short perihelion = tuning::worlddefaults::perihelion;
-    float gravity = tuning::worlddefaults::gravity;
-    float lunar = tuning::worlddefaults::lunar;
-    float tempdecrease = tuning::worlddefaults::tempDecrease;
-    int northpolaradjust = tuning::worlddefaults::northPolarAdjust;
-    int southpolaradjust = tuning::worlddefaults::southPolarAdjust;
-    int averagetemp = tuning::worlddefaults::averageTemp;
-    float waterpickup = tuning::worlddefaults::waterPickup;
-    float riverfactor = tuning::worlddefaults::riverFactor;
-    int riverlandreduce = tuning::worlddefaults::riverLandReduce;
-    int estuarylimit = tuning::worlddefaults::estuaryLimit;
-    int glacialtemp = tuning::worlddefaults::glacialTemp;
-    int glaciertemp = tuning::worlddefaults::glacierTemp;
-    float mountainreduce = tuning::worlddefaults::mountainReduce;
-    int climatenumber = tuning::worlddefaults::climateCount;
-    int maxelevation = tuning::worlddefaults::maxElevation;
-    int sealevel = tuning::worlddefaults::seaLevel;
-    int craterno = tuning::worlddefaults::craterCount;
+    int size = tuning::world::defaults::size;
+    int width = tuning::world::defaults::width;
+    int height = tuning::world::defaults::height;
+    bool rotation = tuning::world::defaults::rotation;
+    float tilt = tuning::world::defaults::tilt;
+    float eccentricity = tuning::world::defaults::eccentricity;
+    short perihelion = tuning::world::defaults::perihelion;
+    float gravity = tuning::world::defaults::gravity;
+    float lunar = tuning::world::defaults::lunar;
+    float tempdecrease = tuning::world::defaults::tempDecrease;
+    int northpolaradjust = tuning::world::defaults::northPolarAdjust;
+    int southpolaradjust = tuning::world::defaults::southPolarAdjust;
+    int averagetemp = tuning::world::defaults::averageTemp;
+    float waterpickup = tuning::world::defaults::waterPickup;
+    float riverfactor = tuning::world::defaults::riverFactor;
+    int riverlandreduce = tuning::world::defaults::riverLandReduce;
+    int estuarylimit = tuning::world::defaults::estuaryLimit;
+    int glacialtemp = tuning::world::defaults::glacialTemp;
+    int glaciertemp = tuning::world::defaults::glacierTemp;
+    float mountainreduce = tuning::world::defaults::mountainReduce;
+    int climatenumber = tuning::world::defaults::climateCount;
+    int maxelevation = tuning::world::defaults::maxElevation;
+    int sealevel = tuning::world::defaults::seaLevel;
+    int craterno = tuning::world::defaults::craterCount;
 
     world.setsaveversion(saveversion);
     world.setsettingssaveversion(settingssaveversion);
@@ -415,6 +415,10 @@ void changeworldproperties(planet& world)
 {
     long seed = world.seed();
     fast_srand(seed);
+
+    // A run may keep the body of the defaults instead (world.defaults.body_from_seed).
+    if (!tuning::world::defaults::bodyFromSeed)
+        return;
 
     // Size
 

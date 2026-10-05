@@ -7,6 +7,12 @@
 
 namespace tuning::climate
 {
+namespace resolution
+{
+inline int referenceWidth = 599;
+inline int referenceHeight = 299;
+}
+
 namespace energybalance
 {
 inline double earthLongwaveInterceptWm2 = 210.0;
@@ -416,6 +422,8 @@ inline float summerAdditionFactor = 0.05f;
 inline const std::vector<parameters::Entry>& parameterentries()
 {
     static const std::vector<parameters::Entry> entries = {
+        { "climate.resolution.reference_width", &resolution::referenceWidth },
+        { "climate.resolution.reference_height", &resolution::referenceHeight },
         { "climate.energybalance.earth_longwave_intercept_wm2", &energybalance::earthLongwaveInterceptWm2 },
         { "climate.energybalance.longwave_slope_wm2_k", &energybalance::longwaveSlopeWm2K },
         { "climate.energybalance.meridional_transport_wm2_k", &energybalance::meridionalTransportWm2K },

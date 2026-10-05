@@ -1,0 +1,14 @@
+{
+ "module": "regional",
+ "namespace": "tuning",
+ "header": "src/app/regional/regional_parameters.hpp",
+ "parameters": {
+  "regional": {
+   "submarine_warp_factor": 100.0,
+   "submarine_extra_margin": 20,
+   "ridge_radiation_extra_margin": 20,
+   "salt_pan_max_rain": 30,
+   "mountain_precipitation_slope_factor": 400.0
+  }
+ }
+}
