@@ -40,6 +40,7 @@
 
 #include "core/classes.hpp"
 #include "world/planet.hpp"
+#include "world/planet_bundle.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "simulations/society/social_generation.hpp"
 #include "app/regional/regional_map.hpp"
@@ -69,6 +70,8 @@
 
 using namespace std;
 
+// A saved world, or the manifest.json of a run bundle.
+inline constexpr const char* kWorldLoadFilter = ".uww,.json";
 inline constexpr const char* kRasterImportFilter = ".png,.tif,.tiff";
 inline constexpr const char* kGradientStripFilter = ".png";
 inline constexpr const char* kVolcanoImportFilter = ".png";
@@ -143,6 +146,7 @@ struct Application
     void updateimportscreen();
     void updatecompletingimportscreen();
     void updateloadingworldscreen();
+    bool loadworldfile(const std::string& filename);
     void updatesavingworldscreen();
     void updateexportingareascreen();
     void updategeneratingregionscreen();

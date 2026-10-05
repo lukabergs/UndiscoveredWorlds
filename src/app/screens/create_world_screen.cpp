@@ -20,7 +20,7 @@ void Application::updatecreateworldscreen()
 
             if (actions.openLoadDialog)
             {
-                openFileDialog(".uww");
+                openFileDialog(kWorldLoadFilter);
                 loadingworld = 1;
             }
 

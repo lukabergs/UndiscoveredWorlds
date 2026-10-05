@@ -41,7 +41,7 @@ void Application::updateglobalmapscreen()
 
         if (standardbutton("Load world"))
         {
-            openFileDialog(".uww");
+            openFileDialog(kWorldLoadFilter);
 
             loadingworld = 1;
         }
