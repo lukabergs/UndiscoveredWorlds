@@ -125,7 +125,7 @@ Rules:
    merged into it. Mineral formation records deposits during tectonics through
    `TectonicFrame` and stays a separate module: coupled in time, separate in code.
 4. Observed Earth data never forces a procedural world. Reference substitution
-   (for example the 850 hPa replay in `climate_coupling.cpp`) is allowed only in
+   (for example the 850 hPa replay in `climate_winds.cpp`) is allowed only in
    explicitly labelled attribution experiments.
 
 The registry is `src/pipeline/world_processes.*`. Each existing generation stage

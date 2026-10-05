@@ -78,6 +78,7 @@ Lessons:
 | `world-0024` | 2026-10-05 | tooling added | keep | consolidation phase 4, step 4: review maps a verifier can read (legend, graticule, direction, parent, plate identity); cross-imports of scripts/evaluation |
 | `world-0025` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 5: assetdata.cpp split, template data in assets/terrain |
 | `world-0026` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 6: climate_validation.cpp split; the C++ climate benchmark, its maps and its reference comparisons removed |
+| `world-0027` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 7: climate_coupling.cpp split by process; test modes as disabled tests; callerless field readers removed |
 
 Lessons:
 
@@ -144,3 +145,5 @@ Lessons:
 - `world-0026`: The reference bundles of the next step are out/scratch/phase4/step06-*.
 - `world-0026`: src/pipeline/world_processes.cpp still describes a process as writing 'the climate validation report'; the text is corrected in step 7, which edits the climate processes.
 - `world-0026`: scripts/refs/reference_map_rendering.py says its palettes follow climate_circulation_diagnostics.cpp, which no longer exists.
+- `world-0027`: The reference bundles of the next step are out/scratch/phase4/step07-*.
+- `world-0027`: src/simulations/climate/climate_context.hpp still names climate_coupling.cpp in a comment (solvegenericlevel is in climate_winds.cpp).

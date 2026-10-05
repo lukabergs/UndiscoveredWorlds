@@ -170,7 +170,7 @@ struct planetfieldaccess
     static PlanetFieldData read(const planet& world, FieldId id)
     {
         PlanetFieldData data;
-        if (readclimateworldfield(world.climate_, id, data, false))
+        if (readclimateworldfield(world.climate_, id, data))
             return data;
         // Absent diagnostics read as empty data: bundles skip them, hashes see them appear.
         if (isclimatediagnosticfield(id))

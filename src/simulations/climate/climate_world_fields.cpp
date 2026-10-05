@@ -13,18 +13,6 @@ using worldmodel::FieldData;
 using worldmodel::FieldId;
 using worldmodel::TableId;
 
-namespace
-{
-// An input grid seen through its x-major pointer, indexed view[x][y].
-template<typename T>
-struct inputview
-{
-    const T* values;
-    int stride;
-    const T* operator[](int x) const { return values + static_cast<std::size_t>(x) * stride; }
-};
-}
-
 // Friend of climateworld: maps catalogue ids onto the climate state.
 struct climateworldfieldaccess
 {
@@ -75,7 +63,7 @@ struct climateworldfieldaccess
         }
     }
 
-    static bool read(const climateworld& world, FieldId id, FieldData& data, bool includeinputs)
+    static bool read(const climateworld& world, FieldId id, FieldData& data)
     {
         namespace encode = worldmodel::encoding;
         const std::size_t columns = static_cast<std::size_t>(world.inputs_.width) + 1;
@@ -127,48 +115,7 @@ struct climateworldfieldaccess
         default: break;
         }
 
-        if (!includeinputs)
-            return false;
-
-        const climateinputs& inputs = world.inputs_;
-        auto inputgrid = [&](const auto* values)
-        {
-            using T = std::remove_cv_t<std::remove_pointer_t<decltype(values)>>;
-            return encode::grid(id, columns, rows, inputview<T>{ values, inputs.rows });
-        };
-
-        switch (id)
-        {
-        case FieldId::seed: data = encode::scalar(id, inputs.seed); return true;
-        case FieldId::width_index: data = encode::scalar(id, inputs.width); return true;
-        case FieldId::height_index: data = encode::scalar(id, inputs.height); return true;
-        case FieldId::prograde_rotation: data = encode::scalar(id, inputs.rotation); return true;
-        case FieldId::axial_tilt: data = encode::scalar(id, inputs.tilt); return true;
-        case FieldId::eccentricity: data = encode::scalar(id, inputs.eccentricity); return true;
-        case FieldId::perihelion: data = encode::scalar(id, inputs.perihelion); return true;
-        case FieldId::gravity: data = encode::scalar(id, inputs.gravity); return true;
-        case FieldId::lunar_strength: data = encode::scalar(id, inputs.lunar); return true;
-        case FieldId::lapse_rate: data = encode::scalar(id, inputs.tempdecrease); return true;
-        case FieldId::north_polar_adjust: data = encode::scalar(id, inputs.northpolaradjust); return true;
-        case FieldId::south_polar_adjust: data = encode::scalar(id, inputs.southpolaradjust); return true;
-        case FieldId::average_temperature: data = encode::scalar(id, inputs.averagetemp); return true;
-        case FieldId::water_pickup: data = encode::scalar(id, inputs.waterpickup); return true;
-        case FieldId::max_elevation: data = encode::scalar(id, inputs.maxelevation); return true;
-        case FieldId::sea_level: data = encode::scalar(id, inputs.sealevel); return true;
-        case FieldId::land_cells: data = encode::scalar(id, inputs.landtotal); return true;
-        case FieldId::sea_cells: data = encode::scalar(id, inputs.seatotal); return true;
-        case FieldId::base_elevation: if (!inputs.nom) return false; data = inputgrid(inputs.nom); return true;
-        case FieldId::mountain_height: if (!inputs.mountainheights) return false; data = inputgrid(inputs.mountainheights); return true;
-        case FieldId::extra_elevation: if (!inputs.extraelev) return false; data = inputgrid(inputs.extraelev); return true;
-        case FieldId::crater_rims: if (!inputs.craterrims) return false; data = inputgrid(inputs.craterrims); return true;
-        case FieldId::crater_centres: if (!inputs.cratercentres) return false; data = inputgrid(inputs.cratercentres); return true;
-        case FieldId::volcano: if (!inputs.volcano) return false; data = inputgrid(inputs.volcano); return true;
-        case FieldId::ocean_ridge_height: if (!inputs.oceanridgeheight) return false; data = inputgrid(inputs.oceanridgeheight); return true;
-        case FieldId::lake_surface: if (!inputs.lakesurface) return false; data = inputgrid(inputs.lakesurface); return true;
-        case FieldId::rift_lake_surface: if (!inputs.riftlakesurface) return false; data = inputgrid(inputs.riftlakesurface); return true;
-        case FieldId::special_features: if (!inputs.special) return false; data = inputgrid(inputs.special); return true;
-        default: return false;
-        }
+        return false;
     }
 
     // seasons x rows x columns on a solver's own grid; seasons without data are NaN.
@@ -333,9 +280,9 @@ struct climateworldfieldaccess
     }
 };
 
-bool readclimateworldfield(const climateworld& world, FieldId id, FieldData& data, bool includeinputs)
+bool readclimateworldfield(const climateworld& world, FieldId id, FieldData& data)
 {
-    return climateworldfieldaccess::read(world, id, data, includeinputs);
+    return climateworldfieldaccess::read(world, id, data);
 }
 
 bool loadclimateworldfield(climateworld& world, const FieldData& data)
@@ -370,45 +317,4 @@ bool isclimatediagnosticfield(FieldId id)
     default:
         return false;
     }
-}
-
-std::vector<FieldId> climateworldfields(bool includeinputs)
-{
-    std::vector<FieldId> fields =
-    {
-        FieldId::north_polar_temperature, FieldId::south_polar_temperature, FieldId::equatorial_temperature,
-        FieldId::sea_ice, FieldId::temperature_january, FieldId::temperature_july, FieldId::precipitation_january,
-        FieldId::precipitation_july, FieldId::mountain_precipitation_january, FieldId::mountain_precipitation_july,
-        FieldId::mountain_precipitation_direction_january, FieldId::mountain_precipitation_direction_july,
-        FieldId::prevailing_wind, FieldId::climate_class, FieldId::biome, FieldId::subtropical_high_latitudes,
-        FieldId::temperature, FieldId::precipitation, FieldId::precipitation_exact, FieldId::pressure, FieldId::wind_east,
-        FieldId::wind_south, FieldId::upper_height, FieldId::upper_wind_east, FieldId::upper_wind_south,
-        FieldId::vertical_velocity, FieldId::evaporation, FieldId::maritime_influence, FieldId::maritime_thermal_anomaly,
-        FieldId::maritime_fetch, FieldId::moisture, FieldId::convergence, FieldId::orographic_uplift,
-        FieldId::orographic_subsidence, FieldId::ocean_current_east, FieldId::ocean_current_south,
-        FieldId::sea_surface_temperature, FieldId::solver_monthly_temperature, FieldId::solver_monthly_precipitation,
-        FieldId::solver_surface_wind_east, FieldId::solver_surface_wind_south, FieldId::solver_upper_wind_east,
-        FieldId::solver_upper_wind_south, FieldId::solver_low_wind_east, FieldId::solver_low_wind_south,
-        FieldId::solver_sea_surface_temperature, FieldId::solver_sea_ice, FieldId::level_wind_east, FieldId::level_wind_north,
-        FieldId::level_geopotential_height, FieldId::level_vertical_velocity, FieldId::level_available,
-        FieldId::column_water, FieldId::moisture_transport_east, FieldId::moisture_transport_north,
-        FieldId::moisture_convergence, FieldId::precipitation_rate, FieldId::ascent, FieldId::current_east,
-        FieldId::current_north, FieldId::mixed_layer_temperature, FieldId::storage_depth
-    };
-    if (includeinputs)
-    {
-        const FieldId inputs[] =
-        {
-            FieldId::seed, FieldId::width_index, FieldId::height_index, FieldId::prograde_rotation, FieldId::axial_tilt,
-            FieldId::eccentricity, FieldId::perihelion, FieldId::gravity, FieldId::lunar_strength, FieldId::lapse_rate,
-            FieldId::north_polar_adjust, FieldId::south_polar_adjust, FieldId::average_temperature, FieldId::water_pickup,
-            FieldId::max_elevation, FieldId::sea_level, FieldId::land_cells, FieldId::sea_cells, FieldId::base_elevation,
-            FieldId::mountain_height, FieldId::extra_elevation, FieldId::crater_rims, FieldId::crater_centres,
-            FieldId::volcano, FieldId::ocean_ridge_height, FieldId::lake_surface, FieldId::rift_lake_surface,
-            FieldId::special_features
-        };
-        fields.insert(fields.end(), std::begin(inputs), std::end(inputs));
-    }
-    std::sort(fields.begin(), fields.end());
-    return fields;
 }

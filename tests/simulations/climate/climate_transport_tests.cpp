@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <gtest/gtest.h>
+#include "test_modes.hpp"
 
 namespace
 {
@@ -233,4 +234,10 @@ TEST(ClimateTransport, Model)
     for (auto& value : ffsl.endMeridionalWindMps) value = -value;
     d = climatehydrology::advectSphericalTracerFfsl(columns, rows, q, u, v, 10.0f, 1000.0f, ffsl, result);
     checkFluxes(columns, 1000.0, q, result, d);
+}
+
+// Not run by ctest: see tests/test_modes.hpp.
+TEST(ClimateTransport, DISABLED_Modes)
+{
+    EXPECT_EQ(0, runtestmode(&climatetransporttool)) << "UW_TEST_ARGUMENTS: --transport-benchmark CSV";
 }

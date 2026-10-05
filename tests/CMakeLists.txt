@@ -14,7 +14,6 @@ add_subdirectory(simulations/geology/mineral_systems)
 
 if(TARGET uw_climate_world)
     add_executable(world_tests
-        world_tests_main.cpp
         core/climate_grid_tests.cpp
         core/parallel_rows_tests.cpp
         io/climate_reference_tests.cpp
@@ -36,7 +35,8 @@ if(TARGET uw_climate_world)
     )
     # The only project library on its link line: climate, its stage runner and
     # its validation must not need the world class.
-    target_link_libraries(world_tests PRIVATE uw_climate_world GTest::gtest)
+    target_link_libraries(world_tests PRIVATE uw_climate_world GTest::gtest GTest::gtest_main)
+    target_include_directories(world_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     # A deadlock of the row executor must fail quickly.
     gtest_discover_tests(world_tests TEST_FILTER "ParallelRows.*" PROPERTIES TIMEOUT 15)
     gtest_discover_tests(world_tests TEST_FILTER "-ParallelRows.*")

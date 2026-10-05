@@ -10,6 +10,7 @@
 #include <random>
 #include <string>
 #include <gtest/gtest.h>
+#include "test_modes.hpp"
 
 namespace
 {
@@ -644,3 +645,9 @@ TEST(ClimateOceanHeat, Model) { runTests(); }
 TEST(ClimateOceanHeat, VariableStorage) { variableStorageTests(); }
 
 TEST(ClimateOceanHeat, HeatKernels) { heatKernelTests(); }
+
+// Not run by ctest: see tests/test_modes.hpp.
+TEST(ClimateOceanHeat, DISABLED_Modes)
+{
+    EXPECT_EQ(0, runtestmode(&climateoceanheattool)) << "UW_TEST_ARGUMENTS: --heat-kernels WIDTH DAYS | --accuracy WIDTH | --ocean-heat-benchmark WIDTH DAYS";
+}

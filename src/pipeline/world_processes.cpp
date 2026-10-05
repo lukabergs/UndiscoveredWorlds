@@ -63,7 +63,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::climates_and_biomes, "climate.classification", K::diagnoser, false, {}, {}, {}, {}, "Writes biomes as well as climate classes." },
         { S::arid_features, "terrain.arid_features", K::detailer, false, {}, {}, {}, {}, "" },
         { S::deltas_wetlands_and_roughness, "hydrology.deltas_and_wetlands", K::detailer, false, {}, {}, {}, {},
-          "Also recomputes climate classes and biomes and writes the climate validation report." },
+          "Also recomputes climate classes and biomes and writes the climate diagnostics." },
         { S::finalize_layers, "layers.finalize", K::diagnoser, true, {}, {}, {}, {},
           "Physical resource layers, gold placers and optional society." },
     };

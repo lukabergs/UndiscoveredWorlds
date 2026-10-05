@@ -10,6 +10,7 @@
 #include <limits>
 #include <vector>
 #include <gtest/gtest.h>
+#include "test_modes.hpp"
 
 namespace
 {
@@ -791,4 +792,10 @@ TEST(ClimateOceanDynamics, Model)
         uniformStress.streamfunctionM3S[(annulusRows / 4) * annulusColumns] > 0.0f &&
         uniformStress.streamfunctionM3S[(3 * annulusRows / 4) * annulusColumns] < 0.0f,
         "uniform zonal stress must reproduce the spherical annulus solution and opposite hemisphere curl signs");
+}
+
+// Not run by ctest: see tests/test_modes.hpp.
+TEST(ClimateOceanDynamics, DISABLED_Modes)
+{
+    EXPECT_EQ(0, runtestmode(&climateoceandynamicstool)) << "UW_TEST_ARGUMENTS: --momentum-replay FIXTURE CSV EKMAN GYRE | --coastal-replay FIXTURE DAYS [STEP_HOURS]";
 }

@@ -36,7 +36,7 @@ def include_issues(root=ROOT):
     A project header is included by its path from src/. core includes only core;
     simulations and pipeline include neither app nor cli; SFML and ImGui are
     included in app alone; code outside the tectonics engine includes only its
-    public headers. Tests may also include a header beside themselves.
+    public headers. Tests may also include a header beside themselves or by its path from tests/.
     """
     issues = []
     source = root / "src"
@@ -56,7 +56,7 @@ def include_issues(root=ROOT):
                 if bracket == "<" or header in GENERATED_HEADERS or header.startswith("gtest/"):
                     continue
                 if not (source / header).is_file():
-                    if directory == "tests" and (path.parent / header).is_file():
+                    if directory == "tests" and ((path.parent / header).is_file() or (root / "tests" / header).is_file()):
                         continue
                     issues.append(f"{relative}: include \"{header}\" is not a path from src/")
                     continue

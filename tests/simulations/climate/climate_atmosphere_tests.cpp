@@ -23,6 +23,7 @@
 #include <iomanip>
 #include <string>
 #include <gtest/gtest.h>
+#include "test_modes.hpp"
 
 namespace
 {
@@ -1606,3 +1607,9 @@ TEST(ClimateAtmosphere, ParallelSurfaceDrag) { testParallelSurfaceDrag(); }
 TEST(ClimateAtmosphere, RegionalThermalTrough) { testRegionalThermalTrough(); }
 
 TEST(ClimateAtmosphere, ReceiverAscentCorrection) { testReceiverAscentCorrection(); }
+
+// Not run by ctest: see tests/test_modes.hpp.
+TEST(ClimateAtmosphere, DISABLED_Modes)
+{
+    EXPECT_EQ(0, runtestmode(&climateatmospheretool)) << "UW_TEST_ARGUMENTS: --atmosphere-replay FIXTURE [TOLERANCE] | --atmosphere-benchmark WIDTH";
+}
