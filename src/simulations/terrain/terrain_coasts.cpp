@@ -539,7 +539,7 @@ void loweroceans(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.sea(i, j) && !world.basebelowsea(i, j) - 170)
+            if (world.sea(i, j) && world.nomfloat(i, j) > static_cast<float>(sealevel - 170))
             {
                 bool nearland = 0;
 

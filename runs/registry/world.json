@@ -21,6 +21,13 @@
       "run": "runs/world/3",
       "date": "2026-10-05T16:35:38+00:00",
       "label": "step 12: terrain on the float accessors"
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "run": "runs/world/4",
+      "date": "2026-10-05T16:43:53+00:00",
+      "label": "step 12 corrected: shelf pass compares depth again"
     }
   ]
 }

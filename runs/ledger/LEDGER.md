@@ -6,6 +6,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
+- `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
 
 ## climate
 
@@ -86,6 +87,7 @@ Lessons:
 | `world-0032` | 2026-10-05 | equivalent on Earth terrain; procedural worlds shifted as listed | keep | consolidation phase 4, step 11: atmosphere.precipitation and atmosphere.precipitation_exact become one field (module climate) |
 | `world-0033` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 11b (added at the user's request): minimal run configuration; climate options kept across a resize; world run 2 is the minimal reference |
 | `world-0034` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 12: terrain on the float accessors (module terrain) |
+| `world-0035` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 12 corrected: a comparison the float pass had rewritten wrongly (module terrain) |
 
 Lessons:
 
@@ -173,3 +175,6 @@ Lessons:
 - `world-0034`: The reference bundles of the next step are out/scratch/phase4/step12a-* (minimal configuration).
 - `world-0034`: The ordinary build prints no conversion warnings; compile a source with /W3 (truncations.ps1) to see every float squeezed into an integer.
 - `world-0034`: A regex written into a script through a shell here-document lost its backslash-b: scripts are written with the Write tool.
+- `world-0035`: The reference bundles of the next step are out/scratch/phase4/step12b-* (minimal configuration); world run 4 is the parent of the hydrology run.
+- `world-0035`: The river-flow palette (0 to 200,000) suits the 512-column world and shows nothing on 128 x 64, where the largest flow is about 2,000.
+- `world-0035`: A rewrite by pattern needs a search for what it must never produce, run every time.
