@@ -4,8 +4,10 @@ add_library(uw_core STATIC
     classes.cpp
     climate_grid.cpp
     grid_coordinates.cpp
+    grid_shapes.cpp
     procedural_noise.cpp
     profiler.cpp
+    text_values.cpp
     world/world_fields.cpp
     world/world_grid_check.cpp
 )

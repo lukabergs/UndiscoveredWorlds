@@ -43,6 +43,7 @@
 #include "app/app_windows.hpp"
 #include "app/rendering/appearance_settings.hpp"
 #include "world/functions.hpp"
+#include "app/appearance_files.hpp"
 #include "app/rendering/map_views.hpp"
 #include "app/generation_workbench.hpp"
 #include "app/rendering/map_appearance.hpp"

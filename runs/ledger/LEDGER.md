@@ -80,6 +80,7 @@ Lessons:
 | `world-0026` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 6: climate_validation.cpp split; the C++ climate benchmark, its maps and its reference comparisons removed |
 | `world-0027` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 7: climate_coupling.cpp split by process; test modes as disabled tests; callerless field readers removed |
 | `world-0028` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 8: main.cpp split by screen |
+| `world-0029` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 9: misc.cpp dissolved into owner sources; fractal noise on small grids; planet::smooth() |
 
 Lessons:
 
@@ -149,3 +150,6 @@ Lessons:
 - `world-0027`: The reference bundles of the next step are out/scratch/phase4/step07-*.
 - `world-0027`: src/simulations/climate/climate_context.hpp still names climate_coupling.cpp and a function solvegenericlevel in a comment; no function of that name exists.
 - `world-0028`: A second, smaller block of the export area screen (the selection rectangle) stays in main.cpp, beside the drawing of the other screens.
+- `world-0029`: The reference bundles of the next compiled step are out/scratch/phase4/step09-*.
+- `world-0029`: The grid size macros ARRAYWIDTH and ARRAYHEIGHT are defined identically in six files; grid_shapes.cpp is one more until they become one constant.
+- `world-0029`: A function moved upwards in planet.cpp needed a helper template defined further down: the build, not the script, found it.

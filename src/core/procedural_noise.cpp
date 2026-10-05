@@ -380,7 +380,8 @@ namespace
 
 void newfractalinit(vector<vector<int>>& arr, int awidth, int aheight, int grain, int min, int max, bool extreme)
 {
-    int s = (aheight + 1) / grain;
+    // A grain finer than the grid would give a step of zero, which never advances.
+    int s = std::max(1, (aheight + 1) / grain);
 
     int newval = 0;
 
@@ -418,7 +419,8 @@ void newfractal(vector<vector<int>>& arr, int awidth, int aheight, int grain, fl
 
     int newheight = 0;
 
-    int s = (aheight + 1) / grain;
+    // A grain finer than the grid would give a step of zero, which never advances.
+    int s = std::max(1, (aheight + 1) / grain);
 
     int focalx = awidth / 2; // Coordinates for the focal point of the value variance.
     int focaly = random(0, aheight);

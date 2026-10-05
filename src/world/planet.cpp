@@ -658,13 +658,6 @@ void planet::clear()
     clearsocialstate();
 }
 
-void planet::smoothnom(int amount)
-{
-    // smooth() works on the base elevation, in whole metres, whatever grid it is given.
-    worldgrid<int> unused;
-    smooth(unused, amount, 1, 1);
-}
-
 void planet::smoothextraelev(int amount)
 {
     smoothoverland(geosphere_.extraelevmap, amount, 0);
@@ -2158,49 +2151,14 @@ T smoothingcell(const worldgrid<T>& grid, int x, int y)
 }
 }
 
-void planet::smooth(worldgrid<int>& arr, int amount, bool vary, bool avoidmountains) // This smoothes the given array by the given amount.
+// Smooths the base elevation, in whole metres, where there are no mountains.
+void planet::smoothnom(int amount)
 {
     for (int i = 0; i <= body_.itswidth; i++)
     {
         for (int j = 1; j < body_.itsheight; j++)
         {
-            if (avoidmountains == 0 || geosphere_.mountainheights[i][j] == 0)
-            {
-                int crount = 0;
-                int ave = 0;
-
-                for (int k = i - amount; k <= i + amount; k++)
-                {
-                    int kk = k;
-
-                    if (kk < 0)
-                        kk = body_.itswidth;
-
-                    if (kk > body_.itswidth)
-                        kk = 0;
-
-                    for (int l = j - amount; l <= j + amount; l++)
-                    {
-                        ave = ave + wholemetres(smoothingcell(geosphere_.mapnom, kk, l));
-                        crount++;
-                    }
-                }
-                ave = ave / crount;
-
-                if (ave > 0 && ave < geosphere_.itsmaxheight)
-                    geosphere_.mapnom[i][j] = static_cast<float>(ave);
-            }
-        }
-    }
-}
-
-void planet::smooth(worldgrid<short>& arr, int amount, bool vary, bool avoidmountains) // This smoothes the given array by the given amount.
-{
-    for (int i = 0; i <= body_.itswidth; i++)
-    {
-        for (int j = 1; j < body_.itsheight; j++)
-        {
-            if (avoidmountains == 0 || geosphere_.mountainheights[i][j] == 0)
+            if (geosphere_.mountainheights[i][j] == 0)
             {
                 int crount = 0;
                 int ave = 0;

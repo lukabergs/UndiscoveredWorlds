@@ -1016,8 +1016,6 @@ private:
 
     int wrapx(int x) const;
     int clipy(int y) const;
-    void smooth(worldgrid<int>& arr, int amount, bool vary, bool avoidmountains);
-    void smooth(worldgrid<short>& arr, int amount, bool vary, bool avoidmountains);
     void smoothoverland(worldgrid<int>& arr, int amount, bool vary);
     void smoothoverland(worldgrid<short>& arr, int amount, bool vary);
 

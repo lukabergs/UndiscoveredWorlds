@@ -18,6 +18,7 @@ endforeach()
 
 add_library(uw_app STATIC
     app_windows.cpp
+    appearance_files.cpp
     create_world_screen.cpp
     generation_workbench.cpp
     rendering/appearance_settings.cpp

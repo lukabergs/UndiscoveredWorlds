@@ -14,7 +14,7 @@
 //  ImGuiFileDialog - https://github.com/aiekick/ImGuiFileDialog
 //
 //  main.cpp contains the functions for drawing the map images (as well as the main loop, of course), and all functions that require external libraries.
-//  misc.cpp contains various utility functions that are used throughout the program.
+//  The former misc.cpp is divided by owner: core/text_values, core/grid_shapes, world/world_setup, world/region_queries, simulations/terrain/coast_queries, simulations/hydrology/flow_queries and app/appearance_files.
 //  Simulation modules under src/simulations contain terrain, climate, and hydrology.
 //  regionalmap.cpp contains the functions used to generate the regional terrain.
 //
@@ -170,81 +170,13 @@ constexpr std::array<std::array<int, 3>, BIOMEMAPCOLOURCOUNT> defaultbiomemapcol
 
 #include "pipeline/generation_progress.hpp"
 
-// Declare functions that are in misc.cpp
-
-void toggle(bool &val);
-string formatnumber(int val);
-bool stob(string const& instring);
-short stos(string const& instring);
-unsigned short stous(string const& instring);
-char stoc(string const& instring);
-unsigned char stouc(string const& instring);
-void savesettings(planet& world, string filename);
-bool loadsettings(planet& world, string filename);
-void createriftblob(vector<vector<float>>& riftblob, int size);
-int normalise(int x, int y, int max);
-void smooth(vector<vector<int>>& arr, int width, int height, int maxelev, int amount, bool vary);
-bool edge(vector<vector<bool>>& arr, int width, int height, int i, int j);
-void drawline(vector<vector<bool>>& arr, int x1, int y1, int x2, int y2);
-void drawlinewrapped(vector<vector<bool>>& arr, int width, int height, int x1, int y1, int x2, int y2);
-void drawcircle(vector<vector<int>>& arr, int x, int y, int col, int radius);
-void box(vector<vector<int>>& arr, int x1, int y1, int x2, int y2, int col);
-void drawcircle3d(vector<vector<vector<int>>>& arr, int x, int y, int col, int radius, int index);
-void box3d(vector<vector<vector<int>>>& arr, int x1, int y1, int x2, int y2, int col, int index);
-twofloats curvepos(twofloats p0, twofloats p1, twofloats p2, twofloats p3, float t);
-void fill(vector<vector<bool>>& arr, int width, int height, int x, int y, bool replacement);
-void fillcontinent(vector<vector<bool>>& arr, vector<vector<short>>& mask, short maskcheck, int width, int height, int startx, int starty, bool replacement);
-int tempelevadd(planet& world, region& region, int temp, int i, int j);
-int tempelevremove(planet& world, region& region, int temp, int i, int j);
-string getdirstring(int dir);
-int findlowestdir(planet& world, int neighbours[8][2], int x, int y);
-int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, vector<vector<int>>& mountaindrainage);
-int getslope(planet& world, int x, int y, int xx, int yy);
-int getslope(region& region, int x, int y, int xx, int yy);
-int getflatness(planet& world, int x, int y);
-int getflatelevation(planet& world, int x, int y);
-int landdistance(planet& world, int x, int y);
-twointegers nearestsea(planet& world, int i, int j, bool land, int limit, int grain);
-twointegers nearestsea(region& region, int leftx, int lefty, int rightx, int righty, int i, int j);
-bool vaguelycoastal(planet& world, int x, int y);
-bool vaguelycoastal(region& region, int x, int y);
-bool northwestlandonly(planet& world, int x, int y);
-bool northwestlandonly(region& region, int x, int y);
-bool lakenorthwestlandonly(region& region, int x, int y);
-bool northeastlandonly(planet& world, int x, int y);
-bool northeastlandonly(region& region, int x, int y);
-bool lakenortheastlandonly(region& region, int x, int y);
-bool southwestlandonly(planet& world, int x, int y);
-bool southwestlandonly(region& region, int x, int y);
-bool lakesouthwestlandonly(region& region, int x, int y);
-bool southeastlandonly(planet& world, int x, int y);
-bool southeastlandonly(region& region, int x, int y);
-bool lakesoutheastlandonly(region& region, int x, int y);
-twointegers findseatile(planet& world, int x, int y, int dir);
-twointegers getflowdestination(planet& world, int x, int y, int dir);
-twointegers getregionalflowdestination(region& region, int x, int y, int dir);
-twointegers getupstreamcell(planet& world, int x, int y);
-int checkwaterinflow(planet& world, int x, int y);
-int checkregionalwaterinflow(region& region, int x, int y);
-twointegers gettotalinflow(planet& world, int x, int y);
-twointegers gettotalinflow(region& region, int x, int y);
-twointegers findlowesthigher(region& region, int dx, int dy, int x, int y, int janload, int julload, int crount, vector<vector<bool>>& mainriver);
-int nearlake(planet& world, int x, int y, int dist, bool rift);
-int getlakeedge(planet& world, int x, int y);
-int getnearestlakelevel(region& region, int x, int y);
-int getnearestlakespecial(region& region, int x, int y);
-twointegers findclosestriver(region& region, int x, int y, bool delta);
-twointegers findclosestriverquickly(region& region, int x, int y);
-int countinflows(region& region, int x, int y);
-void initialiseworld(planet& world);
-void initialisemapcolours(planet& world);
-void initialisegradientmapappearance(planet& world);
-void setdefaultnonreliefmapappearance(planet& world);
-void initialiseregion(planet& world, region& region);
-void changeworldproperties(planet& world);
-void getlandandseatotals(planet& world);
-void makevoronoi(vector<vector<short>>& voronoi, int width, int height, int points);
-void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<vector<bool>>& outline, int pointdist);
+// The former misc.cpp: each group of functions is declared with its source.
+#include "core/text_values.hpp"
+#include "core/grid_shapes.hpp"
+#include "world/world_setup.hpp"
+#include "simulations/terrain/coast_queries.hpp"
+#include "simulations/hydrology/flow_queries.hpp"
+#include "world/region_queries.hpp"
 
 // Simulation entry points live with their implementations. This header
 // remains a compatibility umbrella for the desktop and regional generator.

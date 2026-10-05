@@ -628,13 +628,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         fast_srand(world->seed());
     }
 
-    // The fractal noise of the terrain passes does not terminate on smaller grids.
-    if (options.runCommand && world->width() + 1 < 32)
-    {
-        cerr << "The world grid needs at least 32 columns.\n";
-        return 1;
-    }
-
     applyclimateoptions(options.climate, world->climatesimulation());
     const SocialGenerationOptions socialoptions = makesocialoptions(options.socialEnabled, options.socialMode, options.usePrehistory, options.historyYears);
 
