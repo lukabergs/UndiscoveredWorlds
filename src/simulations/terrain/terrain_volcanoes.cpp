@@ -78,11 +78,11 @@ void terrain::detail::makemountainisland(planet& world, int x, int y, int peakhe
             }
         }
 
-        if (world.nom(x, y) < landheight)
-            world.setnom(x, y, landheight);
+        if (world.nomfloat(x, y) < landheight)
+            world.setnomfloat(x, y, landheight);
 
-        if (world.nom(xx, yy) < landheight)
-            world.setnom(xx, yy, landheight);
+        if (world.nomfloat(xx, yy) < landheight)
+            world.setnomfloat(xx, yy, landheight);
 
         // If there isn't a ridge between them, make one.
 

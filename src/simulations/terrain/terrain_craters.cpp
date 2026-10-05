@@ -70,14 +70,14 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
         }
     }
 
-    int lowestelev = maxelev;
-    int highestelev = 0;
+    float lowestelev = static_cast<float>(maxelev);
+    float highestelev = 0.0f;
 
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
         {
-            int thiselev = world.nom(i, j);
+            float thiselev = world.nomfloat(i, j);
 
             if (thiselev < lowestelev)
                 lowestelev = thiselev;
@@ -87,7 +87,7 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
         }
     }
 
-    int boundary = random(lowestelev, highestelev);
+    int boundary = random(wholemetres(lowestelev), wholemetres(highestelev));
 
     // Create a broad fractal, to vary the density of craters.
 
@@ -108,14 +108,14 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
         {
             bool makethiscrater = 0;
 
-            int thiselev = world.nom(thisx, thisy);
+            float thiselev = world.nomfloat(thisx, thisy);
 
             if (checktype == 0)
                 makethiscrater = 1;
 
             if (checktype == 1)
             {
-                int slope = 0;
+                float slope = 0.0f;
 
                 for (int i = thisx - 1; i <= thisx + 1; i++)
                 {
@@ -128,7 +128,7 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
                     {
                         if (j >= 0 && j <= height)
                         {
-                            int thisslope = thiselev - world.nom(ii, j);
+                            float thisslope = thiselev - world.nomfloat(ii, j);
 
                             if (thisslope > slope)
                                 slope = thisslope;
@@ -209,18 +209,18 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
         {
             if (random(1, 10) != 1)
             {
-                int lowest = maxelev;
+                float lowest = static_cast<float>(maxelev);
 
                 for (int i = 0; i <= width; i++)
                 {
                     for (int j = 0; j <= height; j++)
                     {
-                        if (world.nom(i, j) < lowest)
-                            lowest = world.nom(i, j);
+                        if (world.nomfloat(i, j) < lowest)
+                            lowest = world.nomfloat(i, j);
                     }
                 }
 
-                int sealevel = lowest - random(10, 500);
+                int sealevel = wholemetres(lowest) - random(10, 500);
 
                 if (sealevel < 1)
                     sealevel = 1;
@@ -264,18 +264,18 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
 
     // First, find the base elevation for this crater.
 
-    int baseelev = world.nom(centrex,centrey);
+    float baseelev = world.nomfloat(centrex,centrey);
 
     // Now make a circular depression, with a rim.
 
     int depthmult = random(30, 70); // The higher this is, the deeper and more sloping the crater will be.
 
-    int deepestelev = baseelev-(size * depthmult);
+    float deepestelev = baseelev - static_cast<float>(size * depthmult);
 
-    if (deepestelev < 1)
-        deepestelev = 1;
+    if (deepestelev < 1.0f)
+        deepestelev = 1.0f;
 
-    int aveelev = deepestelev + (baseelev - deepestelev) / 2; // Roughly average elevation of the crater floor.
+    float aveelev = deepestelev + (baseelev - deepestelev) / 2.0f; // Roughly average elevation of the crater floor.
 
     for (int i = 0 - size; i <= size; i++)
     {
@@ -300,18 +300,18 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
 
                     depth = depth * depthmult;
 
-                    int thiselev = baseelev - depth;
+                    float thiselev = baseelev - depth;
 
-                    if (thiselev < 1)
-                        thiselev = 1;
+                    if (thiselev < 1.0f)
+                        thiselev = 1.0f;
 
-                    int oldelev = world.nom(ii, jj);
+                    float oldelev = world.nomfloat(ii, jj);
 
                     if (oldelev >= deepestelev)
                     {                     
                         placed[ii][jj] = 1;
 
-                        world.setnom(ii, jj, thiselev); // This is the flat crater floor.
+                        world.setnomfloat(ii, jj, thiselev); // This is the flat crater floor.
 
                         world.setmountainheight(ii, jj, 0); // Problem here.
                         world.setmountainridge(ii, jj, 0);
@@ -374,9 +374,9 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
 
                     int newelev = (int)(peakbaseelev * mult);
 
-                    int thiselev = world.nom(ii, jj) + newelev;
+                    float thiselev = world.nomfloat(ii, jj) + static_cast<float>(newelev);
 
-                    world.setnom(ii, jj, thiselev);
+                    world.setnomfloat(ii, jj, thiselev);
                 }
             }
         }
@@ -426,7 +426,7 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
 
                     if (nexttocrater)
                     {
-                        int highestcrater = 0;
+                        float highestcrater = 0.0f;
 
                         for (int k = ii - 2; k <= ii + 2; k++)
                         {
@@ -439,15 +439,15 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
                             {
                                 if (l >= 0 && l <= height)
                                 {
-                                    if (placed[kk][l] == 1 && world.nom(kk,l)>highestcrater)
-                                        highestcrater = world.nom(kk, l);
+                                    if (placed[kk][l] == 1 && world.nomfloat(kk,l)>highestcrater)
+                                        highestcrater = world.nomfloat(kk, l);
                                 }
                             }
                         }
 
-                        int newelev = (world.nom(ii, jj) + highestcrater) / 2;
+                        float newelev = (world.nomfloat(ii, jj) + highestcrater) / 2.0f;
 
-                        world.setnom(ii, jj, newelev);
+                        world.setnomfloat(ii, jj, newelev);
                     }
                 }
             }

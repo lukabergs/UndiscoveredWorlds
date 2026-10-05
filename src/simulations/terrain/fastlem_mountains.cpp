@@ -371,9 +371,9 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
             block.x = xstart;
             block.y = ystart;
 
-            int nomsum = 0;
+            double nomsum = 0.0;
             int fractalsum = 0;
-            int bestnom = numeric_limits<int>::min();
+            float bestnom = numeric_limits<float>::lowest();
 
             for (int y = ystart; y <= yend; y++)
             {
@@ -384,12 +384,12 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
 
                     block.land = true;
                     block.landTiles++;
-                    nomsum += world.nom(x, y);
+                    nomsum += world.nomfloat(x, y);
                     fractalsum += fractal[x][y];
 
-                    if (world.nom(x, y) > bestnom)
+                    if (world.nomfloat(x, y) > bestnom)
                     {
-                        bestnom = world.nom(x, y);
+                        bestnom = world.nomfloat(x, y);
                         block.x = x;
                         block.y = y;
                     }
@@ -401,7 +401,7 @@ bool generatefastlemmountains(planet& world, const vector<vector<int>>& fractal)
 
             if (block.land)
             {
-                block.meanNomNormalised = static_cast<float>(max(0, nomsum / max(1, block.landTiles) - sealevel)) / static_cast<float>(max(1, maxelev - sealevel));
+                block.meanNomNormalised = static_cast<float>(max(0.0, nomsum / max(1, block.landTiles) - sealevel)) / static_cast<float>(max(1, maxelev - sealevel));
                 block.meanFractalNormalised = static_cast<float>(fractalsum / max(1, block.landTiles)) / static_cast<float>(max(1, maxelev));
             }
         }

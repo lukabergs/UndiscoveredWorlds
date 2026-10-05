@@ -548,7 +548,7 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
         for (int j = 0; j <= height; j++)
         {
             if (world.sea(i, j) == 0)
-                world.setnom(i, j, world.nom(i, j) + mountaindrainage[i][j]);
+                world.setnomfloat(i, j, world.nomfloat(i, j) + mountaindrainage[i][j]);
         }
     }
 }
@@ -578,7 +578,7 @@ void addfjordmountains(planet& world)
             {
                 if (world.sea(i, j)) // && random(1,maxelev)<world.roughness(i,j))
                 {
-                    int avetemp = (world.mintemp(i, j) + world.maxtemp(i, j)) / 2;
+                    float avetemp = (world.mintempfloat(i, j) + world.maxtempfloat(i, j)) / 2.0f;
 
                     bool fjordreason1 = 0;
                     bool fjordreason2 = 0;
@@ -679,8 +679,8 @@ void addfjordmountains(planet& world)
 
                                 world.setmountainheight(i, j, world.mountainheight(landx, landy));
 
-                                world.setsummerrain(i, j, world.summerrain(landx, landy));
-                                world.setwinterrain(i, j, world.winterrain(landx, landy));
+                                world.setsummerrainfloat(i, j, world.summerrainfloat(landx, landy));
+                                world.setwinterrainfloat(i, j, world.winterrainfloat(landx, landy));
 
                                 justadded[i][j] = 1;
 

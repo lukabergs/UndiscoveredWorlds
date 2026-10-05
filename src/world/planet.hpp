@@ -541,6 +541,10 @@ public:
     void setnom(int x, int y, int amount);
     float nomfloat(int x, int y) const; // no-mountains terrain elevation
     void setnomfloat(int x, int y, float amount);
+    // Land and sea follow the elevation rounded to whole metres (the rule of sea(), the renderers and the
+    // save format): at or below sea level by that rule, for the base elevation and for the whole surface.
+    bool basebelowsea(int x, int y) const;
+    bool surfacebelowsea(int x, int y) const;
 
     //int nomridge(int x, int y) const; // no-mountains, with undersea ridge terrain elevation
 
@@ -605,6 +609,22 @@ public:
 
     int averain(int x, int y) const; // average precipitation
     float averainfloat(int x, int y) const;
+    // The same values as the whole-number accessors above, without rounding.
+    float mintempfloat(int x, int y) const;
+    float maxtempfloat(int x, int y) const;
+    float avetempfloat(int x, int y) const;
+    float summerrainfloat(int x, int y) const;
+    float winterrainfloat(int x, int y) const;
+    float jantempfloat(int x, int y) const;
+    float jultempfloat(int x, int y) const;
+    float janrainfloat(int x, int y) const;
+    float julrainfloat(int x, int y) const;
+    void setsummerrainfloat(int x, int y, float amount);
+    void setwinterrainfloat(int x, int y, float amount);
+    void setjantempfloat(int x, int y, float amount);
+    void setjultempfloat(int x, int y, float amount);
+    void setjanrainfloat(int x, int y, float amount);
+    void setjulrainfloat(int x, int y, float amount);
 
     int seasonalrain(int season, int x, int y) const;
     void setseasonalrain(int season, int x, int y, int amount);
@@ -1454,6 +1474,17 @@ inline void planet::setnom(int x, int y, int amount)
         return;
 
     geosphere_.mapnom[x][y] = static_cast<float>(amount);
+}
+
+inline bool planet::basebelowsea(int x, int y) const
+{
+    UW_FIELD_READ(sea_level);
+    return nom(x, y) <= geosphere_.itssealevel;
+}
+
+inline bool planet::surfacebelowsea(int x, int y) const
+{
+    return map(x, y) <= geosphere_.itssealevel;
 }
 
 inline float planet::nomfloat(int x, int y) const
@@ -3029,6 +3060,22 @@ inline bool planet::sea(int x, int y) const
 inline int planet::mintemp(int x, int y) const { return climate_.mintemp(x, y); }
 
 inline void planet::setmintemp(int x, int y, int amount) { climate_.setmintemp(x, y, amount); }
+
+inline float planet::mintempfloat(int x, int y) const { return climate_.mintempfloat(x, y); }
+inline float planet::maxtempfloat(int x, int y) const { return climate_.maxtempfloat(x, y); }
+inline float planet::avetempfloat(int x, int y) const { return climate_.avetempfloat(x, y); }
+inline float planet::summerrainfloat(int x, int y) const { return climate_.summerrainfloat(x, y); }
+inline float planet::winterrainfloat(int x, int y) const { return climate_.winterrainfloat(x, y); }
+inline float planet::jantempfloat(int x, int y) const { return climate_.jantempfloat(x, y); }
+inline float planet::jultempfloat(int x, int y) const { return climate_.jultempfloat(x, y); }
+inline float planet::janrainfloat(int x, int y) const { return climate_.janrainfloat(x, y); }
+inline float planet::julrainfloat(int x, int y) const { return climate_.julrainfloat(x, y); }
+inline void planet::setsummerrainfloat(int x, int y, float amount) { climate_.setsummerrainfloat(x, y, amount); }
+inline void planet::setwinterrainfloat(int x, int y, float amount) { climate_.setwinterrainfloat(x, y, amount); }
+inline void planet::setjantempfloat(int x, int y, float amount) { climate_.setjantempfloat(x, y, amount); }
+inline void planet::setjultempfloat(int x, int y, float amount) { climate_.setjultempfloat(x, y, amount); }
+inline void planet::setjanrainfloat(int x, int y, float amount) { climate_.setjanrainfloat(x, y, amount); }
+inline void planet::setjulrainfloat(int x, int y, float amount) { climate_.setjulrainfloat(x, y, amount); }
 
 inline int planet::maxtemp(int x, int y) const { return climate_.maxtemp(x, y); }
 

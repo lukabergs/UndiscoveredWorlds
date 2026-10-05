@@ -16,7 +16,7 @@ using namespace std;
 
 namespace
 {
-bool checkdepressiontile(planet& world, std::vector<std::vector<int>>& filledmap, int i, int j, int e, int neighbours[8][2], bool somethingdone, std::vector<std::vector<int>>& noise);
+bool checkdepressiontile(planet& world, std::vector<std::vector<float>>& filledmap, int i, int j, int e, int neighbours[8][2], bool somethingdone, std::vector<std::vector<int>>& noise);
 }
 
 // This function smoothes, but without turning any land to sea or vice versa.
@@ -78,7 +78,7 @@ void smoothland(planet& world, int amount)
                     {
                         if (l > 0 && l < height)
                         {
-                            ave = ave + (float)world.nom(kk, l);
+                            ave = ave + world.nomfloat(kk, l);
                             crount++;
                         }
                     }
@@ -92,11 +92,11 @@ void smoothland(planet& world, int amount)
                     {
                         int newland = 0;
 
-                        if (ave > (float)sealevel) // Now check to see whether the new value is land or sea
+                        if (wholemetres(ave) > sealevel) // Now check to see whether the new value is land or sea
                             newland = 1;
 
                         if (origland == 0 && newland == 0)
-                            world.setnom(i, j, (int)ave);
+                            world.setnomfloat(i, j, ave);
                     }
                 }
             }
@@ -122,7 +122,7 @@ void smoothonlysea(planet& world, int amount)
             int origland = 0;
             int thisamount = amount;
 
-            if (world.nom(i, j) <= sealevel)
+            if (world.basebelowsea(i, j))
             {
                 for (int k = i - thisamount; k <= i + thisamount; k++)
                 {
@@ -133,9 +133,9 @@ void smoothonlysea(planet& world, int amount)
 
                     for (int l = j - thisamount; l <= j + thisamount; l++)
                     {
-                        if (l > 0 && l < height && world.nom(kk, l) <= sealevel)
+                        if (l > 0 && l < height && world.basebelowsea(kk, l))
                         {
-                            ave = ave + (float)world.nom(kk, l);
+                            ave = ave + world.nomfloat(kk, l);
                             crount++;
                         }
                     }
@@ -146,7 +146,7 @@ void smoothonlysea(planet& world, int amount)
                     ave = ave / crount;
 
                     if (ave > 0.0f && ave < maxelev)
-                        world.setnom(i, j, (int)ave);
+                        world.setnomfloat(i, j, ave);
                 }
             }
         }
@@ -314,20 +314,20 @@ void depressionfill(planet& world)
             noise[i][j] = random(0, 5);
     }
 
-    vector<vector<int>> filledmap(ARRAYWIDTH, vector<int>(ARRAYWIDTH, 0)); // This will be the new version of the map.
+    vector<vector<float>> filledmap(ARRAYWIDTH, vector<float>(ARRAYWIDTH, 0.0f)); // This will be the new version of the map.
 
     for (int i = 0; i <= width; i++) // First, fill the new map to a huge height.
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) <= sealevel)
-                filledmap[i][j] = world.nom(i, j); // Sea tiles start with the normal heights.
+            if (world.basebelowsea(i, j))
+                filledmap[i][j] = world.nomfloat(i, j); // Sea tiles start with the normal heights.
             else
             {
                 if (world.outline(i, j) == 1) // If this is a coastal tile
-                    filledmap[i][j] = world.nom(i, j); // Coastal tiles start with the normal heights.
+                    filledmap[i][j] = world.nomfloat(i, j); // Coastal tiles start with the normal heights.
                 else
-                    filledmap[i][j] = maxelev * 2; // Other tiles start very high
+                    filledmap[i][j] = static_cast<float>(maxelev * 2); // Other tiles start very high
 
             }
         }
@@ -350,7 +350,7 @@ void depressionfill(planet& world)
         {
             for (int j = 0; j <= height; j++)
             {
-                if (filledmap[i][j] > world.nom(i, j))
+                if (filledmap[i][j] > world.nomfloat(i, j))
                     somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
             }
         }
@@ -363,7 +363,7 @@ void depressionfill(planet& world)
             {
                 for (int i = width; i >= 0; i--)
                 {
-                    if (filledmap[i][j] > world.nom(i, j))
+                    if (filledmap[i][j] > world.nomfloat(i, j))
                         somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
 
                 }
@@ -378,7 +378,7 @@ void depressionfill(planet& world)
             {
                 for (int j = 0; j <= height; j++)
                 {
-                    if (filledmap[i][j] > world.nom(i, j))
+                    if (filledmap[i][j] > world.nomfloat(i, j))
                         somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
 
                 }
@@ -393,7 +393,7 @@ void depressionfill(planet& world)
             {
                 for (int i = width; i >= 0; i--)
                 {
-                    if (filledmap[i][j] > world.nom(i, j))
+                    if (filledmap[i][j] > world.nomfloat(i, j))
                         somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
 
                 }
@@ -408,7 +408,7 @@ void depressionfill(planet& world)
             {
                 for (int j = height; j >= 0; j--)
                 {
-                    if (filledmap[i][j] > world.nom(i, j))
+                    if (filledmap[i][j] > world.nomfloat(i, j))
                         somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
 
                 }
@@ -423,7 +423,7 @@ void depressionfill(planet& world)
             {
                 for (int i = 0; i <= width; i++)
                 {
-                    if (filledmap[i][j] > world.nom(i, j))
+                    if (filledmap[i][j] > world.nomfloat(i, j))
                         somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
 
                 }
@@ -438,7 +438,7 @@ void depressionfill(planet& world)
             {
                 for (int j = height; j >= 0; j--)
                 {
-                    if (filledmap[i][j] > world.nom(i, j))
+                    if (filledmap[i][j] > world.nomfloat(i, j))
                         somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
 
                 }
@@ -453,7 +453,7 @@ void depressionfill(planet& world)
             {
                 for (int i = 0; i <= width; i++)
                 {
-                    if (filledmap[i][j] > world.nom(i, j))
+                    if (filledmap[i][j] > world.nomfloat(i, j))
                         somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
 
                 }
@@ -464,7 +464,7 @@ void depressionfill(planet& world)
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
-            world.setnom(i, j, filledmap[i][j]);
+            world.setnomfloat(i, j, filledmap[i][j]);
 
     }
 }
@@ -473,7 +473,7 @@ namespace
 {
 // This does the actual checking/filling of each tile.
 
-bool checkdepressiontile(planet& world, vector<vector<int>>& filledmap, int i, int j, int e, int neighbours[8][2], bool somethingdone, vector<vector<int>>& noise)
+bool checkdepressiontile(planet& world, vector<vector<float>>& filledmap, int i, int j, int e, int neighbours[8][2], bool somethingdone, vector<vector<int>>& noise)
 {
     int width = world.width();
     int height = world.height();
@@ -501,9 +501,9 @@ bool checkdepressiontile(planet& world, vector<vector<int>>& filledmap, int i, i
             else
                 ee = e + noise[i][j];
 
-            if (world.nom(i, j) >= filledmap[k][l] + ee)
+            if (world.nomfloat(i, j) >= filledmap[k][l] + ee)
             {
-                filledmap[i][j] = world.nom(i, j);
+                filledmap[i][j] = world.nomfloat(i, j);
                 somethingdone = 1;
 
             }
@@ -538,19 +538,19 @@ void addlandnoise(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) > sealevel && random(1, adjustchance) == 1)
+            if (!world.basebelowsea(i, j) && random(1, adjustchance) == 1)
             {
                 int adjust = randomsign(random(1, maxadjust));
 
-                int newamount = world.nom(i, j) + adjust;
+                float newamount = world.nomfloat(i, j) + static_cast<float>(adjust);
 
-                if (newamount <= sealevel)
-                    newamount = sealevel;
+                if (newamount <= static_cast<float>(sealevel))
+                    newamount = static_cast<float>(sealevel);
 
-                if (newamount > maxelev)
-                    newamount = maxelev;
+                if (newamount > static_cast<float>(maxelev))
+                    newamount = static_cast<float>(maxelev);
 
-                world.setnom(i, j, newamount);
+                world.setnomfloat(i, j, newamount);
             }
         }
     }

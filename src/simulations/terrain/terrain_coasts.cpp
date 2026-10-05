@@ -29,8 +29,8 @@ void removesmallseas(planet& world, int minseasize, int level)
 
     for (int j = 0; j <= height; j++)
     {
-        int amount = (world.nom(width - 1, j) + world.nom(0, j)) / 2;
-        world.setnom(width, j, amount);
+        float amount = (world.nomfloat(width - 1, j) + world.nomfloat(0, j)) / 2.0f;
+        world.setnomfloat(width, j, amount);
     }
 
     vector<vector<bool>> checked(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0)); // This array marks which sea areas have already been scanned.
@@ -46,7 +46,7 @@ void removesmallseas(planet& world, int minseasize, int level)
     {
         for (int j = height - 1; j > 0; j--)
         {
-            if (world.nom(i, j) <= sealevel && checked[i][j] == 0 && area[i][j] == 0)
+            if (world.basebelowsea(i, j) && checked[i][j] == 0 && area[i][j] == 0)
             {
                 int size = areacheck(world, checked, i, j);
 
@@ -71,8 +71,8 @@ void removesmallseas(planet& world, int minseasize, int level)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) <= sealevel && area[i][j] < minseasize)
-                world.setnom(i, j, level);
+            if (world.basebelowsea(i, j) && area[i][j] < minseasize)
+                world.setnomfloat(i, j, level);
         }
     }
 }
@@ -105,7 +105,7 @@ int areacheck(planet& world, vector<vector<bool>>& checked, int startx, int star
         node = q.front(); // Take the node at the front of the queue
         q.pop(); // And then pop it out of the queue
 
-        if (node.x >= 0 && node.x <= width && node.y >= 0 && node.y <= height && world.nom(node.x, node.y) <= sealevel)
+        if (node.x >= 0 && node.x <= width && node.y >= 0 && node.y <= height && world.basebelowsea(node.x, node.y))
         {
             total++;
             checked[node.x][node.y] = 1;
@@ -125,7 +125,7 @@ int areacheck(planet& world, vector<vector<bool>>& checked, int startx, int star
 
                 if (nextnode.y >= 0 && nextnode.y < height)
                 {
-                    if (world.nom(nextnode.x, nextnode.y) <= sealevel && checked[nextnode.x][nextnode.y] == 0) // If this node is sea
+                    if (world.basebelowsea(nextnode.x, nextnode.y) && checked[nextnode.x][nextnode.y] == 0) // If this node is sea
                     {
                         checked[nextnode.x][nextnode.y] = 1;
                         q.push(nextnode); // Put that node onto the queue
@@ -156,11 +156,11 @@ void removestraights(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.map(i, j) <= sealevel)
+            if (world.surfacebelowsea(i, j))
             {
                 if (j > 0)
                 {
-                    if (world.map(i, j - 1) > sealevel) // Sea to the south, land to the north
+                    if (!world.surfacebelowsea(i, j - 1)) // Sea to the south, land to the north
                     {
                         bool keepgoing = 1;
                         int x = i;
@@ -169,10 +169,10 @@ void removestraights(planet& world)
 
                         do
                         {
-                            if (world.map(x, y) > sealevel)
+                            if (!world.surfacebelowsea(x, y))
                                 keepgoing = 0;
 
-                            if (world.map(x, y - 1) <= sealevel)
+                            if (world.surfacebelowsea(x, y - 1))
                                 keepgoing = 0;
 
                             x++;
@@ -189,14 +189,14 @@ void removestraights(planet& world)
                             x = i + (x - i) / 2; // Move to the middle of the line
 
                             int size = random(minsize, maxsize);
-                            disruptseacoastline(world, x, y, world.map(i, j), 0, size);
+                            disruptseacoastline(world, x, y, world.mapfloat(i, j), 0, size);
                         }
                     }
                 }
 
                 if (j < height)
                 {
-                    if (world.map(i, j + 1) > sealevel) // Sea to the north, land to the south
+                    if (!world.surfacebelowsea(i, j + 1)) // Sea to the north, land to the south
                     {
                         bool keepgoing = 1;
                         int x = i;
@@ -205,10 +205,10 @@ void removestraights(planet& world)
 
                         do
                         {
-                            if (world.map(x, y) > sealevel)
+                            if (!world.surfacebelowsea(x, y))
                                 keepgoing = 0;
 
-                            if (world.map(x, y + 1) <= sealevel)
+                            if (world.surfacebelowsea(x, y + 1))
                                 keepgoing = 0;
 
                             x++;
@@ -227,13 +227,13 @@ void removestraights(planet& world)
                                 x = i + (x - i) / 2; // Move to the middle of the line
 
                                 int size = random(minsize, maxsize);
-                                disruptseacoastline(world, x, y, world.map(i, j), 0, size);
+                                disruptseacoastline(world, x, y, world.mapfloat(i, j), 0, size);
                             }
                         }
                     }
                 }
 
-                if (world.map(i + 1, j) > sealevel) // Sea to the west, land to the east
+                if (!world.surfacebelowsea(i + 1, j)) // Sea to the west, land to the east
                 {
                     bool keepgoing = 1;
                     int x = i;
@@ -245,10 +245,10 @@ void removestraights(planet& world)
 
                     do
                     {
-                        if (world.map(x, y) > sealevel)
+                        if (!world.surfacebelowsea(x, y))
                             keepgoing = 0;
 
-                        if (world.map(xx, y) <= sealevel)
+                        if (world.surfacebelowsea(xx, y))
                             keepgoing = 0;
 
                         y++;
@@ -263,11 +263,11 @@ void removestraights(planet& world)
                         y = j + (y - j) / 2; // Move to the middle of the line
 
                         int size = random(minsize, maxsize);
-                        disruptseacoastline(world, x, y, world.map(i, j), 0, size);
+                        disruptseacoastline(world, x, y, world.mapfloat(i, j), 0, size);
                     }
                 }
 
-                if (world.map(i - 1, j) > sealevel) // Sea to the east, land to the west
+                if (!world.surfacebelowsea(i - 1, j)) // Sea to the east, land to the west
                 {
                     bool keepgoing = 1;
                     int x = i;
@@ -279,10 +279,10 @@ void removestraights(planet& world)
 
                     do
                     {
-                        if (world.map(x, y) > sealevel)
+                        if (!world.surfacebelowsea(x, y))
                             keepgoing = 0;
 
-                        if (world.map(x - 1, y) <= sealevel)
+                        if (world.surfacebelowsea(x - 1, y))
                             keepgoing = 0;
 
                         y++;
@@ -297,7 +297,7 @@ void removestraights(planet& world)
                         y = j + (y - j) / 2; // Move to the middle of the line
 
                         int size = random(minsize, maxsize);
-                        disruptseacoastline(world, x, y, world.map(i, j), 0, size);
+                        disruptseacoastline(world, x, y, world.mapfloat(i, j), 0, size);
                     }
                 }
             }
@@ -308,7 +308,7 @@ void removestraights(planet& world)
     {
         for (int j = 1; j < height; j++)
         {
-            if (world.map(i, j) > sealevel)
+            if (!world.surfacebelowsea(i, j))
             {
                 if (northwestlandonly(world, i, j) == 1)
                 {
@@ -333,13 +333,13 @@ void removestraights(planet& world)
                             int choose = random(1, 3);
 
                             if (choose == 1)
-                                world.setnom(i, j, world.nom(ii, jjj));
+                                world.setnomfloat(i, j, world.nomfloat(ii, jjj));
 
                             if (choose == 2)
-                                world.setnom(ii, j, world.nom(i, j));
+                                world.setnomfloat(ii, j, world.nomfloat(i, j));
 
                             if (choose == 3)
-                                world.setnom(i, jjj, world.nom(i, j));
+                                world.setnomfloat(i, jjj, world.nomfloat(i, j));
                         }
                     }
                 }
@@ -367,13 +367,13 @@ void removestraights(planet& world)
                             int choose = random(1, 3);
 
                             if (choose == 1)
-                                world.setnom(i, j, world.nom(iii, jj));
+                                world.setnomfloat(i, j, world.nomfloat(iii, jj));
 
                             if (choose == 2)
-                                world.setnom(iii, j, world.nom(i, j));
+                                world.setnomfloat(iii, j, world.nomfloat(i, j));
 
                             if (choose == 3)
-                                world.setnom(i, jj, world.nom(i, j));
+                                world.setnomfloat(i, jj, world.nomfloat(i, j));
                         }
                     }
                 }
@@ -401,13 +401,13 @@ void removestraights(planet& world)
                             int choose = random(1, 3);
 
                             if (choose == 1)
-                                world.setnom(i, j, world.nom(ii, jjj));
+                                world.setnomfloat(i, j, world.nomfloat(ii, jjj));
 
                             if (choose == 2)
-                                world.setnom(ii, j, world.nom(i, j));
+                                world.setnomfloat(ii, j, world.nomfloat(i, j));
 
                             if (choose == 3)
-                                world.setnom(i, jjj, world.nom(i, j));
+                                world.setnomfloat(i, jjj, world.nomfloat(i, j));
                         }
                     }
 
@@ -438,13 +438,13 @@ void removestraights(planet& world)
                             int choose = random(1, 3);
 
                             if (choose == 1)
-                                world.setnom(i, j, world.nom(iii, jj));
+                                world.setnomfloat(i, j, world.nomfloat(iii, jj));
 
                             if (choose == 2)
-                                world.setnom(iii, j, world.nom(i, j));
+                                world.setnomfloat(iii, j, world.nomfloat(i, j));
 
                             if (choose == 3)
-                                world.setnom(i, jj, world.nom(i, j));
+                                world.setnomfloat(i, jj, world.nomfloat(i, j));
                         }
                     }
                 }
@@ -455,7 +455,7 @@ void removestraights(planet& world)
 
 // This function cuts a slice out of the coastline, to try to make it more interesting.
 
-void disruptseacoastline(planet& world, int centrex, int centrey, int avedepth, bool raise, int size)
+void disruptseacoastline(planet& world, int centrex, int centrey, float avedepth, bool raise, int size)
 {
     int width = world.width();
     int height = world.height();
@@ -474,10 +474,10 @@ void disruptseacoastline(planet& world, int centrex, int centrey, int avedepth, 
 
             if (jj >= 0 && jj <= height)
             {
-                if (world.nom(ii, jj) > avedepth)
+                if (world.nomfloat(ii, jj) > avedepth)
                 {
                     if (i * i + j * j < half * half + half)
-                        world.setnom(ii, jj, avedepth);
+                        world.setnomfloat(ii, jj, avedepth);
                 }
             }
         }
@@ -499,16 +499,16 @@ void widenchannels(planet& world)
             if (world.sea(i, j))
             {
                 if (world.sea(i, j - 1) == 0 && world.sea(i, j + 1) == 0)
-                    world.setnom(i, j - 1, sealevel - 15);
+                    world.setnomfloat(i, j - 1, sealevel - 15);
 
                 if (world.sea(i - 1, j) == 0 && world.sea(i + 1, j) == 0)
-                    world.setnom(i - 1, j, sealevel - 15);
+                    world.setnomfloat(i - 1, j, sealevel - 15);
 
                 if (world.sea(i - 1, j - 1) == 0 && world.sea(i + 1, j + 1) == 0)
-                    world.setnom(i - 1, j - 1, sealevel - 15);
+                    world.setnomfloat(i - 1, j - 1, sealevel - 15);
 
                 if (world.sea(i - 1, j + 1) == 0 && world.sea(i + 1, j - 1) == 0)
-                    world.setnom(i - 1, j + 1, sealevel - 15);
+                    world.setnomfloat(i - 1, j + 1, sealevel - 15);
             }
         }
     }
@@ -520,10 +520,10 @@ void widenchannels(planet& world)
             if (world.sea(i, j))
             {
                 if (world.sea(i, j - 1) == 0 && world.sea(i, j + 1) == 1 && world.sea(i, j + 2) == 0)
-                    world.setnom(i, j, sealevel - 15);
+                    world.setnomfloat(i, j, sealevel - 15);
 
                 if (world.sea(i - 1, j) == 0 && world.sea(i + 1, j) == 1 && world.sea(i + 2, j) == 0)
-                    world.setnom(i + 1, j, sealevel - 15);
+                    world.setnomfloat(i + 1, j, sealevel - 15);
             }
         }
     }
@@ -539,7 +539,7 @@ void loweroceans(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.sea(i, j) && world.nom(i, j) > sealevel - 170)
+            if (world.sea(i, j) && !world.basebelowsea(i, j) - 170)
             {
                 bool nearland = 0;
 
@@ -566,7 +566,7 @@ void loweroceans(planet& world)
                 }
 
                 if (nearland == 0)
-                    world.setnom(i, j, sealevel - 170 + randomsign(random(0, 10)));
+                    world.setnomfloat(i, j, sealevel - 170 + randomsign(random(0, 10)));
             }
         }
     }
@@ -580,7 +580,7 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
     int height = world.height();
     int sealevel = world.sealevel();
 
-    int depth, elev;
+    float depth, elev;
 
     for (int i = 0; i <= width; i++)
     {
@@ -590,18 +590,18 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
             {
                 if (world.coast(i, j))
                 {
-                    depth = sealevel - world.nom(i, j);
-                    int newdepth = (depth + seadepth * severity) / (severity + 1);
+                    depth = sealevel - world.nomfloat(i, j);
+                    float newdepth = (depth + static_cast<float>(seadepth * severity)) / static_cast<float>(severity + 1);
 
-                    world.setnom(i, j, sealevel - newdepth);
+                    world.setnomfloat(i, j, sealevel - newdepth);
                 }
 
                 if (world.outline(i, j))
                 {
-                    elev = world.nom(i, j) - sealevel;
-                    int newelev = (elev + landheight * severity) / (severity + 1);
+                    elev = world.nomfloat(i, j) - sealevel;
+                    float newelev = (elev + static_cast<float>(landheight * severity)) / static_cast<float>(severity + 1);
 
-                    world.setnom(i, j, sealevel + newelev);
+                    world.setnomfloat(i, j, sealevel + newelev);
                 }
             }
         }
@@ -633,7 +633,7 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
                         {
                             if (done[kk][l] == 0 && world.sea(kk, l) == 1 && world.coast(kk, l) == 0)
                             {
-                                int total = 0;
+                                float total = 0.0f;
                                 int crount = 0;
 
                                 for (int m = kk - amount2; m <= kk + amount2; m++)
@@ -648,15 +648,15 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
                                         if (n >= 0 && n <= height && world.sea(mm, n) == 1)
                                         {
                                             crount++;
-                                            total = total + world.nom(mm, n);
+                                            total = total + world.nomfloat(mm, n);
                                         }
                                     }
                                 }
 
                                 if (total != 0)
                                 {
-                                    int newnom = total / crount;
-                                    world.setnom(kk, l, newnom);
+                                    float newnom = total / static_cast<float>(crount);
+                                    world.setnomfloat(kk, l, newnom);
                                     done[kk][l] = 1;
 
                                     world.setnoshade(kk, l, 1);
@@ -696,7 +696,7 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
                         {
                             if (done[kk][l] == 0 && world.sea(kk, l) == 1 && world.coast(kk, l) == 0)
                             {
-                                int total = 0;
+                                float total = 0.0f;
                                 int crount = 0;
 
                                 for (int m = kk - amount2; m <= kk + amount2; m++)
@@ -711,15 +711,15 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
                                         if (n >= 0 && n <= height && world.sea(mm, n) == 1)
                                         {
                                             crount++;
-                                            total = total + world.nom(mm, n);
+                                            total = total + world.nomfloat(mm, n);
                                         }
                                     }
                                 }
 
                                 if (total != 0)
                                 {
-                                    int newnom = total / crount;
-                                    world.setnom(kk, l, newnom);
+                                    float newnom = total / static_cast<float>(crount);
+                                    world.setnomfloat(kk, l, newnom);
                                     done[kk][l] = 1;
                                     world.setnoshade(kk, l, 1);
                                 }
@@ -795,7 +795,7 @@ void checkislands(planet& world)
                         volcano = 0 - volcano;
                     }
 
-                    int totalheight = world.nom(i, j) + volcano;
+                    int totalheight = wholemetres(world.nomfloat(i, j)) + volcano;
 
                     if (totalheight > sealevel)
                     {

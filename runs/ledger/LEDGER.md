@@ -85,6 +85,7 @@ Lessons:
 | `world-0031` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 10: the world series; run 1 is the reference before the float steps |
 | `world-0032` | 2026-10-05 | equivalent on Earth terrain; procedural worlds shifted as listed | keep | consolidation phase 4, step 11: atmosphere.precipitation and atmosphere.precipitation_exact become one field (module climate) |
 | `world-0033` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 11b (added at the user's request): minimal run configuration; climate options kept across a resize; world run 2 is the minimal reference |
+| `world-0034` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 12: terrain on the float accessors (module terrain) |
 
 Lessons:
 
@@ -169,3 +170,6 @@ Lessons:
 - `world-0033`: The tectonics engine inside procedural-world runs on its own 256 x 128 grid whatever the world size: 50 Myr take 23 s there and 6 s in the tectonics recipe on 128 x 64.
 - `world-0033`: Of the ten access runs of Phase 2, nine repeated recipes at a second size; only the default-size procedural world added declarations.
 - `world-0033`: A scratch climate run at the registered size takes 6.5 minutes; on 128 x 64 with the climate on 32 columns it takes 9 seconds and the evaluation remaps the references itself.
+- `world-0034`: The reference bundles of the next step are out/scratch/phase4/step12a-* (minimal configuration).
+- `world-0034`: The ordinary build prints no conversion warnings; compile a source with /W3 (truncations.ps1) to see every float squeezed into an integer.
+- `world-0034`: A regex written into a script through a shell here-document lost its backslash-b: scripts are written with the Write tool.

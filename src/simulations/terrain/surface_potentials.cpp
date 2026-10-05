@@ -13,17 +13,17 @@ bool iswetlandcell(const planet& world, int x, int y)
     return special >= 130 && special < 140;
 }
 
-int averagetemperature(const planet& world, int x, int y)
+float averagetemperature(const planet& world, int x, int y)
 {
-    return (world.mintemp(x, y) + world.maxtemp(x, y)) / 2;
+    return (world.mintempfloat(x, y) + world.maxtempfloat(x, y)) / 2.0f;
 }
 
-int localrelief(const planet& world, int x, int y)
+float localrelief(const planet& world, int x, int y)
 {
     const int width = world.width();
     const int height = world.height();
-    const int centre = world.map(x, y);
-    int maxdifference = 0;
+    const float centre = world.mapfloat(x, y);
+    float maxdifference = 0.0f;
 
     for (const auto& offset : drainageoffsets)
     {
@@ -33,7 +33,7 @@ int localrelief(const planet& world, int x, int y)
             continue;
 
         const int nx = wrap(x + offset[0], width);
-        maxdifference = std::max(maxdifference, std::abs(world.map(nx, ny) - centre));
+        maxdifference = std::max(maxdifference, std::abs(world.mapfloat(nx, ny) - centre));
     }
 
     return maxdifference;
@@ -74,15 +74,15 @@ int inflowcount(const planet& world, int x, int y)
     return inflow;
 }
 
-float temperaturerangefactor(int temperature)
+float temperaturerangefactor(float temperature)
 {
-    if (temperature <= -10 || temperature >= 40)
+    if (temperature <= -10.0f || temperature >= 40.0f)
         return 0.0f;
 
-    if (temperature <= 18)
-        return clampunit(static_cast<float>(temperature + 10) / 28.0f);
+    if (temperature <= 18.0f)
+        return clampunit((temperature + 10.0f) / 28.0f);
 
-    return clampunit(1.0f - static_cast<float>(temperature - 18) / 22.0f);
+    return clampunit(1.0f - (temperature - 18.0f) / 22.0f);
 }
 
 float rainfertilityfactor(int rainfall)
@@ -121,7 +121,7 @@ void generate_surface_potentials(planet& world)
                     continue;
                 }
 
-                const float relief = static_cast<float>(localrelief(world, x, y));
+                const float relief = localrelief(world, x, y);
                 const float reliefnorm = clampunit(relief / 2200.0f);
                 const float lownorm = 1.0f - clampunit(relief / 1400.0f);
                 const float rainfallnorm = clampunit(static_cast<float>(annualrainfall(world, x, y)) / 1000.0f);
@@ -163,9 +163,9 @@ void generate_surface_potentials(planet& world)
                 const float riverproximity = std::max(rivercorridor, majorrivernear ? 1.0f : 0.0f);
                 const float wetlandfactor = wetlandnear ? 1.0f : (lakemargin ? 0.5f : 0.0f);
                 const float gentleterrain = 1.0f - clampunit(relief / 1800.0f);
-                const float coldpenalty = clampunit(static_cast<float>(world.glacialtemp() - world.maxtemp(x, y) + 2) / 14.0f);
+                const float coldpenalty = clampunit(static_cast<float>(world.glacialtemp() - world.maxtempfloat(x, y) + 2) / 14.0f);
                 const float aridpenalty = clampunit(static_cast<float>(200 - annualrainfall(world, x, y)) / 200.0f);
-                const float glacialpenalty = (world.biome(x, y) == biomeice || world.maxtemp(x, y) <= world.glacialtemp()) ? 1.0f : 0.0f;
+                const float glacialpenalty = (world.biome(x, y) == biomeice || world.maxtempfloat(x, y) <= world.glacialtemp()) ? 1.0f : 0.0f;
 
                 float fertilityscore = 0.42f * static_cast<float>(clampscore(depositionscore)) + 22.0f * riverproximity + 14.0f * fertilityrain
                     + 12.0f * fertilitytemperature + 10.0f * wetlandfactor;

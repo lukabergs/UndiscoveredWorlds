@@ -451,18 +451,18 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
                                         {
                                             world.setmountainheight(ii, jj, h);
                                             world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
-                                            world.setnom(ii, jj, conheight);
+                                            world.setnomfloat(ii, jj, conheight);
                                         }
 
                                         if (mode == 2) // Mountains of this kind cannot create their own land, so must stop at the sea.
                                         {
-                                            if (world.map(ii, jj) >= conheight)
+                                            if (world.mapfloat(ii, jj) >= conheight)
                                             {
                                                 world.setmountainheight(ii, jj, h);
                                                 world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
 
                                                 if (fewer == 0)
-                                                    world.setnom(ii, jj, conheight);
+                                                    world.setnomfloat(ii, jj, conheight);
                                             }
                                         }
 
@@ -472,7 +472,7 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
                                             {
                                                 world.setmountainheight(ii, jj, h - sealevel);
                                                 world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
-                                                world.setnom(ii, jj, conheight);
+                                                world.setnomfloat(ii, jj, conheight);
                                             }
                                         }
 
@@ -574,16 +574,16 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
                                         if (mode == 1) // Mountains of this kind can create land just immediately around themselves.
                                         {
-                                            if (world.nom(ii, jj) < conheight)
-                                                world.setnom(ii, jj, conheight);
+                                            if (world.nomfloat(ii, jj) < conheight)
+                                                world.setnomfloat(ii, jj, conheight);
                                         }
 
                                         if (mode == 3) // Island mountains can create land just immediately around themselves.
                                         {
                                             if (h > sealevel)
                                             {
-                                                if (world.nom(ii, jj) < conheight)
-                                                    world.setnom(ii, jj, conheight);
+                                                if (world.nomfloat(ii, jj) < conheight)
+                                                    world.setnomfloat(ii, jj, conheight);
                                             }
                                         }
                                     }
@@ -766,10 +766,10 @@ void drawshape(planet& world, int shapenumber, int centrex, int centrey, bool la
                         xx = wrap(xx, width);
 
                     if (land == 1)
-                        world.setnom(xx, yy, conheight);
+                        world.setnomfloat(xx, yy, conheight);
                     else
                     {
-                        world.setnom(xx, yy, baseheight);
+                        world.setnomfloat(xx, yy, baseheight);
                         world.setmountainheight(xx, yy, 0);
                         world.setmountainridge(xx, yy, 0);
                     }
@@ -875,7 +875,7 @@ void fractaladdland(planet& world, vector<vector<int>>& fractal)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) > sealevel)
+            if (!world.basebelowsea(i, j))
             {
                 int valtoadd = fractal[i][j] - sealevel;
 
@@ -888,13 +888,13 @@ void fractaladdland(planet& world, vector<vector<int>>& fractal)
 
                 valtoadd = valtoadd / divamount;
 
-                int newval = world.nom(i, j) + valtoadd;
+                float newval = world.nomfloat(i, j) + static_cast<float>(valtoadd);
 
-                if (newval > maxelev)
-                    newval = maxelev;
+                if (newval > static_cast<float>(maxelev))
+                    newval = static_cast<float>(maxelev);
 
-                if (newval > world.nom(i, j))
-                    world.setnom(i, j, newval);
+                if (newval > world.nomfloat(i, j))
+                    world.setnomfloat(i, j, newval);
             }
         }
     }

@@ -17,7 +17,7 @@ using namespace std;
 namespace
 {
 void checkergelevation(planet& world);
-int lowestergelevation(planet& world, int startx, int starty, vector<vector<bool>>& thiserg);
+float lowestergelevation(planet& world, int startx, int starty, vector<vector<bool>>& thiserg);
 void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, int lakeno, vector<vector<int>>& thislake, boolshapetemplate laketemplate[], bool canoverlap, int special);
 
 // This ensures that the elevation of each erg remains constant.
@@ -40,7 +40,7 @@ void checkergelevation(planet& world)
                 
                 // First, find the lowest elevation within this erg.
 
-                int lowestelev = lowestergelevation(world, i, j, thiserg);
+                float lowestelev = lowestergelevation(world, i, j, thiserg);
 
                 if (lowestelev < 2)
                     lowestelev = 2;
@@ -57,7 +57,7 @@ void checkergelevation(planet& world)
                         if (thiserg[k][l] == 1)
                         {
                             checked[k][l] = 1;
-                            world.setlakesurface(k, l, lowestelev);
+                            world.setlakesurface(k, l, wholemetres(lowestelev));
                         }
                     }
                 }
@@ -68,12 +68,12 @@ void checkergelevation(planet& world)
 
 // This finds the lowest elevation in an erg.
 
-int lowestergelevation(planet& world, int startx, int starty, vector<vector<bool>>& thiserg)
+float lowestergelevation(planet& world, int startx, int starty, vector<vector<bool>>& thiserg)
 {
     int width = world.width();
     int height = world.height();
 
-    int lowest = 1000000;
+    float lowest = 1000000.0f;
 
     int row[] = { -1,0,0,1 };
     int col[] = { 0,-1,1,0 };
@@ -93,7 +93,7 @@ int lowestergelevation(planet& world, int startx, int starty, vector<vector<bool
 
         if (node.x >= 0 && node.x <= width && node.y >= 0 && node.y <= height && world.special(node.x, node.y) == 120)
         {
-            int thiselev = world.nom(node.x, node.y);
+            float thiselev = world.nomfloat(node.x, node.y);
 
             if (thiselev < lowest)
                 lowest = thiselev;
@@ -147,7 +147,7 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
     int maxmountainlakeheight = 1000; // Ignore mountains smaller than this.
     int mindepth = 5; // Minimum depth.
 
-    int surfaceheight;
+    float surfaceheight;
 
     int imheight = laketemplate[shapenumber].ysize() - 1;
     int imwidth = laketemplate[shapenumber].xsize() - 1;
@@ -189,7 +189,7 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
     int mapi = -1;
     int mapj = -1;
 
-    surfaceheight = 1000000000;
+    surfaceheight = 1000000000.0f;
 
     bool tooclose = 0;
 
@@ -207,8 +207,8 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
                 int xx = x + mapi;
                 int yy = y + mapj;
 
-                if (xx != 0 && xx <= width && world.nom(xx, yy) < surfaceheight)
-                    surfaceheight = world.nom(xx, yy);
+                if (xx != 0 && xx <= width && world.nomfloat(xx, yy) < surfaceheight)
+                    surfaceheight = world.nomfloat(xx, yy);
 
                 if (yy >= 0 && yy <= height)
                 {
@@ -314,8 +314,8 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
                         wrapped = 1;
                     }
 
-                    world.setlakesurface(xx, yy, surfaceheight); // Put the lake on this bit of the lake map.
-                    world.setnom(xx, yy, surfaceheight);
+                    world.setlakesurface(xx, yy, wholemetres(surfaceheight)); // Put the lake on this bit of the lake map.
+                    world.setnomfloat(xx, yy, surfaceheight);
                     world.setspecial(xx, yy, special);
 
                     thislake[xx][yy] = lakeno; // Mark it on the keeping-track array too.
@@ -404,7 +404,7 @@ void broadenfastlemterrainfromrivers(planet& world)
                 float mountainfactor = 1.0f - static_cast<float>(thismountaindistance) / static_cast<float>(maxmountaindistance);
                 mountainfactor = powf(clamp(mountainfactor, 0.0f, 1.0f), tuning::terrain::fastlem::postRiverMountainExponent);
 
-                float elevationfactor = static_cast<float>(world.nom(i, j) - sealevel) / static_cast<float>(max(1, tuning::terrain::fastlem::postRiverElevationRange));
+                float elevationfactor = static_cast<float>(world.nomfloat(i, j) - sealevel) / static_cast<float>(max(1, tuning::terrain::fastlem::postRiverElevationRange));
                 elevationfactor = clamp(elevationfactor, 0.0f, 1.0f);
 
                 const float upliftstrength = riverfactor * mountainfactor * (0.35f + elevationfactor * 0.65f);
@@ -413,12 +413,12 @@ void broadenfastlemterrainfromrivers(planet& world)
                 if (uplift < tuning::terrain::fastlem::postRiverMinimumUplift)
                     continue;
 
-                int newheight = world.nom(i, j) + uplift;
+                float newheight = world.nomfloat(i, j) + static_cast<float>(uplift);
 
-                if (newheight > maxelev - 1)
-                    newheight = maxelev - 1;
+                if (newheight > static_cast<float>(maxelev - 1))
+                    newheight = static_cast<float>(maxelev - 1);
 
-                world.setnom(i, j, newheight);
+                world.setnomfloat(i, j, newheight);
             }
         }
     });
@@ -739,9 +739,9 @@ void refineroughnessmap(planet& world)
                 int sex = eax;
                 int sey = soy;
                 /*
-                int aveheight = (world.nom(i, j) + world.nom(eax, eay) + world.nom(sox, soy) + world.nom(sex, sey)) / 4;
+                int aveheight = (world.nomfloat(i, j) + world.nomfloat(eax, eay) + world.nomfloat(sox, soy) + world.nomfloat(sex, sey)) / 4;
                 */
-                if (world.nom(i, j) <= sealevel && world.nom(nox, noy) <= sealevel && world.nom(sox, soy) <= sealevel && world.nom(eax, eay) <= sealevel && world.nom(wex, wey) <= sealevel) // Sea beds will be very smooth.
+                if (world.basebelowsea(i, j) && world.basebelowsea(nox, noy) && world.basebelowsea(sox, soy) && world.basebelowsea(eax, eay) && world.basebelowsea(wex, wey)) // Sea beds will be very smooth.
                 {
                     float m = 0.08f / (float)maxelev;
                     float n = world.roughness(i, j);
@@ -763,10 +763,10 @@ void refineroughnessmap(planet& world)
 
                     float diff = 0.0f;
 
-                    diff = diff + (float)abs(world.map(i, j) - world.map(eax, eay));
-                    diff = diff + (float)abs(world.map(sox, soy) - world.map(sex, sey));
-                    diff = diff + (float)abs(world.map(i, j) - world.map(sox, soy));
-                    diff = diff + (float)abs(world.map(eax, eay) - world.map(sex, sey));
+                    diff = diff + (float)abs(world.mapfloat(i, j) - world.mapfloat(eax, eay));
+                    diff = diff + (float)abs(world.mapfloat(sox, soy) - world.mapfloat(sex, sey));
+                    diff = diff + (float)abs(world.mapfloat(i, j) - world.mapfloat(sox, soy));
+                    diff = diff + (float)abs(world.mapfloat(eax, eay) - world.mapfloat(sex, sey));
 
                     diff = diff / 20.0f;
 
@@ -848,7 +848,7 @@ void refineroughnessmap(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) > sealevel && world.truelake(i, j) == 0)
+            if (!world.basebelowsea(i, j) && world.truelake(i, j) == 0)
             {
                 bool goahead = 1;
 
@@ -889,7 +889,7 @@ void refineroughnessmap(planet& world)
                         {
                             if (l >= 0 && l <= height)
                             {
-                                if (world.nom(kk, l) > sealevel && world.truelake(kk, l) == 0)
+                                if (!world.basebelowsea(kk, l) && world.truelake(kk, l) == 0)
                                 {
                                     total = total + valuemod[kk][l];
                                     crount++;

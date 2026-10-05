@@ -18,7 +18,7 @@ void makearchipelagos(planet& world, std::vector<std::vector<bool>>& removedland
 // Sea connectivity, coastal elevation, and island cleanup.
 void removesmallseas(planet& world, int minseasize, int level);
 void removestraights(planet& world);
-void disruptseacoastline(planet& world, int centrex, int centrey, int avedepth, bool raise, int size);
+void disruptseacoastline(planet& world, int centrex, int centrey, float avedepth, bool raise, int size);
 void widenchannels(planet& world);
 void loweroceans(planet& world);
 void normalisecoasts(planet& world, int landheight, int seadepth, int severity);

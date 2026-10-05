@@ -1314,7 +1314,7 @@ void createoceanridges(planet& world, worldgrid<bool>& shelves)
         for (int j = startrow; j <= endrow; j++)
         {
             for (int i = 0; i <= width; i++)
-                world.setnom(i, j, world.nom(i, j) + ridgesmap[i][j]);
+                world.setnomfloat(i, j, world.nomfloat(i, j) + ridgesmap[i][j]);
         }
     });
 }
@@ -1976,12 +1976,12 @@ void createoceantrenches(planet& world, worldgrid<bool>& shelves)
             {
                 if (world.sea(i, j) == 1 && shelves[i][j] == 0 && world.oceanridges(i, j) == 0)
                 {
-                    int newval = world.nom(i, j) - random(4900, 5100);
+                    float newval = world.nomfloat(i, j) - static_cast<float>(random(4900, 5100));
 
-                    if (newval < 1)
-                        newval = 1;
+                    if (newval < 1.0f)
+                        newval = 1.0f;
 
-                    world.setnom(i, j, newval);
+                    world.setnomfloat(i, j, newval);
                 }
             }
         }

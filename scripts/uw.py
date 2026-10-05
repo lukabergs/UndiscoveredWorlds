@@ -78,6 +78,12 @@ def evaluation(args, extra):
     options += ['--executable', args.executable] if args.executable else []
     options += ['--label', args.label] if args.label else []
     options += ['--topic', args.topic] if args.topic else []
+    if args.module == 'world' and args.command == 'run' and args.resolution is None:
+        # A run of the world series is compared with the run before it, so its page and its
+        # review request carry the parent's maps and the footprint of the change.
+        complete = [entry for entry in runs.registry('world')['runs'] if entry.get('status') == 'complete' and entry.get('run')]
+        if complete and (ROOT / complete[-1]['run'] / 'bundle/manifest.json').is_file():
+            options += ['--baseline', ROOT / complete[-1]['run'] / 'bundle']
     call([UV, 'run', '--offline', EVALUATION / 'experiment.py', args.module, *options, *extra])
 
 
