@@ -85,7 +85,7 @@ float temperaturerangefactor(float temperature)
     return clampunit(1.0f - (temperature - 18.0f) / 22.0f);
 }
 
-float rainfertilityfactor(int rainfall)
+float rainfertilityfactor(float rainfall)
 {
     if (rainfall <= 75)
         return 0.0f;

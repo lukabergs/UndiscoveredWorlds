@@ -54,9 +54,9 @@ inline bool isdeltacell(const planet& world, int x, int y)
     return world.deltadir(x, y) != 0 || world.deltajan(x, y) != 0 || world.deltajul(x, y) != 0;
 }
 
-inline int annualrainfall(const planet& world, int x, int y)
+inline float annualrainfall(const planet& world, int x, int y)
 {
-    return (world.summerrain(x, y) + world.winterrain(x, y)) / 2;
+    return (world.summerrainfloat(x, y) + world.winterrainfloat(x, y)) / 2.0f;
 }
 
 inline int averageriverflow(const planet& world, int x, int y)
@@ -85,12 +85,12 @@ inline std::vector<int32_t> drainagereceivers(const planet& world)
                 direction = world.deltadir(x, y);
             if (direction < 1 || direction > 8)
             {
-                int lowest = world.nom(x, y);
+                float lowest = world.nomfloat(x, y);
                 for (int candidate = 1; candidate <= 8; ++candidate)
                 {
                     const auto next = getdestination(x, y, candidate);
                     if (next.y < 0 || next.y > height) continue;
-                    const int elevation = world.nom(wrap(next.x, width), next.y);
+                    const float elevation = world.nomfloat(wrap(next.x, width), next.y);
                     if (elevation < lowest) { lowest = elevation; direction = candidate; }
                 }
             }

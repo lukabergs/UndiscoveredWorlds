@@ -15,7 +15,7 @@ bool isshelfproxy(const planet& world, const worldgrid<bool>& shelves, int x, in
     if (x < shelves.columns() && y < shelves.rows() && shelves[x][y])
         return true;
 
-    if (world.nom(x, y) < world.sealevel() - 220)
+    if (world.nomfloat(x, y) < world.sealevel() - 220)
         return false;
 
     if (world.coast(x, y))

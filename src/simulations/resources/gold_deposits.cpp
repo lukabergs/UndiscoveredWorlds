@@ -30,8 +30,8 @@ int worldcoordinate(double fraction, int cells)
 
 float localrelief(const planet& world, int x, int y)
 {
-    int lowest = world.map(x, y);
-    int highest = lowest;
+    float lowest = world.mapfloat(x, y);
+    float highest = lowest;
     for (int dy = -1; dy <= 1; ++dy)
     {
         const int ny = y + dy;
@@ -39,12 +39,12 @@ float localrelief(const planet& world, int x, int y)
             continue;
         for (int dx = -1; dx <= 1; ++dx)
         {
-            const int elevation = world.map(wrap(x + dx, world.width()), ny);
+            const float elevation = world.mapfloat(wrap(x + dx, world.width()), ny);
             lowest = std::min(lowest, elevation);
             highest = std::max(highest, elevation);
         }
     }
-    return static_cast<float>(highest - lowest);
+    return highest - lowest;
 }
 
 void evaluatesurface(const planet& world, mineralsystems::Deposit& deposit)
@@ -56,10 +56,10 @@ void evaluatesurface(const planet& world, mineralsystems::Deposit& deposit)
     surface.worldX = x;
     surface.worldY = y;
     surface.submerged = world.sea(x, y) != 0;
-    surface.elevationM = static_cast<float>(world.map(x, y) - world.sealevel());
+    surface.elevationM = static_cast<float>(world.mapfloat(x, y) - world.sealevel());
     surface.localReliefM = localrelief(world, x, y);
     surface.annualRainfallMm = 12.0f * world.averainfloat(x, y);
-    surface.iceCovered = !surface.submerged && world.maxtemp(x, y) < 0;
+    surface.iceCovered = !surface.submerged && world.maxtempfloat(x, y) < 0;
 }
 
 // Present drainage on the final world; distances treat rows as latitudes.
