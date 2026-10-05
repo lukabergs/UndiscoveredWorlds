@@ -1,7 +1,7 @@
 # Tectonics implementation and checks
 
 The only current engine is `src/simulations/geology/plate_tectonics`, built from
-the working tree as `plate_tectonics`. The app and CLI share
+the working tree as the library `uw_tectonics`. The app and CLI share
 `tectonics::scenario::baseline()` compiled from `configs/tectonics-baseline.json`.
 Do not configure a separate checkout or external tectonics library.
 

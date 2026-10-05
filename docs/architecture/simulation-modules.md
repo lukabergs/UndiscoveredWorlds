@@ -47,7 +47,7 @@ liberated gold into placers on the final drainage network.
 Climate atmospheric water transport is distinct from the surface routing in
 `hydrology/`.
 
-The standalone `uw_climate_erosion` library in `simulations/terrain/climate_erosion.*`
+The standalone solver in `simulations/terrain/climate_erosion.*` (part of `uw_terrain`)
 accepts numerical terrain and climate fields, conserves rock-equivalent volume on a
 cell-centred spherical grid, and has no app or renderer dependency. Nothing calls it
 at present: its CLI adapter and the feedback script that sequenced it (tectonics run
@@ -60,16 +60,20 @@ imported terrain with the Geosphere frozen. The recipe omits the roughness stage
 whose seeded noise climate never reads; land and sea counts are computed when the
 imported terrain is prepared.
 
-`uw_climate_world` (climate processes on `climateworld`, climate validation, map
-imports, progress) builds without planet; `world_tests` links only it.
-`uw_grid`, `uw_climate`, `uw_climate_io`, and `uw_generation_stages` are shared
-libraries used by the desktop and tests. Planet-level domains are separate object
-targets listed in `src/simulations/world_modules.cmake`; they still rely on world
-storage and legacy utilities in `wip/`, but none depends on SFML or ImGui. The
-headless `uw_world_core` (world class, stages, recipes, I/O, validation) and
-`world_pipeline` build with `UW_BUILD_APP=OFF`; the desktop adds rendering, panels
-and the workbench UI (`uw_app_core`). Planet persistence, regional generation and
-the utility umbrella remain coupled; see [world model](world-model.md).
+Each source directory is one static library named after it (`uw_core`, `uw_io`,
+`uw_world`, `uw_pipeline`, `uw_validation`, `uw_cli`, `uw_app`, and `uw_climate`,
+`uw_geology`, `uw_terrain`, `uw_hydrology`, `uw_resources`, `uw_society` under
+`simulations/`), defined in the `CMakeLists.txt` of its directory; the engine is
+`uw_tectonics`. The libraries do not link each other, because world, pipeline and the
+modules refer to each other; the root `CMakeLists.txt` names two sets. `uw_headless`
+is everything but the desktop and is what `world_pipeline` links. `uw_climate_world`
+(core, I/O, climate, pipeline, validation) leaves out `uw_world` and the planet-level
+modules: `world_tests` links only it, so a climate source that needs planet fails
+that link. Planet-level modules still rely on world storage and legacy utilities in
+`src/world/`, but none depends on SFML or ImGui; `world_pipeline` builds with
+`UW_BUILD_APP=OFF`, and the desktop adds `uw_app` (rendering, panels, workbench).
+Planet persistence, regional generation and the utility umbrella remain coupled;
+see [world model](world-model.md).
 
 ## Retention decisions
 

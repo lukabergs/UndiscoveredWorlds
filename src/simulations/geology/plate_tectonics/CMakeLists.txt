@@ -31,8 +31,25 @@ function(uw_tectonics_target_defaults target)
     endif()
 endfunction()
 
+# The same warning level for single sources of another library that work on
+# engine types (snapshot record, heightmap I/O).
+function(uw_tectonics_source_defaults)
+    if(MSVC)
+        set(options /W4 /permissive-)
+        if(PLATE_TECTONICS_WARNINGS_AS_ERRORS)
+            list(APPEND options /WX)
+        endif()
+    else()
+        set(options -Wall -Wextra -Wpedantic)
+        if(PLATE_TECTONICS_WARNINGS_AS_ERRORS)
+            list(APPEND options -Werror)
+        endif()
+    endif()
+    set_source_files_properties(${ARGN} PROPERTIES COMPILE_OPTIONS "${options}")
+endfunction()
+
 include(tectonic_recipe.cmake)
-add_library(plate_tectonics STATIC
+add_library(uw_tectonics STATIC
     bounds.cpp
     geometry.cpp
     heightmap.cpp
@@ -67,7 +84,7 @@ add_library(plate_tectonics STATIC
     utils.cpp
     world_point.cpp
 )
-target_include_directories(plate_tectonics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_include_directories(plate_tectonics PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_definitions(plate_tectonics PRIVATE NOMINMAX)
-uw_tectonics_target_defaults(plate_tectonics)
+target_include_directories(uw_tectonics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(uw_tectonics PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(uw_tectonics PRIVATE NOMINMAX)
+uw_tectonics_target_defaults(uw_tectonics)

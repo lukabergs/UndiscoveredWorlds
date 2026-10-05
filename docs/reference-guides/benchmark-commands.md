@@ -74,7 +74,7 @@ cmake --build out/build/desktop --config Release --target UndiscoveredWorlds --p
 
 Binaries land in `bin/<Config>/` (`bin/Release`, `bin/Debug`). Simulations and benchmarks always use Release; scripts take the paths from `scripts/uwtools/paths.py`.
 
-`world_pipeline` links the headless world core (`uw_world_core`) and the simulation modules; it depends on libpng but not on SFML or ImGui. `uw.py` defaults to `out/build/headless/bin/Release/world_pipeline.exe`; pass `--executable` for another build.
+`world_pipeline` links the headless libraries (the set `uw_headless` in the root `CMakeLists.txt`); it depends on libpng but not on SFML or ImGui. `uw.py` defaults to `out/build/headless/bin/Release/world_pipeline.exe`; pass `--executable` for another build.
 
 ## Recipe runs: `world_pipeline run`
 

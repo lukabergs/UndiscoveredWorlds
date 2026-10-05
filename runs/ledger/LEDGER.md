@@ -73,6 +73,7 @@ Lessons:
 | `world-0019` | 2026-10-05 | tooling added | keep | consolidation phase 3, step 10: palette sidecars and their check |
 | `world-0020` | 2026-10-05 | defects fixed | keep | consolidation phase 3: fresh-context review of the new tooling and its fixes |
 | `world-0021` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 1: directory moves (src/world, src/cli, profiler and environment in src/core, workbench in src/app); the step list of the phase |
+| `world-0022` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 2: per-directory CMake, one static library per directory, engine target uw_tectonics |
 
 Lessons:
 
@@ -127,3 +128,5 @@ Lessons:
 - `world-0021`: out/scratch/phase4/step.ps1 <label> <reference-label> builds both presets, makes the three bundles, compares them and runs the layout and access checks; the three audited runs and both builds take about 20 minutes.
 - `world-0021`: The reference bundles of the next step are out/scratch/phase4/step01-*.
 - `world-0021`: out/scratch/phase4/include_graph.py prints which source directory includes which.
+- `world-0022`: The reference bundles of the next step are out/scratch/phase4/step02-*.
+- `world-0022`: PNG is now found for every configuration, because uw_io always contains the heightmap I/O of the engine tests.

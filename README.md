@@ -117,7 +117,7 @@ For future runs, record the seed, recipe and stage parameters, code revision, in
 ## Tectonics
 
 There is one tectonics implementation: `src/simulations/geology/plate_tectonics`,
-built as the internal `plate_tectonics` target from the current working tree.
+built as the internal `uw_tectonics` target from the current working tree.
 The desktop generator, workbench, mineral history and the `tectonics` recipe of `world_pipeline`
 all use it. No external tectonics checkout or library is needed or supported.
 Existing uncommitted work on `main` is part of that implementation.

@@ -30,9 +30,8 @@ add_executable(tectonics_tests
     # The scenario options of world_pipeline need only the engine.
     ${PROJECT_SOURCE_DIR}/src/cli/tectonic_options.cpp
 )
-target_include_directories(tectonics_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/cli")
 target_link_libraries(tectonics_tests PRIVATE
-    plate_tectonics uw_tectonics_heightmap_io uw_tectonics_snapshots
+    uw_tectonics uw_io uw_validation
     GTest::gtest GTest::gtest_main)
 uw_tectonics_target_defaults(tectonics_tests)
 
