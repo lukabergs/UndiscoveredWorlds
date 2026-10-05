@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import runs
 from uwtools.bundle import Bundle
 
 SNAPSHOT_TABLE = 'geosphere.tectonic_snapshot'
@@ -120,7 +121,7 @@ def main():
     args = parser.parse_args()
     text = json.dumps(statistics(args.bundle), indent=2) + '\n'
     if args.json:
-        args.json.write_text(text, encoding='utf-8')
+        runs.refuse_archive(args.json).write_text(text, encoding='utf-8')
     print(text, end='')
 
 

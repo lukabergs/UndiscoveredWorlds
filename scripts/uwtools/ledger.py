@@ -15,6 +15,7 @@ SUMMARY = DIRECTORY / 'LEDGER.md'
 REQUIRED = ('id', 'date', 'module', 'parent', 'hypothesis', 'change', 'expected', 'observed', 'assessment',
             'verdict', 'decision', 'lessons', 'do_not_retry')
 DECISIONS = ('keep', 'revert', 'park')
+FILLED = ('hypothesis', 'expected', 'assessment', 'verdict')
 
 
 def path(module):
@@ -48,6 +49,10 @@ def validate(entry, existing):
         raise ValueError(f"id {entry['id']!r} is not {entry['module']}-NNNN")
     if entry['parent'] is not None and entry['parent'] not in identifiers:
         raise ValueError(f"parent {entry['parent']} is not in the {entry['module']} ledger")
+    # What was tried and what came of it must be filled in: a draft's empty placeholders are refused.
+    empty = [key for key in FILLED if not (entry[key].strip() if isinstance(entry[key], str) else entry[key])]
+    if empty:
+        raise ValueError(f"ledger entry leaves {', '.join(empty)} empty")
     if entry['decision'] not in DECISIONS:
         raise ValueError(f"decision must be one of {', '.join(DECISIONS)}")
     for key in ('lessons', 'do_not_retry'):

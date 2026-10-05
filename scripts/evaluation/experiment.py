@@ -9,15 +9,17 @@ The module's profile (configs/evaluation/<module>.json, "run" section) holds the
 its arguments and its declared inputs (inputs.py); "registered" adds the settings of a
 registered run (more arguments, a resolution, a recipe file whose scenario becomes flags).
 Native options come last, so they override. --repeat runs the same command again
-(bundle-repeat, check `repeat`); --explicit-recipe runs it again with every value of the
-recipe file as an option (bundle-explicit, check `recipe-equality`). Both second runs
-write no checkpoints.
+(bundle-repeat, check `repeat`); --explicit-recipe makes the recipe-equality pair
+(bundle-explicit, check `recipe-equality`): a scratch run is run again with every value of
+the recipe file as an option, a registered run (which carries those options) again without
+them. Both second runs write no checkpoints.
 
 Without --register the run is scratch, in out/evaluation/<module>/<name>/, or in a
 runs/reports/<experiment> archive (routed to the storage drive) with --archive. With
 --register (`uw.py <module> run`) the run takes the next id of runs/registry/<module>.json,
 runs in runs/<module>/<id>/ and appends a registry record naming that directory when it
-ends. A run directory holds run.json (command, executable and inputs with SHA-256, code
+ends, with status `failed` (and no score) when the tool or the evaluation failed or the
+run was interrupted. A run directory holds run.json (command, executable and inputs with SHA-256, code
 state, timing, steps, exit codes, verdict), log.txt, bundle/, checkpoints/ when the
 settings ask for them, evaluation/ (evaluation.json, review request, run page, maps) and
 ledger-entry.json, a draft to complete and append with `uw.py <module> ledger --add`.
@@ -64,8 +66,9 @@ def recipe_options(recipe):
 
 
 def settings(spec, register, resolution):
-    """Arguments (with placeholders), grid width, recipe and recipe file of a run."""
-    arguments, recipe, recipe_path = list(spec['arguments']), None, None
+    """Profile arguments, recipe options and registered arguments (with placeholders), grid
+    width, placeholder values, recipe and recipe file of a run; the command is them in that order."""
+    arguments, scenario, recipe, recipe_path = list(spec['arguments']), [], None, None
     values = {}
     registered = spec.get('registered', {}) if register else {}
     if registered.get('recipe'):
@@ -73,14 +76,13 @@ def settings(spec, register, resolution):
         recipe = json.loads(recipe_path.read_text(encoding='utf-8'))
         if recipe['height'] * 2 != recipe['width']:
             raise SystemExit('The world grid is W x W/2')
-        arguments += recipe_options(recipe)
+        scenario = recipe_options(recipe)
         interval = recipe['checkpoint_every_updates'] * float(recipe['scenario'].get('delta-time-myr', 1.0))
         values['checkpoint_every'] = f'{interval:g}'
-    arguments += registered.get('arguments', [])
     width = resolution or (recipe['width'] if recipe else None) or registered.get('resolution') or spec['resolution']
     if width < 2 or width % 2:
         raise SystemExit('--resolution must be an even width')
-    return arguments, width, values, recipe, recipe_path
+    return arguments, scenario, list(registered.get('arguments', [])), width, values, recipe, recipe_path
 
 
 def expand(arguments, resolution, directory, values):
@@ -139,7 +141,8 @@ def main():
     parser.add_argument('--baseline', type=Path, help='Bundle compared with the run')
     parser.add_argument('--repeat', action='store_true', help='Run twice and check the bundles are identical')
     parser.add_argument('--explicit-recipe', action='store_true',
-                        help="Run again with the profile's recipe file as options and check the bundles are identical")
+                        help="Run again with the profile's recipe file as options (registered: without them) "
+                             "and check the bundles are identical")
     parser.add_argument('--executable', type=Path)
     parser.add_argument('--label', help='Change summary stored with the run')
     parser.add_argument('--topic', help='Print the ledger entries naming this text before the run (default: the last five)')
@@ -151,14 +154,25 @@ def main():
     if 'run' not in profile:
         raise SystemExit(f'Profile {args.module} has no run section')
     spec = profile['run']
-    arguments, resolution, values, recipe, recipe_path = settings(spec, args.register, args.resolution)
+    arguments, scenario, extra, resolution, values, recipe, recipe_path = settings(spec, args.register, args.resolution)
     # What was already tried is shown before anything runs, so it does not depend on an instruction to read the ledger.
     previous = ledger.relevant(args.module, args.topic)
     if previous:
         print(f'Ledger ({ledger.path(args.module).relative_to(ROOT).as_posix()}):', *map(ledger.brief, previous), sep='\n', flush=True)
+    # Every argument is checked before the run directory exists, so an error leaves nothing behind.
     executable = (args.executable or paths.executable(spec['tool'])).absolute()
     if not executable.is_file():
         raise SystemExit(f'Build {spec["tool"]} first: {executable}')
+    explicit = []
+    if args.explicit_recipe and not scenario:
+        named = spec.get('registered', {}).get('recipe')
+        if not named or not (ROOT / named).is_file():
+            raise SystemExit(f'Profile {args.module} names no recipe file for --explicit-recipe')
+        recipe_path = ROOT / named
+        explicit = recipe_options(json.loads(recipe_path.read_text(encoding='utf-8')))
+    if args.archive:
+        runs.refuse_archive(ROOT / args.archive)
+    baseline = Bundle.open(args.baseline) if args.baseline else None
     environment = dict(os.environ)
     declared = []
     for item in spec.get('inputs', []):
@@ -175,17 +189,16 @@ def main():
         name = args.name or f'{stamp}-seed{args.seed}-{resolution}'
         directory = scratch_directory(args.module, name, args.archive)
         directory.mkdir(parents=True, exist_ok=False)
-    base = [str(executable), *expand(arguments, resolution, directory, values), '--seed', str(args.seed), *native]
+    tool_command = lambda options: [str(executable), *expand(options, resolution, directory, values)]
+    seed = ['--seed', str(args.seed)]
+    base = [*tool_command(arguments + scenario + extra), *seed, *native]
     files = [part for part in base[1:] if not part.startswith('-') and (ROOT / part).is_file()]
     commands = {'run': base, 'repeat': without_checkpoints(base)}
     if args.explicit_recipe:
-        # Every value of the recipe file, then the same native options as the first run.
-        recipe_path = recipe_path or ROOT / spec.get('registered', {}).get('recipe', '')
-        if not recipe_path.is_file():
-            raise SystemExit(f'Profile {args.module} names no recipe file for --explicit-recipe')
-        explicit = recipe_options(json.loads(recipe_path.read_text(encoding='utf-8')))
-        commands['explicit'] = without_checkpoints([str(executable), *expand(arguments, resolution, directory, values),
-                                                    *explicit, '--seed', str(args.seed), *native])
+        # The recipe-equality pair: a run given every value of the recipe file as an option and a
+        # run given none (the compiled defaults). A registered run carries the options itself, so
+        # its second run is the one without them; a scratch run's second run adds them.
+        commands['explicit'] = without_checkpoints([*tool_command(arguments + extra), *explicit, *seed, *native])
     files += [relative(recipe_path)] if recipe_path else []
     declared += [{'path': relative(ROOT / part), 'sha256': sha256(ROOT / part)} for part in files]
 
@@ -202,56 +215,66 @@ def main():
     labels = ['run'] + ['repeat'] * args.repeat + ['explicit'] * args.explicit_recipe
     outputs = ROOT / 'out/evaluation/outputs' / args.module / name
     start = time.time()
-    for label in labels:
-        bundle = directory / ('bundle' if label == 'run' else f'bundle-{label}')
-        # The second runs check the final state only; checkpoints are not written twice.
-        command = [*commands[label], '--bundle', str(bundle)]
-        outcome = run_tool(command, directory, label, environment, outputs)
-        record['runs'].append(outcome)
-        print(f"{label}: exit {outcome['exit_code']} in {outcome['seconds']} s", flush=True)
-        if outcome['exit_code']:
-            break
-    record['finished'] = now()
-    record['seconds'] = round(time.time() - start, 3)
-    record['exit_codes'] = [outcome['exit_code'] for outcome in record['runs']]
-    succeeded = all(code == 0 for code in record['exit_codes'])
-    document, failure = None, None
-    if succeeded:
-        record['steps'] = bundle_steps(directory / 'bundle')
-        try:
-            repeat = Bundle.open(directory / 'bundle-repeat') if args.repeat else None
-            explicit = Bundle.open(directory / 'bundle-explicit') if args.explicit_recipe else None
-            baseline = Bundle.open(args.baseline) if args.baseline else None
-            document = evaluate(profile, profile_path, Bundle.open(directory / 'bundle'), directory / 'evaluation',
-                                baseline=baseline, repeat=repeat, explicit=explicit)
-        except Exception as error:  # the run stays recorded; the evaluation can be made again with `evaluate`
-            failure = error
-            record['evaluation_error'] = f'{type(error).__name__}: {error}'
-    if document:
-        record['verdict'] = document['verdict']
-        for name, key, wanted in (('repeat', 'repeat', args.repeat), ('recipe-equality', 'recipe_equality', args.explicit_recipe)):
-            check = next((item for item in document['checks'] if item['check'] == name), None) if wanted else None
-            if check:
-                record[key] = {'identical': check['status'] == 'pass', 'summary': check['summary']}
-        print(json.dumps(document['verdict'], indent=2))
-    (directory / 'run.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
-    if document:
-        report.run_page(directory / 'evaluation')  # again, now with run.json
-    # The entry to complete (hypothesis, expected, assessment, decision) and append with `uw.py <module> ledger --add`.
-    draft = ledger.template(args.module, change={'code': record['code'], 'label': args.label, 'native_options': native},
-                            observed={'run': relative(directory), 'seed': args.seed, 'resolution': record['grid'],
-                                      'verdict': record.get('verdict')})
-    (directory / 'ledger-entry.json').write_text(json.dumps(draft, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
-    if args.register:
-        entry = {'id': identifier, 'status': 'complete' if succeeded else 'failed', 'run': relative(directory),
-                 'date': record['started'], 'label': args.label or ''}
-        score = document and document['validation']['scores'].get('run', {}).get('score')
-        if score is not None:
-            entry['score'] = round(score, 4)
-        runs.append_record(args.module, entry)
-        print(f'Registered {args.module} run {identifier} in {runs.registry_path(args.module).relative_to(ROOT).as_posix()}')
-    if args.archive:
-        record_in_archive(args.archive, args.module, name, record)
+    document, failure, succeeded = None, None, False
+    try:
+        for label in labels:
+            bundle = directory / ('bundle' if label == 'run' else f'bundle-{label}')
+            # The second runs check the final state only; checkpoints are not written twice.
+            outcome = run_tool([*commands[label], '--bundle', str(bundle)], directory, label, environment, outputs)
+            record['runs'].append(outcome)
+            print(f"{label}: exit {outcome['exit_code']} in {outcome['seconds']} s", flush=True)
+            if outcome['exit_code']:
+                break
+        record['finished'] = now()
+        record['seconds'] = round(time.time() - start, 3)
+        record['exit_codes'] = [outcome['exit_code'] for outcome in record['runs']]
+        succeeded = all(code == 0 for code in record['exit_codes'])
+        if succeeded:
+            try:
+                record['steps'] = bundle_steps(directory / 'bundle')
+                repeat = Bundle.open(directory / 'bundle-repeat') if args.repeat else None
+                explicit_bundle = Bundle.open(directory / 'bundle-explicit') if args.explicit_recipe else None
+                document = evaluate(profile, profile_path, Bundle.open(directory / 'bundle'), directory / 'evaluation',
+                                    baseline=baseline, repeat=repeat, explicit=explicit_bundle)
+            except Exception as error:  # the run stays recorded; evaluate again into another directory
+                failure = error
+                record['evaluation_error'] = f'{type(error).__name__}: {error}'
+        if document:
+            record['verdict'] = document['verdict']
+            for check_name, key, wanted in (('repeat', 'repeat', args.repeat),
+                                            ('recipe-equality', 'recipe_equality', args.explicit_recipe)):
+                check = next((item for item in document['checks'] if item['check'] == check_name), None) if wanted else None
+                if check:
+                    record[key] = {'identical': check['status'] == 'pass', 'summary': check['summary']}
+            print(json.dumps(document['verdict'], indent=2))
+        (directory / 'run.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+        if document:
+            report.run_page(directory / 'evaluation')  # again, now with run.json
+        # The entry to complete (hypothesis, expected, assessment, decision) and append with `uw.py <module> ledger --add`.
+        draft = ledger.template(args.module, change={'code': record['code'], 'label': args.label, 'native_options': native},
+                                observed={'run': relative(directory), 'seed': args.seed, 'resolution': record['grid'],
+                                          'verdict': record.get('verdict')})
+        (directory / 'ledger-entry.json').write_text(json.dumps(draft, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
+        if args.archive:
+            record_in_archive(args.archive, args.module, name, record)
+    except BaseException as error:
+        # An interrupted or failed run still explains its directory.
+        record.setdefault('finished', now())
+        record['error'] = f'{type(error).__name__}: {error}'
+        (directory / 'run.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+        raise
+    finally:
+        if args.register:
+            # Every registered id gets its record, so it is never reused; only a run evaluated to the end is complete.
+            complete = succeeded and document is not None and 'error' not in record
+            entry = {'id': identifier, 'status': 'complete' if complete else 'failed', 'run': relative(directory),
+                     'date': record['started'], 'label': args.label or ''}
+            score = document['validation']['scores'].get('run', {}).get('score') if complete else None
+            if score is not None:
+                entry['score'] = round(score, 4)
+            runs.append_record(args.module, entry)
+            print(f"Registered {args.module} run {identifier} ({entry['status']}) in "
+                  f"{runs.registry_path(args.module).relative_to(ROOT).as_posix()}")
     print(f'Run directory: {directory}')
     if not succeeded:
         raise SystemExit(f"Tool failed; see {directory / record['runs'][-1]['log']}")

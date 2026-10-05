@@ -74,7 +74,7 @@ def write_page(template, data, path):
     if text.count(PLACEHOLDER) != 1:
         raise ValueError(f'{template}: expected one {PLACEHOLDER}')
     payload = json.dumps(clean(data), ensure_ascii=False, allow_nan=False).replace('<', '\\u003c')
-    path = Path(path)
+    path = runs.refuse_archive(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text.replace(PLACEHOLDER, payload), encoding='utf-8')
     return path
@@ -208,7 +208,7 @@ def run_data(evaluation_dir):
     reviews = review.load(directory)['entries']
     verdict = dict(document['verdict'])
     if reviews:
-        verdict['review'] = reviews[-1]['verdict']
+        verdict['review'] = review.latest(directory)['verdict']  # the user's latest over an agent's
     groups, animations = map_groups(document['maps'])
     files = [{'title': 'evaluation.json', 'path': 'evaluation.json'}, {'title': 'report.md', 'path': 'report.md'}]
     files += [{'title': name, 'path': name} for name in ('review.json',) if (directory / name).is_file()]
@@ -288,7 +288,7 @@ def markdown(data):
 
 def run_page(evaluation_dir):
     """Write index.html and report.md of an evaluation directory from its JSON files."""
-    directory = Path(evaluation_dir)
+    directory = runs.refuse_archive(evaluation_dir)
     data = run_data(directory)
     (directory / 'report.md').write_text(markdown(data), encoding='utf-8')
     return write_page('run.html', data, directory / 'index.html')
@@ -324,8 +324,8 @@ def comparison_data(evaluation_dirs, output_dir):
         name = run_identity(directory, run)
         name = name if name not in names else f'{name} ({len(names) + 1})'
         names.append(name)
-        reviews = review.load(directory)['entries']
-        verdict = dict(document['verdict'], review=reviews[-1]['verdict'] if reviews else document['verdict']['review'])
+        counted = review.latest(directory)
+        verdict = dict(document['verdict'], review=counted['verdict'] if counted else document['verdict']['review'])
         page = directory / 'index.html'
         header.append({'name': name, 'bundle': document['run']['bundle'], 'seed': document['run']['seed'],
                        'grid': document['run']['grid'], 'revision': (document['code'].get('revision') or '')[:12],
@@ -394,7 +394,7 @@ def comparison_markdown(data):
 
 def comparison_page(evaluation_dirs, output_dir):
     """Write index.html and report.md comparing evaluations (the first is the baseline) into output_dir."""
-    output = Path(output_dir)
+    output = runs.refuse_archive(output_dir)
     data = comparison_data(evaluation_dirs, output)
     output.mkdir(parents=True, exist_ok=True)
     (output / 'report.md').write_text(comparison_markdown(data), encoding='utf-8')

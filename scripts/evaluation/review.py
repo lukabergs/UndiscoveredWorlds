@@ -17,6 +17,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import runs
 from uwtools.bundle import SEASONS
 
 VERDICTS = ('approved', 'rejected', 'revise')
@@ -64,7 +65,7 @@ def request(profile, document):
 
 
 def record(directory, verdict, notes, reviewer, against, answers=None):
-    directory = Path(directory)
+    directory = runs.refuse_archive(directory)
     evaluation = json.loads((directory / 'evaluation.json').read_text(encoding='utf-8'))
     document = load(directory)
     document['entries'].append({

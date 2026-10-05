@@ -17,8 +17,9 @@ from .paths import ROOT
 CONFIG = ROOT / 'runs/storage.json'
 # Only generated data may leave the workspace: one directory level under runs/, or a
 # direct child of the two parents that hold one directory per experiment or module.
-ROUTABLE = re.compile(r'runs/(archive|reports/[^/]+|work/[^/]+|[a-z][a-z0-9_-]*)')
-RESERVED = {'registry', 'ledger', 'reports', 'work'}
+# runs/archive is sealed (already routed, never written), so it is not routable.
+ROUTABLE = re.compile(r'runs/(reports/[^/]+|work/[^/]+|[a-z][a-z0-9_-]*)')
+RESERVED = {'archive', 'registry', 'ledger', 'reports', 'work'}
 
 
 def storage_root():

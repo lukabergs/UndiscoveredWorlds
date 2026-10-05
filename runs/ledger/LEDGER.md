@@ -71,6 +71,7 @@ Lessons:
 | `world-0017` | 2026-10-05 | equivalent | keep | consolidation phase 3, steps 8 and 11: run layout runs/<module>/<id>/, old layout sealed, storage script ported |
 | `world-0018` | 2026-10-05 | retired | keep | consolidation phase 3, step 13: legacy climate chain retired (step 9 is tectonics-0004) |
 | `world-0019` | 2026-10-05 | tooling added | keep | consolidation phase 3, step 10: palette sidecars and their check |
+| `world-0020` | 2026-10-05 | defects fixed | keep | consolidation phase 3: fresh-context review of the new tooling and its fixes |
 
 Lessons:
 
@@ -120,3 +121,5 @@ Lessons:
 - `world-0018`: pyshp is declared in pyproject.toml and imported nowhere.
 - `world-0018`: scripts/evaluation still imports map_rendering, climate_palettes and tectonics_earth_reference from scripts/benchmarks.
 - `world-0019`: A palette change needs a new version string in the palette file: the same version with another hash makes every existing sidecar of that version fail the layout check.
+- `world-0020`: A check that compares two bundles must be shown failing once: recipe-equality passed for a week of design because both commands were the same.
+- `world-0020`: Sealed directories need a guard in code, not only a README: a default output path beside the bundle pointed into the archive.

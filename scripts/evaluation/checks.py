@@ -135,16 +135,30 @@ def check_frozen(bundle, spec, context):
                   changed)
 
 
+def compare_bundles(bundle, other):
+    """Differences between every field and table of two bundles, including those present in only one.
+    No table is excluded: the bundle tables hold no timings or paths (repeat pairs of 2026-10-05 match)."""
+    changed = compare_hashes(bundle, other, list(bundle.fields))
+    changed += [f'{identifier} absent from the run bundle' for identifier in other.fields if identifier not in bundle.fields]
+    for identifier, entry in bundle.tables.items():
+        if identifier not in other.tables:
+            changed.append(f'{identifier} absent from comparison bundle')
+        elif entry['hash'] != other.tables[identifier]['hash']:
+            changed.append(f'{identifier} differs')
+    changed += [f'{identifier} absent from the run bundle' for identifier in other.tables if identifier not in bundle.tables]
+    total = len(set(bundle.fields) | set(other.fields)) + len(set(bundle.tables) | set(other.tables))
+    return changed, f'{total - len(changed)} of {total} fields and tables identical'
+
+
 def check_repeat(bundle, spec, context):
-    """A second run with the same seed, recipe and code produced identical fields."""
+    """A second run with the same seed, recipe and code produced identical fields and tables."""
     other = context.get('repeat')
     if other is None:
         return result('repeat', 'skip', 'no repeat bundle given')
     if other.seed != bundle.seed or other.recipe != bundle.recipe:
         return result('repeat', 'fail', 'repeat run used a different seed or recipe')
-    changed = compare_hashes(bundle, other, list(bundle.fields))
-    return result('repeat', 'fail' if changed else 'pass',
-                  f'{len(bundle.fields) - len(changed)} of {len(bundle.fields)} fields identical', changed)
+    changed, summary = compare_bundles(bundle, other)
+    return result('repeat', 'fail' if changed else 'pass', summary, changed)
 
 
 def check_recipe_equality(bundle, spec, context):
@@ -155,15 +169,8 @@ def check_recipe_equality(bundle, spec, context):
         return result('recipe-equality', 'skip', 'no explicit-recipe bundle given')
     if other.seed != bundle.seed or other.recipe != bundle.recipe:
         return result('recipe-equality', 'fail', 'explicit-recipe run used a different seed or recipe')
-    changed = compare_hashes(bundle, other, list(bundle.fields))
-    for identifier, entry in bundle.tables.items():
-        if identifier not in other.tables:
-            changed.append(f'{identifier} absent from comparison bundle')
-        elif entry['hash'] != other.tables[identifier]['hash']:
-            changed.append(f'{identifier} differs')
-    total = len(bundle.fields) + len(bundle.tables)
-    return result('recipe-equality', 'fail' if changed else 'pass',
-                  f'{total - len(changed)} of {total} fields and tables identical', changed)
+    changed, summary = compare_bundles(bundle, other)
+    return result('recipe-equality', 'fail' if changed else 'pass', summary, changed)
 
 
 def json_table(bundle, identifier):
@@ -186,11 +193,15 @@ def check_record(bundle, spec, context):
     problems = []
 
     def value(key):
+        """The value, or None after recording the problem: a missing key or a null value is never as expected."""
         try:
-            return lookup(document, key)
+            found = lookup(document, key)
         except (KeyError, TypeError):
             problems.append(f'{key} missing')
             return None
+        if found is None:
+            problems.append(f'{key} is null')
+        return found
 
     for key, expected in spec.get('equals', {}).items():
         found = value(key)
@@ -201,7 +212,7 @@ def check_record(bundle, spec, context):
         if a is not None and b is not None and a != b:
             problems.append(f'{left} is {a!r}, {right} is {b!r}')
     count = len(spec.get('equals', {})) + len(spec.get('same', []))
-    return result('record', 'fail' if problems else 'pass', f'{count - len(problems)} of {count} values of {table} as expected',
+    return result('record', 'fail' if problems else 'pass', f'{max(count - len(problems), 0)} of {count} values of {table} as expected',
                   problems)
 
 

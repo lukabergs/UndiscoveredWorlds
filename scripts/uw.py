@@ -39,7 +39,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from uwtools import ledger, paths
+from uwtools import ledger, paths, runs
 
 # `uv run` exports its own path; subprocesses may not find uv on PATH.
 UV = os.environ.get('UV', 'uv')
@@ -69,7 +69,7 @@ def evaluation(args, extra):
     if args.command == 'evaluate':
         if not args.bundle:
             raise SystemExit(f'{args.module} evaluate requires --bundle DIR')
-        output = args.output or args.bundle.parent / 'evaluation'
+        output = runs.refuse_archive(args.output or args.bundle.parent / 'evaluation')
         call([UV, 'run', '--offline', EVALUATION / 'evaluate.py', '--profile', args.module,
               '--bundle', args.bundle, '--output', output, *extra])
         return
@@ -87,7 +87,10 @@ def ledger_command(args, extra):
     if extra:
         raise SystemExit(f"Unexpected arguments: {' '.join(extra)}")
     if args.add:
-        entry = ledger.append(json.loads(args.add.read_text(encoding='utf-8')))
+        entry = json.loads(args.add.read_text(encoding='utf-8'))
+        if entry.get('module') != args.module:
+            raise SystemExit(f"{args.add} is a {entry.get('module')!r} ledger entry, not {args.module!r}")
+        entry = ledger.append(entry)
         print(f"Appended {entry['id']} to {ledger.path(entry['module']).relative_to(ROOT)}")
     elif args.draft:
         print(json.dumps(ledger.template(args.module), indent=1, ensure_ascii=False))
@@ -170,6 +173,8 @@ def main():
         parser.error(f'{args.module} commands: {", ".join(COMMANDS[args.module])}')
     if args.resolution is not None and (args.resolution < 2 or args.resolution % 2):
         parser.error('--resolution must be an even width')
+    if args.output:
+        runs.refuse_archive(args.output)
     if args.command == 'ledger':
         ledger_command(args, extra)
         return

@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.bundle import SCHEMA as BUNDLE_SCHEMA, Bundle, read_manifest
 from uwtools.hashing import sha256_bytes
+from uwtools import runs
 from checks import run_checks
 from references import References
 from validation import run_validation
@@ -30,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIRECTORY = ROOT / 'configs/evaluation'
 PROFILE_SCHEMA = 'uw-evaluation-profile/v1'
 SCHEMA = 'uw-evaluation/v1'
+FAILED = 'evaluation-error.json'
 
 
 def load_profile(name):
@@ -71,7 +73,10 @@ def verdict(profile, checks, validation, review_entry):
     scores = validation.get('scores', {})
     if 'baseline' in scores:
         run, base = score_value(scores['run']), score_value(scores['baseline'])
-        result['validation'] = 'improved' if run < base - 1e-9 else 'worse' if run > base + 1e-9 else 'equal'
+        if run is None or base is None:  # no weighted field was compared: nothing to rank
+            result['validation'] = 'scored'
+        else:
+            result['validation'] = 'improved' if run < base - 1e-9 else 'worse' if run > base + 1e-9 else 'equal'
     elif scores:
         result['validation'] = 'scored'
     elif validation.get('distributions'):
@@ -93,9 +98,23 @@ def checkpoint_bundles(directory):
 
 def evaluate(profile, profile_path, bundle, output, baseline=None, repeat=None, input_bundle=None, maps=True,
              checkpoints=None, explicit=None):
+    output = runs.refuse_archive(output)
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
-        raise SystemExit(f'{output} is not empty; evaluations are never overwritten')
+        failed = f' (it holds a failed evaluation: {FAILED})' if (output / FAILED).is_file() else ''
+        raise SystemExit(f'{output} is not empty{failed}; evaluations are never overwritten: use another --output')
+    try:
+        return evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input_bundle, maps, checkpoints, explicit)
+    except BaseException as error:
+        # What an interrupted or failed evaluation left behind stays as evidence, marked as incomplete.
+        (output / FAILED).write_text(json.dumps({
+            'schema': 'uw-evaluation-error/v1', 'error': f'{type(error).__name__}: {error}',
+            'recorded': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+            'note': 'This evaluation did not complete; files beside this one are partial.'}, indent=2) + '\n', encoding='utf-8')
+        raise
+
+
+def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input_bundle, maps, checkpoints, explicit):
     context = {'input': input_bundle, 'repeat': repeat, 'explicit': explicit}
     checks = run_checks(bundle, profile.get('checks', []), context)
     references = References()
