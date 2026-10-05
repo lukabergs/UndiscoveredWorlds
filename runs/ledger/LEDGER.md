@@ -75,6 +75,7 @@ Lessons:
 | `world-0021` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 1: directory moves (src/world, src/cli, profiler and environment in src/core, workbench in src/app); the step list of the phase |
 | `world-0022` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 2: per-directory CMake, one static library per directory, engine target uw_tectonics |
 | `world-0023` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 3: one include root (src/) and the layering rules in check_layout.py |
+| `world-0024` | 2026-10-05 | tooling added | keep | consolidation phase 4, step 4: review maps a verifier can read (legend, graticule, direction, parent, plate identity); cross-imports of scripts/evaluation |
 
 Lessons:
 
@@ -133,3 +134,6 @@ Lessons:
 - `world-0022`: PNG is now found for every configuration, because uw_io always contains the heightmap I/O of the engine tests.
 - `world-0023`: A quoted include is searched beside the including file first, so the compiler accepts a bare sibling name; only check_layout.py keeps the include root.
 - `world-0023`: The reference bundles of the next compiled step are out/scratch/phase4/step03-*.
+- `world-0024`: Pillow's built-in font has no minus sign or en dash; map_rendering replaces them in drawn text.
+- `world-0024`: A legend bar that is linear in value crowds the ticks of the elevation scale near sea level; labels that would overlap are left out, the ticks stay.
+- `world-0024`: A Bash heredoc that contains an apostrophe fails before anything runs; scripts are written with the Write tool.

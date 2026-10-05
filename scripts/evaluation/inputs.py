@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'scripts'))
 DERIVED = ROOT / 'out/inputs'
 
 
@@ -28,8 +29,7 @@ def drag_contrast(source, width):
     path = DERIVED / source.parent.parent.name / f'{source.stem.rsplit("-", 1)[0]}-{width}.txt'
     if path.exists():
         return path
-    sys.path.insert(0, str(ROOT / 'scripts/refs'))
-    from cell_grid import conservative_remap
+    from uwtools.cell_grid import conservative_remap
     field = np.clip(conservative_remap(np.asarray(values[3:], dtype=np.float64).reshape(rows, columns), width), 0.25, 4.0)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.tmp')

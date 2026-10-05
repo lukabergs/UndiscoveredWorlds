@@ -21,6 +21,7 @@ from uwtools import runs
 from uwtools.bundle import SEASONS
 
 VERDICTS = ('approved', 'rejected', 'revise')
+IMAGE_KEYS = ('title', 'path', 'kind', 'season', 'palette', 'half_range', 'frames', 'identity', 'identity_events')
 
 
 def load(directory):
@@ -50,7 +51,7 @@ def request(profile, document):
         maps = [item for item in document['maps'] if item.get('map') in names]
         if entry.get('seasons', 'all') != 'all':
             maps = [item for item in maps if item.get('season') in (None, *entry['seasons'])]
-        checklist.append(dict(entry, images=[{key: item.get(key) for key in ('title', 'path', 'kind', 'season', 'palette', 'half_range')} for item in maps]))
+        checklist.append(dict(entry, images=[{key: item.get(key) for key in IMAGE_KEYS if key in item} for item in maps]))
     metrics = []
     for field, seasons in document['validation']['maps'].items():
         for season, entries in seasons.items():
@@ -59,7 +60,7 @@ def request(profile, document):
                             'delta': None if base is None else loss - base,
                             'metrics': {name: value for name, value, _ in entries['run']['rows']}})
     return {'schema': 'uw-review-request/v1', 'module': profile['module'], 'run': blind(document['run']), 'parent': blind(document['baseline']),
-            'palettes': 'configs/climate-palettes.json and configs/tectonics-palettes.json hold the colour scales; a difference map spans -half_range to +half_range',
+            'palettes': 'every image carries its legend and a 30-degree graticule; configs/climate-palettes.json and configs/tectonics-palettes.json hold the colour scales; a difference map spans -half_range to +half_range; kind "parent" is the same map of the parent run',
             'checks_not_passed': [item for item in document['checks'] if item['status'] in ('fail', 'reported')],
             'scores': document['validation']['scores'], 'metrics': metrics, 'distributions': document['validation']['distributions'], 'checklist': checklist}
 

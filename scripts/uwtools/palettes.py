@@ -21,6 +21,28 @@ def tectonics():
     return json.loads(TECTONICS_PATH.read_text(encoding='utf-8'))
 
 
+def climate_anchors(low, high, signed=False, definition=None):
+    """(value, RGB) anchors of a climate scale over low..high."""
+    if not high > low:
+        raise ValueError('Display range must increase')
+    entries = (definition or climate())['signed' if signed else 'positive']
+    # Every signed scale gives zero the same cyan colour, including asymmetric T ranges.
+    return [(low + 2*t*(0-low) if t <= .5 else 2*(t-.5)*high, colour)
+            if signed and low < 0 < high else (low+t*(high-low), colour)
+            for t, colour in entries]
+
+
+def climate_rgb(values, low=0, high=1, signed=False):
+    from .map_rendering import colourize
+    definition = climate()
+    return colourize(values, climate_anchors(low, high, signed, definition), definition['missing'])
+
+
+def climate_field_rgb(values, field):
+    low, high = climate()['scales'][field]
+    return climate_rgb(values, low, high, low < 0)
+
+
 SIDECAR = 'palette.json'
 SIDECAR_SCHEMA = 'uw-palette/v1'
 

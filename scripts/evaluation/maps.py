@@ -1,35 +1,42 @@
 """Review maps of bundle fields in the project palettes (climate and tectonics).
 
+Every image is framed for reading (uwtools.map_rendering.frame): the raster enlarged
+without smoothing, a graticule every 30 degrees, the title and the legend of its palette.
 A profile map with "validation": "<id>" is drawn from that validation entry when it was
 compared: model and reference reduced by validation.py's season rule, conversion and
 remap, and model minus reference on the score's mask, so the pictures show what the loss
-measures. Vector fields are drawn as speed; their difference is the speed difference.
-Differences use the diverging scale of configs/climate-palettes.json ("difference").
-Runs with checkpoint bundles get one APNG per map and season.
+measures. Vector fields are coloured by speed with arrows for direction; their difference
+is the speed difference. Differences use the diverging scale of
+configs/climate-palettes.json ("difference"). With a parent bundle the model side of
+every map is drawn for the parent too (kind "parent"). Runs with checkpoint bundles get
+one APNG per map and season; plate colours in them follow identities tracked from frame
+to frame (track_identities), because the engine's plate index is not persistent.
 """
 import colorsys
-import io
 import json
 import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import palettes
+from uwtools import map_rendering, palettes
 from uwtools.bundle import SEASONS
 from validation import field_mask, load_selected, model_field, reference_field, seasons_for, surface_elevation
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'scripts/benchmarks'))
-import map_rendering  # noqa: E402
-from climate_palettes import DEFINITION as CLIMATE, field_rgb  # noqa: E402
-
+CLIMATE = palettes.climate()
 TECTONICS = palettes.tectonics()
 DERIVED = {'surface_elevation': surface_elevation}
 QUARTERS = ('Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec')
 SNAPSHOT_TABLE = 'geosphere.tectonic_snapshot'
+TRACKED = 'colours follow plate identities tracked by cell overlap between consecutive frames, not the engine index'
+
+
+def tectonics_stops(spec):
+    if 'stops' in spec:
+        return spec['stops']
+    low, high = spec['range']
+    return [(low + t * (high - low), rgb) for t, rgb in TECTONICS['sequential']]
 
 
 def tectonics_rgb(values, name):
@@ -41,44 +48,44 @@ def tectonics_rgb(values, name):
         return map_rendering.categories(values, colours, TECTONICS['missing'])
     if 'colours' in spec:
         return map_rendering.categories(values, dict(enumerate(spec['colours'])), TECTONICS['missing'])
-    if 'stops' in spec:
-        stops = spec['stops']
-    else:
-        low, high = spec['range']
-        stops = [(low + t * (high - low), rgb) for t, rgb in TECTONICS['sequential']]
-    return map_rendering.colourize(values, stops, TECTONICS['missing'])
+    return map_rendering.colourize(values, tectonics_stops(spec), TECTONICS['missing'])
 
 
 def palette_rgb(values, palette):
     family, _, name = palette.partition(':')
     if family == 'climate':
-        return field_rgb(values, name)
+        return palettes.climate_field_rgb(values, name)
     if family == 'climate-difference':
-        return difference_rgb(values, name)
+        return map_rendering.colourize(values, difference_stops(name), CLIMATE['missing'])
     if family == 'tectonics':
         return tectonics_rgb(values, name)
     raise ValueError(f'Unknown palette {palette!r}; use climate:<scale> or tectonics:<field>')
 
 
-def difference_rgb(values, scale):
+def difference_stops(scale):
     """Diverging colours symmetric about zero over +-half_range of the scale."""
     spec = CLIMATE['difference']
     half = float(spec['half_ranges'][scale])
-    stops = [(-half + 2 * half * t, colour) for t, colour in spec['stops']]
-    return map_rendering.colourize(values, stops, CLIMATE['missing'])
+    return [(-half + 2 * half * t, colour) for t, colour in spec['stops']]
 
 
-def map_values(bundle, spec):
-    if 'derived' in spec:
-        values = DERIVED[spec['derived']](bundle)
-    elif 'vector' in spec:
-        east, north = (load_selected(bundle, selector) for selector in spec['vector'])
-        values = np.hypot(east, north)
-    else:
-        values = load_selected(bundle, spec['field'])
-    if spec.get('reduce') == 'season-mean':
-        values = values.mean(axis=0)
-    return values * spec.get('scale', 1)
+def legend(palette, note=None):
+    """The legend of a palette for map_rendering.frame (the title of a map carries its units)."""
+    family, _, name = palette.partition(':')
+    if family == 'climate':
+        low, high = CLIMATE['scales'][name]
+        return {'kind': 'scale', 'stops': palettes.climate_anchors(low, high, low < 0, CLIMATE), 'note': note}
+    if family == 'climate-difference':
+        return {'kind': 'scale', 'stops': difference_stops(name), 'units': 'model − reference', 'note': note}
+    spec = TECTONICS['fields'][name]
+    if spec.get('ids'):
+        return {'kind': 'classes', 'entries': [], 'note': note or 'one colour per plate (engine index)'}
+    if 'colours' in spec:
+        return {'kind': 'classes', 'entries': list(zip(spec['labels'], spec['colours'])), 'note': note}
+    stops = tectonics_stops(spec)
+    ticks = [value for value, _ in stops]
+    ticks = ticks if 'stops' in spec else None
+    return {'kind': 'scale', 'stops': stops, 'ticks': ticks, 'note': note}
 
 
 def available(bundle, spec):
@@ -96,11 +103,31 @@ def masked(bundle, spec, values):
 
 
 def model_layers(bundle, spec):
-    """[(season or None, values)] of a profile map drawn from its own field."""
-    values = masked(bundle, spec, map_values(bundle, spec).astype(float))
+    """[(season or None, values, arrows or None)] of a profile map drawn from its own field."""
+    components = None
+    if 'derived' in spec:
+        values = DERIVED[spec['derived']](bundle)
+    elif 'vector' in spec:
+        components = [load_selected(bundle, selector).astype(float) for selector in spec['vector']]
+        if spec.get('reduce') == 'season-mean':
+            components = [component.mean(axis=0) for component in components]
+        values = np.hypot(*components)
+    else:
+        values = load_selected(bundle, spec['field'])
+    if spec.get('reduce') == 'season-mean' and components is None:
+        values = values.mean(axis=0)
+    values = masked(bundle, spec, values.astype(float) * spec.get('scale', 1))
     if values.ndim == 2:
-        return [(None, values)]
-    return [(season, values[season]) for season in spec.get('seasons', range(values.shape[0]))]
+        return [(None, values, arrows(components, values))]
+    return [(season, values[season], arrows(components and [component[season] for component in components], values[season]))
+            for season in spec.get('seasons', range(values.shape[0]))]
+
+
+def arrows(components, shown):
+    """(east, north) where the map shows a value, or None for a scalar map."""
+    if components is None:
+        return None
+    return tuple(np.where(np.isfinite(shown), component, np.nan) for component in components)
 
 
 def speed(values):
@@ -113,9 +140,31 @@ def season_title(rule, season):
     return QUARTERS[season] if rule == 'quarter' else SEASONS[season]
 
 
-def save(directory, name, rgb):
+def validated_seasons(spec, validation):
+    seasons = seasons_for(validation)
+    if 'seasons' in spec and len(seasons) > 1:
+        seasons = [season for season in seasons if season in spec['seasons']]
+    annual = validation['season'] == 'annual' or validation.get('reduce') == 'season-mean'
+    return [(season, None if annual else season) for season in seasons]
+
+
+def model_images(bundle, spec, validation):
+    """(season or None, the label of the months shown, values, arrows) of the model side of a map:
+    by the validation entry's reduction when the map is linked to one, else from its own field."""
+    if validation is None:
+        for season, values, vectors in model_layers(bundle, spec):
+            yield season, None if season is None else SEASONS[season], values, vectors
+        return
+    for season, layer in validated_seasons(spec, validation):
+        model = model_field(bundle, validation, season)
+        values = masked(bundle, spec, speed(model))
+        yield layer, season_title(validation['season'], layer), values, arrows(model if model.ndim == 3 else None, values)
+
+
+def save(directory, name, rgb, title, palette, vectors=None, note=None):
     relative = Path('maps') / f'{name}.png'
-    map_rendering.save_rgb(directory / relative, rgb)
+    (directory / relative).parent.mkdir(parents=True, exist_ok=True)
+    map_rendering.frame(rgb, title, legend(palette, note), vectors).save(directory / relative)
     return relative.as_posix()
 
 
@@ -126,34 +175,37 @@ def entry(spec, kind, season, title, path, palette, **extra):
             'palette': palette, **extra}
 
 
+def suffix(season):
+    return '' if season is None else f'-{SEASONS[season].lower()}'
+
+
 def validated(bundle, spec, validation, references, directory):
     """Model, reference and difference images of a map linked to a compared validation entry."""
     scale = validation.get('metric_scale', validation['id'])
     written = []
-    seasons = seasons_for(validation)
-    if 'seasons' in spec and len(seasons) > 1:
-        seasons = [season for season in seasons if season in spec['seasons']]
-    for season in seasons:
-        model = speed(model_field(bundle, validation, season))
-        reference = speed(reference_field(validation, references, season, model.shape[-1]))
-        mask = np.isfinite(reference) & np.isfinite(model) & field_mask(bundle, validation, season, model.shape)
-        annual = validation['season'] == 'annual' or validation.get('reduce') == 'season-mean'
-        layer = None if annual else season
+    for season, layer in validated_seasons(spec, validation):
+        model = model_field(bundle, validation, season)
+        reference = reference_field(validation, references, season, model.shape[-1])
+        mask = np.isfinite(speed(reference)) & np.isfinite(speed(model)) & field_mask(bundle, validation, season, speed(model).shape)
         label = season_title(validation['season'], layer)
         title = spec['title'] + ('' if label is None else f' · {label}')
-        suffix = '' if layer is None else f'-{SEASONS[layer].lower()}'
         source = ', '.join(validation['reference'])
         common = {'validation': validation['id'], 'season_label': label}
+        shown = masked(bundle, spec, speed(model))
         written.append(entry(spec, 'model', layer, title,
-                             save(directory, spec['name'] + suffix, palette_rgb(masked(bundle, spec, model), spec['palette'])),
+                             save(directory, spec['name'] + suffix(layer), palette_rgb(shown, spec['palette']), title, spec['palette'],
+                                  arrows(model if model.ndim == 3 else None, shown)),
                              spec['palette'], **common))
         written.append(entry(spec, 'reference', layer, f'{title} · reference ({source})',
-                             save(directory, f"{spec['name']}{suffix}-reference", palette_rgb(reference, spec['palette'])),
+                             save(directory, f"{spec['name']}{suffix(layer)}-reference", palette_rgb(speed(reference), spec['palette']),
+                                  f'{title} · reference ({source})', spec['palette'],
+                                  arrows(reference if reference.ndim == 3 else None, speed(reference))),
                              spec['palette'], **common))
-        difference = np.where(mask, model - reference, np.nan)
+        difference = np.where(mask, speed(model) - speed(reference), np.nan)
         palette = f'climate-difference:{scale}'
         written.append(entry(spec, 'difference', layer, f'{title} · model − reference',
-                             save(directory, f"{spec['name']}{suffix}-difference", palette_rgb(difference, palette)),
+                             save(directory, f"{spec['name']}{suffix(layer)}-difference", palette_rgb(difference, palette),
+                                  f'{title} · model − reference', palette),
                              palette, **common, half_range=CLIMATE['difference']['half_ranges'][scale]))
     return written
 
@@ -164,8 +216,54 @@ def checkpoint_time(bundle):
     return None
 
 
-def animations(bundle, specs, directory, checkpoints):
-    """One APNG per map and season over the checkpoint bundles and the run bundle."""
+def is_identity(spec):
+    family, _, name = spec['palette'].partition(':')
+    return family == 'tectonics' and bool(TECTONICS['fields'][name].get('ids'))
+
+
+def track_identities(frames):
+    """Plate-index rasters in time order -> (rasters of tracked identities, events per frame).
+
+    A plate keeps the identity of the plate of the previous frame it shares most cells
+    with; when two plates claim the same one, the larger overlap keeps it and the other
+    gets a new identity. Events name the identities that appear and vanish at each frame,
+    so a split, a merger and a plate that disappears are visible as such.
+    """
+    tracked, events, previous, following = [], [], None, 0
+    for values in frames:
+        values = np.asarray(values, dtype=float)
+        indices = [int(index) for index in np.unique(values[np.isfinite(values)])]
+        appeared = []
+        if previous is None:
+            mapping = {index: index for index in indices}
+            following = max(indices, default=-1) + 1
+        else:
+            claims = []
+            for index in indices:
+                identities, counts = np.unique(previous[values == index], return_counts=True)
+                known = identities >= 0
+                best = counts[known].argmax() if known.any() else None
+                claims.append((int(counts[known][best]) if best is not None else 0, index,
+                               int(identities[known][best]) if best is not None else -1))
+            mapping, taken = {}, set()
+            for _, index, identity in sorted(claims, reverse=True):
+                if identity < 0 or identity in taken:
+                    identity, following = following, following + 1
+                    appeared.append(identity)
+                taken.add(identity)
+                mapping[index] = identity
+        current = np.full(values.shape, -1, dtype=int)
+        for index, identity in mapping.items():
+            current[values == index] = identity
+        before = set() if previous is None else {int(identity) for identity in np.unique(previous) if identity >= 0}
+        events.append({'appeared': sorted(appeared), 'vanished': sorted(before - set(mapping.values()))})
+        tracked.append(np.where(current >= 0, current, np.nan))
+        previous = current
+    return tracked, events
+
+
+def timeline(bundle, checkpoints):
+    """The checkpoint bundles and the run bundle in time order, with frame labels and durations."""
     frames = [item for item in checkpoints if item.path.resolve() != bundle.path.resolve()]
     times = [checkpoint_time(item) for item in frames]
     final = checkpoint_time(bundle)
@@ -180,52 +278,80 @@ def animations(bundle, specs, directory, checkpoints):
         durations = [max(120, round((b - a) * 120)) for a, b in zip(times, times[1:])] + [1200]
     else:
         durations = [400] * (len(frames) - 1) + [1200]
+    return frames, labels, durations
+
+
+def animations(bundle, specs, directory, checkpoints):
+    """One APNG per map and season over the checkpoint bundles and the run bundle.
+
+    Returns the entries and, per identity map, the tracked raster of the run bundle,
+    so its static map has the colours of the last frame.
+    """
+    frames, labels, durations = timeline(bundle, checkpoints)
     width = max(512, bundle.columns)
-    written = []
+    written, final = [], {}
     for spec in specs:
         if not all(available(item, spec) for item in frames):
             continue
         layers = {}
         for item in frames:
-            for season, values in model_layers(item, spec):
-                buffer = io.BytesIO()
-                Image.fromarray(palette_rgb(values, spec['palette'])).save(buffer, format='PNG')
-                buffer.seek(0)
-                layers.setdefault(season, []).append(buffer)
-        for season, buffers in layers.items():
-            suffix = '' if season is None else f'-{SEASONS[season].lower()}'
-            relative = Path('maps') / f"{spec['name']}{suffix}-animation.png"
+            for season, values, vectors in model_layers(item, spec):
+                layers.setdefault(season, []).append((values, vectors))
+        for season, series in layers.items():
+            extra, note = {}, None
+            if is_identity(spec):
+                tracked, events = track_identities([values for values, _ in series])
+                series = [(values, None) for values in tracked]
+                final[spec['name']] = tracked[-1]
+                note = TRACKED
+                extra = {'identity': note, 'identity_events': [dict(event, frame=label) for event, label in zip(events, labels)
+                                                              if event['appeared'] or event['vanished']]}
+            relative = Path('maps') / f"{spec['name']}{suffix(season)}-animation.png"
             title = spec['title'] + ('' if season is None else f' · {SEASONS[season]}')
-            metadata = map_rendering.save_animation(directory / relative, buffers, [f'{title} · {label}' for label in labels],
-                                                    durations, width)
+            images = [map_rendering.frame(palette_rgb(values, spec['palette']), f'{title} · {label}', legend(spec['palette'], note),
+                                          vectors, width)
+                      for (values, vectors), label in zip(series, labels)]
+            metadata = map_rendering.save_frames(directory / relative, images, durations)
             written.append(entry(spec, 'animation', season, f'{title} · animation', relative.as_posix(), spec['palette'],
-                                 frames=labels, frame_count=metadata['frames'], duration_ms=metadata['duration_ms']))
-    return written
+                                 frames=labels, frame_count=metadata['frames'], duration_ms=metadata['duration_ms'], **extra))
+    return written, final
 
 
-def render(bundle, specs, directory, validation=(), compared=(), references=None, checkpoints=()):
+def render(bundle, specs, directory, validation=(), compared=(), references=None, checkpoints=(), parent=None):
     """Write PNGs under directory/maps; returns the maps entries of evaluation.json (paths relative to directory).
 
     validation: the profile's validation specs; compared: ids that validation compared
     for this bundle (only those get reference and difference maps, so the maps read no
-    reference the score did not use); checkpoints: bundles in time order.
+    reference the score did not use); checkpoints: bundles in time order; parent: the
+    bundle the run is compared with, drawn as kind "parent" with the reduction of the run's maps.
     """
     linked = {item['id']: item for item in validation}
+    animated, tracked = animations(bundle, specs, directory, checkpoints) if checkpoints else ([], {})
     written = []
     for spec in specs:
         target = linked.get(spec.get('validation'))
-        if target is not None and target['id'] in compared and references is not None:
+        if target is not None and not (target['id'] in compared and references is not None):
+            target = None
+        if target is not None:
             written += validated(bundle, spec, target, references, directory)
+        elif available(bundle, spec):
+            for season, label, values, vectors in model_images(bundle, spec, None):
+                note = None
+                if spec['name'] in tracked and season is None:
+                    values, note = tracked[spec['name']], TRACKED
+                title = spec['title'] + ('' if label is None else f' · {label}')
+                written.append(entry(spec, 'model', season, title,
+                                     save(directory, spec['name'] + suffix(season), palette_rgb(values, spec['palette']), title,
+                                          spec['palette'], vectors, note), spec['palette']))
+        else:
             continue
-        if not available(bundle, spec):
-            continue
-        for season, layer in model_layers(bundle, spec):
-            suffix = '' if season is None else f'-{SEASONS[season].lower()}'
-            title = spec['title'] + ('' if season is None else f' · {SEASONS[season]}')
-            written.append(entry(spec, 'model', season, title,
-                                 save(directory, spec['name'] + suffix, palette_rgb(layer, spec['palette'])), spec['palette']))
-    if checkpoints:
-        written += animations(bundle, specs, directory, checkpoints)
+        if parent is not None and available(parent, spec):
+            for season, label, values, vectors in model_images(parent, spec, target):
+                title = spec['title'] + ('' if label is None else f' · {label}') + ' · parent run'
+                written.append(entry(spec, 'parent', season, title,
+                                     save(directory, f"parent-{spec['name']}{suffix(season)}", palette_rgb(values, spec['palette']),
+                                          title, spec['palette'], vectors), spec['palette'], season_label=label))
+    written += animated
     if written:
         palettes.write_sidecar(directory / 'maps')
     return written

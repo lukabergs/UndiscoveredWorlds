@@ -13,8 +13,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
-sys.path.insert(0, str(ROOT / 'scripts/refs'))
-from cell_grid import conservative_remap  # noqa: E402
+from uwtools.cell_grid import conservative_remap  # noqa: E402
 from uwtools import references as reference_files  # noqa: E402
 from uwtools.hashing import sha256  # noqa: E402
 

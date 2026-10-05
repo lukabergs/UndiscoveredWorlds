@@ -135,8 +135,9 @@ if (D.groups.length || D.animations.length) {
   const linked = D.groups.filter(g => g.images.reference || g.images.difference);
   const plain = D.groups.filter(g => !(g.images.reference || g.images.difference));
   for (const g of linked) page.append(h('div', {class: 'group'}, h('h3', {}, g.title, g.validation ? h('span', {class: 'muted'}, ` · validation ${g.validation}`) : null),
-    h('div', {class: 'triple'}, ['model', 'reference', 'difference'].map(kind => g.images[kind] ? figure(g.images[kind], kind === 'difference' ? `model − reference (blue lower, red higher; ±${fmt(g.images[kind].half_range)})` : kind) : h('div', {})))));
-  if (plain.length) page.append(h('div', {class: 'maps'}, plain.map(g => figure(g.images.model || Object.values(g.images)[0], g.title))));
+    h('div', {class: 'triple'}, ['model', 'reference', 'difference'].map(kind => g.images[kind] ? figure(g.images[kind], kind === 'difference' ? `model − reference (blue lower, red higher; ±${fmt(g.images[kind].half_range)})` : kind) : h('div', {}))),
+    g.images.parent ? h('div', {class: 'triple'}, figure(g.images.parent, 'parent run')) : null));
+  if (plain.length) page.append(h('div', {class: 'maps'}, plain.flatMap(g => [figure(g.images.model || Object.values(g.images)[0], g.title)].concat(g.images.parent ? [figure(g.images.parent, 'parent run')] : []))));
   if (D.animations.length) {
     page.append(h('h3', {}, 'Animations'));
     page.append(h('div', {class: 'maps'}, D.animations.map(a => figure(a, `${a.title} · ${a.frames.length} frames`))));
