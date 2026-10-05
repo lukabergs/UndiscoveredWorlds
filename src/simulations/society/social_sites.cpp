@@ -108,9 +108,9 @@ int countinflows(planet& world, int x, int y)
 
 int computeslopepenalty(planet& world, int x, int y)
 {
-    int totaldelta = 0;
+    float totaldelta = 0.0f;
     int samples = 0;
-    const int baseelevation = world.map(x, y);
+    const float baseelevation = world.mapfloat(x, y);
 
     for (int dx = -1; dx <= 1; dx++)
     {
@@ -125,7 +125,7 @@ int computeslopepenalty(planet& world, int x, int y)
             if (ny < 0 || ny > world.height())
                 continue;
 
-            totaldelta += std::abs(baseelevation - world.map(nx, ny));
+            totaldelta += std::fabs(baseelevation - world.mapfloat(nx, ny));
             samples++;
         }
     }
@@ -133,7 +133,7 @@ int computeslopepenalty(planet& world, int x, int y)
     if (samples == 0)
         return 0;
 
-    return std::clamp((totaldelta / samples) / 16, 0, 100);
+    return std::clamp(static_cast<int>(totaldelta / static_cast<float>(samples) / 16.0f), 0, 100);
 }
 
 int computebiomesuitability(int biome)
@@ -283,8 +283,8 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
             const int slopepenalty = computeslopepenalty(world, x, y);
             const int slopescore = std::clamp(100 - slopepenalty, 0, 100);
 
-            const float averageclimate = static_cast<float>(world.jantemp(x, y) + world.jultemp(x, y)) / 2.0f;
-            const float averagerain = static_cast<float>(world.janrain(x, y) + world.julrain(x, y)) / 2.0f;
+            const float averageclimate = (world.jantempfloat(x, y) + world.jultempfloat(x, y)) / 2.0f;
+            const float averagerain = (world.janrainfloat(x, y) + world.julrainfloat(x, y)) / 2.0f;
             const int temperaturescore = std::clamp(100 - static_cast<int>(std::abs(averageclimate - 14.0f) * 4.0f), 0, 100);
             const int rainscore = std::clamp(100 - static_cast<int>(std::abs(averagerain - 80.0f) * 0.8f), 0, 100);
             const int biomescore = computebiomesuitability(world.biome(x, y));
@@ -298,7 +298,7 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
                 const twointegers downstream = getdestination(x, y, riverdir);
                 const int downstreamx = wrapxlocal(downstream.x, width);
                 const int downstreamy = std::clamp(downstream.y, 0, height);
-                gradientpenalty = std::max(0, world.map(x, y) - world.map(downstreamx, downstreamy)) / 24;
+                gradientpenalty = static_cast<int>(std::max(0.0f, world.mapfloat(x, y) - world.mapfloat(downstreamx, downstreamy)) / 24.0f);
             }
 
             const int riveraccess = std::clamp(riverscore - gradientpenalty + (riverflow > 300 ? 12 : 0), 0, 100);
@@ -566,8 +566,8 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
                 if (dx != 0 && dy != 0)
                     movecost++;
 
-                const int elevationdelta = std::abs(world.map(nx, ny) - world.map(node.x, node.y));
-                movecost += std::min(8, elevationdelta / 180);
+                const float elevationdelta = std::fabs(world.mapfloat(nx, ny) - world.mapfloat(node.x, node.y));
+                movecost += std::min(8, static_cast<int>(elevationdelta / 180.0f));
 
                 const int special = world.special(nx, ny);
                 if (special >= 130 && special <= 132)

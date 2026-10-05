@@ -134,7 +134,7 @@ Phase 4 steps (agreed 2026-10-05; one commit and one ledger entry per step, in t
 | 12c | The six elevation components stored as float; global readers on float getters; terrain writers keep fractions | — | `world` run 5 (`world-0036`) |
 | 13 | Hydrology to the float accessors; lake surface, rift lake surface and rift lake bed float | — | `world` run 6 (`world-0037`) |
 | 14 | Resources to the float accessors | — | `world` run 7 (`world-0038`) |
-| 15 | Society to the float accessors | — | `world` run (module society) |
+| 15 | Society to the float accessors | — | `world` run 8 (`world-0039`); evidence is a pair of runs with `--social` |
 | 16 | Phase close: status note, §11, the prompt for Phase 5 | not-exercised list | unchanged |
 
 Rules of the phase, decided by the user on 2026-10-05:

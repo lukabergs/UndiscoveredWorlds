@@ -91,6 +91,7 @@ Lessons:
 | `world-0036` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 12c: the six elevation components stored as float (module terrain) |
 | `world-0037` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 13: hydrology on the float accessors; lake surfaces stored as float (module hydrology) |
 | `world-0038` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 14: resources on the float accessors (module resources) |
+| `world-0039` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 15: society on the float accessors (module society) |
 
 Lessons:
 
@@ -187,3 +188,5 @@ Lessons:
 - `world-0037`: The minimal world has no lakes and, before this step, no deltas; it cannot show a defect in either.
 - `world-0037`: The reference bundles of the next step are out/scratch/phase4/step13-*; world run 6 is the parent.
 - `world-0038`: The reference bundles of the next step are out/scratch/phase4/step14-*; world run 7 is the parent.
+- `world-0039`: Society runs only with --social; no recipe default and no registered run turns it on. A step that touches society needs its own pair of runs with the switch.
+- `world-0039`: The reference bundles after this step are out/scratch/phase4/step15-*; world run 8 is the parent.

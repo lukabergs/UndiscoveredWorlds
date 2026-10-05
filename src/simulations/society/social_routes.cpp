@@ -334,8 +334,8 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
             const auto landmovecost = [&](int cx, int cy, int nx, int ny) -> float
             {
                 float cost = (cx == nx || cy == ny) ? 10.0f : 14.0f;
-                const int elevationdelta = std::abs(world.map(cx, cy) - world.map(nx, ny));
-                cost += std::min(12, elevationdelta / 180);
+                const float elevationdelta = std::fabs(world.mapfloat(cx, cy) - world.mapfloat(nx, ny));
+                cost += std::min(12.0f, elevationdelta / 180.0f);
                 const int special = world.special(nx, ny);
 
                 if (special >= 130 && special <= 132)
