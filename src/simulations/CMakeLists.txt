@@ -25,7 +25,7 @@ target_include_directories(uw_climate PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/climat
 # The energy-map adapter still reads planet and tuning; the other kernels use
 # only their own value types and core grid/season definitions.
 target_include_directories(uw_climate PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../wip"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../world"
     "${CMAKE_CURRENT_SOURCE_DIR}/society"
 )
 target_link_libraries(uw_climate PUBLIC uw_grid)

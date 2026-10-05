@@ -57,4 +57,4 @@ Registered runs up to 75 keep the former snapshot layout (raw arrays plus a mani
 
 `uv run --offline python tests/scripts/check_tectonics_cli.py out/build/headless/bin/Release/world_pipeline.exe` (options the command line refuses, checkpoint times and labels, the mineral history switch); `ctest ... -L tectonics` (`TectonicOptions.*`: values the scenario options or the engine refuse); `uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe` (the profile's checks, among them repeat, recipe equality and the column budget).
 
-Other code locations: `src/io/tectonic_heightmap_io.*` (heightmap images and metric TIFFs of the engine tests), `src/app/tectonic_options.*` (scenario options of `world_pipeline`).
+Other code locations: `src/io/tectonic_heightmap_io.*` (heightmap images and metric TIFFs of the engine tests), `src/cli/tectonic_options.*` (scenario options of `world_pipeline`).

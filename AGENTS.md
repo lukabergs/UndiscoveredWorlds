@@ -12,7 +12,7 @@ Procedural planetary simulation (terrain, tectonics, climate, hydrology, early s
 
 ## Where things go
 
-- Behaviour in `src/simulations/<module>/`, stage order and recipes in `src/pipeline/`, I/O in `src/io/`, observed-data comparisons in `src/validation/`, GUI only in `src/app/`. One translation unit per process, named by its process id. `src/wip/functions.hpp` is a compatibility umbrella; include the owning header instead.
+- Behaviour in `src/simulations/<module>/`, stage order and recipes in `src/pipeline/`, I/O in `src/io/`, observed-data comparisons in `src/validation/`, GUI only in `src/app/`. One translation unit per process, named by its process id. `src/world/functions.hpp` is a compatibility umbrella; include the owning header instead.
 - Downloads and receipts in `refs/source/`, prepared inputs in `refs/processed/`, run artefacts in `runs/`, builds and scratch in `out/`. Bulk directories are junctions into `D:/dev/undiscovered-worlds/` (`runs/storage.json`): keep repo-relative paths, never replace a junction with a directory, and create run and report directories through `scripts/uwtools/storage.py` (`run_directory`, `route`). Registered runs live in `runs/<module>/<id>/` (`scripts/uwtools/runs.py` finds a run in either layout); `runs/archive/` is the sealed earlier layout and is never written. `scripts/repository_scope.py` enforces the 5 MiB blob limit and local-only paths.
 
 ## Simulation evidence

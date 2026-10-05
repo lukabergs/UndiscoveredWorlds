@@ -72,6 +72,7 @@ Lessons:
 | `world-0018` | 2026-10-05 | retired | keep | consolidation phase 3, step 13: legacy climate chain retired (step 9 is tectonics-0004) |
 | `world-0019` | 2026-10-05 | tooling added | keep | consolidation phase 3, step 10: palette sidecars and their check |
 | `world-0020` | 2026-10-05 | defects fixed | keep | consolidation phase 3: fresh-context review of the new tooling and its fixes |
+| `world-0021` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 1: directory moves (src/world, src/cli, profiler and environment in src/core, workbench in src/app); the step list of the phase |
 
 Lessons:
 
@@ -123,3 +124,6 @@ Lessons:
 - `world-0019`: A palette change needs a new version string in the palette file: the same version with another hash makes every existing sidecar of that version fail the layout check.
 - `world-0020`: A check that compares two bundles must be shown failing once: recipe-equality passed for a week of design because both commands were the same.
 - `world-0020`: Sealed directories need a guard in code, not only a README: a default output path beside the bundle pointed into the archive.
+- `world-0021`: out/scratch/phase4/step.ps1 <label> <reference-label> builds both presets, makes the three bundles, compares them and runs the layout and access checks; the three audited runs and both builds take about 20 minutes.
+- `world-0021`: The reference bundles of the next step are out/scratch/phase4/step01-*.
+- `world-0021`: out/scratch/phase4/include_graph.py prints which source directory includes which.

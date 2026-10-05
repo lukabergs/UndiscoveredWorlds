@@ -6,7 +6,7 @@ the `planet` class. The migration status at the end says what is implemented.
 
 ## Why
 
-`planet` (`src/wip/planet.hpp`) is a single object that holds every simulated
+`planet` (`src/world/planet.hpp`) is a single object that holds every simulated
 field, the solver state of climate, tectonic and social entity lists, and more
 than 100 presentation settings (colours, shading, marbling). Its 82 grids are
 fixed `[2048][1024]` arrays, so a world costs 366 MiB at any resolution and a
@@ -55,7 +55,7 @@ Geosphere, not Lithosphere: it includes the prescribed mantle, and the
 tectonics engine's internal solver class is already called `lithosphere`.
 
 In the code today, `planet` holds one data struct per component
-(`src/wip/planet_components.hpp`: planet body, geosphere, hydrosphere,
+(`src/world/planet_components.hpp`: planet body, geosphere, hydrosphere,
 cryosphere, atmosphere parameters, biosphere, anthroposphere, presentation
 settings) and the climate module's `climateworld`. Grids are `worldgrid<T>`
 (`src/core/world/world_grid.hpp`), sized to the world. Solver state that is not

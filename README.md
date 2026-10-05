@@ -77,7 +77,7 @@ Keep headers beside their implementations. Organize by the responsibility of a m
 
 `globalterrain`, `globalclimate`, and `physical_layers` have been split into simulation modules and pipeline entry points. Society CSV loading belongs to `io/social_definitions`; its stage order belongs to `pipeline/social_generation`. [Module boundaries and retention decisions](docs/architecture/simulation-modules.md) describe the active and legacy paths.
 
-`src/wip/` still holds `planet`, `region`, `regionalmap`, `classes`, `misc`, `functions`, `generation_tuning`, and the workbench UI (`generation_workbench`). World storage/persistence, regional generation and shared utilities remain coupled there; stage execution lives in `pipeline/world_stages`. `functions.hpp` is a compatibility umbrella without SFML; map views and drawing live in `app/rendering/map_views.hpp`. New callers should include the owning module's header. The target structure (data-only sphere components, processes, recipes, evaluation) and its migration status are in [world model](docs/architecture/world-model.md).
+`src/world/` still holds `planet`, `region`, `regionalmap`, `classes`, `misc`, `functions`, and `generation_tuning`; the workbench UI (`generation_workbench`) is in `src/app/`. World storage/persistence, regional generation and shared utilities remain coupled there; stage execution lives in `pipeline/world_stages`. `functions.hpp` is a compatibility umbrella without SFML; map views and drawing live in `app/rendering/map_views.hpp`. New callers should include the owning module's header. The target structure (data-only sphere components, processes, recipes, evaluation) and its migration status are in [world model](docs/architecture/world-model.md).
 
 Further land-surface hydrology and ecology belong under `src/simulations/hydrology/` and `src/simulations/ecology/`. Existing climate moisture/storage physics remains in `climate/`. Gold deposits form during tectonics in `geology/mineral_systems/`, travel with their host crust and erode as they are exhumed; `resources/` routes liberated gold into placers on the final drainage. Other mineral and marine scores remain derived heuristics in `resources/`. Biological production belongs in ecology, with society consuming both. `world_pipeline run --recipe tectonics` writes the deposit list and gold budget of a native run (mineral history is on by default; `--mineral-history off` disables it).
 
@@ -90,7 +90,7 @@ Further land-surface hydrology and ecology belong under `src/simulations/hydrolo
 | `configs/` | How an application or run is configured | Application paths; future recipes, resolution, duration, stage switches |
 | `refs/` | Imported inputs and external reference data | Heightmaps, observed precipitation, prepared Earth grids |
 
-The distinction follows purpose. An imported heightmap is a dataset; a generated heightmap is a run artifact. Current tuning constants remain in `src/wip/generation_tuning.hpp`; moving them into configurable recipes is future work.
+The distinction follows purpose. An imported heightmap is a dataset; a generated heightmap is a run artifact. Current tuning constants remain in `src/world/generation_tuning.hpp`; moving them into configurable recipes is future work.
 
 Keep downloads and their receipts/licenses under `refs/source/<dataset>/`. Prepared grids belong under `refs/processed/<quantity>/`; Earth rasters use `{width}` filenames and metadata under `processed/metadata/{width}/`. See [reference preparation](refs/README.md).
 
@@ -194,7 +194,7 @@ by the tectonics cleanup.
 
 The project uses C++ with CMake and vcpkg, SFML, Dear ImGui, ImGui-SFML, and ImGuiFileDialog. CUDA rendering is optional in the existing build configuration. Tectonics is built from `src/simulations/geology/plate_tectonics` as the internal `plate_tectonics` target; no standalone checkout is required. Every target is built as C++17. See the [tectonics integration and checks](docs/architecture/tectonic-contract-validation.md) and [native output contract](docs/architecture/tectonics/tectonic-output-contract.md).
 
-The active JSON registry still supplies benchmark IDs; replacing it requires preserving those IDs. Compatible benchmark imports are generated from the retained Earth master. Later refactoring can extract `src/wip/` responsibilities.
+The active JSON registry still supplies benchmark IDs; replacing it requires preserving those IDs. Compatible benchmark imports are generated from the retained Earth master. Later refactoring can extract `src/world/` responsibilities.
 
 ```powershell
 cmake --preset desktop

@@ -114,6 +114,36 @@ Decided in this phase: steps 8 and 11 were one commit and step 12 came before th
 
 **Phase 4 — source tree and CMake.** `src/cli`, `src/world`, `src/app` GUI-only, per-directory CMake, one standard, one include root (mechanical rewrite of ~700 includes), layering check. Split the giants: `assetdata.cpp` (data to `assets/`), `climate_coupling.cpp` by sub-model, `climate_validation.cpp` by concern (most of it moves to Python), `main.cpp` by screen; `misc.cpp` and `functions.hpp` dissolve under the world-model migration. The terrain, hydrology, resource and society code and the regional map still read the climate fields and the elevation through the whole-number accessors (`climatelegacyscale` in `climate_world.hpp`, `wholemetres` in `world_grid.hpp`); each module moves to the float accessors when it is split or rewritten in this phase, and that change of results is a new baseline for the module. The remaining integer elevation components (mountain height, canyon uplift, crater and volcano heights, ocean ridge height) and lake surfaces become float with the code that produces them.
 
+Phase 4 steps (agreed 2026-10-05; one commit and one ledger entry per step, in this order). "Unchanged" means the seed-1 bundles of the three recipes at 256 columns, with the settings of `world-0010` and `--audit-access`, are identical to the reference; a "baseline" step registers a run instead.
+
+| Step | Work | §11 items | Results |
+|---|---|---|---|
+| 1 | Directory moves: `src/wip` → `src/world`; the CLI sources out of `src/app` into `src/cli`; profiler and environment into `src/core`; the workbench into `src/app` | — | unchanged |
+| 2 | Per-directory CMake, STATIC `uw_<dir>` libraries, `plate_tectonics` → `uw_tectonics` | — | unchanged; full ctest once |
+| 3 | One include root (rewrite of every project include) and the layering rules in `check_layout.py`, shown failing once | — | unchanged |
+| 4 | What the verifier needs before the first baseline (legend, graticule, wind direction, parent maps, plate identity) and the cheap tidy (cross-imports of `scripts/evaluation`, the palette-header main guard, `pyshp`) | review material; part of the script item | unchanged (no compiled source) |
+| 5 | `assetdata.cpp`: data to `assets/` | — | unchanged |
+| 6 | `climate_validation.cpp` by concern; the `climate-benchmark` command and the GUI's benchmark recording go. Nothing under `refs/` is touched: the files the removed readers used stay for the user's pending decision | validation split; `weighted_relative_error` and the `.uwclim` inputs | unchanged |
+| 7 | `climate_coupling.cpp` by sub-model; climate tests split | callerless `readclimateworldfield(..., true)` and `climateworldfields(true)`; replay and benchmark modes of `world_tests` | unchanged; full ctest once |
+| 8 | `main.cpp` by screen | — | unchanged (compiled only) |
+| 9 | `misc.cpp` and `functions.hpp` dissolve | `createfractal` under 32 columns; `planet::smooth()`; finishing a world from a bundle as far as the dissolve reaches | unchanged at 256 columns |
+| 9b | The tectonics report through the three templates; the validation guards of §3 | rest of the script item; unbuilt guards | unchanged (no compiled source) |
+| 10 | The `world` profile runs `run --recipe procedural-world --bundle` and gets one draft review checklist (terrain and hydrology); one registered run at the last unchanged commit is the reference of the float steps | `uw.py world run` not exercised | first run of the `world` series |
+| 11 | `atmosphere.precipitation` and `atmosphere.precipitation_exact` become one field | the two precipitation fields | climate baseline only if `earth-climate` differs from run 388; otherwise the shift lands in the `world` series |
+| 12 | Terrain to the float accessors; mountain height, canyon uplift, crater, volcano and ocean ridge heights float | declared access of the mountain fields | `world` run (module terrain) |
+| 13 | Hydrology to the float accessors; lake surfaces float | `hydrology.deltas_and_wetlands` writing temperature | `world` run (module hydrology) |
+| 14 | Resources to the float accessors | — | `world` run (module resources) |
+| 15 | Society to the float accessors | — | `world` run (module society) |
+| 16 | Phase close: status note, §11, the prompt for Phase 5 | not-exercised list | unchanged |
+
+Rules of the phase, decided by the user on 2026-10-05:
+
+- Reference bundles: the "after" bundles of a step are the reference of the next one; fresh ones are made only when the previous comparison was not identical or the binary's settings changed. The first reference is `out/scratch/phase4/ref-269cff6-*`.
+- Float steps register in the `world` series (`uw.py world run`), one run per step, and the ledger entry names the module. Terrain, hydrology, resources and society get no profile or registry of their own: four profiles would be four more agent-drafted checklists for the user to rewrite.
+- A new baseline is registered, reviewed by the verifier and recorded in the ledger with the verdict "pending user review"; work continues without waiting. Climate run 388 and tectonics run 75 stay the baselines with the user's verdict pending, and the draft checklists in `configs/evaluation/` are used unchanged.
+- ctest runs at steps 2 and 7 only. An agent stops only for something that deletes or migrates data under `refs/` or `runs/`, or that a commit cannot undo; every other choice is taken, and recorded here or in §11.
+- Out of the phase: the FastLEM stages (a modelling task, §11 "Later") and the regional map's move to the float accessors (Phase 5: it writes nothing a bundle carries, so it has no headless baseline). `climatelegacyscale` and `wholemetres` survive Phase 4 for the regional map alone.
+
 **Phase 5 — GUI as viewer.** Loads bundles; the "Generate elements" buttons call processes; `regionalmap` leaves the headless link line; parameters move from `generation_tuning.hpp` into recipes. The renderers and the `.uww` format take whole-number copies of the float fields; both go when the GUI draws from bundles.
 
 Each phase ends with: seed-1 bundle equivalence (`compare_bundles.py`) where results must not change, `--audit-access`, `process_access.py --check` on the stored reports (it shows a hand edit; a phase that changes what a step reads or writes measures the affected recipes again with the read-tracking build and stores the new reports), `check_layout.py`, a compile of both presets, and a ledger entry describing what changed. A phase also takes the open items that §11 assigns to it.
@@ -203,7 +233,6 @@ Phase 4 (source tree and CMake):
 - `createfractal` does not terminate on a world grid under 32 columns (the shelf pass after tectonics hangs at 16 x 8); `world_pipeline run` refuses such grids. Fix when the terrain noise leaves `misc.cpp`, then drop the refusal.
 - `planet::smooth()` ignores the grid it is given and smooths the base elevation.
 - `atmosphere.precipitation` and `atmosphere.precipitation_exact` are both float and differ only where the legacy January/July passes adjust rain: `syncseasonalclimatefromlegacy` overwrites the first and not the second. Make it one field when `climate_fields.cpp` and `climate_coupling.cpp` are split.
-- The FastLEM stages are legacy (`islegacygenerationstage`): `terrain.fastlem_mountains` does not terminate at seed 1 and 256 columns. Repair them or replace them with another erosion and drainage model, then remove the legacy mechanism.
 - A procedural world cannot be finished from a bundle: tables, the climate solver's state and `GenerationScratch` state are not world fields (`kInRunState` in `world_recipes.cpp`, world-model migration step 5).
 - `readclimateworldfield(..., includeinputs = true)` and `climateworldfields(true)` have had no caller since `climate_pipeline` went.
 - From Phase 3. The replay and benchmark modes of `world_tests` (`tests/world_tests_main.cpp`) have no script caller; the replay modes read the fixtures the climate solvers write. They leave the test binary when the climate tests are split.
@@ -220,3 +249,8 @@ Phase 5 (GUI as viewer):
 - The desktop application has not been launched since before Phase 0 (agents never launch it); everything in `src/app` was only compiled. Before or at the start of this phase the user checks by hand: map rendering (temperature, rain and elevation now reach the renderers as whole-number copies of float fields), `.uww` save and load, and the workbench stepping past the FastLEM stages.
 - The tectonics recipe keeps the default planet body while `procedural-world` draws the body from the seed, so for seeds whose gravity is not 1 the module run and the world's tectonics step differ. When parameters move into recipes the body becomes a recipe parameter and the two agree.
 - `--checkpoint-every` and `--checkpoint-at` in Myr apply to the tectonics step only; other evolvers get them when they declare a duration (time model of §1).
+- Moved from Phase 4 (user, 2026-10-05). The regional map (`src/world/regionalmap.cpp`, `region.*`) still reads temperature, rain and elevation through the whole-number accessors; `climatelegacyscale` and `wholemetres` exist for it alone after Phase 4. It writes nothing a bundle carries, so its move to the float accessors has no headless baseline and belongs with the user's manual check of the GUI.
+
+Later (a task of its own, no consolidation phase):
+
+- Moved from Phase 4 (user, 2026-10-05): the FastLEM stages are legacy (`islegacygenerationstage`), and `terrain.fastlem_mountains` does not terminate at seed 1 and 256 columns. Repairing them or replacing them with another erosion and drainage model is a modelling task with its own evaluation, not a change of structure; the legacy mechanism is removed with it. Until then no recipe produces the mountain fields, so their change to float in Phase 4 step 12 is compiled and not exercised.

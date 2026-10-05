@@ -1,4 +1,4 @@
-# Planet-level stages still share the world class and utilities in src/wip.
+# Planet-level stages still share the world class and utilities in src/world.
 # Object libraries keep each domain's sources explicit; none of them depends on
 # SFML or ImGui. Pure numerical solvers live in uw_climate instead.
 function(uw_world_module name)

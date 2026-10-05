@@ -45,9 +45,9 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
     # Headless world core: world state, generation stages, recipes, I/O and
     # validation. No SFML or ImGui; shared by world_pipeline and the desktop.
     set(UW_WORLD_CORE_SOURCES
-        src/app/command_line_generation.cpp
-        src/app/tectonic_options.cpp
-        src/app/diagnostics/profiler.cpp
+        src/cli/command_line_generation.cpp
+        src/cli/tectonic_options.cpp
+        src/core/profiler.cpp
         src/core/grid_coordinates.cpp
         src/io/map_imports.cpp
         src/io/social_definitions.cpp
@@ -56,18 +56,18 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
         src/pipeline/social_generation.cpp
         src/pipeline/world_recipes.cpp
         src/pipeline/world_stages.cpp
-        src/wip/classes.cpp
-        src/wip/misc.cpp
-        src/wip/planet.cpp
-        src/wip/planet_bundle.cpp
-        src/wip/planet_fields.cpp
-        src/wip/region.cpp
-        src/wip/regionalmap.cpp
+        src/world/classes.cpp
+        src/world/misc.cpp
+        src/world/planet.cpp
+        src/world/planet_bundle.cpp
+        src/world/planet_fields.cpp
+        src/world/region.cpp
+        src/world/regionalmap.cpp
     )
 
     set(UW_INCLUDE_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/app"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/app/diagnostics"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/cli"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/io"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline"
@@ -77,7 +77,7 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/society"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/simulations/terrain"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/climate"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/wip"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/world"
     )
 
     include(src/simulations/world_modules.cmake)
@@ -86,8 +86,8 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
     # stage runner, validation, map imports, progress and environment. Linked by
     # uw_world_core; climate_world_tests links it alone to keep it planet-free.
     add_library(uw_climate_world STATIC
-        src/app/app_environment.cpp
-        src/app/climate_options.cpp
+        src/core/app_environment.cpp
+        src/cli/climate_options.cpp
         src/io/raster_image.cpp
         src/io/raster_imports.cpp
         src/pipeline/climate_stages.cpp
@@ -145,7 +145,7 @@ if(UW_BUILD_WORLD OR UW_BUILD_APP)
         )
     endfunction()
 
-    uw_add_world_executable(world_pipeline src/app/world_pipeline_main.cpp)
+    uw_add_world_executable(world_pipeline src/cli/world_pipeline_main.cpp)
 endif()
 
 if(UW_BUILD_APP)
@@ -186,7 +186,7 @@ if(UW_BUILD_APP)
         src/app/ui_charts.cpp
         src/app/ui_panels.cpp
         src/app/world_property_controls.cpp
-        src/wip/generation_workbench.cpp
+        src/app/generation_workbench.cpp
     )
 
     add_library(uw_app_core OBJECT ${UW_DESKTOP_SOURCES})

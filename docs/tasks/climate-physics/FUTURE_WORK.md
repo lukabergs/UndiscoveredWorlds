@@ -75,7 +75,7 @@ changing winds, positivity and mass; uniform flow, vortex and polar trails.
 
 Production: `src/simulations/climate/climate_coupling.cpp`,
 `src/simulations/climate/climate_fields.cpp`,
-`src/pipeline/climate_generation.cpp`, `src/wip/generation_workbench.cpp`.
+`src/pipeline/climate_generation.cpp`, `src/app/generation_workbench.cpp`.
 Bounded atmosphere/ocean/hydrology iterations feed diagnosed layer heating back
 into circulation without repeating coastal temperature postprocessing. They
 retain hydrological stores between passes, under-relax heating, and require
@@ -83,7 +83,7 @@ wind, SST, applied-forcing/heating and rainfall changes plus accepted inner
 solves before reporting convergence. Snow mass participates in spin-up acceptance;
 caps remain explicit nonconvergence. The direct latent-heating ascent feedback is disabled
 when that circulation projection is active; thermodynamic moist adjustment stays.
-Isolation switches in `src/wip/generation_tuning.hpp`: zonal, stationary, surface, upper,
+Isolation switches in `src/world/generation_tuning.hpp`: zonal, stationary, surface, upper,
 lagged coupling and prognostic atmosphere.
 
 Tests: all 16 isolation combinations, zero forcing, hydrostatic units, rotation
