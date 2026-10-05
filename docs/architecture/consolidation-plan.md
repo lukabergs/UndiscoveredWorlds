@@ -248,7 +248,7 @@ Phase 6 steps (listed 2026-10-06 at the start of the phase; one commit and one l
 | `climate_flow_tests.cpp` (`Model`, 95 lines) | 32 x 16 particle grid: radius, equator row and cell width, zero `east`/`south`, trace config | done, `world-0063` | 2 min (00:29 to 00:31) |
 | `climate_energy_tests.cpp` (`Model`, 125 lines) | none shared (independent scalar sections): the fixture holds only `expect` | done, `world-0064` | 0 min (00:31 to 00:31) |
 | `climate_physics_tests.cpp` (`Model`, 145 lines) | none shared: the fixture holds only `expect` | done, `world-0065` | 0 min (00:31 to 00:31) |
-| `climate_koppen_tests.cpp` (`Classification`, 40 lines) | the temperate monthly temperature and 80 mm rain arrays |  |  |
+| `climate_koppen_tests.cpp` (`Classification`, 40 lines) | the temperate monthly temperature and 80 mm rain arrays | done, `world-0066` | 0 min (00:31 to 00:31) |
 | `core/climate_grid_tests.cpp` (`Geometry`, 150 lines) | the 128 x 64 Earth grid and `pi` |  |  |
 | `io/climate_reference_tests.cpp` (`MonthlyGrids`, 60 lines) | the fixture paths in the working directory, removed in `TearDown` |  |  |
 
