@@ -29,12 +29,12 @@ namespace
 
         const int* mapnom;
         const int* lakemap;
-        const short* oceanridgeheightmap;
-        const short* mountainheights;
-        const short* volcanomap;
-        const short* extraelevmap;
-        const short* craterrims;
-        const short* cratercentres;
+        const float* oceanridgeheightmap;
+        const float* mountainheights;
+        const float* volcanomap;
+        const float* extraelevmap;
+        const float* craterrims;
+        const float* cratercentres;
         const short* oceanridgemap;
         const short* oceanriftmap;
         const short* jantempmap;
@@ -2403,12 +2403,12 @@ namespace
     {
         DeviceBuffer<int> mapnom;
         DeviceBuffer<int> lakemap;
-        DeviceBuffer<short> oceanridgeheightmap;
-        DeviceBuffer<short> mountainheights;
-        DeviceBuffer<short> volcanomap;
-        DeviceBuffer<short> extraelevmap;
-        DeviceBuffer<short> craterrims;
-        DeviceBuffer<short> cratercentres;
+        DeviceBuffer<float> oceanridgeheightmap;
+        DeviceBuffer<float> mountainheights;
+        DeviceBuffer<float> volcanomap;
+        DeviceBuffer<float> extraelevmap;
+        DeviceBuffer<float> craterrims;
+        DeviceBuffer<float> cratercentres;
         DeviceBuffer<short> oceanridgemap;
         DeviceBuffer<short> oceanriftmap;
         DeviceBuffer<short> jantempmap;

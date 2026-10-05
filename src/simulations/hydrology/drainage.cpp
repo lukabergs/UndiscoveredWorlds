@@ -611,7 +611,7 @@ void avoidvolcanoes(planet& world)
 
                 twointegers dest = getdestination(i, j, dir);
 
-                if (world.volcano(dest.x, dest.y) != 0)
+                if (world.volcanofloat(dest.x, dest.y) != 0)
                 {
                     int currentelev = world.nom(i, j);
 
@@ -628,7 +628,7 @@ void avoidvolcanoes(planet& world)
 
                         for (int l = j - 1; l <= j + 1; l++)
                         {
-                            if (l >= 0 && l <= height && (kk != i || l != j) && world.volcano(kk, l) == 0)
+                            if (l >= 0 && l <= height && (kk != i || l != j) && world.volcanofloat(kk, l) == 0)
                             {
                                 int nom = world.nom(kk, l);
 
@@ -1129,7 +1129,7 @@ void accumulaterivercatchments(planet& world, int minimum, int mountainheightlim
                 {
                     bool goahead = 1;
 
-                    if (world.mountainheight(i, j) > mountainheightlimit)
+                    if (world.mountainheightfloat(i, j) > mountainheightlimit)
                     {
                         int dir = world.riverdir(i, j);
                         int x = i;
@@ -1156,7 +1156,7 @@ void accumulaterivercatchments(planet& world, int minimum, int mountainheightlim
                         if (y > height)
                             y = height;
 
-                        if (world.mountainheight(x, y) > mountainheightlimit)
+                        if (world.mountainheightfloat(x, y) > mountainheightlimit)
                             goahead = 0;
                     }
 
@@ -1246,11 +1246,11 @@ void removerivermountains(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.sea(i, j) == 0 && world.mountainheight(i, j) == 0)
+            if (world.sea(i, j) == 0 && world.mountainheightfloat(i, j) == 0)
             {
                 twointegers dest = getflowdestination(world, i, j, 0);
 
-                if (world.mountainheight(dest.x, dest.y) > minremoveheight && world.sea(dest.x, dest.y) == 0) // We've got flow from a non-mountain cell into a mountain cell!
+                if (world.mountainheightfloat(dest.x, dest.y) > minremoveheight && world.sea(dest.x, dest.y) == 0) // We've got flow from a non-mountain cell into a mountain cell!
                 {
                     bool keepgoing = 1;
 
@@ -1299,7 +1299,7 @@ void removerivermountains(planet& world)
                         if (world.sea(x, y) == 1)
                             keepgoing = 0;
 
-                        if (world.mountainheight(x, y) == 0)
+                        if (world.mountainheightfloat(x, y) == 0)
                             keepgoing = 0;
 
                     } while (keepgoing == 1);
@@ -1337,7 +1337,7 @@ void removerivermountains(planet& world)
                         {
                             if (xx != y || y != j)
                             {
-                                if (world.mountainheight(xx, y) == 0 && toremove[xx][y] == 0)
+                                if (world.mountainheightfloat(xx, y) == 0 && toremove[xx][y] == 0)
                                 {
                                     crount++;
 

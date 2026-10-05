@@ -1847,7 +1847,7 @@ void createoceanfault(planet& world, int midx, int midy, int mindist, int maxdis
                     oldridgesmap[i][j] = ridgesmap[ii][jj];
                     oldoceanrifts[i][j] = world.oceanrifts(ii, jj);
                     oldoceanridges[i][j] = world.oceanridges(ii, jj);
-                    oldoceanridgeheights[i][j] = world.oceanridgeheights(ii, jj);
+                    oldoceanridgeheights[i][j] = world.oceanridgeheightsfloat(ii, jj);
                     oldoceanridgeangle[i][j] = world.oceanridgeangle(ii, jj);
                     oldoceanridgeoffset[i][j] = world.oceanridgeoffset(ii, jj);
                 }

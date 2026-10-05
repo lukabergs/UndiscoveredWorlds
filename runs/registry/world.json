@@ -28,6 +28,13 @@
       "run": "runs/world/4",
       "date": "2026-10-05T16:43:53+00:00",
       "label": "step 12 corrected: shelf pass compares depth again"
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "run": "runs/world/5",
+      "date": "2026-10-05T18:31:36+00:00",
+      "label": ""
     }
   ]
 }

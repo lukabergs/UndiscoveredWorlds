@@ -433,7 +433,7 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
                             if (jj >= 0 && jj <= height)
                             {
-                                if (world.mountainheight(ii, jj) == 0)
+                                if (world.mountainheightfloat(ii, jj) == 0)
                                 {
                                     if (i >= 0 && i <= height && j >= 0 && j <= height && rangeheighttemplate[i][j] != 0)
                                     {
@@ -445,11 +445,11 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
                                         float frac = (float)fractal[ii][jj];
                                         frac = frac / (float)maxelev;
-                                        h = (int)((float)h * frac);
+                                        const float scaled = (float)h * frac;
 
                                         if (mode == 0 || mode == 1)
                                         {
-                                            world.setmountainheight(ii, jj, h);
+                                            world.setmountainheight(ii, jj, scaled);
                                             world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
                                             world.setnomfloat(ii, jj, conheight);
                                         }
@@ -458,7 +458,7 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
                                         {
                                             if (world.mapfloat(ii, jj) >= conheight)
                                             {
-                                                world.setmountainheight(ii, jj, h);
+                                                world.setmountainheight(ii, jj, scaled);
                                                 world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
 
                                                 if (fewer == 0)
@@ -468,9 +468,9 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
                                         if (mode == 3) // Islands are just strange and different.
                                         {
-                                            if (h > sealevel)
+                                            if (scaled > (float)sealevel)
                                             {
-                                                world.setmountainheight(ii, jj, h - sealevel);
+                                                world.setmountainheight(ii, jj, scaled - (float)sealevel);
                                                 world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
                                                 world.setnomfloat(ii, jj, conheight);
                                             }

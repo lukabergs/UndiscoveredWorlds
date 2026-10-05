@@ -53,12 +53,12 @@ struct climateinputs
     int seatotal = 0;
     int rows = ARRAYHEIGHT;
     const float* nom = nullptr;   // base elevation, metres above the datum
-    const short* mountainheights = nullptr;
-    const short* extraelev = nullptr;
-    const short* craterrims = nullptr;
-    const short* cratercentres = nullptr;
-    const short* volcano = nullptr;
-    const short* oceanridgeheight = nullptr;
+    const float* mountainheights = nullptr;
+    const float* extraelev = nullptr;
+    const float* craterrims = nullptr;
+    const float* cratercentres = nullptr;
+    const float* volcano = nullptr;
+    const float* oceanridgeheight = nullptr;
     const int* lakesurface = nullptr;
     const int* riftlakesurface = nullptr;
     const short* special = nullptr;
@@ -160,8 +160,11 @@ public:
     bool seawrap(int x, int y) const;
     bool outline(int x, int y) const;
     int mountainheight(int x, int y) const;
+    float mountainheightfloat(int x, int y) const;
     int craterrim(int x, int y) const;
+    float craterrimfloat(int x, int y) const;
     int volcano(int x, int y) const;
+    float volcanofloat(int x, int y) const;
     int lakesurface(int x, int y) const;
     int riftlakesurface(int x, int y) const;
     int special(int x, int y) const;
@@ -450,12 +453,6 @@ inline float climateworld::mapfloat(int x, int y) const
 {
     if (!inside(x, y))
         return 0.0f;
-    const float base = inputs_.nom[inputindex(x, y)];
-    return base + static_cast<float>(map(x, y) - wholemetres(base));
-}
-
-inline int climateworld::map(int x, int y) const
-{
     UW_FIELD_READ(volcano);
     UW_FIELD_READ(base_elevation);
     UW_FIELD_READ(sea_level);
@@ -464,20 +461,24 @@ inline int climateworld::map(int x, int y) const
     UW_FIELD_READ(extra_elevation);
     UW_FIELD_READ(crater_rims);
     UW_FIELD_READ(crater_centres);
+    const std::size_t cell = inputindex(x, y);
+    const float base = inputs_.nom[cell];
+    const float thisvolcano = std::fabs(inputs_.volcano[cell]);
+
+    if (wholemetres(base) <= inputs_.sealevel)
+        return base + inputs_.oceanridgeheight[cell] + thisvolcano;
+
+    return base + (std::max)(thisvolcano, inputs_.mountainheights[cell]) + inputs_.extraelev[cell] + inputs_.craterrims[cell] + inputs_.cratercentres[cell];
+}
+
+// Whole metres: the base and what is added to it are rounded separately, as planet::map does.
+inline int climateworld::map(int x, int y) const
+{
     if (!inside(x, y))
         return 0;
 
-    const std::size_t cell = inputindex(x, y);
-    const int nomvalue = wholemetres(inputs_.nom[cell]);
-    const int thisvolcano = std::abs(inputs_.volcano[cell]);
-
-    if (nomvalue <= inputs_.sealevel)
-        return nomvalue + inputs_.oceanridgeheight[cell] + thisvolcano;
-
-    if (thisvolcano > inputs_.mountainheights[cell])
-        return nomvalue + thisvolcano + inputs_.extraelev[cell] + inputs_.craterrims[cell] + inputs_.cratercentres[cell];
-    else
-        return nomvalue + inputs_.mountainheights[cell] + inputs_.extraelev[cell] + inputs_.craterrims[cell] + inputs_.cratercentres[cell];
+    const float base = inputs_.nom[inputindex(x, y)];
+    return wholemetres(base) + wholemetres(mapfloat(x, y) - base);
 }
 
 inline bool climateworld::sea(int x, int y) const
@@ -496,9 +497,9 @@ inline bool climateworld::sea(int x, int y) const
     if (inputs_.volcano[cell] == 0)
         return 0;
 
-    const int thisvolcano = std::abs(inputs_.volcano[cell]);
+    const float thisvolcano = std::fabs(inputs_.volcano[cell]);
 
-    if (wholemetres(inputs_.nom[cell]) + thisvolcano <= inputs_.sealevel)
+    if (wholemetres(inputs_.nom[cell] + thisvolcano) <= inputs_.sealevel)
         return 1;
     else
         return 0;
@@ -545,19 +546,37 @@ inline bool climateworld::outline(int x, int y) const
 inline int climateworld::mountainheight(int x, int y) const
 {
     UW_FIELD_READ(mountain_height);
-    return inside(x, y) ? static_cast<int>(inputs_.mountainheights[inputindex(x, y)]) : 0;
+    return inside(x, y) ? wholemetres(inputs_.mountainheights[inputindex(x, y)]) : 0;
+}
+
+inline float climateworld::mountainheightfloat(int x, int y) const
+{
+    UW_FIELD_READ(mountain_height);
+    return inside(x, y) ? inputs_.mountainheights[inputindex(x, y)] : 0.0f;
 }
 
 inline int climateworld::craterrim(int x, int y) const
 {
     UW_FIELD_READ(crater_rims);
-    return inside(x, y) ? static_cast<int>(inputs_.craterrims[inputindex(x, y)]) : 0;
+    return inside(x, y) ? wholemetres(inputs_.craterrims[inputindex(x, y)]) : 0;
+}
+
+inline float climateworld::craterrimfloat(int x, int y) const
+{
+    UW_FIELD_READ(crater_rims);
+    return inside(x, y) ? inputs_.craterrims[inputindex(x, y)] : 0.0f;
 }
 
 inline int climateworld::volcano(int x, int y) const
 {
     UW_FIELD_READ(volcano);
-    return inside(x, y) ? static_cast<int>(inputs_.volcano[inputindex(x, y)]) : 0;
+    return inside(x, y) ? wholemetres(inputs_.volcano[inputindex(x, y)]) : 0;
+}
+
+inline float climateworld::volcanofloat(int x, int y) const
+{
+    UW_FIELD_READ(volcano);
+    return inside(x, y) ? inputs_.volcano[inputindex(x, y)] : 0.0f;
 }
 
 inline int climateworld::lakesurface(int x, int y) const

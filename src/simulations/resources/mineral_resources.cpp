@@ -202,10 +202,10 @@ void generate_volcanic_reserves(planet& world)
                 const float regionbias = deformingvolcanicbias(regiontype);
                 const float crustbias = crustvolcanicbias(crustclass);
                 const float ridgebias = (world.oceanridges(x, y) != 0 || world.oceanrifts(x, y) != 0) ? 1.0f : 0.0f;
-                const float volcanobias = (world.volcano(x, y) != 0 || world.strato(x, y)) ? 1.0f : 0.0f;
+                const float volcanobias = (world.volcanofloat(x, y) != 0 || world.strato(x, y)) ? 1.0f : 0.0f;
                 const float nearbyvolcano = maxscoreinradius(world, x, y, 2, [&](int nx, int ny)
                 {
-                    return world.volcano(nx, ny) != 0 || world.strato(nx, ny) ? 100 : 0;
+                    return world.volcanofloat(nx, ny) != 0 || world.strato(nx, ny) ? 100 : 0;
                 }) / 100.0f;
 
                 float score = 100.0f * (0.20f * regimemult + 0.18f * boundaryfocus + 0.12f * divergencenorm
@@ -255,7 +255,7 @@ void generate_metal_ore_reserves(planet& world)
                 {
                     return world.volcanicreserve(nx, ny);
                 })) / 100.0f;
-                const float mountainbias = clampunit(static_cast<float>(world.mountainheight(x, y)) / 5000.0f);
+                const float mountainbias = clampunit(static_cast<float>(world.mountainheightfloat(x, y)) / 5000.0f);
 
                 float score = 100.0f * (0.18f * regimebias + 0.18f * boundaryfocus + 0.15f * convergencenorm
                     + 0.12f * shearnorm + 0.12f * strain + 0.08f * uplift + 0.05f * deformation

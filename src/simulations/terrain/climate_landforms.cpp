@@ -215,7 +215,7 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
                     if (xx<0 || xx>width)
                         xx = wrap(xx, width);
 
-                    if (world.sea(xx, yy) != 0 || world.mountainheight(xx, yy) >= maxmountainlakeheight) // Don't try to put them on top of sea or mountains...
+                    if (world.sea(xx, yy) != 0 || world.mountainheightfloat(xx, yy) >= maxmountainlakeheight) // Don't try to put them on top of sea or mountains...
                         tooclose = 1;
                     else
                     {
@@ -320,7 +320,7 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
 
                     thislake[xx][yy] = lakeno; // Mark it on the keeping-track array too.
 
-                    if (world.mountainheight(xx, yy) != 0) // Remove any mountains that might be here.
+                    if (world.mountainheightfloat(xx, yy) != 0) // Remove any mountains that might be here.
                     {
                         for (int dir = 1; dir <= 8; dir++)
                             deleteridge(world, xx, yy, dir);
@@ -374,7 +374,7 @@ void broadenfastlemterrainfromrivers(planet& world)
 
     const bool hasmountains = terraindetail::buildlanddistancefield(world, mountaindistance, maxmountaindistance, [&](int x, int y)
     {
-        return world.mountainheight(x, y) >= tuning::terrain::fastlem::postRiverMinimumMountainHeight;
+        return world.mountainheightfloat(x, y) >= tuning::terrain::fastlem::postRiverMinimumMountainHeight;
     });
 
     if (hasrivers == false || hasmountains == false)
@@ -772,7 +772,7 @@ void refineroughnessmap(planet& world)
 
                     // Alter it according to how mountainous the area is.
 
-                    float mountain = (float)world.mountainheight(i, j);
+                    float mountain = (float)world.mountainheightfloat(i, j);
 
                     if (mountain == 0.0f)
                     {
@@ -787,8 +787,8 @@ void refineroughnessmap(planet& world)
                             {
                                 if (l >= 0 && l <= height)
                                 {
-                                    if (world.mountainheight(kk, l) > 0)
-                                        mountain = (float)world.mountainheight(kk, l) * 0.7f;
+                                    if (world.mountainheightfloat(kk, l) > 0)
+                                        mountain = (float)world.mountainheightfloat(kk, l) * 0.7f;
                                 }
                             }
                         }
@@ -806,8 +806,8 @@ void refineroughnessmap(planet& world)
                                 {
                                     if (l >= 0 && l <= height)
                                     {
-                                        if (world.mountainheight(kk, l) > 0)
-                                            mountain = (float)world.mountainheight(kk, l) * 0.3f;
+                                        if (world.mountainheightfloat(kk, l) > 0)
+                                            mountain = (float)world.mountainheightfloat(kk, l) * 0.3f;
                                     }
                                 }
                             }

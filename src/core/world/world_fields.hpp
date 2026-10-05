@@ -72,18 +72,18 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(tectonic_plate_count, geosphere, i32, scalar, "", "Number of plates in the final state") \
     X(tectonic_sea_level, geosphere, i32, scalar, "m", "Engine sea level on its uint16 datum") \
     X(base_elevation, geosphere, f32, grid, "m above datum", "Terrain without mountains, volcanoes and craters (nom)") \
-    X(mountain_height, geosphere, i16, grid, "m", "Mountain elevation added to the base") \
+    X(mountain_height, geosphere, f32, grid, "m", "Mountain elevation added to the base") \
     X(mountain_ridges, geosphere, i16, grid, "direction bits", "Mountain ridge directions") \
-    X(extra_elevation, geosphere, i16, grid, "m", "Extra terrain elevation (canyon uplift)") \
-    X(crater_rims, geosphere, i16, grid, "m", "Crater rim elevation") \
-    X(crater_centres, geosphere, i16, grid, "m", "Crater centre elevation") \
-    X(volcano, geosphere, i16, grid, "m", "Isolated peaks; negative values are extinct volcanoes") \
+    X(extra_elevation, geosphere, f32, grid, "m", "Extra terrain elevation (canyon uplift)") \
+    X(crater_rims, geosphere, f32, grid, "m", "Crater rim elevation") \
+    X(crater_centres, geosphere, f32, grid, "m", "Crater centre elevation") \
+    X(volcano, geosphere, f32, grid, "m", "Isolated peaks; negative values are extinct volcanoes") \
     X(continental_shelf, geosphere, b8, grid, "", "Continental shelf: shallow sea margins of land") \
     X(stratovolcano, geosphere, b8, grid, "", "Stratovolcano flag") \
     X(island, geosphere, b8, grid, "", "Island flag") \
     X(mountain_island, geosphere, b8, grid, "", "Mountain island flag") \
     X(ocean_ridge, geosphere, i16, grid, "code", "Ocean ridge mask") \
-    X(ocean_ridge_height, geosphere, i16, grid, "m", "Ocean ridge elevation") \
+    X(ocean_ridge_height, geosphere, f32, grid, "m", "Ocean ridge elevation") \
     X(ocean_rift, geosphere, i16, grid, "code", "Ocean rift mask") \
     X(ocean_ridge_offset, geosphere, i16, grid, "cells", "Ocean ridge offset") \
     X(ocean_ridge_angle, geosphere, i16, grid, "degrees", "Ocean ridge angle") \

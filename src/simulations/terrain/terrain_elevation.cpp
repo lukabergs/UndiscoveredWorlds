@@ -212,7 +212,7 @@ void createextraelev(planet& world)
                     world.setextraelev(i, j, 0);
                 else
                 {
-                    float e = (float)world.extraelev(i, j);
+                    float e = world.extraelevfloat(i, j);
                     e = e / div;
                     e = e - maxextra;
 
@@ -224,7 +224,7 @@ void createextraelev(planet& world)
 
                     e = e * gravity;
 
-                    world.setextraelev(i, j, (int)e);
+                    world.setextraelev(i, j, e);
                 }
             }
         }
@@ -250,13 +250,11 @@ void createextraelev(planet& world)
 
                     e = e * multfactor; // The higher this is, the more widespread the extra elevation will be.
 
-                    tempelev[i][j] = (int)e;
+                    if (e < 0.0f)
+                        e = 0.0f;
 
-                    if (tempelev[i][j] < 0)
-                        tempelev[i][j] = 0;
-
-                    if (tempelev[i][j] < world.extraelev(i, j))
-                        world.setextraelev(i, j, tempelev[i][j]);
+                    if (e < world.extraelevfloat(i, j))
+                        world.setextraelev(i, j, e);
                 }
             }
         }

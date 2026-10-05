@@ -64,12 +64,12 @@ struct GlobalCudaRendererInputs
 
     const int* mapnom = nullptr;
     const int* lakemap = nullptr;
-    const short* oceanridgeheightmap = nullptr;
-    const short* mountainheights = nullptr;
-    const short* volcanomap = nullptr;
-    const short* extraelevmap = nullptr;
-    const short* craterrims = nullptr;
-    const short* cratercentres = nullptr;
+    const float* oceanridgeheightmap = nullptr;
+    const float* mountainheights = nullptr;
+    const float* volcanomap = nullptr;
+    const float* extraelevmap = nullptr;
+    const float* craterrims = nullptr;
+    const float* cratercentres = nullptr;
     const short* oceanridgemap = nullptr;
     const short* oceanriftmap = nullptr;
     const short* jantempmap = nullptr;

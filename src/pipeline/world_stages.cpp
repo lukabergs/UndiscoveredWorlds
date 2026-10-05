@@ -503,7 +503,7 @@ void metadatavolcanoes(planet& world, GenerationScratch& scratch)
     {
         for (int x = 0; x <= width; x++)
         {
-            if (world.volcano(x, y) == 0)
+            if (world.volcanofloat(x, y) == 0)
                 continue;
 
             markfeaturecell(scratch, x, y);

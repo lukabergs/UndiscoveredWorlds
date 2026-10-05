@@ -586,7 +586,7 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.volcano(i, j) == 0 && world.mountainisland(i, j) == 0)
+            if (world.volcanofloat(i, j) == 0 && world.mountainisland(i, j) == 0)
             {
                 if (world.coast(i, j))
                 {
@@ -783,7 +783,7 @@ void checkislands(planet& world)
             }
             else
             {
-                int volcano = world.volcano(i, j);
+                float volcano = world.volcanofloat(i, j);
 
                 if (volcano != 0)
                 {
@@ -795,11 +795,11 @@ void checkislands(planet& world)
                         volcano = 0 - volcano;
                     }
 
-                    int totalheight = wholemetres(world.nomfloat(i, j)) + volcano;
+                    const float totalheight = world.nomfloat(i, j) + volcano;
 
-                    if (totalheight > sealevel)
+                    if (wholemetres(totalheight) > sealevel)
                     {
-                        volcano = totalheight - sealevel;
+                        volcano = totalheight - static_cast<float>(sealevel);
 
                         terrain::detail::makemountainisland(world, i, j, volcano);
 

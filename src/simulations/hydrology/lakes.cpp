@@ -53,7 +53,7 @@ void createlakedepression(planet& world, int centrex, int centrey, int origlevel
                 {
                     if (up == 1 || world.nom(ii, j) > currentlevel) // If this cell is higher than the current limit (or if we're raising cells as well as lowering them)
                     {
-                        if (basins[ii][j] == 0 && avoid[ii][j] == 0 && world.sea(ii, j) == 0 && world.truelake(ii, j) == 0 && world.mountainheight(ii, j) < maxmountains)
+                        if (basins[ii][j] == 0 && avoid[ii][j] == 0 && world.sea(ii, j) == 0 && world.truelake(ii, j) == 0 && world.mountainheightfloat(ii, j) < maxmountains)
                         {
                             if ((ii - centrex) * (ii - centrex) + (j - centrey) * (j - centrey) <= radius * radius) // If this cell is within the current radius
                             {
@@ -184,7 +184,7 @@ void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<v
                         if (nolake[xx][yy] == 1)
                             tooclose = 1;
 
-                        if (world.volcano(xx, yy) != 0)
+                        if (world.volcanofloat(xx, yy) != 0)
                             tooclose = 1;
 
                         if (tooclose == 0) // Only do this next check if we haven't already failed
@@ -200,7 +200,7 @@ void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<v
                                 {
                                     if (yyy >= 0 && yyy <= height)
                                     {
-                                        if (thislake[xxxx][yyy] != 0 || world.volcano(xxxx, yyy) != 0) // There's another lake here already! Or a volcano.
+                                        if (thislake[xxxx][yyy] != 0 || world.volcanofloat(xxxx, yyy) != 0) // There's another lake here already! Or a volcano.
                                         {
                                             tooclose = 1;
                                             xxx = xx + minlakedistance;
@@ -224,7 +224,7 @@ void drawlake(planet& world, int shapenumber, int centrex, int centrey, vector<v
                                 {
                                     if (yyy >= 0 && yyy <= height)
                                     {
-                                        if (world.mountainheight(xxxx, yyy) > maxmountainlakeheight) // There are mountains here.
+                                        if (world.mountainheightfloat(xxxx, yyy) > maxmountainlakeheight) // There are mountains here.
                                         {
                                             tooclose = 1;
                                             xxx = xx + minmountaindistance;
@@ -1268,7 +1268,7 @@ void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dod
                     if (yy > righty)
                         righty = yy;
 
-                    if (world.mountainheight(xx, yy) != 0) // Remove any mountains that might be here.
+                    if (world.mountainheightfloat(xx, yy) != 0) // Remove any mountains that might be here.
                     {
                         for (int dir = 1; dir <= 8; dir++)
                             deleteridge(world, xx, yy, dir);

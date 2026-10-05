@@ -76,7 +76,7 @@ void pastewetland(planet& world, int centrex, int centrey, int shapenumber, bool
                         wrapped = 1;
                     }
 
-                    if (world.sea(xx, yy) == 0 && world.mountainheight(xx, yy) == 0) // Don't try to put wetlands on top of sea or mountains...
+                    if (world.sea(xx, yy) == 0 && world.mountainheightfloat(xx, yy) == 0) // Don't try to put wetlands on top of sea or mountains...
                     {
                         world.setspecial(xx, yy, 130);
 

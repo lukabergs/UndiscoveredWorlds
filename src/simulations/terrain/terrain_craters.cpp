@@ -242,7 +242,7 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
     int maxelev = world.maxelevation();
 
     int centreelev = size * 20;
-    int rimelev = size * 250;
+    float rimelev = (float)(size * 250);
 
     float var = ((float)random(80, 120))/100.0f;
 
@@ -250,7 +250,7 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
 
     var = ((float)random(80, 120)) / 100.0f;
 
-    rimelev = (int)((float)rimelev * var);
+    rimelev = rimelev * var;
 
     world.setcraterx(thiscraterno, centrex);
     world.setcratery(thiscraterno, centrey);

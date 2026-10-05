@@ -284,6 +284,23 @@ worldgrid<int> wholegrid(const worldgrid<float>& values)
         whole.data()[index] = wholemetres(values.data()[index]);
     return whole;
 }
+
+// The elevation components were 16-bit whole metres in the save format.
+worldgrid<short> wholeshortgrid(const worldgrid<float>& values)
+{
+    worldgrid<short> whole(values.columns(), values.rows());
+    for (std::size_t index = 0; index < values.size(); index++)
+        whole.data()[index] = static_cast<short>(wholemetres(values.data()[index]));
+    return whole;
+}
+}
+
+void planet::readwholeshortdata(ifstream& infile, worldgrid<float>& arr)
+{
+    worldgrid<short> stored(arr.columns(), arr.rows());
+    readdata(infile, stored);
+    for (std::size_t index = 0; index < arr.size(); index++)
+        arr.data()[index] = static_cast<float>(stored.data()[index]);
 }
 
 void planet::readwholedata(ifstream& infile, worldgrid<float>& arr)
@@ -528,7 +545,7 @@ int planet::mountainheightwrap(int x, int y) const
     x = wrapx(x);
     y = clipy(y);
 
-    return geosphere_.mountainheights[x][y];
+    return wholemetres(geosphere_.mountainheights[x][y]);
 }
 
 // Other public functions.
@@ -997,9 +1014,9 @@ void planet::saveworld(string filename)
     writedata(outfile, hydrosphere_.lakemap);
     writedata(outfile, geosphere_.roughnessmap);
     writedata(outfile, geosphere_.mountainridges);
-    writedata(outfile, geosphere_.mountainheights);
-    writedata(outfile, geosphere_.craterrims);
-    writedata(outfile, geosphere_.cratercentres);
+    writedata(outfile, wholeshortgrid(geosphere_.mountainheights));
+    writedata(outfile, wholeshortgrid(geosphere_.craterrims));
+    writedata(outfile, wholeshortgrid(geosphere_.cratercentres));
     writedata(outfile, wholegrid(geosphere_.mapnom));
     writedata(outfile, hydrosphere_.tidalmap);
     writedata(outfile, hydrosphere_.riftlakemapsurface);
@@ -1019,18 +1036,18 @@ void planet::saveworld(string filename)
     writedata(outfile, geosphere_.evaporitereservemap);
     writedata(outfile, geosphere_.volcanicreservemap);
     writedata(outfile, biosphere_.fisheryreservemap);
-    writedata(outfile, geosphere_.extraelevmap);
+    writedata(outfile, wholeshortgrid(geosphere_.extraelevmap));
     writedata(outfile, hydrosphere_.deltamapdir);
     writedata(outfile, hydrosphere_.deltamapjan);
     writedata(outfile, hydrosphere_.deltamapjul);
     writedata(outfile, geosphere_.islandmap);
     writedata(outfile, geosphere_.mountainislandmap);
     writedata(outfile, geosphere_.oceanridgemap);
-    writedata(outfile, geosphere_.oceanridgeheightmap);
+    writedata(outfile, wholeshortgrid(geosphere_.oceanridgeheightmap));
     writedata(outfile, geosphere_.oceanriftmap);
     writedata(outfile, geosphere_.oceanridgeoffsetmap);
     writedata(outfile, geosphere_.oceanridgeanglemap);
-    writedata(outfile, geosphere_.volcanomap);
+    writedata(outfile, wholeshortgrid(geosphere_.volcanomap));
     writedata(outfile, geosphere_.stratomap);
     writedata(outfile, presentation_.noshademap);
     writedata(outfile, geosphere_.noisemap);
@@ -1698,9 +1715,9 @@ bool planet::loadworld(string filename)
     readdata(infile, hydrosphere_.lakemap);
     readdata(infile, geosphere_.roughnessmap);
     readdata(infile, geosphere_.mountainridges);
-    readdata(infile, geosphere_.mountainheights);
-    readdata(infile, geosphere_.craterrims);
-    readdata(infile, geosphere_.cratercentres);
+    readwholeshortdata(infile, geosphere_.mountainheights);
+    readwholeshortdata(infile, geosphere_.craterrims);
+    readwholeshortdata(infile, geosphere_.cratercentres);
     readwholedata(infile, geosphere_.mapnom);
     readdata(infile, hydrosphere_.tidalmap);
     readdata(infile, hydrosphere_.riftlakemapsurface);
@@ -1746,18 +1763,18 @@ bool planet::loadworld(string filename)
             }
         }, 64);
     }
-    readdata(infile, geosphere_.extraelevmap);
+    readwholeshortdata(infile, geosphere_.extraelevmap);
     readdata(infile, hydrosphere_.deltamapdir);
     readdata(infile, hydrosphere_.deltamapjan);
     readdata(infile, hydrosphere_.deltamapjul);
     readdata(infile, geosphere_.islandmap);
     readdata(infile, geosphere_.mountainislandmap);
     readdata(infile, geosphere_.oceanridgemap);
-    readdata(infile, geosphere_.oceanridgeheightmap);
+    readwholeshortdata(infile, geosphere_.oceanridgeheightmap);
     readdata(infile, geosphere_.oceanriftmap);
     readdata(infile, geosphere_.oceanridgeoffsetmap);
     readdata(infile, geosphere_.oceanridgeanglemap);
-    readdata(infile, geosphere_.volcanomap);
+    readwholeshortdata(infile, geosphere_.volcanomap);
     readdata(infile, geosphere_.stratomap);
     readdata(infile, presentation_.noshademap);
     readdata(infile, geosphere_.noisemap);
@@ -2237,7 +2254,7 @@ void planet::smoothoverland(worldgrid<int>& arr, int amount, bool uponly)
     }
 }
 
-void planet::smoothoverland(worldgrid<short>& arr, int amount, bool uponly)
+void planet::smoothoverland(worldgrid<float>& arr, int amount, bool uponly)
 {
     for (int i = 0; i <= body_.itswidth; i++)
     {
@@ -2246,7 +2263,7 @@ void planet::smoothoverland(worldgrid<short>& arr, int amount, bool uponly)
             if (sea(i, j) == 0)
             {
                 int crount = 0;
-                int ave = 0;
+                float ave = 0.0f;
 
                 for (int k = i - amount; k <= i + amount; k++)
                 {
@@ -2260,23 +2277,23 @@ void planet::smoothoverland(worldgrid<short>& arr, int amount, bool uponly)
 
                     for (int l = j - amount; l <= j + amount; l++)
                     {
-                        ave = ave + (int)smoothingcell(arr, kk, l);
+                        ave = ave + smoothingcell(arr, kk, l);
                         crount++;
                     }
                 }
 
                 if (crount > 0)
                 {
-                    ave = ave / crount;
+                    ave = ave / static_cast<float>(crount);
 
-                    if (ave > 0 && ave < geosphere_.itsmaxheight)
+                    if (ave > 0.0f && ave < static_cast<float>(geosphere_.itsmaxheight))
                     {
                         if (uponly == 0)
-                            arr[i][j] = (short)ave;
+                            arr[i][j] = ave;
                         else
                         {
                             if (ave > arr[i][j])
-                                arr[i][j] = (short)ave;
+                                arr[i][j] = ave;
                         }
                     }
                 }

@@ -184,9 +184,9 @@ struct geospherestate
     int itscraterno; // Number of craters
     worldgrid<float> roughnessmap;
     worldgrid<short> mountainridges;
-    worldgrid<short> mountainheights;
-    worldgrid<short> craterrims;
-    worldgrid<short> cratercentres;
+    worldgrid<float> mountainheights;
+    worldgrid<float> craterrims;
+    worldgrid<float> cratercentres;
     worldgrid<float> mapnom;   // metres above the datum
     worldgrid<std::uint8_t> geologicregimemap;
     worldgrid<std::uint8_t> tectonicconvergencemap;
@@ -225,16 +225,16 @@ struct geospherestate
     worldgrid<std::uint8_t> placerreservemap;
     worldgrid<std::uint8_t> evaporitereservemap;
     worldgrid<std::uint8_t> volcanicreservemap;
-    worldgrid<short> extraelevmap;
+    worldgrid<float> extraelevmap;
     worldgrid<bool> islandmap;
     worldgrid<bool> mountainislandmap;
     worldgrid<short> noisemap;
     worldgrid<short> oceanridgemap;
-    worldgrid<short> oceanridgeheightmap;
+    worldgrid<float> oceanridgeheightmap;
     worldgrid<short> oceanriftmap;
     worldgrid<short> oceanridgeoffsetmap;
     worldgrid<short> oceanridgeanglemap;
-    worldgrid<short> volcanomap;
+    worldgrid<float> volcanomap;
     worldgrid<bool> stratomap;
     fourshorts cratercentreslist[MAXCRATERS]; // This duplicates the information in the cratercentres array, but it tells us the order in which to draw the craters, and their radius, which is also important.
     std::vector<TectonicBoundarySegment> tectonicboundarysegmentlist;

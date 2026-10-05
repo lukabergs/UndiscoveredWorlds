@@ -55,7 +55,7 @@ void cleanmountainridges(planet& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.mountainheight(i, j) != 0 && world.sea(i, j) == 0)
+            if (world.mountainheightfloat(i, j) != 0 && world.sea(i, j) == 0)
             {
                 for (int dir = 1; dir <= 8; dir++)
                 {
@@ -440,11 +440,11 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
         {
             if (OKmountains[i][j] == 0) // Don't change the heights of any mountains that the user has imported.
             {
-                float thismountain = (float)world.mountainheight(i, j);
+                float thismountain = world.mountainheightfloat(i, j);
 
                 thismountain = thismountain * mountainheightfactor;
 
-                world.setmountainheight(i, j, (int)thismountain);
+                world.setmountainheight(i, j, thismountain);
             }
         }
     }
@@ -483,11 +483,11 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
         {
             volcano = 0;
 
-            float mheights = (float) world.mountainheight(i, j);
+            float mheights = world.mountainheightfloat(i, j);
 
             if (mheights == 0 && world.strato(i, j) == 0)
             {
-                mheights = (float)world.volcano(i, j);
+                mheights = world.volcanofloat(i, j);
                 volcano = 1;
             }
 
@@ -636,7 +636,7 @@ void addfjordmountains(planet& world)
 
                         if (nexttoland == 1)
                         {
-                            int highest = 0;
+                            float highest = 0.0f;
 
                             int landx = -1;
                             int landy = -1;
@@ -652,9 +652,9 @@ void addfjordmountains(planet& world)
                                 {
                                     if (l >= 0 && l <= height)
                                     {
-                                        if (world.mountainheight(kk, l) > highest && justadded[kk][l] == 0)
+                                        if (world.mountainheightfloat(kk, l) > highest && justadded[kk][l] == 0)
                                         {
-                                            highest = world.mountainheight(kk, l);
+                                            highest = world.mountainheightfloat(kk, l);
 
                                             landx = kk;
                                             landy = l;
@@ -677,14 +677,14 @@ void addfjordmountains(planet& world)
                                 world.setmountainridge(i, j, world.mountainridge(i, j) + code1);
                                 world.setmountainridge(landx, landy, world.mountainridge(landx, landy) + code2);
 
-                                world.setmountainheight(i, j, world.mountainheight(landx, landy));
+                                world.setmountainheight(i, j, world.mountainheightfloat(landx, landy));
 
                                 world.setsummerrainfloat(i, j, world.summerrainfloat(landx, landy));
                                 world.setwinterrainfloat(i, j, world.winterrainfloat(landx, landy));
 
                                 justadded[i][j] = 1;
 
-                                //world.settest(i,j,world.mountainheight(i,j));
+                                //world.settest(i,j,world.mountainheightfloat(i,j));
                             }
                         }
                     }

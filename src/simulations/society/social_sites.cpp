@@ -186,8 +186,8 @@ int computeresourceopportunity(planet& world, int x, int y, bool usephysicalrese
     proxy += coastscore / 4;
     proxy += riverscore / 3;
     proxy += slopescore / 6;
-    proxy += world.mountainheight(x, y) > 0 ? 24 : 0;
-    proxy += std::abs(world.volcano(x, y)) > 0 ? 30 : 0;
+    proxy += world.mountainheightfloat(x, y) > 0 ? 24 : 0;
+    proxy += std::abs(world.volcanofloat(x, y)) > 0 ? 30 : 0;
     return std::clamp(proxy, 0, 100);
 }
 

@@ -16,7 +16,7 @@ using namespace std;
 
 // This makes a small, mountainous island.
 
-void terrain::detail::makemountainisland(planet& world, int x, int y, int peakheight)
+void terrain::detail::makemountainisland(planet& world, int x, int y, float peakheight)
 {
     int width = world.width();
     int height = world.height();
@@ -44,10 +44,10 @@ void terrain::detail::makemountainisland(planet& world, int x, int y, int peakhe
         if (xx<0 || xx>width)
             xx = wrap(xx, width);
 
-        if (world.mountainheight(x, y) < peakheight)
+        if (world.mountainheightfloat(x, y) < peakheight)
             world.setmountainheight(x, y, peakheight);
 
-        if (world.mountainheight(xx, yy) < peakheight)
+        if (world.mountainheightfloat(xx, yy) < peakheight)
             world.setmountainheight(xx, yy, peakheight);
 
         for (int i = x - 1; i <= x + 1; i++) // Mark it all out as mountain islands!
@@ -196,7 +196,7 @@ void createisolatedvolcano(planet& world, int x, int y, worldgrid<bool>& shelves
             }
         }
 
-        world.setvolcano(x, y, (int)thispeakheight);
+        world.setvolcano(x, y, thispeakheight);
         world.setstrato(x, y, strato);
 
         active = 0;

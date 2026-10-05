@@ -144,7 +144,7 @@ void generate_surface_potentials(planet& world)
 
                 float erosionscore = 100.0f * (0.34f * reliefnorm + 0.30f * flownorm + 0.24f * rainfallnorm + 0.12f * inflownorm);
 
-                if (world.mountainheight(x, y) > 0)
+                if (world.mountainheightfloat(x, y) > 0)
                     erosionscore += 8.0f;
 
                 float depositionscore = 100.0f * (0.32f * lownorm + 0.27f * rivercorridor + 0.15f * rainfallnorm

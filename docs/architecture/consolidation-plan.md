@@ -131,6 +131,7 @@ Phase 4 steps (agreed 2026-10-05; one commit and one ledger entry per step, in t
 | 10 | The `world` profile runs `run --recipe procedural-world --bundle` and gets one draft review checklist (terrain and hydrology); one registered run at the last unchanged commit is the reference of the float steps | `uw.py world run` not exercised | first run of the `world` series |
 | 11 | `atmosphere.precipitation` and `atmosphere.precipitation_exact` become one field | the two precipitation fields | climate baseline only if `earth-climate` differs from run 388; otherwise the shift lands in the `world` series |
 | 12 | Terrain to the float accessors; mountain height, canyon uplift, crater, volcano and ocean ridge heights float | declared access of the mountain fields | `world` run (module terrain) |
+| 12c | The six elevation components stored as float; global readers on float getters; terrain writers keep fractions | — | `world` run 5 (`world-0036`) |
 | 13 | Hydrology to the float accessors; lake surfaces float | `hydrology.deltas_and_wetlands` writing temperature | `world` run (module hydrology) |
 | 14 | Resources to the float accessors | — | `world` run (module resources) |
 | 15 | Society to the float accessors | — | `world` run (module society) |
@@ -259,7 +260,7 @@ Phase 5 (GUI as viewer):
 - The tectonics recipe keeps the default planet body while `procedural-world` draws the body from the seed, so for seeds whose gravity is not 1 the module run and the world's tectonics step differ. When parameters move into recipes the body becomes a recipe parameter and the two agree.
 - `--checkpoint-every` and `--checkpoint-at` in Myr apply to the tectonics step only; other evolvers get them when they declare a duration (time model of §1).
 - Moved from Phase 4 (user, 2026-10-05). The regional map (`src/world/regionalmap.cpp`, `region.*`) still reads temperature, rain and elevation through the whole-number accessors; `climatelegacyscale` and `wholemetres` exist for it alone after Phase 4. It writes nothing a bundle carries, so its move to the float accessors has no headless baseline and belongs with the user's manual check of the GUI.
-- Step 12 left the six elevation components as 16-bit integers; the user decided on 2026-10-05 that they become float now (step 12c). What stays for this phase: the regional map still computes in whole numbers and reads them through rounding accessors until it moves to floats here, and the `.uww` layout stores whole metres until the GUI loads bundles.
+- Step 12c (`world-0036`) made the six elevation components float in storage, catalogue and every global reader. Still whole numbers, as temporary bridges: the regional map and the GUI read them through the rounding getters (`mountainheight()` and the like), the CUDA renderer casts them, and the `.uww` layout stores 16-bit whole metres. Whole on purpose: ocean ridge heights and ridge volcanoes (integer templates and a hash of the integer height), imported mountain heights, the crater centre height. Not exercised: the minimal world has no mountains, craters or ocean ridges, so the edited mountain, crater and ridge writers are compile-checked only; look at those fields in the first run at a size that has them (256 columns and the default duration).
 
 Phase 6 (test structure): see §5.
 

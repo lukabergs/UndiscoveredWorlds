@@ -792,7 +792,7 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
             {
                 if (world.sea(i, j) == 0)
                 {
-                    if (world.mountainheight(i, j) < maxmountainheight)
+                    if (world.mountainheightfloat(i, j) < maxmountainheight)
                     {
                         float crount = 0;
                         float jantotal = 0;
@@ -809,7 +809,7 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
                             {
                                 if (l >= 0 && l <= height)
                                 {
-                                    if (world.sea(kk, l) == 0 && world.mountainheight(kk, l) < maxmountainheight)
+                                    if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) < maxmountainheight)
                                     {
                                         jantotal = jantotal + world.janrain(kk, l);
                                         jultotal = jultotal + world.julrain(kk, l);
@@ -828,21 +828,21 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
                         {
                             // Cells to the north
 
-                            if (world.sea(im, jmm) == 0 && world.mountainheight(im, jmm) < maxmountainheight && (world.mountainheight(im, jm) < maxmountainheight || world.mountainheight(i, jm) < maxmountainheight))
+                            if (world.sea(im, jmm) == 0 && world.mountainheightfloat(im, jmm) < maxmountainheight && (world.mountainheightfloat(im, jm) < maxmountainheight || world.mountainheightfloat(i, jm) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(im, jmm);
                                 jultotal = jultotal + world.julrain(im, jmm);
                                 crount++;
                             }
 
-                            if (world.sea(i, jmm) == 0 && world.mountainheight(i, jmm) < maxmountainheight && (world.mountainheight(im, jm) < maxmountainheight || world.mountainheight(i, jm) < maxmountainheight || world.mountainheight(ip, jm) < maxmountainheight))
+                            if (world.sea(i, jmm) == 0 && world.mountainheightfloat(i, jmm) < maxmountainheight && (world.mountainheightfloat(im, jm) < maxmountainheight || world.mountainheightfloat(i, jm) < maxmountainheight || world.mountainheightfloat(ip, jm) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(i, jmm);
                                 jultotal = jultotal + world.julrain(i, jmm);
                                 crount++;
                             }
 
-                            if (world.sea(ip, jmm) == 0 && world.mountainheight(ip, jmm) < maxmountainheight && (world.mountainheight(i, jm) < maxmountainheight || world.mountainheight(ip, jm) < maxmountainheight))
+                            if (world.sea(ip, jmm) == 0 && world.mountainheightfloat(ip, jmm) < maxmountainheight && (world.mountainheightfloat(i, jm) < maxmountainheight || world.mountainheightfloat(ip, jm) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(ip, jmm);
                                 jultotal = jultotal + world.julrain(ip, jmm);
@@ -851,21 +851,21 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
 
                             // Cells to the south
 
-                            if (world.sea(im, jpp) == 0 && world.mountainheight(im, jpp) < maxmountainheight && (world.mountainheight(im, jp) < maxmountainheight || world.mountainheight(i, jp) < maxmountainheight))
+                            if (world.sea(im, jpp) == 0 && world.mountainheightfloat(im, jpp) < maxmountainheight && (world.mountainheightfloat(im, jp) < maxmountainheight || world.mountainheightfloat(i, jp) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(im, jpp);
                                 jultotal = jultotal + world.julrain(im, jpp);
                                 crount++;
                             }
 
-                            if (world.sea(i, jpp) == 0 && world.mountainheight(i, jpp) < maxmountainheight && (world.mountainheight(im, jp) < maxmountainheight || world.mountainheight(i, jp) < maxmountainheight || world.mountainheight(ip, jp) < maxmountainheight))
+                            if (world.sea(i, jpp) == 0 && world.mountainheightfloat(i, jpp) < maxmountainheight && (world.mountainheightfloat(im, jp) < maxmountainheight || world.mountainheightfloat(i, jp) < maxmountainheight || world.mountainheightfloat(ip, jp) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(i, jpp);
                                 jultotal = jultotal + world.julrain(i, jpp);
                                 crount++;
                             }
 
-                            if (world.sea(ip, jpp) == 0 && world.mountainheight(ip, jpp) < maxmountainheight && (world.mountainheight(i, jp) < maxmountainheight || world.mountainheight(ip, jp) < maxmountainheight))
+                            if (world.sea(ip, jpp) == 0 && world.mountainheightfloat(ip, jpp) < maxmountainheight && (world.mountainheightfloat(i, jp) < maxmountainheight || world.mountainheightfloat(ip, jp) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(ip, jpp);
                                 jultotal = jultotal + world.julrain(ip, jpp);
@@ -874,21 +874,21 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
 
                             // Cells to the west
 
-                            if (world.sea(imm, jm) == 0 && world.mountainheight(imm, jm) < maxmountainheight && (world.mountainheight(im, jm) < maxmountainheight || world.mountainheight(im, j) < maxmountainheight))
+                            if (world.sea(imm, jm) == 0 && world.mountainheightfloat(imm, jm) < maxmountainheight && (world.mountainheightfloat(im, jm) < maxmountainheight || world.mountainheightfloat(im, j) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(imm, jm);
                                 jultotal = jultotal + world.julrain(imm, jm);
                                 crount++;
                             }
 
-                            if (world.sea(imm, j) == 0 && world.mountainheight(imm, j) < maxmountainheight && (world.mountainheight(im, jm) < maxmountainheight || world.mountainheight(im, j) < maxmountainheight || world.mountainheight(im, jp) < maxmountainheight))
+                            if (world.sea(imm, j) == 0 && world.mountainheightfloat(imm, j) < maxmountainheight && (world.mountainheightfloat(im, jm) < maxmountainheight || world.mountainheightfloat(im, j) < maxmountainheight || world.mountainheightfloat(im, jp) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(imm, j);
                                 jultotal = jultotal + world.julrain(imm, j);
                                 crount++;
                             }
 
-                            if (world.sea(imm, jp) == 0 && world.mountainheight(imm, jp) < maxmountainheight && (world.mountainheight(im, j) < maxmountainheight || world.mountainheight(im, jp) < maxmountainheight))
+                            if (world.sea(imm, jp) == 0 && world.mountainheightfloat(imm, jp) < maxmountainheight && (world.mountainheightfloat(im, j) < maxmountainheight || world.mountainheightfloat(im, jp) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(imm, jp);
                                 jultotal = jultotal + world.julrain(imm, jp);
@@ -897,21 +897,21 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
 
                             // Cells to the east
 
-                            if (world.sea(ipp, jm) == 0 && world.mountainheight(ipp, jm) < maxmountainheight && (world.mountainheight(ip, jm) < maxmountainheight || world.mountainheight(ip, j) < maxmountainheight))
+                            if (world.sea(ipp, jm) == 0 && world.mountainheightfloat(ipp, jm) < maxmountainheight && (world.mountainheightfloat(ip, jm) < maxmountainheight || world.mountainheightfloat(ip, j) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(ipp, jm);
                                 jultotal = jultotal + world.julrain(ipp, jm);
                                 crount++;
                             }
 
-                            if (world.sea(ipp, j) == 0 && world.mountainheight(ipp, j) < maxmountainheight && (world.mountainheight(ip, jm) < maxmountainheight || world.mountainheight(ip, j) < maxmountainheight || world.mountainheight(ip, jp) < maxmountainheight))
+                            if (world.sea(ipp, j) == 0 && world.mountainheightfloat(ipp, j) < maxmountainheight && (world.mountainheightfloat(ip, jm) < maxmountainheight || world.mountainheightfloat(ip, j) < maxmountainheight || world.mountainheightfloat(ip, jp) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(ipp, j);
                                 jultotal = jultotal + world.julrain(ipp, j);
                                 crount++;
                             }
 
-                            if (world.sea(ipp, jp) == 0 && world.mountainheight(ipp, jp) < maxmountainheight && (world.mountainheight(ip, j) < maxmountainheight || world.mountainheight(ip, jp) < maxmountainheight))
+                            if (world.sea(ipp, jp) == 0 && world.mountainheightfloat(ipp, jp) < maxmountainheight && (world.mountainheightfloat(ip, j) < maxmountainheight || world.mountainheightfloat(ip, jp) < maxmountainheight))
                             {
                                 jantotal = jantotal + world.janrain(ipp, jp);
                                 jultotal = jultotal + world.julrain(ipp, jp);
@@ -1370,7 +1370,7 @@ void createmountainprecipitation(climateworld& world)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.mountainheight(i, j) == 0 && world.craterrim(i, j) == 0)
+            if (world.mountainheightfloat(i, j) == 0 && world.craterrimfloat(i, j) == 0)
             {
                 world.setwintermountainraindir(i, j, 0);
                 world.setsummermountainraindir(i, j, 0);
@@ -1386,7 +1386,7 @@ void createmountainprecipitation(climateworld& world)
         {
             for (int j = 0; j <= height; j++)
             {
-                if ((world.mountainheight(i, j) != 0 || world.craterrim(i, j) != 0) && world.wintermountainraindir(i, j) == 0)
+                if ((world.mountainheightfloat(i, j) != 0 || world.craterrimfloat(i, j) != 0) && world.wintermountainraindir(i, j) == 0)
                 {
                     // First, find the cell that the wind's coming from. It's the non-mountain cell with the highest precipitation.
 
@@ -1405,7 +1405,7 @@ void createmountainprecipitation(climateworld& world)
                         {
                             if (l >= 0 && l <= height)
                             {
-                                if (world.sea(kk, l) == 0 && world.mountainheight(kk, l) == 0 && world.craterrim(kk, l) == 0)
+                                if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) == 0 && world.craterrimfloat(kk, l) == 0)
                                 {
                                     if (world.winterrain(kk, l) > highestamount)
                                     {
@@ -1461,7 +1461,7 @@ void createmountainprecipitation(climateworld& world)
                         {
                             if (l >= 0 && l <= height)
                             {
-                                if (world.sea(kk, l) == 0 && world.mountainheight(kk, l) == 0 && world.craterrim(kk, l) == 0)
+                                if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) == 0 && world.craterrimfloat(kk, l) == 0)
                                 {
                                     crount++;
                                     total = total + world.winterrain(kk, l);
@@ -1495,8 +1495,8 @@ void createmountainprecipitation(climateworld& world)
 
                     if (windfromcellx != -1 && crount != 0) // If we found one!
                     {
-                        float thisheight = (float)world.mountainheight(i, j);
-                        float craterheight = (float)world.craterrim(i, j);
+                        float thisheight = (float)world.mountainheightfloat(i, j);
+                        float craterheight = (float)world.craterrimfloat(i, j);
 
                         if (craterheight > thisheight)
                             thisheight = craterheight;
@@ -1524,7 +1524,7 @@ void createmountainprecipitation(climateworld& world)
         {
             for (int j = 0; j <= height; j++)
             {
-                if ((world.mountainheight(i, j) != 0 || world.craterrim(i, j) != 0) && world.summermountainraindir(i, j) == 0)
+                if ((world.mountainheightfloat(i, j) != 0 || world.craterrimfloat(i, j) != 0) && world.summermountainraindir(i, j) == 0)
                 {
                     // First, find the cell that the wind's coming from. It's the non-mountain cell with the highest precipitation.
 
@@ -1543,7 +1543,7 @@ void createmountainprecipitation(climateworld& world)
                         {
                             if (l >= 0 && l <= height)
                             {
-                                if (world.sea(kk, l) == 0 && world.mountainheight(kk, l) == 0 && world.craterrim(kk, l) == 0)
+                                if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) == 0 && world.craterrimfloat(kk, l) == 0)
                                 {
                                     if (world.summerrain(kk, l) > highestamount)
                                     {
@@ -1599,7 +1599,7 @@ void createmountainprecipitation(climateworld& world)
                         {
                             if (l >= 0 && l <= height)
                             {
-                                if (world.sea(kk, l) == 0 && world.mountainheight(kk, l) == 0 && world.craterrim(kk, l) == 0)
+                                if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) == 0 && world.craterrimfloat(kk, l) == 0)
                                 {
                                     crount++;
                                     total = total + world.summerrain(kk, l);
@@ -1633,8 +1633,8 @@ void createmountainprecipitation(climateworld& world)
 
                     if (windfromcellx != -1 && crount != 0) // If we found one!
                     {
-                        float thisheight = (float)world.mountainheight(i, j);
-                        float craterheight = (float)world.craterrim(i, j);
+                        float thisheight = (float)world.mountainheightfloat(i, j);
+                        float craterheight = (float)world.craterrimfloat(i, j);
 
                         if (craterheight > thisheight)
                             thisheight = craterheight;
