@@ -55,31 +55,66 @@ void writeFixture(
 }
 }
 
-TEST(ClimateReference, MonthlyGrids)
+namespace
 {
+
+// The fixture files of the reference tests, written into the working directory
+// and removed after each test.
+class ClimateReference : public ::testing::Test
+{
+protected:
     const std::filesystem::path fixture = std::filesystem::current_path() / "tavg_monthly.npy";
     const std::filesystem::path annual = std::filesystem::current_path() / "prec_annual.npy";
+    const std::filesystem::path directory = std::filesystem::current_path() / "reference-experiment-test";
+    const std::filesystem::path input = directory / "2" / "qa.npy";
     climatereference::MonthlyGrid grid;
     std::string error;
 
+    void TearDown() override
+    {
+        std::error_code ignored;
+        std::filesystem::remove(fixture, ignored);
+        std::filesystem::remove(annual, ignored);
+        std::filesystem::remove(input, ignored);
+        std::filesystem::remove(directory / "2", ignored);
+        std::filesystem::remove(directory, ignored);
+    }
+};
+
+}
+
+TEST_F(ClimateReference, MonthlyGridLoads)
+{
     writeFixture(fixture, false);
     expect(climatereference::loadMonthlyGrid(fixture, "tavg", grid, &error), "valid monthly grid must load");
     expect(grid.width == 2 && grid.height == 1 && grid.monthCount == 12, "monthly grid dimensions must match its header");
     expect(grid.value(11, 1, 0) == 23.25f, "monthly grid values must preserve month-major ordering");
     expect(!climatereference::loadMonthlyGrid(fixture, "prec", grid, &error), "variable mismatch must be rejected");
     expect(!climatereference::loadMonthlyGrid(fixture, "tav", grid, &error), "a partial variable name must be rejected");
+}
 
+TEST_F(ClimateReference, AnnualGridLoads)
+{
     writeFixture(annual, false, 1);
     expect(climatereference::loadMonthlyGrid(annual, "prec_annual", grid, &error), "annual grid must load");
     expect(grid.monthCount == 1 && grid.value(0, 1, 0) == 1.25f, "annual grid values must be readable");
+}
 
+TEST_F(ClimateReference, TruncatedGridRejected)
+{
     writeFixture(fixture, true);
     expect(!climatereference::loadMonthlyGrid(fixture, "tavg", grid, &error), "truncated grid data must be rejected");
+}
 
+TEST_F(ClimateReference, ExtraLatitudeRowRejected)
+{
     writeFixture(fixture, false, 12, 2, 2);
     expect(!climatereference::loadMonthlyGrid(fixture, "tavg", grid, &error),
         "a reference with an extra latitude row must be rejected");
+}
 
+TEST_F(ClimateReference, SeasonalSampling)
+{
     climatereference::MonthlyGrid seasonal;
     seasonal.width = 2; seasonal.height = 1; seasonal.monthCount = 12;
     seasonal.values.resize(24);
@@ -98,10 +133,11 @@ TEST(ClimateReference, MonthlyGrids)
         "disabled reference input must preserve the native value");
     expect(climateio::experiment::Inputs{}.field(2, "qa") == nullptr,
         "default input must not read reference data");
+}
 
-    const auto directory = std::filesystem::current_path() / "reference-experiment-test";
+TEST_F(ClimateReference, ExperimentInputs)
+{
     std::filesystem::create_directories(directory / "2");
-    const auto input = directory / "2" / "qa.npy";
     writeFixture(input, false);
     expect(climateio::experiment::Inputs(directory).field(2, "qa") != nullptr,
         "explicit matching reference input must load");
@@ -110,11 +146,4 @@ TEST(ClimateReference, MonthlyGrids)
     try { climateio::experiment::Inputs invalid(directory); }
     catch (const std::runtime_error&) { rejected = true; }
     expect(rejected, "annual data must not be silently used as seasonal forcing");
-
-    std::error_code ignored;
-    std::filesystem::remove(fixture, ignored);
-    std::filesystem::remove(annual, ignored);
-    std::filesystem::remove(input, ignored);
-    std::filesystem::remove(directory / "2", ignored);
-    std::filesystem::remove(directory, ignored);
 }
