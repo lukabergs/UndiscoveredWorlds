@@ -7,10 +7,8 @@ import sys
 import numpy as np
 
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'scripts/benchmarks'))
-from climate_report_data import Archive,FIELDS,magnitude,SOURCES
-from climate_report_render import full_reference,save_map,save_ocean_flow,flow_complete,flow_path
-from climate_report import write_reference_index
 from climate_palettes import VERSION
+from standard_climate_rendering import FIELDS,magnitude,SOURCES,full_reference,save_map,save_ocean_flow,flow_complete,flow_path,write_reference_index
 sys.path.insert(0,str(ROOT/'scripts'))
 from uwtools import references
 from uwtools.hashing import sha256
@@ -18,14 +16,12 @@ from uwtools.hashing import sha256
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--reuse-maps',action='store_true');args=p.parse_args()
     out=ROOT/'refs/processed/climate/maps/standard-v2';parent=ROOT/'runs/reports';records={};coverage={};inputs={}
-    # The annual-reference reader is independent of model/archive state.
-    provider=Archive.__new__(Archive)
     for field,(_,_,_,_,semantic) in FIELDS.items():
         if field=='skin_sst':
             coverage[field]='Unavailable: no retained matching skin-temperature reference.';continue
         cache={}
         for s in ([0] if field=='annual_rain' else range(4)):
-            value=full_reference(field,s,provider,cache)
+            value=full_reference(field,s,cache)
             target=out/'climate'/semantic.format(s=s+1)/'2048.png'
             if not args.reuse_maps or not target.exists():save_map(target,field,value,np.isfinite(magnitude(value)))
             records[f'{field}/{s}']=Path(os.path.relpath(target,parent)).as_posix()

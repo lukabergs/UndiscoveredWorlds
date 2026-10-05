@@ -8,9 +8,8 @@ from PIL import Image
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'scripts/benchmarks'))
-from climate_report_data import bundle
 from climate_palettes import DEFINITION,VERSION
-from climate_report_render import save_wind_flow,flow_path,flow_complete
+from standard_climate_rendering import bundle,save_wind_flow,flow_path,flow_complete
 sys.path.insert(0,str(ROOT/'scripts'))
 from uwtools import references
 from uwtools.hashing import sha256

@@ -69,6 +69,7 @@ Lessons:
 | `world-0015` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 7: observed references as .npy with a manifest per dataset |
 | `world-0016` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 12 (done before steps 8 to 11): Excel automation removed |
 | `world-0017` | 2026-10-05 | equivalent | keep | consolidation phase 3, steps 8 and 11: run layout runs/<module>/<id>/, old layout sealed, storage script ported |
+| `world-0018` | 2026-10-05 | retired | keep | consolidation phase 3, step 13: legacy climate chain retired (step 9 is tectonics-0004) |
 
 Lessons:
 
@@ -114,3 +115,6 @@ Lessons:
 - `world-0017`: The registry files are stored with CRLF in the working tree and LF in git; records are inserted as text.
 - `world-0017`: scripts/evaluation still imports map_rendering, climate_palettes and tectonics_earth_reference from scripts/benchmarks and cell_grid from scripts/refs.
 - `world-0017`: Old-layout paths are still named in map_projection.py, summarize_climate_validation.py, scripts/refs/organize_climate_maps.py and the map guides under docs/reference-guides.
+- `world-0018`: scripts/benchmarks/generate_climate_palette_header.py runs when it is imported (no main guard) and rewrites src/validation/climate/climate_palette.hpp; an import check changed the file's line endings until it was restored.
+- `world-0018`: pyshp is declared in pyproject.toml and imported nowhere.
+- `world-0018`: scripts/evaluation still imports map_rendering, climate_palettes and tectonics_earth_reference from scripts/benchmarks.

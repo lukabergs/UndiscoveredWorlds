@@ -1,7 +1,6 @@
 """global-balanced-v1: per-field comparison losses and the fixed, inspectable global ranking rule.
 
-Moved unchanged from the climate report (scripts/benchmarks/climate_report_metrics.py, which
-re-exports it). Field scales come from configs/climate-palettes.json.
+Moved unchanged from the retired climate report. Field scales come from configs/climate-palettes.json.
 """
 import sys
 from pathlib import Path

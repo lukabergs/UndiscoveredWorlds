@@ -3,8 +3,8 @@
 References are processed fields under refs/processed/<dataset>/ (uwtools.references;
 cell-centred, north row first). They are validation inputs only: nothing here feeds a
 simulation.
-Season rules and unit conversions follow the climate report (climate_report_data.py),
-so per-field losses use the same definitions as global-balanced-v1.
+Season rules and unit conversions are those of global-balanced-v1 (score.py) and of the
+standard reference maps (scripts/refs/standard_climate_rendering.py).
 """
 import sys
 from pathlib import Path

@@ -56,7 +56,7 @@ When the run ends a record `{"id", "status", "run": "runs/<module>/<id>", "date"
 
 **Seed 1** is the default for every new run. Use another seed only for a deliberate seed comparison. Tectonics `run` with a seed other than 1 is recorded as a seed comparison and does not replace the tectonics baseline.
 
-Climate runs registered up to run 365 used seed **20260906**. Use it only to reproduce or extend those runs; adaptive batches set up before this change keep 20260906 automatically. The 20260906 inside the report renderers is the texture seed for wind and current images, shared by model and reference, not a simulation seed.
+Climate runs registered up to run 365 used seed **20260906**. Use it only to reproduce or extend those runs. The 20260906 inside the reference renderers is the texture seed for wind and current images, shared by model and reference, not a simulation seed.
 
 ## Builds
 
@@ -237,7 +237,7 @@ The world grid (`--resolution`) sets the size of every field. Atmosphere/ocean (
 
 Land surface drag is a declared input of the climate profile, applied to `run` and `experiment` alike: `UW_CLIMATE_SURFACE_DRAG_INPUT` names the Earth vegetation drag contrast (`refs/processed/era5-vegetation-drag/1024/land-drag-contrast-1024.txt`, prepared from ERA5 vegetation cover). Other world widths get a version area-averaged from the 1024 file once, in `out/inputs/`. `run.json` records the file and its SHA-256. Procedural worlds never use it.
 
-The legacy climate chain (`climate_benchmark.py`, `write_benchmark_report.py`, `climate_report.py`, `climate_experiment.py`, `check_climate_baseline.py`, `run_report.py`) reads the sealed run layout and is being retired; its runs and reports are in `runs/archive/` and `runs/reports/`.
+Climate runs registered before run 388 were made and reported by a former script chain, retired on 2026-10-05 after the parity check of ledger `climate-0002`. Their data are sealed in `runs/archive/`; their pages (`runs/reports/<id>.html` and `.md`, `climate-comparison-*.html`) stay as written and are not regenerated. Reporting is described in `climate-reporting.md`.
 
 ## Full world
 
