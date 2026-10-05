@@ -100,6 +100,7 @@ Lessons:
 | `world-0045` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 8: hydrology parameters |
 | `world-0046` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 9: climate parameters |
 | `world-0047` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 10: world defaults and the planet body as parameters; generation_tuning.hpp removed |
+| `world-0048` | 2026-10-05 | equivalent | keep | consolidation phase 5, step 10b: snake_case keys in configs/tectonics-baseline.json |
 
 Lessons:
 
@@ -209,3 +210,4 @@ Lessons:
 - `world-0046`: The first registered climate run after this step should compare its solver times with run 388 before any tuning starts.
 - `world-0046`: Reference bundles of the next step: out/scratch/phase5/step09-*.
 - `world-0047`: Reference bundles of the next step: out/scratch/phase5/step10-*.
+- `world-0048`: Run records written before this step hold the dashed scenario keys; a script that reads a stored recipe must accept both.

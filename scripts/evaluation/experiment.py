@@ -60,8 +60,8 @@ def relative(path):
 
 
 def recipe_options(recipe):
-    """The scenario of a recipe file as --key value options."""
-    return [part for key, value in recipe['scenario'].items() for part in ('--' + key, str(value))]
+    """The scenario of a recipe file as --key value options (a key trench_depth is the option --trench-depth)."""
+    return [part for key, value in recipe['scenario'].items() for part in ('--' + key.replace('_', '-'), str(value))]
 
 
 def settings(spec, register, resolution):
@@ -76,7 +76,7 @@ def settings(spec, register, resolution):
         if recipe['height'] * 2 != recipe['width']:
             raise SystemExit('The world grid is W x W/2')
         scenario = recipe_options(recipe)
-        interval = recipe['checkpoint_every_updates'] * float(recipe['scenario'].get('delta-time-myr', 1.0))
+        interval = recipe['checkpoint_every_updates'] * float(recipe['scenario'].get('delta_time_myr', 1.0))
         values['checkpoint_every'] = f'{interval:g}'
     width = resolution or (recipe['width'] if recipe else None) or registered.get('resolution') or spec['resolution']
     if width < 2 or width % 2:

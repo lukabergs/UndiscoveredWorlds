@@ -19,7 +19,8 @@ def review(run):
         if frames and frames[-1]['time']==m['time_myr']:continue
         owner=read_field(path/files['plate_id'],'plate_id',(m['height'],m['width']),native)
         stable=np.asarray(m['topology_diagnostics']['stable_ids'])[owner]
-        scale=record['recipe']['scenario']['world-width-km']*1000/m['width']/record['recipe']['scenario']['delta-time-myr']/1e4
+        scenario=record['recipe']['scenario'];value=lambda key:scenario[key] if key in scenario else scenario[key.replace('_','-')]  # records before the snake_case keys
+        scale=value('world_width_km')*1000/m['width']/value('delta_time_myr')/1e4
         v=np.asarray([p['linear_velocity'] for p in m['plates']])[owner]*scale
         a=np.stack([stable,stable]);b=np.stack([np.roll(stable,-1,1),np.roll(stable,-1,0)])
         closing=np.stack([v[...,0]-np.roll(v[...,0],-1,1),v[...,1]-np.roll(v[...,1],-1,0)])
