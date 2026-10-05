@@ -3,7 +3,7 @@
   "module": "world",
   "description": "Procedural world from a seed (procedural-world recipe): terrain, climate, hydrology and resources after the tectonics step. Judged by the user's review; checks guard budgets and value ranges. Earth hypsometry is context for the review, not a target. Phase 4 registers one run per module that moves to the float accessors in this series; the ledger entry names the module.",
   "evidence": {"checks": "required", "validation": "context", "review": "primary"},
-  "run": {"tool": "world_pipeline", "resolution": 256, "arguments": ["run", "--recipe", "procedural-world", "--resolution", "{width}"], "registered": {"resolution": 512, "arguments": ["--climate-resolution", "64", "--climate-coupling-iterations", "2"]}},
+  "run": {"tool": "world_pipeline", "resolution": 256, "arguments": ["run", "--recipe", "procedural-world", "--resolution", "{width}"], "registered": {"resolution": 128, "arguments": ["--duration", "50", "--climate-resolution", "32", "--climate-coupling-iterations", "2"]}},
   "checks": [
     {"check": "grid"},
     {"check": "required", "fields": ["geosphere.base_elevation", "geosphere.sea_level", "geosphere.crust_age", "geosphere.crust_class", "atmosphere.temperature", "atmosphere.precipitation", "hydrosphere.river_direction", "hydrosphere.river_flow_january", "biosphere.biome"]},

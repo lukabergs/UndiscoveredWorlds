@@ -14,11 +14,27 @@ void climateworld::resize(int width, int height)
     inputs_.height = height;
     levels_.clear();
     diagnostics_.reset();
-    const auto resolution = climatecontext_.resolution;
-    const bool calibrate = climatecontext_.calibrateMeanTemperature;
-    climatecontext_ = {};
-    climatecontext_.resolution = resolution;
-    climatecontext_.calibrateMeanTemperature = calibrate;
+    // A new grid discards the solver state and keeps the run's options (cli/climate_options.cpp):
+    // a procedural world is resized after its options were applied.
+    climatecontext::Context options;
+    options.resolution = climatecontext_.resolution;
+    options.calibrateMeanTemperature = climatecontext_.calibrateMeanTemperature;
+    options.transientWeather = climatecontext_.transientWeather;
+    options.mixedLayerTropics = climatecontext_.mixedLayerTropics;
+    options.genericLevelPressuresHpa = climatecontext_.genericLevelPressuresHpa;
+    options.genericLevelReversalHpa = climatecontext_.genericLevelReversalHpa;
+    options.transportMethod = climatecontext_.transportMethod;
+    options.oceanHeatStepHours = climatecontext_.oceanHeatStepHours;
+    options.reuseOceanCirculation = climatecontext_.reuseOceanCirculation;
+    options.krylovOceanCirculation = climatecontext_.krylovOceanCirculation;
+    options.gatherOceanHeatFluxes = climatecontext_.gatherOceanHeatFluxes;
+    options.oceanHeatWorkers = climatecontext_.oceanHeatWorkers;
+    options.oceanCoastalScheme = climatecontext_.oceanCoastalScheme;
+    options.oceanCaptureDirectory = climatecontext_.oceanCaptureDirectory;
+    options.atmosphereSolver = climatecontext_.atmosphereSolver;
+    options.atmosphereCaptureDirectory = climatecontext_.atmosphereCaptureDirectory;
+    options.couplingIterationLimit = climatecontext_.couplingIterationLimit;
+    climatecontext_ = std::move(options);
     const int cellcount = (inputs_.width + 1) * (inputs_.height + 1);
     jantempmap.resize(inputs_.width + 1, inputs_.height + 1);
     jultempmap.resize(inputs_.width + 1, inputs_.height + 1);

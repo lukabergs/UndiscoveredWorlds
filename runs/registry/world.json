@@ -7,6 +7,13 @@
       "run": "runs/world/1",
       "date": "2026-10-05T14:14:19+00:00",
       "label": "phase 4 reference before the float steps"
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "run": "runs/world/2",
+      "date": "2026-10-05T16:16:49+00:00",
+      "label": "minimal reference: 128 x 64, 50 Myr, climate 32 with 2 iterations"
     }
   ]
 }

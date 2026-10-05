@@ -11,9 +11,11 @@ process is marked stochastic when any report saw it draw from the shared random
 generator. The result is written to src/pipeline/world_process_access.inc. Reads are
 only as complete as the code paths the reports exercised, and a write is seen only
 when it changes a value: small or short worlds leave out lakes, deltas and scenario
-fields. Run seed 1 at the default size for procedural-world and imported-world (both
-with --social), earth-climate and tectonics, and a tectonics run with
-`--plume-count 4 --progressive-rifting on`; reports of smaller runs can be added.
+fields. Stored sets accumulate (runs/reports/phase4-access and phase4b-access are read
+together). The quick set, phase4b-access, is five runs at seed 1: tectonics
+with `--plume-count 4 --progressive-rifting on`, earth-climate, imported-world and
+procedural-world with --social on 128 x 64, and one procedural world with --social at
+the default size, the only run that exercises the lake, delta and wetland writes.
 Stages that are in no recipe (the legacy FastLEM stages) get no declaration.
 `--check` exits 1 when the file would change instead of writing it.
 """
