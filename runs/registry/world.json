@@ -56,6 +56,13 @@
       "run": "runs/world/8",
       "date": "2026-10-05T18:49:50+00:00",
       "label": ""
+    },
+    {
+      "id": 9,
+      "status": "complete",
+      "run": "runs/world/9",
+      "date": "2026-10-05T21:32:44+00:00",
+      "label": "default body for procedural worlds (world.defaults.body_from_seed=false)"
     }
   ]
 }

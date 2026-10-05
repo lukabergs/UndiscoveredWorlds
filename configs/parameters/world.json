@@ -5,7 +5,7 @@
  "types": {"defaults.perihelion": "short"},
  "parameters": {
   "defaults": {
-   "body_from_seed": true,
+   "body_from_seed": false,
    "size": 2,
    "width": 599,
    "height": 299,

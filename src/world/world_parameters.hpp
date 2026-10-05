@@ -9,7 +9,7 @@ namespace tuning::world
 {
 namespace defaults
 {
-inline bool bodyFromSeed = true;
+inline bool bodyFromSeed = false;
 inline int size = 2;
 inline int width = 599;
 inline int height = 299;
