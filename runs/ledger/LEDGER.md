@@ -92,6 +92,7 @@ Lessons:
 | `world-0037` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 13: hydrology on the float accessors; lake surfaces stored as float (module hydrology) |
 | `world-0038` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 14: resources on the float accessors (module resources) |
 | `world-0039` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 15: society on the float accessors (module society) |
+| `world-0040` | 2026-10-05 | pending user review | keep | consolidation phase 4, step 16: phase close |
 
 Lessons:
 
@@ -190,3 +191,5 @@ Lessons:
 - `world-0038`: The reference bundles of the next step are out/scratch/phase4/step14-*; world run 7 is the parent.
 - `world-0039`: Society runs only with --social; no recipe default and no registered run turns it on. A step that touches society needs its own pair of runs with the switch.
 - `world-0039`: The reference bundles after this step are out/scratch/phase4/step15-*; world run 8 is the parent.
+- `world-0040`: A change of number type did not change any declared read or write: the rule of measuring access only when reads or writes change held.
+- `world-0040`: The estimate was wrong by a factor of five because it counted reading every call site by hand; a rename script, a compile with conversion warnings and reading only the flagged lines did the same work.
