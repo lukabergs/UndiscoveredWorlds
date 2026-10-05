@@ -16,6 +16,7 @@
 #include "core/classes.hpp"
 #include "simulations/climate/climate_diagnostics.hpp"
 #include "world/functions.hpp"
+#include "pipeline/recipe_parameters.hpp"
 #include "pipeline/world_stages.hpp"
 #include "io/map_imports.hpp"
 #include "pipeline/physical_layers.hpp"
@@ -39,6 +40,9 @@ void printcommandlineusage()
     cout << "                           other options are not inherited.\n";
     cout << "  --steps <a..b>          Run steps a to b of the recipe (indices or process ids; a.. and ..b allowed).\n";
     cout << "  --only <process>        Run one step.\n";
+    cout << "  --set <name=value>      Set one parameter of a module (names as in configs/parameters/*.json:\n";
+    cout << "                           <module>.<group>.<key>); may be repeated. The bundle manifest records every value.\n";
+    cout << "  --parameters <file>     Set parameters from a JSON file: nested objects, or a manifest's \"parameters\".\n";
     cout << "  --checkpoint-at <step|Myr[,...]>  Write a bundle after these steps (process ids) and at these\n";
     cout << "                           times of the tectonics step (numbers, in Myr).\n";
     cout << "  --checkpoint-every <Myr>  Write a bundle at this interval of the tectonics step.\n";
@@ -138,7 +142,7 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
         }
 
         if (isclimateoption(argument) ||
-            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--duration" || argument == "--mineral-history" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
+            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--set" || argument == "--parameters" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--duration" || argument == "--mineral-history" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -177,6 +181,17 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                 else if (argument == "--from-bundle")
                 {
                     options.fromBundlePath = value;
+                }
+                else if (argument == "--set" || argument == "--parameters")
+                {
+                    string reason;
+                    const bool accepted = argument == "--set" ? setrecipeparameter(value, &reason) : loadrecipeparameters(value, &reason);
+                    if (!accepted)
+                    {
+                        cerr << argument << ": " << reason << '\n';
+                        cleanup();
+                        return false;
+                    }
                 }
                 else if (argument == "--steps" || argument == "--only")
                 {
@@ -675,6 +690,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         metadata.recipe = recipe.name;
         metadata.command = options.commandArguments;
         metadata.steps = bundlesteps(result);
+        metadata.parameters = recipeparametersjson();
         metadata.properties.push_back({ "executable_built", string(__DATE__) + " " + __TIME__ });
         metadata.properties.push_back({ "command", options.runCommand ? "run" : "generate" });
         metadata.properties.push_back({ "access", options.auditAccess ? "measured" : "declared" });

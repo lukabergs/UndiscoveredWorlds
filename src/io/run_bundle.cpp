@@ -163,6 +163,8 @@ void Writer::finish(const Metadata& metadata)
     for (std::size_t index = 0; index < metadata.properties.size(); index++)
         out << (index ? ", " : "") << jsonstring(metadata.properties[index].first) << ": " << jsonstring(metadata.properties[index].second);
     out << "},\n";
+    if (!metadata.parameters.empty())
+        out << "  \"parameters\": " << metadata.parameters << ",\n";
     out << "  \"steps\": [";
     for (std::size_t index = 0; index < metadata.steps.size(); index++)
     {

@@ -5,6 +5,7 @@ add_library(uw_core STATIC
     climate_grid.cpp
     grid_coordinates.cpp
     grid_shapes.cpp
+    parameters.cpp
     procedural_noise.cpp
     profiler.cpp
     text_values.cpp

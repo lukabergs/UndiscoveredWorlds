@@ -7,7 +7,7 @@
 #include "core/classes.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
-#include "world/generation_tuning.hpp"
+#include "simulations/terrain/terrain_parameters.hpp"
 #include "simulations/terrain/climate_landforms.hpp"
 #include "simulations/hydrology/lakes.hpp"
 #include "simulations/terrain/land_distance.hpp"

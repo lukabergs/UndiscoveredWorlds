@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "world/functions.hpp"
-#include "world/generation_tuning.hpp"
+#include "simulations/terrain/terrain_parameters.hpp"
 #include "world/planet.hpp"
 
 using namespace std;

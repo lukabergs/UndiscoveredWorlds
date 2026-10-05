@@ -11,7 +11,7 @@
 #include "core/classes.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
-#include "world/generation_tuning.hpp"
+#include "simulations/terrain/terrain_parameters.hpp"
 
 using namespace std;
 
@@ -625,7 +625,7 @@ void createoceanridges(planet& world, worldgrid<bool>& shelves)
         return workerstouse;
     };
 
-    float thisheightperthousand[firstmaxradius + 1]; // Create a lookup table for these values, for speed.
+    vector<float> thisheightperthousand(firstmaxradius + 1); // Create a lookup table for these values, for speed.
 
     thisheightperthousand[1] = 1.1037f;
 

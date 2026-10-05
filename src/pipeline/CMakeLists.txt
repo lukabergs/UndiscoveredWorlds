@@ -5,6 +5,7 @@ add_library(uw_pipeline STATIC
     generation_progress.cpp
     generation_stage_registry.cpp
     physical_layers.cpp
+    recipe_parameters.cpp
     social_generation.cpp
     world_generation_debug.cpp
     world_processes.cpp

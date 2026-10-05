@@ -6,7 +6,7 @@
 Builds the headless preset (and the desktop preset with --desktop), makes the three seed-1
 bundles on 128 x 64 (tectonics 50 Myr; climate on 32 columns with 2 coupling iterations;
 --audit-access) as <directory>/<LABEL>-<recipe>, compares each with the bundle of the
-reference label, then runs check_layout.py and process_access.py --check on the stored
+reference label, then runs parameters.py --check, check_layout.py and process_access.py --check on the stored
 report sets. --social adds a procedural world with society (<LABEL>-social).
 Build and run output goes to <directory>/<LABEL>-*.log. Exit status: 0 when every build,
 run and check passed and every comparison was identical.
@@ -79,6 +79,8 @@ def main():
             print(f'{name} compare exit {status}: {lines[-1] if lines else ""}')
             passed = passed and status == 0
 
+    status = subprocess.run([sys.executable, 'scripts/parameters.py', '--check'], cwd=ROOT).returncode
+    passed = passed and status == 0
     status = subprocess.run([sys.executable, 'scripts/check_layout.py'], cwd=ROOT).returncode
     print(f'check_layout exit {status}')
     passed = passed and status == 0

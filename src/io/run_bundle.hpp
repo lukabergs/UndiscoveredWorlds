@@ -58,6 +58,7 @@ struct Metadata
     std::vector<std::string> command;
     std::vector<StepRecord> steps;
     std::vector<std::pair<std::string, std::string>> properties;   // extra string facts
+    std::string parameters;   // a JSON object of the modules' tunable values, or empty
 };
 
 class Writer
