@@ -110,6 +110,7 @@ Lessons:
 | `world-0054` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 11: phase close |
 | `world-0055` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 0: baseline test run and the split list |
 | `world-0056` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 1: climate_atmosphere_tests.cpp split |
+| `world-0057` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 2: climate_ocean_dynamics_tests.cpp split |
 
 Lessons:
 
@@ -230,3 +231,4 @@ Lessons:
 - `world-0055`: A test file whose sections mutate a shared config between them (ocean dynamics: oneWayConfig in three states; weather: the stochastic forcing set midway) needs the config reproduced at the state each section saw, or the split changes what is tested.
 - `world-0056`: GoogleTest refuses one suite with both TEST and TEST_F; naming the fixture class after the suite and converting the existing one-liners keeps suite names, ctest -R patterns and the Modes test names stable.
 - `world-0056`: A step's duration is measured commit to commit (git log --format='%h %ci').
+- `world-0057`: When a split recomputes a config state, write down which of the old body's states each section saw (initial, closed exchange, daily freezing steps) before writing the tests; the replay sections and the bottom-stress sections would otherwise have taken the wrong one.

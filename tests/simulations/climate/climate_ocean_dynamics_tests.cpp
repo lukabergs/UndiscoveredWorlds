@@ -151,74 +151,243 @@ int climateoceandynamicstool(int argc, char** argv)
     return -1;
 }
 
-TEST(ClimateOceanDynamics, Model)
+namespace
 {
-    {
-        constexpr double r=2e-6;
-        for (const auto bounds : {std::pair<double,double>{-8e-6,0.0}, {0.0,8e-6},
-                 {-8e-6,8e-6}, {1.0e-4,1.1e-4}, {-1.1e-4,-1.0e-4}})
-        {
-            const double lo=bounds.first,hi=bounds.second;
-            const auto mobility=climateocean::detail::ekmanCellMobility(r,hi,lo);
-            double along=0.0,cross=0.0;
-            constexpr int samples=10000;
-            for (int i=0;i<samples;++i)
-            {
-                const double f=lo+(i+.5)*(hi-lo)/samples;
-                along+=r/(r*r+f*f)/samples;cross+=f/(r*r+f*f)/samples;
-            }
-            expect(mobility.alongStressSeconds>0.0 &&
-                std::abs(mobility.alongStressSeconds-along)<1e-6*along &&
-                std::abs(mobility.crossStressSeconds-cross)<1e-6*std::max(1.0,std::abs(cross)),
-                "cell-averaged Ekman response must match independent quadrature and dissipate wind work");
-            const auto half1=climateocean::detail::ekmanCellMobility(r,hi,.5*(hi+lo));
-            const auto half2=climateocean::detail::ekmanCellMobility(r,.5*(hi+lo),lo);
-            expect(std::abs(mobility.alongStressSeconds-.5*(half1.alongStressSeconds+half2.alongStressSeconds))<1e-7 &&
-                std::abs(mobility.crossStressSeconds-.5*(half1.crossStressSeconds+half2.crossStressSeconds))<1e-7,
-                "uniform-stress Ekman response must be invariant under area subdivision");
-        }
-        const auto equator=climateocean::detail::ekmanCellMobility(r,0.0,0.0);
-        const auto symmetric=climateocean::detail::ekmanCellMobility(r,8e-6,-8e-6);
-        expect(equator.alongStressSeconds==1.0/r && equator.crossStressSeconds==0.0 &&
-            symmetric.crossStressSeconds==0.0,
-            "nonrotating and symmetric equatorial cells must have no cross-stress response");
-    }
-    constexpr int columns = 32;
-    constexpr int rows = 16;
-    constexpr std::size_t cellCount = columns * rows;
-    constexpr float pi = 3.14159265358979323846f;
-    const auto index = [=](int x, int y)
+
+// The 32 x 16 walled basin of the ocean dynamics tests, the one-way and coupled
+// configs, and the forcings the sections derived from the basin.
+class ClimateOceanDynamics : public ::testing::Test
+{
+protected:
+    static constexpr int columns = 32;
+    static constexpr int rows = 16;
+    static constexpr std::size_t cellCount = columns * rows;
+    static constexpr float pi = 3.14159265358979323846f;
+    static std::size_t index(int x, int y)
     {
         return static_cast<std::size_t>(y) * columns + x;
-    };
-    climateocean::OceanForcing forcing;
-    forcing.landMask.assign(cellCount, 0);
-    forcing.bathymetryMetres.assign(cellCount, 4000.0f);
-    forcing.eastWindMps.assign(cellCount, 0.0f);
-    forcing.southWindMps.assign(cellCount, 0.0f);
-    forcing.atmosphericTemperatureC.assign(cellCount, 0.0f);
-    forcing.initialSstC.assign(cellCount, 0.0f);
-    for (int y = 0; y < rows; y++)
-    {
-        const float latitude = pi * 0.5f - pi * (y + 0.5f) / rows;
-        for (int x = 0; x < columns; x++)
-        {
-            const std::size_t cell = index(x, y);
-            const bool wall = x == 0 || x == columns - 1 || y == 0 || y == rows - 1;
-            forcing.landMask[cell] = wall ? 1 : 0;
-            forcing.bathymetryMetres[cell] = wall ? 0.0f : 4000.0f;
-            forcing.eastWindMps[cell] = 10.0f * std::cos(2.0f * latitude);
-            forcing.atmosphericTemperatureC[cell] = 18.0f * std::cos(latitude) - 2.0f;
-            forcing.initialSstC[cell] = forcing.atmosphericTemperatureC[cell];
-        }
     }
 
+    climateocean::OceanForcing forcing;
     climateocean::OceanConfig oneWayConfig;
-    oneWayConfig.oneWay = true;
-    oneWayConfig.streamfunctionIterations = 500;
-    oneWayConfig.heatStepsPerIteration = 2;
-    const auto oneWay = climateocean::solveWindDrivenOcean(
-        columns, rows, forcing, oneWayConfig);
+    climateocean::OceanConfig coupledConfig;
+
+    ClimateOceanDynamics()
+    {
+        forcing.landMask.assign(cellCount, 0);
+        forcing.bathymetryMetres.assign(cellCount, 4000.0f);
+        forcing.eastWindMps.assign(cellCount, 0.0f);
+        forcing.southWindMps.assign(cellCount, 0.0f);
+        forcing.atmosphericTemperatureC.assign(cellCount, 0.0f);
+        forcing.initialSstC.assign(cellCount, 0.0f);
+        for (int y = 0; y < rows; y++)
+        {
+            const float latitude = pi * 0.5f - pi * (y + 0.5f) / rows;
+            for (int x = 0; x < columns; x++)
+            {
+                const std::size_t cell = index(x, y);
+                const bool wall = x == 0 || x == columns - 1 || y == 0 || y == rows - 1;
+                forcing.landMask[cell] = wall ? 1 : 0;
+                forcing.bathymetryMetres[cell] = wall ? 0.0f : 4000.0f;
+                forcing.eastWindMps[cell] = 10.0f * std::cos(2.0f * latitude);
+                forcing.atmosphericTemperatureC[cell] = 18.0f * std::cos(latitude) - 2.0f;
+                forcing.initialSstC[cell] = forcing.atmosphericTemperatureC[cell];
+            }
+        }
+        oneWayConfig.oneWay = true;
+        oneWayConfig.streamfunctionIterations = 500;
+        oneWayConfig.heatStepsPerIteration = 2;
+        coupledConfig = oneWayConfig;
+        coupledConfig.oneWay = false;
+        coupledConfig.couplingIterations = 40;
+        coupledConfig.convergenceTolerance = 1.0e-4f;
+    }
+
+    // The one-way basin solve of the initial config.
+    climateocean::OceanState oneWay() const
+    {
+        return climateocean::solveWindDrivenOcean(columns, rows, forcing, oneWayConfig);
+    }
+
+    // The second state of the old body's oneWayConfig: no vertical exchange and no surface exchange.
+    void closeVerticalExchange()
+    {
+        oneWayConfig.deepWaterTemperatureContrastK = 0.0f;
+        oneWayConfig.surfaceHeatExchangeWm2K = 0.0f;
+    }
+
+    // Uniform 2 C water over varying bathymetry.
+    climateocean::OceanForcing uniform() const
+    {
+        auto uniform = forcing;
+        std::fill(uniform.initialSstC.begin(), uniform.initialSstC.end(), 2.0f);
+        std::fill(uniform.atmosphericTemperatureC.begin(), uniform.atmosphericTemperatureC.end(), 2.0f);
+        for (std::size_t cell = 0; cell < cellCount; ++cell)
+            if (!uniform.landMask[cell]) uniform.bathymetryMetres[cell] = 500.0f + (cell % 7) * 400.0f;
+        return uniform;
+    }
+
+    // A 50 m shelf along the western three columns.
+    climateocean::OceanForcing shelf() const
+    {
+        auto shelf = forcing;
+        for (int y = 0; y < rows; ++y) for (int x = 0; x < columns; ++x)
+            if (!shelf.landMask[index(x, y)]) shelf.bathymetryMetres[index(x, y)] = x < 3 ? 50.0f : 4000.0f;
+        return shelf;
+    }
+
+    // The nonrotating, bottom-drag config of the shelf sections (closed vertical exchange).
+    climateocean::OceanConfig shelfConfig() const
+    {
+        auto shelfConfig = oneWayConfig;
+        shelfConfig.deepWaterTemperatureContrastK = 0.0f;
+        shelfConfig.surfaceHeatExchangeWm2K = 0.0f;
+        shelfConfig.rotationRatePerSecond = 0.0f;
+        shelfConfig.linearBottomDragMps = 0.001f;
+        shelfConfig.oceanTimeStepSeconds = 1.0f;
+        shelfConfig.heatStepsPerIteration = 1;
+        shelfConfig.streamfunctionTolerance = 1.0e-7f;
+        shelfConfig.streamfunctionIterations = 2000;
+        return shelfConfig;
+    }
+
+    climateocean::OceanForcing aquaplanet() const
+    {
+        auto aquaplanet = forcing;
+        std::fill(aquaplanet.landMask.begin(), aquaplanet.landMask.end(), 0);
+        std::fill(aquaplanet.bathymetryMetres.begin(), aquaplanet.bathymetryMetres.end(), 4000.0f);
+        return aquaplanet;
+    }
+
+    // Uniform zero-wind flux fixtures isolate phase change from transport.
+    climateocean::OceanForcing frozen() const
+    {
+        auto frozen = aquaplanet();
+        std::fill(frozen.eastWindMps.begin(), frozen.eastWindMps.end(), 0.0f);
+        std::fill(frozen.southWindMps.begin(), frozen.southWindMps.end(), 0.0f);
+        std::fill(frozen.initialSstC.begin(), frozen.initialSstC.end(), oneWayConfig.freezingTemperatureC);
+        std::fill(frozen.atmosphericTemperatureC.begin(), frozen.atmosphericTemperatureC.end(), -20.0f);
+        frozen.surfaceHeatFluxWm2.assign(cellCount, -100.0f);
+        return frozen;
+    }
+
+    // The third state of the old body's oneWayConfig: one daily heat step without diffusion.
+    void dailyFreezingSteps()
+    {
+        closeVerticalExchange();
+        oneWayConfig.heatStepsPerIteration = 1;
+        oneWayConfig.oceanTimeStepSeconds = 86400.0f;
+        oneWayConfig.heatDiffusivityM2S = 0.0f;
+    }
+
+    // Mixed-layer heat capacity and latent heat of ice per square metre of the one-way config.
+    double capacity() const
+    {
+        return static_cast<double>(oneWayConfig.waterDensityKgM3) * oneWayConfig.waterHeatCapacityJkgK * oneWayConfig.mixedLayerDepthMetres;
+    }
+    double latent() const
+    {
+        return static_cast<double>(oneWayConfig.iceDensityKgM3) * oneWayConfig.latentHeatFusionJkg;
+    }
+
+    // The uniform-wind aquaplanet slab of the momentum sections and its nonrotating config.
+    climateocean::OceanForcing slabForcing() const
+    {
+        auto slabForcing = aquaplanet();
+        std::fill(slabForcing.initialSstC.begin(), slabForcing.initialSstC.end(), 10.0f);
+        std::fill(slabForcing.atmosphericTemperatureC.begin(), slabForcing.atmosphericTemperatureC.end(), 10.0f);
+        std::fill(slabForcing.eastWindMps.begin(), slabForcing.eastWindMps.end(), 8.0f);
+        std::fill(slabForcing.southWindMps.begin(), slabForcing.southWindMps.end(), 6.0f);
+        return slabForcing;
+    }
+    static climateocean::OceanConfig slabConfig()
+    {
+        climateocean::OceanConfig slabConfig;
+        slabConfig.oneWay = true;
+        slabConfig.heatStepsPerIteration = 1;
+        slabConfig.heatDiffusivityM2S = 0.0f;
+        slabConfig.surfaceHeatExchangeWm2K = 0.0f;
+        slabConfig.deepWaterTemperatureContrastK = 0.0f;
+        slabConfig.rotationRatePerSecond = 0.0f;
+        // These all-ocean zonal modes relax much more slowly than closed basins.
+        slabConfig.streamfunctionIterations = 16000;
+        return slabConfig;
+    }
+
+    // A polar-land annulus avoids the singular poles of tau_east = A/cos(phi).
+    static constexpr int annulusColumns = 64, annulusRows = 32;
+    static constexpr int annulusCount = annulusColumns * annulusRows;
+    struct Annulus
+    {
+        climateocean::OceanConfig config;
+        climategrid::SphericalGrid grid;
+        climateocean::OceanForcing forcing;
+    };
+    static Annulus annulus()
+    {
+        Annulus a;
+        a.config.oneWay = true;
+        a.config.heatStepsPerIteration = 1;
+        a.config.heatDiffusivityM2S = 0.0f;
+        a.config.surfaceHeatExchangeWm2K = 0.0f;
+        a.config.deepWaterTemperatureContrastK = 0.0f;
+        a.config.streamfunctionIterations = 16000;
+        a.grid = climategrid::makeSphericalGrid(annulusColumns, annulusRows, a.config.planetRadiusMetres);
+        a.forcing.landMask.assign(annulusCount, 0);
+        a.forcing.bathymetryMetres.assign(annulusCount, 4000.0f);
+        a.forcing.eastWindMps.assign(annulusCount, 0.0f);
+        a.forcing.southWindMps.assign(annulusCount, 0.0f);
+        a.forcing.initialSstC.assign(annulusCount, 20.0f);
+        a.forcing.atmosphericTemperatureC.assign(annulusCount, 20.0f);
+        for (int y = 0; y < annulusRows; ++y)
+            for (int x = 0; x < annulusColumns; ++x)
+            {
+                const auto cell = a.grid.index(x, y);
+                a.forcing.landMask[cell] = y < 2 || y >= annulusRows - 2;
+                a.forcing.eastWindMps[cell] = static_cast<float>(10.0 /
+                    std::sqrt(std::cos(a.grid.latitudeCentresRadians[y])));
+            }
+        return a;
+    }
+};
+
+}
+
+TEST_F(ClimateOceanDynamics, EkmanCellMobility)
+{
+    constexpr double r=2e-6;
+    for (const auto bounds : {std::pair<double,double>{-8e-6,0.0}, {0.0,8e-6},
+             {-8e-6,8e-6}, {1.0e-4,1.1e-4}, {-1.1e-4,-1.0e-4}})
+    {
+        const double lo=bounds.first,hi=bounds.second;
+        const auto mobility=climateocean::detail::ekmanCellMobility(r,hi,lo);
+        double along=0.0,cross=0.0;
+        constexpr int samples=10000;
+        for (int i=0;i<samples;++i)
+        {
+            const double f=lo+(i+.5)*(hi-lo)/samples;
+            along+=r/(r*r+f*f)/samples;cross+=f/(r*r+f*f)/samples;
+        }
+        expect(mobility.alongStressSeconds>0.0 &&
+            std::abs(mobility.alongStressSeconds-along)<1e-6*along &&
+            std::abs(mobility.crossStressSeconds-cross)<1e-6*std::max(1.0,std::abs(cross)),
+            "cell-averaged Ekman response must match independent quadrature and dissipate wind work");
+        const auto half1=climateocean::detail::ekmanCellMobility(r,hi,.5*(hi+lo));
+        const auto half2=climateocean::detail::ekmanCellMobility(r,.5*(hi+lo),lo);
+        expect(std::abs(mobility.alongStressSeconds-.5*(half1.alongStressSeconds+half2.alongStressSeconds))<1e-7 &&
+            std::abs(mobility.crossStressSeconds-.5*(half1.crossStressSeconds+half2.crossStressSeconds))<1e-7,
+            "uniform-stress Ekman response must be invariant under area subdivision");
+    }
+    const auto equator=climateocean::detail::ekmanCellMobility(r,0.0,0.0);
+    const auto symmetric=climateocean::detail::ekmanCellMobility(r,8e-6,-8e-6);
+    expect(equator.alongStressSeconds==1.0/r && equator.crossStressSeconds==0.0 &&
+        symmetric.crossStressSeconds==0.0,
+        "nonrotating and symmetric equatorial cells must have no cross-stress response");
+}
+
+TEST_F(ClimateOceanDynamics, BasinCirculation)
+{
+    const auto oneWay = this->oneWay();
     double currentMagnitude = 0.0;
     double westernBoundaryMagnitude = 0.0;
     double easternBoundaryMagnitude = 0.0;
@@ -255,11 +424,10 @@ TEST(ClimateOceanDynamics, Model)
         "wind-stress divergence must diagnose both upwelling and downwelling");
     expect(oneWay.maximumTransportDivergenceMps < 1.0e-14,
         "barotropic face transport must be divergence free to roundoff");
+}
 
-    climateocean::OceanConfig coupledConfig = oneWayConfig;
-    coupledConfig.oneWay = false;
-    coupledConfig.couplingIterations = 40;
-    coupledConfig.convergenceTolerance = 1.0e-4f;
+TEST_F(ClimateOceanDynamics, CoupledConvergence)
+{
     const auto first = climateocean::solveWindDrivenOcean(
         columns, rows, forcing, coupledConfig);
     const auto second = climateocean::solveWindDrivenOcean(
@@ -277,30 +445,23 @@ TEST(ClimateOceanDynamics, Model)
     const double heatScale = 1.0e22;
     expect(std::abs(first.heatBudgetResidualJ) / heatScale < 1.0e-10,
         "mixed-layer heat transport must close its diagnosed energy budget");
+}
 
-    auto uniform = forcing;
-    std::fill(uniform.initialSstC.begin(), uniform.initialSstC.end(), 2.0f);
-    std::fill(uniform.atmosphericTemperatureC.begin(), uniform.atmosphericTemperatureC.end(), 2.0f);
-    oneWayConfig.deepWaterTemperatureContrastK = 0.0f;
-    oneWayConfig.surfaceHeatExchangeWm2K = 0.0f;
-    for (std::size_t cell = 0; cell < cellCount; ++cell)
-        if (!uniform.landMask[cell]) uniform.bathymetryMetres[cell] = 500.0f + (cell % 7) * 400.0f;
-    const auto constant = climateocean::solveWindDrivenOcean(columns, rows, uniform, oneWayConfig);
+TEST_F(ClimateOceanDynamics, UniformTemperaturePreserved)
+{
+    closeVerticalExchange();
+    const auto constant = climateocean::solveWindDrivenOcean(columns, rows, uniform(), oneWayConfig);
     expect(std::all_of(constant.sstC.begin(), constant.sstC.end(), [](float t) { return std::abs(t - 2.0f) < 1.0e-5f; }) &&
             constant.maximumTransportDivergenceMps < 1.0e-14,
         "variable bathymetry and convergent Ekman flow must preserve uniform temperature with closed vertical exchange");
+}
+
+TEST_F(ClimateOceanDynamics, ShelfWorkBalance)
+{
     // With rotation removed, physical wind work must balance physical drag.
     // Integrate on velocity-face dual areas, independently of the curl stencil.
-    auto shelf = forcing;
-    for (int y = 0; y < rows; ++y) for (int x = 0; x < columns; ++x)
-        if (!shelf.landMask[index(x, y)]) shelf.bathymetryMetres[index(x, y)] = x < 3 ? 50.0f : 4000.0f;
-    auto shelfConfig = oneWayConfig;
-    shelfConfig.rotationRatePerSecond = 0.0f;
-    shelfConfig.linearBottomDragMps = 0.001f;
-    shelfConfig.oceanTimeStepSeconds = 1.0f;
-    shelfConfig.heatStepsPerIteration = 1;
-    shelfConfig.streamfunctionTolerance = 1.0e-7f;
-    shelfConfig.streamfunctionIterations = 2000;
+    const auto shelf = this->shelf();
+    const auto shelfConfig = this->shelfConfig();
     const auto shelfFlow = climateocean::solveWindDrivenOcean(columns, rows, shelf, shelfConfig);
     const auto shelfPower = faceWork(columns, rows, shelf, shelfConfig, shelfFlow);
     expect(shelfFlow.converged && shelfPower.wind > 0 && shelfPower.drag > 0 &&
@@ -308,6 +469,14 @@ TEST(ClimateOceanDynamics, Model)
         "nonrotating steep-shelf flow must balance face-integrated wind work and drag dissipation");
     expect(shelfFlow.maximumTransportDivergenceMps < 1.0e-14 && std::abs(shelfFlow.relativeHeatBudgetResidual) < 1.0e-8,
         "face-depth coastal closure must conserve full-column volume and mixed-layer heat");
+}
+
+TEST_F(ClimateOceanDynamics, CoastalSchemesAgree)
+{
+    const auto oneWay = this->oneWay();
+    closeVerticalExchange();
+    const auto shelf = this->shelf();
+    const auto shelfConfig = this->shelfConfig();
     for (int scheme = 0; scheme < 3; ++scheme)
     {
         auto flatConfig = oneWayConfig;
@@ -332,6 +501,13 @@ TEST(ClimateOceanDynamics, Model)
                 "all coastal replay schemes must retain converged closed transport under either rotation");
         }
     }
+}
+
+TEST_F(ClimateOceanDynamics, ReplayFixtureRoundTrip)
+{
+    const auto shelf = this->shelf();
+    const auto shelfConfig = this->shelfConfig();
+    const auto shelfFlow = climateocean::solveWindDrivenOcean(columns, rows, shelf, shelfConfig);
     const climateocean::detail::OceanReplay capture{columns, rows, 2, shelfConfig, shelf};
     const auto captureDirectory = std::filesystem::temp_directory_path() / "uw-ocean-replay-roundtrip";
     const auto capturePath = capture.write(captureDirectory.string());
@@ -360,14 +536,27 @@ TEST(ClimateOceanDynamics, Model)
     expect(rejected, "ocean replay must reject invalid dimensions before allocating fields");
     std::filesystem::remove(capturePath);
     std::filesystem::remove(captureDirectory);
+}
+
+TEST_F(ClimateOceanDynamics, UnconvergedSolveRejected)
+{
+    const auto first = climateocean::solveWindDrivenOcean(
+        columns, rows, forcing, coupledConfig);
+    closeVerticalExchange();
     oneWayConfig.streamfunctionIterations = 1;
     const auto incomplete = climateocean::solveWindDrivenOcean(columns, rows, forcing, oneWayConfig);
     expect(!incomplete.converged && incomplete.streamfunctionRelativeResidual > oneWayConfig.streamfunctionTolerance,
         "one-way mode must not report an unconverged basin solve as converged");
     expect(!climateocean::usableOceanState(incomplete, cellCount) && climateocean::usableOceanState(first, cellCount),
         "production acceptance must reject finite but unconverged ocean solutions");
+}
+
+TEST_F(ClimateOceanDynamics, SurfaceHeatBudgets)
+{
+    closeVerticalExchange();
+    auto uniform = this->uniform();
+    const auto constant = climateocean::solveWindDrivenOcean(columns, rows, uniform, oneWayConfig);
     uniform.surfaceHeatFluxWm2.assign(cellCount, 25.0f);
-    oneWayConfig.streamfunctionIterations = coupledConfig.streamfunctionIterations;
     const auto heated = climateocean::solveWindDrivenOcean(columns, rows, uniform, oneWayConfig);
     expect(heated.sstC != constant.sstC && std::abs(heated.relativeHeatBudgetResidual) < 1.0e-8,
         "diagnosed surface heat exchange must change SST and close a normalized ocean heat budget");
@@ -393,6 +582,13 @@ TEST(ClimateOceanDynamics, Model)
             std::abs(part.barotropicUpwellingMps + part.ekmanUpwellingMps - heated.ekmanUpwellingMps[cell]) < 1.0e-10;
     }
     expect(componentsClose, "barotropic and Ekman diagnostics must reconstruct variable-depth currents and mixed-layer divergence");
+}
+
+TEST_F(ClimateOceanDynamics, BottomStress)
+{
+    closeVerticalExchange();
+    auto uniform = this->uniform();
+    uniform.surfaceHeatFluxWm2.assign(cellCount, 25.0f);
     auto bottomConfig = oneWayConfig;
     bottomConfig.linearBottomDragMps = 0.001f;
     const auto bottomHeated = climateocean::solveWindDrivenOcean(columns, rows, uniform, bottomConfig);
@@ -427,25 +623,21 @@ TEST(ClimateOceanDynamics, Model)
         expect(!climateocean::solveWindDrivenOcean(columns, rows, uniform, bottomConfig).finite,
             "bottom stress must reject negative and non-finite drag");
     }
-    auto aquaplanet = forcing;
-    std::fill(aquaplanet.landMask.begin(), aquaplanet.landMask.end(), 0);
-    std::fill(aquaplanet.bathymetryMetres.begin(), aquaplanet.bathymetryMetres.end(), 4000.0f);
-    const auto polarOcean = climateocean::solveWindDrivenOcean(columns, rows, aquaplanet, coupledConfig);
+}
+
+TEST_F(ClimateOceanDynamics, OpenPolarOcean)
+{
+    const auto polarOcean = climateocean::solveWindDrivenOcean(columns, rows, aquaplanet(), coupledConfig);
     expect(polarOcean.finite && polarOcean.maximumTransportDivergenceMps < 1.0e-14 &&
         std::all_of(polarOcean.sstC.begin(), polarOcean.sstC.end(), [](float t) { return std::isfinite(t); }),
         "open polar oceans must close faces and clamp meridional pressure neighbours safely");
+}
 
-    // Uniform zero-wind flux fixtures isolate phase change from transport.
-    auto frozen = aquaplanet;
-    std::fill(frozen.eastWindMps.begin(), frozen.eastWindMps.end(), 0.0f);
-    std::fill(frozen.southWindMps.begin(), frozen.southWindMps.end(), 0.0f);
-    std::fill(frozen.initialSstC.begin(), frozen.initialSstC.end(), oneWayConfig.freezingTemperatureC);
-    std::fill(frozen.atmosphericTemperatureC.begin(), frozen.atmosphericTemperatureC.end(), -20.0f);
-    frozen.surfaceHeatFluxWm2.assign(cellCount, -100.0f);
-    oneWayConfig.heatStepsPerIteration = 1;
-    oneWayConfig.oceanTimeStepSeconds = 86400.0f;
-    oneWayConfig.heatDiffusivityM2S = 0.0f;
-    const double latent = static_cast<double>(oneWayConfig.iceDensityKgM3) * oneWayConfig.latentHeatFusionJkg;
+TEST_F(ClimateOceanDynamics, PhaseChange)
+{
+    auto frozen = this->frozen();
+    dailyFreezingSteps();
+    const double latent = this->latent();
     const auto freeze = climateocean::solveWindDrivenOcean(columns, rows, frozen, oneWayConfig);
     expect(freeze.converged && std::abs(freeze.iceThicknessMetres[0] - 100.0 * 86400.0 / latent) < 1.0e-7 &&
         freeze.sstC[0] == oneWayConfig.freezingTemperatureC && std::abs(freeze.relativeHeatBudgetResidual) < 1.0e-10,
@@ -459,11 +651,18 @@ TEST(ClimateOceanDynamics, Model)
         "positive heat must melt existing ice before warming the liquid");
     frozen.surfaceHeatFluxWm2.assign(cellCount, 200.0f);
     const auto melted = climateocean::solveWindDrivenOcean(columns, rows, frozen, oneWayConfig);
-    const double capacity = static_cast<double>(oneWayConfig.waterDensityKgM3) * oneWayConfig.waterHeatCapacityJkgK * oneWayConfig.mixedLayerDepthMetres;
+    const double capacity = this->capacity();
     expect(melted.iceThicknessMetres[0] == 0.0f &&
         std::abs(melted.sstC[0] - (oneWayConfig.freezingTemperatureC + 100.0 * 86400.0 / capacity)) < 1.0e-6 &&
         std::abs(melted.relativeHeatBudgetResidual) < 1.0e-10,
         "heat beyond complete melting must warm SST without losing latent energy");
+}
+
+TEST_F(ClimateOceanDynamics, IceSkinAndFluxReference)
+{
+    auto frozen = this->frozen();
+    dailyFreezingSteps();
+    const double capacity = this->capacity();
     frozen.surfaceHeatFluxWm2.clear();
     frozen.initialIceThicknessMetres.assign(cellCount, 1.0f);
     oneWayConfig.surfaceHeatExchangeWm2K = 18.0f;
@@ -485,9 +684,16 @@ TEST(ClimateOceanDynamics, Model)
     frozen.initialIceThicknessMetres[0] = -1.0f;
     expect(!climateocean::solveWindDrivenOcean(columns, rows, frozen, oneWayConfig).finite,
         "negative initial ice thickness must be rejected");
+}
 
+TEST_F(ClimateOceanDynamics, AnnualHeatAccumulation)
+{
     // A full year must carry latent heat through each season, including the
     // year boundary. Constant flux admits an exact end state and time mean.
+    auto frozen = this->frozen();
+    dailyFreezingSteps();
+    const double capacity = this->capacity();
+    frozen.surfaceHeatFluxReferenceTemperatureC.assign(cellCount, -20.0f); // left by the flux-reference section of the old body
     frozen.initialIceThicknessMetres.assign(cellCount, 0.0f);
     frozen.surfaceHeatFluxWm2.assign(cellCount, 20.0f);
     oneWayConfig.surfaceHeatExchangeWm2K = 0.0f;
@@ -505,7 +711,13 @@ TEST(ClimateOceanDynamics, Model)
         frozen.initialSstC = season.sstC;
         frozen.initialIceThicknessMetres = season.iceThicknessMetres;
     }
+}
 
+TEST_F(ClimateOceanDynamics, PeriodicAnnualSolver)
+{
+    auto frozen = this->frozen();
+    dailyFreezingSteps();
+    frozen.surfaceHeatFluxReferenceTemperatureC.assign(cellCount, -20.0f); // left by the flux-reference section of the old body
     std::array<climateocean::OceanForcing, 4> seasonalForcing;
     std::array<climateocean::OceanConfig, 4> seasonalConfigs;
     for (int season = 0; season < 4; ++season)
@@ -525,7 +737,10 @@ TEST(ClimateOceanDynamics, Model)
     const auto growingIce = climateocean::solvePeriodicOcean(columns, rows, seasonalForcing, seasonalConfigs, 2, 1.0e-5);
     expect(growingIce.accepted && !growingIce.converged && growingIce.years == 2 && growingIce.annualEnthalpyDriftK > 1.0,
         "ice growth must prevent annual convergence even when liquid SST is stationary at freezing");
+}
 
+TEST_F(ClimateOceanDynamics, ThermalRemapAcrossCoasts)
+{
     // Coarse coastal land cells are absent ocean data, not 0 C water. Include
     // wet cells across the periodic seam and both poles, plus an unsupported sea.
     constexpr int coarseColumns = 8, coarseRows = 4;
@@ -560,9 +775,19 @@ TEST(ClimateOceanDynamics, Model)
     expect(climateocean::detail::remapOceanThermalField(
         thermalPlan, coastalLand, coastalTemperature, thermalFallback) == coastalConstant,
         "missing or arbitrary land temperature sentinels must not enter ocean reconstruction");
+}
 
+TEST_F(ClimateOceanDynamics, IceCoverAndAllWetRemap)
+{
+    constexpr int coarseColumns = 8, coarseRows = 4;
+    const auto thermalPlan = climategrid::makeSmoothRemap(coarseColumns, coarseRows, columns, rows);
+    std::vector<std::uint8_t> coastalLand(coarseColumns * coarseRows, 1);
+    std::vector<float> coastalTemperature(coastalLand.size(), std::numeric_limits<float>::quiet_NaN());
+    std::vector<float> thermalFallback(cellCount, -31.0f);
+    thermalFallback[index(columns / 2, rows / 2)] = 9.0f;
     for (int y = 0; y < coarseRows; ++y)
     {
+        coastalLand[y * coarseColumns] = coastalLand[y * coarseColumns + coarseColumns - 1] = 0;
         coastalTemperature[y * coarseColumns] = 1.0f;
         coastalTemperature[y * coarseColumns + coarseColumns - 1] = 0.0f;
     }
@@ -586,10 +811,14 @@ TEST(ClimateOceanDynamics, Model)
     for (std::size_t cell = 0; cell < cellCount; ++cell)
         sameAllWet = sameAllWet && std::abs(unmaskedThermal[cell] - smoothThermal[cell]) < 1.0e-6f;
     expect(sameAllWet, "all-wet thermal reconstruction must retain the accepted smooth remap");
+}
 
+TEST_F(ClimateOceanDynamics, ForcingRestrictionIgnoresLand)
+{
     // Restrict a mixed land/ocean forcing cell: three water donors have a
     // 100 m column, 20 C flux reference and 40 W/m2 heat input. Changing the
     // fourth, land-only donor must not alter the ocean boundary condition.
+    constexpr int coarseColumns = 8, coarseRows = 4;
     const auto forcingPlan = climategrid::makeConservativeRemap(columns, rows, coarseColumns, coarseRows);
     std::vector<std::uint8_t> forcingLand(cellCount, 0);
     std::vector<float> fineDepth(cellCount, 100.0f), fineHeat(cellCount, 40.0f), fineReference(cellCount, 20.0f);
@@ -615,23 +844,14 @@ TEST(ClimateOceanDynamics, Model)
     const auto changedLandHeat = climateocean::detail::remapOceanThermalField(forcingPlan, forcingLand, fineHeat, forcingFallback);
     expect(sameBoundaryFlux && changedLandHeat == wetHeat,
         "land heating must not affect the ocean's paired heat-flux/temperature boundary condition");
+}
 
+TEST_F(ClimateOceanDynamics, UnrotatingSlabBalance)
+{
     // With f=0 the existing damping scale must balance the wind stress;
     // retaining only perpendicular Ekman transport would give zero current.
-    auto slabForcing = aquaplanet;
-    std::fill(slabForcing.initialSstC.begin(), slabForcing.initialSstC.end(), 10.0f);
-    std::fill(slabForcing.atmosphericTemperatureC.begin(), slabForcing.atmosphericTemperatureC.end(), 10.0f);
-    std::fill(slabForcing.eastWindMps.begin(), slabForcing.eastWindMps.end(), 8.0f);
-    std::fill(slabForcing.southWindMps.begin(), slabForcing.southWindMps.end(), 6.0f);
-    climateocean::OceanConfig slabConfig;
-    slabConfig.oneWay = true;
-    slabConfig.heatStepsPerIteration = 1;
-    slabConfig.heatDiffusivityM2S = 0.0f;
-    slabConfig.surfaceHeatExchangeWm2K = 0.0f;
-    slabConfig.deepWaterTemperatureContrastK = 0.0f;
-    slabConfig.rotationRatePerSecond = 0.0f;
-    // These all-ocean zonal modes relax much more slowly than closed basins.
-    slabConfig.streamfunctionIterations = 16000;
+    const auto slabForcing = this->slabForcing();
+    const auto slabConfig = this->slabConfig();
     const auto unrotatingSlab = climateocean::solveWindDrivenOcean(columns, rows, slabForcing, slabConfig);
     const double slabMass = static_cast<double>(slabConfig.waterDensityKgM3) * slabConfig.mixedLayerDepthMetres;
     const double drag = slabConfig.minimumCoriolisPerSecond;
@@ -654,12 +874,15 @@ TEST(ClimateOceanDynamics, Model)
                 std::abs(unrotatingSlab.southCurrentMps[cell] - southBarotropic - windStressFactor * 10.0 * 6.0 / (slabMass * drag)) < 1.0e-7;
         }
     expect(downwindBalance, "zero Coriolis must retain the finite downwind current that balances linear drag");
+}
 
+TEST_F(ClimateOceanDynamics, PolarRowSymmetry)
+{
     // A fully wet pair of polar rows must obey hemisphere symmetry as well as
     // the interior. This also catches a south-face lookup beyond the last row.
-    auto polarStress=slabForcing;
+    auto polarStress=slabForcing();
     std::fill(polarStress.southWindMps.begin(),polarStress.southWindMps.end(),0.0f);
-    auto polarConfig=slabConfig;
+    auto polarConfig=slabConfig();
     polarConfig.rotationRatePerSecond=climateocean::OceanConfig{}.rotationRatePerSecond;
     const auto symmetricSlab=climateocean::solveWindDrivenOcean(columns,rows,polarStress,polarConfig);
     bool polarSymmetry=symmetricSlab.converged;
@@ -672,9 +895,18 @@ TEST(ClimateOceanDynamics, Model)
             std::abs(north.ekmanSouthMps+south.ekmanSouthMps)<1.0e-9;
     }
     expect(polarSymmetry,"uniform zonal stress must give symmetric downwind and antisymmetric crosswind Ekman flow through both polar rows");
+}
 
+TEST_F(ClimateOceanDynamics, ManufacturedSlabMomentum)
+{
     // Manufacture constant centre-cell velocities from the momentum equations;
     // constant velocities make face averaging exact in both hemispheres.
+    auto slabForcing = this->slabForcing();
+    auto slabConfig = this->slabConfig();
+    const double slabMass = static_cast<double>(slabConfig.waterDensityKgM3) * slabConfig.mixedLayerDepthMetres;
+    const double drag = slabConfig.minimumCoriolisPerSecond;
+    const double windStressFactor = static_cast<double>(slabConfig.airDensityKgM3) * slabConfig.dragCoefficient;
+    const auto slabGrid = climategrid::makeSphericalGrid(columns, rows, slabConfig.planetRadiusMetres);
     slabConfig.rotationRatePerSecond = climateocean::OceanConfig{}.rotationRatePerSecond;
     // This manufactured zonal-mean stress drives a slowly relaxing global
     // barotropic mode; resolve it without weakening either equation tolerance.
@@ -726,51 +958,34 @@ TEST(ClimateOceanDynamics, Model)
             << " converged=" << rotatingSlab.converged << '\n';
     expect(momentumBalance, "damped Ekman currents must satisfy both momentum equations in both hemispheres");
     expect(dissipationBalance, "steady wind work must equal positive slab drag dissipation; Coriolis does no work");
+}
 
-    // A polar-land annulus avoids the singular poles of tau_east = A/cos(phi).
+TEST_F(ClimateOceanDynamics, AnnulusCurlFreeStress)
+{
     // Its spherical curl vanishes; Cartesian d(tau_east)/dy would force a gyre.
-    constexpr int annulusColumns = 64, annulusRows = 32;
-    constexpr int annulusCount = annulusColumns * annulusRows;
-    climateocean::OceanConfig annulusConfig;
-    annulusConfig.oneWay = true;
-    annulusConfig.heatStepsPerIteration = 1;
-    annulusConfig.heatDiffusivityM2S = 0.0f;
-    annulusConfig.surfaceHeatExchangeWm2K = 0.0f;
-    annulusConfig.deepWaterTemperatureContrastK = 0.0f;
-    annulusConfig.streamfunctionIterations = 16000;
-    const auto annulusGrid = climategrid::makeSphericalGrid(
-        annulusColumns, annulusRows, annulusConfig.planetRadiusMetres);
-    climateocean::OceanForcing annulus;
-    annulus.landMask.assign(annulusCount, 0);
-    annulus.bathymetryMetres.assign(annulusCount, 4000.0f);
-    annulus.eastWindMps.assign(annulusCount, 0.0f);
-    annulus.southWindMps.assign(annulusCount, 0.0f);
-    annulus.initialSstC.assign(annulusCount, 20.0f);
-    annulus.atmosphericTemperatureC.assign(annulusCount, 20.0f);
-    for (int y = 0; y < annulusRows; ++y)
-        for (int x = 0; x < annulusColumns; ++x)
-        {
-            const auto cell = annulusGrid.index(x, y);
-            annulus.landMask[cell] = y < 2 || y >= annulusRows - 2;
-            annulus.eastWindMps[cell] = static_cast<float>(10.0 /
-                std::sqrt(std::cos(annulusGrid.latitudeCentresRadians[y])));
-        }
+    const auto annulus = this->annulus();
     const auto curlFree = climateocean::solveWindDrivenOcean(
-        annulusColumns, annulusRows, annulus, annulusConfig);
+        annulusColumns, annulusRows, annulus.forcing, annulus.config);
     double maximumCurlFreeTransport = 0.0;
     for (float psi : curlFree.streamfunctionM3S)
         maximumCurlFreeTransport = std::max(maximumCurlFreeTransport, std::abs(static_cast<double>(psi)));
     expect(curlFree.converged && maximumCurlFreeTransport < 100.0,
         "spherically curl-free stress must not drive barotropic circulation beyond float-input roundoff");
+}
 
+TEST_F(ClimateOceanDynamics, AnnulusUniformStress)
+{
     // Uniform eastward stress has spherical curl, unlike Cartesian stress.
     // With no rotation and constant depth, the closed annulus has the analytic
     // solution psi=A[phi-phi_b asinh(tan(phi))/asinh(tan(phi_b))],
     // A=tau R/(rho r). This checks the sign and matching diffusion metric.
+    auto annulus = this->annulus();
+    auto& annulusConfig = annulus.config;
+    const auto& annulusGrid = annulus.grid;
     annulusConfig.rotationRatePerSecond = 0.0f;
-    std::fill(annulus.eastWindMps.begin(), annulus.eastWindMps.end(), 10.0f);
+    std::fill(annulus.forcing.eastWindMps.begin(), annulus.forcing.eastWindMps.end(), 10.0f);
     const auto uniformStress = climateocean::solveWindDrivenOcean(
-        annulusColumns, annulusRows, annulus, annulusConfig);
+        annulusColumns, annulusRows, annulus.forcing, annulusConfig);
     const double boundaryLatitude = annulusGrid.latitudeNorthFacesRadians[2];
     const auto secantPrimitive = [](double latitude) { return std::asinh(std::tan(latitude)); };
     const double stressScale = static_cast<double>(annulusConfig.airDensityKgM3) *
@@ -795,7 +1010,7 @@ TEST(ClimateOceanDynamics, Model)
 }
 
 // Not run by ctest: see tests/test_modes.hpp.
-TEST(ClimateOceanDynamics, DISABLED_Modes)
+TEST_F(ClimateOceanDynamics, DISABLED_Modes)
 {
     EXPECT_EQ(0, runtestmode(&climateoceandynamicstool)) << "UW_TEST_ARGUMENTS: --momentum-replay FIXTURE CSV EKMAN GYRE | --coastal-replay FIXTURE DAYS [STEP_HOURS]";
 }
