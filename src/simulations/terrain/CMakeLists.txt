@@ -1,8 +1,8 @@
 add_library(uw_terrain STATIC
-    assetdata.cpp
     climate_erosion.cpp
     climate_landforms.cpp
     fastlem_mountains.cpp
+    shape_templates.cpp
     surface_potentials.cpp
     terrain_coasts.cpp
     terrain_craters.cpp

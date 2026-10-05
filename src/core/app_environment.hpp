@@ -8,6 +8,8 @@ struct AppEnvironmentConfig
     std::filesystem::path defaultWorldDirectory = ".";
     std::filesystem::path defaultAppearanceDirectory = "assets/appearance";
     std::filesystem::path defaultImageDirectory = "out/images";
+    // Shape templates of the terrain module (simulations/terrain/shape_templates.cpp).
+    std::filesystem::path terrainTemplatePath = "assets/terrain/shape-templates.txt";
     std::filesystem::path referencePrecipitationGridPath = "refs/processed/climate/earth_precipitation_grid.csv";
     std::filesystem::path referenceClimateDirectory = "refs/processed/climate";
     // Processed observed fields: <dataset>/<width>/fields/<name>.npy with manifest.json (refs/README.md).

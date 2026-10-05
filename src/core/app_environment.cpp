@@ -84,6 +84,7 @@ void loadappenvironmentinternal()
     applypathoverride(environmentconfig.defaultWorldDirectory, getenvoverride("UW_DEFAULT_WORLD_DIR", filevalues));
     applypathoverride(environmentconfig.defaultAppearanceDirectory, getenvoverride("UW_DEFAULT_UWS_DIR", filevalues));
     applypathoverride(environmentconfig.defaultImageDirectory, getenvoverride("UW_DEFAULT_IMAGE_DIR", filevalues));
+    applypathoverride(environmentconfig.terrainTemplatePath, getenvoverride("UW_TERRAIN_TEMPLATES", filevalues));
     applypathoverride(environmentconfig.referencePrecipitationGridPath, getenvoverride("UW_REFERENCE_PRECIP_GRID", filevalues));
     applypathoverride(environmentconfig.referenceClimateDirectory, getenvoverride("UW_REFERENCE_CLIMATE_DIR", filevalues));
     applypathoverride(environmentconfig.referenceProcessedDirectory, getenvoverride("UW_REFERENCE_PROCESSED_DIR", filevalues));
