@@ -297,6 +297,7 @@ def build_report(run_ids, output, earth_reference=None, maps_only=False, externa
             overlay = outputs(run_id) / f"maps/boundary_overlay/{label}.png"
             overlay.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(rgba).save(overlay)
+            palettes.write_sidecar(outputs(run_id) / "maps")
             state["overlay"] = image_link(overlay)
             coastline = outputs(run_id) / f"maps/coastline_overlay/{label}.png"
             coastline.parent.mkdir(parents=True, exist_ok=True)

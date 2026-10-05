@@ -3,6 +3,9 @@ from pathlib import Path
 import re
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from uwtools import palettes
+
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_DIRECTORIES = {
     ".git", ".githooks", ".codex", ".agents", "assets", "configs", "refs",
@@ -74,6 +77,17 @@ def main():
                 issues.append(f"Run directories are numeric ids: {path.relative_to(ROOT).as_posix()}")
             elif not (path / "run.json").is_file():
                 issues.append(f"Run directory without run.json: {path.relative_to(ROOT).as_posix()}")
+            else:
+                # Every maps folder of a run names the palettes it was rendered with.
+                for maps in sorted(folder for folder in path.rglob("maps") if folder.is_dir()):
+                    problem = palettes.sidecar_issue(maps)
+                    if problem:
+                        issues.append(f"{maps.relative_to(ROOT).as_posix()}: {problem}")
+    # Reference maps rendered before the sidecar existed have none; one that exists must be sound.
+    for sidecar in (ROOT / "refs/processed").rglob(f"maps/{palettes.SIDECAR}"):
+        problem = palettes.sidecar_issue(sidecar.parent)
+        if problem:
+            issues.append(f"{sidecar.parent.relative_to(ROOT).as_posix()}: {problem}")
 
     reference_maps = ROOT / "refs/processed/climate/maps"
     for path in reference_maps.rglob("*.png"):
@@ -83,7 +97,7 @@ def main():
     if issues:
         print("\n".join(issues))
         return 1
-    print("Layout checks passed: root items, CMake sources, tectonics boundary, reference sidecars, run directories.")
+    print("Layout checks passed: root items, CMake sources, tectonics boundary, reference sidecars, run directories, palette sidecars.")
     return 0
 
 

@@ -226,4 +226,6 @@ def render(bundle, specs, directory, validation=(), compared=(), references=None
                                  save(directory, spec['name'] + suffix, palette_rgb(layer, spec['palette'])), spec['palette']))
     if checkpoints:
         written += animations(bundle, specs, directory, checkpoints)
+    if written:
+        palettes.write_sidecar(directory / 'maps')
     return written
