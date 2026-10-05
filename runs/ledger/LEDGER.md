@@ -105,6 +105,7 @@ Lessons:
 | `world-0050` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 12: procedural worlds keep the default body |
 | `world-0051` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 4a: the stage bodies of src/pipeline on the float accessors (module terrain) |
 | `world-0052` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 2: the desktop application loads a run bundle (compile-only) |
+| `world-0053` | 2026-10-05 | pending user review | keep | consolidation phase 5, step 3: the Generate elements buttons call a process or a terrain function (compile-only) |
 
 Lessons:
 

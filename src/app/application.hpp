@@ -41,6 +41,9 @@
 #include "core/classes.hpp"
 #include "world/planet.hpp"
 #include "world/planet_bundle.hpp"
+#include "pipeline/world_processes.hpp"
+#include "pipeline/world_stages.hpp"
+#include "simulations/terrain/import_elements.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "simulations/society/social_generation.hpp"
 #include "app/regional/regional_map.hpp"
@@ -147,6 +150,7 @@ struct Application
     void updatecompletingimportscreen();
     void updateloadingworldscreen();
     bool loadworldfile(const std::string& filename);
+    bool runprocess(const char* id);
     void updatesavingworldscreen();
     void updateexportingareascreen();
     void updategeneratingregionscreen();

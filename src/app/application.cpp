@@ -391,6 +391,33 @@ void Application::openFileDialog(const char* filter)
     ImGuiFileDialog::Instance()->OpenDialog("ChooseFileDlgKey", "Choose File", filter, dialogConfig);
 }
 
+// Runs one registered process on the world, as a recipe step does (its own seeded random stream).
+bool Application::runprocess(const char* id)
+{
+    const WorldProcessDefinition* process = findworldprocess(id);
+    if (process == nullptr)
+        return false;
+
+    GenerationScratch scratch;
+    WorldStageParameters parameters;
+    GenerationExecutionContext context;
+    context.dorivers = currentrivers;
+    context.dolakes = currentlakes;
+    context.dodeltas = currentdeltas;
+    context.socialoptions = socialoptionsfromworldcontrols();
+    context.landshape = landshape;
+    context.chainland = chainland;
+    context.smalllake = smalllake;
+    context.largelake = largelake;
+    context.okmountains = &OKmountains;
+
+    std::string error;
+    const bool done = executegenerationstage(process->stage, *world, scratch, parameters, context, &error);
+    if (!done)
+        updatereport(error);
+    return done;
+}
+
 void Application::invalidateGlobalMaps()
 {
     resetmapcache(globalmaps);
