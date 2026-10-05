@@ -91,10 +91,24 @@ if (D.scores.length || D.rows.length || D.distributions.length) {
     s.score === null ? ` (partial, covered weight ${fmt(s.covered_weight, 3)})` : ' (lower is better)',
     h('div', {class: 'muted'}, s.note)))));
   if (D.rows.length) {
-    const headers = ['Field', 'Season', 'Loss'].concat(D.has_baseline ? ['Baseline loss', 'Δ'] : [], ['RMSE', 'Bias', 'Correlation']);
+    const headers = ['Field', 'Season', 'Loss'].concat(D.has_baseline ? ['Baseline loss', 'Δ'] : [], ['RMSE', 'Bias', 'Correlation', 'Variance ratio']);
     page.append(table(headers, D.rows.map(r => h('tr', {}, h('td', {}, r.field), h('td', {}, r.season), h('td', {class: 'num'}, fmt(r.loss)),
       D.has_baseline ? [h('td', {class: 'num'}, fmt(r.baseline)), delta(r.delta)] : [],
-      h('td', {class: 'num'}, fmt(r.rmse)), h('td', {class: 'num'}, fmt(r.bias)), h('td', {class: 'num'}, fmt(r.correlation)))), 2));
+      h('td', {class: 'num'}, fmt(r.rmse)), h('td', {class: 'num'}, fmt(r.bias)), h('td', {class: 'num'}, fmt(r.correlation)), h('td', {class: 'num'}, fmt(r.variance_ratio)))), 2));
+  }
+  if (D.features && D.features.rows.length) {
+    page.append(h('h3', {}, 'Features'));
+    page.append(h('p', {class: 'muted'}, D.features.note + ' ' + D.features.method));
+    page.append(table(['Feature', 'Season', 'Unit', 'Run', 'Reference'].concat(D.has_baseline ? ['Baseline'] : []),
+      D.features.rows.map(r => h('tr', {}, h('td', {}, r.feature), h('td', {}, r.season), h('td', {}, r.unit), h('td', {class: 'num'}, fmt(r.run)),
+        h('td', {class: 'num'}, fmt(r.reference)), D.has_baseline ? h('td', {class: 'num'}, fmt(r.baseline)) : [])), 3));
+  }
+  if (D.footprint && D.footprint.rows.length) {
+    page.append(h('h3', {}, 'Footprint against the baseline'));
+    page.append(h('p', {class: 'muted'}, D.footprint.note + ' ' + D.footprint.method));
+    page.append(table(['Field', 'Season', 'Changed area (%)', 'Largest difference', 'at latitude', 'Threshold'],
+      D.footprint.rows.map(r => h('tr', {}, h('td', {}, r.field), h('td', {}, r.season), h('td', {class: 'num'}, fmt(r.changed_area_percent)),
+        h('td', {class: 'num'}, fmt(r.largest_difference)), h('td', {class: 'num'}, fmt(r.largest_difference_latitude)), h('td', {class: 'num'}, fmt(r.threshold)))), 2));
   }
   for (const t of D.distributions) {
     page.append(h('h3', {}, `${t.name} · ${t.reference || ''}`));

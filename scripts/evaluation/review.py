@@ -62,7 +62,8 @@ def request(profile, document):
     return {'schema': 'uw-review-request/v1', 'module': profile['module'], 'run': blind(document['run']), 'parent': blind(document['baseline']),
             'palettes': 'every image carries its legend and a 30-degree graticule; configs/climate-palettes.json and configs/tectonics-palettes.json hold the colour scales; a difference map spans -half_range to +half_range; kind "parent" is the same map of the parent run',
             'checks_not_passed': [item for item in document['checks'] if item['status'] in ('fail', 'reported')],
-            'scores': document['validation']['scores'], 'metrics': metrics, 'distributions': document['validation']['distributions'], 'checklist': checklist}
+            'scores': document['validation']['scores'], 'metrics': metrics, 'distributions': document['validation']['distributions'],
+            'features': document['validation'].get('features'), 'footprint': document['validation'].get('footprint'), 'checklist': checklist}
 
 
 def record(directory, verdict, notes, reviewer, against, answers=None):

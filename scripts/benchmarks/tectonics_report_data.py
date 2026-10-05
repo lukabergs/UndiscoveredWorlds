@@ -7,6 +7,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools.tectonics_earth_reference import hypsography_shape  # noqa: F401 (used by the reports and their tests)
 from uwtools.hashing import sha256
 from uwtools.tectonics import bundle_files, is_run_bundle, snapshot_manifest
 
@@ -280,18 +281,6 @@ def island_sizes(elevation):
             "islands_2_to_64_cells": sum(2 <= s <= 64 for s in sizes),
             "island_cells_2_to_64": sum(s for s in sizes if 2 <= s <= 64),
             "largest_landmasses_cells": sorted(sizes, reverse=True)[:10]}
-
-
-def hypsography_shape(curve):
-    """Measure jumps in the common 0.5% quantile grid, excluding extreme tails."""
-    z = np.asarray(curve["elevation_m"])
-    q = np.asarray(curve["fraction_below"])
-    steps = np.diff(z)
-    selected = np.flatnonzero((q[:-1] >= .05) & (q[1:] <= .95))
-    largest = int(selected[np.argmax(steps[selected])])
-    return {"max_central_quantile_step_m": float(steps[largest]),
-            "max_step_fraction_below": [float(q[largest]), float(q[largest + 1])],
-            "elevation_span_35_40_percent_m": float(np.interp(.4, q, z) - np.interp(.35, q, z))}
 
 
 def largest_connected_patch(mask):

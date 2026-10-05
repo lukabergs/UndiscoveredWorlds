@@ -124,10 +124,33 @@ def tectonics_bundle(exe, seed, resolution, extra, output):
 
 
 def tectonics(args, extra):
+    """Comparison page of registered tectonics runs, from their evaluations (the first run is the baseline).
+
+    A sealed run is evaluated once into runs/reports/tectonics/<id>/evaluation when its final state is a
+    run bundle; runs up to 75 are raw snapshots and cannot be evaluated (run 77 holds the fields of 75)."""
     if not args.runs:
         raise SystemExit('tectonics report requires --runs')
-    python_script('tectonics_report.py', '--runs', *map(str, args.runs), '--external-assets',
-                  *(['--output', args.output] if args.output else []), *extra)
+    if extra:
+        raise SystemExit(f"Unexpected arguments: {' '.join(extra)}")
+    directories = []
+    for identifier in args.runs:
+        run = runs.directory('tectonics', identifier)
+        directory = run / 'evaluation' if run else ROOT / 'runs/reports/tectonics' / str(identifier) / 'evaluation'
+        if not (directory / 'evaluation.json').is_file():
+            if run:
+                raise SystemExit(f'Run {identifier} has no evaluation: {directory}')
+            final = runs.tectonics(identifier)['snapshots'][-1]['path']
+            if not (final / 'manifest.json').is_file() or 'uw-run-bundle' not in (final / 'manifest.json').read_text(encoding='utf-8')[:400]:
+                raise SystemExit(f'Run {identifier} is stored as raw snapshots, not as a run bundle, and cannot be evaluated; '
+                                 'compare a run of the bundle format instead (run 77 holds the fields of runs 75 and 76)')
+            call([UV, 'run', '--offline', EVALUATION / 'evaluate.py', '--profile', 'tectonics', '--bundle', final,
+                  '--output', directory, '--checkpoints', final.parent])
+        directories.append(directory)
+    if len(directories) == 1:
+        call([UV, 'run', '--offline', EVALUATION / 'report.py', 'run', directories[0]])
+        return
+    output = args.output or ROOT / 'runs/reports/tectonics' / ('-'.join(map(str, args.runs)) + '-comparison')
+    call([UV, 'run', '--offline', EVALUATION / 'report.py', 'compare', *directories, '--output', output])
 
 
 def geology(args, extra):

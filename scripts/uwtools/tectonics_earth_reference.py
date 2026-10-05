@@ -2,20 +2,28 @@
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import grid
-from uwtools.hashing import sha256
-from tectonics_report_data import hypsography_shape
+from . import grid
+from .hashing import sha256
 
 
 QUANTILES = np.linspace(0, 1, 201)
 CACHE_SCHEMA = "tectonics-earth-reference/v1"
 
+
+def hypsography_shape(curve):
+    """Measure jumps in the common 0.5% quantile grid, excluding extreme tails."""
+    z = np.asarray(curve["elevation_m"])
+    q = np.asarray(curve["fraction_below"])
+    steps = np.diff(z)
+    selected = np.flatnonzero((q[:-1] >= .05) & (q[1:] <= .95))
+    largest = int(selected[np.argmax(steps[selected])])
+    return {"max_central_quantile_step_m": float(steps[largest]),
+            "max_step_fraction_below": [float(q[largest]), float(q[largest + 1])],
+            "elevation_span_35_40_percent_m": float(np.interp(.4, q, z) - np.interp(.35, q, z))}
 
 def reference_inputs(root, width):
     return [root / f"refs/processed/heightmap/{width}.tif",

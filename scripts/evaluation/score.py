@@ -1,6 +1,6 @@
 """global-balanced-v1: per-field comparison losses and the fixed, inspectable global ranking rule.
 
-Moved unchanged from the retired climate report. Field scales come from configs/climate-palettes.json.
+Moved from the retired climate report; the loss is unchanged. Field scales come from configs/climate-palettes.json.
 """
 import sys
 from pathlib import Path
@@ -62,10 +62,13 @@ def evaluate(model, ref, mask, field):
             ['Distribution distance (%)', tv * 100, 0], ['Bias', am - bm, 0]]
     if correlation is not None:
         rows.append(['Spatial correlation', float(correlation), 1])
+    if mean((bv - bm) ** 2) > 1e-20:
+        # With the correlation, the two axes of a Taylor diagram; reported, not part of the loss.
+        rows.append(['Variance ratio', float(mean((av - am) ** 2) / mean((bv - bm) ** 2)), 1])
     if vector:
         labels = {'RMSE': 'Vector RMSE', 'Error P90': 'Vector error P90', 'Same-bin area (%)': 'Same speed-bin area (%)',
                   'Distribution distance (%)': 'Speed distribution distance (%)', 'Bias': 'Speed bias',
-                  'Spatial correlation': 'Speed spatial correlation'}
+                  'Spatial correlation': 'Speed spatial correlation', 'Variance ratio': 'Speed variance ratio'}
         rows = [[labels.get(name, name), value, target] for name, value, target in rows]
         # The directional domain depends only on reference motion, never candidate speed.
         active = mask & (b > max(.05, .1 * bm))

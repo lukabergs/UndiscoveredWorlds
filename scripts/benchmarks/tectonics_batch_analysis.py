@@ -11,7 +11,7 @@ from uwtools.hashing import sha256
 from uwtools.tectonics import snapshot_manifest
 from tectonics_report_data import load_bundle, write_json
 from tectonics_review import review
-from tectonics_earth_reference import load_earth_reference
+from uwtools.tectonics_earth_reference import load_earth_reference
 from map_rendering import colourize
 
 ROOT = Path(__file__).resolve().parents[2]

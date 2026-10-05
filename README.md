@@ -178,8 +178,8 @@ and never reuse a run directory. They record the git revision and diff hash, the
 recipe, the executable's hash and the native fields; executables and sources are
 not copied. Archived sources and binaries of earlier runs are evidence, never
 development dependencies or defaults for new runs. For normal development, rebuild
-the current tree before generating. `tectonics_report.py --runs <ids>` uses the shared
-`configs/tectonics-palettes.json` palette and exports maps and APNG animations.
+the current tree before generating. `uw.py tectonics report --runs <ids>` compares the evaluations of registered runs
+(maps and APNG animations in the `configs/tectonics-palettes.json` palette).
 
 Gold history consumes the native column displacement and deterministic topology
 identities through `tectonic_frame_reader`. Its point tracers approximate

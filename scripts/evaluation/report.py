@@ -29,7 +29,8 @@ TEMPLATES = Path(__file__).with_name('templates')
 PLACEHOLDER = '__PAGE_DATA__'
 PROFILES = ROOT / 'configs/evaluation'
 METRIC_NAMES = {'rmse': ('RMSE', 'Vector RMSE'), 'bias': ('Bias', 'Speed bias'),
-                'correlation': ('Spatial correlation', 'Speed spatial correlation')}
+                'correlation': ('Spatial correlation', 'Speed spatial correlation'),
+                'variance_ratio': ('Variance ratio', 'Speed variance ratio')}
 KINDS = ('model', 'reference', 'difference')
 
 
@@ -221,6 +222,7 @@ def run_data(evaluation_dir):
             'evidence': document['evidence'], 'checks': document['checks'], 'scores': score_lines(validation),
             'rows': validation_rows(validation), 'has_baseline': document.get('baseline') is not None,
             'distributions': distribution_tables(validation), 'regions': regional_tables(validation),
+            'features': validation.get('features'), 'footprint': validation.get('footprint'),
             'skipped': validation['skipped'], 'reviews': reviews,
             'groups': groups, 'animations': animations, 'files': files,
             'provenance': {'profile': document['profile'], 'code': document['code'], 'references': document['references']}}

@@ -81,6 +81,7 @@ Lessons:
 | `world-0027` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 7: climate_coupling.cpp split by process; test modes as disabled tests; callerless field readers removed |
 | `world-0028` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 8: main.cpp split by screen |
 | `world-0029` | 2026-10-05 | equivalent | keep | consolidation phase 4, step 9: misc.cpp dissolved into owner sources; fractal noise on small grids; planet::smooth() |
+| `world-0030` | 2026-10-05 | tooling added | keep | consolidation phase 4, step 9b: validation guards (features, variance ratio, footprint); the tectonics report through the shared templates |
 
 Lessons:
 
@@ -153,3 +154,5 @@ Lessons:
 - `world-0029`: The reference bundles of the next compiled step are out/scratch/phase4/step09-*.
 - `world-0029`: The grid size macros ARRAYWIDTH and ARRAYHEIGHT are defined identically in six files; grid_shapes.cpp is one more until they become one constant.
 - `world-0029`: A function moved upwards in planet.cpp needed a helper template defined further down: the build, not the script, found it.
+- `world-0030`: runs/reports/tectonics/76/evaluation now exists (written by the check of this step).
+- `world-0030`: The monsoon reversal criterion (120 degrees, 1 m/s in both seasons) gives 24 % of the tropics for ERA5 10 m winds, more than the monsoon regions proper: it also counts cells where weak winds turn.

@@ -51,7 +51,7 @@ Statistics of a snapshot (counts per geologic regime, crust class and boundary t
 
 `uw.py tectonics run` (through `scripts/evaluation/experiment.py --register`) runs the current build with the scenario of `configs/tectonics-baseline.json`, a checkpoint for the starting Geosphere and one every `checkpoint_every_updates` updates, in `runs/tectonics/<id>/`: checkpoints in `checkpoints/`, the final bundle in `bundle/`, the evaluation with `configs/evaluation/tectonics.json` in `evaluation/`. `uw.py tectonics experiment` is the unregistered scratch run in `out/evaluation/tectonics/`. Runs up to 76 are sealed in `runs/archive/` (manifests in `runs/archive/manifests/tectonics/`, snapshots in `runs/archive/checkpoints/tectonics/<id>/`). The baseline run is registered run 75.
 
-Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot and a `batch_manifest.json`); `uw.py tectonics report` and the report scripts read both layouts.
+Registered runs up to 75 keep the former snapshot layout (raw arrays plus a manifest per snapshot and a `batch_manifest.json`); the review scripts (`scripts/benchmarks/tectonics_review.py` and its companions) read both layouts, while `uw.py tectonics report` compares evaluations and so needs runs of the bundle format (run 77 holds the fields of run 75).
 
 ## Checks
 

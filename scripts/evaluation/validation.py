@@ -221,8 +221,7 @@ def compare_maps(bundle, spec, references, baseline=None, regional=None):
 
 
 def compare_hypsometry(bundle, spec, baseline=None):
-    sys.path.append(str(ROOT / 'scripts/benchmarks'))
-    from tectonics_earth_reference import compare_to_earth, load_earth_reference, measure_earth
+    from uwtools.tectonics_earth_reference import compare_to_earth, load_earth_reference, measure_earth
     reference = load_earth_reference(ROOT, spec.get('reference_width', 2048))
     result = {'reference': reference['title'], 'reference_cache': reference['cache']}
     for key, source in (('run', bundle), ('baseline', baseline)):

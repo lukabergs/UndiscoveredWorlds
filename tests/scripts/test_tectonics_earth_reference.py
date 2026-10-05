@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image, TiffImagePlugin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts/benchmarks"))
-from tectonics_earth_reference import measure_earth, weighted_distribution, compare_to_earth, load_earth_reference
+from uwtools.tectonics_earth_reference import measure_earth, weighted_distribution, compare_to_earth, load_earth_reference
 
 
 class EarthHypsographyTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class EarthHypsographyTests(unittest.TestCase):
             tags[33922] = (0., 0., 0., -180., 90., 0.)
             Image.fromarray(values).save(heightmap, tiffinfo=tags)
             Image.fromarray(np.uint8(values > 0) * 255).save(mask)
-            with patch("tectonics_earth_reference.measure_earth", wraps=measure_earth) as measure:
+            with patch("uwtools.tectonics_earth_reference.measure_earth", wraps=measure_earth) as measure:
                 first = load_earth_reference(root, 8)
                 self.assertEqual(load_earth_reference(root, 8), first)
                 self.assertEqual(measure.call_count, 1)

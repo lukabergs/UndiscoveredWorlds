@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import palettes, runs
 from uwtools.hashing import sha256
 from tectonics_report_data import load_bundle, diagnostics, write_json
-from tectonics_earth_reference import load_earth_reference, compare_to_earth
+from uwtools.tectonics_earth_reference import load_earth_reference, compare_to_earth
 from map_rendering import colourize
 
 ROOT = Path(__file__).resolve().parents[2]

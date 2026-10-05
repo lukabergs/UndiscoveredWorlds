@@ -46,7 +46,7 @@ runs/<module>/<id>/
   bundle/             final run bundle
   checkpoints/        checkpoint bundles (tectonics)
   evaluation/         evaluation.json, review-request.json, index.html (run page), report.md, maps/;
-                      analysis/ holds what the tectonics report and review scripts derive from the run
+                      analysis/ holds what the tectonics review scripts derive from the run
   ledger-entry.json   draft ledger entry: complete it and append it with `uw.py <module> ledger --add`
 ```
 
@@ -174,9 +174,10 @@ uv run --offline scripts/uw.py tectonics run --plates 14 --duration 300 --label 
 uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe
 # Snapshot statistics (counts per regime, crust class and boundary type; segments, deforming regions, junctions) of a bundle
 uv run --offline scripts/evaluation/tectonics_statistics.py runs/tectonics/77/bundle
-# Maps, animations and comparison page of registered runs, sealed or not -> runs/reports/tectonics/<A>-<B>.html
+# Comparison page of the evaluations of registered runs (the first is the baseline) -> runs/reports/tectonics/<A>-<B>-comparison/
+# A sealed run in the bundle format is evaluated once into runs/reports/tectonics/<id>/evaluation; runs up to 75 are raw
+# snapshots and are refused (run 77 holds the fields of run 75).
 uv run --offline scripts/uw.py tectonics report --runs 76 77
-uv run --offline scripts/uw.py tectonics report --runs 13 --maps-only
 # Reviews of a run's snapshots -> its evaluation/analysis/ (sealed runs: runs/reports/tectonics/<id>/analysis/)
 uv run --offline scripts/benchmarks/tectonics_review.py 77
 uv run --offline scripts/benchmarks/tectonics_batch_analysis.py 77

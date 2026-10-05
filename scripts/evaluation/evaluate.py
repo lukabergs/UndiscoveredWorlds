@@ -24,6 +24,7 @@ from uwtools import runs
 from checks import run_checks
 from references import References
 from validation import run_validation
+import features
 import report
 import review
 
@@ -119,6 +120,10 @@ def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input
     checks = run_checks(bundle, profile.get('checks', []), context)
     references = References()
     validation = run_validation(bundle, profile.get('validation', []), references, baseline)
+    if validation['maps']:
+        validation['features'] = features.features(bundle, profile['validation'], references, baseline)
+        if baseline is not None:
+            validation['footprint'] = features.footprint(bundle, baseline, profile['validation'])
     rendered = []
     if maps and profile.get('maps'):
         from maps import render
