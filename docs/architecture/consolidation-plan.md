@@ -249,7 +249,7 @@ Phase 6 steps (listed 2026-10-06 at the start of the phase; one commit and one l
 | `climate_energy_tests.cpp` (`Model`, 125 lines) | none shared (independent scalar sections): the fixture holds only `expect` | done, `world-0064` | 0 min (00:31 to 00:31) |
 | `climate_physics_tests.cpp` (`Model`, 145 lines) | none shared: the fixture holds only `expect` | done, `world-0065` | 0 min (00:31 to 00:31) |
 | `climate_koppen_tests.cpp` (`Classification`, 40 lines) | the temperate monthly temperature and 80 mm rain arrays | done, `world-0066` | 0 min (00:31 to 00:31) |
-| `core/climate_grid_tests.cpp` (`Geometry`, 150 lines) | the 128 x 64 Earth grid and `pi` |  |  |
+| `core/climate_grid_tests.cpp` (`Geometry`, 150 lines) | the 128 x 64 Earth grid and `pi` | done, `world-0067` | 0 min (00:31 to 00:31) |
 | `io/climate_reference_tests.cpp` (`MonthlyGrids`, 60 lines) | the fixture paths in the working directory, removed in `TearDown` |  |  |
 
 Not split, each one scenario whose later assertions depend on the earlier steps: `climate_context_tests.cpp` (snapshot, then restart), `core/parallel_rows_tests.cpp`, `io/climate_tiff_tests.cpp` (one file written and read back), `pipeline/climate_pipeline_tests.cpp` and `climate_world_tests.cpp` (one assertion each). The `testXxx` wrapper tests of the atmosphere, hydrology and ocean heat files are already named and keep their bodies.

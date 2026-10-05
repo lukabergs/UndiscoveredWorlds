@@ -120,6 +120,7 @@ Lessons:
 | `world-0064` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 9: climate_energy_tests.cpp split |
 | `world-0065` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 10: climate_physics_tests.cpp split |
 | `world-0066` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 11: climate_koppen_tests.cpp split |
+| `world-0067` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 12: core/climate_grid_tests.cpp split |
 
 Lessons:
 

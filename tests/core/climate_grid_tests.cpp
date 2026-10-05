@@ -16,10 +16,21 @@ void expect(bool condition, const char* message)
 }
 }
 
-TEST(ClimateGrid, Geometry)
+namespace
 {
-    constexpr double pi = 3.14159265358979323846;
-    const auto grid = climategrid::makeSphericalGrid(128, 64, 6371000.0);
+
+// The 128 x 64 Earth grid of the geometry tests.
+class ClimateGrid : public ::testing::Test
+{
+protected:
+    static constexpr double pi = 3.14159265358979323846;
+    const climategrid::SphericalGrid grid = climategrid::makeSphericalGrid(128, 64, 6371000.0);
+};
+
+}
+
+TEST_F(ClimateGrid, SphericalGeometry)
+{
     expect(grid.columns == 128 && grid.rows == 64,
         "the internal climate grid must be W by W/2");
     expect(grid.latitudeCentresRadians.front() < pi * 0.5 &&
@@ -53,7 +64,10 @@ TEST(ClimateGrid, Geometry)
         bandMeasure += climategrid::latitudeBandMeasure(y, 64);
     expect(std::abs(bandMeasure - 2.0) < 1.0e-12,
         "cell-centred latitude bands must cover the sphere exactly");
+}
 
+TEST_F(ClimateGrid, ConstantFieldRemap)
+{
     std::vector<float> fine(512 * 256, 7.25f);
     const auto internal = climategrid::remapField(
         512, 256, fine, 128, 64);
@@ -70,7 +84,10 @@ TEST(ClimateGrid, Geometry)
         512, 256, fine, 128, 64);
     expect(repeatedInternal == internal,
         "explicit grid remapping must be deterministic");
+}
 
+TEST_F(ClimateGrid, IntegralPreservingRemap)
+{
     std::vector<float> bands(512 * 256, 0.0f);
     for (int y = 0; y < 256; y++)
     {
@@ -85,7 +102,10 @@ TEST(ClimateGrid, Geometry)
         128, 64, remappedBands);
     expect(std::abs(sourceIntegral - destinationIntegral) < 1.0e-5,
         "finite-volume remapping must preserve global integrals");
+}
 
+TEST_F(ClimateGrid, NonintegerRefinement)
+{
     // Noninteger refinement used by the 128-cell hydrology / 600-cell world.
     std::vector<float> polarRain(128 * 64, 0.0f);
     std::fill_n(polarRain.begin() + 128, 128, 100.0f);
@@ -100,6 +120,10 @@ TEST(ClimateGrid, Geometry)
         "hydrology output remapping must preserve polar rainfall at noninteger refinement");
     expect(outputRain == climategrid::remapField(128, 64, polarRain, 600, 300),
         "production accessor remapping must agree with flat-field remapping");
+}
+
+TEST_F(ClimateGrid, LimitedLinearReconstruction)
+{
     std::vector<float> smooth(32 * 16);
     for (int y = 0; y < 16; ++y)
         for (int x = 0; x < 32; ++x)
@@ -125,6 +149,10 @@ TEST(ClimateGrid, Geometry)
                     "each reconstructed coarse cell retains its original area-weighted mean");
         }
     }
+}
+
+TEST_F(ClimateGrid, ContinuousReconstruction)
+{
     // Output reconstruction may exchange neighbouring cell means, but must be
     // continuous, bounded and conservative, including the seam and polar caps.
     std::vector<float> peak(16 * 8, 0.0f);
@@ -158,6 +186,10 @@ TEST(ClimateGrid, Geometry)
         "native-resolution fields are not smoothed");
     expect(climategrid::remapSmoothField(16, 8, peak, 8, 4) == climategrid::remapField(16, 8, peak, 8, 4),
         "downsampling retains exact finite-volume restriction");
+}
+
+TEST_F(ClimateGrid, LatitudeProfileReconstruction)
+{
     std::vector<float> latitudeProfile(8, 0.0f);
     latitudeProfile[0] = 1.0f;
     const auto fineProfile = climategrid::remapSmoothField(1, 8, latitudeProfile, 1, 128);
