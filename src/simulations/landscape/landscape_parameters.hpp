@@ -100,6 +100,11 @@ inline bool randomised = true;
 inline bool resolveFlats = true;
 }
 
+namespace deltas
+{
+inline float halfChanceSedimentM3Yr = 5000000.0f;
+}
+
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -145,6 +150,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.roughness.persistence", &roughness::persistence },
         { "landscape.routing.randomised", &routing::randomised },
         { "landscape.routing.resolve_flats", &routing::resolveFlats },
+        { "landscape.deltas.half_chance_sediment_m3_yr", &deltas::halfChanceSedimentM3Yr },
     };
     return entries;
 }

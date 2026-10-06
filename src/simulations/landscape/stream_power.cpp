@@ -65,7 +65,8 @@ std::size_t checkedindex(int32_t value, std::size_t cells, const char* name)
 StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& graph,
                                   const std::vector<float>& erodibility, const std::vector<float>& uplift_m_myr,
                                   const StreamPowerParameters& parameters, std::vector<float>& elevation,
-                                  std::vector<float>& erosion_m, std::vector<float>& deposition_m)
+                                  std::vector<float>& erosion_m, std::vector<float>& deposition_m,
+                                  std::vector<double>* sedimentflux_m3_myr)
 {
     if (parameters.slopeexponent != 1.0)
         throw std::invalid_argument("stepstreampower: only a slope exponent of 1 is supported");
@@ -215,6 +216,20 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
         sweep();
     // The exported flux of the final E and D, so that the budget closes exactly.
     accumulate();
+    if (sedimentflux_m3_myr != nullptr)
+    {
+        std::vector<double>& flux = *sedimentflux_m3_myr;
+        flux.assign(cells, 0.0);
+        for (int32_t entry : graph.order)
+        {
+            const std::size_t i = static_cast<std::size_t>(entry);
+            if (isroot(i))
+                continue;
+            flux[i] = static_cast<std::size_t>(graph.receiver[i]) == i
+                ? exported[i]
+                : upstream[i] + (incision[i] - settling[i]) * metric.area_m2(i);
+        }
+    }
 
     double erodedvolume = 0.0;
     double landdepositedvolume = 0.0;

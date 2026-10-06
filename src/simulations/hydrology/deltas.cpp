@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/classes.hpp"
+#include "simulations/landscape/landscape_parameters.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
 #include "simulations/hydrology/deltas.hpp"
@@ -860,6 +861,16 @@ void createriverdeltas(planet& world)
     int tidefactor = 8; // The higher this is, the more deltas there will be.
     int range = 10; // Minimum gap between deltas.
 
+    // Erosion plan C5a: in an eroded world the chance comes from the sediment the cell
+    // hands on (hydrosphere.sediment_flux; at a mouth, the outlet's load into the sea):
+    // Qs / (Qs + landscape.deltas.half_chance_sediment_m3_yr). It takes one draw of the
+    // shared stream, as the legacy test does: fast_rand's 15 bits (random(0, 32767) is
+    // uniform on them) against the chance times 32768.
+    const planet& view = world;
+    const worldgrid<float>* sedimentflux = view.erosionduration() > 0.0f ? &view.sedimentflux() : nullptr;
+    const double halfchance = tuning::landscape::deltas::halfChanceSedimentM3Yr;
+    constexpr double drawrange = 32768.0;
+
     for (int i = margin; i <= width - margin; i++)
     {
         for (int j = 0; j <= height; j++)
@@ -871,7 +882,17 @@ void createriverdeltas(planet& world)
             {
                 int flowtotal = riverjan + riverjul;
 
-                if (random(1, deltachance) < flowtotal)
+                bool chosen = false;
+                if (sedimentflux != nullptr)
+                {
+                    const double load = std::max(0.0, static_cast<double>((*sedimentflux)[i][j]));
+                    const double chance = load + halfchance > 0.0 ? load / (load + halfchance) : 0.0;
+                    chosen = static_cast<double>(random(0, 32767)) < chance * drawrange;
+                }
+                else
+                    chosen = random(1, deltachance) < flowtotal;
+
+                if (chosen)
                 {
                     if (world.sea(i, j) == 0)
                     {

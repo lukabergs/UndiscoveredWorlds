@@ -53,6 +53,7 @@ Lessons:
 | `erosion-0015` | 2026-10-06 | routing unbiased; straightness reduced; look pending (run 5) | keep | erosion plan, step C3: relief roughness, randomised receivers and flat resolution |
 | `erosion-0016` | 2026-10-06 | cause fixed; calibration pending the user's acceptance | keep | erosion plan, step C4: the ocean floor's depth distribution |
 | `erosion-0017` | 2026-10-06 | contract in place; other recipes identical | keep | erosion plan, step C6: recipe steps with labels and overrides; eroded-world runs a coarse climate before the erosion |
+| `erosion-0018` | 2026-10-06 | flux in place; delta chance superseded by C5b | keep | erosion plan, step C5a: the erosion's sediment flux and the delta chance from it |
 
 Lessons:
 
@@ -82,6 +83,7 @@ Lessons:
 - `erosion-0016`: A mask whose shapes are drawn in cells (warps, Voronoi spacing) covers a different share of the planet at every width; any field set from such a mask inherits the width dependence.
 - `erosion-0017`: A stage that runs twice can read its own earlier output through a world field the first run left non-zero (the climate's SST): a repeated process needs a survey of what its stages read before they write, not only of what they reset.
 - `erosion-0017`: A reference built on another step's tree does not show a merged step's effect: rerun the step check on the merged tree before the entry cites numbers.
+- `erosion-0018`: A chance law with a reference value must be checked against the model's own distribution of the driver before it is chosen: every outlet here was below a tenth of the reference.
 
 ## tectonics
 

@@ -55,10 +55,15 @@ struct StreamPowerBudget
 // read on land cells only. `erosion_m` and `deposition_m` are assigned (not
 // accumulated) the thickness removed from and added to each cell by this step,
 // both non-negative; the caller sums them over the run. Every vector has
-// metric.size() elements. Throws std::invalid_argument on a size mismatch or
-// a slope exponent other than 1.
+// metric.size() elements. When `sedimentflux_m3_myr` is given it is resized to
+// metric.size() and assigned the fluvial sediment flux Q_s = S_up + (E - D) a
+// each land cell of the step passes to its receiver (an outlet: into its sea
+// cell, the volume marine deposition spreads), in m^3/Myr; 0 at sea cells and at
+// land roots, which keep what reaches them. Hillslope transfers are not part of
+// it. Throws std::invalid_argument on a size mismatch or a slope exponent other than 1.
 StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& graph,
                                   const std::vector<float>& erodibility, const std::vector<float>& uplift_m_myr,
                                   const StreamPowerParameters& parameters, std::vector<float>& elevation,
-                                  std::vector<float>& erosion_m, std::vector<float>& deposition_m);
+                                  std::vector<float>& erosion_m, std::vector<float>& deposition_m,
+                                  std::vector<double>* sedimentflux_m3_myr = nullptr);
 }

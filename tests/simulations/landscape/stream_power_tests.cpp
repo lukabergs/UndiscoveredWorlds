@@ -394,6 +394,40 @@ TEST_F(Landscape, StreamPowerLandRootKeepsItsSediment)
     EXPECT_EQ(budget.eroded_km3, budget.landdeposited_km3 + budget.marinedeposited_km3);
 }
 
+TEST_F(Landscape, StreamPowerSedimentFluxAtOutletIsTheExport)
+{
+    // Erosion plan C5a: the flux an outlet passes on is the load marine deposition
+    // spreads, so flux x dt equals the step's marine volume; sea cells carry none.
+    Domain domain = makedomain(4, 100.0f);
+    sethill(domain);
+    const StreamPowerParameters parameters = makeparameters(1.0, 1.0, 200.0);
+    std::vector<double> flux;
+    const StreamPowerBudget budget = landscape::stepstreampower(domain.metric, domain.graph, domain.erodibility,
+        domain.uplift, parameters, domain.elevation, domain.erosion, domain.deposition, &flux);
+    ASSERT_EQ(flux.size(), domain.metric.size());
+    const double marine_m3 = budget.marinedeposited_km3 * 1.0e9;
+    ASSERT_GT(marine_m3, 0.0);
+    EXPECT_NEAR(flux[domain.chain[0]] * parameters.step_myr, marine_m3, 1.0e-9 * marine_m3);
+    for (std::size_t cell : domain.seacolumn)
+        EXPECT_EQ(flux[cell], 0.0);
+}
+
+TEST_F(Landscape, StreamPowerSedimentFluxGrowsDownstreamWithoutDeposition)
+{
+    // G = 0 on a hill: every chain cell is incised and keeps nothing, so the flux each
+    // passes on is its own incision plus everything upstream, growing towards the outlet.
+    Domain domain = makedomain(1, 0.0f);
+    sethill(domain);
+    const StreamPowerParameters parameters = makeparameters(1.0, 0.0, 0.0);
+    std::vector<double> flux;
+    landscape::stepstreampower(domain.metric, domain.graph, domain.erodibility, domain.uplift, parameters,
+                               domain.elevation, domain.erosion, domain.deposition, &flux);
+    EXPECT_GT(flux[domain.chain[static_cast<std::size_t>(chainlength - 1)]], 0.0);
+    for (int x = 0; x + 1 < chainlength; x++)
+        EXPECT_GT(flux[domain.chain[static_cast<std::size_t>(x)]], flux[domain.chain[static_cast<std::size_t>(x + 1)]])
+            << "column " << x;
+}
+
 TEST_F(Landscape, StreamPowerRejectsInvalidInput)
 {
     Domain domain = makedomain(1, 100.0f);

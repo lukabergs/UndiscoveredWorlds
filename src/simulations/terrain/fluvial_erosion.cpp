@@ -63,6 +63,7 @@ void applyfluvialerosionstage(planet& world)
     std::vector<float> erodibility(size), uplift(size), elevation = inputs.elevation;
     std::vector<float> steperosion(size), stepdeposition(size);
     std::vector<double> denudation(size, 0.0), aggradation(size, 0.0);
+    std::vector<double> stepflux, sediment(size, 0.0);  // m^3/Myr of a step; m^3 summed over the run
     for (int y = 0; y < rows; y++)
     {
         for (int x = 0; x < columns; x++)
@@ -101,7 +102,7 @@ void applyfluvialerosionstage(planet& world)
         step.step_myr = std::min(parameters.step_myr, duration - elapsed);
         routing = flowrouting::route(inputs, &elevation);
         const landscape::StreamPowerBudget budget = landscape::stepstreampower(
-            metric, routing.graph, erodibility, uplift, step, elevation, steperosion, stepdeposition);
+            metric, routing.graph, erodibility, uplift, step, elevation, steperosion, stepdeposition, &stepflux);
         total.eroded_km3 += budget.eroded_km3;
         total.landdeposited_km3 += budget.landdeposited_km3;
         total.marinedeposited_km3 += budget.marinedeposited_km3;
@@ -110,6 +111,7 @@ void applyfluvialerosionstage(planet& world)
         {
             denudation[cell] += steperosion[cell];
             aggradation[cell] += stepdeposition[cell];
+            sediment[cell] += stepflux[cell] * step.step_myr;
         }
         elapsed += step.step_myr;
     }
@@ -123,7 +125,9 @@ void applyfluvialerosionstage(planet& world)
     worldgrid<float>& depositionrate = world.depositionrate();
     worldgrid<float>& denudationfield = world.denudation();
     worldgrid<float>& aggradationfield = world.aggradation();
+    worldgrid<float>& sedimentflux = world.sedimentflux();
     const double megayears = std::max(duration, 1.0e-9);
+    constexpr double yearspermegayear = 1.0e6;
     for (int y = 0; y < rows; y++)
     {
         for (int x = 0; x < columns; x++)
@@ -135,6 +139,9 @@ void applyfluvialerosionstage(planet& world)
             depositionrate[x][y] = static_cast<float>(aggradation[cell] / megayears);
             denudationfield[x][y] = static_cast<float>(denudation[cell]);
             aggradationfield[x][y] = static_cast<float>(aggradation[cell]);
+            // hydrosphere.sediment_flux: the mean over the run in m^3/yr; 0 on the final sea.
+            sedimentflux[x][y] = routing.sea[cell] ? 0.0f
+                : static_cast<float>(sediment[cell] / (megayears * yearspermegayear));
         }
     }
     // geosphere.max_elevation is the datum ceiling the terrain stages clamp to, not
