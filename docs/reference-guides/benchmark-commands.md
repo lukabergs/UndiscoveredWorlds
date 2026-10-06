@@ -92,11 +92,20 @@ world_pipeline.exe run --recipe earth-climate --seed 1 --climate-generic-levels 
 world_pipeline.exe run --recipe procedural-world --seed 1 --checkpoint-at terrain.roughness --bundle out/bench/world
 # One part of the recipe on that checkpoint: the climate steps only.
 world_pipeline.exe run --recipe procedural-world --from-bundle out/bench/world-checkpoints/17-terrain.roughness --steps climate.temperature..climate.rainfall_and_coupling --bundle out/bench/world-climate
+# Checkpoints inside the erosion at 5 and 12.5 Myr and every 10 Myr, over a 15 Myr erosion
+#   -> out/bench/eroded-checkpoints/25-terrain.fluvial_erosion-t0005.000, -t0010.000, -t0013.000
+world_pipeline.exe run --recipe eroded-world --seed 1 --duration terrain.fluvial_erosion=15 --checkpoint-at terrain.fluvial_erosion@5,terrain.fluvial_erosion@12.5 --checkpoint-every terrain.fluvial_erosion=10 --bundle out/bench/eroded
 ```
 
 `--steps a..b` and `--only <process>` take step indices or process ids (the `steps`
 of any bundle manifest list both); `--checkpoint-at`, `--checkpoint-every N` and
-`--checkpoint-dir` write one bundle per chosen step. `--from-bundle` loads the
+`--checkpoint-dir` write one bundle per chosen step or time. Bare times
+(`--duration N`, `--checkpoint-every N`, numbers in `--checkpoint-at`) mean the
+tectonics; `--duration <evolver>=N`, `--checkpoint-every <evolver>=N` and
+`--checkpoint-at <evolver>@N` name an evolver of the time model
+(`geology.plate_tectonics`, `terrain.fluvial_erosion`) by its process id or the
+label of one of its steps, and apply to every step of that process
+(`docs/architecture/world-model.md`, Time model). `--from-bundle` loads the
 world of a bundle: its seed and grid apply, command-line options (`--climate-*`,
 `--no-lakes`, ...) are not inherited and must be repeated. A bundle carries the
 world's stored fields. It does not carry tables, the climate solver's own grids,

@@ -49,9 +49,64 @@ landscape::StreamPowerParameters kernelparameters(double baselevel)
     parameters.sedimenttravel_km = t::marine::sedimentTravelKm;
     return parameters;
 }
+
+// Whether the step from `previous` to `elapsed` (Myr) reaches or passes a requested checkpoint time.
+bool reachescheckpoint(const FluvialErosionCheckpoints& checkpoints, double previous, double elapsed)
+{
+    constexpr double tolerance = 1.0e-9;
+    if (checkpoints.everyMyr > 0.0 &&
+        std::floor(elapsed / checkpoints.everyMyr + tolerance) > std::floor(previous / checkpoints.everyMyr + tolerance))
+        return true;
+    for (const double time : checkpoints.atMyr)
+        if (time > previous + tolerance && time <= elapsed + tolerance)
+            return true;
+    return false;
 }
 
-void applyfluvialerosionstage(planet& world)
+// The run's state as of `elapsed` (a checkpoint, or the end with the duration):
+// base elevation, the erosion fields with rates over `elapsed`, the volumes so far
+// and the routing of the current terrain.
+void writeerosionstate(planet& world, const flowrouting::Inputs& inputs, const std::vector<float>& elevation,
+    const std::vector<float>& erodibility, const std::vector<double>& denudation, const std::vector<double>& aggradation,
+    const std::vector<double>& sediment, const landscape::StreamPowerBudget& total, double elapsed)
+{
+    namespace t = tuning::landscape;
+    const flowrouting::Routing routing = flowrouting::route(inputs, &elevation);
+    flowrouting::writeroutingfields(world, inputs, routing);
+
+    const landscape::SphereMetric& metric = inputs.metric;
+    worldgrid<float>& erodibilityfield = world.erodibility();
+    worldgrid<float>& erosionrate = world.erosionrate();
+    worldgrid<float>& depositionrate = world.depositionrate();
+    worldgrid<float>& denudationfield = world.denudation();
+    worldgrid<float>& aggradationfield = world.aggradation();
+    worldgrid<float>& sedimentflux = world.sedimentflux();
+    const double megayears = std::max(elapsed, 1.0e-9);
+    constexpr double yearspermegayear = 1.0e6;
+    for (int y = 0; y < metric.height; y++)
+    {
+        for (int x = 0; x < metric.width; x++)
+        {
+            const std::size_t cell = metric.index(x, y);
+            world.setnomfloat(x, y, elevation[cell]);
+            erodibilityfield[x][y] = routing.sea[cell] ? 0.0f : erodibility[cell] / t::stream_power::erodibility;
+            erosionrate[x][y] = static_cast<float>(denudation[cell] / megayears);
+            depositionrate[x][y] = static_cast<float>(aggradation[cell] / megayears);
+            denudationfield[x][y] = static_cast<float>(denudation[cell]);
+            aggradationfield[x][y] = static_cast<float>(aggradation[cell]);
+            // hydrosphere.sediment_flux: the mean over the elapsed time in m^3/yr; 0 on the current sea.
+            sedimentflux[x][y] = routing.sea[cell] ? 0.0f
+                : static_cast<float>(sediment[cell] / (megayears * yearspermegayear));
+        }
+    }
+    world.seterosionduration(static_cast<float>(elapsed));
+    world.seterodedvolume(static_cast<float>(total.eroded_km3));
+    world.setlanddepositedvolume(static_cast<float>(total.landdeposited_km3));
+    world.setmarinedepositedvolume(static_cast<float>(total.marinedeposited_km3));
+}
+}
+
+void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& checkpoints)
 {
     namespace t = tuning::landscape;
     flowrouting::Inputs inputs = flowrouting::gatherinputs(world);
@@ -113,43 +168,20 @@ void applyfluvialerosionstage(planet& world)
             aggradation[cell] += stepdeposition[cell];
             sediment[cell] += stepflux[cell] * step.step_myr;
         }
+        const double previous = elapsed;
         elapsed += step.step_myr;
-    }
-
-    // The final routing on the eroded terrain, so that no second routing step follows.
-    routing = flowrouting::route(inputs, &elevation);
-    flowrouting::writeroutingfields(world, inputs, routing);
-
-    worldgrid<float>& erodibilityfield = world.erodibility();
-    worldgrid<float>& erosionrate = world.erosionrate();
-    worldgrid<float>& depositionrate = world.depositionrate();
-    worldgrid<float>& denudationfield = world.denudation();
-    worldgrid<float>& aggradationfield = world.aggradation();
-    worldgrid<float>& sedimentflux = world.sedimentflux();
-    const double megayears = std::max(duration, 1.0e-9);
-    constexpr double yearspermegayear = 1.0e6;
-    for (int y = 0; y < rows; y++)
-    {
-        for (int x = 0; x < columns; x++)
+        // Checkpoint hook (time model): the end of the run is not a checkpoint.
+        if (checkpoints.checkpoint && elapsed < duration && reachescheckpoint(checkpoints, previous, elapsed))
         {
-            const std::size_t cell = metric.index(x, y);
-            world.setnomfloat(x, y, elevation[cell]);
-            erodibilityfield[x][y] = routing.sea[cell] ? 0.0f : erodibility[cell] / t::stream_power::erodibility;
-            erosionrate[x][y] = static_cast<float>(denudation[cell] / megayears);
-            depositionrate[x][y] = static_cast<float>(aggradation[cell] / megayears);
-            denudationfield[x][y] = static_cast<float>(denudation[cell]);
-            aggradationfield[x][y] = static_cast<float>(aggradation[cell]);
-            // hydrosphere.sediment_flux: the mean over the run in m^3/yr; 0 on the final sea.
-            sedimentflux[x][y] = routing.sea[cell] ? 0.0f
-                : static_cast<float>(sediment[cell] / (megayears * yearspermegayear));
+            writeerosionstate(world, inputs, elevation, erodibility, denudation, aggradation, sediment, total, elapsed);
+            checkpoints.checkpoint(elapsed);
         }
     }
-    // geosphere.max_elevation is the datum ceiling the terrain stages clamp to, not
-    // the summit; the roughness was held to it above, and with uplift 0 the
-    // stream-power steps lower the terrain or deposit below the terrain upstream,
-    // so the ceiling stays valid.
-    world.seterosionduration(static_cast<float>(duration));
-    world.seterodedvolume(static_cast<float>(total.eroded_km3));
-    world.setlanddepositedvolume(static_cast<float>(total.landdeposited_km3));
-    world.setmarinedepositedvolume(static_cast<float>(total.marinedeposited_km3));
+
+    // The end of the run: the final routing on the eroded terrain, so that no second
+    // routing step follows. geosphere.max_elevation is the datum ceiling the terrain
+    // stages clamp to, not the summit; the roughness was held to it above, and with
+    // uplift 0 the stream-power steps lower the terrain or deposit below the terrain
+    // upstream, so the ceiling stays valid.
+    writeerosionstate(world, inputs, elevation, erodibility, denudation, aggradation, sediment, total, duration);
 }

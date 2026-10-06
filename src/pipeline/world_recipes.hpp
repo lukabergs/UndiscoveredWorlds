@@ -89,6 +89,11 @@ struct RecipeSteps
 // a process that occurs once ("climate.winds"); an id that occurs more than once is
 // refused, and `reason` names its labels.
 bool findrecipestep(const WorldRecipe& recipe, std::string_view text, std::size_t& index, std::string* reason = nullptr);
+// The evolver of the time model named by its process id or by the label of one of
+// its steps in the recipe; null, with `reason`, otherwise. A duration or checkpoint
+// given for it applies to the process, so to every step of it in the recipe.
+const WorldProcessDefinition* findtimedevolver(const WorldRecipe& recipe, std::string_view label,
+    std::string* reason = nullptr);
 // A label as a file or directory name: characters other than letters, digits and ._@- become '_'.
 std::string recipesteppathname(std::string_view label);
 // "a..b", "a..", "..b" or one step.

@@ -6,6 +6,23 @@
 // and writes the final routing fields itself (docs/architecture/erosion-hydrology-plan.md,
 // section 3, Processes).
 
+#include <functional>
+#include <vector>
+
 class planet;
 
-void applyfluvialerosionstage(planet& world);
+// Checkpoints inside the run, in Myr of erosion time. After the step that reaches
+// or passes a requested time (one step may serve several), the world holds the
+// state as of that step, as the end of the run writes it (base elevation, the
+// erosion fields with rates over the elapsed time, erosion_duration = the elapsed
+// time, the volumes so far and the routing of the terrain then), and the callback
+// runs with the elapsed time. The end of the run is not a checkpoint; checkpoints
+// leave the result unchanged.
+struct FluvialErosionCheckpoints
+{
+    double everyMyr = 0;
+    std::vector<double> atMyr;
+    std::function<void(double elapsedMyr)> checkpoint;
+};
+
+void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& checkpoints = {});

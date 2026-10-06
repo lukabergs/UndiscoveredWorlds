@@ -85,6 +85,8 @@ struct WorldStageParameters
     bool tectonicMineralHistory = true;
     double tectonicCheckpointEveryMyr = 0;      // checkpoints inside the tectonics evolver, see evolverCheckpoint
     std::vector<double> tectonicCheckpointsMyr;
+    double erosionCheckpointEveryMyr = 0;       // checkpoints inside terrain.fluvial_erosion, see evolverCheckpoint
+    std::vector<double> erosionCheckpointsMyr;
     int seaLevel = 0;                           // terraforming target; tectonics writes the result back
     bool useHypsometricRemap = false;
     std::vector<WorldCurvePoint> hypsometricCurve;  // monotone target curve, sampled by the editor

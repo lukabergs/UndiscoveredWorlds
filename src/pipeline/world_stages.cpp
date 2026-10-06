@@ -1172,10 +1172,19 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         return true;
 
     case GenerationStageId::fluvial_erosion:
+    {
         // The land and sea totals are not recounted here: they are undeclared writes of
         // this process, and the stages after it read the counts of the rainfall stage.
-        applyfluvialerosionstage(world);
+        FluvialErosionCheckpoints checkpoints;
+        if (context.evolverCheckpoint)
+        {
+            checkpoints.everyMyr = parameters.erosionCheckpointEveryMyr;
+            checkpoints.atMyr = parameters.erosionCheckpointsMyr;
+            checkpoints.checkpoint = [&](double timemyr) { context.evolverCheckpoint(stageId, timemyr); };
+        }
+        applyfluvialerosionstage(world, checkpoints);
         return true;
+    }
 
     case GenerationStageId::fjords:
         if (world.seatotal() > 0)

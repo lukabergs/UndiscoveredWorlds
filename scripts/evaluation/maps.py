@@ -312,6 +312,10 @@ def validated(bundle, spec, validation, references, directory):
 
 
 def checkpoint_time(bundle):
+    """Myr of a checkpoint: the evolver's checkpoint_time_myr property, else the tectonic snapshot's time."""
+    time = bundle.manifest.get('properties', {}).get('checkpoint_time_myr')
+    if time is not None:
+        return float(time)
     if SNAPSHOT_TABLE in bundle.tables:
         return json.loads(bundle.table_text(SNAPSHOT_TABLE)).get('time_myr')
     return None

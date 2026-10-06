@@ -16,6 +16,15 @@ struct ImportedClimateMaps;
 
 constexpr int kEarthBenchmarkWidth = 512;
 
+// A time given for a named evolver: the label (the process id, or the label of one
+// of its steps in the recipe) is resolved once the recipe is known.
+struct EvolverTimeRequest
+{
+    std::string label;
+    std::string text;     // the time as given
+    double timeMyr = 0;
+};
+
 struct CommandLineGenerationOptions
 {
     bool run = false;
@@ -52,6 +61,9 @@ struct CommandLineGenerationOptions
     std::vector<std::string> checkpointAt;   // --checkpoint-at: steps (labels or process ids) after which a bundle is written.
     std::vector<double> checkpointTimesMyr;  // --checkpoint-at with numbers: times inside the tectonics evolver.
     double checkpointEveryMyr = 0;           // --checkpoint-every: interval inside the tectonics evolver.
+    std::vector<EvolverTimeRequest> evolverDurations;         // --duration <evolver>=<Myr>
+    std::vector<EvolverTimeRequest> evolverCheckpointEvery;   // --checkpoint-every <evolver>=<Myr>
+    std::vector<EvolverTimeRequest> evolverCheckpointTimes;   // --checkpoint-at <evolver>@<Myr>
     tectonics::scenario::Scenario tectonicScenario = tectonics::scenario::baseline();   // with the --<scenario key> overrides
     bool tectonicScenarioGiven = false;
     bool mineralHistory = true;              // --mineral-history on|off

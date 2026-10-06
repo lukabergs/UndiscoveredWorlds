@@ -303,7 +303,8 @@ WorldRecipe erodedworldrecipe()
     using S = GenerationStageId;
     const std::vector<GenerationStageId> climate = stagesbetween(S::global_temperature, S::rainfall);
     appendsteps(recipe.steps, stagesbetween(S::geosphere_initialization, S::terrain_roughness));
-    appendsteps(recipe.steps, climate, "coarse", { { "climate.resolution", "32" }, { "climate.coupling_iterations", "2" } });    appendsteps(recipe.steps, { S::fluvial_erosion, S::fjords });
+    appendsteps(recipe.steps, climate, "coarse", { { "climate.resolution", "32" }, { "climate.coupling_iterations", "2" } });
+    appendsteps(recipe.steps, { S::fluvial_erosion, S::fjords });
     appendsteps(recipe.steps, climate, "full");
     appendsteps(recipe.steps, { S::flow_routing, S::rivers, S::lake_levels, S::mountain_temperature_lapse,
                                 S::climates_and_biomes, S::arid_features, S::deltas_wetlands_and_roughness, S::finalize_layers });
@@ -445,6 +446,20 @@ std::vector<RecipeIssue> validaterecipe(const WorldRecipe& recipe)
         }
     }
     return issues;
+}
+
+const WorldProcessDefinition* findtimedevolver(const WorldRecipe& recipe, std::string_view label, std::string* reason)
+{
+    const WorldProcessDefinition* process = findworldprocess(label);
+    for (std::size_t step = 0; process == nullptr && step < recipe.steps.size(); step++)
+        if (label == recipe.steps[step].label)
+            process = &getworldprocess(recipe.steps[step].stage);
+    if (process != nullptr && process->time.source != nullptr)
+        return process;
+    if (reason != nullptr)
+        *reason = std::string(label) + " is neither an evolver of the time model (" + timedevolverids() +
+            ") nor the label of one of its steps in recipe " + recipe.name;
+    return nullptr;
 }
 
 bool findrecipestep(const WorldRecipe& recipe, std::string_view text, std::size_t& index, std::string* reason)

@@ -158,6 +158,28 @@ Steps are named by index, by label or by the id of a process that occurs once
 with a message naming its labels. Step checkpoints are written to
 `<index>-<label>` (characters outside letters, digits and `._@-` become `_`).
 
+Time model. An evolver that runs through time declares its duration and step in
+its process row (`EvolverTime` in `world_processes.hpp`): `geology.plate_tectonics`
+takes them from `configs/tectonics-baseline.json` (`evolution_duration_myr`,
+`delta_time_myr`), `terrain.fluvial_erosion` from the parameters
+`landscape.erosion.duration_myr` and `step_myr` (its last step is shortened to end
+at the duration). The compiled values are the defaults; a parameter is set by
+`--set`, by a recipe step's override or by `--duration <evolver>=<Myr>` (recorded in
+the manifest as any `--set`, and winning over it). On the command line
+`--duration <Myr>`, `--checkpoint-every <Myr>` and a number in `--checkpoint-at` mean
+the tectonics; `--duration <evolver>=<Myr>`, `--checkpoint-every <evolver>=<Myr>` and
+`--checkpoint-at <evolver>@<Myr>` name the evolver by its process id or by the label
+of one of its steps in the recipe, and apply to the process (every step of it). A
+name that is neither is refused; a named erosion that the recipe or the selected
+steps do not run gives a warning. A checkpoint inside an evolver writes the world as
+of that time to `<index>-<label>-t<Myr>`, with the manifest properties
+`checkpoint_process` and `checkpoint_time_myr`; the end of the run is not one, and
+checkpoints leave the result unchanged. Tectonics checkpoints must fall on whole
+steps; an erosion checkpoint must come before the erosion duration, follows the step
+that reaches or passes its time and holds the base elevation, the erosion fields
+with rates over the elapsed time, `erosion_duration` (the elapsed time), the volumes
+so far and the routing of the terrain then (the stage's one writer, as at the end).
+
 A run can cover part of a recipe (`world_pipeline run --steps a..b` or `--only`)
 and start from the world of a bundle (`--from-bundle`); checkpoints write a bundle
 after chosen steps. The same read check then decides whether the start point is

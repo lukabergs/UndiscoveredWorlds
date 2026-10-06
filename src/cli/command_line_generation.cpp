@@ -22,6 +22,7 @@
 #include "io/raster_imports.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "world/planet_bundle.hpp"
+#include "pipeline/world_processes.hpp"
 #include "pipeline/world_recipes.hpp"
 #include "pipeline/world_generation_debug.hpp"
 
@@ -46,11 +47,19 @@ void printcommandlineusage()
     cout << "  --set <name=value>      Set one parameter of a module (names as in configs/parameters/*.json:\n";
     cout << "                           <module>.<group>.<key>); may be repeated. The bundle manifest records every value.\n";
     cout << "  --parameters <file>     Set parameters from a JSON file: nested objects, or a manifest's \"parameters\".\n";
-    cout << "  --checkpoint-at <step|Myr[,...]>  Write a bundle after these steps (labels or process ids) and at these\n";
-    cout << "                           times of the tectonics step (numbers, in Myr).\n";
-    cout << "  --checkpoint-every <Myr>  Write a bundle at this interval of the tectonics step.\n";
-    cout << "  --checkpoint-dir <dir>  Checkpoint directory (default <bundle>-checkpoints); one bundle per checkpoint.\n";
-    cout << "  --duration <Myr>        Tectonic duration (as --tectonic-duration-myr).\n";
+    cout << "  --checkpoint-at <item[,...]>  Write a bundle after a step (its label or process id), at a time of the\n";
+    cout << "                           tectonics (a number, in Myr) or at a time inside an evolver (<evolver>@<Myr>).\n";
+    cout << "  --checkpoint-every [<evolver>=]<Myr>  Write a bundle at this interval inside an evolver (default the\n";
+    cout << "                           tectonics).\n";
+    cout << "  --checkpoint-dir <dir>  Checkpoint directory (default <bundle>-checkpoints); one bundle per checkpoint,\n";
+    cout << "                           <index>-<label> after a step, <index>-<label>-t<Myr> inside an evolver.\n";
+    cout << "  --duration [<evolver>=]<Myr>  Duration of an evolver (default the tectonics, as --tectonic-duration-myr);\n";
+    cout << "                           terrain.fluvial_erosion=<Myr> sets landscape.erosion.duration_myr.\n";
+    cout << "                           Evolvers: " << timedevolverids() << ", named by the process id\n";
+    cout << "                           or the label of one of its steps in the recipe; a duration or checkpoint applies\n";
+    cout << "                           to the process (every step of it). Tectonics checkpoints fall on whole steps; an\n";
+    cout << "                           erosion checkpoint (before the erosion duration) follows the step that reaches\n";
+    cout << "                           its time and is named by the time then. --duration <evolver>= wins over --set.\n";
     cout << "  --mineral-history <on|off>  Record mineral deposits during tectonics (default on).\n";
     cout << "                           The tectonics recipe runs the engine on the world grid (--resolution, default\n";
     cout << "                           from configs/tectonics-baseline.json) with the default planet body.\n";
@@ -82,6 +91,29 @@ void printcommandlineusage()
     cout << "  --no-prehistory         Disable prehistory pass in historical mode.\n";
     cout << "  --history-years <years> Historical simulation span.\n";
     cout << "  --help                  Show this message.\n";
+}
+
+namespace
+{
+// The whole text as a finite number.
+bool parsewholenumber(const string& text, double& number)
+{
+    size_t parsed = 0;
+    try { number = stod(text, &parsed); } catch (const exception&) { return false; }
+    return !text.empty() && parsed == text.size() && std::isfinite(number);
+}
+
+// "<evolver>=<Myr>" or "<evolver>@<Myr>", split at `separator`: the label and a
+// positive time. The label is resolved once the recipe is known.
+EvolverTimeRequest evolvertimerequest(const string& item, size_t separator)
+{
+    EvolverTimeRequest request;
+    request.label = item.substr(0, separator);
+    request.text = item.substr(separator + 1);
+    if (request.label.empty() || !parsewholenumber(request.text, request.timeMyr) || !(request.timeMyr > 0.0))
+        throw invalid_argument("time");
+    return request;
+}
 }
 
 bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerationOptions& options)
@@ -213,13 +245,15 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                         const size_t comma = min(value.find(',', start), value.size());
                         if (comma > start)
                         {
-                            // A number is a time of the tectonics step, anything else a step.
+                            // A number is a time of the tectonics step, <evolver>@<number> a time
+                            // inside that evolver, anything else a step.
                             const string item = value.substr(start, comma - start);
-                            size_t parsed = 0;
+                            const size_t at = item.rfind('@');
                             double timemyr = 0.0;
-                            try { timemyr = stod(item, &parsed); } catch (const exception&) { parsed = 0; }
-                            if (parsed == item.size())
+                            if (parsewholenumber(item, timemyr))
                                 options.checkpointTimesMyr.push_back(timemyr);
+                            else if (at != string::npos && parsewholenumber(item.substr(at + 1), timemyr))
+                                options.evolverCheckpointTimes.push_back(evolvertimerequest(item, at));
                             else
                                 options.checkpointAt.push_back(item);
                         }
@@ -228,14 +262,20 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                 }
                 else if (argument == "--checkpoint-every")
                 {
-                    options.checkpointEveryMyr = stod(value);
-                    if (!(options.checkpointEveryMyr > 0.0))
+                    // <Myr> for the tectonics, <evolver>=<Myr> for the named evolver.
+                    const size_t equals = value.find('=');
+                    if (equals != string::npos)
+                        options.evolverCheckpointEvery.push_back(evolvertimerequest(value, equals));
+                    else if (!parsewholenumber(value, options.checkpointEveryMyr) || !(options.checkpointEveryMyr > 0.0))
                         throw invalid_argument("checkpoint-every");
                 }
                 else if (argument == "--duration")
                 {
-                    options.plateTectonicsDurationMyr = stod(value);
-                    if (!(options.plateTectonicsDurationMyr > 0.0))
+                    // <Myr> for the tectonics, <evolver>=<Myr> for the named evolver.
+                    const size_t equals = value.find('=');
+                    if (equals != string::npos)
+                        options.evolverDurations.push_back(evolvertimerequest(value, equals));
+                    else if (!parsewholenumber(value, options.plateTectonicsDurationMyr) || !(options.plateTectonicsDurationMyr > 0.0))
                         throw invalid_argument("duration");
                 }
                 else if (argument == "--mineral-history")
@@ -545,7 +585,8 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         }
     }
     else if (frombundle || !options.stepsText.empty() || !options.checkpointAt.empty() ||
-        !options.checkpointTimesMyr.empty() || options.checkpointEveryMyr > 0.0)
+        !options.checkpointTimesMyr.empty() || options.checkpointEveryMyr > 0.0 ||
+        !options.evolverCheckpointTimes.empty() || !options.evolverCheckpointEvery.empty())
     {
         cerr << "--from-bundle, --steps, --only and checkpoints belong to the run command.\n";
         return 1;
@@ -706,8 +747,90 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         runoptions.sourceprovenance = source.provenance;
     }
 
+    // Evolvers named on the command line (<evolver>=<Myr>, <evolver>@<Myr>), resolved in this recipe.
+    double tectonicduration = options.plateTectonicsDurationMyr;
+    double tectoniccheckpointevery = options.checkpointEveryMyr;
+    vector<double> tectoniccheckpoints = options.checkpointTimesMyr;
+    double erosioncheckpointevery = 0.0;
+    vector<double> erosioncheckpoints;
+    bool erosionnamed = false;
+    {
+        const auto resolve = [&](const EvolverTimeRequest& request, const char* option) -> const WorldProcessDefinition*
+        {
+            string reason;
+            const WorldProcessDefinition* process = findtimedevolver(recipe, request.label, &reason);
+            if (process == nullptr)
+                cerr << option << ": " << reason << '\n';
+            else if (process->stage == GenerationStageId::fluvial_erosion)
+                erosionnamed = true;
+            return process;
+        };
+        for (const EvolverTimeRequest& request : options.evolverDurations)
+        {
+            const WorldProcessDefinition* process = resolve(request, "--duration");
+            if (process == nullptr)
+                return 1;
+            // A duration parameter is set as by --set and recorded in the manifest; it wins over --set.
+            string reason;
+            if (process->time.durationParameter == nullptr)
+                tectonicduration = request.timeMyr;
+            else if (!setrecipeparameter(string(process->time.durationParameter) + "=" + request.text, &reason) ||
+                !validaterecipeparameters(&reason))
+            {
+                cerr << "--duration: " << reason << '\n';
+                return 1;
+            }
+        }
+        for (const EvolverTimeRequest& request : options.evolverCheckpointEvery)
+        {
+            const WorldProcessDefinition* process = resolve(request, "--checkpoint-every");
+            if (process == nullptr)
+                return 1;
+            (process->stage == GenerationStageId::fluvial_erosion ? erosioncheckpointevery : tectoniccheckpointevery) = request.timeMyr;
+        }
+        for (const EvolverTimeRequest& request : options.evolverCheckpointTimes)
+        {
+            const WorldProcessDefinition* process = resolve(request, "--checkpoint-at");
+            if (process == nullptr)
+                return 1;
+            (process->stage == GenerationStageId::fluvial_erosion ? erosioncheckpoints : tectoniccheckpoints).push_back(request.timeMyr);
+        }
+    }
+    debugoptions.plateTectonicsDurationMyr = tectonicduration;
+    if (erosioncheckpointevery > 0.0 || !erosioncheckpoints.empty())
+    {
+        // The end of the run is not a checkpoint: a time at or beyond the duration would never be written.
+        string text;
+        getrecipeparameter("landscape.erosion.duration_myr", text);
+        const double duration = stod(text);
+        for (const double timemyr : erosioncheckpoints)
+            if (timemyr >= duration)
+            {
+                cerr << "--checkpoint-at: erosion time " << timemyr << " is not before the erosion duration (" << duration << " Myr).\n";
+                return 1;
+            }
+        if (erosioncheckpointevery >= duration)
+        {
+            cerr << "--checkpoint-every: erosion interval " << erosioncheckpointevery << " is not shorter than the erosion duration ("
+                 << duration << " Myr).\n";
+            return 1;
+        }
+    }
+    if (erosionnamed)
+    {
+        bool runserosion = false;
+        const size_t first = runoptions.selectSteps ? runoptions.steps.first : 0;
+        const size_t last = runoptions.selectSteps ? runoptions.steps.last : recipe.steps.size() - 1;
+        for (size_t index = first; index <= last && index < recipe.steps.size(); index++)
+            runserosion = runserosion || recipe.steps[index].stage == GenerationStageId::fluvial_erosion;
+        if (!runserosion)
+            cerr << "Warning: terrain.fluvial_erosion is named but " << (runoptions.selectSteps ? "the selected steps of " : "")
+                 << "recipe " << recipe.name << " do" << (runoptions.selectSteps ? "" : "es") << " not run it.\n";
+    }
+
     // Every bundle of the run, final or checkpoint, is written the same way.
-    const auto writebundle = [&](const filesystem::path& directory, const RecipeRunResult& result)
+    const auto writebundle = [&](const filesystem::path& directory, const RecipeRunResult& result,
+        const vector<pair<string, string>>& properties)
     {
         runbundle::Metadata metadata;
         metadata.seed = world->seed();
@@ -722,6 +845,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         metadata.properties.push_back({ "access", options.auditAccess ? "measured" : "declared" });
         if (frombundle)
             metadata.properties.push_back({ "from_bundle", options.fromBundlePath });
+        metadata.properties.insert(metadata.properties.end(), properties.begin(), properties.end());
 
         // What this run wrote replaces what the source bundle carried.
         vector<worldmodel::FieldId> writtenfields;
@@ -752,7 +876,8 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     // Checkpoints inside an evolver see the run as of the last finished step.
     RecipeRunResult finishedsteps;
     std::function<void(GenerationStageId, double)> evolvercheckpoint;
-    if (!checkpointsteps.empty() || !options.checkpointTimesMyr.empty() || options.checkpointEveryMyr > 0.0)
+    if (!checkpointsteps.empty() || !tectoniccheckpoints.empty() || tectoniccheckpointevery > 0.0 ||
+        !erosioncheckpoints.empty() || erosioncheckpointevery > 0.0)
     {
         if (options.checkpointDirectory.empty() && options.bundlePath.empty())
         {
@@ -794,7 +919,9 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             snprintf(time, sizeof(time), "-t%08.3f", timemyr);
             const filesystem::path directory = checkpointdirectory /
                 ((record.index < 10 ? "0" : "") + to_string(record.index) + "-" + recipesteppathname(record.label) + time);
-            writebundle(directory, partial);
+            char exact[32];
+            snprintf(exact, sizeof(exact), "%.17g", timemyr);
+            writebundle(directory, partial, { { "checkpoint_process", process.id }, { "checkpoint_time_myr", exact } });
             updatereport("Checkpoint: " + directory.string());
         };
         runoptions.afterstep = [&, checkpointdirectory](const RecipeRunResult& sofar, const RecipeStepRecord& step, string& error)
@@ -807,7 +934,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
                 ((step.index < 10 ? "0" : "") + to_string(step.index) + "-" + recipesteppathname(step.label));
             try
             {
-                writebundle(directory, sofar);
+                writebundle(directory, sofar, {});
             }
             catch (const exception& failure)
             {
@@ -885,6 +1012,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         context.smalllake = smalllake;
         context.largelake = largelake;
         context.okmountains = &okmountains;
+        context.evolverCheckpoint = evolvercheckpoint;   // imported recipes have no evolver of the time model today
 
         runresult = runimportedworldrecipe(*world, recipe, context, runoptions);
     }
@@ -894,15 +1022,17 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         initializegenerationscratch(scratch);
 
         WorldStageParameters parameters;
-        parameters.tectonicDurationMyr = options.plateTectonicsDurationMyr;
+        parameters.tectonicDurationMyr = tectonicduration;
         parameters.tectonicPlateCount = options.plateTectonicsPlateCount;
         parameters.seaLevel = world->sealevel();
         if (options.tectonicScenarioGiven)
             parameters.tectonicScenario = std::make_shared<const tectonics::scenario::Scenario>(options.tectonicScenario);
         parameters.tectonicWorldGrid = tectonicsmodule;
         parameters.tectonicMineralHistory = options.mineralHistory;
-        parameters.tectonicCheckpointEveryMyr = options.checkpointEveryMyr;
-        parameters.tectonicCheckpointsMyr = options.checkpointTimesMyr;
+        parameters.tectonicCheckpointEveryMyr = tectoniccheckpointevery;
+        parameters.tectonicCheckpointsMyr = tectoniccheckpoints;
+        parameters.erosionCheckpointEveryMyr = erosioncheckpointevery;
+        parameters.erosionCheckpointsMyr = erosioncheckpoints;
 
         GenerationExecutionContext context;
         context.evolverCheckpoint = evolvercheckpoint;
@@ -952,7 +1082,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     {
         try
         {
-            writebundle(options.bundlePath, runresult);
+            writebundle(options.bundlePath, runresult, {});
         }
         catch (const exception& error)
         {

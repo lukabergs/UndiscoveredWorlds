@@ -24,7 +24,9 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::geosphere_initialization, "geology.geosphere_initialization", K::initializer, true, {}, {}, {}, {},
           "Creates the engine (starting topography from its own seeded stream) and the inherited gold provinces." },
         { S::plate_tectonics, "geology.plate_tectonics", K::evolver, true, {}, {}, {}, {},
-          "Continues the initializer's engine; re-creates it deterministically when the run carries none." },
+          "Continues the initializer's engine; re-creates it deterministically when the run carries none.",
+          { nullptr, nullptr, "configs/tectonics-baseline.json (evolution_duration_myr, delta_time_myr); the run sets them "
+                              "with --duration and --delta-time-myr; checkpoints fall on whole steps" } },
         { S::terraforming, "terrain.terraforming", K::editor, false, {}, {}, {}, {}, "" },
         { S::inland_seas, "terrain.inland_sea_policy", K::editor, false, {}, {}, {}, {}, "" },
         { S::archipelagos, "terrain.archipelagos", K::detailer, false, {}, {}, {}, {}, "" },
@@ -55,7 +57,11 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::flow_routing, "hydrology.flow_routing", K::diagnoser, false, {}, {}, {}, {},
           "Runoff from Fu's Budyko curve of the annual precipitation and the open-water evaporation law of the lakes; discharge loses evaporation from channel and floodplain where PET exceeds P (erosion plan C2); every depression overflows at its spill." },
         { S::fluvial_erosion, "terrain.fluvial_erosion", K::evolver, false, {}, {}, {}, {},
-          "Writes its final routing fields too, so no second routing step follows it." },
+          "Writes its final routing fields too, so no second routing step follows it. A checkpoint writes the "
+          "same fields as of its time (the routing of the terrain then, rates over the elapsed time).",
+          { "landscape.erosion.duration_myr", "landscape.erosion.step_myr",
+            "configs/parameters/landscape.json; the last step is shortened to end at the duration; a checkpoint "
+            "follows the step that reaches its time" } },
         { S::fjords, "terrain.fjords", K::detailer, false, {}, {}, {}, {}, "" },
         { S::rivers_and_basins, "hydrology.rivers_and_basins", K::diagnoser, false, {}, {}, {}, {},
           "Also places salt lakes, adds land noise and fills depressions (terrain edits)." },
@@ -113,6 +119,15 @@ const WorldProcessDefinition* findworldprocess(std::string_view id)
         if (id == process.id)
             return &process;
     return nullptr;
+}
+
+std::string timedevolverids()
+{
+    std::string ids;
+    for (const WorldProcessDefinition& process : getworldprocesses())
+        if (process.time.source != nullptr)
+            ids += (ids.empty() ? "" : ", ") + std::string(process.id);
+    return ids;
 }
 
 bool declareswrite(const WorldProcessDefinition& process, worldmodel::FieldId field)
