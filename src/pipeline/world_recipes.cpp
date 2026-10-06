@@ -1,12 +1,15 @@
 #include "pipeline/world_recipes.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <map>
 #include <set>
 #include <stdexcept>
 
 #include "world/planet_fields.hpp"
 #include "core/world/field_access.hpp"
+#include "pipeline/recipe_parameters.hpp"
 
 using worldmodel::Component;
 using worldmodel::FieldId;
@@ -51,6 +54,16 @@ std::vector<GenerationStageId> stagesfrom(GenerationStageId first)
     return steps;
 }
 
+// The stages from first to last in registry order (inclusive).
+std::vector<GenerationStageId> stagesbetween(GenerationStageId first, GenerationStageId last)
+{
+    std::vector<GenerationStageId> steps;
+    const auto& stages = getgenerationstages();
+    for (std::size_t index = getgenerationstageindex(first); index <= getgenerationstageindex(last); index++)
+        steps.push_back(stages[index].id);
+    return steps;
+}
+
 std::vector<GenerationStageId> without(std::vector<GenerationStageId> steps, std::initializer_list<GenerationStageId> left)
 {
     steps.erase(std::remove_if(steps.begin(), steps.end(), [&](GenerationStageId stage)
@@ -67,6 +80,153 @@ std::vector<GenerationStageId> withouterosion(std::vector<GenerationStageId> ste
     return without(std::move(steps), { GenerationStageId::flow_routing, GenerationStageId::fluvial_erosion,
                                        GenerationStageId::rivers, GenerationStageId::lake_levels });
 }
+
+// Steps of the given stages, each labelled with a suffix (none: the process id) and the same overrides.
+void appendsteps(std::vector<RecipeStep>& steps, const std::vector<GenerationStageId>& stages,
+    std::string_view suffix = {}, const std::vector<RecipeOverride>& overrides = {})
+{
+    for (GenerationStageId stage : stages)
+        steps.push_back(recipestep(stage, suffix, overrides));
+}
+
+std::vector<RecipeStep> labelledsteps(const std::vector<GenerationStageId>& stages)
+{
+    std::vector<RecipeStep> steps;
+    appendsteps(steps, stages);
+    return steps;
+}
+
+// Climate-context settings a step can override (cli/climate_options.cpp sets them for the run).
+constexpr std::string_view kClimateResolution = "climate.resolution";
+constexpr std::string_view kClimateCouplingIterations = "climate.coupling_iterations";
+
+bool readinteger(const RecipeOverride& entry, int& value, std::string& error)
+{
+    std::size_t parsed = 0;
+    try
+    {
+        value = std::stoi(entry.value, &parsed);
+    }
+    catch (const std::exception&)
+    {
+        parsed = 0;
+    }
+    if (parsed == 0 || parsed != entry.value.size())
+    {
+        error = entry.name + " takes a whole number, not " + entry.value;
+        return false;
+    }
+    return true;
+}
+
+// Checks an override's name and value with the bounds of the matching command-line
+// option (cli/climate_options.cpp) or the parameter's type; `number` receives a
+// climate-context value. Changes nothing.
+bool checkoverride(const RecipeOverride& entry, std::string& error, int* number = nullptr)
+{
+    int value = 0;
+    if (entry.name == kClimateResolution)
+    {
+        if (!readinteger(entry, value, error))
+            return false;
+        if (value < 8 || value % 4 != 0 || value > ARRAYWIDTH / 2)
+        {
+            error = entry.name + " must be a multiple of 4 between 8 and " + std::to_string(ARRAYWIDTH / 2) + ", not " + entry.value;
+            return false;
+        }
+    }
+    else if (entry.name == kClimateCouplingIterations)
+    {
+        if (!readinteger(entry, value, error))
+            return false;
+        if (value < 1 || value > 100)
+        {
+            error = entry.name + " must be between 1 and 100, not " + entry.value;
+            return false;
+        }
+    }
+    else
+        return checkrecipeparameter(entry.name, entry.value, &error);
+    if (number != nullptr)
+        *number = value;
+    return true;
+}
+
+// Applies one step's overrides and puts back what they replaced.
+class StepOverrides
+{
+public:
+    explicit StepOverrides(planet& world) : world_(world) {}
+    ~StepOverrides() { restore(); }
+    StepOverrides(const StepOverrides&) = delete;
+    StepOverrides& operator=(const StepOverrides&) = delete;
+
+    bool apply(const std::vector<RecipeOverride>& overrides, std::vector<RecipeOverride>& applied, std::string& error)
+    {
+        for (const RecipeOverride& entry : overrides)
+        {
+            int number = 0;
+            if (!checkoverride(entry, error, &number))
+                return false;
+            if (entry.name == kClimateResolution)
+            {
+                climatecontext::Context& climate = world_.climatesimulation();
+                const int columns = number;
+                if (!savedresolution_)
+                    resolution_ = climate.resolution;
+                savedresolution_ = true;
+                // As --climate-resolution without --climate-hydrology-resolution.
+                climate.resolution = { columns, columns, 2 * columns, columns / 2 };
+                applied.push_back({ entry.name, std::to_string(columns) });
+            }
+            else if (entry.name == kClimateCouplingIterations)
+            {
+                climatecontext::Context& climate = world_.climatesimulation();
+                const int iterations = number;
+                if (!savedcoupling_)
+                    coupling_ = climate.couplingIterationLimit;
+                savedcoupling_ = true;
+                climate.couplingIterationLimit = iterations;
+                applied.push_back({ entry.name, std::to_string(iterations) });
+            }
+            else
+            {
+                std::string previous;
+                getrecipeparameter(entry.name, previous);
+                if (!setrecipeparameter(entry.name + "=" + entry.value, &error))
+                    return false;
+                parameters_.push_back({ entry.name, previous });
+                std::string value;
+                getrecipeparameter(entry.name, value);
+                applied.push_back({ entry.name, value });
+            }
+        }
+        if (!parameters_.empty() && !validaterecipeparameters(&error))
+            return false;
+        return true;
+    }
+
+    void restore()
+    {
+        // In reverse, so that a name overridden twice gets its first value back.
+        for (auto entry = parameters_.rbegin(); entry != parameters_.rend(); ++entry)
+            setrecipeparameter(entry->name + "=" + entry->value);
+        parameters_.clear();
+        if (savedresolution_)
+            world_.climatesimulation().resolution = resolution_;
+        if (savedcoupling_)
+            world_.climatesimulation().couplingIterationLimit = coupling_;
+        savedresolution_ = savedcoupling_ = false;
+    }
+
+private:
+    planet& world_;
+    std::vector<RecipeOverride> parameters_;      // values before the step
+    climatecontext::Resolution resolution_;
+    int coupling_ = 0;
+    bool savedresolution_ = false;
+    bool savedcoupling_ = false;
+};
 
 bool isfrozen(const WorldRecipe& recipe, Component component)
 {
@@ -92,12 +252,28 @@ WorldHashes hashworld(const planet& world)
 }
 }
 
+RecipeStep recipestep(GenerationStageId stage, std::string_view suffix, std::vector<RecipeOverride> overrides)
+{
+    RecipeStep step;
+    step.stage = stage;
+    step.label = getworldprocess(stage).id;
+    if (!suffix.empty())
+        step.label += "@" + std::string(suffix);
+    step.overrides = std::move(overrides);
+    return step;
+}
+
+bool recipehasstage(const WorldRecipe& recipe, GenerationStageId stage)
+{
+    return std::any_of(recipe.steps.begin(), recipe.steps.end(), [&](const RecipeStep& step) { return step.stage == stage; });
+}
+
 WorldRecipe proceduralworldrecipe()
 {
     WorldRecipe recipe;
     recipe.name = "procedural-world";
     recipe.description = "Full generation from a seed: tectonics, terrain passes, climate, hydrology, layers, optional society";
-    recipe.steps = withouterosion(stagesfrom(GenerationStageId::geosphere_initialization));
+    recipe.steps = labelledsteps(withouterosion(stagesfrom(GenerationStageId::geosphere_initialization)));
     recipe.inputs = worldpropertyinputs();
     return recipe;
 }
@@ -107,7 +283,7 @@ WorldRecipe importedworldrecipe()
     WorldRecipe recipe;
     recipe.name = "imported-world";
     recipe.description = "Imported terrain, then the remaining terrain passes, climate, hydrology and layers";
-    recipe.steps = withouterosion(stagesfrom(GenerationStageId::mountain_bases));
+    recipe.steps = labelledsteps(withouterosion(stagesfrom(GenerationStageId::mountain_bases)));
     recipe.inputs = importedterraininputs();
     return recipe;
 }
@@ -116,13 +292,21 @@ WorldRecipe erodedworldrecipe()
 {
     WorldRecipe recipe;
     recipe.name = "eroded-world";
-    recipe.description = "procedural-world with flow routing and fluvial erosion after the climate coupling and before the fjords; "
-                         "rivers come from the routing (hydrology.rivers) and lakes from a water balance in its depressions "
-                         "(hydrology.lake_levels) instead of the legacy river, basin and lake stages (Phase B)";
-    // Phase B swaps legacy hydrology stages for landscape ones here, one step at a time:
-    // the second list holds the legacy stages left out and the landscape stages not yet switched on.
-    recipe.steps = without(stagesfrom(GenerationStageId::geosphere_initialization),
-                           { GenerationStageId::rivers_and_basins, GenerationStageId::basin_editor, GenerationStageId::lakes });
+    recipe.description = "The terrain stages of procedural-world; a coarse climate (32 columns, 2 coupling iterations) for the "
+                         "fluvial erosion, which routes itself, and the fjords; the full climate on the eroded terrain at the "
+                         "run's climate settings; the flow routing, rivers from it (hydrology.rivers) and lakes from a water "
+                         "balance in its depressions (hydrology.lake_levels); the remaining stages, layers.finalize once at the end";
+    // The full climate recomputes everything on the eroded terrain except one deliberate
+    // warm start: climate.pressure and climate.winds read the sea-surface temperatures the
+    // coarse climate left in the world (pressuresurfacetemperature, climate_coupling_internal.hpp)
+    // until climate.ocean_currents rewrites them.
+    using S = GenerationStageId;
+    const std::vector<GenerationStageId> climate = stagesbetween(S::global_temperature, S::rainfall);
+    appendsteps(recipe.steps, stagesbetween(S::geosphere_initialization, S::terrain_roughness));
+    appendsteps(recipe.steps, climate, "coarse", { { "climate.resolution", "32" }, { "climate.coupling_iterations", "2" } });    appendsteps(recipe.steps, { S::fluvial_erosion, S::fjords });
+    appendsteps(recipe.steps, climate, "full");
+    appendsteps(recipe.steps, { S::flow_routing, S::rivers, S::lake_levels, S::mountain_temperature_lapse,
+                                S::climates_and_biomes, S::arid_features, S::deltas_wetlands_and_roughness, S::finalize_layers });
     recipe.inputs = worldpropertyinputs();
     // hydrology.lake_levels reads the imported lake mask: all zero in a procedural world.
     recipe.inputs.push_back(FieldId::imported_lake);
@@ -136,7 +320,7 @@ WorldRecipe earthclimaterecipe()
     recipe.description = "Climate processes only on imported terrain; Geosphere is frozen";
     for (const GenerationStageDefinition& stage : getgenerationstages())
         if (isclimatefeedbackstage(stage.id) && stage.id != GenerationStageId::terrain_roughness)
-            recipe.steps.push_back(stage.id);
+            recipe.steps.push_back(recipestep(stage.id));
     recipe.frozen = { Component::geosphere };
     recipe.inputs = importedterraininputs();
     return recipe;
@@ -148,9 +332,11 @@ WorldRecipe earthhydrologyrecipe()
     recipe.name = "earth-hydrology";
     recipe.description = "earth-climate with the flow routing and the lake levels after the rainfall, on the imported "
                          "terrain and its imported lakes (--import-lakes); Geosphere is frozen";
-    const auto rainfall = std::find(recipe.steps.begin(), recipe.steps.end(), GenerationStageId::rainfall);
-    const auto routing = recipe.steps.insert(rainfall == recipe.steps.end() ? rainfall : rainfall + 1, GenerationStageId::flow_routing);
-    recipe.steps.insert(routing + 1, GenerationStageId::lake_levels);
+    const auto rainfall = std::find_if(recipe.steps.begin(), recipe.steps.end(),
+        [](const RecipeStep& step) { return step.stage == GenerationStageId::rainfall; });
+    const auto routing = recipe.steps.insert(rainfall == recipe.steps.end() ? rainfall : rainfall + 1,
+        recipestep(GenerationStageId::flow_routing));
+    recipe.steps.insert(routing + 1, recipestep(GenerationStageId::lake_levels));
     // hydrology.lake_levels reads the imported lake mask, which the import writes before the recipe.
     recipe.inputs.push_back(FieldId::imported_lake);
     return recipe;
@@ -161,7 +347,7 @@ WorldRecipe tectonicsrecipe()
     WorldRecipe recipe;
     recipe.name = "tectonics";
     recipe.description = "The tectonics module alone: starting Geosphere, then plate tectonics; the engine runs on the world grid";
-    recipe.steps = { GenerationStageId::geosphere_initialization, GenerationStageId::plate_tectonics };
+    recipe.steps = labelledsteps({ GenerationStageId::geosphere_initialization, GenerationStageId::plate_tectonics });
     recipe.inputs = worldpropertyinputs();
     return recipe;
 }
@@ -201,13 +387,36 @@ std::vector<RecipeIssue> validaterecipe(const WorldRecipe& recipe)
     std::set<FieldId> available(recipe.inputs.begin(), recipe.inputs.end());
     std::set<TableId> availabletables(recipe.inputtables.begin(), recipe.inputtables.end());
 
+    // Labels are unique, and a label that is a process id belongs to that process's only step.
+    std::map<GenerationStageId, int> occurrences;
+    for (const RecipeStep& step : recipe.steps)
+        occurrences[step.stage]++;
+    std::set<std::string> labels;
+    for (std::size_t index = 0; index < recipe.steps.size(); index++)
+    {
+        const RecipeStep& step = recipe.steps[index];
+        const int position = static_cast<int>(index);
+        if (step.label.empty() || !labels.insert(step.label).second)
+            issues.push_back({ position, true, "label '" + step.label + "' is empty or not unique" });
+        if (const WorldProcessDefinition* named = findworldprocess(step.label))
+            if (named->stage != step.stage || occurrences[step.stage] > 1)
+                issues.push_back({ position, true, "label " + step.label + " is a process id; a repeated process needs a suffix on every step" });
+        // Override values are checked here, before any step runs.
+        for (const RecipeOverride& entry : step.overrides)
+        {
+            std::string problem;
+            if (!checkoverride(entry, problem))
+                issues.push_back({ position, true, step.label + " override: " + problem });
+        }
+    }
+
     for (std::size_t index = 0; index < recipe.steps.size(); index++)
     {
         const int step = static_cast<int>(index);
         const WorldProcessDefinition* process = nullptr;
         try
         {
-            process = &getworldprocess(recipe.steps[index]);
+            process = &getworldprocess(recipe.steps[index].stage);
         }
         catch (const std::exception&)
         {
@@ -238,20 +447,54 @@ std::vector<RecipeIssue> validaterecipe(const WorldRecipe& recipe)
     return issues;
 }
 
-bool findrecipestep(const WorldRecipe& recipe, std::string_view text, std::size_t& index)
+bool findrecipestep(const WorldRecipe& recipe, std::string_view text, std::size_t& index, std::string* reason)
 {
+    const auto fail = [&](const std::string& message)
+    {
+        if (reason != nullptr)
+            *reason = message;
+        return false;
+    };
+    const std::string missing = "recipe " + recipe.name + " has no step " + std::string(text);
     if (!text.empty() && text.find_first_not_of("0123456789") == std::string_view::npos)
     {
         index = static_cast<std::size_t>(std::stoul(std::string(text)));
-        return index < recipe.steps.size();
+        return index < recipe.steps.size() || fail(missing);
     }
     for (std::size_t step = 0; step < recipe.steps.size(); step++)
-        if (text == getworldprocess(recipe.steps[step]).id)
+        if (text == recipe.steps[step].label)
         {
             index = step;
             return true;
         }
-    return false;
+    std::vector<std::size_t> matches;
+    for (std::size_t step = 0; step < recipe.steps.size(); step++)
+        if (text == getworldprocess(recipe.steps[step].stage).id)
+            matches.push_back(step);
+    if (matches.empty())
+        return fail(missing);
+    if (matches.size() > 1)
+    {
+        std::string labels;
+        for (std::size_t match : matches)
+            labels += (labels.empty() ? "" : ", ") + recipe.steps[match].label;
+        return fail("process " + std::string(text) + " occurs " + std::to_string(matches.size()) + " times in recipe " +
+            recipe.name + "; name one step by its label: " + labels);
+    }
+    index = matches.front();
+    return true;
+}
+
+std::string recipesteppathname(std::string_view label)
+{
+    std::string name(label);
+    for (char& character : name)
+    {
+        const unsigned char code = static_cast<unsigned char>(character);
+        if (!std::isalnum(code) && character != '.' && character != '_' && character != '@' && character != '-')
+            character = '_';
+    }
+    return name;
 }
 
 bool parserecipesteps(const WorldRecipe& recipe, std::string_view text, RecipeSteps& steps, std::string* reason)
@@ -269,10 +512,10 @@ bool parserecipesteps(const WorldRecipe& recipe, std::string_view text, RecipeSt
     const std::string_view last = separator == std::string_view::npos ? first : text.substr(separator + 2);
     steps.first = 0;
     steps.last = recipe.steps.size() - 1;
-    if (!first.empty() && !findrecipestep(recipe, first, steps.first))
-        return fail("recipe " + recipe.name + " has no step " + std::string(first));
-    if (!last.empty() && !findrecipestep(recipe, last, steps.last))
-        return fail("recipe " + recipe.name + " has no step " + std::string(last));
+    if (!first.empty() && !findrecipestep(recipe, first, steps.first, reason))
+        return false;
+    if (!last.empty() && !findrecipestep(recipe, last, steps.last, reason))
+        return false;
     if (steps.last < steps.first)
         return fail("step " + std::string(last) + " comes before " + std::string(first));
     return true;
@@ -320,7 +563,7 @@ std::vector<RecipeIssue> validaterecipesteps(const WorldRecipe& recipe, const Re
 
     for (std::size_t index = 0; index <= last && index < recipe.steps.size(); index++)
     {
-        const WorldProcessDefinition& process = getworldprocess(recipe.steps[index]);
+        const WorldProcessDefinition& process = getworldprocess(recipe.steps[index].stage);
         const int step = static_cast<int>(index);
         if (index >= first)
         {
@@ -334,10 +577,10 @@ std::vector<RecipeIssue> validaterecipesteps(const WorldRecipe& recipe, const Re
                         ", which an earlier step outside this run provides and a bundle cannot load" });
             for (const InRunState& state : kInRunState)
             {
-                if (state.to != recipe.steps[index])
+                if (state.to != recipe.steps[index].stage)
                     continue;
                 for (std::size_t earlier = 0; earlier < first; earlier++)
-                    if (recipe.steps[earlier] == state.from)
+                    if (recipe.steps[earlier].stage == state.from)
                         issues.push_back({ step, true, std::string(process.id) + " needs the " + state.what + " of " +
                             getworldprocess(state.from).id + " from the same run" });
             }
@@ -382,13 +625,24 @@ RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationSc
     const std::size_t laststep = options.selectSteps ? options.steps.last + 1 : recipe.steps.size();
     for (std::size_t index = firststep; index < laststep && index < recipe.steps.size(); index++)
     {
-        const GenerationStageId stage = recipe.steps[index];
+        const RecipeStep& step = recipe.steps[index];
+        const GenerationStageId stage = step.stage;
         const WorldProcessDefinition& process = getworldprocess(stage);
         RecipeStepRecord record;
         record.index = static_cast<int>(index);
         record.stage = stage;
         record.process = process.id;
-        record.label = getgenerationstage(stage).label;
+        record.label = step.label;
+
+        // The step's own settings, set before the read tracking starts and restored before anything else runs.
+        StepOverrides overrides(world);
+        std::string overrideerror;
+        if (!overrides.apply(step.overrides, record.overrides, overrideerror))
+        {
+            result.error = record.label + " failed: override: " + overrideerror;
+            result.steps.push_back(record);
+            return result;
+        }
 
         worldmodel::access::resetreads();
         std::string message;
@@ -404,6 +658,15 @@ RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationSc
             message = error.what();
         }
         record.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+
+        if (worldmodel::access::tracking)
+        {
+            record.reads = worldmodel::access::fieldsread();
+            record.tablereads = worldmodel::access::tablesread();
+            record.drewrandom = worldmodel::access::drewrandom();
+        }
+        overrides.restore();
+
         if (!executed)
         {
             result.error = record.label + " failed" + (message.empty() ? std::string() : ": " + message);
@@ -412,13 +675,6 @@ RecipeRunResult runrecipe(const WorldRecipe& recipe, planet& world, GenerationSc
         }
         if (!message.empty())
             record.violations.push_back("note: " + message);
-
-        if (worldmodel::access::tracking)
-        {
-            record.reads = worldmodel::access::fieldsread();
-            record.tablereads = worldmodel::access::tablesread();
-            record.drewrandom = worldmodel::access::drewrandom();
-        }
 
         if (options.auditAccess)
         {
@@ -482,6 +738,8 @@ std::vector<runbundle::StepRecord> bundlesteps(const RecipeRunResult& result)
         step.index = record.index;
         step.process = record.process;
         step.label = record.label;
+        for (const RecipeOverride& entry : record.overrides)
+            step.overrides.emplace_back(entry.name, entry.value);
         step.seconds = record.seconds;
         for (FieldId write : record.writes)
             step.writes.push_back(worldmodel::qualifiedname(write));

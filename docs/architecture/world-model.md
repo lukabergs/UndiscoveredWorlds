@@ -135,12 +135,28 @@ step must be in its write set).
 
 ### Recipes and the scheduler
 
-A recipe lists steps (process id, label, parameters) and may freeze components.
-Before running, the scheduler checks that every field a step reads is either
+A recipe lists steps (process id, label, overrides) and may freeze components.
+The label is unique within the recipe: the process id, or the id with a suffix
+(`climate.rainfall_and_coupling@coarse`) on every occurrence of a process that
+appears more than once. Overrides are settings that hold while the step runs and
+are restored after it: module parameters named as `--set` takes them
+(`<module>.<group>.<key>`) and two climate-context settings, `climate.resolution`
+(as `--climate-resolution`, without `--climate-hydrology-resolution`) and
+`climate.coupling_iterations`; a step's override wins over the run's value for
+that step only. A repeated process draws the same seeded random sequence each
+time (its stream is seeded by the process id). Before running, the scheduler
+checks the labels, the override names, that every field a step reads is either
 produced by an earlier step or supplied by the recipe's inputs, and that no step
 declares a write into a frozen component. With `--audit-access` it also hashes
 every field before and after each step and fails on undeclared writes. Each run
-records provenance per field.
+records provenance per field as the label of the last step that wrote it; the
+bundle manifest's step records carry each step's label and its overrides, and
+`parameters` holds the run's values outside them.
+
+Steps are named by index, by label or by the id of a process that occurs once
+(`--steps`, `--only`, `--checkpoint-at`); the id of a repeated process is refused
+with a message naming its labels. Step checkpoints are written to
+`<index>-<label>` (characters outside letters, digits and `._@-` become `_`).
 
 A run can cover part of a recipe (`world_pipeline run --steps a..b` or `--only`)
 and start from the world of a bundle (`--from-bundle`); checkpoints write a bundle
@@ -156,12 +172,20 @@ Built-in recipes (`src/pipeline/world_recipes.*`):
 |---|---|
 | `procedural-world` | Full generation from a seed: tectonics, terrain passes, climate, hydrology, layers, optional society |
 | `imported-world` | Imported terrain followed by the remaining terrain passes, climate and hydrology |
-| `eroded-world` | `procedural-world` with flow routing and fluvial erosion after the climate coupling and before the fjords; the legacy hydrology stages still run after them (erosion plan, Phase A) |
+| `eroded-world` | The terrain stages of `procedural-world`; a coarse climate (the seven climate stages from `climate.temperature` to `climate.rainfall_and_coupling`, labelled `@coarse`, with `climate.resolution=32` and `climate.coupling_iterations=2`); `terrain.fluvial_erosion`, which routes itself, and `terrain.fjords`; the full climate on the eroded terrain at the run's climate settings (`@full`; its pressure and winds start from the coarse climate's sea-surface temperatures); `hydrology.flow_routing`, `hydrology.rivers`, `hydrology.lake_levels` and the remaining stages, with `layers.finalize` once at the end (erosion plan C6). The legacy river, basin and lake stages do not run |
 | `earth-climate` | Imported Earth terrain, Geosphere frozen, climate processes only; the climate validation recipe |
 
 Coarse and fine climate are two invocations of the Climate process with
-different working grids; a later grid-refinement step can raise the surface
-resolution between them.
+different working grids (`eroded-world` runs them this way); a later
+grid-refinement step can raise the surface resolution between them. The second
+invocation recomputes everything except one deliberate warm start:
+`climate.temperature` rebuilds the monthly temperatures, `climate.pressure` resets
+the solver state (winds, boundary layer, moisture and ocean storage, process
+fields) and the coupling diagnostics, and the ocean's seasonal circulation cache
+(`--climate-ocean-circulation-cache reuse`) lives only within one ocean solve; but
+`climate.pressure` and `climate.winds` start from the sea-surface temperatures the
+first invocation left in the world (`pressuresurfacetemperature`,
+`climate_coupling_internal.hpp`), which `climate.ocean_currents` then rewrites.
 
 ## Atmosphere levels
 

@@ -52,6 +52,7 @@ Lessons:
 | `erosion-0014` | 2026-10-06 | law in place; discharge comparison worse than C1 (attributed to the rainfall) | keep | erosion plan, step C2: Budyko runoff, transmission losses and winter baseflow |
 | `erosion-0015` | 2026-10-06 | routing unbiased; straightness reduced; look pending (run 5) | keep | erosion plan, step C3: relief roughness, randomised receivers and flat resolution |
 | `erosion-0016` | 2026-10-06 | cause fixed; calibration pending the user's acceptance | keep | erosion plan, step C4: the ocean floor's depth distribution |
+| `erosion-0017` | 2026-10-06 | contract in place; other recipes identical | keep | erosion plan, step C6: recipe steps with labels and overrides; eroded-world runs a coarse climate before the erosion |
 
 Lessons:
 
@@ -79,6 +80,8 @@ Lessons:
 - `erosion-0015`: Noise octaves finer than the grid act as per-cell white noise whose slope grows with the width; band-limit them to twice the cell size so a parameter means the same at every width.
 - `erosion-0016`: A random(a, b) that draws 15 bits makes every fractal with a range above 32768 one-sided: check a noise source's mean on its own before reading what a stage does with it.
 - `erosion-0016`: A mask whose shapes are drawn in cells (warps, Voronoi spacing) covers a different share of the planet at every width; any field set from such a mask inherits the width dependence.
+- `erosion-0017`: A stage that runs twice can read its own earlier output through a world field the first run left non-zero (the climate's SST): a repeated process needs a survey of what its stages read before they write, not only of what they reset.
+- `erosion-0017`: A reference built on another step's tree does not show a merged step's effect: rerun the step check on the merged tree before the entry cites numbers.
 
 ## tectonics
 

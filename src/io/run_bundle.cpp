@@ -170,7 +170,15 @@ void Writer::finish(const Metadata& metadata)
     {
         const StepRecord& step = metadata.steps[index];
         out << (index ? ",\n" : "\n") << "    {\"index\": " << step.index << ", \"process\": " << jsonstring(step.process)
-            << ", \"label\": " << jsonstring(step.label) << ", \"seconds\": " << step.seconds << ", \"writes\": [";
+            << ", \"label\": " << jsonstring(step.label);
+        if (!step.overrides.empty())
+        {
+            out << ", \"overrides\": {";
+            for (std::size_t entry = 0; entry < step.overrides.size(); entry++)
+                out << (entry ? ", " : "") << jsonstring(step.overrides[entry].first) << ": " << step.overrides[entry].second;
+            out << "}";
+        }
+        out << ", \"seconds\": " << step.seconds << ", \"writes\": [";
         for (std::size_t write = 0; write < step.writes.size(); write++)
             out << (write ? ", " : "") << jsonstring(step.writes[write]);
         out << "]}";

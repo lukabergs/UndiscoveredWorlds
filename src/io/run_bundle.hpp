@@ -45,6 +45,8 @@ struct StepRecord
     int index = 0;
     std::string process;
     std::string label;
+    // Settings the recipe changed for this step only (name, JSON value); written when not empty.
+    std::vector<std::pair<std::string, std::string>> overrides;
     double seconds = 0.0;
     std::vector<std::string> writes;     // fields whose contents changed (audit)
 };

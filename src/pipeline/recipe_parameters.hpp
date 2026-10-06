@@ -16,6 +16,12 @@ const std::vector<parameters::Entry>& recipeparameters();
 // "name=value", the form of `world_pipeline run --set`.
 bool setrecipeparameter(std::string_view assignment, std::string* error = nullptr);
 
+// The current value of one parameter in its canonical JSON text; false for an unknown name.
+bool getrecipeparameter(std::string_view name, std::string& value);
+
+// Whether `value` is valid text for the named parameter's type; the current value is left as it was.
+bool checkrecipeparameter(std::string_view name, std::string_view value, std::string* error = nullptr);
+
 // A JSON file of values: objects nested as the names are dotted
 // ({"terrain": {"oceanridges": {"grid_size": 16}}}), or the "parameters" object of a bundle manifest.
 bool loadrecipeparameters(const std::filesystem::path& path, std::string* error = nullptr);

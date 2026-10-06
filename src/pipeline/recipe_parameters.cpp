@@ -135,6 +135,35 @@ bool setrecipeparameter(std::string_view assignment, std::string* error)
     return setnamed(assignment.substr(0, equals), assignment.substr(equals + 1), error);
 }
 
+bool getrecipeparameter(std::string_view name, std::string& value)
+{
+    const parameters::Entry* entry = findentry(name);
+    if (entry == nullptr)
+        return false;
+    value = parameters::text(*entry);
+    return true;
+}
+
+bool checkrecipeparameter(std::string_view name, std::string_view value, std::string* error)
+{
+    const parameters::Entry* entry = findentry(name);
+    if (entry == nullptr)
+    {
+        if (error != nullptr)
+            *error = "unknown parameter " + std::string(name);
+        return false;
+    }
+    const std::string previous = parameters::text(*entry);
+    if (!parameters::settext(*entry, value, error))
+    {
+        if (error != nullptr && error->empty())
+            *error = "invalid value " + std::string(value) + " for " + std::string(name);
+        return false;
+    }
+    parameters::settext(*entry, previous);
+    return true;
+}
+
 bool loadrecipeparameters(const std::filesystem::path& path, std::string* error)
 {
     std::ifstream file(path, std::ios::binary);

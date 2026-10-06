@@ -40,12 +40,13 @@ void printcommandlineusage()
     cout << "                           --import-land and --import-sea or --from-bundle are given.\n";
     cout << "  --from-bundle <dir>     Start from the world of a run bundle or checkpoint. Its seed and grid apply;\n";
     cout << "                           other options are not inherited.\n";
-    cout << "  --steps <a..b>          Run steps a to b of the recipe (indices or process ids; a.. and ..b allowed).\n";
-    cout << "  --only <process>        Run one step.\n";
+    cout << "  --steps <a..b>          Run steps a to b of the recipe (indices, step labels or the ids of processes\n";
+    cout << "                           that occur once; a.. and ..b allowed).\n";
+    cout << "  --only <step>           Run one step.\n";
     cout << "  --set <name=value>      Set one parameter of a module (names as in configs/parameters/*.json:\n";
     cout << "                           <module>.<group>.<key>); may be repeated. The bundle manifest records every value.\n";
     cout << "  --parameters <file>     Set parameters from a JSON file: nested objects, or a manifest's \"parameters\".\n";
-    cout << "  --checkpoint-at <step|Myr[,...]>  Write a bundle after these steps (process ids) and at these\n";
+    cout << "  --checkpoint-at <step|Myr[,...]>  Write a bundle after these steps (labels or process ids) and at these\n";
     cout << "                           times of the tectonics step (numbers, in Myr).\n";
     cout << "  --checkpoint-every <Myr>  Write a bundle at this interval of the tectonics step.\n";
     cout << "  --checkpoint-dir <dir>  Checkpoint directory (default <bundle>-checkpoints); one bundle per checkpoint.\n";
@@ -561,7 +562,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     }
     // The imported lakes are read only by hydrology.lake_levels: a run whose recipe has that step.
     if (!options.importLakesPath.empty() && (!options.runCommand || !importedworld ||
-        find(recipe.steps.begin(), recipe.steps.end(), GenerationStageId::lake_levels) == recipe.steps.end())) {
+        !recipehasstage(recipe, GenerationStageId::lake_levels))) {
         cerr << "--import-lakes requires the run command with an imported recipe that has hydrology.lake_levels "
                 "(earth-hydrology).\n";
         return 1;
@@ -740,9 +741,10 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     for (const string& step : options.checkpointAt)
     {
         size_t index = 0;
-        if (!findrecipestep(recipe, step, index))
+        string reason;
+        if (!findrecipestep(recipe, step, index, &reason))
         {
-            cerr << "Recipe " << recipe.name << " has no step " << step << " to checkpoint.\n";
+            cerr << "Invalid checkpoint step: " << reason << '\n';
             return 1;
         }
         checkpointsteps.push_back(index);
@@ -762,13 +764,23 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         evolvercheckpoint = [&, checkpointdirectory](GenerationStageId stage, double timemyr)
         {
             // The running step is listed with its declared writes: they are in the world as of this time.
+            // Steps run in order: the running step follows the last finished one.
+            // The running step's overrides are in effect here, so a checkpoint written
+            // inside a step with parameter overrides records the overridden values in its
+            // parameters (no evolver step has overrides today).
             const WorldProcessDefinition& process = getworldprocess(stage);
             RecipeRunResult partial = finishedsteps;
             RecipeStepRecord record;
-            record.index = static_cast<int>(find(recipe.steps.begin(), recipe.steps.end(), stage) - recipe.steps.begin());
+            record.index = finishedsteps.steps.empty() ? static_cast<int>(runoptions.selectSteps ? runoptions.steps.first : 0)
+                                                       : finishedsteps.steps.back().index + 1;
             record.stage = stage;
             record.process = process.id;
-            record.label = getgenerationstage(stage).label;
+            record.label = process.id;
+            if (static_cast<size_t>(record.index) < recipe.steps.size())
+            {
+                record.label = recipe.steps[record.index].label;
+                record.overrides = recipe.steps[record.index].overrides;
+            }
             record.writes = process.writes;
             record.tablewrites = process.tablewrites;
             for (worldmodel::FieldId write : record.writes)
@@ -777,11 +789,11 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
                 partial.provenance.tables[write] = record.label;
             partial.steps.push_back(record);
 
-            // One bundle per time: <recipe index>-<process id>-t<Myr>.
+            // One bundle per time: <recipe index>-<step label>-t<Myr>.
             char time[32];
             snprintf(time, sizeof(time), "-t%08.3f", timemyr);
             const filesystem::path directory = checkpointdirectory /
-                ((record.index < 10 ? "0" : "") + to_string(record.index) + "-" + record.process + time);
+                ((record.index < 10 ? "0" : "") + to_string(record.index) + "-" + recipesteppathname(record.label) + time);
             writebundle(directory, partial);
             updatereport("Checkpoint: " + directory.string());
         };
@@ -790,8 +802,9 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             finishedsteps = sofar;
             if (find(checkpointsteps.begin(), checkpointsteps.end(), static_cast<size_t>(step.index)) == checkpointsteps.end())
                 return true;
-            // One bundle per step: <recipe index>-<process id>.
-            const filesystem::path directory = checkpointdirectory / ((step.index < 10 ? "0" : "") + to_string(step.index) + "-" + step.process);
+            // One bundle per step: <recipe index>-<step label>.
+            const filesystem::path directory = checkpointdirectory /
+                ((step.index < 10 ? "0" : "") + to_string(step.index) + "-" + recipesteppathname(step.label));
             try
             {
                 writebundle(directory, sofar);

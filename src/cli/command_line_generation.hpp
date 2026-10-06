@@ -49,7 +49,7 @@ struct CommandLineGenerationOptions
     bool runCommand = false;     // run: the recipe is named, nothing is registered.
     std::string fromBundlePath;  // --from-bundle: the world of this bundle instead of a seed or imported terrain.
     std::string stepsText;       // --steps a..b, or --only p as p..p; empty runs the whole recipe.
-    std::vector<std::string> checkpointAt;   // --checkpoint-at: steps (process ids) after which a bundle is written.
+    std::vector<std::string> checkpointAt;   // --checkpoint-at: steps (labels or process ids) after which a bundle is written.
     std::vector<double> checkpointTimesMyr;  // --checkpoint-at with numbers: times inside the tectonics evolver.
     double checkpointEveryMyr = 0;           // --checkpoint-every: interval inside the tectonics evolver.
     tectonics::scenario::Scenario tectonicScenario = tectonics::scenario::baseline();   // with the --<scenario key> overrides
