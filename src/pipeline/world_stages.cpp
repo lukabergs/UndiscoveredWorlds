@@ -18,6 +18,7 @@
 #include "simulations/hydrology/lake_levels.hpp"
 #include "simulations/hydrology/rivers.hpp"
 #include "simulations/terrain/fluvial_erosion.hpp"
+#include "simulations/terrain/terrain_parameters.hpp"
 
 using namespace std;
 
@@ -197,47 +198,101 @@ vector<vector<int>> buildterrainfractal(planet& world, int salt, int maximum)
     return fractal;
 }
 
-void metadataoceanrefinement(planet& world, GenerationScratch& scratch)
+// The ocean's depth curve (tuning::terrain::ocean_floor): depth in metres at an area share
+// 0..1 of the ocean, linear within each band.
+float oceandepthatshare(float share)
+{
+    namespace of = tuning::terrain::ocean_floor;
+    const array<float, 9> edges = { 0.0f, 200.0f, 1000.0f, 2000.0f, 3000.0f, 4000.0f, 5000.0f, 6000.0f, of::deepestM };
+    const array<float, 8> shares = { of::share0200M, of::share2001000M, of::share10002000M, of::share20003000M,
+                                     of::share30004000M, of::share40005000M, of::share50006000M, of::shareOver6000M };
+    float total = 0.0f;
+    for (const float value : shares)
+        total += max(0.0f, value);
+
+    if (total <= 0.0f)
+        return edges.back();
+
+    float lower = 0.0f;
+    for (size_t band = 0; band < shares.size(); band++)
+    {
+        const float bandshare = max(0.0f, shares[band]) / total;
+        if (bandshare > 0.0f && (share < lower + bandshare || band == shares.size() - 1))
+            return edges[band] + clamp01((share - lower) / bandshare) * (edges[band + 1] - edges[band]);
+
+        lower += bandshare;
+    }
+
+    return edges.back();
+}
+
+// Every sea cell takes the depth of the ocean curve at its area-weighted rank of the engine's
+// depth: the engine's structure (shallow margins and ridges, deep old basins) stays, and the
+// depth distribution no longer depends on the grid width or on the shelf mask.
+void metadataoceanrefinement(planet& world, GenerationScratch&)
 {
     const int width = world.width();
     const int height = world.height();
-    const int maxelev = world.maxelevation();
-    const int sealevel = world.sealevel();
-    vector<vector<int>> seafractal = makeintgrid();
+    const float sealevel = static_cast<float>(world.sealevel());
+    const float pi = 3.14159265358979f;
 
-    reseedterrainpass(world, 0x4110);
-    createfractal(seafractal, width, height, 8, 0.2f, static_cast<float>(random(3, 6)), 1, maxelev, 0, 0);
-    warp(seafractal, width, height, maxelev, random(20, 80), 1);
-
-    const float coastalvarreduce = static_cast<float>(maxelev) / 500.0f;
-    const float oceanvarreduce = static_cast<float>(maxelev) / 1000.0f;
-
-    for (int x = 0; x <= width; x++)
+    struct SeaCell
     {
-        for (int y = 0; y <= height; y++)
+        float elevation;
+        float weight;
+        int x;
+        int y;
+    };
+
+    vector<SeaCell> cells;
+    double totalweight = 0.0;
+
+    for (int y = 0; y <= height; y++)
+    {
+        // Cell-centred rows: the area of a cell is proportional to the cosine of its latitude.
+        const float latitude = (0.5f - (static_cast<float>(y) + 0.5f) / static_cast<float>(height + 1)) * pi;
+        const float weight = max(0.0f, cosf(latitude));
+
+        for (int x = 0; x <= width; x++)
         {
             if (world.sea(x, y) == 0)
                 continue;
 
-            if (world.continentalshelves()[x][y])
-            {
-                const float var = static_cast<float>(seafractal[x][y] - maxelev / 2) / coastalvarreduce;
-                float newvalue = static_cast<float>(sealevel - 200) + var;
-                newvalue = min(newvalue, static_cast<float>(sealevel - 10));
-                world.setnomfloat(x, y, max(1.0f, newvalue));
-            }
-            else
-            {
-                int xx = x + width / 2;
-                if (xx > width)
-                    xx -= width;
-
-                const float var = static_cast<float>(seafractal[xx][y] - maxelev / 2) / oceanvarreduce;
-                float newvalue = static_cast<float>(sealevel - 5000) + var;
-                newvalue = min(newvalue, static_cast<float>(sealevel - 3000));
-                world.setnomfloat(x, y, max(1.0f, newvalue));
-            }
+            cells.push_back({ world.nomfloat(x, y), weight, x, y });
+            totalweight += weight;
         }
+    }
+
+    if (cells.empty() || totalweight <= 0.0)
+        return;
+
+    // Shallowest first.
+    stable_sort(cells.begin(), cells.end(), [](const SeaCell& a, const SeaCell& b) { return a.elevation > b.elevation; });
+
+    const float minimumdepth = tuning::terrain::ocean_floor::minimumDepthM;
+    double cumulative = 0.0;
+    size_t first = 0;
+
+    while (first < cells.size())
+    {
+        // Cells of equal engine height form one group and all take the share at the group's
+        // middle, so a tie is not broken by the order of the rows.
+        size_t last = first;
+        double groupweight = 0.0;
+        while (last < cells.size() && cells[last].elevation == cells[first].elevation)
+        {
+            groupweight += cells[last].weight;
+            last++;
+        }
+
+        const float share = static_cast<float>((cumulative + 0.5 * groupweight) / totalweight);
+        const float depth = max(oceandepthatshare(share), minimumdepth);
+
+        for (size_t index = first; index < last; index++)
+            world.setnomfloat(cells[index].x, cells[index].y, max(1.0f, sealevel - depth));
+
+        cumulative += groupweight;
+        first = last;
     }
 }
 
@@ -264,6 +319,15 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
     vector<int> segmentlookup(static_cast<size_t>(maxsegmentid + 1), -1);
     vector<int> segmentids;
     vector<vector<pair<int, int>>> segmentcells;
+
+    // A trench is cut below the floor as it was before this stage (at least 450 m deep), so it
+    // shows on the ocean curve's deep floor and overlapping kernels do not add up.
+    vector<vector<float>> trenchfloor(static_cast<size_t>(width + 1), vector<float>(static_cast<size_t>(height + 1), 0.0f));
+    for (int x = 0; x <= width; x++)
+    {
+        for (int y = 0; y <= height; y++)
+            trenchfloor[x][y] = min(world.nomfloat(x, y), static_cast<float>(sealevel - 450));
+    }
 
     for (int y = 0; y <= height; y++)
     {
@@ -349,7 +413,7 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
                         if (trenchdepth <= 0)
                             continue;
 
-                        const float target = max(1.0f, min(world.nomfloat(nx, ny), static_cast<float>(sealevel - 450 - trenchdepth)));
+                        const float target = max(1.0f, min(world.nomfloat(nx, ny), trenchfloor[nx][ny] - static_cast<float>(trenchdepth)));
                         if (target >= world.nomfloat(nx, ny))
                             continue;
 
@@ -682,14 +746,36 @@ void applyterraintexturing(planet& world, GenerationScratch& scratch)
     const int sealevel = world.sealevel();
     const int midpoint = world.maxelevation() / 2;
 
+    // The sea's texture is the fractal at zero mean and unit spread: the fractal's draws cover
+    // only part of its range and its spread grows with the grid height in cells.
+    double sum = 0.0;
+    double sumsquares = 0.0;
+    double count = 0.0;
+
+    for (int x = 0; x <= world.width(); x++)
+    {
+        for (int y = 0; y <= world.height(); y++)
+        {
+            const double value = static_cast<double>(fractal[x][y]);
+            sum += value;
+            sumsquares += value * value;
+            count += 1.0;
+        }
+    }
+
+    const double mean = count > 0.0 ? sum / count : 0.0;
+    const double spread = count > 0.0 ? sqrt(max(0.0, sumsquares / count - mean * mean)) : 0.0;
+    const float seascale = spread > 0.0 ? tuning::terrain::ocean_floor::textureSdM / static_cast<float>(spread) : 0.0f;
+
     for (int x = 0; x <= world.width(); x++)
     {
         for (int y = 0; y <= world.height(); y++)
         {
             const float oldvalue = world.nomfloat(x, y);
             const int noise = fractal[x][y] - midpoint;
-            const float strength = world.sea(x, y) ? 0.14f : 0.10f;
-            float newvalue = oldvalue + static_cast<float>(noise) * strength;
+            float newvalue = world.sea(x, y)
+                ? oldvalue + static_cast<float>(static_cast<double>(fractal[x][y]) - mean) * seascale
+                : oldvalue + static_cast<float>(noise) * 0.10f;
 
             if (world.sea(x, y))
                 newvalue = min(newvalue, static_cast<float>(sealevel - 10));

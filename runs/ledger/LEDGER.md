@@ -5,6 +5,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 ## Settled / don't retry
 
 - `erosion-0014`: The rainfall solver's bulk-aerodynamic potential evaporation as the Budyko PET (discharge recall on Earth fell from 0.63 to 0.46).
+- `erosion-0016`: Depth from the engine's crust age by the plate-cooling law: the engine's ocean ages are mostly the run's age (median 590 Myr at 600 Myr) and two thirds of the sea lies on continental crust, so 98 percent of the ocean lands at 5 to 6 km.
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -50,6 +51,7 @@ Lessons:
 | `erosion-0013` | 2026-10-06 | validation in place; the Caspian stays open until the runoff is fixed (C2) | keep | erosion plan, step C1: Earth lakes in earth-hydrology and the HydroSHEDS validation kinds |
 | `erosion-0014` | 2026-10-06 | law in place; discharge comparison worse than C1 (attributed to the rainfall) | keep | erosion plan, step C2: Budyko runoff, transmission losses and winter baseflow |
 | `erosion-0015` | 2026-10-06 | routing unbiased; straightness reduced; look pending (run 5) | keep | erosion plan, step C3: relief roughness, randomised receivers and flat resolution |
+| `erosion-0016` | 2026-10-06 | cause fixed; calibration pending the user's acceptance | keep | erosion plan, step C4: the ocean floor's depth distribution |
 
 Lessons:
 
@@ -75,6 +77,8 @@ Lessons:
 - `erosion-0014`: A runoff coefficient below one hides an excess of precipitation; replacing it with a physical law can worsen a discharge comparison while improving the model, so report the land water totals beside the comparison.
 - `erosion-0015`: A random choice between two grid neighbours that matches the gradient in mean angle still drifts: a river's heading is its mean displacement, so the probabilities must balance the cross products with the gradient, and a test must sum displacements, not angles.
 - `erosion-0015`: Noise octaves finer than the grid act as per-cell white noise whose slope grows with the width; band-limit them to twice the cell size so a parameter means the same at every width.
+- `erosion-0016`: A random(a, b) that draws 15 bits makes every fractal with a range above 32768 one-sided: check a noise source's mean on its own before reading what a stage does with it.
+- `erosion-0016`: A mask whose shapes are drawn in cells (warps, Voronoi spacing) covers a different share of the planet at every width; any field set from such a mask inherits the width dependence.
 
 ## tectonics
 

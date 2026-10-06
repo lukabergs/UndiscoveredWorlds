@@ -9,6 +9,7 @@
 #include <queue>
 
 #include "core/classes.hpp"
+#include "simulations/terrain/terrain_parameters.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
@@ -27,8 +28,6 @@ void smoothland(planet& world, int amount)
     int height = world.height();
     int sealevel = world.sealevel();
     float maxelev = (float)world.maxelevation();
-    float seaamount = (float)(amount * 3);
-    float div = maxelev / seaamount;
 
     int grain = 8; // Level of detail on this fractal map.
     float valuemod = 0.2f;
@@ -45,6 +44,25 @@ void smoothland(planet& world, int amount)
 
     createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, (int)maxelev, 0, 0);
 
+    // A sea cell's radius is set in km (tuning::terrain::ocean_floor) and chosen between the two
+    // radii by the fractal across its own range; in cells it is the km over the cell size.
+    int fractalmin = fractal[0][0];
+    int fractalmax = fractal[0][0];
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            fractalmin = min(fractalmin, fractal[i][j]);
+            fractalmax = max(fractalmax, fractal[i][j]);
+        }
+    }
+
+    const float cellkm = world.radius() / 1000.0f * 3.14159265358979f / static_cast<float>(height + 1);
+    const float minimumradiuskm = tuning::terrain::ocean_floor::smoothingMinimumRadiusKm;
+    const float maximumradiuskm = tuning::terrain::ocean_floor::smoothingMaximumRadiusKm;
+    const float fractalrange = static_cast<float>(max(1, fractalmax - fractalmin));
+
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
@@ -57,7 +75,15 @@ void smoothland(planet& world, int amount)
             if (world.sea(i, j) == 0) // Check to see whether this point is originally land or sea
                 origland = 1;
             else
-                thisamount = (int)((float)fractal[i][j] / div);
+            {
+                const float position = static_cast<float>(fractal[i][j] - fractalmin) / fractalrange;
+                const float radiuskm = minimumradiuskm + position * (maximumradiuskm - minimumradiuskm);
+                thisamount = cellkm > 0.0f ? static_cast<int>(lroundf(radiuskm / cellkm)) : 0;
+            }
+
+            // Land is never written; a sea cell whose radius is under half a cell keeps its value.
+            if (origland == 0 && thisamount < 1)
+                continue;
 
             if (thisamount < 1)
                 thisamount = 1;

@@ -9,6 +9,7 @@
 #include <queue>
 
 #include "core/classes.hpp"
+#include "simulations/terrain/terrain_parameters.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
@@ -609,10 +610,42 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity)
 
     // Now we need to smooth the seabeds around them.
 
+    // The sea cells within two cells of a coastal sea cell are not shaded, as before the reach
+    // of the smoothing was set in km (a presentation mark, independent of the smoothing).
+    const int shadereach = 2;
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            if (world.coast(i, j) == 0)
+                continue;
+
+            for (int k = i - shadereach; k <= i + shadereach; k++)
+            {
+                const int kk = (k < 0 || k > width) ? wrap(k, width) : k;
+
+                for (int l = j - shadereach; l <= j + shadereach; l++)
+                {
+                    if (l >= 0 && l <= height && world.sea(kk, l) == 1 && world.coast(kk, l) == 0)
+                        world.setnoshade(kk, l, 1);
+                }
+            }
+        }
+    }
+
+    // The reach of the smoothing and its square are set in km (tuning::terrain::ocean_floor);
+    // in cells they are the km over the cell size, and under half a cell there is none.
+    const float cellkm = world.radius() / 1000.0f * 3.14159265358979f / static_cast<float>(height + 1);
+    const int reach = cellkm > 0.0f ? static_cast<int>(lroundf(tuning::terrain::ocean_floor::coastSmoothingRadiusKm / cellkm)) : 0;
+
+    if (reach < 1)
+        return;
+
     vector<vector<bool>> done(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
 
-    int amount = 2;
-    int amount2 = 2;
+    int amount = reach;
+    int amount2 = reach;
 
     for (int i = 0; i <= width; i++)
     {

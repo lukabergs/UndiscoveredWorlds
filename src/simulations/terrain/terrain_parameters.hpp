@@ -7,6 +7,24 @@
 
 namespace tuning::terrain
 {
+namespace ocean_floor
+{
+inline float share0200M = 6.9f;
+inline float share2001000M = 4.5f;
+inline float share10002000M = 4.4f;
+inline float share20003000M = 8.5f;
+inline float share30004000M = 22.5f;
+inline float share40005000M = 32.1f;
+inline float share50006000M = 20.2f;
+inline float shareOver6000M = 0.9f;
+inline float deepestM = 7000.0f;
+inline float minimumDepthM = 10.0f;
+inline float textureSdM = 150.0f;
+inline float smoothingMinimumRadiusKm = 20.0f;
+inline float smoothingMaximumRadiusKm = 120.0f;
+inline float coastSmoothingRadiusKm = 40.0f;
+}
+
 namespace oceanridges
 {
 inline int boundaryMaxSourceDifference = 400;
@@ -38,6 +56,20 @@ inline int faultLookDistance = 4;
 inline const std::vector<parameters::Entry>& parameterentries()
 {
     static const std::vector<parameters::Entry> entries = {
+        { "terrain.ocean_floor.share_0_200_m", &ocean_floor::share0200M },
+        { "terrain.ocean_floor.share_200_1000_m", &ocean_floor::share2001000M },
+        { "terrain.ocean_floor.share_1000_2000_m", &ocean_floor::share10002000M },
+        { "terrain.ocean_floor.share_2000_3000_m", &ocean_floor::share20003000M },
+        { "terrain.ocean_floor.share_3000_4000_m", &ocean_floor::share30004000M },
+        { "terrain.ocean_floor.share_4000_5000_m", &ocean_floor::share40005000M },
+        { "terrain.ocean_floor.share_5000_6000_m", &ocean_floor::share50006000M },
+        { "terrain.ocean_floor.share_over_6000_m", &ocean_floor::shareOver6000M },
+        { "terrain.ocean_floor.deepest_m", &ocean_floor::deepestM },
+        { "terrain.ocean_floor.minimum_depth_m", &ocean_floor::minimumDepthM },
+        { "terrain.ocean_floor.texture_sd_m", &ocean_floor::textureSdM },
+        { "terrain.ocean_floor.smoothing_minimum_radius_km", &ocean_floor::smoothingMinimumRadiusKm },
+        { "terrain.ocean_floor.smoothing_maximum_radius_km", &ocean_floor::smoothingMaximumRadiusKm },
+        { "terrain.ocean_floor.coast_smoothing_radius_km", &ocean_floor::coastSmoothingRadiusKm },
         { "terrain.oceanridges.boundary_max_source_difference", &oceanridges::boundaryMaxSourceDifference },
         { "terrain.oceanridges.grid_size", &oceanridges::gridSize },
         { "terrain.oceanridges.point_shift_fractal_grain", &oceanridges::pointShiftFractalGrain },

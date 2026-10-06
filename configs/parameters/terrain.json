@@ -3,7 +3,31 @@
  "namespace": "tuning::terrain",
  "header": "src/simulations/terrain/terrain_parameters.hpp",
  "types": {"oceanridges.ridge_angle_search_distance": "short"},
+ "notes": {
+  "ocean_floor.share_*": "Erosion plan C4. terrain.ocean_depth_refinement gives every sea cell the depth at its area-weighted rank of the tectonic engine's depth on this curve, so the engine's ordering of depths stays (which sea cell is shallower than which; cells of equal engine height take the share at their group's middle) and the share of the ocean in each depth band is Earth's at every grid width and engine duration. Percent of the ocean area per band: ETOPO 2022 at 2048 columns, the hypsometry reference's inputs, as scripts/evaluation/landscape_statistics.py ocean-depths measures them (0-0.2 km 6.9, 0.2-1 4.5, 1-2 4.4, 2-3 8.5, 3-4 22.5, 4-5 32.1, 5-6 20.2, over 6 0.9; mean 3702 m, median 4104 m). Depth is linear in the area share within a band. The shares are normalised by their sum.",
+  "ocean_floor.deepest_m": "The lower end of the last band (over 6 km): the curve's deepest floor; trenches below it are made by terrain.tectonic_trenches.",
+  "ocean_floor.minimum_depth_m": "Every sea cell stays at least this far below sea level, the floor the earlier refinement kept on shelves (10 m).",
+  "ocean_floor.texture_sd_m": "terrain.texturing adds to sea cells its fractal normalised to zero mean and unit standard deviation times this, so the texture neither shifts the ocean nor grows with the grid width (the earlier 0.14 x (fractal - half the maximum elevation) lowered the sea floor by 0 to 4.6 km, because the fractal's draws cover only the lower half of the engine's 0 to 65536 m range, and its spread grew with the grid height in cells). 150 m: of the order of abyssal-hill relief (rms heights of order 100 m, Goff and Jordan 1988), a choice of order rather than a fit; it moves at most 1.5 points of ocean area between neighbouring bands at 128 and 256 columns.",
+  "ocean_floor.smoothing_*_radius_km": "terrain.smoothing averages each sea cell over a square of this half-width (land included), chosen per cell between the two by a fractal; the radius in cells is the radius in km over the cell size (the planet's radius x pi / rows), rounded, and 0 leaves the cell. The earlier radius was fractal / (maximum elevation / 6) cells, at least 1: nominally up to 6, but with the same fractal whose draws cover only the lower half of its range it was mostly 1 to 3 cells at every width (313 to 940 km at 128 columns). 20 and 120 km are a choice: 1 and 6 cells of the 2048-column world the stage was written for (19.5 km per cell). Cell sizes (6371 km radius): 312.7 km at 128 columns, 156.4 at 256, 78.2 at 512, so there is no sea smoothing at 128, 0 or 1 cell at 256 (1 where the radius reaches 78.2 km) and 0 to 2 cells at 512.",
+  "ocean_floor.coast_smoothing_radius_km": "terrain.coastline_adjustment averages the sea cells within this distance of a coastal sea cell over a square of this half-width (sea only); in cells it is the km over the cell size, rounded, and under half a cell there is no smoothing (the pull of the coastal cells themselves towards the coast depth is unchanged). The earlier reach was 2 cells at every width; 40 km is 2 cells at 2048 columns (19.5 km per cell). Rounded: 0 cells at 128 (40 / 312.7) and 256 (40 / 156.4), 1 cell at 512 (40 / 78.2 = 0.51), where the smoothing switches on. The marks that keep the sea cells within 2 cells of a coastal sea cell unshaded (presentation.no_shade) are set as before whatever the reach."
+ },
  "parameters": {
+  "ocean_floor": {
+   "share_0_200_m": 6.9,
+   "share_200_1000_m": 4.5,
+   "share_1000_2000_m": 4.4,
+   "share_2000_3000_m": 8.5,
+   "share_3000_4000_m": 22.5,
+   "share_4000_5000_m": 32.1,
+   "share_5000_6000_m": 20.2,
+   "share_over_6000_m": 0.9,
+   "deepest_m": 7000.0,
+   "minimum_depth_m": 10.0,
+   "texture_sd_m": 150.0,
+   "smoothing_minimum_radius_km": 20.0,
+   "smoothing_maximum_radius_km": 120.0,
+   "coast_smoothing_radius_km": 40.0
+  },
   "oceanridges": {
    "boundary_max_source_difference": 400,
    "grid_size": 16,
