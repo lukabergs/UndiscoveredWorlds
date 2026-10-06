@@ -36,7 +36,7 @@ float clampholdridgebiotemperature(float temperature);
 float calculateholdridgebiotemperature(const seasonalclimatesummary& summary);
 int calculateholdridgebiomeinternal(float janTemp, float aprTemp, float julTemp, float octTemp, float janRain, float aprRain, float julRain, float octRain);
 int calculateholdridgebiomefromseasonal(const seasonalclimatesummary& summary);
-short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimatesummary& summary);
+short calculateclimatefromseasonal(float elev, int sealevel, const seasonalclimatesummary& summary);
 
 bool isclassificationwater(climateworld& world, int x, int y)
 {
@@ -132,7 +132,7 @@ short calculateplanetclimate(climateworld& world, int x, int y)
         }
         return climatekoppen::classifyMonthly(temperature, rain, y < monthly.rows / 2);
     }
-    const int elev = world.map(x, y);
+    const float elev = world.mapfloat(x, y);
     const int sealevel = world.sealevel();
     const seasonalclimatesummary summary = summariseseasonalclimate(world, x, y);
     return calculateclimatefromseasonal(elev, sealevel, summary);
@@ -261,7 +261,7 @@ int calculateholdridgebiomefromseasonal(const seasonalclimatesummary& summary)
         summary.rains[seasonoctober]);
 }
 
-short calculateclimatefromseasonal(int elev, int sealevel, const seasonalclimatesummary& summary)
+short calculateclimatefromseasonal(float elev, int sealevel, const seasonalclimatesummary& summary)
 {
     string group, preptype, heattype;
 

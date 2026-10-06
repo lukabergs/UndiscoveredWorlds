@@ -125,6 +125,7 @@ Lessons:
 | `world-0069` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 14: phase close |
 | `world-0070` | 2026-10-06 | equivalent | keep | climate rules on the float accessors (section 11, Later): the count before the move and the reference step check |
 | `world-0071` | 2026-10-06 | equivalent | keep | climate rules on the float accessors, 1 of 3: climate_fields.cpp (module climate) |
+| `world-0072` | 2026-10-06 | equivalent | keep | climate rules on the float accessors, 2 of 3: climate_classification.cpp (module climate) |
 
 Lessons:
 
