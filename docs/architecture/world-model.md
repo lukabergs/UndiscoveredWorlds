@@ -156,6 +156,7 @@ Built-in recipes (`src/pipeline/world_recipes.*`):
 |---|---|
 | `procedural-world` | Full generation from a seed: tectonics, terrain passes, climate, hydrology, layers, optional society |
 | `imported-world` | Imported terrain followed by the remaining terrain passes, climate and hydrology |
+| `eroded-world` | `procedural-world` with flow routing and fluvial erosion after the climate coupling and before the fjords; the legacy hydrology stages still run after them (erosion plan, Phase A) |
 | `earth-climate` | Imported Earth terrain, Geosphere frozen, climate processes only; the climate validation recipe |
 
 Coarse and fine climate are two invocations of the Climate process with

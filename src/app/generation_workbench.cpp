@@ -722,6 +722,8 @@ mapviewenum preferredworkbenchmapview(GenerationStageId stageId)
     case GenerationStageId::plate_tectonics:
     case GenerationStageId::tectonic_trenches:
     case GenerationStageId::tectonic_volcanoes:
+    case GenerationStageId::flow_routing:
+    case GenerationStageId::fluvial_erosion:
         return relief;
 
     case GenerationStageId::terraforming:

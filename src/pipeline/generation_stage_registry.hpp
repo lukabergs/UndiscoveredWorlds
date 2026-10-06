@@ -40,6 +40,8 @@ enum class GenerationStageId
     winds,
     sea_ice_and_tides,
     rainfall,
+    flow_routing,
+    fluvial_erosion,
     fjords,
     rivers_and_basins,
     basin_editor,

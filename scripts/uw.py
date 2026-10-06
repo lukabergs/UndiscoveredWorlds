@@ -3,16 +3,16 @@
     uv run --offline scripts/uw.py <module> <command> [shared options] [native options]
 
 Modules and commands:
-    climate|tectonics|world run  registered run: the next id of runs/registry/<module>.json, run in runs/<module>/<id>/
+    climate|tectonics|world|erosion run  registered run: the next id of runs/registry/<module>.json, run in runs/<module>/<id>/
                        with the registered settings of configs/evaluation/<module>.json (run.json, log.txt,
                        bundle/, checkpoints/, evaluation/, ledger-entry.json; scripts/evaluation/experiment.py)
-    climate|tectonics|world experiment  unregistered scratch run + evaluation with the profile's settings
+    climate|tectonics|world|erosion experiment  unregistered scratch run + evaluation with the profile's settings
                        (out/evaluation/<module>/ unless --archive runs/reports/<name>); --repeat runs twice
                        and checks that the bundles are identical
-    climate|tectonics|world evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR] [--checkpoints DIR])
+    climate|tectonics|world|erosion evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR] [--checkpoints DIR])
     tectonics report   comparison page of the evaluations of registered runs (--runs A B ...), in runs/reports/tectonics/
     geology   run      tectonics bundles at each width, scored against Earth references (out/bench/geology)
-    climate|tectonics|world report --evaluation DIR [DIR ...] [--output DIR]
+    climate|tectonics|world|erosion report --evaluation DIR [DIR ...] [--output DIR]
                        pages from evaluation.json (scripts/evaluation/report.py): one DIR rewrites its run
                        page (index.html, report.md); several give a comparison page, the first DIR being the
                        baseline, in --output (default out/evaluation/<module>/comparison)
@@ -22,7 +22,7 @@ Modules and commands:
                        ledger [--topic TEXT]   entries naming the topic, or the last five
                        ledger --draft          a new entry with every key, printed for filling in
                        ledger --add FILE.json  validate and append one entry; LEDGER.md is regenerated
-    climate|tectonics|world dashboard [--output DIR]
+    climate|tectonics|world|erosion dashboard [--output DIR]
                        registry runs and ledger entries (default out/evaluation/<module>/dashboard)
 
 Shared options: --seed (default 1), --resolution W (grid W x W/2), --executable, --output, --label.
@@ -49,7 +49,8 @@ SCRATCH = ROOT / 'out/bench'
 EVALUATION = ROOT / 'scripts/evaluation'
 COMMANDS = {'tectonics': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'), 'geology': ('run',),
             'climate': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
-            'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review')}
+            'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
+            'erosion': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review')}
 
 
 def call(command):
@@ -78,10 +79,10 @@ def evaluation(args, extra):
     options += ['--executable', args.executable] if args.executable else []
     options += ['--label', args.label] if args.label else []
     options += ['--topic', args.topic] if args.topic else []
-    if args.module == 'world' and args.command == 'run' and args.resolution is None:
-        # A run of the world series is compared with the run before it, so its page and its
+    if args.module in ('world', 'erosion') and args.command == 'run' and args.resolution is None:
+        # A run of the world or erosion series is compared with the run before it, so its page and its
         # review request carry the parent's maps and the footprint of the change.
-        complete = [entry for entry in runs.registry('world')['runs'] if entry.get('status') == 'complete' and entry.get('run')]
+        complete = [entry for entry in runs.registry(args.module)['runs'] if entry.get('status') == 'complete' and entry.get('run')]
         if complete and (ROOT / complete[-1]['run'] / 'bundle/manifest.json').is_file():
             options += ['--baseline', ROOT / complete[-1]['run'] / 'bundle']
     call([UV, 'run', '--offline', EVALUATION / 'experiment.py', args.module, *options, *extra])
@@ -199,7 +200,7 @@ def main():
     if args.command == 'ledger':
         ledger_command(args, extra)
         return
-    if args.command in ('experiment', 'evaluate') or (args.command == 'run' and args.module in ('climate', 'tectonics', 'world')):
+    if args.command in ('experiment', 'evaluate') or (args.command == 'run' and args.module in ('climate', 'tectonics', 'world', 'erosion')):
         evaluation(args, extra)
         return
     if args.command == 'review':
@@ -212,7 +213,7 @@ def main():
             parser.error('--evaluation belongs to report')
         pages(args, extra)
         return
-    if args.module in ('world', 'climate') and args.command == 'report':
+    if args.module in ('world', 'erosion', 'climate') and args.command == 'report':
         parser.error(f'{args.module} report requires --evaluation DIR [DIR ...]')
     {'tectonics': tectonics, 'geology': geology}[args.module](args, extra)
 

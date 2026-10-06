@@ -137,6 +137,7 @@ Lessons:
 | `world-0081` | 2026-10-06 | documents only | keep | erosion plan, step 0.2: the plan, the agent workflow guide and the project agents |
 | `world-0082` | 2026-10-06 | documents only | keep | erosion plan, step A0: the landscape kernel contracts |
 | `world-0083` | 2026-10-06 | kernel tests pass | keep | erosion plan, step A1: sphere metric, flow graph and depressions kernels with their tests |
+| `world-0084` | 2026-10-06 | equivalent | keep | erosion plan, step A3: catalogue fields, stages, the eroded-world recipe and the erosion evaluation module |
 
 Lessons:
 
@@ -269,3 +270,5 @@ Lessons:
 - `world-0080`: generateglobalclimate in src/pipeline/climate_generation.cpp has no caller: the recipes run the climate stages through world_stages.cpp.
 - `world-0081`: A plan that will be executed by workers in parallel needs its shared contracts (headers, file ownership per step) written before the workers start; the plan makes that the orchestrator's first step (A0).
 - `world-0083`: Steepest descent must be computed on the filled surface, not the terrain, or a rim cell beside a depression drains into it and the receiver chain cycles; the plan's section 3 said terrain.
+- `world-0084`: A catalogue addition makes every bundle larger, so the next step check against an older reference reports the new fields as missing and exits 1 even when every existing field is identical; the first step check after A3 (A4's) uses an A3 bundle as its reference.
+- `world-0084`: The palette file carries a version name that check_layout compares with the palette sidecars of registered runs: adding a palette entry needs a new version (tectonics-v5-erosion).

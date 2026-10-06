@@ -243,10 +243,85 @@ def check_minerals(bundle, spec, context):
                   f'budget counts {counted} deposits; the table lists {listed}')
 
 
+def absent_fields(bundle, identifiers):
+    return [identifier for identifier in identifiers if identifier not in bundle.fields]
+
+
+def land_mask(bundle, spec):
+    """Land cells: elevation above sea level."""
+    return bundle.load(spec['elevation']).astype(float) > float(bundle.scalar(spec['sea_level']))
+
+
+def check_volume_budget(bundle, spec, context):
+    """A volume total equals the sum of its parts: |total - sum(parts)| <= limit x max(|total|, 1e-12)."""
+    missing = absent_fields(bundle, [spec['total']] + list(spec['parts']))
+    if missing:
+        return result('volume-budget', 'skip', f"{', '.join(missing)} absent")
+    total = float(bundle.scalar(spec['total']))
+    parts = sum(float(bundle.scalar(identifier)) for identifier in spec['parts'])
+    residual = total - parts
+    allowed = spec['max_relative_residual'] * max(abs(total), 1e-12)
+    closed = bool(np.isfinite(residual)) and abs(residual) <= allowed
+    return result('volume-budget', 'pass' if closed else 'fail',
+                  f"{spec['total']} {total:.6g}, parts {parts:.6g}; residual {residual:.3g}, allowed {allowed:.3g}")
+
+
+def check_drained(bundle, spec, context):
+    """Every land cell has a flow direction or lies in a depression."""
+    missing = absent_fields(bundle, [spec['direction'], spec['depression'], spec['elevation'], spec['sea_level']])
+    if missing:
+        return result('drained', 'skip', f"{', '.join(missing)} absent")
+    land = land_mask(bundle, spec)
+    direction = bundle.load(spec['direction'])
+    depression = bundle.load(spec['depression'])
+    undrained = int(np.count_nonzero(land & (direction == 0) & (depression == 0)))
+    return result('drained', 'fail' if undrained else 'pass',
+                  f'{undrained} of {int(np.count_nonzero(land))} land cells undrained')
+
+
+# Flow direction codes as river_direction: (dx, dy) with east = +x, south = +y (north row first).
+DIRECTION_OFFSETS = {1: (0, -1), 2: (1, -1), 3: (1, 0), 4: (1, 1), 5: (0, 1), 6: (-1, 1), 7: (-1, 0), 8: (-1, -1)}
+
+
+def receiver_values(values, dx, dy):
+    """values at the neighbour (x + dx, y + dy) of every cell; longitude wraps."""
+    return np.roll(values, shift=(-dy, -dx), axis=(0, 1))
+
+
+def has_neighbour(shape, dy):
+    """False on the polar row that has no neighbour in direction dy."""
+    rows = np.ones(shape, dtype=bool)
+    if dy < 0:
+        rows[0, :] = False
+    elif dy > 0:
+        rows[-1, :] = False
+    return rows
+
+
+def check_monotone(bundle, spec, context):
+    """Discharge does not decrease from a land cell to its land receiver along flow_direction."""
+    missing = absent_fields(bundle, [spec['direction'], spec['discharge'], spec['elevation'], spec['sea_level']])
+    if missing:
+        return result('monotone', 'skip', f"{', '.join(missing)} absent")
+    land = land_mask(bundle, spec)
+    direction = bundle.load(spec['direction'])
+    discharge = bundle.load(spec['discharge']).astype(float)
+    tolerance = 1e-6 * np.maximum(1.0, discharge)
+    violations = 0
+    links = 0
+    for code, (dx, dy) in DIRECTION_OFFSETS.items():
+        linked = land & (direction == code) & has_neighbour(land.shape, dy) & receiver_values(land, dx, dy)
+        links += int(np.count_nonzero(linked))
+        violations += int(np.count_nonzero(linked & (receiver_values(discharge, dx, dy) < discharge - tolerance)))
+    return result('monotone', 'fail' if violations else 'pass',
+                  f'{violations} of {links} land-to-land links lose discharge')
+
+
 CHECKS = {'grid': check_grid, 'required': check_required, 'finite': check_finite, 'range': check_range,
           'written': check_written, 'frozen': check_frozen, 'repeat': check_repeat,
           'recipe-equality': check_recipe_equality, 'record': check_record, 'budget': check_budget,
-          'minerals': check_minerals}
+          'minerals': check_minerals, 'volume-budget': check_volume_budget, 'drained': check_drained,
+          'monotone': check_monotone}
 
 
 def run_checks(bundle, specs, context):

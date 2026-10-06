@@ -26,6 +26,8 @@ struct WorldRecipe
 WorldRecipe proceduralworldrecipe();
 // imported-world: imported terrain, then the remaining terrain passes, climate and hydrology.
 WorldRecipe importedworldrecipe();
+// eroded-world: procedural-world with flow routing and fluvial erosion after the climate coupling.
+WorldRecipe erodedworldrecipe();
 // earth-climate: climate processes only on imported terrain; Geosphere is frozen.
 WorldRecipe earthclimaterecipe();
 // tectonics: the Geosphere initializer and the tectonics evolver on the engine's grid.

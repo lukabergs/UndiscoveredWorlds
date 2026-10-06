@@ -156,6 +156,7 @@ using namespace std;
 struct planetbodystate
 {
     int itssize; // Size of planet. 1=tiny; 2=small; 3=Earthlike.
+    float itsradius_m = 0.0f; // Planet radius in metres (world.body.radius_km).
     int itswidth;   // width of global map
     int itsheight;  // height of global map
     long itsseed;    // seed number of this world
@@ -221,6 +222,8 @@ struct geospherestate
     worldgrid<std::uint8_t> erosionpotentialmap;
     worldgrid<std::uint8_t> depositionpotentialmap;
     worldgrid<std::uint8_t> floodplainfertilitymap;
+    worldgrid<float> erodibilitymap, erosionratemap, depositionratemap, denudationmap, aggradationmap;
+    float itserosionduration = 0.0f, itserodedvolume = 0.0f, itslanddepositedvolume = 0.0f, itsmarinedepositedvolume = 0.0f;
     worldgrid<std::uint8_t> metalorereservemap;
     worldgrid<std::uint8_t> placerreservemap;
     worldgrid<std::uint8_t> evaporitereservemap;
@@ -254,6 +257,9 @@ struct hydrospherestate
     worldgrid<int> rivermapjan;
     worldgrid<int> rivermapjul;
     worldgrid<float> lakemap;
+    worldgrid<std::uint8_t> flowdirectionmap;
+    worldgrid<float> drainageareamap, dischargemap, filledelevationmap;
+    worldgrid<std::int32_t> depressionidmap;
     worldgrid<short> tidalmap;
     worldgrid<float> riftlakemapsurface;
     worldgrid<float> riftlakemapbed;

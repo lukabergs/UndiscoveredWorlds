@@ -17,6 +17,7 @@
 #include "core/climate_grid.hpp"
 #include "simulations/climate/climate_hydrology.hpp"
 #include "world/functions.hpp"
+#include "world/world_parameters.hpp"
 
 namespace
 {
@@ -91,6 +92,7 @@ planet::planet() //constructor
     geosphere_.itstectonicdeltatimemyr = 0.0f;
     geosphere_.itstectonicplatecount = 0;
     geosphere_.itstectonicsealevelm = 0;
+    body_.itsradius_m = tuning::world::body::radiusKm * 1000.0f;
     resizegrids();
 }
 
@@ -108,6 +110,16 @@ void planet::resizegrids()
     hydrosphere_.rivermapjan.resize(columns, rows);
     hydrosphere_.rivermapjul.resize(columns, rows);
     hydrosphere_.lakemap.resize(columns, rows);
+    hydrosphere_.flowdirectionmap.resize(columns, rows);
+    hydrosphere_.drainageareamap.resize(columns, rows);
+    hydrosphere_.dischargemap.resize(columns, rows);
+    hydrosphere_.filledelevationmap.resize(columns, rows);
+    hydrosphere_.depressionidmap.resize(columns, rows);
+    geosphere_.erodibilitymap.resize(columns, rows);
+    geosphere_.erosionratemap.resize(columns, rows);
+    geosphere_.depositionratemap.resize(columns, rows);
+    geosphere_.denudationmap.resize(columns, rows);
+    geosphere_.aggradationmap.resize(columns, rows);
     geosphere_.roughnessmap.resize(columns, rows);
     geosphere_.mountainridges.resize(columns, rows);
     geosphere_.mountainheights.resize(columns, rows);
@@ -660,6 +672,20 @@ void planet::clear()
         }
     }, 64);
     geosphere_.shelfmap.fill(false);
+    hydrosphere_.flowdirectionmap.fill(0);
+    hydrosphere_.drainageareamap.fill(0.0f);
+    hydrosphere_.dischargemap.fill(0.0f);
+    hydrosphere_.filledelevationmap.fill(0.0f);
+    hydrosphere_.depressionidmap.fill(0);
+    geosphere_.erodibilitymap.fill(0.0f);
+    geosphere_.erosionratemap.fill(0.0f);
+    geosphere_.depositionratemap.fill(0.0f);
+    geosphere_.denudationmap.fill(0.0f);
+    geosphere_.aggradationmap.fill(0.0f);
+    geosphere_.itserosionduration = 0.0f;
+    geosphere_.itserodedvolume = 0.0f;
+    geosphere_.itslanddepositedvolume = 0.0f;
+    geosphere_.itsmarinedepositedvolume = 0.0f;
     // Subtropical-high rows span the full 2048-column capacity in saves.
     climate_.horselats.fill(0);
 

@@ -34,10 +34,48 @@ def lake_elevation(bundle):
     return np.where(surface > 0, surface - float(bundle.scalar('geosphere.sea_level')), np.nan)
 
 
+def lake_depth(bundle):
+    """Depth of the routing's filled surface above the terrain (m); zero outside depressions."""
+    return bundle.load('hydrosphere.filled_elevation').astype(float) - bundle.load('geosphere.base_elevation').astype(float)
+
+
+def depression_class(bundle):
+    """Depression id folded onto 12 colour classes (1..12); 0 outside depressions."""
+    identity = bundle.load('hydrosphere.depression_id').astype(np.int64)
+    return np.where(identity != 0, identity % 12 + 1, 0).astype(float)
+
+
+# Flow direction codes as river_direction: (dx, dy) with east = +x, south = +y (north row first).
+FLOW_OFFSETS = {1: (0, -1), 2: (1, -1), 3: (1, 0), 4: (1, 1), 5: (0, 1), 6: (-1, 1), 7: (-1, 0), 8: (-1, -1)}
+
+
+def drainage_basin(bundle):
+    """The outlet of every land cell along flow_direction, folded onto 12 colour classes (1..12); 0 on sea."""
+    direction = bundle.load('hydrosphere.flow_direction')
+    land = bundle.load('geosphere.base_elevation').astype(float) > float(bundle.scalar('geosphere.sea_level'))
+    rows, columns = direction.shape
+    y, x = np.indices((rows, columns))
+    receiver = (y * columns + x).ravel()
+    for code, (dx, dy) in FLOW_OFFSETS.items():
+        ny = y + dy
+        cells = (direction == code) & (ny >= 0) & (ny < rows)
+        receiver[cells.ravel()] = (ny * columns + (x + dx) % columns)[cells]
+    for _ in range(64):
+        following = receiver[receiver]
+        if np.array_equal(following, receiver):
+            break
+        receiver = following
+    return np.where(land, receiver.reshape(rows, columns) % 12 + 1, 0).astype(float)
+
+
 # Derived maps: the function and the fields it reads.
-DERIVED = {'surface_elevation': surface_elevation, 'lake_elevation': lake_elevation}
+DERIVED = {'surface_elevation': surface_elevation, 'lake_elevation': lake_elevation, 'lake_depth': lake_depth,
+           'depression_class': depression_class, 'drainage_basin': drainage_basin}
 DERIVED_FIELDS = {'surface_elevation': ['geosphere.base_elevation', 'geosphere.mountain_height', 'geosphere.volcano'],
-                  'lake_elevation': ['hydrosphere.lake_surface', 'geosphere.sea_level']}
+                  'lake_elevation': ['hydrosphere.lake_surface', 'geosphere.sea_level'],
+                  'lake_depth': ['hydrosphere.filled_elevation', 'geosphere.base_elevation'],
+                  'depression_class': ['hydrosphere.depression_id'],
+                  'drainage_basin': ['hydrosphere.flow_direction', 'geosphere.base_elevation', 'geosphere.sea_level']}
 QUARTERS = ('Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec')
 SNAPSHOT_TABLE = 'geosphere.tectonic_snapshot'
 TRACKED = 'colours follow plate identities tracked by cell overlap between consecutive frames, not the engine index'
@@ -113,6 +151,18 @@ def masked(bundle, spec, values):
     return values
 
 
+def transformed(spec, values):
+    """Map spec options: "hide_zero" (zeros become NaN) and "transform": "log10" (values <= 0 become NaN)."""
+    if spec.get('hide_zero'):
+        values = np.where(values == 0, np.nan, values)
+    if spec.get('transform') == 'log10':
+        with np.errstate(divide='ignore', invalid='ignore'):
+            values = np.where(values > 0, np.log10(np.where(values > 0, values, 1.0)), np.nan)
+    elif spec.get('transform') is not None:
+        raise ValueError(f"Unknown map transform {spec['transform']!r}; known: log10")
+    return values
+
+
 def model_layers(bundle, spec):
     """[(season or None, values, arrows or None)] of a profile map drawn from its own field."""
     components = None
@@ -127,7 +177,7 @@ def model_layers(bundle, spec):
         values = load_selected(bundle, spec['field'])
     if spec.get('reduce') == 'season-mean' and components is None:
         values = values.mean(axis=0)
-    values = masked(bundle, spec, values.astype(float) * spec.get('scale', 1))
+    values = transformed(spec, masked(bundle, spec, values.astype(float) * spec.get('scale', 1)))
     if values.ndim == 2:
         return [(None, values, arrows(components, values))]
     return [(season, values[season], arrows(components and [component[season] for component in components], values[season]))

@@ -50,6 +50,8 @@ const vector<GenerationStageDefinition>& getgenerationstages()
         { GenerationStageId::sea_surface_temperatures, "Sea surface temperatures", "Diagnose evaporation from the coupled ocean temperature and wind.", GenerationStageDomain::climate, true, true },
         { GenerationStageId::sea_ice_and_tides, "Sea ice and tides", "Optionally add sea-ice coverage and tidal effects to the climate model.", GenerationStageDomain::climate, true, true },
         { GenerationStageId::rainfall, "Rainfall", "Generate rainfall and moisture transport across the current terrain.", GenerationStageDomain::hydrology, true, false },
+        { GenerationStageId::flow_routing, "Flow routing", "Route runoff over the terrain: receivers, drainage area, discharge, depressions and their spill points.", GenerationStageDomain::hydrology, true, true },
+        { GenerationStageId::fluvial_erosion, "Fluvial erosion", "Erode and deposit along the drainage network with the stream power law over the erosion duration.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::fjords, "Fjords", "Optionally carve fjords along cold coastal mountain fronts.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::rivers_and_basins, "Rivers and basins", "Plan rivers and drainage basins from the current terrain and rainfall.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::basin_editor, "Basin editor", "Review detected endorheic basins and choose whether to keep, fill, or drain them.", GenerationStageDomain::hydrology, true, true },

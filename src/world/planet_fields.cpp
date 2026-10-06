@@ -54,6 +54,7 @@ struct planetfieldaccess
         {
         case FieldId::seed: return op.scalar(id, world.body_.itsseed);
         case FieldId::size_class: return op.scalar(id, world.body_.itssize);
+        case FieldId::radius: return op.scalar(id, world.body_.itsradius_m);
         case FieldId::width_index: return op.scalar(id, world.body_.itswidth);
         case FieldId::height_index: return op.scalar(id, world.body_.itsheight);
         case FieldId::prograde_rotation: return op.scalar(id, world.body_.itsrotation);
@@ -134,6 +135,15 @@ struct planetfieldaccess
         case FieldId::erosion_potential: return op.grid(id, world.geosphere_.erosionpotentialmap);
         case FieldId::deposition_potential: return op.grid(id, world.geosphere_.depositionpotentialmap);
         case FieldId::floodplain_fertility: return op.grid(id, world.geosphere_.floodplainfertilitymap);
+        case FieldId::erodibility: return op.grid(id, world.geosphere_.erodibilitymap);
+        case FieldId::erosion_rate: return op.grid(id, world.geosphere_.erosionratemap);
+        case FieldId::deposition_rate: return op.grid(id, world.geosphere_.depositionratemap);
+        case FieldId::denudation: return op.grid(id, world.geosphere_.denudationmap);
+        case FieldId::aggradation: return op.grid(id, world.geosphere_.aggradationmap);
+        case FieldId::erosion_duration: return op.scalar(id, world.geosphere_.itserosionduration);
+        case FieldId::eroded_volume: return op.scalar(id, world.geosphere_.itserodedvolume);
+        case FieldId::land_deposited_volume: return op.scalar(id, world.geosphere_.itslanddepositedvolume);
+        case FieldId::marine_deposited_volume: return op.scalar(id, world.geosphere_.itsmarinedepositedvolume);
         case FieldId::metal_ore_potential: return op.grid(id, world.geosphere_.metalorereservemap);
         case FieldId::placer_potential: return op.grid(id, world.geosphere_.placerreservemap);
         case FieldId::evaporite_potential: return op.grid(id, world.geosphere_.evaporitereservemap);
@@ -143,6 +153,11 @@ struct planetfieldaccess
         case FieldId::river_flow_july: return op.grid(id, world.hydrosphere_.rivermapjul);
         case FieldId::lake_surface: return op.grid(id, world.hydrosphere_.lakemap);
         case FieldId::rift_lake_surface: return op.grid(id, world.hydrosphere_.riftlakemapsurface);
+        case FieldId::flow_direction: return op.grid(id, world.hydrosphere_.flowdirectionmap);
+        case FieldId::drainage_area: return op.grid(id, world.hydrosphere_.drainageareamap);
+        case FieldId::discharge: return op.grid(id, world.hydrosphere_.dischargemap);
+        case FieldId::filled_elevation: return op.grid(id, world.hydrosphere_.filledelevationmap);
+        case FieldId::depression_id: return op.grid(id, world.hydrosphere_.depressionidmap);
         case FieldId::rift_lake_bed: return op.grid(id, world.hydrosphere_.riftlakemapbed);
         case FieldId::lake_start: return op.grid(id, world.hydrosphere_.lakestartmap);
         case FieldId::special_features: return op.grid(id, world.hydrosphere_.specials);

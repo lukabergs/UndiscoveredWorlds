@@ -529,6 +529,38 @@ public:
     worldgrid<bool>& continentalshelves() { UW_FIELD_READ(continental_shelf); return geosphere_.shelfmap; }
     const worldgrid<bool>& continentalshelves() const { UW_FIELD_READ(continental_shelf); return geosphere_.shelfmap; }
 
+    // Routing and fluvial erosion fields (erosion plan, Phase A), written whole by their processes.
+    const worldgrid<std::uint8_t>& flowdirection() const { UW_FIELD_READ(flow_direction); return hydrosphere_.flowdirectionmap; }
+    worldgrid<std::uint8_t>& flowdirection() { return hydrosphere_.flowdirectionmap; }
+    const worldgrid<float>& drainagearea() const { UW_FIELD_READ(drainage_area); return hydrosphere_.drainageareamap; }
+    worldgrid<float>& drainagearea() { return hydrosphere_.drainageareamap; }
+    const worldgrid<float>& discharge() const { UW_FIELD_READ(discharge); return hydrosphere_.dischargemap; }
+    worldgrid<float>& discharge() { return hydrosphere_.dischargemap; }
+    const worldgrid<float>& filledelevation() const { UW_FIELD_READ(filled_elevation); return hydrosphere_.filledelevationmap; }
+    worldgrid<float>& filledelevation() { return hydrosphere_.filledelevationmap; }
+    const worldgrid<std::int32_t>& depressionid() const { UW_FIELD_READ(depression_id); return hydrosphere_.depressionidmap; }
+    worldgrid<std::int32_t>& depressionid() { return hydrosphere_.depressionidmap; }
+    const worldgrid<float>& erodibility() const { UW_FIELD_READ(erodibility); return geosphere_.erodibilitymap; }
+    worldgrid<float>& erodibility() { return geosphere_.erodibilitymap; }
+    const worldgrid<float>& erosionrate() const { UW_FIELD_READ(erosion_rate); return geosphere_.erosionratemap; }
+    worldgrid<float>& erosionrate() { return geosphere_.erosionratemap; }
+    const worldgrid<float>& depositionrate() const { UW_FIELD_READ(deposition_rate); return geosphere_.depositionratemap; }
+    worldgrid<float>& depositionrate() { return geosphere_.depositionratemap; }
+    const worldgrid<float>& denudation() const { UW_FIELD_READ(denudation); return geosphere_.denudationmap; }
+    worldgrid<float>& denudation() { return geosphere_.denudationmap; }
+    const worldgrid<float>& aggradation() const { UW_FIELD_READ(aggradation); return geosphere_.aggradationmap; }
+    worldgrid<float>& aggradation() { return geosphere_.aggradationmap; }
+    float radius() const { UW_FIELD_READ(radius); return body_.itsradius_m; }
+    void setradius(float amount) { body_.itsradius_m = amount; }
+    float erosionduration() const { UW_FIELD_READ(erosion_duration); return geosphere_.itserosionduration; }
+    void seterosionduration(float amount) { geosphere_.itserosionduration = amount; }
+    float erodedvolume() const { UW_FIELD_READ(eroded_volume); return geosphere_.itserodedvolume; }
+    void seterodedvolume(float amount) { geosphere_.itserodedvolume = amount; }
+    float landdepositedvolume() const { UW_FIELD_READ(land_deposited_volume); return geosphere_.itslanddepositedvolume; }
+    void setlanddepositedvolume(float amount) { geosphere_.itslanddepositedvolume = amount; }
+    float marinedepositedvolume() const { UW_FIELD_READ(marine_deposited_volume); return geosphere_.itsmarinedepositedvolume; }
+    void setmarinedepositedvolume(float amount) { geosphere_.itsmarinedepositedvolume = amount; }
+
     bool coast(int x, int y) const; // whether this is coast, next to land
 
     void longitude(int x, int& degrees, int& minutes, int& seconds, bool& negative) const;   // returns the longitude of this point

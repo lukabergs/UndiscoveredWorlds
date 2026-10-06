@@ -37,6 +37,7 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
 #define UW_WORLD_FIELD_LIST(X) \
     X(seed, planetbody, i32, scalar, "", "World seed") \
     X(size_class, planetbody, i32, scalar, "", "Planet size class: 1 tiny, 2 small, 3 Earthlike") \
+    X(radius, planetbody, f32, scalar, "m", "Planet radius") \
     X(width_index, planetbody, i32, scalar, "cells", "Largest x index of the surface grid (width - 1)") \
     X(height_index, planetbody, i32, scalar, "cells", "Largest y index of the surface grid (height - 1)") \
     X(prograde_rotation, planetbody, b8, scalar, "", "True when the planet rotates like Earth") \
@@ -120,6 +121,15 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(erosion_potential, geosphere, u8, grid, "0..100", "Relative erosion potential") \
     X(deposition_potential, geosphere, u8, grid, "0..100", "Relative deposition potential") \
     X(floodplain_fertility, geosphere, u8, grid, "0..100", "Floodplain and lowland fertility proxy") \
+    X(erodibility, geosphere, f32, grid, "relative", "Erodibility relative to landscape.stream_power.erodibility") \
+    X(erosion_rate, geosphere, f32, grid, "m/Myr", "Mean erosion rate over the erosion run") \
+    X(deposition_rate, geosphere, f32, grid, "m/Myr", "Mean deposition rate over the erosion run") \
+    X(denudation, geosphere, f32, grid, "m", "Cumulative denudation of the erosion run") \
+    X(aggradation, geosphere, f32, grid, "m", "Cumulative aggradation of the erosion run") \
+    X(erosion_duration, geosphere, f32, scalar, "Myr", "Duration of the erosion run") \
+    X(eroded_volume, geosphere, f32, scalar, "km3", "Volume eroded over the erosion run") \
+    X(land_deposited_volume, geosphere, f32, scalar, "km3", "Volume deposited on land over the erosion run") \
+    X(marine_deposited_volume, geosphere, f32, scalar, "km3", "Volume deposited in the sea over the erosion run") \
     X(metal_ore_potential, geosphere, u8, grid, "0..100", "Metal ore potential score") \
     X(placer_potential, geosphere, u8, grid, "0..100", "Placer potential score") \
     X(evaporite_potential, geosphere, u8, grid, "0..100", "Evaporite potential score") \
@@ -129,6 +139,11 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(river_flow_july, hydrosphere, i32, grid, "legacy flow", "July river flow") \
     X(lake_surface, hydrosphere, f32, grid, "m above datum", "Lake surface elevation") \
     X(rift_lake_surface, hydrosphere, f32, grid, "m above datum", "Rift lake surface elevation") \
+    X(flow_direction, hydrosphere, u8, grid, "direction code", "Flow direction of the routing (1..8 as river_direction; 0 sea)") \
+    X(drainage_area, hydrosphere, f32, grid, "km2", "Drainage area of the routing") \
+    X(discharge, hydrosphere, f32, grid, "m3/s", "Annual mean discharge of the routing") \
+    X(filled_elevation, hydrosphere, f32, grid, "m above datum", "Priority-Flood surface: equals the terrain outside depressions") \
+    X(depression_id, hydrosphere, i32, grid, "id", "Depression of the routing (0 none)") \
     X(rift_lake_bed, hydrosphere, f32, grid, "m above datum", "Rift lake bed elevation") \
     X(lake_start, hydrosphere, b8, grid, "", "Lake seed cell") \
     X(special_features, hydrosphere, i16, grid, "code", "100 salt lake, 110 salt pan, 120 dunes, 130/131/132 fresh/brackish/salt wetlands") \
