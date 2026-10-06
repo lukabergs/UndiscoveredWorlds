@@ -12,7 +12,7 @@ void placesaltlake(planet& world, int centrex, int centrey, bool large, bool dod
 void convertsaltlakes(planet& world, std::vector<std::vector<std::vector<float>>>& saltlakemap);
 void createlakemap(planet& world, std::vector<std::vector<int>>& nolake, boolshapetemplate smalllake[], boolshapetemplate largelake[]);
 void createriftlakemap(planet& world, std::vector<std::vector<int>>& nolake);
-int nexttolake(planet& world, int x, int y);
+float nexttolake(planet& world, int x, int y);
 void removesealakes(planet& world);
 void connectlakes(planet& world);
 void makelakestartpoint(planet& world, std::vector<std::vector<int>>& thislake, int lakeno, int leftx, int lefty, int rightx, int righty);

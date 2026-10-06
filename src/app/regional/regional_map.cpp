@@ -525,7 +525,7 @@ void makeregionalwater(planet& world, region& region, vector<vector<bool>>& safe
         {
             int yy = lefty + y;
 
-            int surfacelevel = nearlake(world, xx, yy, 1, 0);
+            int surfacelevel = wholemetres(nearlake(world, xx, yy, 1, 0));
 
             if (surfacelevel != 0)
                 makelakeislands(world, region, x * 16, y * 16, xx, yy, surfacelevel, island, lakeislands);
@@ -3211,7 +3211,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
         janinflow = world.riverjan(nox, noy);
         julinflow = world.riverjul(nox, noy);
 
-        fromtilelevel = nexttolake(world, nox, noy);
+        fromtilelevel = wholemetres(nexttolake(world, nox, noy));
 
         if (fromtilelevel == 0)
             fromtilelevel = world.riftlakesurface(nox, noy);
@@ -3228,7 +3228,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
         janinflow = world.riverjan(nex, ney);
         julinflow = world.riverjul(nex, ney);
 
-        fromtilelevel = nexttolake(world, nex, ney);
+        fromtilelevel = wholemetres(nexttolake(world, nex, ney));
 
         if (fromtilelevel == 0)
             fromtilelevel = world.riftlakesurface(nex, ney);
@@ -3245,7 +3245,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
         janinflow = world.riverjan(eax, eay);
         julinflow = world.riverjul(eax, eay);
 
-        fromtilelevel = nexttolake(world, eax, eay);
+        fromtilelevel = wholemetres(nexttolake(world, eax, eay));
 
         if (fromtilelevel == 0)
             fromtilelevel = world.riftlakesurface(eax, eay);
@@ -3262,7 +3262,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
         janinflow = world.riverjan(sex, sey);
         julinflow = world.riverjul(sex, sey);
 
-        fromtilelevel = nexttolake(world, sex, sey);
+        fromtilelevel = wholemetres(nexttolake(world, sex, sey));
 
         if (fromtilelevel == 0)
             fromtilelevel = world.riftlakesurface(sex, sey);
@@ -3279,7 +3279,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
         janinflow = world.riverjan(sox, soy);
         julinflow = world.riverjul(sox, soy);
 
-        fromtilelevel = nexttolake(world, sox, soy);
+        fromtilelevel = wholemetres(nexttolake(world, sox, soy));
 
         if (fromtilelevel == 0)
             fromtilelevel = world.riftlakesurface(sox, soy);
@@ -3296,7 +3296,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
         janinflow = world.riverjan(swx, swy);
         julinflow = world.riverjul(swx, swy);
 
-        fromtilelevel = nexttolake(world, swx, swy);
+        fromtilelevel = wholemetres(nexttolake(world, swx, swy));
 
         if (fromtilelevel == 0)
             fromtilelevel = world.riftlakesurface(swx, swy);
@@ -3313,7 +3313,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
         janinflow = world.riverjan(wex, wey);
         julinflow = world.riverjul(wex, wey);
 
-        fromtilelevel = nexttolake(world, wex, wey);
+        fromtilelevel = wholemetres(nexttolake(world, wex, wey));
 
         if (fromtilelevel == 0)
             fromtilelevel = world.riftlakesurface(wex, wey);
@@ -3330,7 +3330,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
         janinflow = world.riverjan(nwx, nwy);
         julinflow = world.riverjul(nwx, nwy);
 
-        fromtilelevel = nexttolake(world, nwx, nwy);
+        fromtilelevel = wholemetres(nexttolake(world, nwx, nwy));
 
         if (fromtilelevel == 0)
             fromtilelevel = world.riftlakesurface(nwx, nwy);
@@ -3719,7 +3719,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
                     if (world.lakesurface(nox, noy) == 0)
                         fromtilelevel = world.nom(nox, noy) - riverlandreduce;
                     else
-                        fromtilelevel = nexttolake(world, nox, noy);
+                        fromtilelevel = wholemetres(nexttolake(world, nox, noy));
                 }
 
                 if (rivernumber == 2)
@@ -3733,7 +3733,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
                     if (world.lakesurface(nex, ney) == 0)
                         fromtilelevel = world.nom(nex, ney) - riverlandreduce;
                     else
-                        fromtilelevel = nexttolake(world, nex, ney);
+                        fromtilelevel = wholemetres(nexttolake(world, nex, ney));
                 }
 
                 if (rivernumber == 3)
@@ -3747,7 +3747,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
                     if (world.lakesurface(eax, eay) == 0)
                         fromtilelevel = world.nom(eax, eay) - riverlandreduce;
                     else
-                        fromtilelevel = nexttolake(world, eax, eay);
+                        fromtilelevel = wholemetres(nexttolake(world, eax, eay));
                 }
 
                 if (rivernumber == 4)
@@ -3761,7 +3761,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
                     if (world.lakesurface(sex, sey) == 0)
                         fromtilelevel = world.nom(sex, sey) - riverlandreduce;
                     else
-                        fromtilelevel = nexttolake(world, sex, sey);
+                        fromtilelevel = wholemetres(nexttolake(world, sex, sey));
                 }
 
                 if (rivernumber == 5)
@@ -3775,7 +3775,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
                     if (world.lakesurface(sox, soy) == 0)
                         fromtilelevel = world.nom(sox, soy) - riverlandreduce;
                     else
-                        fromtilelevel = nexttolake(world, sox, soy);
+                        fromtilelevel = wholemetres(nexttolake(world, sox, soy));
                 }
 
                 if (rivernumber == 6)
@@ -3789,7 +3789,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
                     if (world.lakesurface(swx, swy) == 0)
                         fromtilelevel = world.nom(swx, swy) - riverlandreduce;
                     else
-                        fromtilelevel = nexttolake(world, swx, swy);
+                        fromtilelevel = wholemetres(nexttolake(world, swx, swy));
                 }
 
                 if (rivernumber == 7)
@@ -3803,7 +3803,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
                     if (world.lakesurface(wex, wey) == 0)
                         fromtilelevel = world.nom(wex, wey) - riverlandreduce;
                     else
-                        fromtilelevel = nexttolake(world, wex, wey);
+                        fromtilelevel = wholemetres(nexttolake(world, wex, wey));
                 }
 
                 if (rivernumber == 8)
@@ -3817,7 +3817,7 @@ void makerivertile(planet& world, region& region, int dx, int dy, int sx, int sy
                     if (world.lakesurface(nwx, nwy) == 0)
                         fromtilelevel = world.nom(nwx, nwy) - riverlandreduce;
                     else
-                        fromtilelevel = nexttolake(world, nwx, nwy);
+                        fromtilelevel = wholemetres(nexttolake(world, nwx, nwy));
                 }
 
                 if (totilelevel <= sealevel)
@@ -13451,7 +13451,7 @@ void makesaltpantile(planet& world, region& region, int dx, int dy, int sx, int 
     int surfacelevel = world.lakesurface(sx, sy);
 
     if (surfacelevel == 0)
-        surfacelevel = nexttolake(world, sx, sy);
+        surfacelevel = wholemetres(nexttolake(world, sx, sy));
 
     if (surfacelevel == 0)
         return;

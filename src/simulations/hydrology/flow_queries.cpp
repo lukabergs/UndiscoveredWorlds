@@ -494,7 +494,7 @@ twointegers gettotalinflow(planet& world, int x, int y)
 
 // This function tells whether a given point on the world map is in or next to a lake.
 
-int nearlake(planet& world, int x, int y, int dist, bool rift)
+float nearlake(planet& world, int x, int y, int dist, bool rift)
 {
     int width = world.width();
     int height = world.height();
@@ -511,14 +511,14 @@ int nearlake(planet& world, int x, int y, int dist, bool rift)
             if (j >= 0 && j <= height)
             {
                 if (world.lakesurfacefloat(ii, j) != 0)
-                    return world.lakesurface(ii, j);
+                    return world.lakesurfacefloat(ii, j);
 
                 if (rift == 1 && world.riftlakesurfacefloat(ii, j) != 0)
-                    return world.riftlakesurface(ii, j);
+                    return world.riftlakesurfacefloat(ii, j);
             }
         }
     }
-    return 0;
+    return 0.0f;
 }
 
 // This function tells us whether a tile is a lake tile on the edge.

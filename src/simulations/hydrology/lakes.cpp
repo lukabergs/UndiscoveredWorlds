@@ -1660,7 +1660,7 @@ void createriftlakemap(planet& world, vector<vector<int>>& nolake)
 
 // This function tells us whether a tile is next to a lake.
 
-int nexttolake(planet& world, int x, int y)
+float nexttolake(planet& world, int x, int y)
 {
     int width = world.width();
     int height = world.height();
@@ -1677,10 +1677,10 @@ int nexttolake(planet& world, int x, int y)
         for (int j = y - dist; j <= y + dist; j++)
         {
             if (j >= 0 && j <= height && world.lakesurfacefloat(ii, j) != 0)
-                return (world.lakesurface(ii, j));
+                return world.lakesurfacefloat(ii, j);
         }
     }
-    return (0);
+    return 0.0f;
 }
 
 // This removes any cells of sea that are next to lakes.

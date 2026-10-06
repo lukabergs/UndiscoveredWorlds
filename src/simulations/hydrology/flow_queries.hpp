@@ -19,5 +19,5 @@ twointegers getflowdestination(planet& world, int x, int y, int dir);
 twointegers getupstreamcell(planet& world, int x, int y);
 int checkwaterinflow(planet& world, int x, int y);
 twointegers gettotalinflow(planet& world, int x, int y);
-int nearlake(planet& world, int x, int y, int dist, bool rift);
+float nearlake(planet& world, int x, int y, int dist, bool rift);
 int getlakeedge(planet& world, int x, int y);
