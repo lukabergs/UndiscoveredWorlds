@@ -23,6 +23,13 @@
       "run": "runs/erosion/3",
       "date": "2026-10-06T16:44:18+00:00",
       "label": "erosion plan B6: judging run of eroded-world at 256 columns after Phase B (rivers, lake levels, basin classes, consumers on the routing); compared with run 1"
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "run": "runs/erosion/4",
+      "date": "2026-10-06T18:09:44+00:00",
+      "label": "512-column eroded-world at the settings of run 3 (600 Myr, climate 64/2), requested by the user to check the run time against the estimate and compare with run 3"
     }
   ]
 }
