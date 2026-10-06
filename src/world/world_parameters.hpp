@@ -36,6 +36,11 @@ inline int seaLevel = 24000;
 inline int craterCount = 0;
 }
 
+namespace body
+{
+inline float radiusKm = 6371.0f;
+}
+
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -65,6 +70,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "world.defaults.max_elevation", &defaults::maxElevation },
         { "world.defaults.sea_level", &defaults::seaLevel },
         { "world.defaults.crater_count", &defaults::craterCount },
+        { "world.body.radius_km", &body::radiusKm },
     };
     return entries;
 }

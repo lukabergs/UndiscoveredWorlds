@@ -135,6 +135,7 @@ Lessons:
 | `world-0079` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app: close (plan section 11, AGENTS.md) |
 | `world-0080` | 2026-10-06 | equivalent | keep | erosion plan, step 0: the FastLEM stages removed |
 | `world-0081` | 2026-10-06 | documents only | keep | erosion plan, step 0.2: the plan, the agent workflow guide and the project agents |
+| `world-0082` | 2026-10-06 | documents only | keep | erosion plan, step A0: the landscape kernel contracts |
 
 Lessons:
 

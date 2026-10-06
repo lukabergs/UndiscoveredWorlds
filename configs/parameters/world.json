@@ -30,6 +30,9 @@
    "max_elevation": 48000,
    "sea_level": 24000,
    "crater_count": 0
+  },
+  "body": {
+   "radius_km": 6371.0
   }
  }
 }

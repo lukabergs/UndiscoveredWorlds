@@ -42,7 +42,7 @@ target_link_libraries(uw_climate_world INTERFACE
 add_library(uw_headless INTERFACE)
 target_link_libraries(uw_headless INTERFACE
     uw_cli uw_pipeline uw_world uw_validation uw_io uw_core
-    uw_climate uw_geology uw_terrain uw_hydrology uw_resources uw_society
+    uw_climate uw_geology uw_terrain uw_hydrology uw_landscape uw_resources uw_society
     uw_mineral_tectonics uw_mineral_systems uw_tectonics
     PNG::PNG Threads::Threads)
 

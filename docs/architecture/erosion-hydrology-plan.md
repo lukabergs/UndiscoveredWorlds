@@ -102,7 +102,7 @@ Durations are commit to commit (`AGENTS.md`); the Estimate column is checked aga
 | Step | Work | Agent | Check | Estimate | Duration |
 |---|---|---|---|---|---|
 | 0.1 | Delete the FastLEM stages, `broadenfastlemterrainfromrivers`, the `terrain.fastlem` parameters, `islegacygenerationstage` and their references | worker | step check with `--desktop`, every bundle identical | 1 h | done, `3b3395a`, `world-0080`: 55 min (e1254e7 12:13 to 13:08), of which the worker ran about 6 min; the three bundles identical, both presets built |
-| 0.2 | This plan; `docs/reference-guides/agent-workflow.md`; the agents `worker`, `mechanic`, `surveyor`, `reviewer`; consolidation plan §8 and §11; `AGENTS.md`; `~/.claude/CLAUDE.md`; memory | lead | none (documents) | 2 h | |
+| 0.2 | This plan; `docs/reference-guides/agent-workflow.md`; the agents `worker`, `mechanic`, `surveyor`, `reviewer`; consolidation plan §8 and §11; `AGENTS.md`; `~/.claude/CLAUDE.md`; memory | lead | none (documents) | 2 h | done, `16ddfb3`, `world-0081`: 6 min of commits (3b3395a 13:08 to 16ddfb3 13:14); the lead session wrote the documents before 3b3395a, so the commit range understates it |
 
 **Phase A — the global kernel and the eroded recipe** (one orchestrating session, Opus 5.5 `high`; `world` ledger until A3 creates the `erosion` module, then `erosion`).
 
