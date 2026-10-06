@@ -132,6 +132,7 @@ Lessons:
 | `world-0076` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app, 1 of 3: the climate solver files (module climate) |
 | `world-0077` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app, 2 of 3: the lake queries of hydrology (module hydrology; the regional map rounds at its reads) |
 | `world-0078` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app, 3 of 3: the marine resources read the float SST (module resources) |
+| `world-0079` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app: close (plan section 11, AGENTS.md) |
 
 Lessons:
 
@@ -260,3 +261,4 @@ Lessons:
 - `world-0073`: A template helper with int and float overloads hides who uses the rounding one: grep the callers by receiver and argument type before deleting an overload; here the only int caller was in src/app.
 - `world-0073`: Reference bundles out/scratch/climate-float/elevation-* are the head state for the next step.
 - `world-0074`: Before a float step, check which rules the step check reaches (mountain fields, sea cells, diagnostics switches in the reference bundles); when none is reached, say so before the move instead of predicting a changed world.
+- `world-0079`: Counting which recipe reaches a changed line (field nonzero in the reference bundle, step present in the recipe) before the move predicted all three outcomes exactly, including the one field that would differ.
