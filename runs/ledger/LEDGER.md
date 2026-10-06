@@ -134,6 +134,7 @@ Lessons:
 | `world-0078` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app, 3 of 3: the marine resources read the float SST (module resources) |
 | `world-0079` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app: close (plan section 11, AGENTS.md) |
 | `world-0080` | 2026-10-06 | equivalent | keep | erosion plan, step 0: the FastLEM stages removed |
+| `world-0081` | 2026-10-06 | documents only | keep | erosion plan, step 0.2: the plan, the agent workflow guide and the project agents |
 
 Lessons:
 
@@ -264,3 +265,4 @@ Lessons:
 - `world-0074`: Before a float step, check which rules the step check reaches (mountain fields, sea cells, diagnostics switches in the reference bundles); when none is reached, say so before the move instead of predicting a changed world.
 - `world-0079`: Counting which recipe reaches a changed line (field nonzero in the reference bundle, step present in the recipe) before the move predicted all three outcomes exactly, including the one field that would differ.
 - `world-0080`: generateglobalclimate in src/pipeline/climate_generation.cpp has no caller: the recipes run the climate stages through world_stages.cpp.
+- `world-0081`: A plan that will be executed by workers in parallel needs its shared contracts (headers, file ownership per step) written before the workers start; the plan makes that the orchestrator's first step (A0).

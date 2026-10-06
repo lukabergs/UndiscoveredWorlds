@@ -1,0 +1,61 @@
+# Agent workflow: roles, models, checks
+
+Decided with the user on 2026-10-06. Model strength is allocated by the cost of being wrong: planning and review get the strongest model, implementation gets a competent one with a good brief, and verification is done by scripts that an agent only interprets. Everything that can be deterministic (builds, bundle comparisons, tests, parameter and layout checks, git, the ledger) is outside the models.
+
+## Roles and models
+
+Claude models only (Sonnet and Haiku are not used for now). The adversarial reviewer is GPT-6 Astra through Codex (`~/.codex/config.toml`), run by the user outside these sessions and without context from them.
+
+| Role | Who | Model, effort | Does | Does not |
+|---|---|---|---|---|
+| Planner / lead | the interactive session | Fable 5.1, `high` (`xhigh` for a design question the plan cannot settle; never routinely) | understands the request, writes or revises the plan (goal, decisions, step table, acceptance checks, risks), answers the user, reviews phase results | implement steps itself when a worker can |
+| Orchestrator | the session that runs a phase | Opus 5.5, `high` | holds the step list, briefs workers, runs disjoint steps in parallel, integrates, runs the step check, writes ledger entries and commits, decides retry or stop | take design decisions the plan does not settle: it records the question in the plan and continues with independent work; if the whole phase is blocked, it stops with a handoff note |
+| Worker (`.claude/agents/worker.md`) | subagent | Opus 5.5, `high` | one bounded step: code, configs, tests, the step's named checks | surveys, architecture, unasked checks, large runs |
+| Mechanic (`.claude/agents/mechanic.md`) | subagent | Opus 5.5, `medium` | edits by recipe: renames, rewrites by pattern, moves, generated files, list and reference updates | judgement calls (left and reported) |
+| Surveyor (`.claude/agents/surveyor.md`) | subagent, read-only | Opus 5.5, `medium` | fan-out reading of code, data and sources; evidence with locations | recommendations, decisions |
+| Reviewer (`.claude/agents/reviewer.md`) | subagent, read-only, fresh context | Fable 5.1, `high` | checks a finished step against its plan step and the evidence behind its ledger entry | editing, running |
+| Verifier (`.claude/agents/verifier.md`) | subagent, read-only | Opus 5.5, `high` | visual checklist of an evaluated run | paused since 2026-10-05; the user says when it resumes |
+| Adversarial reviewer | Codex, by the user | GPT-6 Astra, `xhigh` | assumes the step is wrong and looks for the most consequential failure, on the commit range and the plan alone | receives no reasoning from the Claude sessions |
+
+Effort escalation: `xhigh` or `max` only after a failed attempt at `high` on the same step, and the failure is recorded in the ledger entry (`lessons`). An agent's model and effort are fixed in its definition; the Agent tool's `model` parameter overrides the model only. When a step is harder than its definition's effort, the orchestrator does it in-session rather than inventing a new agent.
+
+A human-facing decision (what a world should look like, a data deletion under `refs/` or `runs/`, a public contract) is the user's; the planner writes the recommendation into the plan and the orchestrator continues with what does not depend on it (`self-sufficiency`, AGENTS.md).
+
+## A phase, step by step
+
+1. The planner's session ends with the plan section updated and the prompt for the orchestrating session (consolidation plan §8). The prompt points to documents; it repeats nothing an agent can read.
+2. The orchestrator reads the plan section, the ledger entries it names and the files of the first steps, then builds the step order: steps with disjoint file sets run in parallel in background workers; steps that share files run in sequence.
+3. For each step: brief → work → the step's deterministic checks → the orchestrator reads the diff → `reviewer` when the step changes behaviour, a contract or a kernel (not for a one-line fix or a documentation edit) → fixes by the same worker (its context is intact: continue it with SendMessage) → ledger entry → one commit. Duration is measured commit to commit (`AGENTS.md`).
+4. The phase closes with the one judging run the plan names (if any), the plan's status note, §Open items, the memory notes, and the prompt for the next phase.
+
+### The brief
+
+The brief is a worker's only context. It states: the goal in one sentence; the plan step (document and section); the files to change and the files to leave alone; what is already ruled out and why; the exact check commands and their expected results; what not to run; whether to commit; what to report. A brief that cannot be written clearly means the step is not ready to delegate: the planner refines the plan first.
+
+Parallel workers get disjoint file sets. Two steps that must touch the same file are one step, or the second waits. When a worker must experiment destructively on shared files, run it with `isolation: worktree`; the orchestrator merges.
+
+### Verification is scripts first
+
+- Default check of a step: `scripts/evaluation/step_check.py <label> --reference <previous label>` (headless build, the three seed-1 bundles at the minimal configuration with `--audit-access`, bundle comparison, `parameters.py --check`, `check_layout.py`, `process_access.py --check`); `--desktop` only when `src/app` changed. Labels are used once.
+- New behaviour comes with its own deterministic test: a GoogleTest on a synthetic grid of a few hundred cells for a kernel (`tests/`, run as `ctest -R "^<Suite>\."`), a profile check for a run-level invariant (`configs/evaluation/<module>.json`, `scripts/evaluation/checks.py`), a Python unit test for a script. The test states the expected numbers; "looks right" is not a test.
+- One build per step, not per edit. No full ctest, Python suite or desktop launch unless the step changes what they cover, and then only the affected suite (`-R`, `-k`).
+- Runs: the minimal configuration (128 x 64, `--duration 50`, `--climate-resolution 32 --climate-coupling-iterations 2`) for every "did anything change" question; one 256-column run with the default duration per phase close when the phase changes mountains or terrain (the plan names it); 512 columns only when the user asks. Before a run longer than a few minutes, ask whether a smaller one answers the same question and record what the small one cannot show.
+- Agents interpret outputs (`compare_bundles.py` summaries, test counts, check reports, the maps the evaluation renders); they do not eyeball arrays or write per-run scripts. Observed values go into the ledger entry as numbers.
+- A claim of improvement needs the evaluation (`uw.py <module> evaluate`) and, for visual modules, the user's verdict; the verifier is paused.
+
+### Review
+
+`reviewer` gets: the plan step, the commit range or the dirty files, the draft ledger entry, and nothing of the author's reasoning. It answers whether the step is satisfied, whether each claim has evidence, what the minimal configuration could not exercise, and what to fix. Its findings go into the ledger entry (`observed`, `not_run`, `lessons`) or back to the worker. The adversarial review by GPT-6 Astra is the user's step: when a phase closes, the orchestrator lists the commit range and the plan section in the handoff so the user can hand them over; findings the user brings back are new steps or §Open items.
+
+### Budget
+
+- Launch independent subagents in one message; keep working while they run; never poll.
+- Read with excerpts and searches, not whole large files; delegate wide reading to `surveyor`.
+- Prefer the smallest configuration, suite and build that answers the question; say what was skipped.
+- A session writes what it learned where the next agent reads it (`AGENTS.md`, the plan, the ledger, `docs/reference-guides/`, memory) before it ends.
+
+## Configuration
+
+- Agents: `.claude/agents/*.md` (frontmatter `model`, `effort`, `tools`, `disallowedTools`); documented fields at https://code.claude.com/docs/en/sub-agents.md. No `CLAUDE.md` in the repository: `AGENTS.md` is the project file (consolidation plan §8).
+- Session model and effort: the user's `~/.claude/settings.json` (`model: fable`, `modelSettings` with `effortLevel: high` for Fable 5.1 and Opus 5.5). An orchestrating session is started with `--model opus` (or the `/model` command); the agents' models are fixed in their definitions regardless of the session's.
+- Codex (adversarial review): `~/.codex/config.toml` (`gpt-6-astra`, `xhigh`); it reads `~/.codex/AGENTS.md` and the repository's `AGENTS.md`.
