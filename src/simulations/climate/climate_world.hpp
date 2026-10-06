@@ -158,6 +158,7 @@ public:
     float mapfloat(int x, int y) const;
     bool sea(int x, int y) const;
     bool seawrap(int x, int y) const;
+    bool basebelowsea(int x, int y) const;   // the base elevation in whole metres is at or below sea level (planet::basebelowsea)
     bool outline(int x, int y) const;
     int mountainheight(int x, int y) const;
     float mountainheightfloat(int x, int y) const;
@@ -292,6 +293,8 @@ public:
     void setwintermountainrain(int x, int y, int amount);
     int summermountainrain(int x, int y) const;
     void setsummermountainrain(int x, int y, int amount);
+    void setwintermountainrainfloat(int x, int y, float amount);
+    void setsummermountainrainfloat(int x, int y, float amount);
     int janmountainraindir(int x, int y) const;
     void setjanmountainraindir(int x, int y, int amount);
     int julmountainraindir(int x, int y) const;
@@ -520,6 +523,12 @@ inline bool climateworld::seawrap(int x, int y) const
         return 1;
     else
         return 0;
+}
+
+inline bool climateworld::basebelowsea(int x, int y) const
+{
+    UW_FIELD_READ(sea_level);
+    return nom(x, y) <= inputs_.sealevel;
 }
 
 inline bool climateworld::outline(int x, int y) const
@@ -1536,6 +1545,22 @@ inline void climateworld::setsummermountainrain(int x, int y, int amount)
         janmountainrainmap[x][y] = static_cast<float>(amount);
     else
         julmountainrainmap[x][y] = static_cast<float>(amount);
+}
+
+inline void climateworld::setwintermountainrainfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    (jantempmap[x][y] < jultempmap[x][y] ? janmountainrainmap[x][y] : julmountainrainmap[x][y]) = amount;
+}
+
+inline void climateworld::setsummermountainrainfloat(int x, int y, float amount)
+{
+    if (y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    (jantempmap[x][y] >= jultempmap[x][y] ? janmountainrainmap[x][y] : julmountainrainmap[x][y]) = amount;
 }
 
 inline int climateworld::janmountainraindir(int x, int y) const

@@ -33,8 +33,8 @@ struct maritimesample
 
 int coldseasonindex(climateworld& world, int x, int y);
 int warmseasonindex(climateworld& world, int x, int y);
-int coldoceansst(climateworld& world, int x, int y);
-int warmoceansst(climateworld& world, int x, int y);
+float coldoceansst(climateworld& world, int x, int y);
+float warmoceansst(climateworld& world, int x, int y);
 maritimesample sampleupwindmaritimeinfluence(climateworld& world, int season, int x, int y);
 maritimesample storedmaritimeinfluence(climateworld& world, int season, int x, int y);
 void storescaledmaritimeinfluence(climateworld& world, int season, int x, int y, const maritimesample& sample);
@@ -49,22 +49,22 @@ void smoothtemperatures(climateworld& world);
 
 int coldseasonindex(climateworld& world, int x, int y)
 {
-    return (world.jantemp(x, y) <= world.jultemp(x, y)) ? seasonjanuary : seasonjuly;
+    return (world.jantempfloat(x, y) <= world.jultempfloat(x, y)) ? seasonjanuary : seasonjuly;
 }
 
 int warmseasonindex(climateworld& world, int x, int y)
 {
-    return (world.jantemp(x, y) >= world.jultemp(x, y)) ? seasonjanuary : seasonjuly;
+    return (world.jantempfloat(x, y) >= world.jultempfloat(x, y)) ? seasonjanuary : seasonjuly;
 }
 
-int coldoceansst(climateworld& world, int x, int y)
+float coldoceansst(climateworld& world, int x, int y)
 {
-    return world.seasonalsst(coldseasonindex(world, x, y), x, y);
+    return world.seasonalsstfloat(coldseasonindex(world, x, y), x, y);
 }
 
-int warmoceansst(climateworld& world, int x, int y)
+float warmoceansst(climateworld& world, int x, int y)
 {
-    return world.seasonalsst(warmseasonindex(world, x, y), x, y);
+    return world.seasonalsstfloat(warmseasonindex(world, x, y), x, y);
 }
 
 maritimesample sampleupwindmaritimeinfluence(climateworld& world, int season, int x, int y)
@@ -191,8 +191,8 @@ void createcoastalclimateinfluence(climateworld& world)
                 {
                     if (world.sea(x, y) == 1)
                     {
-                        world.setseasonalmaritimeinfluence(season, x, y, 0);
-                        world.setseasonalmaritimethermalanomaly(season, x, y, 0);
+                        world.setseasonalmaritimeinfluencefloat(season, x, y, 0.0f);
+                        world.setseasonalmaritimethermalanomalyfloat(season, x, y, 0.0f);
                         world.setseasonalmaritimefetch(season, x, y, 0);
                     }
                     else
@@ -268,8 +268,8 @@ void createdesertworldrain(climateworld& world)
         {
             for (int i = 0; i <= width; i++)
             {
-                int elev = world.map(i, j);
-                int biggestdiff = 0;
+                float elev = world.mapfloat(i, j);
+                float biggestdiff = 0.0f;
 
                 for (int k = i - 1; k <= i + 1; k++)
                 {
@@ -281,7 +281,7 @@ void createdesertworldrain(climateworld& world)
                     {
                         if (l >= 0 && l <= height)
                         {
-                            int thisdiff = elev - world.map(kk, l);
+                            float thisdiff = elev - world.mapfloat(kk, l);
 
                             if (thisdiff > biggestdiff)
                                 biggestdiff = thisdiff;
@@ -289,14 +289,14 @@ void createdesertworldrain(climateworld& world)
                     }
                 }
 
-                float thisslopemult = (float)biggestdiff / slopefactor;
+                float thisslopemult = biggestdiff / slopefactor;
 
                 float thisfractalmult = (float)fractal[i][j] / maxelev;
 
                 float thisrain = maxrain * thisslopemult * thisfractalmult;
 
-                world.setjanrain(i, j, (int)thisrain);
-                world.setjulrain(i, j, (int)thisrain);
+                world.setjanrainfloat(i, j, thisrain);
+                world.setjulrainfloat(i, j, thisrain);
             }
         }
     });
@@ -309,11 +309,11 @@ void createdesertworldrain(climateworld& world)
         {
             for (int i = 0; i <= width; i++)
             {
-                float oldjanrain = (float)world.janrain(i, j);
-                float oldjulrain = (float)world.julrain(i, j);
+                float oldjanrain = world.janrainfloat(i, j);
+                float oldjulrain = world.julrainfloat(i, j);
                 
-                float jandiff = (float)world.jantemp(i, j) - idealtemp;
-                float juldiff = (float)world.jultemp(i, j) - idealtemp;
+                float jandiff = world.jantempfloat(i, j) - idealtemp;
+                float juldiff = world.jultempfloat(i, j) - idealtemp;
 
                 if (jandiff < 0.0f)
                     jandiff = 0.0f - jandiff;
@@ -336,8 +336,8 @@ void createdesertworldrain(climateworld& world)
                 float newjanrain = oldjanrain * janmult;
                 float newjulrain = oldjulrain * julmult;
                 
-                world.setjanrain(i, j, (int)newjanrain);
-                world.setjulrain(i, j, (int)newjulrain);
+                world.setjanrainfloat(i, j, newjanrain);
+                world.setjulrainfloat(i, j, newjulrain);
             }
         }
     });
@@ -346,8 +346,8 @@ void createdesertworldrain(climateworld& world)
 
     int dist = tuning::climate::desertworld::blurDistance;
 
-    vector<vector<int>> finaljanrain(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-    vector<vector<int>> finaljulrain(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    vector<vector<float>> finaljanrain(ARRAYWIDTH, vector<float>(ARRAYHEIGHT, 0.0f));
+    vector<vector<float>> finaljulrain(ARRAYWIDTH, vector<float>(ARRAYHEIGHT, 0.0f));
 
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
@@ -356,8 +356,8 @@ void createdesertworldrain(climateworld& world)
             for (int i = 0; i <= width; i++)
             {
                 int crount = 0;
-                int jantotal = 0;
-                int jultotal = 0;
+                float jantotal = 0.0f;
+                float jultotal = 0.0f;
 
                 for (int k = i - dist; k <= i + dist; k++)
                 {
@@ -369,19 +369,16 @@ void createdesertworldrain(climateworld& world)
                     {
                         if (l >= 0 && l <= height)
                         {
-                            jantotal = jantotal + world.janrain(i, j);
-                            jultotal = jultotal + world.julrain(i, j);
+                            jantotal = jantotal + world.janrainfloat(i, j);
+                            jultotal = jultotal + world.julrainfloat(i, j);
 
                             crount++;
                         }
                     }
                 }
 
-                float newjanrain = (float)jantotal / (float)crount;
-                float newjulrain = (float)jultotal / (float)crount;
-
-                finaljanrain[i][j] = (int)newjanrain;
-                finaljulrain[i][j] = (int)newjulrain;
+                finaljanrain[i][j] = jantotal / (float)crount;
+                finaljulrain[i][j] = jultotal / (float)crount;
             }
         }
     });
@@ -392,8 +389,8 @@ void createdesertworldrain(climateworld& world)
         {
             for (int i = 0; i <= width; i++)
             {
-                world.setjanrain(i, j, finaljanrain[i][j]);
-                world.setjulrain(i, j, finaljulrain[i][j]);
+                world.setjanrainfloat(i, j, finaljanrain[i][j]);
+                world.setjulrainfloat(i, j, finaljulrain[i][j]);
             }
         }
     });
@@ -441,11 +438,11 @@ void adjustseasonalrainfall(climateworld& world, vector<vector<int>>& inland)
                 {
                     float med = 1.0f;
 
-                    float diff = (float)(abs(world.maxtemp(i, j) - avemedmaxtemp));
+                    float diff = std::fabs(world.maxtempfloat(i, j) - static_cast<float>(avemedmaxtemp));
 
                     med = med - diff * medmaxtempdifffactor;
 
-                    diff = minmedcoldtemp - world.mintemp(i, j);
+                    diff = minmedcoldtemp - world.mintempfloat(i, j);
 
                     if (diff > 0.0f)
                         med = med - diff * medmintempdifffactor;
@@ -521,16 +518,16 @@ void adjustseasonalrainfall(climateworld& world, vector<vector<int>>& inland)
             {
                 if (mediterranean[i][j] != 0)
                 {
-                    float winterrain = (float)world.winterrain(i, j);
-                    float summerrain = (float)world.summerrain(i, j);
+                    float winterrain = world.winterrainfloat(i, j);
+                    float summerrain = world.summerrainfloat(i, j);
 
                     float rainshift = summerrain * medstrength * mediterranean[i][j];
 
                     winterrain = winterrain + rainshift;
                     summerrain = summerrain - rainshift;
 
-                    world.setwinterrain(i, j, (int)winterrain);
-                    world.setsummerrain(i, j, (int)summerrain);
+                    world.setwinterrainfloat(i, j, winterrain);
+                    world.setsummerrainfloat(i, j, summerrain);
                 }
             }
         }
@@ -562,14 +559,14 @@ void adjustseasonalrainfall(climateworld& world, vector<vector<int>>& inland)
                 currentwinteradd = currentwinteradd + winterstep;
                 currentsummeradd = currentsummeradd + summerstep;
 
-                float currentjan = float(world.janrain(i, j));
-                float currentjul = float(world.julrain(i, j));
+                float currentjan = world.janrainfloat(i, j);
+                float currentjul = world.julrainfloat(i, j);
 
                 currentjan = currentjan + currentjan * currentwinteradd;
                 currentjul = currentjul + currentjul * currentsummeradd;
 
-                world.setjanrain(i, j, (int)currentjan);
-                world.setjulrain(i, j, (int)currentjul);
+                world.setjanrainfloat(i, j, currentjan);
+                world.setjulrainfloat(i, j, currentjul);
             }
 
             float tropicsouth = (float)world.horse(i, 3);
@@ -585,14 +582,14 @@ void adjustseasonalrainfall(climateworld& world, vector<vector<int>>& inland)
                 currentwinteradd = currentwinteradd + winterstep;
                 currentsummeradd = currentsummeradd + summerstep;
 
-                float currentjan = float(world.janrain(i, j));
-                float currentjul = float(world.julrain(i, j));
+                float currentjan = world.janrainfloat(i, j);
+                float currentjul = world.julrainfloat(i, j);
 
                 currentjan = currentjan + currentjan * currentsummeradd;
                 currentjul = currentjul + currentjul * currentwinteradd;
 
-                world.setjanrain(i, j, (int)currentjan);
-                world.setjulrain(i, j, (int)currentjul);
+                world.setjanrainfloat(i, j, currentjan);
+                world.setjulrainfloat(i, j, currentjul);
             }
         }
 
@@ -709,8 +706,8 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
     int height = world.height();
     int sealevel = world.sealevel();
 
-    vector<vector<int>> smoothedjanrain(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-    vector<vector<int>> smoothedjulrain(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    vector<vector<float>> smoothedjanrain(ARRAYWIDTH, vector<float>(ARRAYHEIGHT, 0.0f));
+    vector<vector<float>> smoothedjulrain(ARRAYWIDTH, vector<float>(ARRAYHEIGHT, 0.0f));
 
     for (int n = 0; n < 5; n++) // Quick basic smooth, which will include smoothing from one mountain tile to the next.
     {
@@ -721,9 +718,9 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
                 for (int i = 0; i <= width; i++)
                 {
                     int crount = 0;
-                    int jantotal = 0;
-                    int jultotal = 0;
-                    int centreheight = world.map(i, j);
+                    float jantotal = 0.0f;
+                    float jultotal = 0.0f;
+                    float centreheight = world.mapfloat(i, j);
 
                     for (int k = i - 1; k <= i + 1; k++)
                     {
@@ -736,10 +733,10 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
                         {
                             if (l >= 0 && l <= height)
                             {
-                                if (abs(centreheight - world.map(kk, l)) < 150)
+                                if (std::fabs(centreheight - world.mapfloat(kk, l)) < 150.0f)
                                 {
-                                    jantotal = jantotal + world.janrain(kk, l);
-                                    jultotal = jultotal + world.julrain(kk, l);
+                                    jantotal = jantotal + world.janrainfloat(kk, l);
+                                    jultotal = jultotal + world.julrainfloat(kk, l);
                                     crount++;
                                 }
                             }
@@ -761,8 +758,8 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
             {
                 for (int i = 0; i <= width; i++)
                 {
-                    world.setjanrain(i, j, smoothedjanrain[i][j]);
-                    world.setjulrain(i, j, smoothedjulrain[i][j]);
+                    world.setjanrainfloat(i, j, smoothedjanrain[i][j]);
+                    world.setjulrainfloat(i, j, smoothedjulrain[i][j]);
                 }
             }
         });
@@ -812,8 +809,8 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
                                 {
                                     if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) < maxmountainheight)
                                     {
-                                        jantotal = jantotal + world.janrain(kk, l);
-                                        jultotal = jultotal + world.julrain(kk, l);
+                                        jantotal = jantotal + world.janrainfloat(kk, l);
+                                        jultotal = jultotal + world.julrainfloat(kk, l);
                                         crount++;
                                     }
                                 }
@@ -831,22 +828,22 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
 
                             if (world.sea(im, jmm) == 0 && world.mountainheightfloat(im, jmm) < maxmountainheight && (world.mountainheightfloat(im, jm) < maxmountainheight || world.mountainheightfloat(i, jm) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(im, jmm);
-                                jultotal = jultotal + world.julrain(im, jmm);
+                                jantotal = jantotal + world.janrainfloat(im, jmm);
+                                jultotal = jultotal + world.julrainfloat(im, jmm);
                                 crount++;
                             }
 
                             if (world.sea(i, jmm) == 0 && world.mountainheightfloat(i, jmm) < maxmountainheight && (world.mountainheightfloat(im, jm) < maxmountainheight || world.mountainheightfloat(i, jm) < maxmountainheight || world.mountainheightfloat(ip, jm) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(i, jmm);
-                                jultotal = jultotal + world.julrain(i, jmm);
+                                jantotal = jantotal + world.janrainfloat(i, jmm);
+                                jultotal = jultotal + world.julrainfloat(i, jmm);
                                 crount++;
                             }
 
                             if (world.sea(ip, jmm) == 0 && world.mountainheightfloat(ip, jmm) < maxmountainheight && (world.mountainheightfloat(i, jm) < maxmountainheight || world.mountainheightfloat(ip, jm) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(ip, jmm);
-                                jultotal = jultotal + world.julrain(ip, jmm);
+                                jantotal = jantotal + world.janrainfloat(ip, jmm);
+                                jultotal = jultotal + world.julrainfloat(ip, jmm);
                                 crount++;
                             }
 
@@ -854,22 +851,22 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
 
                             if (world.sea(im, jpp) == 0 && world.mountainheightfloat(im, jpp) < maxmountainheight && (world.mountainheightfloat(im, jp) < maxmountainheight || world.mountainheightfloat(i, jp) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(im, jpp);
-                                jultotal = jultotal + world.julrain(im, jpp);
+                                jantotal = jantotal + world.janrainfloat(im, jpp);
+                                jultotal = jultotal + world.julrainfloat(im, jpp);
                                 crount++;
                             }
 
                             if (world.sea(i, jpp) == 0 && world.mountainheightfloat(i, jpp) < maxmountainheight && (world.mountainheightfloat(im, jp) < maxmountainheight || world.mountainheightfloat(i, jp) < maxmountainheight || world.mountainheightfloat(ip, jp) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(i, jpp);
-                                jultotal = jultotal + world.julrain(i, jpp);
+                                jantotal = jantotal + world.janrainfloat(i, jpp);
+                                jultotal = jultotal + world.julrainfloat(i, jpp);
                                 crount++;
                             }
 
                             if (world.sea(ip, jpp) == 0 && world.mountainheightfloat(ip, jpp) < maxmountainheight && (world.mountainheightfloat(i, jp) < maxmountainheight || world.mountainheightfloat(ip, jp) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(ip, jpp);
-                                jultotal = jultotal + world.julrain(ip, jpp);
+                                jantotal = jantotal + world.janrainfloat(ip, jpp);
+                                jultotal = jultotal + world.julrainfloat(ip, jpp);
                                 crount++;
                             }
 
@@ -877,22 +874,22 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
 
                             if (world.sea(imm, jm) == 0 && world.mountainheightfloat(imm, jm) < maxmountainheight && (world.mountainheightfloat(im, jm) < maxmountainheight || world.mountainheightfloat(im, j) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(imm, jm);
-                                jultotal = jultotal + world.julrain(imm, jm);
+                                jantotal = jantotal + world.janrainfloat(imm, jm);
+                                jultotal = jultotal + world.julrainfloat(imm, jm);
                                 crount++;
                             }
 
                             if (world.sea(imm, j) == 0 && world.mountainheightfloat(imm, j) < maxmountainheight && (world.mountainheightfloat(im, jm) < maxmountainheight || world.mountainheightfloat(im, j) < maxmountainheight || world.mountainheightfloat(im, jp) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(imm, j);
-                                jultotal = jultotal + world.julrain(imm, j);
+                                jantotal = jantotal + world.janrainfloat(imm, j);
+                                jultotal = jultotal + world.julrainfloat(imm, j);
                                 crount++;
                             }
 
                             if (world.sea(imm, jp) == 0 && world.mountainheightfloat(imm, jp) < maxmountainheight && (world.mountainheightfloat(im, j) < maxmountainheight || world.mountainheightfloat(im, jp) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(imm, jp);
-                                jultotal = jultotal + world.julrain(imm, jp);
+                                jantotal = jantotal + world.janrainfloat(imm, jp);
+                                jultotal = jultotal + world.julrainfloat(imm, jp);
                                 crount++;
                             }
 
@@ -900,22 +897,22 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
 
                             if (world.sea(ipp, jm) == 0 && world.mountainheightfloat(ipp, jm) < maxmountainheight && (world.mountainheightfloat(ip, jm) < maxmountainheight || world.mountainheightfloat(ip, j) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(ipp, jm);
-                                jultotal = jultotal + world.julrain(ipp, jm);
+                                jantotal = jantotal + world.janrainfloat(ipp, jm);
+                                jultotal = jultotal + world.julrainfloat(ipp, jm);
                                 crount++;
                             }
 
                             if (world.sea(ipp, j) == 0 && world.mountainheightfloat(ipp, j) < maxmountainheight && (world.mountainheightfloat(ip, jm) < maxmountainheight || world.mountainheightfloat(ip, j) < maxmountainheight || world.mountainheightfloat(ip, jp) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(ipp, j);
-                                jultotal = jultotal + world.julrain(ipp, j);
+                                jantotal = jantotal + world.janrainfloat(ipp, j);
+                                jultotal = jultotal + world.julrainfloat(ipp, j);
                                 crount++;
                             }
 
                             if (world.sea(ipp, jp) == 0 && world.mountainheightfloat(ipp, jp) < maxmountainheight && (world.mountainheightfloat(ip, j) < maxmountainheight || world.mountainheightfloat(ip, jp) < maxmountainheight))
                             {
-                                jantotal = jantotal + world.janrain(ipp, jp);
-                                jultotal = jultotal + world.julrain(ipp, jp);
+                                jantotal = jantotal + world.janrainfloat(ipp, jp);
+                                jultotal = jultotal + world.julrainfloat(ipp, jp);
                                 crount++;
                             }
                         }
@@ -925,8 +922,8 @@ void smoothrainfall(climateworld& world, int maxmountainheight)
                             jantotal = jantotal / crount;
                             jultotal = jultotal / crount;
 
-                            world.setjanrain(i, j, (int)jantotal);
-                            world.setjulrain(i, j, (int)jultotal);
+                            world.setjanrainfloat(i, j, jantotal);
+                            world.setjulrainfloat(i, j, jultotal);
                         }
                     }
                 }
@@ -956,16 +953,16 @@ void caprainfall(climateworld& world)
             {
                 for (int season = 0; season < CLIMATESEASONCOUNT; season++)
                 {
-                    float seasonalrain = static_cast<float>(world.seasonalrain(season, i, j));
+                    float seasonalrain = world.seasonalrainfloat(season, i, j);
 
                     if (seasonalrain > maxrain)
                         seasonalrain = (seasonalrain - maxrain) * capfactor + maxrain;
 
-                    world.setseasonalrain(season, i, j, static_cast<int>(std::max(0.0f, seasonalrain)));
+                    world.setseasonalrainfloat(season, i, j, std::max(0.0f, seasonalrain));
                 }
 
-                float janrain = (float)world.janrain(i, j);
-                float julrain = (float)world.julrain(i, j);
+                float janrain = world.janrainfloat(i, j);
+                float julrain = world.julrainfloat(i, j);
 
                 if (janrain > maxrain)
                 {
@@ -987,10 +984,10 @@ void caprainfall(climateworld& world)
                 if (julrain < 0.0f)
                     julrain = 0.0f;
 
-                world.setjanrain(i, j, (int)janrain);
-                world.setjulrain(i, j, (int)julrain);
-                world.setseasonalrain(seasonjanuary, i, j, (int)janrain);
-                world.setseasonalrain(seasonjuly, i, j, (int)julrain);
+                world.setjanrainfloat(i, j, janrain);
+                world.setjulrainfloat(i, j, julrain);
+                world.setseasonalrainfloat(seasonjanuary, i, j, janrain);
+                world.setseasonalrainfloat(seasonjuly, i, j, julrain);
             }
         }
     });
@@ -1007,18 +1004,18 @@ void caprainfall(climateworld& world)
             {
                 for (int i = 0; i <= width; i++)
                 {
-                    float averain = (float)((world.janrain(i, j) + world.julrain(i, j)) / 2);
+                    float averain = (world.janrainfloat(i, j) + world.julrainfloat(i, j)) / 2.0f;
 
                     if (averain > 0.0f)
                     {
-                        float thisjanrain = (float)world.janrain(i, j) * adjustfactor + averain * (10.0f - adjustfactor);
-                        float thisjulrain = (float)world.julrain(i, j) * adjustfactor + averain * (10.0f - adjustfactor);
+                        float thisjanrain = world.janrainfloat(i, j) * adjustfactor + averain * (10.0f - adjustfactor);
+                        float thisjulrain = world.julrainfloat(i, j) * adjustfactor + averain * (10.0f - adjustfactor);
 
                         thisjanrain = thisjanrain * reducefactor;
                         thisjulrain = thisjulrain * reducefactor;
 
-                        world.setjanrain(i, j, (int)thisjanrain);
-                        world.setjulrain(i, j, (int)thisjulrain);
+                        world.setjanrainfloat(i, j, thisjanrain);
+                        world.setjulrainfloat(i, j, thisjulrain);
                     }
                 }
             }
@@ -1247,7 +1244,6 @@ void createseaicemap(climateworld& world, vector<vector<int>>& fractal)
         return;
     int width = world.width();
     int height = world.height();
-    int sealevel = world.sealevel();
     int maxelev = world.maxelevation();
 
     int permice = -3;
@@ -1270,7 +1266,7 @@ void createseaicemap(climateworld& world, vector<vector<int>>& fractal)
     {
         for (int j = 0; j <= height; j++)
         {
-            if (world.nom(i, j) <= sealevel && coldoceansst(world, i, j) <= seasice)
+            if (world.basebelowsea(i, j) && coldoceansst(world, i, j) <= seasice)
             {
                 foundcoldwater = 1;
                 break;
@@ -1287,11 +1283,11 @@ void createseaicemap(climateworld& world, vector<vector<int>>& fractal)
         {
             for (int i = 0; i <= width; i++)
             {
-                if (world.nom(i, j) > sealevel)
+                if (!world.basebelowsea(i, j))
                     continue;
 
-                int warmtotal = 0;
-                int coldtotal = 0;
+                float warmtotal = 0.0f;
+                float coldtotal = 0.0f;
                 int crount = 0;
 
                 for (int k = -tempdist; k <= tempdist; k++)
@@ -1307,7 +1303,7 @@ void createseaicemap(climateworld& world, vector<vector<int>>& fractal)
                         {
                             int ll = j + l;
 
-                            if (ll >= 0 && ll <= height && world.nom(kk, ll) <= sealevel)
+                            if (ll >= 0 && ll <= height && world.basebelowsea(kk, ll))
                             {
                                 warmtotal = warmtotal + warmoceansst(world, kk, ll);
                                 coldtotal = coldtotal + coldoceansst(world, kk, ll);
@@ -1320,8 +1316,9 @@ void createseaicemap(climateworld& world, vector<vector<int>>& fractal)
                 if (crount == 0)
                     continue;
 
-                int warmsst = warmtotal / crount + (fractal[i][j] / adjustfactor) - maxadjust / 2;
-                int coldsst = coldtotal / crount + (fractal[i][j] / adjustfactor) - maxadjust / 2;
+                const float fractaladjust = static_cast<float>((fractal[i][j] / adjustfactor) - maxadjust / 2);
+                float warmsst = warmtotal / static_cast<float>(crount) + fractaladjust;
+                float coldsst = coldtotal / static_cast<float>(crount) + fractaladjust;
 
                 if (warmsst <= permice)
                     world.setseaice(i, j, 2);
@@ -1393,7 +1390,7 @@ void createmountainprecipitation(climateworld& world)
 
                     int windfromcellx = -1;
                     int windfromcelly = -1;
-                    int highestamount = -1;
+                    float highestamount = -1.0f;
 
                     for (int k = i - 1; k <= i + 1; k++)
                     {
@@ -1408,9 +1405,9 @@ void createmountainprecipitation(climateworld& world)
                             {
                                 if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) == 0 && world.craterrimfloat(kk, l) == 0)
                                 {
-                                    if (world.winterrain(kk, l) > highestamount)
+                                    if (world.winterrainfloat(kk, l) > highestamount)
                                     {
-                                        highestamount = world.winterrain(kk, l);
+                                        highestamount = world.winterrainfloat(kk, l);
                                         windfromcellx = kk;
                                         windfromcelly = l;
                                     }
@@ -1434,9 +1431,9 @@ void createmountainprecipitation(climateworld& world)
                                 {
                                     if (world.wintermountainraindir(kk, l) != 0)
                                     {
-                                        if (world.winterrain(kk, l) > highestamount)
+                                        if (world.winterrainfloat(kk, l) > highestamount)
                                         {
-                                            highestamount = world.winterrain(kk, l);
+                                            highestamount = world.winterrainfloat(kk, l);
                                             windfromcellx = kk;
                                             windfromcelly = l;
                                         }
@@ -1449,7 +1446,7 @@ void createmountainprecipitation(climateworld& world)
                     // Now find the average precipitation of neighbouring cells.
 
                     short crount = 0;
-                    int total = 0;
+                    float total = 0.0f;
 
                     for (int k = i - 1; k <= i + 1; k++)
                     {
@@ -1465,7 +1462,7 @@ void createmountainprecipitation(climateworld& world)
                                 if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) == 0 && world.craterrimfloat(kk, l) == 0)
                                 {
                                     crount++;
-                                    total = total + world.winterrain(kk, l);
+                                    total = total + world.winterrainfloat(kk, l);
                                 }
                             }
                         }
@@ -1487,7 +1484,7 @@ void createmountainprecipitation(climateworld& world)
                                     if (world.wintermountainraindir(kk, l) != 0)
                                     {
                                         crount++;
-                                        total = total + world.winterrain(kk, l);
+                                        total = total + world.winterrainfloat(kk, l);
                                     }
                                 }
                             }
@@ -1507,12 +1504,12 @@ void createmountainprecipitation(climateworld& world)
                         if (thisheight < totalmountaineffect) // Reduce the strength of this.
                             effect = thisheight / totalmountaineffect;
 
-                        float rainamount = (float)total / (float)crount;
-                        float rainamount2 = (float)world.winterrain(i, j);
+                        float rainamount = total / (float)crount;
+                        float rainamount2 = world.winterrainfloat(i, j);
 
                         float newrainamount = (rainamount * effect) + (rainamount2 * (1.0f - effect));
 
-                        world.setwintermountainrain(i, j, (int)newrainamount);
+                        world.setwintermountainrainfloat(i, j, newrainamount);
 
                         int dir = getdir(windfromcellx, windfromcelly, i, j);
                         world.setwintermountainraindir(i, j, dir);
@@ -1531,7 +1528,7 @@ void createmountainprecipitation(climateworld& world)
 
                     int windfromcellx = -1;
                     int windfromcelly = -1;
-                    int highestamount = -1;
+                    float highestamount = -1.0f;
 
                     for (int k = i - 1; k <= i + 1; k++)
                     {
@@ -1546,9 +1543,9 @@ void createmountainprecipitation(climateworld& world)
                             {
                                 if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) == 0 && world.craterrimfloat(kk, l) == 0)
                                 {
-                                    if (world.summerrain(kk, l) > highestamount)
+                                    if (world.summerrainfloat(kk, l) > highestamount)
                                     {
-                                        highestamount = world.summerrain(kk, l);
+                                        highestamount = world.summerrainfloat(kk, l);
                                         windfromcellx = kk;
                                         windfromcelly = l;
                                     }
@@ -1572,9 +1569,9 @@ void createmountainprecipitation(climateworld& world)
                                 {
                                     if (world.summermountainraindir(kk, l) != 0)
                                     {
-                                        if (world.summerrain(kk, l) > highestamount)
+                                        if (world.summerrainfloat(kk, l) > highestamount)
                                         {
-                                            highestamount = world.summerrain(kk, l);
+                                            highestamount = world.summerrainfloat(kk, l);
                                             windfromcellx = kk;
                                             windfromcelly = l;
                                         }
@@ -1587,7 +1584,7 @@ void createmountainprecipitation(climateworld& world)
                     // Now find the average precipitation of neighbouring cells.
 
                     short crount = 0;
-                    int total = 0;
+                    float total = 0.0f;
 
                     for (int k = i - 1; k <= i + 1; k++)
                     {
@@ -1603,7 +1600,7 @@ void createmountainprecipitation(climateworld& world)
                                 if (world.sea(kk, l) == 0 && world.mountainheightfloat(kk, l) == 0 && world.craterrimfloat(kk, l) == 0)
                                 {
                                     crount++;
-                                    total = total + world.summerrain(kk, l);
+                                    total = total + world.summerrainfloat(kk, l);
                                 }
                             }
                         }
@@ -1625,7 +1622,7 @@ void createmountainprecipitation(climateworld& world)
                                     if (world.summermountainraindir(kk, l) != 0)
                                     {
                                         crount++;
-                                        total = total + world.summerrain(kk, l);
+                                        total = total + world.summerrainfloat(kk, l);
                                     }
                                 }
                             }
@@ -1645,12 +1642,12 @@ void createmountainprecipitation(climateworld& world)
                         if (thisheight < totalmountaineffect) // Reduce the strength of this.
                             effect = thisheight / totalmountaineffect;
 
-                        float rainamount = (float)total / (float)crount;
-                        float rainamount2 = (float)world.summerrain(i, j);
+                        float rainamount = total / (float)crount;
+                        float rainamount2 = world.summerrainfloat(i, j);
 
                         float newrainamount = (rainamount * effect) + (rainamount2 * (1.0f - effect));
 
-                        world.setsummermountainrain(i, j, (int)newrainamount);
+                        world.setsummermountainrainfloat(i, j, newrainamount);
 
                         int dir = getdir(windfromcellx, windfromcelly, i, j);
                         world.setsummermountainraindir(i, j, dir);

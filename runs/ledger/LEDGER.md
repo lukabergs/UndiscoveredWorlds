@@ -124,6 +124,7 @@ Lessons:
 | `world-0068` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 13: io/climate_reference_tests.cpp split |
 | `world-0069` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 14: phase close |
 | `world-0070` | 2026-10-06 | equivalent | keep | climate rules on the float accessors (section 11, Later): the count before the move and the reference step check |
+| `world-0071` | 2026-10-06 | equivalent | keep | climate rules on the float accessors, 1 of 3: climate_fields.cpp (module climate) |
 
 Lessons:
 
@@ -248,3 +249,4 @@ Lessons:
 - `world-0069`: Splitting a long test body is fastest when the sections' shared state is listed first (which variables, which config state each section saw) and the assertion literals are compared by script afterwards; reading the body once and writing all tests in one pass took 3 to 9 minutes per file.
 - `world-0070`: step_check.py refuses a label whose directory already holds any <label>-* entry, including a log written there by hand; keep logs in a subdirectory.
 - `world-0070`: A count of whole-number calls must strip comments: a commented-out block held 16 of the calls counted earlier.
+- `world-0071`: climateworld now has basebelowsea; the nom() <= sealevel tests left in climate_winds.cpp, climate_ocean_currents.cpp, climate_sea_surface_temperature.cpp and climate_stages.cpp can use it when those files are next touched.
