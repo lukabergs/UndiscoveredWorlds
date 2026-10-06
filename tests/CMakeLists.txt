@@ -33,6 +33,7 @@ if(TARGET uw_climate_world)
         simulations/climate/climate_transport_tests.cpp
         simulations/climate/climate_weather_tests.cpp
         simulations/landscape/landscape_tests.cpp
+        simulations/landscape/stream_power_tests.cpp
     )
     # Planet-free libraries only on its link line: climate, its stage runner, its
     # validation and the landscape kernels must not need the world class.

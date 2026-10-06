@@ -31,6 +31,7 @@ namespace landscape
 struct StreamPowerParameters
 {
     double step_myr = 1.0;                      // dt
+    double baselevel_m = 0.0;                   // the sea surface: the receiver elevation of every outlet
     double areaexponent = 0.5;                  // m
     double slopeexponent = 1.0;                 // n; Phase A accepts 1 only (the implicit step is linear in the slope)
     double depositioncoefficient = 1.0;         // G of Yuan et al. 2019; 0 is detachment-limited
