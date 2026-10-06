@@ -58,6 +58,7 @@ Lessons:
 | `erosion-0019` | 2026-10-07 | equivalent | keep | erosion plan, step C7: the fluvial erosion joins the time model |
 | `erosion-0020` | 2026-10-07 | mechanism in place; little land built at the current sediment supply | keep | erosion plan, step C5b: progradation at river mouths and distributaries on the new land |
 | `erosion-0021` | 2026-10-07 | law in place; effect to judge at 256 columns | keep | erosion plan, step C8: local isostatic rebound during the erosion run |
+| `erosion-0022` | 2026-10-07 | pending user review | keep | erosion plan, step C9: the Phase C judging run (erosion run 5) and the close |
 
 Lessons:
 
@@ -92,6 +93,7 @@ Lessons:
 - `erosion-0020`: A cap measured only by how many cells it turns into land needs an uncapped run of the same code: here every capped prograded cell was land without the cap too, so the cap's effect was elsewhere (heights, spills).
 - `erosion-0020`: Access measured on a world where a field stays zero misses its writes: measure a new field's writer on the size where it changes.
 - `erosion-0021`: An isostatic response with different fractions for removal and loading creates column whenever material only moves: check a mass-moving kernel's response for volume neutrality before choosing densities.
+- `erosion-0022`: A phase whose steps each pass a minimal parity check can still need one tracked run at the judging size before the close: four of Phase C's access gaps showed only at 256 columns.
 
 ## tectonics
 
