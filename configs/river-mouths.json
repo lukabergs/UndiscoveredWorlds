@@ -1,0 +1,25 @@
+{
+  "description": "Approximate mouth coordinates and mean discharges of twenty large rivers, authored from memory by an agent on 2026-10-06 without checking a source; validation data for earth-hydrology only, never an input; the user reviews or replaces it, e.g. from the GRDC data in refs/source/physical/grdc-wmo-2024",
+  "rivers": [
+    {"name": "Amazon", "lon": -50.0, "lat": -0.5, "discharge_m3_s": 209000},
+    {"name": "Congo", "lon": 12.3, "lat": -6.0, "discharge_m3_s": 41000},
+    {"name": "Ganges-Brahmaputra", "lon": 90.6, "lat": 22.2, "discharge_m3_s": 38000},
+    {"name": "Orinoco", "lon": -61.0, "lat": 8.6, "discharge_m3_s": 33000},
+    {"name": "Yangtze", "lon": 121.9, "lat": 31.4, "discharge_m3_s": 30000},
+    {"name": "Yenisei", "lon": 82.5, "lat": 71.8, "discharge_m3_s": 19600},
+    {"name": "Paraná (Río de la Plata)", "lon": -57.5, "lat": -34.8, "discharge_m3_s": 18000},
+    {"name": "Lena", "lon": 127.0, "lat": 72.8, "discharge_m3_s": 17000},
+    {"name": "Mississippi", "lon": -89.3, "lat": 29.1, "discharge_m3_s": 16800},
+    {"name": "Mekong", "lon": 106.6, "lat": 9.8, "discharge_m3_s": 16000},
+    {"name": "Tocantins", "lon": -48.5, "lat": -1.2, "discharge_m3_s": 13600},
+    {"name": "Irrawaddy", "lon": 95.0, "lat": 15.9, "discharge_m3_s": 13000},
+    {"name": "Ob", "lon": 72.6, "lat": 67.0, "discharge_m3_s": 12500},
+    {"name": "Amur", "lon": 141.0, "lat": 52.9, "discharge_m3_s": 11400},
+    {"name": "St. Lawrence", "lon": -64.5, "lat": 49.2, "discharge_m3_s": 10100},
+    {"name": "Mackenzie", "lon": -135.0, "lat": 69.0, "discharge_m3_s": 9900},
+    {"name": "Pearl (Zhujiang)", "lon": 113.6, "lat": 22.3, "discharge_m3_s": 9500},
+    {"name": "Volga", "lon": 47.8, "lat": 45.8, "discharge_m3_s": 8000},
+    {"name": "Columbia", "lon": -124.0, "lat": 46.2, "discharge_m3_s": 7500},
+    {"name": "Niger", "lon": 6.0, "lat": 4.5, "discharge_m3_s": 5600}
+  ]
+}

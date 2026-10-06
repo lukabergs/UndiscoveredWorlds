@@ -2,20 +2,23 @@
 
 Map comparisons use the per-field evaluation of score.py, so each field's loss is
 defined as in global-balanced-v1. Distribution comparisons (hypsometry) use the tectonics Earth
-reference measurements. References are never inputs to a simulation.
+reference measurements; river_mouths compares the routing's largest outlets with the authored
+table configs/river-mouths.json. References are never inputs to a simulation.
 """
+import json
 import re
 import sys
 from pathlib import Path
 
 import numpy as np
 
+from checks import DIRECTION_OFFSETS, has_neighbour, receiver_values, whole_metres
 from references import MONTH_DAYS
 from score import DEFINITION as PALETTE, VERSION as SCORE_VERSION, WEIGHTS, evaluate, magnitude, weights
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from uwtools import regions  # noqa: E402
+from uwtools import grid, regions  # noqa: E402
 from uwtools.hashing import sha256  # noqa: E402
 
 SELECTOR = re.compile(r'^([a-z]+\.[a-z0-9_]+)(?:\[(\d+|@[A-Za-z0-9_.-]+)\])?$')
@@ -236,6 +239,80 @@ def compare_hypsometry(bundle, spec, baseline=None):
     return result
 
 
+RIVER_FIELDS = ('hydrosphere.flow_direction', 'hydrosphere.discharge', 'geosphere.base_elevation',
+                'geosphere.sea_level', 'planetbody.radius')
+
+
+def river_outlets(bundle):
+    """(longitude, latitude, discharge) of the land cells whose flow direction points to a sea cell,
+    largest discharge first (ties in row-major order). Sea is the base elevation in whole metres at
+    or below sea level; longitude wraps and a polar row has no neighbour beyond the pole."""
+    sea = whole_metres(bundle.load('geosphere.base_elevation').astype(float)) <= float(bundle.scalar('geosphere.sea_level'))
+    direction = bundle.load('hydrosphere.flow_direction')
+    outlet = np.zeros(sea.shape, dtype=bool)
+    for code, (dx, dy) in DIRECTION_OFFSETS.items():
+        outlet |= ~sea & (direction == code) & has_neighbour(sea.shape, dy) & receiver_values(sea, dx, dy)
+    y, x = np.nonzero(outlet)
+    discharge = bundle.load('hydrosphere.discharge').astype(float)[y, x]
+    order = np.argsort(-discharge, kind='stable')
+    rows, columns = sea.shape
+    return grid.longitudes(columns)[x[order]], grid.latitudes(rows)[y[order]], discharge[order]
+
+
+def great_circle_km(lon1, lat1, lon2, lat2, radius_m):
+    """Haversine distance (km) on a sphere of the given radius; arguments in degrees, broadcast."""
+    lon1, lat1, lon2, lat2 = (np.deg2rad(np.asarray(value, dtype=float)) for value in (lon1, lat1, lon2, lat2))
+    h = np.sin((lat2 - lat1) / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
+    return 2 * radius_m * np.arcsin(np.sqrt(np.clip(h, 0, 1))) / 1000
+
+
+def measure_river_mouths(bundle, rivers, top, match_km):
+    lon, lat, discharge = river_outlets(bundle)
+    count = len(discharge)
+    lon, lat, discharge = lon[:top], lat[:top], discharge[:top]
+    radius = float(bundle.scalar('planetbody.radius'))
+    listed, comparison = [], {}
+    for river in rivers:
+        distances = great_circle_km(river['lon'], river['lat'], lon, lat, radius)
+        nearest = int(np.argmin(distances)) if len(distances) else None
+        distance = float(distances[nearest]) if nearest is not None else None
+        matched = distance is not None and distance <= match_km
+        entry = {'name': river['name'], 'distance_km': distance, 'matched': bool(matched),
+                 'outlet_discharge_m3_s': float(discharge[nearest]) if matched else None,
+                 'observed_discharge_m3_s': river['discharge_m3_s']}
+        if nearest is not None:
+            entry['outlet'] = {'lon': float(lon[nearest]), 'lat': float(lat[nearest])}
+        listed.append(entry)
+        comparison[f"{river['name']}: distance_km"] = distance
+        comparison[f"{river['name']}: matched outlet discharge_m3_s"] = entry['outlet_discharge_m3_s']
+    distances = [entry['distance_km'] for entry in listed if entry['distance_km'] is not None]
+    metrics = {'matched': sum(entry['matched'] for entry in listed), 'table_rivers': len(listed),
+               'median_distance_km': float(np.median(distances)) if distances else None,
+               'largest_outlet_discharge_m3_s': float(discharge[0]) if count else None,
+               'outlets': count, 'top': int(top), 'match_km': float(match_km)}
+    return {'metrics': metrics, 'earth_comparison': comparison, 'rivers': listed,
+            'top_outlets': [{'lon': float(a), 'lat': float(b), 'discharge_m3_s': float(q)}
+                            for a, b, q in zip(lon, lat, discharge)]}
+
+
+def compare_river_mouths(bundle, spec, baseline=None):
+    """The `top` largest-discharge outlets of the routing against an authored table of Earth's river mouths.
+
+    A table river is matched when one of the top outlets lies within match_km of its mouth;
+    the median distance is over the table rivers, each to its nearest top outlet."""
+    path = ROOT / spec['table']
+    table = json.loads(path.read_text(encoding='utf-8'))
+    top, match_km = int(spec.get('top', 20)), float(spec.get('match_km', 500))
+    result = {'reference': f"{path.name}: {len(table['rivers'])} authored river mouths, top {top} outlets, "
+                           f"match within {match_km:g} km",
+              'table': path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix(),
+              'table_sha256': sha256(path), 'note': table.get('description', '')}
+    for key, source in (('run', bundle), ('baseline', baseline)):
+        if source is not None:
+            result[key] = measure_river_mouths(source, table['rivers'], top, match_km)
+    return result
+
+
 def field_losses(comparison, key):
     """Season-mean loss of one map comparison, as rank() in the climate report."""
     entries = [season[key]['loss'] for season in comparison.values()]
@@ -272,6 +349,13 @@ def run_validation(bundle, specs, references, baseline=None):
     for spec in specs:
         if spec['kind'] == 'hypsometry':
             distributions[spec['id']] = compare_hypsometry(bundle, spec, baseline)
+        elif spec['kind'] == 'river_mouths':
+            missing = [field for field in RIVER_FIELDS if field not in bundle.fields or
+                       (baseline is not None and field not in baseline.fields)]
+            if missing:
+                skipped.append({'id': spec['id'], 'reason': 'model fields absent: ' + ', '.join(missing)})
+            else:
+                distributions[spec['id']] = compare_river_mouths(bundle, spec, baseline)
         elif not available(bundle, spec) or (baseline is not None and not available(baseline, spec)):
             skipped.append({'id': spec['id'], 'reason': 'model fields absent: ' + ', '.join(spec['model'])})
         else:

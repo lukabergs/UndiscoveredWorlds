@@ -93,3 +93,6 @@ desktop.ini
 notes.txt
 temp/extra/
 .codex_tmp/
+
+# Git worktrees of background agents (Claude Code isolation)
+.claude/worktrees/

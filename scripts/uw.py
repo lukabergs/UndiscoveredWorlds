@@ -6,13 +6,13 @@ Modules and commands:
     climate|tectonics|world|erosion run  registered run: the next id of runs/registry/<module>.json, run in runs/<module>/<id>/
                        with the registered settings of configs/evaluation/<module>.json (run.json, log.txt,
                        bundle/, checkpoints/, evaluation/, ledger-entry.json; scripts/evaluation/experiment.py)
-    climate|tectonics|world|erosion experiment  unregistered scratch run + evaluation with the profile's settings
+    climate|tectonics|world|erosion|hydrology experiment  unregistered scratch run + evaluation with the profile's settings
                        (out/evaluation/<module>/ unless --archive runs/reports/<name>); --repeat runs twice
                        and checks that the bundles are identical
-    climate|tectonics|world|erosion evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR] [--checkpoints DIR])
+    climate|tectonics|world|erosion|hydrology evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR] [--checkpoints DIR])
     tectonics report   comparison page of the evaluations of registered runs (--runs A B ...), in runs/reports/tectonics/
     geology   run      tectonics bundles at each width, scored against Earth references (out/bench/geology)
-    climate|tectonics|world|erosion report --evaluation DIR [DIR ...] [--output DIR]
+    climate|tectonics|world|erosion|hydrology report --evaluation DIR [DIR ...] [--output DIR]
                        pages from evaluation.json (scripts/evaluation/report.py): one DIR rewrites its run
                        page (index.html, report.md); several give a comparison page, the first DIR being the
                        baseline, in --output (default out/evaluation/<module>/comparison)
@@ -50,7 +50,8 @@ EVALUATION = ROOT / 'scripts/evaluation'
 COMMANDS = {'tectonics': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'), 'geology': ('run',),
             'climate': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
             'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
-            'erosion': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review')}
+            'erosion': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
+            'hydrology': ('report', 'experiment', 'evaluate', 'review')}
 
 
 def call(command):
@@ -213,7 +214,7 @@ def main():
             parser.error('--evaluation belongs to report')
         pages(args, extra)
         return
-    if args.module in ('world', 'erosion', 'climate') and args.command == 'report':
+    if args.module in ('world', 'erosion', 'climate', 'hydrology') and args.command == 'report':
         parser.error(f'{args.module} report requires --evaluation DIR [DIR ...]')
     {'tectonics': tectonics, 'geology': geology}[args.module](args, extra)
 
