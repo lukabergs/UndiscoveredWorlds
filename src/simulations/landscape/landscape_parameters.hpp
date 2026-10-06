@@ -45,6 +45,7 @@ inline float criticalSlope = 0.0f;
 namespace marine
 {
 inline float sedimentTravelKm = 300.0f;
+inline float deltaTopM = 1.5f;
 }
 
 namespace erosion
@@ -100,11 +101,6 @@ inline bool randomised = true;
 inline bool resolveFlats = true;
 }
 
-namespace deltas
-{
-inline float halfChanceSedimentM3Yr = 5000000.0f;
-}
-
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -129,6 +125,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.hillslope.diffusivity_km2_myr", &hillslope::diffusivityKm2Myr },
         { "landscape.hillslope.critical_slope", &hillslope::criticalSlope },
         { "landscape.marine.sediment_travel_km", &marine::sedimentTravelKm },
+        { "landscape.marine.delta_top_m", &marine::deltaTopM },
         { "landscape.erosion.duration_myr", &erosion::durationMyr },
         { "landscape.erosion.step_myr", &erosion::stepMyr },
         { "landscape.erosion.uplift_m_myr", &erosion::upliftMMyr },
@@ -150,7 +147,6 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.roughness.persistence", &roughness::persistence },
         { "landscape.routing.randomised", &routing::randomised },
         { "landscape.routing.resolve_flats", &routing::resolveFlats },
-        { "landscape.deltas.half_chance_sediment_m3_yr", &deltas::halfChanceSedimentM3Yr },
     };
     return entries;
 }

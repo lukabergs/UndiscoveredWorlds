@@ -126,6 +126,7 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(deposition_rate, geosphere, f32, grid, "m/Myr", "Mean deposition rate over the erosion run") \
     X(denudation, geosphere, f32, grid, "m", "Cumulative denudation of the erosion run") \
     X(aggradation, geosphere, f32, grid, "m", "Cumulative aggradation of the erosion run") \
+    X(prograded, geosphere, u8, grid, "0/1", "Land built by marine deposition over the erosion run: sea at its start, land at its end") \
     X(erosion_duration, geosphere, f32, scalar, "Myr", "Duration of the erosion run") \
     X(eroded_volume, geosphere, f32, scalar, "km3", "Volume eroded over the erosion run") \
     X(land_deposited_volume, geosphere, f32, scalar, "km3", "Volume deposited on land over the erosion run") \

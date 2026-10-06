@@ -3,6 +3,7 @@
 # world_tests links this library (tests/CMakeLists.txt).
 add_library(uw_landscape STATIC
     depressions.cpp
+    distributaries.cpp
     flow_graph.cpp
     lake_balance.cpp
     relief_roughness.cpp

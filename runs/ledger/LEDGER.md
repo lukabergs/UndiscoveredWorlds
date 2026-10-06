@@ -55,6 +55,7 @@ Lessons:
 | `erosion-0017` | 2026-10-06 | contract in place; other recipes identical | keep | erosion plan, step C6: recipe steps with labels and overrides; eroded-world runs a coarse climate before the erosion |
 | `erosion-0018` | 2026-10-06 | flux in place; delta chance superseded by C5b | keep | erosion plan, step C5a: the erosion's sediment flux and the delta chance from it |
 | `erosion-0019` | 2026-10-07 | equivalent | keep | erosion plan, step C7: the fluvial erosion joins the time model |
+| `erosion-0020` | 2026-10-07 | mechanism in place; little land built at the current sediment supply | keep | erosion plan, step C5b: progradation at river mouths and distributaries on the new land |
 
 Lessons:
 
@@ -86,6 +87,8 @@ Lessons:
 - `erosion-0017`: A reference built on another step's tree does not show a merged step's effect: rerun the step check on the merged tree before the entry cites numbers.
 - `erosion-0018`: A chance law with a reference value must be checked against the model's own distribution of the driver before it is chosen: every outlet here was below a tenth of the reference.
 - `erosion-0019`: A checkpoint path that duplicates the end-of-run writer diverges as soon as a later step adds a field to one of them: share one writer before others edit the function.
+- `erosion-0020`: A cap measured only by how many cells it turns into land needs an uncapped run of the same code: here every capped prograded cell was land without the cap too, so the cap's effect was elsewhere (heights, spills).
+- `erosion-0020`: Access measured on a world where a field stays zero misses its writes: measure a new field's writer on the size where it changes.
 
 ## tectonics
 

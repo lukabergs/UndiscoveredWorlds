@@ -223,6 +223,7 @@ struct geospherestate
     worldgrid<std::uint8_t> depositionpotentialmap;
     worldgrid<std::uint8_t> floodplainfertilitymap;
     worldgrid<float> erodibilitymap, erosionratemap, depositionratemap, denudationmap, aggradationmap;
+    worldgrid<std::uint8_t> progradedmap;
     float itserosionduration = 0.0f, itserodedvolume = 0.0f, itslanddepositedvolume = 0.0f, itsmarinedepositedvolume = 0.0f;
     worldgrid<std::uint8_t> metalorereservemap;
     worldgrid<std::uint8_t> placerreservemap;

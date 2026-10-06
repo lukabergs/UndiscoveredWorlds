@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
+#include <cstdint>
 #include <vector>
 
 #include "core/deterministic_random.hpp"
@@ -47,6 +49,7 @@ landscape::StreamPowerParameters kernelparameters(double baselevel)
     parameters.hillslopediffusivity_km2_myr = t::hillslope::diffusivityKm2Myr;
     parameters.criticalslope = t::hillslope::criticalSlope;
     parameters.sedimenttravel_km = t::marine::sedimentTravelKm;
+    parameters.deltatop_m = t::marine::deltaTopM;
     return parameters;
 }
 
@@ -81,6 +84,7 @@ void writeerosionstate(planet& world, const flowrouting::Inputs& inputs, const s
     worldgrid<float>& denudationfield = world.denudation();
     worldgrid<float>& aggradationfield = world.aggradation();
     worldgrid<float>& sedimentflux = world.sedimentflux();
+    worldgrid<std::uint8_t>& prograded = world.prograded();
     const double megayears = std::max(elapsed, 1.0e-9);
     constexpr double yearspermegayear = 1.0e6;
     for (int y = 0; y < metric.height; y++)
@@ -97,6 +101,8 @@ void writeerosionstate(planet& world, const flowrouting::Inputs& inputs, const s
             // hydrosphere.sediment_flux: the mean over the elapsed time in m^3/yr; 0 on the current sea.
             sedimentflux[x][y] = routing.sea[cell] ? 0.0f
                 : static_cast<float>(sediment[cell] / (megayears * yearspermegayear));
+            // geosphere.prograded (erosion plan C5b): sea when the run started, land now.
+            prograded[x][y] = inputs.sea[cell] != 0 && routing.sea[cell] == 0 ? 1 : 0;
         }
     }
     world.seterosionduration(static_cast<float>(elapsed));
@@ -162,6 +168,8 @@ void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& ch
         total.landdeposited_km3 += budget.landdeposited_km3;
         total.marinedeposited_km3 += budget.marinedeposited_km3;
         total.depositionsweeps += budget.depositionsweeps;
+        total.strandedloads += budget.strandedloads;
+        total.stranded_km3 += budget.stranded_km3;
         for (std::size_t cell = 0; cell < size; cell++)
         {
             denudation[cell] += steperosion[cell];
@@ -184,4 +192,7 @@ void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& ch
     // uplift 0 the stream-power steps lower the terrain or deposit below the terrain
     // upstream, so the ceiling stays valid.
     writeerosionstate(world, inputs, elevation, erodibility, denudation, aggradation, sediment, total, duration);
+    if (total.strandedloads > 0)
+        std::cout << "Fluvial erosion: " << total.strandedloads << " marine load(s) found no sea cell below the delta top ("
+                  << total.stranded_km3 << " km3 of " << total.marinedeposited_km3 << " km3 marine)\n";
 }

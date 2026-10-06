@@ -558,6 +558,9 @@ public:
     worldgrid<float>& denudation() { return geosphere_.denudationmap; }
     const worldgrid<float>& aggradation() const { UW_FIELD_READ(aggradation); return geosphere_.aggradationmap; }
     worldgrid<float>& aggradation() { return geosphere_.aggradationmap; }
+    // Erosion plan C5b: land built by marine deposition over the erosion run (0/1).
+    const worldgrid<std::uint8_t>& prograded() const { UW_FIELD_READ(prograded); return geosphere_.progradedmap; }
+    worldgrid<std::uint8_t>& prograded() { return geosphere_.progradedmap; }
     float radius() const { UW_FIELD_READ(radius); return body_.itsradius_m; }
     void setradius(float amount) { body_.itsradius_m = amount; }
     float erosionduration() const { UW_FIELD_READ(erosion_duration); return geosphere_.itserosionduration; }

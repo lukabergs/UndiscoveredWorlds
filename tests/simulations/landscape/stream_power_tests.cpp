@@ -428,6 +428,239 @@ TEST_F(Landscape, StreamPowerSedimentFluxGrowsDownstreamWithoutDeposition)
             << "column " << x;
 }
 
+namespace
+{
+// The sea cells off the chain and off the sea column: their own receivers, at `depth_m`.
+void setopensea(Domain& domain, double depth_m)
+{
+    for (std::size_t cell = 0; cell < domain.metric.size(); cell++)
+    {
+        if (domain.graph.land[cell] != 0
+            || std::find(domain.seacolumn.begin(), domain.seacolumn.end(), cell) != domain.seacolumn.end())
+            continue;
+        domain.elevation[cell] = static_cast<float>(-depth_m);
+    }
+}
+
+// Every sea cell at or below the delta top, and the sea's deposits sum to the
+// step's marine volume.
+void expectfilledandspilled(const Domain& domain, const StreamPowerBudget& budget, double top)
+{
+    double seatotal_m3 = 0.0;
+    for (std::size_t cell = 0; cell < domain.metric.size(); cell++)
+    {
+        if (domain.graph.land[cell] != 0)
+            continue;
+        EXPECT_LE(domain.elevation[cell], top + 1.0e-4) << "sea cell " << cell;
+        seatotal_m3 += static_cast<double>(domain.deposition[cell]) * domain.metric.area_m2(cell);
+    }
+    const double marine_m3 = budget.marinedeposited_km3 * 1.0e9;
+    EXPECT_NEAR(seatotal_m3, marine_m3, 1.0e-6 * marine_m3);
+    EXPECT_EQ(budget.strandedloads, 0);
+    EXPECT_EQ(budget.stranded_km3, 0.0);
+    EXPECT_NEAR(budget.eroded_km3, budget.landdeposited_km3 + budget.marinedeposited_km3, 1.0e-9 * budget.eroded_km3);
+}
+}
+
+TEST_F(Landscape, StreamPowerProgradationFillsShallowMouthCellsToTheDeltaTop)
+{
+    // Erosion plan C5b: a shallow sea column (1 to 4 m deep) in front of an eroding
+    // hill, the open sea 1 km deep. Each sea cell on the path keeps no more than raises
+    // it to the delta top, so every cell of the column, the pit included, stands at
+    // baselevel + delta top (land under the whole-metre mask); the pit's remainder
+    // spills into the open sea, and the budget still closes.
+    const int seacells = 4;
+    Domain domain = makedomain(seacells, 100.0f);
+    sethill(domain);
+    setopensea(domain, 1000.0);
+    for (int k = 0; k < seacells; k++)
+        domain.elevation[domain.seacolumn[static_cast<std::size_t>(k)]] = static_cast<float>(-1.0 * (k + 1));
+    StreamPowerParameters parameters = makeparameters(1.0, 1.0, 200.0);
+    parameters.deltatop_m = 1.5;
+    const std::vector<float> before = domain.elevation;
+    const StreamPowerBudget budget = step(domain, parameters);
+
+    EXPECT_GT(budget.marinedeposited_km3, 0.0);
+    const double top = parameters.baselevel_m + parameters.deltatop_m;
+    for (int k = 0; k < seacells; k++)
+    {
+        const std::size_t cell = domain.seacolumn[static_cast<std::size_t>(k)];
+        EXPECT_NEAR(domain.elevation[cell], top, 1.0e-4) << "sea cell " << k;
+        EXPECT_NEAR(domain.deposition[cell], top - before[cell], 1.0e-4) << "sea cell " << k;
+        EXPECT_GT(static_cast<double>(std::lround(domain.elevation[cell])), parameters.baselevel_m) << "sea cell " << k;
+    }
+    expectfilledandspilled(domain, budget, top);
+}
+
+TEST_F(Landscape, StreamPowerProgradationCountsTheEarlierOutletsDeposit)
+{
+    // Two outlets 2 m high on row 7 (columns 1 and 3) drain into one sea cell between
+    // them (column 2, a pit 1 m deep); the open sea is 1 km deep. Their erodibility
+    // is so high that each exports nearly its whole 2 m: the first fits into the pit's
+    // 2.5 m of room, the second does not, so the pit stands at the delta top only if
+    // the first outlet's deposit is counted, and the excess spills into the open sea.
+    Domain domain = makedomain(1, 0.0f, 1);
+    const SphereMetric& metric = domain.metric;
+    FlowGraph& graph = domain.graph;
+    for (std::size_t cell : domain.chain)
+    {
+        graph.land[cell] = 0;
+        graph.outletsea[cell] = -1;
+        graph.receiver[cell] = static_cast<int32_t>(cell);
+        graph.direction[cell] = 0;
+        graph.distance_m[cell] = 0.0f;
+        graph.area_m2[cell] = 0.0;
+        graph.discharge_m3_yr[cell] = 0.0;
+    }
+    graph.order.clear();
+    domain.chain.clear();
+    domain.seacolumn.clear();
+    setopensea(domain, 1000.0);
+    const std::size_t pit = metric.index(2, chainrow);
+    domain.elevation[pit] = -1.0f;
+    for (int x : { 1, 3 })
+    {
+        const std::size_t cell = metric.index(x, chainrow);
+        const int direction = x < 2 ? 3 : westdirection;
+        graph.land[cell] = 1;
+        graph.order.push_back(static_cast<int32_t>(cell));
+        graph.direction[cell] = static_cast<uint8_t>(direction);
+        graph.distance_m[cell] = static_cast<float>(metric.distance_m(cell, direction));
+        graph.outletsea[cell] = static_cast<int32_t>(pit);
+        graph.area_m2[cell] = metric.area_m2(cell);
+        graph.discharge_m3_yr[cell] = runoff_m_yr * graph.area_m2[cell];
+        domain.elevation[cell] = 2.0f;
+        domain.erodibility[cell] = 1.0e7f;
+        domain.chain.push_back(cell);
+    }
+    StreamPowerParameters parameters = makeparameters(1.0, 0.0, 0.0);
+    parameters.deltatop_m = 1.5;
+    const StreamPowerBudget budget = step(domain, parameters);
+
+    const double area = metric.area_m2(pit);
+    const double room = 2.5 * area;
+    const double first = static_cast<double>(domain.erosion[domain.chain[0]]) * area;
+    const double second = static_cast<double>(domain.erosion[domain.chain[1]]) * area;
+    ASSERT_LT(first, room);
+    ASSERT_LT(second, room);
+    ASSERT_GT(first + second, room);
+    const double top = parameters.baselevel_m + parameters.deltatop_m;
+    EXPECT_NEAR(domain.elevation[pit], top, 1.0e-4);
+    const double marine_m3 = budget.marinedeposited_km3 * 1.0e9;
+    EXPECT_NEAR(marine_m3, first + second, 1.0e-5 * marine_m3);
+    EXPECT_NEAR(marine_m3 - static_cast<double>(domain.deposition[pit]) * area, first + second - room, 1.0e-3 * room);
+    expectfilledandspilled(domain, budget, top);
+}
+
+TEST_F(Landscape, StreamPowerProgradationCappedWalkSpillsFromAShallowPit)
+{
+    // The sea column is 1 km deep down to a pit only 1 m deep; the open sea is 1 km
+    // deep. The walk leaves its e-folding shares on the deep cells and ends at the
+    // pit, which fills to the delta top; the rest spills into the open sea.
+    const int seacells = 4;
+    Domain domain = makedomain(seacells, 100.0f);
+    sethill(domain);
+    setopensea(domain, 1000.0);
+    for (int k = 0; k + 1 < seacells; k++)
+        domain.elevation[domain.seacolumn[static_cast<std::size_t>(k)]] = -1000.0f;
+    const std::size_t pit = domain.seacolumn.back();
+    domain.elevation[pit] = -1.0f;
+    StreamPowerParameters parameters = makeparameters(1.0, 1.0, 200.0);
+    parameters.deltatop_m = 1.5;
+    const StreamPowerBudget budget = step(domain, parameters);
+
+    const double top = parameters.baselevel_m + parameters.deltatop_m;
+    EXPECT_NEAR(domain.elevation[pit], top, 1.0e-4);
+    double spilled_m3 = 0.0;
+    for (std::size_t cell = 0; cell < domain.metric.size(); cell++)
+        if (domain.graph.land[cell] == 0
+            && std::find(domain.seacolumn.begin(), domain.seacolumn.end(), cell) == domain.seacolumn.end())
+            spilled_m3 += static_cast<double>(domain.deposition[cell]) * domain.metric.area_m2(cell);
+    EXPECT_GT(spilled_m3, 0.0);
+    expectfilledandspilled(domain, budget, top);
+}
+
+TEST_F(Landscape, StreamPowerProgradationBuildsNothingInADeepSea)
+{
+    // A deep sea (1 to 4 km) and a small load (one low outlet cell): no sea cell gets
+    // near the delta top, so the deposits are those without the cap, bit for bit,
+    // and every sea cell stays below the sea level.
+    const int seacells = 4;
+    Domain capped = makedomain(seacells, 0.0f, 1);
+    capped.elevation[capped.chain[0]] = 10.0f;
+    for (int k = 0; k < seacells; k++)
+        capped.elevation[capped.seacolumn[static_cast<std::size_t>(k)]] = static_cast<float>(-1000.0 * (k + 1));
+    Domain uncapped = capped;
+    StreamPowerParameters parameters = makeparameters(1.0, 1.0, 0.0);
+    const StreamPowerBudget uncappedbudget = step(uncapped, parameters);
+    parameters.deltatop_m = 1.5;
+    const StreamPowerBudget budget = step(capped, parameters);
+
+    EXPECT_GT(budget.marinedeposited_km3, 0.0);
+    EXPECT_EQ(budget.marinedeposited_km3, uncappedbudget.marinedeposited_km3);
+    EXPECT_NEAR(budget.eroded_km3, budget.landdeposited_km3 + budget.marinedeposited_km3, 1.0e-9 * budget.eroded_km3);
+    for (std::size_t cell : capped.seacolumn)
+    {
+        EXPECT_EQ(capped.deposition[cell], uncapped.deposition[cell]);
+        EXPECT_EQ(capped.elevation[cell], uncapped.elevation[cell]);
+        EXPECT_LT(capped.elevation[cell], parameters.baselevel_m);
+    }
+}
+
+TEST_F(Landscape, StreamPowerProgradationStrandsALoadInAnEnclosedSea)
+{
+    // A one-cell sea (column 2 of row 7, 1 m deep) enclosed by land, fed by an outlet
+    // 10 m high at column 1 whose erodibility makes it export nearly all of its 10 m:
+    // more than the sea cell's 2.5 m of room. The cell fills to the delta top, the
+    // spill reaches no sea cell, and the remainder stays on the cell as one stranded load.
+    Domain domain = makedomain(1, 0.0f, 1);
+    const SphereMetric& metric = domain.metric;
+    FlowGraph& graph = domain.graph;
+    for (std::size_t cell : domain.chain)
+    {
+        graph.land[cell] = 0;
+        graph.outletsea[cell] = -1;
+        graph.direction[cell] = 0;
+        graph.distance_m[cell] = 0.0f;
+        graph.area_m2[cell] = 0.0;
+        graph.discharge_m3_yr[cell] = 0.0;
+    }
+    graph.order.clear();
+    domain.chain.clear();
+    domain.seacolumn.clear();
+    setopensea(domain, 1000.0);
+    const std::size_t sea = metric.index(2, chainrow);
+    domain.elevation[sea] = -1.0f;
+    for (int direction = 1; direction <= landscape::directioncount; direction++)
+    {
+        const std::size_t cell = metric.neighbour(sea, direction);
+        graph.land[cell] = 1;  // land around the sea cell, outside the order: unchanged by the step
+        domain.elevation[cell] = 10.0f;
+    }
+    const std::size_t outlet = metric.index(1, chainrow);
+    const int eastdirection = 3;
+    graph.order.push_back(static_cast<int32_t>(outlet));
+    graph.direction[outlet] = static_cast<uint8_t>(eastdirection);
+    graph.distance_m[outlet] = static_cast<float>(metric.distance_m(outlet, eastdirection));
+    graph.outletsea[outlet] = static_cast<int32_t>(sea);
+    graph.area_m2[outlet] = metric.area_m2(outlet);
+    graph.discharge_m3_yr[outlet] = runoff_m_yr * graph.area_m2[outlet];
+    domain.erodibility[outlet] = 1.0e7f;
+    StreamPowerParameters parameters = makeparameters(1.0, 0.0, 0.0);
+    parameters.deltatop_m = 1.5;
+    const StreamPowerBudget budget = step(domain, parameters);
+
+    const double area = metric.area_m2(sea);
+    const double room = 2.5 * area;
+    const double load = static_cast<double>(domain.erosion[outlet]) * metric.area_m2(outlet);
+    ASSERT_GT(load, room);
+    EXPECT_EQ(budget.strandedloads, 1);
+    EXPECT_NEAR(budget.stranded_km3, (load - room) / 1.0e9, 1.0e-6 * load / 1.0e9);
+    EXPECT_NEAR(budget.marinedeposited_km3, load / 1.0e9, 1.0e-6 * load / 1.0e9);
+    EXPECT_NEAR(domain.elevation[sea], -1.0 + load / area, 1.0e-4 * load / area);
+    EXPECT_NEAR(budget.eroded_km3, budget.landdeposited_km3 + budget.marinedeposited_km3, 1.0e-9 * budget.eroded_km3);
+}
+
 TEST_F(Landscape, StreamPowerRejectsInvalidInput)
 {
     Domain domain = makedomain(1, 100.0f);

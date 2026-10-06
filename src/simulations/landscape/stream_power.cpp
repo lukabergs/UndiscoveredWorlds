@@ -4,8 +4,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <queue>
 #include <stdexcept>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -306,11 +309,56 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
 
     // Marine deposition: each outlet's load enters its sea cell and walks down the
     // seabed's receivers, leaving 1 - exp(-d / travel) of what remains at every cell
-    // it leaves over a distance d and all of the rest at a seabed pit. The walk is
-    // capped at the cell count against a cycle; the remainder then stays where the
-    // cap is reached, so the budget still closes.
+    // it leaves over a distance d and the rest at the walk's end: a seabed pit, the
+    // last sea cell before land, or the cell where the cap of one step per cell
+    // (against a cycle) is reached. Progradation (erosion plan C5b), fill and spill:
+    // no sea cell is raised above the delta top (baselevel_m + deltatop_m). A cell
+    // keeps at most the room left below it (less what earlier outlets of this step
+    // laid there); the rest of its share passes on with the load. At the walk's end
+    // the cell keeps what fits and the remainder spills over the sea, lowest current
+    // surface first (a priority walk from the end cell over its 8-connected sea
+    // neighbours, through full cells), filling each cell it reaches up to the delta
+    // top. Only when no sea cell with room is reachable does the remainder stay on
+    // the end cell (counted as stranded), so the budget closes exactly.
     std::vector<double> marine(cells, 0.0);  // m^3
     const double travel = parameters.sedimenttravel_km * metresperkilometre;
+    const double deltatop = parameters.baselevel_m + parameters.deltatop_m;
+    auto room = [&](std::size_t cell) {
+        if (!std::isfinite(deltatop))
+            return std::numeric_limits<double>::infinity();
+        return std::max(0.0, (deltatop - z[cell]) * metric.area_m2(cell) - marine[cell]);
+    };
+    std::vector<uint32_t> reached;  // spill stamps, allocated at the first spill
+    uint32_t stamp = 0;
+    using Candidate = std::pair<double, std::size_t>;  // current surface, cell
+    auto spill = [&](std::size_t start, double load) {
+        if (reached.empty())
+            reached.assign(cells, 0);
+        stamp++;
+        std::priority_queue<Candidate, std::vector<Candidate>, std::greater<Candidate>> queue;
+        auto reach = [&](std::size_t from) {
+            for (int direction = 1; direction <= directioncount; direction++)
+            {
+                const std::size_t next = metric.neighbour(from, direction);
+                if (next == from || graph.land[next] != 0 || reached[next] == stamp)
+                    continue;
+                reached[next] = stamp;
+                queue.push({ z[next] + marine[next] / metric.area_m2(next), next });
+            }
+        };
+        reached[start] = stamp;
+        reach(start);
+        while (load > 0.0 && !queue.empty())
+        {
+            const std::size_t cell = queue.top().second;
+            queue.pop();
+            const double placed = std::min(load, room(cell));
+            marine[cell] += placed;
+            load -= placed;
+            reach(cell);
+        }
+        return load;
+    };
     for (int32_t entry : graph.order)
     {
         const std::size_t outlet = static_cast<std::size_t>(entry);
@@ -325,12 +373,22 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
             const std::size_t next = checkedindex(graph.receiver[cell], cells, "graph.receiver of a sea cell");
             if (next == cell || graph.land[next] != 0 || step >= cells)
             {
-                marine[cell] += load;
+                const double kept = std::min(load, room(cell));
+                marine[cell] += kept;
+                load -= kept;
+                if (load > 0.0)
+                    load = spill(cell, load);
+                if (load > 0.0)
+                {
+                    marine[cell] += load;
+                    budget.strandedloads++;
+                    budget.stranded_km3 += load / cubicmetrespercubickilometre;
+                }
                 break;
             }
             const double distance = static_cast<double>(graph.distance_m[cell]);
             const double fraction = travel > 0.0 ? 1.0 - std::exp(-distance / travel) : 1.0;
-            const double settled = fraction * load;
+            const double settled = std::min(fraction * load, room(cell));
             marine[cell] += settled;
             load -= settled;
             cell = next;

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/climate_seasons.hpp"
+#include "simulations/landscape/distributaries.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 #include "world/planet.hpp"
@@ -80,6 +81,46 @@ void seasonalrunoff(const planet& world, const worldgrid<float>* annualrunoff, i
     if (baseflow > 0.0)
         for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             runoff[season] = (1.0 - baseflow) * runoff[season] + baseflow * annual / CLIMATESEASONCOUNT;
+}
+
+// Distributaries on prograded land (erosion plan C5b), written into the legacy delta
+// fields by landscape::splitdistributaries (distributaries.hpp: the split, its order
+// and the layout the delta fields' readers expect) on the routing's filled surface,
+// with the rivers' January and July flows and landscape.rivers.minimum_flow. Every
+// cell's delta fields are written: 0 except on the delta cells of prograded land.
+void writedistributaries(planet& world, const landscape::SphereMetric& metric, const std::vector<std::uint8_t>& land)
+{
+    const planet& view = world;
+    const std::size_t size = metric.size();
+    const worldgrid<std::uint8_t>& prograded = view.prograded();
+    const worldgrid<std::uint8_t>& direction = view.flowdirection();
+    const worldgrid<float>& filled = view.filledelevation();
+
+    std::vector<std::uint8_t> sea(size), progradedcells(size), codes(size);
+    std::vector<float> surface(size);
+    std::vector<std::int32_t> january(size), july(size);
+    for (std::size_t cell = 0; cell < size; cell++)
+    {
+        const int x = metric.column(cell);
+        const int y = metric.row(cell);
+        sea[cell] = land[cell] ? 0 : 1;
+        progradedcells[cell] = prograded[x][y];
+        codes[cell] = direction[x][y];
+        surface[cell] = filled[x][y];
+        january[cell] = view.riverjan(x, y);
+        july[cell] = view.riverjul(x, y);
+    }
+    const landscape::Distributaries split = landscape::splitdistributaries(
+        metric, sea, progradedcells, surface, static_cast<double>(view.sealevel()), codes, january, july,
+        static_cast<double>(tuning::landscape::rivers::minimumFlow));
+    for (std::size_t cell = 0; cell < size; cell++)
+    {
+        const int x = metric.column(cell);
+        const int y = metric.row(cell);
+        world.setdeltadir(x, y, split.direction[cell]);
+        world.setdeltajan(x, y, split.january[cell]);
+        world.setdeltajul(x, y, split.july[cell]);
+    }
 }
 }
 
@@ -221,5 +262,7 @@ void applyriverstage(planet& world)
             world.setriverjul(mx, my, view.riverjul(mx, my) + july);
         }
     }
+    if (view.erosionduration() > 0.0f)
+        writedistributaries(world, metric, land);
     world.setmaxriverflow();
 }

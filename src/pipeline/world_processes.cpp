@@ -67,7 +67,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
           "Also places salt lakes, adds land noise and fills depressions (terrain edits)." },
         { S::basin_editor, "hydrology.basin_policy", K::editor, false, {}, {}, {}, {}, "" },
         { S::rivers, "hydrology.rivers", K::diagnoser, false, {}, {}, {}, {},
-          "River directions and the January and July flows in legacy units from the routing (erosion plan B1)." },
+          "River directions and the January and July flows in legacy units from the routing (erosion plan B1); in an eroded world also the distributaries on prograded land, in the delta fields, whatever the deltas option (erosion plan C5b)." },
         { S::lakes, "hydrology.lakes", K::detailer, false, {}, {}, {}, {}, "" },
         { S::lake_levels, "hydrology.lake_levels", K::diagnoser, false, {}, {}, {}, {},
           "Lake levels by water balance in the routing's depressions; salt lakes and pans where closed (erosion plan B2)." },
@@ -75,7 +75,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::climates_and_biomes, "climate.classification", K::diagnoser, false, {}, {}, {}, {}, "Writes biomes as well as climate classes." },
         { S::arid_features, "terrain.arid_features", K::detailer, false, {}, {}, {}, {}, "" },
         { S::deltas_wetlands_and_roughness, "hydrology.deltas_and_wetlands", K::detailer, false, {}, {}, {}, {},
-          "Also recomputes climate classes and biomes and writes the climate diagnostics." },
+          "Also recomputes climate classes and biomes and writes the climate diagnostics. Eroded worlds skip the legacy delta placement and its river check, and clear the distributaries of hydrology.rivers when deltas are turned off (erosion plan C5b)." },
         { S::finalize_layers, "layers.finalize", K::diagnoser, true, {}, {}, {}, {},
           "Physical resource layers, gold placers and optional society. In an eroded world it applies the erosion run's exhumation to the deposits, so it runs once per world." },
     };

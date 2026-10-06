@@ -140,6 +140,7 @@ struct planetfieldaccess
         case FieldId::deposition_rate: return op.grid(id, world.geosphere_.depositionratemap);
         case FieldId::denudation: return op.grid(id, world.geosphere_.denudationmap);
         case FieldId::aggradation: return op.grid(id, world.geosphere_.aggradationmap);
+        case FieldId::prograded: return op.grid(id, world.geosphere_.progradedmap);
         case FieldId::erosion_duration: return op.scalar(id, world.geosphere_.itserosionduration);
         case FieldId::eroded_volume: return op.scalar(id, world.geosphere_.itserodedvolume);
         case FieldId::land_deposited_volume: return op.scalar(id, world.geosphere_.itslanddepositedvolume);
