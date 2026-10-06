@@ -25,12 +25,16 @@ struct ReliefRoughness
 };
 
 // Adds the perturbation to the land cells (sea == 0) of `elevation`. The noise is a
-// pure function of the seed and of each cell centre's position on the sphere (so
-// it has no seam at the date line and no stretch at the poles, and does not depend
-// on the grid width beyond its sampling), zero-mean, with a peak magnitude of about
-// amplitude_m. A land cell stays land: it is not lowered to sealevel + 1 m or below
-// by the perturbation. Sea cells are not changed. Deterministic and thread-count
-// independent.
+// function of the seed and of each cell centre's position on the sphere (so it has
+// no seam at the date line and no stretch at the poles), zero-mean in expectation,
+// with a peak magnitude of about amplitude_m when every octave is resolved. The
+// grid resolves an octave whose wavelength is at least twice the north-south cell
+// size; the others get weight 0 and the normalisation stays that of the full
+// octave set, so the value is independent of the grid width up to the octaves the
+// grid resolves (a coarse grid carries less relief). A lowering is scaled by
+// min(1, (elevation - sealevel - 1 m) / amplitude_m), and a land cell is never
+// lowered to sealevel + 1 m or below: it stays land. Sea cells are not changed.
+// Deterministic and thread-count independent.
 void addreliefroughness(const SphereMetric& metric, const ReliefRoughness& roughness, const std::vector<uint8_t>& sea,
                         float sealevel, std::vector<float>& elevation);
 }

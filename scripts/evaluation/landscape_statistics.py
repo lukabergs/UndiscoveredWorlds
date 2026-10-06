@@ -4,7 +4,9 @@ Two validation kinds that measure a bundle without an observed reference map, so
 step of Phase C reports the same numbers from the evaluation instead of from ad hoc scripts:
 
 - drainage_pattern: the routing's direction statistics (the share of land draining due east or
-  west, the share continuing in its receiver's direction), lakes, closed lakes, endorheic land,
+  west, overall and in the latitude bands 0-30, 30-60 and 60-90 degrees; the share continuing in
+  its receiver's direction; the land-mean angle between the receiver displacement and the downhill
+  direction of the filled surface, step C3), lakes, closed lakes, endorheic land,
   deltas, wetlands and the land-mean denudation rate. Context, not a target: the numbers are
   compared with the baseline run.
 - ocean_depths: the area-weighted share of the ocean by depth band against Earth's (ETOPO 2022,
@@ -84,6 +86,43 @@ def land_mask(bundle):
     return whole_metres(bundle.load('geosphere.base_elevation').astype(float)) > float(bundle.scalar('geosphere.sea_level'))
 
 
+def direction_deviation(land, direction, filled, sea_level):
+    """Land-mean absolute angle (degrees) between each land cell's receiver displacement and the
+    local downhill direction of the filled surface (sea cells at the sea level), by central
+    differences (one-sided on the polar rows), on the sphere metric of the routing: east-west
+    spacing cos(latitude) per row (grid.latitudes), a diagonal at the mean spacing of its two rows,
+    north-south spacing pi / rows; outlets point towards their sea cell. Cells without a direction
+    or without a gradient are skipped; None when no cell remains."""
+    rows, columns = direction.shape
+    dx = np.cos(np.deg2rad(grid.latitudes(rows))) * 2.0 * np.pi / columns
+    dy = np.pi / rows
+    surface = np.where(land, filled, sea_level)
+    gradient_east = (np.roll(surface, -1, axis=1) - np.roll(surface, 1, axis=1)) / (2.0 * dx[:, None])
+    north = np.vstack([surface[:1], surface[:-1]])
+    south = np.vstack([surface[1:], surface[-1:]])
+    spacing = np.full(rows, 2.0 * dy)
+    spacing[0] = spacing[-1] = dy
+    gradient_north = (north - south) / spacing[:, None]
+    east = np.zeros(direction.shape)
+    northward = np.zeros(direction.shape)
+    row_index = np.arange(rows)[:, None] * np.ones(direction.shape, dtype=int)
+    for code, (ox, oy) in DIRECTION_OFFSETS.items():
+        mine = direction == code
+        if oy == 0:
+            spacing_east = dx[row_index]
+        else:
+            spacing_east = 0.5 * (dx[row_index] + dx[np.clip(row_index + oy, 0, rows - 1)])
+        east = np.where(mine, ox * spacing_east, east)
+        northward = np.where(mine, -oy * dy, northward)
+    downhill_east, downhill_north = -gradient_east, -gradient_north
+    valid = land & (direction >= 1) & (direction <= 8) & ((downhill_east != 0) | (downhill_north != 0))
+    if not np.any(valid):
+        return None
+    dot = east * downhill_east + northward * downhill_north
+    cross = east * downhill_north - northward * downhill_east
+    return float(np.mean(np.degrees(np.abs(np.arctan2(cross, dot)))[valid]))
+
+
 def measure_drainage_pattern(bundle):
     land = land_mask(bundle)
     direction = bundle.load('hydrosphere.flow_direction').astype(int)
@@ -106,6 +145,16 @@ def measure_drainage_pattern(bundle):
         receivers = int(np.count_nonzero(land_receiver))
         metrics['cells_with_land_receiver'] = receivers
         metrics['share_straight'] = float(np.count_nonzero(straight) / receivers) if receivers else None
+        latitude = np.abs(grid.latitudes(shape[0]))[:, None] * np.ones(shape)
+        for lower, upper in ((0, 30), (30, 60), (60, 90)):
+            band = land & (latitude >= lower) & ((latitude < upper) if upper < 90 else (latitude <= upper))
+            cells = int(np.count_nonzero(band))
+            metrics[f'share_east_west_{lower}_{upper}'] = (float(np.count_nonzero(band & east_west) / cells)
+                                                           if cells else None)
+        if bundle.has('hydrosphere.filled_elevation'):
+            metrics['direction_deviation_deg'] = direction_deviation(
+                land, direction, bundle.load('hydrosphere.filled_elevation').astype(float),
+                float(bundle.scalar('geosphere.sea_level')))
     if bundle.has('hydrosphere.lake_surface'):
         metrics['lake_cells'] = int(np.count_nonzero(bundle.load('hydrosphere.lake_surface') != 0))
     if bundle.has('hydrosphere.special_features'):

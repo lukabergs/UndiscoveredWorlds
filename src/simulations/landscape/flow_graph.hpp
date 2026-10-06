@@ -49,16 +49,30 @@ struct FlowGraph
 
 // How receivers are chosen (erosion plan, Phase C, step C3). The defaults are the
 // deterministic D8 described above.
-// - randomised: a land cell that drains to a lower neighbour picks, among the two
-//   neighbours whose directions bracket its local gradient direction, one with
-//   probabilities that reproduce that direction on average (the intent of Rho8,
-//   Fairfield and Leymarie 1991, on the latitude-longitude metric, whose neighbour
-//   directions are not 45 degrees apart away from the equator). The draw is a pure
-//   function of `seed` and the cell index (core/deterministic_random.hpp), never the
-//   shared random stream, so a routing repeated on the same terrain is identical.
-// - resolveflats: cells of a flat filled surface (a flooded depression or a flat
-//   without a lower neighbour) drain towards lower terrain and away from higher
-//   terrain (Barnes, Lehman and Mulla 2014) instead of following the flood order.
+// - randomised: a land cell that drains to a lower neighbour (the steepest-descent
+//   case above) picks, among the two neighbours whose directions bracket its local
+//   gradient direction, one with probabilities that make the mean displacement
+//   parallel to the gradient (the intent of Rho8, Fairfield and Leymarie 1991, on
+//   the latitude-longitude metric, whose neighbour directions are not 45 degrees
+//   apart away from the equator). The gradient g is D-infinity's (Tarboton 1997):
+//   the steepest of the eight facets formed by the cell, a cardinal and the
+//   adjacent diagonal neighbour, with the metric's distances; with p1, p2 the
+//   offsets to the facet's two neighbours in metres, the second is drawn with
+//   probability |p1 x g| / (|p1 x g| + |p2 x g|), so (1 - f) p1 + f p2 is parallel
+//   to g. The receiver is lower on the filled surface or a sea neighbour (an
+//   outlet, as above); when neither drawn neighbour is, the D8 choice stays. The
+//   draw is a pure function of `seed` and the cell index
+//   (core/deterministic_random.hpp), never the shared random stream, so a routing
+//   repeated on the same terrain is identical.
+// - resolveflats: the cells that follow their flood receiver (a flooded depression
+//   or a flat without a lower neighbour) drain towards their flat's low edges and
+//   away from higher terrain (Barnes, Lehman and Mulla 2014) instead of following
+//   the flood order. Raised cells whose flood-receiver chains leave the fill at the
+//   same cell form a flat whose only low edge is that cell, so a depression's cells
+//   drain through its spill; a connected region of cells at their own terrain and
+//   one filled elevation is a flat whose low edges are the adjacent land cells at
+//   that elevation that drain downhill (a region without one keeps the flood
+//   order). Depressions are not changed.
 struct RoutingOptions
 {
     bool randomised = false;

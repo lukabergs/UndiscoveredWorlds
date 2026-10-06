@@ -64,6 +64,35 @@ class DrainagePatternTests(unittest.TestCase):
         self.assertEqual(metrics["endorheic_cells"], 3)
         self.assertEqual(metrics["delta_cells"], 1)
         self.assertAlmostEqual(metrics["land_mean_erosion_rate_m_myr"], (7 * 9.0 + 21 * 2.0) / 28)
+        # Rows are centred at 67.5, 22.5, -22.5 and -67.5 degrees: rows 1 and 2 are the 0-30 band
+        # (row 1's 7 westward cells of 14), rows 0 and 3 the 60-90 band (northward), none 30-60.
+        self.assertAlmostEqual(metrics["share_east_west_0_30"], 7 / 14)
+        self.assertIsNone(metrics["share_east_west_30_60"])
+        self.assertAlmostEqual(metrics["share_east_west_60_90"], 0.0)
+        self.assertNotIn("direction_deviation_deg", metrics)  # no filled elevation
+
+    def test_direction_deviation(self):
+        """The filled surface rises 100 m per column east of the sea column, so the downhill
+        direction is west, except at column 7, whose east neighbour across the date line is the
+        sea (east). Rows 0, 2 and 3 drain west: 0 degrees, 180 at column 7. Row 1 drains north: 90
+        everywhere. The cell x 3 of row 2 drains north-west: atan2(dy, mean dx of rows 1 and 2) =
+        atan2(pi / 4, cos(22.5) pi / 4) from west."""
+        world = drainage_world()
+        filled = np.zeros((ROWS, COLUMNS), dtype=np.float32)
+        filled[:, 0] = -100.0
+        filled[:, 1:] = 100.0 * np.arange(1, COLUMNS)
+        direction = np.full((ROWS, COLUMNS), 7, dtype=np.uint8)
+        direction[:, 0] = 0
+        direction[1, 1:] = 1
+        direction[2, 3] = 8
+        world["hydrosphere.filled_elevation"] = filled
+        world["hydrosphere.flow_direction"] = direction
+        with tempfile.TemporaryDirectory() as directory:
+            metrics = measure_drainage_pattern(write_bundle(directory, world))
+        diagonal = np.degrees(np.arctan2(1.0, np.cos(np.radians(22.5))))
+        self.assertAlmostEqual(metrics["direction_deviation_deg"], (3 * 180.0 + 7 * 90.0 + diagonal) / 28)
+        self.assertAlmostEqual(metrics["share_east_west_0_30"], 6 / 14)
+        self.assertAlmostEqual(metrics["share_east_west_60_90"], 1.0)
 
 
 class OceanDepthTests(unittest.TestCase):

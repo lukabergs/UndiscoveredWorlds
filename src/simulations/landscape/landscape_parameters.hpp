@@ -88,16 +88,16 @@ inline float floodplainSlope = 0.0002f;
 
 namespace roughness
 {
-inline float amplitudeM = 0.0f;
-inline float wavelengthKm = 0.0f;
-inline int octaves = 1;
-inline float persistence = 0.5f;
+inline float amplitudeM = 30.0f;
+inline float wavelengthKm = 2000.0f;
+inline int octaves = 6;
+inline float persistence = 0.6f;
 }
 
 namespace routing
 {
-inline bool randomised = false;
-inline bool resolveFlats = false;
+inline bool randomised = true;
+inline bool resolveFlats = true;
 }
 
 // Every value above, by its recipe name.

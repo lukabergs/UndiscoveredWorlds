@@ -49,6 +49,7 @@ Lessons:
 | `erosion-0012` | 2026-10-06 | equivalent | keep | erosion plan, step C0: the Phase C contracts |
 | `erosion-0013` | 2026-10-06 | validation in place; the Caspian stays open until the runoff is fixed (C2) | keep | erosion plan, step C1: Earth lakes in earth-hydrology and the HydroSHEDS validation kinds |
 | `erosion-0014` | 2026-10-06 | law in place; discharge comparison worse than C1 (attributed to the rainfall) | keep | erosion plan, step C2: Budyko runoff, transmission losses and winter baseflow |
+| `erosion-0015` | 2026-10-06 | routing unbiased; straightness reduced; look pending (run 5) | keep | erosion plan, step C3: relief roughness, randomised receivers and flat resolution |
 
 Lessons:
 
@@ -72,6 +73,8 @@ Lessons:
 - `erosion-0013`: A lake raster that marks water does not give a lake level: the elevation import under it is a bed (ETOPO keeps lake bathymetry); a check that every lake surface lies at or above its terrain finds such a premise in one run.
 - `erosion-0014`: A climate model's potential evaporation can be several times Earth's over dry land (a bulk formula with a hot dry surface and no surface resistance): check its land distribution against a temperature law before a Budyko curve reads it.
 - `erosion-0014`: A runoff coefficient below one hides an excess of precipitation; replacing it with a physical law can worsen a discharge comparison while improving the model, so report the land water totals beside the comparison.
+- `erosion-0015`: A random choice between two grid neighbours that matches the gradient in mean angle still drifts: a river's heading is its mean displacement, so the probabilities must balance the cross products with the gradient, and a test must sum displacements, not angles.
+- `erosion-0015`: Noise octaves finer than the grid act as per-cell white noise whose slope grows with the width; band-limit them to twice the cell size so a parameter means the same at every width.
 
 ## tectonics
 

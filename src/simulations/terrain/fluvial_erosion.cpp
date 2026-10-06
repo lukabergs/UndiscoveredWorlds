@@ -4,13 +4,18 @@
 #include <cmath>
 #include <vector>
 
+#include "core/deterministic_random.hpp"
 #include "simulations/hydrology/flow_routing.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
+#include "simulations/landscape/relief_roughness.hpp"
 #include "simulations/landscape/stream_power.hpp"
 #include "world/planet.hpp"
 
 namespace
 {
+// Salt of the relief roughness's seed (landscape::ReliefRoughness::seed).
+constexpr int roughnessseedsalt = 0x5266;
+
 // K per cell: the crust-class multiplier times the age factor; the field
 // geosphere.erodibility stores this relative value, the kernel gets it times
 // landscape.stream_power.erodibility.
@@ -68,6 +73,23 @@ void applyfluvialerosionstage(planet& world)
         }
     }
 
+    // Relief roughness (erosion plan C3): the land's sub-cell relief, added once to
+    // the working elevation; it stays in the eroded terrain. It can raise land, so
+    // the result is held to the datum ceiling geosphere.max_elevation.
+    if (t::roughness::amplitudeM != 0.0)
+    {
+        landscape::ReliefRoughness roughness;
+        roughness.amplitude_m = t::roughness::amplitudeM;
+        roughness.wavelength_km = t::roughness::wavelengthKm;
+        roughness.octaves = t::roughness::octaves;
+        roughness.persistence = t::roughness::persistence;
+        roughness.seed = deterministiccontextseed(world.seed(), roughnessseedsalt);
+        landscape::addreliefroughness(metric, roughness, inputs.sea, inputs.sealevel, elevation);
+        const float ceiling = static_cast<float>(world.maxelevation());
+        for (float& height : elevation)
+            height = std::min(height, ceiling);
+    }
+
     const landscape::StreamPowerParameters parameters = kernelparameters(inputs.sealevel);
     const double duration = t::erosion::durationMyr;
     landscape::StreamPowerBudget total;
@@ -116,7 +138,9 @@ void applyfluvialerosionstage(planet& world)
         }
     }
     // geosphere.max_elevation is the datum ceiling the terrain stages clamp to, not
-    // the summit; erosion only lowers the terrain, so the ceiling stays valid.
+    // the summit; the roughness was held to it above, and with uplift 0 the
+    // stream-power steps lower the terrain or deposit below the terrain upstream,
+    // so the ceiling stays valid.
     world.seterosionduration(static_cast<float>(duration));
     world.seterodedvolume(static_cast<float>(total.eroded_km3));
     world.setlanddepositedvolume(static_cast<float>(total.landdeposited_km3));
