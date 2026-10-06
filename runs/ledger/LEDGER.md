@@ -123,6 +123,7 @@ Lessons:
 | `world-0067` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 12: core/climate_grid_tests.cpp split |
 | `world-0068` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 13: io/climate_reference_tests.cpp split |
 | `world-0069` | 2026-10-06 | equivalent | keep | consolidation phase 6, step 14: phase close |
+| `world-0070` | 2026-10-06 | equivalent | keep | climate rules on the float accessors (section 11, Later): the count before the move and the reference step check |
 
 Lessons:
 
@@ -245,3 +246,5 @@ Lessons:
 - `world-0056`: A step's duration is measured commit to commit (git log --format='%h %ci').
 - `world-0057`: When a split recomputes a config state, write down which of the old body's states each section saw (initial, closed exchange, daily freezing steps) before writing the tests; the replay sections and the bottom-stress sections would otherwise have taken the wrong one.
 - `world-0069`: Splitting a long test body is fastest when the sections' shared state is listed first (which variables, which config state each section saw) and the assertion literals are compared by script afterwards; reading the body once and writing all tests in one pass took 3 to 9 minutes per file.
+- `world-0070`: step_check.py refuses a label whose directory already holds any <label>-* entry, including a log written there by hand; keep logs in a subdirectory.
+- `world-0070`: A count of whole-number calls must strip comments: a commented-out block held 16 of the calls counted earlier.
