@@ -259,6 +259,9 @@ public:
     void setseasonalevaporation(int season, int x, int y, int amount);
     float seasonalevaporationfloat(int season, int x, int y) const;
     void setseasonalevaporationfloat(int season, int x, int y, float amount);
+    // Potential evapotranspiration of the rainfall solver (mm/month; erosion plan C2).
+    float seasonalpotentialevaporationfloat(int season, int x, int y) const;
+    void setseasonalpotentialevaporationfloat(int season, int x, int y, float amount);
     int seasonalmaritimeinfluence(int season, int x, int y) const;
     void setseasonalmaritimeinfluence(int season, int x, int y, int amount);
     float seasonalmaritimeinfluencefloat(int season, int x, int y) const;
@@ -368,6 +371,7 @@ private:
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalcurrentumaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalcurrentvmaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalevaporationmaps;
+    std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalpotentialevaporationmaps;
     std::array<std::vector<short>, CLIMATESEASONCOUNT> seasonalmaritimefetchmaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalmaritimeinfluencemaps;
     std::array<std::vector<float>, CLIMATESEASONCOUNT> seasonalmaritimethermalanomalymaps;
@@ -1289,6 +1293,23 @@ inline void climateworld::setseasonalevaporationfloat(int season, int x, int y, 
         return;
 
     seasonalevaporationmaps[season][seasonalclimateindex(x, y)] = amount;
+}
+
+inline float climateworld::seasonalpotentialevaporationfloat(int season, int x, int y) const
+{
+    UW_FIELD_READ(potential_evaporation);
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return 0.0f;
+
+    return seasonalpotentialevaporationmaps[season][seasonalclimateindex(x, y)];
+}
+
+inline void climateworld::setseasonalpotentialevaporationfloat(int season, int x, int y, float amount)
+{
+    if (!validseasonindex(season) || y<0 || y>inputs_.height || x<0 || x>inputs_.width)
+        return;
+
+    seasonalpotentialevaporationmaps[season][seasonalclimateindex(x, y)] = amount;
 }
 
 inline float climateworld::seasonalmaritimeinfluencefloat(int season, int x, int y) const

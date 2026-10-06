@@ -18,7 +18,9 @@
     {"check": "repeat"}
   ],
   "validation": [
-    {"id": "hypsometry", "kind": "hypsometry", "reference_width": 2048}
+    {"id": "hypsometry", "kind": "hypsometry", "reference_width": 2048},
+    {"id": "ocean_depths", "kind": "ocean_depths", "reference_width": 2048},
+    {"id": "drainage_pattern", "kind": "drainage_pattern"}
   ],
   "maps": [
     {"name": "elevation", "title": "Surface elevation (m)", "derived": "surface_elevation", "palette": "tectonics:elevation"},

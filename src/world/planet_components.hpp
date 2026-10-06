@@ -260,6 +260,8 @@ struct hydrospherestate
     worldgrid<std::uint8_t> flowdirectionmap;
     worldgrid<float> drainageareamap, dischargemap, filledelevationmap;
     worldgrid<std::int32_t> depressionidmap;
+    worldgrid<float> runoffmap, sedimentfluxmap;
+    worldgrid<std::uint8_t> importedlakemap;
     worldgrid<short> tidalmap;
     worldgrid<float> riftlakemapsurface;
     worldgrid<float> riftlakemapbed;

@@ -158,6 +158,9 @@ struct planetfieldaccess
         case FieldId::discharge: return op.grid(id, world.hydrosphere_.dischargemap);
         case FieldId::filled_elevation: return op.grid(id, world.hydrosphere_.filledelevationmap);
         case FieldId::depression_id: return op.grid(id, world.hydrosphere_.depressionidmap);
+        case FieldId::runoff: return op.grid(id, world.hydrosphere_.runoffmap);
+        case FieldId::sediment_flux: return op.grid(id, world.hydrosphere_.sedimentfluxmap);
+        case FieldId::imported_lake: return op.grid(id, world.hydrosphere_.importedlakemap);
         case FieldId::rift_lake_bed: return op.grid(id, world.hydrosphere_.riftlakemapbed);
         case FieldId::lake_start: return op.grid(id, world.hydrosphere_.lakestartmap);
         case FieldId::special_features: return op.grid(id, world.hydrosphere_.specials);

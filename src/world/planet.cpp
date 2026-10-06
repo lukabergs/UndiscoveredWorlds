@@ -115,6 +115,9 @@ void planet::resizegrids()
     hydrosphere_.dischargemap.resize(columns, rows);
     hydrosphere_.filledelevationmap.resize(columns, rows);
     hydrosphere_.depressionidmap.resize(columns, rows);
+    hydrosphere_.runoffmap.resize(columns, rows);
+    hydrosphere_.sedimentfluxmap.resize(columns, rows);
+    hydrosphere_.importedlakemap.resize(columns, rows);
     geosphere_.erodibilitymap.resize(columns, rows);
     geosphere_.erosionratemap.resize(columns, rows);
     geosphere_.depositionratemap.resize(columns, rows);
@@ -677,6 +680,9 @@ void planet::clear()
     hydrosphere_.dischargemap.fill(0.0f);
     hydrosphere_.filledelevationmap.fill(0.0f);
     hydrosphere_.depressionidmap.fill(0);
+    hydrosphere_.runoffmap.fill(0.0f);
+    hydrosphere_.sedimentfluxmap.fill(0.0f);
+    hydrosphere_.importedlakemap.fill(0);
     geosphere_.erodibilitymap.fill(0.0f);
     geosphere_.erosionratemap.fill(0.0f);
     geosphere_.depositionratemap.fill(0.0f);

@@ -22,8 +22,10 @@ int directionto(const SphereMetric& metric, std::size_t cell, std::size_t target
 }
 
 FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& elevation,
-                         const std::vector<uint8_t>& sea, float sealevel, const Depressions& depressions)
+                         const std::vector<uint8_t>& sea, float sealevel, const Depressions& depressions,
+                         const RoutingOptions& options)
 {
+    (void)options;  // erosion plan C3 implements randomised and resolveflats
     const std::size_t count = metric.size();
     if (elevation.size() != count || sea.size() != count || depressions.filledelevation.size() != count
         || depressions.depressionid.size() != count || depressions.floodreceiver.size() != count)

@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "core/climate_seasons.hpp"
+#include "core/deterministic_random.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
 #include "world/planet.hpp"
 
@@ -12,6 +13,8 @@ namespace flowrouting
 namespace
 {
 constexpr double secondsperyear = 365.25 * 86400.0;
+// Salt of the routing's per-cell draws (landscape::RoutingOptions::seed).
+constexpr int routingseedsalt = 0x7207;
 }
 
 Inputs gatherinputs(const planet& world)
@@ -26,6 +29,10 @@ Inputs gatherinputs(const planet& world)
     inputs.sea.resize(size);
     inputs.runoff_m_yr.resize(size);
     inputs.sealevel = static_cast<float>(world.sealevel());
+    inputs.routingoptions.randomised = tuning::landscape::routing::randomised;
+    inputs.routingoptions.resolveflats = tuning::landscape::routing::resolveFlats;
+    if (inputs.routingoptions.randomised)  // the seed is read only when a draw needs it
+        inputs.routingoptions.seed = deterministiccontextseed(world.seed(), routingseedsalt);
     for (int y = 0; y < rows; y++)
     {
         for (int x = 0; x < columns; x++)
@@ -70,7 +77,8 @@ Routing route(const Inputs& inputs, const std::vector<float>* elevation)
     routing.sea = elevation != nullptr ? seamask(terrain, inputs.sealevel) : inputs.sea;
     routing.depressions = landscape::filldepressions(inputs.metric, terrain, routing.sea,
                                                      tuning::landscape::depressions::minimumDepthM);
-    routing.graph = landscape::buildflowgraph(inputs.metric, terrain, routing.sea, inputs.sealevel, routing.depressions);
+    routing.graph = landscape::buildflowgraph(inputs.metric, terrain, routing.sea, inputs.sealevel, routing.depressions,
+                                              inputs.routingoptions);
     landscape::accumulateflow(inputs.metric, inputs.runoff_m_yr, routing.graph);
     return routing;
 }

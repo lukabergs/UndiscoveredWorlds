@@ -23,7 +23,8 @@
   ],
   "validation": [
     {"id": "river_mouths", "kind": "river_mouths", "table": "configs/river-mouths.json", "top": 20, "match_km": 500},
-    {"id": "hypsometry", "kind": "hypsometry", "reference_width": 2048}
+    {"id": "hypsometry", "kind": "hypsometry", "reference_width": 2048},
+    {"id": "drainage_pattern", "kind": "drainage_pattern"}
   ],
   "maps": [
     {"name": "elevation", "title": "Surface elevation (m)", "derived": "surface_elevation", "palette": "tectonics:elevation"},

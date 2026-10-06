@@ -540,6 +540,14 @@ public:
     worldgrid<float>& filledelevation() { return hydrosphere_.filledelevationmap; }
     const worldgrid<std::int32_t>& depressionid() const { UW_FIELD_READ(depression_id); return hydrosphere_.depressionidmap; }
     worldgrid<std::int32_t>& depressionid() { return hydrosphere_.depressionidmap; }
+    // Erosion plan Phase C: the routing's runoff (C2), the erosion's sediment flux (C5)
+    // and the lake mask of an imported lake raster (C1).
+    const worldgrid<float>& runoff() const { UW_FIELD_READ(runoff); return hydrosphere_.runoffmap; }
+    worldgrid<float>& runoff() { return hydrosphere_.runoffmap; }
+    const worldgrid<float>& sedimentflux() const { UW_FIELD_READ(sediment_flux); return hydrosphere_.sedimentfluxmap; }
+    worldgrid<float>& sedimentflux() { return hydrosphere_.sedimentfluxmap; }
+    const worldgrid<std::uint8_t>& importedlake() const { UW_FIELD_READ(imported_lake); return hydrosphere_.importedlakemap; }
+    worldgrid<std::uint8_t>& importedlake() { return hydrosphere_.importedlakemap; }
     const worldgrid<float>& erodibility() const { UW_FIELD_READ(erodibility); return geosphere_.erodibilitymap; }
     worldgrid<float>& erodibility() { return geosphere_.erodibilitymap; }
     const worldgrid<float>& erosionrate() const { UW_FIELD_READ(erosion_rate); return geosphere_.erosionratemap; }
@@ -666,6 +674,7 @@ public:
     int seasonalrain(int season, int x, int y) const;
     void setseasonalrain(int season, int x, int y, int amount);
     float seasonalrainfloat(int season, int x, int y) const;
+    float seasonalpotentialevaporationfloat(int season, int x, int y) const;
     float seasonaltempfloat(int season, int x, int y) const;
     void setseasonaltempfloat(int season, int x, int y, float amount);
     void setseasonalrainfloat(int season, int x, int y, float amount);
@@ -1746,6 +1755,8 @@ inline int planet::seasonalrain(int season, int x, int y) const { return climate
 inline void planet::setseasonalrain(int season, int x, int y, int amount) { climate_.setseasonalrain(season, x, y, amount); }
 
 inline float planet::seasonalrainfloat(int season, int x, int y) const { return climate_.seasonalrainfloat(season, x, y); }
+
+inline float planet::seasonalpotentialevaporationfloat(int season, int x, int y) const { return climate_.seasonalpotentialevaporationfloat(season, x, y); }
 
 inline float planet::seasonaltempfloat(int season, int x, int y) const { return climate_.seasonaltempfloat(season, x, y); }
 

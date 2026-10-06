@@ -33,6 +33,9 @@ if(TARGET uw_climate_world)
         simulations/climate/climate_transport_tests.cpp
         simulations/climate/climate_weather_tests.cpp
         simulations/landscape/lake_balance_tests.cpp
+        simulations/landscape/relief_roughness_tests.cpp
+        simulations/landscape/routing_options_tests.cpp
+        simulations/landscape/runoff_tests.cpp
         simulations/landscape/landscape_tests.cpp
         simulations/landscape/stream_power_tests.cpp
     )

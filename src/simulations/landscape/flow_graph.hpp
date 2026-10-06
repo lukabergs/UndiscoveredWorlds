@@ -47,6 +47,25 @@ struct FlowGraph
     std::size_t size() const { return receiver.size(); }
 };
 
+// How receivers are chosen (erosion plan, Phase C, step C3). The defaults are the
+// deterministic D8 described above.
+// - randomised: a land cell that drains to a lower neighbour picks, among the two
+//   neighbours whose directions bracket its local gradient direction, one with
+//   probabilities that reproduce that direction on average (the intent of Rho8,
+//   Fairfield and Leymarie 1991, on the latitude-longitude metric, whose neighbour
+//   directions are not 45 degrees apart away from the equator). The draw is a pure
+//   function of `seed` and the cell index (core/deterministic_random.hpp), never the
+//   shared random stream, so a routing repeated on the same terrain is identical.
+// - resolveflats: cells of a flat filled surface (a flooded depression or a flat
+//   without a lower neighbour) drain towards lower terrain and away from higher
+//   terrain (Barnes, Lehman and Mulla 2014) instead of following the flood order.
+struct RoutingOptions
+{
+    bool randomised = false;
+    std::uint64_t seed = 0;
+    bool resolveflats = false;
+};
+
 // Receivers, directions, distances, outlets and the order; area and discharge are
 // zero until accumulateflow. `sea` marks sea cells (1); `elevation` is the terrain
 // of every cell; a sea neighbour of a land cell counts with elevation `sealevel`;
@@ -54,7 +73,8 @@ struct FlowGraph
 // and supplies the receivers of flooded and pit cells. Ties in the steepest descent
 // go to the lowest direction code, so the result is deterministic.
 FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& elevation,
-                         const std::vector<uint8_t>& sea, float sealevel, const Depressions& depressions);
+                         const std::vector<uint8_t>& sea, float sealevel, const Depressions& depressions,
+                         const RoutingOptions& options = {});
 
 // Area and discharge accumulated along `order` reversed. `runoff_m_yr` is the
 // runoff depth per cell per year (sea cells ignored): discharge = sum over the

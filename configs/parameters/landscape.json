@@ -10,17 +10,24 @@
   "hillslope.critical_slope": "0 turns the limiter off; otherwise the diffusion acts on max(0, gradient - critical_slope).",
   "runoff": "runoff = coefficient x annual precipitation x (1 - snow_reduction x snow fraction) x (1 - ice_reduction x ice fraction); the snow fraction is the share of the seasons with a mean temperature below snow_temperature_c, the ice fraction is 1 where every season is below it. Evaporation-based runoff is a Phase B refinement.",
   "erosion.uplift_m_myr": "Uniform rock uplift during the erosion run; 0 in Phase A (post-tectonic denudation). The engine's rate replaces it in Phase D.",
-  "isostasy.rebound_fraction": "Read from Phase C (step C3); 0 until then.",
+  "isostasy.rebound_fraction": "Read from Phase C (step C8); 0 until then.",
   "rivers.minimum_flow": "A cell is a river where its annual mean flow in legacy units (river_factor) reaches this; 3 is the flow of one mean-sized cell under the legacy source threshold of 40 mm/month (40 / 15 = 2.7).",
   "lakes.evaporation_*": "Open-water evaporation E = evaporation_per_c x max(0, T - evaporation_zero_c) in m/yr, T the annual mean air temperature of the depression: 2.0 m/yr at 25 C, 0.9 at 10 C, 0.15 at 0 C.",
-  "potentials.*_reference_rate_m_myr": "The rate that maps to a score of 100: score = 100 x log10(1 + rate) / log10(1 + reference), clamped to 0..100."
+  "potentials.*_reference_rate_m_myr": "The rate that maps to a score of 100: score = 100 x log10(1 + rate) / log10(1 + reference), clamped to 0..100.",
+  "runoff.budyko": "Erosion plan C2: false keeps the coefficient law above; true takes the runoff from Fu's Budyko curve (runoff = P - AET, AET / P = 1 + PET / P - (1 + (PET / P)^w)^(1 / w), w = budyko_w) with PET from atmosphere.potential_evaporation. Set by C2.",
+  "transmission.*": "Erosion plan C2: losses of a river's flow to evaporation from its channel and floodplain where it crosses land drier than open water; enabled false turns them off. The values are set by C2.",
+  "rivers.baseflow_fraction": "Erosion plan C2: the share of each cell's annual runoff released evenly through the four seasons (groundwater and the slow melt of held snow); the rest follows the seasonal snow rule. 0 keeps the Phase B rule.",
+  "roughness.*": "Erosion plan C3: a seeded, deterministic fractal perturbation of the land's base elevation at the start of the erosion pass (amplitude_m 0 turns it off), drawn from a hash of the world seed, never from the shared random stream. The values are set by C3.",
+  "routing.*": "Erosion plan C3: randomised picks a land cell's receiver among its two neighbours that bracket the local gradient direction, with probabilities that reproduce that direction on average (the intent of Rho8, Fairfield and Leymarie 1991, on the latitude-longitude metric), from a hash of the world seed and the cell; resolve_flats routes across flat filled surfaces towards lower terrain and away from higher terrain (Barnes et al. 2014). false keeps deterministic D8."
  },
  "parameters": {
   "runoff": {
    "coefficient": 0.4,
    "snow_reduction": 0.4,
    "ice_reduction": 0.7,
-   "snow_temperature_c": 0.0
+   "snow_temperature_c": 0.0,
+   "budyko": false,
+   "budyko_w": 2.6
   },
   "depressions": {
    "minimum_depth_m": 0.1
@@ -53,7 +60,8 @@
    "rebound_fraction": 0.0
   },
   "rivers": {
-   "minimum_flow": 3
+   "minimum_flow": 3,
+   "baseflow_fraction": 0.0
   },
   "lakes": {
    "evaporation_per_c": 0.075,
@@ -62,6 +70,23 @@
   "potentials": {
    "erosion_reference_rate_m_myr": 100.0,
    "deposition_reference_rate_m_myr": 100.0
+  },
+  "transmission": {
+   "enabled": false,
+   "width_coefficient": 0.0,
+   "width_exponent": 0.5,
+   "floodplain_factor": 1.0,
+   "floodplain_slope": 0.0
+  },
+  "roughness": {
+   "amplitude_m": 0.0,
+   "wavelength_km": 0.0,
+   "octaves": 1,
+   "persistence": 0.5
+  },
+  "routing": {
+   "randomised": false,
+   "resolve_flats": false
   }
  }
 }

@@ -45,6 +45,7 @@ Lessons:
 | `erosion-0009` | 2026-10-06 | pending user review | keep | erosion plan, step B6: the Phase B judging run (erosion run 3) and the close |
 | `erosion-0010` | 2026-10-06 | accepted by the user | keep | erosion plan, after Phase B: the user's verdict on runs 1 and 3, the river-mouth overlay, the answers and the adversarial review prompt |
 | `erosion-0011` | 2026-10-06 | run recorded; estimate wrong (11 min expected, 6.7 min measured) | keep | erosion plan, after Phase B: the 512-column run (erosion run 4), the Earth-reference assessment and the revised Phase C |
+| `erosion-0012` | 2026-10-06 | equivalent | keep | erosion plan, step C0: the Phase C contracts |
 
 Lessons:
 
@@ -63,6 +64,7 @@ Lessons:
 - `erosion-0009`: An evaluation records its profile file's hash at evaluation time: changing the profile while a registered run is in progress would record a hash that does not match the maps it rendered, so profile edits wait until the run is evaluated.
 - `erosion-0010`: D8 on a latitude-longitude grid prefers east and west away from the equator because those neighbours are closer: count the direction codes of a routing before reading its pattern as terrain.
 - `erosion-0011`: A run-time estimate from a registered run of an older code version can be far off: the coupled rainfall fell from 287 s to 34 s at the same settings within a day; take timings from runs of the current code (run.json steps) before estimating.
+- `erosion-0012`: A restart from a checkpoint needs every table the later stages read to be loadable from a bundle: the tectonic boundary segments are not, so the earliest useful checkpoint for terrain-stage experiments is after the last stage that reads them, not after the tectonics.
 
 ## tectonics
 

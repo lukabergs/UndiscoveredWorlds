@@ -144,6 +144,9 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(discharge, hydrosphere, f32, grid, "m3/s", "Annual mean discharge of the routing") \
     X(filled_elevation, hydrosphere, f32, grid, "m above datum", "Priority-Flood surface: equals the terrain outside depressions") \
     X(depression_id, hydrosphere, i32, grid, "id", "Depression of the routing (0 none)") \
+    X(runoff, hydrosphere, f32, grid, "mm/yr", "Runoff depth the routing accumulates (land and sea cells)") \
+    X(sediment_flux, hydrosphere, f32, grid, "m3/yr", "Sediment a land cell passes to its receiver (an outlet: into its sea cell), mean over the erosion run; 0 at sea") \
+    X(imported_lake, hydrosphere, u8, grid, "0/1", "Lake water of an imported lake raster (Earth imports); 0 in procedural worlds") \
     X(rift_lake_bed, hydrosphere, f32, grid, "m above datum", "Rift lake bed elevation") \
     X(lake_start, hydrosphere, b8, grid, "", "Lake seed cell") \
     X(special_features, hydrosphere, i16, grid, "code", "100 salt lake, 110 salt pan, 120 dunes, 130/131/132 fresh/brackish/salt wetlands") \
@@ -174,6 +177,7 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(upper_wind_south, atmosphere, f32, seasonal, "m/s", "Seasonal 500 hPa southward wind") \
     X(vertical_velocity, atmosphere, f32, seasonal, "hPa/day", "Seasonal 500 hPa ascent") \
     X(evaporation, atmosphere, f32, seasonal, "mm/day", "Seasonal ocean evaporation") \
+    X(potential_evaporation, atmosphere, f32, seasonal, "mm/month", "Seasonal potential evapotranspiration of the rainfall solver") \
     X(maritime_influence, atmosphere, f32, seasonal, "0..1", "Seasonal maritime influence") \
     X(maritime_thermal_anomaly, atmosphere, f32, seasonal, "C", "Seasonal maritime thermal anomaly") \
     X(maritime_fetch, atmosphere, i16, seasonal, "cells", "Seasonal maritime fetch distance") \

@@ -350,6 +350,20 @@ def run_validation(bundle, specs, references, baseline=None):
     for spec in specs:
         if spec['kind'] == 'hypsometry':
             distributions[spec['id']] = compare_hypsometry(bundle, spec, baseline)
+        elif spec['kind'] in ('drainage_pattern', 'ocean_depths'):
+            import landscape_statistics
+            needed = landscape_statistics.DRAINAGE_FIELDS if spec['kind'] == 'drainage_pattern' else ()
+            missing = [field for field in needed if field not in bundle.fields or
+                       (baseline is not None and field not in baseline.fields)]
+            if missing:
+                skipped.append({'id': spec['id'], 'reason': 'model fields absent: ' + ', '.join(missing)})
+            elif spec['kind'] == 'drainage_pattern':
+                distributions[spec['id']] = landscape_statistics.compare_drainage_pattern(bundle, spec, baseline)
+            else:
+                distributions[spec['id']] = landscape_statistics.compare_ocean_depths(bundle, spec, baseline)
+        elif spec['kind'] in ('upstream_area', 'basins', 'internal_drainage', 'discharge'):
+            import hydrology_reference
+            distributions[spec['id']] = hydrology_reference.compare(spec['kind'], bundle, spec, baseline)
         elif spec['kind'] == 'river_mouths':
             missing = [field for field in RIVER_FIELDS if field not in bundle.fields or
                        (baseline is not None and field not in baseline.fields)]

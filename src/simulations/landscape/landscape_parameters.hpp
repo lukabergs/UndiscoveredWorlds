@@ -13,6 +13,8 @@ inline float coefficient = 0.4f;
 inline float snowReduction = 0.4f;
 inline float iceReduction = 0.7f;
 inline float snowTemperatureC = 0.0f;
+inline bool budyko = false;
+inline float budykoW = 2.6f;
 }
 
 namespace depressions
@@ -60,6 +62,7 @@ inline float reboundFraction = 0.0f;
 namespace rivers
 {
 inline int minimumFlow = 3;
+inline float baseflowFraction = 0.0f;
 }
 
 namespace lakes
@@ -74,6 +77,29 @@ inline float erosionReferenceRateMMyr = 100.0f;
 inline float depositionReferenceRateMMyr = 100.0f;
 }
 
+namespace transmission
+{
+inline bool enabled = false;
+inline float widthCoefficient = 0.0f;
+inline float widthExponent = 0.5f;
+inline float floodplainFactor = 1.0f;
+inline float floodplainSlope = 0.0f;
+}
+
+namespace roughness
+{
+inline float amplitudeM = 0.0f;
+inline float wavelengthKm = 0.0f;
+inline int octaves = 1;
+inline float persistence = 0.5f;
+}
+
+namespace routing
+{
+inline bool randomised = false;
+inline bool resolveFlats = false;
+}
+
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -82,6 +108,8 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.runoff.snow_reduction", &runoff::snowReduction },
         { "landscape.runoff.ice_reduction", &runoff::iceReduction },
         { "landscape.runoff.snow_temperature_c", &runoff::snowTemperatureC },
+        { "landscape.runoff.budyko", &runoff::budyko },
+        { "landscape.runoff.budyko_w", &runoff::budykoW },
         { "landscape.depressions.minimum_depth_m", &depressions::minimumDepthM },
         { "landscape.stream_power.erodibility", &stream_power::erodibility },
         { "landscape.stream_power.crust_class_multiplier_continental", &stream_power::crustClassMultiplierContinental },
@@ -101,10 +129,22 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.erosion.uplift_m_myr", &erosion::upliftMMyr },
         { "landscape.isostasy.rebound_fraction", &isostasy::reboundFraction },
         { "landscape.rivers.minimum_flow", &rivers::minimumFlow },
+        { "landscape.rivers.baseflow_fraction", &rivers::baseflowFraction },
         { "landscape.lakes.evaporation_per_c", &lakes::evaporationPerC },
         { "landscape.lakes.evaporation_zero_c", &lakes::evaporationZeroC },
         { "landscape.potentials.erosion_reference_rate_m_myr", &potentials::erosionReferenceRateMMyr },
         { "landscape.potentials.deposition_reference_rate_m_myr", &potentials::depositionReferenceRateMMyr },
+        { "landscape.transmission.enabled", &transmission::enabled },
+        { "landscape.transmission.width_coefficient", &transmission::widthCoefficient },
+        { "landscape.transmission.width_exponent", &transmission::widthExponent },
+        { "landscape.transmission.floodplain_factor", &transmission::floodplainFactor },
+        { "landscape.transmission.floodplain_slope", &transmission::floodplainSlope },
+        { "landscape.roughness.amplitude_m", &roughness::amplitudeM },
+        { "landscape.roughness.wavelength_km", &roughness::wavelengthKm },
+        { "landscape.roughness.octaves", &roughness::octaves },
+        { "landscape.roughness.persistence", &roughness::persistence },
+        { "landscape.routing.randomised", &routing::randomised },
+        { "landscape.routing.resolve_flats", &routing::resolveFlats },
     };
     return entries;
 }

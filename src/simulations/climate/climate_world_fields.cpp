@@ -48,6 +48,7 @@ struct climateworldfieldaccess
         case FieldId::upper_wind_south: return op.seasonal(id, world.seasonaluppervwindmaps);
         case FieldId::vertical_velocity: return op.seasonal(id, world.seasonalverticalvelocitymaps);
         case FieldId::evaporation: return op.seasonal(id, world.seasonalevaporationmaps);
+        case FieldId::potential_evaporation: return op.seasonal(id, world.seasonalpotentialevaporationmaps);
         case FieldId::maritime_influence: return op.seasonal(id, world.seasonalmaritimeinfluencemaps);
         case FieldId::maritime_thermal_anomaly: return op.seasonal(id, world.seasonalmaritimethermalanomalymaps);
         case FieldId::maritime_fetch: return op.seasonal(id, world.seasonalmaritimefetchmaps);

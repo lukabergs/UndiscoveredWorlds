@@ -76,6 +76,7 @@ void climateworld::resize(int width, int height)
     resizefloatfield(seasonalcurrentvmaps);
     resizefloatfield(seasonalsstmaps);
     resizefloatfield(seasonalevaporationmaps);
+    resizefloatfield(seasonalpotentialevaporationmaps);
     resizefloatfield(seasonalmaritimeinfluencemaps);
     resizefloatfield(seasonalmaritimethermalanomalymaps);
     resizefield(seasonalmaritimefetchmaps);

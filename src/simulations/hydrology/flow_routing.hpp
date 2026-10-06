@@ -27,6 +27,8 @@ struct Inputs
     std::vector<uint8_t> sea;
     std::vector<float> runoff_m_yr;
     float sealevel = 0.0f;
+    // landscape.routing.*, seeded from the world seed (erosion plan C3).
+    landscape::RoutingOptions routingoptions;
 };
 
 // Reads the world. The elevation is the base elevation (nomfloat): procedural
