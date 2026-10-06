@@ -43,6 +43,7 @@ Lessons:
 | `erosion-0007` | 2026-10-06 | equivalent at the minimal configuration | keep | erosion plan, step B3: basin classes from the routing and the lake levels |
 | `erosion-0008` | 2026-10-06 | consumers on the erosion pass; procedural recipes identical | keep | erosion plan, step B4: the surface potentials, the placers and the mineral exhumation read the erosion pass |
 | `erosion-0009` | 2026-10-06 | pending user review | keep | erosion plan, step B6: the Phase B judging run (erosion run 3) and the close |
+| `erosion-0010` | 2026-10-06 | accepted by the user | keep | erosion plan, after Phase B: the user's verdict on runs 1 and 3, the river-mouth overlay, the answers and the adversarial review prompt |
 
 Lessons:
 
@@ -59,6 +60,7 @@ Lessons:
 - `erosion-0008`: A quantity defined with a time discount (the liberated gold's placer residence) must keep that discount when a new source adds to it, or the budget closes while the inventory is several times too large.
 - `erosion-0009`: A tracked run at the judging size measures writes the minimal world never makes (salt lakes and pans here); one such run per phase close keeps the declarations complete.
 - `erosion-0009`: An evaluation records its profile file's hash at evaluation time: changing the profile while a registered run is in progress would record a hash that does not match the maps it rendered, so profile edits wait until the run is evaluated.
+- `erosion-0010`: D8 on a latitude-longitude grid prefers east and west away from the equator because those neighbours are closer: count the direction codes of a routing before reading its pattern as terrain.
 
 ## tectonics
 

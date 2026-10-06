@@ -130,7 +130,7 @@ def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input
         if checkpoints is None:
             checkpoints = bundle.path.parent / 'checkpoints'
         rendered = render(bundle, profile['maps'], output, profile.get('validation', []), validation['maps'], references,
-                          checkpoint_bundles(checkpoints), baseline)
+                          checkpoint_bundles(checkpoints), baseline, validation['distributions'])
     document = {
         'schema': SCHEMA,
         'evaluated': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),

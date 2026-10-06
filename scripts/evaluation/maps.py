@@ -8,7 +8,9 @@ remap, and model minus reference on the score's mask, so the pictures show what 
 measures. Vector fields are coloured by speed with arrows for direction; their difference
 is the speed difference. Differences use the diverging scale of
 configs/climate-palettes.json ("difference"). With a parent bundle the model side of
-every map is drawn for the parent too (kind "parent"). Runs with checkpoint bundles get
+every map is drawn for the parent too (kind "parent"). A map with "overlay": "<id>" of a
+river_mouths validation entry carries that entry's markers (overlay) and is skipped when the
+entry was not compared. Runs with checkpoint bundles get
 one APNG per map and season; plate colours in them follow identities tracked from frame
 to frame (track_identities), because the engine's plate index is not persistent.
 """
@@ -223,10 +225,35 @@ def model_images(bundle, spec, validation):
         yield layer, season_title(validation['season'], layer), values, arrows(model if model.ndim == 3 else None, values)
 
 
-def save(directory, name, rgb, title, palette, vectors=None, note=None):
+def river_mouth_markers(result):
+    """(markers for map_rendering.draw_markers, legend note) of one side ('run' or 'baseline') of a
+    river_mouths result: a ring per table mouth, a square per top outlet, a line per matched mouth."""
+    rivers, metrics = result['rivers'], result['metrics']
+    markers = {'rings': [(river['lon'], river['lat'], river['name']) for river in rivers],
+               'squares': [(outlet['lon'], outlet['lat']) for outlet in result['top_outlets']],
+               'links': [(river['lon'], river['lat'], river['outlet']['lon'], river['outlet']['lat'])
+                         for river in rivers if river['matched']]}
+    note = (f"rings: table river mouths; magenta squares: the {metrics['top']} largest outlets; "
+            f"lines: mouths matched within {metrics['match_km']:g} km")
+    return markers, note
+
+
+def overlay(spec, validation, distributions, key):
+    """(markers, note) of a map's overlay for the run or the baseline (key); ({}, None) for a map
+    without one; None when the overlay's validation entry has no result, so the map is skipped."""
+    if 'overlay' not in spec:
+        return {}, None
+    kinds = {item['id']: item['kind'] for item in validation}
+    if kinds.get(spec['overlay']) != 'river_mouths':
+        raise ValueError(f"Map overlay {spec['overlay']!r} names no river_mouths validation entry")
+    result = (distributions or {}).get(spec['overlay'], {}).get(key)
+    return None if result is None else river_mouth_markers(result)
+
+
+def save(directory, name, rgb, title, palette, vectors=None, note=None, markers=None):
     relative = Path('maps') / f'{name}.png'
     (directory / relative).parent.mkdir(parents=True, exist_ok=True)
-    map_rendering.frame(rgb, title, legend(palette, note), vectors).save(directory / relative)
+    map_rendering.frame(rgb, title, legend(palette, note), vectors, markers=markers).save(directory / relative)
     return relative.as_posix()
 
 
@@ -379,13 +406,15 @@ def animations(bundle, specs, directory, checkpoints):
     return written, final
 
 
-def render(bundle, specs, directory, validation=(), compared=(), references=None, checkpoints=(), parent=None):
+def render(bundle, specs, directory, validation=(), compared=(), references=None, checkpoints=(), parent=None,
+           distributions=None):
     """Write PNGs under directory/maps; returns the maps entries of evaluation.json (paths relative to directory).
 
     validation: the profile's validation specs; compared: ids that validation compared
     for this bundle (only those get reference and difference maps, so the maps read no
     reference the score did not use); checkpoints: bundles in time order; parent: the
-    bundle the run is compared with, drawn as kind "parent" with the reduction of the run's maps.
+    bundle the run is compared with, drawn as kind "parent" with the reduction of the run's maps;
+    distributions: validation's results by entry id, read by map overlays.
     """
     linked = {item['id']: item for item in validation}
     animated, tracked = animations(bundle, specs, directory, checkpoints) if checkpoints else ([], {})
@@ -396,23 +425,26 @@ def render(bundle, specs, directory, validation=(), compared=(), references=None
             target = None
         if target is not None:
             written += validated(bundle, spec, target, references, directory)
-        elif available(bundle, spec):
+        elif available(bundle, spec) and overlay(spec, validation, distributions, 'run') is not None:
+            markers, marked_note = overlay(spec, validation, distributions, 'run')
             for season, label, values, vectors in model_images(bundle, spec, None):
-                note = None
+                note = marked_note
                 if spec['name'] in tracked and season is None:
                     values, note = tracked[spec['name']], TRACKED
                 title = spec['title'] + ('' if label is None else f' · {label}')
                 written.append(entry(spec, 'model', season, title,
                                      save(directory, spec['name'] + suffix(season), palette_rgb(values, spec['palette']), title,
-                                          spec['palette'], vectors, note), spec['palette']))
+                                          spec['palette'], vectors, note, markers), spec['palette']))
         else:
             continue
-        if parent is not None and available(parent, spec):
+        marked = overlay(spec, validation, distributions, 'baseline')
+        if parent is not None and available(parent, spec) and marked is not None:
             for season, label, values, vectors in model_images(parent, spec, target):
                 title = spec['title'] + ('' if label is None else f' · {label}') + ' · parent run'
                 written.append(entry(spec, 'parent', season, title,
                                      save(directory, f"parent-{spec['name']}{suffix(season)}", palette_rgb(values, spec['palette']),
-                                          title, spec['palette'], vectors), spec['palette'], season_label=label))
+                                          title, spec['palette'], vectors, marked[1], marked[0]), spec['palette'],
+                                     season_label=label))
     written += animated
     if written:
         palettes.write_sidecar(directory / 'maps')

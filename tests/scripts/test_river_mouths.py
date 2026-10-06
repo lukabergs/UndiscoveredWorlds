@@ -12,7 +12,11 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "evaluation"))
 
+from PIL import Image  # noqa: E402
+
+from uwtools import map_rendering  # noqa: E402
 from uwtools.bundle import SCHEMA, Bundle  # noqa: E402
+from maps import river_mouth_markers  # noqa: E402
 from validation import compare_river_mouths, run_validation  # noqa: E402
 
 COLUMNS, ROWS = 8, 4
@@ -113,6 +117,21 @@ class RiverMouthTests(unittest.TestCase):
             result = run_validation(bundle, [spec], None)
         self.assertEqual(result["distributions"], {})
         self.assertEqual(result["skipped"][0]["id"], "river_mouths")
+
+    def test_overlay_markers(self):
+        """Rings at the table mouths, squares at the top outlets, on an 8 x 4 raster of 8-pixel cells."""
+        markers, _ = river_mouth_markers(self.compare(500))
+        scale, background = 8, (40, 60, 80)
+        image = Image.new("RGB", (COLUMNS * scale, ROWS * scale), background)
+        map_rendering.draw_markers(image, COLUMNS, ROWS, scale, origin=(0, 0), **markers)
+        radius = 10  # min(max(2 * scale, 6), 10)
+        # Mouth B (160.0, -20.0) has no outlet at its centre: the ring is white at its radius.
+        x, y = (160.0 + 180) / 360 * COLUMNS * scale, (90 + 20.0) / 180 * ROWS * scale
+        self.assertEqual(image.getpixel((round(x) - radius + 1, round(y))), map_rendering.MOUTH)
+        # Outlet A, cell (1, 1): a magenta square at the cell centre.
+        self.assertEqual(image.getpixel((round(1.5 * scale), round(1.5 * scale))), map_rendering.OUTLET)
+        # A cell far from every marker keeps the raster colour.
+        self.assertEqual(image.getpixel((round(4.5 * scale), round(0.5 * scale))), background)
 
 
 if __name__ == "__main__":

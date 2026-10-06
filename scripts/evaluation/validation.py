@@ -277,7 +277,8 @@ def measure_river_mouths(bundle, rivers, top, match_km):
         nearest = int(np.argmin(distances)) if len(distances) else None
         distance = float(distances[nearest]) if nearest is not None else None
         matched = distance is not None and distance <= match_km
-        entry = {'name': river['name'], 'distance_km': distance, 'matched': bool(matched),
+        entry = {'name': river['name'], 'lon': float(river['lon']), 'lat': float(river['lat']),
+                 'distance_km': distance, 'matched': bool(matched),
                  'outlet_discharge_m3_s': float(discharge[nearest]) if matched else None,
                  'observed_discharge_m3_s': river['discharge_m3_s']}
         if nearest is not None:

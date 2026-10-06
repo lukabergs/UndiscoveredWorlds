@@ -1,5 +1,6 @@
 """Origin-independent numeric raster colouring. No run, module or file-layout knowledge."""
 from pathlib import Path
+import unicodedata
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -166,14 +167,95 @@ def _draw_arrows(draw, east, north, scale, columns=36):
     return full
 
 
-def frame(rgb, title=None, legend=None, arrows=None, width=1024):
+MOUTH, OUTLET, DARK = (255, 255, 255), (255, 0, 255), (16, 16, 16)
+
+
+def _position(lon, lat, columns, rows, scale):
+    return (lon + 180) / 360 * columns * scale, (90 - lat) / 180 * rows * scale
+
+
+def _ascii(text):
+    """The built-in font has Latin letters without accents: fold them (Paraná -> Parana)."""
+    return unicodedata.normalize("NFKD", _plain(text)).encode("ascii", "ignore").decode("ascii")
+
+
+def _label_box(x, y, length, radius, height, place):
+    """(left, top, right, bottom) of a label beside a ring: right, left, above or below it."""
+    if place == "right":
+        left, top = x + radius + 3, y - 7
+    elif place == "left":
+        left, top = x - radius - 3 - length, y - 7
+    else:
+        left, top = x - length / 2, y - radius - 15 if place == "above" else y + radius + 2
+    return left, top, left + length, top + 13
+
+
+def draw_markers(canvas, columns, rows, scale, rings=(), squares=(), links=(), origin=(LEFT, TOP)):
+    """Point markers on the raster of a framed map (cell size `scale` pixels, raster at `origin`).
+
+    rings: (lon, lat, label), a white ring with a dark outline and its label; squares: (lon, lat),
+    a filled magenta square; links: (lon, lat, lon, lat), a thin line drawn the short way in
+    longitude. Positions in degrees, columns east from 180 W. Markers keep a few pixels at
+    small cell sizes and are drawn again one raster width east and west, so the left and
+    right edges join; everything is clipped to the raster. A label goes right of its ring,
+    left, above or below it: the first of those places inside the raster that covers the
+    least area of the markers and of the labels placed before it.
+    """
+    width, height = columns * scale, rows * scale
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    radius, half = min(max(2 * scale, 6), 10), min(max(scale, 3), 5)
+    shifts = (0, -width, width)
+    for lon, lat, end_lon, end_lat in links:
+        x, y = _position(lon, lat, columns, rows, scale)
+        reach = ((end_lon - lon + 180) % 360 - 180) / 360 * width
+        end_y = _position(end_lon, end_lat, columns, rows, scale)[1]
+        for shift in shifts:
+            draw.line([x + shift, y, x + shift + reach, end_y], fill=DARK, width=3)
+            draw.line([x + shift, y, x + shift + reach, end_y], fill=MOUTH, width=1)
+    for lon, lat, _ in rings:
+        x, y = _position(lon, lat, columns, rows, scale)
+        for shift in shifts:
+            draw.ellipse([x + shift - radius - 1, y - radius - 1, x + shift + radius + 1, y + radius + 1], outline=DARK, width=4)
+            draw.ellipse([x + shift - radius, y - radius, x + shift + radius, y + radius], outline=MOUTH, width=2)
+    for lon, lat in squares:
+        x, y = _position(lon, lat, columns, rows, scale)
+        for shift in shifts:
+            draw.rectangle([x + shift - half, y - half, x + shift + half, y + half], fill=OUTLET, outline=DARK)
+    font = ImageFont.load_default(size=11)
+    placed = []
+    for lon, lat, _ in rings:
+        x, y = _position(lon, lat, columns, rows, scale)
+        placed.append((x - radius, y - radius, x + radius, y + radius))
+    for lon, lat in squares:
+        x, y = _position(lon, lat, columns, rows, scale)
+        placed.append((x - half, y - half, x + half, y + half))
+    covered = lambda box: sum(max(0, min(box[2], other[2]) - max(box[0], other[0])) *
+                              max(0, min(box[3], other[3]) - max(box[1], other[1])) for other in placed)
+    for lon, lat, label in rings:
+        if not label:
+            continue
+        x, y = _position(lon, lat, columns, rows, scale)
+        text = _ascii(str(label))
+        length = font.getlength(text)
+        boxes = [_label_box(x, y, length, radius, height, place) for place in ("right", "left", "above", "below")]
+        inside = [box for box in boxes if box[0] >= 0 and box[2] <= width and box[1] >= 0 and box[3] <= height] or boxes[:2]
+        box = min(inside, key=covered)
+        placed.append(box)
+        draw.text((box[0], box[1]), text, font=font, fill=MOUTH, stroke_width=1, stroke_fill=DARK)
+    canvas.paste(layer, tuple(origin), layer)
+    return canvas
+
+
+def frame(rgb, title=None, legend=None, arrows=None, width=1024, markers=None):
     """A map for reading: the raster enlarged without smoothing to at least `width` pixels,
     a graticule every 30 degrees with its labels, the title, and the legend.
 
     The grid is cell-centred with rows from north to south and columns east from 180 W.
     legend: {"kind": "scale", "stops": [(value, rgb), ...], "units", "ticks", "note"} or
     {"kind": "classes", "entries": [(label, rgb), ...], "note"}. arrows: (east, north)
-    components on the grid of the raster.
+    components on the grid of the raster. markers: the keyword arguments of draw_markers
+    (rings, squares, links), drawn over the raster and the graticule.
     """
     rgb = np.asarray(rgb, dtype=np.uint8)
     rows, columns = rgb.shape[:2]
@@ -202,6 +284,8 @@ def frame(rgb, title=None, legend=None, arrows=None, width=1024):
         if legend is not None and full is not None:
             note = f"arrows: direction; full length at {full:.3g} or more"
             legend["note"] = f"{legend['note']}; {note}" if legend.get("note") else note
+    if markers:
+        draw_markers(canvas, columns, rows, scale, **markers)
     if title:
         draw.text((LEFT, 7), _plain(title), font=ImageFont.load_default(size=15), fill=INK)
     if legend is not None:
