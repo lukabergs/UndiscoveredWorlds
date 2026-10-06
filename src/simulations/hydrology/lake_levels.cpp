@@ -111,6 +111,23 @@ void applylakelevelstage(planet& world)
     if (!staleids.empty())
         std::cout << "Lake levels: " << staleids.size() << " depression(s) no longer match the routing and hold no lake\n";
 
+    // Imported lakes (Earth imports, --import-lakes; erosion plan C1): all zero in a procedural world.
+    // Only the cells outside every depression count: a depression's water is the balance's.
+    const worldgrid<std::uint8_t>& importedlake = view.importedlake();
+    std::vector<uint8_t> imported(size, 0);
+    bool anyimported = false;
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            if (importedlake[x][y] != 0 && inputs.depressionid[metric.index(x, y)] == 0)
+            {
+                imported[metric.index(x, y)] = 1;
+                anyimported = true;
+            }
+        }
+    }
+
     const landscape::LakeBalance balance = landscape::balancelakes(inputs);
     for (int y = 0; y < rows; y++)
         for (int x = 0; x < columns; x++)
@@ -136,5 +153,44 @@ void applylakelevelstage(planet& world)
                                            [](const landscape::LakeLevel& entry, int32_t value) { return entry.id < value; });
         if (lake != balance.lakes.end() && lake->id == id && !lake->overflowing)
             world.setspecial(metric.column(cell), metric.row(cell), saltlake);
+    }
+
+    // Imported lake cells inside a depression (depression_id != 0, after the stale ones are dropped)
+    // are left to the balance, whatever it decides: an overflowing lake, a closed one or a dry
+    // depression. Imported water is written only on the cells outside depressions, where the balance
+    // has no say: each 8-connected group of them is water at one level. The import's terrain is the
+    // lake bed (ETOPO keeps the bathymetry of the large lakes), not the lake surface, so the level is
+    // the highest filled elevation of the group's cells (outside a depression the filled elevation is
+    // the terrain): water fills to the lowest rim, the highest bed cell of a draining bed, and no
+    // cell of the group lies above that level. The cells are fresh water with no special feature; a
+    // cell the balance already flooded (the flat of a depression's spill) keeps the balance's level.
+    if (!anyimported)
+        return;
+    std::vector<uint8_t> visited(size, 0);
+    std::vector<std::size_t> members;
+    for (std::size_t start = 0; start < size; start++)
+    {
+        if (imported[start] == 0 || visited[start] != 0)
+            continue;
+        members.assign(1, start);
+        visited[start] = 1;
+        float level = std::max(inputs.filledelevation[start], inputs.elevation[start]);
+        for (std::size_t next = 0; next < members.size(); next++)
+        {
+            const std::size_t cell = members[next];
+            level = std::max(level, std::max(inputs.filledelevation[cell], inputs.elevation[cell]));
+            for (int code = 1; code <= landscape::directioncount; code++)
+            {
+                const std::size_t neighbour = metric.neighbour(cell, code);
+                if (neighbour != cell && imported[neighbour] != 0 && visited[neighbour] == 0)
+                {
+                    visited[neighbour] = 1;
+                    members.push_back(neighbour);
+                }
+            }
+        }
+        for (const std::size_t cell : members)
+            if (balance.surface[cell] == 0.0f)
+                world.setlakesurface(metric.column(cell), metric.row(cell), level);
     }
 }

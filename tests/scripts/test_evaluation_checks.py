@@ -24,6 +24,7 @@ DRAINED = {"check": "drained", "direction": "hydrosphere.flow_direction", "depre
            "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"}
 MONOTONE = {"check": "monotone", "direction": "hydrosphere.flow_direction", "discharge": "hydrosphere.discharge",
             "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"}
+LAKES = {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation"}
 
 
 def write_bundle(directory, fields):
@@ -87,6 +88,17 @@ class EvaluationCheckTests(unittest.TestCase):
         west = [[0, 7, 7, 7], [0, 7, 7, 7]]
         self.assertEqual(self.run_check(routing(west, [[0, 3, 2, 1], [0, 3, 2, 1]]), MONOTONE), "pass")
         self.assertEqual(self.run_check(routing(west, [[0, 3, 2, 1], [0, 1, 2, 1]]), MONOTONE), "fail")
+
+    def test_lake_above_terrain(self):
+        fields = routing([[0, 7, 7, 7], [0, 7, 7, 7]], [[0, 3, 2, 1], [0, 3, 2, 1]])
+        lake = np.zeros((ROWS, COLUMNS), dtype=np.float32)
+        lake[0, 1], lake[1, 2] = 100.0, 250.0  # at its terrain (100) and above it (200)
+        fields["hydrosphere.lake_surface"] = lake
+        self.assertEqual(self.run_check(fields, LAKES), "pass")
+        lake[0, 3] = 299.5  # below its terrain (300)
+        self.assertEqual(self.run_check(fields, LAKES), "fail")
+        del fields["hydrosphere.lake_surface"]
+        self.assertEqual(self.run_check(fields, LAKES), "skip")
 
     def test_land_rule_rounds_to_whole_metres(self):
         fields = routing([[0, 7, 7, 7], [0, 7, 7, 7]], [[0, 3, 2, 1], [0, 3, 2, 1]])

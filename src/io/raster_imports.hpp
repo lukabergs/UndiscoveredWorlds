@@ -50,3 +50,11 @@ bool importlandheightmapcells(const std::string& filepathname, int width, int he
     const MapImportSettings* settings, const std::function<void(int, int, int)>& setnom);
 bool importseadepthmapcells(const std::string& filepathname, int width, int height, int sealevel,
     const MapImportSettings* settings, const std::function<void(int, int, int)>& setnom);
+
+// A lake mask PNG of any 2:1 size (north row first, longitude -180 to 180; lake where the
+// red or grey value is at least 128) onto the world grid of largest indices width and
+// height: setlake(x, y) for every world cell whose area in grid units (longitude by
+// latitude overlap fractions, so a block count when the world width divides the mask's)
+// is at least half lake. False when the file cannot be read or is not twice as wide as high.
+bool importlakemaskcells(const std::string& filepathname, int width, int height,
+    const std::function<void(int, int)>& setlake);

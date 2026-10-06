@@ -60,6 +60,7 @@ struct CommandLineGenerationOptions
     std::vector<std::string> commandArguments;
     std::string importLandPath;
     std::string importSeaPath;
+    std::string importLakesPath;   // --import-lakes: a lake mask for hydrosphere.imported_lake (imported recipes)
 };
 
 void printcommandlineusage();

@@ -9,8 +9,8 @@ measures. Vector fields are coloured by speed with arrows for direction; their d
 is the speed difference. Differences use the diverging scale of
 configs/climate-palettes.json ("difference"). With a parent bundle the model side of
 every map is drawn for the parent too (kind "parent"). A map with "overlay": "<id>" of a
-river_mouths validation entry carries that entry's markers (overlay) and is skipped when the
-entry was not compared. Runs with checkpoint bundles get
+river_mouths or upstream_area validation entry carries that entry's markers (overlay: mouths and
+outlets, or the reference major rivers) and is skipped when the entry was not compared. Runs with checkpoint bundles get
 one APNG per map and season; plate colours in them follow identities tracked from frame
 to frame (track_identities), because the engine's plate index is not persistent.
 """
@@ -238,16 +238,28 @@ def river_mouth_markers(result):
     return markers, note
 
 
+def reference_river_markers(result):
+    """(markers, legend note) of an upstream_area result: a dot on every reference cell of a major
+    river (the same for the run and the baseline)."""
+    markers = {'dots': [tuple(cell) for cell in result['major_river_cells']]}
+    return markers, 'red dots: HydroRIVERS cells with at least 100000 km2 upstream'
+
+
 def overlay(spec, validation, distributions, key):
     """(markers, note) of a map's overlay for the run or the baseline (key); ({}, None) for a map
-    without one; None when the overlay's validation entry has no result, so the map is skipped."""
+    without one; None when the overlay's validation entry has no result, so the map is skipped.
+    The entry is a river_mouths one (its mouths and outlets) or an upstream_area one (the reference
+    major rivers)."""
     if 'overlay' not in spec:
         return {}, None
     kinds = {item['id']: item['kind'] for item in validation}
-    if kinds.get(spec['overlay']) != 'river_mouths':
-        raise ValueError(f"Map overlay {spec['overlay']!r} names no river_mouths validation entry")
-    result = (distributions or {}).get(spec['overlay'], {}).get(key)
-    return None if result is None else river_mouth_markers(result)
+    kind = kinds.get(spec['overlay'])
+    if kind not in ('river_mouths', 'upstream_area'):
+        raise ValueError(f"Map overlay {spec['overlay']!r} names no river_mouths or upstream_area validation entry")
+    entry = (distributions or {}).get(spec['overlay'], {})
+    if entry.get(key) is None:
+        return None
+    return river_mouth_markers(entry[key]) if kind == 'river_mouths' else reference_river_markers(entry)
 
 
 def save(directory, name, rgb, title, palette, vectors=None, note=None, markers=None):

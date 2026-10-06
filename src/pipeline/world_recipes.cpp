@@ -124,6 +124,8 @@ WorldRecipe erodedworldrecipe()
     recipe.steps = without(stagesfrom(GenerationStageId::geosphere_initialization),
                            { GenerationStageId::rivers_and_basins, GenerationStageId::basin_editor, GenerationStageId::lakes });
     recipe.inputs = worldpropertyinputs();
+    // hydrology.lake_levels reads the imported lake mask: all zero in a procedural world.
+    recipe.inputs.push_back(FieldId::imported_lake);
     return recipe;
 }
 
@@ -144,9 +146,13 @@ WorldRecipe earthhydrologyrecipe()
 {
     WorldRecipe recipe = earthclimaterecipe();
     recipe.name = "earth-hydrology";
-    recipe.description = "earth-climate followed by the flow routing on the imported terrain; Geosphere is frozen";
+    recipe.description = "earth-climate with the flow routing and the lake levels after the rainfall, on the imported "
+                         "terrain and its imported lakes (--import-lakes); Geosphere is frozen";
     const auto rainfall = std::find(recipe.steps.begin(), recipe.steps.end(), GenerationStageId::rainfall);
-    recipe.steps.insert(rainfall == recipe.steps.end() ? rainfall : rainfall + 1, GenerationStageId::flow_routing);
+    const auto routing = recipe.steps.insert(rainfall == recipe.steps.end() ? rainfall : rainfall + 1, GenerationStageId::flow_routing);
+    recipe.steps.insert(routing + 1, GenerationStageId::lake_levels);
+    // hydrology.lake_levels reads the imported lake mask, which the import writes before the recipe.
+    recipe.inputs.push_back(FieldId::imported_lake);
     return recipe;
 }
 

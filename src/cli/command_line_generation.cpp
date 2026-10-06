@@ -19,6 +19,7 @@
 #include "pipeline/recipe_parameters.hpp"
 #include "pipeline/world_stages.hpp"
 #include "io/map_imports.hpp"
+#include "io/raster_imports.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "world/planet_bundle.hpp"
 #include "pipeline/world_recipes.hpp"
@@ -69,6 +70,9 @@ void printcommandlineusage()
     cout << "  --resolution <width>    Set an even global width and derive height as width/2.\n";
     cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
     cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
+    cout << "  --import-lakes <png>    run with earth-hydrology: a 2:1 lake mask (255 lake, 0 not; north row first, from 180 W)\n";
+    cout << "                           into hydrosphere.imported_lake: a land cell is lake where at least half its\n";
+    cout << "                           area is lake. hydrology.lake_levels keeps each lake as water at one level.\n";
     cout << "  --no-rivers             Disable river generation.\n";
     cout << "  --no-lakes              Disable lake generation.\n";
     cout << "  --no-deltas             Disable delta generation.\n";
@@ -143,7 +147,7 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
         }
 
         if (isclimateoption(argument) ||
-            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--set" || argument == "--parameters" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--duration" || argument == "--mineral-history" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
+            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--set" || argument == "--parameters" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--duration" || argument == "--mineral-history" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--import-lakes" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -293,6 +297,12 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                 {
                     options.importSeaPath = value;
                     options.hasImportSeaPath = true;
+                }
+                else if (argument == "--import-lakes")
+                {
+                    if (value.empty())
+                        throw invalid_argument("empty path");
+                    options.importLakesPath = value;
                 }
                 else if (argument == "--social-mode")
                 {
@@ -547,6 +557,13 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     const bool tectonicsmodule = recipe.name == "tectonics";
     if (options.climateOnly && !importedworld) {
         cerr << "--climate-only requires imported terrain.\n";
+        return 1;
+    }
+    // The imported lakes are read only by hydrology.lake_levels: a run whose recipe has that step.
+    if (!options.importLakesPath.empty() && (!options.runCommand || !importedworld ||
+        find(recipe.steps.begin(), recipe.steps.end(), GenerationStageId::lake_levels) == recipe.steps.end())) {
+        cerr << "--import-lakes requires the run command with an imported recipe that has hydrology.lake_levels "
+                "(earth-hydrology).\n";
         return 1;
     }
     const long seed = options.hasSeed ? options.seed : 1;
@@ -820,6 +837,29 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             endworldgendebugrun();
             cerr << "Failed to import sea map: " << seapath.string() << '\n';
             return 1;
+        }
+
+        // Lakes only on land: a lake cell the terrain import made sea stays sea.
+        if (!options.importLakesPath.empty())
+        {
+            int lakecells = 0;
+            const bool imported = importlakemaskcells(options.importLakesPath, world->width(), world->height(),
+                [&](int x, int y)
+                {
+                    if (!world->basebelowsea(x, y))
+                    {
+                        world->importedlake()[x][y] = 1;
+                        lakecells++;
+                    }
+                });
+            if (!imported)
+            {
+                endtimedreporting();
+                endworldgendebugrun();
+                cerr << "Failed to import lake map: " << options.importLakesPath << '\n';
+                return 1;
+            }
+            updatereport("Imported lakes: " + to_string(lakecells) + " land cells from " + options.importLakesPath);
         }
 
         GenerationExecutionContext context;

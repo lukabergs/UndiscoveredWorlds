@@ -46,6 +46,7 @@ Lessons:
 | `erosion-0010` | 2026-10-06 | accepted by the user | keep | erosion plan, after Phase B: the user's verdict on runs 1 and 3, the river-mouth overlay, the answers and the adversarial review prompt |
 | `erosion-0011` | 2026-10-06 | run recorded; estimate wrong (11 min expected, 6.7 min measured) | keep | erosion plan, after Phase B: the 512-column run (erosion run 4), the Earth-reference assessment and the revised Phase C |
 | `erosion-0012` | 2026-10-06 | equivalent | keep | erosion plan, step C0: the Phase C contracts |
+| `erosion-0013` | 2026-10-06 | validation in place; the Caspian stays open until the runoff is fixed (C2) | keep | erosion plan, step C1: Earth lakes in earth-hydrology and the HydroSHEDS validation kinds |
 
 Lessons:
 
@@ -65,6 +66,8 @@ Lessons:
 - `erosion-0010`: D8 on a latitude-longitude grid prefers east and west away from the equator because those neighbours are closer: count the direction codes of a routing before reading its pattern as terrain.
 - `erosion-0011`: A run-time estimate from a registered run of an older code version can be far off: the coupled rainfall fell from 287 s to 34 s at the same settings within a day; take timings from runs of the current code (run.json steps) before estimating.
 - `erosion-0012`: A restart from a checkpoint needs every table the later stages read to be loadable from a bundle: the tectonic boundary segments are not, so the earliest useful checkpoint for terrain-stage experiments is after the last stage that reads them, not after the tectonics.
+- `erosion-0013`: A whole-tail restart from a checkpoint is limited by the tables and solver fields a bundle cannot load: stopping the restart before the stages that need them (layers.finalize, climate.classification) still gives every earlier field bit for bit in a minute.
+- `erosion-0013`: A lake raster that marks water does not give a lake level: the elevation import under it is a bed (ETOPO keeps lake bathymetry); a check that every lake surface lies at or above its terrain finds such a premise in one run.
 
 ## tectonics
 

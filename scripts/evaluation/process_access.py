@@ -20,6 +20,9 @@ The set erosion-a-access is one minimal eroded-world run at seed 1 (128 x 64, --
 climate 32/2), measured in erosion plan step A4 for hydrology.flow_routing and terrain.fluvial_erosion.
 The set erosion-b-access holds one minimal eroded-world run per Phase B step that changed a
 process's access (b1-eroded-world.json, ...), each measured at that step's commit and kept.
+The set erosion-c-access does the same for Phase C (c1-eroded-world.json, c1-earth-hydrology.json, ...);
+Phase C's steps also measure earth-hydrology at 128 x 64 (Earth maps and lakes, climate 32/2) when
+they change a process of that recipe.
 A process that no report ran gets no declaration.
 `--check` exits 1 when the file would change instead of writing it.
 """

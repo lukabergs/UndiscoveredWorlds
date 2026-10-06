@@ -1,5 +1,6 @@
 #include "io/raster_imports.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -249,6 +250,78 @@ bool importseadepthmapcells(const string& filepathname, int width, int height, i
 
                 setnom(i, j, elev);
             }
+        }
+    }
+
+    return true;
+}
+
+namespace
+{
+// For each of `cells` equal intervals over [0, pixels): the pixels it overlaps and the
+// overlapped length of each (in pixels).
+struct PixelOverlap
+{
+    int pixel;
+    double length;
+};
+
+std::vector<std::vector<PixelOverlap>> pixeloverlaps(int cells, int pixels)
+{
+    std::vector<std::vector<PixelOverlap>> overlaps(static_cast<size_t>(cells));
+    const double step = static_cast<double>(pixels) / static_cast<double>(cells);
+    for (int cell = 0; cell < cells; cell++)
+    {
+        const double start = step * cell;
+        const double end = cell + 1 == cells ? static_cast<double>(pixels) : step * (cell + 1);
+        for (int pixel = static_cast<int>(floor(start)); pixel < pixels && pixel < end; pixel++)
+        {
+            const double length = min(end, pixel + 1.0) - max(start, static_cast<double>(pixel));
+            if (length > 0.0)
+                overlaps[static_cast<size_t>(cell)].push_back({ pixel, length });
+        }
+    }
+    return overlaps;
+}
+}
+
+bool importlakemaskcells(const string& filepathname, int width, int height,
+    const function<void(int, int)>& setlake)
+{
+    rasterimage::Image mask;
+
+    if (!mask.loadFromFile(filepathname))
+        return false;
+
+    const rasterimage::Size size = mask.getSize();
+
+    if (size.x == 0 || size.x != 2 * size.y)
+        return false;
+
+    const vector<vector<PixelOverlap>> columns = pixeloverlaps(width + 1, static_cast<int>(size.x));
+    const vector<vector<PixelOverlap>> rows = pixeloverlaps(height + 1, static_cast<int>(size.y));
+
+    for (int i = 0; i <= width; i++)
+    {
+        for (int j = 0; j <= height; j++)
+        {
+            double lake = 0.0;
+            double total = 0.0;
+
+            for (const PixelOverlap& column : columns[static_cast<size_t>(i)])
+            {
+                for (const PixelOverlap& row : rows[static_cast<size_t>(j)])
+                {
+                    const double area = column.length * row.length;
+                    total += area;
+
+                    if (mask.getPixel(static_cast<unsigned int>(column.pixel), static_cast<unsigned int>(row.pixel)).r >= 128)
+                        lake += area;
+                }
+            }
+
+            if (total > 0.0 && 2.0 * lake >= total)
+                setlake(i, j);
         }
     }
 

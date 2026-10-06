@@ -167,7 +167,7 @@ def _draw_arrows(draw, east, north, scale, columns=36):
     return full
 
 
-MOUTH, OUTLET, DARK = (255, 255, 255), (255, 0, 255), (16, 16, 16)
+MOUTH, OUTLET, DARK, DOT = (255, 255, 255), (255, 0, 255), (16, 16, 16), (255, 48, 48)
 
 
 def _position(lon, lat, columns, rows, scale):
@@ -190,12 +190,14 @@ def _label_box(x, y, length, radius, height, place):
     return left, top, left + length, top + 13
 
 
-def draw_markers(canvas, columns, rows, scale, rings=(), squares=(), links=(), origin=(LEFT, TOP)):
+def draw_markers(canvas, columns, rows, scale, rings=(), squares=(), links=(), dots=(), origin=(LEFT, TOP)):
     """Point markers on the raster of a framed map (cell size `scale` pixels, raster at `origin`).
 
     rings: (lon, lat, label), a white ring with a dark outline and its label; squares: (lon, lat),
     a filled magenta square; links: (lon, lat, lon, lat), a thin line drawn the short way in
-    longitude. Positions in degrees, columns east from 180 W. Markers keep a few pixels at
+    longitude; dots: (lon, lat), a small red square without outline (half a cell wide, at least
+    2 pixels), drawn first so the other markers stay on top. Positions in degrees, columns east
+    from 180 W. Markers keep a few pixels at
     small cell sizes and are drawn again one raster width east and west, so the left and
     right edges join; everything is clipped to the raster. A label goes right of its ring,
     left, above or below it: the first of those places inside the raster that covers the
@@ -206,6 +208,12 @@ def draw_markers(canvas, columns, rows, scale, rings=(), squares=(), links=(), o
     draw = ImageDraw.Draw(layer)
     radius, half = min(max(2 * scale, 6), 10), min(max(scale, 3), 5)
     shifts = (0, -width, width)
+    side = max(2, scale // 2)
+    for lon, lat in dots:
+        x, y = _position(lon, lat, columns, rows, scale)
+        left, top = round(x - side / 2), round(y - side / 2)
+        for shift in shifts:
+            draw.rectangle([left + shift, top, left + shift + side - 1, top + side - 1], fill=DOT)
     for lon, lat, end_lon, end_lat in links:
         x, y = _position(lon, lat, columns, rows, scale)
         reach = ((end_lon - lon + 180) % 360 - 180) / 360 * width

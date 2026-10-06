@@ -363,7 +363,11 @@ def run_validation(bundle, specs, references, baseline=None):
                 distributions[spec['id']] = landscape_statistics.compare_ocean_depths(bundle, spec, baseline)
         elif spec['kind'] in ('upstream_area', 'basins', 'internal_drainage', 'discharge'):
             import hydrology_reference
-            distributions[spec['id']] = hydrology_reference.compare(spec['kind'], bundle, spec, baseline)
+            reason = hydrology_reference.skip_reason(spec['kind'], bundle, spec, baseline)
+            if reason:
+                skipped.append({'id': spec['id'], 'reason': reason})
+            else:
+                distributions[spec['id']] = hydrology_reference.compare(spec['kind'], bundle, spec, baseline)
         elif spec['kind'] == 'river_mouths':
             missing = [field for field in RIVER_FIELDS if field not in bundle.fields or
                        (baseline is not None and field not in baseline.fields)]

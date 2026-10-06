@@ -285,6 +285,27 @@ def check_drained(bundle, spec, context):
                   f'{undrained} of {int(np.count_nonzero(land))} land cells undrained')
 
 
+def check_lake_above_terrain(bundle, spec, context):
+    """Every lake cell (a nonzero lake surface) lies at or above its terrain: no lake surface below
+    its bed. Compared in float32, as the fields are stored."""
+    missing = absent_fields(bundle, [spec['lake'], spec['elevation']])
+    if missing:
+        return result('lake-above-terrain', 'skip', f"{', '.join(missing)} absent")
+    surface = bundle.load(spec['lake']).astype(np.float32)
+    elevation = bundle.load(spec['elevation']).astype(np.float32)
+    lake = surface != 0
+    below = lake & (surface < elevation)
+    rows, columns = np.nonzero(below)
+    depth = (elevation - surface)[below]
+    order = np.argsort(-depth, kind='stable')[:10]
+    details = [f'row {int(rows[i])}, column {int(columns[i])}: surface {float(surface[rows[i], columns[i]]):.2f}, '
+               f'terrain {float(elevation[rows[i], columns[i]]):.2f}' for i in order]
+    summary = f'{int(below.sum())} of {int(lake.sum())} lake cells below their terrain'
+    if below.any():
+        summary += f' (deepest {float(depth.max()):.2f} m)'
+    return result('lake-above-terrain', 'fail' if below.any() else 'pass', summary, details)
+
+
 # Flow direction codes as river_direction: (dx, dy) with east = +x, south = +y (north row first).
 DIRECTION_OFFSETS = {1: (0, -1), 2: (1, -1), 3: (1, 0), 4: (1, 1), 5: (0, 1), 6: (-1, 1), 7: (-1, 0), 8: (-1, -1)}
 
@@ -327,7 +348,7 @@ CHECKS = {'grid': check_grid, 'required': check_required, 'finite': check_finite
           'written': check_written, 'frozen': check_frozen, 'repeat': check_repeat,
           'recipe-equality': check_recipe_equality, 'record': check_record, 'budget': check_budget,
           'minerals': check_minerals, 'volume-budget': check_volume_budget, 'drained': check_drained,
-          'monotone': check_monotone}
+          'monotone': check_monotone, 'lake-above-terrain': check_lake_above_terrain}
 
 
 def run_checks(bundle, specs, context):

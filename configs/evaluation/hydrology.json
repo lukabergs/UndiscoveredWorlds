@@ -1,12 +1,13 @@
 {
   "schema": "uw-evaluation-profile/v1",
   "module": "hydrology",
-  "description": "Earth hydrology on imported terrain (earth-hydrology recipe): the earth-climate recipe followed by hydrology.flow_routing, the Geosphere frozen. The largest outlets of the routing are compared with an authored, unchecked table of Earth's river mouths (configs/river-mouths.json), which is context until the user has reviewed it; Earth hypsometry is context for the review. Checks guard drainage, discharge monotonicity and value ranges.",
+  "description": "Earth hydrology on imported terrain (earth-hydrology recipe): the earth-climate recipe with hydrology.flow_routing and hydrology.lake_levels after the rainfall, Earth's lakes imported from refs/processed/lakes/2048.png, the Geosphere frozen. The routing is compared with the prepared HydroSHEDS fields (upstream area, discharge, basins, internal drainage; the discharge reference is a WaterGAP model estimate). The largest outlets of the routing are compared with an authored, unchecked table of Earth's river mouths (configs/river-mouths.json), which is context until the user has reviewed it; Earth hypsometry is context for the review. Checks guard drainage, discharge monotonicity and value ranges.",
   "evidence": {"checks": "required", "validation": "context", "review": "primary"},
   "run": {"tool": "world_pipeline", "resolution": 256,
           "arguments": ["run", "--recipe", "earth-hydrology", "--resolution", "{width}",
                         "--import-land", "refs/processed/land_ocean/maps/earth_land_{width}x{height}.tif",
                         "--import-sea", "refs/processed/land_ocean/maps/earth_sea_{width}x{height}.tif",
+                        "--import-lakes", "refs/processed/lakes/2048.png",
                         "--climate-resolution", "64", "--climate-coupling-iterations", "2"],
           "inputs": [{"environment": "UW_CLIMATE_SURFACE_DRAG_INPUT", "derive": "drag-contrast",
                       "source": "refs/processed/era5-vegetation-drag/1024/land-drag-contrast-1024.txt"}]},
@@ -19,22 +20,28 @@
     {"check": "range", "field": "hydrosphere.drainage_area", "min": 0},
     {"check": "frozen", "components": ["geosphere"]},
     {"check": "drained", "direction": "hydrosphere.flow_direction", "depression": "hydrosphere.depression_id", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"},
+    {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation"},
     {"check": "monotone", "direction": "hydrosphere.flow_direction", "discharge": "hydrosphere.discharge", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"}
   ],
   "validation": [
     {"id": "river_mouths", "kind": "river_mouths", "table": "configs/river-mouths.json", "top": 20, "match_km": 500},
     {"id": "hypsometry", "kind": "hypsometry", "reference_width": 2048},
-    {"id": "drainage_pattern", "kind": "drainage_pattern"}
+    {"id": "drainage_pattern", "kind": "drainage_pattern"},
+    {"id": "upstream_area", "kind": "upstream_area"},
+    {"id": "discharge_reference", "kind": "discharge"},
+    {"id": "basins", "kind": "basins"},
+    {"id": "internal_drainage", "kind": "internal_drainage"}
   ],
   "maps": [
     {"name": "elevation", "title": "Surface elevation (m)", "derived": "surface_elevation", "palette": "tectonics:elevation"},
     {"name": "discharge", "title": "Discharge (log10 m3/s; dark where there is none)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log"},
     {"name": "river-mouths", "title": "River mouths: table mouths and the largest outlets over discharge (log10 m3/s)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log", "overlay": "river_mouths"},
+    {"name": "reference-rivers", "title": "Discharge (log10 m3/s) with the reference major rivers (HydroRIVERS, at least 100000 km2 upstream)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log", "overlay": "upstream_area"},
     {"name": "basins", "title": "Drainage basins (outlet folded onto 12 colours; dark at sea)", "derived": "drainage_basin", "hide_zero": true, "palette": "tectonics:category_12"},
     {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"}
   ],
   "review_status": "Draft written by an agent on 2026-10-06 (erosion plan, step B5). The user rewrites it; until then a verdict on it is a reading aid, not a judgement of the world.",
   "review": [
-    {"id": "largest-outlets-at-mouths", "question": "Do the largest outlets sit at the mouths of Earth's largest rivers?", "maps": ["river-mouths", "discharge", "basins", "annual-rain", "elevation"], "seasons": "all", "region": "coasts", "good": "the highest outlet discharges at or near the mouths of the Amazon, Congo, Ganges-Brahmaputra, Orinoco and Yangtze, with basins of about their shape; no large outlet on a dry coast", "severity": "major"}
+    {"id": "largest-outlets-at-mouths", "question": "Do the largest outlets sit at the mouths of Earth's largest rivers?", "maps": ["river-mouths", "reference-rivers", "discharge", "basins", "annual-rain", "elevation"], "seasons": "all", "region": "coasts", "good": "the highest outlet discharges at or near the mouths of the Amazon, Congo, Ganges-Brahmaputra, Orinoco and Yangtze, with basins of about their shape; no large outlet on a dry coast", "severity": "major"}
   ]
 }
