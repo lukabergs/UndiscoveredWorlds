@@ -8,6 +8,7 @@
 
 #include "core/deterministic_random.hpp"
 #include "simulations/hydrology/flow_routing.hpp"
+#include "simulations/landscape/isostasy.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
 #include "simulations/landscape/relief_roughness.hpp"
 #include "simulations/landscape/stream_power.hpp"
@@ -153,6 +154,8 @@ void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& ch
     }
 
     const landscape::StreamPowerParameters parameters = kernelparameters(inputs.sealevel);
+    const landscape::IsostasyParameters isostasy{t::isostasy::reboundFraction, t::isostasy::loadingFraction};
+    const float ceiling = static_cast<float>(world.maxelevation());
     const double duration = t::erosion::durationMyr;
     landscape::StreamPowerBudget total;
     double elapsed = 0.0;
@@ -164,6 +167,15 @@ void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& ch
         routing = flowrouting::route(inputs, &elevation);
         const landscape::StreamPowerBudget budget = landscape::stepstreampower(
             metric, routing.graph, erodibility, uplift, step, elevation, steperosion, stepdeposition, &stepflux);
+        // Local isostasy (erosion plan C8): the step's removed rock lifts each column by
+        // a fraction, its laid sediment presses it down. The erosion fields keep counting
+        // the rock removed and the sediment laid (layers.finalize's exhumation reads
+        // them); the net elevation change of the run now includes the response. A cell
+        // that both lost and gained in the step can end above where the kernel left it,
+        // so the result is held to the datum ceiling, as after the roughness.
+        landscape::applyisostasy(isostasy, steperosion, stepdeposition, elevation);
+        for (float& height : elevation)
+            height = std::min(height, ceiling);
         total.eroded_km3 += budget.eroded_km3;
         total.landdeposited_km3 += budget.landdeposited_km3;
         total.marinedeposited_km3 += budget.marinedeposited_km3;
@@ -188,9 +200,10 @@ void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& ch
 
     // The end of the run: the final routing on the eroded terrain, so that no second
     // routing step follows. geosphere.max_elevation is the datum ceiling the terrain
-    // stages clamp to, not the summit; the roughness was held to it above, and with
-    // uplift 0 the stream-power steps lower the terrain or deposit below the terrain
-    // upstream, so the ceiling stays valid.
+    // stages clamp to, not the summit; the roughness and every step's isostatic
+    // response were held to it above (with uplift 0 the stream-power steps lower the
+    // terrain or deposit below the terrain upstream, but the rebound can lift a cell
+    // that both lost and gained above where the kernel left it), so it stays valid.
     writeerosionstate(world, inputs, elevation, erodibility, denudation, aggradation, sediment, total, duration);
     if (total.strandedloads > 0)
         std::cout << "Fluvial erosion: " << total.strandedloads << " marine load(s) found no sea cell below the delta top ("

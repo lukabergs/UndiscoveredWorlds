@@ -122,7 +122,9 @@ void generate_surface_potentials(planet& world)
     const bool eroded = reader.erosionduration() > 0.0f;
     // Net rates over the run (B4 review): the gross erosion and deposition rates of a
     // cell are both large where sediment passes through, so the scores read the net
-    // lowering and the net accumulation instead.
+    // rock removal and the net accumulation instead (denudation minus aggradation and
+    // the reverse: rock removed and sediment laid, not the surface's movement, which
+    // the isostatic response of landscape.isostasy.* makes smaller).
     const worldgrid<float>* denudation = eroded ? &reader.denudation() : nullptr;
     const worldgrid<float>* aggradation = eroded ? &reader.aggradation() : nullptr;
     const float duration = eroded ? reader.erosionduration() : 1.0f;

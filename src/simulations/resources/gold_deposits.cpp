@@ -163,7 +163,9 @@ void generate_gold_deposits(planet& world)
 
     MineralBudget budget = world.mineralbudget();
     // An eroded world (erosion_duration > 0) exhumes the deposits once more by
-    // the erosion run's net lowering before the liberated gold is routed.
+    // the erosion run's net rock removal (denudation minus aggradation) before the
+    // liberated gold is routed. That is rock removed, not surface lowering: with the
+    // isostatic rebound (landscape.isostasy.*) the surface lowers by only part of it.
     const planet& reader = world;
     const bool eroded = reader.erosionduration() > 0.0f;
     const worldgrid<float>* denudation = eroded ? &reader.denudation() : nullptr;

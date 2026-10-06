@@ -57,7 +57,8 @@ inline float upliftMMyr = 0.0f;
 
 namespace isostasy
 {
-inline float reboundFraction = 0.0f;
+inline float reboundFraction = 0.848f;
+inline float loadingFraction = 0.848f;
 }
 
 namespace rivers
@@ -130,6 +131,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.erosion.step_myr", &erosion::stepMyr },
         { "landscape.erosion.uplift_m_myr", &erosion::upliftMMyr },
         { "landscape.isostasy.rebound_fraction", &isostasy::reboundFraction },
+        { "landscape.isostasy.loading_fraction", &isostasy::loadingFraction },
         { "landscape.rivers.minimum_flow", &rivers::minimumFlow },
         { "landscape.rivers.baseflow_fraction", &rivers::baseflowFraction },
         { "landscape.lakes.evaporation_per_c", &lakes::evaporationPerC },

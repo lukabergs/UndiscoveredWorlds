@@ -6,6 +6,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 
 - `erosion-0014`: The rainfall solver's bulk-aerodynamic potential evaporation as the Budyko PET (discharge recall on Earth fell from 0.63 to 0.46).
 - `erosion-0016`: Depth from the engine's crust age by the plate-cooling law: the engine's ocean ages are mostly the run's age (median 590 Myr at 600 Myr) and two thirds of the sea lies on continental crust, so 98 percent of the ocean lands at 5 to 6 km.
+- `erosion-0021`: Loading fraction 2700/3300 with rebound 2800/3300 on rock volumes (it raised the land by 0.66 m on average in 20 Myr).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -56,6 +57,7 @@ Lessons:
 | `erosion-0018` | 2026-10-06 | flux in place; delta chance superseded by C5b | keep | erosion plan, step C5a: the erosion's sediment flux and the delta chance from it |
 | `erosion-0019` | 2026-10-07 | equivalent | keep | erosion plan, step C7: the fluvial erosion joins the time model |
 | `erosion-0020` | 2026-10-07 | mechanism in place; little land built at the current sediment supply | keep | erosion plan, step C5b: progradation at river mouths and distributaries on the new land |
+| `erosion-0021` | 2026-10-07 | law in place; effect to judge at 256 columns | keep | erosion plan, step C8: local isostatic rebound during the erosion run |
 
 Lessons:
 
@@ -89,6 +91,7 @@ Lessons:
 - `erosion-0019`: A checkpoint path that duplicates the end-of-run writer diverges as soon as a later step adds a field to one of them: share one writer before others edit the function.
 - `erosion-0020`: A cap measured only by how many cells it turns into land needs an uncapped run of the same code: here every capped prograded cell was land without the cap too, so the cap's effect was elsewhere (heights, spills).
 - `erosion-0020`: Access measured on a world where a field stays zero misses its writes: measure a new field's writer on the size where it changes.
+- `erosion-0021`: An isostatic response with different fractions for removal and loading creates column whenever material only moves: check a mass-moving kernel's response for volume neutrality before choosing densities.
 
 ## tectonics
 
