@@ -36,7 +36,10 @@ struct Depressions
     std::vector<Depression> depressions;  // by id - 1
 };
 
-// `sea` marks sea cells (1), the seeds of the flood; `elevation` is the terrain.
+// `sea` marks sea cells (1), the seeds of the flood, which enter at their own
+// elevation (the seabed): the caller's mask must put every cell at or below the
+// sea level in the sea (basebelowsea), so that no land cell lies below a sea
+// neighbour's seabed; `elevation` is the terrain.
 // A flooded cell is raised to the elevation of the cell it was reached from;
 // cells raised by less than `minimumdepth_m` keep depressionid 0 (and their
 // filledelevation is still the raised value). Deterministic: the priority queue

@@ -136,6 +136,7 @@ Lessons:
 | `world-0080` | 2026-10-06 | equivalent | keep | erosion plan, step 0: the FastLEM stages removed |
 | `world-0081` | 2026-10-06 | documents only | keep | erosion plan, step 0.2: the plan, the agent workflow guide and the project agents |
 | `world-0082` | 2026-10-06 | documents only | keep | erosion plan, step A0: the landscape kernel contracts |
+| `world-0083` | 2026-10-06 | kernel tests pass | keep | erosion plan, step A1: sphere metric, flow graph and depressions kernels with their tests |
 
 Lessons:
 
@@ -267,3 +268,4 @@ Lessons:
 - `world-0079`: Counting which recipe reaches a changed line (field nonzero in the reference bundle, step present in the recipe) before the move predicted all three outcomes exactly, including the one field that would differ.
 - `world-0080`: generateglobalclimate in src/pipeline/climate_generation.cpp has no caller: the recipes run the climate stages through world_stages.cpp.
 - `world-0081`: A plan that will be executed by workers in parallel needs its shared contracts (headers, file ownership per step) written before the workers start; the plan makes that the orchestrator's first step (A0).
+- `world-0083`: Steepest descent must be computed on the filled surface, not the terrain, or a rim cell beside a depression drains into it and the receiver chain cycles; the plan's section 3 said terrain.

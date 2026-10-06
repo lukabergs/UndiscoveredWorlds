@@ -19,15 +19,21 @@ struct FlowGraph
     // Per cell. A land cell's receiver is the neighbour of steepest descent (drop
     // over centre distance) among the eight, a sea neighbour counting with
     // elevation = sea level. A land cell whose steepest descent is a sea neighbour
-    // is an outlet: receiver = the cell itself, direction = 0, outletsea = that sea
-    // neighbour. A land cell with no lower neighbour, or flooded by a depression
-    // (depressionid != 0), takes the depression kernel's flood receiver (towards
-    // its spill), so every land cell has a receiver and every chain ends at an
-    // outlet. A sea cell's receiver is its lowest sea neighbour (the seabed's
-    // steepest descent), itself when none is lower; sea cells have direction 0.
+    // is an outlet: receiver = the cell itself, direction = the code towards that
+    // sea neighbour, outletsea = that sea neighbour (so every land cell has a
+    // direction 1..8, which the drained check of the evaluation relies on). A land
+    // cell with no lower neighbour, or flooded by a depression (depressionid != 0),
+    // takes the depression kernel's flood receiver (towards its spill), so every
+    // land cell has a receiver and every chain ends at an outlet; a flood receiver
+    // that is a sea cell makes the cell an outlet. A sea cell's receiver is its
+    // lowest sea neighbour (the seabed's steepest descent), itself when none is
+    // lower; sea cells have direction 0. A land cell the flood never reached (a
+    // region without a sea cell) is its own receiver with direction 0 and a root
+    // of `order`, like an outlet without a sea cell; the evaluation's drained
+    // check reports such cells, as intended.
     std::vector<int32_t> receiver;        // index of the receiver; the cell itself for outlets and seabed pits
-    std::vector<uint8_t> direction;       // 1..8 towards the receiver; 0 for outlets, sea cells and self-receivers
-    std::vector<float> distance_m;        // centre to centre; 0 when the receiver is the cell itself
+    std::vector<uint8_t> direction;       // 1..8 towards the receiver, or towards outletsea for an outlet; 0 for sea cells
+    std::vector<float> distance_m;        // centre to centre, to outletsea for an outlet; 0 for a seabed pit
     std::vector<int32_t> outletsea;       // outlets: the sea cell the water enters; -1 elsewhere
     std::vector<uint8_t> land;            // 1 land, 0 sea (the input mask)
     // The Braun-Willett stack over the land cells: outlets first, every cell after
