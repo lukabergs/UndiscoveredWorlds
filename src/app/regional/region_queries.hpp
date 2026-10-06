@@ -12,6 +12,7 @@ class region;
 
 int tempelevadd(planet& world, region& region, int temp, int i, int j);
 int tempelevremove(planet& world, region& region, int temp, int i, int j);
+int tempelevremove(planet& world, int temp, int i, int j);   // whole-number form on the global map, for the regional generator
 int getslope(region& region, int x, int y, int xx, int yy);
 twointegers nearestsea(region& region, int leftx, int lefty, int rightx, int righty, int i, int j);
 bool vaguelycoastal(region& region, int x, int y);

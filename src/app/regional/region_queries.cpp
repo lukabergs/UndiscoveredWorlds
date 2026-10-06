@@ -56,6 +56,25 @@ int tempelevremove(planet& world, region& region, int temp, int i, int j)
     return temp;
 }
 
+// The same on the global map, in whole numbers as the regional generator computes (the float form is
+// tempelevremove in simulations/climate/climate_elevation.hpp).
+
+int tempelevremove(planet& world, int temp, int i, int j)
+{
+    int elevation = world.map(i, j) - world.sealevel();
+
+    if (elevation < 0)
+        elevation = 0;
+
+    float elevationadjust = (float)elevation;
+    elevationadjust = elevationadjust / 1000.0f;
+    elevationadjust = elevationadjust * world.tempdecrease();
+
+    temp = temp + (int)elevationadjust;
+
+    return temp;
+}
+
 // Same thing on the regional map.
 
 int getslope(region& region, int x, int y, int xx, int yy)
