@@ -40,6 +40,7 @@ Lessons:
 | `erosion-0004` | 2026-10-06 | validation in place; observations recorded | keep | erosion plan, step B5: the earth-hydrology profile and the river_mouths validation |
 | `erosion-0005` | 2026-10-06 | rivers from the routing; procedural recipes identical | keep | erosion plan, step B1: hydrology.rivers from the routing in eroded-world |
 | `erosion-0006` | 2026-10-06 | lake levels by water balance; procedural recipes identical | keep | erosion plan, step B2: lake levels by water balance in eroded-world |
+| `erosion-0007` | 2026-10-06 | equivalent at the minimal configuration | keep | erosion plan, step B3: basin classes from the routing and the lake levels |
 
 Lessons:
 
@@ -51,6 +52,7 @@ Lessons:
 - `erosion-0004`: A fixed runoff coefficient of 0.4 on the climate module's precipitation makes desert rivers like the Nile carry many times their observed flow: the runoff needs the land evaporation the climate module computes but does not store (the evaporation-based runoff named for Phase B in configs/parameters/landscape.json, runoff note).
 - `erosion-0005`: A stage that replaces a legacy writer must also write what the legacy writer left on cells outside its own domain (the legacy river map carried directions and flows into the sea, where the delta stage reads them); a consumer survey of the field, not of the stage, finds that.
 - `erosion-0006`: A per-depression inflow taken from an accumulated discharge must exclude every cell downstream of the depression that still lies at its level, or the depression's own water returns as inflow; the routing's minimum-depth threshold creates exactly such cells.
+- `erosion-0007`: A step whose effect needs a feature the minimal world lacks (closed lakes) shows identical bundles; say so in the expected field before the check, so that identical is a confirmation and not a surprise.
 
 ## tectonics
 
