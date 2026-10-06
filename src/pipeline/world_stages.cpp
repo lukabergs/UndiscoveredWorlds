@@ -14,6 +14,8 @@
 #include "pipeline/physical_layers.hpp"
 #include "pipeline/world_generation_debug.hpp"
 #include "pipeline/world_processes.hpp"
+#include "simulations/hydrology/flow_routing.hpp"
+#include "simulations/terrain/fluvial_erosion.hpp"
 
 using namespace std;
 
@@ -1075,6 +1077,16 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         // The planet keeps its own land/sea counts for the stages after climate.
         getlandandseatotals(world);
         executeclimatestage(stageId, world.climate(), climatecontext);
+        return true;
+
+    case GenerationStageId::flow_routing:
+        applyflowroutingstage(world);
+        return true;
+
+    case GenerationStageId::fluvial_erosion:
+        // The land and sea totals are not recounted here: they are undeclared writes of
+        // this process, and the stages after it read the counts of the rainfall stage.
+        applyfluvialerosionstage(world);
         return true;
 
     case GenerationStageId::fjords:

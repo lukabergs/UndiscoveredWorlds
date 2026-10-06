@@ -210,7 +210,7 @@ $wp = "out/build/headless/bin/Release/world_pipeline.exe"
 uv run --offline scripts/evaluation/compare_bundles.py out/bench/a out/bench/b
 ```
 
-The climate/erosion feedback experiment (run 63) has no runner at present; it returns as a recipe once `terrain.climate_erosion` is an evolver (`docs/architecture/consolidation-plan.md` §6). `uw.py tectonics report` still renders run 63.
+The climate/erosion feedback experiment (run 63) has no runner: its solver was replaced by the `landscape` kernels and the recipe `eroded-world` (`docs/architecture/erosion-hydrology-plan.md`); the engine coupling returns in that plan's Phase D. `uw.py tectonics report` still renders run 63.
 
 ## Geology
 

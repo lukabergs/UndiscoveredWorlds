@@ -13,7 +13,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "evaluation"))
 
 from uwtools.bundle import SCHEMA, Bundle  # noqa: E402
-from checks import CHECKS  # noqa: E402
+from checks import CHECKS, land_mask  # noqa: E402
 
 COLUMNS, ROWS = 4, 2
 
@@ -87,6 +87,14 @@ class EvaluationCheckTests(unittest.TestCase):
         west = [[0, 7, 7, 7], [0, 7, 7, 7]]
         self.assertEqual(self.run_check(routing(west, [[0, 3, 2, 1], [0, 3, 2, 1]]), MONOTONE), "pass")
         self.assertEqual(self.run_check(routing(west, [[0, 3, 2, 1], [0, 1, 2, 1]]), MONOTONE), "fail")
+
+    def test_land_rule_rounds_to_whole_metres(self):
+        fields = routing([[0, 7, 7, 7], [0, 7, 7, 7]], [[0, 3, 2, 1], [0, 3, 2, 1]])
+        fields["geosphere.base_elevation"][0, 1] = 0.4
+        with tempfile.TemporaryDirectory() as directory:
+            land = land_mask(write_bundle(directory, fields), DRAINED)
+        self.assertFalse(land[0, 1])
+        self.assertTrue(land[1, 1])
 
 
 if __name__ == "__main__":

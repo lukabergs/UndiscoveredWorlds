@@ -1,7 +1,7 @@
 add_library(uw_terrain STATIC
-    climate_erosion.cpp
     climate_landforms.cpp
     coast_queries.cpp
+    fluvial_erosion.cpp
     import_elements.cpp
     shape_templates.cpp
     surface_potentials.cpp

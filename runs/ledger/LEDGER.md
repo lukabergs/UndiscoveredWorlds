@@ -30,6 +30,17 @@ Lessons:
 - `climate-0002`: weighted_relative_error (registry) and global-balanced-v1 can order a pair of runs differently.
 - `climate-0003`: Registered climate runs no longer carry weighted_relative_error or the other C++ benchmark metrics; the registry record holds global-balanced-v1 only.
 
+## erosion
+
+| Id | Date | Verdict | Decision | What |
+|---|---|---|---|---|
+| `erosion-0001` | 2026-10-06 | integration runs; checks pass; look not yet judged | keep | erosion plan, step A4: hydrology.flow_routing and terrain.fluvial_erosion integrated; recipe eroded-world runs at the minimal configuration |
+
+Lessons:
+
+- `erosion-0001`: A dispatch case that calls a helper which writes fields (getlandandseatotals) is an undeclared write of that process even when the audit happens to see no change; keep the stage body to the process and let the measured declaration cover it.
+- `erosion-0001`: Inputs gathered once for an evolver that recomputes its own mask must be gathered for every cell (runoff over the sea), or cells that change class during the run get none.
+
 ## tectonics
 
 | Id | Date | Verdict | Decision | What |

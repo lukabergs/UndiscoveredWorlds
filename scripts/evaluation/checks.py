@@ -247,9 +247,15 @@ def absent_fields(bundle, identifiers):
     return [identifier for identifier in identifiers if identifier not in bundle.fields]
 
 
+def whole_metres(values):
+    """Round to the nearest whole metre, half away from zero (std::lround, the planet's wholemetres)."""
+    return np.where(values >= 0, np.floor(values + 0.5), np.ceil(values - 0.5))
+
+
 def land_mask(bundle, spec):
-    """Land cells: elevation above sea level."""
-    return bundle.load(spec['elevation']).astype(float) > float(bundle.scalar(spec['sea_level']))
+    """Land cells: elevation in whole metres above sea level (the rule of planet::basebelowsea)."""
+    elevation = bundle.load(spec['elevation']).astype(float)
+    return whole_metres(elevation) > float(bundle.scalar(spec['sea_level']))
 
 
 def check_volume_budget(bundle, spec, context):

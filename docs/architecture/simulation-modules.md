@@ -47,13 +47,16 @@ liberated gold into placers on the final drainage network.
 Climate atmospheric water transport is distinct from the surface routing in
 `hydrology/`.
 
-The standalone solver in `simulations/terrain/climate_erosion.*` (part of `uw_terrain`)
-accepts numerical terrain and climate fields, conserves rock-equivalent volume on a
-cell-centred spherical grid, and has no app or renderer dependency. Nothing calls it
-at present: its CLI adapter and the feedback script that sequenced it (tectonics run
-63) were removed, and it waits for a `terrain.climate_erosion` evolver. The app's climate-only import mode
-selects climate stages through `pipeline/` and asserts that terrain is unchanged.
-This is a surface experiment with frozen plates; the tectonic state is not advanced.
+Erosion and drainage (since 2026-10-06, `docs/architecture/erosion-hydrology-plan.md`):
+the planet-free kernels in `simulations/landscape/` (`uw_landscape`: sphere metric,
+Priority-Flood depressions, D8 flow graph, implicit stream power with deposition,
+hillslope diffusion and marine deposition) and two processes on the planet,
+`hydrology.flow_routing` (diagnoser, `simulations/hydrology/flow_routing.cpp`) and
+`terrain.fluvial_erosion` (evolver, `simulations/terrain/fluvial_erosion.cpp`), run in
+the recipe `eroded-world` after the climate coupling. The former standalone solver
+`climate_erosion.*` and the feedback experiment of tectonics run 63 are gone; the
+app's climate-only import mode still selects climate stages through `pipeline/` and
+asserts that terrain is unchanged.
 
 The climate-only import mode runs the `earth-climate` recipe: climate processes on
 imported terrain with the Geosphere frozen. The recipe omits the roughness stage,

@@ -22,6 +22,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import map_rendering, palettes
 from uwtools.bundle import SEASONS
+from checks import whole_metres
 from validation import field_mask, load_selected, model_field, reference_field, seasons_for, surface_elevation
 
 CLIMATE = palettes.climate()
@@ -52,7 +53,7 @@ FLOW_OFFSETS = {1: (0, -1), 2: (1, -1), 3: (1, 0), 4: (1, 1), 5: (0, 1), 6: (-1,
 def drainage_basin(bundle):
     """The outlet of every land cell along flow_direction, folded onto 12 colour classes (1..12); 0 on sea."""
     direction = bundle.load('hydrosphere.flow_direction')
-    land = bundle.load('geosphere.base_elevation').astype(float) > float(bundle.scalar('geosphere.sea_level'))
+    land = whole_metres(bundle.load('geosphere.base_elevation').astype(float)) > float(bundle.scalar('geosphere.sea_level'))
     rows, columns = direction.shape
     y, x = np.indices((rows, columns))
     receiver = (y * columns + x).ravel()

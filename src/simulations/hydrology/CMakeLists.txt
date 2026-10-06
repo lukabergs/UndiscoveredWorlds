@@ -3,6 +3,7 @@ add_library(uw_hydrology STATIC
     drainage.cpp
     drainage_basins.cpp
     flow_queries.cpp
+    flow_routing.cpp
     lake_effects.cpp
     lakes.cpp
     tides.cpp

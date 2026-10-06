@@ -1,0 +1,107 @@
+#include "simulations/hydrology/flow_routing.hpp"
+
+#include <algorithm>
+#include <cmath>
+
+#include "core/climate_seasons.hpp"
+#include "simulations/landscape/landscape_parameters.hpp"
+#include "world/planet.hpp"
+
+namespace flowrouting
+{
+namespace
+{
+constexpr double secondsperyear = 365.25 * 86400.0;
+}
+
+Inputs gatherinputs(const planet& world)
+{
+    namespace runoff = tuning::landscape::runoff;
+    const int columns = world.width() + 1;
+    const int rows = world.height() + 1;
+    Inputs inputs;
+    inputs.metric = landscape::SphereMetric(columns, rows, static_cast<double>(world.radius()));
+    const std::size_t size = inputs.metric.size();
+    inputs.elevation.resize(size);
+    inputs.sea.resize(size);
+    inputs.runoff_m_yr.resize(size);
+    inputs.sealevel = static_cast<float>(world.sealevel());
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t cell = inputs.metric.index(x, y);
+            inputs.elevation[cell] = world.nomfloat(x, y);
+            inputs.sea[cell] = world.basebelowsea(x, y) ? 1 : 0;
+            // Runoff is computed for every cell, sea included (precipitation exists over the
+            // sea): a seabed that marine deposition raises above the sea level during the
+            // erosion run then contributes to the next routing; accumulateflow ignores sea cells.
+            // Seasonal precipitation is mm/month; four seasons of three months make the year.
+            double annual_mm = 0.0;
+            int coldseasons = 0;
+            for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            {
+                annual_mm += 3.0 * std::max(0.0f, world.seasonalrainfloat(season, x, y));
+                if (world.seasonaltempfloat(season, x, y) < runoff::snowTemperatureC)
+                    coldseasons++;
+            }
+            const double snowfraction = static_cast<double>(coldseasons) / CLIMATESEASONCOUNT;
+            const double icefraction = coldseasons == CLIMATESEASONCOUNT ? 1.0 : 0.0;
+            const double depth = runoff::coefficient * annual_mm / 1000.0 *
+                (1.0 - runoff::snowReduction * snowfraction) * (1.0 - runoff::iceReduction * icefraction);
+            inputs.runoff_m_yr[cell] = static_cast<float>(std::max(0.0, depth));
+        }
+    }
+    return inputs;
+}
+
+std::vector<uint8_t> seamask(const std::vector<float>& elevation, float sealevel)
+{
+    std::vector<uint8_t> sea(elevation.size());
+    for (std::size_t cell = 0; cell < elevation.size(); cell++)
+        sea[cell] = static_cast<float>(std::lround(elevation[cell])) <= sealevel ? 1 : 0;
+    return sea;
+}
+
+Routing route(const Inputs& inputs, const std::vector<float>* elevation)
+{
+    const std::vector<float>& terrain = elevation != nullptr ? *elevation : inputs.elevation;
+    Routing routing;
+    routing.sea = elevation != nullptr ? seamask(terrain, inputs.sealevel) : inputs.sea;
+    routing.depressions = landscape::filldepressions(inputs.metric, terrain, routing.sea,
+                                                     tuning::landscape::depressions::minimumDepthM);
+    routing.graph = landscape::buildflowgraph(inputs.metric, terrain, routing.sea, inputs.sealevel, routing.depressions);
+    landscape::accumulateflow(inputs.metric, inputs.runoff_m_yr, routing.graph);
+    return routing;
+}
+
+void writeroutingfields(planet& world, const Inputs& inputs, const Routing& routing)
+{
+    const int columns = inputs.metric.width;
+    const int rows = inputs.metric.height;
+    worldgrid<std::uint8_t>& direction = world.flowdirection();
+    worldgrid<float>& area = world.drainagearea();
+    worldgrid<float>& discharge = world.discharge();
+    worldgrid<float>& filled = world.filledelevation();
+    worldgrid<std::int32_t>& depression = world.depressionid();
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t cell = inputs.metric.index(x, y);
+            direction[x][y] = routing.graph.direction[cell];
+            area[x][y] = static_cast<float>(routing.graph.area_m2[cell] / 1.0e6);
+            discharge[x][y] = static_cast<float>(routing.graph.discharge_m3_yr[cell] / secondsperyear);
+            filled[x][y] = routing.depressions.filledelevation[cell];
+            depression[x][y] = routing.depressions.depressionid[cell];
+        }
+    }
+}
+}
+
+void applyflowroutingstage(planet& world)
+{
+    const flowrouting::Inputs inputs = flowrouting::gatherinputs(world);
+    const flowrouting::Routing routing = flowrouting::route(inputs);
+    flowrouting::writeroutingfields(world, inputs, routing);
+}

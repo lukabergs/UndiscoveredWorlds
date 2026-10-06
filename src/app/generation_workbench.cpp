@@ -757,10 +757,19 @@ mapviewenum preferredworkbenchmapview(GenerationStageId stageId)
 
 namespace
 {
+// The erosion stages belong to the eroded-world recipe until its promotion (erosion
+// plan, step C4); the workbench walks the registered stages, so it steps over them.
+bool workbenchskipsstage(GenerationStageId stage)
+{
+    return stage == GenerationStageId::flow_routing || stage == GenerationStageId::fluvial_erosion;
+}
+
 void advanceworkbenchstage(GenerationSessionState& session)
 {
     const vector<GenerationStageDefinition>& stages = getgenerationstages();
     if (session.currentStageIndex < stages.size())
+        session.currentStageIndex++;
+    while (session.currentStageIndex < stages.size() && workbenchskipsstage(stages[session.currentStageIndex].id))
         session.currentStageIndex++;
 
     if (workbenchfinished(session) == false && getcurrentgenerationstage(session).id == GenerationStageId::terraforming)
@@ -950,6 +959,7 @@ bool runremaininggenerationstages(planet& world, GenerationScratch& scratch, Gen
     for (size_t index = startStageIndex; index < stages.size(); index++)
     {
         if (context.climateOnly && !isclimatefeedbackstage(stages[index].id)) continue;
+        if (workbenchskipsstage(stages[index].id)) continue;
         if (executeworkbenchstage(stages[index].id, world, scratch, ui, context, errormessage) == false)
             return false;
     }

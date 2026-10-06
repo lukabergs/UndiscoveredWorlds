@@ -16,6 +16,8 @@ are read together; phase4c is the four small runs measured after the float steps
 with `--plume-count 4 --progressive-rifting on`, earth-climate, imported-world and
 procedural-world with --social on 128 x 64, and one procedural world with --social at
 the default size, the only run that exercises the lake, delta and wetland writes.
+The set erosion-a-access is one minimal eroded-world run at seed 1 (128 x 64, --duration 50,
+climate 32/2), measured in erosion plan step A4 for hydrology.flow_routing and terrain.fluvial_erosion.
 A process that no report ran gets no declaration.
 `--check` exits 1 when the file would change instead of writing it.
 """
