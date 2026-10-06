@@ -119,7 +119,7 @@ struct MineralBudget
 {
     double formedGoldT[kDepositSystemCount] = {};
     double inheritedGoldT = 0.0;
-    double erodedGoldT = 0.0;    // Removed from ore bodies during the tectonic run.
+    double erodedGoldT = 0.0;    // Removed from ore bodies during the tectonic run and, in an eroded world, the erosion run.
     double subductedGoldT = 0.0; // Remaining gold lost with consumed host crust.
     int formedCount[kDepositSystemCount] = {};
     int inheritedCount = 0;

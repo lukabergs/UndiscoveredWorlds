@@ -71,7 +71,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::deltas_wetlands_and_roughness, "hydrology.deltas_and_wetlands", K::detailer, false, {}, {}, {}, {},
           "Also recomputes climate classes and biomes and writes the climate diagnostics." },
         { S::finalize_layers, "layers.finalize", K::diagnoser, true, {}, {}, {}, {},
-          "Physical resource layers, gold placers and optional society." },
+          "Physical resource layers, gold placers and optional society. In an eroded world it applies the erosion run's exhumation to the deposits, so it runs once per world." },
     };
 
     for (WorldProcessDefinition& process : processes)

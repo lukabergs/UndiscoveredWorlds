@@ -1,6 +1,7 @@
 #include "simulations/resources/gold_deposits.hpp"
 
 #include "core/deterministic_random.hpp"
+#include "simulations/geology/mineral_systems/mineral_history.hpp"
 #include "simulations/geology/mineral_systems/placer_routing.hpp"
 #include "simulations/resources/physical_layers_internal.hpp"
 
@@ -62,6 +63,53 @@ void evaluatesurface(const planet& world, mineralsystems::Deposit& deposit)
     surface.iceCovered = !surface.submerged && world.maxtempfloat(x, y) < 0;
 }
 
+// The erosion run's placer residence weights (erosion plan B4, review): over a run
+// of D Myr the gold liberated before it decays by exp(-D / tau), and gold released
+// at a constant rate during it remains at tau / D x (1 - exp(-D / tau)) of the total,
+// as the tectonic exhumation's per-step decay gives (mineral_history.cpp).
+struct ResidenceWeights
+{
+    double carried = 1.0;   // for the gold liberated before the erosion run
+    double released = 1.0;  // for the gold the erosion run releases
+};
+
+ResidenceWeights residenceweights(double durationMyr)
+{
+    const double residence = mineralsystems::ErosionParameters{}.placerResidenceMyr;
+    ResidenceWeights weights;
+    if (durationMyr > 0.0 && residence > 0.0)
+    {
+        weights.carried = std::exp(-durationMyr / residence);
+        weights.released = residence / durationMyr * (1.0 - weights.carried);
+    }
+    return weights;
+}
+
+// Post-erosion exhumation of a deposit by the erosion run's net lowering at its
+// cell (denudation minus aggradation, never negative: a buried deposit is not
+// exhumed), booked as the tectonic exhumation books it (mineral_history.cpp): the
+// gold released joins the budget's eroded gold in full and the recent liberated gold
+// at its residence weight, the earlier liberated gold decays over the run, and a
+// fully eroded ore body takes the eroded fate at the end of the run. Applied once
+// per world: layers.finalize must not run twice on an eroded world (plan section 6).
+void exhumeaftererosion(mineralsystems::Deposit& deposit, double lowering_m, double timeMyr,
+    const ResidenceWeights& weights, mineralsystems::MineralBudget& budget)
+{
+    using namespace mineralsystems;
+    deposit.recentLiberatedGoldT *= weights.carried;
+    if (deposit.fate != DepositFate::preserved)
+        return;
+    const double released = exhumedeposit(deposit, std::max(0.0, lowering_m));
+    deposit.recentLiberatedGoldT += released * weights.released;
+    budget.erodedGoldT += released;
+    if (deposit.erodedFraction >= 1.0)
+    {
+        deposit.fate = DepositFate::eroded;
+        deposit.fateTimeMyr = timeMyr;
+        ++budget.erodedCount;
+    }
+}
+
 // Present drainage on the final world; distances treat rows as latitudes.
 mineralsystems::DrainageNetwork drainagenetwork(const planet& world)
 {
@@ -114,12 +162,28 @@ void generate_gold_deposits(planet& world)
         [](const Deposit& deposit) { return deposit.system == DepositSystem::placer_gold; }), deposits.end());
 
     MineralBudget budget = world.mineralbudget();
+    // An eroded world (erosion_duration > 0) exhumes the deposits once more by
+    // the erosion run's net lowering before the liberated gold is routed.
+    const planet& reader = world;
+    const bool eroded = reader.erosionduration() > 0.0f;
+    const worldgrid<float>* denudation = eroded ? &reader.denudation() : nullptr;
+    const worldgrid<float>* aggradation = eroded ? &reader.aggradation() : nullptr;
+    const ResidenceWeights weights = residenceweights(eroded ? static_cast<double>(reader.erosionduration()) : 0.0);
+    const double erodedtimeMyr = static_cast<double>(world.tectonictimemyr()) +
+        (eroded ? static_cast<double>(reader.erosionduration()) : 0.0);
     std::vector<PlacerSource> sources;
     std::uint32_t lastid = 0;
     for (Deposit& deposit : deposits)
     {
         evaluatesurface(world, deposit);
         lastid = std::max(lastid, deposit.id);
+        if (denudation != nullptr)
+        {
+            const int x = deposit.surface.worldX;
+            const int y = deposit.surface.worldY;
+            exhumeaftererosion(deposit, static_cast<double>((*denudation)[x][y]) - static_cast<double>((*aggradation)[x][y]),
+                erodedtimeMyr, weights, budget);
+        }
         if (deposit.recentLiberatedGoldT > 0.0)
             sources.push_back({ deposit.id, deposit.surface.worldY * (world.width() + 1) + deposit.surface.worldX,
                 deposit.recentLiberatedGoldT });

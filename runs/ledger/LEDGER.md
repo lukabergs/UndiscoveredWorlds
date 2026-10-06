@@ -41,6 +41,7 @@ Lessons:
 | `erosion-0005` | 2026-10-06 | rivers from the routing; procedural recipes identical | keep | erosion plan, step B1: hydrology.rivers from the routing in eroded-world |
 | `erosion-0006` | 2026-10-06 | lake levels by water balance; procedural recipes identical | keep | erosion plan, step B2: lake levels by water balance in eroded-world |
 | `erosion-0007` | 2026-10-06 | equivalent at the minimal configuration | keep | erosion plan, step B3: basin classes from the routing and the lake levels |
+| `erosion-0008` | 2026-10-06 | consumers on the erosion pass; procedural recipes identical | keep | erosion plan, step B4: the surface potentials, the placers and the mineral exhumation read the erosion pass |
 
 Lessons:
 
@@ -53,6 +54,8 @@ Lessons:
 - `erosion-0005`: A stage that replaces a legacy writer must also write what the legacy writer left on cells outside its own domain (the legacy river map carried directions and flows into the sea, where the delta stage reads them); a consumer survey of the field, not of the stage, finds that.
 - `erosion-0006`: A per-depression inflow taken from an accumulated discharge must exclude every cell downstream of the depression that still lies at its level, or the depression's own water returns as inflow; the routing's minimum-depth threshold creates exactly such cells.
 - `erosion-0007`: A step whose effect needs a feature the minimal world lacks (closed lakes) shows identical bundles; say so in the expected field before the check, so that identical is a confirmation and not a surprise.
+- `erosion-0008`: Cumulative erosion and deposition fields of a scheme with deposition are gross fluxes: any consumer that means 'lowered' or 'buried' needs their difference, and a review question that asks for the net and gross split finds it quickly.
+- `erosion-0008`: A quantity defined with a time discount (the liberated gold's placer residence) must keep that discount when a new source adds to it, or the budget closes while the inventory is several times too large.
 
 ## tectonics
 

@@ -1,4 +1,5 @@
 #include "simulations/terrain/surface_potentials.hpp"
+#include "simulations/landscape/landscape_parameters.hpp"
 #include "simulations/resources/physical_layers_internal.hpp"
 
 namespace physical_layers
@@ -98,6 +99,15 @@ float rainfertilityfactor(float rainfall)
 
     return clampunit(1.0f - static_cast<float>(rainfall - 1800) / 1200.0f);
 }
+
+// 100 x log10(1 + rate) / log10(1 + reference), rates in m/Myr; the caller clamps to 0..100.
+float ratepotential(float rate, float reference)
+{
+    const float denominator = std::log10(1.0f + std::max(0.0f, reference));
+    if (denominator <= 0.0f)
+        return 0.0f;
+    return 100.0f * std::log10(1.0f + std::max(0.0f, rate)) / denominator;
+}
 }
 
 void generate_surface_potentials(planet& world)
@@ -106,6 +116,18 @@ void generate_surface_potentials(planet& world)
     const int height = world.height();
     const int maximumflow = std::max(1, world.maxriverflow());
     const int majorriverthreshold = std::max(250, maximumflow / 20);
+    // An eroded world (erosion_duration > 0) takes the erosion and deposition
+    // potentials from the erosion run's rates; a procedural world keeps the proxies.
+    const planet& reader = world;
+    const bool eroded = reader.erosionduration() > 0.0f;
+    // Net rates over the run (B4 review): the gross erosion and deposition rates of a
+    // cell are both large where sediment passes through, so the scores read the net
+    // lowering and the net accumulation instead.
+    const worldgrid<float>* denudation = eroded ? &reader.denudation() : nullptr;
+    const worldgrid<float>* aggradation = eroded ? &reader.aggradation() : nullptr;
+    const float duration = eroded ? reader.erosionduration() : 1.0f;
+    const float erosionreference = tuning::landscape::potentials::erosionReferenceRateMMyr;
+    const float depositionreference = tuning::landscape::potentials::depositionReferenceRateMMyr;
 
     parallelforrows(0, height, [&](int startrow, int endrow)
     {
@@ -157,6 +179,13 @@ void generate_surface_potentials(planet& world)
 
                 if (reliefnorm > 0.7f)
                     depositionscore *= 0.6f;
+
+                if (eroded)
+                {
+                    const float net = ((*denudation)[x][y] - (*aggradation)[x][y]) / duration;
+                    erosionscore = ratepotential(std::max(0.0f, net), erosionreference);
+                    depositionscore = ratepotential(std::max(0.0f, -net), depositionreference);
+                }
 
                 const float fertilitytemperature = temperaturerangefactor(averagetemperature(world, x, y));
                 const float fertilityrain = rainfertilityfactor(annualrainfall(world, x, y));

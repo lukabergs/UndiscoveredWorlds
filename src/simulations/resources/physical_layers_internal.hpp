@@ -69,20 +69,31 @@ inline int averageriverflow(const planet& world, int x, int y)
 // Downstream cell of each land or delta cell, row-major with the planet's
 // inclusive bounds; -1 where water leaves the map or no lower neighbour exists.
 // Rivers and deltas give the direction; elsewhere the steepest descent does.
+// In an eroded world (erosion_duration > 0) a land cell drains along the
+// routing's flow_direction (an outlet's code points into its sea cell); a land
+// cell without a code there (sea when the routing ran, or never reached) and a
+// sea delta cell keep the rule above.
 inline std::vector<int32_t> drainagereceivers(const planet& world)
 {
     const int width = world.width();
     const int height = world.height();
     const size_t columns = size_t(width) + 1;
     std::vector<int32_t> receiver(columns * (size_t(height) + 1), -1);
+    const worldgrid<std::uint8_t>* flow = world.erosionduration() > 0.0f ? &world.flowdirection() : nullptr;
     for (int y = 0; y <= height; ++y)
     {
         for (int x = 0; x <= width; ++x)
         {
             if (world.sea(x, y) != 0 && !isdeltacell(world, x, y)) continue;
-            int direction = world.riverdir(x, y);
-            if (world.deltadir(x, y) > 0)
-                direction = world.deltadir(x, y);
+            int direction = 0;
+            if (flow != nullptr && world.sea(x, y) == 0)
+                direction = (*flow)[x][y];
+            if (direction < 1 || direction > 8)
+            {
+                direction = world.riverdir(x, y);
+                if (world.deltadir(x, y) > 0)
+                    direction = world.deltadir(x, y);
+            }
             if (direction < 1 || direction > 8)
             {
                 float lowest = world.nomfloat(x, y);
