@@ -35,11 +35,14 @@ Lessons:
 | Id | Date | Verdict | Decision | What |
 |---|---|---|---|---|
 | `erosion-0001` | 2026-10-06 | integration runs; checks pass; look not yet judged | keep | erosion plan, step A4: hydrology.flow_routing and terrain.fluvial_erosion integrated; recipe eroded-world runs at the minimal configuration |
+| `erosion-0002` | 2026-10-06 | pending user review | keep | erosion plan, step A6: the judging runs at 256 columns (run 1 at K = 24, run 2 at K = 100); run 1 is the module baseline pending the user's review |
 
 Lessons:
 
 - `erosion-0001`: A dispatch case that calls a helper which writes fields (getlandandseatotals) is an undeclared write of that process even when the audit happens to see no change; keep the stage body to the process and let the measured declaration cover it.
 - `erosion-0001`: Inputs gathered once for an evolver that recomputes its own mask must be gathered for every cell (runoff over the sea), or cells that change class during the run get none.
+- `erosion-0002`: A land-mean denudation at 20 km cells with kappa = 200 km2/Myr is diffusion-dominated: raising the stream power erodibility 4.2 times changed it by 6 percent. Check which term carries a rate before calibrating by it; the plan's band was written for the fluvial law.
+- `erosion-0002`: A band criterion with a single lever needs the lever's sensitivity checked at the minimal configuration first (the A4 bundle showed 0.83 m/Myr at K = 24; one minimal run at K = 100 would have shown the insensitivity in 35 s instead of a 256-column run).
 
 ## tectonics
 

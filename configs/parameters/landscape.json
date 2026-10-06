@@ -3,7 +3,7 @@
  "namespace": "tuning::landscape",
  "header": "src/simulations/landscape/landscape_parameters.hpp",
  "notes": {
-  "stream_power.erodibility": "K in m/Myr per (km3/yr)^area_exponent. Derivation (erosion plan section 3): the tectonic engine's river law is river_erosion = 15 m/Myr per km of sqrt(catchment km2) with uniform runoff; with discharge Q = r P A, P = 1 m/yr and r = runoff.coefficient = 0.4, the same incision needs K = 15 / sqrt(0.4) = 23.7, rounded to 24.",
+  "stream_power.erodibility": "K in m/Myr per (km3/yr)^area_exponent, per unit slope. Derivation (erosion plan section 3): the tectonic engine's river law is river_erosion = 15 m/Myr per km of sqrt(catchment km2) with uniform runoff; with discharge Q = r P A, P = 1 m/yr and r = runoff.coefficient = 0.4, the same incision needs K = 15 / sqrt(0.4) = 23.7, rounded to 24. Calibration record (step A6, 2026-10-06, 256 columns, 20 Myr): erosion run 1 at K = 24 gave a land-mean denudation of 4.03 m/Myr and run 2 at K = 100 gave 4.26 m/Myr, so the rate is not set by K: the hillslope diffusion (hillslope.diffusivity_km2_myr) dominates the denudation at 20 km cells and the fluvial term is small in headwaters (F = K Q^m dt / L about 4e-4 at K = 24). The default stays 24; the plan's band is a section 6 item.",
   "stream_power.crust_class_multiplier_*": "K is multiplied by the multiplier of the cell's geosphere.crust_class (continental, transitional, oceanic).",
   "stream_power.crust_age_factor": "K is multiplied by 1 + crust_age_factor x crust_age / 1000 Myr; 0 turns the age factor off.",
   "stream_power.slope_exponent": "n; Phase A implements n = 1 only (the implicit step is linear in the slope) and the kernel rejects other values.",

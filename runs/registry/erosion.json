@@ -1,4 +1,21 @@
 {
   "schema": "erosion-run-registry/v1",
-  "runs": []
+  "baseline": 1,
+  "baseline_status": "pending the user's review (erosion plan A6, 2026-10-06); run 2 is the erodibility sensitivity experiment at K = 100",
+  "runs": [
+    {
+      "id": 1,
+      "status": "complete",
+      "run": "runs/erosion/1",
+      "date": "2026-10-06T12:44:15+00:00",
+      "label": "erosion plan A6: first judging run of eroded-world at 256 columns, default duration, climate 64/2; baseline pending the user's review"
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "run": "runs/erosion/2",
+      "date": "2026-10-06T12:53:07+00:00",
+      "label": "erosion plan A6: judging run at 256 columns with erodibility 100 (run 1 at 24 was below the denudation band); the module baseline pending the user's review"
+    }
+  ]
 }

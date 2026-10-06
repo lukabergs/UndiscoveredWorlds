@@ -22,8 +22,8 @@
   ],
   "maps": [
     {"name": "elevation", "title": "Surface elevation (m)", "derived": "surface_elevation", "palette": "tectonics:elevation"},
-    {"name": "erosion-rate", "title": "Erosion rate (m/Myr, mean over the erosion run)", "field": "geosphere.erosion_rate", "palette": "tectonics:erosion_rate_m_myr"},
-    {"name": "deposition-rate", "title": "Deposition rate (log10 m/Myr; dark where there is none)", "field": "geosphere.deposition_rate", "transform": "log10", "palette": "tectonics:deposition_rate_log"},
+    {"name": "erosion-rate", "title": "Erosion rate (log10 m/Myr, mean over the erosion run; dark where there is none)", "field": "geosphere.erosion_rate", "transform": "log10", "palette": "tectonics:rate_log"},
+    {"name": "deposition-rate", "title": "Deposition rate (log10 m/Myr; dark where there is none)", "field": "geosphere.deposition_rate", "transform": "log10", "palette": "tectonics:rate_log"},
     {"name": "discharge", "title": "Discharge (log10 m3/s; dark where there is none)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log"},
     {"name": "lake-depth", "title": "Lake depth: filled surface above the terrain (m; dark outside depressions)", "derived": "lake_depth", "hide_zero": true, "palette": "tectonics:lake_depth_m"},
     {"name": "depressions", "title": "Depressions (id folded onto 12 colours; dark outside depressions)", "derived": "depression_class", "hide_zero": true, "palette": "tectonics:category_12"},
