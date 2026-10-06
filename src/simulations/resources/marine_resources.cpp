@@ -29,7 +29,7 @@ float averagesst(const planet& world, int x, int y)
     float total = 0.0f;
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-        total += static_cast<float>(world.seasonalsst(season, x, y));
+        total += world.seasonalsstfloat(season, x, y);
 
     return total / static_cast<float>(CLIMATESEASONCOUNT);
 }

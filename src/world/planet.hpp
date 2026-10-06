@@ -667,6 +667,7 @@ public:
 
     int seasonalsst(int season, int x, int y) const;
     void setseasonalsst(int season, int x, int y, int amount);
+    float seasonalsstfloat(int season, int x, int y) const;
 
     int seasonalevaporation(int season, int x, int y) const;
     void setseasonalevaporation(int season, int x, int y, int amount);
@@ -1767,6 +1768,8 @@ inline void planet::setseasonalcurrentv(int season, int x, int y, int amount) { 
 inline int planet::seasonalsst(int season, int x, int y) const { return climate_.seasonalsst(season, x, y); }
 
 inline void planet::setseasonalsst(int season, int x, int y, int amount) { climate_.setseasonalsst(season, x, y, amount); }
+
+inline float planet::seasonalsstfloat(int season, int x, int y) const { return climate_.seasonalsstfloat(season, x, y); }
 
 inline int planet::seasonalevaporation(int season, int x, int y) const { return climate_.seasonalevaporation(season, x, y); }
 
