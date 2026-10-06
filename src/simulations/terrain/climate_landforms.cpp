@@ -7,10 +7,8 @@
 #include "core/classes.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
-#include "simulations/terrain/terrain_parameters.hpp"
 #include "simulations/terrain/climate_landforms.hpp"
 #include "simulations/hydrology/lakes.hpp"
-#include "simulations/terrain/land_distance.hpp"
 
 using namespace std;
 
@@ -353,75 +351,6 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
 
     makelakestartpoint(world, thislake, lakeno, leftx, lefty, rightx, righty);
 }
-}
-
-void broadenfastlemterrainfromrivers(planet& world)
-{
-    const int width = world.width();
-    const int height = world.height();
-    const int sealevel = world.sealevel();
-    const int maxelev = world.maxelevation();
-    const int maxriverdistance = tuning::terrain::fastlem::postRiverMaximumDistance;
-    const int maxmountaindistance = tuning::terrain::fastlem::postRiverMountainDistance;
-
-    vector<vector<short>> riverdistance(ARRAYWIDTH, vector<short>(ARRAYHEIGHT, static_cast<short>(maxriverdistance + 1)));
-    vector<vector<short>> mountaindistance(ARRAYWIDTH, vector<short>(ARRAYHEIGHT, static_cast<short>(maxmountaindistance + 1)));
-
-    const bool hasrivers = terraindetail::buildlanddistancefield(world, riverdistance, maxriverdistance, [&](int x, int y)
-    {
-        return world.riverdir(x, y) != 0 || world.riverjan(x, y) != 0 || world.riverjul(x, y) != 0 || world.lakesurfacefloat(x, y) != 0 || world.riftlakesurfacefloat(x, y) != 0;
-    });
-
-    const bool hasmountains = terraindetail::buildlanddistancefield(world, mountaindistance, maxmountaindistance, [&](int x, int y)
-    {
-        return world.mountainheightfloat(x, y) >= tuning::terrain::fastlem::postRiverMinimumMountainHeight;
-    });
-
-    if (hasrivers == false || hasmountains == false)
-        return;
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
-    {
-        for (int j = startrow; j <= endrow; j++)
-        {
-            for (int i = 0; i <= width; i++)
-            {
-                if (world.sea(i, j) == 1 || world.outline(i, j) == 1)
-                    continue;
-
-                if (world.lakesurfacefloat(i, j) != 0 || world.riftlakesurfacefloat(i, j) != 0)
-                    continue;
-
-                const int thisriverdistance = riverdistance[i][j];
-                const int thismountaindistance = mountaindistance[i][j];
-
-                if (thisriverdistance <= 0 || thisriverdistance > maxriverdistance || thismountaindistance > maxmountaindistance)
-                    continue;
-
-                float riverfactor = static_cast<float>(thisriverdistance) / static_cast<float>(maxriverdistance);
-                riverfactor = powf(clamp(riverfactor, 0.0f, 1.0f), tuning::terrain::fastlem::postRiverDistanceExponent);
-
-                float mountainfactor = 1.0f - static_cast<float>(thismountaindistance) / static_cast<float>(maxmountaindistance);
-                mountainfactor = powf(clamp(mountainfactor, 0.0f, 1.0f), tuning::terrain::fastlem::postRiverMountainExponent);
-
-                float elevationfactor = static_cast<float>(world.nomfloat(i, j) - sealevel) / static_cast<float>(max(1, tuning::terrain::fastlem::postRiverElevationRange));
-                elevationfactor = clamp(elevationfactor, 0.0f, 1.0f);
-
-                const float upliftstrength = riverfactor * mountainfactor * (0.35f + elevationfactor * 0.65f);
-                const int uplift = static_cast<int>(roundf(static_cast<float>(tuning::terrain::fastlem::postRiverMaximumUplift) * upliftstrength));
-
-                if (uplift < tuning::terrain::fastlem::postRiverMinimumUplift)
-                    continue;
-
-                float newheight = world.nomfloat(i, j) + static_cast<float>(uplift);
-
-                if (newheight > static_cast<float>(maxelev - 1))
-                    newheight = static_cast<float>(maxelev - 1);
-
-                world.setnomfloat(i, j, newheight);
-            }
-        }
-    });
 }
 
 // This function puts ergs in deserts.

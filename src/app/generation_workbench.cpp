@@ -12,7 +12,6 @@
 
 #include "app/generation_workbench.hpp"
 
-#include "simulations/terrain/fastlem_mountains.hpp"
 #include "app/rendering/map_appearance.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "app/ui_charts.hpp"
@@ -742,7 +741,6 @@ mapviewenum preferredworkbenchmapview(GenerationStageId stageId)
     case GenerationStageId::rivers_and_basins:
     case GenerationStageId::basin_editor:
     case GenerationStageId::lakes:
-    case GenerationStageId::post_river_fastlem:
     case GenerationStageId::deltas_wetlands_and_roughness:
         return rivers;
 
@@ -761,8 +759,6 @@ void advanceworkbenchstage(GenerationSessionState& session)
 {
     const vector<GenerationStageDefinition>& stages = getgenerationstages();
     if (session.currentStageIndex < stages.size())
-        session.currentStageIndex++;
-    while (session.currentStageIndex < stages.size() && islegacygenerationstage(stages[session.currentStageIndex].id))
         session.currentStageIndex++;
 
     if (workbenchfinished(session) == false && getcurrentgenerationstage(session).id == GenerationStageId::terraforming)
@@ -952,7 +948,6 @@ bool runremaininggenerationstages(planet& world, GenerationScratch& scratch, Gen
     for (size_t index = startStageIndex; index < stages.size(); index++)
     {
         if (context.climateOnly && !isclimatefeedbackstage(stages[index].id)) continue;
-        if (islegacygenerationstage(stages[index].id)) continue;
         if (executeworkbenchstage(stages[index].id, world, scratch, ui, context, errormessage) == false)
             return false;
     }

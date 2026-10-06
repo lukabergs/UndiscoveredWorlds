@@ -16,7 +16,7 @@ are read together; phase4c is the four small runs measured after the float steps
 with `--plume-count 4 --progressive-rifting on`, earth-climate, imported-world and
 procedural-world with --social on 128 x 64, and one procedural world with --social at
 the default size, the only run that exercises the lake, delta and wetland writes.
-Stages that are in no recipe (the legacy FastLEM stages) get no declaration.
+A process that no report ran gets no declaration.
 `--check` exits 1 when the file would change instead of writing it.
 """
 import argparse

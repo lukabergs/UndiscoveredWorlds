@@ -21,11 +21,6 @@ bool isclimatefeedbackstage(GenerationStageId id)
     }
 }
 
-bool islegacygenerationstage(GenerationStageId id)
-{
-    return id == GenerationStageId::fastlem_mountains || id == GenerationStageId::post_river_fastlem;
-}
-
 const vector<GenerationStageDefinition>& getgenerationstages()
 {
     static const vector<GenerationStageDefinition> generationstages =
@@ -41,7 +36,6 @@ const vector<GenerationStageDefinition>& getgenerationstages()
         { GenerationStageId::tectonic_trenches, "Tectonic trenches", "Optionally imprint convergent-margin trench systems from tectonic metadata.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::tectonic_volcanoes, "Tectonic volcanoes", "Optionally place volcanic arcs and hotspot-style uplifts from tectonic signals.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::terrain_texturing, "Terrain texturing", "Refresh derived terrain masks and shelves after major height edits.", GenerationStageDomain::terrain, true, true },
-        { GenerationStageId::fastlem_mountains, "FastLEM mountains", "Optionally generate major mountain systems with FastLEM.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::mountain_bases, "Mountain base uplift", "Optionally broaden mountain roots and connect ranges to surrounding uplands.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::terrain_smoothing, "Terrain smoothing", "Optionally smooth terrain while preserving the large-scale landform structure.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::canyon_uplift, "Canyon uplift", "Optionally raise land around incised drainage corridors and canyon systems.", GenerationStageDomain::terrain, true, true },
@@ -60,7 +54,6 @@ const vector<GenerationStageDefinition>& getgenerationstages()
         { GenerationStageId::rivers_and_basins, "Rivers and basins", "Plan rivers and drainage basins from the current terrain and rainfall.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::basin_editor, "Basin editor", "Review detected endorheic basins and choose whether to keep, fill, or drain them.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::lakes, "Lakes", "Optionally generate lakes and rift lakes from the current drainage network.", GenerationStageDomain::hydrology, true, true },
-        { GenerationStageId::post_river_fastlem, "Post-river FastLEM", "Optionally broaden FastLEM terrain around established river systems.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::mountain_temperature_lapse, "Mountain temperature lapse", "Optionally apply mountain lapse-rate cooling to seasonal temperatures.", GenerationStageDomain::climate, true, true },
         { GenerationStageId::climates_and_biomes, "Climates and biomes", "Generate climate classes and biome distributions.", GenerationStageDomain::climate, true, false },
         { GenerationStageId::arid_features, "Arid features", "Optionally add dunes, salt pans, and other arid-land features.", GenerationStageDomain::hydrology, true, true },

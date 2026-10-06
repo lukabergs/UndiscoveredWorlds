@@ -565,9 +565,6 @@ void generateglobalclimate(planet& world, bool dorivers, bool dolakes, bool dode
         }      
     }
 
-    if (beginworldgenstep("Broadening FastLEM terrain from rivers"))
-        broadenfastlemterrainfromrivers(world);
-
     world.setmaxriverflow();
 
     if (beginworldgenstep("Applying mountain temperature lapse"))

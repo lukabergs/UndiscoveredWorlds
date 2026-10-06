@@ -32,7 +32,7 @@ src/
   pipeline/                Stages, process registry, recipes and scheduler, progress
   simulations/
     geology/               Plate-tectonics engine, world adapter, mineral deposit history
-    terrain/               Fractals, coasts, ridges, elevation, FastLEM, landforms
+    terrain/               Fractals, coasts, ridges, elevation, landforms
     climate/               Atmosphere, ocean, energy, moisture, transport
       legacy/              Tested alternative thermal and ocean feedback closures
     hydrology/             Drainage, basins, lakes, deltas, wetlands, tides

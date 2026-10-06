@@ -49,7 +49,7 @@ void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdi
 void createoceanridges(planet& world, worldgrid<bool>& shelves);
 void createoceantrenches(planet& world, worldgrid<bool>& shelves);
 
-// Convert raw ridge masks from imports or FastLEM to mountain relief.
+// Convert raw ridge masks from imports to mountain relief.
 void createmountainsfromraw(planet& world, std::vector<std::vector<int>>& rawmountains, std::vector<std::vector<bool>>& OKmountains);
 
 // Isolated volcanoes and mountainous islands.

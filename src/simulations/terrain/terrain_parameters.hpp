@@ -34,52 +34,6 @@ inline int faultVariation = 3;
 inline int faultLookDistance = 4;
 }
 
-namespace fastlem
-{
-inline int cellSize = 6;
-inline int baseLatticeStep = 5;
-inline int outletMinimumDistanceBlocks = 18;
-inline float minimumCandidateSpacingBlocks = 3.0f;
-inline float siteWeightMin = 0.80f;
-inline float siteWeightMax = 1.40f;
-inline float clusterNoiseThreshold = 0.62f;
-inline int minimumLandTilesPerSite = 2;
-inline int fallbackNeighbourRadius = 3;
-inline int minimumConnections = 3;
-inline int iterations = 24;
-inline float mExponent = 0.5f;
-inline float baseUplift = 0.60f;
-inline float inlandUplift = 6.20f;
-inline float reliefUplift = 1.80f;
-inline float noiseUplift = 1.60f;
-inline float baseErodibility = 0.32f;
-inline float coastalErodibility = 0.22f;
-inline float noiseErodibility = 0.10f;
-inline float minimumErodibility = 0.08f;
-inline float maximumErodibility = 2.5f;
-inline float maxSlopeRadians = 0.38f;
-inline int minimumRidgeCoastDistance = 2;
-inline int minimumPeakCoastDistance = 4;
-inline float minimumRidgeElevationNormalised = 0.14f;
-inline float minimumPeakElevationNormalised = 0.32f;
-inline float minimumRidgeScore = 0.22f;
-inline float elevationScoreWeight = 0.60f;
-inline float coastScoreWeight = 0.40f;
-inline float peakHeightExponent = 0.95f;
-inline int minimumPeakHeight = 1400;
-inline int maximumPeakHeight = 10500;
-inline int minimumCandidateSites = 18;
-inline int minimumBoundaryCandidates = 8;
-inline int postRiverMaximumDistance = 18;
-inline int postRiverMountainDistance = 16;
-inline int postRiverMaximumUplift = 650;
-inline int postRiverMinimumUplift = 24;
-inline int postRiverMinimumMountainHeight = 500;
-inline float postRiverDistanceExponent = 1.25f;
-inline float postRiverMountainExponent = 0.90f;
-inline int postRiverElevationRange = 5000;
-}
-
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -107,48 +61,6 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "terrain.oceanridges.fault_step", &oceanridges::faultStep },
         { "terrain.oceanridges.fault_variation", &oceanridges::faultVariation },
         { "terrain.oceanridges.fault_look_distance", &oceanridges::faultLookDistance },
-        { "terrain.fastlem.cell_size", &fastlem::cellSize },
-        { "terrain.fastlem.base_lattice_step", &fastlem::baseLatticeStep },
-        { "terrain.fastlem.outlet_minimum_distance_blocks", &fastlem::outletMinimumDistanceBlocks },
-        { "terrain.fastlem.minimum_candidate_spacing_blocks", &fastlem::minimumCandidateSpacingBlocks },
-        { "terrain.fastlem.site_weight_min", &fastlem::siteWeightMin },
-        { "terrain.fastlem.site_weight_max", &fastlem::siteWeightMax },
-        { "terrain.fastlem.cluster_noise_threshold", &fastlem::clusterNoiseThreshold },
-        { "terrain.fastlem.minimum_land_tiles_per_site", &fastlem::minimumLandTilesPerSite },
-        { "terrain.fastlem.fallback_neighbour_radius", &fastlem::fallbackNeighbourRadius },
-        { "terrain.fastlem.minimum_connections", &fastlem::minimumConnections },
-        { "terrain.fastlem.iterations", &fastlem::iterations },
-        { "terrain.fastlem.m_exponent", &fastlem::mExponent },
-        { "terrain.fastlem.base_uplift", &fastlem::baseUplift },
-        { "terrain.fastlem.inland_uplift", &fastlem::inlandUplift },
-        { "terrain.fastlem.relief_uplift", &fastlem::reliefUplift },
-        { "terrain.fastlem.noise_uplift", &fastlem::noiseUplift },
-        { "terrain.fastlem.base_erodibility", &fastlem::baseErodibility },
-        { "terrain.fastlem.coastal_erodibility", &fastlem::coastalErodibility },
-        { "terrain.fastlem.noise_erodibility", &fastlem::noiseErodibility },
-        { "terrain.fastlem.minimum_erodibility", &fastlem::minimumErodibility },
-        { "terrain.fastlem.maximum_erodibility", &fastlem::maximumErodibility },
-        { "terrain.fastlem.max_slope_radians", &fastlem::maxSlopeRadians },
-        { "terrain.fastlem.minimum_ridge_coast_distance", &fastlem::minimumRidgeCoastDistance },
-        { "terrain.fastlem.minimum_peak_coast_distance", &fastlem::minimumPeakCoastDistance },
-        { "terrain.fastlem.minimum_ridge_elevation_normalised", &fastlem::minimumRidgeElevationNormalised },
-        { "terrain.fastlem.minimum_peak_elevation_normalised", &fastlem::minimumPeakElevationNormalised },
-        { "terrain.fastlem.minimum_ridge_score", &fastlem::minimumRidgeScore },
-        { "terrain.fastlem.elevation_score_weight", &fastlem::elevationScoreWeight },
-        { "terrain.fastlem.coast_score_weight", &fastlem::coastScoreWeight },
-        { "terrain.fastlem.peak_height_exponent", &fastlem::peakHeightExponent },
-        { "terrain.fastlem.minimum_peak_height", &fastlem::minimumPeakHeight },
-        { "terrain.fastlem.maximum_peak_height", &fastlem::maximumPeakHeight },
-        { "terrain.fastlem.minimum_candidate_sites", &fastlem::minimumCandidateSites },
-        { "terrain.fastlem.minimum_boundary_candidates", &fastlem::minimumBoundaryCandidates },
-        { "terrain.fastlem.post_river_maximum_distance", &fastlem::postRiverMaximumDistance },
-        { "terrain.fastlem.post_river_mountain_distance", &fastlem::postRiverMountainDistance },
-        { "terrain.fastlem.post_river_maximum_uplift", &fastlem::postRiverMaximumUplift },
-        { "terrain.fastlem.post_river_minimum_uplift", &fastlem::postRiverMinimumUplift },
-        { "terrain.fastlem.post_river_minimum_mountain_height", &fastlem::postRiverMinimumMountainHeight },
-        { "terrain.fastlem.post_river_distance_exponent", &fastlem::postRiverDistanceExponent },
-        { "terrain.fastlem.post_river_mountain_exponent", &fastlem::postRiverMountainExponent },
-        { "terrain.fastlem.post_river_elevation_range", &fastlem::postRiverElevationRange },
     };
     return entries;
 }

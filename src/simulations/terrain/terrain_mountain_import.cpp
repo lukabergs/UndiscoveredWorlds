@@ -1,4 +1,4 @@
-// Convert raw ridge masks from imports or FastLEM to mountain relief.
+// Convert raw ridge masks from imports to mountain relief.
 // Algorithms by Jonathan Hill, extracted from globalterrain.cpp.
 
 #include "simulations/terrain/terrain_internal.hpp"

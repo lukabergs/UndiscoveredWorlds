@@ -10,7 +10,6 @@
 #include "pipeline/climate_stages.hpp"
 
 #include "core/classes.hpp"
-#include "simulations/terrain/fastlem_mountains.hpp"
 #include "world/functions.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "pipeline/world_generation_debug.hpp"
@@ -704,12 +703,6 @@ void applyterraintexturing(planet& world, GenerationScratch& scratch)
     }
 }
 
-bool applyfastlemmountains(planet& world)
-{
-    vector<vector<int>> fractal = buildterrainfractal(world, 0x4112, 12750);
-    return generatefastlemmountains(world, fractal);
-}
-
 void rebuildterrainroughness(planet& world)
 {
     vector<vector<int>> roughness = buildterrainfractal(world, 0x4113, world.maxelevation());
@@ -1027,11 +1020,6 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         applyterraintexturing(world, scratch);
         return true;
 
-    case GenerationStageId::fastlem_mountains:
-        if (applyfastlemmountains(world) == false && errormessage != nullptr)
-            *errormessage = "FastLEM mountains did not produce enough ridge candidates for this seed.";
-        return true;
-
     case GenerationStageId::mountain_bases:
     {
         vector<vector<bool>> defaultmountains = makeboolgrid(false);
@@ -1106,10 +1094,6 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 
     case GenerationStageId::lakes:
         applylakestage(world, scratch, context);
-        return true;
-
-    case GenerationStageId::post_river_fastlem:
-        broadenfastlemterrainfromrivers(world);
         return true;
 
     case GenerationStageId::mountain_temperature_lapse:

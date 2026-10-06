@@ -2,7 +2,6 @@ add_library(uw_terrain STATIC
     climate_erosion.cpp
     climate_landforms.cpp
     coast_queries.cpp
-    fastlem_mountains.cpp
     import_elements.cpp
     shape_templates.cpp
     surface_potentials.cpp

@@ -26,7 +26,6 @@ enum class GenerationStageId
     tectonic_trenches,
     tectonic_volcanoes,
     terrain_texturing,
-    fastlem_mountains,
     mountain_bases,
     terrain_smoothing,
     canyon_uplift,
@@ -45,7 +44,6 @@ enum class GenerationStageId
     rivers_and_basins,
     basin_editor,
     lakes,
-    post_river_fastlem,
     mountain_temperature_lapse,
     climates_and_biomes,
     arid_features,
@@ -69,7 +67,3 @@ std::size_t getgenerationstageindex(GenerationStageId id);
 bool isterraingenerationstage(GenerationStageId id);
 bool isclimategenerationstage(GenerationStageId id);
 bool isclimatefeedbackstage(GenerationStageId id);
-// Legacy stages keep their code and registry entry, but no recipe and no
-// workbench session runs them. The FastLEM passes are legacy until they are
-// repaired or replaced by another erosion and drainage model.
-bool islegacygenerationstage(GenerationStageId id);
