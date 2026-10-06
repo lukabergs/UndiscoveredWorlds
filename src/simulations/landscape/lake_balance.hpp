@@ -15,8 +15,13 @@
 // (terrain elevation ascending, ties by cell index), k the smallest count whose
 // cumulative area reaches A*_d, and its level is midway between the terrain of the
 // k-th lowest cell and that of the (k+1)-th (or the spill, if smaller); such a lake
-// is closed. A closed depression whose A*_d is below the area of its lowest cell
-// holds no lake (k = 0, level 0): it is dry.
+// is closed. When A*_d lies between the area of all cells but the highest and the
+// depression's area, every cell is lake but the lake stays closed, its level midway
+// between the highest cell and the spill. The cells tied in terrain with the k-th
+// lowest are lake with it (a level cannot separate equal cells). A closed depression
+// whose A*_d is below the area of its lowest cell holds no lake (k = 0, level 0): it
+// is dry. A cell outside d that lies downstream of d's cells at d's filled level
+// (a shallow flooded cell with id 0) is part of d's flat, not an external donor.
 // Simplifications of Phase B (plan section 6): the cells of d form one water body
 // (two pits below a sill inside one depression share a level); the discharge is
 // the routing's, which assumes every upstream depression overflows.

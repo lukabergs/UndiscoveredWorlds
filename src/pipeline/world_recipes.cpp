@@ -117,13 +117,12 @@ WorldRecipe erodedworldrecipe()
     WorldRecipe recipe;
     recipe.name = "eroded-world";
     recipe.description = "procedural-world with flow routing and fluvial erosion after the climate coupling and before the fjords; "
-                         "rivers come from the routing (hydrology.rivers) instead of the legacy river, basin and lake stages, "
-                         "and the world has no lakes until the lake levels are switched on (Phase B)";
+                         "rivers come from the routing (hydrology.rivers) and lakes from a water balance in its depressions "
+                         "(hydrology.lake_levels) instead of the legacy river, basin and lake stages (Phase B)";
     // Phase B swaps legacy hydrology stages for landscape ones here, one step at a time:
     // the second list holds the legacy stages left out and the landscape stages not yet switched on.
     recipe.steps = without(stagesfrom(GenerationStageId::geosphere_initialization),
-                           { GenerationStageId::rivers_and_basins, GenerationStageId::basin_editor, GenerationStageId::lakes,
-                             GenerationStageId::lake_levels });
+                           { GenerationStageId::rivers_and_basins, GenerationStageId::basin_editor, GenerationStageId::lakes });
     recipe.inputs = worldpropertyinputs();
     return recipe;
 }

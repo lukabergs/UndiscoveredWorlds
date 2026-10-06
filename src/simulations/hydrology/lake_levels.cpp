@@ -1,9 +1,140 @@
 #include "simulations/hydrology/lake_levels.hpp"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <iostream>
+#include <utility>
+#include <vector>
+
+#include "core/climate_seasons.hpp"
+#include "simulations/hydrology/flow_routing.hpp"
 #include "simulations/landscape/lake_balance.hpp"
+#include "simulations/landscape/landscape_parameters.hpp"
 #include "world/planet.hpp"
 
-// Step B2 of docs/architecture/erosion-hydrology-plan.md fills this file.
-void applylakelevelstage(planet&)
+namespace
 {
+constexpr double secondsperyear = 365.25 * 86400.0;
+constexpr int saltlake = 100;
+constexpr int saltpan = 110;
+}
+
+void applylakelevelstage(planet& world)
+{
+    namespace lakes = tuning::landscape::lakes;
+    const planet& view = world;  // reads through the const getters, which the access tracking sees
+    flowrouting::Inputs routing = flowrouting::gatherinputs(view);
+    const landscape::SphereMetric& metric = routing.metric;
+    const int columns = metric.width;
+    const int rows = metric.height;
+    const std::size_t size = metric.size();
+
+    const worldgrid<float>& filled = view.filledelevation();
+    const worldgrid<std::int32_t>& depression = view.depressionid();
+    const worldgrid<std::uint8_t>& direction = view.flowdirection();
+    const worldgrid<float>& discharge = view.discharge();
+
+    landscape::LakeBalanceInputs inputs;
+    inputs.metric = &metric;
+    inputs.elevation = std::move(routing.elevation);
+    inputs.runoff_m_yr = std::move(routing.runoff_m_yr);
+    inputs.filledelevation.resize(size);
+    inputs.depressionid.resize(size);
+    inputs.receiver.resize(size);
+    inputs.discharge_m3_yr.resize(size);
+    inputs.precipitation_m_yr.resize(size);
+    inputs.evaporation_m_yr.resize(size);
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t cell = metric.index(x, y);
+            inputs.filledelevation[cell] = filled[x][y];
+            inputs.depressionid[cell] = depression[x][y];
+            inputs.discharge_m3_yr[cell] = static_cast<double>(discharge[x][y]) * secondsperyear;
+            int32_t receiver = -1;
+            const int code = direction[x][y];
+            if (code >= 1 && code <= landscape::directioncount)
+            {
+                const std::size_t neighbour = metric.neighbour(cell, code);
+                if (neighbour != cell && routing.sea[neighbour] == 0)
+                    receiver = static_cast<int32_t>(neighbour);
+            }
+            inputs.receiver[cell] = receiver;
+            // Seasonal precipitation is mm/month; four seasons of three months make the year.
+            double rain_mm = 0.0;
+            double temperature = 0.0;
+            for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            {
+                rain_mm += view.seasonalrainfloat(season, x, y);
+                temperature += view.seasonaltempfloat(season, x, y);
+            }
+            temperature /= CLIMATESEASONCOUNT;
+            inputs.precipitation_m_yr[cell] = static_cast<float>(3.0 * rain_mm / 1000.0);
+            inputs.evaporation_m_yr[cell] = static_cast<float>(
+                lakes::evaporationPerC * std::max(0.0, temperature - lakes::evaporationZeroC));
+        }
+    }
+
+    // The routing fields come from the last routing of terrain.fluvial_erosion. In eroded-world no
+    // stage between it and this one writes the base elevation, so the guard below drops nothing; it
+    // stays against a recipe that edits the terrain in between. A depression with a cell that is now
+    // sea, borders the sea or is not below its filled level no longer matches the routing (a fresh
+    // Priority-Flood never puts a depression next to the sea): it is dropped and reported, so no lake
+    // is written next to the sea (removesealakes would spread such a lake over the ocean).
+    std::vector<uint8_t> stale(size, 0);
+    for (std::size_t cell = 0; cell < size; cell++)
+    {
+        const int32_t id = inputs.depressionid[cell];
+        if (id == 0)
+            continue;
+        bool consistent = routing.sea[cell] == 0 && inputs.elevation[cell] < inputs.filledelevation[cell];
+        for (int code = 1; consistent && code <= landscape::directioncount; code++)
+        {
+            const std::size_t neighbour = metric.neighbour(cell, code);
+            if (neighbour != cell && routing.sea[neighbour] != 0)
+                consistent = false;
+        }
+        if (!consistent)
+            stale[cell] = 1;
+    }
+    std::vector<int32_t> staleids;
+    for (std::size_t cell = 0; cell < size; cell++)
+        if (stale[cell] != 0)
+            staleids.push_back(inputs.depressionid[cell]);
+    std::sort(staleids.begin(), staleids.end());
+    for (int32_t& id : inputs.depressionid)
+        if (id != 0 && std::binary_search(staleids.begin(), staleids.end(), id))
+            id = 0;
+    staleids.erase(std::unique(staleids.begin(), staleids.end()), staleids.end());
+    if (!staleids.empty())
+        std::cout << "Lake levels: " << staleids.size() << " depression(s) no longer match the routing and hold no lake\n";
+
+    const landscape::LakeBalance balance = landscape::balancelakes(inputs);
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < columns; x++)
+            world.setlakesurface(x, y, balance.surface[metric.index(x, y)]);
+    for (const landscape::LakeLevel& lake : balance.lakes)
+    {
+        if (!lake.overflowing && lake.lakecells == 0)
+        {
+            const std::size_t cell = static_cast<std::size_t>(lake.lowestcell);
+            // A pan carries a lake surface at its own terrain, as the legacy pans do, so the
+            // arid features keep away from it and basin_class sees a closed depression.
+            world.setlakesurface(metric.column(cell), metric.row(cell), inputs.elevation[cell]);
+            world.setspecial(metric.column(cell), metric.row(cell), saltpan);
+        }
+    }
+    for (std::size_t cell = 0; cell < size; cell++)
+    {
+        const int32_t id = inputs.depressionid[cell];
+        if (id == 0 || balance.surface[cell] == 0.0f)
+            continue;
+        // balance.lakes is in ascending id.
+        const auto lake = std::lower_bound(balance.lakes.begin(), balance.lakes.end(), id,
+                                           [](const landscape::LakeLevel& entry, int32_t value) { return entry.id < value; });
+        if (lake != balance.lakes.end() && lake->id == id && !lake->overflowing)
+            world.setspecial(metric.column(cell), metric.row(cell), saltlake);
+    }
 }
