@@ -33,7 +33,8 @@ void printcommandlineusage()
     cout << "  run                 Run a recipe (--recipe) or part of it; nothing is registered.\n";
     cout << "  generate            Generate a procedural world, or climate on imported terrain with --climate-only.\n";
     cout << "Options of run:\n";
-    cout << "  --recipe <name>         procedural-world, imported-world, earth-climate or tectonics. Imported recipes use the\n";
+    cout << "  --recipe <name>         procedural-world, imported-world, eroded-world, earth-climate, earth-hydrology or\n";
+    cout << "                           tectonics. Imported recipes use the\n";
     cout << "                           Earth terrain of configs/app.env at --resolution (default 512) unless\n";
     cout << "                           --import-land and --import-sea or --from-bundle are given.\n";
     cout << "  --from-bundle <dir>     Start from the world of a run bundle or checkpoint. Its seed and grid apply;\n";
@@ -823,7 +824,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
         GenerationExecutionContext context;
         context.dorivers = options.rivers;
-        context.climateOnly = recipe.name == "earth-climate";
+        context.climateOnly = recipe.name == "earth-climate" || recipe.name == "earth-hydrology";
         context.dolakes = options.lakes;
         context.dodeltas = options.deltas;
         context.socialoptions = socialoptions;
@@ -860,7 +861,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         context.chainland = chainland;
         context.smalllake = smalllake;
         context.largelake = largelake;
-        context.climateOnly = recipe.name == "earth-climate";
+        context.climateOnly = recipe.name == "earth-climate" || recipe.name == "earth-hydrology";
 
         runresult = runrecipeonterrain(*world, recipe, scratch, parameters, context, runoptions);
     }
@@ -871,7 +872,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     if (!runresult.completed)
     {
         cerr << "Recipe " << recipe.name << " failed: " << runresult.error << '\n';
-        if (recipe.name == "earth-climate" || options.runCommand)
+        if (recipe.name == "earth-climate" || recipe.name == "earth-hydrology" || options.runCommand)
             return 1;
     }
     if (!reportrecipe(recipe, runresult, options.accessReportPath))

@@ -757,11 +757,12 @@ mapviewenum preferredworkbenchmapview(GenerationStageId stageId)
 
 namespace
 {
-// The erosion stages belong to the eroded-world recipe until its promotion (erosion
+// The landscape stages belong to the eroded-world recipe until its promotion (erosion
 // plan, step C4); the workbench walks the registered stages, so it steps over them.
 bool workbenchskipsstage(GenerationStageId stage)
 {
-    return stage == GenerationStageId::flow_routing || stage == GenerationStageId::fluvial_erosion;
+    return stage == GenerationStageId::flow_routing || stage == GenerationStageId::fluvial_erosion
+        || stage == GenerationStageId::rivers || stage == GenerationStageId::lake_levels;
 }
 
 void advanceworkbenchstage(GenerationSessionState& session)

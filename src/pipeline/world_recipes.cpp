@@ -51,14 +51,21 @@ std::vector<GenerationStageId> stagesfrom(GenerationStageId first)
     return steps;
 }
 
-// The erosion stages run only in eroded-world; the other recipes leave them out.
-std::vector<GenerationStageId> withouterosion(std::vector<GenerationStageId> steps)
+std::vector<GenerationStageId> without(std::vector<GenerationStageId> steps, std::initializer_list<GenerationStageId> left)
 {
-    steps.erase(std::remove_if(steps.begin(), steps.end(), [](GenerationStageId stage)
+    steps.erase(std::remove_if(steps.begin(), steps.end(), [&](GenerationStageId stage)
     {
-        return stage == GenerationStageId::flow_routing || stage == GenerationStageId::fluvial_erosion;
+        return std::find(left.begin(), left.end(), stage) != left.end();
     }), steps.end());
     return steps;
+}
+
+// The landscape stages (erosion plan) run only in eroded-world and earth-hydrology;
+// the other recipes leave them out.
+std::vector<GenerationStageId> withouterosion(std::vector<GenerationStageId> steps)
+{
+    return without(std::move(steps), { GenerationStageId::flow_routing, GenerationStageId::fluvial_erosion,
+                                       GenerationStageId::rivers, GenerationStageId::lake_levels });
 }
 
 bool isfrozen(const WorldRecipe& recipe, Component component)
@@ -111,7 +118,10 @@ WorldRecipe erodedworldrecipe()
     recipe.name = "eroded-world";
     recipe.description = "procedural-world with flow routing and fluvial erosion after the climate coupling and before the fjords; "
                          "the legacy hydrology stages still run after them (Phase A)";
-    recipe.steps = stagesfrom(GenerationStageId::geosphere_initialization);
+    // Phase B swaps legacy hydrology stages for landscape ones here, one step at a time:
+    // the stages in the second list are those not yet switched on.
+    recipe.steps = without(stagesfrom(GenerationStageId::geosphere_initialization),
+                           { GenerationStageId::rivers, GenerationStageId::lake_levels });
     recipe.inputs = worldpropertyinputs();
     return recipe;
 }
@@ -129,6 +139,16 @@ WorldRecipe earthclimaterecipe()
     return recipe;
 }
 
+WorldRecipe earthhydrologyrecipe()
+{
+    WorldRecipe recipe = earthclimaterecipe();
+    recipe.name = "earth-hydrology";
+    recipe.description = "earth-climate followed by the flow routing on the imported terrain; Geosphere is frozen";
+    const auto rainfall = std::find(recipe.steps.begin(), recipe.steps.end(), GenerationStageId::rainfall);
+    recipe.steps.insert(rainfall == recipe.steps.end() ? rainfall : rainfall + 1, GenerationStageId::flow_routing);
+    return recipe;
+}
+
 WorldRecipe tectonicsrecipe()
 {
     WorldRecipe recipe;
@@ -141,12 +161,12 @@ WorldRecipe tectonicsrecipe()
 
 bool recipeimportsterrain(const WorldRecipe& recipe)
 {
-    return recipe.name == "imported-world" || recipe.name == "earth-climate";
+    return recipe.name == "imported-world" || recipe.name == "earth-climate" || recipe.name == "earth-hydrology";
 }
 
 std::vector<std::string> worldrecipenames()
 {
-    return { "procedural-world", "imported-world", "eroded-world", "earth-climate", "tectonics" };
+    return { "procedural-world", "imported-world", "eroded-world", "earth-climate", "earth-hydrology", "tectonics" };
 }
 
 bool findworldrecipe(std::string_view name, WorldRecipe& recipe)
@@ -159,6 +179,8 @@ bool findworldrecipe(std::string_view name, WorldRecipe& recipe)
         recipe = erodedworldrecipe();
     else if (name == "earth-climate")
         recipe = earthclimaterecipe();
+    else if (name == "earth-hydrology")
+        recipe = earthhydrologyrecipe();
     else if (name == "tectonics")
         recipe = tectonicsrecipe();
     else

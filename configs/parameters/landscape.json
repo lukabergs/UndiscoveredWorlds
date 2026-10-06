@@ -10,7 +10,10 @@
   "hillslope.critical_slope": "0 turns the limiter off; otherwise the diffusion acts on max(0, gradient - critical_slope).",
   "runoff": "runoff = coefficient x annual precipitation x (1 - snow_reduction x snow fraction) x (1 - ice_reduction x ice fraction); the snow fraction is the share of the seasons with a mean temperature below snow_temperature_c, the ice fraction is 1 where every season is below it. Evaporation-based runoff is a Phase B refinement.",
   "erosion.uplift_m_myr": "Uniform rock uplift during the erosion run; 0 in Phase A (post-tectonic denudation). The engine's rate replaces it in Phase D.",
-  "isostasy.rebound_fraction": "Read from Phase C (step C3); 0 until then."
+  "isostasy.rebound_fraction": "Read from Phase C (step C3); 0 until then.",
+  "rivers.minimum_flow": "A cell is a river where its annual mean flow in legacy units (river_factor) reaches this; 3 is the flow of one mean-sized cell under the legacy source threshold of 40 mm/month (40 / 15 = 2.7).",
+  "lakes.evaporation_*": "Open-water evaporation E = evaporation_per_c x max(0, T - evaporation_zero_c) in m/yr, T the annual mean air temperature of the depression: 2.0 m/yr at 25 C, 0.9 at 10 C, 0.15 at 0 C.",
+  "potentials.*_reference_rate_m_myr": "The rate that maps to a score of 100: score = 100 x log10(1 + rate) / log10(1 + reference), clamped to 0..100."
  },
  "parameters": {
   "runoff": {
@@ -48,6 +51,17 @@
   },
   "isostasy": {
    "rebound_fraction": 0.0
+  },
+  "rivers": {
+   "minimum_flow": 3
+  },
+  "lakes": {
+   "evaporation_per_c": 0.075,
+   "evaporation_zero_c": -2.0
+  },
+  "potentials": {
+   "erosion_reference_rate_m_myr": 100.0,
+   "deposition_reference_rate_m_myr": 100.0
   }
  }
 }

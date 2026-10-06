@@ -30,6 +30,8 @@ WorldRecipe importedworldrecipe();
 WorldRecipe erodedworldrecipe();
 // earth-climate: climate processes only on imported terrain; Geosphere is frozen.
 WorldRecipe earthclimaterecipe();
+// earth-hydrology: earth-climate followed by the flow routing; Geosphere is frozen.
+WorldRecipe earthhydrologyrecipe();
 // tectonics: the Geosphere initializer and the tectonics evolver on the engine's grid.
 WorldRecipe tectonicsrecipe();
 // True for the recipes that start from imported terrain.

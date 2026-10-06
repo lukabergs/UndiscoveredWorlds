@@ -4,6 +4,7 @@
 add_library(uw_landscape STATIC
     depressions.cpp
     flow_graph.cpp
+    lake_balance.cpp
     sphere_metric.cpp
     stream_power.cpp
 )

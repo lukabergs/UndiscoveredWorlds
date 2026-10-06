@@ -57,6 +57,23 @@ namespace isostasy
 inline float reboundFraction = 0.0f;
 }
 
+namespace rivers
+{
+inline int minimumFlow = 3;
+}
+
+namespace lakes
+{
+inline float evaporationPerC = 0.075f;
+inline float evaporationZeroC = -2.0f;
+}
+
+namespace potentials
+{
+inline float erosionReferenceRateMMyr = 100.0f;
+inline float depositionReferenceRateMMyr = 100.0f;
+}
+
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -83,6 +100,11 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.erosion.step_myr", &erosion::stepMyr },
         { "landscape.erosion.uplift_m_myr", &erosion::upliftMMyr },
         { "landscape.isostasy.rebound_fraction", &isostasy::reboundFraction },
+        { "landscape.rivers.minimum_flow", &rivers::minimumFlow },
+        { "landscape.lakes.evaporation_per_c", &lakes::evaporationPerC },
+        { "landscape.lakes.evaporation_zero_c", &lakes::evaporationZeroC },
+        { "landscape.potentials.erosion_reference_rate_m_myr", &potentials::erosionReferenceRateMMyr },
+        { "landscape.potentials.deposition_reference_rate_m_myr", &potentials::depositionReferenceRateMMyr },
     };
     return entries;
 }

@@ -15,6 +15,8 @@
 #include "pipeline/world_generation_debug.hpp"
 #include "pipeline/world_processes.hpp"
 #include "simulations/hydrology/flow_routing.hpp"
+#include "simulations/hydrology/lake_levels.hpp"
+#include "simulations/hydrology/rivers.hpp"
 #include "simulations/terrain/fluvial_erosion.hpp"
 
 using namespace std;
@@ -1104,8 +1106,16 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
             createrivermap(world, scratch.mountaindrainage);
         return true;
 
+    case GenerationStageId::rivers:
+        applyriverstage(world);
+        return true;
+
     case GenerationStageId::lakes:
         applylakestage(world, scratch, context);
+        return true;
+
+    case GenerationStageId::lake_levels:
+        applylakelevelstage(world);
         return true;
 
     case GenerationStageId::mountain_temperature_lapse:
