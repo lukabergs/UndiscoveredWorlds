@@ -18,6 +18,8 @@ procedural-world with --social on 128 x 64, and one procedural world with --soci
 the default size, the only run that exercises the lake, delta and wetland writes.
 The set erosion-a-access is one minimal eroded-world run at seed 1 (128 x 64, --duration 50,
 climate 32/2), measured in erosion plan step A4 for hydrology.flow_routing and terrain.fluvial_erosion.
+The set erosion-b-access holds one minimal eroded-world run per Phase B step that changed a
+process's access (b1-eroded-world.json, ...), each measured at that step's commit and kept.
 A process that no report ran gets no declaration.
 `--check` exits 1 when the file would change instead of writing it.
 """

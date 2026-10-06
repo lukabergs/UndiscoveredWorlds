@@ -1,8 +1,188 @@
 #include "simulations/hydrology/rivers.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <deque>
+#include <vector>
+
+#include "core/climate_seasons.hpp"
+#include "simulations/landscape/landscape_parameters.hpp"
+#include "simulations/landscape/sphere_metric.hpp"
 #include "world/planet.hpp"
 
-// Step B1 of docs/architecture/erosion-hydrology-plan.md fills this file.
-void applyriverstage(planet&)
+namespace
 {
+constexpr double secondsperyear = 365.25 * 86400.0;
+constexpr double pi = 3.14159265358979323846;
+// Legacy flow law (erosion plan section 6, "Legacy flow units"): a cell of mean size
+// under 1 mm/month contributes 1 / river_factor units; 0.012 m/yr is 1 mm/month.
+constexpr double metresperyearpermmpermonth = 0.012;
+constexpr int januaryseason = seasonjanuary;
+constexpr int julyseason = seasonjuly;
+
+// Seasonal runoff of one cell in mm/month (section 6, "Seasonal flows"): the
+// precipitation of a season at or above the snow temperature, plus what the cold
+// seasons before it held as snow (cycling over the four seasons); zero everywhere
+// when no season is warm.
+void seasonalrunoff(const planet& world, int x, int y, double runoff[CLIMATESEASONCOUNT])
+{
+    double rain[CLIMATESEASONCOUNT];
+    bool warm[CLIMATESEASONCOUNT];
+    int firstwarm = -1;
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+    {
+        rain[season] = std::max(0.0, static_cast<double>(world.seasonalrainfloat(season, x, y)));
+        warm[season] = world.seasonaltempfloat(season, x, y) >= tuning::landscape::runoff::snowTemperatureC;
+        runoff[season] = 0.0;
+        if (warm[season] && firstwarm < 0)
+            firstwarm = season;
+    }
+    if (firstwarm < 0)
+        return;
+    double held = 0.0;
+    for (int step = 1; step <= CLIMATESEASONCOUNT; step++)
+    {
+        const int season = (firstwarm + step) % CLIMATESEASONCOUNT;
+        if (warm[season])
+        {
+            runoff[season] = rain[season] + held;
+            held = 0.0;
+        }
+        else
+            held += rain[season];
+    }
+}
+}
+
+void applyriverstage(planet& world)
+{
+    const planet& view = world;
+    const int columns = view.width() + 1;
+    const int rows = view.height() + 1;
+    const double radius = static_cast<double>(view.radius());
+    const landscape::SphereMetric metric(columns, rows, radius);
+    const std::size_t size = metric.size();
+    const worldgrid<std::uint8_t>& direction = view.flowdirection();
+    const worldgrid<float>& discharge = view.discharge();
+
+    // Land cells and their receivers along flow_direction (none into the sea or past a pole).
+    std::vector<std::uint8_t> land(size, 0);
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < columns; x++)
+            land[metric.index(x, y)] = view.basebelowsea(x, y) ? 0 : 1;
+
+    constexpr std::size_t none = static_cast<std::size_t>(-1);
+    std::vector<std::size_t> receiver(size, none);
+    std::vector<int> indegree(size, 0);
+    for (std::size_t cell = 0; cell < size; cell++)
+    {
+        if (!land[cell])
+            continue;
+        const int code = direction[metric.column(cell)][metric.row(cell)];
+        if (code < 1 || code > landscape::directioncount)
+            continue;
+        const std::size_t next = metric.neighbour(cell, code);
+        if (next == cell || !land[next])
+            continue;
+        receiver[cell] = next;
+        indegree[next]++;
+    }
+
+    // Seasonal runoff x cell area, accumulated downstream (Kahn's order, increasing cell index).
+    std::vector<double> accumulated(size * CLIMATESEASONCOUNT, 0.0);
+    for (std::size_t cell = 0; cell < size; cell++)
+    {
+        if (!land[cell])
+            continue;
+        double runoff[CLIMATESEASONCOUNT];
+        seasonalrunoff(view, metric.column(cell), metric.row(cell), runoff);
+        const double area = metric.area_m2(cell);
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            accumulated[cell * CLIMATESEASONCOUNT + season] = runoff[season] * area;
+    }
+    std::deque<std::size_t> queue;
+    for (std::size_t cell = 0; cell < size; cell++)
+        if (land[cell] && indegree[cell] == 0)
+            queue.push_back(cell);
+    while (!queue.empty())
+    {
+        const std::size_t cell = queue.front();
+        queue.pop_front();
+        const std::size_t next = receiver[cell];
+        if (next == none)
+            continue;
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            accumulated[next * CLIMATESEASONCOUNT + season] += accumulated[cell * CLIMATESEASONCOUNT + season];
+        if (--indegree[next] == 0)
+            queue.push_back(next);
+    }
+
+    // Annual flow in legacy units, split into January and July by the seasonal runoff.
+    const double meanarea = 4.0 * pi * radius * radius / (static_cast<double>(columns) * static_cast<double>(rows));
+    const double unitdischarge = tuning::landscape::runoff::coefficient * metresperyearpermmpermonth *
+        static_cast<double>(view.riverfactor()) * meanarea;
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t cell = metric.index(x, y);
+            if (!land[cell])
+            {
+                world.setriverdir(x, y, 0);
+                world.setriverjan(x, y, 0);
+                world.setriverjul(x, y, 0);
+                continue;
+            }
+            world.setriverdir(x, y, direction[x][y]);
+            const double flow = static_cast<double>(discharge[x][y]) * secondsperyear / unitdischarge;
+            int january = 0;
+            int july = 0;
+            if (flow >= static_cast<double>(tuning::landscape::rivers::minimumFlow))
+            {
+                double total = 0.0;
+                for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                    total += accumulated[cell * CLIMATESEASONCOUNT + season];
+                const double januaryshare = total > 0.0 ? 4.0 * accumulated[cell * CLIMATESEASONCOUNT + januaryseason] / total : 1.0;
+                const double julyshare = total > 0.0 ? 4.0 * accumulated[cell * CLIMATESEASONCOUNT + julyseason] / total : 1.0;
+                january = static_cast<int>(std::lround(flow * januaryshare));
+                july = static_cast<int>(std::lround(flow * julyshare));
+            }
+            world.setriverjan(x, y, january);
+            world.setriverjul(x, y, july);
+        }
+    }
+
+    // River mouths: as the legacy map does, the sea cell an outlet drains into takes the
+    // outlet's direction and flows (the delta stage reads them there); where several
+    // outlets share a sea cell, their flows add and the direction is the largest one's.
+    std::vector<int> mouthbest(size, -1);
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t cell = metric.index(x, y);
+            const int code = direction[x][y];
+            if (!land[cell] || code < 1 || code > landscape::directioncount)
+                continue;
+            const std::size_t mouth = metric.neighbour(cell, code);
+            if (mouth == cell || land[mouth])
+                continue;
+            const int mx = metric.column(mouth);
+            const int my = metric.row(mouth);
+            const int january = view.riverjan(x, y);
+            const int july = view.riverjul(x, y);
+            if (january == 0 && july == 0)
+                continue;
+            const int flow = january + july;
+            if (flow > mouthbest[mouth])
+            {
+                mouthbest[mouth] = flow;
+                world.setriverdir(mx, my, code);
+            }
+            world.setriverjan(mx, my, view.riverjan(mx, my) + january);
+            world.setriverjul(mx, my, view.riverjul(mx, my) + july);
+        }
+    }
+    world.setmaxriverflow();
 }

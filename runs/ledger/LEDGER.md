@@ -38,6 +38,7 @@ Lessons:
 | `erosion-0002` | 2026-10-06 | pending user review | keep | erosion plan, step A6: the judging runs at 256 columns (run 1 at K = 24, run 2 at K = 100); run 1 is the module baseline pending the user's review |
 | `erosion-0003` | 2026-10-06 | equivalent | keep | erosion plan, step B0: the Phase B contracts |
 | `erosion-0004` | 2026-10-06 | validation in place; observations recorded | keep | erosion plan, step B5: the earth-hydrology profile and the river_mouths validation |
+| `erosion-0005` | 2026-10-06 | rivers from the routing; procedural recipes identical | keep | erosion plan, step B1: hydrology.rivers from the routing in eroded-world |
 
 Lessons:
 
@@ -47,6 +48,7 @@ Lessons:
 - `erosion-0002`: A band criterion with a single lever needs the lever's sensitivity checked at the minimal configuration first (the A4 bundle showed 0.83 m/Myr at K = 24; one minimal run at K = 100 would have shown the insensitivity in 35 s instead of a 256-column run).
 - `erosion-0003`: The plan's step list named one legacy stage per new process, but the legacy stages share state (basin_policy reruns the river map; lakes needs the river stage's scratch masks): a survey of what each legacy stage calls and needs found it before any worker started.
 - `erosion-0004`: A fixed runoff coefficient of 0.4 on the climate module's precipitation makes desert rivers like the Nile carry many times their observed flow: the runoff needs the land evaporation the climate module computes but does not store (the evaporation-based runoff named for Phase B in configs/parameters/landscape.json, runoff note).
+- `erosion-0005`: A stage that replaces a legacy writer must also write what the legacy writer left on cells outside its own domain (the legacy river map carried directions and flows into the sea, where the delta stage reads them); a consumer survey of the field, not of the stage, finds that.
 
 ## tectonics
 
