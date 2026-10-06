@@ -4,6 +4,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 
 ## Settled / don't retry
 
+- `erosion-0014`: The rainfall solver's bulk-aerodynamic potential evaporation as the Budyko PET (discharge recall on Earth fell from 0.63 to 0.46).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -47,6 +48,7 @@ Lessons:
 | `erosion-0011` | 2026-10-06 | run recorded; estimate wrong (11 min expected, 6.7 min measured) | keep | erosion plan, after Phase B: the 512-column run (erosion run 4), the Earth-reference assessment and the revised Phase C |
 | `erosion-0012` | 2026-10-06 | equivalent | keep | erosion plan, step C0: the Phase C contracts |
 | `erosion-0013` | 2026-10-06 | validation in place; the Caspian stays open until the runoff is fixed (C2) | keep | erosion plan, step C1: Earth lakes in earth-hydrology and the HydroSHEDS validation kinds |
+| `erosion-0014` | 2026-10-06 | law in place; discharge comparison worse than C1 (attributed to the rainfall) | keep | erosion plan, step C2: Budyko runoff, transmission losses and winter baseflow |
 
 Lessons:
 
@@ -68,6 +70,8 @@ Lessons:
 - `erosion-0012`: A restart from a checkpoint needs every table the later stages read to be loadable from a bundle: the tectonic boundary segments are not, so the earliest useful checkpoint for terrain-stage experiments is after the last stage that reads them, not after the tectonics.
 - `erosion-0013`: A whole-tail restart from a checkpoint is limited by the tables and solver fields a bundle cannot load: stopping the restart before the stages that need them (layers.finalize, climate.classification) still gives every earlier field bit for bit in a minute.
 - `erosion-0013`: A lake raster that marks water does not give a lake level: the elevation import under it is a bed (ETOPO keeps lake bathymetry); a check that every lake surface lies at or above its terrain finds such a premise in one run.
+- `erosion-0014`: A climate model's potential evaporation can be several times Earth's over dry land (a bulk formula with a hot dry surface and no surface resistance): check its land distribution against a temperature law before a Budyko curve reads it.
+- `erosion-0014`: A runoff coefficient below one hides an excess of precipitation; replacing it with a physical law can worsen a discharge comparison while improving the model, so report the land water totals beside the comparison.
 
 ## tectonics
 

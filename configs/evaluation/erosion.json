@@ -6,8 +6,8 @@
   "run": {"tool": "world_pipeline", "resolution": 256, "arguments": ["run", "--recipe", "eroded-world", "--resolution", "{width}"], "registered": {"resolution": 128, "arguments": ["--duration", "50", "--climate-resolution", "32", "--climate-coupling-iterations", "2"]}},
   "checks": [
     {"check": "grid"},
-    {"check": "required", "fields": ["planetbody.radius", "hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "geosphere.erodibility", "geosphere.erosion_rate", "geosphere.deposition_rate", "geosphere.denudation", "geosphere.aggradation", "geosphere.erosion_duration", "geosphere.eroded_volume", "geosphere.land_deposited_volume", "geosphere.marine_deposited_volume", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.precipitation"]},
-    {"check": "written", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "geosphere.erodibility", "geosphere.erosion_rate", "geosphere.deposition_rate", "geosphere.denudation", "geosphere.aggradation", "geosphere.erosion_duration", "geosphere.eroded_volume", "geosphere.land_deposited_volume", "geosphere.marine_deposited_volume", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.precipitation"]},
+    {"check": "required", "fields": ["planetbody.radius", "hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "geosphere.erodibility", "geosphere.erosion_rate", "geosphere.deposition_rate", "geosphere.denudation", "geosphere.aggradation", "geosphere.erosion_duration", "geosphere.eroded_volume", "geosphere.land_deposited_volume", "geosphere.marine_deposited_volume", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.precipitation", "atmosphere.potential_evaporation", "hydrosphere.runoff"]},
+    {"check": "written", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "geosphere.erodibility", "geosphere.erosion_rate", "geosphere.deposition_rate", "geosphere.denudation", "geosphere.aggradation", "geosphere.erosion_duration", "geosphere.eroded_volume", "geosphere.land_deposited_volume", "geosphere.marine_deposited_volume", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.precipitation", "atmosphere.potential_evaporation", "hydrosphere.runoff"]},
     {"check": "finite", "fields": ["geosphere.*", "hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation"]},
     {"check": "range", "field": "geosphere.erosion_rate", "min": 0, "max": 2000},
     {"check": "range", "field": "hydrosphere.discharge", "min": 0},
@@ -15,7 +15,7 @@
     {"check": "volume-budget", "total": "geosphere.eroded_volume", "parts": ["geosphere.land_deposited_volume", "geosphere.marine_deposited_volume"], "max_relative_residual": 1e-06},
     {"check": "drained", "direction": "hydrosphere.flow_direction", "depression": "hydrosphere.depression_id", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"},
     {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation"},
-    {"check": "monotone", "direction": "hydrosphere.flow_direction", "discharge": "hydrosphere.discharge", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"},
+    {"check": "monotone", "direction": "hydrosphere.flow_direction", "discharge": "hydrosphere.drainage_area", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"},
     {"check": "repeat"}
   ],
   "validation": [
@@ -28,6 +28,7 @@
     {"name": "erosion-rate", "title": "Erosion rate (log10 m/Myr, mean over the erosion run; dark where there is none)", "field": "geosphere.erosion_rate", "transform": "log10", "palette": "tectonics:rate_log"},
     {"name": "deposition-rate", "title": "Deposition rate (log10 m/Myr; dark where there is none)", "field": "geosphere.deposition_rate", "transform": "log10", "palette": "tectonics:rate_log"},
     {"name": "discharge", "title": "Discharge (log10 m3/s; dark where there is none)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log"},
+    {"name": "runoff", "title": "Runoff depth the routing accumulates (mm/yr)", "field": "hydrosphere.runoff", "palette": "climate:annual_rain"},
     {"name": "lake-depth", "title": "Lake depth: filled surface above the terrain (m; dark outside depressions)", "derived": "lake_depth", "hide_zero": true, "palette": "tectonics:lake_depth_m"},
     {"name": "depressions", "title": "Depressions (id folded onto 12 colours; dark outside depressions)", "derived": "depression_class", "hide_zero": true, "palette": "tectonics:category_12"},
     {"name": "basins", "title": "Drainage basins (outlet folded onto 12 colours; dark at sea)", "derived": "drainage_basin", "hide_zero": true, "palette": "tectonics:category_12"},

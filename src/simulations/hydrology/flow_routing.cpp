@@ -6,6 +6,7 @@
 #include "core/climate_seasons.hpp"
 #include "core/deterministic_random.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
+#include "simulations/landscape/runoff.hpp"
 #include "world/planet.hpp"
 
 namespace flowrouting
@@ -20,6 +21,8 @@ constexpr int routingseedsalt = 0x7207;
 Inputs gatherinputs(const planet& world)
 {
     namespace runoff = tuning::landscape::runoff;
+    namespace transmission = tuning::landscape::transmission;
+    namespace lakes = tuning::landscape::lakes;
     const int columns = world.width() + 1;
     const int rows = world.height() + 1;
     Inputs inputs;
@@ -33,6 +36,23 @@ Inputs gatherinputs(const planet& world)
     inputs.routingoptions.resolveflats = tuning::landscape::routing::resolveFlats;
     if (inputs.routingoptions.randomised)  // the seed is read only when a draw needs it
         inputs.routingoptions.seed = deterministiccontextseed(world.seed(), routingseedsalt);
+    // The imported lakes are read only when the losses need them.
+    const bool budyko = runoff::budyko;
+    inputs.transmissionenabled = transmission::enabled;
+    inputs.evaporation_m_yr.resize(size);
+    const worldgrid<std::uint8_t>* importedlake = nullptr;
+    if (inputs.transmissionenabled)
+    {
+        importedlake = &world.importedlake();
+        landscape::TransmissionLoss& loss = inputs.transmission;
+        loss.deficit_m_yr.resize(size);
+        loss.openwater.resize(size);
+        loss.widthcoefficient = transmission::widthCoefficient;
+        loss.widthexponent = transmission::widthExponent;
+        loss.floodplainfactor = transmission::floodplainFactor;
+        loss.floodplainslope = transmission::floodplainSlope;
+        loss.sealevel = inputs.sealevel;
+    }
     for (int y = 0; y < rows; y++)
     {
         for (int x = 0; x < columns; x++)
@@ -43,20 +63,41 @@ Inputs gatherinputs(const planet& world)
             // Runoff is computed for every cell, sea included (precipitation exists over the
             // sea): a seabed that marine deposition raises above the sea level during the
             // erosion run then contributes to the next routing; accumulateflow ignores sea cells.
-            // Seasonal precipitation is mm/month; four seasons of three months make the year.
+            // Seasonal precipitation is mm/month; four seasons of three months make the year. The
+            // potential evaporation is the open-water law of landscape.lakes applied to each
+            // season's temperature and averaged over the four (m/yr): the one law of the runoff,
+            // the transmission losses and the lake balance.
             double annual_mm = 0.0;
-            int coldseasons = 0;
+            double evaporation = 0.0;
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             {
                 annual_mm += 3.0 * std::max(0.0f, world.seasonalrainfloat(season, x, y));
-                if (world.seasonaltempfloat(season, x, y) < runoff::snowTemperatureC)
-                    coldseasons++;
+                evaporation += landscape::openwaterevaporation(world.seasonaltempfloat(season, x, y),
+                                                               lakes::evaporationPerC, lakes::evaporationZeroC);
             }
-            const double snowfraction = static_cast<double>(coldseasons) / CLIMATESEASONCOUNT;
-            const double icefraction = coldseasons == CLIMATESEASONCOUNT ? 1.0 : 0.0;
-            const double depth = runoff::coefficient * annual_mm / 1000.0 *
-                (1.0 - runoff::snowReduction * snowfraction) * (1.0 - runoff::iceReduction * icefraction);
+            evaporation /= CLIMATESEASONCOUNT;
+            inputs.evaporation_m_yr[cell] = static_cast<float>(evaporation);
+            double depth;
+            if (budyko)  // Fu's curve: a runoff ratio near 1 where PET is small, so no snow or ice term
+                depth = landscape::budykorunoff(annual_mm / 1000.0, evaporation, runoff::budykoW);
+            else
+            {
+                int coldseasons = 0;
+                for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+                    if (world.seasonaltempfloat(season, x, y) < runoff::snowTemperatureC)
+                        coldseasons++;
+                const double snowfraction = static_cast<double>(coldseasons) / CLIMATESEASONCOUNT;
+                const double icefraction = coldseasons == CLIMATESEASONCOUNT ? 1.0 : 0.0;
+                depth = runoff::coefficient * annual_mm / 1000.0 *
+                    (1.0 - runoff::snowReduction * snowfraction) * (1.0 - runoff::iceReduction * icefraction);
+            }
             inputs.runoff_m_yr[cell] = static_cast<float>(std::max(0.0, depth));
+            if (inputs.transmissionenabled)
+            {
+                inputs.transmission.deficit_m_yr[cell] =
+                    static_cast<float>(std::max(0.0, evaporation - annual_mm / 1000.0));
+                inputs.transmission.openwater[cell] = (*importedlake)[x][y] != 0 ? 1 : 0;
+            }
         }
     }
     return inputs;
@@ -79,7 +120,17 @@ Routing route(const Inputs& inputs, const std::vector<float>* elevation)
                                                      tuning::landscape::depressions::minimumDepthM);
     routing.graph = landscape::buildflowgraph(inputs.metric, terrain, routing.sea, inputs.sealevel, routing.depressions,
                                               inputs.routingoptions);
-    landscape::accumulateflow(inputs.metric, inputs.runoff_m_yr, routing.graph);
+    if (inputs.transmissionenabled)
+    {
+        // The cells of this routing's depressions lose nothing to the channel: the lake balance
+        // (hydrology.lake_levels) owns their evaporation.
+        landscape::TransmissionLoss loss = inputs.transmission;
+        loss.depressionid = routing.depressions.depressionid;
+        routing.transmissionloss_m3_yr = landscape::accumulateflowwithlosses(
+            inputs.metric, inputs.runoff_m_yr, terrain, loss, routing.graph);
+    }
+    else
+        landscape::accumulateflow(inputs.metric, inputs.runoff_m_yr, routing.graph);
     return routing;
 }
 
@@ -92,6 +143,7 @@ void writeroutingfields(planet& world, const Inputs& inputs, const Routing& rout
     worldgrid<float>& discharge = world.discharge();
     worldgrid<float>& filled = world.filledelevation();
     worldgrid<std::int32_t>& depression = world.depressionid();
+    worldgrid<float>& runoff = world.runoff();
     for (int y = 0; y < rows; y++)
     {
         for (int x = 0; x < columns; x++)
@@ -102,6 +154,7 @@ void writeroutingfields(planet& world, const Inputs& inputs, const Routing& rout
             discharge[x][y] = static_cast<float>(routing.graph.discharge_m3_yr[cell] / secondsperyear);
             filled[x][y] = routing.depressions.filledelevation[cell];
             depression[x][y] = routing.depressions.depressionid[cell];
+            runoff[x][y] = inputs.runoff_m_yr[cell] * 1000.0f;
         }
     }
 }

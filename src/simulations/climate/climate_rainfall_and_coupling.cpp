@@ -772,13 +772,19 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
     hydrologyfloatgrid rawannualrain(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid quarterrain(width + 1, height + 1, 0.0f);
     hydrologyfloatgrid quarterconvergence(width + 1, height + 1, 0.0f);
+    // Bulk-aerodynamic potential evaporation summed over the solver steps of a
+    // quarter (mm per step, so mm per quarter), on land and sea cells alike; stored
+    // per season as the monthly mean (mm/month), as the precipitation.
+    hydrologyfloatgrid quarterpotentialevaporation(width + 1, height + 1, 0.0f);
     std::array<hydrologyfloatgrid, CLIMATESEASONCOUNT> storedseasonalrain;
+    std::array<hydrologyfloatgrid, CLIMATESEASONCOUNT> storedseasonalpotentialevaporation;
     std::array<hydrologyfloatgrid, CLIMATESEASONCOUNT> storedseasonalmoisture;
     std::array<hydrologyfloatgrid, CLIMATESEASONCOUNT> storedseasonalconvergence;
 
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
         storedseasonalrain[season] = hydrologyfloatgrid(width + 1, height + 1, 0.0f);
+        storedseasonalpotentialevaporation[season] = hydrologyfloatgrid(width + 1, height + 1, 0.0f);
         storedseasonalmoisture[season] = hydrologyfloatgrid(width + 1, height + 1, 0.0f);
         storedseasonalconvergence[season] = hydrologyfloatgrid(width + 1, height + 1, 0.0f);
     }
@@ -893,6 +899,7 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
         {
             quarterrain.fill(0.0f);
             quarterconvergence.fill(0.0f);
+            quarterpotentialevaporation.fill(0.0f);
         }
 
         for (int y = 0; y <= height; y++)
@@ -1520,6 +1527,7 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                             relativehumidity,
                             timestepseconds,
                             transfercoefficient);
+                        quarterpotentialevaporation[x][y] += potentialevaporation;
                         if (sea && referenceqa)
                             referenceledger[quarter][y * (width + 1) + x][3] += potentialevaporation -
                                 climatephysics::bulkAerodynamicEvaporationMmAtPressure(surfacetemperature,
@@ -2162,6 +2170,8 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                             0.0f,
                             quarterrain[x][y] / 3.0f);
                         storedseasonalrain[quarter][x][y] = physicalrain;
+                        storedseasonalpotentialevaporation[quarter][x][y] =
+                            quarterpotentialevaporation[x][y] / 3.0f;
                         storedseasonalmoisture[quarter][x][y] =
                             seasonalprocess[quarter].columnWaterMm[y * (width + 1) + x] /
                             static_cast<float>(seasonalprocess[quarter].durationSeconds);
@@ -2509,6 +2519,8 @@ void createadvectedrainfall(climateworld& world, vector<vector<int>>& inland, ve
                     monthly.referenceRainfallMm[season][y * (outputwidth + 1) + x] = seasonalrain;
                     world.setseasonalmoisturefloat(season, x, y, seasonalmoisture);
                     world.setseasonalconvergencefloat(season, x, y, seasonalconvergence);
+                    world.setseasonalpotentialevaporationfloat(season, x, y, std::max(0.0f,
+                        samplehydrologygrid(storedseasonalpotentialevaporation[season], outputremap, x, y)));
 
                     if (season == seasonjanuary)
                         world.setjanrainfloat(x, y, seasonalrain);

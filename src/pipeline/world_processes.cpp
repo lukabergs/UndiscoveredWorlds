@@ -53,7 +53,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::rainfall, "climate.rainfall_and_coupling", K::evolver, false, {}, {}, {}, {},
           "Runs the coupled wind/pressure/ocean/SST/rainfall iteration." },
         { S::flow_routing, "hydrology.flow_routing", K::diagnoser, false, {}, {}, {}, {},
-          "Phase A: runoff = coefficient x precipitation reduced by snow and ice; every depression overflows at its spill." },
+          "Runoff from Fu's Budyko curve of the annual precipitation and the open-water evaporation law of the lakes; discharge loses evaporation from channel and floodplain where PET exceeds P (erosion plan C2); every depression overflows at its spill." },
         { S::fluvial_erosion, "terrain.fluvial_erosion", K::evolver, false, {}, {}, {}, {},
           "Writes its final routing fields too, so no second routing step follows it." },
         { S::fjords, "terrain.fjords", K::detailer, false, {}, {}, {}, {}, "" },

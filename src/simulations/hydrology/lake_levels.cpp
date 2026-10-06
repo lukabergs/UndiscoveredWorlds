@@ -22,7 +22,6 @@ constexpr int saltpan = 110;
 
 void applylakelevelstage(planet& world)
 {
-    namespace lakes = tuning::landscape::lakes;
     const planet& view = world;  // reads through the const getters, which the access tracking sees
     flowrouting::Inputs routing = flowrouting::gatherinputs(view);
     const landscape::SphereMetric& metric = routing.metric;
@@ -39,12 +38,14 @@ void applylakelevelstage(planet& world)
     inputs.metric = &metric;
     inputs.elevation = std::move(routing.elevation);
     inputs.runoff_m_yr = std::move(routing.runoff_m_yr);
+    // The routing's potential evaporation: the open-water law per season, averaged (one law
+    // for the runoff, the transmission losses and the lakes).
+    inputs.evaporation_m_yr = std::move(routing.evaporation_m_yr);
     inputs.filledelevation.resize(size);
     inputs.depressionid.resize(size);
     inputs.receiver.resize(size);
     inputs.discharge_m3_yr.resize(size);
     inputs.precipitation_m_yr.resize(size);
-    inputs.evaporation_m_yr.resize(size);
     for (int y = 0; y < rows; y++)
     {
         for (int x = 0; x < columns; x++)
@@ -64,16 +65,9 @@ void applylakelevelstage(planet& world)
             inputs.receiver[cell] = receiver;
             // Seasonal precipitation is mm/month; four seasons of three months make the year.
             double rain_mm = 0.0;
-            double temperature = 0.0;
             for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-            {
                 rain_mm += view.seasonalrainfloat(season, x, y);
-                temperature += view.seasonaltempfloat(season, x, y);
-            }
-            temperature /= CLIMATESEASONCOUNT;
             inputs.precipitation_m_yr[cell] = static_cast<float>(3.0 * rain_mm / 1000.0);
-            inputs.evaporation_m_yr[cell] = static_cast<float>(
-                lakes::evaporationPerC * std::max(0.0, temperature - lakes::evaporationZeroC));
         }
     }
 

@@ -8,15 +8,15 @@
   "stream_power.crust_age_factor": "K is multiplied by 1 + crust_age_factor x crust_age / 1000 Myr; 0 turns the age factor off.",
   "stream_power.slope_exponent": "n; Phase A implements n = 1 only (the implicit step is linear in the slope) and the kernel rejects other values.",
   "hillslope.critical_slope": "0 turns the limiter off; otherwise the diffusion acts on max(0, gradient - critical_slope).",
-  "runoff": "runoff = coefficient x annual precipitation x (1 - snow_reduction x snow fraction) x (1 - ice_reduction x ice fraction); the snow fraction is the share of the seasons with a mean temperature below snow_temperature_c, the ice fraction is 1 where every season is below it. Evaporation-based runoff is a Phase B refinement.",
+  "runoff": "With budyko false: runoff = coefficient x annual precipitation x (1 - snow_reduction x snow fraction) x (1 - ice_reduction x ice fraction); the snow fraction is the share of the seasons with a mean temperature below snow_temperature_c, the ice fraction is 1 where every season is below it. With budyko true (the default since erosion plan C2) the runoff is Fu's curve (runoff.budyko) and coefficient, snow_reduction and ice_reduction are not read by the routing; coefficient stays the unit of the legacy flow conversion in hydrology.rivers (a mean-sized cell under 1 mm/month contributes 1 / river_factor units at coefficient 0.4, the Phase A law). snow_temperature_c also sets the seasonal snow rule of hydrology.rivers. The potential evaporation (PET) of the runoff, the transmission losses and the lake balance is one law, the open-water law of lakes.evaporation_* applied to each season's temperature and averaged over the year. The rainfall solver's bulk-aerodynamic potential evaporation (atmosphere.potential_evaporation) is 2 to 5 times Earth's over dry land (land medians of 6 to 7 m/yr at 20 to 40 C on the 256-column Earth run, which left the Mississippi about 6 mm/yr of runoff) and is not used: it stays a climate diagnostic.",
   "erosion.uplift_m_myr": "Uniform rock uplift during the erosion run; 0 in Phase A (post-tectonic denudation). The engine's rate replaces it in Phase D.",
   "isostasy.rebound_fraction": "Read from Phase C (step C8); 0 until then.",
   "rivers.minimum_flow": "A cell is a river where its annual mean flow in legacy units (river_factor) reaches this; 3 is the flow of one mean-sized cell under the legacy source threshold of 40 mm/month (40 / 15 = 2.7).",
-  "lakes.evaporation_*": "Open-water evaporation E = evaporation_per_c x max(0, T - evaporation_zero_c) in m/yr, T the annual mean air temperature of the depression: 2.0 m/yr at 25 C, 0.9 at 10 C, 0.15 at 0 C.",
+  "lakes.evaporation_*": "Open-water evaporation E = evaporation_per_c x max(0, T - evaporation_zero_c) in m/yr, applied to each season's mean air temperature and averaged over the four seasons (erosion plan C2: before, to the annual mean temperature): 2.0 m/yr at 25 C, 0.9 at 10 C, 0.15 at 0 C. It is the one potential evaporation of the routing's runoff (Fu's curve), the transmission losses and the lake balance (runoff note).",
   "potentials.*_reference_rate_m_myr": "The rate that maps to a score of 100: score = 100 x log10(1 + rate) / log10(1 + reference), clamped to 0..100.",
-  "runoff.budyko": "Erosion plan C2: false keeps the coefficient law above; true takes the runoff from Fu's Budyko curve (runoff = P - AET, AET / P = 1 + PET / P - (1 + (PET / P)^w)^(1 / w), w = budyko_w) with PET from atmosphere.potential_evaporation. Set by C2.",
-  "transmission.*": "Erosion plan C2: losses of a river's flow to evaporation from its channel and floodplain where it crosses land drier than open water; enabled false turns them off. The values are set by C2.",
-  "rivers.baseflow_fraction": "Erosion plan C2: the share of each cell's annual runoff released evenly through the four seasons (groundwater and the slow melt of held snow); the rest follows the seasonal snow rule. 0 keeps the Phase B rule.",
+  "runoff.budyko": "Erosion plan C2: true takes a cell's annual runoff depth from Fu's Budyko curve, runoff = P - AET with AET / P = 1 + PET / P - (1 + (PET / P)^w)^(1 / w) (Fu 1981; Zhang et al. 2004, Water Resources Research 40, W02502), P the annual precipitation and PET the open-water evaporation of lakes.evaporation_* applied per season and averaged over the year (runoff note). The curve gives a runoff ratio near 1 where PET is small and near 0 where PET is many times P, so it replaces the coefficient and the snow and ice reductions. budyko_w = 2.6 is the typical value Zhang et al. 2004 fit over catchments worldwide (Fu's w; larger w evaporates more). false keeps the coefficient law (runoff note).",
+  "transmission.*": "Erosion plan C2: losses of a river's flow to evaporation from its channel and floodplain where it crosses land drier than open water (the Sudd's role for the Nile). Each land cell loses min(flow, width x link length x deficit) before passing its flow on, with deficit = max(0, PET - P) of the cell (m/yr; PET the open-water law of the runoff note), the link length the distance to its receiver, and width = width_coefficient x (discharge in m3/s)^width_exponent, multiplied by floodplain_factor where the link's slope is below floodplain_slope; a cell of open water (hydrosphere.imported_lake) loses deficit x its area instead; a cell flooded by a depression of the routing loses nothing, because the lake balance (hydrology.lake_levels) owns its evaporation. width_coefficient 5 m per (m3/s)^0.5 and width_exponent 0.5 are the downstream hydraulic geometry of Leopold and Maddock 1953 (width = a Q^b with b about 0.5; a = 5 is a mid value of the fitted coefficients, not a fit of this world: 50 m at 100 m3/s, 500 m at 10000 m3/s). floodplain_factor 10 below floodplain_slope 2e-4 (20 cm per km, a lowland river): a lowland river's floodplain and wetlands evaporate over about ten channel widths. enabled false turns the losses off (discharge then grows monotonically downstream).",
+  "rivers.baseflow_fraction": "Erosion plan C2: b, the share of each cell's annual runoff released evenly through the four seasons (groundwater and the slow melt of held snow): a season's runoff = (1 - b) x the snow-rule runoff + b x annual runoff / 4, so cold-season rivers keep flowing (the 512-column run 4 had no January flow over most land north of 30N). 0.25 is a round value chosen by the Phase C session, not fitted: observed baseflow indices (the slow share of a river's flow; global analysis of Beck et al. 2013, Water Resources Research 49) are mostly higher, so it is a low estimate of the evenly released share. 0 keeps the Phase B rule.",
   "roughness.*": "Erosion plan C3: a seeded, deterministic fractal perturbation of the land's base elevation at the start of the erosion pass (amplitude_m 0 turns it off), drawn from a hash of the world seed, never from the shared random stream. The values are set by C3.",
   "routing.*": "Erosion plan C3: randomised picks a land cell's receiver among its two neighbours that bracket the local gradient direction, with probabilities that reproduce that direction on average (the intent of Rho8, Fairfield and Leymarie 1991, on the latitude-longitude metric), from a hash of the world seed and the cell; resolve_flats routes across flat filled surfaces towards lower terrain and away from higher terrain (Barnes et al. 2014). false keeps deterministic D8."
  },
@@ -26,7 +26,7 @@
    "snow_reduction": 0.4,
    "ice_reduction": 0.7,
    "snow_temperature_c": 0.0,
-   "budyko": false,
+   "budyko": true,
    "budyko_w": 2.6
   },
   "depressions": {
@@ -61,7 +61,7 @@
   },
   "rivers": {
    "minimum_flow": 3,
-   "baseflow_fraction": 0.0
+   "baseflow_fraction": 0.25
   },
   "lakes": {
    "evaporation_per_c": 0.075,
@@ -72,11 +72,11 @@
    "deposition_reference_rate_m_myr": 100.0
   },
   "transmission": {
-   "enabled": false,
-   "width_coefficient": 0.0,
+   "enabled": true,
+   "width_coefficient": 5.0,
    "width_exponent": 0.5,
-   "floodplain_factor": 1.0,
-   "floodplain_slope": 0.0
+   "floodplain_factor": 10.0,
+   "floodplain_slope": 0.0002
   },
   "roughness": {
    "amplitude_m": 0.0,

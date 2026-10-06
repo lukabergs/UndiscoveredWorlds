@@ -13,15 +13,15 @@
                       "source": "refs/processed/era5-vegetation-drag/1024/land-drag-contrast-1024.txt"}]},
   "checks": [
     {"check": "grid"},
-    {"check": "required", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "planetbody.radius", "geosphere.base_elevation", "geosphere.sea_level"]},
-    {"check": "written", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id"]},
+    {"check": "required", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "planetbody.radius", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.potential_evaporation", "hydrosphere.runoff"]},
+    {"check": "written", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "atmosphere.potential_evaporation", "hydrosphere.runoff"]},
     {"check": "finite", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id"]},
     {"check": "range", "field": "hydrosphere.discharge", "min": 0},
     {"check": "range", "field": "hydrosphere.drainage_area", "min": 0},
     {"check": "frozen", "components": ["geosphere"]},
     {"check": "drained", "direction": "hydrosphere.flow_direction", "depression": "hydrosphere.depression_id", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"},
     {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation"},
-    {"check": "monotone", "direction": "hydrosphere.flow_direction", "discharge": "hydrosphere.discharge", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"}
+    {"check": "monotone", "direction": "hydrosphere.flow_direction", "discharge": "hydrosphere.drainage_area", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"}
   ],
   "validation": [
     {"id": "river_mouths", "kind": "river_mouths", "table": "configs/river-mouths.json", "top": 20, "match_km": 500},
@@ -37,6 +37,7 @@
     {"name": "discharge", "title": "Discharge (log10 m3/s; dark where there is none)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log"},
     {"name": "river-mouths", "title": "River mouths: table mouths and the largest outlets over discharge (log10 m3/s)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log", "overlay": "river_mouths"},
     {"name": "reference-rivers", "title": "Discharge (log10 m3/s) with the reference major rivers (HydroRIVERS, at least 100000 km2 upstream)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log", "overlay": "upstream_area"},
+    {"name": "runoff", "title": "Runoff depth the routing accumulates (mm/yr)", "field": "hydrosphere.runoff", "palette": "climate:annual_rain"},
     {"name": "basins", "title": "Drainage basins (outlet folded onto 12 colours; dark at sea)", "derived": "drainage_basin", "hide_zero": true, "palette": "tectonics:category_12"},
     {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"}
   ],

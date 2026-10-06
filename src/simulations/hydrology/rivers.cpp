@@ -21,12 +21,21 @@ constexpr double metresperyearpermmpermonth = 0.012;
 constexpr int januaryseason = seasonjanuary;
 constexpr int julyseason = seasonjuly;
 
-// Seasonal runoff of one cell in mm/month (section 6, "Seasonal flows"): the
-// precipitation of a season at or above the snow temperature, plus what the cold
-// seasons before it held as snow (cycling over the four seasons); zero everywhere
-// when no season is warm.
-void seasonalrunoff(const planet& world, int x, int y, double runoff[CLIMATESEASONCOUNT])
+// Seasonal runoff of one cell in mm/month (section 6, "Seasonal flows"). The snow
+// rule (B1): the precipitation of a season at or above the snow temperature, plus
+// what the cold seasons before it held as snow (cycling over the four seasons); a
+// cell with no warm season releases its annual depth evenly (annual / 4 a season),
+// so the seasons sum to the annual depth everywhere. With landscape.runoff.budyko on, the
+// snow-rule seasons are scaled so that they sum to the routing's annual runoff
+// depth (hydrosphere.runoff), so annual and seasonal flows rest on the same depth;
+// off, they stay the precipitation, as in Phase B. The winter baseflow (erosion
+// plan C2): a season's runoff = (1 - b) x the snow-rule runoff + b x the annual
+// depth spread evenly, b = landscape.rivers.baseflow_fraction (b = 0 keeps B1 on
+// cells with a warm season).
+void seasonalrunoff(const planet& world, const worldgrid<float>* annualrunoff, int x, int y,
+                    double runoff[CLIMATESEASONCOUNT])
 {
+    const double baseflow = tuning::landscape::rivers::baseflowFraction;
     double rain[CLIMATESEASONCOUNT];
     bool warm[CLIMATESEASONCOUNT];
     int firstwarm = -1;
@@ -38,20 +47,39 @@ void seasonalrunoff(const planet& world, int x, int y, double runoff[CLIMATESEAS
         if (warm[season] && firstwarm < 0)
             firstwarm = season;
     }
-    if (firstwarm < 0)
-        return;
-    double held = 0.0;
-    for (int step = 1; step <= CLIMATESEASONCOUNT; step++)
+    double precipitation = 0.0;  // mm/month summed over the seasons
+    for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        precipitation += rain[season];
+    // The annual depth in the units of the seasons (mm/month summed over the four
+    // seasons): the routing's depth (mm/yr, three months a season) or the precipitation.
+    const double annual = annualrunoff != nullptr
+        ? std::max(0.0, static_cast<double>((*annualrunoff)[x][y])) / 3.0
+        : precipitation;
+    if (firstwarm >= 0)
     {
-        const int season = (firstwarm + step) % CLIMATESEASONCOUNT;
-        if (warm[season])
+        double held = 0.0;
+        for (int step = 1; step <= CLIMATESEASONCOUNT; step++)
         {
-            runoff[season] = rain[season] + held;
-            held = 0.0;
+            const int season = (firstwarm + step) % CLIMATESEASONCOUNT;
+            if (warm[season])
+            {
+                runoff[season] = rain[season] + held;
+                held = 0.0;
+            }
+            else
+                held += rain[season];
         }
-        else
-            held += rain[season];
+        // Every season's precipitation reaches a warm season, so the snow rule sums to the precipitation.
+        const double scale = annualrunoff != nullptr ? (precipitation > 0.0 ? annual / precipitation : 0.0) : 1.0;
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            runoff[season] *= scale;
     }
+    else
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            runoff[season] = annual / CLIMATESEASONCOUNT;
+    if (baseflow > 0.0)
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+            runoff[season] = (1.0 - baseflow) * runoff[season] + baseflow * annual / CLIMATESEASONCOUNT;
 }
 }
 
@@ -90,13 +118,14 @@ void applyriverstage(planet& world)
     }
 
     // Seasonal runoff x cell area, accumulated downstream (Kahn's order, increasing cell index).
+    const worldgrid<float>* annualrunoff = tuning::landscape::runoff::budyko ? &view.runoff() : nullptr;
     std::vector<double> accumulated(size * CLIMATESEASONCOUNT, 0.0);
     for (std::size_t cell = 0; cell < size; cell++)
     {
         if (!land[cell])
             continue;
         double runoff[CLIMATESEASONCOUNT];
-        seasonalrunoff(view, metric.column(cell), metric.row(cell), runoff);
+        seasonalrunoff(view, annualrunoff, metric.column(cell), metric.row(cell), runoff);
         const double area = metric.area_m2(cell);
         for (int season = 0; season < CLIMATESEASONCOUNT; season++)
             accumulated[cell * CLIMATESEASONCOUNT + season] = runoff[season] * area;
@@ -118,7 +147,15 @@ void applyriverstage(planet& world)
             queue.push_back(next);
     }
 
-    // Annual flow in legacy units, split into January and July by the seasonal runoff.
+    // Annual flow in legacy units, split into January and July by the seasonal runoff. The
+    // seasonal shares come from the lossless accumulation above, while the annual flow is the
+    // routing's discharge after its transmission losses: the losses are spread evenly over the
+    // seasons, in proportion to each season's share.
+    // runoff.coefficient is the unit of the conversion, not the runoff law: a legacy
+    // flow unit is the discharge of a mean-sized cell under 1 mm/month at the Phase A
+    // coefficient (0.4) divided by river_factor, so the units, and rivers.minimum_flow
+    // with them, stay those of Phase B whichever law (Budyko or the coefficient) made
+    // the discharge.
     const double meanarea = 4.0 * pi * radius * radius / (static_cast<double>(columns) * static_cast<double>(rows));
     const double unitdischarge = tuning::landscape::runoff::coefficient * metresperyearpermmpermonth *
         static_cast<double>(view.riverfactor()) * meanarea;

@@ -13,7 +13,7 @@ inline float coefficient = 0.4f;
 inline float snowReduction = 0.4f;
 inline float iceReduction = 0.7f;
 inline float snowTemperatureC = 0.0f;
-inline bool budyko = false;
+inline bool budyko = true;
 inline float budykoW = 2.6f;
 }
 
@@ -62,7 +62,7 @@ inline float reboundFraction = 0.0f;
 namespace rivers
 {
 inline int minimumFlow = 3;
-inline float baseflowFraction = 0.0f;
+inline float baseflowFraction = 0.25f;
 }
 
 namespace lakes
@@ -79,11 +79,11 @@ inline float depositionReferenceRateMMyr = 100.0f;
 
 namespace transmission
 {
-inline bool enabled = false;
-inline float widthCoefficient = 0.0f;
+inline bool enabled = true;
+inline float widthCoefficient = 5.0f;
 inline float widthExponent = 0.5f;
-inline float floodplainFactor = 1.0f;
-inline float floodplainSlope = 0.0f;
+inline float floodplainFactor = 10.0f;
+inline float floodplainSlope = 0.0002f;
 }
 
 namespace roughness
