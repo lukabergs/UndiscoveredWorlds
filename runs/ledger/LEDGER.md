@@ -127,6 +127,7 @@ Lessons:
 | `world-0071` | 2026-10-06 | equivalent | keep | climate rules on the float accessors, 1 of 3: climate_fields.cpp (module climate) |
 | `world-0072` | 2026-10-06 | equivalent | keep | climate rules on the float accessors, 2 of 3: climate_classification.cpp (module climate) |
 | `world-0073` | 2026-10-06 | equivalent | keep | climate rules on the float accessors, 3 of 3: climate_elevation.hpp (module climate; the whole-number form moves to src/app) |
+| `world-0074` | 2026-10-06 | equivalent | keep | climate rules on the float accessors: close (plan section 11, AGENTS.md, verification guide) |
 
 Lessons:
 
@@ -254,3 +255,4 @@ Lessons:
 - `world-0071`: climateworld now has basebelowsea; the nom() <= sealevel tests left in climate_winds.cpp, climate_ocean_currents.cpp, climate_sea_surface_temperature.cpp and climate_stages.cpp can use it when those files are next touched.
 - `world-0073`: A template helper with int and float overloads hides who uses the rounding one: grep the callers by receiver and argument type before deleting an overload; here the only int caller was in src/app.
 - `world-0073`: Reference bundles out/scratch/climate-float/elevation-* are the head state for the next step.
+- `world-0074`: Before a float step, check which rules the step check reaches (mountain fields, sea cells, diagnostics switches in the reference bundles); when none is reached, say so before the move instead of predicting a changed world.

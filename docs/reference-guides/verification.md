@@ -53,6 +53,8 @@ The check of one refactoring step (headless build, the three minimal seed-1 bund
 uv run --offline python scripts/evaluation/step_check.py <label> --reference <previous label> [--desktop] [--social]
 ```
 
+A label is used once: the check refuses a directory that already holds any `<label>-*` entry, a log written there by hand included, so keep your own logs in a subdirectory.
+
 Parameters: edit `configs/parameters/<module>.json`, then `uv run --offline python scripts/parameters.py` writes the headers (`--check` fails on a stale one). One run with another value: `world_pipeline run ... --set hydrology.rivers.minimum_flow=80`, or `--parameters FILE.json`; the bundle's `manifest.json` lists every value under `parameters`.
 
 
