@@ -42,6 +42,7 @@ Lessons:
 | `erosion-0006` | 2026-10-06 | lake levels by water balance; procedural recipes identical | keep | erosion plan, step B2: lake levels by water balance in eroded-world |
 | `erosion-0007` | 2026-10-06 | equivalent at the minimal configuration | keep | erosion plan, step B3: basin classes from the routing and the lake levels |
 | `erosion-0008` | 2026-10-06 | consumers on the erosion pass; procedural recipes identical | keep | erosion plan, step B4: the surface potentials, the placers and the mineral exhumation read the erosion pass |
+| `erosion-0009` | 2026-10-06 | pending user review | keep | erosion plan, step B6: the Phase B judging run (erosion run 3) and the close |
 
 Lessons:
 
@@ -56,6 +57,8 @@ Lessons:
 - `erosion-0007`: A step whose effect needs a feature the minimal world lacks (closed lakes) shows identical bundles; say so in the expected field before the check, so that identical is a confirmation and not a surprise.
 - `erosion-0008`: Cumulative erosion and deposition fields of a scheme with deposition are gross fluxes: any consumer that means 'lowered' or 'buried' needs their difference, and a review question that asks for the net and gross split finds it quickly.
 - `erosion-0008`: A quantity defined with a time discount (the liberated gold's placer residence) must keep that discount when a new source adds to it, or the budget closes while the inventory is several times too large.
+- `erosion-0009`: A tracked run at the judging size measures writes the minimal world never makes (salt lakes and pans here); one such run per phase close keeps the declarations complete.
+- `erosion-0009`: An evaluation records its profile file's hash at evaluation time: changing the profile while a registered run is in progress would record a hash that does not match the maps it rendered, so profile edits wait until the run is evaluated.
 
 ## tectonics
 

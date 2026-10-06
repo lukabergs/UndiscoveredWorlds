@@ -28,6 +28,8 @@
     {"name": "lake-depth", "title": "Lake depth: filled surface above the terrain (m; dark outside depressions)", "derived": "lake_depth", "hide_zero": true, "palette": "tectonics:lake_depth_m"},
     {"name": "depressions", "title": "Depressions (id folded onto 12 colours; dark outside depressions)", "derived": "depression_class", "hide_zero": true, "palette": "tectonics:category_12"},
     {"name": "basins", "title": "Drainage basins (outlet folded onto 12 colours; dark at sea)", "derived": "drainage_basin", "hide_zero": true, "palette": "tectonics:category_12"},
+    {"name": "river-flow", "title": "River flow in January (legacy flow units)", "field": "hydrosphere.river_flow_january", "palette": "tectonics:river_flow"},
+    {"name": "lakes", "title": "Lake surface elevation (m above sea level; dark where there is no lake)", "derived": "lake_elevation", "palette": "tectonics:lake_surface_m"},
     {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"}
   ],
   "review_status": "Draft written by an agent on 2026-10-06 (erosion plan, step A3). The user rewrites it; until then a verdict on it is a reading aid, not a judgement of the world.",
