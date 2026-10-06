@@ -44,7 +44,6 @@ void countclimatelandandsea(climateworld& world)
 {
     const int width = world.width();
     const int height = world.height();
-    const int sealevel = world.sealevel();
 
     int seatotal = 0;
     int landtotal = 0;
@@ -53,7 +52,7 @@ void countclimatelandandsea(climateworld& world)
     {
         for (int j = 1; j < height; j++)
         {
-            if (world.nom(i, j) > sealevel)
+            if (!world.basebelowsea(i, j))
                 landtotal++;
             else
                 seatotal++;

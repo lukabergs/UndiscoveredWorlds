@@ -64,7 +64,6 @@ void createsurfacetemperaturemap(climateworld& world)
     auto& climate = world.climatesimulation();
     const int width = world.width();
     const int height = world.height();
-    const int sealevel = world.sealevel();
     for (int season = 0; season < CLIMATESEASONCOUNT; season++)
     {
         parallelforrows(0, height, [&](int startrow, int endrow)
@@ -73,9 +72,9 @@ void createsurfacetemperaturemap(climateworld& world)
             {
                 for (int x = 0; x <= width; x++)
                 {
-                    if (world.nom(x, y) > sealevel)
+                    if (!world.basebelowsea(x, y))
                     {
-                        world.setseasonalsst(season, x, y, 0);
+                        world.setseasonalsstfloat(season, x, y, 0.0f);
                         world.setseasonalevaporation(season, x, y, 0);
                         world.setseasonalmoisture(season, x, y, 0);
                         continue;

@@ -99,7 +99,7 @@ void createoceancurrentmap(climateworld& world)
             for (int x = 0; x < outputcolumns; x++)
             {
                 const std::size_t cell = static_cast<std::size_t>(y) * outputcolumns + x;
-                const bool land = world.nom(x, y) > sealevel;
+                const bool land = !world.basebelowsea(x, y);
                 outputland[cell] = land ? 1.0f : 0.0f;
                 outputlandmask[cell] = land ? 1 : 0;
                 hydrologyland[cell] = world.sea(x, y) ? 0.0f : 1.0f;
@@ -427,11 +427,11 @@ void createoceancurrentmap(climateworld& world)
             for (int x = 0; x < outputcolumns; x++)
             {
                 const std::size_t cell = static_cast<std::size_t>(y) * outputcolumns + x;
-                if (world.nom(x, y) > sealevel)
+                if (!world.basebelowsea(x, y))
                 {
                     world.setseasonalcurrentu(season, x, y, 0);
                     world.setseasonalcurrentv(season, x, y, 0);
-                    world.setseasonalsst(season, x, y, 0);
+                    world.setseasonalsstfloat(season, x, y, 0.0f);
                     continue;
                 }
                 world.setseasonalcurrentufloat(season, x, y, eastcurrent[cell]);

@@ -403,7 +403,7 @@ void createvectorwindmap(climateworld& world)
             for (int x = 0; x <= width; ++x) result[x][y] = flat[y * (width + 1) + x];
         return result;
     };
-    const auto land = sample([&](int x, int y) { return world.nom(x, y) > world.sealevel() ? 1.0f : 0.0f; });
+    const auto land = sample([&](int x, int y) { return !world.basebelowsea(x, y) ? 1.0f : 0.0f; });
     vector<float> vegetationcontrast((width + 1) * (height + 1), 1.0f);
     if (atmosphere::vegetationDragContrastFraction > 0.0f)
     {
@@ -418,7 +418,7 @@ void createvectorwindmap(climateworld& world)
         else std::cout << "No prescribed vegetation input; retaining uniform land drag.\n";
     }
     auto nativevegetation = sample([&](int x, int y) {
-        return world.nom(x,y) > world.sealevel() ? vegetationcontrast[y * (width + 1) + x] : 0.0f;
+        return !world.basebelowsea(x, y) ? vegetationcontrast[y * (width + 1) + x] : 0.0f;
     });
     for (std::size_t cell = 0; cell < nativevegetation.size(); ++cell)
         nativevegetation[cell] = land[cell] > 0 ? nativevegetation[cell] / land[cell] : 1.0f;
@@ -477,7 +477,7 @@ void createvectorwindmap(climateworld& world)
             for (int x = 0; x <= width; ++x)
             {
                 const int cell = y * (width + 1) + x;
-                localDrag[cell] = surfacedrag(world.nom(x, y) > world.sealevel() ? 1.0f : 0.0f,
+                localDrag[cell] = surfacedrag(!world.basebelowsea(x, y) ? 1.0f : 0.0f,
                     std::max(0.0f, world.nomfloat(x, y) - static_cast<float>(world.sealevel())),
                     std::max(worldpermanentlandicefraction(world, x, y),
                         atmosphere::persistentSnowDragFraction * persistentsnowoutput[cell]), vegetationcontrast[cell]);
@@ -1372,7 +1372,7 @@ void createvectorwindmap(climateworld& world)
             for (int y = 0; y <= height; ++y)
                 for (int x = 0; x <= width; ++x)
                 {
-                    const float drag = surfacedrag(world.nom(x, y) > world.sealevel() ? 1.0f : 0.0f,
+                    const float drag = surfacedrag(!world.basebelowsea(x, y) ? 1.0f : 0.0f,
                         std::max(0.0f, world.nomfloat(x, y) - static_cast<float>(world.sealevel())),
                         std::max(worldpermanentlandicefraction(world,x,y), atmosphere::persistentSnowDragFraction *
                             persistentsnowoutput[y * (width + 1) + x]), vegetationcontrast[y * (width + 1) + x]);

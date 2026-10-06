@@ -129,6 +129,7 @@ Lessons:
 | `world-0073` | 2026-10-06 | equivalent | keep | climate rules on the float accessors, 3 of 3: climate_elevation.hpp (module climate; the whole-number form moves to src/app) |
 | `world-0074` | 2026-10-06 | equivalent | keep | climate rules on the float accessors: close (plan section 11, AGENTS.md, verification guide) |
 | `world-0075` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app (section 11, Later): the count before the move and the reference step check |
+| `world-0076` | 2026-10-06 | equivalent | keep | rounding-getter calls outside src/app, 1 of 3: the climate solver files (module climate) |
 
 Lessons:
 
