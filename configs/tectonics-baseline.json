@@ -37,6 +37,7 @@
     "initial_ocean_depth_m": 6000,
     "initial_land_relief_m": 2000,
     "delta_time_myr": 1.0,
+    "uplift_rate_window_myr": 10,
     "boundary_conditioned_terrain": "on",
     "trench_response_myr": 1.5,
     "process_variation": 0.35,

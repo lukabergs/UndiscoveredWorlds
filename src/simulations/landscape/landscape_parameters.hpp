@@ -53,6 +53,7 @@ namespace erosion
 inline float durationMyr = 20.0f;
 inline float stepMyr = 1.0f;
 inline float upliftMMyr = 0.0f;
+inline float engineUpliftScale = 1.0f;
 }
 
 namespace isostasy
@@ -130,6 +131,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.erosion.duration_myr", &erosion::durationMyr },
         { "landscape.erosion.step_myr", &erosion::stepMyr },
         { "landscape.erosion.uplift_m_myr", &erosion::upliftMMyr },
+        { "landscape.erosion.engine_uplift_scale", &erosion::engineUpliftScale },
         { "landscape.isostasy.rebound_fraction", &isostasy::reboundFraction },
         { "landscape.isostasy.loading_fraction", &isostasy::loadingFraction },
         { "landscape.rivers.minimum_flow", &rivers::minimumFlow },

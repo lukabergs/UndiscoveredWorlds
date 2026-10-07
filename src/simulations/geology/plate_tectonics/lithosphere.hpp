@@ -114,6 +114,8 @@ class lithosphere {
     const uint8_t* getCrustClassMap() const noexcept;
     const uint8_t* getSurfaceCrustTypeMap() const noexcept;
     const float* getUpliftTendencyMap() const noexcept;
+    /// Rock uplift rate, m/Myr, signed (columns::Model::upliftRate), republished each update.
+    const float* getRockUpliftRateMap() const noexcept;
     const float* getSubsidenceTendencyMap() const noexcept;
     const float* getAccumulatedStrainMap() const noexcept;
     const float* getTensionMap() const noexcept;
@@ -240,6 +242,7 @@ class lithosphere {
     std::vector<float> crust_thickness_map;
     std::vector<uint8_t> crust_class_map;
     std::vector<float> uplift_tendency_map;
+    std::vector<float> rock_uplift_rate_map;
     std::vector<float> subsidence_tendency_map;
     std::vector<float> accumulated_strain_map;
     std::vector<uint8_t> boundary_type_map;

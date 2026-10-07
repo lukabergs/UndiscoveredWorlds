@@ -394,7 +394,8 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"world_width_km\": " << scenario.world_width_km << ",\n";
     output << indent << "  \"mantle_flow_speed_cm_yr\": " << scenario.mantle_flow_speed_cm_yr << ",\n";
     output << indent << "  \"thermal_subsidence_strength\": " << scenario.thermal_subsidence_strength << ",\n";
-    output << indent << "  \"delta_time_myr\": " << scenario.delta_time_myr << "\n";
+    output << indent << "  \"delta_time_myr\": " << scenario.delta_time_myr << ",\n";
+    output << indent << "  \"uplift_rate_window_myr\": " << scenario.uplift_rate_window_myr << "\n";
     output << indent << "}";
 }
 

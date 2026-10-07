@@ -112,6 +112,7 @@ struct planetfieldaccess
         case FieldId::crust_thickness: return op.grid(id, world.geosphere_.tectoniccrustthicknessmap);
         case FieldId::crust_class: return op.grid(id, world.geosphere_.tectoniccrustclassmap);
         case FieldId::uplift_tendency: return op.grid(id, world.geosphere_.tectonicuplifttendencymap);
+        case FieldId::rock_uplift_rate: return op.grid(id, world.geosphere_.tectonicrockupliftratemap);
         case FieldId::subsidence_tendency: return op.grid(id, world.geosphere_.tectonicsubsidencetendencymap);
         case FieldId::accumulated_strain: return op.grid(id, world.geosphere_.tectonicaccumulatedstrainmap);
         case FieldId::boundary_type: return op.grid(id, world.geosphere_.tectonicboundarytypemap);

@@ -858,6 +858,9 @@ public:
     float tectonicuplifttendency(int x, int y) const;
     void settectonicuplifttendency(int x, int y, float amount);
 
+    float tectonicrockupliftrate(int x, int y) const; // m/Myr, signed
+    void settectonicrockupliftrate(int x, int y, float amount);
+
     float tectonicsubsidencetendency(int x, int y) const;
     void settectonicsubsidencetendency(int x, int y, float amount);
 
@@ -2387,6 +2390,23 @@ inline void planet::settectonicuplifttendency(int x, int y, float amount)
         return;
 
     geosphere_.tectonicuplifttendencymap[x][y] = std::clamp(amount, 0.0f, 1.0f);
+}
+
+inline float planet::tectonicrockupliftrate(int x, int y) const
+{
+    UW_FIELD_READ(rock_uplift_rate);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
+    return geosphere_.tectonicrockupliftratemap[x][y];
+}
+
+inline void planet::settectonicrockupliftrate(int x, int y, float amount)
+{
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return;
+
+    geosphere_.tectonicrockupliftratemap[x][y] = amount;
 }
 
 inline float planet::tectonicsubsidencetendency(int x, int y) const

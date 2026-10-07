@@ -52,6 +52,11 @@ struct StreamPowerParameters
     // passes on down the seabed path, and the end's remainder spills over the sea.
     // Infinity: no cap and no spill (Phase A and B).
     double deltatop_m = std::numeric_limits<double>::infinity();
+    // Uplift of sea cells (erosion plan D1, the user's decision of 2026-10-07): when
+    // true, every sea cell of the graph rises by U dt (U may be negative) before the
+    // marine deposition, so the next routing's sea mask moves the coast both ways.
+    // False (the default): U acts on land cells only, as before.
+    bool upliftsea = false;
 };
 
 struct StreamPowerBudget
@@ -66,7 +71,8 @@ struct StreamPowerBudget
 
 // Advances `elevation` by one step. `graph` was built and accumulated on the
 // elevation passed in; `erodibility` (K) and `uplift_m_myr` (U) are per cell and
-// read on land cells only. `erosion_m` and `deposition_m` are assigned (not
+// read on land cells only (U on sea cells too with parameters.upliftsea; uplift is
+// neither erosion nor deposition and is in no budget). `erosion_m` and `deposition_m` are assigned (not
 // accumulated) the thickness removed from and added to each cell by this step,
 // both non-negative; the caller sums them over the run. Every vector has
 // metric.size() elements. When `sedimentflux_m3_myr` is given it is resized to

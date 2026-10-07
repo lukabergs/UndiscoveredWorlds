@@ -51,6 +51,7 @@ landscape::StreamPowerParameters kernelparameters(double baselevel)
     parameters.criticalslope = t::hillslope::criticalSlope;
     parameters.sedimenttravel_km = t::marine::sedimentTravelKm;
     parameters.deltatop_m = t::marine::deltaTopM;
+    parameters.upliftsea = true;  // erosion plan D1: the engine's uplift moves the coast both ways
     return parameters;
 }
 
@@ -132,7 +133,10 @@ void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& ch
         {
             const std::size_t cell = metric.index(x, y);
             erodibility[cell] = relativeerodibility(world, x, y) * t::stream_power::erodibility;
-            uplift[cell] = t::erosion::upliftMMyr;  // the kernel applies it to land cells of the step's own mask
+            // U (erosion plan D1): the uniform uplift plus the engine's rock uplift rate, m/Myr,
+            // signed; the kernel applies it to land and sea cells (upliftsea).
+            uplift[cell] = static_cast<float>(t::erosion::upliftMMyr
+                + t::erosion::engineUpliftScale * world.tectonicrockupliftrate(x, y));
         }
     }
 

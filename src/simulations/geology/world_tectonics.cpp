@@ -270,6 +270,7 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
     const float* crustthicknessmap = tectonics_get_crust_thickness_map(simulation.pointer);
     const std::uint8_t* crustclassmap = tectonics_get_crust_class_map(simulation.pointer);
     const float* uplifttendencymap = tectonics_get_uplift_tendency_map(simulation.pointer);
+    const float* rockupliftratemap = tectonics_get_rock_uplift_rate_map(simulation.pointer);
     const float* subsidencetendencymap = tectonics_get_subsidence_tendency_map(simulation.pointer);
     const float* accumulatedstrainmap = tectonics_get_accumulated_strain_map(simulation.pointer);
     const std::uint8_t* boundarytypemap = tectonics_get_boundary_type_map(simulation.pointer);
@@ -284,7 +285,8 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
 
     if (convergencemap == nullptr || divergencemap == nullptr || shearmap == nullptr || regimemap == nullptr
         || crustagemyrmap == nullptr || crustthicknessmap == nullptr || crustclassmap == nullptr
-        || uplifttendencymap == nullptr || subsidencetendencymap == nullptr || accumulatedstrainmap == nullptr
+        || uplifttendencymap == nullptr || rockupliftratemap == nullptr || subsidencetendencymap == nullptr
+        || accumulatedstrainmap == nullptr
         || boundarytypemap == nullptr || boundarydistancemap == nullptr || boundarysegmentidmap == nullptr
         || nearestboundaryidmap == nullptr || deformingregionidmap == nullptr || deformingregiontypemap == nullptr
         || deformationratemap == nullptr || deformationvelocityxmap == nullptr || deformationvelocityymap == nullptr)
@@ -366,6 +368,8 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
             world.settectoniccrustthickness(x, y, crustthicknessmap[index]);
             world.settectoniccrustclass(x, y, crustclass);
             world.settectonicuplifttendency(x, y, uplifttendencymap[index]);
+            // A rate of elevation change: sampled bilinearly as the heights are, no length scale.
+            world.settectonicrockupliftrate(x, y, grid.height(rockupliftratemap, x, y));
             world.settectonicsubsidencetendency(x, y, subsidencetendencymap[index]);
             world.settectonicaccumulatedstrain(x, y, accumulatedstrainmap[index]);
             world.settectonicboundarytype(x, y, boundarytype);

@@ -393,6 +393,8 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
                       static_cast<uint8_t>(tectonics::contract::CrustClass::None)),
       uplift_tendency_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
                           0.0f),
+      rock_uplift_rate_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
+                           0.0f),
       subsidence_tendency_map(
           static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
       accumulated_strain_map(
@@ -441,6 +443,9 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
     }
     if (!std::isfinite(params.delta_time_myr) || params.delta_time_myr <= 0.0) {
         throw runtime_error("delta_time_myr must be finite and > 0");
+    }
+    if (!std::isfinite(params.uplift_rate_window_myr) || params.uplift_rate_window_myr <= 0.0) {
+        throw runtime_error("uplift_rate_window_myr must be finite and > 0");
     }
     if (!std::isfinite(params.evolution_duration_myr) || params.evolution_duration_myr <= 0.0 ||
         params.evolution_duration_myr / params.delta_time_myr >
@@ -914,6 +919,10 @@ const float* lithosphere::getUpliftTendencyMap() const noexcept {
     return uplift_tendency_map.data();
 }
 
+const float* lithosphere::getRockUpliftRateMap() const noexcept {
+    return rock_uplift_rate_map.data();
+}
+
 const float* lithosphere::getSubsidenceTendencyMap() const noexcept {
     return subsidence_tendency_map.data();
 }
@@ -1041,6 +1050,7 @@ void lithosphere::resetSimulationState() {
     std::fill(crust_class_map.begin(), crust_class_map.end(),
               static_cast<uint8_t>(tectonics::contract::CrustClass::None));
     std::fill(uplift_tendency_map.begin(), uplift_tendency_map.end(), 0.0f);
+    std::fill(rock_uplift_rate_map.begin(), rock_uplift_rate_map.end(), 0.0f);
     std::fill(subsidence_tendency_map.begin(), subsidence_tendency_map.end(), 0.0f);
     std::fill(accumulated_strain_map.begin(), accumulated_strain_map.end(), 0.0f);
     std::fill(boundary_type_map.begin(), boundary_type_map.end(),
@@ -2431,6 +2441,9 @@ void lithosphere::publishColumns() {
         plates[imap[i]]->setCrust(x, y, hmap[i], amap[i], material_map[i]);
     }
     display_hmap = hmap;
+    const auto& uplift_rate = column_model.upliftRate();
+    for (size_t i = 0; i < rock_uplift_rate_map.size(); ++i)
+        rock_uplift_rate_map[i] = i < uplift_rate.size() ? static_cast<float>(uplift_rate[i]) : 0.0f;
 }
 
 void lithosphere::updateColumns() {
@@ -2470,7 +2483,7 @@ void lithosphere::updateColumns() {
     column_model.advance(displacement, scenario.delta_time_myr,
         scenario.erosion_strength, scenario.thermal_subsidence_strength, scenario.submarine_erosion_ratio,
         &margin_forcing,scenario.margin_processes,scenario.experimental_noise,scenario.sediment_load_feedback,
-        plume.basalt_m.empty()?nullptr:&plume);
+        plume.basalt_m.empty()?nullptr:&plume,scenario.uplift_rate_window_myr);
     plume_influence_map.resize(plume.influence.size());
     std::transform(plume.influence.begin(),plume.influence.end(),plume_influence_map.begin(),
         [](double value){return static_cast<float>(value);});

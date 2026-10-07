@@ -661,6 +661,49 @@ TEST_F(Landscape, StreamPowerProgradationStrandsALoadInAnEnclosedSea)
     EXPECT_NEAR(budget.eroded_km3, budget.landdeposited_km3 + budget.marinedeposited_km3, 1.0e-9 * budget.eroded_km3);
 }
 
+// Uplift of sea cells (erosion plan D1): with upliftsea a sea cell rises by U dt and
+// keeps its marine deposit on top; a lone sea cell 150 m deep under U = 100 m/Myr is
+// at -50 m after one step and +50 m after two, so the next routing's sea mask (in
+// whole metres at or below the sea level: flowrouting::seamask, not linked here)
+// makes it land. Without the flag sea cells do not move. Uplift is no erosion or
+// deposition: the fluvial and marine budgets are those of the run without it, and close.
+TEST_F(Landscape, StreamPowerUpliftsSeaCellsOnlyWhenAsked)
+{
+    const int seacells = 4;
+    Domain lifted = makedomain(seacells, 100.0f);
+    sethill(lifted);
+    const std::size_t lone = lifted.metric.index(10, 2);  // a sea cell no sediment reaches
+    lifted.elevation[lone] = -150.0f;
+    Domain still = lifted;
+    StreamPowerParameters parameters = makeparameters(1.0, 1.0, 200.0);
+    const StreamPowerBudget fixedbudget = step(still, parameters);
+    parameters.upliftsea = true;
+    const std::vector<float> before = lifted.elevation;
+    const StreamPowerBudget budget = step(lifted, parameters);
+
+    EXPECT_EQ(still.elevation[lone], -150.0f);
+    EXPECT_FLOAT_EQ(lifted.elevation[lone], -50.0f);
+    EXPECT_EQ(lifted.erosion[lone], 0.0f);
+    EXPECT_EQ(lifted.deposition[lone], 0.0f);
+    for (std::size_t cell : lifted.seacolumn)
+    {
+        EXPECT_NEAR(still.elevation[cell], before[cell] + static_cast<double>(still.deposition[cell]), 1.0e-2);
+        EXPECT_NEAR(lifted.elevation[cell], before[cell] + 100.0 + static_cast<double>(lifted.deposition[cell]), 1.0e-2);
+        EXPECT_EQ(lifted.deposition[cell], still.deposition[cell]);
+    }
+    for (std::size_t cell : lifted.chain)
+        EXPECT_EQ(lifted.elevation[cell], still.elevation[cell]);
+    EXPECT_EQ(budget.eroded_km3, fixedbudget.eroded_km3);
+    EXPECT_EQ(budget.landdeposited_km3, fixedbudget.landdeposited_km3);
+    EXPECT_EQ(budget.marinedeposited_km3, fixedbudget.marinedeposited_km3);
+    EXPECT_GT(budget.marinedeposited_km3, 0.0);
+    EXPECT_NEAR(budget.eroded_km3, budget.landdeposited_km3 + budget.marinedeposited_km3, 1.0e-9 * budget.eroded_km3);
+
+    step(lifted, parameters);
+    EXPECT_FLOAT_EQ(lifted.elevation[lone], 50.0f);
+    EXPECT_GT(std::lround(lifted.elevation[lone]), parameters.baselevel_m);  // land at the next routing
+}
+
 TEST_F(Landscape, StreamPowerRejectsInvalidInput)
 {
     Domain domain = makedomain(1, 100.0f);

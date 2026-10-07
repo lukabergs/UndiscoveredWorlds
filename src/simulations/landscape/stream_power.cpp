@@ -320,6 +320,18 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
     // neighbours, through full cells), filling each cell it reaches up to the delta
     // top. Only when no sea cell with room is reachable does the remainder stay on
     // the end cell (counted as stranded), so the budget closes exactly.
+    // Sea cells rise (or sink) by U dt when parameters.upliftsea is set: no fluvial
+    // erosion there, and no budget entry (uplift moves rock in from below, it is not
+    // eroded or deposited). It comes before the marine deposition so that the delta
+    // top's room is measured on the seabed where this step leaves it: a deposit never
+    // builds a sea cell above the delta top, as without uplift; the uplift itself may.
+    // Outlets drain to baselevel_m, not to their sea cell, so the fluvial part of
+    // the step does not depend on it.
+    if (parameters.upliftsea)
+        for (std::size_t i = 0; i < cells; i++)
+            if (graph.land[i] == 0)
+                z[i] += static_cast<double>(uplift_m_myr[i]) * dt;
+
     std::vector<double> marine(cells, 0.0);  // m^3
     const double travel = parameters.sedimenttravel_km * metresperkilometre;
     const double deltatop = parameters.baselevel_m + parameters.deltatop_m;

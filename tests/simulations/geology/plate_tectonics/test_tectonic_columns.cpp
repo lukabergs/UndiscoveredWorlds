@@ -334,3 +334,81 @@ TEST(TectonicColumns, SedimentLoadedFlowConvergesWithSmallerTimesteps) {
     }
     EXPECT_LT(medium_error,.8*coarse_error);
 }
+
+// The rock uplift rate (erosion plan D1) counts the tectonic sub-steps only: the
+// diffusion and the rivers change the columns, never the rate; a plume's basalt on a
+// continental column raises it by 400/3300 of its thickness (Airy, land), so 330 m
+// over 1 Myr is a step rate of 40 m/Myr, kept as an exponential mean with tau = 5 Myr.
+TEST(TectonicColumns, RockUpliftRateCountsTectonicChangeOnly) {
+    tectonics::margins::Parameters still; // No root flow: the roots would carry the change sideways.
+    still.root_mobility = 0;
+    {
+        auto cells = std::vector<Cell>(128, seed(500, true, 100));
+        for (size_t i = 0; i < cells.size(); ++i) if (i % 16 == 8) cells[i] = seed(3000, true, 100);
+        auto rivers = still;
+        rivers.enabled = true; // routeSediment with the default river erosion; no forcing, no thermal change
+        Model world;
+        world.initialize(16, 8, 100000, cells);
+        for (int i = 0; i < 3; ++i) world.advance(std::vector<Displacement>(128), 1, 1, 1, 1, nullptr, rivers);
+        EXPECT_GT(world.budget().eroded_kg, 0);
+        EXPECT_GT(world.budget().river_eroded_kg, 0);
+        EXPECT_LT(elevation_m(world.cells()[8]), 3000);
+        ASSERT_EQ(world.upliftRate().size(), 128u);
+        for (double rate : world.upliftRate()) EXPECT_NEAR(rate, 0, 1e-12);
+    }
+    tectonics::plumes::Source plume;
+    plume.basalt_m.assign(32, 0);
+    plume.influence.assign(32, 0);
+    plume.basalt_m[9] = 330;
+    Model world;
+    world.initialize(8, 4, 100000, std::vector<Cell>(32, seed(500, true, 100)));
+    world.advance(std::vector<Displacement>(32), 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
+    const double weight = -std::expm1(-1.0 / 5); // 1 - e^(-dt/tau)
+    EXPECT_NEAR(world.upliftRate()[9], 40 * weight, 1e-12);
+    EXPECT_NEAR(world.upliftRate()[9], 7.2507698768807245, 1e-12);
+    for (size_t i = 0; i < 32; ++i) if (i != 9) EXPECT_NEAR(world.upliftRate()[i], 0, 1e-12);
+    // A step without tectonic change decays the mean by e^(-dt/tau).
+    world.advance(std::vector<Displacement>(32), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
+    EXPECT_NEAR(world.upliftRate()[9], 40 * weight * std::exp(-1.0 / 5), 1e-12);
+    EXPECT_THROW(world.advance(std::vector<Displacement>(32), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 0),
+        std::runtime_error);
+}
+
+// The measurement is Eulerian: plate motion over a slope changes the elevation of a
+// fixed cell by -v . grad z. Land columns 500 + 100 x m (x = 0..15, 100 km cells, so
+// grad z = 1 m/km) move east by v = 0.25 cell (25 km) in 1 Myr with nothing else
+// acting. The remap's parabolic reconstruction is exact on linear data, so a cell
+// whose stencil (x - 3 .. x + 2) stays off the wrap's jump gets the mean of the
+// ramp shifted by 0.25 cell: the step rate is -v . grad z = -25 km/Myr x 1 m/km =
+// -25 m/Myr and r = -25 (1 - e^(-1/5)) = -4.5317311730504545. A start point taken
+// after transportColumns would give 0.
+TEST(TectonicColumns, RockUpliftRateIsEulerianAdvectionOverASlope) {
+    tectonics::margins::Parameters still;
+    still.root_mobility = 0;
+    std::vector<Cell> cells(128);
+    for (size_t i = 0; i < cells.size(); ++i) cells[i] = seed(500 + 100. * (i % 16), true, 100);
+    Model world;
+    world.initialize(16, 8, 100000, cells);
+    world.advance(std::vector<Displacement>(128, {.25, 0}), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
+    for (size_t i = 0; i < 128; ++i) {
+        if (i % 16 < 3 || i % 16 > 13) continue; // stencils that see the 1500 m jump across the wrap
+        EXPECT_NEAR(world.upliftRate()[i], -25 * -std::expm1(-1.0 / 5), 1e-9) << "cell " << i;
+        EXPECT_NEAR(world.upliftRate()[i], -4.5317311730504545, 1e-9) << "cell " << i;
+    }
+}
+
+// Thermal subsidence of an ageing ocean floor is tectonic: a 20 Myr old ocean column
+// (thermal strength 1, nothing else acting) ages to 21 Myr in one step and sinks by
+// subsidence_m(21) - subsidence_m(20) = 39.50061759809455 m (Parsons & Sclater law
+// of tectonic_thermal.hpp), so r = -39.50061759809455 (1 - e^(-1/5)) = -7.160247204961215.
+TEST(TectonicColumns, RockUpliftRateCountsThermalSubsidence) {
+    Model world;
+    world.initialize(8, 4, 100000, std::vector<Cell>(32, seed(-5000, false, 20)));
+    world.advance(std::vector<Displacement>(32), 1, 0, 1, 1, nullptr, {}, {}, false, nullptr, 5);
+    const double sinking = tectonics::thermal::subsidence_m(21) - tectonics::thermal::subsidence_m(20);
+    EXPECT_NEAR(sinking, 39.50061759809455, 1e-9);
+    for (double rate : world.upliftRate()) {
+        EXPECT_NEAR(rate, -sinking * -std::expm1(-1.0 / 5), 1e-9);
+        EXPECT_NEAR(rate, -7.160247204961215, 1e-9);
+    }
+}

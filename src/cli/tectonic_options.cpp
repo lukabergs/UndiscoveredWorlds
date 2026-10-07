@@ -236,6 +236,8 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.margin_processes.rift_breakup_thickness_m=parse_double(arg.c_str(),value);
     } else if (arg == "--delta-time-myr") {
         scenario.delta_time_myr = parse_double("--delta-time-myr", value);
+    } else if (arg == "--uplift-rate-window-myr") {
+        scenario.uplift_rate_window_myr=parse_double(arg.c_str(),value);
     } else {
         return false;
     }
@@ -327,6 +329,7 @@ void printtectonicoptionsusage(std::ostream& out)
         "--sediment-travel-km",
         "--rift-breakup-thickness-m",
         "--delta-time-myr",
+        "--uplift-rate-window-myr",
     };
     std::string line = "   ";
     for (const char* flag : flags)

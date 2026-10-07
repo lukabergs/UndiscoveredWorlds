@@ -128,6 +128,7 @@ void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vect
         c.ocean*=ratio; c.oceanic_age_volume*=ratio; c.thermal_rejuvenation_volume*=ratio;
     }
     budget_ = {}; budget_.enabled = true;
+    uplift_rate_m_myr_.assign(cells_.size(), 0.0);
     for (const auto& c : cells_) { validate(c); budget_.initial_mass_kg += mass_per_area(c) * cell_m * cell_m; }
     budget_.mass_kg = budget_.initial_mass_kg;
     subdivision_ = subdivision;
@@ -456,7 +457,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
                     double erosion_strength, double thermal_strength, double submarine_erosion_ratio,
                     const margins::Forcing* forcing, const margins::Parameters& margin_parameters,
                     const noise_pass::Parameters& noise, bool sediment_feedback,
-                    const plumes::Source* plume) {
+                    const plumes::Source* plume, double uplift_rate_window_myr) {
     margins::validate(margin_parameters);
     if (plume && (plume->basalt_m.size()!=cells_.size() || plume->influence.size()!=cells_.size()))
         throw std::runtime_error("Mantle plume source shape mismatch");
@@ -472,7 +473,8 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     if (!budget_.enabled || velocity.size() != cells_.size() || !std::isfinite(dt) || dt <= 0
         || !std::isfinite(erosion_strength) || erosion_strength < 0
         || !std::isfinite(thermal_strength) || thermal_strength < 0
-        || !std::isfinite(submarine_erosion_ratio) || submarine_erosion_ratio < 0 || submarine_erosion_ratio > 1)
+        || !std::isfinite(submarine_erosion_ratio) || submarine_erosion_ratio < 0 || submarine_erosion_ratio > 1
+        || !std::isfinite(uplift_rate_window_myr) || uplift_rate_window_myr <= 0)
         throw std::runtime_error("Invalid column update parameters");
     const double diffusion = transport_diffusivity * erosion_strength * dt / (cell_m_ * cell_m_);
     if (diffusion > .2) throw std::runtime_error("Sediment transport requires a smaller timestep");
@@ -483,6 +485,9 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         return static_cast<size_t>((y + static_cast<int>(height_)) % static_cast<int>(height_)) * width_
             + (x + static_cast<int>(width_)) % static_cast<int>(width_);
     };
+    // Elevation before the tectonic sub-steps, on the same fixed cells (Eulerian).
+    std::vector<double> elevation_before(cells_.size());
+    for (size_t i = 0; i < cells_.size(); ++i) elevation_before[i] = elevation_m(cells_[i], thermal_strength);
     auto next = transportColumns(velocity, dt);
     const double area = cell_m_ * cell_m_;
     std::vector<double> arc_source(next.size());
@@ -594,6 +599,13 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     // Density conversion includes sediment expansion; no sediment is deleted.
     std::vector<double> elevation(next.size()), deposits(next.size(), 0);
     for (size_t i = 0; i < next.size(); ++i) elevation[i] = elevation_m(next[i], thermal_strength);
+    // Rock uplift rate: the tectonic elevation change of this step (before the
+    // surface processes below), kept as an exponential mean. Measurement only.
+    const double uplift_weight = -std::expm1(-dt / uplift_rate_window_myr);
+    for (size_t i = 0; i < next.size(); ++i) {
+        const double rate = (elevation[i] - elevation_before[i]) / dt;
+        uplift_rate_m_myr_[i] += (rate - uplift_rate_m_myr_[i]) * uplift_weight;
+    }
     for (uint32_t y = 0; y < height_; ++y) for (uint32_t x = 0; x < width_; ++x) {
         const auto i = index(x, y);
         const size_t neighbors[] = {index(static_cast<int>(x) - 1, y), index(x + 1, y),

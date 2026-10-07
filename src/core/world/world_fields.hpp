@@ -98,6 +98,7 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(crust_thickness, geosphere, f32, grid, "engine units", "Crust thickness proxy") \
     X(crust_class, geosphere, u8, grid, "code", "Crust class: 0 none, 1 oceanic, 2 transitional, 3 continental") \
     X(uplift_tendency, geosphere, f32, grid, "engine units", "Native uplift tendency") \
+    X(rock_uplift_rate, geosphere, f32, grid, "m/Myr", "Tectonic rock uplift rate, 10 Myr exponential mean of the engine's elevation change before surface processes; negative is subsidence. The mean starts at 0 with the run, so a run of t Myr shorter than the window underestimates it by the factor 1 - e^(-t/10)") \
     X(subsidence_tendency, geosphere, f32, grid, "engine units", "Native subsidence tendency") \
     X(accumulated_strain, geosphere, f32, grid, "engine units", "Accumulated strain memory") \
     X(boundary_type, geosphere, u8, grid, "code", "Plate boundary type") \

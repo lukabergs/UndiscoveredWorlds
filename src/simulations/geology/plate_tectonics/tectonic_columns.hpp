@@ -59,8 +59,14 @@ public:
                  double erosion_strength, double thermal_strength, double submarine_erosion_ratio = 1,
                  const margins::Forcing* forcing = nullptr, const margins::Parameters& margins = {},
                  const noise_pass::Parameters& noise = {}, bool sediment_feedback = false,
-                 const plumes::Source* plume = nullptr);
+                 const plumes::Source* plume = nullptr, double uplift_rate_window_myr = 10);
     const std::vector<Cell>& cells() const { return cells_; }
+    // Rock uplift rate per cell, m/Myr, signed: an exponential mean (e-folding time
+    // uplift_rate_window_myr) of the elevation change of the tectonic sub-steps
+    // (transport, subduction overlap, rifting, trench flexure, arcs, plumes, roots,
+    // thermal subsidence), before the diffusion, rivers and noise. Eulerian: the
+    // cells are fixed, so topography carried in by plate motion counts. Zero at start.
+    const std::vector<double>& upliftRate() const { return uplift_rate_m_myr_; }
     const Budget& budget() const { return budget_; }
 private:
     void spreadRoots(std::vector<Cell>& cells, double dt_myr, double thermal_strength, bool sediment_feedback);
@@ -79,6 +85,7 @@ private:
     std::vector<Cell> transport_cells_; // Persistent rock subcells; never re-seeded between updates.
     std::vector<double> newborn_ocean_crust_; // Fixed mantle-space birth pattern; rock then advects.
     Budget budget_;
+    std::vector<double> uplift_rate_m_myr_; // Measurement only; never feeds back into the columns.
 };
 } // namespace tectonics::columns
 #endif

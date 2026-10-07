@@ -61,6 +61,9 @@ struct Scenario {
     noise_pass::Parameters experimental_noise;
     plumes::Parameters plume_processes; // count 0 (default) leaves every run unchanged
     double delta_time_myr = kDefaultDeltaTimeMyr;
+    // E-folding time of the exported rock uplift rate: an exponential mean of the
+    // elevation change of the tectonic sub-steps, before the surface processes.
+    double uplift_rate_window_myr = 10;
     float gravity_mps2 = kDefaultGravityMps2;
 };
 

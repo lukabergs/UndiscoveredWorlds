@@ -151,6 +151,7 @@ void planet::resizegrids()
     geosphere_.tectoniccrustthicknessmap.resize(columns, rows);
     geosphere_.tectoniccrustclassmap.resize(columns, rows);
     geosphere_.tectonicuplifttendencymap.resize(columns, rows);
+    geosphere_.tectonicrockupliftratemap.resize(columns, rows);
     geosphere_.tectonicsubsidencetendencymap.resize(columns, rows);
     geosphere_.tectonicaccumulatedstrainmap.resize(columns, rows);
     geosphere_.tectonicboundarytypemap.resize(columns, rows);
@@ -221,6 +222,7 @@ void planet::cleartectonicprovenanceinternal()
     geosphere_.tectonicsedimentmap.fill(0);
     geosphere_.tectonicriftdamagemap.fill(0);
     geosphere_.tectonicplumeinfluencemap.fill(0);
+    geosphere_.tectonicrockupliftratemap.fill(0);
     geosphere_.tectonicsnapshotrecord.clear();
     geosphere_.itstectonictimeoriginstep = 0;
     geosphere_.itstectonictimemyr = 0.0f;
@@ -582,6 +584,7 @@ void planet::clear()
     geosphere_.tectonicsedimentmap.fill(0);
     geosphere_.tectonicriftdamagemap.fill(0);
     geosphere_.tectonicplumeinfluencemap.fill(0);
+    geosphere_.tectonicrockupliftratemap.fill(0);
     geosphere_.tectonicsnapshotrecord.clear();
     geosphere_.tectonicboundarysegmentlist.clear();
     geosphere_.tectonicdeformingregionlist.clear();
@@ -741,6 +744,7 @@ void planet::shiftterrain(int offset)
     shift(geosphere_.tectoniccrustthicknessmap, offset);
     shift(geosphere_.tectoniccrustclassmap, offset);
     shift(geosphere_.tectonicuplifttendencymap, offset);
+    shift(geosphere_.tectonicrockupliftratemap, offset);
     shift(geosphere_.tectonicsubsidencetendencymap, offset);
     shift(geosphere_.tectonicaccumulatedstrainmap, offset);
     shift(geosphere_.tectonicboundarytypemap, offset);
@@ -1478,6 +1482,7 @@ bool planet::loadworld(string filename)
     }
     readvariable(infile, body_.itsseed);
     resizegrids();
+    geosphere_.tectonicrockupliftratemap.fill(0); // Not in the .uww: a loaded world has no rate.
     readvariable(infile, body_.itsrotation);
     readvariable(infile, body_.itstilt);
     readvariable(infile, body_.itseccentricity);
