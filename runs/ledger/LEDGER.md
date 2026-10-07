@@ -59,6 +59,7 @@ Lessons:
 | `erosion-0020` | 2026-10-07 | mechanism in place; little land built at the current sediment supply | keep | erosion plan, step C5b: progradation at river mouths and distributaries on the new land |
 | `erosion-0021` | 2026-10-07 | law in place; effect to judge at 256 columns | keep | erosion plan, step C8: local isostatic rebound during the erosion run |
 | `erosion-0022` | 2026-10-07 | pending user review | keep | erosion plan, step C9: the Phase C judging run (erosion run 5) and the close |
+| `erosion-0023` | 2026-10-07 | changed as intended; eroded-world only | keep | erosion plan, step D0: the default erodibility corrected from 24 to the derived 750 (unit error) |
 
 Lessons:
 
@@ -94,6 +95,7 @@ Lessons:
 - `erosion-0020`: Access measured on a world where a field stays zero misses its writes: measure a new field's writer on the size where it changes.
 - `erosion-0021`: An isostatic response with different fractions for removal and loading creates column whenever material only moves: check a mass-moving kernel's response for volume neutrality before choosing densities.
 - `erosion-0022`: A phase whose steps each pass a minimal parity check can still need one tracked run at the judging size before the close: four of Phase C's access gaps showed only at 256 columns.
+- `erosion-0023`: A derivation that matches two laws must carry the units of each quantity through: a precipitation of 1 m/yr is 1e-3 km/yr in a discharge counted in km3/yr, and the square root turned that into a factor of 31.6 that four phases of runs read as a calibration question.
 
 ## tectonics
 

@@ -24,7 +24,7 @@ inline float minimumDepthM = 0.1f;
 
 namespace stream_power
 {
-inline float erodibility = 24.0f;
+inline float erodibility = 750.0f;
 inline float crustClassMultiplierContinental = 1.0f;
 inline float crustClassMultiplierTransitional = 1.3f;
 inline float crustClassMultiplierOceanic = 1.5f;
