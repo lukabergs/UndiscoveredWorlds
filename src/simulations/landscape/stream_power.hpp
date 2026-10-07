@@ -69,6 +69,28 @@ struct StreamPowerBudget
     double stranded_km3 = 0.0;         // their remainders, left on the walk's end cell (part of marinedeposited_km3)
 };
 
+// The glacial term of a step (erosion plan Phase G; glacial.hpp). On each land cell
+// the erodibility becomes K_eff = gamma^m x erodibilityratio x K + (1 - gamma)^m x K
+// with gamma = min(1, iceflux / discharge) (Hergarten 2021, Eq. 27); the implicit
+// solve and the deposition work on the ice surface elevation + thickness (a
+// receiver's surface likewise, sea receivers at the base level), and the bed is the
+// solved surface less the thickness, held at or above baselevel_m - flotationratio x
+// thickness, so it may end below its receiver (an overdeepening) or below the sea
+// level (a fjord). Hillslope diffusion and marine deposition act on the bed. With
+// zero flux and thickness on every cell the step equals the step without the input
+// bit for bit.
+struct GlacialInput
+{
+    const std::vector<double>* iceflux_m3_yr = nullptr;  // per cell, accumulateice on the same graph
+    const std::vector<float>* thickness_m = nullptr;     // per cell, icethickness of that flux
+    double erodibilityratio = 2.0;                       // K_g / K
+    double flotationratio = 0.892;
+    // When given: resized to metric.size() and assigned the glacial part of each
+    // cell's erosion_m (gamma^m K_g / K_eff of the incision plus the lowering below
+    // the solved surface), non-negative and at most erosion_m.
+    std::vector<float>* glacialerosion_m = nullptr;
+};
+
 // Advances `elevation` by one step. `graph` was built and accumulated on the
 // elevation passed in; `erodibility` (K) and `uplift_m_myr` (U) are per cell and
 // read on land cells only (U on sea cells too with parameters.upliftsea; uplift is
@@ -80,10 +102,12 @@ struct StreamPowerBudget
 // each land cell of the step passes to its receiver (an outlet: into its sea
 // cell, the volume marine deposition spreads), in m^3/Myr; 0 at sea cells and at
 // land roots, which keep what reaches them. Hillslope transfers are not part of
-// it. Throws std::invalid_argument on a size mismatch or a slope exponent other than 1.
+// it. `glacial`, when given, adds the glacial term (GlacialInput); `elevation` stays
+// the bed. Throws std::invalid_argument on a size mismatch or a slope exponent other than 1.
 StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& graph,
                                   const std::vector<float>& erodibility, const std::vector<float>& uplift_m_myr,
                                   const StreamPowerParameters& parameters, std::vector<float>& elevation,
                                   std::vector<float>& erosion_m, std::vector<float>& deposition_m,
-                                  std::vector<double>* sedimentflux_m3_myr = nullptr);
+                                  std::vector<double>* sedimentflux_m3_myr = nullptr,
+                                  const GlacialInput* glacial = nullptr);
 }

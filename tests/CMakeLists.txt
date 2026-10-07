@@ -33,6 +33,7 @@ if(TARGET uw_climate_world)
         simulations/climate/climate_transport_tests.cpp
         simulations/climate/climate_weather_tests.cpp
         simulations/landscape/distributaries_tests.cpp
+        simulations/landscape/glacial_tests.cpp
         simulations/landscape/isostasy_tests.cpp
         simulations/landscape/lake_balance_tests.cpp
         simulations/landscape/ocean_mask_tests.cpp

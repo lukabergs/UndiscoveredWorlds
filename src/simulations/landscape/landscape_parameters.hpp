@@ -104,6 +104,19 @@ inline bool resolveFlats = true;
 inline float oceanMinimumAreaFraction = 0.002f;
 }
 
+namespace glacial
+{
+inline bool enabled = true;
+inline float erodibilityRatio = 2.0f;
+inline float coolingC = 4.0f;
+inline float fullIceRangeM = 500.0f;
+inline float widthReferenceM = 400.0f;
+inline float widthExponent = 0.3f;
+inline float thicknessRatio = 0.25f;
+inline float maximumThicknessM = 3000.0f;
+inline float flotationRatio = 0.892f;
+}
+
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -153,6 +166,15 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.routing.randomised", &routing::randomised },
         { "landscape.routing.resolve_flats", &routing::resolveFlats },
         { "landscape.routing.ocean_minimum_area_fraction", &routing::oceanMinimumAreaFraction },
+        { "landscape.glacial.enabled", &glacial::enabled },
+        { "landscape.glacial.erodibility_ratio", &glacial::erodibilityRatio },
+        { "landscape.glacial.cooling_c", &glacial::coolingC },
+        { "landscape.glacial.full_ice_range_m", &glacial::fullIceRangeM },
+        { "landscape.glacial.width_reference_m", &glacial::widthReferenceM },
+        { "landscape.glacial.width_exponent", &glacial::widthExponent },
+        { "landscape.glacial.thickness_ratio", &glacial::thicknessRatio },
+        { "landscape.glacial.maximum_thickness_m", &glacial::maximumThicknessM },
+        { "landscape.glacial.flotation_ratio", &glacial::flotationRatio },
     };
     return entries;
 }

@@ -69,8 +69,9 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
                                   const std::vector<float>& erodibility, const std::vector<float>& uplift_m_myr,
                                   const StreamPowerParameters& parameters, std::vector<float>& elevation,
                                   std::vector<float>& erosion_m, std::vector<float>& deposition_m,
-                                  std::vector<double>* sedimentflux_m3_myr)
+                                  std::vector<double>* sedimentflux_m3_myr, const GlacialInput* glacial)
 {
+    static_cast<void>(glacial);  // the glacial term is erosion plan step G1
     if (parameters.slopeexponent != 1.0)
         throw std::invalid_argument("stepstreampower: only a slope exponent of 1 is supported");
     const std::size_t cells = metric.size();

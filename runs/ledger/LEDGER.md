@@ -66,6 +66,7 @@ Lessons:
 | `erosion-0025` | 2026-10-07 | changed as intended | keep | erosion plan, step H4a (C10, first half): eroded-world becomes procedural-world; imported worlds on the new hydrology |
 | `erosion-0026` | 2026-10-07 | equivalent | keep | erosion plan, step H4b (C10, second half): the legacy hydrology deleted |
 | `erosion-0027` | 2026-10-07 | pending user review | keep | erosion plan, step H5: the Phase H close (erosion run 8, the promoted procedural-world at 256 columns) |
+| `erosion-0028` | 2026-10-08 | pass (contracts; no behaviour change) | keep | erosion plan, step G0: the Phase G survey, design and contracts (glacial erosion) |
 
 Lessons:
 
@@ -104,6 +105,7 @@ Lessons:
 - `erosion-0023`: A derivation that matches two laws must carry the units of each quantity through: a precipitation of 1 m/yr is 1e-3 km/yr in a discharge counted in km3/yr, and the square root turned that into a factor of 31.6 that four phases of runs read as a calibration question.
 - `erosion-0024`: A rule that decides which cells are sea must be shared by every consumer (routing, erosion, rivers, basins, checks): a second copy of the old rule in one consumer silently undoes the change there.
 - `erosion-0025`: A stage that fills depressions before a water-balance lake stage leaves it nothing to fill: when a new process takes over a feature, look for the older stages that pre-empt it.
+- `erosion-0028`: The fjord stage's name promised a carving it never did: read a stage before planning to feed it.
 
 ## tectonics
 

@@ -127,6 +127,7 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(deposition_rate, geosphere, f32, grid, "m/Myr", "Mean deposition rate over the erosion run") \
     X(denudation, geosphere, f32, grid, "m", "Cumulative denudation of the erosion run") \
     X(aggradation, geosphere, f32, grid, "m", "Cumulative aggradation of the erosion run") \
+    X(glacial_denudation, geosphere, f32, grid, "m", "Glacial part of the denudation of the erosion run") \
     X(prograded, geosphere, u8, grid, "0/1", "Land built by marine deposition over the erosion run: sea at its start, land at its end") \
     X(erosion_duration, geosphere, f32, scalar, "Myr", "Duration of the erosion run") \
     X(eroded_volume, geosphere, f32, scalar, "km3", "Volume eroded over the erosion run") \
@@ -158,6 +159,9 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(delta_flow_january, hydrosphere, i32, grid, "legacy flow", "January delta flow") \
     X(delta_flow_july, hydrosphere, i32, grid, "legacy flow", "July delta flow") \
     X(sea_ice, cryosphere, i16, grid, "code", "Sea ice: 1 seasonal, 2 permanent") \
+    X(equilibrium_line_altitude, cryosphere, f32, grid, "m above datum", "Glacier equilibrium-line altitude of the erosion run (its climate cooled by landscape.glacial.cooling_c)") \
+    X(glaciation, cryosphere, f32, grid, "0..1", "Share of the erosion run's time a cell carried ice") \
+    X(ice_thickness, cryosphere, f32, grid, "m", "Present-day ice on the final terrain (the ELA without the cooling)") \
     X(temperature_january, atmosphere, f32, grid, "C", "January temperature (legacy pair)") \
     X(temperature_july, atmosphere, f32, grid, "C", "July temperature (legacy pair)") \
     X(precipitation_january, atmosphere, f32, grid, "mm/month", "January precipitation (legacy pair)") \

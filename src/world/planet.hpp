@@ -561,6 +561,16 @@ public:
     // Erosion plan C5b: land built by marine deposition over the erosion run (0/1).
     const worldgrid<std::uint8_t>& prograded() const { UW_FIELD_READ(prograded); return geosphere_.progradedmap; }
     worldgrid<std::uint8_t>& prograded() { return geosphere_.progradedmap; }
+    // Erosion plan Phase G: the glacial part of the denudation, the run's ELA, the
+    // share of the run under ice and the present-day ice thickness.
+    const worldgrid<float>& glacialdenudation() const { UW_FIELD_READ(glacial_denudation); return geosphere_.glacialdenudationmap; }
+    worldgrid<float>& glacialdenudation() { return geosphere_.glacialdenudationmap; }
+    const worldgrid<float>& equilibriumline() const { UW_FIELD_READ(equilibrium_line_altitude); return cryosphere_.equilibriumlinemap; }
+    worldgrid<float>& equilibriumline() { return cryosphere_.equilibriumlinemap; }
+    const worldgrid<float>& glaciation() const { UW_FIELD_READ(glaciation); return cryosphere_.glaciationmap; }
+    worldgrid<float>& glaciation() { return cryosphere_.glaciationmap; }
+    const worldgrid<float>& icethickness() const { UW_FIELD_READ(ice_thickness); return cryosphere_.icethicknessmap; }
+    worldgrid<float>& icethickness() { return cryosphere_.icethicknessmap; }
     float radius() const { UW_FIELD_READ(radius); return body_.itsradius_m; }
     void setradius(float amount) { body_.itsradius_m = amount; }
     float erosionduration() const { UW_FIELD_READ(erosion_duration); return geosphere_.itserosionduration; }

@@ -224,6 +224,7 @@ struct geospherestate
     worldgrid<std::uint8_t> depositionpotentialmap;
     worldgrid<std::uint8_t> floodplainfertilitymap;
     worldgrid<float> erodibilitymap, erosionratemap, depositionratemap, denudationmap, aggradationmap;
+    worldgrid<float> glacialdenudationmap;  // erosion plan Phase G
     worldgrid<std::uint8_t> progradedmap;
     float itserosionduration = 0.0f, itserodedvolume = 0.0f, itslanddepositedvolume = 0.0f, itsmarinedepositedvolume = 0.0f;
     worldgrid<std::uint8_t> metalorereservemap;
@@ -280,6 +281,9 @@ struct cryospherestate
 {
     int itsglacialtemp;     // Areas with this average temperature or lower will have glacial terrain
     int itsglaciertemp;     // Rivers in areas with this maximum temperature or lower will be glaciers
+    // Erosion plan Phase G: the glacial erosion's ELA, the share of the run under ice
+    // and the present-day ice thickness, written by terrain.fluvial_erosion.
+    worldgrid<float> equilibriumlinemap, glaciationmap, icethicknessmap;
 };
 
 // Planet parameters of the climate; climate fields live in climateworld.
