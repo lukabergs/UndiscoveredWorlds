@@ -6,12 +6,15 @@
   "run": {"tool": "world_pipeline", "resolution": 256, "arguments": ["run", "--recipe", "procedural-world", "--resolution", "{width}"], "registered": {"resolution": 128, "arguments": ["--duration", "50", "--climate-resolution", "32", "--climate-coupling-iterations", "2"]}},
   "checks": [
     {"check": "grid"},
-    {"check": "required", "fields": ["planetbody.radius", "hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "geosphere.erodibility", "geosphere.erosion_rate", "geosphere.deposition_rate", "geosphere.denudation", "geosphere.aggradation", "geosphere.erosion_duration", "geosphere.eroded_volume", "geosphere.land_deposited_volume", "geosphere.marine_deposited_volume", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.precipitation", "atmosphere.potential_evaporation", "hydrosphere.runoff", "hydrosphere.sediment_flux", "geosphere.prograded"]},
-    {"check": "written", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "geosphere.erodibility", "geosphere.erosion_rate", "geosphere.deposition_rate", "geosphere.denudation", "geosphere.aggradation", "geosphere.erosion_duration", "geosphere.eroded_volume", "geosphere.land_deposited_volume", "geosphere.marine_deposited_volume", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.precipitation", "atmosphere.potential_evaporation", "hydrosphere.runoff", "hydrosphere.sediment_flux"]},
+    {"check": "required", "fields": ["planetbody.radius", "hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "geosphere.erodibility", "geosphere.erosion_rate", "geosphere.deposition_rate", "geosphere.denudation", "geosphere.aggradation", "geosphere.erosion_duration", "geosphere.eroded_volume", "geosphere.land_deposited_volume", "geosphere.marine_deposited_volume", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.precipitation", "atmosphere.potential_evaporation", "hydrosphere.runoff", "hydrosphere.sediment_flux", "geosphere.prograded", "cryosphere.equilibrium_line_altitude", "cryosphere.glaciation", "cryosphere.ice_thickness", "geosphere.glacial_denudation"]},
+    {"check": "written", "fields": ["hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation", "hydrosphere.depression_id", "geosphere.erodibility", "geosphere.erosion_rate", "geosphere.deposition_rate", "geosphere.denudation", "geosphere.aggradation", "geosphere.erosion_duration", "geosphere.eroded_volume", "geosphere.land_deposited_volume", "geosphere.marine_deposited_volume", "geosphere.base_elevation", "geosphere.sea_level", "atmosphere.precipitation", "atmosphere.potential_evaporation", "hydrosphere.runoff", "hydrosphere.sediment_flux", "cryosphere.equilibrium_line_altitude", "cryosphere.glaciation", "cryosphere.ice_thickness", "geosphere.glacial_denudation"]},
     {"check": "finite", "fields": ["geosphere.*", "hydrosphere.flow_direction", "hydrosphere.drainage_area", "hydrosphere.discharge", "hydrosphere.filled_elevation"]},
     {"check": "range", "field": "geosphere.erosion_rate", "min": 0, "max": 2000},
     {"check": "range", "field": "hydrosphere.discharge", "min": 0},
     {"check": "range", "field": "hydrosphere.drainage_area", "min": 0},
+    {"check": "range", "field": "cryosphere.glaciation", "min": 0, "max": 1},
+    {"check": "range", "field": "cryosphere.ice_thickness", "min": 0, "max": 3000},
+    {"check": "range", "field": "geosphere.glacial_denudation", "min": 0},
     {"check": "volume-budget", "total": "geosphere.eroded_volume", "parts": ["geosphere.land_deposited_volume", "geosphere.marine_deposited_volume"], "max_relative_residual": 1e-06},
     {"check": "drained", "direction": "hydrosphere.flow_direction", "depression": "hydrosphere.depression_id", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level"},
     {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation"},
@@ -21,7 +24,8 @@
   "validation": [
     {"id": "hypsometry", "kind": "hypsometry", "reference_width": 2048},
     {"id": "ocean_depths", "kind": "ocean_depths", "reference_width": 2048},
-    {"id": "drainage_pattern", "kind": "drainage_pattern"}
+    {"id": "drainage_pattern", "kind": "drainage_pattern"},
+    {"id": "glaciation", "kind": "glaciation"}
   ],
   "maps": [
     {"name": "elevation", "title": "Surface elevation (m)", "derived": "surface_elevation", "palette": "tectonics:elevation"},
@@ -35,6 +39,10 @@
     {"name": "basins", "title": "Drainage basins (outlet folded onto 12 colours; dark at sea)", "derived": "drainage_basin", "hide_zero": true, "palette": "tectonics:category_12"},
     {"name": "river-flow", "title": "River flow in January (legacy flow units)", "field": "hydrosphere.river_flow_january", "palette": "tectonics:river_flow"},
     {"name": "lakes", "title": "Lake surface elevation (m above sea level; dark where there is no lake)", "derived": "lake_elevation", "palette": "tectonics:lake_surface_m"},
+    {"name": "equilibrium-line", "title": "Equilibrium-line altitude of the erosion run, with its cooling (m above sea level; land only)", "derived": "equilibrium_line_above_sea", "palette": "tectonics:elevation"},
+    {"name": "glaciation", "title": "Glaciation: share of the erosion run with ice (0 to 1)", "field": "cryosphere.glaciation", "palette": "tectonics:uplift_tendency"},
+    {"name": "ice-thickness", "title": "Present-day ice thickness on the final terrain (m; dark where there is none)", "field": "cryosphere.ice_thickness", "hide_zero": true, "palette": "tectonics:lake_surface_m"},
+    {"name": "glacial-denudation", "title": "Glacial denudation (log10 m over the erosion run; the legend's m/Myr are m; dark where there is none)", "field": "geosphere.glacial_denudation", "transform": "log10", "palette": "tectonics:rate_log"},
     {"name": "annual-rain", "title": "Annual precipitation (mm/yr)", "field": "atmosphere.precipitation", "reduce": "season-mean", "scale": 12, "palette": "climate:annual_rain"}
   ],
   "review_status": "Draft written by an agent on 2026-10-06 (erosion plan, step A3). The user rewrites it; until then a verdict on it is a reading aid, not a judgement of the world.",

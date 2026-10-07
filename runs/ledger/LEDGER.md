@@ -7,6 +7,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0014`: The rainfall solver's bulk-aerodynamic potential evaporation as the Budyko PET (discharge recall on Earth fell from 0.63 to 0.46).
 - `erosion-0016`: Depth from the engine's crust age by the plate-cooling law: the engine's ocean ages are mostly the run's age (median 590 Myr at 600 Myr) and two thirds of the sea lies on continental crust, so 98 percent of the ocean lands at 5 to 6 km.
 - `erosion-0021`: Loading fraction 2700/3300 with rebound 2800/3300 on rock volumes (it raised the land by 0.66 m on average in 20 Myr).
+- `erosion-0031`: Routing on the ice surface during the run: ice flickers on and off between steps (643 appearances on 305 cells in 20 steps at the minimal size).
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -69,6 +70,7 @@ Lessons:
 | `erosion-0028` | 2026-10-08 | pass (contracts; no behaviour change) | keep | erosion plan, step G0: the Phase G survey, design and contracts (glacial erosion) |
 | `erosion-0029` | 2026-10-08 | pass | keep | erosion plan, step G2: terrain.fjords deleted |
 | `erosion-0030` | 2026-10-08 | pass with notes (review on Opus 5.5) | keep | erosion plan, step G1: the glacial kernel (ELA, ice flux, thickness) and the glacial term of the stream-power step |
+| `erosion-0031` | 2026-10-08 | pass with notes (review rework, re-review pass with notes; both on Opus 5.5) | keep | erosion plan, step G3: the glacial term in terrain.fluvial_erosion, its fields, evaluation and access |
 
 Lessons:
 
@@ -110,6 +112,8 @@ Lessons:
 - `erosion-0028`: The fjord stage's name promised a carving it never did: read a stage before planning to feed it.
 - `erosion-0029`: Stages do not share a random stream across processes (seedprocessstream): removing a stochastic stage changes only what it wrote.
 - `erosion-0030`: The flotation floor belongs inside the implicit sweep: a clamp after the solve would have left the erosion, deposition and sediment flux inconsistent with the elevation.
+- `erosion-0031`: Feeding a state (the ice thickness) back into the routing one step late makes it flicker; Hergarten's bed directions avoid it.
+- `erosion-0031`: A temperature field cooled only above the sea level gives an ELA on max(elevation, sea level), not on the seabed.
 
 ## tectonics
 

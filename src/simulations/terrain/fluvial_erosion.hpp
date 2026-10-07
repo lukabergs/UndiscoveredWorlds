@@ -4,7 +4,9 @@
 // elevation with the landscape stream power kernel over
 // landscape.erosion.duration_myr in steps of step_myr; routes at every step
 // and writes the final routing fields itself (docs/architecture/erosion-hydrology-plan.md,
-// section 3, Processes).
+// section 3, Processes). With landscape.glacial.enabled the kernel also erodes with the
+// ice of an ELA from the coarse climate, routing on the bed with the ice surface's sea, and
+// the stage writes the glacial fields and the present-day ice (erosion plan Phase G).
 
 #include <functional>
 #include <vector>

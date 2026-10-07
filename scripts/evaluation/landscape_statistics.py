@@ -11,6 +11,11 @@ step of Phase C reports the same numbers from the evaluation instead of from ad 
   compared with the baseline run.
 - ocean_depths: the area-weighted share of the ocean by depth band against Earth's (ETOPO 2022,
   the hypsometry reference's inputs), with the mean and the median depth.
+- glaciation: the glacial fields of the erosion run (erosion plan Phase G): the glaciated and the
+  present-day ice-covered share of the land, the mean glaciation, glaciated sea cells (sea with
+  glacial denudation) and their depths, glaciated cells below the sea level, glaciated and
+  ice-covered lakes, the ELA above the sea level per 15-degree latitude band and the
+  glacial share of the denudation. Reported numbers, no threshold.
 """
 import sys
 from pathlib import Path
@@ -27,6 +32,9 @@ from uwtools.tectonics_earth_reference import reference_inputs  # noqa: E402
 
 OCEAN_BANDS_KM = (0.0, 0.2, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, np.inf)
 DRAINAGE_FIELDS = ('hydrosphere.flow_direction', 'geosphere.base_elevation', 'geosphere.sea_level')
+GLACIATION_FIELDS = ('cryosphere.glaciation', 'cryosphere.ice_thickness', 'cryosphere.equilibrium_line_altitude',
+                     'geosphere.glacial_denudation', 'geosphere.base_elevation', 'geosphere.sea_level')
+ELA_BAND_DEGREES = 15
 
 
 def band_label(lower, upper):
@@ -181,6 +189,85 @@ def compare_drainage_pattern(bundle, spec, baseline=None):
     return result
 
 
+def latitude_name(degrees):
+    return f'{abs(degrees)}{"S" if degrees < 0 else "N"}'
+
+
+def measure_glaciation(bundle):
+    """The glacial fields over the land of land_mask: shares by area (bundle.area_weights), glaciated
+    sea cells (not land, no lake surface, glacial denudation > 0; their area from planetbody.radius,
+    None without it; the minimum and median depth below the sea level and the count deeper than
+    100 m), glaciated cells whose bed ends at or below the sea level (land_mask false), the largest
+    glacial denudation, lake cells (a nonzero lake surface, the lake checks' rule) with glaciation
+    and with present-day ice,
+    the area-weighted mean ELA above the sea level per 15-degree band (None where a band has no
+    land, and everywhere when the ELA is zero on every cell: the glacial term was off) and the land-mean glacial denudation with its share of the land-mean denudation."""
+    land = land_mask(bundle)
+    weights = bundle.area_weights()
+    glaciation = bundle.load('cryosphere.glaciation').astype(float)
+    ice = bundle.load('cryosphere.ice_thickness').astype(float)
+    glacial = bundle.load('geosphere.glacial_denudation').astype(float)
+    sea_level = float(bundle.scalar('geosphere.sea_level'))
+    lake = (bundle.load('hydrosphere.lake_surface') != 0) if bundle.has('hydrosphere.lake_surface') \
+        else np.zeros(land.shape, dtype=bool)
+    land_area = weights[land].sum()
+    metrics = {'land_cells': int(np.count_nonzero(land))}
+
+    def land_share(mask):
+        return float(weights[land & mask].sum() / land_area) if land_area else None
+
+    metrics['glaciated_land_share'] = land_share(glaciation > 0)
+    metrics['land_mean_glaciation'] = float(np.average(glaciation[land], weights=weights[land])) if land_area else None
+    metrics['ice_covered_land_share'] = land_share(ice > 0)
+    metrics['glaciated_land_cells'] = int(np.count_nonzero(land & (glaciation > 0)))
+    metrics['ice_covered_land_cells'] = int(np.count_nonzero(land & (ice > 0)))
+    metrics['maximum_ice_thickness_m'] = float(ice.max()) if ice.size else None
+    # Glaciated sea: sea at the end with glacial denudation. Fjords cut from land and seabed
+    # eroded under grounded ice are not told apart: the bundle does not hold the start's sea.
+    sea = ~land & ~lake & (glacial > 0)
+    depth = sea_level - bundle.load('geosphere.base_elevation').astype(float)[sea]
+    metrics['glaciated_sea_cells'] = int(np.count_nonzero(sea))
+    if bundle.has('planetbody.radius'):
+        radius_km = float(bundle.scalar('planetbody.radius')) / 1000.0
+        metrics['glaciated_sea_area_km2'] = float(weights[sea].sum() * 4.0 * np.pi * radius_km ** 2)
+    else:
+        metrics['glaciated_sea_area_km2'] = None
+    metrics['glaciated_sea_min_depth_m'] = float(depth.min()) if depth.size else None
+    metrics['glaciated_sea_median_depth_m'] = float(np.median(depth)) if depth.size else None
+    metrics['glaciated_sea_cells_deeper_than_100_m'] = int(np.count_nonzero(depth > 100.0))
+    metrics['glaciated_cells_below_sea_level'] = int(np.count_nonzero(~land & (glaciation > 0)))
+    metrics['maximum_glacial_denudation_m'] = float(glacial.max()) if glacial.size else None
+    metrics['glaciated_lake_cells'] = int(np.count_nonzero(lake & (glaciation > 0)))
+    metrics['ice_on_lake_cells'] = int(np.count_nonzero(lake & (ice > 0)))
+    ela = bundle.load('cryosphere.equilibrium_line_altitude').astype(float)
+    computed = bool(np.any(ela != 0))  # zero everywhere: the glacial term was off, no ELA
+    ela = ela - sea_level
+    latitude = grid.latitudes(land.shape[0])[:, None] * np.ones(land.shape)
+    for lower in range(-90, 90, ELA_BAND_DEGREES):
+        upper = lower + ELA_BAND_DEGREES
+        band = land & (latitude >= lower) & ((latitude < upper) if upper < 90 else (latitude <= upper))
+        key = f'ela_above_sea_m_{latitude_name(lower)}_{latitude_name(upper)}'
+        metrics[key] = float(np.average(ela[band], weights=weights[band])) if computed and np.any(band) else None
+    if land_area:
+        glacial_mean = float(np.average(glacial[land], weights=weights[land]))
+        metrics['land_mean_glacial_denudation_m'] = glacial_mean
+        if bundle.has('geosphere.denudation'):
+            denudation_mean = float(np.average(bundle.load('geosphere.denudation').astype(float)[land],
+                                               weights=weights[land]))
+            metrics['land_mean_denudation_m'] = denudation_mean
+            metrics['glacial_denudation_share'] = glacial_mean / denudation_mean if denudation_mean > 0 else None
+    return metrics
+
+
+def compare_glaciation(bundle, spec, baseline=None):
+    result = {'reference': 'none: reported numbers of the glacial fields (erosion plan Phase G), compared with the '
+                           'baseline run'}
+    for key, source in (('run', bundle), ('baseline', baseline)):
+        if source is not None:
+            result[key] = {'earth_comparison': {}, 'metrics': measure_glaciation(source)}
+    return result
+
+
 def main():
     """Print the measurements of bundles (checkpoints included) as one JSON document per bundle."""
     import argparse
@@ -188,11 +275,12 @@ def main():
     from uwtools.bundle import Bundle
     parser = argparse.ArgumentParser(description='Reported landscape numbers of run bundles: '
                                      'uv run --offline scripts/evaluation/landscape_statistics.py '
-                                     '{ocean-depths,drainage-pattern} BUNDLE [BUNDLE ...]')
-    parser.add_argument('measure', choices=('ocean-depths', 'drainage-pattern'))
+                                     '{ocean-depths,drainage-pattern,glaciation} BUNDLE [BUNDLE ...]')
+    parser.add_argument('measure', choices=('ocean-depths', 'drainage-pattern', 'glaciation'))
     parser.add_argument('bundles', nargs='+', type=Path)
     args = parser.parse_args()
-    measure = measure_ocean_depths if args.measure == 'ocean-depths' else measure_drainage_pattern
+    measure = {'ocean-depths': measure_ocean_depths, 'drainage-pattern': measure_drainage_pattern,
+               'glaciation': measure_glaciation}[args.measure]
     for path in args.bundles:
         print(json.dumps({'bundle': path.as_posix(), 'metrics': measure(Bundle.open(path))}))
 

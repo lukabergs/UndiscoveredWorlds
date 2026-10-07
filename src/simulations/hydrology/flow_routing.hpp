@@ -78,7 +78,9 @@ std::vector<uint8_t> oceancells(const planet& world);
 // Priority-Flood and the drainage tree with accumulated area and discharge on
 // the inputs' elevation (or on `elevation` when given: the evolver's working
 // copy, whose sea mask is recomputed); the discharge loses the transmission
-// losses when the inputs enable them.
+// losses when the inputs enable them. `sea`, when given with `elevation`, is the sea
+// mask instead of seamask(elevation): the glacial evolver routes on the bed with the
+// sea mask of the ice surface, so grounded ice below the sea level stays land.
 struct Routing
 {
     landscape::Depressions depressions;
@@ -86,7 +88,8 @@ struct Routing
     std::vector<uint8_t> sea;
     double transmissionloss_m3_yr = 0.0;  // total over the land; 0 without losses
 };
-Routing route(const Inputs& inputs, const std::vector<float>* elevation = nullptr);
+Routing route(const Inputs& inputs, const std::vector<float>* elevation = nullptr,
+              const std::vector<uint8_t>* sea = nullptr);
 
 // Writes hydrosphere.flow_direction, drainage_area (km2), discharge (m3/s,
 // annual mean), filled_elevation, depression_id and runoff (mm/yr, every cell).

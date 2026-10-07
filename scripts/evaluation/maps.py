@@ -41,6 +41,15 @@ def lake_depth(bundle):
     return bundle.load('hydrosphere.filled_elevation').astype(float) - bundle.load('geosphere.base_elevation').astype(float)
 
 
+def equilibrium_line_above_sea(bundle):
+    """The equilibrium-line altitude relative to sea level (m) on land (base elevation in whole metres
+    above the sea level); NaN at sea and where the ELA is 0 (the glacial term was off)."""
+    ela = bundle.load('cryosphere.equilibrium_line_altitude').astype(float)
+    sea_level = float(bundle.scalar('geosphere.sea_level'))
+    land = whole_metres(bundle.load('geosphere.base_elevation').astype(float)) > sea_level
+    return np.where(land & (ela != 0), ela - sea_level, np.nan)
+
+
 def depression_class(bundle):
     """Depression id folded onto 12 colour classes (1..12); 0 outside depressions."""
     identity = bundle.load('hydrosphere.depression_id').astype(np.int64)
@@ -72,12 +81,15 @@ def drainage_basin(bundle):
 
 # Derived maps: the function and the fields it reads.
 DERIVED = {'surface_elevation': surface_elevation, 'lake_elevation': lake_elevation, 'lake_depth': lake_depth,
-           'depression_class': depression_class, 'drainage_basin': drainage_basin}
+           'depression_class': depression_class, 'drainage_basin': drainage_basin,
+           'equilibrium_line_above_sea': equilibrium_line_above_sea}
 DERIVED_FIELDS = {'surface_elevation': ['geosphere.base_elevation', 'geosphere.mountain_height', 'geosphere.volcano'],
                   'lake_elevation': ['hydrosphere.lake_surface', 'geosphere.sea_level'],
                   'lake_depth': ['hydrosphere.filled_elevation', 'geosphere.base_elevation'],
                   'depression_class': ['hydrosphere.depression_id'],
-                  'drainage_basin': ['hydrosphere.flow_direction', 'geosphere.base_elevation', 'geosphere.sea_level']}
+                  'drainage_basin': ['hydrosphere.flow_direction', 'geosphere.base_elevation', 'geosphere.sea_level'],
+                  'equilibrium_line_above_sea': ['cryosphere.equilibrium_line_altitude', 'geosphere.base_elevation',
+                                                 'geosphere.sea_level']}
 QUARTERS = ('Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec')
 SNAPSHOT_TABLE = 'geosphere.tectonic_snapshot'
 TRACKED = 'colours follow plate identities tracked by cell overlap between consecutive frames, not the engine index'

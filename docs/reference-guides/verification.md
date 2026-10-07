@@ -41,7 +41,7 @@ out/build/headless/bin/Release/world_pipeline.exe generate --seed 1 --audit-acce
 # Earth climate (the climate profile's run) and a start from a checkpoint bundle:
 out/build/headless/bin/Release/world_pipeline.exe run --recipe earth-climate --seed 1 --bundle out/scratch/climate
 out/build/headless/bin/Release/world_pipeline.exe run --recipe procedural-world --from-bundle CHECKPOINT --steps a..b --bundle out/scratch/part
-uv run --offline python scripts/evaluation/process_access.py (Get-ChildItem runs/reports/phase4-access/*.json, runs/reports/phase4b-access/*.json, runs/reports/phase4c-access/*.json) --check   # the access file equals what the stored reports give
+uv run --offline python scripts/evaluation/process_access.py (Get-ChildItem runs/reports/phase4-access/*.json, runs/reports/phase4b-access/*.json, runs/reports/phase4c-access/*.json) --check   # the access file equals what the stored reports give; the full list of stored sets (phase4 to phase4c, erosion-a to erosion-d, erosion-g) is ACCESS_SETS in scripts/evaluation/step_check.py, which runs this check
 # Determinism of a profile run: two runs, bundles compared by the profile's repeat check (out/evaluation/<module>/);
 # --explicit-recipe adds a run given the recipe file explicitly (the profile's recipe-equality check)
 uv run --offline scripts/uw.py tectonics experiment --duration 20 --repeat --explicit-recipe

@@ -58,7 +58,10 @@ std::vector<WorldProcessDefinition> buildprocesses()
           "Runoff from Fu's Budyko curve of the annual precipitation and the open-water evaporation law of the lakes; discharge loses evaporation from channel and floodplain where PET exceeds P (erosion plan C2); every depression overflows at its spill." },
         { S::fluvial_erosion, "terrain.fluvial_erosion", K::evolver, false, {}, {}, {}, {},
           "Writes its final routing fields too, so no second routing step follows it. A checkpoint writes the "
-          "same fields as of its time (the routing of the terrain then, rates over the elapsed time).",
+          "same fields as of its time (the routing of the terrain then, rates over the elapsed time). Glaciers "
+          "from an equilibrium-line altitude of the coarse climate erode with the rivers; during the run the "
+          "routing takes its sea from their ice surface (grounded ice stays land); it writes the ELA, the glaciation, the glacial denudation and, at the end, the "
+          "present-day ice thickness on the final terrain (erosion plan Phase G).",
           { "landscape.erosion.duration_myr", "landscape.erosion.step_myr",
             "configs/parameters/landscape.json; the last step is shortened to end at the duration; a checkpoint "
             "follows the step that reaches its time" } },

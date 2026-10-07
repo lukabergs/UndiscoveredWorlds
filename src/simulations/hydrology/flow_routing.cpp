@@ -139,11 +139,14 @@ std::vector<uint8_t> oceancells(const planet& world)
     return below;
 }
 
-Routing route(const Inputs& inputs, const std::vector<float>* elevation)
+Routing route(const Inputs& inputs, const std::vector<float>* elevation, const std::vector<uint8_t>* sea)
 {
     const std::vector<float>& terrain = elevation != nullptr ? *elevation : inputs.elevation;
     Routing routing;
-    routing.sea = elevation != nullptr ? seamask(inputs.metric, terrain, inputs.sealevel) : inputs.sea;
+    if (elevation != nullptr && sea != nullptr)
+        routing.sea = *sea;
+    else
+        routing.sea = elevation != nullptr ? seamask(inputs.metric, terrain, inputs.sealevel) : inputs.sea;
     routing.depressions = landscape::filldepressions(inputs.metric, terrain, routing.sea,
                                                      tuning::landscape::depressions::minimumDepthM);
     routing.graph = landscape::buildflowgraph(inputs.metric, terrain, routing.sea, inputs.sealevel, routing.depressions,
