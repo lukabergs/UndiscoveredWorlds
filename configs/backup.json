@@ -1,0 +1,11 @@
+{
+  "schema": "uw-backup/v1",
+  "description": "Untracked data copied to the backup by scripts/uwtools/backup.py. Additive: nothing is ever deleted in the destination, and a file that would be overwritten is first moved to <destination>/.versions/<timestamp>/. out/ is not backed up (builds and scratch).",
+  "destination": "D:/dev/bak/undiscovered-worlds",
+  "sources": {
+    "refs": "refs",
+    "meta": "meta",
+    "runs": "runs",
+    "memory": "~/.claude/projects/c--dev-undiscovered-worlds/memory"
+  }
+}
