@@ -5,6 +5,7 @@ import html
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -135,9 +136,13 @@ def write_index(root):
                 continue
             by_name.setdefault(product["name"], []).append((resolution["width"], product))
     rows = []
+    catalogue = []
     for name, variants in sorted(by_name.items(), key=lambda item: str(product_directory(item[0]))):
         product = variants[0][1]
         description, stops, unit, notes = describe(product, additional, generator)
+        catalogue.append(dict(name=name, product=product, description=description, unit=unit,
+                              folder=product_directory(name).relative_to("climate").as_posix(),
+                              widths=sorted(width for width, _ in variants)))
         links = []
         for width, variant in sorted(variants):
             files = (*variant["maps"], variant["csv"])
@@ -204,7 +209,198 @@ document.querySelectorAll('input,select').forEach(e=>e.addEventListener('input',
     document = document.replace("ROWS", "\n".join(rows)).replace("CATEGORIES", "".join(categories)).replace("MISSING", missing)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "index.html").write_text(document, encoding="utf-8")
-    print(f"Indexed {len(rows)} climate map types at {len(widths)} widths; all file links exist.")
+    write_guide(root, directory, manifest, catalogue, widths)
+    print(f"Indexed {len(rows)} climate map types at {len(widths)} widths; all file links exist; README.md written.")
+
+
+REPOSITORY = Path(__file__).resolve().parents[2]
+MONTHS = re.compile(r"\b(jan|apr|jul|oct)\b")
+
+# Preparation commands in build order: (processed dataset, command, default refs/source input).
+PREPARATION = [
+    ("heightmap, land_ocean", "uv run scripts/refs/prepare_earth_maps.py --width 2048", "refs/source/ETOPO, refs/source/GSHHG"),
+    ("worldclim", "uv run --offline python scripts/refs/prepare_climate_reference.py --width 2048", "refs/source/worldclim-2.1-10m"),
+    ("imerg", "uv run --offline python scripts/refs/prepare_imerg_reference.py --width 2048", "refs/source/imerg-v07b-annual"),
+    ("imerg", "uv run --offline python scripts/refs/prepare_imerg_reference.py --width 2048 --monthly-input refs/source/IMERGmonthlyClimatology2001to2022GeoTIFF", "refs/source/IMERGmonthlyClimatology2001to2022GeoTIFF"),
+    ("era5", "uv run --offline python scripts/refs/prepare_diagnostic_references.py --width 2048", "refs/source/era5-planette-2001-2020"),
+    ("era5", "uv run scripts/refs/prepare_additional_references.py --family era5 --input refs/source/era5-cds-2001-2020 --width 2048", "refs/source/era5-cds-2001-2020"),
+    ("era5land", "uv run scripts/refs/prepare_additional_references.py --family land --input refs/source/era5-land-2001-2020 --width 2048", "refs/source/era5-land-2001-2020"),
+    ("oisst", "uv run scripts/refs/prepare_additional_references.py --family oisst --input refs/source/noaa-oisst-v2.1-2001-2020 --width 2048", "refs/source/noaa-oisst-v2.1-2001-2020"),
+    ("glorys", "uv run scripts/refs/prepare_additional_references.py --family marine --input refs/source/glorys12-2001-2020 --width 2048", "refs/source/glorys12-2001-2020"),
+    ("ceres", "uv run scripts/refs/prepare_additional_references.py --family ceres --input refs/source/ceres-ebaf-edition4.2.1 --width 2048", "refs/source/ceres-ebaf-edition4.2.1"),
+]
+RENDERING = [
+    "uv run --offline python scripts/refs/prepare_reduced_earth_benchmark.py --width 128 256 512 1024 2048",
+    "uv run --offline scripts/refs/render_standard_climate_maps.py",
+    "uv run --offline scripts/refs/render_standard_flow_references.py",
+    "uv run --offline scripts/refs/write_reference_map_index.py",
+]
+
+
+def shown(path):
+    """A path as written from the repository root (junctions are not followed)."""
+    return Path(os.path.relpath(os.path.abspath(path), REPOSITORY)).as_posix()
+
+
+def cell(text):
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def source_datasets(root):
+    """{processed dataset: refs/source folders or URLs its preparation receipts name}."""
+    found = {}
+    receipts = [(r.parent.parent.name, json.loads(r.read_text(encoding="utf-8")))
+                for r in sorted(root.glob("*/*/*-preparation.json"))]
+    diagnostic = root / "climate/diagnostic-reference-preparation.json"
+    if diagnostic.is_file():
+        receipts.append(("era5", {"era5": json.loads(diagnostic.read_text(encoding="utf-8")).get("era5")}))
+    for dataset, receipt in receipts:
+        text = json.dumps(receipt).replace("\\\\", "/")
+        folders = set(re.findall(r"refs/source/([^/\"]+)", text))
+        if not folders and isinstance(receipt.get("source"), str):
+            folders = {receipt["source"]}
+        found.setdefault(dataset, set()).update(folders)
+    return found
+
+
+def write_guide(root, directory, manifest, catalogue, widths):
+    """refs/processed/climate/maps/README.md, the path and comparison guide linked from index.html."""
+    origins = source_datasets(root)
+    folder_dataset = {folder: dataset for dataset, folders in origins.items() for folder in folders}
+    palettes_file = REPOSITORY / "configs/climate-palettes.json"
+    definition = json.loads(palettes_file.read_text(encoding="utf-8"))
+    profile_file = REPOSITORY / "configs/evaluation/climate.json"
+    profile = json.loads(profile_file.read_text(encoding="utf-8"))
+    lines = ["# Path and comparison guide", "",
+             f"Generated by `scripts/refs/write_reference_map_index.py` with [index.html](index.html) from "
+             f"`{shown(root / 'metadata/reference-maps/manifest.json')}`, the preparation receipts, "
+             f"`configs/climate-palettes.json` and `configs/evaluation/climate.json`. Do not edit: rerun the script.", ""]
+
+    # Families: one row per map type, the season folder written <s>.
+    groups = {}
+    for entry in catalogue:
+        key = entry["name"][4:] if entry["name"][:3] in ("jan", "apr", "jul", "oct") else entry["name"]
+        groups.setdefault(key, []).append(entry)
+    families = {}
+    for key, entries in groups.items():
+        parts = [entry["folder"].split("/") for entry in entries]
+        pattern = "/".join(p if all(len(q) == len(parts[0]) and q[i] == p for q in parts) else "<s>"
+                           for i, p in enumerate(parts[0]))
+        first = entries[0]
+        product = first["product"]
+        datasets = set()
+        for source in product.get("sources", []):
+            source = source.replace("\\", "/")
+            if source.startswith("refs/source/"):
+                folder = source.split("/")[2]
+                datasets.add(folder_dataset.get(folder, folder))
+            elif source.startswith("refs/processed/"):
+                datasets.add(source.split("/")[2])
+        if not datasets:
+            datasets = {Path(manifest["temperature_source" if key == "temperature" else "precipitation_source"]).parts[2]}
+        display = product.get("display")
+        if display is None:
+            palette = "Koeppen categories" if key == "koppen" else "not recorded"
+        elif ":" in display["palette"]:
+            palette = display["palette"]
+        else:
+            palette = f"{display['palette']} (limit {display['limit']}, {product.get('palette_version', 'unversioned')})"
+        seasons = "1-4" if len(entries) > 1 else "annual"
+        period = MONTHS.sub("the named month", product.get("period", "annual / representative-month average" if key != "koppen" else "12-month climatology"))
+        families.setdefault(pattern.split("/")[0], []).append(
+            (pattern, first["description"], first["unit"], period, ", ".join(sorted(datasets)), palette, seasons))
+    lines += ["## What this folder holds", "",
+              f"{len(catalogue)} map products ({len(groups)} map types) in {len(families)} families at widths "
+              f"{', '.join(map(str, widths))}, plus the standard 2048-wide set in `standard-v2/`. "
+              "Seasons are folder `1` January, `2` April, `3` July, `4` October; winds, pressure and LIC use the named month, "
+              "other seasonal products the day-weighted quarter starting there. The searchable index adds palette anchors and links.", ""]
+    for family, rows in sorted(families.items()):
+        lines += [f"### {family} ({len(rows)})", "",
+                  "| Folder | Meaning | Units | Period | Dataset | Palette | Seasons |", "| --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["| " + " | ".join(cell(v) for v in (f"`{row[0]}`",) + row[1:]) + " |" for row in sorted(rows)]
+        lines.append("")
+    standard = directory / "standard-v2/manifest.json"
+    if standard.is_file():
+        record = json.loads(standard.read_text(encoding="utf-8"))
+        flow = directory / "standard-v2/wind-flow-manifest.json"
+        flows = json.loads(flow.read_text(encoding="utf-8")) if flow.is_file() else {}
+        lines += ["### standard-v2", "",
+                  f"[standard-v2/index.html](standard-v2/index.html): {len(record['reference_maps'])} images "
+                  f"({record.get('palette_version')}) plus {len(flows.get('products', {}))} wind LIC/particle images "
+                  f"(seed {flows.get('seed')}). {record.get('method', '')}", ""]
+        lines += [f"- `{field}`: {state}" for field, state in record.get("coverage", {}).items() if state != "Available"]
+        lines.append("")
+    unavailable = manifest["outputs"][0]["unavailable"]
+    if unavailable:
+        lines += ["### Unavailable", ""] + [f"- {p['product']}: {p['reason']}" for p in unavailable] + [""]
+
+    first = catalogue[0]
+    width = first["widths"][-1]
+    output = next(o for o in manifest["outputs"] if o["width"] == width)
+    example = next(p for p in output["products"] if p["name"] == first["name"])
+    lines += ["## Path layout", "",
+              f"- Grid: {manifest['grid']}; latitude = {manifest['latitude_formula']}; longitude = -180 + (x + 0.5) * 360 / W; "
+              "north up, -180 to 180. Map layout version " + str(manifest.get("map_layout_version")) + ".",
+              f"- Widths: {', '.join(f'{w} x {w // 2}' for w in widths)}. File names are the width only.",
+              "- `maps/climate/<quantity>/<style or season>/<season>/<layer>[/<provider>]/<W>.png` (this folder), with the same "
+              "folders under `../fields/` (float32 GeoTIFF) and `../csv/`. Layers: `s` surface, `u` 500 hPa, `850` 850 hPa, "
+              "`toa`, `column`; a provider folder (`era5`, `glorys`, `ceres`, ...) marks an alternative to the primary product.",
+              f"- Numeric fields: {manifest['transformations'].get('numeric_fields', '')}. CSV missing values are NaN; black PNG pixels are missing.",
+              f"- Example ({first['name']}, {width}): " + ", ".join(f"`{shown(root / f['file'])}`" for f in (*example["maps"], example["csv"])),
+              f"- Transformations: " + "; ".join(f"{k}: {v}" for k, v in manifest["transformations"].items() if k != "numeric_fields") + ".", ""]
+
+    sidecar = directory / "palette.json"
+    recorded = json.loads(sidecar.read_text(encoding="utf-8"))["palettes"] if sidecar.is_file() else {}
+    current = sum(1 for e in catalogue if e["product"].get("palette_version") == definition["version"])
+    lines += ["## Colour scales", "",
+              f"Runs and references use the project palettes (`scripts/uwtools/palettes.py`). `configs/climate-palettes.json` "
+              f"is `{definition['version']}`; {current} of {len(catalogue)} products here were drawn with it"
+              + (" (the table names the palette of the others)" if current < len(catalogue) else "")
+              + "; a palette without `climate:` is a renderer palette with the fixed display limit shown. `palette.json` beside the maps records the palette files in force when "
+              "they were rendered: " + ("; ".join(f"{k} {v['version']} ({v['file']}, sha256 {v['sha256'][:12]})" for k, v in recorded.items()) or "none written yet") + ".",
+              "Positive scales run blue to red; signed scales run white-magenta-blue-cyan-green-yellow-red with zero cyan; "
+              "missing is black; endpoints saturate. Model-minus-reference maps use the `difference` scale.", "",
+              "| Scale | Range | Kind | Difference half range |", "| --- | --- | --- | --- |"]
+    halves = definition.get("difference", {}).get("half_ranges", {})
+    lines += [f"| `{name}` | {low} to {high} | {'signed' if low < 0 else 'positive'} | {halves.get(name, '')} |"
+              for name, (low, high) in definition["scales"].items()]
+    lines.append("")
+
+    maps_by_validation = {m.get("validation"): m.get("palette", "") for m in profile.get("maps", [])}
+    lines += ["## Comparing a run with these references", "",
+              "Scores do not read these images: `scripts/uw.py climate` evaluates a run bundle against the prepared fields "
+              "`refs/processed/<dataset>/<width>/fields/<variable>_<layout>.npy` (named `<dataset>_<variable>`, read through "
+              "`scripts/uwtools/references.py`) on common masks with spherical area weights, scored by global-balanced-v1. "
+              "The run page draws model, reference and model minus reference in the palettes above, so a run map is compared "
+              "with the PNG of the same quantity and season here.", "", "```powershell",
+              "uv run --offline scripts/uw.py climate experiment --resolution 128 --climate-resolution 64",
+              "uv run --offline scripts/uw.py climate evaluate --bundle runs/climate/<id>/bundle --baseline runs/climate/<baseline>/bundle --output out/evaluation/climate/<id>",
+              "uv run --offline scripts/uw.py climate report --evaluation runs/climate/<baseline>/evaluation runs/climate/<id>/evaluation --output runs/reports/<name>",
+              "```", "",
+              f"Validation entries of `configs/evaluation/climate.json` ({len(profile.get('validation', []))}):", "",
+              "| Entry | Kind | Season | Reference fields | Review palette |", "| --- | --- | --- | --- | --- |"]
+    lines += [f"| `{v['id']}` | {v['kind']} | {v.get('season', '')} | {', '.join(v['reference'])} | {maps_by_validation.get(v['id'], '')} |"
+              for v in profile.get("validation", [])]
+    lines += ["", "Commands and the score are described in `docs/reference-guides/climate-reporting.md` and `benchmark-commands.md`.", ""]
+
+    lines += ["## Rebuilding", "", "Prepared fields first (each writes `refs/processed/<dataset>/<width>/`), then the maps, then this guide:", "",
+              "```powershell"] + [command for _, command, _ in PREPARATION] + RENDERING + ["```", "",
+              "## Sources", "",
+              "| Processed dataset | Preparation input | `refs/source` folders named by its receipts | Map types |", "| --- | --- | --- | --- |"]
+    counts = {}
+    for rows in families.values():
+        for row in rows:
+            for dataset in row[4].split(", "):
+                counts[dataset] = counts.get(dataset, 0) + 1
+    inputs = {}
+    for datasets, _, source in PREPARATION:
+        for dataset in datasets.split(", "):
+            inputs.setdefault(dataset, []).extend(source.split(", "))
+    for dataset in sorted(set(inputs) | set(origins) | set(counts)):
+        named = ", ".join(f"`{f}`" if not f.startswith("http") else f for f in sorted(origins.get(dataset, ()))) or "not recorded"
+        lines.append(f"| `{dataset}` | {', '.join(f'`{s}`' for s in inputs.get(dataset, [])) or '-'} | {named} | {counts.get(dataset, 0)} |")
+    lines.append("")
+    (directory / "README.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 if __name__ == "__main__":
