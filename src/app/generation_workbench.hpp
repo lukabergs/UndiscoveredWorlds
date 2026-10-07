@@ -108,5 +108,6 @@ bool cycleinlandseacomponentpolicyat(GenerationSessionState& session, int x, int
 bool runcurrentgenerationstagewithoutpreview(GenerationSessionState& session, planet& committedworld, const GenerationExecutionContext& context, std::string* errormessage = nullptr);
 // Stage parameters edited in the workbench (samples the hypsometric curve).
 WorldStageParameters makestageparameters(const GenerationWorkbenchUiState& ui);
-bool runremaininggenerationstages(planet& world, GenerationScratch& scratch, GenerationWorkbenchUiState& ui, const GenerationExecutionContext& context, std::size_t startStageIndex, std::string* errormessage = nullptr);
+// Runs the procedural-world recipe through the recipe runner the command line uses.
+bool runproceduralworldrecipe(planet& world, GenerationScratch& scratch, GenerationWorkbenchUiState& ui, const GenerationExecutionContext& context, std::string* errormessage = nullptr);
 GenerationWorkbenchPanelResult drawgenerationworkbenchpanel(const ImGuiViewport* main_viewport, ImGuiWindowFlags window_flags, const planet& displayedworld, GenerationSessionState& session);

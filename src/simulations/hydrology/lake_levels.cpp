@@ -9,6 +9,7 @@
 
 #include "core/climate_seasons.hpp"
 #include "simulations/hydrology/flow_routing.hpp"
+#include "simulations/landscape/depressions.hpp"
 #include "simulations/landscape/lake_balance.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
 #include "world/planet.hpp"
@@ -72,7 +73,7 @@ void applylakelevelstage(planet& world)
     }
 
     // The routing fields come from the last routing (hydrology.flow_routing, or the final routing of
-    // terrain.fluvial_erosion). In eroded-world the stage follows hydrology.flow_routing directly, so
+    // terrain.fluvial_erosion). In every recipe the stage follows hydrology.flow_routing directly, so
     // the guard below drops nothing; it stays against a recipe that edits the terrain in between. The
     // sea here is the routing's (the world ocean, erosion plan H3): an enclosed below-sea basin is a
     // depression, not sea. A depression with a cell that is now sea, borders the sea or is not below
@@ -106,6 +107,12 @@ void applylakelevelstage(planet& world)
     staleids.erase(std::unique(staleids.begin(), staleids.end()), staleids.end());
     if (!staleids.empty())
         std::cout << "Lake levels: " << staleids.size() << " depression(s) no longer match the routing and hold no lake\n";
+    // A world without sea (landscape::terminalsink): the routing's depression at the lowest cell is
+    // its terminal basin, whose lake is closed whatever its inflow (every other depression drains
+    // into it).
+    const int32_t sink = landscape::terminalsink(inputs.elevation, routing.sea);
+    if (sink >= 0)
+        inputs.terminalid = inputs.depressionid[static_cast<std::size_t>(sink)];
 
     // Imported lakes (Earth imports, --import-lakes; erosion plan C1): all zero in a procedural world.
     // Only the cells outside every depression count: a depression's water is the balance's.
@@ -125,7 +132,7 @@ void applylakelevelstage(planet& world)
     }
 
     // The stage owns the lake surfaces (every cell is rewritten below) and the salt lakes and pans.
-    // eroded-world runs it before and after the full climate, so the previous run's features are
+    // procedural-world runs it before and after the full climate, so the previous run's features are
     // cleared first; no other stage of a recipe with this one writes special 100 or 110 before it.
     for (int y = 0; y < rows; y++)
     {
@@ -146,8 +153,6 @@ void applylakelevelstage(planet& world)
     // too (erosion plan H3: an enclosed below-sea basin is not sea; Death Valley, Qattara, the salt
     // flats around a terminal lake). A pan carries a lake surface at its own terrain, as the legacy pans do, so the arid features
     // keep away from it, basin_class sees a closed depression and planet::sea does not count it.
-    // The legacy removesealakes and connectlakes (hydrology.deltas_and_wetlands) may still reopen
-    // some enclosed below-sea cells after this stage until erosion plan H4 removes them.
     // The terrain is above the datum's zero wherever the sea level (at least 1) is above it, so a
     // pan surface is not the 0 that means no lake, except on a cell at the datum floor itself.
     std::vector<uint8_t> belowsea(size);

@@ -127,7 +127,16 @@ std::vector<uint8_t> oceancells(const planet& world)
     for (int y = 0; y < rows; y++)
         for (int x = 0; x < columns; x++)
             below[metric.index(x, y)] = world.basebelowsea(x, y) ? 1 : 0;
-    return landscape::oceanmask(metric, below, tuning::landscape::routing::oceanMinimumAreaFraction);
+    if (world.erosionduration() > 0.0f)
+        return landscape::oceanmask(metric, below, tuning::landscape::routing::oceanMinimumAreaFraction);
+    // No erosion (imported terrain: imported-world, earth-hydrology): the imported sea map decides,
+    // so every below-sea cell is sea unless the imported lake mask marks it.
+    const worldgrid<std::uint8_t>& importedlake = world.importedlake();
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < columns; x++)
+            if (importedlake[x][y] != 0)
+                below[metric.index(x, y)] = 0;
+    return below;
 }
 
 Routing route(const Inputs& inputs, const std::vector<float>* elevation)

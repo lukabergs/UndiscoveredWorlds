@@ -27,7 +27,9 @@ struct FlowGraph
     // land cell has a receiver and every chain ends at an outlet; a flood receiver
     // that is a sea cell makes the cell an outlet. A sea cell's receiver is its
     // lowest sea neighbour (the seabed's steepest descent), itself when none is
-    // lower; sea cells have direction 0. A land cell the flood never reached (a
+    // lower; sea cells have direction 0. On a grid without a sea cell the flood
+    // starts from the terminal sink (depressions.hpp), which is its own receiver with
+    // direction 0, the one root. A land cell the flood never reached (a
     // region without a sea cell) is its own receiver with direction 0 and a root
     // of `order`, like an outlet without a sea cell; the evaluation's drained
     // check reports such cells, as intended.

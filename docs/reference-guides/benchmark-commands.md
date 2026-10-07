@@ -90,11 +90,11 @@ world_pipeline.exe run --recipe earth-climate --seed 1 --resolution 1024 --clima
 world_pipeline.exe run --recipe earth-climate --seed 1 --climate-generic-levels 925,850,700 --bundle out/bench/climate-levels
 # A full world with a checkpoint bundle after the last terrain step -> out/bench/world-checkpoints/17-terrain.roughness
 world_pipeline.exe run --recipe procedural-world --seed 1 --checkpoint-at terrain.roughness --bundle out/bench/world
-# One part of the recipe on that checkpoint: the climate steps only.
-world_pipeline.exe run --recipe procedural-world --from-bundle out/bench/world-checkpoints/17-terrain.roughness --steps climate.temperature..climate.rainfall_and_coupling --bundle out/bench/world-climate
+# One part of the recipe on that checkpoint: the coarse climate steps only (the climate runs twice, so steps are named by label).
+world_pipeline.exe run --recipe procedural-world --from-bundle out/bench/world-checkpoints/17-terrain.roughness --steps climate.temperature@coarse..climate.rainfall_and_coupling@coarse --bundle out/bench/world-climate
 # Checkpoints inside the erosion at 5 and 12.5 Myr and every 10 Myr, over a 15 Myr erosion
 #   -> out/bench/eroded-checkpoints/25-terrain.fluvial_erosion-t0005.000, -t0010.000, -t0013.000
-world_pipeline.exe run --recipe eroded-world --seed 1 --duration terrain.fluvial_erosion=15 --checkpoint-at terrain.fluvial_erosion@5,terrain.fluvial_erosion@12.5 --checkpoint-every terrain.fluvial_erosion=10 --bundle out/bench/eroded
+world_pipeline.exe run --recipe procedural-world --seed 1 --duration terrain.fluvial_erosion=15 --checkpoint-at terrain.fluvial_erosion@5,terrain.fluvial_erosion@12.5 --checkpoint-every terrain.fluvial_erosion=10 --bundle out/bench/eroded
 ```
 
 `--steps a..b` and `--only <process>` take step indices or process ids (the `steps`
@@ -219,7 +219,7 @@ $wp = "out/build/headless/bin/Release/world_pipeline.exe"
 uv run --offline scripts/evaluation/compare_bundles.py out/bench/a out/bench/b
 ```
 
-The climate/erosion feedback experiment (run 63) has no runner: its solver was replaced by the `landscape` kernels and the recipe `eroded-world` (`docs/architecture/erosion-hydrology-plan.md`); the engine coupling returns in that plan's Phase D. `uw.py tectonics report` still renders run 63.
+The climate/erosion feedback experiment (run 63) has no runner: its solver was replaced by the `landscape` kernels in the recipe `procedural-world` (`docs/architecture/erosion-hydrology-plan.md`); the engine coupling returns in that plan's Phase D. `uw.py tectonics report` still renders run 63.
 
 ## Geology
 

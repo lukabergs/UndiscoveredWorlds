@@ -117,9 +117,11 @@ LakeBalance balancelakes(const LakeBalanceInputs& inputs)
         const double evaporation = depression.evaporation_m3_yr / depression.area_m2;
         lake.netloss_m_yr = std::max(0.0, evaporation - precipitation);
 
-        const bool overflowing = lake.netloss_m_yr <= 0.0 ||
-                                 lake.inflow_m3_yr / lake.netloss_m_yr >= depression.area_m2;
-        if (overflowing)
+        const bool fills = lake.netloss_m_yr <= 0.0 ||
+                           lake.inflow_m3_yr / lake.netloss_m_yr >= depression.area_m2;
+        // The terminal depression has no spill: when it fills, every cell is lake and it stays closed.
+        const bool terminal = id == inputs.terminalid;
+        if (fills && !terminal)
         {
             lake.overflowing = true;
             lake.level_m = lake.spill_m;
@@ -128,7 +130,7 @@ LakeBalance balancelakes(const LakeBalanceInputs& inputs)
         }
         else
         {
-            const double equilibrium = lake.inflow_m3_yr / lake.netloss_m_yr;
+            const double equilibrium = fills ? depression.area_m2 : lake.inflow_m3_yr / lake.netloss_m_yr;
             std::size_t k = 0;
             double area = 0.0;
             if (equilibrium >= metric.area_m2(cells.front()))

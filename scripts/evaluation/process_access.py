@@ -16,6 +16,8 @@ are read together; phase4c is the four small runs measured after the float steps
 with `--plume-count 4 --progressive-rifting on`, earth-climate, imported-world and
 procedural-world with --social on 128 x 64, and one procedural world with --social at
 the default size, the only run that exercises the lake, delta and wetland writes.
+The erosion sets below were measured on the recipe eroded-world, which became procedural-world in
+erosion plan step H4 (their file names keep the old name).
 The set erosion-a-access is one minimal eroded-world run at seed 1 (128 x 64, --duration 50,
 climate 32/2), measured in erosion plan step A4 for hydrology.flow_routing and terrain.fluvial_erosion.
 The set erosion-b-access holds one minimal eroded-world run per Phase B step that changed a

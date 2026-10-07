@@ -60,13 +60,17 @@ bool belowsea(float elevation, float sealevel);
 // the same rule; gatherinputs takes Inputs::sea from it.
 // The evolver recomputes it at every routing, so a seabed that marine deposition
 // raises above the sea level becomes land and a coastal cell eroded below it
-// becomes sea. Without a below-sea cell the mask is all land: Priority-Flood has no
-// seed, nothing is filled, and no cell has a depression (as before H3).
+// becomes sea. Without a below-sea cell the mask is all land: Priority-Flood starts
+// from the terminal sink, the lowest cell (landscape::filldepressions), every other
+// depression drains towards it and its basin is the terminal depression, whose lake
+// hydrology.lake_levels keeps closed.
 std::vector<uint8_t> seamask(const landscape::SphereMetric& metric, const std::vector<float>& elevation, float sealevel);
 
 // The planet's sea for hydrology (erosion plan H3): seamask of the base elevation on
 // the metric of gatherinputs (row-major, north row first, (width + 1) x (height + 1)
-// cells). The one rule of the routing, the lake levels, the rivers and the eroded
+// cells) in an eroded world (geosphere.erosion_duration > 0). A world without erosion
+// (imported terrain) takes its sea from the import: every cell at or below the sea
+// level that hydrosphere.imported_lake does not mark, whatever its region's size. The one rule of the routing, the lake levels, the rivers and the eroded
 // drainage basins; planet::sea (the surface without a lake surface) stays the rule
 // of the legacy stages and the climate.
 std::vector<uint8_t> oceancells(const planet& world);

@@ -22,6 +22,10 @@
 // whose A*_d is below the area of its lowest cell holds no lake (k = 0, level 0): it
 // is dry. A cell outside d that lies downstream of d's cells at d's filled level
 // (a shallow flooded cell with id 0) is part of d's flat, not an external donor.
+// The terminal depression (terminalid: the terminal basin of a grid without a sea
+// cell, landscape::Depression::terminal) has no spill, so it never overflows: when
+// A*_d reaches its area every cell is lake and the lake stays closed, its level
+// midway between the highest cell and the depression's filled level.
 // Simplifications of Phase B (plan section 6): the cells of d form one water body
 // (two pits below a sill inside one depression share a level); the discharge is
 // the routing's, which assumes every upstream depression overflows.
@@ -45,6 +49,7 @@ struct LakeBalanceInputs
     std::vector<float> runoff_m_yr;         // runoff depth per cell
     std::vector<float> precipitation_m_yr;  // annual precipitation per cell
     std::vector<float> evaporation_m_yr;    // open-water evaporation per cell
+    int32_t terminalid = 0;                 // the terminal depression's id; 0 none
 };
 
 struct LakeLevel

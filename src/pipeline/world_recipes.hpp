@@ -3,7 +3,7 @@
 // Recipes order processes; the scheduler checks them before running and can
 // audit what each step actually writes (docs/architecture/world-model.md).
 // A step is a process invocation with a label and its own settings; a process
-// may appear more than once (eroded-world runs the climate twice).
+// may appear more than once (procedural-world runs the climate twice).
 
 #include <functional>
 #include <string>
@@ -49,15 +49,15 @@ struct WorldRecipe
 // True when a step of the recipe runs this process.
 bool recipehasstage(const WorldRecipe& recipe, GenerationStageId stage);
 
-// procedural-world: every stage from plate tectonics.
+// procedural-world: the terrain stages, a coarse climate (@coarse: 32 columns, 2 coupling
+// iterations), the fluvial erosion and the fjords, the flow routing and lake levels
+// (@before-climate), the full climate at the run's settings (@full; its pressure and
+// winds start from the coarse climate's sea-surface temperatures), then the flow
+// routing, the rivers, the lake levels (@after-climate) and the remaining stages.
 WorldRecipe proceduralworldrecipe();
-// imported-world: imported terrain, then the remaining terrain passes, climate and hydrology.
+// imported-world: imported terrain, then the remaining terrain passes, climate, the fjords,
+// the flow routing, rivers and lake levels (no erosion), and the remaining stages.
 WorldRecipe importedworldrecipe();
-// eroded-world: the terrain stages, a coarse climate (@coarse: 32 columns, 2 coupling
-// iterations), the fluvial erosion and the fjords, the full climate at the run's
-// settings (@full; its pressure and winds start from the coarse climate's sea-surface
-// temperatures), then the flow routing, the hydrology and the remaining stages.
-WorldRecipe erodedworldrecipe();
 // earth-climate: climate processes only on imported terrain; Geosphere is frozen.
 WorldRecipe earthclimaterecipe();
 // earth-hydrology: earth-climate followed by the flow routing and the lake levels; Geosphere is frozen.

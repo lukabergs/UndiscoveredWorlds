@@ -56,7 +56,7 @@ void Application::updatecreatingworldscreen()
             context.largelake = largelake;
 
             string errormessage;
-            runremaininggenerationstages(*world, scratch, ui, context, getgenerationstageindex(GenerationStageId::geosphere_initialization), &errormessage);
+            runproceduralworldrecipe(*world, scratch, ui, context, &errormessage);
 
             if (errormessage.empty() == false)
                 updatereport(errormessage);

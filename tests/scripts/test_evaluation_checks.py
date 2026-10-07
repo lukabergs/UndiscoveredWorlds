@@ -41,7 +41,7 @@ def write_bundle(directory, fields, columns=COLUMNS, rows=ROWS, parameters=None)
         entries.append({"id": identifier, "component": component, "layout": "scalar" if values.ndim == 0 else "grid",
                         "dtype": values.dtype.str, "shape": list(values.shape), "units": "", "file": relative,
                         "hash": "0", "written_by": "test", "description": ""})
-    manifest = {"schema": SCHEMA, "seed": 1, "recipe": "eroded-world",
+    manifest = {"schema": SCHEMA, "seed": 1, "recipe": "procedural-world",
                 "grid": {"columns": columns, "rows": rows, "registration": "cell-centred",
                          "layout": "row-major, north row first"},
                 "fields": entries, "tables": []}

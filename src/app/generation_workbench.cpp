@@ -13,6 +13,7 @@
 #include "app/generation_workbench.hpp"
 
 #include "app/rendering/map_appearance.hpp"
+#include "pipeline/world_recipes.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "app/ui_charts.hpp"
 
@@ -663,6 +664,11 @@ bool executeworkbenchstage(GenerationStageId stageid, planet& world, GenerationS
     const GenerationExecutionContext& context, string* errormessage)
 {
     WorldStageParameters parameters = makestageparameters(ui);
+    // The rivers come from a fresh routing after the fjords, as in imported-world: the workbench
+    // steps over hydrology.flow_routing at its registry place, before the fjords.
+    if (stageid == GenerationStageId::rivers
+        && !executegenerationstage(GenerationStageId::flow_routing, world, scratch, parameters, context, errormessage))
+        return false;
     const bool executed = executegenerationstage(stageid, world, scratch, parameters, context, errormessage);
     ui.seaLevel = parameters.seaLevel;
     if (executed && stageid == GenerationStageId::terraforming && ui.terrainRenderPreset != WorkbenchTerrainRenderPreset::custom)
@@ -743,6 +749,8 @@ mapviewenum preferredworkbenchmapview(GenerationStageId stageId)
     case GenerationStageId::rivers_and_basins:
     case GenerationStageId::basin_editor:
     case GenerationStageId::lakes:
+    case GenerationStageId::rivers:
+    case GenerationStageId::lake_levels:
     case GenerationStageId::deltas_wetlands_and_roughness:
         return rivers;
 
@@ -757,12 +765,16 @@ mapviewenum preferredworkbenchmapview(GenerationStageId stageId)
 
 namespace
 {
-// The landscape stages belong to the eroded-world recipe until its promotion (erosion
-// plan, step C4); the workbench walks the registered stages, so it steps over them.
+// The step-by-step workbench walks the registered stages with one climate pass, so it runs the
+// hydrology of imported-world, not the erosion (procedural-world runs it through
+// runproceduralworldrecipe): it steps over terrain.fluvial_erosion, over hydrology.flow_routing
+// at its registry place (the rivers step routes first, after the fjords) and over the legacy
+// river, basin and lake stages (erosion plan H4).
 bool workbenchskipsstage(GenerationStageId stage)
 {
     return stage == GenerationStageId::flow_routing || stage == GenerationStageId::fluvial_erosion
-        || stage == GenerationStageId::rivers || stage == GenerationStageId::lake_levels;
+        || stage == GenerationStageId::rivers_and_basins || stage == GenerationStageId::basin_editor
+        || stage == GenerationStageId::lakes;
 }
 
 void advanceworkbenchstage(GenerationSessionState& session)
@@ -952,22 +964,30 @@ bool runcurrentgenerationstagewithoutpreview(GenerationSessionState& session, pl
     return applycurrentgenerationstage(session, committedworld, context, errormessage);
 }
 
-bool runremaininggenerationstages(planet& world, GenerationScratch& scratch, GenerationWorkbenchUiState& ui, const GenerationExecutionContext& context, size_t startStageIndex, string* errormessage)
+bool runproceduralworldrecipe(planet& world, GenerationScratch& scratch, GenerationWorkbenchUiState& ui, const GenerationExecutionContext& context, string* errormessage)
 {
+    // The recipe the command line runs (world_pipeline run --recipe procedural-world): it has two
+    // climate passes and repeated hydrology steps, which the registry walk of the workbench cannot
+    // express. Each step still reports its stage through beginworldgenstep.
     ScopedWorkbenchDebugRun debugrun(world.seed(), ui.tectonicDurationMyr, ui.tectonicPlateCount);
-    const vector<GenerationStageDefinition>& stages = getgenerationstages();
-
-    for (size_t index = startStageIndex; index < stages.size(); index++)
+    const WorldRecipe recipe = proceduralworldrecipe();
+    WorldStageParameters parameters = makestageparameters(ui);
+    RecipeRunOptions options;
+    options.afterstep = [&](const RecipeRunResult&, const RecipeStepRecord& step, string&)
     {
-        if (context.climateOnly && !isclimatefeedbackstage(stages[index].id)) continue;
-        if (workbenchskipsstage(stages[index].id)) continue;
-        if (executeworkbenchstage(stages[index].id, world, scratch, ui, context, errormessage) == false)
-            return false;
-    }
-
-    if (context.climateOnly) writeclimatediagnostics(world.climate());
-
-    return true;
+        if (step.stage == GenerationStageId::terraforming)
+        {
+            ui.seaLevel = parameters.seaLevel;
+            if (ui.terrainRenderPreset != WorkbenchTerrainRenderPreset::custom)
+                applyterrainrenderpreset(ui, world, ui.terrainRenderPreset);
+        }
+        return true;
+    };
+    const RecipeRunResult result = runrecipe(recipe, world, scratch, parameters, context, options);
+    ui.seaLevel = parameters.seaLevel;
+    if (!result.completed && errormessage != nullptr)
+        *errormessage = result.error;
+    return result.completed;
 }
 
 

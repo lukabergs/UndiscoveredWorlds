@@ -119,6 +119,9 @@ void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& ch
 {
     namespace t = tuning::landscape;
     flowrouting::Inputs inputs = flowrouting::gatherinputs(world);
+    // The evolver's sea is the eroded rule from the start (seamask: the world ocean, erosion plan
+    // H3), as at every routing of the run, whatever erosion_duration says before the run writes it.
+    inputs.sea = flowrouting::seamask(inputs.metric, inputs.elevation, inputs.sealevel);
     const landscape::SphereMetric& metric = inputs.metric;
     const int columns = metric.width;
     const int rows = metric.height;

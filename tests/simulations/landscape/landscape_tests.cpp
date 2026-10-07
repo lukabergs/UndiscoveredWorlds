@@ -5,6 +5,7 @@
 #include "landscape_fixture.hpp"
 #include "simulations/landscape/depressions.hpp"
 #include "simulations/landscape/flow_graph.hpp"
+#include "simulations/landscape/lake_balance.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 
 #include <cmath>
@@ -317,4 +318,102 @@ TEST_F(Landscape, DepressionsBowlDrainsThroughFlowGraph)
         EXPECT_GE(graph.outletsea[static_cast<std::size_t>(end)], 0) << "cell " << cell;
     }
     expectorder(graph);
+}
+
+// An all-land grid (erosion plan H4): a 1000 m plateau with bowl A (columns 3..4, rows
+// 3..4, 600 m, its cell (3, 3) at 500 m, the lowest of the grid) and bowl B (columns
+// 10..11, rows 3..4, 800 m). The flood starts from the terminal sink (3, 3): bowl A is the
+// terminal depression (1, no spill, raised to the 1000 m pass), bowl B an ordinary one
+// whose flood receivers lead to the sink; the flow graph has the sink as its one root, and
+// the lake balance keeps the terminal lake closed when it fills and dry when it does not.
+TEST_F(Landscape, DepressionsAllLandDrainToTerminalSink)
+{
+    const landscape::SphereMetric metric(width, height, radius);
+    const auto inbowla = [](int x, int y) { return x >= 3 && x <= 4 && y >= 3 && y <= 4; };
+    const auto inbowlb = [](int x, int y) { return x >= 10 && x <= 11 && y >= 3 && y <= 4; };
+    std::vector<float> elevation(metric.size(), 1000.0f);
+    const std::vector<uint8_t> sea(metric.size(), 0);
+    for (std::size_t cell = 0; cell < metric.size(); cell++)
+    {
+        const int x = metric.column(cell), y = metric.row(cell);
+        if (inbowla(x, y))
+            elevation[cell] = 600.0f;
+        if (inbowlb(x, y))
+            elevation[cell] = 800.0f;
+    }
+    const std::size_t sink = metric.index(3, 3);
+    elevation[sink] = 500.0f;
+    ASSERT_EQ(landscape::terminalsink(elevation, sea), static_cast<int32_t>(sink));
+
+    const landscape::Depressions depressions = landscape::filldepressions(metric, elevation, sea, 0.1f);
+    ASSERT_EQ(depressions.depressions.size(), 2u);
+    const landscape::Depression& terminal = depressions.depressions[0];
+    EXPECT_EQ(terminal.id, 1);
+    EXPECT_TRUE(terminal.terminal);
+    EXPECT_EQ(terminal.spillcell, -1);
+    EXPECT_EQ(terminal.spillelevation_m, 1000.0f);
+    const landscape::Depression& other = depressions.depressions[1];
+    EXPECT_FALSE(other.terminal);
+    EXPECT_GE(other.spillcell, 0);
+    EXPECT_EQ(other.spillelevation_m, 1000.0f);
+    EXPECT_EQ(depressions.floodreceiver[sink], -1);
+    for (std::size_t cell = 0; cell < metric.size(); cell++)
+    {
+        const int x = metric.column(cell), y = metric.row(cell);
+        const int32_t expected = inbowla(x, y) ? 1 : inbowlb(x, y) ? other.id : 0;
+        EXPECT_EQ(depressions.depressionid[cell], expected) << "cell " << cell;
+        EXPECT_EQ(depressions.filledelevation[cell], 1000.0f) << "cell " << cell;
+        if (cell == sink)
+            continue;
+        // Every flood-receiver chain ends at the sink.
+        std::size_t current = cell;
+        for (std::size_t step = 0; step <= metric.size() && depressions.floodreceiver[current] >= 0; step++)
+            current = static_cast<std::size_t>(depressions.floodreceiver[current]);
+        EXPECT_EQ(current, sink) << "cell " << cell;
+    }
+
+    landscape::FlowGraph graph;
+    ASSERT_NO_THROW(graph = landscape::buildflowgraph(metric, elevation, sea, 0.0f, depressions));
+    for (std::size_t cell = 0; cell < metric.size(); cell++)
+        EXPECT_EQ(chainend(graph, cell), static_cast<int32_t>(sink)) << "cell " << cell;
+    EXPECT_EQ(graph.direction[sink], 0);
+    expectorder(graph);
+
+    const std::vector<float> runoff(metric.size(), 0.1f);
+    landscape::accumulateflow(metric, runoff, graph);
+    landscape::LakeBalanceInputs inputs;
+    inputs.metric = &metric;
+    inputs.elevation = elevation;
+    inputs.filledelevation = depressions.filledelevation;
+    inputs.depressionid = depressions.depressionid;
+    inputs.receiver.resize(metric.size());
+    inputs.discharge_m3_yr = graph.discharge_m3_yr;
+    inputs.runoff_m_yr = runoff;
+    inputs.terminalid = landscape::terminalsink(elevation, sea) >= 0 ? depressions.depressionid[sink] : 0;
+    ASSERT_EQ(inputs.terminalid, 1);
+    for (std::size_t cell = 0; cell < metric.size(); cell++)
+        inputs.receiver[cell] = graph.receiver[cell] == static_cast<int32_t>(cell) ? -1 : graph.receiver[cell];
+
+    // Wet (no net loss): bowl B overflows, the terminal lake fills its basin and stays closed.
+    inputs.precipitation_m_yr.assign(metric.size(), 1.0f);
+    inputs.evaporation_m_yr.assign(metric.size(), 0.5f);
+    landscape::LakeBalance wet;
+    ASSERT_NO_THROW(wet = landscape::balancelakes(inputs));
+    ASSERT_EQ(wet.lakes.size(), 2u);
+    EXPECT_FALSE(wet.lakes[0].overflowing);
+    EXPECT_EQ(wet.lakes[0].lakecells, 4);
+    EXPECT_GT(wet.lakes[0].level_m, 600.0f);
+    EXPECT_LT(wet.lakes[0].level_m, 1000.0f);
+    EXPECT_TRUE(wet.lakes[1].overflowing);
+
+    // Dry (no runoff, strong evaporation): the terminal basin is a salt pan on the sink.
+    inputs.runoff_m_yr.assign(metric.size(), 0.0f);
+    inputs.discharge_m3_yr.assign(metric.size(), 0.0);
+    inputs.precipitation_m_yr.assign(metric.size(), 0.0f);
+    inputs.evaporation_m_yr.assign(metric.size(), 2.0f);
+    const landscape::LakeBalance dry = landscape::balancelakes(inputs);
+    EXPECT_EQ(dry.lakes[0].lakecells, 0);
+    EXPECT_FALSE(dry.lakes[0].overflowing);
+    const std::vector<uint8_t> pan = landscape::saltpans(inputs, dry, std::vector<uint8_t>(metric.size(), 0));
+    EXPECT_EQ(pan[sink], 1);
 }

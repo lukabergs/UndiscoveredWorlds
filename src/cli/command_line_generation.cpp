@@ -35,7 +35,7 @@ void printcommandlineusage()
     cout << "  run                 Run a recipe (--recipe) or part of it; nothing is registered.\n";
     cout << "  generate            Generate a procedural world, or climate on imported terrain with --climate-only.\n";
     cout << "Options of run:\n";
-    cout << "  --recipe <name>         procedural-world, imported-world, eroded-world, earth-climate, earth-hydrology or\n";
+    cout << "  --recipe <name>         procedural-world, imported-world, earth-climate, earth-hydrology or\n";
     cout << "                           tectonics. Imported recipes use the\n";
     cout << "                           Earth terrain of configs/app.env at --resolution (default 512) unless\n";
     cout << "                           --import-land and --import-sea or --from-bundle are given.\n";
@@ -80,11 +80,11 @@ void printcommandlineusage()
     cout << "  --resolution <width>    Set an even global width and derive height as width/2.\n";
     cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
     cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
-    cout << "  --import-lakes <png>    run with earth-hydrology: a 2:1 lake mask (255 lake, 0 not; north row first, from 180 W)\n";
+    cout << "  --import-lakes <png>    run with earth-hydrology or imported-world: a 2:1 lake mask (255 lake, 0 not; north row first, from 180 W)\n";
     cout << "                           into hydrosphere.imported_lake: a land cell is lake where at least half its\n";
     cout << "                           area is lake. hydrology.lake_levels keeps each lake as water at one level.\n";
-    cout << "  --no-rivers             Disable river generation.\n";
-    cout << "  --no-lakes              Disable lake generation.\n";
+    cout << "  --no-rivers             Disable river generation (no effect since erosion plan H4; removed in H4b).\n";
+    cout << "  --no-lakes              Disable lake generation (no effect since erosion plan H4; removed in H4b).\n";
     cout << "  --no-deltas             Disable delta generation.\n";
     cout << "  --social                Enable social generation.\n";
     cout << "  --social-mode <mode>    static or historical.\n";
@@ -605,7 +605,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     if (!options.importLakesPath.empty() && (!options.runCommand || !importedworld ||
         !recipehasstage(recipe, GenerationStageId::lake_levels))) {
         cerr << "--import-lakes requires the run command with an imported recipe that has hydrology.lake_levels "
-                "(earth-hydrology).\n";
+                "(earth-hydrology or imported-world).\n";
         return 1;
     }
     const long seed = options.hasSeed ? options.seed : 1;

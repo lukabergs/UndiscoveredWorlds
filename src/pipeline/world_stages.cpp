@@ -865,19 +865,13 @@ void applyaridfeatures(planet& world, const GenerationExecutionContext& context)
 
 void applydeltawetlandstage(planet& world, const GenerationExecutionContext& context)
 {
-    // In an eroded world the deltas come from the erosion (erosion plan C5b): marine
-    // deposition builds land at river mouths and hydrology.rivers writes the
-    // distributaries over it, so the legacy placement and its river check (which caps
-    // and trims rivers near the legacy fans) do not run. With deltas turned off, the
-    // distributaries hydrology.rivers wrote are cleared here, before the wetlands read
-    // them (hydrology.rivers does not see the option).
+    // The deltas come from the erosion (erosion plan C5b): marine deposition builds land at
+    // river mouths and hydrology.rivers writes the distributaries over it; the legacy placement
+    // and its river check run in no recipe (erosion plan H4). With deltas turned off, the
+    // distributaries hydrology.rivers wrote are cleared here, before the wetlands read them
+    // (hydrology.rivers does not see the option); a world without erosion has none.
     const planet& view = world;
     const bool eroded = view.erosionduration() > 0.0f;
-    if (context.dodeltas && !eroded)
-    {
-        createriverdeltas(world);
-        checkrivers(world);
-    }
     if (!context.dodeltas && eroded)
     {
         for (int x = 0; x <= world.width(); x++)
@@ -892,10 +886,8 @@ void applydeltawetlandstage(planet& world, const GenerationExecutionContext& con
     createwetlands(world, context.smalllake);
     removeexcesswetlands(world);
     refineroughnessmap(world);
-    // Legacy: in eroded-world these may still reopen enclosed below-sea cells that
-    // hydrology.lake_levels made lakes or salt pans (erosion plan H3) until H4 removes them.
-    removesealakes(world);
-    connectlakes(world);
+    // The lakes are hydrology.lake_levels' (erosion plan H4): removesealakes and connectlakes no
+    // longer run, since they could reopen enclosed below-sea cells it made lakes or salt pans (H3).
     checkpoleclimates(world.climate());
     world.syncseasonalclimatefromlegacy();
     createclimatemap(world.climate());
@@ -1204,7 +1196,7 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         }
         applyfluvialerosionstage(world, checkpoints);
         // The erosion moves coasts: refresh the planet's land and sea counts here, so the
-        // climate after it (eroded-world's @full climate) does not have to.
+        // climate after it (procedural-world's @full climate) does not have to.
         getlandandseatotals(world);
         return true;
     }
@@ -1212,7 +1204,7 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
     case GenerationStageId::fjords:
         if (world.seatotal() > 0)
             addfjordmountains(world);
-        // In eroded-world the fjords come before the full climate and move coasts too.
+        // In procedural-world the fjords come before the full climate and move coasts too.
         if (world.erosionduration() > 0)
             getlandandseatotals(world);
         return true;

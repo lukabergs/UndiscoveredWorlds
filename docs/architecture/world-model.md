@@ -192,13 +192,12 @@ Built-in recipes (`src/pipeline/world_recipes.*`):
 
 | Recipe | Purpose |
 |---|---|
-| `procedural-world` | Full generation from a seed: tectonics, terrain passes, climate, hydrology, layers, optional society |
-| `imported-world` | Imported terrain followed by the remaining terrain passes, climate and hydrology |
-| `eroded-world` | The terrain stages of `procedural-world`; a coarse climate (the seven climate stages from `climate.temperature` to `climate.rainfall_and_coupling`, labelled `@coarse`, with `climate.resolution=32` and `climate.coupling_iterations=2`); `terrain.fluvial_erosion`, which routes itself, and `terrain.fjords`; the full climate on the eroded terrain at the run's climate settings (`@full`; its pressure and winds start from the coarse climate's sea-surface temperatures); `hydrology.flow_routing`, `hydrology.rivers`, `hydrology.lake_levels` and the remaining stages, with `layers.finalize` once at the end (erosion plan C6). The legacy river, basin and lake stages do not run |
+| `procedural-world` | Full generation from a seed: the terrain stages from `geology.geosphere_initialization` (tectonics) to `terrain.roughness`; a coarse climate (the seven climate stages from `climate.temperature` to `climate.rainfall_and_coupling`, labelled `@coarse`, with `climate.resolution=32` and `climate.coupling_iterations=2`); `terrain.fluvial_erosion`, which routes itself, and `terrain.fjords`; the full climate on the eroded terrain at the run's climate settings (`@full`; its pressure and winds start from the coarse climate's sea-surface temperatures); `hydrology.flow_routing` and `hydrology.lake_levels` on the eroded terrain before the full climate (`@before-climate`, erosion plan H3) and again after it (`@after-climate`) with `hydrology.rivers` between them; the remaining stages, with `layers.finalize` once at the end (optional society). The legacy river, basin and lake stages do not run (erosion plan H4, formerly the recipe `eroded-world`) |
+| `imported-world` | Imported terrain followed by the remaining terrain passes, climate, `terrain.fjords`, `hydrology.flow_routing`, `hydrology.rivers` and `hydrology.lake_levels` (no erosion: the imported terrain is the user's) and the remaining stages |
 | `earth-climate` | Imported Earth terrain, Geosphere frozen, climate processes only; the climate validation recipe |
 
 Coarse and fine climate are two invocations of the Climate process with
-different working grids (`eroded-world` runs them this way); a later
+different working grids (`procedural-world` runs them this way); a later
 grid-refinement step can raise the surface resolution between them. The second
 invocation recomputes everything except one deliberate warm start:
 `climate.temperature` rebuilds the monthly temperatures, `climate.pressure` resets

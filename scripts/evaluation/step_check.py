@@ -1,14 +1,13 @@
 """Check of one refactoring step at the minimal configuration.
 
     uv run --offline scripts/evaluation/step_check.py LABEL [--reference LABEL] [--desktop] [--social]
-                                                       [--eroded] [--directory out/scratch/phase5]
+                                                       [--directory out/scratch/phase5]
 
 Builds the headless preset (and the desktop preset with --desktop), makes the three seed-1
 bundles on 128 x 64 (tectonics 50 Myr; climate on 32 columns with 2 coupling iterations;
 --audit-access) as <directory>/<LABEL>-<recipe>, compares each with the bundle of the
 reference label, then runs parameters.py --check, check_layout.py and process_access.py --check on the stored
-report sets. --social adds a procedural world with society (<LABEL>-social); --eroded adds
-the eroded-world recipe at the same configuration (<LABEL>-eroded-world).
+report sets. --social adds a procedural world with society (<LABEL>-social).
 Build and run output goes to <directory>/<LABEL>-*.log. Exit status: 0 when every build,
 run and check passed and every comparison was identical.
 """
@@ -30,7 +29,6 @@ RECIPES = {
     'tectonics': ['--recipe', 'tectonics', '--duration', '50'],
 }
 SOCIAL = {'social': RECIPES['procedural-world'] + ['--social']}
-ERODED = {'eroded-world': ['--recipe', 'eroded-world', '--duration', '50'] + CLIMATE}
 ACCESS_SETS = ('phase4-access', 'phase4b-access', 'phase4c-access', 'erosion-a-access', 'erosion-b-access',
                'erosion-c-access', 'erosion-d-access')
 
@@ -52,7 +50,6 @@ def main():
     parser.add_argument('--reference')
     parser.add_argument('--desktop', action='store_true')
     parser.add_argument('--social', action='store_true')
-    parser.add_argument('--eroded', action='store_true')
     parser.add_argument('--directory', default='out/scratch/phase5')
     arguments = parser.parse_args()
     directory = ROOT / arguments.directory
@@ -72,8 +69,6 @@ def main():
     runs = dict(RECIPES)
     if arguments.social:
         runs.update(SOCIAL)
-    if arguments.eroded:
-        runs.update(ERODED)
     for name, options in runs.items():
         bundle = directory / f'{label}-{name}'
         start = time.time()

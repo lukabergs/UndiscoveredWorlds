@@ -53,7 +53,7 @@ Priority-Flood depressions, D8 flow graph, implicit stream power with deposition
 hillslope diffusion and marine deposition) and two processes on the planet,
 `hydrology.flow_routing` (diagnoser, `simulations/hydrology/flow_routing.cpp`) and
 `terrain.fluvial_erosion` (evolver, `simulations/terrain/fluvial_erosion.cpp`), run in
-the recipe `eroded-world` after the climate coupling. The former standalone solver
+the recipe `procedural-world` after the coarse climate. The former standalone solver
 `climate_erosion.*` and the feedback experiment of tectonics run 63 are gone; the
 app's climate-only import mode still selects climate stages through `pipeline/` and
 asserts that terrain is unchanged.

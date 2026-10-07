@@ -45,15 +45,6 @@ std::vector<FieldId> importedterraininputs()
     return inputs;
 }
 
-std::vector<GenerationStageId> stagesfrom(GenerationStageId first)
-{
-    std::vector<GenerationStageId> steps;
-    const auto& stages = getgenerationstages();
-    for (std::size_t index = getgenerationstageindex(first); index < stages.size(); index++)
-        steps.push_back(stages[index].id);
-    return steps;
-}
-
 // The stages from first to last in registry order (inclusive).
 std::vector<GenerationStageId> stagesbetween(GenerationStageId first, GenerationStageId last)
 {
@@ -62,23 +53,6 @@ std::vector<GenerationStageId> stagesbetween(GenerationStageId first, Generation
     for (std::size_t index = getgenerationstageindex(first); index <= getgenerationstageindex(last); index++)
         steps.push_back(stages[index].id);
     return steps;
-}
-
-std::vector<GenerationStageId> without(std::vector<GenerationStageId> steps, std::initializer_list<GenerationStageId> left)
-{
-    steps.erase(std::remove_if(steps.begin(), steps.end(), [&](GenerationStageId stage)
-    {
-        return std::find(left.begin(), left.end(), stage) != left.end();
-    }), steps.end());
-    return steps;
-}
-
-// The landscape stages (erosion plan) run only in eroded-world and earth-hydrology;
-// the other recipes leave them out.
-std::vector<GenerationStageId> withouterosion(std::vector<GenerationStageId> steps)
-{
-    return without(std::move(steps), { GenerationStageId::flow_routing, GenerationStageId::fluvial_erosion,
-                                       GenerationStageId::rivers, GenerationStageId::lake_levels });
 }
 
 // Steps of the given stages, each labelled with a suffix (none: the process id) and the same overrides.
@@ -272,31 +246,12 @@ WorldRecipe proceduralworldrecipe()
 {
     WorldRecipe recipe;
     recipe.name = "procedural-world";
-    recipe.description = "Full generation from a seed: tectonics, terrain passes, climate, hydrology, layers, optional society";
-    recipe.steps = labelledsteps(withouterosion(stagesfrom(GenerationStageId::geosphere_initialization)));
-    recipe.inputs = worldpropertyinputs();
-    return recipe;
-}
-
-WorldRecipe importedworldrecipe()
-{
-    WorldRecipe recipe;
-    recipe.name = "imported-world";
-    recipe.description = "Imported terrain, then the remaining terrain passes, climate, hydrology and layers";
-    recipe.steps = labelledsteps(withouterosion(stagesfrom(GenerationStageId::mountain_bases)));
-    recipe.inputs = importedterraininputs();
-    return recipe;
-}
-
-WorldRecipe erodedworldrecipe()
-{
-    WorldRecipe recipe;
-    recipe.name = "eroded-world";
-    recipe.description = "The terrain stages of procedural-world; a coarse climate (32 columns, 2 coupling iterations) for the "
-                         "fluvial erosion, which routes itself, and the fjords; the flow routing and lake levels on the eroded "
-                         "terrain; the full climate on it at the run's climate settings, with those lakes and pans; the flow "
-                         "routing again, rivers from it (hydrology.rivers) and lakes from a water "
-                         "balance in its depressions (hydrology.lake_levels); the remaining stages, layers.finalize once at the end";
+    recipe.description = "Full generation from a seed: tectonics and the terrain passes; a coarse climate (32 columns, 2 "
+                         "coupling iterations) for the fluvial erosion, which routes itself, and the fjords; the flow "
+                         "routing and lake levels on the eroded terrain; the full climate on it at the run's climate "
+                         "settings, with those lakes and pans; the flow routing again, rivers from it (hydrology.rivers) "
+                         "and lakes from a water balance in its depressions (hydrology.lake_levels); the remaining stages, "
+                         "layers.finalize once at the end (society with --social)";
     // The full climate recomputes everything on the eroded terrain except one deliberate
     // warm start: climate.pressure and climate.winds read the sea-surface temperatures the
     // coarse climate left in the world (pressuresurfacetemperature, climate_coupling_internal.hpp)
@@ -319,6 +274,30 @@ WorldRecipe erodedworldrecipe()
     recipe.inputs = worldpropertyinputs();
     // hydrology.lake_levels reads the imported lake mask: all zero in a procedural world.
     recipe.inputs.push_back(FieldId::imported_lake);
+    return recipe;
+}
+
+WorldRecipe importedworldrecipe()
+{
+    WorldRecipe recipe;
+    recipe.name = "imported-world";
+    recipe.description = "Imported terrain, then the remaining terrain passes, climate, the fjords, the flow routing, "
+                         "rivers from it (hydrology.rivers) and lakes from a water balance in its depressions "
+                         "(hydrology.lake_levels), and layers; the imported terrain is not eroded";
+    using S = GenerationStageId;
+    // terrain.depression_fill is left out: the lake balance owns the depressions of the imported terrain.
+    std::vector<GenerationStageId> terrainandclimate = stagesbetween(S::mountain_bases, S::rainfall);
+    terrainandclimate.erase(std::remove(terrainandclimate.begin(), terrainandclimate.end(), S::depression_fill),
+                            terrainandclimate.end());
+    appendsteps(recipe.steps, terrainandclimate);
+    // The fjords edit the terrain, so they come before the routing that the rivers and lakes read.
+    appendsteps(recipe.steps, { S::fjords, S::flow_routing, S::rivers, S::lake_levels });
+    appendsteps(recipe.steps, { S::mountain_temperature_lapse, S::climates_and_biomes, S::arid_features,
+                                S::deltas_wetlands_and_roughness, S::finalize_layers });
+    recipe.inputs = importedterraininputs();
+    // hydrology.lake_levels reads the imported lake mask (--import-lakes), written by the import before the recipe.
+    if (std::find(recipe.inputs.begin(), recipe.inputs.end(), FieldId::imported_lake) == recipe.inputs.end())
+        recipe.inputs.push_back(FieldId::imported_lake);
     return recipe;
 }
 
@@ -368,7 +347,7 @@ bool recipeimportsterrain(const WorldRecipe& recipe)
 
 std::vector<std::string> worldrecipenames()
 {
-    return { "procedural-world", "imported-world", "eroded-world", "earth-climate", "earth-hydrology", "tectonics" };
+    return { "procedural-world", "imported-world", "earth-climate", "earth-hydrology", "tectonics" };
 }
 
 bool findworldrecipe(std::string_view name, WorldRecipe& recipe)
@@ -377,8 +356,6 @@ bool findworldrecipe(std::string_view name, WorldRecipe& recipe)
         recipe = proceduralworldrecipe();
     else if (name == "imported-world")
         recipe = importedworldrecipe();
-    else if (name == "eroded-world")
-        recipe = erodedworldrecipe();
     else if (name == "earth-climate")
         recipe = earthclimaterecipe();
     else if (name == "earth-hydrology")
