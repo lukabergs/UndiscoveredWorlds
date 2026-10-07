@@ -75,6 +75,9 @@ void addreliefroughness(const SphereMetric& metric, const ReliefRoughness& rough
 {
     if (roughness.amplitude_m == 0.0)
         return;
+    // The noise lives on the sphere; a torus metric has no position on it (erosion plan D2a).
+    if (metric.wrapsrows)
+        throw std::invalid_argument("addreliefroughness: a torus metric is not supported");
     const std::size_t count = metric.size();
     if (sea.size() != count || elevation.size() != count)
         throw std::invalid_argument("addreliefroughness: input sizes differ from the metric");

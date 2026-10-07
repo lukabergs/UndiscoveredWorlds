@@ -103,6 +103,7 @@ Lessons:
 | `tectonics-0002` | 2026-10-04 | equivalent | keep | consolidation phase 1: tectonics into world_pipeline |
 | `tectonics-0003` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 8: first registered run in runs/tectonics/<id>/ |
 | `tectonics-0004` | 2026-10-05 | equivalent except the announced table | keep | consolidation phase 3, step 9: snapshot statistics and comparison in Python, command-line checks as profile checks; the verifier's first review of a tectonics run |
+| `tectonics-0005` | 2026-10-07 | equivalent | keep | erosion plan, step D2a: the landscape kernels on a torus metric (preparation of D2b, the engine's implicit rivers) |
 
 Lessons:
 
@@ -114,6 +115,7 @@ Lessons:
 - `tectonics-0004`: On procedural-world bundles the regime counts differ from the engine's own, because later terrain steps rewrite geologic_regime.
 - `tectonics-0004`: The phase's reference bundles for later comparisons are out/scratch/phase3/step9-* (the snapshot table of before-* still has the summary).
 - `tectonics-0004`: A reviewer cannot tell a plate split from colour reuse: the plate map colours the engine's plate index, which is not a persistent identity.
+- `tectonics-0005`: A test that covers a metric change must exercise every code path that reads the changed geometry (here the randomised routing's offsets), and a conservation check cannot detect a face that is missing or doubled on both sides: a symmetry check can.
 
 ## world
 

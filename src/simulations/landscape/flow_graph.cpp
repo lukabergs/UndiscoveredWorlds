@@ -43,7 +43,10 @@ Offset neighbouroffset(const SphereMetric& metric, std::size_t cell, int directi
         return { ox * dx, 0.0 };
     if (ox == 0)
         return { 0.0, -oy * metric.dy_m };
-    const double meandx = 0.5 * (dx + metric.rowdx_m[static_cast<std::size_t>(y + oy)]);
+    // The neighbour's row: y + oy on a sphere (a caller never asks beyond a pole),
+    // wrapped on a torus.
+    const int other = metric.row(metric.neighbour(cell, direction));
+    const double meandx = 0.5 * (dx + metric.rowdx_m[static_cast<std::size_t>(other)]);
     return { ox * meandx, -oy * metric.dy_m };
 }
 

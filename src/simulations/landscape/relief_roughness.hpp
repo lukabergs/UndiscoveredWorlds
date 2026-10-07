@@ -34,7 +34,8 @@ struct ReliefRoughness
 // grid resolves (a coarse grid carries less relief). A lowering is scaled by
 // min(1, (elevation - sealevel - 1 m) / amplitude_m), and a land cell is never
 // lowered to sealevel + 1 m or below: it stays land. Sea cells are not changed.
-// Deterministic and thread-count independent.
+// Deterministic and thread-count independent. Throws std::invalid_argument on a
+// torus metric (wrapsrows) unless amplitude_m is 0.
 void addreliefroughness(const SphereMetric& metric, const ReliefRoughness& roughness, const std::vector<uint8_t>& sea,
                         float sealevel, std::vector<float>& elevation);
 }

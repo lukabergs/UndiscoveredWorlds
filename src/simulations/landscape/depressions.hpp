@@ -1,8 +1,9 @@
 #pragma once
 
 // Priority-Flood (Barnes et al. 2014) over a terrain on a SphereMetric, seeded
-// from the sea cells and nothing else (polar rows are closed): the filled surface,
-// one id per depression, its spill, and the flood receiver of every land cell
+// from the sea cells and nothing else (polar rows are closed; a torus metric wraps
+// them): the filled surface, one id per depression, its spill, and the flood
+// receiver of every land cell
 // (docs/architecture/erosion-hydrology-plan.md, section 3, Kernels). Phase A: a
 // depression's level is its spill elevation (every depression overflows); the
 // water-balance level of Phase B lowers it.

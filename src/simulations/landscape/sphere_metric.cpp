@@ -53,9 +53,13 @@ std::size_t SphereMetric::neighbour(std::size_t cell, int direction) const
 {
     if (!valid(direction))
         return cell;
-    const int y = row(cell) + offsetsy[direction];
+    int y = row(cell) + offsetsy[direction];
     if (y < 0 || y >= height)
-        return cell;
+    {
+        if (!wrapsrows)
+            return cell;
+        y = (y + height) % height;
+    }
     const int x = (column(cell) + offsetsx[direction] + width) % width;
     return index(x, y);
 }
@@ -70,7 +74,7 @@ double SphereMetric::distance_m(std::size_t cell, int direction) const
     const int y = row(cell);
     if (oy == 0)
         return rowdx_m[static_cast<std::size_t>(y)];
-    const int other = (y + oy < 0 || y + oy >= height) ? y : y + oy;
+    const int other = row(neighbour(cell, direction));  // y beyond a pole, wrapped on a torus
     return std::hypot(0.5 * (rowdx_m[static_cast<std::size_t>(y)] + rowdx_m[static_cast<std::size_t>(other)]), dy_m);
 }
 
@@ -82,7 +86,23 @@ double SphereMetric::facelength_m(std::size_t cell, int direction) const
     if (oy == 0)
         return dy_m;
     const int y = row(cell);
-    const int other = (y + oy < 0 || y + oy >= height) ? y : y + oy;
+    const int other = row(neighbour(cell, direction));  // y beyond a pole, wrapped on a torus
     return 0.5 * (rowdx_m[static_cast<std::size_t>(y)] + rowdx_m[static_cast<std::size_t>(other)]);
+}
+
+SphereMetric torusmetric(int width, int height, double cell_m)
+{
+    if (width < 1 || height < 1 || !(cell_m > 0.0))
+        throw std::invalid_argument("torusmetric needs a positive grid and cell size");
+    SphereMetric metric;
+    metric.width = width;
+    metric.height = height;
+    metric.radius_m = 0.0;
+    metric.dy_m = cell_m;
+    metric.rowarea_m2.assign(static_cast<std::size_t>(height), cell_m * cell_m);
+    metric.rowdx_m.assign(static_cast<std::size_t>(height), cell_m);
+    metric.rowlatitude_rad.assign(static_cast<std::size_t>(height), 0.0);
+    metric.wrapsrows = true;
+    return metric;
 }
 }
