@@ -137,7 +137,8 @@ void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vect
         transport_cells_[static_cast<size_t>(y)*width*subdivision+x] = cells_[(y/subdivision)*width+x/subdivision];
 }
 
-std::vector<Cell> Model::transportColumns(const std::vector<Displacement>& velocity, double dt) {
+std::vector<Cell> Model::transportColumns(const std::vector<Displacement>& velocity, double dt,
+                                          std::vector<std::vector<double>>& carried) {
     const uint32_t w=width_*subdivision_, h=height_*subdivision_;
     double max_motion=0;
     for (auto v : velocity) max_motion=std::max({max_motion,std::abs(v.x),std::abs(v.y)});
@@ -171,6 +172,8 @@ std::vector<Cell> Model::transportColumns(const std::vector<Displacement>& veloc
             for (size_t i=0; i<values.size(); ++i) moved_cells[i].*member=moved[i];
         }
         transport_cells_=std::move(moved_cells);
+        // Measurement fields on the subcells move by the same remap and sub-steps.
+        for (auto& values : carried) values=transport::remap(w,h,values,fine_velocity);
     }
     std::vector<Cell> coarse(cells_.size());
     const double fraction=1.0/(subdivision_*subdivision_);
@@ -485,10 +488,40 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         return static_cast<size_t>((y + static_cast<int>(height_)) % static_cast<int>(height_)) * width_
             + (x + static_cast<int>(width_)) % static_cast<int>(width_);
     };
-    // Elevation before the tectonic sub-steps, on the same fixed cells (Eulerian).
+    // Elevation before the tectonic sub-steps and the running mean of the uplift
+    // rate, carried with the rock for the measurement below: on the subcells (the
+    // subcell's own elevation, the coarse mean), shifted to positive values because
+    // the remap rejects negative ones, with a field of ones whose remap is the
+    // arriving rock's coverage. In the first sub-step the positivity limiter cannot
+    // act (the shift exceeds 4 times the range, the reconstruction's largest
+    // excursion over both axes is 3 times); from the second sub-step on the fields
+    // are amounts (value x coverage, coverage 0 to about 2 at plate boundaries), the
+    // positivity and shape limiters can act, and moved / coverage is a bounded
+    // approximation there.
     std::vector<double> elevation_before(cells_.size());
     for (size_t i = 0; i < cells_.size(); ++i) elevation_before[i] = elevation_m(cells_[i], thermal_strength);
-    auto next = transportColumns(velocity, dt);
+    const uint32_t fine_width = width_ * subdivision_;
+    const auto parent = [&](size_t f) {
+        return static_cast<size_t>(f / fine_width / subdivision_) * width_ + (f % fine_width) / subdivision_;
+    };
+    std::vector<std::vector<double>> carried(3, std::vector<double>(transport_cells_.size(), 1.0));
+    for (size_t f = 0; f < transport_cells_.size(); ++f) {
+        carried[0][f] = elevation_m(transport_cells_[f], thermal_strength);
+        carried[1][f] = uplift_rate_m_myr_[parent(f)];
+    }
+    for (int k = 0; k < 2; ++k) {
+        const auto [low, high] = std::minmax_element(carried[k].begin(), carried[k].end());
+        const double shift = 4 * (*high - *low) - *low + 1;
+        for (double& value : carried[k]) value += shift;
+    }
+    const auto coarse_mean = [&](const std::vector<double>& fine) {
+        std::vector<double> mean(cells_.size(), 0.0);
+        const double fraction = 1.0 / (subdivision_ * subdivision_);
+        for (size_t f = 0; f < fine.size(); ++f) mean[parent(f)] += fine[f] * fraction;
+        return mean;
+    };
+    const auto elevation_stay = coarse_mean(carried[0]), rate_stay = coarse_mean(carried[1]);
+    auto next = transportColumns(velocity, dt, carried);
     const double area = cell_m_ * cell_m_;
     std::vector<double> arc_source(next.size());
     for (size_t i=0; i<next.size(); ++i) {
@@ -601,10 +634,31 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     for (size_t i = 0; i < next.size(); ++i) elevation[i] = elevation_m(next[i], thermal_strength);
     // Rock uplift rate: the tectonic elevation change of this step (before the
     // surface processes below), kept as an exponential mean. Measurement only.
+    // In the plate's frame (semi-Lagrangian: the elevation before the step and the
+    // previous mean are those of the rock now in the cell, carried by the engine's
+    // own remap on the subcells with the material's sub-steps and displacements), so
+    // plate motion over relief is not uplift and the mean follows the rock. The
+    // carried value is the arriving rock's mean (divided by its coverage), compared
+    // with the value that stayed, so a cell without motion is exact. Exact for a
+    // translation when a single column field varies and the elevation is linear in
+    // it (land): each column field gets its own limited reconstruction, so with
+    // several varying fields the carried elevation differs from the columns' by the
+    // limiters' differences. Limits: the remap smears the carried mean by at most
+    // a(1 - a) subcells^2 of variance per axis and sub-step (a the fractional
+    // subcell displacement; a flattened peak), a(1 - a) n / s^2 cells^2 per step
+    // with n sub-steps at subdivision s, and (1 - w) / w = 9.5 times that in steady
+    // state at a 10 Myr window and 1 Myr steps (5 cm/yr at 128 columns: a = 0.64,
+    // n = 1, s = 4, sigma about 0.37 cells); where plates converge the rock of both
+    // sides mixes; at a divergent boundary the cell keeps the rock that stayed (its
+    // own side); new crust has no history of its own.
     const double uplift_weight = -std::expm1(-dt / uplift_rate_window_myr);
+    const auto coverage = coarse_mean(carried[2]);
+    const auto elevation_moved = coarse_mean(carried[0]), rate_moved = coarse_mean(carried[1]);
     for (size_t i = 0; i < next.size(); ++i) {
-        const double rate = (elevation[i] - elevation_before[i]) / dt;
-        uplift_rate_m_myr_[i] += (rate - uplift_rate_m_myr_[i]) * uplift_weight;
+        const double source_elevation = elevation_before[i] + (elevation_moved[i] / coverage[i] - elevation_stay[i]);
+        const double source_rate = uplift_rate_m_myr_[i] + (rate_moved[i] / coverage[i] - rate_stay[i]);
+        const double rate = (elevation[i] - source_elevation) / dt;
+        uplift_rate_m_myr_[i] = source_rate + (rate - source_rate) * uplift_weight;
     }
     for (uint32_t y = 0; y < height_; ++y) for (uint32_t x = 0; x < width_; ++x) {
         const auto i = index(x, y);

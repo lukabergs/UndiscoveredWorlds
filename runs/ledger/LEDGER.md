@@ -7,6 +7,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0014`: The rainfall solver's bulk-aerodynamic potential evaporation as the Budyko PET (discharge recall on Earth fell from 0.63 to 0.46).
 - `erosion-0016`: Depth from the engine's crust age by the plate-cooling law: the engine's ocean ages are mostly the run's age (median 590 Myr at 600 Myr) and two thirds of the sea lies on continental crust, so 98 percent of the ocean lands at 5 to 6 km.
 - `erosion-0021`: Loading fraction 2700/3300 with rebound 2800/3300 on rock volumes (it raised the land by 0.66 m on average in 20 Myr).
+- `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -111,6 +112,7 @@ Lessons:
 | `tectonics-0007` | 2026-10-07 | changed as intended; contract extended (bundle only) | keep | erosion plan, step D1: the engine's rock uplift rate in the tectonic output contract, read by the erosion as U |
 | `tectonics-0008` | 2026-10-07 | pending user review | keep | erosion plan, step D3: the Phase D close (tectonics run 78 with implicit engine rivers, erosion run 7 with D0 and D1) and the close documents |
 | `tectonics-0009` | 2026-10-07 | changed as intended | keep | erosion plan, step H1: implicit engine rivers become the tectonics baseline (the user's decision after reviewing run 78) |
+| `tectonics-0010` | 2026-10-07 | changed as intended; measurement only in the engine | keep | erosion plan, step H2: the engine's rock uplift rate in the plate's frame |
 
 Lessons:
 
@@ -129,6 +131,7 @@ Lessons:
 - `tectonics-0007`: An exponential mean removes intermittent changes, not a steady advective term: an Eulerian rate over moving plates keeps -v.grad z.
 - `tectonics-0008`: `uw.py <module> run` without arguments uses the profile's registered settings, which for erosion are the minimal configuration: a judging run repeats the previous judging run's command from its run.json.
 - `tectonics-0008`: A legacy stage whose writes no measured run ever saw can start writing when an upstream change creates the cells it acts on (here new land near the poles): the close's tracked run at the judging size finds it, a minimal run never would.
+- `tectonics-0010`: Sampling cell averages bilinearly is not the same transport as a conservative remap with limited parabolic reconstruction: a 'Lagrangian' measurement must move its fields with the very scheme that moves the material, or curvature turns into spurious uplift.
 
 ## world
 

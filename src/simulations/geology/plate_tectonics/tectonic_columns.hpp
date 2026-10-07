@@ -64,13 +64,27 @@ public:
     // Rock uplift rate per cell, m/Myr, signed: an exponential mean (e-folding time
     // uplift_rate_window_myr) of the elevation change of the tectonic sub-steps
     // (transport, subduction overlap, rifting, trench flexure, arcs, plumes, roots,
-    // thermal subsidence), before the diffusion, rivers and noise. Eulerian: the
-    // cells are fixed, so topography carried in by plate motion counts. Zero at start.
+    // thermal subsidence), before the diffusion, rivers and noise. In the plate's frame
+    // (semi-Lagrangian: the elevation before the step and the previous mean are carried
+    // with the rock by the engine's own remap, on the subcells with the material's
+    // sub-steps and per-cell displacements), so plate motion over relief is neither
+    // uplift nor subsidence and the mean follows the rock. Exact (to rounding) for a
+    // translation when a single column field varies (land); at plate boundaries, from
+    // the second sub-step on, the remap's limiters can act on the carried amounts and
+    // the carried values are a bounded approximation. The remap smears the carried
+    // mean: at most a(1 - a) subcells^2 of variance per axis and sub-step (a the
+    // fractional subcell displacement; a flattened peak), a(1 - a) n / s^2 cells^2 per
+    // step (n sub-steps, subdivision s), 9.5 times that in steady state at a 10 Myr
+    // window and 1 Myr steps; less for resolved smooth relief. Converging rock mixes;
+    // a divergent cell keeps the rock that stayed on its own side; new crust has no
+    // history of its own. Zero at start.
     const std::vector<double>& upliftRate() const { return uplift_rate_m_myr_; }
     const Budget& budget() const { return budget_; }
 private:
     void spreadRoots(std::vector<Cell>& cells, double dt_myr, double thermal_strength, bool sediment_feedback);
-    std::vector<Cell> transportColumns(const std::vector<Displacement>& velocity, double dt_myr);
+    // carried: non-negative fields on the subcells, remapped in place with the material.
+    std::vector<Cell> transportColumns(const std::vector<Displacement>& velocity, double dt_myr,
+                                       std::vector<std::vector<double>>& carried);
     void reconcileTransport(const std::vector<Cell>& evolved);
     void routeSediment(std::vector<Cell>& cells, double dt_myr, double thermal_strength,
                        const margins::Parameters& parameters, const margins::Forcing* forcing);

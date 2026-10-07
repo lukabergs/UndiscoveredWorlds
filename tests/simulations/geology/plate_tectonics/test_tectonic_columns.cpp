@@ -374,15 +374,14 @@ TEST(TectonicColumns, RockUpliftRateCountsTectonicChangeOnly) {
         std::runtime_error);
 }
 
-// The measurement is Eulerian: plate motion over a slope changes the elevation of a
-// fixed cell by -v . grad z. Land columns 500 + 100 x m (x = 0..15, 100 km cells, so
-// grad z = 1 m/km) move east by v = 0.25 cell (25 km) in 1 Myr with nothing else
-// acting. The remap's parabolic reconstruction is exact on linear data, so a cell
-// whose stencil (x - 3 .. x + 2) stays off the wrap's jump gets the mean of the
-// ramp shifted by 0.25 cell: the step rate is -v . grad z = -25 km/Myr x 1 m/km =
-// -25 m/Myr and r = -25 (1 - e^(-1/5)) = -4.5317311730504545. A start point taken
-// after transportColumns would give 0.
-TEST(TectonicColumns, RockUpliftRateIsEulerianAdvectionOverASlope) {
+// The measurement is in the plate's frame (erosion plan H2): plate motion over a slope
+// is not uplift. Land columns 500 + 100 x m (x = 0..15, 100 km cells, so grad z =
+// 1 m/km) move east by v = 0.25 cell (25 km) in 1 Myr with nothing else acting. The
+// elevation before the step is carried by the same remap as the columns, and land
+// elevation is linear in them, so the rate is 0 up to rounding in every cell, also
+// where the remap sees the 1500 m jump across the wrap (tolerance 1e-9 m/Myr). A
+// fixed-cell (Eulerian) rate would be -v . grad z = -25 m/Myr, r = -4.53.
+TEST(TectonicColumns, RockUpliftRateIsZeroForPlateMotionOverASlope) {
     tectonics::margins::Parameters still;
     still.root_mobility = 0;
     std::vector<Cell> cells(128);
@@ -390,11 +389,161 @@ TEST(TectonicColumns, RockUpliftRateIsEulerianAdvectionOverASlope) {
     Model world;
     world.initialize(16, 8, 100000, cells);
     world.advance(std::vector<Displacement>(128, {.25, 0}), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
+    for (size_t i = 0; i < 128; ++i) EXPECT_NEAR(world.upliftRate()[i], 0, 1e-9) << "cell " << i;
+}
+
+// A tectonic change on a moving plate is measured as the change alone. On the same
+// ramp moving east by 0.25 cell, a plume adds 330 m of basalt under cell 9 of every
+// row: 40 m on a land column (as in RockUpliftRateCountsTectonicChangeOnly), so the
+// step rate there is 40 m/Myr and r = 40 (1 - e^(-1/5)) = 7.2507698768807245, not
+// the Eulerian 40 - 25 = 15 m/Myr; every other cell stays at 0.
+TEST(TectonicColumns, RockUpliftRateOnAMovingPlateIsTheTectonicChange) {
+    tectonics::margins::Parameters still;
+    still.root_mobility = 0;
+    std::vector<Cell> cells(128);
+    for (size_t i = 0; i < cells.size(); ++i) cells[i] = seed(500 + 100. * (i % 16), true, 100);
+    tectonics::plumes::Source plume;
+    plume.basalt_m.assign(128, 0);
+    plume.influence.assign(128, 0);
+    for (size_t row = 0; row < 8; ++row) plume.basalt_m[row * 16 + 9] = 330;
+    Model world;
+    world.initialize(16, 8, 100000, cells);
+    world.advance(std::vector<Displacement>(128, {.25, 0}), 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
     for (size_t i = 0; i < 128; ++i) {
-        if (i % 16 < 3 || i % 16 > 13) continue; // stencils that see the 1500 m jump across the wrap
-        EXPECT_NEAR(world.upliftRate()[i], -25 * -std::expm1(-1.0 / 5), 1e-9) << "cell " << i;
-        EXPECT_NEAR(world.upliftRate()[i], -4.5317311730504545, 1e-9) << "cell " << i;
+        const double expected = i % 16 == 9 ? 40 * -std::expm1(-1.0 / 5) : 0;
+        EXPECT_NEAR(world.upliftRate()[i], expected, 1e-9) << "cell " << i;
     }
+    EXPECT_NEAR(world.upliftRate()[9], 7.2507698768807245, 1e-9);
+}
+
+// Pure translation of a curved surface (no other process): land columns
+// z = 1000 + 500 sin(2 pi x / 16) + 300 cos(2 pi y / 8) on a 16 x 8 torus move by
+// (0.16, 0.1) cell in 1 Myr, at subdivision 1 and at the baseline's 4. The carried
+// elevation moves with the engine's own remap, so the mean is 0 up to rounding
+// (largest 9.1e-13 m/Myr at subdivision 1, 1.0e-12 at 4; tolerance 1e-9). A bilinear
+// sample at x - u (the first H2 method) leaves about a (1 - a) z'' / 2 per axis: at
+// subdivision 1 a largest step rate of 12.9 m/Myr, a mean of 2.34 m/Myr after one
+// step (w = 0.181). At subdivision 4 the subcells start as uniform 4 x 4 blocks,
+// which a shift within one sub-step moves exactly as bilinear interpolation does.
+TEST(TectonicColumns, RockUpliftRateIsZeroForPlateMotionOverACurvedSurface) {
+    tectonics::margins::Parameters still;
+    still.root_mobility = 0;
+    const double pi = std::acos(-1.0);
+    const auto z = [&](double x, double y) {
+        return 1000 + 500 * std::sin(2 * pi * x / 16) + 300 * std::cos(2 * pi * y / 8);
+    };
+    std::vector<Cell> cells(128);
+    for (size_t i = 0; i < cells.size(); ++i)
+        cells[i] = seed(z(static_cast<double>(i % 16), static_cast<double>(i / 16)), true, 100);
+    for (uint32_t subdivision : {1u, 4u}) {
+        Model world;
+        world.initialize(16, 8, 100000, cells, subdivision);
+        const Displacement u{.16, .1};
+        world.advance(std::vector<Displacement>(128, u), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
+        const double weight = -std::expm1(-1.0 / 5);
+        double residual = 0, bilinear = 0;
+        for (size_t i = 0; i < 128; ++i) {
+            residual = std::max(residual, std::abs(world.upliftRate()[i]));
+            const double sx = i % 16 - u.x, sy = i / 16 - u.y;
+            const double fx = std::floor(sx), fy = std::floor(sy), ax = sx - fx, ay = sy - fy;
+            const double sampled = (1 - ay) * ((1 - ax) * z(fx, fy) + ax * z(fx + 1, fy))
+                + ay * ((1 - ax) * z(fx, fy + 1) + ax * z(fx + 1, fy + 1));
+            bilinear = std::max(bilinear, std::abs((elevation_m(world.cells()[i]) - sampled) * weight));
+        }
+        EXPECT_LT(residual, 1e-9) << "subdivision " << subdivision;
+        if (subdivision == 1) EXPECT_GT(bilinear, 2); // measured 2.34 m/Myr (a step rate of 12.9 m/Myr)
+    }
+}
+
+// The running mean follows the rock, across the x and y wraps. Uniform land 500 m
+// moves by (0.25, 0.25) cell per 1 Myr step; a plume adds 330 m of basalt (40 m) under
+// cell (15, 7) in the first step only: r1 = 40 w there (w = 1 - e^(-1/5)), 0
+// elsewhere. The second step has no tectonic change in the rock's frame, so its mean
+// is (1 - w) r1 = e^(-1/5) r1 spread where the rock went. The limiter flattens the
+// single-cell peak (subdivision 1) and the 4 x 4 block of subcells (subdivision 4,
+// two sub-steps of half a subcell), so both move as constants: (15, 7) keeps
+// 0.75 x 0.75 = 0.5625 of it, (0, 7) east across the x wrap and (15, 0) south across
+// the y wrap get 0.1875, (0, 0) gets 0.0625. A mean read at the destination instead
+// of the source, a wrong y sign or a missing wrap puts these shares elsewhere.
+TEST(TectonicColumns, RockUpliftRateMeanFollowsTheRockAcrossTheWrap) {
+    tectonics::margins::Parameters still;
+    still.root_mobility = 0;
+    tectonics::plumes::Source plume;
+    plume.basalt_m.assign(128, 0);
+    plume.influence.assign(128, 0);
+    plume.basalt_m[7 * 16 + 15] = 330;
+    for (uint32_t subdivision : {1u, 4u}) {
+        Model world;
+        world.initialize(16, 8, 100000, std::vector<Cell>(128, seed(500, true, 100)), subdivision);
+        const std::vector<Displacement> u(128, {.25, .25});
+        world.advance(u, 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
+        const double r1 = 40 * -std::expm1(-1.0 / 5);
+        for (size_t i = 0; i < 128; ++i)
+            EXPECT_NEAR(world.upliftRate()[i], i == 127 ? r1 : 0, 1e-9) << "subdivision " << subdivision << " cell " << i;
+        world.advance(u, 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
+        const double carried = r1 * std::exp(-1.0 / 5);
+        EXPECT_NEAR(carried, 5.9364282816937015, 1e-12);
+        for (size_t i = 0; i < 128; ++i) {
+            double share = 0;
+            if (i == 7 * 16 + 15) share = .5625;
+            if (i == 7 * 16 + 0) share = .1875;
+            if (i == 0 * 16 + 15) share = .1875;
+            if (i == 0 * 16 + 0) share = .0625;
+            EXPECT_NEAR(world.upliftRate()[i], share * carried, 1e-9) << "subdivision " << subdivision << " cell " << i;
+        }
+    }
+}
+
+// Diverging plates at subdivision 4: land z = 1000 + 500 sin(2 pi x / 16) (range
+// R = 1000 m), the west half (x < 8) moves west and the east half east by 0.2 cell per
+// 1 Myr step, so plates part between x = 7 and 8 and across the wrap; the opening
+// stretches the boundary columns (real subsidence). With a window of 1e-3 Myr the
+// mean is the step rate, so the carried source elevation is z_after - rate dt. Over
+// six steps it stays within [low - 2R, high + 2R] of the elevations before each step
+// (measured: within [low - 1353, high - 7.6] m). At the boundary columns (0, 7, 8, 15)
+// it differs from the cell's own elevation before the step (the rock that stayed)
+// by 4.9 m in the first step and by up to 1353 m later, once the boundary columns
+// (thinned by a fifth each step) lie km below the sea level and their subcells
+// differ strongly (the subcell elevations are not linear in the columns there): the
+// measured rate at x = 7 then falls short of the cell's own elevation change by 23,
+// 46 and 70 percent in the second to fourth steps (largest boundary rate 2327 m/Myr). Off the boundary (x = 2..5, 10..13) the rate stays at 0 (measured
+// 4.0e-11 m/Myr), the translation of one varying column field.
+TEST(TectonicColumns, RockUpliftRateAtDivergentBoundariesIsBounded) {
+    tectonics::margins::Parameters still;
+    still.root_mobility = 0;
+    const double pi = std::acos(-1.0);
+    std::vector<Cell> cells(128);
+    for (size_t i = 0; i < cells.size(); ++i)
+        cells[i] = seed(1000 + 500 * std::sin(2 * pi * static_cast<double>(i % 16) / 16), true, 100);
+    std::vector<Displacement> u(128);
+    for (size_t i = 0; i < u.size(); ++i) u[i].x = i % 16 < 8 ? -.2 : .2;
+    Model world;
+    world.initialize(16, 8, 100000, cells, 4);
+    double boundary = 0, interior = 0, lowest = 1e300, highest = -1e300, boundary_rate = 0;
+    for (int step = 0; step < 6; ++step) {
+        std::vector<double> before(128);
+        for (size_t i = 0; i < 128; ++i) before[i] = elevation_m(world.cells()[i]);
+        const auto [low, high] = std::minmax_element(before.begin(), before.end());
+        const double range = *high - *low;
+        world.advance(u, 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 1e-3);
+        for (size_t i = 0; i < 128; ++i) {
+            const double rate = world.upliftRate()[i];
+            const double source = elevation_m(world.cells()[i]) - rate;
+            EXPECT_GE(source, *low - 2 * range) << "step " << step << " cell " << i;
+            EXPECT_LE(source, *high + 2 * range) << "step " << step << " cell " << i;
+            lowest = std::min(lowest, source - *low);
+            highest = std::max(highest, source - *high);
+            const size_t x = i % 16;
+            if (x == 0 || x == 7 || x == 8 || x == 15) {
+                boundary = std::max(boundary, std::abs(source - before[i]));
+                boundary_rate = std::max(boundary_rate, std::abs(rate));
+            } else if ((x >= 2 && x <= 5) || (x >= 10 && x <= 13)) interior = std::max(interior, std::abs(rate));
+        }
+    }
+    EXPECT_LT(interior, 1e-9);
+    EXPECT_LT(boundary, 1400); // measured 1353 m
+    EXPECT_GT(boundary_rate, 0);
+    EXPECT_GT(lowest, -2000); EXPECT_LT(highest, 0);
 }
 
 // Thermal subsidence of an ageing ocean floor is tectonic: a 20 Myr old ocean column
