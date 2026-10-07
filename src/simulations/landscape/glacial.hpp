@@ -54,7 +54,7 @@ void accumulateice(const SphereMetric& metric, const FlowGraph& graph, const std
                    std::vector<double>& iceflux_m3_yr);
 
 // Thickness per cell: min(maximumthickness_m, thicknessratio x widthreference_m x
-// (A_i / 1 km^2)^widthexponent) with A_i = iceflux / (1 m/yr); 0 where the flux is 0.
+// (A_i / 1 km^2)^widthexponent) with A_i = iceflux / (1 m/yr); 0 where the flux is not positive.
 // `thickness_m` is resized and assigned on every cell.
 void icethickness(const std::vector<double>& iceflux_m3_yr, const GlacialParameters& parameters,
                   std::vector<float>& thickness_m);

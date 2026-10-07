@@ -36,6 +36,18 @@
 // With G = 0, c = s = 0 and this is Braun & Willett 2013:
 // z_new = (z_old + U dt + F z_r) / (1 + F) with F = k dt. A land root (its own
 // receiver, no sea cell) has k = 0 and keeps all the sediment reaching it.
+//
+// The glacial term (erosion plan Phase G, GlacialInput): on a land cell with ice
+// share gamma = min(1, Q_ice / Q) the erodibility in k_i is
+// K_eff = gamma^m K_g + (1 - gamma)^m K with K_g = erodibilityratio K, and z is the
+// ice surface z + h (h the cell's thickness) throughout the solve. A cell with
+// h > 0 is not incised below the surface baselevel_m - flotationratio h + h (its bed
+// at the depth where the ice floats): where the solution would end below it, z_new
+// is that surface and E_i = (b_i - z_new) / ((1 - c_i) dt), the incision the mass
+// balance above gives for it, so the sediment budget stays exact; a cell whose b_i
+// is already below it keeps z_new = b_i and is not incised. After the solve the bed
+// is z_new - h. Without ice (gamma = 0, h = 0) no glacial arithmetic is done, so the
+// step is bit-identical to the one without the input.
 
 namespace landscape
 {
@@ -71,7 +83,6 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
                                   std::vector<float>& erosion_m, std::vector<float>& deposition_m,
                                   std::vector<double>* sedimentflux_m3_myr, const GlacialInput* glacial)
 {
-    static_cast<void>(glacial);  // the glacial term is erosion plan step G1
     if (parameters.slopeexponent != 1.0)
         throw std::invalid_argument("stepstreampower: only a slope exponent of 1 is supported");
     const std::size_t cells = metric.size();
@@ -87,6 +98,13 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
     checksize(elevation.size(), cells, "elevation");
     checksize(erosion_m.size(), cells, "erosion_m");
     checksize(deposition_m.size(), cells, "deposition_m");
+    if (glacial != nullptr)
+    {
+        if (glacial->iceflux_m3_yr == nullptr || glacial->thickness_m == nullptr)
+            throw std::invalid_argument("stepstreampower: the glacial input lacks its ice flux or thickness");
+        checksize(glacial->iceflux_m3_yr->size(), cells, "glacial iceflux_m3_yr");
+        checksize(glacial->thickness_m->size(), cells, "glacial thickness_m");
+    }
 
     // Every cell of `order` is land and drains to a land receiver, or is its own
     // receiver: an outlet into its outletsea cell (a sea cell), or a land root
@@ -112,7 +130,23 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
     const double exponent = parameters.areaexponent;            // m
 
     // Double working copies: z is updated in place, zold keeps the start of the step.
+    // With ice, z of a cell of the order is its ice surface until the solve ends.
     std::vector<double> z(elevation.begin(), elevation.end());
+    std::vector<double> ice;  // h per cell (m); empty without glacial input
+    if (glacial != nullptr)
+    {
+        ice.assign(cells, 0.0);
+        for (int32_t entry : graph.order)
+        {
+            const std::size_t i = static_cast<std::size_t>(entry);
+            const double thickness = static_cast<double>((*glacial->thickness_m)[i]);
+            if (thickness > 0.0)
+            {
+                ice[i] = thickness;
+                z[i] += thickness;
+            }
+        }
+    }
     const std::vector<double> zold = z;
 
     // k_i = K_i Q_i^m / L_i in 1/Myr, Q in km^3/yr. An outlet's distance is to its
@@ -120,7 +154,11 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
     auto isroot = [&](std::size_t i) {
         return static_cast<std::size_t>(graph.receiver[i]) == i && graph.outletsea[i] < 0;
     };
+    // With ice, K is K_eff and glacialshare holds gamma^m K_g / K_eff.
     std::vector<double> rate(cells, 0.0);
+    std::vector<double> glacialshare;
+    if (glacial != nullptr)
+        glacialshare.assign(cells, 0.0);
     for (int32_t entry : graph.order)
     {
         const std::size_t i = static_cast<std::size_t>(entry);
@@ -129,8 +167,22 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
         const double length = static_cast<double>(graph.distance_m[i]);
         if (length <= 0.0)
             continue;
+        double erodibilityhere = static_cast<double>(erodibility[i]);
+        if (glacial != nullptr)
+        {
+            const double water = graph.discharge_m3_yr[i];
+            const double gamma =
+                water > 0.0 ? std::max(0.0, std::min(1.0, (*glacial->iceflux_m3_yr)[i] / water)) : 0.0;
+            if (gamma > 0.0)
+            {
+                const double glacialpart = std::pow(gamma, exponent) * glacial->erodibilityratio * erodibilityhere;
+                erodibilityhere = glacialpart + std::pow(1.0 - gamma, exponent) * erodibilityhere;
+                if (erodibilityhere > 0.0)
+                    glacialshare[i] = glacialpart / erodibilityhere;
+            }
+        }
         const double discharge = std::max(0.0, graph.discharge_m3_yr[i]) / cubicmetrespercubickilometre;
-        rate[i] = static_cast<double>(erodibility[i]) * std::pow(discharge, exponent) / length;
+        rate[i] = erodibilityhere * std::pow(discharge, exponent) / length;
     }
 
     std::vector<double> incision(cells, 0.0);    // E_i, m/Myr
@@ -167,6 +219,21 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
             {
                 znew = (base + factor * zr) / (1.0 + factor);
                 eroding = rate[i] * std::max(0.0, znew - zr);  // rounding can leave znew a hair below zr
+                if (!ice.empty() && ice[i] > 0.0)
+                {
+                    // The flotation floor of the bed, as an ice surface.
+                    const double floor = (parameters.baselevel_m - glacial->flotationratio * ice[i]) + ice[i];
+                    if (znew < floor && base > floor)
+                    {
+                        znew = floor;  // znew < base here, so factor, retained and dt are positive
+                        eroding = (base - floor) / (retained * dt);
+                    }
+                    else if (znew < floor)
+                    {
+                        znew = base;  // the bed starts below the floor: not incised, not raised
+                        eroding = 0.0;
+                    }
+                }
             }
             z[i] = znew;
             incision[i] = eroding;
@@ -220,6 +287,14 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
         sweep();
     // The exported flux of the final E and D, so that the budget closes exactly.
     accumulate();
+    // From here on z is the bed again: the solved surface less the ice.
+    if (!ice.empty())
+        for (int32_t entry : graph.order)
+        {
+            const std::size_t i = static_cast<std::size_t>(entry);
+            if (ice[i] > 0.0)
+                z[i] -= ice[i];
+        }
     if (sedimentflux_m3_myr != nullptr)
     {
         std::vector<double>& flux = *sedimentflux_m3_myr;
@@ -428,6 +503,20 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
         {
             erosion_m[i] = 0.0f;
             deposition_m[i] = static_cast<float>(marine[i] / metric.area_m2(i));
+        }
+    }
+    if (glacial != nullptr && glacial->glacialerosion_m != nullptr)
+    {
+        // The glacial part of each cell's fluvial-glacial incision, never more than its erosion.
+        std::vector<float>& glacialerosion = *glacial->glacialerosion_m;
+        glacialerosion.assign(cells, 0.0f);
+        for (int32_t entry : graph.order)
+        {
+            const std::size_t i = static_cast<std::size_t>(entry);
+            if (glacialshare[i] <= 0.0)
+                continue;
+            const float part = static_cast<float>(glacialshare[i] * incision[i] * dt);
+            glacialerosion[i] = std::min(std::max(part, 0.0f), erosion_m[i]);
         }
     }
 

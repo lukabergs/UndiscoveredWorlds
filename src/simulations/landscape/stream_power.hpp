@@ -74,9 +74,11 @@ struct StreamPowerBudget
 // with gamma = min(1, iceflux / discharge) (Hergarten 2021, Eq. 27); the implicit
 // solve and the deposition work on the ice surface elevation + thickness (a
 // receiver's surface likewise, sea receivers at the base level), and the bed is the
-// solved surface less the thickness, held at or above baselevel_m - flotationratio x
-// thickness, so it may end below its receiver (an overdeepening) or below the sea
-// level (a fjord). Hillslope diffusion and marine deposition act on the bed. With
+// solved surface less the thickness. The solve does not incise a bed with ice below
+// baselevel_m - flotationratio x thickness (the cell's incision is reduced to what
+// leaves it there, so the budget closes; a bed already below it is neither incised
+// nor raised), so the bed may end below its receiver (an overdeepening) or below the
+// sea level (a fjord). Hillslope diffusion and marine deposition act on the bed. With
 // zero flux and thickness on every cell the step equals the step without the input
 // bit for bit.
 struct GlacialInput
@@ -86,8 +88,8 @@ struct GlacialInput
     double erodibilityratio = 2.0;                       // K_g / K
     double flotationratio = 0.892;
     // When given: resized to metric.size() and assigned the glacial part of each
-    // cell's erosion_m (gamma^m K_g / K_eff of the incision plus the lowering below
-    // the solved surface), non-negative and at most erosion_m.
+    // cell's erosion_m (gamma^m K_g / K_eff of the cell's fluvial-glacial incision,
+    // not the hillslope lowering), non-negative and at most erosion_m.
     std::vector<float>* glacialerosion_m = nullptr;
 };
 
