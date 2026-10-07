@@ -151,3 +151,26 @@ out/build/headless-modules/bin/tectonic_pipeline.exe inspect --final --seed 1 `
   function is its nearest whole metre and is unchanged). `world_tectonics.cpp`
   stores it as the world's base elevation, which is float since consolidation
   phase 1; code that reads whole metres sees the same values as before.
+
+## 9. Erosion plan Phase D (engine changes, 2026-10-07)
+
+- `columns::Model::advance` measures each update's tectonic elevation change
+  (`elevation_m` after `spreadRoots` minus before `transportColumns`, so the
+  engine's diffusion, rivers, waves and their isostatic response are excluded)
+  and keeps a 10 Myr exponential mean (`uplift_rate_window_myr`), exported as
+  `tectonics_get_rock_uplift_rate_map` and `geosphere.rock_uplift_rate`. The
+  measurement is Eulerian: plate motion over relief contributes a steady
+  -v.grad z that the mean does not remove, and old ocean contributes its
+  thermal subsidence (eroded run 7: ocean mean about -11 m/Myr, land p90
+  +29 m/Myr). Measurement only: every engine result is unchanged.
+- `river_implicit` (off by default) solves river incision with the landscape
+  kernel on the engine's torus (Braun-Willett implicit step, Priority-Flood
+  depressions, marine e-folding deposition), K = river_erosion / sqrt(1e-3)
+  with a uniform 1 m/yr runoff. Most of its effect is the base level, not
+  the solver: the baseline's explicit outlets erode down to the seabed
+  (`river_outlet_sea_level` off); at 128 x 64, 50 Myr the river erosion is
+  4.39e20 kg explicit, 2.19e20 explicit with sea-level outlets, 2.35e20
+  implicit. Closed basins pass their load to their spill (the explicit pits
+  kept it). At 256 x 128, 600 Myr (run 78 against 77): land above 2 km 18.0
+  to 15.8 percent of land, above 3 km 12.2 to 10.1 (finding 5: Earth 10.7
+  and 5.0), land fraction 33.6 to 37.1 percent.
