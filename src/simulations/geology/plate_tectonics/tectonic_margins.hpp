@@ -15,6 +15,12 @@ struct Parameters {
     double arc_distance_km = 200;
     double arc_melt_ratio = .75; // Mantle-derived basalt mass / removed slab basalt mass.
     double river_erosion = 5; // Stream-power coefficient: m/Myr per km of sqrt(drainage area).
+    // Rivers by the implicit landscape kernel on the torus; waves stay explicit.
+    // Implicit rivers always end at sea level at an outlet (river_outlet_sea_level
+    // has no effect), ignore the forcing's sediment_multiplier, require
+    // alluvial_transport 0, and pass a depression's load on to its spill (G = 0:
+    // closed basins do not trap sediment, unlike the explicit path's pits).
+    bool river_implicit = false;
     double sediment_travel_km = 300;
     double alluvial_transport = 0; // 0: sediment bypass; >0: capacity / stream-power erosion potential.
     bool river_outlet_sea_level = false; // Clip river outlet slope at sea level; submarine routing still follows seabed.

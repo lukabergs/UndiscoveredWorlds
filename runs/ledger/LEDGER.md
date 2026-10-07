@@ -106,6 +106,7 @@ Lessons:
 | `tectonics-0003` | 2026-10-05 | equivalent | keep | consolidation phase 3, step 8: first registered run in runs/tectonics/<id>/ |
 | `tectonics-0004` | 2026-10-05 | equivalent except the announced table | keep | consolidation phase 3, step 9: snapshot statistics and comparison in Python, command-line checks as profile checks; the verifier's first review of a tectonics run |
 | `tectonics-0005` | 2026-10-07 | equivalent | keep | erosion plan, step D2a: the landscape kernels on a torus metric (preparation of D2b, the engine's implicit rivers) |
+| `tectonics-0006` | 2026-10-07 | equivalent with the option off; option in place | keep | erosion plan, step D2b: an opt-in implicit river solver in the tectonics engine (the landscape kernel on the engine's torus) |
 
 Lessons:
 
@@ -118,6 +119,8 @@ Lessons:
 - `tectonics-0004`: The phase's reference bundles for later comparisons are out/scratch/phase3/step9-* (the snapshot table of before-* still has the summary).
 - `tectonics-0004`: A reviewer cannot tell a plate split from colour reuse: the plate map colours the engine's plate index, which is not a persistent identity.
 - `tectonics-0005`: A test that covers a metric change must exercise every code path that reads the changed geometry (here the randomised routing's offsets), and a conservation check cannot detect a face that is missing or doubled on both sides: a symmetry check can.
+- `tectonics-0006`: A switch that changes a solver and a boundary condition at once needs a run that changes only the boundary condition before anything is attributed to the solver: here the base level carried almost all of the difference.
+- `tectonics-0006`: A budget closed by rescaling is closed by construction: check the solver's own budget before the rescale, or the test of conservation tests nothing.
 
 ## world
 

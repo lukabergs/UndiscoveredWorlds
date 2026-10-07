@@ -1,5 +1,9 @@
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
+#include "simulations/landscape/depressions.hpp"
+#include "simulations/landscape/flow_graph.hpp"
+#include "simulations/landscape/sphere_metric.hpp"
+#include "simulations/landscape/stream_power.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +34,23 @@ void validate(const Cell& c) {
     }
     if (std::abs(c.continental_area + c.oceanic_area - 1) > 1e-8)
         throw std::runtime_error("Crust area fractions must sum to one");
+}
+// Removes up to `mass` (kg/m²) of rock from a column: sediment first, then
+// continental, then oceanic crust. Age volumes and the ocean's thermal
+// rejuvenation scale with the volume left. Returns the mass removed.
+double removeRock(Cell& c, double mass) {
+    double remaining=mass,removed=0;
+    const auto erode=[&](double& volume,double density,double* age) {
+        const double taken=std::min(volume,std::max(0.0,remaining)/density);
+        if (age) *age*=volume>0?(volume-taken)/volume:0;
+        volume-=taken;remaining-=taken*density;removed+=taken*density;
+    };
+    erode(c.sediment,sediment_density,nullptr);
+    erode(c.continent,continental_density,&c.continental_age_volume);
+    const double deficit=c.ocean>0?c.thermal_rejuvenation_volume/c.ocean:0;
+    erode(c.ocean,oceanic_density,&c.oceanic_age_volume);
+    c.thermal_rejuvenation_volume=c.ocean*deficit;
+    return removed;
 }
 }
 double mass_per_area(const Cell& c) {
@@ -268,9 +289,95 @@ void Model::spreadRoots(std::vector<Cell>& cells, double dt, double thermal_stre
     }
 }
 
+// Relative tolerance of the implicit kernel's eroded against deposited thickness:
+// about 10 times the worst float rounding measured (2.4e-8 in the margins tests,
+// 4.9e-9 over the 50 updates of the minimal 128 x 64 tectonics run).
+constexpr double implicit_budget_tolerance=2.5e-7;
+
+void Model::routeRiversImplicit(std::vector<Cell>& cells, double dt, double thermal_strength,
+                                const margins::Parameters& p, const margins::Forcing* forcing) {
+    const size_t count=cells.size();
+    const auto metric=landscape::torusmetric(static_cast<int>(width_),static_cast<int>(height_),cell_m_);
+    // With a uniform runoff r = 1 m/yr on land the kernel's discharge is
+    // Q = A_m2 * 1 m/yr / 1e9 = A_km2 * 1e-3 km^3/yr, so K = river_erosion / sqrt(1e-3)
+    // gives K sqrt(Q) = river_erosion sqrt(A_km2): the explicit law (m/Myr per km of
+    // sqrt(catchment km^2)) times the slope to the receiver (sea level at an outlet).
+    const double erodibility_scale=p.river_erosion/std::sqrt(1e-3);
+    std::vector<float> z(count),runoff(count),erodibility(count),uplift(count,0.0f),erosion(count),deposition(count);
+    std::vector<uint8_t> sea(count);
+    for (size_t i=0;i<count;++i) {
+        z[i]=static_cast<float>(elevation_m(cells[i],thermal_strength));
+        sea[i]=z[i]<=0?1:0;
+        runoff[i]=sea[i]?0.0f:1.0f;
+        const double factor=forcing && !forcing->erosion_multiplier.empty()?forcing->erosion_multiplier[i]:1;
+        erodibility[i]=static_cast<float>(erodibility_scale*factor);
+    }
+    // minimumdepth_m also chooses receivers (a cell raised by less than it takes the
+    // steepest descent on the filled surface); 0 routes every flooded cell along the
+    // flood order through its spill.
+    const auto depressions=landscape::filldepressions(metric,z,sea,0.0f);
+    auto graph=landscape::buildflowgraph(metric,z,sea,0.0f,depressions);
+    landscape::accumulateflow(metric,runoff,graph);
+    landscape::StreamPowerParameters law;
+    law.step_myr=dt;
+    law.baselevel_m=0;
+    law.areaexponent=.5;
+    law.slopeexponent=1;
+    law.depositioncoefficient=0;
+    law.hillslopediffusivity_km2_myr=0; // The engine diffuses separately.
+    // A scalar travel length: the kernel has no per-cell settling, so the
+    // forcing's sediment_multiplier does not act on implicit rivers.
+    law.sedimenttravel_km=p.sediment_travel_km;
+    law.deltatop_m=std::numeric_limits<double>::infinity();
+    auto surface=z;
+    landscape::stepstreampower(metric,graph,erodibility,uplift,law,surface,erosion,deposition);
+    // Erosion thickness becomes rock mass at the sediment density, as in the
+    // explicit path. A column that cannot supply it gives what it has, and the
+    // deposits are scaled so that deposited mass equals removed mass exactly.
+    const double area=cell_m_*cell_m_;
+    // The kernel's own budget (equal cell areas on the torus): eroded and
+    // deposited thickness agree up to the rounding of each cell's value to float.
+    double eroded_m=0,deposited_m=0;
+    for (size_t i=0;i<count;++i) { eroded_m+=erosion[i];deposited_m+=deposition[i]; }
+    if (std::abs(eroded_m-deposited_m)>implicit_budget_tolerance*std::max(eroded_m,deposited_m))
+        throw std::runtime_error("Implicit river kernel budget does not close");
+    double removed_total=0,requested_total=0;
+    for (size_t i=0;i<count;++i) {
+        requested_total+=static_cast<double>(deposition[i])*sediment_density;
+        if (erosion[i]<=0) continue;
+        const double wanted=static_cast<double>(erosion[i])*sediment_density;
+        auto& c=cells[i];
+        const double removed=removeRock(c,wanted);
+        if (removed<wanted && c.sediment==0 && c.continent==0 && c.ocean==0) ++budget_.river_unsupplied_cells;
+        removed_total+=removed;
+        budget_.river_eroded_kg+=removed*area;
+        budget_.eroded_kg+=removed*area;
+    }
+    if (removed_total==0) return;
+    if (!(requested_total>0)) throw std::runtime_error("Implicit river erosion without deposition");
+    const double scale=removed_total/requested_total;
+    for (size_t i=0;i<count;++i) {
+        if (deposition[i]<=0) continue;
+        const double deposit=static_cast<double>(deposition[i])*sediment_density*scale;
+        cells[i].sediment+=deposit/sediment_density;
+        budget_.deposited_kg+=deposit*area;
+    }
+}
+
 void Model::routeSediment(std::vector<Cell>& cells, double dt, double thermal_strength,
-                         const margins::Parameters& p, const margins::Forcing* forcing) {
-    if (!p.enabled || (p.river_erosion==0 && p.wave_erosion_m_myr==0 && p.wave_retreat_km_myr==0)) return;
+                         const margins::Parameters& parameters, const margins::Forcing* forcing) {
+    if (!parameters.enabled || (parameters.river_erosion==0 && parameters.wave_erosion_m_myr==0
+        && parameters.wave_retreat_km_myr==0)) return;
+    // Implicit rivers first; the explicit loop below then carries only wave
+    // attack and its load (river term zero), and is skipped without waves.
+    margins::Parameters waves_only;
+    if (parameters.river_implicit) {
+        if (parameters.river_erosion>0) routeRiversImplicit(cells,dt,thermal_strength,parameters,forcing);
+        if (parameters.wave_erosion_m_myr==0 && parameters.wave_retreat_km_myr==0) return;
+        waves_only=parameters;
+        waves_only.river_erosion=0;
+    }
+    const margins::Parameters& p=parameters.river_implicit?waves_only:parameters;
     const size_t count=cells.size();
     std::vector<double> z(count),catchment(count),load(count),slope(count),distance(count),exposure(count);
     std::vector<double> upstream_drop(count,std::numeric_limits<double>::infinity());
@@ -318,17 +425,7 @@ void Model::routeSediment(std::vector<Cell>& cells, double dt, double thermal_st
                 +p.wave_retreat_km_myr*1000*z[i]/cell_m_);
             const double incision=std::min(.25*(z[i]-z[j]),
                 factor*(p.river_erosion*std::sqrt(catchment[i])*river_slope+waves)*dt);
-            double remaining=incision*sediment_density;
-            const auto erode=[&](double& volume,double density,double* age) {
-                const double taken=std::min(volume,std::max(0.0,remaining)/density);
-                if (age) *age*=volume>0?(volume-taken)/volume:0;
-                volume-=taken;remaining-=taken*density;removed+=taken*density;
-            };
-            erode(c.sediment,sediment_density,nullptr);
-            erode(c.continent,continental_density,&c.continental_age_volume);
-            const double deficit=c.ocean>0?c.thermal_rejuvenation_volume/c.ocean:0;
-            erode(c.ocean,oceanic_density,&c.oceanic_age_volume);
-            c.thermal_rejuvenation_volume=c.ocean*deficit;
+            removed=removeRock(c,incision*sediment_density);
             budget_.river_eroded_kg+=removed*cell_m_*cell_m_;
             budget_.eroded_kg+=removed*cell_m_*cell_m_;
         }

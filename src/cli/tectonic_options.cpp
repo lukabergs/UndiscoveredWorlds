@@ -222,6 +222,9 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.initial_boundary_influence=parse_double(arg.c_str(),value);
     } else if (arg == "--river-erosion") {
         scenario.margin_processes.river_erosion=parse_double(arg.c_str(),value);
+    } else if (arg == "--river-implicit") {
+        if (std::string(value)!="on" && std::string(value)!="off") fail("river-implicit requires on/off");
+        scenario.margin_processes.river_implicit=std::string(value)=="on";
     } else if (arg == "--alluvial-transport") {
         scenario.margin_processes.alluvial_transport=parse_double(arg.c_str(),value);
     } else if (arg == "--river-outlet-sea-level") {
@@ -318,6 +321,7 @@ void printtectonicoptionsusage(std::ostream& out)
         "--sediment-subduction-fraction",
         "--initial-boundary-influence",
         "--river-erosion",
+        "--river-implicit",
         "--alluvial-transport",
         "--river-outlet-sea-level",
         "--sediment-travel-km",

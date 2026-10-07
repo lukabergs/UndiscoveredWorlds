@@ -18,6 +18,8 @@ void validate(const Parameters& p) {
         if (!std::isfinite(value) || value<0) throw std::runtime_error("Invalid margin process parameter");
     for (double value : {p.flexural_length_km,p.trench_response_myr,p.sediment_travel_km,p.rift_breakup_thickness_m,p.wave_height_scale_m})
         if (!std::isfinite(value) || value<=0) throw std::runtime_error("Invalid margin process length");
+    if (p.river_implicit && p.alluvial_transport>0)
+        throw std::runtime_error("Implicit rivers have no alluvial transport capacity: set alluvial_transport to 0");
 }
 Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
         const std::vector<uint32_t>& owners,const std::vector<columns::Cell>& cells,

@@ -84,7 +84,7 @@ add_library(uw_tectonics STATIC
     utils.cpp
     world_point.cpp
 )
-target_link_libraries(uw_tectonics PUBLIC uw_includes)
+target_link_libraries(uw_tectonics PUBLIC uw_includes PRIVATE uw_landscape)
 target_include_directories(uw_tectonics PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(uw_tectonics PRIVATE NOMINMAX)
 uw_tectonics_target_defaults(uw_tectonics)

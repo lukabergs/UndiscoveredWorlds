@@ -375,6 +375,7 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"arc_distance_km\": " << scenario.margin_processes.arc_distance_km << ",\n";
     output << indent << "  \"arc_melt_ratio\": " << scenario.margin_processes.arc_melt_ratio << ",\n";
     output << indent << "  \"river_erosion\": " << scenario.margin_processes.river_erosion << ",\n";
+    output << indent << "  \"river_implicit\": " << (scenario.margin_processes.river_implicit?"true":"false") << ",\n";
     output << indent << "  \"sediment_subduction_fraction\": " << scenario.margin_processes.sediment_subduction_fraction << ",\n";
     output << indent << "  \"progressive_rifting\": " << scenario.topology_processes.progressive_rifting << ",\n";
     output << indent << "  \"rift_yield_n_m\": " << scenario.topology_processes.yield_n_m << ",\n";

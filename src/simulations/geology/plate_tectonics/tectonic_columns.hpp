@@ -41,6 +41,7 @@ struct Budget {
     double redistributed_continent_kg = 0;
     double redistributed_sediment_kg = 0;
     double noise_redistributed_kg = 0; // Synthetic experiment; internal transfer, not a mass source.
+    uint64_t river_unsupplied_cells = 0; // Implicit rivers: cell updates whose column could not supply the erosion.
     double relative_mass_residual = 0;
 };
 double mass_per_area(const Cell& c);
@@ -67,6 +68,8 @@ private:
     void reconcileTransport(const std::vector<Cell>& evolved);
     void routeSediment(std::vector<Cell>& cells, double dt_myr, double thermal_strength,
                        const margins::Parameters& parameters, const margins::Forcing* forcing);
+    void routeRiversImplicit(std::vector<Cell>& cells, double dt_myr, double thermal_strength,
+                             const margins::Parameters& parameters, const margins::Forcing* forcing);
     uint32_t width_ = 0, height_ = 0;
     double cell_m_ = 0;
     long seed_ = 0;

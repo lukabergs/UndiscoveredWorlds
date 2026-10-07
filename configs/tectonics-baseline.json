@@ -28,6 +28,7 @@
     "arc_distance_km": 200,
     "arc_melt_ratio": 0.4,
     "river_erosion": 15,
+    "river_implicit": "off",
     "sediment_travel_km": 300,
     "rift_breakup_thickness_m": 12000,
     "thermal_subsidence_strength": 1.0,

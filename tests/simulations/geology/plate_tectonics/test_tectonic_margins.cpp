@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 namespace {
 struct MarginFixture {
@@ -108,6 +109,120 @@ TEST(TectonicMargins, RiversDeliverSedimentOffshoreWithoutSmoothingQuietSeafloor
     model.advance(stopped,1,0,0,0,nullptr,p);
     EXPECT_DOUBLE_EQ(model.budget().river_eroded_kg,0);
     for (size_t i=0;i<f.cells.size();++i) EXPECT_DOUBLE_EQ(initial[i].ocean,model.cells()[i].ocean);
+}
+
+namespace {
+// The river fixture: a continental ramp 2000 - 90 x m on columns 0..19, ocean at -4000 m elsewhere.
+std::vector<tectonics::columns::Cell> riverRamp(const MarginFixture& f) {
+    std::vector<tectonics::columns::Cell> cells(f.w*f.h);
+    for (uint32_t i=0;i<f.w*f.h;++i) {
+        const auto x=i%f.w;
+        cells[i]=x<20?tectonics::columns::seed(2000-90*x,true,40):tectonics::columns::seed(-4000,false,40);
+    }
+    return cells;
+}
+}
+
+TEST(TectonicMargins, ImplicitRiversDeliverSedimentOffshoreAndCloseTheBudget) {
+    MarginFixture f;
+    tectonics::margins::Parameters p;p.enabled=true;p.river_implicit=true;
+    f.cells=riverRamp(f);
+    tectonics::columns::Model model;model.initialize(f.w,f.h,150000,f.cells);
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    model.advance(stopped,1,0,1,0,nullptr,p);
+    EXPECT_GT(model.budget().river_eroded_kg,0);
+    EXPECT_NEAR(model.budget().eroded_kg,model.budget().deposited_kg,model.budget().eroded_kg*1e-12);
+    EXPECT_GT(model.cells()[20].sediment,0);
+    EXPECT_EQ(model.budget().river_unsupplied_cells,0U);
+    EXPECT_LT(std::abs(model.budget().relative_mass_residual),1e-12);
+    const double uniform_kg=model.budget().river_eroded_kg;
+    EXPECT_NEAR(uniform_kg,3.8899922614932e16,1e6);
+    // Per-cell erodibility from the process variation acts and keeps the budget closed.
+    p.process_variation=.35;
+    auto forcing=tectonics::margins::forcing(f.w,f.h,150000,1,f.owners,f.cells,f.velocity,p,nullptr,1,20);
+    model.initialize(f.w,f.h,150000,f.cells);
+    model.advance(stopped,1,0,1,0,&forcing,p);
+    const double varied_kg=model.budget().river_eroded_kg;
+    // Measured: 3.8895274412625e16 kg with the variation, 3.8899922614932e16
+    // without (relative difference 1.19e-4: the multiplier averages near 1 on the ramp).
+    EXPECT_NEAR(varied_kg,3.8895274412625e16,1e6);
+    EXPECT_GT(std::abs(varied_kg-uniform_kg),1e-4*uniform_kg);
+    EXPECT_NEAR(model.budget().eroded_kg,model.budget().deposited_kg,model.budget().eroded_kg*1e-12);
+    EXPECT_LT(std::abs(model.budget().relative_mass_residual),1e-12);
+    p.process_variation=0;
+    f.cells.assign(f.w*f.h,tectonics::columns::seed(-4000,false,40));
+    model.initialize(f.w,f.h,150000,f.cells,2,1,{4000,600});
+    const auto initial=model.cells();
+    model.advance(stopped,1,0,0,0,nullptr,p);
+    EXPECT_DOUBLE_EQ(model.budget().river_eroded_kg,0);
+    EXPECT_DOUBLE_EQ(model.budget().deposited_kg,0);
+    for (size_t i=0;i<f.cells.size();++i) EXPECT_DOUBLE_EQ(initial[i].ocean,model.cells()[i].ocean);
+}
+
+TEST(TectonicMargins, ImplicitAndExplicitRiversAgreeOnASmallStep) {
+    // Same law, same receivers: with outlets at sea level the explicit step's
+    // erosion is the implicit one's first-order limit as dt goes to zero.
+    MarginFixture f;
+    f.cells=riverRamp(f);
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    const auto eroded=[&](bool implicit) {
+        tectonics::margins::Parameters p;p.enabled=true;p.river_erosion=15;
+        p.river_outlet_sea_level=true;p.river_implicit=implicit;
+        tectonics::columns::Model model;model.initialize(f.w,f.h,150000,f.cells);
+        model.advance(stopped,.01,0,1,0,nullptr,p);
+        return model.budget().river_eroded_kg;
+    };
+    const double explicit_kg=eroded(false),implicit_kg=eroded(true);
+    EXPECT_GT(explicit_kg,0);
+    // Measured: implicit / explicit = 0.99994325 at dt = 0.01 Myr (the implicit
+    // step divides each drop by 1 + K sqrt(A) dt / L, at most 6.5e-4 here).
+    EXPECT_LT(implicit_kg,explicit_kg);
+    EXPECT_NEAR(implicit_kg/explicit_kg,1,1e-4);
+}
+
+TEST(TectonicMargins, ImplicitRiversKeepTheExplicitWavePass) {
+    MarginFixture f;
+    f.cells=riverRamp(f);
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    tectonics::margins::Parameters p;p.enabled=true;p.river_implicit=true;
+    tectonics::columns::Model rivers;rivers.initialize(f.w,f.h,150000,f.cells);
+    rivers.advance(stopped,1,0,1,0,nullptr,p);
+    p.wave_erosion_m_myr=50;
+    tectonics::columns::Model waves;waves.initialize(f.w,f.h,150000,f.cells);
+    waves.advance(stopped,1,0,1,0,nullptr,p);
+    // river_eroded_kg also counts the explicit pass's wave attack.
+    // Measured: 4.2952e15 kg of wave erosion beyond the rivers' 3.8900e16 kg.
+    EXPECT_NEAR(waves.budget().river_eroded_kg-rivers.budget().river_eroded_kg,4.2952e15,1e11);
+    EXPECT_NEAR(waves.budget().eroded_kg,waves.budget().deposited_kg,waves.budget().eroded_kg*1e-12);
+    EXPECT_LT(std::abs(waves.budget().relative_mass_residual),1e-12);
+    p.alluvial_transport=1;
+    EXPECT_THROW(waves.advance(stopped,1,0,1,0,nullptr,p),std::runtime_error);
+}
+
+TEST(TectonicMargins, ImplicitRiversPassAClosedDepressionsLoadToItsSpill) {
+    // A pit at 500 m in row 8 of the ramp (neighbours 1010 to 1190 m) drains
+    // through its rim to the sea; the explicit path's pit keeps what reaches it.
+    MarginFixture f;
+    f.cells=riverRamp(f);
+    const size_t pit=8*f.w+10,shelf8=8*f.w+20,shelf3=3*f.w+20;
+    f.cells[pit]=tectonics::columns::seed(500,true,40);
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    const auto run=[&](bool implicit) {
+        tectonics::margins::Parameters p;p.enabled=true;p.river_implicit=implicit;
+        tectonics::columns::Model model;model.initialize(f.w,f.h,150000,f.cells);
+        model.advance(stopped,1,0,1,0,nullptr,p);
+        EXPECT_NEAR(model.budget().eroded_kg,model.budget().deposited_kg,model.budget().eroded_kg*1e-12);
+        EXPECT_LT(std::abs(model.budget().relative_mass_residual),1e-12);
+        return model.cells();
+    };
+    const auto implicit=run(true),explicit_=run(false);
+    // Measured: the pit's catchment (row 8 west of it and its neighbours in rows
+    // 7 and 9) reaches the shelf of row 8, 82.939 m against 30.070 m on an
+    // undisturbed row and 11.673 m on rows 7 and 9.
+    EXPECT_DOUBLE_EQ(implicit[pit].sediment,f.cells[pit].sediment);
+    EXPECT_NEAR(implicit[shelf8].sediment,82.939,1e-3);
+    EXPECT_NEAR(implicit[shelf3].sediment,30.070,1e-3);
+    EXPECT_GT(explicit_[pit].sediment,f.cells[pit].sediment);
 }
 
 TEST(TectonicMargins, ContinentalRiftsCreateOceanFloorWhenCrustBecomesThin) {
