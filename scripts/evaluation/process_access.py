@@ -24,7 +24,8 @@ The set erosion-c-access does the same for Phase C (c1-eroded-world.json, c1-ear
 Phase C's steps also measure earth-hydrology at 128 x 64 (Earth maps and lakes, climate 32/2) when
 they change a process of that recipe.
 The set erosion-d-access holds the Phase D runs (d1-eroded-world.json: the engine's rock uplift rate,
-written by geology.plate_tectonics and read by terrain.fluvial_erosion).
+written by geology.plate_tectonics and read by terrain.fluvial_erosion; d-close-eroded-world-256.json: the
+close's tracked run at 256 columns).
 A process that no report ran gets no declaration.
 `--check` exits 1 when the file would change instead of writing it.
 """

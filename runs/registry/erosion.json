@@ -37,6 +37,20 @@
       "run": "runs/erosion/5",
       "date": "2026-10-06T22:49:45+00:00",
       "label": "erosion plan C9: judging run of eroded-world at 256 columns after Phase C (Earth lakes and validation, Budyko runoff with losses and baseflow, relief roughness and randomised routing, the ocean floor, progradation and distributaries, the coarse climate before the erosion, the time model, isostasy); compared with run 3"
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "run": "runs/erosion/6",
+      "date": "2026-10-07T14:40:55+00:00",
+      "label": "erosion plan D close: K 750 (D0) and the engine's rock uplift (D1), against run 5"
+    },
+    {
+      "id": 7,
+      "status": "complete",
+      "run": "runs/erosion/7",
+      "date": "2026-10-07T14:42:35+00:00",
+      "label": "erosion plan D close: judging run of eroded-world at 256 columns after Phase D (K 750 from D0; the engine's rock uplift with sea cells, D1); settings of run 5, compared with run 5"
     }
   ]
 }

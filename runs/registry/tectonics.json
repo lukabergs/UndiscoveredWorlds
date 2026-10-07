@@ -390,6 +390,13 @@
       "run": "runs/tectonics/77",
       "date": "2026-10-05T08:38:23+00:00",
       "label": "phase 3 step 8: first registered run of the run layout (settings of run 76)"
+    },
+    {
+      "id": 78,
+      "status": "complete",
+      "run": "runs/tectonics/78",
+      "date": "2026-10-07T14:40:55+00:00",
+      "label": "erosion plan D close: implicit engine rivers (river_implicit on), against run 75"
     }
   ]
 }

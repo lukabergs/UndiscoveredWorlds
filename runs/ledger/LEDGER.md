@@ -109,6 +109,7 @@ Lessons:
 | `tectonics-0005` | 2026-10-07 | equivalent | keep | erosion plan, step D2a: the landscape kernels on a torus metric (preparation of D2b, the engine's implicit rivers) |
 | `tectonics-0006` | 2026-10-07 | equivalent with the option off; option in place | keep | erosion plan, step D2b: an opt-in implicit river solver in the tectonics engine (the landscape kernel on the engine's torus) |
 | `tectonics-0007` | 2026-10-07 | changed as intended; contract extended (bundle only) | keep | erosion plan, step D1: the engine's rock uplift rate in the tectonic output contract, read by the erosion as U |
+| `tectonics-0008` | 2026-10-07 | pending user review | keep | erosion plan, step D3: the Phase D close (tectonics run 78 with implicit engine rivers, erosion run 7 with D0 and D1) and the close documents |
 
 Lessons:
 
@@ -125,6 +126,8 @@ Lessons:
 - `tectonics-0006`: A budget closed by rescaling is closed by construction: check the solver's own budget before the rescale, or the test of conservation tests nothing.
 - `tectonics-0007`: A source term applied only to one class of cell, with the class recomputed every step, moves a boundary one way: apply it to both sides or bound it at the boundary, and count cells gained as well as lost.
 - `tectonics-0007`: An exponential mean removes intermittent changes, not a steady advective term: an Eulerian rate over moving plates keeps -v.grad z.
+- `tectonics-0008`: `uw.py <module> run` without arguments uses the profile's registered settings, which for erosion are the minimal configuration: a judging run repeats the previous judging run's command from its run.json.
+- `tectonics-0008`: A legacy stage whose writes no measured run ever saw can start writing when an upstream change creates the cells it acts on (here new land near the poles): the close's tracked run at the judging size finds it, a minimal run never would.
 
 ## world
 
