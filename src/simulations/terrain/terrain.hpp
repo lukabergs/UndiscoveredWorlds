@@ -25,7 +25,7 @@ void normalisecoasts(planet& world, int landheight, int seadepth, int severity);
 void checkislands(planet& world);
 void extendnoshade(planet& world);
 
-// Ridge connectivity, mountain bases, and fjord relief.
+// Ridge connectivity and mountain bases.
 void cleanmountainridges(planet& world);
 int getridge(planet& world, int x, int y, int dir);
 int getridge(std::vector<std::vector<int>>& arr, int x, int y, int dir);
@@ -33,7 +33,6 @@ int getoceanridge(planet& world, int x, int y, int dir);
 void deleteridge(planet& world, int x, int y, int dir);
 void deleteridge(planet& world, std::vector<std::vector<int>>& ridgesarr, std::vector<std::vector<int>>& heightsarr, int x, int y, int dir);
 void raisemountainbases(planet& world, std::vector<std::vector<int>>& mountaindrainage, std::vector<std::vector<bool>>& OKmountains);
-void addfjordmountains(planet& world);
 
 // Elevation smoothing, relief noise, and depression filling.
 void smoothland(planet& world, int amount);

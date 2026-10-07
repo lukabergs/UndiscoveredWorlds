@@ -196,15 +196,6 @@ inline void applymeasuredaccess(WorldProcessDefinition& process)
         process.stochastic = true;
         return;
     }
-    if (id == "terrain.fjords")
-    {
-        process.reads = { F::temperature_january, F::temperature_july, F::glacial_temperature, F::base_elevation, F::erosion_duration, F::max_elevation, F::mountain_height, F::mountain_island, F::roughness, F::sea_level, F::volcano, F::lake_surface, F::seed };
-        process.writes = {};
-        process.tablereads = {};
-        process.tablewrites = {};
-        process.stochastic = true;
-        return;
-    }
     if (id == "terrain.fluvial_erosion")
     {
         process.reads = { F::precipitation, F::temperature, F::base_elevation, F::crust_age, F::crust_class, F::erosion_duration, F::max_elevation, F::rock_uplift_rate, F::sea_level, F::imported_lake, F::radius, F::seed };

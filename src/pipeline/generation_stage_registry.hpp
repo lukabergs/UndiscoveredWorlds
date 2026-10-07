@@ -42,7 +42,6 @@ enum class GenerationStageId
     rainfall,
     flow_routing,
     fluvial_erosion,
-    fjords,
     rivers,
     lake_levels,
     mountain_temperature_lapse,

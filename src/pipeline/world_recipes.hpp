@@ -50,12 +50,12 @@ struct WorldRecipe
 bool recipehasstage(const WorldRecipe& recipe, GenerationStageId stage);
 
 // procedural-world: the terrain stages, a coarse climate (@coarse: 32 columns, 2 coupling
-// iterations), the fluvial erosion and the fjords, the flow routing and lake levels
+// iterations), the fluvial erosion, the flow routing and lake levels
 // (@before-climate), the full climate at the run's settings (@full; its pressure and
 // winds start from the coarse climate's sea-surface temperatures), then the flow
 // routing, the rivers, the lake levels (@after-climate) and the remaining stages.
 WorldRecipe proceduralworldrecipe();
-// imported-world: imported terrain, then the remaining terrain passes, climate, the fjords,
+// imported-world: imported terrain, then the remaining terrain passes, climate,
 // the flow routing, rivers and lake levels (no erosion), and the remaining stages.
 WorldRecipe importedworldrecipe();
 // earth-climate: climate processes only on imported terrain; Geosphere is frozen.

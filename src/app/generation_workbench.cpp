@@ -664,8 +664,8 @@ bool executeworkbenchstage(GenerationStageId stageid, planet& world, GenerationS
     const GenerationExecutionContext& context, string* errormessage)
 {
     WorldStageParameters parameters = makestageparameters(ui);
-    // The rivers come from a fresh routing after the fjords, as in imported-world: the workbench
-    // steps over hydrology.flow_routing at its registry place, before the fjords.
+    // The rivers come from a fresh routing, as in imported-world: the workbench steps over
+    // hydrology.flow_routing at its registry place.
     if (stageid == GenerationStageId::rivers
         && !executegenerationstage(GenerationStageId::flow_routing, world, scratch, parameters, context, errormessage))
         return false;
@@ -765,7 +765,7 @@ namespace
 // The step-by-step workbench walks the registered stages with one climate pass, so it runs the
 // hydrology of imported-world, not the erosion (procedural-world runs it through
 // runproceduralworldrecipe): it steps over terrain.fluvial_erosion and over hydrology.flow_routing
-// at its registry place (the rivers step routes first, after the fjords; erosion plan H4).
+// at its registry place (the rivers step routes first; erosion plan H4).
 bool workbenchskipsstage(GenerationStageId stage)
 {
     return stage == GenerationStageId::flow_routing || stage == GenerationStageId::fluvial_erosion;

@@ -52,7 +52,6 @@ const vector<GenerationStageDefinition>& getgenerationstages()
         { GenerationStageId::rainfall, "Rainfall", "Generate rainfall and moisture transport across the current terrain.", GenerationStageDomain::hydrology, true, false },
         { GenerationStageId::flow_routing, "Flow routing", "Route runoff over the terrain: receivers, drainage area, discharge, depressions and their spill points.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::fluvial_erosion, "Fluvial erosion", "Erode and deposit along the drainage network with the stream power law over the erosion duration.", GenerationStageDomain::terrain, true, true },
-        { GenerationStageId::fjords, "Fjords", "Optionally carve fjords along cold coastal mountain fronts.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::rivers, "Rivers", "Rivers and their seasonal flows from the routing's discharge and flow directions.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::lake_levels, "Lake levels", "Lake levels in the routing's depressions from a water balance; salt lakes and pans in closed basins.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::mountain_temperature_lapse, "Mountain temperature lapse", "Optionally apply mountain lapse-rate cooling to seasonal temperatures.", GenerationStageDomain::climate, true, true },

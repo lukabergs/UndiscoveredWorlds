@@ -247,7 +247,7 @@ WorldRecipe proceduralworldrecipe()
     WorldRecipe recipe;
     recipe.name = "procedural-world";
     recipe.description = "Full generation from a seed: tectonics and the terrain passes; a coarse climate (32 columns, 2 "
-                         "coupling iterations) for the fluvial erosion, which routes itself, and the fjords; the flow "
+                         "coupling iterations) for the fluvial erosion, which routes itself; the flow "
                          "routing and lake levels on the eroded terrain; the full climate on it at the run's climate "
                          "settings, with those lakes and pans; the flow routing again, rivers from it (hydrology.rivers) "
                          "and lakes from a water balance in its depressions (hydrology.lake_levels); the remaining stages, "
@@ -260,7 +260,7 @@ WorldRecipe proceduralworldrecipe()
     const std::vector<GenerationStageId> climate = stagesbetween(S::global_temperature, S::rainfall);
     appendsteps(recipe.steps, stagesbetween(S::geosphere_initialization, S::terrain_roughness));
     appendsteps(recipe.steps, climate, "coarse", { { "climate.resolution", "32" }, { "climate.coupling_iterations", "2" } });
-    appendsteps(recipe.steps, { S::fluvial_erosion, S::fjords });
+    appendsteps(recipe.steps, { S::fluvial_erosion });
     // The lakes and salt pans of the eroded terrain before the full climate, so that it sees them
     // (erosion plan H3: an enclosed below-sea basin is a lake or a pan, not sea); both run again
     // after it. A repeated process needs a label on every step.
@@ -281,7 +281,7 @@ WorldRecipe importedworldrecipe()
 {
     WorldRecipe recipe;
     recipe.name = "imported-world";
-    recipe.description = "Imported terrain, then the remaining terrain passes, climate, the fjords, the flow routing, "
+    recipe.description = "Imported terrain, then the remaining terrain passes, climate, the flow routing, "
                          "rivers from it (hydrology.rivers) and lakes from a water balance in its depressions "
                          "(hydrology.lake_levels), and layers; the imported terrain is not eroded";
     using S = GenerationStageId;
@@ -290,8 +290,8 @@ WorldRecipe importedworldrecipe()
     terrainandclimate.erase(std::remove(terrainandclimate.begin(), terrainandclimate.end(), S::depression_fill),
                             terrainandclimate.end());
     appendsteps(recipe.steps, terrainandclimate);
-    // The fjords edit the terrain, so they come before the routing that the rivers and lakes read.
-    appendsteps(recipe.steps, { S::fjords, S::flow_routing, S::rivers, S::lake_levels });
+    // The routing on the final terrain, then the rivers and lakes that read it.
+    appendsteps(recipe.steps, { S::flow_routing, S::rivers, S::lake_levels });
     appendsteps(recipe.steps, { S::mountain_temperature_lapse, S::climates_and_biomes, S::arid_features,
                                 S::deltas_wetlands_and_roughness, S::finalize_layers });
     recipe.inputs = importedterraininputs();

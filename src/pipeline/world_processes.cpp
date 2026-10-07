@@ -62,7 +62,6 @@ std::vector<WorldProcessDefinition> buildprocesses()
           { "landscape.erosion.duration_myr", "landscape.erosion.step_myr",
             "configs/parameters/landscape.json; the last step is shortened to end at the duration; a checkpoint "
             "follows the step that reaches its time" } },
-        { S::fjords, "terrain.fjords", K::detailer, false, {}, {}, {}, {}, "" },
         { S::rivers, "hydrology.rivers", K::diagnoser, false, {}, {}, {}, {},
           "River directions and the January and July flows in legacy units from the routing (erosion plan B1); in an eroded world also the distributaries on prograded land, in the delta fields, whatever the deltas option (erosion plan C5b)." },
         { S::lake_levels, "hydrology.lake_levels", K::diagnoser, false, {}, {}, {}, {},

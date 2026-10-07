@@ -1040,14 +1040,6 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         return true;
     }
 
-    case GenerationStageId::fjords:
-        if (world.seatotal() > 0)
-            addfjordmountains(world);
-        // In procedural-world the fjords come before the full climate and move coasts too.
-        if (world.erosionduration() > 0)
-            getlandandseatotals(world);
-        return true;
-
     case GenerationStageId::rivers:
         applyriverstage(world);
         return true;
