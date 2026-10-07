@@ -179,13 +179,9 @@ constexpr std::array<std::array<int, 3>, BIOMEMAPCOLOURCOUNT> defaultbiomemapcol
 #include "simulations/terrain/terrain.hpp"
 #include "simulations/geology/world_tectonics.hpp"
 
-#include "pipeline/climate_generation.hpp"
 #include "simulations/climate/climate_fields.hpp"
 #include "simulations/climate/climate_classification.hpp"
-#include "simulations/hydrology/drainage.hpp"
 #include "simulations/hydrology/lakes.hpp"
-#include "simulations/hydrology/lake_effects.hpp"
-#include "simulations/hydrology/deltas.hpp"
 #include "simulations/hydrology/wetlands.hpp"
 #include "simulations/hydrology/tides.hpp"
 #include "simulations/terrain/climate_landforms.hpp"

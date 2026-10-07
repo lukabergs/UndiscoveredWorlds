@@ -412,8 +412,6 @@ struct Application
     int& currentaveragetemp = worldpropertycontrols.averagetemp;
     float& currentwaterpickup = worldpropertycontrols.waterpickup;
     int& currentglacialtemp = worldpropertycontrols.glacialtemp;
-    bool& currentrivers = worldpropertycontrols.rivers; // This one controls whether or not rivers will be calculated for the custom world.
-    bool& currentlakes = worldpropertycontrols.lakes; // This one controls whether or not lakes will be calculated for the custom world.
     bool& currentdeltas = worldpropertycontrols.deltas; // This one controls whether or not river deltas will be calculated for the custom world.
     bool& currentsocialenabled = worldpropertycontrols.socialEnabled;
     SocialGenerationOptions::Mode& currentsocialmode = worldpropertycontrols.socialMode;

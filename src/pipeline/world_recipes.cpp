@@ -521,26 +521,6 @@ bool parserecipesteps(const WorldRecipe& recipe, std::string_view text, RecipeSt
     return true;
 }
 
-namespace
-{
-// State a stage leaves for a later one in GenerationScratch, outside the world
-// fields. Until it becomes world state (world-model migration step 5), a run
-// cannot start between the two.
-struct InRunState
-{
-    GenerationStageId from;
-    GenerationStageId to;
-    const char* what;
-};
-
-constexpr InRunState kInRunState[] =
-{
-    { GenerationStageId::mountain_bases, GenerationStageId::rivers_and_basins, "mountain drainage" },
-    { GenerationStageId::mountain_bases, GenerationStageId::basin_editor, "mountain drainage" },
-    { GenerationStageId::rivers_and_basins, GenerationStageId::lakes, "salt-lake and no-lake masks" },
-};
-}
-
 std::vector<RecipeIssue> validaterecipesteps(const WorldRecipe& recipe, const RecipeRunOptions& options)
 {
     std::vector<RecipeIssue> issues;
@@ -575,15 +555,6 @@ std::vector<RecipeIssue> validaterecipesteps(const WorldRecipe& recipe, const Re
                 if (expectedtables.count(read) != 0 && presenttables.count(read) == 0)
                     issues.push_back({ step, true, std::string(process.id) + " reads table " + worldmodel::qualifiedname(read) +
                         ", which an earlier step outside this run provides and a bundle cannot load" });
-            for (const InRunState& state : kInRunState)
-            {
-                if (state.to != recipe.steps[index].stage)
-                    continue;
-                for (std::size_t earlier = 0; earlier < first; earlier++)
-                    if (recipe.steps[earlier].stage == state.from)
-                        issues.push_back({ step, true, std::string(process.id) + " needs the " + state.what + " of " +
-                            getworldprocess(state.from).id + " from the same run" });
-            }
         }
         expected.insert(process.writes.begin(), process.writes.end());
         expectedtables.insert(process.tablewrites.begin(), process.tablewrites.end());

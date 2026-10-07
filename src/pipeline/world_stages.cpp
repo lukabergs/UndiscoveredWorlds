@@ -39,11 +39,6 @@ vector<vector<std::uint8_t>> makefeaturegrid(std::uint8_t value = 0)
     return vector<vector<std::uint8_t>>(ARRAYWIDTH, vector<std::uint8_t>(ARRAYHEIGHT, value));
 }
 
-vector<vector<vector<float>>> makesaltlakegrid()
-{
-    return vector<vector<vector<float>>>(ARRAYWIDTH, vector<vector<float>>(ARRAYHEIGHT, vector<float>(2, 0.0f)));
-}
-
 void reseedterrainpass(planet& world, int salt)
 {
     fast_srand(deterministicfastseed(deterministiccontextseed(world.seed(), salt)));
@@ -692,50 +687,6 @@ void applyinlandseapolicies(planet& world, GenerationScratch& scratch)
     detectinlandseas(world, scratch);
 }
 
-void applybasinpolicies(planet& world, GenerationScratch& scratch)
-{
-    if (scratch.basinComponents.empty())
-        detectbasincomponents(world, scratch);
-
-    for (const GenerationBasinComponent& component : scratch.basinComponents)
-    {
-        if (component.policy == GenerationComponentPolicy::keep)
-            continue;
-
-        if (component.policy == GenerationComponentPolicy::fill)
-        {
-            float targetelevation = 0.0f;
-
-            for (int x = 0; x <= world.width(); x++)
-            {
-                for (int y = 0; y <= world.height(); y++)
-                {
-                    if (scratch.basinComponentIds[x][y] == component.id)
-                        targetelevation = max(targetelevation, world.nomfloat(x, y));
-                }
-            }
-
-            for (int x = 0; x <= world.width(); x++)
-            {
-                for (int y = 0; y <= world.height(); y++)
-                {
-                    if (scratch.basinComponentIds[x][y] == component.id)
-                        world.setnomfloat(x, y, targetelevation);
-                }
-            }
-        }
-        else
-        {
-            const vector<pair<int, int>> path = findcomponentdrainpath(world, scratch.basinComponentIds, component.id);
-
-            for (const pair<int, int>& cell : path)
-                world.setnom(cell.first, cell.second, max(1, world.sealevel() - 10));
-        }
-    }
-
-    detectbasincomponents(world, scratch);
-}
-
 void applyterraintexturing(planet& world, GenerationScratch& scratch)
 {
     clearfeaturemask(scratch);
@@ -804,59 +755,6 @@ void rebuildterrainroughness(planet& world)
     }
 }
 
-void applyriverandbasinstage(planet& world, GenerationScratch& scratch, const GenerationExecutionContext& context)
-{
-    if (context.dorivers == false)
-        return;
-
-    const int width = world.width();
-    const int height = world.height();
-    int saltlakesplaced = 0;
-    scratch.saltLakeMap = makesaltlakegrid();
-    scratch.noLake = makeintgrid();
-    scratch.basinSeeds = makeintgrid();
-
-    createrivermap(world, scratch.mountaindrainage);
-
-    if (context.dolakes || world.seatotal() == 0)
-    {
-        createsaltlakes(world, saltlakesplaced, scratch.saltLakeMap, scratch.noLake, scratch.basinSeeds, context.smalllake);
-        addlandnoise(world);
-        depressionfill(world);
-
-        for (int x = 0; x <= width; x++)
-        {
-            for (int y = 0; y <= height; y++)
-            {
-                world.setriverdir(x, y, 0);
-                world.setriverjan(x, y, 0);
-                world.setriverjul(x, y, 0);
-            }
-        }
-
-        createrivermap(world, scratch.mountaindrainage);
-    }
-
-    world.setmaxriverflow();
-    detectbasincomponents(world, scratch);
-}
-
-void applylakestage(planet& world, GenerationScratch& scratch, const GenerationExecutionContext& context)
-{
-    if (context.dolakes == false)
-    {
-        if (world.seatotal() == 0)
-            convertsaltlakes(world, scratch.saltLakeMap);
-
-        return;
-    }
-
-    convertsaltlakes(world, scratch.saltLakeMap);
-    createlakemap(world, scratch.noLake, context.smalllake, context.largelake);
-    createriftlakemap(world, scratch.noLake);
-    world.setmaxriverflow();
-}
-
 void applyaridfeatures(planet& world, const GenerationExecutionContext& context)
 {
     createergs(world, context.smalllake, context.largelake, context.landshape);
@@ -866,8 +764,7 @@ void applyaridfeatures(planet& world, const GenerationExecutionContext& context)
 void applydeltawetlandstage(planet& world, const GenerationExecutionContext& context)
 {
     // The deltas come from the erosion (erosion plan C5b): marine deposition builds land at
-    // river mouths and hydrology.rivers writes the distributaries over it; the legacy placement
-    // and its river check run in no recipe (erosion plan H4). With deltas turned off, the
+    // river mouths and hydrology.rivers writes the distributaries over it. With deltas turned off, the
     // distributaries hydrology.rivers wrote are cleared here, before the wetlands read them
     // (hydrology.rivers does not see the option); a world without erosion has none.
     const planet& view = world;
@@ -886,8 +783,7 @@ void applydeltawetlandstage(planet& world, const GenerationExecutionContext& con
     createwetlands(world, context.smalllake);
     removeexcesswetlands(world);
     refineroughnessmap(world);
-    // The lakes are hydrology.lake_levels' (erosion plan H4): removesealakes and connectlakes no
-    // longer run, since they could reopen enclosed below-sea cells it made lakes or salt pans (H3).
+    // The lakes are hydrology.lake_levels' (erosion plan H4); nothing here spreads or joins them.
     checkpoleclimates(world.climate());
     world.syncseasonalclimatefromlegacy();
     createclimatemap(world.climate());
@@ -970,63 +866,6 @@ void detectinlandseas(planet& world, GenerationScratch& scratch)
 
         for (const pair<int, int>& cell : components[componentindex])
             scratch.inlandSeaComponentIds[cell.first][cell.second] = component.id;
-    }
-}
-
-void detectbasincomponents(planet& world, GenerationScratch& scratch)
-{
-    const int width = world.width();
-    const int height = world.height();
-    scratch.basinComponentIds = makeintgrid(0);
-    scratch.basinComponents.clear();
-    vector<vector<bool>> visited = makeboolgrid(false);
-    int nextid = 1;
-
-    for (int y = 0; y <= height; y++)
-    {
-        for (int x = 0; x <= width; x++)
-        {
-            if (visited[x][y] || world.basinclass(x, y) != BasinClass::endorheic)
-                continue;
-
-            queue<pair<int, int>> frontier;
-            frontier.emplace(x, y);
-            visited[x][y] = true;
-            GenerationBasinComponent component;
-            component.id = nextid;
-            component.seedX = x;
-            component.seedY = y;
-            component.basinClass = BasinClass::endorheic;
-
-            while (frontier.empty() == false)
-            {
-                const pair<int, int> current = frontier.front();
-                frontier.pop();
-                component.cellCount++;
-                scratch.basinComponentIds[current.first][current.second] = nextid;
-
-                const int directions[8][2] =
-                {
-                    { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
-                    { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }
-                };
-
-                for (const auto& direction : directions)
-                {
-                    const int nx = wrapx(world, current.first + direction[0]);
-                    const int ny = current.second + direction[1];
-
-                    if (ny < 0 || ny > height || visited[nx][ny] || world.basinclass(nx, ny) != BasinClass::endorheic)
-                        continue;
-
-                    visited[nx][ny] = true;
-                    frontier.emplace(nx, ny);
-                }
-            }
-
-            scratch.basinComponents.push_back(component);
-            nextid++;
-        }
     }
 }
 
@@ -1209,22 +1048,8 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
             getlandandseatotals(world);
         return true;
 
-    case GenerationStageId::rivers_and_basins:
-        applyriverandbasinstage(world, scratch, context);
-        return true;
-
-    case GenerationStageId::basin_editor:
-        applybasinpolicies(world, scratch);
-        if (context.dorivers)
-            createrivermap(world, scratch.mountaindrainage);
-        return true;
-
     case GenerationStageId::rivers:
         applyriverstage(world);
-        return true;
-
-    case GenerationStageId::lakes:
-        applylakestage(world, scratch, context);
         return true;
 
     case GenerationStageId::lake_levels:
@@ -1255,7 +1080,7 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 
 bool stageusesmanualpreview(GenerationStageId stageid)
 {
-    return stageid == GenerationStageId::inland_seas || stageid == GenerationStageId::basin_editor;
+    return stageid == GenerationStageId::inland_seas;
 }
 
 void rebuildheightdistribution(const planet& world, GenerationScratch& scratch)
@@ -1302,15 +1127,10 @@ void initializegenerationscratch(GenerationScratch& scratch)
     for (size_t index = 1; index < scratch.squareroot.size(); index++)
         scratch.squareroot[index] = static_cast<int>(sqrt(static_cast<float>(index)));
 
-    scratch.saltLakeMap = makesaltlakegrid();
-    scratch.noLake = makeintgrid();
-    scratch.basinSeeds = makeintgrid();
     scratch.inlandSeaComponentIds = makeintgrid(0);
-    scratch.basinComponentIds = makeintgrid(0);
     scratch.heightHistogram.assign(kHeightHistogramBins, 0);
     scratch.heightCdf.assign(kHeightHistogramBins, 0.0f);
     scratch.inlandSeaComponents.clear();
-    scratch.basinComponents.clear();
     clearfeaturemask(scratch);
 }
 

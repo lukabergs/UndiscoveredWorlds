@@ -58,47 +58,6 @@ int findlowestdir(planet& world, int neighbours[8][2], int x, int y)
     return (dir);
 }
 
-// Same thing, but for river directions.
-
-int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, vector<vector<int>>& mountaindrainage)
-{
-    int width = world.width();
-    int height = world.height();
-    const std::uint64_t directionseed = deterministiccontextseed(world.seed(), 0x6102);
-
-    float lowest = static_cast<float>(world.maxelevation() * 2);
-    int nnn = -1;
-
-    const int start = deterministicrandom(directionseed, 0, 7, x, y, 1);
-
-    for (int n = start; n <= start + 7; n++)
-    {
-        int nn = wrap(n, 7);
-
-        int i = x + neighbours[nn][0];
-
-        if (i<0 || i>width)
-            i = wrap(i, width);
-
-        int j = y + neighbours[nn][1];
-
-        if (j >= 0 && j <= height)
-        {
-            float pointelev = world.nomfloat(i, j);
-
-            if (pointelev < lowest)
-            {
-                lowest = pointelev;
-                nnn = nn;
-            }
-        }
-    }
-
-    int dir = nnn + 1;
-
-    return (dir);
-}
-
 // This gets the amount the land is sloping between two points.
 
 float getslope(planet& world, int x, int y, int xx, int yy)

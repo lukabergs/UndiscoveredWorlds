@@ -65,12 +65,6 @@ void clampworldpropertycontrols(WorldPropertyControls& controls)
     controls.eccentricity = std::clamp(controls.eccentricity, 0.0f, 0.999f);
     controls.lunar = std::clamp(controls.lunar, 0.0f, 10.0f);
 
-    if (!controls.rivers)
-    {
-        controls.lakes = false;
-        controls.deltas = false;
-    }
-
     controls.historyYears = std::max(10, controls.historyYears);
 
     if (!controls.socialEnabled)

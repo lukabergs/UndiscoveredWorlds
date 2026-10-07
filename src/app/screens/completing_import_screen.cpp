@@ -13,7 +13,7 @@ void Application::updatecompletingimportscreen()
             // Plug in the world settings.
 
             applyworldpropertycontrols(*world, worldpropertycontrols);
-            completeimportedworldgeneration(*world, currentrivers, currentlakes, currentdeltas, socialoptionsfromworldcontrols(), smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
+            completeimportedworldgeneration(*world, currentdeltas, socialoptionsfromworldcontrols(), smalllake, largelake, landshape, OKmountains, &importedclimatemaps);
 
             // Now draw a new map
 

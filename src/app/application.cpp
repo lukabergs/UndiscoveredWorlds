@@ -401,8 +401,6 @@ bool Application::runprocess(const char* id)
     GenerationScratch scratch;
     WorldStageParameters parameters;
     GenerationExecutionContext context;
-    context.dorivers = currentrivers;
-    context.dolakes = currentlakes;
     context.dodeltas = currentdeltas;
     context.socialoptions = socialoptionsfromworldcontrols();
     context.landshape = landshape;
@@ -715,8 +713,6 @@ void Application::startproceduralworkbenchsession()
     applyworlddimensions(*world, worldpropertycontrols);
     world->setseed(seedentry);
     syncworldpropertycontrols(*world, worldpropertycontrols);
-    currentrivers = true;
-    currentlakes = true;
     currentdeltas = true;
 
     resizeglobaldisplayforworld(*world, globaldisplay, highlightdisplay);
@@ -729,8 +725,6 @@ void Application::startproceduralworkbenchsession()
     brandnew = 0;
 
     GenerationExecutionContext context;
-    context.dorivers = currentrivers;
-    context.dolakes = currentlakes;
     context.dodeltas = currentdeltas;
     context.socialoptions = socialoptionsfromworldcontrols();
     context.landshape = landshape;
@@ -1093,8 +1087,6 @@ void Application::drawdialogwindows()
         world->setgravity(getdefaultgravityforsize(currentsize));
 
         syncworldpropertycontrols(*world, worldpropertycontrols);
-        currentrivers = true;
-        currentlakes = true;
         currentdeltas = true;
 
         int width = world->width();

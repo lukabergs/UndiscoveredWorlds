@@ -10,7 +10,6 @@
 class planet;
 
 int findlowestdir(planet& world, int neighbours[8][2], int x, int y);
-int findlowestdirriver(planet& world, int neighbours[8][2], int x, int y, std::vector<std::vector<int>>& mountaindrainage);
 float getslope(planet& world, int x, int y, int xx, int yy);
 int getflatness(planet& world, int x, int y);
 float getflatelevation(planet& world, int x, int y);

@@ -19,8 +19,6 @@ struct WorldPropertyControls
     int averagetemp = 0;
     float waterpickup = 0.0f;
     int glacialtemp = 0;
-    bool rivers = true;
-    bool lakes = true;
     bool deltas = true;
     bool socialEnabled = false;
     SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;

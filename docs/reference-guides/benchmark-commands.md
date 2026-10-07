@@ -107,12 +107,10 @@ tectonics; `--duration <evolver>=N`, `--checkpoint-every <evolver>=N` and
 label of one of its steps, and apply to every step of that process
 (`docs/architecture/world-model.md`, Time model). `--from-bundle` loads the
 world of a bundle: its seed and grid apply, command-line options (`--climate-*`,
-`--no-lakes`, ...) are not inherited and must be repeated. A bundle carries the
-world's stored fields. It does not carry tables, the climate solver's own grids,
-levels and diagnostics, or state kept between steps outside the world fields
-(mountain drainage, the salt-lake masks). The scheduler therefore refuses a start
-point whose steps read such state from a skipped step and names the step that
-must be in the run; those fields and tables are copied into the new bundle from
+`--no-deltas`, ...) are not inherited and must be repeated. A bundle carries the
+world's stored fields. It does not carry tables or the climate solver's own grids,
+levels and diagnostics. The scheduler therefore refuses a start point whose steps
+read such data from a skipped step and names the step that must be in the run; those fields and tables are copied into the new bundle from
 the source unless a step of the run writes them.
 
 The `climate-benchmark` command, the desktop app's "Record climate benchmark" and the
@@ -266,4 +264,4 @@ The world series is where consolidation Phase 4 records the modules without a pr
 resources, society): run 2 is the reference before they moved to the float accessors (run 1 is the same model on 512 x 256, where lakes
 and deltas form), and each later run names its module in its ledger entry. Add `--resolution 512` when lakes matter. The review checklist of the world profile is a draft by an agent (`review_status`).
 
-`--no-rivers`, `--no-lakes` and `--no-deltas` shorten runs.
+`--no-deltas` clears the delta distributaries of an eroded world.

@@ -35,7 +35,7 @@ src/
     terrain/               Fractals, coasts, ridges, elevation, landforms
     climate/               Atmosphere, ocean, energy, moisture, transport
       legacy/              Tested alternative thermal and ocean feedback closures
-    hydrology/             Drainage, basins, lakes, deltas, wetlands, tides
+    hydrology/             Flow routing, drainage basins, rivers, lakes, wetlands, tides
     resources/             Mineral and marine resource potentials, present-day placers
     society/               Settlement, routes, trade, polities, history
   io/                      Map imports, raster/reference readers, export selection

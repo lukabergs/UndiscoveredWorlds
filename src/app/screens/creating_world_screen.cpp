@@ -46,8 +46,6 @@ void Application::updatecreatingworldscreen()
             ui.seaLevel = world->sealevel();
 
             GenerationExecutionContext context;
-            context.dorivers = true;
-            context.dolakes = true;
             context.dodeltas = true;
             context.socialoptions = socialoptionsfromdebug();
             context.landshape = landshape;

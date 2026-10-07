@@ -110,8 +110,8 @@ A process is one operation with a declared access set. Kinds:
 | initializer | creates fields from a seed and parameters | starting crust and terrain, inherited deposit provinces |
 | evolver | advances state through time | tectonics, erosion, climate spin-up |
 | diagnoser | derives fields from existing state | flow routing, Köppen classes, biomes, drainage basins |
-| detailer | adds plausible small-scale detail from noise | roughness, archipelagos, lake shapes, coastline breakup |
-| editor | applies a user-directed, non-physical adjustment | terraforming, inland-sea and basin policies, smoothing |
+| detailer | adds plausible small-scale detail from noise | roughness, archipelagos, coastline breakup |
+| editor | applies a user-directed, non-physical adjustment | terraforming, inland-sea policy, smoothing |
 
 Rules:
 
@@ -192,7 +192,7 @@ Built-in recipes (`src/pipeline/world_recipes.*`):
 
 | Recipe | Purpose |
 |---|---|
-| `procedural-world` | Full generation from a seed: the terrain stages from `geology.geosphere_initialization` (tectonics) to `terrain.roughness`; a coarse climate (the seven climate stages from `climate.temperature` to `climate.rainfall_and_coupling`, labelled `@coarse`, with `climate.resolution=32` and `climate.coupling_iterations=2`); `terrain.fluvial_erosion`, which routes itself, and `terrain.fjords`; the full climate on the eroded terrain at the run's climate settings (`@full`; its pressure and winds start from the coarse climate's sea-surface temperatures); `hydrology.flow_routing` and `hydrology.lake_levels` on the eroded terrain before the full climate (`@before-climate`, erosion plan H3) and again after it (`@after-climate`) with `hydrology.rivers` between them; the remaining stages, with `layers.finalize` once at the end (optional society). The legacy river, basin and lake stages do not run (erosion plan H4, formerly the recipe `eroded-world`) |
+| `procedural-world` | Full generation from a seed: the terrain stages from `geology.geosphere_initialization` (tectonics) to `terrain.roughness`; a coarse climate (the seven climate stages from `climate.temperature` to `climate.rainfall_and_coupling`, labelled `@coarse`, with `climate.resolution=32` and `climate.coupling_iterations=2`); `terrain.fluvial_erosion`, which routes itself, and `terrain.fjords`; the full climate on the eroded terrain at the run's climate settings (`@full`; its pressure and winds start from the coarse climate's sea-surface temperatures); `hydrology.flow_routing` and `hydrology.lake_levels` on the eroded terrain before the full climate (`@before-climate`, erosion plan H3) and again after it (`@after-climate`) with `hydrology.rivers` between them; the remaining stages, with `layers.finalize` once at the end (optional society). Formerly the recipe `eroded-world` (erosion plan H4); the legacy river, basin and lake stages were deleted in H4b |
 | `imported-world` | Imported terrain followed by the remaining terrain passes, climate, `terrain.fjords`, `hydrology.flow_routing`, `hydrology.rivers` and `hydrology.lake_levels` (no erosion: the imported terrain is the user's) and the remaining stages |
 | `earth-climate` | Imported Earth terrain, Geosphere frozen, climate processes only; the climate validation recipe |
 

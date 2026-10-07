@@ -371,18 +371,6 @@ void drawworldeditpropertieswindow(const ImGuiViewport* main_viewport, ImGuiWind
 
     ImGui::Text("   ");
 
-    ImGui::Checkbox("Generate rivers", &controls.rivers);
-
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Untick this if you don't want rivers to be generated.");
-
-    ImGui::SameLine((float)rightalign);
-
-    ImGui::Checkbox("Generate lakes", &controls.lakes);
-
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Untick this if you don't want large lakes to be generated.");
-
     ImGui::Checkbox("Generate deltas", &controls.deltas);
 
     if (ImGui::IsItemHovered())

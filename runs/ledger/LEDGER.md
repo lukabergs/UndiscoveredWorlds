@@ -64,6 +64,7 @@ Lessons:
 | `erosion-0023` | 2026-10-07 | changed as intended; eroded-world only | keep | erosion plan, step D0: the default erodibility corrected from 24 to the derived 750 (unit error) |
 | `erosion-0024` | 2026-10-07 | changed as intended | keep | erosion plan, step H3: enclosed below-sea basins are depressions for the lake balance, not sea |
 | `erosion-0025` | 2026-10-07 | changed as intended | keep | erosion plan, step H4a (C10, first half): eroded-world becomes procedural-world; imported worlds on the new hydrology |
+| `erosion-0026` | 2026-10-07 | equivalent | keep | erosion plan, step H4b (C10, second half): the legacy hydrology deleted |
 
 Lessons:
 

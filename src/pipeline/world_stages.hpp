@@ -38,29 +38,14 @@ struct GenerationWaterComponent
     GenerationComponentPolicy policy = GenerationComponentPolicy::keep;
 };
 
-struct GenerationBasinComponent
-{
-    int id = 0;
-    int seedX = 0;
-    int seedY = 0;
-    int cellCount = 0;
-    BasinClass basinClass = BasinClass::none;
-    GenerationComponentPolicy policy = GenerationComponentPolicy::keep;
-};
-
 // State carried between stages outside the world. Migration step 5 turns the
 // physical parts into world fields; the component lists hold editor policies.
 struct GenerationScratch
 {
     std::vector<std::vector<int>> mountaindrainage;
     std::vector<int> squareroot;
-    std::vector<std::vector<std::vector<float>>> saltLakeMap;
-    std::vector<std::vector<int>> noLake;
-    std::vector<std::vector<int>> basinSeeds;
     std::vector<std::vector<int>> inlandSeaComponentIds;
     std::vector<GenerationWaterComponent> inlandSeaComponents;
-    std::vector<std::vector<int>> basinComponentIds;
-    std::vector<GenerationBasinComponent> basinComponents;
     std::vector<int> heightHistogram;
     std::vector<float> heightCdf;
     std::vector<std::vector<std::uint8_t>> stageFeatureMask;   // overlay of cells changed by the last stage
@@ -94,8 +79,6 @@ struct WorldStageParameters
 
 struct GenerationExecutionContext
 {
-    bool dorivers = true;
-    bool dolakes = true;
     bool dodeltas = true;
     SocialGenerationOptions socialoptions;
     boolshapetemplate* landshape = nullptr;
@@ -116,7 +99,6 @@ void initializegenerationscratch(GenerationScratch& scratch);
 void rebuildheightdistribution(const planet& world, GenerationScratch& scratch);
 bool stageusesmanualpreview(GenerationStageId stageId);
 void detectinlandseas(planet& world, GenerationScratch& scratch);
-void detectbasincomponents(planet& world, GenerationScratch& scratch);
 
 // Runs one stage on the world. Returns false only when the stage cannot run.
 bool executegenerationstage(GenerationStageId stageId, planet& world, GenerationScratch& scratch,

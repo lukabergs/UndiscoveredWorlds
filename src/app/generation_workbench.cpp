@@ -746,9 +746,6 @@ mapviewenum preferredworkbenchmapview(GenerationStageId stageId)
     case GenerationStageId::arid_features:
         return precipitation;
 
-    case GenerationStageId::rivers_and_basins:
-    case GenerationStageId::basin_editor:
-    case GenerationStageId::lakes:
     case GenerationStageId::rivers:
     case GenerationStageId::lake_levels:
     case GenerationStageId::deltas_wetlands_and_roughness:
@@ -767,14 +764,11 @@ namespace
 {
 // The step-by-step workbench walks the registered stages with one climate pass, so it runs the
 // hydrology of imported-world, not the erosion (procedural-world runs it through
-// runproceduralworldrecipe): it steps over terrain.fluvial_erosion, over hydrology.flow_routing
-// at its registry place (the rivers step routes first, after the fjords) and over the legacy
-// river, basin and lake stages (erosion plan H4).
+// runproceduralworldrecipe): it steps over terrain.fluvial_erosion and over hydrology.flow_routing
+// at its registry place (the rivers step routes first, after the fjords; erosion plan H4).
 bool workbenchskipsstage(GenerationStageId stage)
 {
-    return stage == GenerationStageId::flow_routing || stage == GenerationStageId::fluvial_erosion
-        || stage == GenerationStageId::rivers_and_basins || stage == GenerationStageId::basin_editor
-        || stage == GenerationStageId::lakes;
+    return stage == GenerationStageId::flow_routing || stage == GenerationStageId::fluvial_erosion;
 }
 
 void advanceworkbenchstage(GenerationSessionState& session)
@@ -798,30 +792,6 @@ void seedcommittedwatercomponents(GenerationSessionState& session)
         session.committedScratch.inlandSeaComponentIds = session.previewScratch.inlandSeaComponentIds;
         session.committedScratch.inlandSeaComponents = session.previewScratch.inlandSeaComponents;
     }
-}
-
-void seedcommittedbasincomponents(GenerationSessionState& session)
-{
-    if (session.committedScratch.basinComponents.empty() && session.previewAvailable && session.previewScratch.basinComponents.empty() == false)
-    {
-        session.committedScratch.basinComponentIds = session.previewScratch.basinComponentIds;
-        session.committedScratch.basinComponents = session.previewScratch.basinComponents;
-    }
-}
-
-const char* policylabel(GenerationComponentPolicy policy)
-{
-    switch (policy)
-    {
-    case GenerationComponentPolicy::keep:
-        return "Keep";
-    case GenerationComponentPolicy::fill:
-        return "Fill";
-    case GenerationComponentPolicy::drain:
-        return "Drain";
-    }
-
-    return "Keep";
 }
 
 void cyclepolicy(GenerationComponentPolicy& policy)
@@ -860,8 +830,6 @@ bool previewcurrentgenerationstage(GenerationSessionState& session, const planet
     {
         if (stageid == GenerationStageId::inland_seas && session.previewScratch.inlandSeaComponents.empty())
             detectinlandseas(session.previewWorld, session.previewScratch);
-        else if (stageid == GenerationStageId::basin_editor && session.previewScratch.basinComponents.empty())
-            detectbasincomponents(session.previewWorld, session.previewScratch);
 
         if (isterraingenerationstage(stageid) && session.ui.terrainRenderPreset != WorkbenchTerrainRenderPreset::custom)
             applyterrainrenderpreset(session.ui, session.previewWorld, session.ui.terrainRenderPreset);
@@ -1198,48 +1166,6 @@ GenerationWorkbenchPanelResult drawgenerationworkbenchpanel(const ImGuiViewport*
             ImGui::TextUnformatted("Preview this stage to detect components.");
         else
             ImGui::TextWrapped("Click inland seas on the map to cycle policies: red keeps the sea, green drains it, blue landfills it.");
-    }
-    else if (stage.id == GenerationStageId::basin_editor)
-    {
-        seedcommittedbasincomponents(session);
-        vector<GenerationBasinComponent>& visiblecomponents = session.previewAvailable ? session.previewScratch.basinComponents : session.committedScratch.basinComponents;
-
-        ImGui::TextUnformatted("Endorheic basin components");
-
-        if (visiblecomponents.empty())
-            ImGui::TextUnformatted("Preview this stage to detect components.");
-
-        for (GenerationBasinComponent& component : visiblecomponents)
-        {
-            ImGui::PushID(component.id);
-            ImGui::Text("Basin %d | cells %d", component.id, component.cellCount);
-            ImGui::SameLine();
-            if (ImGui::SmallButton(policylabel(component.policy)))
-            {
-                cyclepolicy(component.policy);
-
-                for (GenerationBasinComponent& committedcomponent : session.committedScratch.basinComponents)
-                {
-                    if (committedcomponent.id == component.id)
-                    {
-                        committedcomponent.policy = component.policy;
-                        break;
-                    }
-                }
-
-                for (GenerationBasinComponent& previewcomponent : session.previewScratch.basinComponents)
-                {
-                    if (previewcomponent.id == component.id)
-                    {
-                        previewcomponent.policy = component.policy;
-                        break;
-                    }
-                }
-
-                result.displayChanged = true;
-            }
-            ImGui::PopID();
-        }
     }
     else
     {

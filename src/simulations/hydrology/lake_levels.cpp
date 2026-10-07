@@ -78,8 +78,7 @@ void applylakelevelstage(planet& world)
     // sea here is the routing's (the world ocean, erosion plan H3): an enclosed below-sea basin is a
     // depression, not sea. A depression with a cell that is now sea, borders the sea or is not below
     // its filled level no longer matches the routing (a fresh Priority-Flood never puts a depression
-    // next to the sea): it is dropped and reported, so no lake is written next to the sea
-    // (removesealakes would spread such a lake over the ocean).
+    // next to the sea): it is dropped and reported, so no lake is written next to the sea.
     std::vector<uint8_t> stale(size, 0);
     for (std::size_t cell = 0; cell < size; cell++)
     {

@@ -74,8 +74,7 @@ changing winds, positivity and mass; uniform flow, vortex and polar trails.
   fixtures converge with the existing preconditioner.
 
 Production: `src/simulations/climate/climate_coupling.cpp`,
-`src/simulations/climate/climate_fields.cpp`,
-`src/pipeline/climate_generation.cpp`, `src/app/generation_workbench.cpp`.
+`src/simulations/climate/climate_fields.cpp`, `src/app/generation_workbench.cpp`.
 Bounded atmosphere/ocean/hydrology iterations feed diagnosed layer heating back
 into circulation without repeating coastal temperature postprocessing. They
 retain hydrological stores between passes, under-relax heating, and require

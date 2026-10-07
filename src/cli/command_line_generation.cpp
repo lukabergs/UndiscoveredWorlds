@@ -83,8 +83,6 @@ void printcommandlineusage()
     cout << "  --import-lakes <png>    run with earth-hydrology or imported-world: a 2:1 lake mask (255 lake, 0 not; north row first, from 180 W)\n";
     cout << "                           into hydrosphere.imported_lake: a land cell is lake where at least half its\n";
     cout << "                           area is lake. hydrology.lake_levels keeps each lake as water at one level.\n";
-    cout << "  --no-rivers             Disable river generation (no effect since erosion plan H4; removed in H4b).\n";
-    cout << "  --no-lakes              Disable lake generation (no effect since erosion plan H4; removed in H4b).\n";
     cout << "  --no-deltas             Disable delta generation.\n";
     cout << "  --social                Enable social generation.\n";
     cout << "  --social-mode <mode>    static or historical.\n";
@@ -149,18 +147,6 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
             options.auditAccess = true;
             continue;
         }
-        if (argument == "--no-rivers")
-        {
-            options.rivers = false;
-            continue;
-        }
-
-        if (argument == "--no-lakes")
-        {
-            options.lakes = false;
-            continue;
-        }
-
         if (argument == "--no-deltas")
         {
             options.deltas = false;
@@ -524,12 +510,10 @@ RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe,
     return runrecipeonterrain(world, recipe, scratch, parameters, context, runoptions);
 }
 
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate, bool climateOnly)
+void completeimportedworldgeneration(planet& world, bool dodeltas, const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate landshape[], vector<vector<bool>>& okmountains, const ImportedClimateMaps* importedclimate, bool climateOnly)
 {
     GenerationExecutionContext context;
-    context.dorivers = dorivers;
     context.climateOnly = climateOnly;
-    context.dolakes = dolakes;
     context.dodeltas = dodeltas;
     context.socialoptions = socialoptions;
     context.landshape = landshape;
@@ -1003,9 +987,7 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         }
 
         GenerationExecutionContext context;
-        context.dorivers = options.rivers;
         context.climateOnly = recipe.name == "earth-climate" || recipe.name == "earth-hydrology";
-        context.dolakes = options.lakes;
         context.dodeltas = options.deltas;
         context.socialoptions = socialoptions;
         context.landshape = landshape;
@@ -1036,8 +1018,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
         GenerationExecutionContext context;
         context.evolverCheckpoint = evolvercheckpoint;
-        context.dorivers = options.rivers;
-        context.dolakes = options.lakes;
         context.dodeltas = options.deltas;
         context.socialoptions = socialoptions;
         context.landshape = landshape;

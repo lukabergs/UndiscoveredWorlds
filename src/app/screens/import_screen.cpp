@@ -22,8 +22,6 @@ void Application::updateimportscreen()
             const GenerationWorkbenchPanelResult workbenchpanel = drawgenerationworkbenchpanel(main_viewport, window_flags, displayedworkbenchworld, generationworkbench);
 
             GenerationExecutionContext workbenchcontext;
-            workbenchcontext.dorivers = currentrivers;
-            workbenchcontext.dolakes = currentlakes;
             workbenchcontext.dodeltas = currentdeltas;
             workbenchcontext.socialoptions = socialoptionsfromworldcontrols();
             workbenchcontext.landshape = landshape;
@@ -453,7 +451,7 @@ void Application::updateimportscreen()
         if (standardbutton("Workbench"))
         {
             initializeimportedworkbenchsession(generationworkbench, *world, importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation);
-            previewcurrentgenerationstage(generationworkbench, *world, GenerationExecutionContext{ currentrivers, currentlakes, currentdeltas, socialoptionsfromworldcontrols(), landshape, chainland, smalllake, largelake, &OKmountains, (importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation) ? &importedclimatemaps : nullptr }, nullptr);
+            previewcurrentgenerationstage(generationworkbench, *world, GenerationExecutionContext{ currentdeltas, socialoptionsfromworldcontrols(), landshape, chainland, smalllake, largelake, &OKmountains, (importedclimatemaps.hasTemperature || importedclimatemaps.hasPrecipitation) ? &importedclimatemaps : nullptr }, nullptr);
             invalidateGlobalMaps();
             showGlobalMapView(preferredworkbenchmapview(getcurrentgenerationstage(generationworkbench).id));
         }

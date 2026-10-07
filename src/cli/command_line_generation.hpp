@@ -29,8 +29,6 @@ struct CommandLineGenerationOptions
 {
     bool run = false;
     bool showHelp = false;
-    bool rivers = true;
-    bool lakes = true;
     bool deltas = true;
     bool socialEnabled = false;
     SocialGenerationOptions::Mode socialMode = SocialGenerationOptions::Mode::static_ex_nihilo;
@@ -86,7 +84,7 @@ struct GenerationExecutionContext;
 // Runs a recipe on an imported world (imported-world or earth-climate).
 RecipeRunResult runimportedworldrecipe(planet& world, const WorldRecipe& recipe, const GenerationExecutionContext& context,
     const RecipeRunOptions& runoptions);
-void completeimportedworldgeneration(planet& world, bool dorivers, bool dolakes, bool dodeltas,
+void completeimportedworldgeneration(planet& world, bool dodeltas,
     const SocialGenerationOptions& socialoptions, boolshapetemplate smalllake[], boolshapetemplate largelake[],
     boolshapetemplate landshape[], std::vector<std::vector<bool>>& okmountains,
     const ImportedClimateMaps* importedclimate = nullptr, bool climateOnly = false);
