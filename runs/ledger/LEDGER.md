@@ -65,6 +65,7 @@ Lessons:
 | `erosion-0024` | 2026-10-07 | changed as intended | keep | erosion plan, step H3: enclosed below-sea basins are depressions for the lake balance, not sea |
 | `erosion-0025` | 2026-10-07 | changed as intended | keep | erosion plan, step H4a (C10, first half): eroded-world becomes procedural-world; imported worlds on the new hydrology |
 | `erosion-0026` | 2026-10-07 | equivalent | keep | erosion plan, step H4b (C10, second half): the legacy hydrology deleted |
+| `erosion-0027` | 2026-10-07 | pending user review | keep | erosion plan, step H5: the Phase H close (erosion run 8, the promoted procedural-world at 256 columns) |
 
 Lessons:
 

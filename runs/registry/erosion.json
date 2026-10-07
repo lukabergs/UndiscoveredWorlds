@@ -51,6 +51,13 @@
       "run": "runs/erosion/7",
       "date": "2026-10-07T14:42:35+00:00",
       "label": "erosion plan D close: judging run of eroded-world at 256 columns after Phase D (K 750 from D0; the engine's rock uplift with sea cells, D1); settings of run 5, compared with run 5"
+    },
+    {
+      "id": 8,
+      "status": "complete",
+      "run": "runs/erosion/8",
+      "date": "2026-10-07T19:54:31+00:00",
+      "label": "erosion plan H5: judging run of the promoted procedural-world at 256 columns after Phase H (implicit engine rivers, uplift in the plate's frame, enclosed basins as lakes, the legacy hydrology removed); settings of run 7, compared with run 7"
     }
   ]
 }
