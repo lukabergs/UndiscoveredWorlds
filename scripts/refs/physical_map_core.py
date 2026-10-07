@@ -22,6 +22,7 @@ from rasterio.transform import from_bounds
 from rasterio.warp import reproject, Resampling
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uwtools import palettes
 from uwtools.hashing import sha256
 from cell_grid import conservative_remap, grid_dimensions
 
@@ -38,6 +39,27 @@ WORLD_COVER = {
     90: ('Herbaceous wetland', '#0096a0'), 95: ('Mangroves', '#00cf75'),
     100: ('Moss and lichen', '#fae6a0'),
 }
+# Layers of a quantity the generated maps also show are drawn with that map's project palette
+# (configs/tectonics-palettes.json, its full range) instead of a provider CPT or cmocean ramp.
+# key: (palette, conversion of the layer's units to the palette's: a factor, 'log10', or 'metres'
+# (factor from the layer's units through METRES), note). CRUST1.0 solid crust thickness is total
+# crust, oceanic included, not the generated continental crust: it keeps its own palette.
+PROJECT_PALETTES = {
+    'hydrology/rivers_discharge': ('tectonics:discharge_log', 'log10', 'm3 s-1 shown as log10 m3/s; no discharge is dark'),
+    'hydrology/lake_depth': ('tectonics:lake_depth_m', 1,
+                             'HydroLAKES mean depth of each lake at its pour point, not the generated per-cell filled depth'),
+    'tectonics/seafloor_age': ('tectonics:crust_age_myr', 1, 'Ma as Myr'),
+    'crust/sediment_thickness': ('tectonics:sediment_m', 'metres', 'shown in m'),
+    'geology/marine_sediment_thickness': ('tectonics:sediment_m', 'metres', 'shown in m'),
+}
+METRES = {'m': 1, 'metres': 1, 'meters': 1, 'km': 1000}
+# Categorical layers coloured like the generated maps: basins fold their code onto 12 classes
+# (code % 12 + 1, as the generated basin maps fold the outlet); plates take the plate-id colour.
+CATEGORY_PALETTES = {'hydrology/basin_level3': 'tectonics:category_12', 'tectonics/plates/': 'tectonics:plate_id'}
+
+
+def hexadecimal(colour):
+    return '#'+''.join(f'{int(c):02x}' for c in colour)
 
 
 def slug(value):
@@ -151,9 +173,39 @@ class Layer:
     colours: list | None = None
     bands: list | None = None
     zero_colour: str | None = None
+    project_palette: str | None = None
+    palette_conversion: float | str = 1
 
     def __post_init__(self):
-        if self.palette_source==CMO_SOURCE and not self.palette.startswith('cmo.'):
+        project = PROJECT_PALETTES.get(self.key)
+        category = next((palette for prefix, palette in CATEGORY_PALETTES.items() if self.key.startswith(prefix)), None)
+        version = palettes.tectonics()['version']
+        if project:
+            self.project_palette, self.palette_conversion, note = project
+            if self.palette_conversion == 'metres':
+                if self.units not in METRES:
+                    raise ValueError(f'{self.key}: no conversion from {self.units!r} to metres')
+                self.palette_conversion = METRES[self.units]
+            stops = palettes.palette_stops(self.project_palette)
+            low, high = stops[0][0], stops[-1][0]
+            logarithmic = self.palette_conversion == 'log10'
+            self.limits = (10**low, 10**high) if logarithmic else (low/self.palette_conversion, high/self.palette_conversion)
+            self.scale = 'log' if logarithmic else 'linear'
+            self.palette, self.bands = self.project_palette, None
+            self.palette_status = (f'Project palette {self.project_palette} ({version}), shared with the generated maps'
+                                   + (f'; {note}' if note else ''))
+            self.palette_source = palettes.TECTONICS_PATH.relative_to(palettes.ROOT).as_posix()
+        elif category:
+            spec = palettes.tectonics()['fields'][category.partition(':')[2]]
+            colour = ((lambda code: spec['colours'][int(code) % 12 + 1]) if 'colours' in spec else palettes.identity_colour)
+            self.classes = {int(code): (label, hexadecimal(colour(code))) for code, (label, _) in self.classes.items()}
+            self.palette_status = (f'Project palette {category} ({version}), shared with the generated maps'
+                                   + ('; code folded onto 12 colours (code % 12 + 1)' if 'colours' in spec else ''))
+            self.palette_source = palettes.TECTONICS_PATH.relative_to(palettes.ROOT).as_posix()
+        elif self.project_palette:
+            # A manifest record drawn with a project palette that the mapping no longer assigns.
+            raise ValueError(f'{self.key}: its project palette {self.project_palette} is no longer assigned; rerun its family')
+        elif self.palette_source==CMO_SOURCE and not self.palette.startswith('cmo.'):
             self.palette_source=('manifest.json' if self.classes else
                                  'https://matplotlib.org/stable/users/explain/colors/colormaps.html')
 
@@ -180,7 +232,18 @@ def band_rgb(values,bands):
     return np.rint(output).astype('uint8')
 
 
+def project_values(values, layer):
+    """Values in the units of the layer's project palette."""
+    if layer.palette_conversion == 'log10':
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.where(values > 0, np.log10(np.where(values > 0, values, 1.0)), np.nan)
+    return values * layer.palette_conversion
+
+
 def colour_table(layer):
+    if layer.project_palette:
+        stops = palettes.palette_stops(layer.project_palette)
+        return palettes.palette_rgb(np.linspace(stops[0][0], stops[-1][0], 256)[None, :], layer.project_palette)[0]
     if layer.bands:
         return band_rgb(np.linspace(*layer.limits,256),layer.bands)
     if layer.colours is not None:
@@ -198,6 +261,8 @@ def rgba(values, layer):
             mask = valid & (values == int(code))
             output[mask,:3] = tuple(bytes.fromhex(colour.lstrip('#')))
         valid &= np.isin(values, list(map(int,layer.classes)))
+    elif layer.project_palette:
+        output[:,:,:3] = palettes.palette_rgb(project_values(np.where(valid, values, np.nan), layer), layer.project_palette)
     elif layer.bands:
         output[:,:,:3]=band_rgb(np.where(valid,values,layer.limits[0]),layer.bands)
     else:
@@ -347,6 +412,7 @@ class Atlas:
                                 png=str(png.relative_to(self.output)).replace('\\','/'),
                                 tiff=str(tif.relative_to(self.output)).replace('\\','/'),
                                 png_sha256=sha256(png),tiff_sha256=sha256(tif)))
+        palettes.write_sidecar(self.output/'maps')
         entry = dict(vars(layer),legend=str(legend_path.relative_to(self.output)).replace('\\','/'),outputs=records)
         self.products=[p for p in self.products if p['key']!=layer.key]+[entry]
         self.save()

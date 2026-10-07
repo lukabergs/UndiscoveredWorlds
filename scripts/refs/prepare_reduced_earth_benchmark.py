@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import references
+from uwtools import palettes, references
 from uwtools.hashing import sha256
 from cell_grid import conservative_remap, grid_dimensions, latitude_centres
 from reference_climate_maps import export_additional, export_diagnostics, export_koppen, load_diagnostics
@@ -181,6 +181,14 @@ def refresh_additional_maps(args, widths):
     temporary = manifest_path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     temporary.replace(manifest_path)
+    write_sidecars(args.output_root)
+
+
+def write_sidecars(root: Path) -> None:
+    """palette.json in every maps folder this script writes (uwtools.palettes)."""
+    for directory in (root / "land_ocean" / "maps", root / "climate" / "maps"):
+        if directory.is_dir():
+            palettes.write_sidecar(directory)
 
 
 def load_precipitation(path: Path) -> np.ndarray:
@@ -236,46 +244,28 @@ def write_grid_csv(path: Path, values: np.ndarray) -> None:
             )
 
 
-def _palette(values: np.ndarray, anchors: tuple[tuple[float, tuple[int, int, int]], ...]) -> np.ndarray:
-    levels = np.asarray([anchor[0] for anchor in anchors], dtype=np.float32)
-    colours = np.asarray([anchor[1] for anchor in anchors], dtype=np.float32)
-    rgb = np.empty((*values.shape, 3), dtype=np.uint8)
-    for channel in range(3):
-        rgb[..., channel] = np.clip(
-            np.interp(np.where(np.isfinite(values), values, 0), levels, colours[:, channel]), 0.0, 255.0
-        ).astype(np.uint8)
-    rgb[~np.isfinite(values)] = 0
-    return rgb
+# Preview palettes: the project palettes of the generated maps of the same quantity
+# (configs/climate-palettes.json, configs/tectonics-palettes.json). Sea depth is drawn
+# as negative elevation; cells of the other class are missing.
+VISUAL_PALETTES = {
+    "temperature": "climate:air_temperature",
+    "precipitation": "climate:annual_rain",
+    "land": "tectonics:elevation",
+    "sea": "tectonics:elevation",
+}
 
 
 def visual_palette(quantity: str):
-    from climate_palettes import anchors
-    temperature = anchors(-54, 40, True)
-    precipitation = anchors(0, 6000)
-    land = (
-        (0.0, (0, 0, 0)),
-        (1.0, (66, 92, 45)),
-        (1500.0, (153, 137, 94)),
-        (4000.0, (193, 177, 150)),
-        (6500.0, (245, 244, 239)),
-    )
-    sea = (
-        (0.0, (0, 0, 0)),
-        (1.0, (86, 155, 177)),
-        (3000.0, (22, 72, 125)),
-        (11000.0, (5, 28, 60)),
-    )
-    return {
-        "temperature": temperature,
-        "precipitation": precipitation,
-        "land": land,
-        "sea": sea,
-    }[quantity]
+    """(value, RGB) anchors of a preview, in its palette's units (sea: negative elevation)."""
+    return palettes.palette_stops(VISUAL_PALETTES[quantity])
 
 
 def write_visual_map(path: Path, values: np.ndarray, quantity: str) -> None:
+    values = values.astype(np.float32)
+    if quantity in ("land", "sea"):
+        values = np.where(values > 0, values if quantity == "land" else -values, np.nan)
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(_palette(values.astype(np.float32), visual_palette(quantity)), mode="RGB").save(path)
+    Image.fromarray(palettes.palette_rgb(values, VISUAL_PALETTES[quantity]), mode="RGB").save(path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -420,7 +410,8 @@ def main() -> None:
         ):
             with Image.open(png) as preview:
                 source = args.precipitation if name == "precipitation" else args.temperature if name == "temperature" else args.elevation
-                emit(name, values, preview.copy(), unit, category=category, sources=[source.as_posix()])
+                emit(name, values, preview.copy(), unit, category=category, sources=[source.as_posix()],
+                     display=dict(palette=VISUAL_PALETTES[name], limit=None, factor=-1 if name == "sea" else 1))
         if monthly_precipitation is not None:
             export_koppen(temperature_layers, monthly_precipitation, width, mask, emit)
             products[-1]["sources"] = [args.temperature.as_posix(), args.monthly_precipitation.as_posix()]
@@ -497,8 +488,9 @@ def main() -> None:
                 "conservative averaging; units remain degrees C"
             ),
             "visual_palettes": (
-                "temperature and precipitation use the simulator benchmark anchors; "
-                "land elevation and sea depth use fixed metre palettes"
+                "the project palettes of the generated maps (palette.json beside the maps): "
+                "temperature climate:air_temperature, precipitation climate:annual_rain, "
+                "land elevation and sea depth tectonics:elevation (depth as negative elevation)"
             ),
             "numeric_fields": "Single-channel IEEE float32 GeoTIFF, EPSG:4326, pixel-is-area, nodata=-9999.9; no display clamping",
             "vectors": "Eastward and northward components in physical units; northward is negated only for screen coordinates",
@@ -520,6 +512,7 @@ def main() -> None:
     manifest_path.write_text(
         json.dumps(receipt, indent=2) + "\n", encoding="utf-8"
     )
+    write_sidecars(args.output_root)
     for missing in records[0]["unavailable"]:
         print(f"Unavailable {missing['product']}: {missing['reason']}", flush=True)
 

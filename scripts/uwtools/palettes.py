@@ -43,6 +43,66 @@ def climate_field_rgb(values, field):
     return climate_rgb(values, low, high, low < 0)
 
 
+def climate_scale(field):
+    """(low, high) of a climate scale."""
+    low, high = climate()['scales'][field]
+    return low, high
+
+
+def tectonics_stops(spec, definition=None):
+    """(value, RGB) anchors of a continuous tectonics field: its stops, or the sequential ramp over its range."""
+    if 'stops' in spec:
+        return spec['stops']
+    low, high = spec['range']
+    return [(low + t * (high - low), rgb) for t, rgb in (definition or tectonics())['sequential']]
+
+
+def identity_colour(identity):
+    """Colour of an identity (plate index or id) on an 'ids' tectonics field."""
+    import colorsys
+    return [round(c * 255) for c in colorsys.hsv_to_rgb((int(identity) * .61803398875) % 1, .52, .92)]
+
+
+def tectonics_rgb(values, name):
+    """Identities, labelled classes or interpolated stops of tectonics field `name`."""
+    import numpy as np
+    from .map_rendering import categories, colourize
+    definition = tectonics()
+    spec = definition['fields'][name]
+    if spec.get('ids'):
+        colours = {int(identity): identity_colour(identity) for identity in np.unique(values[np.isfinite(values)])}
+        return categories(values, colours, definition['missing'])
+    if 'colours' in spec:
+        return categories(values, dict(enumerate(spec['colours'])), definition['missing'])
+    return colourize(values, tectonics_stops(spec, definition), definition['missing'])
+
+
+def palette_stops(palette):
+    """(value, RGB) anchors of a continuous palette 'climate:<scale>' or 'tectonics:<field>', in its own units."""
+    family, _, name = palette.partition(':')
+    if family == 'climate':
+        definition = climate()
+        low, high = definition['scales'][name]
+        return climate_anchors(low, high, low < 0, definition)
+    if family == 'tectonics':
+        definition = tectonics()
+        spec = definition['fields'][name]
+        if spec.get('ids') or 'colours' in spec:
+            raise ValueError(f'{palette} is categorical')
+        return tectonics_stops(spec, definition)
+    raise ValueError(f'Unknown palette {palette!r}; use climate:<scale> or tectonics:<field>')
+
+
+def palette_rgb(values, palette):
+    """RGB of values in palette 'climate:<scale>' or 'tectonics:<field>' (the generated maps' rule)."""
+    family, _, name = palette.partition(':')
+    if family == 'climate':
+        return climate_field_rgb(values, name)
+    if family == 'tectonics':
+        return tectonics_rgb(values, name)
+    raise ValueError(f'Unknown palette {palette!r}; use climate:<scale> or tectonics:<field>')
+
+
 SIDECAR = 'palette.json'
 SIDECAR_SCHEMA = 'uw-palette/v1'
 

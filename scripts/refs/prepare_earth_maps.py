@@ -17,7 +17,7 @@ from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import grid
+from uwtools import grid, palettes
 from uwtools.hashing import sha256
 
 ROOT = Path(__file__).resolve().parents[2] / "refs"
@@ -247,15 +247,14 @@ def preview():
         land = np.asarray(image) > 0
     with Image.open(MASKS["lakes"]) as image:
         lakes = np.asarray(image) > 0
-    rgb = np.empty((HEIGHT, WIDTH, 3), dtype=np.uint8)
-    for channel in range(3):
-        water = np.interp(height, [-11000, 0], [(5, 28, 60)[channel], (86, 155, 177)[channel]])
-        ground = np.interp(height, [-500, 0, 1500, 4000, 6500],
-                           [(118, 142, 91)[channel], (151, 172, 108)[channel],
-                            (158, 143, 105)[channel], (186, 169, 141)[channel], (245, 244, 239)[channel]])
-        rgb[:, :, channel] = np.where(land, ground, water).astype(np.uint8)
-    rgb[lakes] = (70, 144, 182)
+    # The generated maps' palettes: tectonics:elevation, with the land mask deciding the side of
+    # sea level (land below it, e.g. the Dead Sea shore, takes the sea-level land colour), and
+    # tectonics:lake_surface_m for lake surfaces, as on the generated lake-elevation maps.
+    shown = np.where(land, np.maximum(height, 0), np.minimum(height, -1))
+    rgb = palettes.palette_rgb(shown, "tectonics:elevation")
+    rgb[lakes] = palettes.palette_rgb(height[lakes], "tectonics:lake_surface_m")
     Image.fromarray(rgb).save(METADATA / "earth_height_preview.png")
+    palettes.write_sidecar(METADATA)
     sheet = Image.new("RGB", (2080, 1136), "#151b24")
     draw = ImageDraw.Draw(sheet)
     font_path = Path("C:/Windows/Fonts/segoeui.ttf")

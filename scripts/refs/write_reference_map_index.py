@@ -9,9 +9,10 @@ from pathlib import Path
 
 import numpy as np
 
-from reference_map_rendering import scalar_rgb
+from reference_map_rendering import display_stops
 from reference_map_layout import product_directory
-from climate_palettes import anchors, VERSION
+from reference_climate_maps import additional_display, product_display
+from climate_palettes import VERSION
 
 
 def module_at(path):
@@ -21,17 +22,20 @@ def module_at(path):
     return module
 
 
-def colours(levels, limit, palette, legacy=False):
-    if legacy:
-        stops=((0,(5,12,24)),(.55*limit,(18,125,175)),(limit,(250,235,125))) if palette=='speed' else (
-            ((-limit,(25,175,245)),(0,(18,20,25)),(limit,(245,120,35))) if palette=='divergence' else
-            ((-limit,(225,75,45)),(0,(18,20,25)),(limit,(45,220,185))))
-        rgb=np.rint(np.stack([np.interp(levels,[v for v,_ in stops],[c[i] for _,c in stops]) for i in range(3)],axis=-1)).astype(int)
-    else:
-        stops=anchors(0 if palette=='speed' else -limit,limit,palette!='speed')
-        return [(v,'#'+''.join(f'{c:02x}' for c in rgb)) for v,rgb in stops]
-    return [(level, "#" + "".join(f"{int(c):02x}" for c in colour))
-            for level, colour in zip(levels, rgb)]
+UNKNOWN = "Unknown palette: this product does not record the palette its PNG was drawn with; the legend is the renderer's palette and may not match the image."
+
+
+def hexadecimal(stops):
+    return [(value, "#" + "".join(f"{int(c):02x}" for c in colour)) for value, colour in stops]
+
+
+def legacy_colours(levels, limit, palette):
+    """Anchors of the renderer palettes before climate-colour-v2, for products still rendered with them."""
+    stops=((0,(5,12,24)),(.55*limit,(18,125,175)),(limit,(250,235,125))) if palette=='speed' else (
+        ((-limit,(25,175,245)),(0,(18,20,25)),(limit,(245,120,35))) if palette=='divergence' else
+        ((-limit,(225,75,45)),(0,(18,20,25)),(limit,(45,220,185))))
+    rgb=np.rint(np.stack([np.interp(levels,[v for v,_ in stops],[c[i] for _,c in stops]) for i in range(3)],axis=-1)).astype(int)
+    return hexadecimal(zip(levels, rgb))
 
 
 def describe(product, additional, generator):
@@ -39,10 +43,16 @@ def describe(product, additional, generator):
     key = name[4:] if name[:3] in ("jan", "apr", "jul", "oct") else name
     notes = product.get("numeric_meaning", product.get("comparison", ""))
     legacy=product.get('palette_version')!=VERSION
+    # The display a product's PNG was drawn with, recorded when it was written; products
+    # written before that fall back to the renderer palettes, flagged as unknown.
+    shown = product.get("display")
+    if shown is None and key != "koppen":
+        notes = (notes + " " if notes else "") + UNKNOWN
     if key in ("temperature", "precipitation"):
         old={'temperature':[(-54,'#e1e1e1'),(-40,'#b900ff'),(-25,'#2d00ff'),(-10,'#0069ff'),(0,'#00dce6'),(10,'#00cd46'),(20,'#ffe600'),(30,'#dc2d00')],
              'precipitation':[(0,'#040a23'),(250,'#0c235f'),(500,'#0f50a0'),(1000,'#0a96cd'),(1500,'#0faf5a'),(2500,'#87cd23'),(3500,'#f5e119'),(4500,'#fa7314'),(6000,'#dc1914')]}
-        stops = old[key] if legacy else [(v, "#" + "".join(f"{c:02x}" for c in rgb)) for v, rgb in generator.visual_palette(key)]
+        stops = (hexadecimal(display_stops(**shown)) if shown else
+                 old[key] if legacy else hexadecimal(generator.visual_palette(key)))
         description = {"temperature": "Four representative months of WorldClim near-surface air temperature, averaged over land",
                        "precipitation": "IMERG annual precipitation, land and ocean"}[key]
         return description, stops, product["units"], notes
@@ -50,7 +60,9 @@ def describe(product, additional, generator):
         return "Observed monthly-temperature/rainfall derived Koeppen-Geiger climate class", [], "category", notes
     if key in additional:
         record = additional[key]
+        dataset = key[:-len(record["variable"]) - 1]
         limit, palette = record["limit"], record["palette"]
+        display = additional_display(dataset, record)
         description = record.get("description") or key.replace("_", " ")
         if key.startswith("ceres_"):
             words = {"toa": "top of atmosphere", "sfc": "surface", "sw": "shortwave",
@@ -70,7 +82,6 @@ def describe(product, additional, generator):
         layer, style = key.split("_wind_", 1)
         description = f"{layer} wind {style}; " + {"surface": "10 m", "upper": "500 hPa", "850hpa": "850 hPa"}[layer]
         limit, palette = 25, "divergence" if style in ("east", "north") else "speed"
-        if not legacy:limit={'surface':25,'850hpa':30,'upper':40}[layer]
         if style in ("lic", "particles"):
             notes += " Background colour is speed tinted by land/ocean and texture; arrows show direction. The PNG has no exact scalar colour lookup."
     elif key.endswith("_divergence"):
@@ -87,11 +98,15 @@ def describe(product, additional, generator):
             "moisture_flux_convergence": ("Vapour convergence computed on this output grid, positive moisture supply", 20, "convergence"),
             "ocean_current_speed": ("Speed of the mean GLORYS near-surface current vector; arrows show direction", 2, "speed"),
         }[key]
-    if not legacy:
-        limit={'column_water':65,'column_moisture_flux':800,'column_moisture_flux_east':800,'column_moisture_flux_north':800,'ocean_current_speed':1}.get(key,limit)
-    levels = (0, limit * .55, limit) if palette == "speed" else (-limit, 0, limit)
     unit = "m/s background" if key.endswith(("_lic", "_particles")) else product["units"]
-    return description, colours(levels, limit, palette,legacy), unit, notes
+    if shown:
+        return description, hexadecimal(display_stops(**shown)), unit, notes
+    if not legacy or ":" in palette:
+        # Current products: the anchors of the palette the renderer used (uwtools.palettes).
+        display = display if key in additional else product_display(key)
+        return description, hexadecimal(display_stops(*display)), unit, notes
+    levels = (0, limit * .55, limit) if palette == "speed" else (-limit, 0, limit)
+    return description, legacy_colours(levels, limit, palette), unit, notes
 
 
 def legend(stops, unit):

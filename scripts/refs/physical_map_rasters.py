@@ -58,7 +58,9 @@ def crust(atlas):
             specs.append((name+'_'+param,values,name.replace('_',' ').title()+' '+{'rho':'density','vp':'P-wave speed','vs':'S-wave speed'}[param],units,limits,palette))
     for key,data,title,units,limits,palette in specs:
         layer=Layer('crust/'+key,title,units,'crust1-2013',limits,palette,
-                    notes='CRUST1.0 1-degree layered model. Solid thickness excludes water and ice; Moho depth uses sea level.',period='2013 model')
+                    notes='CRUST1.0 1-degree layered model. Solid thickness excludes water and ice; Moho depth uses sea level.'
+                          +(' Kept on its own palette, not the generated continental_crust_m: this is total solid crust, oceanic crust (about 6-7 km) included, a different quantity from continental crust.' if key=='solid_crust_thickness' else ''),
+                    period='2013 model')
         atlas.emit(layer,lambda w,a=data:regular_grid(a,lat,lon,w))
 
 
@@ -100,6 +102,7 @@ def seafloor(atlas):
     with netCDF4.Dataset(p) as ds:
         lon=ds['lon'][:];lat=ds['lat'][:];data=as_float(ds['z'][:])
         units=getattr(ds['z'],'units','m')
+    # The units attribute sets the conversion to the project palette's metres (physical_map_core.METRES).
     atlas.emit(Layer('geology/marine_sediment_thickness','Marine sediment thickness',units,'globsed-v3',(0,10000),'cmo.turbid',period='GlobSed v3'),
                lambda w:regular_grid(data,lat,lon,w))
 

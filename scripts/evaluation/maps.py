@@ -14,7 +14,6 @@ outlets, or the reference major rivers) and is skipped when the entry was not co
 one APNG per map and season; plate colours in them follow identities tracked from frame
 to frame (track_identities), because the engine's plate index is not persistent.
 """
-import colorsys
 import json
 import sys
 from pathlib import Path
@@ -85,33 +84,15 @@ TRACKED = 'colours follow plate identities tracked by cell overlap between conse
 
 
 def tectonics_stops(spec):
-    if 'stops' in spec:
-        return spec['stops']
-    low, high = spec['range']
-    return [(low + t * (high - low), rgb) for t, rgb in TECTONICS['sequential']]
-
-
-def tectonics_rgb(values, name):
-    """The rule of tectonics_report.py: identities, labelled classes or interpolated stops."""
-    spec = TECTONICS['fields'][name]
-    if spec.get('ids'):
-        colours = {int(identity): [round(c * 255) for c in colorsys.hsv_to_rgb((int(identity) * .61803398875) % 1, .52, .92)]
-                   for identity in np.unique(values[np.isfinite(values)])}
-        return map_rendering.categories(values, colours, TECTONICS['missing'])
-    if 'colours' in spec:
-        return map_rendering.categories(values, dict(enumerate(spec['colours'])), TECTONICS['missing'])
-    return map_rendering.colourize(values, tectonics_stops(spec), TECTONICS['missing'])
+    return palettes.tectonics_stops(spec, TECTONICS)
 
 
 def palette_rgb(values, palette):
+    """climate:<scale> and tectonics:<field> resolve in uwtools.palettes, shared with the reference renderers."""
     family, _, name = palette.partition(':')
-    if family == 'climate':
-        return palettes.climate_field_rgb(values, name)
     if family == 'climate-difference':
         return map_rendering.colourize(values, difference_stops(name), CLIMATE['missing'])
-    if family == 'tectonics':
-        return tectonics_rgb(values, name)
-    raise ValueError(f'Unknown palette {palette!r}; use climate:<scale> or tectonics:<field>')
+    return palettes.palette_rgb(values, palette)
 
 
 def difference_stops(scale):

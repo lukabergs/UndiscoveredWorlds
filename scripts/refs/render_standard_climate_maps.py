@@ -10,7 +10,7 @@ ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'scripts/ben
 from climate_palettes import VERSION
 from standard_climate_rendering import FIELDS,magnitude,SOURCES,full_reference,save_map,save_ocean_flow,flow_complete,flow_path,write_reference_index
 sys.path.insert(0,str(ROOT/'scripts'))
-from uwtools import references
+from uwtools import palettes, references
 from uwtools.hashing import sha256
 
 def main():
@@ -39,4 +39,5 @@ def main():
         images_sha256={str((parent/path).relative_to(ROOT)):sha256(parent/path) for path in records.values()})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     write_reference_index(out,records,coverage,parent)
+    palettes.write_sidecar(out.parent)
 if __name__=='__main__':main()

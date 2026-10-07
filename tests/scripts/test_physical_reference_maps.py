@@ -111,6 +111,26 @@ class ColourAndExportTests(unittest.TestCase):
         self.assertEqual(out[0,1].tolist(),[0,100,200,255])
         self.assertEqual(out[0,2].tolist(),[0,0,0,0])
 
+    def test_shared_quantities_use_the_generated_palette(self):
+        from uwtools import palettes
+        import cmocean
+        sediment=Layer('crust/sediment_thickness','Sediment','km','test',(0,15),'cmo.turbid')
+        np.testing.assert_array_equal(rgba(np.array([[1.]]),sediment)[0,0,:3],
+                                      palettes.palette_rgb(np.array([[1000.]]),'tectonics:sediment_m')[0,0])
+        globsed=Layer('geology/marine_sediment_thickness','Sediment','m','test',(0,10000),'cmo.turbid')
+        np.testing.assert_array_equal(rgba(np.array([[1000.]]),globsed)[0,0,:3],
+                                      palettes.palette_rgb(np.array([[1000.]]),'tectonics:sediment_m')[0,0])
+        with self.assertRaises(ValueError):
+            Layer('geology/marine_sediment_thickness','Sediment','furlong','test',(0,10000),'cmo.turbid')
+        discharge=Layer('hydrology/rivers_discharge','Discharge','m3 s-1','test',(1,100000),'cmo.deep','log')
+        np.testing.assert_array_equal(rgba(np.array([[1000.]]),discharge)[0,0,:3],
+                                      palettes.palette_rgb(np.array([[3.]]),'tectonics:discharge_log')[0,0])
+        # Total solid crust is not the generated continental crust: its former palette stays.
+        crust=Layer('crust/solid_crust_thickness','Crust','km','test',(0,80),'cmo.deep')
+        self.assertIsNone(crust.project_palette)
+        former=np.rint(cmocean.cm.deep(np.linspace(0,1,256))[:,:3]*255).astype('uint8')[128]
+        np.testing.assert_array_equal(rgba(np.array([[40.]]),crust)[0,0,:3],former)
+
     def test_provider_cpt_thresholds_are_not_smoothed(self):
         colours=band_rgb(np.array([1,49,51,199]),provider_cpt('fullrategrid.cpt'))
         self.assertEqual(colours[0].tolist(),[255,0,255])

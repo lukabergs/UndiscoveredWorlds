@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw, TiffImagePlugin
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'benchmarks'))
 from climate_palettes import rgb as shared_rgb
+from uwtools import palettes
 
 from cell_grid import latitude_centres, latitude_edges
 
@@ -35,6 +36,25 @@ def write_float32_geotiff(path: Path, values: np.ndarray) -> None:
 
 def scalar_rgb(values, limit, palette="speed"):
     return shared_rgb(values, 0 if palette == 'speed' else -limit, limit, palette != 'speed')
+
+
+def display_rgb(values, palette, limit=None, factor=1):
+    """A project palette "climate:<scale>" or "tectonics:<field>" over its configured range (the
+    generated maps' palette of the same quantity), else the shared ramp over a fixed limit
+    ("speed" 0..limit, otherwise signed). factor converts values to the palette's units."""
+    values = np.asarray(values) * factor
+    if ':' in palette:
+        return palettes.palette_rgb(values, palette)
+    return scalar_rgb(values, limit, palette)
+
+
+def display_stops(palette, limit=None, factor=1):
+    """(value, RGB) anchors of display_rgb in the values' own units."""
+    if ':' in palette:
+        stops = palettes.palette_stops(palette)
+    else:
+        stops = palettes.climate_anchors(0 if palette == 'speed' else -limit, limit, palette != 'speed')
+    return sorted(((value / factor, colour) for value, colour in stops), key=lambda stop: stop[0])
 
 
 def divergence(east, north):

@@ -24,6 +24,7 @@ maps = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(maps)
 import reference_map_rendering as rendering
 import reference_climate_maps as climate_maps
+from uwtools import palettes
 
 
 class EarthBenchmarkMapTests(unittest.TestCase):
@@ -190,7 +191,7 @@ class EarthBenchmarkMapTests(unittest.TestCase):
             bundle("oisst", "sst_monthly", "sst", 20)
             (sources / "oisst/4/oisst-additional-preparation.json").write_text(json.dumps(dict(
                 family="oisst", width=4, height=2, products=[dict(bundle="fields/sst_monthly.npy", variable="sst",
-                units="degrees C", ocean_only=True, limit=35, palette="divergence",
+                units="degrees C", ocean_only=True, limit=None, palette="climate:sst_oisst",
                 sources=["fixture"], period="2001-2020 monthly climatology")])) )
             with patch.object(sys, "argv", argv + ["--refresh-additional", "--additional-family", "oisst"]):
                 maps.main()
@@ -201,8 +202,31 @@ class EarthBenchmarkMapTests(unittest.TestCase):
                 self.assertEqual(next(p for p in before["products"] if p["name"] == "jan_surface_wind_lic"),
                                  products["jan_surface_wind_lic"])
                 self.assertIn("jan_oisst_sst", products)
+                # The record names the palette its PNG was drawn with; the PNG has its colours.
+                self.assertEqual(products["jan_oisst_sst"]["display"],
+                                 dict(palette="climate:sst_oisst", limit=None, factor=1))
+                with Image.open(output / products["jan_oisst_sst"]["maps"][0]["file"]) as image:
+                    ocean = np.asarray(image.convert("RGB"))[0, -1]
+                np.testing.assert_array_equal(ocean, palettes.palette_rgb(np.array([[20.]]), "climate:sst_oisst")[0, 0])
                 self.assertFalse(any(p["product"] == "sea_surface_temperature" for p in after["unavailable"]))
                 self.assertTrue(any(p["product"] == "ocean_currents" for p in after["unavailable"]))
+
+    def test_reference_displays_match_the_generated_palettes(self):
+        def same(values, display, palette, shown):
+            np.testing.assert_array_equal(rendering.display_rgb(np.array([values]), *display),
+                                          palettes.palette_rgb(np.array([shown]), palette))
+        t2m = climate_maps.additional_display("era5", {"variable": "t2m"})
+        same([-60., -10., 0., 15., 45.], t2m, "climate:air_temperature", [-60., -10., 0., 15., 45.])
+        same([1.], climate_maps.additional_display("era5", {"variable": "mer"}), "climate:evaporation", [28.935185185185187])
+        same([1.], climate_maps.additional_display("era5land", {"variable": "ro"}), "climate:annual_rain", [365.25])
+        same([1., 40.], climate_maps.product_display("column_water"), "climate:water", [1., 40.])
+        land = np.array([[0., 2000.]], dtype=np.float32)
+        with tempfile.TemporaryDirectory() as temporary:
+            image_path = Path(temporary) / "land.png"
+            maps.write_visual_map(image_path, land, "land")
+            with Image.open(image_path) as image:
+                np.testing.assert_array_equal(np.asarray(image)[0, 1],
+                                              palettes.palette_rgb(np.array([[2000.]]), "tectonics:elevation")[0, 0])
 
     def test_missing_references_are_reported_without_fabricated_maps(self):
         emitted = []

@@ -11,7 +11,7 @@ sys.path.insert(0,str(ROOT/'scripts/benchmarks'))
 from climate_palettes import DEFINITION,VERSION
 from standard_climate_rendering import bundle,save_wind_flow,flow_path,flow_complete
 sys.path.insert(0,str(ROOT/'scripts'))
-from uwtools import references
+from uwtools import palettes, references
 from uwtools.hashing import sha256
 
 def main():
@@ -33,4 +33,5 @@ def main():
         print(field,'reference textures rendered',flush=True)
     (out/'wind-flow-manifest.json').write_text(json.dumps(dict(palette_version=VERSION,inputs_sha256=inputs,products=records,
         seed=20260906,particle_days=4.5,method='Monthly ERA5 vectors; shared LIC and 4.5-day particle kernels and seed with standard model comparisons. Shared palettes and fixed layer speed limits.'),indent=2)+'\n')
+    palettes.write_sidecar(out.parent)
 if __name__=='__main__':main()

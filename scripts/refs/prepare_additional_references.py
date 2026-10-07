@@ -13,47 +13,62 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
-import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools import references
+from uwtools import palettes, references
 from uwtools.hashing import sha256
 from cell_grid import conservative_remap, grid_dimensions
 
 # source variable: (bundle prefix, stored variable, units, scale, offset,
 #                   expected source units, display maximum, palette, ocean only)
+# A palette "climate:<scale>" is the project palette of the generated map of the same
+# quantity over its configured range (display maximum None); "speed" (0..maximum) and
+# "divergence"/"convergence" (-maximum..maximum) are the shared climate ramps for
+# quantities without a generated map. DISPLAY_FACTORS convert stored units to the
+# palette's units for display only; the fields keep their stored units.
+LATENT_HEAT = 2.5e6  # J/kg
+EVAPORATION_W_M2 = LATENT_HEAT / 86400  # W/m2 of latent heat per mm/day of evaporation (28.94)
+DAYS_PER_YEAR = 365.25  # runoff mm/day shown in mm/yr, as the generated runoff map
+DISPLAY_FACTORS = {("era5", "mer"): EVAPORATION_W_M2, ("era5land", "e"): EVAPORATION_W_M2,
+                   ("era5", "mslhf"): -1,  # mslhf is downward positive; evaporation is upward latent heat loss
+                   **{("era5land", key): DAYS_PER_YEAR for key in ("ro", "sro", "ssro")}}
+CURRENT_LIMIT = palettes.climate_scale("current")[1]
 ERA5 = {
     "viwve": ("era5", "viwve", "kg m^-1 s^-1", 1, 0, ("kg m**-1 s**-1",), 500, "divergence", False),
     "viwvn": ("era5", "viwvn", "kg m^-1 s^-1", 1, 0, ("kg m**-1 s**-1",), 500, "divergence", False),
-    "vimd": ("era5", "vimd", "mm/day convergence", -86400, 0, ("kg m**-2 s**-1",), 20, "convergence", False),
-    "sst": ("era5", "sst", "degrees C", 1, -273.15, ("K",), 35, "divergence", True),
-    "t2m": ("era5", "t2m", "degrees C", 1, -273.15, ("K",), 35, "divergence", False),
-    "d2m": ("era5", "d2m", "degrees C", 1, -273.15, ("K",), 35, "divergence", False),
+    "vimd": ("era5", "vimd", "mm/day convergence", -86400, 0, ("kg m**-2 s**-1",), None, "climate:convergence", False),
+    "sst": ("era5", "sst", "degrees C", 1, -273.15, ("K",), None, "climate:sst", True),
+    "t2m": ("era5", "t2m", "degrees C", 1, -273.15, ("K",), None, "climate:air_temperature", False),
+    "d2m": ("era5", "d2m", "degrees C", 1, -273.15, ("K",), None, "climate:air_temperature", False),
     "tcc": ("era5", "tcc", "fraction", 1, 0, ("(0 - 1)", "1"), 1, "speed", False),
     "lcc": ("era5", "lcc", "fraction", 1, 0, ("(0 - 1)", "1"), 1, "speed", False),
     "hcc": ("era5", "hcc", "fraction", 1, 0, ("(0 - 1)", "1"), 1, "speed", False),
     "blh": ("era5", "blh", "m", 1, 0, ("m",), 3000, "speed", False),
     "sp": ("era5", "sp", "hPa", .01, 0, ("Pa",), 1050, "speed", False),
+    # Surface net radiation and latent heat have generated maps; TOA radiation and sensible heat do not.
+    **{key: ("era5", key, "W/m^2 downward positive", 1, 0, ("W m**-2",), None, "climate:surface_radiation", False)
+       for key in ("msnswrf", "msnlwrf")},
     **{key: ("era5", key, "W/m^2 downward positive", 1, 0, ("W m**-2",), 300, "convergence", False)
-       for key in ("msnswrf", "msnlwrf", "mtnswrf", "mtnlwrf", "msshf", "mslhf")},
-    "mer": ("era5", "mer", "mm/day upward positive", -86400, 0, ("kg m**-2 s**-1",), 10, "speed", False),
+       for key in ("mtnswrf", "mtnlwrf", "msshf")},
+    "mslhf": ("era5", "mslhf", "W/m^2 downward positive", 1, 0, ("W m**-2",), None, "climate:evaporation", False),
+    "mer": ("era5", "mer", "mm/day upward positive", -86400, 0, ("kg m**-2 s**-1",), None, "climate:evaporation", False),
 }
 LAND = {
     **{f"swvl{i}": ("era5land", f"swvl{i}", "m^3/m^3", 1, 0, ("m**3 m**-3",), .5, "speed", False)
        for i in range(1, 5)},
-    **{key: ("era5land", key, "mm/day", 1000, 0, ("m", "m of water equivalent"), 10, "speed", False)
+    **{key: ("era5land", key, "mm/day", 1000, 0, ("m", "m of water equivalent"), None, "climate:annual_rain", False)
        for key in ("ro", "sro", "ssro")},
-    "e": ("era5land", "e", "mm/day upward positive", -1000, 0, ("m of water equivalent", "m"), 10, "speed", False),
+    "e": ("era5land", "e", "mm/day upward positive", -1000, 0, ("m of water equivalent", "m"), None, "climate:evaporation", False),
     "sd": ("era5land", "sd", "mm water equivalent", 1000, 0, ("m of water equivalent",), 1000, "speed", False),
     "sde": ("era5land", "snow_depth", "m snow depth", 1, 0, ("m",), 5, "speed", False),
     "snowc": ("era5land", "snowc", "fraction", .01, 0, ("%",), 1, "speed", False),
 }
-OISST = {"sst": ("oisst", "sst", "degrees C", 1, 0, ("degC", "degree_Celsius", "degrees C"), 35, "divergence", True)}
+OISST = {"sst": ("oisst", "sst", "degrees C", 1, 0, ("degC", "degree_Celsius", "degrees C"), None, "climate:sst_oisst", True)}
 MARINE = {
-    **{key: ("glorys", key, "m/s", 1, 0, ("m s-1", "m s^-1", "m/s"), 2, "divergence", True)
+    **{key: ("glorys", key, "m/s", 1, 0, ("m s-1", "m s^-1", "m/s"), CURRENT_LIMIT, "divergence", True)
        for key in ("uo", "vo")},
-    "thetao": ("glorys", "thetao", "degrees C", 1, 0, ("degrees_C", "degree_Celsius", "degrees_Celsius"), 35, "divergence", True),
-    "mlotst": ("glorys", "mlotst", "m", 1, 0, ("m",), 500, "speed", True),
+    "thetao": ("glorys", "thetao", "degrees C", 1, 0, ("degrees_C", "degree_Celsius", "degrees_Celsius"), None, "climate:sst", True),
+    "mlotst": ("glorys", "mlotst", "m", 1, 0, ("m",), None, "climate:storage_depth", True),
 }
 ERA5_ALIASES = dict(zip(
     ("avg_snswrf", "avg_snlwrf", "avg_tnswrf", "avg_tnlwrf", "avg_ishf", "avg_slhtf", "avg_ie"),
@@ -65,8 +80,12 @@ CDS_GROUP_VARIABLES = {
     "energy": {"msnswrf", "msnlwrf", "mtnswrf", "mtnlwrf", "msshf", "mslhf", "mer"},
     "land": set(LAND) - {"sd"},  # The CDS snow_depth request supplies geometric depth (sde).
 }
+# CERES surface net radiation shares the generated surface_radiation palette; top-of-atmosphere
+# radiation, incoming/outgoing components and cloud radiative effects stay on the signed ramp.
+CERES_SURFACE_NET = ("sfc_net_sw_all", "sfc_net_lw_all", "sfc_net_tot_all")
 CERES = {
-    **{key + "_mon": ("ceres", key, "W/m^2 " + direction, 1, 0, ("W m-2",), 400, "convergence", False)
+    **{key + "_mon": ("ceres", key, "W/m^2 " + direction, 1, 0, ("W m-2",),
+                      *((None, "climate:surface_radiation") if key in CERES_SURFACE_NET else (400, "convergence")), False)
        for key, direction in (
            ("toa_sw_all", "outgoing"), ("toa_lw_all", "outgoing"), ("toa_net_all", "downward positive"),
            ("solar", "incoming"), ("sfc_sw_down_all", "downward"), ("sfc_sw_up_all", "upward"),
@@ -81,6 +100,15 @@ CERES = {
     "cldtemp_total_daynight_mon": ("ceres", "cloud_temp", "degrees C", 1, -273.15, ("K",), 60, "divergence", False),
     "cldtau_total_day_mon": ("ceres", "cloud_tau", "dimensionless", 1, 0, ("dimensionless",), 30, "speed", False),
 }
+
+
+def display(prefix, variable):
+    """(palette, display maximum, display factor) of a catalogued field; None when it is not catalogued."""
+    for catalog in (ERA5, LAND, OISST, MARINE, CERES):
+        for spec in catalog.values():
+            if spec[:2] == (prefix, variable):
+                return spec[7], spec[6], DISPLAY_FACTORS.get((prefix, variable), 1)
+    return None
 
 
 def normalize(data):
@@ -170,6 +198,7 @@ def prepare(directory, output, family, width, start, end):
     dataset = references.directory(prefixes.pop(), width, output)
     dataset.mkdir(parents=True, exist_ok=True)
     from contextlib import ExitStack
+    import xarray as xr
     with ExitStack() as stack:
         datasets = [(p, stack.enter_context(xr.open_dataset(p))) for p in paths]
         if family == "era5":
@@ -206,7 +235,8 @@ def prepare(directory, output, family, width, start, end):
                                 source_depth_m=(selected[0][1].depth.values.tolist()
                                                 if "depth" in selected[0][1].coords else None),
                                 sources=[p.as_posix() for p, _ in selected], sha256=sha256(bundle),
-                                limit=limit, palette=palette, ocean_only=ocean, land_only=family == "land",
+                                limit=limit, palette=palette, display_factor=DISPLAY_FACTORS.get((prefix, variable), 1),
+                                ocean_only=ocean, land_only=family == "land",
                                 period=f"{start}-{end} monthly climatology", width=width, height=height))
             print(f"Prepared {prefix}.{variable}_monthly: {width}x{height}, {unit}", flush=True)
     if not records:

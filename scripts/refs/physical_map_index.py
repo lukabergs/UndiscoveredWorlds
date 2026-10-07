@@ -8,6 +8,9 @@ from PIL import Image, ImageDraw
 import rasterio
 
 from physical_map_core import REPO, Layer, colour_table, legend, rgba, sha256, coverage_bounds
+from uwtools import palettes
+
+PALETTE_FIELDS=('palette','scale','limits','bands','classes','palette_status','palette_source','project_palette','palette_conversion')
 
 NONSPATIAL={
     'phreeqc-3.8.6':'Thermodynamic reaction databases; water-chemistry maps require spatial water compositions and a reaction/transport model.',
@@ -26,7 +29,8 @@ def render_existing(root):
     root=Path(root);manifest=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
     for record in manifest['products']:
         layer=layer_from_record(record)
-        record['palette_source']=layer.palette_source
+        # Layer() applies the project palettes (physical_map_core.PROJECT_PALETTES, CATEGORY_PALETTES).
+        record.update({k:v for k,v in vars(layer).items() if k in PALETTE_FIELDS})
         if layer.method.startswith('Record count'):
             layer.zero_colour='#111820';record['zero_colour']=layer.zero_colour
         legend(root/record['legend'],layer)
@@ -37,6 +41,7 @@ def render_existing(root):
             Image.fromarray(rgba(values,layer)).save(path)
             output['png_sha256']=sha256(path)
             output['coverage_pixel_bounds']=coverage_bounds(values)
+    if (root/'maps').is_dir():palettes.write_sidecar(root/'maps')
     (root/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
 
 
@@ -93,6 +98,7 @@ def index(root):
     manifest['nonspatial_inputs']=NONSPATIAL
     manifest['model_dependent_outputs']=['Weathering/erosion rates','Soil development','Spatial water chemistry','Biome/habitat suitability','Undiscovered mineral potential']
     manifest['model_dependent_explanation']='These require additional process models and boundary conditions; they are not generated as observed reference maps.'
+    manifest['project_palettes']=palettes.contract()  # layers with project_palette or a tectonics: palette_status
     manifest['palette_assets']={str(p.relative_to(REPO)).replace('\\','/'):sha256(p) for p in (REPO/'assets/palettes/physical').glob('*') if p.is_file()}
     (root/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
     backdrop=root/'earth-context.png'
