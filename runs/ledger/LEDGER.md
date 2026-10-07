@@ -11,6 +11,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
 - `world-0054`: converting the regional generator to float reads by pattern without launching the desktop application
+- `world-0086`: Creating a junction from a worktree to the main tree's refs/ (or any data directory).
 
 ## climate
 
@@ -214,6 +215,7 @@ Lessons:
 | `world-0083` | 2026-10-06 | kernel tests pass | keep | erosion plan, step A1: sphere metric, flow graph and depressions kernels with their tests |
 | `world-0084` | 2026-10-06 | equivalent | keep | erosion plan, step A3: catalogue fields, stages, the eroded-world recipe and the erosion evaluation module |
 | `world-0085` | 2026-10-06 | kernel tests pass | keep | erosion plan, step A2: the stream power kernel with its tests |
+| `world-0086` | 2026-10-07 | recovered except one hand-written guide | keep | incident during erosion plan Phase D: refs/processed deleted through a worktree junction, regenerated from refs/source; backup, guard hook and reference palettes |
 
 Lessons:
 
@@ -350,3 +352,5 @@ Lessons:
 - `world-0084`: The palette file carries a version name that check_layout compares with the palette sidecars of registered runs: adding a palette entry needs a new version (tectonics-v5-erosion).
 - `world-0085`: A budget that closes by construction (the exported flux recomputed from the final erosion and deposition) proves nothing about the deposition coefficients; the closed form needs its own one-cell test against the formula.
 - `world-0085`: Float outputs resolve about 6e-8 relative: a plan tolerance of 1e-9 can only be checked on double accumulators.
+- `world-0086`: A recursive delete follows a junction inside its target: never leave a link to irreplaceable data inside a directory that will be removed, check that a link removal succeeded (Test-Path) before the delete, and keep a copy of every untracked data directory.
+- `world-0086`: When data is regenerated, look for any hash a run recorded (run.json inputs): one surviving hash turns 'probably the same' into 'identical'.
