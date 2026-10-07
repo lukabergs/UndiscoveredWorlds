@@ -892,6 +892,8 @@ void applydeltawetlandstage(planet& world, const GenerationExecutionContext& con
     createwetlands(world, context.smalllake);
     removeexcesswetlands(world);
     refineroughnessmap(world);
+    // Legacy: in eroded-world these may still reopen enclosed below-sea cells that
+    // hydrology.lake_levels made lakes or salt pans (erosion plan H3) until H4 removes them.
     removesealakes(world);
     connectlakes(world);
     checkpoleclimates(world.climate());

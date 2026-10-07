@@ -6,6 +6,7 @@
 #include "simulations/landscape/sphere_metric.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -352,4 +353,100 @@ TEST_F(Landscape, LakeBalanceFlatDownstreamIsNotADonor)
     ASSERT_EQ(balance.lakes.size(), 1u);
     EXPECT_EQ(balance.lakes[0].inflow_m3_yr, 0.0);
     EXPECT_EQ(balance.lakes[0].lakecells, 0);
+}
+
+namespace
+{
+// The cells at or below `sealevel` in whole metres (the rule of planet::basebelowsea).
+std::vector<uint8_t> belowsea(const LakeBalanceInputs& inputs, float sealevel)
+{
+    std::vector<uint8_t> below(inputs.elevation.size(), 0);
+    for (std::size_t cell = 0; cell < below.size(); cell++)
+        below[cell] = static_cast<float>(std::lround(inputs.elevation[cell])) <= sealevel ? 1 : 0;
+    return below;
+}
+
+// The bowl of LakeBalanceClosedBowlReachesItsLevel: a closed lake on its four lowest cells.
+LakeBalanceInputs closedbowl(const SphereMetric& metric)
+{
+    LakeBalanceInputs inputs = makeplain(metric);
+    constexpr float runoff = 0.01f;
+    setuniformclimate(inputs, runoff, 0.3f, 1.2f);
+    addbowl(inputs, metric, bowlx, bowly, 7, 0.0);
+    const std::vector<std::size_t> cells = bowlcells(inputs, 7);
+    const double equilibrium = areaof(metric, cells, 3) + 0.5 * metric.area_m2(cells[3]);
+    const double ownrunoff = static_cast<double>(runoff) * areaof(metric, cells, cells.size());
+    inputs.discharge_m3_yr[metric.index(bowlx - 1, bowly + 1)] = equilibrium * netloss(inputs, cells) - ownrunoff;
+    return inputs;
+}
+}
+
+// An enclosed below-sea bowl (erosion plan H3; sea level 175 m, spill 200 m, floor 110 to
+// 190 m) with a closed lake on its four lowest cells (110 to 140 m): its other cells at or
+// below the sea level (150, 160, 170 m) are salt pans, the two above it (180, 190 m) and
+// the lake are not. A second pass on the same inputs gives the same lake and pans.
+TEST_F(Landscape, LakeBalanceSaltFlatsAroundAClosedLakeBelowTheSea)
+{
+    const SphereMetric metric = makemetric();
+    const LakeBalanceInputs inputs = closedbowl(metric);
+    const std::vector<std::size_t> cells = bowlcells(inputs, 7);
+    const std::vector<uint8_t> below = belowsea(inputs, 175.0f);
+
+    const LakeBalance balance = landscape::balancelakes(inputs);
+    const std::vector<uint8_t> pans = landscape::saltpans(inputs, balance, below);
+
+    ASSERT_EQ(balance.lakes.size(), 1u);
+    EXPECT_FALSE(balance.lakes[0].overflowing);
+    EXPECT_EQ(balance.lakes[0].lakecells, 4);
+    const float level = 0.5f * (inputs.elevation[cells[3]] + inputs.elevation[cells[4]]);
+    EXPECT_LT(level, 175.0f);  // the lake surface lies below the sea level
+    for (std::size_t index = 0; index < cells.size(); index++)
+    {
+        EXPECT_EQ(balance.surface[cells[index]], index < 4 ? level : 0.0f) << "bowl cell " << index;
+        EXPECT_EQ(pans[cells[index]], index >= 4 && index <= 6 ? 1 : 0) << "bowl cell " << index;
+    }
+    std::size_t pancount = 0;
+    for (uint8_t pan : pans)
+        pancount += pan;
+    EXPECT_EQ(pancount, 3u);
+
+    const LakeBalance again = landscape::balancelakes(inputs);
+    EXPECT_EQ(again.surface, balance.surface);
+    EXPECT_EQ(landscape::saltpans(inputs, again, below), pans);
+}
+
+// A dry bowl below the sea: its lowest cell and every cell at or below the sea level are pans.
+TEST_F(Landscape, LakeBalanceDryBowlBelowTheSeaIsAPan)
+{
+    const SphereMetric metric = makemetric();
+    LakeBalanceInputs inputs = makeplain(metric);
+    setuniformclimate(inputs, 0.0f, 0.3f, 1.2f);
+    addbowl(inputs, metric, bowlx, bowly, 7, 0.0);
+    const std::vector<std::size_t> cells = bowlcells(inputs, 7);
+    const LakeBalance balance = landscape::balancelakes(inputs);
+    ASSERT_EQ(balance.lakes[0].lakecells, 0);
+    const std::vector<uint8_t> pans = landscape::saltpans(inputs, balance, belowsea(inputs, 175.0f));
+    for (std::size_t index = 0; index < cells.size(); index++)
+        EXPECT_EQ(pans[cells[index]], index <= 6 ? 1 : 0) << "bowl cell " << index;
+    // Above the sea only the lowest cell.
+    const std::vector<uint8_t> high = landscape::saltpans(inputs, balance, belowsea(inputs, 100.0f));
+    for (std::size_t cell = 0; cell < metric.size(); cell++)
+        EXPECT_EQ(high[cell], cell == cells[0] ? 1 : 0) << "cell " << cell;
+}
+
+// An overflowing (open) depression gets no pans, above the sea or not.
+TEST_F(Landscape, LakeBalanceOpenDepressionHasNoPans)
+{
+    const SphereMetric metric = makemetric();
+    LakeBalanceInputs inputs = makeplain(metric);
+    setuniformclimate(inputs, 0.01f, 0.3f, 1.2f);
+    addbowl(inputs, metric, bowlx, bowly, 7, 0.0);
+    const std::vector<std::size_t> cells = bowlcells(inputs, 7);
+    inputs.discharge_m3_yr[metric.index(bowlx - 1, bowly + 1)] =
+        2.0 * areaof(metric, cells, cells.size()) * netloss(inputs, cells);
+    const LakeBalance balance = landscape::balancelakes(inputs);
+    ASSERT_TRUE(balance.lakes[0].overflowing);
+    for (float sealevel : { 100.0f, 175.0f })
+        for (uint8_t pan : landscape::saltpans(inputs, balance, belowsea(inputs, sealevel)))
+            EXPECT_EQ(pan, 0);
 }

@@ -258,6 +258,51 @@ def land_mask(bundle, spec):
     return whole_metres(elevation) > float(bundle.scalar(spec['sea_level']))
 
 
+OCEAN_FRACTION_PARAMETER = 'landscape.routing.ocean_minimum_area_fraction'
+OCEAN_FRACTION_DEFAULT = 0.002
+
+
+def ocean_mask(bundle, spec):
+    """The routing's sea (erosion plan H3, landscape::oceanmask): every 8-connected region of
+    below-sea cells (longitude wraps, no pole crossing) whose area is at least the manifest's
+    landscape.routing.ocean_minimum_area_fraction (default 0.002) of the planet, and always the
+    largest region by area (the lower cell index on a tie). Cell areas of the cell-centred grid:
+    sin(north edge) - sin(south edge) of the row, the same for every column."""
+    below = ~land_mask(bundle, spec)
+    rows, columns = below.shape
+    fraction = float(bundle.manifest.get('parameters', {}).get(OCEAN_FRACTION_PARAMETER, OCEAN_FRACTION_DEFAULT))
+    edges = np.radians(90.0 - 180.0 * np.arange(rows + 1) / rows)
+    rowarea = np.sin(edges[:-1]) - np.sin(edges[1:])
+    region = np.full(below.shape, -1, dtype=np.int64)
+    areas = []
+    for start_y, start_x in zip(*np.nonzero(below)):
+        if region[start_y, start_x] >= 0:
+            continue
+        ident = len(areas)
+        region[start_y, start_x] = ident
+        stack = [(int(start_y), int(start_x))]
+        area = 0.0
+        while stack:
+            y, x = stack.pop()
+            area += rowarea[y]
+            for dy in (-1, 0, 1):
+                ny = y + dy
+                if ny < 0 or ny >= rows:
+                    continue
+                for dx in (-1, 0, 1):
+                    nx = (x + dx) % columns
+                    if below[ny, nx] and region[ny, nx] < 0:
+                        region[ny, nx] = ident
+                        stack.append((ny, nx))
+        areas.append(area)
+    if not areas:
+        return np.zeros(below.shape, dtype=bool)
+    areas = np.array(areas)
+    sea = areas >= fraction * columns * float(rowarea.sum())
+    sea[int(np.argmax(areas))] = True  # argmax takes the first of equal areas
+    return np.where(region >= 0, sea[np.maximum(region, 0)], False)
+
+
 def check_volume_budget(bundle, spec, context):
     """A volume total equals the sum of its parts: |total - sum(parts)| <= limit x max(|total|, 1e-12)."""
     missing = absent_fields(bundle, [spec['total']] + list(spec['parts']))
@@ -273,11 +318,12 @@ def check_volume_budget(bundle, spec, context):
 
 
 def check_drained(bundle, spec, context):
-    """Every land cell has a flow direction or lies in a depression."""
+    """Every land cell (not the routing's sea, ocean_mask: an enclosed below-sea basin is land)
+    has a flow direction or lies in a depression."""
     missing = absent_fields(bundle, [spec['direction'], spec['depression'], spec['elevation'], spec['sea_level']])
     if missing:
         return result('drained', 'skip', f"{', '.join(missing)} absent")
-    land = land_mask(bundle, spec)
+    land = ~ocean_mask(bundle, spec)
     direction = bundle.load(spec['direction'])
     depression = bundle.load(spec['depression'])
     undrained = int(np.count_nonzero(land & (direction == 0) & (depression == 0)))
@@ -326,11 +372,12 @@ def has_neighbour(shape, dy):
 
 
 def check_monotone(bundle, spec, context):
-    """Discharge does not decrease from a land cell to its land receiver along flow_direction."""
+    """Discharge does not decrease from a land cell to its land receiver along flow_direction
+    (land: not the routing's sea, ocean_mask)."""
     missing = absent_fields(bundle, [spec['direction'], spec['discharge'], spec['elevation'], spec['sea_level']])
     if missing:
         return result('monotone', 'skip', f"{', '.join(missing)} absent")
-    land = land_mask(bundle, spec)
+    land = ~ocean_mask(bundle, spec)
     direction = bundle.load(spec['direction'])
     discharge = bundle.load(spec['discharge']).astype(float)
     tolerance = 1e-6 * np.maximum(1.0, discharge)

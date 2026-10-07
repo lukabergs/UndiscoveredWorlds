@@ -293,8 +293,9 @@ WorldRecipe erodedworldrecipe()
     WorldRecipe recipe;
     recipe.name = "eroded-world";
     recipe.description = "The terrain stages of procedural-world; a coarse climate (32 columns, 2 coupling iterations) for the "
-                         "fluvial erosion, which routes itself, and the fjords; the full climate on the eroded terrain at the "
-                         "run's climate settings; the flow routing, rivers from it (hydrology.rivers) and lakes from a water "
+                         "fluvial erosion, which routes itself, and the fjords; the flow routing and lake levels on the eroded "
+                         "terrain; the full climate on it at the run's climate settings, with those lakes and pans; the flow "
+                         "routing again, rivers from it (hydrology.rivers) and lakes from a water "
                          "balance in its depressions (hydrology.lake_levels); the remaining stages, layers.finalize once at the end";
     // The full climate recomputes everything on the eroded terrain except one deliberate
     // warm start: climate.pressure and climate.winds read the sea-surface temperatures the
@@ -305,9 +306,16 @@ WorldRecipe erodedworldrecipe()
     appendsteps(recipe.steps, stagesbetween(S::geosphere_initialization, S::terrain_roughness));
     appendsteps(recipe.steps, climate, "coarse", { { "climate.resolution", "32" }, { "climate.coupling_iterations", "2" } });
     appendsteps(recipe.steps, { S::fluvial_erosion, S::fjords });
+    // The lakes and salt pans of the eroded terrain before the full climate, so that it sees them
+    // (erosion plan H3: an enclosed below-sea basin is a lake or a pan, not sea); both run again
+    // after it. A repeated process needs a label on every step.
+    appendsteps(recipe.steps, { S::flow_routing, S::lake_levels }, "before-climate");
     appendsteps(recipe.steps, climate, "full");
-    appendsteps(recipe.steps, { S::flow_routing, S::rivers, S::lake_levels, S::mountain_temperature_lapse,
-                                S::climates_and_biomes, S::arid_features, S::deltas_wetlands_and_roughness, S::finalize_layers });
+    appendsteps(recipe.steps, { S::flow_routing }, "after-climate");
+    appendsteps(recipe.steps, { S::rivers });
+    appendsteps(recipe.steps, { S::lake_levels }, "after-climate");
+    appendsteps(recipe.steps, { S::mountain_temperature_lapse, S::climates_and_biomes, S::arid_features,
+                                S::deltas_wetlands_and_roughness, S::finalize_layers });
     recipe.inputs = worldpropertyinputs();
     // hydrology.lake_levels reads the imported lake mask: all zero in a procedural world.
     recipe.inputs.push_back(FieldId::imported_lake);

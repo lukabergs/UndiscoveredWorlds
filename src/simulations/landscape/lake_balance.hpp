@@ -69,4 +69,13 @@ struct LakeBalance
 
 // Throws std::invalid_argument when a vector's size differs from metric->size().
 LakeBalance balancelakes(const LakeBalanceInputs& inputs);
+
+// The salt pans of a balance (erosion plan H3): 1 on the lowest cell of every dry
+// closed depression, and on every cell of a closed depression (dry or holding a
+// lake) that `belowsea` marks (at or below the sea level; an enclosed below-sea
+// basin is not sea) and the lake does not cover (surface 0): the salt flats around
+// a terminal lake. 0 elsewhere; an overflowing depression has none. Throws
+// std::invalid_argument when a size differs from inputs.metric->size().
+std::vector<uint8_t> saltpans(const LakeBalanceInputs& inputs, const LakeBalance& balance,
+                              const std::vector<uint8_t>& belowsea);
 }

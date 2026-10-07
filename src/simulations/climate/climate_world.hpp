@@ -158,7 +158,7 @@ public:
     float mapfloat(int x, int y) const;
     bool sea(int x, int y) const;
     bool seawrap(int x, int y) const;
-    bool basebelowsea(int x, int y) const;   // the base elevation in whole metres is at or below sea level (planet::basebelowsea)
+    bool basebelowsea(int x, int y) const;   // the base elevation in whole metres is at or below sea level (planet::basebelowsea) and the cell has no lake surface
     bool outline(int x, int y) const;
     int mountainheight(int x, int y) const;
     float mountainheightfloat(int x, int y) const;
@@ -529,10 +529,15 @@ inline bool climateworld::seawrap(int x, int y) const
         return 0;
 }
 
+// A cell with a lake surface (a lake or salt pan in an enclosed below-sea basin,
+// erosion plan H3) is not below the sea, as in sea().
 inline bool climateworld::basebelowsea(int x, int y) const
 {
     UW_FIELD_READ(sea_level);
-    return nom(x, y) <= inputs_.sealevel;
+    UW_FIELD_READ(lake_surface);
+    if (nom(x, y) > inputs_.sealevel)
+        return false;
+    return !inside(x, y) || inputs_.lakesurface[inputindex(x, y)] == 0;
 }
 
 inline bool climateworld::outline(int x, int y) const

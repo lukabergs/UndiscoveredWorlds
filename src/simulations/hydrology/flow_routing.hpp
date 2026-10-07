@@ -18,8 +18,8 @@ class planet;
 namespace flowrouting
 {
 // The kernel's view of the planet: the metric from planetbody.radius, the base
-// elevation per cell (row-major, north row first), the sea mask from
-// basebelowsea, the sea level, the potential evaporation and the runoff in m/yr
+// elevation per cell (row-major, north row first), the sea mask (oceancells: the
+// below-sea regions that count as ocean), the sea level, the potential evaporation and the runoff in m/yr
 // of every cell (sea included). The potential evaporation is the open-water law
 // of landscape.lakes (landscape::openwaterevaporation) applied to each season's
 // temperature and averaged over the four; the runoff, the transmission losses and
@@ -48,11 +48,28 @@ struct Inputs
 // worlds carry no template mountains since the FastLEM removal (plan, section 6).
 Inputs gatherinputs(const planet& world);
 
-// The sea mask of an elevation: at or below the sea level in whole metres, the
-// rule of planet::basebelowsea. The evolver recomputes it at every routing, so a
-// seabed that marine deposition raises above the sea level becomes land and a
-// coastal cell eroded below it becomes sea.
-std::vector<uint8_t> seamask(const std::vector<float>& elevation, float sealevel);
+// Whether an elevation is at or below the sea level in whole metres: the rule of
+// planet::basebelowsea.
+bool belowsea(float elevation, float sealevel);
+
+// The sea mask of an elevation (erosion plan H3): the below-sea cells (belowsea) of
+// the 8-connected below-sea regions that landscape::oceanmask keeps as sea (the
+// largest, and every one of at least landscape.routing.ocean_minimum_area_fraction
+// of the planet's area); a smaller enclosed below-sea region is land to the
+// routing, a depression for the lake balance. oceancells gives the planet's mask by
+// the same rule; gatherinputs takes Inputs::sea from it.
+// The evolver recomputes it at every routing, so a seabed that marine deposition
+// raises above the sea level becomes land and a coastal cell eroded below it
+// becomes sea. Without a below-sea cell the mask is all land: Priority-Flood has no
+// seed, nothing is filled, and no cell has a depression (as before H3).
+std::vector<uint8_t> seamask(const landscape::SphereMetric& metric, const std::vector<float>& elevation, float sealevel);
+
+// The planet's sea for hydrology (erosion plan H3): seamask of the base elevation on
+// the metric of gatherinputs (row-major, north row first, (width + 1) x (height + 1)
+// cells). The one rule of the routing, the lake levels, the rivers and the eroded
+// drainage basins; planet::sea (the surface without a lake surface) stays the rule
+// of the legacy stages and the climate.
+std::vector<uint8_t> oceancells(const planet& world);
 
 // Priority-Flood and the drainage tree with accumulated area and discharge on
 // the inputs' elevation (or on `elevation` when given: the evolver's working

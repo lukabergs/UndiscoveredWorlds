@@ -7,6 +7,7 @@ add_library(uw_landscape STATIC
     flow_graph.cpp
     isostasy.cpp
     lake_balance.cpp
+    ocean_mask.cpp
     relief_roughness.cpp
     runoff.cpp
     sphere_metric.cpp

@@ -101,6 +101,7 @@ namespace routing
 {
 inline bool randomised = true;
 inline bool resolveFlats = true;
+inline float oceanMinimumAreaFraction = 0.002f;
 }
 
 // Every value above, by its recipe name.
@@ -151,6 +152,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.roughness.persistence", &roughness::persistence },
         { "landscape.routing.randomised", &routing::randomised },
         { "landscape.routing.resolve_flats", &routing::resolveFlats },
+        { "landscape.routing.ocean_minimum_area_fraction", &routing::oceanMinimumAreaFraction },
     };
     return entries;
 }

@@ -103,8 +103,9 @@ void writeerosionstate(planet& world, const flowrouting::Inputs& inputs, const s
             // hydrosphere.sediment_flux: the mean over the elapsed time in m^3/yr; 0 on the current sea.
             sedimentflux[x][y] = routing.sea[cell] ? 0.0f
                 : static_cast<float>(sediment[cell] / (megayears * yearspermegayear));
-            // geosphere.prograded (erosion plan C5b): sea when the run started, land now.
-            prograded[x][y] = inputs.sea[cell] != 0 && routing.sea[cell] == 0 ? 1 : 0;
+            // geosphere.prograded (erosion plan C5b): sea when the run started and now above the sea
+            // level (raised by deposition); an arm of the sea merely cut off from the ocean (H3) is not.
+            prograded[x][y] = inputs.sea[cell] != 0 && !flowrouting::belowsea(elevation[cell], inputs.sealevel) ? 1 : 0;
         }
     }
     world.seterosionduration(static_cast<float>(elapsed));

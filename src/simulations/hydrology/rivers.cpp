@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/climate_seasons.hpp"
+#include "simulations/hydrology/flow_routing.hpp"
 #include "simulations/landscape/distributaries.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
@@ -135,11 +136,14 @@ void applyriverstage(planet& world)
     const worldgrid<std::uint8_t>& direction = view.flowdirection();
     const worldgrid<float>& discharge = view.discharge();
 
-    // Land cells and their receivers along flow_direction (none into the sea or past a pole).
+    // Land cells and their receivers along flow_direction (none into the sea or past a pole). The
+    // sea is the routing's (flowrouting::oceancells, erosion plan H3): an enclosed below-sea basin is
+    // land here, so rivers run into its lake or pan; the distributaries put the sea level only on
+    // these sea cells and read a basin cell at its filled surface, the lake level.
+    const std::vector<std::uint8_t> ocean = flowrouting::oceancells(view);
     std::vector<std::uint8_t> land(size, 0);
-    for (int y = 0; y < rows; y++)
-        for (int x = 0; x < columns; x++)
-            land[metric.index(x, y)] = view.basebelowsea(x, y) ? 0 : 1;
+    for (std::size_t cell = 0; cell < size; cell++)
+        land[cell] = ocean[cell] != 0 ? 0 : 1;
 
     constexpr std::size_t none = static_cast<std::size_t>(-1);
     std::vector<std::size_t> receiver(size, none);

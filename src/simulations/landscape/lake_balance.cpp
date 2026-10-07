@@ -157,4 +157,32 @@ LakeBalance balancelakes(const LakeBalanceInputs& inputs)
     }
     return balance;
 }
+
+std::vector<uint8_t> saltpans(const LakeBalanceInputs& inputs, const LakeBalance& balance,
+                              const std::vector<uint8_t>& belowsea)
+{
+    if (inputs.metric == nullptr)
+        throw std::invalid_argument("saltpans: no metric");
+    const std::size_t size = inputs.metric->size();
+    if (inputs.depressionid.size() != size || balance.surface.size() != size || belowsea.size() != size)
+        throw std::invalid_argument("saltpans: a size does not match the metric's");
+    std::vector<int32_t> closedids;  // ascending, as balance.lakes
+    std::vector<uint8_t> pan(size, 0);
+    for (const LakeLevel& lake : balance.lakes)
+    {
+        if (lake.overflowing)
+            continue;
+        closedids.push_back(lake.id);
+        if (lake.lakecells == 0 && lake.lowestcell >= 0)
+            pan[static_cast<std::size_t>(lake.lowestcell)] = 1;
+    }
+    for (std::size_t cell = 0; cell < size && !closedids.empty(); cell++)
+    {
+        const int32_t id = inputs.depressionid[cell];
+        if (id != 0 && belowsea[cell] != 0 && balance.surface[cell] == 0.0f &&
+            std::binary_search(closedids.begin(), closedids.end(), id))
+            pan[cell] = 1;
+    }
+    return pan;
+}
 }

@@ -1,5 +1,6 @@
 #include "simulations/hydrology/drainage_basins.hpp"
 #include "simulations/resources/physical_layers_internal.hpp"
+#include "simulations/hydrology/flow_routing.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -137,7 +138,9 @@ bool reachesseaquickly(const planet& world, int x, int y, int maxsteps)
 }
 
 // Eroded worlds (erosion plan, step B3): paths follow flow_direction; the sea is the
-// routing's (basebelowsea). A depression is closed when its highest lake surface lies
+// routing's (flowrouting::oceancells, erosion plan H3: an enclosed below-sea basin
+// smaller than landscape.routing.ocean_minimum_area_fraction is not sea, so what
+// drains into it is endorheic). A depression is closed when its highest lake surface lies
 // more than this below its filled level (a dry closed depression's salt pan carries a lake
 // surface at its terrain; a depression without any lake cell is not closed).
 constexpr float closedlakemarginm = 0.01f;
@@ -226,7 +229,7 @@ std::vector<std::uint8_t> closeddepressioncells(const planet& world)
 // Per cell: the terminal of its path along flow_direction, memoised (a cell takes its
 // receiver's terminal unless it lies in a closed depression). A walk longer than the
 // cell count is counted as exorheic.
-std::vector<std::uint8_t> classifyerodedbasins(const planet& world)
+std::vector<std::uint8_t> classifyerodedbasins(const planet& world, const std::vector<std::uint8_t>& ocean)
 {
     const int width = world.width();
     const int height = world.height();
@@ -243,7 +246,7 @@ std::vector<std::uint8_t> classifyerodedbasins(const planet& world)
         {
             const int startindex = physicalindex(x, y, cellwidth);
 
-            if (world.basebelowsea(x, y))
+            if (ocean[static_cast<std::size_t>(startindex)] != 0)
             {
                 drainage[startindex] = static_cast<std::uint8_t>(DrainageTerminal::exorheic);
                 continue;
@@ -261,7 +264,7 @@ std::vector<std::uint8_t> classifyerodedbasins(const planet& world)
             {
                 const int index = physicalindex(currentx, currenty, cellwidth);
 
-                if (world.basebelowsea(currentx, currenty))
+                if (ocean[static_cast<std::size_t>(index)] != 0)
                 {
                     terminal = DrainageTerminal::exorheic;
                     break;
@@ -309,16 +312,18 @@ std::vector<std::uint8_t> classifyerodedbasins(const planet& world)
 }
 
 // The legacy coastal walk along flow_direction: the sea or a coast within maxsteps.
-bool reachesseaalongflow(const planet& world, const worldgrid<std::uint8_t>& direction, int x, int y, int maxsteps)
+bool reachesseaalongflow(const planet& world, const std::vector<std::uint8_t>& ocean,
+                         const worldgrid<std::uint8_t>& direction, int x, int y, int maxsteps)
 {
     const int width = world.width();
     const int height = world.height();
+    const int cellwidth = width + 1;
     int currentx = x;
     int currenty = y;
 
     for (int step = 0; step < maxsteps; step++)
     {
-        if (world.basebelowsea(currentx, currenty) || world.outline(currentx, currenty))
+        if (ocean[static_cast<std::size_t>(physicalindex(currentx, currenty, cellwidth))] != 0 || world.outline(currentx, currenty))
             return true;
 
         int nextx = 0;
@@ -331,7 +336,7 @@ bool reachesseaalongflow(const planet& world, const worldgrid<std::uint8_t>& dir
         currenty = nexty;
     }
 
-    return world.basebelowsea(currentx, currenty) || world.outline(currentx, currenty);
+    return ocean[static_cast<std::size_t>(physicalindex(currentx, currenty, cellwidth))] != 0 || world.outline(currentx, currenty);
 }
 
 void generateerodedbasins(planet& world)
@@ -340,7 +345,8 @@ void generateerodedbasins(planet& world)
     const int width = view.width();
     const int height = view.height();
     const int cellwidth = width + 1;
-    const std::vector<std::uint8_t> drainage = classifyerodedbasins(view);
+    const std::vector<std::uint8_t> ocean = flowrouting::oceancells(view);
+    const std::vector<std::uint8_t> drainage = classifyerodedbasins(view, ocean);
     const worldgrid<std::uint8_t>& direction = view.flowdirection();
     const float coastalceiling = static_cast<float>(view.sealevel()) + 250.0f;
 
@@ -350,7 +356,7 @@ void generateerodedbasins(planet& world)
         {
             for (int x = 0; x <= width; x++)
             {
-                if (view.basebelowsea(x, y))
+                if (ocean[static_cast<std::size_t>(physicalindex(x, y, cellwidth))] != 0)
                 {
                     world.setbasinclass(x, y, BasinClass::none);
                     continue;
@@ -359,7 +365,7 @@ void generateerodedbasins(planet& world)
                 const DrainageTerminal terminal = static_cast<DrainageTerminal>(drainage[physicalindex(x, y, cellwidth)]);
                 const bool coastal = terminal == DrainageTerminal::exorheic
                     && view.mapfloat(x, y) <= coastalceiling
-                    && (view.outline(x, y) || reachesseaalongflow(view, direction, x, y, 3));
+                    && (view.outline(x, y) || reachesseaalongflow(view, ocean, direction, x, y, 3));
 
                 if (coastal)
                     world.setbasinclass(x, y, BasinClass::coastal);

@@ -71,12 +71,14 @@ void applylakelevelstage(planet& world)
         }
     }
 
-    // The routing fields come from the last routing of terrain.fluvial_erosion. In eroded-world no
-    // stage between it and this one writes the base elevation, so the guard below drops nothing; it
-    // stays against a recipe that edits the terrain in between. A depression with a cell that is now
-    // sea, borders the sea or is not below its filled level no longer matches the routing (a fresh
-    // Priority-Flood never puts a depression next to the sea): it is dropped and reported, so no lake
-    // is written next to the sea (removesealakes would spread such a lake over the ocean).
+    // The routing fields come from the last routing (hydrology.flow_routing, or the final routing of
+    // terrain.fluvial_erosion). In eroded-world the stage follows hydrology.flow_routing directly, so
+    // the guard below drops nothing; it stays against a recipe that edits the terrain in between. The
+    // sea here is the routing's (the world ocean, erosion plan H3): an enclosed below-sea basin is a
+    // depression, not sea. A depression with a cell that is now sea, borders the sea or is not below
+    // its filled level no longer matches the routing (a fresh Priority-Flood never puts a depression
+    // next to the sea): it is dropped and reported, so no lake is written next to the sea
+    // (removesealakes would spread such a lake over the ocean).
     std::vector<uint8_t> stale(size, 0);
     for (std::size_t cell = 0; cell < size; cell++)
     {
@@ -122,20 +124,42 @@ void applylakelevelstage(planet& world)
         }
     }
 
+    // The stage owns the lake surfaces (every cell is rewritten below) and the salt lakes and pans.
+    // eroded-world runs it before and after the full climate, so the previous run's features are
+    // cleared first; no other stage of a recipe with this one writes special 100 or 110 before it.
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            const int feature = view.special(x, y);
+            if (feature == saltlake || feature == saltpan)
+                world.setspecial(x, y, 0);
+        }
+    }
+
     const landscape::LakeBalance balance = landscape::balancelakes(inputs);
     for (int y = 0; y < rows; y++)
         for (int x = 0; x < columns; x++)
             world.setlakesurface(x, y, balance.surface[metric.index(x, y)]);
-    for (const landscape::LakeLevel& lake : balance.lakes)
+    // A dry closed depression is a salt pan on its lowest cell. In every closed depression, dry or
+    // holding a lake, each cell at or below the sea level that the lake does not cover is a salt pan
+    // too (erosion plan H3: an enclosed below-sea basin is not sea; Death Valley, Qattara, the salt
+    // flats around a terminal lake). A pan carries a lake surface at its own terrain, as the legacy pans do, so the arid features
+    // keep away from it, basin_class sees a closed depression and planet::sea does not count it.
+    // The legacy removesealakes and connectlakes (hydrology.deltas_and_wetlands) may still reopen
+    // some enclosed below-sea cells after this stage until erosion plan H4 removes them.
+    // The terrain is above the datum's zero wherever the sea level (at least 1) is above it, so a
+    // pan surface is not the 0 that means no lake, except on a cell at the datum floor itself.
+    std::vector<uint8_t> belowsea(size);
+    for (std::size_t cell = 0; cell < size; cell++)
+        belowsea[cell] = flowrouting::belowsea(inputs.elevation[cell], routing.sealevel) ? 1 : 0;
+    const std::vector<uint8_t> pan = landscape::saltpans(inputs, balance, belowsea);
+    for (std::size_t cell = 0; cell < size; cell++)
     {
-        if (!lake.overflowing && lake.lakecells == 0)
-        {
-            const std::size_t cell = static_cast<std::size_t>(lake.lowestcell);
-            // A pan carries a lake surface at its own terrain, as the legacy pans do, so the
-            // arid features keep away from it and basin_class sees a closed depression.
-            world.setlakesurface(metric.column(cell), metric.row(cell), inputs.elevation[cell]);
-            world.setspecial(metric.column(cell), metric.row(cell), saltpan);
-        }
+        if (pan[cell] == 0)
+            continue;
+        world.setlakesurface(metric.column(cell), metric.row(cell), inputs.elevation[cell]);
+        world.setspecial(metric.column(cell), metric.row(cell), saltpan);
     }
     for (std::size_t cell = 0; cell < size; cell++)
     {

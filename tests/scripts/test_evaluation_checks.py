@@ -13,7 +13,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "evaluation"))
 
 from uwtools.bundle import SCHEMA, Bundle  # noqa: E402
-from checks import CHECKS, land_mask  # noqa: E402
+from checks import CHECKS, land_mask, ocean_mask  # noqa: E402
 
 COLUMNS, ROWS = 4, 2
 
@@ -27,8 +27,9 @@ MONOTONE = {"check": "monotone", "direction": "hydrosphere.flow_direction", "dis
 LAKES = {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation"}
 
 
-def write_bundle(directory, fields):
-    """A minimal uw-run-bundle/v1 directory holding the given fields ({id: array})."""
+def write_bundle(directory, fields, columns=COLUMNS, rows=ROWS, parameters=None):
+    """A minimal uw-run-bundle/v1 directory holding the given fields ({id: array}) and, when given,
+    the manifest's parameters ({"module.group.key": value})."""
     directory = Path(directory)
     entries = []
     for identifier, values in fields.items():
@@ -41,9 +42,11 @@ def write_bundle(directory, fields):
                         "dtype": values.dtype.str, "shape": list(values.shape), "units": "", "file": relative,
                         "hash": "0", "written_by": "test", "description": ""})
     manifest = {"schema": SCHEMA, "seed": 1, "recipe": "eroded-world",
-                "grid": {"columns": COLUMNS, "rows": ROWS, "registration": "cell-centred",
+                "grid": {"columns": columns, "rows": rows, "registration": "cell-centred",
                          "layout": "row-major, north row first"},
                 "fields": entries, "tables": []}
+    if parameters is not None:
+        manifest["parameters"] = parameters
     (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return Bundle.open(directory)
 
@@ -107,6 +110,50 @@ class EvaluationCheckTests(unittest.TestCase):
             land = land_mask(write_bundle(directory, fields), DRAINED)
         self.assertFalse(land[0, 1])
         self.assertTrue(land[1, 1])
+
+    def test_enclosed_below_sea_cell_is_land(self):
+        """Erosion plan H3: on 8 x 4 cells an ocean in column 0 (area 2 of the planet's 16) and one
+        enclosed below-sea cell (row 2, column 4; area 0.71, 4.4 percent). Under a 10 percent
+        threshold the cell is land, so without a direction or a depression it is undrained; in a
+        depression it passes; under the default 0.2 percent it is sea."""
+        columns, rows = 8, 4
+        elevation = np.full((rows, columns), 100.0, dtype=np.float32)
+        elevation[:, 0] = -100.0
+        elevation[2, 4] = -50.0
+        direction = np.full((rows, columns), 7, dtype=np.uint8)
+        direction[:, 0] = 0
+        direction[2, 4] = 0
+        fields = {"geosphere.base_elevation": elevation, "geosphere.sea_level": np.array(0, dtype=np.int32),
+                  "hydrosphere.flow_direction": direction,
+                  "hydrosphere.depression_id": np.zeros((rows, columns), dtype=np.int32)}
+
+        def status(parameters):
+            with tempfile.TemporaryDirectory() as directory:
+                bundle = write_bundle(directory, fields, columns, rows, parameters)
+                return CHECKS["drained"](bundle, DRAINED, {})["status"], ocean_mask(bundle, DRAINED)
+
+        threshold = {"landscape.routing.ocean_minimum_area_fraction": 0.1}
+        outcome, ocean = status(threshold)
+        self.assertEqual(outcome, "fail")
+        self.assertTrue(ocean[:, 0].all())
+        self.assertFalse(ocean[2, 4])
+        self.assertEqual(status(None)[0], "pass")
+        fields["hydrosphere.depression_id"][2, 4] = 1
+        self.assertEqual(status(threshold)[0], "pass")
+
+    def test_ocean_is_largest_by_area(self):
+        """A polar row of 8 cells (area 2.34) loses to 4 cells near the equator (2.83) when only the
+        largest region is sea."""
+        columns, rows = 8, 4
+        elevation = np.full((rows, columns), 100.0, dtype=np.float32)
+        elevation[0, :] = -100.0
+        elevation[2, 2:6] = -100.0
+        fields = {"geosphere.base_elevation": elevation, "geosphere.sea_level": np.array(0, dtype=np.int32)}
+        with tempfile.TemporaryDirectory() as directory:
+            ocean = ocean_mask(write_bundle(directory, fields, columns, rows,
+                                            {"landscape.routing.ocean_minimum_area_fraction": 1.0}), DRAINED)
+        self.assertFalse(ocean[0, :].any())
+        self.assertTrue(ocean[2, 2:6].all())
 
 
 if __name__ == "__main__":

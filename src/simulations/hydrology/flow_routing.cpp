@@ -6,6 +6,7 @@
 #include "core/climate_seasons.hpp"
 #include "core/deterministic_random.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
+#include "simulations/landscape/ocean_mask.hpp"
 #include "simulations/landscape/runoff.hpp"
 #include "world/planet.hpp"
 
@@ -59,7 +60,6 @@ Inputs gatherinputs(const planet& world)
         {
             const std::size_t cell = inputs.metric.index(x, y);
             inputs.elevation[cell] = world.nomfloat(x, y);
-            inputs.sea[cell] = world.basebelowsea(x, y) ? 1 : 0;
             // Runoff is computed for every cell, sea included (precipitation exists over the
             // sea): a seabed that marine deposition raises above the sea level during the
             // erosion run then contributes to the next routing; accumulateflow ignores sea cells.
@@ -100,22 +100,41 @@ Inputs gatherinputs(const planet& world)
             }
         }
     }
+    // Only the below-sea cells of the ocean regions are sea (erosion plan H3).
+    inputs.sea = oceancells(world);
     return inputs;
 }
 
-std::vector<uint8_t> seamask(const std::vector<float>& elevation, float sealevel)
+bool belowsea(float elevation, float sealevel)
 {
-    std::vector<uint8_t> sea(elevation.size());
+    return static_cast<float>(std::lround(elevation)) <= sealevel;
+}
+
+std::vector<uint8_t> seamask(const landscape::SphereMetric& metric, const std::vector<float>& elevation, float sealevel)
+{
+    std::vector<uint8_t> below(elevation.size());
     for (std::size_t cell = 0; cell < elevation.size(); cell++)
-        sea[cell] = static_cast<float>(std::lround(elevation[cell])) <= sealevel ? 1 : 0;
-    return sea;
+        below[cell] = belowsea(elevation[cell], sealevel) ? 1 : 0;
+    return landscape::oceanmask(metric, below, tuning::landscape::routing::oceanMinimumAreaFraction);
+}
+
+std::vector<uint8_t> oceancells(const planet& world)
+{
+    const int columns = world.width() + 1;
+    const int rows = world.height() + 1;
+    const landscape::SphereMetric metric(columns, rows, static_cast<double>(world.radius()));
+    std::vector<uint8_t> below(metric.size());
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < columns; x++)
+            below[metric.index(x, y)] = world.basebelowsea(x, y) ? 1 : 0;
+    return landscape::oceanmask(metric, below, tuning::landscape::routing::oceanMinimumAreaFraction);
 }
 
 Routing route(const Inputs& inputs, const std::vector<float>* elevation)
 {
     const std::vector<float>& terrain = elevation != nullptr ? *elevation : inputs.elevation;
     Routing routing;
-    routing.sea = elevation != nullptr ? seamask(terrain, inputs.sealevel) : inputs.sea;
+    routing.sea = elevation != nullptr ? seamask(inputs.metric, terrain, inputs.sealevel) : inputs.sea;
     routing.depressions = landscape::filldepressions(inputs.metric, terrain, routing.sea,
                                                      tuning::landscape::depressions::minimumDepthM);
     routing.graph = landscape::buildflowgraph(inputs.metric, terrain, routing.sea, inputs.sealevel, routing.depressions,
