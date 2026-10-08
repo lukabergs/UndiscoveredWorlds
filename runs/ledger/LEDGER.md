@@ -9,6 +9,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0021`: Loading fraction 2700/3300 with rebound 2800/3300 on rock volumes (it raised the land by 0.66 m on average in 20 Myr).
 - `erosion-0031`: Routing on the ice surface during the run: ice flickers on and off between steps (643 appearances on 305 cells in 20 steps at the minimal size).
 - `erosion-0036`: stopping the fixed point when the receivers settle: the decision covers the whole window, so overlapping windows stop at different passes
+- `erosion-0037`: ownership of a shared fine cell by the larger drainage area: the bed can rise where a gentle tributary meets a steeper larger link
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -77,6 +78,7 @@ Lessons:
 | `erosion-0034` | 2026-10-08 | pass | keep | erosion plan, step E0: survey, the Phase E table and decisions, the contracts of the regional pass |
 | `erosion-0035` | 2026-10-08 | pass | keep | erosion plan, step E2a: the window grid, the spherical noise and the upsampling of the regional pass |
 | `erosion-0036` | 2026-10-08 | pass | keep | erosion plan, step E2c: the analytical relief of the regional pass |
+| `erosion-0037` | 2026-10-08 | pass | keep | erosion plan, step E2b: the pinned channel network of the regional pass |
 
 Lessons:
 
@@ -128,6 +130,7 @@ Lessons:
 - `erosion-0035`: An overlap test must make the two windows differ in every origin the code uses (columns, rows, the date line); two windows clipped at the same pole hide row-offset bugs.
 - `erosion-0036`: A seam argument must include every rule that moves information sideways: 8-connected pinned channels let a diagonal receiver cut between two pinned cells, which the plan's 'catchments between channels' assumption did not see.
 - `erosion-0036`: An early stop of an iteration is a global decision; for window-independent results the pass count must be fixed.
+- `erosion-0037`: A rasterised network's guarantees (no capture, no rise, no loop) need a separation bound proved from the geometry; tests over thousands of seeds did not find the capture the reviewer derived.
 
 ## tectonics
 
