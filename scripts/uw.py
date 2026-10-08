@@ -10,6 +10,11 @@ Modules and commands:
                        (out/evaluation/<module>/ unless --archive runs/reports/<name>); --repeat runs twice
                        and checks that the bundles are identical
     climate|tectonics|world|erosion|hydrology evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR] [--checkpoints DIR])
+    regional  run      registered regional bundle (world_pipeline region, profile configs/evaluation/regional.json):
+                       uw.py regional run --from-bundle WORLD (--window W,S,E,N | --pixels X0,Y0,X1,Y1) --scale K
+                       [--set ...]; seed and grid from the world bundle (no --resolution); compare two regional
+                       bundles on their overlap with scripts/evaluation/regional_overlap.py A B
+    regional  evaluate|review|report|ledger  as for the other modules
     tectonics report   comparison page of the evaluations of registered runs (--runs A B ...), in runs/reports/tectonics/
     geology   run      tectonics bundles at each width, scored against Earth references (out/bench/geology)
     climate|tectonics|world|erosion|hydrology report --evaluation DIR [DIR ...] [--output DIR]
@@ -25,7 +30,8 @@ Modules and commands:
     climate|tectonics|world|erosion dashboard [--output DIR]
                        registry runs and ledger entries (default out/evaluation/<module>/dashboard)
 
-Shared options: --seed (default 1), --resolution W (grid W x W/2), --executable, --output, --label.
+Shared options: --seed (default 1; regional: checked against the world bundle's when given), --resolution W
+(grid W x W/2; not regional), --executable, --output, --label.
 Any other --flag value pairs go to the module's native tool unchanged and after the profile's
 arguments, so they override them: world_pipeline flags for every module (tectonics: the
 scenario options of `run --recipe tectonics`, and --duration).
@@ -51,7 +57,8 @@ COMMANDS = {'tectonics': ('run', 'report', 'experiment', 'evaluate', 'dashboard'
             'climate': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
             'world': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
             'erosion': ('run', 'report', 'experiment', 'evaluate', 'dashboard', 'ledger', 'review'),
-            'hydrology': ('report', 'experiment', 'evaluate', 'review')}
+            'hydrology': ('report', 'experiment', 'evaluate', 'review'),
+            'regional': ('run', 'report', 'evaluate', 'review', 'ledger')}
 
 
 def call(command):
@@ -75,7 +82,7 @@ def evaluation(args, extra):
               '--bundle', args.bundle, '--output', output, *extra])
         return
     options = ['--register'] if args.command == 'run' else []
-    options += ['--seed', args.seed]
+    options += ['--seed', args.seed] if args.seed is not None else []
     options += ['--resolution', args.resolution] if args.resolution is not None else []
     options += ['--executable', args.executable] if args.executable else []
     options += ['--label', args.label] if args.label else []
@@ -178,7 +185,7 @@ def main():
                                      allow_abbrev=False)
     parser.add_argument('module', choices=COMMANDS)
     parser.add_argument('command')
-    parser.add_argument('--seed', type=int, default=1)
+    parser.add_argument('--seed', type=int, help='World seed (default 1; regional: the world bundle\'s, checked when given)')
     parser.add_argument('--resolution', type=int, help='Grid width W; height is W/2')
     parser.add_argument('--executable', type=Path)
     parser.add_argument('--output', type=Path)
@@ -192,6 +199,8 @@ def main():
     parser.add_argument('--add', type=Path, help='ledger: JSON file of one entry to append')
     parser.add_argument('--reference-width', type=int, default=512, help='Earth reference width (geology)')
     args, extra = parser.parse_known_args()
+    if args.seed is None and args.module != 'regional':
+        args.seed = 1
     if args.command not in COMMANDS[args.module]:
         parser.error(f'{args.module} commands: {", ".join(COMMANDS[args.module])}')
     if args.resolution is not None and (args.resolution < 2 or args.resolution % 2):
@@ -201,7 +210,7 @@ def main():
     if args.command == 'ledger':
         ledger_command(args, extra)
         return
-    if args.command in ('experiment', 'evaluate') or (args.command == 'run' and args.module in ('climate', 'tectonics', 'world', 'erosion')):
+    if args.command in ('experiment', 'evaluate') or (args.command == 'run' and args.module in ('climate', 'tectonics', 'world', 'erosion', 'regional')):
         evaluation(args, extra)
         return
     if args.command == 'review':
@@ -214,7 +223,7 @@ def main():
             parser.error('--evaluation belongs to report')
         pages(args, extra)
         return
-    if args.module in ('world', 'erosion', 'climate', 'hydrology') and args.command == 'report':
+    if args.module in ('world', 'erosion', 'climate', 'hydrology', 'regional') and args.command == 'report':
         parser.error(f'{args.module} report requires --evaluation DIR [DIR ...]')
     {'tectonics': tectonics, 'geology': geology}[args.module](args, extra)
 

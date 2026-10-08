@@ -61,6 +61,10 @@ struct Metadata
     std::vector<StepRecord> steps;
     std::vector<std::pair<std::string, std::string>> properties;   // extra string facts
     std::string parameters;   // a JSON object of the modules' tunable values, or empty
+    // Extra top-level members (name, JSON value) written after "parameters" in this order;
+    // a regional bundle's window, source and diagnostics (io/regional_bundle.hpp). World
+    // bundles have none.
+    std::vector<std::pair<std::string, std::string>> blocks;
 };
 
 class Writer

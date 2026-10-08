@@ -1,4 +1,5 @@
 """Origin-independent numeric raster colouring. No run, module or file-layout knowledge."""
+import math
 from pathlib import Path
 import unicodedata
 
@@ -255,11 +256,53 @@ def draw_markers(canvas, columns, rows, scale, rings=(), squares=(), links=(), d
     return canvas
 
 
-def frame(rgb, title=None, legend=None, arrows=None, width=1024, markers=None):
+def _graticule_step(span):
+    """Degrees between graticule lines: at most eight lines across span."""
+    return next((step for step in (0.25, 0.5, 1, 2, 5, 10, 15, 30) if span / step <= 8), 30)
+
+
+def _degree_label(value, positive, negative):
+    value = (value + 180) % 360 - 180 if positive == "E" else value
+    if abs(value) < 1e-9:
+        return "0"
+    if positive == "E" and abs(abs(value) - 180) < 1e-9:
+        return "180"
+    return f"{abs(value):g}{positive if value > 0 else negative}"
+
+
+def _regional_graticule(draw, raster, extent, total, font):
+    """Graticule of a box (west, south, east, north) in degrees; west > east crosses the date line."""
+    west, south, east, north = extent
+    east = east + 360 if east <= west else east
+    step = _graticule_step(max(east - west, north - south))
+    longitude = math.ceil(west / step) * step
+    while longitude <= east + 1e-9:
+        x = LEFT + (longitude - west) / (east - west) * raster.width
+        if west < longitude < east:
+            draw.line([x, TOP, x, TOP + raster.height - 1], fill=GRID)
+        text = _degree_label(longitude, "E", "W")
+        draw.text((min(max(x - font.getlength(text) / 2, 0), total - 2 - font.getlength(text)), TOP + raster.height + 4),
+                  text, font=font, fill=INK)
+        longitude += step
+    latitude = math.ceil(south / step) * step
+    while latitude <= north + 1e-9:
+        y = TOP + (north - latitude) / (north - south) * raster.height
+        if south < latitude < north:
+            draw.line([LEFT, y, LEFT + raster.width - 1, y], fill=GRID)
+        text = _degree_label(latitude, "N", "S")
+        draw.text((max(LEFT - 6 - font.getlength(text), 0), min(max(y - 8, TOP), TOP + raster.height - 14)), text,
+                  font=font, fill=INK)
+        latitude += step
+
+
+def frame(rgb, title=None, legend=None, arrows=None, width=1024, markers=None, extent=None):
     """A map for reading: the raster enlarged without smoothing to at least `width` pixels,
     a graticule every 30 degrees with its labels, the title, and the legend.
 
     The grid is cell-centred with rows from north to south and columns east from 180 W.
+    extent: (west, south, east, north) in degrees of a raster that covers only that box (a
+    regional bundle's window; west > east across the date line): the graticule is drawn
+    over the box at a step that fits it, markers are not drawn.
     legend: {"kind": "scale", "stops": [(value, rgb), ...], "units", "ticks", "note"} or
     {"kind": "classes", "entries": [(label, rgb), ...], "note"}. arrows: (east, north)
     components on the grid of the raster. markers: the keyword arguments of draw_markers
@@ -275,13 +318,16 @@ def frame(rgb, title=None, legend=None, arrows=None, width=1024, markers=None):
     canvas = Image.new("RGB", (total, TOP + raster.height + AXIS + _legend_height(legend, total, font)), PAPER)
     canvas.paste(raster, (LEFT, TOP))
     draw = ImageDraw.Draw(canvas, "RGBA")
-    for longitude in range(-180, 181, 30):
+    if extent is not None:
+        _regional_graticule(draw, raster, extent, total, font)
+        markers = None
+    for longitude in range(-180, 181, 30) if extent is None else ():
         x = LEFT + (longitude + 180) / 360 * raster.width
         if -180 < longitude < 180:
             draw.line([x, TOP, x, TOP + raster.height - 1], fill=GRID)
         text = "0" if longitude == 0 else "180" if abs(longitude) == 180 else f"{abs(longitude)}{'E' if longitude > 0 else 'W'}"
         draw.text((min(x - font.getlength(text) / 2, total - 2 - font.getlength(text)), TOP + raster.height + 4), text, font=font, fill=INK)
-    for latitude in range(-90, 91, 30):
+    for latitude in range(-90, 91, 30) if extent is None else ():
         y = TOP + (90 - latitude) / 180 * raster.height
         if -90 < latitude < 90:
             draw.line([LEFT, y, LEFT + raster.width - 1, y], fill=GRID)

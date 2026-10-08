@@ -5,6 +5,7 @@
 
 #include "cli/command_line_generation.hpp"
 #include "cli/climate_options.hpp"
+#include "cli/regional_command.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -34,6 +35,7 @@ void printcommandlineusage()
     cout << "Commands:\n";
     cout << "  run                 Run a recipe (--recipe) or part of it; nothing is registered.\n";
     cout << "  generate            Generate a procedural world, or climate on imported terrain with --climate-only.\n";
+    cout << "  region              The regional pass on a window of a world bundle at a scale: a regional bundle.\n";
     cout << "Options of run:\n";
     cout << "  --recipe <name>         procedural-world, imported-world, earth-climate, earth-hydrology or\n";
     cout << "                           tectonics. Imported recipes use the\n";
@@ -63,6 +65,7 @@ void printcommandlineusage()
     cout << "  --mineral-history <on|off>  Record mineral deposits during tectonics (default on).\n";
     cout << "                           The tectonics recipe runs the engine on the world grid (--resolution, default\n";
     cout << "                           from configs/tectonics-baseline.json) with the default planet body.\n";
+    printregionusage(cout);
     cout << "Options:\n";
     cout << "  --climate-only          With generate: recompute climate on imported terrain without modifying it.\n";
     cout << "  --seed <number>         Use a fixed world seed (default 1).\n";

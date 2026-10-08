@@ -5,6 +5,7 @@ add_library(uw_io STATIC
     map_imports.cpp
     raster_image.cpp
     raster_imports.cpp
+    regional_bundle.cpp
     run_bundle.cpp
     social_definitions.cpp
     tectonic_heightmap_io.cpp

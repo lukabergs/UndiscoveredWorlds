@@ -1,5 +1,6 @@
-// The headless entry point: recipe runs, world generation and the Earth climate
-// benchmark. It never opens a window; the desktop application is separate.
+// The headless entry point: recipe runs, world generation, regional maps of a world
+// bundle and the Earth climate benchmark. It never opens a window; the desktop
+// application is separate.
 
 #include <windows.h>
 #include <shellapi.h>
@@ -11,6 +12,7 @@
 
 #include "core/app_environment.hpp"
 #include "cli/command_line_generation.hpp"
+#include "cli/regional_command.hpp"
 
 using namespace std;
 
@@ -32,6 +34,12 @@ int main()
 
     CommandLineGenerationOptions options;
     const string command = arguments[0];
+    if (command == "region")
+    {
+        ensureworkingdirectory();
+        reloadappenvironment();
+        return runregioncommand(vector<string>(arguments.begin() + 1, arguments.end()));
+    }
     if (command == "run")
     {
         options.runCommand = true;

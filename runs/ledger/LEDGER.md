@@ -80,6 +80,7 @@ Lessons:
 | `erosion-0036` | 2026-10-08 | pass | keep | erosion plan, step E2c: the analytical relief of the regional pass |
 | `erosion-0037` | 2026-10-08 | pass | keep | erosion plan, step E2b: the pinned channel network of the regional pass |
 | `erosion-0038` | 2026-10-08 | pass | keep | erosion plan, step E3: the regional pass (planet-free) and its planet adapter |
+| `erosion-0039` | 2026-10-08 | pass | keep | erosion plan, step E2d: the regional bundle, the region subcommand and the evaluation module regional |
 
 Lessons:
 
@@ -134,6 +135,7 @@ Lessons:
 - `erosion-0037`: A rasterised network's guarantees (no capture, no rise, no loop) need a separation bound proved from the geometry; tests over thousands of seeds did not find the capture the reviewer derived.
 - `erosion-0038`: A synthetic world of 32 x 16 cells clips every halo at both poles: an overlap test then never varies the row origin. Use a world tall enough for domains clear of the poles.
 - `erosion-0038`: A steep synthetic world hides the risk of plains; the seam test needs a low-relief variant where noise and channel gradients are comparable.
+- `erosion-0039`: A field id from the catalogue must keep the catalogue's meaning, not only its dtype and units: river_direction is set on every land cell of a world.
 
 ## tectonics
 

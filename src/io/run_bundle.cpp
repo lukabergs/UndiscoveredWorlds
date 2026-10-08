@@ -165,6 +165,8 @@ void Writer::finish(const Metadata& metadata)
     out << "},\n";
     if (!metadata.parameters.empty())
         out << "  \"parameters\": " << metadata.parameters << ",\n";
+    for (const auto& [name, value] : metadata.blocks)
+        out << "  " << jsonstring(name) << ": " << value << ",\n";
     out << "  \"steps\": [";
     for (std::size_t index = 0; index < metadata.steps.size(); index++)
     {

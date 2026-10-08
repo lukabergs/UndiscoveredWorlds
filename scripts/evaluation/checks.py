@@ -391,11 +391,42 @@ def check_monotone(bundle, spec, context):
                   f'{violations} of {links} land-to-land links lose discharge')
 
 
+def check_regional_window(bundle, spec, context):
+    """A regional bundle (world_pipeline region): its window block matches its grid (the kept
+    global cells times the scale, the fine origin the first kept cell times the scale) on a
+    W x W/2 world, every grid field has the bundle's grid, and its source block names the
+    world bundle's manifest hash and the bundle's seed."""
+    window, source = bundle.manifest.get('window'), bundle.manifest.get('source')
+    if window is None or source is None:
+        return result('regional-window', 'fail', 'no window or source block')
+    problems = []
+    scale, width, height = window['scale'], window['world_columns'], window['world_rows']
+    if width != 2 * height or scale < 1:
+        problems.append(f'world grid {width} x {height} at scale {scale}')
+    if (bundle.columns, bundle.rows) != (window['columns'] * scale, window['rows'] * scale):
+        problems.append(f"grid {bundle.columns} x {bundle.rows} is not {window['columns']} x {window['rows']} cells at scale {scale}")
+    if (window['fine_column0'], window['fine_row0']) != (window['column0'] * scale, window['row0'] * scale):
+        problems.append('the fine origin is not the first kept cell times the scale')
+    if not (0 <= window['column0'] < width and 0 <= window['row0'] and window['row0'] + window['rows'] <= height
+            and window['columns'] + 2 * window['halo'] <= width):
+        problems.append('the window or its halo lies off the world grid')
+    for identifier, info in bundle.fields.items():
+        if info.layout == 'grid' and tuple(info.shape) != (bundle.rows, bundle.columns):
+            problems.append(f'{identifier}: shape {list(info.shape)}')
+    digest = str(source.get('manifest_sha256', ''))
+    if len(digest) != 64 or source.get('seed') != bundle.seed:
+        problems.append('the source block lacks the manifest hash or names another seed')
+    summary = (f"{window['columns']} x {window['rows']} global cells at scale {scale} on {width} x {height}"
+               if not problems else f'{len(problems)} problem(s)')
+    return result('regional-window', 'fail' if problems else 'pass', summary, problems)
+
+
 CHECKS = {'grid': check_grid, 'required': check_required, 'finite': check_finite, 'range': check_range,
           'written': check_written, 'frozen': check_frozen, 'repeat': check_repeat,
           'recipe-equality': check_recipe_equality, 'record': check_record, 'budget': check_budget,
           'minerals': check_minerals, 'volume-budget': check_volume_budget, 'drained': check_drained,
-          'monotone': check_monotone, 'lake-above-terrain': check_lake_above_terrain}
+          'monotone': check_monotone, 'lake-above-terrain': check_lake_above_terrain,
+          'regional-window': check_regional_window}
 
 
 def run_checks(bundle, specs, context):

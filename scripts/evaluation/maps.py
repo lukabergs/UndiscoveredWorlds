@@ -13,6 +13,9 @@ river_mouths or upstream_area validation entry carries that entry's markers (ove
 outlets, or the reference major rivers) and is skipped when the entry was not compared. Runs with checkpoint bundles get
 one APNG per map and season; plate colours in them follow identities tracked from frame
 to frame (track_identities), because the engine's plate index is not persistent.
+A regional bundle (a manifest with a window block, `world_pipeline region`) is framed with
+the graticule of its window. A map with "composite": "<name>" is an RGB image of several
+fields (COMPOSITES: regional_terrain, the elevation with sea, ice, lakes and rivers).
 """
 import json
 import sys
@@ -79,17 +82,63 @@ def drainage_basin(bundle):
     return np.where(land, receiver.reshape(rows, columns) % 12 + 1, 0).astype(float)
 
 
+def elevation_above_sea(bundle):
+    """The base elevation relative to sea level (m)."""
+    return bundle.load('geosphere.base_elevation').astype(float) - float(bundle.scalar('geosphere.sea_level'))
+
+
+def window_extent(bundle):
+    """(west, south, east, north) in degrees of a regional bundle's window block, or None for a
+    bundle of the whole world."""
+    window = bundle.manifest.get('window')
+    return None if window is None else tuple(float(window[key]) for key in ('west', 'south', 'east', 'north'))
+
+
+def regional_terrain(bundle):
+    """(RGB, legend note) of a regional bundle: sea and land on the elevation palette (cells of
+    geosphere.sea on its sea colours, the others on its land colours), present-day ice whitened,
+    lakes on the lake-surface palette and channel cells (channel_direction 1..8) on the
+    discharge palette."""
+    sea_level = float(bundle.scalar('geosphere.sea_level'))
+    elevation = bundle.load('geosphere.base_elevation').astype(float) - sea_level
+    sea = bundle.load('geosphere.sea') != 0
+    rgb = palette_rgb(np.where(sea, np.minimum(elevation, -1.0), np.maximum(elevation, 0.0)), 'tectonics:elevation')
+    rgb = rgb.astype(float)
+    ice = (bundle.load('cryosphere.ice_thickness') > 0) & ~sea
+    rgb[ice] = 0.3 * rgb[ice] + 0.7 * 250.0
+    surface = bundle.load('hydrosphere.lake_surface').astype(float)
+    lake = (surface > 0) & ~sea
+    lakes = palette_rgb(np.where(lake, surface - sea_level, np.nan), 'tectonics:lake_surface_m')
+    rgb[lake] = lakes[lake]
+    channel = (bundle.load('hydrosphere.channel_direction') > 0) & ~sea
+    discharge = bundle.load('hydrosphere.discharge').astype(float)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        logarithm = np.where(channel & (discharge > 0), np.log10(np.where(discharge > 0, discharge, 1.0)), np.nan)
+    rivers = palette_rgb(logarithm, 'tectonics:discharge_log')
+    rgb[channel] = rivers[channel]
+    note = ('sea and land on the elevation scale; whitened: present-day ice; lakes on the lake-surface scale '
+            '(tectonics lake_surface_m); channel cells by log10 discharge (tectonics discharge_log, 0 to 6 m3/s)')
+    return np.clip(np.rint(rgb), 0, 255).astype(np.uint8), note
+
+
+# Composite maps (an RGB image of several fields): the function and the fields it reads.
+COMPOSITES = {'regional_terrain': regional_terrain}
+COMPOSITE_FIELDS = {'regional_terrain': ['geosphere.base_elevation', 'geosphere.sea_level', 'geosphere.sea',
+                                         'cryosphere.ice_thickness', 'hydrosphere.lake_surface',
+                                         'hydrosphere.channel_direction', 'hydrosphere.discharge']}
+
 # Derived maps: the function and the fields it reads.
 DERIVED = {'surface_elevation': surface_elevation, 'lake_elevation': lake_elevation, 'lake_depth': lake_depth,
            'depression_class': depression_class, 'drainage_basin': drainage_basin,
-           'equilibrium_line_above_sea': equilibrium_line_above_sea}
+           'equilibrium_line_above_sea': equilibrium_line_above_sea, 'elevation_above_sea': elevation_above_sea}
 DERIVED_FIELDS = {'surface_elevation': ['geosphere.base_elevation', 'geosphere.mountain_height', 'geosphere.volcano'],
                   'lake_elevation': ['hydrosphere.lake_surface', 'geosphere.sea_level'],
                   'lake_depth': ['hydrosphere.filled_elevation', 'geosphere.base_elevation'],
                   'depression_class': ['hydrosphere.depression_id'],
                   'drainage_basin': ['hydrosphere.flow_direction', 'geosphere.base_elevation', 'geosphere.sea_level'],
                   'equilibrium_line_above_sea': ['cryosphere.equilibrium_line_altitude', 'geosphere.base_elevation',
-                                                 'geosphere.sea_level']}
+                                                 'geosphere.sea_level'],
+                  'elevation_above_sea': ['geosphere.base_elevation', 'geosphere.sea_level']}
 QUARTERS = ('Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec')
 SNAPSHOT_TABLE = 'geosphere.tectonic_snapshot'
 TRACKED = 'colours follow plate identities tracked by cell overlap between consecutive frames, not the engine index'
@@ -137,6 +186,8 @@ def available(bundle, spec):
     selectors = spec.get('vector', [spec['field']] if 'field' in spec else [])
     if 'derived' in spec:
         selectors = DERIVED_FIELDS[spec['derived']]
+    if 'composite' in spec:
+        selectors = COMPOSITE_FIELDS[spec['composite']]
     return all(selector.split('[')[0] in bundle.fields for selector in selectors)
 
 
@@ -255,10 +306,10 @@ def overlay(spec, validation, distributions, key):
     return river_mouth_markers(entry[key]) if kind == 'river_mouths' else reference_river_markers(entry)
 
 
-def save(directory, name, rgb, title, palette, vectors=None, note=None, markers=None):
+def save(directory, name, rgb, title, palette, vectors=None, note=None, markers=None, extent=None):
     relative = Path('maps') / f'{name}.png'
     (directory / relative).parent.mkdir(parents=True, exist_ok=True)
-    map_rendering.frame(rgb, title, legend(palette, note), vectors, markers=markers).save(directory / relative)
+    map_rendering.frame(rgb, title, legend(palette, note), vectors, markers=markers, extent=extent).save(directory / relative)
     return relative.as_posix()
 
 
@@ -428,10 +479,19 @@ def render(bundle, specs, directory, validation=(), compared=(), references=None
     linked = {item['id']: item for item in validation}
     animated, tracked = animations(bundle, specs, directory, checkpoints) if checkpoints else ([], {})
     written = []
+    # A regional bundle covers its window only: its graticule is the window's.
+    extent = window_extent(bundle)
     for spec in specs:
         target = linked.get(spec.get('validation'))
         if target is not None and not (target['id'] in compared and references is not None):
             target = None
+        if 'composite' in spec:
+            if available(bundle, spec):
+                rgb, note = COMPOSITES[spec['composite']](bundle)
+                written.append(entry(spec, 'model', None, spec['title'],
+                                     save(directory, spec['name'], rgb, spec['title'], spec['palette'], note=note,
+                                          extent=extent), spec['palette']))
+            continue
         if target is not None:
             written += validated(bundle, spec, target, references, directory)
         elif available(bundle, spec) and overlay(spec, validation, distributions, 'run') is not None:
@@ -443,7 +503,7 @@ def render(bundle, specs, directory, validation=(), compared=(), references=None
                 title = spec['title'] + ('' if label is None else f' · {label}')
                 written.append(entry(spec, 'model', season, title,
                                      save(directory, spec['name'] + suffix(season), palette_rgb(values, spec['palette']), title,
-                                          spec['palette'], vectors, note, markers), spec['palette']))
+                                          spec['palette'], vectors, note, markers, extent), spec['palette']))
         else:
             continue
         marked = overlay(spec, validation, distributions, 'baseline')
@@ -452,7 +512,8 @@ def render(bundle, specs, directory, validation=(), compared=(), references=None
                 title = spec['title'] + ('' if label is None else f' · {label}') + ' · parent run'
                 written.append(entry(spec, 'parent', season, title,
                                      save(directory, f"parent-{spec['name']}{suffix(season)}", palette_rgb(values, spec['palette']),
-                                          title, spec['palette'], vectors, marked[1], marked[0]), spec['palette'],
+                                          title, spec['palette'], vectors, marked[1], marked[0], window_extent(parent)),
+                                     spec['palette'],
                                      season_label=label))
     written += animated
     if written:

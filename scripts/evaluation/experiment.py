@@ -14,6 +14,13 @@ Native options come last, so they override. --repeat runs the same command again
 the recipe file as an option, a registered run (which carries those options) again without
 them. Both second runs write no checkpoints.
 
+A profile whose run has "seeded": false (the `regional` module: `world_pipeline region`)
+takes its seed and grid from its inputs: no --seed is passed unless given (the tool then
+checks it), --resolution is refused, the options of "required_options" (groups, one of
+each present) must be among the arguments, every bundle directory named in the command is
+declared as an input by its manifest's SHA-256, and run.json records the seed, grid and
+window of the bundle written.
+
 Without --register the run is scratch, in out/evaluation/<module>/<name>/, or in a
 runs/reports/<experiment> archive (routed to the storage drive) with --archive. With
 --register (`uw.py <module> run`) the run takes the next id of runs/registry/<module>.json,
@@ -78,6 +85,11 @@ def settings(spec, register, resolution):
         scenario = recipe_options(recipe)
         interval = recipe['checkpoint_every_updates'] * float(recipe['scenario'].get('delta_time_myr', 1.0))
         values['checkpoint_every'] = f'{interval:g}'
+    if not spec.get('seeded', True):
+        # The tool takes its seed and grid from its inputs (the region command: the world bundle).
+        if resolution is not None:
+            raise SystemExit('This module takes its grid from its inputs; --resolution is not accepted')
+        return arguments, scenario, list(registered.get('arguments', [])), None, values, recipe, recipe_path
     width = resolution or (recipe['width'] if recipe else None) or registered.get('resolution') or spec['resolution']
     if width < 2 or width % 2:
         raise SystemExit('--resolution must be an even width')
@@ -86,7 +98,9 @@ def settings(spec, register, resolution):
 
 def expand(arguments, resolution, directory, values):
     """Profile arguments with {width}, {height}, {directory} (the run directory) and recipe values filled in."""
-    values = dict(values, width=resolution, height=resolution // 2, directory=directory.as_posix())
+    values = dict(values, directory=directory.as_posix())
+    if resolution is not None:
+        values.update(width=resolution, height=resolution // 2)
     return [str(argument).format(**values) for argument in arguments]
 
 
@@ -135,7 +149,7 @@ def main():
     parser.add_argument('--register', action='store_true', help='Registered run in runs/<module>/<id>/')
     parser.add_argument('--name', help='Scratch run directory name (default: UTC time and seed)')
     parser.add_argument('--archive', help='runs/reports/<experiment> archive for kept scratch evidence')
-    parser.add_argument('--seed', type=int, default=1)
+    parser.add_argument('--seed', type=int, help='World seed (default 1; a profile with "seeded": false passes it only when given)')
     parser.add_argument('--resolution', type=int, help='Grid width W (default from the profile)')
     parser.add_argument('--baseline', type=Path, help='Bundle compared with the run')
     parser.add_argument('--repeat', action='store_true', help='Run twice and check the bundles are identical')
@@ -154,6 +168,11 @@ def main():
         raise SystemExit(f'Profile {args.module} has no run section')
     spec = profile['run']
     arguments, scenario, extra, resolution, values, recipe, recipe_path = settings(spec, args.register, args.resolution)
+    seeded = spec.get('seeded', True)
+    given = arguments + scenario + extra + native
+    for group in spec.get('required_options', []):
+        if not any(option in given for option in group):
+            raise SystemExit(f"{args.module} runs require {' or '.join(group)} (a native option or a registered argument)")
     # What was already tried is shown before anything runs, so it does not depend on an instruction to read the ledger.
     previous = ledger.relevant(args.module, args.topic)
     if previous:
@@ -185,11 +204,14 @@ def main():
     else:
         identifier = None
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        name = args.name or f'{stamp}-seed{args.seed}-{resolution}'
+        name = args.name or (f'{stamp}-seed{1 if args.seed is None else args.seed}-{resolution}' if seeded else f'{stamp}-{args.module}')
         directory = scratch_directory(args.module, name, args.archive)
         directory.mkdir(parents=True, exist_ok=False)
     tool_command = lambda options: [str(executable), *expand(options, resolution, directory, values)]
-    seed = ['--seed', str(args.seed)]
+    if seeded:
+        seed = ['--seed', str(1 if args.seed is None else args.seed)]
+    else:
+        seed = [] if args.seed is None else ['--seed', str(args.seed)]
     base = [*tool_command(arguments + scenario + extra), *seed, *native]
     files = [part for part in base[1:] if not part.startswith('-') and (ROOT / part).is_file()]
     commands = {'run': base, 'repeat': without_checkpoints(base)}
@@ -200,9 +222,15 @@ def main():
         commands['explicit'] = without_checkpoints([*tool_command(arguments + extra), *explicit, *seed, *native])
     files += [relative(recipe_path)] if recipe_path else []
     declared += [{'path': relative(ROOT / part), 'sha256': sha256(ROOT / part)} for part in files]
+    if not seeded:
+        # A bundle the tool reads (region --from-bundle) is declared by its manifest.
+        manifests = [ROOT / part / 'manifest.json' for part in base[1:]
+                     if not part.startswith('-') and (ROOT / part / 'manifest.json').is_file()]
+        declared += [{'path': relative(path), 'sha256': sha256(path)} for path in manifests]
 
     record = {'schema': 'uw-run/v1', 'module': args.module, 'id': identifier, 'name': name, 'label': args.label,
-              'seed': args.seed, 'grid': [resolution, resolution // 2], 'tool': spec['tool'],
+              'seed': (1 if args.seed is None else args.seed) if seeded else args.seed,
+              'grid': [resolution, resolution // 2] if seeded else None, 'tool': spec['tool'],
               'command': [*base, '--bundle', str(directory / 'bundle')],
               'executable': {'path': relative(executable), 'sha256': sha256(executable)},
               'configuration': paths.CONFIGURATION, 'code': code_state(), 'inputs': declared,
@@ -231,6 +259,11 @@ def main():
         if succeeded:
             try:
                 record['steps'] = bundle_steps(directory / 'bundle')
+                if not seeded:
+                    manifest = json.loads((directory / 'bundle/manifest.json').read_text(encoding='utf-8'))
+                    record['seed'] = manifest['seed']
+                    record['grid'] = [manifest['grid']['columns'], manifest['grid']['rows']]
+                    record['window'] = manifest.get('window')
                 repeat = Bundle.open(directory / 'bundle-repeat') if args.repeat else None
                 explicit_bundle = Bundle.open(directory / 'bundle-explicit') if args.explicit_recipe else None
                 document = evaluate(profile, profile_path, Bundle.open(directory / 'bundle'), directory / 'evaluation',
@@ -251,7 +284,7 @@ def main():
             report.run_page(directory / 'evaluation')  # again, now with run.json
         # The entry to complete (hypothesis, expected, assessment, decision) and append with `uw.py <module> ledger --add`.
         draft = ledger.template(args.module, change={'code': record['code'], 'label': args.label, 'native_options': native},
-                                observed={'run': relative(directory), 'seed': args.seed, 'resolution': record['grid'],
+                                observed={'run': relative(directory), 'seed': record['seed'], 'resolution': record['grid'],
                                           'verdict': record.get('verdict')})
         (directory / 'ledger-entry.json').write_text(json.dumps(draft, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
         if args.archive:
