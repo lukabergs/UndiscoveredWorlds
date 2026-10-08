@@ -2,7 +2,7 @@
 
 // The regional pass (docs/architecture/erosion-hydrology-plan.md, Phase E, step E3,
 // and section 6, "Decided for Phase E"): global fields and a window in, the window's
-// fine fields out. Steps: the start surface (the global filled elevation upsampled,
+// fine fields out. Steps: the start surface (the global base elevation upsampled,
 // band-limited noise added with an amplitude from the local relief and tapered near
 // the sea level, block means corrected); the pinned channels; the analytical relief
 // on the domain; sea, lakes, rivers and climate on the fine grid by local rules;
@@ -66,8 +66,25 @@ struct RegionalFields
     std::vector<float> januaryprecipitation_mm, julyprecipitation_mm;
     std::vector<float> icethickness_m;
     std::vector<int16_t> climate;
+
+    // Diagnostics (plan E3; window-dependent, not fields): the largest |block mean -
+    // global value| over the kept window's global cells of the start surface after the
+    // block-mean correction, before the channels are pinned and the solve; and the
+    // solve's AnalyticalReliefResult::converged (the last two passes' receivers equal)
+    // and changedreceivers (over the whole domain); the mean and largest lowering by the
+    // solve (start surface minus result) over the kept window's unpinned land cells.
+    double blockmeanerror_m = 0.0;
+    bool reliefconverged = false;
+    int changedreceivers = 0;
+    double meanlowering_m = 0.0;
+    double maxlowering_m = 0.0;
 };
 
+// Throws std::invalid_argument when the window is not on the inputs' grid, a global
+// field has the wrong size, the radius is not positive, the sea level not finite, or
+// window.halo < 2 x meanpasses + 2 (the block-mean correction reaches 2 global cells
+// per pass; two more keep the channels and the solve's edge out of the kept window);
+// rasterisechannels and solveanalyticalrelief throw on their own bad inputs.
 RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                const RegionalParameters& parameters);
 }

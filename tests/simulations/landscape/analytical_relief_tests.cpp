@@ -177,6 +177,7 @@ TEST_F(Landscape, AnalyticalReliefChainFollowsTheCharacteristicSolution)
         parameters.elapsed_myr = elapsed;
         const AnalyticalReliefResult result = landscape::solveanalyticalrelief(metric, input, parameters);
         EXPECT_TRUE(result.converged);
+        EXPECT_EQ(result.changedreceivers, 0);
         EXPECT_EQ(result.iterations, parameters.maxiterations);
         EXPECT_EQ(result.elevation_m[0], 100.0f);
         EXPECT_EQ(result.direction[0], 0);
@@ -336,6 +337,9 @@ TEST_F(Landscape, AnalyticalReliefRunsEveryPassAndReportsTheLastTwo)
         if (!previous.empty())
         {
             EXPECT_EQ(result.converged, result.direction == previous) << passes << " passes";
+            // The count is the cells whose receiver changed: 0 exactly when converged.
+            EXPECT_EQ(result.converged, result.changedreceivers == 0) << passes << " passes";
+            EXPECT_GE(result.changedreceivers, 0);
             (result.converged ? agreeing : disagreeing)++;
         }
         previous = result.direction;
@@ -538,6 +542,7 @@ TEST_F(Landscape, AnalyticalReliefPitDrainsThroughItsRim)
     EXPECT_EQ(result.elevation_m, input.start_m);
     EXPECT_EQ(result.iterations, 1);
     EXPECT_FALSE(result.converged);
+    EXPECT_EQ(result.changedreceivers, 0);  // one pass: nothing to compare
     EXPECT_EQ(result.discharge_m3_yr, (std::vector<double>{ 0.0, 4.0e6, 3.0e6, 2.0e6, 1.0e6 }));
 }
 

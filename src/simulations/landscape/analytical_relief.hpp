@@ -74,6 +74,7 @@ struct AnalyticalReliefResult
     std::vector<double> discharge_m3_yr;
     int iterations = 0;                  // routing passes run: maxiterations
     bool converged = false;              // the last two passes' receivers are equal (false with one pass)
+    int changedreceivers = 0;            // cells whose receiver differs between the last two passes (0 with one pass)
 };
 
 // Throws std::invalid_argument when the input sizes differ from the metric's (key:

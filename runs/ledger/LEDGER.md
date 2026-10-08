@@ -79,6 +79,7 @@ Lessons:
 | `erosion-0035` | 2026-10-08 | pass | keep | erosion plan, step E2a: the window grid, the spherical noise and the upsampling of the regional pass |
 | `erosion-0036` | 2026-10-08 | pass | keep | erosion plan, step E2c: the analytical relief of the regional pass |
 | `erosion-0037` | 2026-10-08 | pass | keep | erosion plan, step E2b: the pinned channel network of the regional pass |
+| `erosion-0038` | 2026-10-08 | pass | keep | erosion plan, step E3: the regional pass (planet-free) and its planet adapter |
 
 Lessons:
 
@@ -131,6 +132,8 @@ Lessons:
 - `erosion-0036`: A seam argument must include every rule that moves information sideways: 8-connected pinned channels let a diagonal receiver cut between two pinned cells, which the plan's 'catchments between channels' assumption did not see.
 - `erosion-0036`: An early stop of an iteration is a global decision; for window-independent results the pass count must be fixed.
 - `erosion-0037`: A rasterised network's guarantees (no capture, no rise, no loop) need a separation bound proved from the geometry; tests over thousands of seeds did not find the capture the reviewer derived.
+- `erosion-0038`: A synthetic world of 32 x 16 cells clips every halo at both poles: an overlap test then never varies the row origin. Use a world tall enough for domains clear of the poles.
+- `erosion-0038`: A steep synthetic world hides the risk of plains; the seam test needs a low-relief variant where noise and channel gradients are comparable.
 
 ## tectonics
 

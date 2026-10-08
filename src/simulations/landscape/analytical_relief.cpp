@@ -329,6 +329,10 @@ AnalyticalReliefResult solveanalyticalrelief(const PatchMetric& metric, const An
         Routing routing = route(metric, routed, input.pinned, input.key);
         result.iterations = pass;
         result.converged = pass > 1 && routing.receiver == previous.receiver;
+        result.changedreceivers = 0;
+        if (pass > 1)
+            for (std::size_t cell = 0; cell < count; cell++)
+                result.changedreceivers += routing.receiver[cell] != previous.receiver[cell] ? 1 : 0;
         // Every pass solves from the start surface on the receivers of the damped surface.
         result.elevation_m = solve(metric, input, parameters, routing, result.discharge_m3_yr);
         result.direction = routing.direction;
