@@ -81,6 +81,7 @@ Lessons:
 | `erosion-0037` | 2026-10-08 | pass | keep | erosion plan, step E2b: the pinned channel network of the regional pass |
 | `erosion-0038` | 2026-10-08 | pass | keep | erosion plan, step E3: the regional pass (planet-free) and its planet adapter |
 | `erosion-0039` | 2026-10-08 | pass | keep | erosion plan, step E2d: the regional bundle, the region subcommand and the evaluation module regional |
+| `erosion-0040` | 2026-10-08 | pending user review | keep | erosion plan, step E4: the Phase E close (regional runs 1 to 4 on erosion run 9's bundle) |
 
 Lessons:
 
@@ -136,6 +137,8 @@ Lessons:
 - `erosion-0038`: A synthetic world of 32 x 16 cells clips every halo at both poles: an overlap test then never varies the row origin. Use a world tall enough for domains clear of the poles.
 - `erosion-0038`: A steep synthetic world hides the risk of plains; the seam test needs a low-relief variant where noise and channel gradients are comparable.
 - `erosion-0039`: A field id from the catalogue must keep the catalogue's meaning, not only its dtype and units: river_direction is set on every land cell of a world.
+- `erosion-0040`: The block-mean error on real terrain (178 m with two passes at k = 16) was seven times the synthetic world's: calibrate a correction on the real bundle before setting its default.
+- `erosion-0040`: Evaluations are never overwritten: a map fix after a registration goes into a second evaluation folder of the run.
 
 ## tectonics
 

@@ -1,0 +1,33 @@
+{
+  "schema": "regional-run-registry/v1",
+  "runs": [
+    {
+      "id": 1,
+      "status": "complete",
+      "run": "runs/regional/1",
+      "date": "2026-10-08T20:12:51+00:00",
+      "label": "window A, k 16"
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "run": "runs/regional/2",
+      "date": "2026-10-08T20:12:58+00:00",
+      "label": "window B (east of A, 4 columns shared), k 16"
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "run": "runs/regional/3",
+      "date": "2026-10-08T20:13:08+00:00",
+      "label": "wide window around A and B, k 4"
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "run": "runs/regional/4",
+      "date": "2026-10-08T20:13:10+00:00",
+      "label": "window A, k 16, elapsed 20 Myr (sensitivity)"
+    }
+  ]
+}

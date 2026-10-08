@@ -97,8 +97,11 @@ def window_extent(bundle):
 def regional_terrain(bundle):
     """(RGB, legend note) of a regional bundle: sea and land on the elevation palette (cells of
     geosphere.sea on its sea colours, the others on its land colours), present-day ice whitened,
-    lakes on the lake-surface palette and channel cells (channel_direction 1..8) on the
-    discharge palette."""
+    lakes on the lake-surface palette and rivers on the discharge palette: the channel cells
+    (channel_direction 1..8) that carry a world river's flow (river_flow_january or _july
+    above 0: the world writes its flows only where they reach landscape.rivers.minimum_flow).
+    Every global link is a pinned channel (the seams need them, erosion plan section 6), so
+    drawing every channel would draw a river through every global cell (E4)."""
     sea_level = float(bundle.scalar('geosphere.sea_level'))
     elevation = bundle.load('geosphere.base_elevation').astype(float) - sea_level
     sea = bundle.load('geosphere.sea') != 0
@@ -110,14 +113,15 @@ def regional_terrain(bundle):
     lake = (surface > 0) & ~sea
     lakes = palette_rgb(np.where(lake, surface - sea_level, np.nan), 'tectonics:lake_surface_m')
     rgb[lake] = lakes[lake]
-    channel = (bundle.load('hydrosphere.channel_direction') > 0) & ~sea
+    flowing = (bundle.load('hydrosphere.river_flow_january') > 0) | (bundle.load('hydrosphere.river_flow_july') > 0)
+    channel = (bundle.load('hydrosphere.channel_direction') > 0) & flowing & ~sea
     discharge = bundle.load('hydrosphere.discharge').astype(float)
     with np.errstate(divide='ignore', invalid='ignore'):
         logarithm = np.where(channel & (discharge > 0), np.log10(np.where(discharge > 0, discharge, 1.0)), np.nan)
     rivers = palette_rgb(logarithm, 'tectonics:discharge_log')
     rgb[channel] = rivers[channel]
     note = ('sea and land on the elevation scale; whitened: present-day ice; lakes on the lake-surface scale '
-            '(tectonics lake_surface_m); channel cells by log10 discharge (tectonics discharge_log, 0 to 6 m3/s)')
+            '(tectonics lake_surface_m); the rivers of the world by log10 discharge (tectonics discharge_log, 0 to 6 m3/s)')
     return np.clip(np.rint(rgb), 0, 255).astype(np.uint8), note
 
 
@@ -125,7 +129,8 @@ def regional_terrain(bundle):
 COMPOSITES = {'regional_terrain': regional_terrain}
 COMPOSITE_FIELDS = {'regional_terrain': ['geosphere.base_elevation', 'geosphere.sea_level', 'geosphere.sea',
                                          'cryosphere.ice_thickness', 'hydrosphere.lake_surface',
-                                         'hydrosphere.channel_direction', 'hydrosphere.discharge']}
+                                         'hydrosphere.channel_direction', 'hydrosphere.discharge',
+                                         'hydrosphere.river_flow_january', 'hydrosphere.river_flow_july']}
 
 # Derived maps: the function and the fields it reads.
 DERIVED = {'surface_elevation': surface_elevation, 'lake_elevation': lake_elevation, 'lake_depth': lake_depth,

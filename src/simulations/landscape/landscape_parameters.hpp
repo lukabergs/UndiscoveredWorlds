@@ -119,8 +119,8 @@ inline float flotationRatio = 0.892f;
 
 namespace regional
 {
-inline int haloCells = 8;
-inline int meanPasses = 2;
+inline int haloCells = 16;
+inline int meanPasses = 6;
 inline float noiseAmplitudeM = 20.0f;
 inline float noiseReliefFraction = 0.25f;
 inline float noisePersistence = 0.6f;
