@@ -41,6 +41,8 @@ if(TARGET uw_climate_world)
         simulations/landscape/ocean_mask_tests.cpp
         simulations/landscape/regional_grid_tests.cpp
         simulations/landscape/regional_pass_tests.cpp
+        simulations/landscape/regional_surface_tests.cpp
+        simulations/landscape/regional_water_tests.cpp
         simulations/landscape/relief_roughness_tests.cpp
         simulations/landscape/routing_options_tests.cpp
         simulations/landscape/runoff_tests.cpp

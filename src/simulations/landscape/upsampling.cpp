@@ -89,6 +89,31 @@ std::vector<float> upsample(const std::vector<float>& field, int width, int heig
     return fine;
 }
 
+std::vector<float> upsample(const std::vector<float>& field, int width, int height, const RegionalWindow& window,
+                            const FineWarp& warp)
+{
+    if (warp.empty())
+        return upsample(field, width, height, window);
+    checkfield(field, width, height, "upsample");
+    checkwindow(window, width, height, "upsample");
+    const int finewidth = window.domainfinewidth(), fineheight = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(finewidth) * static_cast<std::size_t>(fineheight);
+    if (warp.dx.size() != count || warp.dy.size() != count)
+        throw std::invalid_argument("upsample: the warp must hold one displacement per domain fine cell");
+    std::vector<float> fine(count);
+    for (int y = 0; y < fineheight; y++)
+    {
+        const double gy = globalunits(window.absolutefinerow(y), window.scale);
+        for (int x = 0; x < finewidth; x++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(y) * static_cast<std::size_t>(finewidth) + static_cast<std::size_t>(x);
+            const double gx = globalunits(window.absolutefinecolumn(x), window.scale);
+            fine[cell] = static_cast<float>(bicubic(field, width, height, gx + warp.dx[cell], gy + warp.dy[cell]));
+        }
+    }
+    return fine;
+}
+
 void correctblockmeans(const std::vector<float>& field, int width, int height, const RegionalWindow& window, int passes,
                        std::vector<float>& fine)
 {

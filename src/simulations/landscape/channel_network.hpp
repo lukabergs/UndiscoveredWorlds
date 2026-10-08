@@ -42,6 +42,16 @@ struct ChannelParameters
                                        // and the cap keeps their curves sqrt(2) apart, so they share
                                        // no fine cell; no path reaches another cell's centre fine cell
     std::uint64_t seed = 0;            // derived from the world seed with a fixed salt
+    // Phase R, R3 (the legacy scheme, plan section 6): a link enters and leaves each
+    // global cell at points on the shared edges (a hash of the edge; a diagonal through
+    // the shared corner), bends through a junction near the cell's centre (a hash of
+    // the cell) and follows Catmull-Rom legs through jittered midpoints, inside its
+    // own cell. Read by R3; Phase E's geometry ignores them.
+    double meanderdischargeexponent = 0.0;  // midpoint displacement x min(1, (Q / meanderreference_m3s)^exponent)
+    double meanderreference_m3s = 1000.0;
+    double junctionjitter = 0.25;      // the junction lies within this fraction of k of the cell's centre
+    double edgemargin = 0.1875;        // edge points stay this fraction of k away from the cell's corners
+    int springspercell = 0;            // springs from hashed points into the cell's own river (source cells)
 };
 
 // The pinned channels on the window's domain grid (domainfinewidth() x
@@ -82,6 +92,16 @@ struct FineChannels
     std::vector<int32_t> globalcell;     // the upstream global cell's index, -1 off the network
 };
 
+// Phase R, R1 (contract of R0; empty vectors keep the Phase E behaviour above):
+// `start_m` is the regional start surface and `finesea` the fine sea of the domain
+// (domainfinewidth() x domainfineheight(), regional_surface.hpp), decided before the
+// channels. With them, a link ends at its first fine sea cell (the fine coast, not
+// the global sea block) and no channel cell is pinned through the fine sea; the bed
+// follows the start surface's running minimum downstream, held between the
+// receiver's end value and the upstream cell's filled elevation (no straight-profile
+// trenches), never rising along the directions, and at least the next float above
+// the sea level on a land cell.
 FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork& network,
-                               const ChannelParameters& parameters, float sealevel);
+                               const ChannelParameters& parameters, float sealevel,
+                               const std::vector<float>& start_m = {}, const std::vector<uint8_t>& finesea = {});
 }

@@ -28,7 +28,13 @@
   "regional.pin_area_km2": "Global links whose upstream cell drains at least this area are pinned fine channels; 0 pins every land cell's link, which bounds every unpinned fine catchment to about one global cell (seams).",
   "regional.elapsed_myr": "Elapsed time of the transient analytical relief (n = 1, no uplift): knickpoints from the pinned channels travel upstream at K Q^m for this long; K and m are stream_power's.",
   "regional.damping": "Weight of the newest solution in the routing surface of the analytical relief's fixed point (an exponential moving average, Tzathas et al. 2024 section 5.1, which gives no value); 1 is no damping. Every pass solves from the start surface; only the surface the next routing reads is damped (erosion plan E2c).",
-  "regional.mean_passes": "Block-mean correction passes (erosion plan E4, measured on erosion run 9's bundle, global cells 164-183 x 48-63 at k = 16, 8.4 km of relief): the largest block-mean error of the kept window was 178 m with 2 passes, 81 m with 3, 38 m with 4 and 9.4 m with 6 (about 0.45 per pass), at 4.3 to 6.6 s per window; 6 is the first value under 10 m. Each pass widens the reach by two global cells: halo_cells must be at least 2 x mean_passes + 2 (the pass throws otherwise)."
+  "regional.mean_passes": "Block-mean correction passes (erosion plan E4, measured on erosion run 9's bundle, global cells 164-183 x 48-63 at k = 16, 8.4 km of relief): the largest block-mean error of the kept window was 178 m with 2 passes, 81 m with 3, 38 m with 4 and 9.4 m with 6 (about 0.45 per pass), at 4.3 to 6.6 s per window; 6 is the first value under 10 m. Each pass widens the reach by two global cells: halo_cells must be at least 2 x mean_passes + 2 (the pass throws otherwise).",
+  "regional.warp_*": "Erosion plan Phase R, R2: a domain warp of the sampling positions of the global fields (a smooth vector noise on the sphere, a pure function of the fine cell's absolute position and the seed), so that the global grid's rows, columns and diagonals do not print through coasts, lake shores and ice edges. warp_amplitude_cells is the largest displacement in global cells (0: no warp, the Phase E surface), warp_wavelength_cells the warp noise's first wavelength in global cells, warp_fade_m the height from the sea level over which the elevation's warp fades to zero (0: no fade), so inland valleys stay under the pinned channels. Values set by R2 from measurements on regional run 1's window (the block-mean error must stay under about 10 m).",
+  "regional.coast_*": "Erosion plan Phase R, R2 (the legacy coast lessons of plan section 6): coast_noise_amplitude_m is the amplitude at the global-cell scale of a fractal noise with persistence coast_noise_persistence and octaves down to two fine cells, kept across the coast instead of tapered away; coast_sea_drop_m pushes the sea side below the sea level so the coast is steep; coast_land_share replaces the centre rule: a global land cell's block is at least this share land and a global sea cell's at most 1 minus it. 0 for all three keeps the Phase E coast (the coast_band_m taper and the centre rule). Values set by R2.",
+  "regional.meander_*": "meander_amplitude: Phase E, the largest sideways displacement of a link as a fraction of its length, capped at 0.35 (k - 2) fine cells (the proven no-capture bound). Phase R, R3 replaces the links by the legacy scheme (rivers inside their own global cell) and reinterprets it as the largest midpoint displacement as a fraction of k, scaled by min(1, (discharge / meander_reference_m3s)^meander_discharge_exponent) (exponent 0: no discharge dependence).",
+  "regional.jitter_*": "Erosion plan Phase R, R3: jitter_junction, the junction of a global cell's river lies within this fraction of k of the cell's centre (a hash of the cell); jitter_edge_margin, the entry and exit points on a shared edge (a hash of the edge, so both cells agree) stay this fraction of k away from the cell's corners (legacy: 3 of 16).",
+  "regional.springs_per_cell": "Erosion plan Phase R, R3: springs drawn from hashed points of a source cell (no pinned inflow) into its own river; 0 draws none.",
+  "regional.shore_noise": "Erosion plan Phase R, R4: lake shores and ice edges are the zero contour of a signed per-cell indicator (lake or ice cells negative, a hashed magnitude) interpolated at the warped positions plus fractal noise of this amplitude as a fraction of the indicator's scale; 0 keeps the Phase E rules (lake water on every fine bed below the global surface, ice masked by the global cells)."
  },
  "parameters": {
   "runoff": {
@@ -125,7 +131,20 @@
    "elapsed_myr": 1.0,
    "threshold_slope": 0.6,
    "max_iterations": 20,
-   "damping": 0.5
+   "damping": 0.5,
+   "warp_amplitude_cells": 0.0,
+   "warp_wavelength_cells": 2.0,
+   "warp_fade_m": 0.0,
+   "coast_noise_amplitude_m": 0.0,
+   "coast_noise_persistence": 0.5,
+   "coast_sea_drop_m": 0.0,
+   "coast_land_share": 0.0,
+   "meander_discharge_exponent": 0.0,
+   "meander_reference_m3s": 1000.0,
+   "jitter_junction": 0.25,
+   "jitter_edge_margin": 0.1875,
+   "springs_per_cell": 0,
+   "shore_noise": 0.0
   }
  }
 }

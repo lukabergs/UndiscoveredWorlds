@@ -131,6 +131,19 @@ inline float elapsedMyr = 1.0f;
 inline float thresholdSlope = 0.6f;
 inline int maxIterations = 20;
 inline float damping = 0.5f;
+inline float warpAmplitudeCells = 0.0f;
+inline float warpWavelengthCells = 2.0f;
+inline float warpFadeM = 0.0f;
+inline float coastNoiseAmplitudeM = 0.0f;
+inline float coastNoisePersistence = 0.5f;
+inline float coastSeaDropM = 0.0f;
+inline float coastLandShare = 0.0f;
+inline float meanderDischargeExponent = 0.0f;
+inline float meanderReferenceM3s = 1000.0f;
+inline float jitterJunction = 0.25f;
+inline float jitterEdgeMargin = 0.1875f;
+inline int springsPerCell = 0;
+inline float shoreNoise = 0.0f;
 }
 
 // Every value above, by its recipe name.
@@ -203,6 +216,19 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.threshold_slope", &regional::thresholdSlope },
         { "landscape.regional.max_iterations", &regional::maxIterations },
         { "landscape.regional.damping", &regional::damping },
+        { "landscape.regional.warp_amplitude_cells", &regional::warpAmplitudeCells },
+        { "landscape.regional.warp_wavelength_cells", &regional::warpWavelengthCells },
+        { "landscape.regional.warp_fade_m", &regional::warpFadeM },
+        { "landscape.regional.coast_noise_amplitude_m", &regional::coastNoiseAmplitudeM },
+        { "landscape.regional.coast_noise_persistence", &regional::coastNoisePersistence },
+        { "landscape.regional.coast_sea_drop_m", &regional::coastSeaDropM },
+        { "landscape.regional.coast_land_share", &regional::coastLandShare },
+        { "landscape.regional.meander_discharge_exponent", &regional::meanderDischargeExponent },
+        { "landscape.regional.meander_reference_m3s", &regional::meanderReferenceM3s },
+        { "landscape.regional.jitter_junction", &regional::jitterJunction },
+        { "landscape.regional.jitter_edge_margin", &regional::jitterEdgeMargin },
+        { "landscape.regional.springs_per_cell", &regional::springsPerCell },
+        { "landscape.regional.shore_noise", &regional::shoreNoise },
     };
     return entries;
 }

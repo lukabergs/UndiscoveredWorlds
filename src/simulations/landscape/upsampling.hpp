@@ -21,6 +21,23 @@ double bicubic(const std::vector<float>& field, int width, int height, double gx
 // (domainfinewidth() x domainfineheight(), row-major, north row first).
 std::vector<float> upsample(const std::vector<float>& field, int width, int height, const RegionalWindow& window);
 
+// A domain warp (erosion plan Phase R, R0 contract; R2 fills it): the displacement of
+// every domain fine cell's sampling position, in global cell units (dx eastwards, dy
+// southwards, as gx and gy grow), a pure function of the fine cell's absolute
+// position and the seed (regional_surface.hpp, regionalwarp). Empty vectors: no warp.
+struct FineWarp
+{
+    std::vector<double> dx;
+    std::vector<double> dy;
+    bool empty() const { return dx.empty(); }
+};
+
+// The field interpolated by `bicubic` at every domain fine cell centre displaced by
+// the warp; an empty warp gives `upsample` exactly. Throws std::invalid_argument when
+// a non-empty warp does not hold one displacement per domain fine cell.
+std::vector<float> upsample(const std::vector<float>& field, int width, int height, const RegionalWindow& window,
+                            const FineWarp& warp);
+
 // Block-mean correction, `passes` times: for every global cell of the domain the
 // residual (mean of its k x k fine values minus the global value) is computed, the
 // residuals are interpolated by `bicubic` at the fine centres and subtracted. The

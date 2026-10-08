@@ -250,8 +250,12 @@ int32_t outletdistance(const GlobalNetwork& network, std::size_t cell, std::vect
 // link's basin (accepted: the X exists only where the global routing crosses its own
 // flow on a flat).
 FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork& network,
-                               const ChannelParameters& parameters, float sealevel)
+                               const ChannelParameters& parameters, float sealevel,
+                               const std::vector<float>& start_m, const std::vector<uint8_t>& finesea)
 {
+    // R0: the contract only; R1 reads them.
+    (void)start_m;
+    (void)finesea;
     const int k = window.scale;
     const int width = network.width;
     const int height = network.height;

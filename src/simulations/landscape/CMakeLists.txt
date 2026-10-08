@@ -13,6 +13,8 @@ add_library(uw_landscape STATIC
     ocean_mask.cpp
     regional_grid.cpp
     regional_pass.cpp
+    regional_surface.cpp
+    regional_water.cpp
     relief_roughness.cpp
     runoff.cpp
     sphere_metric.cpp
