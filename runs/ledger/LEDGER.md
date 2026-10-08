@@ -83,6 +83,7 @@ Lessons:
 | `erosion-0039` | 2026-10-08 | pass | keep | erosion plan, step E2d: the regional bundle, the region subcommand and the evaluation module regional |
 | `erosion-0040` | 2026-10-08 | pending user review | keep | erosion plan, step E4: the Phase E close (regional runs 1 to 4 on erosion run 9's bundle) |
 | `erosion-0041` | 2026-10-08 | pass | keep | erosion plan, step R0: the contracts of Phase R (regional realism) |
+| `erosion-0042` | 2026-10-09 | pass | keep | erosion plan, step R1: channels end at the fine coast, beds follow the start surface, rivers wet in lakes, map outlines |
 
 Lessons:
 
@@ -142,6 +143,8 @@ Lessons:
 - `erosion-0040`: Evaluations are never overwritten: a map fix after a registration goes into a second evaluation folder of the run.
 - `erosion-0041`: A contracts step that lets two workers run in parallel must name the test files too: the shared test world went into its own header so each step can add overlap variants in its own file.
 - `erosion-0041`: Inert parameters do not test a seam: the overlap tests build the struct defaults, so a step whose feature is off by default must add its own overlap variants with the feature on.
+- `erosion-0042`: A synthetic test world can hide a real-data case: it set the lake surface equal to the filled elevation, while erosion run 9 has closed lakes under their sills, which left rivers dry across them.
+- `erosion-0042`: A cell pinned at a global value in a surface that follows the fine terrain stands as a pillar: the junction's bed needs its own rule (R3).
 
 ## tectonics
 

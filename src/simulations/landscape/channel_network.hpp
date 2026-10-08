@@ -84,7 +84,8 @@ struct FineChannels
 {
     std::vector<uint8_t> channel;        // 1 on a pinned channel cell
     std::vector<uint8_t> direction;      // 1..8 towards the owner link's next cell (0 at a link's last cell:
-                                         // its first fine cell in a sea block, or a land sink's centre)
+                                         // its first fine cell in a sea block (R1: its first fine sea
+                                         // cell), or a land sink's centre)
     std::vector<float> bed_m;            // pinned bed elevation, m above datum
     std::vector<float> discharge_m3s;    // the upstream global cell's discharge
     std::vector<int32_t> januaryflow;    // the upstream global cell's legacy flows
@@ -92,15 +93,39 @@ struct FineChannels
     std::vector<int32_t> globalcell;     // the upstream global cell's index, -1 off the network
 };
 
-// Phase R, R1 (contract of R0; empty vectors keep the Phase E behaviour above):
-// `start_m` is the regional start surface and `finesea` the fine sea of the domain
+// Phase R, R1 (empty vectors keep the Phase E behaviour above, exactly): `start_m`
+// is the regional start surface and `finesea` the fine sea of the domain
 // (domainfinewidth() x domainfineheight(), regional_surface.hpp), decided before the
-// channels. With them, a link ends at its first fine sea cell (the fine coast, not
-// the global sea block) and no channel cell is pinned through the fine sea; the bed
-// follows the start surface's running minimum downstream, held between the
-// receiver's end value and the upstream cell's filled elevation (no straight-profile
-// trenches), never rising along the directions, and at least the next float above
-// the sea level on a land cell.
+// channels; each is used on its own.
+// - With `finesea`, a link ends at its first fine sea cell inside the domain (the fine
+//   coast, not the global sea block), whose bed is the sea level exactly and whose
+//   direction is 0, so no channel cell is pinned through the fine sea and every
+//   channel cell before a link's last is fine land. A path cell outside the domain,
+//   where the fine sea is unknown, ends the link in a global sea block as in Phase E.
+//   A link into a sea receiver ends at the sea level even if the fine sea leaves the
+//   receiver's centre land. A land global cell whose own centre is fine sea (never
+//   with regionalsea's mask) has a link of that one cell, at the sea level.
+// - With `start_m`, the bed of a link's path cell m (not its first or last) is
+//   max(r_m, f): r_m the minimum of the upstream cell's filled elevation and of the
+//   start surface over the path cells 0 .. m that lie inside the domain (a NaN and cells outside
+//   it lower nothing), f = max(end, min(top, next float above the sea level)), with top
+//   the upstream cell's filled elevation and end the receiver's (the sea level for a
+//   link that ends in the sea). The first cell keeps top, the last takes end. So the
+//   bed lies in [end, top], follows the start surface's lows (no straight-profile
+//   trenches), never rises along a link or along the directions (ownership, .cpp),
+//   and stands above the sea level on every cell before the last unless top is the
+//   sea level itself.
+// Seams: a channel cell's values depend on the links crossing it and, under R1, on
+// `start_m` and `finesea` at the cells of those links' paths up to it. A path lies
+// inside the box of its two global cells' blocks (its sideways displacement stays
+// below the k / 2 - 1/2 fine cells between a centre and its block's far edge, and a
+// diagonal's side neighbours are in the box), so those cells lie at most one global
+// cell nearer the domain's edge than the channel cell. The regional pass's start
+// surface and fine sea agree between windows from 2 x meanpasses global cells inside
+// the domain's edge (each block-mean pass spoils the residuals of the outer two), so
+// its channels agree from 2 x meanpasses + 1 cells inside it.
+// Throws std::invalid_argument also for a non-empty `start_m` or `finesea` whose size
+// is not the domain's.
 FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork& network,
                                const ChannelParameters& parameters, float sealevel,
                                const std::vector<float>& start_m = {}, const std::vector<uint8_t>& finesea = {});

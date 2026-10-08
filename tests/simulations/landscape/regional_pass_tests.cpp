@@ -127,7 +127,8 @@ TEST_F(Landscape, RegionalPassProperties)
         EXPECT_LT(seacentres, centres);
         EXPECT_EQ(wrong, 0);
 
-        // Lakes: the global surface where the fine bed lies below it, never sea.
+        // Lakes: the global surface where the fine bed lies below it (on a channel cell
+        // at or below it, R1), never sea.
         int lakecells = 0;
         for (int y = 0; y < fh; y++)
             for (int x = 0; x < fw; x++)
@@ -138,7 +139,10 @@ TEST_F(Landscape, RegionalPassProperties)
                 lakecells++;
                 const std::size_t global = globalof(window, width, x, y);
                 EXPECT_EQ(fields.lakesurface_m[cell], inputs.lakesurface_m[global]);
-                EXPECT_LT(fields.elevation_m[cell], fields.lakesurface_m[cell]);
+                if (fields.riverdirection[cell] != 0)
+                    EXPECT_LE(fields.elevation_m[cell], fields.lakesurface_m[cell]);
+                else
+                    EXPECT_LT(fields.elevation_m[cell], fields.lakesurface_m[cell]);
                 EXPECT_EQ(fields.sea[cell], 0);
             }
         EXPECT_GT(lakecells, 0);
@@ -213,6 +217,96 @@ TEST_F(Landscape, RegionalPassProperties)
                     "sea cells at the interpolated temperature %d, lapse-corrected %d\n",
                     scale, channels, toseas, outside, lakecells, seaexact, seaabove);
     }
+}
+
+TEST_F(Landscape, RegionalPassChannelsEndAtTheFineCoast)
+{
+    // Phase R, R1: the sea is decided before the channels, so a channel cell that leads
+    // on is land, its bed above the sea level and at or above the next cell's (a link's
+    // last cell in the sea keeps its seabed); a channel cell of a global lake cell whose
+    // bed lies at or below the lake surface carries the lake's water. Wet cells are left
+    // out of the bed checks: on real data a lowered lake cell may lie below the sea level
+    // (a lake below it) and below its outlet's sill (regional_water.hpp).
+    const RegionalGlobalInputs small = syntheticworld(32);
+    const RegionalGlobalInputs large = syntheticworld(64);
+    int lakechannels = 0;
+    for (int scale : {4, 5, 8})
+        for (const bool wide : {false, true})
+        {
+            SCOPED_TRACE(testing::Message() << "k " << scale << (wide ? ", window C" : ", window A"));
+            const RegionalGlobalInputs& inputs = wide ? large : small;
+            const RegionalWindow window = wide ? windowc(scale) : windowa(scale);
+            const RegionalFields fields = landscape::runregionalpass(inputs, window, RegionalParameters{});
+            const int fw = window.finewidth(), fh = window.fineheight();
+            int channels = 0;
+            for (int y = 0; y < fh; y++)
+                for (int x = 0; x < fw; x++)
+                {
+                    const std::size_t cell = at(x, y, fw);
+                    const int direction = fields.riverdirection[cell];
+                    if (direction == 0)
+                        continue;
+                    channels++;
+                    EXPECT_EQ(fields.sea[cell], 0) << x << ", " << y;
+                    EXPECT_GT(fields.elevation_m[cell], sealevel) << x << ", " << y;
+                    const int nx = x + landscape::directionoffsetx(direction), ny = y + landscape::directionoffsety(direction);
+                    // (Under a lake the elevation may rise along the directions: wet
+                    // channel cells are lowered to the surface, regional_water.hpp.)
+                    if (nx >= 0 && ny >= 0 && nx < fw && ny < fh && fields.lakesurface_m[cell] <= 0.0f)
+                        EXPECT_LE(fields.elevation_m[at(nx, ny, fw)], fields.elevation_m[cell]) << x << ", " << y;
+                    const float surface = inputs.lakesurface_m[globalof(window, inputs.width, x, y)];
+                    if (surface > 0.0f && fields.elevation_m[cell] <= surface)
+                    {
+                        lakechannels++;
+                        EXPECT_EQ(fields.lakesurface_m[cell], surface) << x << ", " << y;
+                    }
+                }
+            EXPECT_GT(channels, 0);
+        }
+    EXPECT_GT(lakechannels, 0);
+}
+
+TEST_F(Landscape, RegionalPassLakeBelowItsSill)
+{
+    // R1 (review): a closed lake whose surface lies 20 m below its cell's filled
+    // elevation, where the channel beds are pinned (the global cell's centre at the
+    // filled elevation). Channel cells at or below the filled elevation carry the lake
+    // and are lowered to its surface, so no lake surface lies below its cell; the
+    // lake's centre is wet. The overlap stays bit-identical.
+    const RegionalGlobalInputs inputs = lakebelowsill(syntheticworld(32), 20.0f);
+    for (int scale : {4, 5})
+    {
+        SCOPED_TRACE("k = " + std::to_string(scale));
+        const RegionalWindow window = windowa(scale);
+        const RegionalFields fields = landscape::runregionalpass(inputs, window, RegionalParameters{});
+        const int fw = window.finewidth(), fh = window.fineheight();
+        int centres = 0, wetchannels = 0;
+        for (int y = 0; y < fh; y++)
+            for (int x = 0; x < fw; x++)
+            {
+                const std::size_t cell = at(x, y, fw);
+                const std::size_t global = globalof(window, inputs.width, x, y);
+                const float surface = inputs.lakesurface_m[global];
+                if (fields.lakesurface_m[cell] > 0.0f)
+                {
+                    EXPECT_EQ(fields.lakesurface_m[cell], surface) << x << ", " << y;
+                    EXPECT_LE(fields.elevation_m[cell], fields.lakesurface_m[cell]) << x << ", " << y;
+                    wetchannels += fields.riverdirection[cell] != 0 ? 1 : 0;
+                }
+                if (surface <= 0.0f || !centrecell(window, x, y))
+                    continue;
+                centres++;
+                ASSERT_GT(surface, 0.0f);
+                EXPECT_LT(surface, inputs.network.filledelevation_m[global]);
+                EXPECT_EQ(fields.lakesurface_m[cell], surface) << "the lake's centre is dry";
+                EXPECT_LE(fields.elevation_m[cell], surface);
+            }
+        EXPECT_EQ(centres, 1);
+        EXPECT_GT(wetchannels, 0);
+    }
+    const OverlapCounts counts =
+        compareoverlap(lakebelowsill(syntheticworld(64), 20.0f), windowc(4), windowd(4), "lake below its sill C/D");
+    EXPECT_GT(counts.lake, 0);
 }
 
 TEST_F(Landscape, RegionalPassCoastSpeckle)

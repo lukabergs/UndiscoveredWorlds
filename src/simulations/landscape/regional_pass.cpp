@@ -69,7 +69,13 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     checksize(inputs.climate, globalsize, "climate");
 
     // The block-mean correction reaches 2 global cells per pass beyond any fine cell it
-    // changes; two more keep the channels and the solve's edge out of the kept window.
+    // changes, so the start surface and the fine sea agree between windows from
+    // 2 x meanpasses global cells inside the domain's edge. R1: the channels read them
+    // along their paths, which reach one global cell nearer the edge
+    // (channel_network.hpp), so the channels agree from 2 x meanpasses + 1 cells; the
+    // two cells kept here leave the solve one global cell between a kept cell and the
+    // pinned cells it depends on (Phase E allowed it two). As in Phase E, the overlap
+    // tests at this smallest halo (k 4, 5 and 8, low relief) are what establish it.
     if (parameters.meanpasses < 0 || window.halo < 2 * parameters.meanpasses + 2)
         throw std::invalid_argument("runregionalpass: the halo must be at least 2 x meanpasses + 2 global cells");
 
@@ -88,14 +94,19 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     fields.window = window;
     fields.blockmeanerror_m = start.blockmeanerror_m;
 
-    // 2. The pinned channels take their bed (above the start surface or not).
-    const FineChannels channels = rasterisechannels(window, inputs.network, parameters.channels, inputs.sealevel);
-    for (std::size_t cell = 0; cell < count; cell++)
-        if (channels.channel[cell] != 0)
-            surface[cell] = channels.bed_m[cell];
-
-    // 3. The sea by local rules (regional_surface.hpp).
+    // 2. The sea by local rules on the start surface (regional_surface.hpp), before the
+    // channels (R1), so the channels end at the fine coast and never change the mask.
     const std::vector<uint8_t> sea = regionalsea(inputs, window, warp, parameters, surface);
+
+    // 3. The pinned channels: they end at their first fine sea cell, and their beds
+    // follow the start surface's running minimum (channel_network.hpp). Beds are
+    // pinned on land; a link's last cell in the sea keeps its own (seabed) elevation,
+    // since the solve pins every sea cell at the sea level anyway.
+    const FineChannels channels =
+        rasterisechannels(window, inputs.network, parameters.channels, inputs.sealevel, surface, sea);
+    for (std::size_t cell = 0; cell < count; cell++)
+        if (channels.channel[cell] != 0 && sea[cell] == 0)
+            surface[cell] = channels.bed_m[cell];
 
     // 4. The analytical relief: channels, sea and the domain's outer ring pinned. A
     // sea cell enters the solve at the sea level (the base level of the rivers), so

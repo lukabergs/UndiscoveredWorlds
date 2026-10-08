@@ -101,7 +101,10 @@ def regional_terrain(bundle):
     (channel_direction 1..8) that carry a world river's flow (river_flow_january or _july
     above 0: the world writes its flows only where they reach landscape.rivers.minimum_flow).
     Every global link is a pinned channel (the seams need them, erosion plan section 6), so
-    drawing every channel would draw a river through every global cell (E4)."""
+    drawing every channel would draw a river through every global cell (E4). Over the rivers
+    (erosion plan R1): the lake shores (lake cells with a 4-neighbour that is not lake) in
+    LAKE_OUTLINE, then the landmass outline (cells that are not sea with a sea 4-neighbour) in
+    black; the window's edge is not a boundary."""
     sea_level = float(bundle.scalar('geosphere.sea_level'))
     elevation = bundle.load('geosphere.base_elevation').astype(float) - sea_level
     sea = bundle.load('geosphere.sea') != 0
@@ -120,9 +123,28 @@ def regional_terrain(bundle):
         logarithm = np.where(channel & (discharge > 0), np.log10(np.where(discharge > 0, discharge, 1.0)), np.nan)
     rivers = palette_rgb(logarithm, 'tectonics:discharge_log')
     rgb[channel] = rivers[channel]
+    rgb[shore(lake)] = LAKE_OUTLINE
+    rgb[shore(~sea)] = 0.0
     note = ('sea and land on the elevation scale; whitened: present-day ice; lakes on the lake-surface scale '
-            '(tectonics lake_surface_m); the rivers of the world by log10 discharge (tectonics discharge_log, 0 to 6 m3/s)')
+            '(tectonics lake_surface_m); the rivers of the world by log10 discharge (tectonics discharge_log, 0 to 6 m3/s); '
+            'black: the landmass outline (land cells beside the sea); dark blue: the lake shores (the outer lake cells)')
     return np.clip(np.rint(rgb), 0, 255).astype(np.uint8), note
+
+
+# The colour of the lake shores in regional_terrain (the landmass outline is black).
+LAKE_OUTLINE = (20.0, 40.0, 120.0)
+
+
+def shore(mask):
+    """The cells of a Boolean mask with a 4-neighbour outside it: the 1-pixel outline on the mask's
+    side of its boundary. The window's edge is not a boundary and nothing wraps (a regional window)."""
+    mask = np.asarray(mask, dtype=bool)
+    outside = np.zeros_like(mask)
+    outside[1:, :] |= ~mask[:-1, :]
+    outside[:-1, :] |= ~mask[1:, :]
+    outside[:, 1:] |= ~mask[:, :-1]
+    outside[:, :-1] |= ~mask[:, 1:]
+    return mask & outside
 
 
 # Composite maps (an RGB image of several fields): the function and the fields it reads.

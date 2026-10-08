@@ -4,7 +4,7 @@
 #include <cstddef>
 
 // Erosion plan steps E3 and R0 (docs/architecture/erosion-hydrology-plan.md, Phase E
-// and Phase R): moved from regional_pass.cpp unchanged.
+// and Phase R): moved from regional_pass.cpp; R1 wets the channel cells in lakes.
 
 namespace landscape
 {
@@ -41,7 +41,6 @@ FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow
 {
     (void)warp;
     (void)parameters;
-    (void)channels;
     const int width = inputs.width, height = inputs.height;
     const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
     const std::size_t globalsize = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -65,9 +64,28 @@ FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow
         {
             const std::size_t cell = at(x, y, domainwidth);
             const std::size_t global = at(window.globalcolumn(x), row, width);
+            // R1: a channel cell carries the lake's water where its bed is at or below
+            // the higher of the lake surface and the global cell's filled elevation,
+            // and its elevation is lowered to at most the surface. Beds are pinned at
+            // or below the filled elevation, which equals the surface of a lake that
+            // spills and lies above that of a closed lake under its sill; the strict
+            // rule left rivers dry through their lakes. A shore cell whose bed follows
+            // a start surface above that level stays dry.
             const float surfacelevel = inputs.lakesurface_m[global];
-            if (sea[cell] == 0 && surfacelevel > 0.0f && elevation_m[cell] < surfacelevel)
-                water.lakesurface_m[cell] = surfacelevel;
+            if (sea[cell] == 0 && surfacelevel > 0.0f)
+            {
+                if (channels.channel[cell] != 0)
+                {
+                    const float level = std::max(surfacelevel, inputs.network.filledelevation_m[global]);
+                    if (elevation_m[cell] <= level)
+                    {
+                        water.lakesurface_m[cell] = surfacelevel;
+                        elevation_m[cell] = std::min(elevation_m[cell], surfacelevel);
+                    }
+                }
+                else if (elevation_m[cell] < surfacelevel)
+                    water.lakesurface_m[cell] = surfacelevel;
+            }
             water.icethickness_m[cell] = nearice[global] != 0 ? std::max(0.0f, ice[cell]) : 0.0f;
         }
     }

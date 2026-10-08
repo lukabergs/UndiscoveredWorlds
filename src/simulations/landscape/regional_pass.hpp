@@ -4,8 +4,9 @@
 // and section 6, "Decided for Phase E"): global fields and a window in, the window's
 // fine fields out. Steps: the start surface (the global base elevation upsampled,
 // band-limited noise added with an amplitude from the local relief and tapered near
-// the sea level, block means corrected); the pinned channels; the analytical relief
-// on the domain; sea, lakes, rivers and climate on the fine grid by local rules;
+// the sea level, block means corrected); the sea by local rules (Phase R, R1: before
+// the channels, which end at the fine coast); the pinned channels; the analytical
+// relief on the domain; lakes, rivers and climate on the fine grid by local rules;
 // the halo discarded (Phase R: the start surface and the sea in regional_surface.hpp,
 // lakes and ice in regional_water.hpp). Every step is a pure function of the global fields, the seed
 // and absolute position within the halo's reach, so two windows give the same

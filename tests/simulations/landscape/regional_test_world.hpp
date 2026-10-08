@@ -40,8 +40,10 @@ constexpr double pi = 3.14159265358979323846;
 constexpr double radius_m = 6371.0e3;
 constexpr double secondsperyear = 365.25 * 86400.0;
 constexpr float sealevel = 0.0f;
-// The halo of these tests: two block-mean passes reach 4 global cells, so 6 leaves
-// two cells for the channels and the solve (the plan's default is 8).
+// The halo of these tests: two block-mean passes reach 4 global cells; the channels
+// read the start surface and the fine sea up to one global cell nearer the edge
+// (channel_network.hpp, R1), so 6 leaves the solve one global cell (the plan's
+// default is 16 with six passes).
 constexpr int testhalo = 6;
 
 std::size_t at(int x, int y, int width)
@@ -254,6 +256,17 @@ RegionalGlobalInputs syntheticworld(int width, double relief = 1.0)
             inputs.icethickness_m[cell] = static_cast<float>(std::max(0.0, 0.5 * (land - 2000.0)));
             inputs.climate[cell] = static_cast<int16_t>(std::fabs(phi) * 180.0 / pi / 15.0 + (network.sea[cell] != 0 ? 100 : 0));
         }
+    return inputs;
+}
+
+// The lake closed under its spill level (R1's review: on erosion run 9 a closed lake's
+// surface can lie below the routing's filled elevation): every lake surface lowered by
+// drop_m, the filled elevations kept.
+RegionalGlobalInputs lakebelowsill(RegionalGlobalInputs inputs, float drop_m)
+{
+    for (float& surface : inputs.lakesurface_m)
+        if (surface > 0.0f)
+            surface -= drop_m;
     return inputs;
 }
 

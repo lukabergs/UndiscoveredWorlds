@@ -2,7 +2,8 @@
 
 // Pinned channels of the regional pass (erosion plan step E2b,
 // docs/architecture/erosion-hydrology-plan.md, Phase E and section 6, "Seams of the
-// solve"). Every quantity below is computed in absolute fine coordinates from one
+// solve"; Phase R, step R1: the fine coast and the start surface's running minimum).
+// Every quantity below is computed in absolute fine coordinates from one
 // global link (its two global cells and the seed) and only mapped to the window's
 // domain when a fine cell is written, so a link is the same fine path in every
 // window, and a fine cell's values depend only on the links whose paths cross it.
@@ -12,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -229,19 +231,30 @@ int32_t outletdistance(const GlobalNetwork& network, std::size_t cell, std::vect
 // crosses a cell taken by another link therefore runs into it and on along the
 // owner's path (its own later cells stay its own where it owns them):
 // - the bed never rises: the next cell's owner holds it at or below this link's bed
-//   there, which is at or below this cell's (each link's bed descends: the inputs are
-//   checked so that no receiver stands above its upstream cell);
+//   there, which is at or below this cell's, because each link's bed never rises along
+//   its own path: the inputs are checked so that no receiver (and, for a link into the
+//   sea, no sea level) stands above its upstream cell, so end <= top; the linear
+//   profile (Phase E) runs from top to end; the R1 bed is top at the first cell, then
+//   max(running, bedfloor), where the running minimum starts at top and never rises
+//   and end <= bedfloor <= top, so it never rises and stays in [end, top], then end
+//   at the last cell;
 // - no loop, without any assumption on the drainage areas: along the directions the
 //   bed descends, or stays equal while the owner stays the same (its path position
 //   grows) or changes to a link that ranks strictly higher in (outlet distance,
-//   index), a fixed order of the links; the centre rule agrees with it, because the
-//   only links that reach a centre (meandercap) are the cell's outgoing link, at the
-//   cell's filled elevation, and the links into the cell, which end there at the same
-//   bed and start one link further from the outlet;
+//   index), a fixed order of the links; equal beds are common under the R1 bed (a
+//   running minimum is flat between the start surface's new lows, and the floor is
+//   flat), and each such step is one of these two; the centre rule agrees with it,
+//   because the only links that reach a centre (meandercap) are the cell's outgoing
+//   link, at the cell's filled elevation, and the links into the cell, which end there
+//   at the same bed (their last cell takes the end value exactly) and start one link
+//   further from the outlet; where a fine sea makes the centre sea, the outgoing link
+//   ends at its first cell and every incoming link that reaches it ends there too,
+//   all at the sea level;
 // - every chain ends at a link's last cell, where the direction is 0: its first fine
-//   cell in any sea block, or a land sink's centre. A link cut at a sea side
-//   neighbour's corner drops to the sea level there, which is a descent (the sea
-//   level is checked to be at or below the upstream cell).
+//   cell in any sea block (Phase E) or its first fine sea cell (R1), or a land sink's
+//   centre. A link cut at a sea side neighbour's corner, or at a fine coast before its
+//   receiver, drops to the sea level there, which is a descent (the sea level is
+//   checked to be at or below the upstream cell).
 // Links adjacent on the global tree (the same receiver, or one's receiver the other's
 // upstream cell) may share fine cells, and a chain then runs on along the other link
 // to the same outlet; links that are not adjacent share none (meandercap), except two
@@ -253,9 +266,6 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                                const ChannelParameters& parameters, float sealevel,
                                const std::vector<float>& start_m, const std::vector<uint8_t>& finesea)
 {
-    // R0: the contract only; R1 reads them.
-    (void)start_m;
-    (void)finesea;
     const int k = window.scale;
     const int width = network.width;
     const int height = network.height;
@@ -282,6 +292,13 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
     const int domainwidth = window.domaincolumns * k;
     const int domainheight = window.domainrows * k;
     const std::size_t finecells = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
+    if (!start_m.empty() && start_m.size() != finecells)
+        throw std::invalid_argument("rasterisechannels: the start surface must be empty or hold the domain's fine cells");
+    if (!finesea.empty() && finesea.size() != finecells)
+        throw std::invalid_argument("rasterisechannels: the fine sea must be empty or hold the domain's fine cells");
+    const bool usestart = !start_m.empty();
+    const bool usesea = !finesea.empty();
+    const float abovesea = std::nextafter(sealevel, std::numeric_limits<float>::infinity());
     FineChannels out;
     out.channel.assign(finecells, 0);
     out.direction.assign(finecells, 0);
@@ -345,28 +362,46 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
             const std::uint64_t hash = deterministiccombine(parameters.seed, static_cast<std::int64_t>(upstream),
                                                             static_cast<std::int64_t>(receiver));
             std::vector<FineCell> path = linkpath(k, i, j, ox, oy, parameters.meanderamplitude, hash);
-            // A link ends at its first fine cell inside any global sea cell's k x k
-            // block: the sea receiver's, or a sea side neighbour's whose corner a
-            // diagonal or a meander crosses (a diagonal segment runs through the
-            // corner its two side neighbours share). The rest of the path is not drawn.
-            const auto insea = std::find_if(path.begin(), path.end(), [&](const FineCell& cell) {
+            // Phase E (no fine sea): a link ends at its first fine cell inside any
+            // global sea cell's k x k block: the sea receiver's, or a sea side
+            // neighbour's whose corner a diagonal or a meander crosses (a diagonal
+            // segment runs through the corner its two side neighbours share). R1 (a fine
+            // sea): at its first fine sea cell inside the domain, the fine coast; a path
+            // cell outside the domain, where the fine sea is not known, still ends it in
+            // a global sea block (only links near the domain's edge, inside the halo,
+            // have such cells). The rest of the path is not drawn.
+            auto inseablock = [&](const FineCell& cell) {
                 const std::int64_t column = cell.x >= 0 ? cell.x / k : (cell.x - (k - 1)) / k;  // floor
                 const std::int64_t row = cell.y >= 0 ? cell.y / k : (cell.y - (k - 1)) / k;
                 if (row < 0 || row >= height)
                     return false;
                 const std::int64_t wrapped = ((column % width) + width) % width;
                 return network.sea[static_cast<std::size_t>(row) * width + static_cast<std::size_t>(wrapped)] != 0;
+            };
+            const auto insea = std::find_if(path.begin(), path.end(), [&](const FineCell& cell) {
+                std::size_t index = 0;
+                if (usesea && domainindex(cell, index))
+                    return finesea[index] != 0;
+                return inseablock(cell);
             });
-            const bool intosea = insea != path.end();
-            if (intosea)
+            const bool cut = insea != path.end();
+            if (cut)
                 path.erase(insea + 1, path.end());
+            // A link into a sea receiver ends at the sea level even where the fine sea
+            // leaves the receiver's centre land (never with regionalsea's mask, which
+            // keeps a sea cell's centre sea; without a fine sea the cut always happens).
+            const bool intosea = cut || network.sea[receiver] != 0;
 
-            // Bed: linear in the path length (fine cell edges, sqrt(2) per diagonal
-            // step) from the upstream filled elevation to the receiver's, or to the
-            // sea level, exactly, for a link that ends in the sea. The global routing's
-            // receivers lie on the filled surface and land stands at or above the sea
-            // level, so an end above the upstream cell, or a filled elevation that is
-            // not a number, is bad input.
+            // Bed. Without a start surface (Phase E): linear in the path length (fine
+            // cell edges, sqrt(2) per diagonal step) from the upstream filled elevation
+            // to the receiver's, or to the sea level, exactly, for a link that ends in
+            // the sea. With a start surface (R1): the running minimum of the start
+            // surface along the path (path cells inside the domain only), starting from
+            // the upstream filled elevation, held at or above `bedfloor`; the path's first
+            // cell keeps the upstream filled elevation and its last cell takes the end
+            // value exactly. The global routing's receivers lie on the filled surface
+            // and land stands at or above the sea level, so an end above the upstream
+            // cell, or a filled elevation that is not a number, is bad input.
             const float top = network.filledelevation_m[upstream];
             const float end = intosea ? sealevel : network.filledelevation_m[receiver];
             if (!std::isfinite(top) || !std::isfinite(end))
@@ -385,16 +420,32 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
             const double total = along.back();
             const int32_t rank = outletdistance(network, upstream, distance);
             const int32_t upstreamindex = static_cast<int32_t>(upstream);
+            // The floor of a cell before the last, which is a land cell where a fine
+            // sea is given: the next float above the sea level, but never above the
+            // upstream cell (a coastal cell exactly at the sea level keeps its level)
+            // and never below the end value. end <= floor <= top, so the bed stays in
+            // [end, top] and the clamp keeps the running minimum's order.
+            const float bedfloor = std::max(end, std::min(top, abovesea));
+            float running = top;
 
             for (std::size_t m = 0; m < path.size(); m++)
             {
                 std::size_t index = 0;
-                if (!domainindex(path[m], index))
+                const bool inside = domainindex(path[m], index);
+                if (usestart && inside)
+                    running = std::min(running, start_m[index]);  // a NaN start value lowers nothing
+                if (!inside)
                     continue;
                 const bool lastcell = m + 1 == path.size();
-                const float bed =
-                    m == 0 ? top
-                           : (lastcell ? end : static_cast<float>(top + (static_cast<double>(end) - top) * along[m] / total));
+                float bed = 0.0f;
+                if (lastcell)
+                    bed = end;  // a path of one cell is cut at its first cell: a fine sea centre
+                else if (m == 0)
+                    bed = top;
+                else if (usestart)
+                    bed = std::max(running, bedfloor);
+                else
+                    bed = static_cast<float>(top + (static_cast<double>(end) - top) * along[m] / total);
                 const uint8_t own = m == 0 ? 1 : 0;
                 if (out.channel[index] != 0)
                 {

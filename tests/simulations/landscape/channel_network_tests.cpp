@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <limits>
 #include <stdexcept>
@@ -994,4 +995,427 @@ TEST_F(Landscape, ChannelNetworkRejectsBadInput)
     EXPECT_THROW(rasterisechannels(worldwindow(4), loop, parameters(0.3, 1), sealevel), std::invalid_argument);
     // ... but a bad link out of reach of the domain is not looked at.
     EXPECT_NO_THROW(rasterisechannels(domainwindow(4, 0, 2, 0, 2), notfinite, parameters(0.3, 1), sealevel));
+}
+
+namespace
+{
+// Phase R, R1: domain fields of a window as functions of the absolute fine cell (x, y).
+std::vector<float> finefield(const RegionalWindow& window, const std::function<float(std::int64_t, std::int64_t)>& value)
+{
+    std::vector<float> field(static_cast<std::size_t>(window.domainfinewidth()) * window.domainfineheight());
+    for (int y = 0; y < window.domainfineheight(); y++)
+        for (int x = 0; x < window.domainfinewidth(); x++)
+            field[static_cast<std::size_t>(y) * window.domainfinewidth() + x] =
+                value(absolutecolumn(window, x), absoluterow(window, y));
+    return field;
+}
+
+std::vector<uint8_t> finemask(const RegionalWindow& window, const std::function<bool(std::int64_t, std::int64_t)>& test)
+{
+    const std::vector<float> field =
+        finefield(window, [&](std::int64_t x, std::int64_t y) { return test(x, y) ? 1.0f : 0.0f; });
+    std::vector<uint8_t> mask(field.size());
+    for (std::size_t cell = 0; cell < field.size(); cell++)
+        mask[cell] = field[cell] != 0.0f ? 1 : 0;
+    return mask;
+}
+
+// The global sea blocks as a fine mask (where Phase E ends its links).
+std::vector<uint8_t> seablocks(const GlobalNetwork& network, const RegionalWindow& window)
+{
+    return finemask(window, [&](std::int64_t x, std::int64_t y) {
+        return network.sea[globalindex(static_cast<int>(x / window.scale), static_cast<int>(y / window.scale))] != 0;
+    });
+}
+
+// A start surface of white noise in [low, high) from a hash of the absolute fine cell.
+double hashunit(std::int64_t x, std::int64_t y, std::uint64_t salt = 0)
+{
+    std::uint64_t h = static_cast<std::uint64_t>(y * 1000003 + x) + 0x9e3779b97f4a7c15ULL + salt;
+    h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
+    h ^= h >> 31;
+    return static_cast<double>(h >> 11) / 9007199254740992.0;
+}
+
+std::vector<float> noisesurface(const RegionalWindow& window, float low, float high)
+{
+    return finefield(window, [&](std::int64_t x, std::int64_t y) {
+        return low + (high - low) * static_cast<float>(hashunit(x, y));
+    });
+}
+
+// Checks every channel cell against a fine sea mask: a cell that leads on is not sea,
+// its bed above the sea level (every land cell of these worlds stands above it) and at
+// or above the next cell's; a link's last cell is sea at the sea level or a land
+// sink's centre; following the directions from any channel cell ends there without a
+// loop. Returns the number of channel cells.
+int checkfinecoast(const GlobalNetwork& network, const RegionalWindow& window, const FineChannels& channels,
+                   const std::vector<uint8_t>& finesea)
+{
+    const int count = channelcount(channels);
+    for (std::size_t cell = 0; cell < channels.channel.size(); cell++)
+    {
+        if (channels.channel[cell] == 0)
+            continue;
+        if (channels.direction[cell] == 0)
+        {
+            const std::size_t global = globalof(window, cell);
+            const bool sink = network.sea[global] == 0 && network.direction[global] == 0 && iscentre(window, cell);
+            EXPECT_TRUE(finesea[cell] != 0 || sink) << "fine cell " << cell;
+            if (finesea[cell] != 0)
+                EXPECT_EQ(channels.bed_m[cell], sealevel) << "fine cell " << cell;
+            continue;
+        }
+        EXPECT_EQ(finesea[cell], 0) << "a channel runs on through the sea at fine cell " << cell;
+        EXPECT_GT(channels.bed_m[cell], sealevel) << "fine cell " << cell;
+        std::size_t next = 0;
+        EXPECT_TRUE(nextcell(window, cell, channels.direction[cell], next));
+        EXPECT_LE(channels.bed_m[next], channels.bed_m[cell]) << "fine cell " << cell;
+        std::size_t walk = cell;
+        int steps = 0;
+        while (channels.direction[walk] != 0 && steps <= count && nextcell(window, walk, channels.direction[walk], walk))
+            steps++;
+        EXPECT_LE(steps, count) << "loop from fine cell " << cell;
+        EXPECT_EQ(channels.direction[walk], 0) << "from fine cell " << cell;
+    }
+    return count;
+}
+}
+
+TEST_F(Landscape, ChannelNetworkEndsAtTheFineCoast)
+{
+    // The main world with a fine sea that reaches beyond the global sea column 0: the
+    // west half of column 1's blocks (fine columns k .. k + k / 2 - 1), short of their
+    // centres. Without a meander the link (1, 2) -> (0, 2) ends at fine column
+    // k + k / 2 - 1, its first fine sea cell (Phase E: k - 1, in the sea block), at the
+    // sea level, and nothing lies west of it on its row but (15, 2)'s end at column 0.
+    const GlobalNetwork network = syntheticnetwork();
+    for (const Case& c : cases)
+    {
+        SCOPED_TRACE(testing::Message() << "k " << c.scale << ", meander " << c.meanderamplitude << ", seed " << c.seed);
+        const int k = c.scale;
+        const RegionalWindow window = worldwindow(k);
+        const std::vector<uint8_t> finesea = finemask(window, [&](std::int64_t x, std::int64_t) { return x < k + k / 2; });
+        for (const bool withstart : { false, true })
+        {
+            SCOPED_TRACE(withstart ? "with a start surface" : "without a start surface");
+            const std::vector<float> start = withstart ? noisesurface(window, -50.0f, 400.0f) : std::vector<float>{};
+            const FineChannels channels =
+                rasterisechannels(window, network, parameters(c.meanderamplitude, c.seed), sealevel, start, finesea);
+            EXPECT_GT(checkfinecoast(network, window, channels, finesea), 0);
+            if (c.meanderamplitude != 0.0)
+                continue;
+            const std::int64_t row = 2 * k + k / 2;
+            std::size_t mouth = 0;
+            ASSERT_TRUE(domaincell(window, k + k / 2 - 1, row, mouth));
+            EXPECT_EQ(channels.globalcell[mouth], static_cast<int32_t>(globalindex(1, 2)));
+            EXPECT_EQ(channels.direction[mouth], 0);
+            EXPECT_EQ(channels.bed_m[mouth], sealevel);
+            for (std::int64_t column = 1; column < k + k / 2 - 1; column++)
+            {
+                std::size_t cell = 0;
+                ASSERT_TRUE(domaincell(window, column, row, cell));
+                EXPECT_EQ(channels.channel[cell], 0) << "column " << column;
+            }
+        }
+    }
+}
+
+TEST_F(Landscape, ChannelNetworkBedFollowsTheStartSurface)
+{
+    // A straight chain at k = 8 without a meander: (6, 4) at 100 m drains west to (5, 4)
+    // at 50 m, which drains west into the sea at (4, 4). Fine row 36; (6, 4)'s centre is
+    // fine column 52, (5, 4)'s 44, the sea block's east column 39. The start surface is
+    // 1000 m except on that row.
+    GlobalNetwork network = seaworld();
+    setland(network, 6, 4, west, 100.0f, 200.0f);
+    setland(network, 5, 4, west, 50.0f, 300.0f);
+    const int k = 8;
+    const RegionalWindow window = worldwindow(k);
+    const std::int64_t row = 36;
+    // Along (6, 4)'s link, columns 52 .. 44: a rise, a fall, a dip below the receiver's
+    // 50 m; along (5, 4)'s link, columns 43 .. 39: below the sea level.
+    const float profile[] = { 90.0f, 95.0f, 70.0f, 80.0f, 40.0f, 60.0f, 45.0f, 30.0f, 10.0f };
+    const std::vector<float> start = finefield(window, [&](std::int64_t x, std::int64_t y) {
+        if (y != row)
+            return 1000.0f;
+        if (x >= 44 && x <= 52)
+            return profile[52 - x];
+        return x >= 39 && x <= 43 ? -20.0f : 1000.0f;
+    });
+    const float abovesea = std::nextafter(sealevel, std::numeric_limits<float>::infinity());
+    {
+        const FineChannels channels = rasterisechannels(window, network, parameters(0.0, 1), sealevel, start);
+        // (6, 4): its filled elevation at its centre, then the running minimum of the
+        // start surface (90, 90, 70, 70, then 40, 30 held at the receiver's 50).
+        const float expected[] = { 100.0f, 90.0f, 70.0f, 70.0f, 50.0f, 50.0f, 50.0f, 50.0f, 50.0f };
+        for (int m = 0; m <= 8; m++)
+        {
+            std::size_t cell = 0;
+            ASSERT_TRUE(domaincell(window, 52 - m, row, cell));
+            EXPECT_EQ(channels.bed_m[cell], expected[m]) << "step " << m;
+            EXPECT_EQ(channels.globalcell[cell], static_cast<int32_t>(globalindex(m < 8 ? 6 : 5, 4))) << "step " << m;
+        }
+        // (5, 4): 50 m at its centre, then held at the next float above the sea level on
+        // land although the start surface lies below it; the sea level at column 39.
+        for (int m = 1; m <= 5; m++)
+        {
+            std::size_t cell = 0;
+            ASSERT_TRUE(domaincell(window, 44 - m, row, cell));
+            EXPECT_EQ(channels.bed_m[cell], m < 5 ? abovesea : sealevel) << "step " << m;
+            EXPECT_EQ(channels.direction[cell], m < 5 ? west : 0) << "step " << m;
+        }
+    }
+    {
+        // A fine sea off the global sea block: fine columns 40 and 41 of block row 4.
+        // (5, 4)'s link ends at column 41, its first fine sea cell, at the sea level;
+        // columns 40 and 39 hold no channel.
+        const std::vector<uint8_t> blocks = seablocks(network, window);
+        const std::vector<uint8_t> finesea = finemask(window, [&](std::int64_t x, std::int64_t y) {
+            return blocks[static_cast<std::size_t>(y) * window.domainfinewidth() + static_cast<std::size_t>(x)] != 0 ||
+                   (y / k == 4 && (x == 40 || x == 41));
+        });
+        const FineChannels channels = rasterisechannels(window, network, parameters(0.0, 1), sealevel, start, finesea);
+        std::size_t mouth = 0;
+        ASSERT_TRUE(domaincell(window, 41, row, mouth));
+        EXPECT_EQ(channels.globalcell[mouth], static_cast<int32_t>(globalindex(5, 4)));
+        EXPECT_EQ(channels.direction[mouth], 0);
+        EXPECT_EQ(channels.bed_m[mouth], sealevel);
+        for (std::int64_t column : { 40, 39 })
+        {
+            std::size_t cell = 0;
+            ASSERT_TRUE(domaincell(window, column, row, cell));
+            EXPECT_EQ(channels.channel[cell], 0) << "column " << column;
+        }
+        EXPECT_EQ(checkfinecoast(network, window, channels, finesea), 9 + 3);
+    }
+}
+
+TEST_F(Landscape, ChannelNetworkStartSurfaceBedNeverRises)
+{
+    // Under a noisy start surface (white noise from 50 m below the sea level to 150 m
+    // above, so it dips below receivers and the sea level everywhere) the beds never
+    // rise along the directions, stay at or above the sea level and at most the
+    // upstream cell's filled elevation, and every pinned chain still ends in its own
+    // outlet: on the main world, and across the X of two crossing diagonals, whose
+    // shared cells go to the lower bed (the accepted exception: chains may change basin
+    // there, but every chain ends in the sea without a loop).
+    const GlobalNetwork network = syntheticnetwork();
+    for (const Case& c : cases)
+    {
+        SCOPED_TRACE(testing::Message() << "k " << c.scale << ", meander " << c.meanderamplitude << ", seed " << c.seed);
+        const RegionalWindow window = worldwindow(c.scale);
+        const std::vector<float> start = noisesurface(window, -50.0f, 150.0f);
+        const FineChannels channels =
+            rasterisechannels(window, network, parameters(c.meanderamplitude, c.seed), sealevel, start);
+        int flat = 0;
+        for (std::size_t cell = 0; cell < channels.channel.size(); cell++)
+        {
+            if (channels.channel[cell] == 0)
+                continue;
+            EXPECT_GE(channels.bed_m[cell], sealevel);
+            EXPECT_LE(channels.bed_m[cell], network.filledelevation_m[static_cast<std::size_t>(channels.globalcell[cell])]);
+            std::size_t next = 0;
+            if (channels.direction[cell] != 0 && nextcell(window, cell, channels.direction[cell], next))
+                flat += channels.bed_m[next] == channels.bed_m[cell] ? 1 : 0;
+        }
+        EXPECT_GT(flat, 0);  // a running minimum is flat between the start surface's new lows
+        EXPECT_GT(checkfinecoast(network, window, channels, seablocks(network, window)), 0);
+        const WalkReport report = walkpinned(network, window, channels);
+        EXPECT_EQ(report.walks, 120);
+        EXPECT_EQ(report.nonadjacent, 0);
+        EXPECT_EQ(report.wrongoutlet, 0);
+    }
+
+    GlobalNetwork crossing = seaworld();
+    setland(crossing, 6, 3, southeast, 100.0f, 100.0f);
+    setland(crossing, 7, 4, east, 20.0f, 200.0f);
+    setland(crossing, 8, 4, east, 10.0f, 300.0f);
+    setland(crossing, 7, 3, southwest, 30.0f, 100.0f);
+    setland(crossing, 6, 4, west, 20.0f, 200.0f);
+    setland(crossing, 5, 4, west, 10.0f, 300.0f);
+    for (int k : { 4, 5, 8 })
+        for (std::uint64_t seed = 1; seed <= 16; seed++)
+        {
+            SCOPED_TRACE(testing::Message() << "crossing, k " << k << ", seed " << seed);
+            const RegionalWindow window = worldwindow(k);
+            const std::vector<float> start = noisesurface(window, -50.0f, 150.0f);
+            const FineChannels channels = rasterisechannels(window, crossing, parameters(0.3, seed), sealevel, start);
+            EXPECT_GT(checkfinecoast(crossing, window, channels, seablocks(crossing, window)), 0);
+            EXPECT_EQ(walkpinned(crossing, window, channels).walks, 6);
+        }
+}
+
+TEST_F(Landscape, ChannelNetworkRejectsWrongSizedSurfaces)
+{
+    const GlobalNetwork network = syntheticnetwork();
+    const RegionalWindow window = worldwindow(4);
+    const std::size_t cells = static_cast<std::size_t>(window.domainfinewidth()) * window.domainfineheight();
+    EXPECT_THROW(rasterisechannels(window, network, parameters(0.3, 1), sealevel, std::vector<float>(cells - 1, 1.0f)),
+                 std::invalid_argument);
+    EXPECT_THROW(rasterisechannels(window, network, parameters(0.3, 1), sealevel, {}, std::vector<uint8_t>(cells + 1, 0)),
+                 std::invalid_argument);
+    EXPECT_NO_THROW(rasterisechannels(window, network, parameters(0.3, 1), sealevel, std::vector<float>(cells, 1.0f),
+                                      std::vector<uint8_t>(cells, 0)));
+}
+
+TEST_F(Landscape, ChannelNetworkWindowsAgreeAwayFromTheirEdges)
+{
+    // The seam claim of R1 at channel level: given the same start surface and fine sea
+    // (functions of the absolute fine cell: noise from 50 m below the sea level to 400 m
+    // above, the fine sea of ChannelNetworkEndsAtTheFineCoast plus 3 % of the fine cells
+    // as sea specks that cut links anywhere), windows agree on every channel field at the
+    // fine cells at least one global cell inside both domains: a path lies in the box of
+    // its two cells' blocks (channel_network.hpp), so what a cell's links read lies in
+    // both domains. Cells nearer an edge may differ (counted, not asserted).
+    const GlobalNetwork network = syntheticnetwork();
+    int compared = 0, comparedchannels = 0, edgediffer = 0;
+    for (const Case& c : cases)
+    {
+        SCOPED_TRACE(testing::Message() << "k " << c.scale << ", meander " << c.meanderamplitude << ", seed " << c.seed);
+        const int k = c.scale;
+        const ChannelParameters settings = parameters(c.meanderamplitude, c.seed);
+        const RegionalWindow windows[] = {
+            domainwindow(k, 5, worldwidth, 0, worldheight),
+            domainwindow(k, 13, 8, 1, 5),
+            domainwindow(k, 2, 10, 0, 8),
+            domainwindow(k, 9, 5, 3, 4),
+            domainwindow(k, 0, 3, 6, 2),
+        };
+        std::vector<FineChannels> results;
+        for (const RegionalWindow& window : windows)
+        {
+            const std::vector<uint8_t> finesea = finemask(window, [&](std::int64_t x, std::int64_t y) {
+                return x < k + k / 2 || hashunit(x, y, 77) < 0.03;
+            });
+            results.push_back(rasterisechannels(window, network, settings, sealevel, noisesurface(window, -50.0f, 400.0f),
+                                                finesea));
+        }
+        auto inside = [&](const RegionalWindow& window, int x, int y) {
+            return x >= k && y >= k && x < window.domainfinewidth() - k && y < window.domainfineheight() - k;
+        };
+        for (std::size_t p = 0; p < results.size(); p++)
+            for (std::size_t q = 0; q < results.size(); q++)
+            {
+                if (p == q)
+                    continue;
+                const RegionalWindow& a = windows[p];
+                const RegionalWindow& b = windows[q];
+                for (int y = 0; y < a.domainfineheight(); y++)
+                    for (int x = 0; x < a.domainfinewidth(); x++)
+                    {
+                        std::size_t other = 0;
+                        if (!domaincell(b, absolutecolumn(a, x), absoluterow(a, y), other))
+                            continue;
+                        const std::size_t cell =
+                            static_cast<std::size_t>(y) * static_cast<std::size_t>(a.domainfinewidth()) + x;
+                        const int bx = static_cast<int>(other % static_cast<std::size_t>(b.domainfinewidth()));
+                        const int by = static_cast<int>(other / static_cast<std::size_t>(b.domainfinewidth()));
+                        const FineChannels& ra = results[p];
+                        const FineChannels& rb = results[q];
+                        const bool same = ra.channel[cell] == rb.channel[other] &&
+                                          ra.direction[cell] == rb.direction[other] && ra.bed_m[cell] == rb.bed_m[other] &&
+                                          ra.discharge_m3s[cell] == rb.discharge_m3s[other] &&
+                                          ra.januaryflow[cell] == rb.januaryflow[other] &&
+                                          ra.julyflow[cell] == rb.julyflow[other] &&
+                                          ra.globalcell[cell] == rb.globalcell[other];
+                        if (!inside(a, x, y) || !inside(b, bx, by))
+                        {
+                            edgediffer += same ? 0 : 1;
+                            continue;
+                        }
+                        compared++;
+                        comparedchannels += ra.channel[cell];
+                        ASSERT_TRUE(same) << p << " " << q << " fine cell " << cell;
+                    }
+            }
+    }
+    EXPECT_GT(compared, 0);
+    EXPECT_GT(comparedchannels, 0);
+    std::printf("[channels] R1 seams: %d interior cells compared (%d on channels), %d cells near an edge differ\n",
+                compared, comparedchannels, edgediffer);
+}
+
+TEST_F(Landscape, ChannelNetworkCutBeforeALandReceiver)
+{
+    // At k = 8 without a meander, (6, 4) at 100 m drains west to the land cell (5, 4) at
+    // 50 m (fine columns 52 to 44 on fine row 36), which drains into the sea at (4, 4).
+    // A fine sea at columns 47 and 48 of block row 4 cuts (6, 4)'s link at column 48
+    // before its land receiver: the end becomes the sea level and the floor the next
+    // float above it, so the bed follows the start surface below the receiver's 50 m.
+    GlobalNetwork network = seaworld();
+    setland(network, 6, 4, west, 100.0f, 200.0f);
+    setland(network, 5, 4, west, 50.0f, 300.0f);
+    const int k = 8;
+    const RegionalWindow window = worldwindow(k);
+    const std::int64_t row = 36;
+    const std::vector<float> start = finefield(window, [&](std::int64_t x, std::int64_t y) {
+        if (y == row && x == 51)
+            return 30.0f;
+        return y == row && x == 50 ? -10.0f : 1000.0f;
+    });
+    const std::vector<uint8_t> blocks = seablocks(network, window);
+    const std::vector<uint8_t> finesea = finemask(window, [&](std::int64_t x, std::int64_t y) {
+        return blocks[static_cast<std::size_t>(y) * window.domainfinewidth() + static_cast<std::size_t>(x)] != 0 ||
+               (y / k == 4 && (x == 47 || x == 48));
+    });
+    const FineChannels channels = rasterisechannels(window, network, parameters(0.0, 1), sealevel, start, finesea);
+    const float abovesea = std::nextafter(sealevel, std::numeric_limits<float>::infinity());
+    const float expected[] = { 100.0f, 30.0f, abovesea, abovesea, sealevel };
+    for (int m = 0; m <= 4; m++)
+    {
+        std::size_t cell = 0;
+        ASSERT_TRUE(domaincell(window, 52 - m, row, cell));
+        EXPECT_EQ(channels.globalcell[cell], static_cast<int32_t>(globalindex(6, 4))) << "step " << m;
+        EXPECT_EQ(channels.bed_m[cell], expected[m]) << "step " << m;
+        EXPECT_EQ(channels.direction[cell], m < 4 ? west : 0) << "step " << m;
+    }
+    for (std::int64_t column : { 47, 46, 45 })
+    {
+        std::size_t cell = 0;
+        ASSERT_TRUE(domaincell(window, column, row, cell));
+        EXPECT_EQ(channels.channel[cell], 0) << "column " << column;
+    }
+    std::size_t receiver = 0;
+    ASSERT_TRUE(domaincell(window, 44, row, receiver));
+    EXPECT_EQ(channels.globalcell[receiver], static_cast<int32_t>(globalindex(5, 4)));
+    EXPECT_EQ(channels.bed_m[receiver], 50.0f);
+    checkfinecoast(network, window, channels, finesea);
+}
+
+TEST_F(Landscape, ChannelNetworkNaNInTheStartSurfaceLowersNothing)
+{
+    // A NaN in the start surface is skipped by the running minimum (no throw): the beds
+    // equal those with the NaN replaced by a value above the link. (6, 4) at 100 m drains
+    // west to (5, 4) at 50 m, k = 8, fine row 36: 80 m at column 51, NaN at 50, 60 m at 49.
+    GlobalNetwork network = seaworld();
+    setland(network, 6, 4, west, 100.0f, 200.0f);
+    setland(network, 5, 4, west, 50.0f, 300.0f);
+    const int k = 8;
+    const RegionalWindow window = worldwindow(k);
+    const std::int64_t row = 36;
+    auto surface = [&](float atfifty) {
+        return finefield(window, [&](std::int64_t x, std::int64_t y) {
+            if (y != row)
+                return 1000.0f;
+            if (x == 51)
+                return 80.0f;
+            if (x == 50)
+                return atfifty;
+            return x == 49 ? 60.0f : 1000.0f;
+        });
+    };
+    const FineChannels withnan =
+        rasterisechannels(window, network, parameters(0.0, 1), sealevel, surface(std::numeric_limits<float>::quiet_NaN()));
+    const FineChannels without = rasterisechannels(window, network, parameters(0.0, 1), sealevel, surface(1000.0f));
+    EXPECT_EQ(withnan.bed_m, without.bed_m);
+    EXPECT_EQ(withnan.direction, without.direction);
+    const float expected[] = { 100.0f, 80.0f, 80.0f, 60.0f };
+    for (int m = 0; m <= 3; m++)
+    {
+        std::size_t cell = 0;
+        ASSERT_TRUE(domaincell(window, 52 - m, row, cell));
+        EXPECT_EQ(withnan.bed_m[cell], expected[m]) << "step " << m;
+    }
 }
