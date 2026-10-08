@@ -354,14 +354,20 @@ def run_validation(bundle, specs, references, baseline=None):
             import landscape_statistics
             needed = {'drainage_pattern': landscape_statistics.DRAINAGE_FIELDS,
                       'glaciation': landscape_statistics.GLACIATION_FIELDS}.get(spec['kind'], ())
+            # A baseline from before the glacial fields (erosion plan Phase G) had no glacial
+            # term: the run's numbers are still reported, without a baseline side.
+            glacialbaseline = baseline
+            if spec['kind'] == 'glaciation' and baseline is not None and \
+                    any(field not in baseline.fields for field in needed):
+                glacialbaseline = None
             missing = [field for field in needed if field not in bundle.fields or
-                       (baseline is not None and field not in baseline.fields)]
+                       (baseline is not None and spec['kind'] != 'glaciation' and field not in baseline.fields)]
             if missing:
                 skipped.append({'id': spec['id'], 'reason': 'model fields absent: ' + ', '.join(missing)})
             elif spec['kind'] == 'drainage_pattern':
                 distributions[spec['id']] = landscape_statistics.compare_drainage_pattern(bundle, spec, baseline)
             elif spec['kind'] == 'glaciation':
-                distributions[spec['id']] = landscape_statistics.compare_glaciation(bundle, spec, baseline)
+                distributions[spec['id']] = landscape_statistics.compare_glaciation(bundle, spec, glacialbaseline)
             else:
                 distributions[spec['id']] = landscape_statistics.compare_ocean_depths(bundle, spec, baseline)
         elif spec['kind'] in ('upstream_area', 'basins', 'internal_drainage', 'discharge'):
