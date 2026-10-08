@@ -8,6 +8,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0016`: Depth from the engine's crust age by the plate-cooling law: the engine's ocean ages are mostly the run's age (median 590 Myr at 600 Myr) and two thirds of the sea lies on continental crust, so 98 percent of the ocean lands at 5 to 6 km.
 - `erosion-0021`: Loading fraction 2700/3300 with rebound 2800/3300 on rock volumes (it raised the land by 0.66 m on average in 20 Myr).
 - `erosion-0031`: Routing on the ice surface during the run: ice flickers on and off between steps (643 appearances on 305 cells in 20 steps at the minimal size).
+- `erosion-0036`: stopping the fixed point when the receivers settle: the decision covers the whole window, so overlapping windows stop at different passes
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -75,6 +76,7 @@ Lessons:
 | `erosion-0033` | 2026-10-08 | pass | keep | erosion plan, step E1: the legacy regional generator leaves src/app (Phase E, headless regional maps) |
 | `erosion-0034` | 2026-10-08 | pass | keep | erosion plan, step E0: survey, the Phase E table and decisions, the contracts of the regional pass |
 | `erosion-0035` | 2026-10-08 | pass | keep | erosion plan, step E2a: the window grid, the spherical noise and the upsampling of the regional pass |
+| `erosion-0036` | 2026-10-08 | pass | keep | erosion plan, step E2c: the analytical relief of the regional pass |
 
 Lessons:
 
@@ -124,6 +126,8 @@ Lessons:
 - `erosion-0034`: Splitting a header between two parallel workers: implement the shared part (here the patch metric) in the contracts step.
 - `erosion-0035`: Moving floating-point code into a helper keeps results bit-identical only if the products keep their order: a*(b*c) is not (a*b)*c, so the helper exposes the pieces, not their product.
 - `erosion-0035`: An overlap test must make the two windows differ in every origin the code uses (columns, rows, the date line); two windows clipped at the same pole hide row-offset bugs.
+- `erosion-0036`: A seam argument must include every rule that moves information sideways: 8-connected pinned channels let a diagonal receiver cut between two pinned cells, which the plan's 'catchments between channels' assumption did not see.
+- `erosion-0036`: An early stop of an iteration is a global decision; for window-independent results the pass count must be fixed.
 
 ## tectonics
 

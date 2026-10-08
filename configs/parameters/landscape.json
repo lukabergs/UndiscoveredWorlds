@@ -26,7 +26,8 @@
   "regional.halo_cells": "Global cells computed around a regional window and discarded (erosion plan Phase E, section 6, 'Seams of the solve'): at least the reach of the upsampling (2 per block-mean pass: 4 with two passes; the interpolation reads the global field directly) plus the solve's catchments between pinned channels (about 2). Raised, not tuned by look, if Landscape.RegionalOverlap fails.",
   "regional.noise_amplitude_m": "Regional noise: octaves from twice the global north-south spacing down to twice the fine one (the global terrain already carries the longer ones); amplitude = noise_amplitude_m + noise_relief_fraction x the interpolated local global relief, tapered to zero within coast_band_m of the sea level. Initial values of Phase E, judged by the user at E4.",
   "regional.pin_area_km2": "Global links whose upstream cell drains at least this area are pinned fine channels; 0 pins every land cell's link, which bounds every unpinned fine catchment to about one global cell (seams).",
-  "regional.elapsed_myr": "Elapsed time of the transient analytical relief (n = 1, no uplift): knickpoints from the pinned channels travel upstream at K Q^m for this long; K and m are stream_power's."
+  "regional.elapsed_myr": "Elapsed time of the transient analytical relief (n = 1, no uplift): knickpoints from the pinned channels travel upstream at K Q^m for this long; K and m are stream_power's.",
+  "regional.damping": "Weight of the newest solution in the routing surface of the analytical relief's fixed point (an exponential moving average, Tzathas et al. 2024 section 5.1, which gives no value); 1 is no damping. Every pass solves from the start surface; only the surface the next routing reads is damped (erosion plan E2c)."
  },
  "parameters": {
   "runoff": {
@@ -122,7 +123,8 @@
    "meander_amplitude": 0.3,
    "elapsed_myr": 1.0,
    "threshold_slope": 0.6,
-   "max_iterations": 20
+   "max_iterations": 20,
+   "damping": 0.5
   }
  }
 }

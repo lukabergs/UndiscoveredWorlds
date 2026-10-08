@@ -130,6 +130,7 @@ inline float meanderAmplitude = 0.3f;
 inline float elapsedMyr = 1.0f;
 inline float thresholdSlope = 0.6f;
 inline int maxIterations = 20;
+inline float damping = 0.5f;
 }
 
 // Every value above, by its recipe name.
@@ -201,6 +202,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.elapsed_myr", &regional::elapsedMyr },
         { "landscape.regional.threshold_slope", &regional::thresholdSlope },
         { "landscape.regional.max_iterations", &regional::maxIterations },
+        { "landscape.regional.damping", &regional::damping },
     };
     return entries;
 }
