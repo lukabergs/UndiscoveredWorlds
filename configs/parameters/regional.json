@@ -1,7 +1,7 @@
 {
  "module": "regional",
  "namespace": "tuning",
- "header": "src/app/regional/regional_parameters.hpp",
+ "header": "src/simulations/regional/regional_parameters.hpp",
  "parameters": {
   "regional": {
    "submarine_warp_factor": 100.0,

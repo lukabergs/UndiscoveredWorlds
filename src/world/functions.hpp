@@ -14,9 +14,9 @@
 //  ImGuiFileDialog - https://github.com/aiekick/ImGuiFileDialog
 //
 //  main.cpp contains the functions for drawing the map images (as well as the main loop, of course), and all functions that require external libraries.
-//  The former misc.cpp is divided by owner: core/text_values, core/grid_shapes, world/world_setup, app/regional/region_queries, simulations/terrain/coast_queries, simulations/hydrology/flow_queries and app/appearance_files.
+//  The former misc.cpp is divided by owner: core/text_values, core/grid_shapes, world/world_setup, simulations/regional/region_queries, simulations/terrain/coast_queries, simulations/hydrology/flow_queries and app/appearance_files.
 //  Simulation modules under src/simulations contain terrain, climate, and hydrology.
-//  app/regional/regional_map.cpp contains the functions used to generate the regional terrain.
+//  simulations/regional/regional_map.cpp contains the functions used to generate the regional terrain.
 //
 //  The code uses a number of shape templates; their data is assets/terrain/shape-templates.txt, decoded in simulations/terrain/shape_templates.cpp.
 //

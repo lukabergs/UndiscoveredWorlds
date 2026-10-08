@@ -11,7 +11,7 @@
 
 #include "core/classes.hpp"
 #include "world/planet.hpp"
-#include "app/regional/regional_map.hpp"
+#include "simulations/regional/regional_map.hpp"
 #include "world/functions.hpp"
 
 using namespace std;

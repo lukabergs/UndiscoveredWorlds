@@ -13,10 +13,11 @@
 #include <queue>
 
 #include "core/classes.hpp"
-#include "app/regional/regional_parameters.hpp"
+#include "simulations/regional/regional_parameters.hpp"
 #include "world/planet.hpp"
-#include "app/regional/region.hpp"
-#include "app/regional/regional_map.hpp"
+#include "simulations/regional/region.hpp"
+#include "world/functions.hpp" // MAXCRATERRADIUS has no other header
+#include "simulations/regional/regional_map.hpp"
 //#include "profiler.h"
 
 // Climate class of a regional cell from its seasonal extremes (climate_classification.hpp).

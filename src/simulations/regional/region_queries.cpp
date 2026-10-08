@@ -1,7 +1,7 @@
 // The same questions on a regional map (coasts, flow, lakes, rivers), and temperature adjusted for regional elevation.
 // Moved unchanged from misc.cpp (Jonathan Hill, 2022).
 
-#include "app/regional/region_queries.hpp"
+#include "simulations/regional/region_queries.hpp"
 
 #include <iostream>
 #include <cmath>
@@ -11,8 +11,8 @@
 
 #include "core/classes.hpp"
 #include "world/planet.hpp"
-#include "app/regional/region.hpp"
-#include "app/regional/regional_map.hpp"
+#include "simulations/regional/region.hpp"
+#include "simulations/regional/regional_map.hpp"
 
 using namespace std;
 

@@ -3,7 +3,7 @@
 // Lapse-rate adjustment of a temperature by the cell's elevation above sea level.
 // World is any type with mapfloat(x, y), sealevel() and tempdecrease() (C/km): planet or
 // climateworld. The lapse rate is applied exactly; the regional generator keeps its
-// whole-number form in app/regional/region_queries.
+// whole-number form in simulations/regional/region_queries.
 
 #include <algorithm>
 

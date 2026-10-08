@@ -72,6 +72,7 @@ Lessons:
 | `erosion-0030` | 2026-10-08 | pass with notes (review on Opus 5.5) | keep | erosion plan, step G1: the glacial kernel (ELA, ice flux, thickness) and the glacial term of the stream-power step |
 | `erosion-0031` | 2026-10-08 | pass with notes (review rework, re-review pass with notes; both on Opus 5.5) | keep | erosion plan, step G3: the glacial term in terrain.fluvial_erosion, its fields, evaluation and access |
 | `erosion-0032` | 2026-10-08 | pending user review | keep | erosion plan, step G4: the Phase G close (erosion run 9, glacial erosion at 256 columns) |
+| `erosion-0033` | 2026-10-08 | pass | keep | erosion plan, step E1: the legacy regional generator leaves src/app (Phase E, headless regional maps) |
 
 Lessons:
 
@@ -116,6 +117,7 @@ Lessons:
 - `erosion-0031`: Feeding a state (the ice thickness) back into the routing one step late makes it flicker; Hergarten's bed directions avoid it.
 - `erosion-0031`: A temperature field cooled only above the sea level gives an ELA on max(elevation, sea level), not on the seabed.
 - `erosion-0032`: A comparison with a run from before new fields must still report the run's side; the validation dispatcher skipped the whole kind.
+- `erosion-0033`: The regional code was GUI-only by place and linkage, not by dependency: no SFML or ImGui in 25,000 lines.
 
 ## tectonics
 

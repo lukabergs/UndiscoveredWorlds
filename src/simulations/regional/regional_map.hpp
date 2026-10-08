@@ -3,9 +3,12 @@
 // The regional map: a 32 x 32 tile window of the world generated at 16 times its resolution.
 // Desktop only: nothing in a recipe or a bundle depends on it.
 
-#include "world/functions.hpp"
-#include "app/regional/region.hpp"
-#include "app/regional/region_queries.hpp"
+#include <vector>
+
+#include "core/classes.hpp"
+#include "world/planet.hpp"
+#include "simulations/regional/region.hpp"
+#include "simulations/regional/region_queries.hpp"
 
 #define REGIONALTILEWIDTH 32
 #define REGIONALTILEHEIGHT 32

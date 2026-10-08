@@ -6,8 +6,8 @@
 //
 //  Please see functions.hpp for notes.
 
-#include "app/regional/region.hpp"
-#include "app/regional/regional_map.hpp"
+#include "simulations/regional/region.hpp"
+#include "simulations/regional/regional_map.hpp"
 
 region::region() //constructor
 {
