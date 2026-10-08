@@ -1,6 +1,6 @@
 {
   "schema": "erosion-run-registry/v1",
-  "baseline": 3,
+  "baseline": 9,
   "baseline_status": "run 3 (Phase B's judging run) is the baseline: approved by the user on 2026-10-06 together with run 1 ('runs look fine'; note on the ocean depths, plan section 6); run 1 is the Phase A baseline, run 2 the erodibility sensitivity experiment at K = 100",
   "runs": [
     {
