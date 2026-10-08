@@ -1,19 +1,125 @@
 #include "simulations/landscape/regional_grid.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
 #include "simulations/landscape/sphere_metric.hpp"
 
-// The window functions are implemented in erosion plan step E2a
-// (docs/architecture/erosion-hydrology-plan.md, Phase E); the patch metric below is
-// part of the contracts (E0), so that E2c can use it while E2a runs.
+// The window functions are erosion plan step E2a (docs/architecture/erosion-hydrology-plan.md,
+// Phase E); the patch metric below is part of the contracts (E0).
 
 namespace landscape
 {
 namespace
 {
 constexpr double pi = 3.14159265358979323846;
+
+// A box edge that lies within this many global cells of a cell edge is taken to be
+// on it, so that a box given by cell-edge degrees (rounded in decimal) is not
+// widened by a whole cell; a box edge inside a cell snaps outwards to the cell's edge.
+constexpr double edgetolerance = 1e-9;
+
+std::int64_t wrap(std::int64_t value, std::int64_t period) { return ((value % period) + period) % period; }
+}
+
+int RegionalWindow::keptfinecolumnoffset() const
+{
+    return static_cast<int>(wrap(static_cast<std::int64_t>(column0) - domaincolumn0, worldwidth)) * scale;
+}
+
+int RegionalWindow::keptfinerowoffset() const { return (row0 - domainrow0) * scale; }
+
+std::int64_t RegionalWindow::absolutefinecolumn(int x) const
+{
+    const std::int64_t finewidth = static_cast<std::int64_t>(worldwidth) * scale;
+    return wrap(static_cast<std::int64_t>(domaincolumn0) * scale + x, finewidth);
+}
+
+std::int64_t RegionalWindow::absolutefinerow(int y) const { return static_cast<std::int64_t>(domainrow0) * scale + y; }
+
+double RegionalWindow::finelatitude_rad(int y) const
+{
+    // The row-centre latitude of SphereMetric for row J of the kW x kH grid (the
+    // same expressions, so that it equals PatchMetric::rowlatitude_rad bit for bit).
+    const int fineheight = worldheight * scale;
+    const int j = static_cast<int>(absolutefinerow(y));
+    const double north = pi / 2.0 - pi * j / fineheight;
+    const double south = pi / 2.0 - pi * (j + 1) / fineheight;
+    return 0.5 * (north + south);
+}
+
+double RegionalWindow::finelongitude_rad(int x) const
+{
+    // 2 pi (I + 0.5) / (k W): relief_roughness.cpp's expression for a global cell.
+    const int finewidth = worldwidth * scale;
+    return 2.0 * pi * (static_cast<double>(absolutefinecolumn(x)) + 0.5) / finewidth;
+}
+
+int RegionalWindow::globalcolumn(int x) const { return static_cast<int>(absolutefinecolumn(x) / scale); }
+
+int RegionalWindow::globalrow(int y) const { return static_cast<int>(absolutefinerow(y) / scale); }
+
+RegionalWindow regionalwindow(int worldwidth, int scale, int halo, double west_deg, double south_deg, double east_deg,
+                              double north_deg)
+{
+    if (worldwidth < 4 || worldwidth % 2 != 0)
+        throw std::invalid_argument("regionalwindow: the world width must be even and at least 4");
+    if (scale < 1)
+        throw std::invalid_argument("regionalwindow: the scale must be at least 1");
+    if (halo < 0)
+        throw std::invalid_argument("regionalwindow: the halo must not be negative");
+    if (!std::isfinite(west_deg) || !std::isfinite(east_deg) || !std::isfinite(south_deg) || !std::isfinite(north_deg))
+        throw std::invalid_argument("regionalwindow: the box must be finite");
+    if (south_deg < -90.0 || north_deg > 90.0 || south_deg >= north_deg)
+        throw std::invalid_argument("regionalwindow: the latitudes must satisfy -90 <= south < north <= 90");
+    // |lon| <= 360 keeps the cell indices below far from any integer overflow.
+    if (std::fabs(west_deg) > 360.0 || std::fabs(east_deg) > 360.0)
+        throw std::invalid_argument("regionalwindow: a longitude must lie within -360 .. 360");
+    // The width eastwards from west to east; 0 is a single meridian (west == east, or
+    // west 180 and east -180), not the whole circle (that is -180 .. 180).
+    const double span = east_deg - west_deg + (west_deg > east_deg ? 360.0 : 0.0);
+    if (span == 0.0)
+        throw std::invalid_argument("regionalwindow: west and east are the same meridian");
+
+    RegionalWindow window;
+    window.worldwidth = worldwidth;
+    window.worldheight = worldwidth / 2;
+    window.scale = scale;
+    window.halo = halo;
+    const int width = worldwidth, height = window.worldheight;
+
+    // Column i spans longitudes -180 + 360 i / W .. -180 + 360 (i + 1) / W; the box
+    // snaps outwards to whole columns; west > east crosses the date line, so the
+    // east edge lies one turn further east.
+    const double westcells = (west_deg + 180.0) / 360.0 * width;
+    double eastcells = (east_deg + 180.0) / 360.0 * width;
+    if (west_deg > east_deg)
+        eastcells += width;
+    const std::int64_t first = static_cast<std::int64_t>(std::floor(westcells + edgetolerance));
+    std::int64_t last = static_cast<std::int64_t>(std::ceil(eastcells - edgetolerance));  // one past the box
+    if (last <= first)
+        last = first + 1;
+    if (last - first + 2 * static_cast<std::int64_t>(halo) > width)
+        throw std::invalid_argument("regionalwindow: the domain (box and halo) is wider than the planet");
+
+    // Row j spans latitudes 90 - 180 j / H .. 90 - 180 (j + 1) / H.
+    const double northcells = (90.0 - north_deg) / 180.0 * height;
+    const double southcells = (90.0 - south_deg) / 180.0 * height;
+    int row0 = static_cast<int>(std::floor(northcells + edgetolerance));
+    int rowend = static_cast<int>(std::ceil(southcells - edgetolerance));
+    row0 = std::max(0, std::min(height - 1, row0));
+    rowend = std::max(row0 + 1, std::min(height, rowend));
+
+    window.column0 = static_cast<int>(wrap(first, width));
+    window.columns = static_cast<int>(last - first);
+    window.row0 = row0;
+    window.rows = rowend - row0;
+    window.domaincolumn0 = static_cast<int>(wrap(static_cast<std::int64_t>(window.column0) - halo, width));
+    window.domaincolumns = window.columns + 2 * halo;
+    window.domainrow0 = std::max(0, row0 - halo);
+    window.domainrows = std::min(height, rowend + halo) - window.domainrow0;
+    return window;
 }
 
 std::size_t PatchMetric::neighbour(std::size_t cell, int direction) const

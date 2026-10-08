@@ -23,13 +23,17 @@ std::vector<float> upsample(const std::vector<float>& field, int width, int heig
 
 // Block-mean correction, `passes` times: for every global cell of the domain the
 // residual (mean of its k x k fine values minus the global value) is computed, the
-// residuals are interpolated by `bicubic` at the fine centres and subtracted. A
-// residual needs the cell's whole block, and the interpolation reaches two global
-// cells, so a pass changes the fine values within two global cells of the domain's
-// edge differently from a wider domain: the reach is 2 x passes global cells plus
-// the stencil, which the halo must exceed (section 6). Rows beyond the poles do not
-// exist; the residual of a domain-edge cell is computed from its block, which lies
-// inside the domain by construction.
+// residuals are interpolated by `bicubic` at the fine centres and subtracted. The
+// block means approach the global values without reaching them: with +-10 m of
+// per-fine-cell noise on a smooth field at k = 4 the largest interior error fell
+// from 8.5 m to 0.44 m after two passes (E2a, Landscape.UpsamplingBlockMeans*).
+// The stencil reaches two global cells beyond the domain's edge, where no residual
+// exists: those cells take the nearest domain cell's residual (a clamp, as rows are
+// clamped at the poles). So a pass changes the fine values within two global cells
+// of a non-polar domain edge differently from a wider domain, and the reach is
+// 2 x passes global cells (upsample itself reads the global field and adds none),
+// which the halo must exceed (section 6). The residual of a domain-edge cell is
+// computed from its block, which lies inside the domain by construction.
 void correctblockmeans(const std::vector<float>& field, int width, int height, const RegionalWindow& window, int passes,
                        std::vector<float>& fine);
 }

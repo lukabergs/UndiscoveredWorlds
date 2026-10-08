@@ -65,9 +65,13 @@ struct RegionalWindow
 };
 
 // The window that covers a box in degrees, snapped outwards to whole global cells.
-// west > east crosses the date line; west == east, south >= north, a latitude
-// outside -90 .. 90, scale < 1, halo < 0, worldwidth < 4 or an odd worldwidth, and a
-// domain wider than the planet (columns + 2 halo > W) throw std::invalid_argument.
+// The box runs eastwards from west to east: west > east crosses the date line (east
+// lies one turn further), so its width is east - west, plus 360 when west > east;
+// -180 .. 180 is the whole circle. A box of width 0 (west == east, or west 180 and
+// east -180: the same meridian) is rejected, as are a longitude with |lon| > 360, a
+// non-finite value, south >= north, a latitude outside -90 .. 90, scale < 1,
+// halo < 0, worldwidth < 4 or an odd worldwidth, and a domain wider than the planet
+// (columns + 2 halo > W): all throw std::invalid_argument.
 RegionalWindow regionalwindow(int worldwidth, int scale, int halo, double west_deg, double south_deg, double east_deg,
                               double north_deg);
 

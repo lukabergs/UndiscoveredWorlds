@@ -74,6 +74,7 @@ Lessons:
 | `erosion-0032` | 2026-10-08 | pending user review | keep | erosion plan, step G4: the Phase G close (erosion run 9, glacial erosion at 256 columns) |
 | `erosion-0033` | 2026-10-08 | pass | keep | erosion plan, step E1: the legacy regional generator leaves src/app (Phase E, headless regional maps) |
 | `erosion-0034` | 2026-10-08 | pass | keep | erosion plan, step E0: survey, the Phase E table and decisions, the contracts of the regional pass |
+| `erosion-0035` | 2026-10-08 | pass | keep | erosion plan, step E2a: the window grid, the spherical noise and the upsampling of the regional pass |
 
 Lessons:
 
@@ -121,6 +122,8 @@ Lessons:
 - `erosion-0033`: The regional code was GUI-only by place and linkage, not by dependency: no SFML or ImGui in 25,000 lines.
 - `erosion-0034`: A halo default must be checked against the sum of the reaches it covers: the first draft set 4 global cells while the block-mean passes alone reach 6.
 - `erosion-0034`: Splitting a header between two parallel workers: implement the shared part (here the patch metric) in the contracts step.
+- `erosion-0035`: Moving floating-point code into a helper keeps results bit-identical only if the products keep their order: a*(b*c) is not (a*b)*c, so the helper exposes the pieces, not their product.
+- `erosion-0035`: An overlap test must make the two windows differ in every origin the code uses (columns, rows, the date line); two windows clipped at the same pole hide row-offset bugs.
 
 ## tectonics
 

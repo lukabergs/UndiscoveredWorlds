@@ -20,6 +20,11 @@ double gradientnoise(std::uint64_t seed, double x, double y, double z);
 // The unit vector of a latitude and longitude in radians.
 void unitvector(double latitude_rad, double longitude_rad, double& px, double& py, double& pz);
 
+// Standard deviation of one octave of gradientnoise on the sphere (area-weighted
+// over the 1024 x 512 cell centres, three seeds and two wavelengths: 0.266 to
+// 0.271; a property of the noise, not a tuning value; step C3).
+constexpr double octavedeviation = 0.268;
+
 struct FractalNoise
 {
     std::uint64_t seed = 0;
@@ -28,7 +33,8 @@ struct FractalNoise
     int octaves = 1;
     double persistence = 0.5;    // octave o weighs persistence^o
     double shortest_km = 0.0;    // an octave whose wavelength is below this gets weight 0
-    double longest_km = 0.0;     // an octave whose wavelength is above this gets weight 0 (0: no limit)
+    double longest_km = 0.0;     // an octave whose wavelength is this or above gets weight 0 (0: no limit),
+                                 // so bands [shortest, longest) that meet never share an octave
 };
 
 // The octave set of a FractalNoise with its seeds, scales, weights and lattice
@@ -46,12 +52,17 @@ public:
     // sum divided by it has a standard deviation of about 1 when every octave has
     // weight; octavedeviation is the measured deviation of one octave (0.268, C3).
     double normalisation() const { return normalisation_; }
+    // The sum of the squared full weights, resolved or not: relief_roughness.cpp
+    // forms its factor from it in the order it always has (floating-point products
+    // are not associative), which keeps its results bit-identical.
+    double squaredweights() const { return squaredweights_; }
     // Number of octaves with a non-zero weight.
     int resolved() const { return resolved_; }
 
 private:
     std::vector<std::uint64_t> seeds_;
     std::vector<double> scale_, weight_, offset_;
+    double squaredweights_ = 0.0;
     double normalisation_ = 1.0;
     int resolved_ = 0;
 };
