@@ -117,6 +117,21 @@ inline float maximumThicknessM = 3000.0f;
 inline float flotationRatio = 0.892f;
 }
 
+namespace regional
+{
+inline int haloCells = 8;
+inline int meanPasses = 2;
+inline float noiseAmplitudeM = 20.0f;
+inline float noiseReliefFraction = 0.25f;
+inline float noisePersistence = 0.6f;
+inline float coastBandM = 50.0f;
+inline float pinAreaKm2 = 0.0f;
+inline float meanderAmplitude = 0.3f;
+inline float elapsedMyr = 1.0f;
+inline float thresholdSlope = 0.6f;
+inline int maxIterations = 20;
+}
+
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -175,6 +190,17 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.glacial.thickness_ratio", &glacial::thicknessRatio },
         { "landscape.glacial.maximum_thickness_m", &glacial::maximumThicknessM },
         { "landscape.glacial.flotation_ratio", &glacial::flotationRatio },
+        { "landscape.regional.halo_cells", &regional::haloCells },
+        { "landscape.regional.mean_passes", &regional::meanPasses },
+        { "landscape.regional.noise_amplitude_m", &regional::noiseAmplitudeM },
+        { "landscape.regional.noise_relief_fraction", &regional::noiseReliefFraction },
+        { "landscape.regional.noise_persistence", &regional::noisePersistence },
+        { "landscape.regional.coast_band_m", &regional::coastBandM },
+        { "landscape.regional.pin_area_km2", &regional::pinAreaKm2 },
+        { "landscape.regional.meander_amplitude", &regional::meanderAmplitude },
+        { "landscape.regional.elapsed_myr", &regional::elapsedMyr },
+        { "landscape.regional.threshold_slope", &regional::thresholdSlope },
+        { "landscape.regional.max_iterations", &regional::maxIterations },
     };
     return entries;
 }

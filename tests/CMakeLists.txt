@@ -32,17 +32,23 @@ if(TARGET uw_climate_world)
         simulations/climate/climate_physics_tests.cpp
         simulations/climate/climate_transport_tests.cpp
         simulations/climate/climate_weather_tests.cpp
+        simulations/landscape/analytical_relief_tests.cpp
+        simulations/landscape/channel_network_tests.cpp
         simulations/landscape/distributaries_tests.cpp
         simulations/landscape/glacial_tests.cpp
         simulations/landscape/isostasy_tests.cpp
         simulations/landscape/lake_balance_tests.cpp
         simulations/landscape/ocean_mask_tests.cpp
+        simulations/landscape/regional_grid_tests.cpp
+        simulations/landscape/regional_pass_tests.cpp
         simulations/landscape/relief_roughness_tests.cpp
         simulations/landscape/routing_options_tests.cpp
         simulations/landscape/runoff_tests.cpp
+        simulations/landscape/spherical_noise_tests.cpp
         simulations/landscape/landscape_tests.cpp
         simulations/landscape/stream_power_tests.cpp
         simulations/landscape/torus_metric_tests.cpp
+        simulations/landscape/upsampling_tests.cpp
     )
     # Planet-free libraries only on its link line: climate, its stage runner, its
     # validation and the landscape kernels must not need the world class.
