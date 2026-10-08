@@ -23,7 +23,7 @@ A human-facing decision (what a world should look like, a data deletion under `r
 
 ## A phase, step by step
 
-1. The planner's session ends with the plan section updated and the prompt for the orchestrating session (consolidation plan §8). The prompt points to documents; it repeats nothing an agent can read.
+1. The planner's session ends with the plan section updated and the prompt for the orchestrating session printed in the chat (never saved in the plan; consolidation plan §8). The prompt points to documents; it repeats nothing an agent can read.
 2. The orchestrator reads the plan section, the ledger entries it names and the files of the first steps, then builds the step order: steps with disjoint file sets run in parallel in background workers; steps that share files run in sequence.
 3. For each step: brief → work → the step's deterministic checks → the orchestrator reads the diff → `reviewer` when the step changes behaviour, a contract or a kernel (not for a one-line fix or a documentation edit) → fixes by the same worker (its context is intact: continue it with SendMessage) → ledger entry → one commit. Duration is measured commit to commit (`AGENTS.md`).
 4. The phase closes with the one judging run the plan names (if any), the plan's status note, §Open items, the memory notes, and the prompt for the next phase.
