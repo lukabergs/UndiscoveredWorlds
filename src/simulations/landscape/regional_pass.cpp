@@ -7,7 +7,11 @@
 #include <stdexcept>
 #include <string>
 
+#include "simulations/landscape/regional_cirques.hpp"
+#include "simulations/landscape/regional_glacial.hpp"
+#include "simulations/landscape/regional_ice.hpp"
 #include "simulations/landscape/regional_surface.hpp"
+#include "simulations/landscape/regional_troughs.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/regional_water.hpp"
 #include "simulations/landscape/upsampling.hpp"
@@ -16,7 +20,9 @@
 // section 6, "Decided for Phase E"); Phase R step R0 split the start surface and the
 // sea (regional_surface.cpp) and the lakes and ice (regional_water.cpp) out of it;
 // Phase R2 step R6 wired the incision and the valleys (regional_valleys.cpp), which R9
-// implemented with the solve's uplift term.
+// implemented with the solve's uplift term; Phase E5 step E5.0 wired the glacial forms
+// (regional_glacial.cpp, regional_troughs.cpp, regional_cirques.cpp, regional_ice.cpp),
+// inert at the defaults.
 
 namespace landscape
 {
@@ -83,6 +89,7 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     checkoptional(inputs.denudation_m, globalsize, "denudation_m");
     checkoptional(inputs.island, globalsize, "island");
     checkoptional(inputs.mountainisland, globalsize, "mountainisland");
+    checkoptional(inputs.equilibriumline_m, globalsize, "equilibriumline_m");
 
     // The block-mean correction reaches 2 global cells per pass beyond any fine cell it
     // changes, so the start surface and the fine sea agree between windows from
@@ -204,8 +211,17 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     // read the result.
     carvevalleys(inputs, window, parameters, channels, sea, elevation);
 
-    // 5. Lakes and ice (regional_water.hpp).
-    const FineWater water = regionalwater(inputs, window, warp, parameters, sea, channels, elevation);
+    // 4c. The glacial forms (Phase E5): the fine ELA and glaciation fields (inactive, and
+    // no field read, unless a glacial feature is on: regional_glacial.hpp), then the
+    // troughs (E5.1) and the cirques (E5.2), each a no-op at its defaults.
+    const FineGlacial glacial = regionalglacialfields(inputs, window, parameters);
+    carvetroughs(inputs, window, parameters, glacial, channels, sea, elevation);
+    carvecirques(inputs, window, parameters, glacial, channels, sea, elevation);
+
+    // 5. Lakes and ice (regional_water.hpp); 5b. ice above the present ELA (E5.3, a no-op
+    // at its defaults), added to the ice of 5.
+    FineWater water = regionalwater(inputs, window, warp, parameters, sea, channels, elevation);
+    iceabovetheela(inputs, window, parameters, glacial, sea, elevation, water.icethickness_m);
 
     // 6.-7. Rivers and climate on the fine grid.
     const std::vector<float> januarytemperature = upsample(inputs.januarytemperature_c, width, height, window);

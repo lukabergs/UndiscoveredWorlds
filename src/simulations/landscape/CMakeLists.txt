@@ -11,11 +11,15 @@ add_library(uw_landscape STATIC
     isostasy.cpp
     lake_balance.cpp
     ocean_mask.cpp
+    regional_cirques.cpp
     regional_coast.cpp
     regional_edges.cpp
+    regional_glacial.cpp
     regional_grid.cpp
+    regional_ice.cpp
     regional_pass.cpp
     regional_surface.cpp
+    regional_troughs.cpp
     regional_valleys.cpp
     regional_water.cpp
     relief_roughness.cpp

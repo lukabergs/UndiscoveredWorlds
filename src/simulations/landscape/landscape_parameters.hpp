@@ -166,6 +166,21 @@ inline float valleyReferenceM3s = 1000.0f;
 inline float valleyFloorMaxKm = 40.0f;
 inline float valleySideSlope = 0.05f;
 inline int valleyReachCells = 16;
+inline float troughWidthKm = 0.0f;
+inline float troughReferenceKm2 = 1000.0f;
+inline float troughWidthExponent = 0.5f;
+inline float troughWidthMaxKm = 40.0f;
+inline float troughWallM = 1000.0f;
+inline float troughExponent = 2.0f;
+inline float troughGlaciationMin = 0.5f;
+inline float cirqueRadiusKm = 0.0f;
+inline float cirqueDepthM = 300.0f;
+inline float cirqueBandM = 1500.0f;
+inline int cirqueCandidates = 2;
+inline float cirqueGlaciationMin = 0.5f;
+inline float iceElaThicknessFraction = 0.0f;
+inline float iceElaThicknessMaxM = 1000.0f;
+inline float iceElaEdgeNoiseM = 100.0f;
 }
 
 // Every value above, by its recipe name.
@@ -273,6 +288,21 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.valley_floor_max_km", &regional::valleyFloorMaxKm },
         { "landscape.regional.valley_side_slope", &regional::valleySideSlope },
         { "landscape.regional.valley_reach_cells", &regional::valleyReachCells },
+        { "landscape.regional.trough_width_km", &regional::troughWidthKm },
+        { "landscape.regional.trough_reference_km2", &regional::troughReferenceKm2 },
+        { "landscape.regional.trough_width_exponent", &regional::troughWidthExponent },
+        { "landscape.regional.trough_width_max_km", &regional::troughWidthMaxKm },
+        { "landscape.regional.trough_wall_m", &regional::troughWallM },
+        { "landscape.regional.trough_exponent", &regional::troughExponent },
+        { "landscape.regional.trough_glaciation_min", &regional::troughGlaciationMin },
+        { "landscape.regional.cirque_radius_km", &regional::cirqueRadiusKm },
+        { "landscape.regional.cirque_depth_m", &regional::cirqueDepthM },
+        { "landscape.regional.cirque_band_m", &regional::cirqueBandM },
+        { "landscape.regional.cirque_candidates", &regional::cirqueCandidates },
+        { "landscape.regional.cirque_glaciation_min", &regional::cirqueGlaciationMin },
+        { "landscape.regional.ice_ela_thickness_fraction", &regional::iceElaThicknessFraction },
+        { "landscape.regional.ice_ela_thickness_max_m", &regional::iceElaThicknessMaxM },
+        { "landscape.regional.ice_ela_edge_noise_m", &regional::iceElaEdgeNoiseM },
     };
     return entries;
 }

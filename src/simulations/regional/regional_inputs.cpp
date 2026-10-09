@@ -53,7 +53,16 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
     inputs.island.resize(size);
     inputs.mountainisland.resize(size);
     inputs.erosionduration_myr = static_cast<double>(world.erosionduration());
+    // Phase E5 (E5.0): the run's ELA, and the present climate's ELA offset cooling_c over
+    // the lapse rate (landscape.glacial.cooling_c is the run's when the region command
+    // restored it from the world bundle's manifest, regional_command.cpp).
+    inputs.equilibriumline_m.resize(size);
+    inputs.presentelaoffset_m = inputs.lapserate_c_per_km > 0.0f
+                                    ? static_cast<double>(tuning::landscape::glacial::coolingC) * 1000.0 /
+                                          static_cast<double>(inputs.lapserate_c_per_km)
+                                    : 0.0;
 
+    const worldgrid<float>& equilibriumline = world.equilibriumline();
     const worldgrid<float>& glaciation = world.glaciation();
     const worldgrid<float>& denudation = world.denudation();
     const worldgrid<std::uint8_t>& direction = world.flowdirection();
@@ -89,6 +98,7 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
             inputs.denudation_m[cell] = denudation[x][y];
             inputs.island[cell] = world.island(x, y) ? 1 : 0;
             inputs.mountainisland[cell] = world.mountainisland(x, y) ? 1 : 0;
+            inputs.equilibriumline_m[cell] = equilibriumline[x][y];
         }
     }
     return inputs;
@@ -134,6 +144,21 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.valleys.floormax_km = regional::valleyFloorMaxKm;
     parameters.valleys.sideslope = regional::valleySideSlope;
     parameters.valleys.reachcells = regional::valleyReachCells;
+    parameters.troughs.width_km = regional::troughWidthKm;
+    parameters.troughs.reference_km2 = regional::troughReferenceKm2;
+    parameters.troughs.widthexponent = regional::troughWidthExponent;
+    parameters.troughs.widthmax_km = regional::troughWidthMaxKm;
+    parameters.troughs.wall_m = regional::troughWallM;
+    parameters.troughs.exponent = regional::troughExponent;
+    parameters.troughs.glaciationmin = regional::troughGlaciationMin;
+    parameters.cirques.radius_km = regional::cirqueRadiusKm;
+    parameters.cirques.depth_m = regional::cirqueDepthM;
+    parameters.cirques.band_m = regional::cirqueBandM;
+    parameters.cirques.candidates = regional::cirqueCandidates;
+    parameters.cirques.glaciationmin = regional::cirqueGlaciationMin;
+    parameters.ice.thicknessfraction = regional::iceElaThicknessFraction;
+    parameters.ice.thicknessmax_m = regional::iceElaThicknessMaxM;
+    parameters.ice.edgenoise_m = regional::iceElaEdgeNoiseM;
     parameters.channels.pinarea_km2 = regional::pinAreaKm2;
     parameters.channels.meanderamplitude = regional::meanderAmplitude;
     parameters.channels.meanderdischargeexponent = regional::meanderDischargeExponent;

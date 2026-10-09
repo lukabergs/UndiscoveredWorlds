@@ -445,4 +445,30 @@ void speckle(const RegionalGlobalInputs& inputs, const RegionalWindow& window, c
                 (kind != 0 ? landinsea : seainland)++;
         }
 }
+
+// Phase E5 (E5.0): the synthetic glacial fields. The run's ELA is a smooth field of
+// latitude and longitude, 1300 to 1900 m, so the continent's centre and ridge (up to about
+// 3850 m) stand above it and the lowlands below; the glaciation is the clamped height
+// above the ELA over 1000 m, offset by 500 m (so cells a little below the ELA were iced
+// too, as glacier tongues are), on land only; the present ELA lies 500 m higher.
+RegionalGlobalInputs withglacialfields(RegionalGlobalInputs inputs)
+{
+    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    inputs.equilibriumline_m.assign(size, 0.0f);
+    inputs.glaciation.assign(size, 0.0f);
+    inputs.presentelaoffset_m = 500.0;
+    for (int j = 0; j < inputs.height; j++)
+        for (int i = 0; i < inputs.width; i++)
+        {
+            const std::size_t cell = at(i, j, inputs.width);
+            const double phi = latitude_rad(j, inputs.height), lambda = longitude_rad(i, inputs.width);
+            const double ela = 1600.0 + 200.0 * std::sin(2.0 * lambda) + 100.0 * std::sin(3.0 * phi);
+            inputs.equilibriumline_m[cell] = static_cast<float>(ela);
+            if (inputs.network.sea[cell] != 0)
+                continue;
+            const double above = static_cast<double>(inputs.elevation_m[cell]) - ela + 500.0;
+            inputs.glaciation[cell] = static_cast<float>(std::clamp(above / 1000.0, 0.0, 1.0));
+        }
+    return inputs;
+}
 }

@@ -36,8 +36,9 @@ void printregionusage(ostream& out)
     out << "  --bundle <dir>          The regional bundle (new or empty directory; required).\n";
     out << "  --set <name=value>, --parameters <file>  As for run (landscape.regional.* sets the pass,\n";
     out << "                           halo_cells the halo); the manifest records every value. The stream power\n";
-    out << "                           law (landscape.stream_power.erodibility, area_exponent) is first set to\n";
-    out << "                           the world bundle's recorded values; --set and --parameters override it.\n";
+    out << "                           law (landscape.stream_power.erodibility, area_exponent) and the glacial\n";
+    out << "                           cooling (landscape.glacial.cooling_c) are first set to the world bundle's\n";
+    out << "                           recorded values; --set and --parameters override them.\n";
     out << "  --seed <number>         Must equal the world bundle's seed when given.\n";
 }
 
@@ -116,7 +117,10 @@ bool applyworldstreampower(const vector<string>& arguments, vector<string>& appl
     const size_t close = open == string::npos ? string::npos : text.find('}', open);
     if (close == string::npos)
         return true;
-    for (const char* name : {"landscape.stream_power.erodibility", "landscape.stream_power.area_exponent"})
+    // Phase E5 (E5.0): the glacial cooling too, so the present climate's ELA offset of the
+    // regional pass (regional_inputs.cpp) is the run's.
+    for (const char* name : {"landscape.stream_power.erodibility", "landscape.stream_power.area_exponent",
+                             "landscape.glacial.cooling_c"})
     {
         const size_t found = text.find("\"" + string(name) + "\"", open);
         if (found == string::npos || found > close)

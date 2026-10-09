@@ -1,9 +1,10 @@
 #pragma once
 
 // Inputs and parameters of the regional pass (docs/architecture/erosion-hydrology-plan.md,
-// Phase E, step E3, Phase R, step R0, and Phase R2, step R6): shared by regional_pass.hpp,
-// which composes the pass, and the parts it calls (regional_surface.hpp, regional_coast.hpp,
-// regional_edges.hpp, regional_water.hpp, regional_valleys.hpp).
+// Phase E, step E3, Phase R, step R0, Phase R2, step R6, and Phase E5, step E5.0): shared by
+// regional_pass.hpp, which composes the pass, and the parts it calls (regional_surface.hpp,
+// regional_coast.hpp, regional_edges.hpp, regional_water.hpp, regional_valleys.hpp,
+// regional_glacial.hpp, regional_troughs.hpp, regional_cirques.hpp, regional_ice.hpp).
 // Planet-free: the planet adapter is src/simulations/regional/regional_inputs.hpp.
 
 #include <cstdint>
@@ -43,6 +44,15 @@ struct RegionalGlobalInputs
     std::vector<uint8_t> island;           // geosphere.island: a one-cell island of the world
     std::vector<uint8_t> mountainisland;   // geosphere.mountain_island
     double erosionduration_myr = 0.0;      // geosphere.erosion_duration (0: unknown; the denudation rate is then 0)
+
+    // Phase E5 (the glacial forms, regional_glacial.hpp): the erosion run's
+    // equilibrium-line altitude (cryosphere.equilibrium_line_altitude, m above datum, the
+    // run's climate cooled by landscape.glacial.cooling_c), W x H or empty (no glacial form
+    // is cut and no ice added by the ELA rule without it); and the height by which the
+    // present climate's ELA lies above the run's: cooling_c x 1000 / the lapse rate in C/km
+    // (the adapter computes it; 0 when unknown).
+    std::vector<float> equilibriumline_m;
+    double presentelaoffset_m = 0.0;
 };
 
 // The domain warp (Phase R, R2): a smooth vector noise that displaces the sampling
@@ -133,6 +143,45 @@ struct ValleyParameters
     int reachcells = 0;                  // the farthest fine cell a channel shapes; at most k (the halo rule)
 };
 
+// Glacial troughs (Phase E5, step E5.1, regional_troughs.hpp): a land channel cell of a
+// glaciated cell is the axis of a trough whose cross-section is a power law of the
+// distance (exponent 2: a parabola, the U shape), its half-width from the ice catchment of
+// the channel's global cell (regional_glacial.hpp, glacialcatchment). width_km 0: off (the
+// Phase R2 pass exactly).
+struct TroughParameters
+{
+    double width_km = 0.0;               // half-width on the ground at the reference ice catchment (0: no troughs)
+    double reference_km2 = 1000.0;       // the ice catchment at which the half-width is width_km
+    double widthexponent = 0.5;          // half-width = width_km x (A_i / reference_km2)^widthexponent
+    double widthmax_km = 40.0;           // the half-width's cap, km (and at most k fine cells)
+    double wall_m = 1000.0;              // the cross-section's height above the bed at the half-width
+    double exponent = 2.0;               // target = bed + wall_m x (d / W)^exponent, d the ground distance
+    double glaciationmin = 0.5;          // a channel cell is a trough axis where the fine glaciation is at least this
+};
+
+// Cirques (Phase E5, step E5.2, regional_cirques.hpp): hashed candidate points in every
+// glaciated global cell's block become parabolic bowls where the fine surface lies above
+// the run's ELA by less than band_m (above that is the plateau ice, not a cirque's
+// headwall). radius_km 0: off.
+struct CirqueParameters
+{
+    double radius_km = 0.0;              // the bowl's radius on the ground (0: no cirques); at most k fine cells
+    double depth_m = 300.0;              // the floor below the centre's surface, unless the run's ELA at the centre is higher
+    double band_m = 1500.0;              // candidates more than this above the run's ELA are not cirques
+    int candidates = 2;                  // hashed candidate points per glaciated global cell
+    double glaciationmin = 0.5;          // the global cell's glaciation at least this
+};
+
+// Ice above the ELA (Phase E5, step E5.3, regional_ice.hpp): a fine land cell whose
+// surface lies above the present climate's ELA carries ice, added to the present-day ice
+// of regional_water.hpp (never removed). thicknessfraction 0: off.
+struct IceParameters
+{
+    double thicknessfraction = 0.0;      // thickness = this x (surface - present ELA), at least 1 m (0: no ELA ice)
+    double thicknessmax_m = 1000.0;      // the thickness's cap
+    double edgenoise_m = 100.0;          // the threshold's noise: ice where surface >= ELA + edgenoise_m x noise (own salt)
+};
+
 struct RegionalParameters
 {
     double noiseamplitude_m = 20.0;      // noise amplitude where the global relief is zero
@@ -145,6 +194,9 @@ struct RegionalParameters
     EdgeParameters edges;
     ShoreParameters shores;
     ValleyParameters valleys;
+    TroughParameters troughs;
+    CirqueParameters cirques;
+    IceParameters ice;
     ChannelParameters channels;
     AnalyticalReliefParameters relief;
 };
