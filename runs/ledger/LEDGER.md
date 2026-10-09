@@ -13,6 +13,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0043`: coast noise on the elevation of the coastal band (doubled coastal roughness and channel trenches: A coastal channel q1 -740 to -1585 m)
 - `erosion-0043`: a shore floor not capped by the global cell's own distance from the sea level (C's block-mean error 29 m)
 - `erosion-0044`: springs on every source cell by default (pillars 21 / 166 / 200 -> 24 / 220 / 272)
+- `erosion-0045`: the lake zone chosen per global cell (water steps up to 168 m between adjacent wet cells)
+- `erosion-0045`: an indicator blind to the terrain (beds carved up to 2.9 km, shores raised up to 744 m)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -89,6 +91,7 @@ Lessons:
 | `erosion-0042` | 2026-10-09 | pass | keep | erosion plan, step R1: channels end at the fine coast, beds follow the start surface, rivers wet in lakes, map outlines |
 | `erosion-0043` | 2026-10-09 | pass | keep | erosion plan, step R2: fractal coasts by a warp, a coast noise on the sea decision and faithfulness by land share |
 | `erosion-0044` | 2026-10-09 | pass | keep | erosion plan, step R3: rivers after the legacy scheme, inside their own global cells (junctions, edge points, Catmull-Rom legs) |
+| `erosion-0045` | 2026-10-09 | pass | keep | erosion plan, step R4: lake shores and ice edges from signed indicators at warped positions |
 
 Lessons:
 
@@ -156,6 +159,8 @@ Lessons:
 - `erosion-0043`: A loop that stops when a whole-window condition holds is seam-safe only if every pass after that point would change nothing; check that before trusting the stop.
 - `erosion-0044`: A direction histogram mostly measures which way the window's rivers flow; the share of steps that keep their direction, the longest straight run and the sinuosity measure the eight-direction bias the user saw.
 - `erosion-0044`: A step built on an earlier version of a parallel step must be re-measured and re-reviewed on the merged tree.
+- `erosion-0045`: A mask drawn by an indicator must see the terrain it floods, or the bed and the shore rules reshape the solve's result to fit it.
+- `erosion-0045`: A choice between neighbours (which lake a fine cell takes) must be made per fine cell, or adjacent cells of two global cells disagree.
 
 ## tectonics
 

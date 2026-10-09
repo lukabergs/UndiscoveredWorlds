@@ -65,12 +65,18 @@ struct CoastParameters
 };
 
 // Lake shores and ice edges (Phase R, R4): the zero contour of a signed per-cell
-// indicator interpolated at the warped positions plus fractal noise. shorenoise 0
-// keeps the Phase E rules (lake water on every fine bed below the global surface,
-// ice masked by the global cells).
+// indicator interpolated at the warped positions plus fractal noise (regional_water.hpp;
+// the noise's persistence is coast.noisepersistence). shorenoise 0 keeps the Phase E
+// rules (lake water on every fine bed below the global surface, ice masked by the global
+// cells).
 struct ShoreParameters
 {
     double shorenoise = 0.0;             // noise amplitude as a fraction of the indicator's scale (0: Phase E rules)
+    double terrain_m = 50.0;             // the terrain term's scale D: clamp((z - surface) / D, -w, 1) joins the sum
+                                         // (w the lake cells' mask interpolated at the warped position, clamped to
+                                         // 0 .. 1), water only where z < surface + D; beds lowered by less than 2 D,
+                                         // shores within D below the water raised by at most 2 D (regional_water.hpp;
+                                         // 0: no terrain term, no bound)
 };
 
 struct RegionalParameters

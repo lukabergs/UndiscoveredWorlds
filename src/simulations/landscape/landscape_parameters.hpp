@@ -147,7 +147,8 @@ inline float meanderReferenceM3s = 1000.0f;
 inline float jitterJunction = 0.25f;
 inline float jitterEdgeMargin = 0.1875f;
 inline int springsPerCell = 0;
-inline float shoreNoise = 0.0f;
+inline float shoreNoise = 0.15f;
+inline float shoreTerrainM = 50.0f;
 }
 
 // Every value above, by its recipe name.
@@ -237,6 +238,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.jitter_edge_margin", &regional::jitterEdgeMargin },
         { "landscape.regional.springs_per_cell", &regional::springsPerCell },
         { "landscape.regional.shore_noise", &regional::shoreNoise },
+        { "landscape.regional.shore_terrain_m", &regional::shoreTerrainM },
     };
     return entries;
 }

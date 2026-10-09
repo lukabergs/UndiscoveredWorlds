@@ -102,6 +102,7 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.coast.sharepasses = regional::sharePasses;
     parameters.coast.signedpasses = regional::signedPasses;
     parameters.shores.shorenoise = regional::shoreNoise;
+    parameters.shores.terrain_m = regional::shoreTerrainM;
     parameters.channels.pinarea_km2 = regional::pinAreaKm2;
     parameters.channels.meanderamplitude = regional::meanderAmplitude;
     parameters.channels.meanderdischargeexponent = regional::meanderDischargeExponent;
