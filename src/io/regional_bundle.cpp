@@ -259,7 +259,11 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
     addcataloguefield(writer, written, "hydrosphere.lake_surface", fields.lakesurface_m, "<f4", grid,
                       "Lake surface of the global lake where the fine bed lies below it, 0 elsewhere", by);
     addcataloguefield(writer, written, "cryosphere.ice_thickness", fields.icethickness_m, "<f4", grid,
-                      "Present-day ice thickness, upsampled; 0 unless the global cell or a neighbour has ice", by);
+                      "Present-day ice thickness: the global ice upsampled where the global cell or a neighbour "
+                      "has ice; with regional.ice_ela_thickness_fraction above 0, at least that fraction of the "
+                      "height above the present climate's equilibrium line (1 m to ice_ela_thickness_max_m) on "
+                      "fine land and lake cells above it (plus an edge noise); 0 elsewhere",
+                      by);
     addcataloguefield(writer, written, "atmosphere.temperature_january", fields.januarytemperature_c, "<f4", grid,
                       "January temperature, interpolated and corrected by the lapse rate for the fine elevation", by);
     addcataloguefield(writer, written, "atmosphere.temperature_july", fields.julytemperature_c, "<f4", grid,

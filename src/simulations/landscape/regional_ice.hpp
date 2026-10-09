@@ -10,7 +10,8 @@
 // (the final elevation) satisfies z >= E + ice.edgenoise_m x n, with E the present
 // climate's ELA at the cell (glacial.presentela_m: the run's ELA raised by
 // presentelaoffset_m, cooling_c over the lapse rate) and n a RegionalNoise of its own salt
-// (persistence coast.noisepersistence, in about -1 .. 1; 0 noise with edgenoise_m 0) so
+// (persistence coast.noisepersistence, standard deviation about 1, so the edge wanders
+// by about edgenoise_m and at most a few times it; no noise with edgenoise_m 0) so
 // the ice edge does not follow the interpolated ELA's contour exactly, carries ice of
 // thickness max(the thickness it has, max(1 m, min(ice.thicknessmax_m,
 // ice.thicknessfraction x (z - E)))): the accumulation areas of the present climate that
