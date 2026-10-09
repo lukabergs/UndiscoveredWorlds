@@ -149,6 +149,23 @@ inline float jitterEdgeMargin = 0.1875f;
 inline int springsPerCell = 0;
 inline float shoreNoise = 0.15f;
 inline float shoreTerrainM = 50.0f;
+inline int coastOneSided = 0;
+inline float coastGlacialAmplitudeM = 0.0f;
+inline float coastGlacialDropFraction = 0.0f;
+inline float coastDenudationAmplitudeM = 0.0f;
+inline float coastDenudationReferenceM = 1000.0f;
+inline float islandMargin = 0.0f;
+inline int gateSmooth = 0;
+inline int straightMaxCells = 0;
+inline int straightChunkMinCells = 2;
+inline int straightChunkMaxCells = 7;
+inline float upliftScale = 0.0f;
+inline float denudationRateScale = 0.0f;
+inline float valleyFloorCells = 0.0f;
+inline float valleyReferenceM3s = 1000.0f;
+inline float valleyFloorMaxCells = 4.0f;
+inline float valleySideSlope = 0.0f;
+inline int valleyReachCells = 0;
 }
 
 // Every value above, by its recipe name.
@@ -239,6 +256,23 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.springs_per_cell", &regional::springsPerCell },
         { "landscape.regional.shore_noise", &regional::shoreNoise },
         { "landscape.regional.shore_terrain_m", &regional::shoreTerrainM },
+        { "landscape.regional.coast_one_sided", &regional::coastOneSided },
+        { "landscape.regional.coast_glacial_amplitude_m", &regional::coastGlacialAmplitudeM },
+        { "landscape.regional.coast_glacial_drop_fraction", &regional::coastGlacialDropFraction },
+        { "landscape.regional.coast_denudation_amplitude_m", &regional::coastDenudationAmplitudeM },
+        { "landscape.regional.coast_denudation_reference_m", &regional::coastDenudationReferenceM },
+        { "landscape.regional.island_margin", &regional::islandMargin },
+        { "landscape.regional.gate_smooth", &regional::gateSmooth },
+        { "landscape.regional.straight_max_cells", &regional::straightMaxCells },
+        { "landscape.regional.straight_chunk_min_cells", &regional::straightChunkMinCells },
+        { "landscape.regional.straight_chunk_max_cells", &regional::straightChunkMaxCells },
+        { "landscape.regional.uplift_scale", &regional::upliftScale },
+        { "landscape.regional.denudation_rate_scale", &regional::denudationRateScale },
+        { "landscape.regional.valley_floor_cells", &regional::valleyFloorCells },
+        { "landscape.regional.valley_reference_m3s", &regional::valleyReferenceM3s },
+        { "landscape.regional.valley_floor_max_cells", &regional::valleyFloorMaxCells },
+        { "landscape.regional.valley_side_slope", &regional::valleySideSlope },
+        { "landscape.regional.valley_reach_cells", &regional::valleyReachCells },
     };
     return entries;
 }

@@ -8,12 +8,14 @@
 #include <string>
 
 #include "simulations/landscape/regional_surface.hpp"
+#include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/regional_water.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
 // Erosion plan step E3 (docs/architecture/erosion-hydrology-plan.md, Phase E, and
 // section 6, "Decided for Phase E"); Phase R step R0 split the start surface and the
-// sea (regional_surface.cpp) and the lakes and ice (regional_water.cpp) out of it.
+// sea (regional_surface.cpp) and the lakes and ice (regional_water.cpp) out of it;
+// Phase R2 step R6 wired the incision and the valleys (regional_valleys.cpp, inert until R9).
 
 namespace landscape
 {
@@ -31,6 +33,14 @@ void checksize(const std::vector<T>& field, std::size_t size, const char* name)
 {
     if (field.size() != size)
         throw std::invalid_argument(std::string("runregionalpass: ") + name + " must hold width x height values");
+}
+
+// The Phase R2 fields may be absent (empty: zero everywhere).
+template<typename T>
+void checkoptional(const std::vector<T>& field, std::size_t size, const char* name)
+{
+    if (!field.empty() && field.size() != size)
+        throw std::invalid_argument(std::string("runregionalpass: ") + name + " must be empty or hold width x height values");
 }
 
 // The domain's values at the kept window's cells.
@@ -67,6 +77,11 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     checksize(inputs.julyprecipitation_mm, globalsize, "julyprecipitation_mm");
     checksize(inputs.icethickness_m, globalsize, "icethickness_m");
     checksize(inputs.climate, globalsize, "climate");
+    checkoptional(inputs.upliftrate_m_myr, globalsize, "upliftrate_m_myr");
+    checkoptional(inputs.glaciation, globalsize, "glaciation");
+    checkoptional(inputs.denudation_m, globalsize, "denudation_m");
+    checkoptional(inputs.island, globalsize, "island");
+    checkoptional(inputs.mountainisland, globalsize, "mountainisland");
 
     // The block-mean correction reaches 2 global cells per pass beyond any fine cell it
     // changes, so the start surface and the fine sea agree between windows from
@@ -103,9 +118,25 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     // 3. The pinned channels: they end at their first fine sea cell, and their beds
     // follow the start surface's running minimum (channel_network.hpp). Beds are
     // pinned on land; a link's last cell in the sea keeps its own (seabed) elevation,
-    // since the solve pins every sea cell at the sea level anyway.
-    const FineChannels channels =
-        rasterisechannels(window, inputs.network, parameters.channels, inputs.sealevel, surface, sea);
+    // since the solve pins every sea cell at the sea level anyway. R9 (regional_valleys.hpp):
+    // with the incision active the bed law reads the network's incised filled elevations
+    // and the start surface lowered by the upsampled incision, so the channels cut below
+    // the land by the world's uplift over the elapsed time; inactive, the inputs as they are.
+    const GlobalIncision incision = globalincision(inputs, parameters);
+    GlobalNetwork incisednetwork;
+    std::vector<float> bedsurface;
+    if (incision.active)
+    {
+        incisednetwork = inputs.network;
+        incisednetwork.filledelevation_m = incision.filledelevation_m;
+        const std::vector<float> fineincision = upsample(incision.incision_m, width, height, window);
+        bedsurface = surface;
+        for (std::size_t cell = 0; cell < count; cell++)
+            bedsurface[cell] = static_cast<float>(static_cast<double>(surface[cell]) - std::max(0.0f, fineincision[cell]));
+    }
+    const FineChannels channels = rasterisechannels(window, incision.active ? incisednetwork : inputs.network,
+                                                    parameters.channels, inputs.sealevel,
+                                                    incision.active ? bedsurface : surface, sea);
     for (std::size_t cell = 0; cell < count; cell++)
         if (channels.channel[cell] != 0 && sea[cell] == 0)
             surface[cell] = channels.bed_m[cell];
@@ -158,6 +189,10 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
         fields.meanlowering_m = cells > 0 ? total / static_cast<double>(cells) : 0.0;
         fields.maxlowering_m = largest;
     }
+
+    // 4b. The valley floors around the channels (regional_valleys.hpp; R9, a no-op at the
+    // defaults), after the solve's diagnostics and before the lakes, which read the result.
+    carvevalleys(inputs, window, parameters, channels, sea, elevation);
 
     // 5. Lakes and ice (regional_water.hpp).
     const FineWater water = regionalwater(inputs, window, warp, parameters, sea, channels, elevation);

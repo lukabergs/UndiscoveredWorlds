@@ -46,7 +46,16 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
     inputs.julyprecipitation_mm.resize(size);
     inputs.icethickness_m.resize(size);
     inputs.climate.resize(size);
+    // Phase R2 (R6): the erosion run's and the engine's fields for R7 and R9.
+    inputs.upliftrate_m_myr.resize(size);
+    inputs.glaciation.resize(size);
+    inputs.denudation_m.resize(size);
+    inputs.island.resize(size);
+    inputs.mountainisland.resize(size);
+    inputs.erosionduration_myr = static_cast<double>(world.erosionduration());
 
+    const worldgrid<float>& glaciation = world.glaciation();
+    const worldgrid<float>& denudation = world.denudation();
     const worldgrid<std::uint8_t>& direction = world.flowdirection();
     const worldgrid<float>& area = world.drainagearea();
     const worldgrid<float>& discharge = world.discharge();
@@ -75,6 +84,11 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
             inputs.julyprecipitation_mm[cell] = world.julrainfloat(x, y);
             inputs.icethickness_m[cell] = ice[x][y];
             inputs.climate[cell] = static_cast<int16_t>(world.climate(x, y));
+            inputs.upliftrate_m_myr[cell] = world.tectonicrockupliftrate(x, y);
+            inputs.glaciation[cell] = glaciation[x][y];
+            inputs.denudation_m[cell] = denudation[x][y];
+            inputs.island[cell] = world.island(x, y) ? 1 : 0;
+            inputs.mountainisland[cell] = world.mountainisland(x, y) ? 1 : 0;
         }
     }
     return inputs;
@@ -101,8 +115,25 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.coast.shorefloor_m = regional::coastShoreFloorM;
     parameters.coast.sharepasses = regional::sharePasses;
     parameters.coast.signedpasses = regional::signedPasses;
+    parameters.coast.onesided = regional::coastOneSided;
+    parameters.coast.glacialamplitude_m = regional::coastGlacialAmplitudeM;
+    parameters.coast.glacialdropfraction = regional::coastGlacialDropFraction;
+    parameters.coast.denudationamplitude_m = regional::coastDenudationAmplitudeM;
+    parameters.coast.denudationreference_m = regional::coastDenudationReferenceM;
+    parameters.coast.islandmargin = regional::islandMargin;
+    parameters.edges.smoothgate = regional::gateSmooth;
+    parameters.edges.straightmax = regional::straightMaxCells;
+    parameters.edges.chunkmin = regional::straightChunkMinCells;
+    parameters.edges.chunkmax = regional::straightChunkMaxCells;
     parameters.shores.shorenoise = regional::shoreNoise;
     parameters.shores.terrain_m = regional::shoreTerrainM;
+    parameters.valleys.upliftscale = regional::upliftScale;
+    parameters.valleys.denudationratescale = regional::denudationRateScale;
+    parameters.valleys.floorcells = regional::valleyFloorCells;
+    parameters.valleys.reference_m3s = regional::valleyReferenceM3s;
+    parameters.valleys.floormaxcells = regional::valleyFloorMaxCells;
+    parameters.valleys.sideslope = regional::valleySideSlope;
+    parameters.valleys.reachcells = regional::valleyReachCells;
     parameters.channels.pinarea_km2 = regional::pinAreaKm2;
     parameters.channels.meanderamplitude = regional::meanderAmplitude;
     parameters.channels.meanderdischargeexponent = regional::meanderDischargeExponent;

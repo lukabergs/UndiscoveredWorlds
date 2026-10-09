@@ -7,10 +7,14 @@
 #include <limits>
 
 #include "core/deterministic_random.hpp"
+#include "simulations/landscape/regional_coast.hpp"
+#include "simulations/landscape/regional_edges.hpp"
 
-// Erosion plan steps E3, R0 and R2 (docs/architecture/erosion-hydrology-plan.md, Phase E
-// and Phase R): the Phase E start surface and sea moved from regional_pass.cpp by R0; the
-// warp, the coast noise and the land-share rule of R2.
+// Erosion plan steps E3, R0, R2 and R6 (docs/architecture/erosion-hydrology-plan.md, Phase E,
+// Phase R and Phase R2): the Phase E start surface and sea moved from regional_pass.cpp by
+// R0; the warp, the coast noise and the land-share rule of R2; R6 moved the sea gate to
+// regional_edges.cpp (R8's) and the coast factors and the island sink to regional_coast.cpp
+// (R7's), called from here with the R2 behaviour at their defaults.
 
 namespace landscape
 {
@@ -87,35 +91,6 @@ std::vector<float> coastalcells(const std::vector<uint8_t>& sea, int width, int 
                     : 0.0f;
         }
     return coastal;
-}
-
-// Phase E's eligibility of a global cell's fine cells for the sea: a global sea cell
-// among the cell and its 8 neighbours, and not a lake cell (lake surface above zero)
-// unless the cell itself is sea.
-std::vector<uint8_t> nearseacells(const RegionalGlobalInputs& inputs)
-{
-    const int width = inputs.width, height = inputs.height;
-    std::vector<uint8_t> nearsea(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
-    for (int j = 0; j < height; j++)
-        for (int i = 0; i < width; i++)
-        {
-            const std::size_t global = at(i, j, width);
-            const bool lake = inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0;
-            nearsea[global] = !lake && aroundcell(width, height, i, j, [&](std::size_t other) {
-                return inputs.network.sea[other] != 0;
-            }) ? 1 : 0;
-        }
-    return nearsea;
-}
-
-// The global cells that may hold no fine sea (nearseacells 0) as 1, the others as 0.
-std::vector<float> inlandcells(const RegionalGlobalInputs& inputs)
-{
-    const std::vector<uint8_t> nearsea = nearseacells(inputs);
-    std::vector<float> inland(nearsea.size());
-    for (std::size_t cell = 0; cell < nearsea.size(); cell++)
-        inland[cell] = nearsea[cell] != 0 ? 0.0f : 1.0f;
-    return inland;
 }
 
 // A fine cell centre's latitude and longitude from its absolute indices: the expressions
@@ -195,6 +170,7 @@ struct CellSample
     float weight = 0.0f;     // the coastal weight (0 .. 1)
     float amplitude = 0.0f;  // the coast noise's amplitude before the coastal weight
     float inland = 0.0f;     // the global cells that may hold no sea, interpolated (0 .. 1; the land-share rule)
+    float dropfactor = 1.0f; // multiplies the sea-side push (R7's coast factors; 1 without them)
 };
 
 // The per-cell part of the start surface, a pure function of the global fields, the seed
@@ -207,6 +183,7 @@ public:
           relief_(localrelief(inputs.elevation_m, inputs.width, inputs.height)),
           coastal_(coastalcells(inputs.network.sea, inputs.width, inputs.height)),
           inland_(inlandcells(inputs)),
+          factors_(coastfactors(inputs, parameters)),
           coast_(inputs.width, inputs.height, scale, inputs.seed, coastsalt, parameters.coast.noisepersistence)
     {
         // Phase E's noise (erosion plan E3): the band from twice the global north-south
@@ -268,8 +245,15 @@ public:
         if (coastnoise_)
         {
             const double weight = std::clamp(bicubic(coastal_, width, height, wx, wy), 0.0, 1.0);
-            const double amplitude = parameters_.coast.noiseamplitude_m +
-                                     parameters_.coast.noiserelieffraction * std::max(0.0, static_cast<double>(relief));
+            double amplitude = parameters_.coast.noiseamplitude_m +
+                               parameters_.coast.noiserelieffraction * std::max(0.0, static_cast<double>(relief));
+            // R7's factors (regional_coast.hpp): the world's glaciation and denudation add to the
+            // amplitude and weaken the sea-side push; not read while inactive (bit-identity).
+            if (factors_.active)
+            {
+                amplitude += std::max(0.0, bicubic(factors_.amplitude_m, width, height, wx, wy));
+                cell.dropfactor = static_cast<float>(std::clamp(bicubic(factors_.dropfactor, width, height, wx, wy), 0.0, 1.0));
+            }
             if (weight > 0.0 && amplitude > 0.0)
             {
                 const double inlandamplitude = std::max(
@@ -301,25 +285,26 @@ private:
     std::vector<float> relief_;
     std::vector<float> coastal_;
     std::vector<float> inland_;
+    CoastFactors factors_;
     RegionalNoise coast_;
     std::optional<FractalNoiseField> band_;
     bool coastnoise_ = false;
 };
 
-// The elevation made to agree with the mask: a sea cell above the sea level lowered to
-// it, an eligible land cell at or below it raised to the next float above it.
-void clamptomask(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const std::vector<uint8_t>& nearsea,
+// The elevation made to agree with the mask on the gated cells (regional_edges.hpp,
+// seagate): a sea cell above the sea level lowered to it, a land cell at or below it
+// raised to the next float above it.
+void clamptomask(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const std::vector<uint8_t>& gate,
                  const std::vector<uint8_t>& sea, std::vector<float>& surface)
 {
     const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
     const float abovesea = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
-            if (nearsea[at(window.globalcolumn(x), row, inputs.width)] == 0)
+            if (gate[cell] == 0)
                 continue;
             if (sea[cell] != 0)
                 surface[cell] = std::min(surface[cell], inputs.sealevel);
@@ -414,8 +399,12 @@ void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const RegionalW
 // (halo >= 2 meanpasses + 2) stays sufficient. The passes stop early when no block of the
 // box misses its share; a pass that changes nothing within the box is the same as no pass,
 // and changes beyond the box travel one reach per pass, so stopping early keeps the result.
+// R6: the cells that may be sea come from the gate (regional_edges.hpp, seagate: the 3 x 3
+// rule per global cell until R8), the mask passes through the island sink
+// (regional_coast.hpp) and the straight-run breaker (regional_edges.hpp), both no-ops at
+// their defaults, and the coast factors scale the push (Surfacer).
 void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
-                      const Surfacer& surfacer, const std::vector<uint8_t>& nearsea, StartSurface& start)
+                      const Surfacer& surfacer, StartSurface& start)
 {
     const int width = inputs.width, height = inputs.height;
     const int k = window.scale;
@@ -439,8 +428,18 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
 
     // The samples and Phase E's block means on the box.
     const FineWarp warp = regionalwarp(box, inputs.seed, parameters);
+    const std::vector<uint8_t> gate = seagate(inputs, box, warp, parameters);
+    // A block may hold sea when any of its cells may (with the 3 x 3 gate: its global cell's
+    // nearseacells value); the land-share rule and the shore apply to those blocks only.
+    std::vector<uint8_t> blockgate(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows), 0);
+    for (int y = 0; y < fineheight; y++)
+        for (int x = 0; x < finewidth; x++)
+            if (gate[at(x, y, finewidth)] != 0)
+                blockgate[at(x / k, y / k, columns)] = 1;
+    const bool onesided = parameters.coast.onesided != 0;
+    const bool maskhooks = parameters.coast.islandmargin > 0.0 || parameters.edges.straightmax > 0;
     std::vector<float> surface(finecount), noise(finecount), fullnoise(finecount), weight(finecount),
-        amplitude(finecount), inland(finecount);
+        amplitude(finecount), inland(finecount), dropfactor(finecount);
     const std::size_t domaincount = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
     start.base_m.assign(domaincount, 0.0f);
     start.lapsebase_m.assign(domaincount, 0.0f);
@@ -456,6 +455,7 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
             weight[cell] = sample.weight;
             amplitude[cell] = sample.amplitude;
             inland[cell] = sample.inland;
+            dropfactor[cell] = sample.dropfactor;
             const int dx = x - domainx, dy = y - domainy;
             if (dx >= 0 && dx < domainwidth && dy >= 0 && dy < domainheight)
             {
@@ -468,19 +468,29 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     // The decision surface: the corrected surface with the full coast noise in place of the
     // elevation's tapered one, its sea side pushed down (a height h below the sea level
     // before the coast noise sinks by seadrop x coastal weight x min(1, -h / amplitude), so
-    // the push fades with the weight) and lifted by seadrop x inland.
+    // the push fades with the weight) and lifted by seadrop x inland. R7: the push is
+    // multiplied by the coast factors' drop factor (1 without them), and with coast.onesided
+    // the noise inside a global sea cell may not lift the decision above the sea level: where
+    // it would, the cell takes the decision without the noise (the legacy's rule).
     std::vector<double> decision(finecount);
-    for (std::size_t cell = 0; cell < finecount; cell++)
-    {
-        const double value = static_cast<double>(surface[cell]);
-        const double h = value - static_cast<double>(noise[cell]) - sealevel;
-        const double local = static_cast<double>(amplitude[cell]);
-        const double push = h < 0.0 && local > 0.0
-                                ? parameters.coast.seadrop_m * static_cast<double>(weight[cell]) * std::min(1.0, -h / local)
-                                : 0.0;
-        decision[cell] = value - static_cast<double>(noise[cell]) + static_cast<double>(fullnoise[cell]) - push +
-                         parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
-    }
+    for (int y = 0; y < fineheight; y++)
+        for (int x = 0; x < finewidth; x++)
+        {
+            const std::size_t cell = at(x, y, finewidth);
+            const double value = static_cast<double>(surface[cell]);
+            const double h = value - static_cast<double>(noise[cell]) - sealevel;
+            const double local = static_cast<double>(amplitude[cell]);
+            double push = h < 0.0 && local > 0.0
+                              ? parameters.coast.seadrop_m * static_cast<double>(weight[cell]) * std::min(1.0, -h / local)
+                              : 0.0;
+            if (dropfactor[cell] != 1.0f)
+                push *= static_cast<double>(dropfactor[cell]);
+            const double base = value - static_cast<double>(noise[cell]) - push + parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
+            const double withnoise = base + static_cast<double>(fullnoise[cell]);
+            decision[cell] = withnoise;
+            if (onesided && inputs.network.sea[globalof(x / k, y / k)] != 0 && base <= sealevel && withnoise > sealevel)
+                decision[cell] = base;
+        }
 
     // The offset: one value per block, interpolated bilinearly between block centres
     // (clamped at the box's edges, wrapped around a whole turn), so it is continuous
@@ -525,14 +535,10 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     // neighbours are land; a neighbour beyond the box or a pole does not count). The
     // shares are counted on the filled mask.
     std::vector<uint8_t> raw(finecount, 0), mask(finecount, 0);
-    auto makemask = [&]() {
-        interpolate();
-        for (int y = 0; y < fineheight; y++)
-            for (int x = 0; x < finewidth; x++)
-                raw[at(x, y, finewidth)] = nearsea[globalof(x / k, y / k)] != 0 &&
-                                                   decision[at(x, y, finewidth)] + field[at(x, y, finewidth)] <= sealevel
-                                               ? 1
-                                               : 0;
+    // The pinch sweep and the hole fill, raw -> mask (below); R6: run again after the mask
+    // hooks (the island sink and the straight-run breaker) when either is on, on the mask
+    // they left, so the shares are counted on a mask without pinches or holes.
+    auto cleanmask = [&]() {
         // Diagonal pinches first: in a 2 x 2 square whose land and sea cells touch only
         // diagonally, the sea cells become land (all squares at once, `mask` as the scratch).
         std::fill(mask.begin(), mask.end(), 0);
@@ -573,6 +579,21 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
                 mask[at(x, y, finewidth)] = hole ? 0 : 1;
             }
     };
+    auto makemask = [&]() {
+        interpolate();
+        for (int y = 0; y < fineheight; y++)
+            for (int x = 0; x < finewidth; x++)
+                raw[at(x, y, finewidth)] =
+                    gate[at(x, y, finewidth)] != 0 && decision[at(x, y, finewidth)] + field[at(x, y, finewidth)] <= sealevel ? 1 : 0;
+        cleanmask();
+        if (maskhooks)
+        {
+            sinksmallislands(inputs, box, parameters, gate, mask);
+            breakstraightruns(inputs, box, parameters, gate, mask);
+            raw = mask;
+            cleanmask();
+        }
+    };
     const int blockcells = k * k;
     const double share = parameters.coast.landshare;
     const int leastland = static_cast<int>(std::ceil(share * blockcells - 1.0e-9));
@@ -592,7 +613,7 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
             for (int bx = 0; bx < columns; bx++)
             {
                 const std::size_t global = globalof(bx, by);
-                if (nearsea[global] == 0)
+                if (blockgate[at(bx, by, columns)] == 0)
                     continue;
                 const bool seacell = inputs.network.sea[global] != 0;
                 int land = 0;
@@ -656,7 +677,7 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
         {
             const std::size_t cell = at(x, y, finewidth);
             const std::size_t global = globalof(x / k, y / k);
-            if (nearsea[global] == 0)
+            if (gate[cell] == 0)
                 continue;
             const double value = decision[cell] + field[cell] - sealevel;
             const double floor = std::max(
@@ -684,7 +705,7 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
             else if (mask[cell] == 0 && shoreheight[cell] > 0.0f)
                 surface[cell] = std::max(surface[cell], static_cast<float>(sealevel + static_cast<double>(shoreheight[cell])));
         }
-        clamptomask(inputs, box, nearsea, mask, surface);
+        clamptomask(inputs, box, gate, mask, surface);
     };
     keepshore();
     // The sign-keeping passes may not bring a cell nearer the sea level than it is now or
@@ -846,7 +867,7 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
         {
             // The warp is evaluated again on the widened box (regionalwarp's values, a pure
             // function of position, so `warp` is not read).
-            landsharesurface(inputs, window, parameters, surfacer, nearseacells(inputs), result);
+            landsharesurface(inputs, window, parameters, surfacer, result);
         }
     }
 

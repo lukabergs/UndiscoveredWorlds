@@ -60,6 +60,18 @@ struct AnalyticalReliefInput
     // windows that cross the date line differently order the same cells the same way;
     // the other ties (steepest descent, donors) go by direction code.
     std::vector<std::uint64_t> key;
+    // Erosion plan Phase R2 (R6 contract, R9 implements): the rock uplift rate per cell,
+    // m/Myr, at least 0; empty: no uplift (the solution above exactly). With it, a cell
+    // within the knickpoint wave's reach (tau <= t) takes min(z0(x), the outlet's elevation
+    // + U(x) x tau(x)) instead of the outlet's elevation: the characteristic solution's
+    // uplift term (Steer 2021; Tzathas et al. 2024, Eqs. 8 and 9 with u > 0), which in the
+    // steady state is the profile of slope U / (K Q^m) from the pinned cell up to where it
+    // meets the start surface; the cell's own rate stands for the rate along its path (an
+    // approximation the plan records). Cells beyond the reach (tau > t) advect the start
+    // surface as without uplift: the regional pass works in the frame of the global mean
+    // elevation, where uplift appears as the pinned channels' incision (regional_valleys.hpp),
+    // not as a lift of the land. The threshold slope applies after it as before.
+    std::vector<float> uplift_m_myr;
 };
 
 struct AnalyticalReliefResult
@@ -77,8 +89,8 @@ struct AnalyticalReliefResult
     int changedreceivers = 0;            // cells whose receiver differs between the last two passes (0 with one pass)
 };
 
-// Throws std::invalid_argument when the input sizes differ from the metric's (key:
-// empty or one per cell), two keys are equal, a parameter is out of range (K <= 0,
+// Throws std::invalid_argument when the input sizes differ from the metric's (key and
+// uplift_m_myr: empty or one per cell), two keys are equal, a parameter is out of range (K <= 0,
 // m < 0, t < 0 or not finite, threshold slope <= 0, no iteration, damping outside
 // 0 < damping <= 1), or no cell of a non-empty patch is pinned. No cell ends above its start elevation: the
 // advected value is min(z0(x), the rule's value), since with no uplift the erosion

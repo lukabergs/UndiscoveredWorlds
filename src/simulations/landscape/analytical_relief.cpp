@@ -293,7 +293,8 @@ AnalyticalReliefResult solveanalyticalrelief(const PatchMetric& metric, const An
     const std::size_t rows = static_cast<std::size_t>(metric.height < 0 ? 0 : metric.height);
     if (metric.width < 0 || metric.height < 0 || metric.rowdx_m.size() != rows || metric.rowarea_m2.size() != rows
         || input.start_m.size() != count || input.pinned.size() != count || input.runoff_m_yr.size() != count
-        || (!input.key.empty() && input.key.size() != count))
+        || (!input.key.empty() && input.key.size() != count)
+        || (!input.uplift_m_myr.empty() && input.uplift_m_myr.size() != count))
         throw std::invalid_argument("solveanalyticalrelief: input sizes differ from the metric's");
     if (!(parameters.erodibility > 0.0) || !(parameters.areaexponent >= 0.0) || !(parameters.elapsed_myr >= 0.0)
         || !std::isfinite(parameters.elapsed_myr) || !(parameters.thresholdslope > 0.0) || parameters.maxiterations < 1
