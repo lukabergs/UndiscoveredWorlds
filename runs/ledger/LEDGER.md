@@ -94,6 +94,7 @@ Lessons:
 | `erosion-0045` | 2026-10-09 | pass | keep | erosion plan, step R4: lake shores and ice edges from signed indicators at warped positions |
 | `erosion-0046` | 2026-10-09 | pending user review | keep | erosion plan, step R5: the Phase R close (regional runs 5 to 8 on erosion run 9, against runs 1 to 4) |
 | `erosion-0047` | 2026-10-09 | pass | keep | erosion plan, after Phase R: the user's review of regional runs 5 to 8; lakes over rivers and a fading-river terrain map; Phase R2 planned |
+| `erosion-0048` | 2026-10-09 | pass | keep | erosion plan, step R6: the contracts of Phase R2 (regional realism, second round) |
 
 Lessons:
 
@@ -166,6 +167,9 @@ Lessons:
 - `erosion-0046`: When the user pauses, stop every background agent (TaskStop), not only the wakeup loop.
 - `erosion-0046`: A completion notification can arrive before the agent's report or after a run cut short: check the worktree for an uncommitted diff before waiting.
 - `erosion-0047`: A scratch script named after a standard-library module (glob.py) breaks every later Python run from that directory: run scratch scripts with python -I and give probes distinctive names.
+- `erosion-0048`: A contracts step can let three workers run at once when every hook has its own translation unit and test file and the composing file only calls them; a hook that must be a no-op keeps the original expression textually (a re-associated sum is identical only by luck), and the parity check on every judging window is the proof.
+- `erosion-0048`: A contract that reads the mask beyond a block states its reach against the margin formula of the land-share rule, and a contract that incises or lifts by a rate times a time states the time bound within which its physical argument holds.
+- `erosion-0048`: regional_overlap.py compares bundles made with the same parameters only: after a step adds parameters, a reproduction of an earlier run is compared field by field, and the comparison's log is saved.
 
 ## tectonics
 
