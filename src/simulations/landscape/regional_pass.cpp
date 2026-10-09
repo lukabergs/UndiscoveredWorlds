@@ -15,7 +15,8 @@
 // Erosion plan step E3 (docs/architecture/erosion-hydrology-plan.md, Phase E, and
 // section 6, "Decided for Phase E"); Phase R step R0 split the start surface and the
 // sea (regional_surface.cpp) and the lakes and ice (regional_water.cpp) out of it;
-// Phase R2 step R6 wired the incision and the valleys (regional_valleys.cpp, inert until R9).
+// Phase R2 step R6 wired the incision and the valleys (regional_valleys.cpp), which R9
+// implemented with the solve's uplift term.
 
 namespace landscape
 {
@@ -163,6 +164,14 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
             solveinput.key[cell] = static_cast<std::uint64_t>(window.absolutefinecolumn(x) +
                                                               window.absolutefinerow(y) * planetfinewidth);
         }
+    // R9: the solve's uplift term from the incision's rate (analytical_relief.hpp), only
+    // with the incision active; empty otherwise (the solve without uplift exactly).
+    if (incision.active)
+    {
+        solveinput.uplift_m_myr = upsample(incision.rate_m_myr, width, height, window);
+        for (float& rate : solveinput.uplift_m_myr)
+            rate = std::max(0.0f, rate);
+    }
     const AnalyticalReliefResult solved = solveanalyticalrelief(metric, solveinput, parameters.relief);
     fields.reliefconverged = solved.converged;
     fields.changedreceivers = solved.changedreceivers;
@@ -190,8 +199,9 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
         fields.maxlowering_m = largest;
     }
 
-    // 4b. The valley floors around the channels (regional_valleys.hpp; R9, a no-op at the
-    // defaults), after the solve's diagnostics and before the lakes, which read the result.
+    // 4b. The valley floors around the channels (regional_valleys.hpp; R9, a no-op while
+    // valley_floor_km is 0), after the solve's diagnostics and before the lakes, which
+    // read the result.
     carvevalleys(inputs, window, parameters, channels, sea, elevation);
 
     // 5. Lakes and ice (regional_water.hpp).

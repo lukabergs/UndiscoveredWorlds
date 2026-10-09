@@ -123,10 +123,11 @@ struct ValleyParameters
 {
     double upliftscale = 0.0;            // the incision rate takes upliftscale x max(0, the world's rock uplift rate)
     double denudationratescale = 0.0;    // ... or denudationratescale x denudation / erosion duration, the larger
-    double floorcells = 0.0;             // a valley floor's half-width is floorcells x sqrt(Q / reference_m3s) fine
-                                         // cells, Q the channel's discharge (0: no valleys)
+    double floor_km = 0.0;               // a valley floor's half-width is floor_km x sqrt(Q / reference_m3s) km on
+                                         // the ground, Q the channel's discharge (0: no valleys); in fine cells
+                                         // by the fine north-south spacing, so the width does not change with k
     double reference_m3s = 1000.0;
-    double floormaxcells = 4.0;          // the half-width's cap, fine cells
+    double floormax_km = 40.0;           // the half-width's cap, km (and at most k fine cells)
     double sideslope = 0.0;              // rise over run of the valley sides beyond the floor (0: no sides)
     int reachcells = 0;                  // the farthest fine cell a channel shapes; at most k (the halo rule)
 };

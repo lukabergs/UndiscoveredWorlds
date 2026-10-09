@@ -9,6 +9,8 @@
 
 #include "regional_test_world.hpp"
 
+#include "simulations/landscape/regional_valleys.hpp"
+
 namespace
 {
 // A cell of the kept window is its global cell's channel junction (channel_network.hpp,
@@ -78,6 +80,95 @@ TEST_F(Landscape, RegionalOverlapLowRelief)
     const OverlapCounts second = compareoverlap(rows, windowc(8), windowd(8), "low relief C/D");
     EXPECT_GT(second.sea, 0);
     EXPECT_GT(second.lake, 0);
+    EXPECT_GT(second.channel, 0);
+}
+
+namespace
+{
+// R9's inputs on the synthetic world: a rock uplift rate smooth in latitude (35 m/Myr at
+// the equator, -5 at the poles: subsidence there) and a denudation smooth in longitude
+// (100 to 500 m over a 20 Myr erosion run: 5 to 25 m/Myr), both times `relief` (the
+// low-relief variant's scale, so the incision stays a share of the land's height).
+RegionalGlobalInputs withvalleyfields(RegionalGlobalInputs inputs, double relief = 1.0)
+{
+    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    inputs.upliftrate_m_myr.resize(size);
+    inputs.denudation_m.resize(size);
+    inputs.erosionduration_myr = 20.0;
+    for (int j = 0; j < inputs.height; j++)
+        for (int i = 0; i < inputs.width; i++)
+        {
+            const double c = std::cos(latitude_rad(j, inputs.height));
+            inputs.upliftrate_m_myr[at(i, j, inputs.width)] = static_cast<float>(relief * (40.0 * c * c - 5.0));
+            inputs.denudation_m[at(i, j, inputs.width)] =
+                static_cast<float>(relief * (300.0 + 200.0 * std::sin(longitude_rad(i, inputs.width))));
+        }
+    return inputs;
+}
+
+// R9's features on: the incision from both rates over 20 Myr, the solve's uplift term,
+// valley floors of 300 km x sqrt(Q / 1e5 m3/s) (about one fine cell at k 4, 313 km; the
+// synthetic cells carry 1e3 to 1e5 m3/s, so the widths vary below the cap of 1250 km) and
+// sides of slope 0.02 out to k.
+RegionalParameters valleyparameters(int scale)
+{
+    RegionalParameters parameters;
+    parameters.relief.elapsed_myr = 20.0;
+    parameters.valleys.upliftscale = 1.0;
+    parameters.valleys.denudationratescale = 1.0;
+    parameters.valleys.floor_km = 300.0;
+    parameters.valleys.reference_m3s = 1.0e5;
+    parameters.valleys.floormax_km = 1250.0;
+    parameters.valleys.sideslope = 0.02;
+    parameters.valleys.reachcells = scale;
+    return parameters;
+}
+
+// The number of kept fine cells whose elevation differs between two passes.
+int changedcells(const RegionalFields& a, const RegionalFields& b)
+{
+    int changed = 0;
+    for (std::size_t cell = 0; cell < a.elevation_m.size(); cell++)
+        changed += a.elevation_m[cell] != b.elevation_m[cell] ? 1 : 0;
+    return changed;
+}
+}
+
+TEST_F(Landscape, RegionalOverlapValleys)
+{
+    // R9's incision, uplift term and valley floors at the smallest halo the pass allows:
+    // the overlaps stay bit-identical (compareoverlap asserts it), and the features act.
+    const RegionalGlobalInputs columns = withvalleyfields(syntheticworld(32));
+    for (int scale : {4, 5})
+    {
+        SCOPED_TRACE("k = " + std::to_string(scale));
+        const RegionalParameters parameters = valleyparameters(scale);
+        ASSERT_TRUE(landscape::globalincision(columns, parameters).active);
+        const OverlapCounts counts = compareoverlap(columns, windowa(scale), windowb(scale), "valleys A/B", parameters);
+        EXPECT_EQ(counts.shared, 4 * 5 * scale * scale);
+        EXPECT_GT(counts.channel, 0);
+        const RegionalFields on = landscape::runregionalpass(columns, windowb(scale), parameters);
+        const RegionalFields off = landscape::runregionalpass(columns, windowb(scale), RegionalParameters{});
+        EXPECT_GT(changedcells(on, off), 0);
+    }
+    const RegionalGlobalInputs rows = withvalleyfields(syntheticworld(64));
+    const OverlapCounts counts = compareoverlap(rows, windowc(4), windowd(4), "valleys C/D", valleyparameters(4));
+    EXPECT_GT(counts.sea, 0);
+    EXPECT_GT(counts.lake, 0);
+    EXPECT_GT(counts.channel, 0);
+}
+
+TEST_F(Landscape, RegionalOverlapValleysLowRelief)
+{
+    // The low-relief world (elevations x 0.01) with the rates x 0.01, at k = 8.
+    const RegionalParameters parameters = valleyparameters(8);
+    const RegionalGlobalInputs columns = withvalleyfields(syntheticworld(32, 0.01), 0.01);
+    ASSERT_TRUE(landscape::globalincision(columns, parameters).active);
+    const OverlapCounts first = compareoverlap(columns, windowa(8), windowb(8), "valleys low relief A/B", parameters);
+    EXPECT_GT(first.channel, 0);
+    const RegionalGlobalInputs rows = withvalleyfields(syntheticworld(64, 0.01), 0.01);
+    const OverlapCounts second = compareoverlap(rows, windowc(8), windowd(8), "valleys low relief C/D", parameters);
+    EXPECT_GT(second.sea, 0);
     EXPECT_GT(second.channel, 0);
 }
 

@@ -222,6 +222,80 @@ TEST_F(Landscape, AnalyticalReliefChainFollowsTheCharacteristicSolution)
     EXPECT_NEAR(late.elevation_m[5], 101.0 + (136.259199 - 100.0 - 18.856181) / (39.938032 - 18.856181), 4e-6);
 }
 
+TEST_F(Landscape, AnalyticalReliefUpliftLiftsTheRespondedProfile)
+{
+    // Erosion plan R9: with a constant uplift U and t at least every response time, cell i
+    // takes min(z0(i), z0(outlet) + U tau(i)), the steady-state profile of slope
+    // U / (K Q^m) up to where it meets the start surface. U = 0.04 m/Myr: U tau = 0.754,
+    // 1.598, 2.571, 3.764 and 5.450 m, so cells 1 to 4 lie on the profile and cell 5 is
+    // clamped at its start (105 m). Within the reach only: at t = 30 cells 2 to 5 (tau > t)
+    // advect the start as without uplift.
+    const PatchMetric metric = squaremetric(chainlength, 1, chainspacing);
+    const AnalyticalReliefInput plain = chaininput();
+    AnalyticalReliefInput input = plain;
+    constexpr double uplift = 0.04;
+    input.uplift_m_myr.assign(input.start_m.size(), static_cast<float>(uplift));
+    AnalyticalReliefParameters parameters;
+    parameters.thresholdslope = 1.0;
+    std::vector<double> tau(chainlength, 0.0);
+    for (int i = 1; i < chainlength; i++)
+        tau[static_cast<std::size_t>(i)] = tau[static_cast<std::size_t>(i - 1)]
+                                           + chainspacing / (750.0 * std::sqrt((chainlength - i) * 1.0e-3));
+
+    parameters.elapsed_myr = 200.0;
+    const AnalyticalReliefResult result = landscape::solveanalyticalrelief(metric, input, parameters);
+    EXPECT_TRUE(result.converged);
+    EXPECT_EQ(result.elevation_m[0], 100.0f);
+    for (int i = 1; i < chainlength; i++)
+    {
+        const std::size_t cell = static_cast<std::size_t>(i);
+        EXPECT_EQ(result.direction[cell], 7) << "cell " << i;
+        const double expected = std::min(chainbase + i, chainbase + uplift * tau[cell]);
+        EXPECT_NEAR(result.elevation_m[cell], expected, 8e-6) << "cell " << i;
+    }
+    EXPECT_LT(result.elevation_m[4], 104.0f);
+    EXPECT_EQ(result.elevation_m[5], 105.0f);
+
+    parameters.elapsed_myr = 30.0;
+    const AnalyticalReliefResult early = landscape::solveanalyticalrelief(metric, input, parameters);
+    const AnalyticalReliefResult earlyplain = landscape::solveanalyticalrelief(metric, plain, parameters);
+    EXPECT_NEAR(early.elevation_m[1], chainbase + uplift * tau[1], 8e-6);
+    for (int i = 2; i < chainlength; i++)
+        EXPECT_EQ(early.elevation_m[static_cast<std::size_t>(i)], earlyplain.elevation_m[static_cast<std::size_t>(i)])
+            << "cell " << i;
+}
+
+TEST_F(Landscape, AnalyticalReliefZeroUpliftChangesNothing)
+{
+    // U = 0 everywhere gives the solution without uplift bit for bit, on the chain at
+    // three times and on the dome (whose ring outlets differ in height) and the bowl.
+    const PatchMetric chain = squaremetric(chainlength, 2, chainspacing);
+    const AnalyticalReliefInput plain = chaininput(true);
+    AnalyticalReliefInput zero = plain;
+    zero.uplift_m_myr.assign(plain.start_m.size(), 0.0f);
+    AnalyticalReliefParameters parameters;
+    parameters.thresholdslope = 1.0;
+    for (double elapsed : { 0.0, 30.0, 100.0 })
+    {
+        parameters.elapsed_myr = elapsed;
+        EXPECT_EQ(landscape::solveanalyticalrelief(chain, zero, parameters).elevation_m,
+                  landscape::solveanalyticalrelief(chain, plain, parameters).elevation_m)
+            << "t = " << elapsed;
+    }
+    for (const PatchMetric& metric : { domemetric(), bowlmetric() })
+    {
+        const AnalyticalReliefInput base = metric.width == 40 ? domeinput(metric) : bowlinput(metric);
+        AnalyticalReliefInput lifted = base;
+        lifted.uplift_m_myr.assign(base.start_m.size(), 0.0f);
+        AnalyticalReliefParameters defaults;
+        defaults.elapsed_myr = 5.0;
+        const AnalyticalReliefResult a = landscape::solveanalyticalrelief(metric, base, defaults);
+        const AnalyticalReliefResult b = landscape::solveanalyticalrelief(metric, lifted, defaults);
+        EXPECT_EQ(a.elevation_m, b.elevation_m);
+        EXPECT_EQ(a.direction, b.direction);
+    }
+}
+
 TEST_F(Landscape, AnalyticalReliefZeroTimeKeepsTheStartBelowTheThreshold)
 {
     // A cliff on a chain: with t = 0 only the threshold slope (0.5) acts, from the
@@ -682,6 +756,13 @@ TEST_F(Landscape, AnalyticalReliefRejectsBadInput)
     input.key = { 5, 9, 2, 7, 9, 0 };  // 9 twice
     EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, defaults), std::invalid_argument);
     input.key = { 5, 9, 2, 7, 8, 0 };
+    EXPECT_NO_THROW(landscape::solveanalyticalrelief(metric, input, defaults));
+    input = good;
+    input.uplift_m_myr.assign(good.start_m.size() - 1, 1.0f);
+    EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, defaults), std::invalid_argument);
+    input.uplift_m_myr.assign(good.start_m.size() + 1, 1.0f);
+    EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, defaults), std::invalid_argument);
+    input.uplift_m_myr.assign(good.start_m.size(), 1.0f);
     EXPECT_NO_THROW(landscape::solveanalyticalrelief(metric, input, defaults));
 
     AnalyticalReliefParameters parameters = defaults;

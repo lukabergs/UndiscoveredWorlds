@@ -129,9 +129,9 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.shores.terrain_m = regional::shoreTerrainM;
     parameters.valleys.upliftscale = regional::upliftScale;
     parameters.valleys.denudationratescale = regional::denudationRateScale;
-    parameters.valleys.floorcells = regional::valleyFloorCells;
+    parameters.valleys.floor_km = regional::valleyFloorKm;
     parameters.valleys.reference_m3s = regional::valleyReferenceM3s;
-    parameters.valleys.floormaxcells = regional::valleyFloorMaxCells;
+    parameters.valleys.floormax_km = regional::valleyFloorMaxKm;
     parameters.valleys.sideslope = regional::valleySideSlope;
     parameters.valleys.reachcells = regional::valleyReachCells;
     parameters.channels.pinarea_km2 = regional::pinAreaKm2;

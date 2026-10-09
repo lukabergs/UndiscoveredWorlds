@@ -2,7 +2,7 @@
 
 // Analytical relief of the regional pass (docs/architecture/erosion-hydrology-plan.md,
 // Phase E, step E2c, and section 6, "The solve"): the transient solution of the
-// linear stream power law (n = 1, uplift 0) on a fine patch whose pinned cells keep
+// linear stream power law (n = 1, uplift 0 unless uplift_m_myr is given) on a fine patch whose pinned cells keep
 // their elevation (Steer 2021, Earth Surface Dynamics 9, 1239; Tzathas, Gailleton,
 // Steer and Cordonnier 2024: a non-flat starting terrain, fixed boundary heights, a
 // prescribed network, elapsed time and a threshold-slope hillslope). With n = 1 and
@@ -60,7 +60,7 @@ struct AnalyticalReliefInput
     // windows that cross the date line differently order the same cells the same way;
     // the other ties (steepest descent, donors) go by direction code.
     std::vector<std::uint64_t> key;
-    // Erosion plan Phase R2 (R6 contract, R9 implements): the rock uplift rate per cell,
+    // Erosion plan Phase R2 (the R6 contract, implemented by R9): the rock uplift rate per cell,
     // m/Myr, at least 0; empty: no uplift (the solution above exactly). With it, a cell
     // within the knickpoint wave's reach (tau <= t) takes min(z0(x), the outlet's elevation
     // + U(x) x tau(x)) instead of the outlet's elevation: the characteristic solution's

@@ -219,7 +219,7 @@ std::vector<float> solve(const PatchMetric& metric, const AnalyticalReliefInput&
     }
 
     // The characteristic solution (Tzathas et al. 2024, Eqs. 8 and 9 with u = 0): with
-    // tau <= t the pinned cell's elevation; otherwise the start elevation of the point
+    // tau <= t the pinned cell's elevation (with uplift_m_myr, plus U tau); otherwise the start elevation of the point
     // at response time s = tau - t downstream, linear in tau along the link a -> r
     // with tau(r) <= s < tau(a) (the paper's locally constant 1 / a). The walk covers
     // the links within time t of the cell. Neither value may exceed the cell's own
@@ -227,6 +227,7 @@ std::vector<float> solve(const PatchMetric& metric, const AnalyticalReliefInput&
     // receiver path that climbs on the start surface (a depression's flood links, or
     // receivers taken from a later surface) would carry a higher z0 up to it.
     const double elapsed = parameters.elapsed_myr;
+    const std::vector<float>& uplift = input.uplift_m_myr;
     std::vector<double> advected(count, 0.0);
     for (std::size_t cell = 0; cell < count; cell++)
     {
@@ -238,7 +239,13 @@ std::vector<float> solve(const PatchMetric& metric, const AnalyticalReliefInput&
         }
         if (tau[cell] <= elapsed)
         {
-            advected[cell] = std::min(own, static_cast<double>(start[static_cast<std::size_t>(outlet[cell])]));
+            if (uplift.empty())
+                advected[cell] = std::min(own, static_cast<double>(start[static_cast<std::size_t>(outlet[cell])]));
+            else
+                // The uplift term (R9, analytical_relief.hpp): the outlet's elevation plus
+                // U tau, the cell's own U for the rate along its path.
+                advected[cell] = std::min(own, static_cast<double>(start[static_cast<std::size_t>(outlet[cell])])
+                                                   + std::max(0.0, static_cast<double>(uplift[cell])) * tau[cell]);
             continue;
         }
         const double target = tau[cell] - elapsed;
