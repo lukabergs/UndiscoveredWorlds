@@ -24,6 +24,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0051`: the smooth gate with the 3 x 3 lift (the coast stays within one fine cell of the block edge)
 - `erosion-0051`: gate reach 2 (158 low-land cells two cells from the sea on A)
 - `erosion-0051`: straight_max_cells 6 (runs of 5 and 6 stay)
+- `erosion-0054`: trough_width_km 10 or 20 at the 40 km cap (alike; the land's mean falls 63 m on B)
+- `erosion-0055`: the candidate's band test on the solved fine elevation (not seam-safe in the innermost halo ring; the review of E5.0)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -109,6 +111,9 @@ Lessons:
 | `erosion-0051` | 2026-10-09 | pass | keep | erosion plan, step R8: grid artefacts on the coast (the smooth sea gate, the straight-run breaker) |
 | `erosion-0052` | 2026-10-09 | pending user review | keep | erosion plan, step R10: the Phase R2 close (regional runs 9 to 12 on erosion run 9, against runs 5 to 8) |
 | `erosion-0053` | 2026-10-09 | pass | keep | erosion plan, step E5.0: the contracts of Phase E5 (glacial forms on the regional map) |
+| `erosion-0054` | 2026-10-09 | pass | keep | erosion plan, step E5.1: glacial troughs (the U-shaped valleys) of the regional pass |
+| `erosion-0055` | 2026-10-09 | pass | keep | erosion plan, step E5.2: cirques on the regional map |
+| `erosion-0056` | 2026-10-09 | pass | keep | erosion plan, step E5.3: present-day ice above the equilibrium line on the regional map |
 
 Lessons:
 
@@ -199,6 +204,10 @@ Lessons:
 - `erosion-0053`: The glacial past's ELA and the present climate's differ by cooling_c over the world's lapse rate (881 m on erosion run 9): the forms cut by ice read the run's ELA, the present-day ice the present one, and a bundle-recorded parameter the regional pass depends on is restored by the region command as the stream power law is.
 - `erosion-0053`: A probe that picks a manifest key by its suffix (lapse_rate) can take a climate constant for the world's scalar field: read the field (atmosphere/lapse_rate.npy) the code reads.
 - `erosion-0053`: A form centred by a rule that reads the solved elevation at a non-channel cell is not seam-safe at the smallest halo, even when its footprint is within k: only the start surface, the sea and the channel beds agree in the innermost halo ring; a placement or eligibility rule reads a pure global quantity (the upsampled base) there.
+- `erosion-0054`: A width law with a cap must be swept against the cap: on an ice-sheet world the catchments of the big glaciated rivers put every setting above a few kilometres at the cap, so the sweep's variable is the cap or the exponent, not the reference width.
+- `erosion-0054`: A cross-section metric defined against the lower bank reads a widened trough as a shallower valley (the banks came down): report the lowered zone's width and depth as well.
+- `erosion-0055`: A hand-built test surface must set every field the rule reads: when a rule moves from the fine surface to the global base, the tests' flat surfaces must be flat in both, and an exact edge of a band is not asserted on an upsampled constant (bicubic rounding), only values inside and outside it.
+- `erosion-0056`: A threshold rule's sweep variable (the fraction) does not move the iced area: the area is the ELA's and the edge noise's; sweep the edge noise when the area is the question.
 
 ## tectonics
 
