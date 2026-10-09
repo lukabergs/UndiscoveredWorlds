@@ -410,7 +410,16 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     const int k = window.scale;
     const int sharecount = std::max(0, parameters.coast.sharepasses);
     const int signedcount = std::max(0, parameters.coast.signedpasses);
-    const int margin = (k <= 2 ? 2 : 1) * sharecount + 2 + 2 * signedcount;
+    // R6: a mask hook (the island sink's ring of m fine cells, regional_coast.hpp; the
+    // straight-run breaker, which reads its block and one cell beyond, regional_edges.hpp)
+    // widens what a block's share reads beyond the block to e = 2 + hookreach + 2 fine cells
+    // (the pinch sweep and the hole fill run twice), and a share pass's reach is one block
+    // (the offset's tent) plus a second block where e exceeds half a block: r = 1 +
+    // ceil(max(0, e - k / 2) / k) (the R6 review's finding). Without a hook the R2 rule stands.
+    const int hookreach = std::max(parameters.coast.islandmargin > 0.0 ? std::max(1, static_cast<int>(std::lround(parameters.coast.islandmargin * k))) : 0,
+                                   parameters.edges.straightmax > 0 ? 1 : 0);
+    const int sharereach = hookreach > 0 ? 1 + (std::max(0, 2 + hookreach + 2 - k / 2) + k - 1) / k : (k <= 2 ? 2 : 1);
+    const int margin = sharereach * sharecount + 2 + 2 * signedcount;
     const double sealevel = static_cast<double>(inputs.sealevel);
 
     RegionalWindow box = window;
@@ -485,11 +494,15 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
                               : 0.0;
             if (dropfactor[cell] != 1.0f)
                 push *= static_cast<double>(dropfactor[cell]);
-            const double base = value - static_cast<double>(noise[cell]) - push + parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
-            const double withnoise = base + static_cast<double>(fullnoise[cell]);
-            decision[cell] = withnoise;
-            if (onesided && inputs.network.sea[globalof(x / k, y / k)] != 0 && base <= sealevel && withnoise > sealevel)
-                decision[cell] = base;
+            // R2's expression, kept textually (the R6 review: a re-associated sum rounds differently).
+            decision[cell] = value - static_cast<double>(noise[cell]) + static_cast<double>(fullnoise[cell]) - push +
+                             parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
+            if (onesided && inputs.network.sea[globalof(x / k, y / k)] != 0)
+            {
+                const double base = value - static_cast<double>(noise[cell]) - push + parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
+                if (base <= sealevel && decision[cell] > sealevel)
+                    decision[cell] = base;
+            }
         }
 
     // The offset: one value per block, interpolated bilinearly between block centres
