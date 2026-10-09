@@ -15,6 +15,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0044`: springs on every source cell by default (pillars 21 / 166 / 200 -> 24 / 220 / 272)
 - `erosion-0045`: the lake zone chosen per global cell (water steps up to 168 m between adjacent wet cells)
 - `erosion-0045`: an indicator blind to the terrain (beds carved up to 2.9 km, shores raised up to 744 m)
+- `erosion-0049`: the valley floor in fine cells (a floor four times wider on the ground at k 4 than at k 16): kilometres instead
+- `erosion-0049`: a side slope of 0.02 at 16 cells of reach (the land around the rivers flattened: block mean -483 m on B)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -95,6 +97,7 @@ Lessons:
 | `erosion-0046` | 2026-10-09 | pending user review | keep | erosion plan, step R5: the Phase R close (regional runs 5 to 8 on erosion run 9, against runs 1 to 4) |
 | `erosion-0047` | 2026-10-09 | pass | keep | erosion plan, after Phase R: the user's review of regional runs 5 to 8; lakes over rivers and a fading-river terrain map; Phase R2 planned |
 | `erosion-0048` | 2026-10-09 | pass | keep | erosion plan, step R6: the contracts of Phase R2 (regional realism, second round) |
+| `erosion-0049` | 2026-10-09 | pass | keep | erosion plan, step R9: channels incise by the world's uplift or denudation rate, the solve's uplift term, valley floors from the flow |
 
 Lessons:
 
@@ -170,6 +173,9 @@ Lessons:
 - `erosion-0048`: A contracts step can let three workers run at once when every hook has its own translation unit and test file and the composing file only calls them; a hook that must be a no-op keeps the original expression textually (a re-associated sum is identical only by luck), and the parity check on every judging window is the proof.
 - `erosion-0048`: A contract that reads the mask beyond a block states its reach against the margin formula of the land-share rule, and a contract that incises or lifts by a rate times a time states the time bound within which its physical argument holds.
 - `erosion-0048`: regional_overlap.py compares bundles made with the same parameters only: after a step adds parameters, a reproduction of an earlier run is compared field by field, and the comparison's log is saved.
+- `erosion-0049`: A rate times a time must be bounded by what saturates it (here the local relief) and its note must state the time within which the physical argument holds; otherwise a parameter sweep finds a value that lowers whole blocks without bound.
+- `erosion-0049`: Widths of fine-scale forms are set in kilometres, never in fine cells, so a window at another scale shows the same ground.
+- `erosion-0049`: A step that changes the land's mean states the acceptable block-mean shift before its sweep, and the shift is attributed by turning each term off in turn (the solve's lowering, not the sides, carried it here).
 
 ## tectonics
 
