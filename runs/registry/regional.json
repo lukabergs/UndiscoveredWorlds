@@ -56,6 +56,34 @@
       "run": "runs/regional/8",
       "date": "2026-10-09T08:26:22+00:00",
       "label": "window A, k 16, elapsed 20 Myr (Phase R; run 4 before)"
+    },
+    {
+      "id": 9,
+      "status": "complete",
+      "run": "runs/regional/9",
+      "date": "2026-10-09T15:00:24+00:00",
+      "label": "window A, k 16 (Phase R2; run 5 before)"
+    },
+    {
+      "id": 10,
+      "status": "complete",
+      "run": "runs/regional/10",
+      "date": "2026-10-09T15:00:46+00:00",
+      "label": "window B (east of A, 4 columns shared), k 16 (Phase R2; run 6 before)"
+    },
+    {
+      "id": 11,
+      "status": "complete",
+      "run": "runs/regional/11",
+      "date": "2026-10-09T15:01:09+00:00",
+      "label": "wide window around A and B, k 4 (Phase R2; run 7 before)"
+    },
+    {
+      "id": 12,
+      "status": "complete",
+      "run": "runs/regional/12",
+      "date": "2026-10-09T15:01:12+00:00",
+      "label": "window A, k 16, elapsed 50 Myr (Phase R2; the default is 20; run 8 at 20 Myr before)"
     }
   ]
 }

@@ -17,6 +17,13 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0045`: an indicator blind to the terrain (beds carved up to 2.9 km, shores raised up to 744 m)
 - `erosion-0049`: the valley floor in fine cells (a floor four times wider on the ground at k 4 than at k 16): kilometres instead
 - `erosion-0049`: a side slope of 0.02 at 16 cells of reach (the land around the rivers flattened: block mean -483 m on B)
+- `erosion-0050`: the island sink at the legacy margin 0.5 (inert: the ring meets the mainland)
+- `erosion-0050`: coast noise 150 m / 0.7 for the default (islands in global sea nearly double, C's block-mean error 15.8 m)
+- `erosion-0050`: glacial 100 or denudation 50 (C's block-mean error 15.5 m)
+- `erosion-0051`: the sign of the interpolated sea indicator as the gate (narrower than the 3 x 3 rule; cannot open (184, 49))
+- `erosion-0051`: the smooth gate with the 3 x 3 lift (the coast stays within one fine cell of the block edge)
+- `erosion-0051`: gate reach 2 (158 low-land cells two cells from the sea on A)
+- `erosion-0051`: straight_max_cells 6 (runs of 5 and 6 stay)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -98,6 +105,9 @@ Lessons:
 | `erosion-0047` | 2026-10-09 | pass | keep | erosion plan, after Phase R: the user's review of regional runs 5 to 8; lakes over rivers and a fading-river terrain map; Phase R2 planned |
 | `erosion-0048` | 2026-10-09 | pass | keep | erosion plan, step R6: the contracts of Phase R2 (regional realism, second round) |
 | `erosion-0049` | 2026-10-09 | pass | keep | erosion plan, step R9: channels incise by the world's uplift or denudation rate, the solve's uplift term, valley floors from the flow |
+| `erosion-0050` | 2026-10-09 | pass | keep | erosion plan, step R7: islands and coast ruggedness (one-sided coast noise, the island sink, ruggedness from glaciation and denudation) |
+| `erosion-0051` | 2026-10-09 | pass | keep | erosion plan, step R8: grid artefacts on the coast (the smooth sea gate, the straight-run breaker) |
+| `erosion-0052` | 2026-10-09 | pending user review | keep | erosion plan, step R10: the Phase R2 close (regional runs 9 to 12 on erosion run 9, against runs 5 to 8) |
 
 Lessons:
 
@@ -176,6 +186,14 @@ Lessons:
 - `erosion-0049`: A rate times a time must be bounded by what saturates it (here the local relief) and its note must state the time within which the physical argument holds; otherwise a parameter sweep finds a value that lowers whole blocks without bound.
 - `erosion-0049`: Widths of fine-scale forms are set in kilometres, never in fine cells, so a window at another scale shows the same ground.
 - `erosion-0049`: A step that changes the land's mean states the acceptable block-mean shift before its sweep, and the shift is attributed by turning each term off in turn (the solve's lowering, not the sides, carried it here).
+- `erosion-0050`: A hook that reads a neighbouring block adds a whole block to a share pass's reach: derive the margin from what the final mask reads, not from the hook's own radius.
+- `erosion-0050`: A selection rule of 'fewest X' cannot tune a term whose purpose is to add X somewhere; the step must name the place where the term should act and measure it there.
+- `erosion-0050`: Save attribution probes as scripts or diagnostics, never as transient prints.
+- `erosion-0051`: A smooth gate needs its lift to end where the gate ends, or the coast stops where the lift's ramp meets the depth.
+- `erosion-0051`: A bicubic indicator's sign is narrower than the hard rule it replaces (its outer weights are negative): a reach around centres, not a sign, replaces a neighbourhood rule.
+- `erosion-0051`: A test that asserts a premise about the box's size must compute the box with the composing file's formula, or a later margin change makes it check less than it says.
+- `erosion-0052`: A phase whose contracts step gives each step its own translation unit and test file runs its steps at once; the reviews, not the implementation, set the pace (three reviews of 8 to 10 min each, three workers of 24 to 34 min, in about 55 min of wall clock).
+- `erosion-0052`: A registered run's code.dirty is false only for the first run registered from a clean tree; the registry write dirties the tree for the rest (as in R5).
 
 ## tectonics
 
