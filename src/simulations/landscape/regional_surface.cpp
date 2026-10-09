@@ -412,13 +412,16 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     const int signedcount = std::max(0, parameters.coast.signedpasses);
     // R6: a mask hook (the island sink's ring of m fine cells, regional_coast.hpp; the
     // straight-run breaker, which reads its block and one cell beyond, regional_edges.hpp)
-    // widens what a block's share reads beyond the block to e = 2 + hookreach + 2 fine cells
-    // (the pinch sweep and the hole fill run twice), and a share pass's reach is one block
-    // (the offset's tent) plus a second block where e exceeds half a block: r = 1 +
-    // ceil(max(0, e - k / 2) / k) (the R6 review's finding). Without a hook the R2 rule stands.
+    // widens what a block's share reads beyond the block: the final pinch sweep and hole fill
+    // read two cells into the neighbouring block, whose hook read that whole block and its
+    // ring on the first-cleaned mask, so e = k + hookreach + 2 fine cells (the second clean's
+    // two cells lie inside the neighbour, already counted by k), and a share pass's reach is
+    // one block (the offset's tent) plus the blocks e exceeds half a block by: r = 1 +
+    // ceil(max(0, e - k / 2) / k) (the R6 and R7 reviews' derivation: r = 2 at k 16 with m 2,
+    // 3 at k 4 with m 1). Without a hook the R2 rule stands.
     const int hookreach = std::max(parameters.coast.islandmargin > 0.0 ? std::max(1, static_cast<int>(std::lround(parameters.coast.islandmargin * k))) : 0,
                                    parameters.edges.straightmax > 0 ? 1 : 0);
-    const int sharereach = hookreach > 0 ? 1 + (std::max(0, 2 + hookreach + 2 - k / 2) + k - 1) / k : (k <= 2 ? 2 : 1);
+    const int sharereach = hookreach > 0 ? 1 + (std::max(0, k + hookreach + 2 - k / 2) + k - 1) / k : (k <= 2 ? 2 : 1);
     const int margin = sharereach * sharecount + 2 + 2 * signedcount;
     const double sealevel = static_cast<double>(inputs.sealevel);
 
