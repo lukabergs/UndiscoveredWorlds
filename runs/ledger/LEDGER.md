@@ -108,6 +108,7 @@ Lessons:
 | `erosion-0050` | 2026-10-09 | pass | keep | erosion plan, step R7: islands and coast ruggedness (one-sided coast noise, the island sink, ruggedness from glaciation and denudation) |
 | `erosion-0051` | 2026-10-09 | pass | keep | erosion plan, step R8: grid artefacts on the coast (the smooth sea gate, the straight-run breaker) |
 | `erosion-0052` | 2026-10-09 | pending user review | keep | erosion plan, step R10: the Phase R2 close (regional runs 9 to 12 on erosion run 9, against runs 5 to 8) |
+| `erosion-0053` | 2026-10-09 | pass | keep | erosion plan, step E5.0: the contracts of Phase E5 (glacial forms on the regional map) |
 
 Lessons:
 
@@ -194,6 +195,10 @@ Lessons:
 - `erosion-0051`: A test that asserts a premise about the box's size must compute the box with the composing file's formula, or a later margin change makes it check less than it says.
 - `erosion-0052`: A phase whose contracts step gives each step its own translation unit and test file runs its steps at once; the reviews, not the implementation, set the pace (three reviews of 8 to 10 min each, three workers of 24 to 34 min, in about 55 min of wall clock).
 - `erosion-0052`: A registered run's code.dirty is false only for the first run registered from a clean tree; the registry write dirties the tree for the rest (as in R5).
+- `erosion-0053`: step_check.py writes to out/scratch/phase5 unless --directory names the reference's directory: a reference label in another directory needs the option, or the compare fails on a missing manifest.
+- `erosion-0053`: The glacial past's ELA and the present climate's differ by cooling_c over the world's lapse rate (881 m on erosion run 9): the forms cut by ice read the run's ELA, the present-day ice the present one, and a bundle-recorded parameter the regional pass depends on is restored by the region command as the stream power law is.
+- `erosion-0053`: A probe that picks a manifest key by its suffix (lapse_rate) can take a climate constant for the world's scalar field: read the field (atmosphere/lapse_rate.npy) the code reads.
+- `erosion-0053`: A form centred by a rule that reads the solved elevation at a non-channel cell is not seam-safe at the smallest halo, even when its footprint is within k: only the start surface, the sea and the channel beds agree in the innermost halo ring; a placement or eligibility rule reads a pure global quantity (the upsampled base) there.
 
 ## tectonics
 
