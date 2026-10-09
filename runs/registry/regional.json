@@ -84,6 +84,27 @@
       "run": "runs/regional/12",
       "date": "2026-10-09T15:01:12+00:00",
       "label": "window A, k 16, elapsed 50 Myr (Phase R2; the default is 20; run 8 at 20 Myr before)"
+    },
+    {
+      "id": 13,
+      "status": "complete",
+      "run": "runs/regional/13",
+      "date": "2026-10-09T18:07:53+00:00",
+      "label": "window A, k 16 (Phase E5: troughs, cirques, ELA ice; run 9 before)"
+    },
+    {
+      "id": 14,
+      "status": "complete",
+      "run": "runs/regional/14",
+      "date": "2026-10-09T18:08:16+00:00",
+      "label": "window B (east of A, 4 columns shared), k 16 (Phase E5; run 10 before)"
+    },
+    {
+      "id": 15,
+      "status": "complete",
+      "run": "runs/regional/15",
+      "date": "2026-10-09T18:08:40+00:00",
+      "label": "wide window around A and B, k 4 (Phase E5; run 11 before)"
     }
   ]
 }

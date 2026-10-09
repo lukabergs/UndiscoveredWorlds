@@ -114,6 +114,7 @@ Lessons:
 | `erosion-0054` | 2026-10-09 | pass | keep | erosion plan, step E5.1: glacial troughs (the U-shaped valleys) of the regional pass |
 | `erosion-0055` | 2026-10-09 | pass | keep | erosion plan, step E5.2: cirques on the regional map |
 | `erosion-0056` | 2026-10-09 | pass | keep | erosion plan, step E5.3: present-day ice above the equilibrium line on the regional map |
+| `erosion-0057` | 2026-10-09 | pending user review | keep | erosion plan, step E5.4: the Phase E5 close (regional runs 13 to 15 on erosion run 9, against runs 9 to 11) |
 
 Lessons:
 
@@ -208,6 +209,9 @@ Lessons:
 - `erosion-0054`: A cross-section metric defined against the lower bank reads a widened trough as a shallower valley (the banks came down): report the lowered zone's width and depth as well.
 - `erosion-0055`: A hand-built test surface must set every field the rule reads: when a rule moves from the fine surface to the global base, the tests' flat surfaces must be flat in both, and an exact edge of a band is not asserted on an upsampled constant (bicubic rounding), only values inside and outside it.
 - `erosion-0056`: A threshold rule's sweep variable (the fraction) does not move the iced area: the area is the ELA's and the edge noise's; sweep the edge noise when the area is the question.
+- `erosion-0057`: When the implementing model's session limit stops parallel workers whose code and tests are complete, their worktree diffs apply cleanly to the main tree when the contracts gave each its own files: the lead finishes the measurements and commits the steps by their files, and the reviews run on those commits.
+- `erosion-0057`: A sweep variable that saturates at a cap on the judging world (the ice catchments here) is reported with the measured distribution, not inferred from the sweep's shape; the reviews caught an inferred number twice this phase.
+- `erosion-0057`: The registered maps cannot show forms a few hundred metres deep on a 10 km elevation palette: a relief composite (hillshade or on-minus-off) belongs in the evaluation tooling before the next form-cutting step.
 
 ## tectonics
 
