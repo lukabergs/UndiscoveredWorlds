@@ -287,7 +287,8 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                 << ", \"reliefconverged\": " << (fields.reliefconverged ? "true" : "false")
                 << ", \"changedreceivers\": " << fields.changedreceivers
                 << ", \"meanlowering_m\": " << jsonnumber(fields.meanlowering_m)
-                << ", \"maxlowering_m\": " << jsonnumber(fields.maxlowering_m) << "}";
+                << ", \"maxlowering_m\": " << jsonnumber(fields.maxlowering_m)
+                << ", \"sharepasses\": " << fields.sharepasses << ", \"sharemisses\": " << fields.sharemisses << "}";
     manifest.blocks.push_back({"diagnostics", diagnostics.str()});
     writer.finish(manifest);
 }

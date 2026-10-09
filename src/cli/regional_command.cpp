@@ -398,7 +398,12 @@ int runregioncommand(const vector<string>& arguments)
          << window.halo << "; fine grid " << window.finewidth() << " x " << window.fineheight() << '\n';
     cout << "Regional pass: " << seconds << " s; block-mean error " << fields.blockmeanerror_m << " m, relief "
          << (fields.reliefconverged ? "converged" : "not converged") << ", " << fields.changedreceivers
-         << " receivers changed, lowering mean " << fields.meanlowering_m << " m, largest " << fields.maxlowering_m << " m\n";
+         << " receivers changed, lowering mean " << fields.meanlowering_m << " m, largest " << fields.maxlowering_m << " m";
+    if (fields.sharepasses >= 0)
+        cout << "; land share met after " << fields.sharepasses << " passes";
+    else if (fields.sharemisses > 0)
+        cout << "; land share not met: " << fields.sharemisses << " blocks missing after every pass";
+    cout << '\n';
     cout << "Regional bundle: " << options.bundlePath << '\n';
     return 0;
 }

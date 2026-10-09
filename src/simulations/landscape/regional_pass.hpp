@@ -48,6 +48,10 @@ struct RegionalFields
     int changedreceivers = 0;
     double meanlowering_m = 0.0;
     double maxlowering_m = 0.0;
+    // The land-share rule's passes and misses (StartSurface::sharepasses and sharemisses;
+    // -1 and 0 without the rule).
+    int sharepasses = -1;
+    int sharemisses = 0;
 };
 
 // Throws std::invalid_argument when the window is not on the inputs' grid, a global

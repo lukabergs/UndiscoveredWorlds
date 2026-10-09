@@ -131,13 +131,17 @@ inline float elapsedMyr = 1.0f;
 inline float thresholdSlope = 0.6f;
 inline int maxIterations = 20;
 inline float damping = 0.5f;
-inline float warpAmplitudeCells = 0.0f;
+inline float warpAmplitudeCells = 0.5f;
 inline float warpWavelengthCells = 2.0f;
-inline float warpFadeM = 0.0f;
-inline float coastNoiseAmplitudeM = 0.0f;
-inline float coastNoisePersistence = 0.5f;
-inline float coastSeaDropM = 0.0f;
-inline float coastLandShare = 0.0f;
+inline float warpFadeM = 300.0f;
+inline float coastNoiseAmplitudeM = 50.0f;
+inline float coastNoisePersistence = 0.6f;
+inline float coastNoiseReliefFraction = 0.25f;
+inline float coastSeaDropM = 300.0f;
+inline float coastLandShare = 0.5f;
+inline float coastShoreFloorM = 20.0f;
+inline int sharePasses = 8;
+inline int signedPasses = 12;
 inline float meanderDischargeExponent = 0.0f;
 inline float meanderReferenceM3s = 1000.0f;
 inline float jitterJunction = 0.25f;
@@ -221,8 +225,12 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.warp_fade_m", &regional::warpFadeM },
         { "landscape.regional.coast_noise_amplitude_m", &regional::coastNoiseAmplitudeM },
         { "landscape.regional.coast_noise_persistence", &regional::coastNoisePersistence },
+        { "landscape.regional.coast_noise_relief_fraction", &regional::coastNoiseReliefFraction },
         { "landscape.regional.coast_sea_drop_m", &regional::coastSeaDropM },
         { "landscape.regional.coast_land_share", &regional::coastLandShare },
+        { "landscape.regional.coast_shore_floor_m", &regional::coastShoreFloorM },
+        { "landscape.regional.share_passes", &regional::sharePasses },
+        { "landscape.regional.signed_passes", &regional::signedPasses },
         { "landscape.regional.meander_discharge_exponent", &regional::meanderDischargeExponent },
         { "landscape.regional.meander_reference_m3s", &regional::meanderReferenceM3s },
         { "landscape.regional.jitter_junction", &regional::jitterJunction },

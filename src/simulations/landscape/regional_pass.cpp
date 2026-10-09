@@ -93,6 +93,8 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     RegionalFields fields;
     fields.window = window;
     fields.blockmeanerror_m = start.blockmeanerror_m;
+    fields.sharepasses = start.sharepasses;
+    fields.sharemisses = start.sharemisses;
 
     // 2. The sea by local rules on the start surface (regional_surface.hpp), before the
     // channels (R1), so the channels end at the fine coast and never change the mask.

@@ -95,8 +95,12 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.warp.fade_m = regional::warpFadeM;
     parameters.coast.noiseamplitude_m = regional::coastNoiseAmplitudeM;
     parameters.coast.noisepersistence = regional::coastNoisePersistence;
+    parameters.coast.noiserelieffraction = regional::coastNoiseReliefFraction;
     parameters.coast.seadrop_m = regional::coastSeaDropM;
     parameters.coast.landshare = regional::coastLandShare;
+    parameters.coast.shorefloor_m = regional::coastShoreFloorM;
+    parameters.coast.sharepasses = regional::sharePasses;
+    parameters.coast.signedpasses = regional::signedPasses;
     parameters.shores.shorenoise = regional::shoreNoise;
     parameters.channels.pinarea_km2 = regional::pinAreaKm2;
     parameters.channels.meanderamplitude = regional::meanderAmplitude;

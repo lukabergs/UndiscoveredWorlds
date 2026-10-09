@@ -50,9 +50,16 @@ struct WarpParameters
 // and landshare 0 keep the Phase E coast (the taper of coastband_m and the centre rule).
 struct CoastParameters
 {
-    double noiseamplitude_m = 0.0;       // amplitude at the global-cell scale (octaves down to two fine cells)
+    double noiseamplitude_m = 0.0;       // amplitude at the global-cell scale (octaves down to two fine cells),
+                                         // plus noiserelieffraction x the local global relief
     double noisepersistence = 0.5;
-    double seadrop_m = 0.0;              // how far the sea side is pushed below the sea level
+    double noiserelieffraction = 0.0;    // added amplitude per metre of local global relief
+    double seadrop_m = 0.0;              // the decision surface's push below the sea level on the sea side and lift
+                                         // towards global cells that may hold no sea (with landshare > 0 only)
+    double shorefloor_m = 20.0;          // the elevation's shore: a fine cell at least this deep or high (as far as
+                                         // the decision is), capped at its global cell's distance from the sea level
+    int sharepasses = 8;                 // the cap of the land-share offset's Jacobi passes
+    int signedpasses = 12;               // the sign-keeping block-mean passes after the land-share mask
     double landshare = 0.0;              // a global land cell's block is at least this share land, a sea cell's
                                          // at most 1 - landshare (0: the centre rule of Phase E)
 };

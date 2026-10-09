@@ -10,6 +10,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0031`: Routing on the ice surface during the run: ice flickers on and off between steps (643 appearances on 305 cells in 20 steps at the minimal size).
 - `erosion-0036`: stopping the fixed point when the receivers settle: the decision covers the whole window, so overlapping windows stop at different passes
 - `erosion-0037`: ownership of a shared fine cell by the larger drainage area: the bed can rise where a gentle tributary meets a steeper larger link
+- `erosion-0043`: coast noise on the elevation of the coastal band (doubled coastal roughness and channel trenches: A coastal channel q1 -740 to -1585 m)
+- `erosion-0043`: a shore floor not capped by the global cell's own distance from the sea level (C's block-mean error 29 m)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -84,6 +86,7 @@ Lessons:
 | `erosion-0040` | 2026-10-08 | pending user review | keep | erosion plan, step E4: the Phase E close (regional runs 1 to 4 on erosion run 9's bundle) |
 | `erosion-0041` | 2026-10-08 | pass | keep | erosion plan, step R0: the contracts of Phase R (regional realism) |
 | `erosion-0042` | 2026-10-09 | pass | keep | erosion plan, step R1: channels end at the fine coast, beds follow the start surface, rivers wet in lakes, map outlines |
+| `erosion-0043` | 2026-10-09 | pass | keep | erosion plan, step R2: fractal coasts by a warp, a coast noise on the sea decision and faithfulness by land share |
 
 Lessons:
 
@@ -145,6 +148,10 @@ Lessons:
 - `erosion-0041`: Inert parameters do not test a seam: the overlap tests build the struct defaults, so a step whose feature is off by default must add its own overlap variants with the feature on.
 - `erosion-0042`: A synthetic test world can hide a real-data case: it set the lake surface equal to the filled elevation, while erosion run 9 has closed lakes under their sills, which left rivers dry across them.
 - `erosion-0042`: A cell pinned at a global value in a surface that follows the fine terrain stands as a pillar: the junction's bed needs its own rule (R3).
+- `erosion-0043`: A noise that sets a mask belongs on the decision surface, not on the elevation the channels and the solve read.
+- `erosion-0043`: A per-cell floor in a faithful block-mean scheme must be capped by what the block's mean allows.
+- `erosion-0043`: A synthetic world narrower than the box never exercises the box's edge: a seam test needs a world wider than the domain plus the margin.
+- `erosion-0043`: A loop that stops when a whole-window condition holds is seam-safe only if every pass after that point would change nothing; check that before trusting the stop.
 
 ## tectonics
 
