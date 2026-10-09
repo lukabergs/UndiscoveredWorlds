@@ -15,7 +15,8 @@ one APNG per map and season; plate colours in them follow identities tracked fro
 to frame (track_identities), because the engine's plate index is not persistent.
 A regional bundle (a manifest with a window block, `world_pipeline region`) is framed with
 the graticule of its window. A map with "composite": "<name>" is an RGB image of several
-fields (COMPOSITES: regional_terrain, the elevation with sea, ice, lakes and rivers).
+fields (COMPOSITES: regional_terrain, the elevation with sea, ice, lakes and rivers;
+regional_terrain_fade, the same with rivers fading in with their flow).
 """
 import json
 import sys
@@ -101,8 +102,8 @@ def regional_terrain(bundle):
     (channel_direction 1..8) that carry a world river's flow (river_flow_january or _july
     above 0: the world writes its flows only where they reach landscape.rivers.minimum_flow).
     Every global link is a pinned channel (the seams need them, erosion plan section 6), so
-    drawing every channel would draw a river through every global cell (E4). Over the rivers
-    (erosion plan R1): the lake shores (lake cells with a 4-neighbour that is not lake) in
+    drawing every channel would draw a river through every global cell (E4). Lakes are drawn over
+    the rivers (the user, 2026-10-09). Over both (erosion plan R1): the lake shores (lake cells with a 4-neighbour that is not lake) in
     LAKE_OUTLINE, then the landmass outline (cells that are not sea with a sea 4-neighbour) in
     black; the window's edge is not a boundary."""
     sea_level = float(bundle.scalar('geosphere.sea_level'))
@@ -114,8 +115,6 @@ def regional_terrain(bundle):
     rgb[ice] = 0.3 * rgb[ice] + 0.7 * 250.0
     surface = bundle.load('hydrosphere.lake_surface').astype(float)
     lake = (surface > 0) & ~sea
-    lakes = palette_rgb(np.where(lake, surface - sea_level, np.nan), 'tectonics:lake_surface_m')
-    rgb[lake] = lakes[lake]
     flowing = (bundle.load('hydrosphere.river_flow_january') > 0) | (bundle.load('hydrosphere.river_flow_july') > 0)
     channel = (bundle.load('hydrosphere.channel_direction') > 0) & flowing & ~sea
     discharge = bundle.load('hydrosphere.discharge').astype(float)
@@ -123,6 +122,8 @@ def regional_terrain(bundle):
         logarithm = np.where(channel & (discharge > 0), np.log10(np.where(discharge > 0, discharge, 1.0)), np.nan)
     rivers = palette_rgb(logarithm, 'tectonics:discharge_log')
     rgb[channel] = rivers[channel]
+    lakes = palette_rgb(np.where(lake, surface - sea_level, np.nan), 'tectonics:lake_surface_m')
+    rgb[lake] = lakes[lake]
     rgb[shore(lake)] = LAKE_OUTLINE
     rgb[shore(~sea)] = 0.0
     note = ('sea and land on the elevation scale; whitened: present-day ice; lakes on the lake-surface scale '
@@ -133,6 +134,49 @@ def regional_terrain(bundle):
 
 # The colour of the lake shores in regional_terrain (the landmass outline is black).
 LAKE_OUTLINE = (20.0, 40.0, 120.0)
+# regional_terrain_fade: the legacy desktop's river colour (Undiscovered Worlds Classic,
+# misc.cpp: 75, 104, 169) and the annual flow, in the world's legacy units ((January + July) / 2,
+# hydrology.rivers), at which a river is transparent and fully opaque, on a log scale. The legacy
+# regional relief map drew rivers solid from a user-set flow of 150; 300 is about the world's 95th
+# percentile on land (erosion run 9).
+FADE_RIVER = (75.0, 104.0, 169.0)
+FADE_FLOW_TRANSPARENT = 10.0
+FADE_FLOW_OPAQUE = 300.0
+
+
+def regional_terrain_fade(bundle):
+    """(RGB, legend note) of a regional bundle: regional_terrain's sea, land, ice, lakes and
+    outlines, with the rivers in one colour (the legacy desktop's) blended over the terrain with an
+    opacity that grows with the annual flow, from transparent at FADE_FLOW_TRANSPARENT to opaque at
+    FADE_FLOW_OPAQUE on a log scale, so small streams fade out and large rivers stand out. The
+    channel cells drawn are regional_terrain's (a world river's flow on a pinned channel)."""
+    sea_level = float(bundle.scalar('geosphere.sea_level'))
+    elevation = bundle.load('geosphere.base_elevation').astype(float) - sea_level
+    sea = bundle.load('geosphere.sea') != 0
+    rgb = palette_rgb(np.where(sea, np.minimum(elevation, -1.0), np.maximum(elevation, 0.0)), 'tectonics:elevation')
+    rgb = rgb.astype(float)
+    ice = (bundle.load('cryosphere.ice_thickness') > 0) & ~sea
+    rgb[ice] = 0.3 * rgb[ice] + 0.7 * 250.0
+    surface = bundle.load('hydrosphere.lake_surface').astype(float)
+    lake = (surface > 0) & ~sea
+    january = bundle.load('hydrosphere.river_flow_january').astype(float)
+    july = bundle.load('hydrosphere.river_flow_july').astype(float)
+    flow = 0.5 * (january + july)
+    channel = (bundle.load('hydrosphere.channel_direction') > 0) & (flow > 0) & ~sea
+    low, high = np.log10(FADE_FLOW_TRANSPARENT), np.log10(FADE_FLOW_OPAQUE)
+    with np.errstate(divide='ignore'):
+        alpha = np.clip((np.log10(np.where(channel, flow, 1.0)) - low) / (high - low), 0.0, 1.0)
+    alpha = np.where(channel, alpha, 0.0)[..., None]
+    rgb = (1.0 - alpha) * rgb + alpha * np.array(FADE_RIVER)
+    lakes = palette_rgb(np.where(lake, surface - sea_level, np.nan), 'tectonics:lake_surface_m')
+    rgb[lake] = lakes[lake]
+    rgb[shore(lake)] = LAKE_OUTLINE
+    rgb[shore(~sea)] = 0.0
+    note = ('sea and land on the elevation scale; whitened: present-day ice; lakes on the lake-surface scale; '
+            f'rivers in the legacy river colour, transparent at an annual flow of {FADE_FLOW_TRANSPARENT:g} and '
+            f'opaque from {FADE_FLOW_OPAQUE:g} legacy units (log scale); black: the landmass outline; '
+            'dark blue: the lake shores')
+    return np.clip(np.rint(rgb), 0, 255).astype(np.uint8), note
 
 
 def shore(mask):
@@ -148,11 +192,12 @@ def shore(mask):
 
 
 # Composite maps (an RGB image of several fields): the function and the fields it reads.
-COMPOSITES = {'regional_terrain': regional_terrain}
+COMPOSITES = {'regional_terrain': regional_terrain, 'regional_terrain_fade': regional_terrain_fade}
 COMPOSITE_FIELDS = {'regional_terrain': ['geosphere.base_elevation', 'geosphere.sea_level', 'geosphere.sea',
                                          'cryosphere.ice_thickness', 'hydrosphere.lake_surface',
                                          'hydrosphere.channel_direction', 'hydrosphere.discharge',
                                          'hydrosphere.river_flow_january', 'hydrosphere.river_flow_july']}
+COMPOSITE_FIELDS['regional_terrain_fade'] = COMPOSITE_FIELDS['regional_terrain']
 
 # Derived maps: the function and the fields it reads.
 DERIVED = {'surface_elevation': surface_elevation, 'lake_elevation': lake_elevation, 'lake_depth': lake_depth,

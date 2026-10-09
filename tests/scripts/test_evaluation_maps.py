@@ -14,7 +14,8 @@ sys.path.insert(0, str(SCRIPTS / "evaluation"))
 import numpy as np  # noqa: E402
 
 from uwtools.bundle import Bundle, FieldInfo  # noqa: E402
-from maps import LAKE_OUTLINE, SNAPSHOT_TABLE, checkpoint_time, regional_terrain  # noqa: E402
+from maps import (FADE_FLOW_OPAQUE, FADE_RIVER, LAKE_OUTLINE, SNAPSHOT_TABLE, checkpoint_time,  # noqa: E402
+                  regional_terrain, regional_terrain_fade)
 
 
 def bundle(directory, properties, snapshot_time=None):
@@ -65,6 +66,7 @@ class RegionalTerrainOutlineTests(unittest.TestCase):
         direction = np.zeros((rows, columns), dtype=np.uint8)
         direction[4, 2] = 7                              # a river on the coast cell (4, 2)
         direction[4, 4] = 7                              # and on the inland cell (4, 4)
+        direction[2, 6] = 7                              # and through the lake's interior cell (2, 6)
         flow = (direction > 0).astype(np.int32)
         with tempfile.TemporaryDirectory() as directory:
             item = regional_bundle(directory, {
@@ -89,6 +91,39 @@ class RegionalTerrainOutlineTests(unittest.TestCase):
         expected_shore[2, 7] = False                     # beside the window's east edge only: not a shore
         np.testing.assert_array_equal(shore, expected_shore)
         self.assertFalse(black[4, 4] or shore[4, 4])     # the inland river keeps its colour
+        self.assertFalse(np.array_equal(rgb[2, 6], rgb[4, 4]))  # lakes are drawn over the rivers
+
+    def test_fade_rivers_grow_opaque_with_flow(self):
+        rows, columns = 3, 6
+        direction = np.zeros((rows, columns), dtype=np.uint8)
+        direction[1, 1:5] = 3                            # four river cells, flows 5, 10, 300 and 1000
+        flow = np.zeros((rows, columns), dtype=np.int32)
+        flow[1, 1:5] = [5, 10, 300, 1000]
+        surface = np.zeros((rows, columns), dtype=np.float32)
+        surface[1, 5] = 150.0                            # a lake cell on the river's last column
+        direction[1, 5] = 3
+        flow[1, 5] = 1000
+        with tempfile.TemporaryDirectory() as directory:
+            item = regional_bundle(directory, {
+                "geosphere.base_elevation": np.full((rows, columns), 100.0, dtype=np.float32),
+                "geosphere.sea_level": np.array(0.0, dtype=np.float32),
+                "geosphere.sea": np.zeros((rows, columns), dtype=np.uint8),
+                "cryosphere.ice_thickness": np.zeros((rows, columns), dtype=np.float32),
+                "hydrosphere.lake_surface": surface,
+                "hydrosphere.channel_direction": direction,
+                "hydrosphere.discharge": np.where(direction > 0, 100.0, 0.0).astype(np.float32),
+                "hydrosphere.river_flow_january": flow,
+                "hydrosphere.river_flow_july": flow,
+            })
+            rgb, note = regional_terrain_fade(item)
+        land = rgb[0, 1]
+        np.testing.assert_array_equal(rgb[1, 1], land)   # below the transparent flow: the terrain
+        np.testing.assert_array_equal(rgb[1, 2], land)   # at it: still the terrain
+        river = np.array(FADE_RIVER, dtype=np.uint8)
+        np.testing.assert_array_equal(rgb[1, 3], river)  # at the opaque flow: the river colour
+        np.testing.assert_array_equal(rgb[1, 4], river)
+        self.assertFalse(np.array_equal(rgb[1, 5], river))  # the lake is drawn over the river
+        self.assertIn(f"{FADE_FLOW_OPAQUE:g}", note)
         self.assertIn("outline", note)
 
 
