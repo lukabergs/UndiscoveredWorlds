@@ -12,6 +12,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0037`: ownership of a shared fine cell by the larger drainage area: the bed can rise where a gentle tributary meets a steeper larger link
 - `erosion-0043`: coast noise on the elevation of the coastal band (doubled coastal roughness and channel trenches: A coastal channel q1 -740 to -1585 m)
 - `erosion-0043`: a shore floor not capped by the global cell's own distance from the sea level (C's block-mean error 29 m)
+- `erosion-0044`: springs on every source cell by default (pillars 21 / 166 / 200 -> 24 / 220 / 272)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
@@ -87,6 +88,7 @@ Lessons:
 | `erosion-0041` | 2026-10-08 | pass | keep | erosion plan, step R0: the contracts of Phase R (regional realism) |
 | `erosion-0042` | 2026-10-09 | pass | keep | erosion plan, step R1: channels end at the fine coast, beds follow the start surface, rivers wet in lakes, map outlines |
 | `erosion-0043` | 2026-10-09 | pass | keep | erosion plan, step R2: fractal coasts by a warp, a coast noise on the sea decision and faithfulness by land share |
+| `erosion-0044` | 2026-10-09 | pass | keep | erosion plan, step R3: rivers after the legacy scheme, inside their own global cells (junctions, edge points, Catmull-Rom legs) |
 
 Lessons:
 
@@ -152,6 +154,8 @@ Lessons:
 - `erosion-0043`: A per-cell floor in a faithful block-mean scheme must be capped by what the block's mean allows.
 - `erosion-0043`: A synthetic world narrower than the box never exercises the box's edge: a seam test needs a world wider than the domain plus the margin.
 - `erosion-0043`: A loop that stops when a whole-window condition holds is seam-safe only if every pass after that point would change nothing; check that before trusting the stop.
+- `erosion-0044`: A direction histogram mostly measures which way the window's rivers flow; the share of steps that keep their direction, the longest straight run and the sinuosity measure the eight-direction bias the user saw.
+- `erosion-0044`: A step built on an earlier version of a parallel step must be re-measured and re-reviewed on the merged tree.
 
 ## tectonics
 

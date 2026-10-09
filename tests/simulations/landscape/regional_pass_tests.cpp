@@ -9,6 +9,20 @@
 
 #include "regional_test_world.hpp"
 
+namespace
+{
+// A cell of the kept window is its global cell's channel junction (channel_network.hpp,
+// R3: the junction replaces the centre fine cell), for the default channel parameters.
+bool junctioncell(const RegionalWindow& window, int width, int x, int y)
+{
+    const int k = window.scale;
+    const int i = (window.column0 + x / k) % width, j = window.row0 + y / k;
+    const landscape::FinePosition junction = landscape::channeljunction(window, RegionalParameters{}.channels, i, j);
+    return junction.column - static_cast<std::int64_t>(k) * i == x % k &&
+           junction.row - static_cast<std::int64_t>(k) * j == y % k;
+}
+}
+
 TEST_F(Landscape, RegionalOverlap)
 {
     const RegionalGlobalInputs inputs = syntheticworld(32);
@@ -172,7 +186,7 @@ TEST_F(Landscape, RegionalPassProperties)
         }
         EXPECT_GT(seaexact, 0);
 
-        // Channel cells' directions lead to the sea, to a land sink's centre or out of
+        // Channel cells' directions lead to the sea, to a land sink's junction or out of
         // the window, without a loop.
         int channels = 0, toseas = 0, outside = 0, failures = 0;
         for (int y = 0; y < fh; y++)
@@ -195,7 +209,7 @@ TEST_F(Landscape, RegionalPassProperties)
                     if (direction == 0)
                     {
                         const std::size_t global = globalof(window, width, cx, cy);
-                        const bool sink = centrecell(window, cx, cy) && inputs.network.direction[global] == 0;
+                        const bool sink = junctioncell(window, width, cx, cy) && inputs.network.direction[global] == 0;
                         failures += sink ? 0 : 1;
                         ended = true;
                         break;
@@ -269,10 +283,10 @@ TEST_F(Landscape, RegionalPassChannelsEndAtTheFineCoast)
 TEST_F(Landscape, RegionalPassLakeBelowItsSill)
 {
     // R1 (review): a closed lake whose surface lies 20 m below its cell's filled
-    // elevation, where the channel beds are pinned (the global cell's centre at the
-    // filled elevation). Channel cells at or below the filled elevation carry the lake
-    // and are lowered to its surface, so no lake surface lies below its cell; the
-    // lake's centre is wet. The overlap stays bit-identical.
+    // elevation, where the channel beds are pinned (the global cell's junction at or
+    // below the filled elevation, R3). Channel cells at or below the filled elevation
+    // carry the lake and are lowered to its surface, so no lake surface lies below its
+    // cell; the lake's junction is wet. The overlap stays bit-identical.
     const RegionalGlobalInputs inputs = lakebelowsill(syntheticworld(32), 20.0f);
     for (int scale : {4, 5})
     {
@@ -293,12 +307,12 @@ TEST_F(Landscape, RegionalPassLakeBelowItsSill)
                     EXPECT_LE(fields.elevation_m[cell], fields.lakesurface_m[cell]) << x << ", " << y;
                     wetchannels += fields.riverdirection[cell] != 0 ? 1 : 0;
                 }
-                if (surface <= 0.0f || !centrecell(window, x, y))
+                if (surface <= 0.0f || !junctioncell(window, inputs.width, x, y))
                     continue;
                 centres++;
                 ASSERT_GT(surface, 0.0f);
                 EXPECT_LT(surface, inputs.network.filledelevation_m[global]);
-                EXPECT_EQ(fields.lakesurface_m[cell], surface) << "the lake's centre is dry";
+                EXPECT_EQ(fields.lakesurface_m[cell], surface) << "the lake's junction is dry";
                 EXPECT_LE(fields.elevation_m[cell], surface);
             }
         EXPECT_EQ(centres, 1);
