@@ -120,8 +120,9 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
 
 // The fine sea of the domain, by local rules only (no flood fill): a fine cell is
 // sea when its surface is at or below the sea level and its global cell or one of
-// the eight neighbours is sea, and a fine cell of a global lake cell is never sea
-// unless its global cell is. With coast.landshare 0 (Phase E's faithfulness, the centre
+// the eight neighbours is sea (R8: where the gate allows it, regional_edges.hpp, seagate,
+// which is that rule at edges.smoothgate 0), and a fine cell of a global lake cell is
+// never sea unless its global cell is. With coast.landshare 0 (Phase E's faithfulness, the centre
 // rule): each global cell's centre fine cell follows the global mask, so `surface_m` is
 // changed there (a sea centre lowered to the sea level, a land centre counted as sea
 // raised to the next float above it). With coast.landshare > 0 the start surface already

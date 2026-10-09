@@ -182,7 +182,7 @@ public:
         : inputs_(inputs), parameters_(parameters), scale_(scale),
           relief_(localrelief(inputs.elevation_m, inputs.width, inputs.height)),
           coastal_(coastalcells(inputs.network.sea, inputs.width, inputs.height)),
-          inland_(inlandcells(inputs)),
+          inland_(inlandcells(inputs, parameters)),
           factors_(coastfactors(inputs, parameters)),
           coast_(inputs.width, inputs.height, scale, inputs.seed, coastsalt, parameters.coast.noisepersistence)
     {
@@ -708,8 +708,10 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
             const double band = floor > 0.0 ? std::clamp(2.0 - reach / floor, 0.0, 1.0) : 0.0;
             const bool crossed = mask[cell] != 0 ? surface[cell] > inputs.sealevel : surface[cell] <= inputs.sealevel;
             const double fade = crossed ? 1.0 : band;
+            // R7: a sea cell whose decision is land (only the mask hooks make one: the island
+            // sink) takes the floor in full, so sunk land leaves no zero-depth sheet.
             if (mask[cell] != 0)
-                shoredepth[cell] = static_cast<float>(fade * std::max(0.0, std::min(-value, floor)));
+                shoredepth[cell] = static_cast<float>(fade * (value > 0.0 ? floor : std::max(0.0, std::min(-value, floor))));
             else
                 shoreheight[cell] = static_cast<float>(fade * std::max(0.0, std::min(value, floor)));
         }
@@ -910,7 +912,6 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
                                  const FineWarp& warp, const RegionalParameters& parameters,
                                  std::vector<float>& surface_m)
 {
-    (void)warp;
     const int width = inputs.width;
     const int k = window.scale;
     const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
@@ -922,8 +923,10 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
     // follows the global mask: a sea centre above the sea level is lowered to the sea
     // level, a land centre counted as sea is raised to the next float above it. A fine
     // cell of a global lake cell (lake surface above zero) is never sea unless its global
-    // cell is sea: a lake below the sea level beside the ocean stays a lake.
-    const std::vector<uint8_t> nearsea = nearseacells(inputs);
+    // cell is sea: a lake below the sea level beside the ocean stays a lake. R8: the global
+    // rule is the gate's (regional_edges.hpp, seagate; the 3 x 3 rule at edges.smoothgate 0),
+    // so the sea agrees with the start surface's mask.
+    const std::vector<uint8_t> gate = seagate(inputs, window, warp, parameters);
     const float abovesea = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
     std::vector<uint8_t> sea(count, 0);
     for (int y = 0; y < domainheight; y++)
@@ -938,10 +941,10 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
             {
                 if (inputs.network.sea[global] != 0)
                     surface_m[cell] = std::min(surface_m[cell], inputs.sealevel);
-                else if (surface_m[cell] <= inputs.sealevel && nearsea[global] != 0)
+                else if (surface_m[cell] <= inputs.sealevel && gate[cell] != 0)
                     surface_m[cell] = abovesea;
             }
-            sea[cell] = surface_m[cell] <= inputs.sealevel && nearsea[global] != 0 ? 1 : 0;
+            sea[cell] = surface_m[cell] <= inputs.sealevel && gate[cell] != 0 ? 1 : 0;
         }
     }
     return sea;

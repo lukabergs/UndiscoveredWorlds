@@ -95,7 +95,8 @@ struct CoastParameters
 struct EdgeParameters
 {
     int smoothgate = 0;                  // 0: a fine cell may be sea only where its global cell's 3 x 3 holds a sea
-                                         // cell; 1: R8's smooth gate (the interpolated global sea indicator)
+                                         // cell; n >= 1: R8's smooth gate, a sea cell within n global cells of the
+                                         // warped position (regional_edges.hpp, seagate and inlandcells)
     int straightmax = 0;                 // straight shore runs longer than this many fine cells are broken (0: never)
     int chunkmin = 2;                    // the chunks' sizes in fine cells (the legacy removestraights: 2 to 7)
     int chunkmax = 7;

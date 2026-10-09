@@ -39,8 +39,9 @@ CoastFactors coastfactors(const RegionalGlobalInputs& inputs, const RegionalPara
 // land cell (a ring cell beyond the box or a pole counts as land, so nothing sinks there;
 // the box's margin keeps that away from the domain), every land cell of the block becomes
 // sea where its gate is 1. The elevation's clamp and shore floor follow the mask. A pure
-// function of the mask within m cells of the block and the global fields, so the rule's
-// reach stays within a share pass's (regional_surface.cpp, landsharesurface).
+// function of the mask within m cells of the block and the global fields (every block is
+// decided on the mask as it came in); regional_surface.cpp widens the land-share rule's
+// margin for the ring (its margin comment).
 void sinksmallislands(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const RegionalParameters& parameters,
                       const std::vector<uint8_t>& gate, std::vector<uint8_t>& mask);
 }
