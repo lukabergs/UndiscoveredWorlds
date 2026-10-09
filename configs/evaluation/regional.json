@@ -21,7 +21,7 @@
   ],
   "validation": [],
   "maps": [
-    {"name": "terrain", "title": "Regional terrain: elevation (m relative to sea level) with sea, ice, lakes and rivers", "composite": "regional_terrain", "palette": "tectonics:elevation"},
+    {"name": "terrain", "title": "Regional terrain: elevation (m relative to sea level) with sea, ice, lakes and the rivers of an annual flow of at least 150 (legacy units, the legacy map's default)", "composite": "regional_terrain", "options": {"minimum_flow": 150}, "palette": "tectonics:elevation"},
     {"name": "terrain-fade", "title": "Regional terrain with rivers fading in with their flow (legacy river colour)", "composite": "regional_terrain_fade", "palette": "tectonics:elevation"},
     {"name": "elevation", "title": "Elevation (m relative to sea level)", "derived": "elevation_above_sea", "palette": "tectonics:elevation"},
     {"name": "discharge", "title": "Discharge (log10 m3/s; dark where there is none)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log"},

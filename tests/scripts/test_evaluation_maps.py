@@ -93,6 +93,37 @@ class RegionalTerrainOutlineTests(unittest.TestCase):
         self.assertFalse(black[4, 4] or shore[4, 4])     # the inland river keeps its colour
         self.assertFalse(np.array_equal(rgb[2, 6], rgb[4, 4]))  # lakes are drawn over the rivers
 
+    def test_minimum_flow_option_culls_small_rivers(self):
+        rows, columns = 3, 6
+        direction = np.zeros((rows, columns), dtype=np.uint8)
+        direction[1, 1:5] = 3                            # four river cells, annual flows 5, 100, 150 and 1000
+        january = np.zeros((rows, columns), dtype=np.int32)
+        july = np.zeros((rows, columns), dtype=np.int32)
+        january[1, 1:5] = [5, 100, 100, 1000]
+        july[1, 1:5] = [5, 100, 200, 1000]
+        with tempfile.TemporaryDirectory() as directory:
+            item = regional_bundle(directory, {
+                "geosphere.base_elevation": np.full((rows, columns), 100.0, dtype=np.float32),
+                "geosphere.sea_level": np.array(0.0, dtype=np.float32),
+                "geosphere.sea": np.zeros((rows, columns), dtype=np.uint8),
+                "cryosphere.ice_thickness": np.zeros((rows, columns), dtype=np.float32),
+                "hydrosphere.lake_surface": np.zeros((rows, columns), dtype=np.float32),
+                "hydrosphere.channel_direction": direction,
+                "hydrosphere.discharge": np.where(direction > 0, 100.0, 0.0).astype(np.float32),
+                "hydrosphere.river_flow_january": january,
+                "hydrosphere.river_flow_july": july,
+            })
+            every, _ = regional_terrain(item)
+            culled, note = regional_terrain(item, minimum_flow=150)
+        land = every[0, 1]
+        for column in range(1, 5):
+            self.assertFalse(np.array_equal(every[1, column], land))   # without the option every flowing channel is drawn
+        np.testing.assert_array_equal(culled[1, 1], land)             # 5: culled
+        np.testing.assert_array_equal(culled[1, 2], land)             # 100: culled
+        self.assertFalse(np.array_equal(culled[1, 3], land))          # (100 + 200) / 2 = 150: drawn
+        self.assertFalse(np.array_equal(culled[1, 4], land))          # 1000: drawn
+        self.assertIn('at least 150', note)
+
     def test_fade_rivers_grow_opaque_with_flow(self):
         rows, columns = 3, 6
         direction = np.zeros((rows, columns), dtype=np.uint8)

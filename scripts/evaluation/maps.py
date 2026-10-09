@@ -16,7 +16,8 @@ to frame (track_identities), because the engine's plate index is not persistent.
 A regional bundle (a manifest with a window block, `world_pipeline region`) is framed with
 the graticule of its window. A map with "composite": "<name>" is an RGB image of several
 fields (COMPOSITES: regional_terrain, the elevation with sea, ice, lakes and rivers;
-regional_terrain_fade, the same with rivers fading in with their flow).
+regional_terrain_fade, the same with rivers fading in with their flow); the map's "options"
+are passed to the composite's function as keyword arguments (regional_terrain's minimum_flow).
 """
 import json
 import sys
@@ -95,12 +96,16 @@ def window_extent(bundle):
     return None if window is None else tuple(float(window[key]) for key in ('west', 'south', 'east', 'north'))
 
 
-def regional_terrain(bundle):
+def regional_terrain(bundle, minimum_flow=None):
     """(RGB, legend note) of a regional bundle: sea and land on the elevation palette (cells of
     geosphere.sea on its sea colours, the others on its land colours), present-day ice whitened,
     lakes on the lake-surface palette and rivers on the discharge palette: the channel cells
     (channel_direction 1..8) that carry a world river's flow (river_flow_january or _july
-    above 0: the world writes its flows only where they reach landscape.rivers.minimum_flow).
+    above 0: the world writes its flows only where they reach landscape.rivers.minimum_flow),
+    or, with minimum_flow (the map's "options" in the evaluation profile; erosion plan Phase R2,
+    after the user's question of 2026-10-09; the legacy regional relief map drew rivers solid from
+    a user-set flow of 150), only the channels whose annual flow ((January + July) / 2, legacy
+    units) reaches it.
     Every global link is a pinned channel (the seams need them, erosion plan section 6), so
     drawing every channel would draw a river through every global cell (E4). Lakes are drawn over
     the rivers (the user, 2026-10-09). Over both (erosion plan R1): the lake shores (lake cells with a 4-neighbour that is not lake) in
@@ -115,7 +120,12 @@ def regional_terrain(bundle):
     rgb[ice] = 0.3 * rgb[ice] + 0.7 * 250.0
     surface = bundle.load('hydrosphere.lake_surface').astype(float)
     lake = (surface > 0) & ~sea
-    flowing = (bundle.load('hydrosphere.river_flow_january') > 0) | (bundle.load('hydrosphere.river_flow_july') > 0)
+    january = bundle.load('hydrosphere.river_flow_january')
+    july = bundle.load('hydrosphere.river_flow_july')
+    if minimum_flow is None:
+        flowing = (january > 0) | (july > 0)
+    else:
+        flowing = 0.5 * (january.astype(float) + july.astype(float)) >= float(minimum_flow)
     channel = (bundle.load('hydrosphere.channel_direction') > 0) & flowing & ~sea
     discharge = bundle.load('hydrosphere.discharge').astype(float)
     with np.errstate(divide='ignore', invalid='ignore'):
@@ -126,8 +136,11 @@ def regional_terrain(bundle):
     rgb[lake] = lakes[lake]
     rgb[shore(lake)] = LAKE_OUTLINE
     rgb[shore(~sea)] = 0.0
+    rivers_note = ('the rivers of the world by log10 discharge (tectonics discharge_log, 0 to 6 m3/s)' if minimum_flow is None
+                   else f'the rivers with an annual flow of at least {minimum_flow:g} legacy units by log10 discharge '
+                        '(tectonics discharge_log, 0 to 6 m3/s)')
     note = ('sea and land on the elevation scale; whitened: present-day ice; lakes on the lake-surface scale '
-            '(tectonics lake_surface_m); the rivers of the world by log10 discharge (tectonics discharge_log, 0 to 6 m3/s); '
+            f'(tectonics lake_surface_m); {rivers_note}; '
             'black: the landmass outline (land cells beside the sea); dark blue: the lake shores (the outer lake cells)')
     return np.clip(np.rint(rgb), 0, 255).astype(np.uint8), note
 
@@ -559,7 +572,7 @@ def render(bundle, specs, directory, validation=(), compared=(), references=None
             target = None
         if 'composite' in spec:
             if available(bundle, spec):
-                rgb, note = COMPOSITES[spec['composite']](bundle)
+                rgb, note = COMPOSITES[spec['composite']](bundle, **spec.get('options', {}))
                 written.append(entry(spec, 'model', None, spec['title'],
                                      save(directory, spec['name'], rgb, spec['title'], spec['palette'], note=note,
                                           extent=extent), spec['palette']))
