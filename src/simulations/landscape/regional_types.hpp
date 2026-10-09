@@ -48,7 +48,8 @@ struct RegionalGlobalInputs
     // Phase E5 (the glacial forms, regional_glacial.hpp): the erosion run's
     // equilibrium-line altitude (cryosphere.equilibrium_line_altitude, m above datum, the
     // run's climate cooled by landscape.glacial.cooling_c), W x H or empty (no glacial form
-    // is cut and no ice added by the ELA rule without it); and the height by which the
+    // is cut and no ice added by the ELA rule without it; the adapter leaves it empty when
+    // every value is zero, the world having had no glacial term); and the height by which the
     // present climate's ELA lies above the run's: cooling_c x 1000 / the lapse rate in C/km
     // (the adapter computes it; 0 when unknown).
     std::vector<float> equilibriumline_m;

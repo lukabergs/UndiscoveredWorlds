@@ -6,23 +6,31 @@
 // (regional_troughs.hpp) and before the lakes and ice (regional_water.hpp). Planet-free.
 //
 // Contract (E5.2). No-op while cirques.radius_km <= 0 or the glacial fields are inactive.
-// Candidates: for every global land cell whose block lies in the domain and whose
-// glaciation (the global field, inputs.glaciation; 0 when empty) is at least
-// cirques.glaciationmin, cirques.candidates points, the n-th at the fine offset
-// (deterministiccombine(seed, salt, i, j, n) reduced to 0..k-1 in each axis, the two axes
-// from different bits) inside the block, a pure function of the global cell, the index
-// and the seed, so every window places the same cirques. A candidate is a cirque when its
-// fine cell is land (not sea), not a channel cell, and its surface z (the elevation as
-// passed in, read before any cirque is cut, so the order of the candidates does not
-// matter) lies at or above the run's ELA there (glacial.runela_m, the glacial past's) and
-// at most cirques.band_m above it (higher ground was plateau ice, not a cirque's
-// headwall). Its floor is f = max(runela at the centre, z - cirques.depth_m), at least the
-// next float above the sea level. The bowl: R = cirques.radius_km x 1000 / the fine
-// cell's size (finepatchmetric's dy_m) in fine cells, at most k (the halo rule as
-// carvevalleys; a radius under one cell carves the centre cell alone); every land cell
-// that is not a channel within Euclidean distance d <= R of the centre is lowered to at
-// most f + (z_cell - f) x (d / R)^2 (its own surface at the rim, the floor at the centre:
-// a parabolic bowl, steepest on the upslope side, which is the headwall); a cell inside
+// Candidates: for every global land cell whose block lies in the domain (the halo
+// included, not the kept box alone) and whose glaciation (the global field,
+// inputs.glaciation; 0 when empty) is at least cirques.glaciationmin, cirques.candidates
+// points, the n-th at the fine offset (deterministiccombine(seed, salt, i, j, n) reduced
+// to 0..k-1 in each axis, the two axes from different bits) inside the block, a pure
+// function of the global cell, the index and the seed, so every window places the same
+// cirques. A candidate is a cirque when its fine cell is land (not sea), not a channel
+// cell, and the surface z there lies at or above the run's ELA (glacial.runela_m, the
+// glacial past's) and at most cirques.band_m above it (higher ground was plateau ice, not
+// a cirque's headwall); z is the global base elevation upsampled at the fine centre
+// (upsample(inputs.elevation_m, ...), a pure function of the global fields and the fine
+// position), not the solved elevation: a bowl that reaches a kept cell may be centred in
+// the innermost halo ring, where the solved elevation of a non-channel cell is not
+// guaranteed to agree between windows (only the start surface, the sea and the channel
+// beds agree there; the review of E5.0). Its floor is f = max(runela at the centre,
+// z - cirques.depth_m), at least the next float above the sea level. The bowl: R =
+// cirques.radius_km x 1000 / the fine cell's size (finepatchmetric's dy_m) in fine cells,
+// at most k (the halo rule as carvevalleys; a radius under one cell carves the centre
+// cell alone); every land cell that is not a channel within Euclidean distance d <= R
+// (in fine cells: ground kilometres north-south, east-west shrunk by the cosine of the
+// latitude, R9's approximation) of the centre is lowered to at most
+// f + (z_cell - f) x (d / R)^2, z_cell its own elevation as passed in, read before any
+// cirque is cut (so the order of the candidates does not matter; a kept cell's own value
+// agrees between windows): the floor at the centre, its own surface at the rim, a
+// parabolic bowl, steepest on the upslope side, which is the headwall; a cell inside
 // several bowls takes the lowest target; a cell already below f is left; nothing is
 // raised; no cell is lowered to or below the sea level. Radii in kilometres, never fine
 // cells (R9's lesson). E5.2 keeps the overlap tests bit-identical with the cirques on

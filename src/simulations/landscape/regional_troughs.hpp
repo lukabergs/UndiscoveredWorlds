@@ -14,8 +14,9 @@
 // W = min(troughs.widthmax_km, troughs.width_km x (A_i / troughs.reference_km2)^widthexponent)
 // km on the ground, in fine cells W / the fine cell's size (finepatchmetric's dy_m, the
 // same in every window) and at most k (one global cell, the halo rule as carvevalleys):
-// every land cell that is not a channel within Euclidean distance d <= W (fine cells) of
-// the axis is lowered to at most b + troughs.wall_m x (d / W)^exponent, b the axis cell's
+// every land cell that is not a channel within Euclidean distance d <= W (fine cells:
+// ground kilometres north-south, east-west shrunk by the cosine of the latitude, R9's
+// approximation) of the axis is lowered to at most b + troughs.wall_m x (d / W)^exponent, b the axis cell's
 // bed (its pinned elevation), so the floor is flat near the axis and the walls steepen
 // towards the half-width (exponent 2: a parabola, the glacial trough's cross-section);
 // a cell within several troughs takes the lowest target; no cell is lowered to or below

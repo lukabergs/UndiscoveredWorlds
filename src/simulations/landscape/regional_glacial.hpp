@@ -10,8 +10,8 @@
 // The ELA. cryosphere.equilibrium_line_altitude is the erosion run's ELA, computed from
 // the coarse climate cooled by landscape.glacial.cooling_c (glacial.hpp): the ELA of the
 // glacial past that shaped the troughs and cirques. The present climate's ELA lies
-// cooling_c / lapse rate higher (RegionalGlobalInputs::presentelaoffset_m, about 540 m on
-// erosion run 9): the one that decides the present-day ice. Both are the global field
+// cooling_c / lapse rate higher (RegionalGlobalInputs::presentelaoffset_m, 881 m on
+// erosion run 9: 4 C over its 4.54 C/km): the one that decides the present-day ice. Both are the global field
 // upsampled at the unwarped fine centres (a smooth climate quantity, as the temperatures;
 // no lapse correction: an altitude, not a temperature).
 //

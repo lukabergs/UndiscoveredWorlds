@@ -101,6 +101,15 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
             inputs.equilibriumline_m[cell] = equilibriumline[x][y];
         }
     }
+    // A world without the glacial term (landscape.glacial.enabled false, or no erosion
+    // stage) carries an ELA field of zeros: passed as present it would ice every land
+    // cell above the datum's 881 m; left empty, every glacial hook is inert (the review of
+    // E5.0).
+    bool anyela = false;
+    for (float value : inputs.equilibriumline_m)
+        anyela = anyela || value != 0.0f;
+    if (!anyela)
+        inputs.equilibriumline_m.clear();
     return inputs;
 }
 
