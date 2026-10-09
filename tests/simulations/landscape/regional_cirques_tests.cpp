@@ -103,6 +103,27 @@ int changed(const std::vector<float>& a, const std::vector<float>& b)
 
 int changedcirques(const RegionalFields& a, const RegionalFields& b) { return changed(a.elevation_m, b.elevation_m); }
 
+// The changed kept cells of `a`'s window inside the global cells `other`'s kept box
+// shares with it: the overlap test shows a bowl reached the shared cells (E5.2's review).
+int changedonoverlap(const RegionalFields& a, const RegionalFields& b, const RegionalWindow& other)
+{
+    const RegionalWindow& window = a.window;
+    const int k = window.scale, width = window.finewidth();
+    int count = 0;
+    for (std::size_t cell = 0; cell < a.elevation_m.size(); cell++)
+    {
+        if (a.elevation_m[cell] == b.elevation_m[cell])
+            continue;
+        const int x = static_cast<int>(cell % static_cast<std::size_t>(width));
+        const int y = static_cast<int>(cell / static_cast<std::size_t>(width));
+        const int i = (window.column0 + x / k) % window.worldwidth, j = window.row0 + y / k;
+        const int column = ((i - other.column0) % window.worldwidth + window.worldwidth) % window.worldwidth;
+        if (column < other.columns && j >= other.row0 && j < other.row0 + other.rows)
+            count++;
+    }
+    return count;
+}
+
 bool indomain(const RegionalWindow& window, int i, int j)
 {
     const int column = ((i - window.domaincolumn0) % window.worldwidth + window.worldwidth) % window.worldwidth;
@@ -355,8 +376,10 @@ TEST_F(Landscape, RegionalOverlapCirques)
         const RegionalFields on = landscape::runregionalpass(columns, windowb(scale), parameters);
         const RegionalFields off = landscape::runregionalpass(columns, windowb(scale), RegionalParameters{});
         const int cut = changedcirques(on, off);
-        std::printf("[regional] cirques B, k %d: %d cells lowered\n", scale, cut);
+        const int onoverlap = changedonoverlap(on, off, windowa(scale));
+        std::printf("[regional] cirques B, k %d: %d cells lowered, %d on the overlap with A\n", scale, cut, onoverlap);
         EXPECT_GT(cut, 0);
+        EXPECT_GT(onoverlap, 0);
     }
     const RegionalGlobalInputs rows = withglacialfields(syntheticworld(64));
     const OverlapCounts counts = compareoverlap(rows, windowc(4), windowd(4), "cirques C/D", parameters);
@@ -365,6 +388,8 @@ TEST_F(Landscape, RegionalOverlapCirques)
     const RegionalFields on = landscape::runregionalpass(rows, windowd(4), parameters);
     const RegionalFields off = landscape::runregionalpass(rows, windowd(4), RegionalParameters{});
     const int cut = changedcirques(on, off);
-    std::printf("[regional] cirques D, k 4: %d cells lowered\n", cut);
+    const int onoverlap = changedonoverlap(on, off, windowc(4));
+    std::printf("[regional] cirques D, k 4: %d cells lowered, %d on the overlap with C\n", cut, onoverlap);
     EXPECT_GT(cut, 0);
+    EXPECT_GT(onoverlap, 0);
 }

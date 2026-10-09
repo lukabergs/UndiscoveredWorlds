@@ -106,6 +106,28 @@ int troughchangedcells(const RegionalFields& a, const RegionalFields& b)
     return changed;
 }
 
+// The changed kept cells of `a`'s window that lie in the global cells `other`'s kept
+// box shares with it (the overlap compareoverlap compares), so the overlap test shows
+// the troughs act on the shared cells, not only somewhere in the window (E5.1's review).
+int troughchangedonoverlap(const RegionalFields& a, const RegionalFields& b, const RegionalWindow& other)
+{
+    const RegionalWindow& window = a.window;
+    const int k = window.scale, width = window.finewidth();
+    int changed = 0;
+    for (std::size_t cell = 0; cell < a.elevation_m.size(); cell++)
+    {
+        if (a.elevation_m[cell] == b.elevation_m[cell])
+            continue;
+        const int x = static_cast<int>(cell % static_cast<std::size_t>(width));
+        const int y = static_cast<int>(cell / static_cast<std::size_t>(width));
+        const int i = (window.column0 + x / k) % window.worldwidth, j = window.row0 + y / k;
+        const int column = ((i - other.column0) % window.worldwidth + window.worldwidth) % window.worldwidth;
+        if (column < other.columns && j >= other.row0 && j < other.row0 + other.rows)
+            changed++;
+    }
+    return changed;
+}
+
 // The troughs on the synthetic world, where a fine cell is 313 km at k 4 (32 columns) and
 // a global land cell's ice catchment is of the order of 1e6 km2: a half-width of 600 km x
 // (A_i / 1e6 km2)^0.5, so the troughs span one to k fine cells; walls of 1,000 m.
@@ -295,8 +317,11 @@ TEST_F(Landscape, RegionalOverlapTroughs)
         const RegionalFields on = landscape::runregionalpass(columns, windowb(scale), parameters);
         const RegionalFields off = landscape::runregionalpass(columns, windowb(scale), RegionalParameters{});
         const int changed = troughchangedcells(on, off);
-        std::printf("[regional] troughs B, k %d: %d of %zu kept cells lowered\n", scale, changed, on.elevation_m.size());
+        const int onoverlap = troughchangedonoverlap(on, off, windowa(scale));
+        std::printf("[regional] troughs B, k %d: %d of %zu kept cells lowered, %d on the overlap with A\n", scale, changed,
+                    on.elevation_m.size(), onoverlap);
         EXPECT_GT(changed, 0);
+        EXPECT_GT(onoverlap, 0);
         for (std::size_t cell = 0; cell < on.elevation_m.size(); cell++)
             ASSERT_LE(on.elevation_m[cell], off.elevation_m[cell]);
     }
@@ -308,4 +333,5 @@ TEST_F(Landscape, RegionalOverlapTroughs)
     const RegionalFields on = landscape::runregionalpass(rows, windowd(4), parameters);
     const RegionalFields off = landscape::runregionalpass(rows, windowd(4), RegionalParameters{});
     EXPECT_GT(troughchangedcells(on, off), 0);
+    EXPECT_GT(troughchangedonoverlap(on, off, windowc(4)), 0);
 }

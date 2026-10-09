@@ -19,12 +19,16 @@
 // that regional_water.hpp placed (the global glaciers upsampled, tongues below the ELA
 // included) is never removed or thinned; a lake cell above the ELA is iced like land (a
 // frozen lake). Every value is a pure function of the fields, the seed and absolute
-// position; the rule reads one cell, so the halo rule holds trivially. E5.3 keeps the
-// overlap tests bit-identical with the ELA ice on and adds its variants; it updates the
-// regional bundle's description of cryosphere.ice_thickness (src/io/regional_bundle.cpp,
-// which E5.3 owns) and measures the iced share of the land against the present-day ice
-// of the global field on erosion run 9's windows A, B and C; thicknessfraction's default
-// comes from the global ice's thickness per metre above the ELA on those windows.
+// position; the rule reads one cell, so the halo rule holds trivially. At k 1 the noise
+// is inactive (RegionalNoise, as the coast noise) and the threshold is the plain ELA.
+// E5.3 keeps the overlap tests bit-identical with the ELA ice on and adds its variants,
+// updates the regional bundle's description of cryosphere.ice_thickness
+// (src/io/regional_bundle.cpp) and measured the iced share of the land against the
+// present-day ice of the global field on erosion run 9's window B at k 16 (the close's
+// registered runs show A and C): the global ice is 2.6 m thick per metre above the
+// present ELA there (ice-sheet thicknesses at the 3,000 m cap), unusable as a fraction,
+// so thicknessfraction's default 0.3 is chosen for a visible thickness (median 62 m on
+// B) under the cap.
 
 #include <cstdint>
 #include <vector>

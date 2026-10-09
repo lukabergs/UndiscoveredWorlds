@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <limits>
 
-#include "simulations/landscape/sphere_metric.hpp"
 
 // Erosion plan Phase E5: the E5.0 contract (regional_troughs.hpp), which step E5.1
 // implements: glacial troughs, a power-law cross-section about every glaciated land channel

@@ -2,8 +2,8 @@
 // E5.3 implements: present-day ice on the fine cells above the present climate's ELA),
 // suite Landscape: TEST_F(Landscape, RegionalIce<What>) on the synthetic world of
 // regional_test_world.hpp with withglacialfields. E5.3 adds the rule's tests and the
-// overlap variants with the ELA ice on (RegionalOverlapIce*), on a world wider than the
-// widened box.
+// overlap variants with the ELA ice on (RegionalOverlapIce*); the rule reads one cell, so
+// it has no widened box of its own.
 
 #include "landscape_fixture.hpp"
 
