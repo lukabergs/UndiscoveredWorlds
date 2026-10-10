@@ -345,6 +345,18 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                         << ", \"maxforcedmove_m\": " << jsonnumber(projection.maxforcedmove_m)
                         << ", \"driedcells\": " << level.driedcells << ", \"shoresbelowlake\": " << level.shoresbelowlake
                         << ", \"landbelowsea\": " << level.landbelowsea
+                        << ", \"maxlandbelowsea_m\": " << jsonnumber(level.maxlandbelowsea_m)
+                        << ", \"maxlandbelowsea_column\": " << level.maxlandbelowseacolumn
+                        << ", \"maxlandbelowsea_row\": " << level.maxlandbelowsearow
+                        << ", \"rimraised\": " << level.rimraised
+                        << ", \"maxrimraise_m\": " << jsonnumber(level.maxrimraise_m)
+                        << ", \"maxborderstep_parent_column\": " << projection.maxborderstepcolumn
+                        << ", \"maxborderstep_parent_row\": " << projection.maxbordersteprow
+                        << ", \"maxforced_parent_column\": " << projection.maxforcedcolumn
+                        << ", \"maxforced_parent_row\": " << projection.maxforcedrow
+                        << ", \"seainlandparents\": " << level.seainlandparents
+                        << ", \"seabeyondparent\": " << level.seabeyondparent
+                        << ", \"drybelowlake\": " << level.drybelowlake
                         << ", \"reliefconverged\": " << (level.reliefconverged ? "true" : "false")
                         << ", \"changedreceivers\": " << level.changedreceivers
                         << ", \"seconds\": " << jsonnumber(level.seconds) << ", \"steps\": [";

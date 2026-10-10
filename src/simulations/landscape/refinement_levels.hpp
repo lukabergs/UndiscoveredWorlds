@@ -40,9 +40,25 @@
 //   the sea gate and the lakes), the channels, the solve and the lakes run at every level; the
 //   incision is globalincision, computed once and upsampled per level.
 // - LevelDiagnostics::blockmeanerror_m is measured after `presmoothing`.
+// - Masks inherited and refined within one parent cell (S2.8; §3 "S2.7: smooth before exact",
+//   item 3, and "S2.8: masks without walls"): at level >= 2 a cell may be sea only where its
+//   parent or a parent 8-neighbour is sea (and the global gate allows it); every other cell is
+//   land at its own height, below the sea level allowed and counted (LevelDiagnostics::
+//   landbelowsea, maxlandbelowsea_m; regionalsea's parentgate); level 1 keeps the single pass's
+//   sea. At every level the lakes flood every cell below a lake's surface 4-connected to
+//   its core inside the lake cell's 3 x 3 global cells (regionalwater's LakeInheritance), the
+//   core at level >= 2 the cells below the surface under the parent's water, the flood within
+//   one parent cell of it. The parent's masks are read from its kept box (sea and lake surface
+//   after the projection's drying). Reach: the flood is a component inside one lake cell's
+//   3 x 3 zone, read on the solved elevation: a kept cell's water depends on the solved field
+//   up to 2 global cells beyond it (level 1; 1 parent cell + 3 level cells at level >= 2, also
+//   within 2 global cells), on top of the smoothing's reach, so the loop's halo adds 2 global
+//   cells (refinementhalo: 2 x meanpasses + 2 + 2 x smooth_passes + lakefloodreach, 28 at the
+//   defaults).
 // Planet-free: the parameters are filled from tuning::landscape::refinement by the planet
 // adapter (src/simulations/regional/regional_inputs.hpp, refinementparameters).
 
+#include <cstdint>
 #include <vector>
 
 #include "simulations/landscape/refinement_grid.hpp"
@@ -70,6 +86,13 @@ struct RefinementParameters
 // The prolongation's reach in parent cells beyond a child's parent cell (Catmull-Rom:
 // the halo chain's `reach`, refinement_grid.hpp).
 constexpr int prolongationreach = 2;
+
+// The lake flood's reach in global cells (S2.8: a component inside one lake cell's 3 x 3 zone).
+constexpr int lakefloodreach = 2;
+
+// The halo in global cells the loop requires: 2 x meanpasses + 2 (the single pass's rule), 2 x
+// smoothpasses (S2.7's smoothing) and lakefloodreach (S2.8).
+constexpr int refinementhalo(int meanpasses, int smoothpasses) { return 2 * meanpasses + 2 + 2 * smoothpasses + lakefloodreach; }
 
 // The steps of a level in their fixed order (section 3, "S2.3's level placement", item 5),
 // after the prolongation.
@@ -190,6 +213,18 @@ struct LevelDiagnostics
     int driedcells = 0;                  // kept wet non-channel cells at or above their surface after the projection
     int shoresbelowlake = 0;             // kept dry cells (not sea, not channel) at or below a wet 8-neighbour's surface
     int landbelowsea = 0;                // kept dry cells (not sea, not wet) at or below the sea level
+    double maxlandbelowsea_m = 0.0;      // the largest depth of such a cell below the sea level (S2.8)
+    std::int64_t maxlandbelowseacolumn = -1;  // its absolute column and row at the level (-1: none)
+    std::int64_t maxlandbelowsearow = -1;
+    int rimraised = 0;                   // kept cells the lake flood's rim raise lifted (FineWater::rimraise_m)
+    double maxrimraise_m = 0.0;          // the largest such lift
+    // S2.8's mask checks (kept box): sea cells whose parent (level 1: global cell) is land; of
+    // them, those with no sea among the parent and its 8 neighbours (0 at level >= 2 by the
+    // inherited gate); dry cells (not sea, not channel) below the surface of a wet 4-neighbour
+    // after the projection.
+    int seainlandparents = 0;
+    int seabeyondparent = 0;
+    int drybelowlake = 0;
     bool reliefconverged = false;        // the level's solve (AnalyticalReliefResult)
     int changedreceivers = 0;
     double seconds = 0.0;                // the level's wall-clock time
@@ -211,13 +246,16 @@ struct RefinementResult
     // window's kept box (levels[l - 1].window: columns x rows, row-major, north row first),
     // index = level - 1; the final level's is fields.elevation_m.
     std::vector<std::vector<float>> coarserelevation_m;
+    // Their sea and lake surface after the projection on the same kept boxes (S2.8).
+    std::vector<std::vector<uint8_t>> coarsersea;
+    std::vector<std::vector<float>> coarserlakesurface_m;
     // The halo chain of levels 0 .. target.level (refinement_grid.hpp, halochain), index =
     // level; the resample of resampleregionalfields reads it (step S2.4).
     std::vector<LevelWindow> chain;
 };
 
 // The loop. Throws std::invalid_argument when the target is not a window on the inputs'
-// grid (as runregionalpass), its halo is below 2 x meanpasses + 2 + 2 x smoothpasses,
+// grid (as runregionalpass), its halo is below refinementhalo(meanpasses, smoothpasses),
 // target.level < 1, refinement.factor < 2, refinement.smoothpasses < 0 or
 // refinement.smoothrelaxation not positive and finite, factor^level does not fit an int, a global field has the wrong
 // size, the radius is not positive or the sea level not finite, and as halochain (a level's

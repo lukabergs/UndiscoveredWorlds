@@ -138,7 +138,7 @@ RegionalLevel regionallevelsteps(const RegionalGlobalInputs& inputs, const Regio
 
     // 2. The sea by local rules on the start surface (regional_surface.hpp), before the
     // channels (R1), so the channels end at the fine coast and never change the mask.
-    level.sea = regionalsea(inputs, window, warp, parameters, surface);
+    level.sea = regionalsea(inputs, window, warp, parameters, surface, details.parentseagate);
     const std::vector<uint8_t>& sea = level.sea;
 
     // 3. The pinned channels: they end at their first fine sea cell, and their beds
@@ -245,7 +245,11 @@ RegionalLevel regionallevelsteps(const RegionalGlobalInputs& inputs, const Regio
         carvecirques(inputs, window, parameters, level.glacial, channels, sea, elevation, bandlower, bandupper);
 
     // 5. Lakes and ice (regional_water.hpp).
-    level.water = regionalwater(inputs, window, warp, parameters, sea, channels, elevation, details.globallakedepth);
+    LakeInheritance lakes = details.lakes;
+    if (lakes.flood)
+        lakes.startsurface_m = &surface;  // the start surface with the beds pinned (S2.8)
+    level.water = regionalwater(inputs, window, warp, parameters, sea, channels, elevation, details.globallakedepth,
+                                lakes);
     return level;
 }
 

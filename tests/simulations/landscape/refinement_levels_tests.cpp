@@ -7,7 +7,7 @@
 // box-averaged equals k = 4) and the parity of one level with the single pass; S2.3's
 // rework (the bounds, the detail band, the global lake depth) the valleys at level 2; S2.4
 // the resample of the final level to a requested metres per pixel; S2.7 the overlap and the
-// consistency with the smoothing before the projection on.
+// consistency with the smoothing before the projection on; S2.8 the inherited masks.
 
 #include <gtest/gtest.h>
 
@@ -122,10 +122,13 @@ RegionalParameters everyfeature()
 // in whole global cells, with the lake (global cell 248, 71), ice and channels; the coast,
 // coastwest (120 .. 140 E, 5 S .. 15 N) and coasteast (130 .. 150 E, 0 .. 20 N), the windows of
 // RegionalOverlapIslandsWideWorld.
-RegionalWindow windowp() { return landscape::regionalwindow(256, 16, testhalo, 160.0, -15.0, 180.0, 10.0); }
-RegionalWindow windowq() { return landscape::regionalwindow(256, 16, testhalo, 170.0, -10.0, -170.0, 15.0); }
-RegionalWindow coastwest() { return landscape::regionalwindow(256, 16, testhalo, 120.0, -5.0, 140.0, 15.0); }
-RegionalWindow coasteast() { return landscape::regionalwindow(256, 16, testhalo, 130.0, 0.0, 150.0, 20.0); }
+// The loop's smallest halo at meanpasses 2 without smoothing: testhalo plus the lake flood's reach
+// (refinementhalo).
+constexpr int loophalo = landscape::refinementhalo(2, 0);
+RegionalWindow windowp() { return landscape::regionalwindow(256, 16, loophalo, 160.0, -15.0, 180.0, 10.0); }
+RegionalWindow windowq() { return landscape::regionalwindow(256, 16, loophalo, 170.0, -10.0, -170.0, 15.0); }
+RegionalWindow coastwest() { return landscape::regionalwindow(256, 16, loophalo, 120.0, -5.0, 140.0, 15.0); }
+RegionalWindow coasteast() { return landscape::regionalwindow(256, 16, loophalo, 130.0, 0.0, 150.0, 20.0); }
 
 RefinementResult refine(const RegionalGlobalInputs& inputs, const RegionalWindow& window, int level,
                         const RegionalParameters& parameters, const std::string& name)
@@ -479,10 +482,24 @@ TEST_F(Landscape, RefinementLevelsParityAtOneLevel)
         EXPECT_EQ(differing(single.discharge_m3s, level.discharge_m3s, cells), 0);
         EXPECT_EQ(differing(single.januaryflow, level.januaryflow, cells), 0);
         EXPECT_EQ(differing(single.julyflow, level.julyflow, cells), 0);
-        EXPECT_EQ(differing(single.lakesurface_m, level.lakesurface_m, cells), 0);
+        // The lake surfaces differ from S2.8 on: the loop floods every cell below a lake's
+        // surface connected to its core (RefinementLevelsInheritedMasks).
         EXPECT_EQ(differing(single.januaryprecipitation_mm, level.januaryprecipitation_mm, cells), 0);
         EXPECT_EQ(differing(single.julyprecipitation_mm, level.julyprecipitation_mm, cells), 0);
         EXPECT_EQ(differing(single.climate, level.climate, cells), 0);
+        int wetsingle = 0, wetlevel = 0;
+        for (std::size_t cell = 0; cell < single.lakesurface_m.size(); cell++)
+        {
+            wetsingle += single.lakesurface_m[cell] > 0.0f ? 1 : 0;
+            wetlevel += level.lakesurface_m[cell] > 0.0f ? 1 : 0;
+        }
+        // The flood only adds water: every wet cell of the single pass is wet at level 1.
+        int lost = 0;
+        for (std::size_t cell = 0; cell < single.lakesurface_m.size(); cell++)
+            lost += single.lakesurface_m[cell] > 0.0f && !(level.lakesurface_m[cell] > 0.0f) ? 1 : 0;
+        std::printf("[refinement] parity: wet cells %d in the single pass, %d at level 1 (the flood), %d of the single "
+                    "pass's dry at level 1\n", wetsingle, wetlevel, lost);
+        EXPECT_EQ(lost, 0);
 
         // The bounds: land channel beds stay (unless a parent moved its beds), sea cells stay
         // at or below the sea level, wet cells below their surface, dry land above the sea
@@ -495,7 +512,7 @@ TEST_F(Landscape, RefinementLevelsParityAtOneLevel)
         for (std::size_t cell = 0; cell < single.elevation_m.size(); cell++)
         {
             const float before = single.elevation_m[cell], after = level.elevation_m[cell];
-            const bool sea = single.sea[cell] != 0, wet = single.lakesurface_m[cell] > 0.0f;
+            const bool sea = single.sea[cell] != 0, wet = level.lakesurface_m[cell] > 0.0f;  // the level's lakes (S2.8)
             if (single.riverdirection[cell] != 0 && !sea && !wet)
             {
                 beds++;
@@ -541,7 +558,10 @@ TEST_F(Landscape, RefinementLevelsRejects)
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, one), std::invalid_argument);
     target.window.halo = 5;  // below 2 x meanpasses + 2
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, RefinementParameters{}), std::invalid_argument);
-    // The smoothing's passes widen the rule: 6 is below 2 x 2 + 2 + 2 x 1.
+    // The lake flood's reach (S2.8): 6 is below 2 x 2 + 2 + 2.
+    target.window.halo = testhalo;
+    EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, RefinementParameters{}), std::invalid_argument);
+    // The smoothing's passes widen the rule: 6 is below 2 x 2 + 2 + 2 x 1 + 2.
     target.window.halo = testhalo;
     RefinementParameters smoothing;
     smoothing.smoothpasses = 1;
@@ -564,7 +584,7 @@ TEST_F(Landscape, RefinementLevelsSmoothing)
     const RegionalParameters parameters = everyfeature();
     RefinementParameters refinement;
     refinement.smoothpasses = 6;
-    const int halo = testhalo + 2 * refinement.smoothpasses;
+    const int halo = landscape::refinementhalo(2, refinement.smoothpasses);
     const RegionalWindow p = landscape::regionalwindow(256, 16, halo, 160.0, -15.0, 180.0, 10.0);
     const RegionalWindow q = landscape::regionalwindow(256, 16, halo, 170.0, -10.0, -170.0, 15.0);
     const auto run = [&](const RegionalWindow& window, int level, const std::string& name) {
@@ -607,6 +627,123 @@ TEST_F(Landscape, RefinementLevelsSmoothing)
     const auto cells = sharedcells(one.levels[0].window, a.levels[0].window);
     ASSERT_EQ(cells.size(), one.levels[0].window.keptsize());
     EXPECT_EQ(differing(one.fields.elevation_m, a.coarserelevation_m[0], cells), 0);
+}
+
+// Step S2.8: the masks inherited and refined within one parent cell, every feature on, on P (the
+// lake) and R (the coast), two levels. Level 2's sea lies inside level 1's sea dilated by one
+// level-1 cell; no dry cell (not sea, not channel) lies below the surface of a wet 4-neighbour at
+// either level (the flood wets every cell below a lake's surface connected to its water, step 5
+// raises the rest, the projection keeps dry land above the water beside it). The overlap identity
+// with the inherited masks on is RefinementLevelsOverlap's (every feature on: P and Q across the
+// date line, differing in column and row origin, with the lake; R and S with the coast).
+TEST_F(Landscape, RefinementLevelsInheritedMasks)
+{
+    const RegionalGlobalInputs inputs = wideworld();
+    const RegionalParameters parameters = everyfeature();
+    // Dry cells of a kept field below the surface of a wet 4-neighbour.
+    const auto drybelow = [](const std::vector<float>& elevation, const std::vector<uint8_t>& sea,
+                             const std::vector<float>& lake, const std::vector<uint8_t>* direction, int columns, int rows) {
+        int count = 0;
+        for (int y = 0; y < rows; y++)
+            for (int x = 0; x < columns; x++)
+            {
+                const std::size_t cell = at(x, y, columns);
+                if (lake[cell] > 0.0f || sea[cell] != 0 || (direction != nullptr && (*direction)[cell] != 0))
+                    continue;
+                const int offsets[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                bool below = false;
+                for (const auto& offset : offsets)
+                {
+                    const int nx = x + offset[0], ny = y + offset[1];
+                    if (nx < 0 || ny < 0 || nx >= columns || ny >= rows)
+                        continue;
+                    const float surface = lake[at(nx, ny, columns)];
+                    below = below || (surface > 0.0f && elevation[cell] < surface);
+                }
+                count += below ? 1 : 0;
+            }
+        return count;
+    };
+    for (const RegionalWindow& window : {windowp(), coastwest()})
+    {
+        const std::string name = "inherited masks at column " + std::to_string(window.column0);
+        const RefinementResult result = refine(inputs, window, 2, parameters, name);
+        ASSERT_EQ(result.coarsersea.size(), 1u);
+        ASSERT_EQ(result.coarserlakesurface_m.size(), 1u);
+        expectexact(result, name);
+        const LevelWindow& one = result.levels[0].window;
+        const LevelWindow& two = result.levels[1].window;
+        const std::vector<uint8_t>& parentsea = result.coarsersea[0];
+        const RegionalFields& fields = result.fields;
+
+        // Level 2's sea inside level 1's sea dilated by one level-1 cell.
+        int sea = 0, landparent = 0, beyond = 0;
+        const std::int64_t widthone = one.levelwidth();
+        for (int y = 0; y < two.rows; y++)
+            for (int x = 0; x < two.columns; x++)
+            {
+                if (fields.sea[at(x, y, two.columns)] == 0)
+                    continue;
+                sea++;
+                const std::int64_t column = landscape::wraplevel(two.column0 + x, two.levelwidth()) / 4;
+                const std::int64_t row = (two.row0 + y) / 4;
+                bool own = false, nearby = false;
+                for (int dr = -1; dr <= 1; dr++)
+                    for (int dc = -1; dc <= 1; dc++)
+                    {
+                        const std::int64_t px = landscape::wraplevel(column + dc - one.column0, widthone);
+                        const std::int64_t py = row + dr - one.row0;
+                        ASSERT_TRUE(px < one.columns && py >= 0 && py < one.rows) << name;
+                        const bool parent = parentsea[at(static_cast<int>(px), static_cast<int>(py), one.columns)] != 0;
+                        nearby = nearby || parent;
+                        own = own || (dr == 0 && dc == 0 && parent);
+                    }
+                landparent += own ? 0 : 1;
+                beyond += nearby ? 0 : 1;
+            }
+        const int drytwo = drybelow(fields.elevation_m, fields.sea, fields.lakesurface_m, &fields.riverdirection,
+                                    two.columns, two.rows);
+        const int dryone = drybelow(result.coarserelevation_m[0], parentsea, result.coarserlakesurface_m[0], nullptr,
+                                    one.columns, one.rows);
+        int wet = 0;
+        for (const float surface : fields.lakesurface_m)
+            wet += surface > 0.0f ? 1 : 0;
+        std::printf("[refinement] %s: level 2 sea %d (%d in land parents, %d beyond one parent cell), wet %d; dry below a "
+                    "lake: level 1 %d (channels included), level 2 %d (diagnostics %d, %d)\n",
+                    name.c_str(), sea, landparent, beyond, wet, dryone, drytwo, result.levels[0].drybelowlake,
+                    result.levels[1].drybelowlake);
+        EXPECT_EQ(beyond, 0) << name;
+        EXPECT_EQ(result.levels[1].seabeyondparent, 0) << name;
+        EXPECT_EQ(result.levels[1].seainlandparents, landparent) << name;
+        EXPECT_EQ(drytwo, 0) << name;
+        EXPECT_EQ(result.levels[0].drybelowlake, 0) << name;
+        EXPECT_EQ(result.levels[1].drybelowlake, 0) << name;
+        if (window.column0 == windowp().column0)
+            EXPECT_GT(wet, 0) << name;
+        else
+            EXPECT_GT(sea, 0) << name;
+    }
+}
+
+// Step S2.8 review: the lake flood at the loop's smallest halo with the lake cell (global cell 248,
+// 71) on a kept edge of both windows: E keeps columns up to 248 (the zone's column 249 lies in its
+// halo), F from 248 across the date line (the zone's column 247 in its halo). Every level's shared
+// kept cells (the lake cell's column) bit-identical, with every feature on, and the lake wet there.
+TEST_F(Landscape, RefinementLevelsOverlapLakeAtEdge)
+{
+    const RegionalGlobalInputs inputs = wideworld();
+    const RegionalParameters parameters = everyfeature();
+    const RegionalWindow e = landscape::regionalwindow(256, 16, loophalo, 155.0, -15.0, 169.5, -5.0);
+    const RegionalWindow f = landscape::regionalwindow(256, 16, loophalo, 169.5, -15.0, -175.0, -5.0);
+    ASSERT_EQ(e.column0 + e.columns - 1, 248);
+    ASSERT_EQ(f.column0, 248);
+    ASSERT_GT(inputs.lakesurface_m[at(248, 71, inputs.width)], 0.0f);
+    const RefinementResult a = refine(inputs, e, 2, parameters, "lake at the edge E");
+    const RefinementResult b = refine(inputs, f, 2, parameters, "lake at the edge F");
+    expectexact(a, "E");
+    expectexact(b, "F");
+    const OverlapCounts counts = compareoverlaplevels(a, b, "lake at the edge E/F");
+    EXPECT_GT(counts.lake, 0);
 }
 
 // Step S2.4: the source level of a request and the resample of a refinement's final level,

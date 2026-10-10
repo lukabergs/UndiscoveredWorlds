@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
+#include <utility>
 
 #include "core/deterministic_random.hpp"
 #include "simulations/landscape/regional_surface.hpp"
@@ -194,7 +196,8 @@ std::size_t finezone(const RegionalGlobalInputs& inputs, const std::vector<uint8
 
 FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const FineWarp& warp,
                      const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
-                     const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth)
+                     const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth,
+                     const LakeInheritance& inheritance)
 {
     const int width = inputs.width, height = inputs.height;
     const int k = window.scale;
@@ -275,6 +278,61 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
             lakesum[cell] = static_cast<double>(lakeindicator[cell]) + shorenoise * lakenoise.at(finecolumn, finerow) + term;
             wet[cell] = lakesum[cell] < 0.0 && (terrain <= 0.0 || height_m < terrain) ? 1 : 0;
         }
+    }
+
+    // 1b. The refinement loop's flood (S2.8, LakeInheritance): the core (level 1: the water of
+    // 1; level >= 2: the cells below S whose parent carries the zone's surface) and every cell
+    // below S 4-connected to it through cells of the same zone below S, not sea, where the lake
+    // cells dominate (the warped half-mask contour, lakeweight >= 0.5) or the global cell lies
+    // above S, and at level >= 2 within one parent cell of the parent's water.
+    if (inheritance.flood)
+    {
+        const bool inherited = inheritance.parentsurface_m != nullptr;
+        const auto passable = [&](std::size_t cell, int x, int y) {
+            if (sea[cell] != 0 || zone[cell] == none || !(elevation_m[cell] < surface[cell]))
+                return false;
+            if (inheritance.startsurface_m != nullptr && !((*inheritance.startsurface_m)[cell] < surface[cell]))
+                return false;
+            if (inherited && (*inheritance.parentreach)[cell] == 0)
+                return false;
+            const std::size_t global = at(window.globalcolumn(x), window.globalrow(y), width);
+            return lakeweight[cell] >= 0.5f || inputs.elevation_m[global] > surface[cell];
+        };
+        std::vector<uint8_t> flooded(count, 0);
+        std::vector<std::size_t> queue;
+        for (int y = 0; y < domainheight; y++)
+            for (int x = 0; x < domainwidth; x++)
+            {
+                const std::size_t cell = at(x, y, domainwidth);
+                const bool core = inherited ? sea[cell] == 0 && zone[cell] != none &&
+                                                  (*inheritance.parentsurface_m)[cell] == surface[cell] &&
+                                                  elevation_m[cell] < surface[cell]
+                                            : wet[cell] != 0;
+                if (core)
+                {
+                    flooded[cell] = 1;
+                    queue.push_back(cell);
+                }
+            }
+        for (std::size_t next = 0; next < queue.size(); next++)
+        {
+            const std::size_t cell = queue[next];
+            const int x = static_cast<int>(cell % static_cast<std::size_t>(domainwidth));
+            const int y = static_cast<int>(cell / static_cast<std::size_t>(domainwidth));
+            const int offsets[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (const auto& offset : offsets)
+            {
+                const int nx = x + offset[0], ny = y + offset[1];
+                if (nx < 0 || ny < 0 || nx >= domainwidth || ny >= domainheight)
+                    continue;
+                const std::size_t other = at(nx, ny, domainwidth);
+                if (flooded[other] != 0 || zone[other] != zone[cell] || !passable(other, nx, ny))
+                    continue;
+                flooded[other] = 1;
+                queue.push_back(other);
+            }
+        }
+        wet = std::move(flooded);
     }
 
     // A wet 8-neighbour (inside the domain) of fine cell (x, y) passing `test`.
@@ -393,6 +451,8 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
     // later option).
     // The wet cells are final, so the order of the cells does not matter; a neighbour beyond
     // the domain is not seen (within the halo).
+    if (inheritance.flood)
+        water.rimraise_m.assign(count, 0.0f);
     std::vector<float> raised(count, 0.0f);
     std::vector<uint8_t> raise(count, 0);
     for (int y = 0; y < domainheight; y++)
@@ -404,19 +464,31 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
             if (water.lakesurface_m[cell] > 0.0f || sea[cell] != 0 || channels.channel[cell] != 0)
                 continue;
             const std::size_t global = at(window.globalcolumn(x), row, width);
-            float level = below;
+            float level = below, beside = below;
             if (lakecell[global] != 0)
                 level = inputs.lakesurface_m[global];
             neighbour(x, y, [&](std::size_t other) {
                 if (water.lakesurface_m[other] > 0.0f)
-                    level = std::max(level, water.lakesurface_m[other]);
+                    beside = std::max(beside, water.lakesurface_m[other]);
                 return false;
             });
+            level = std::max(level, beside);
             if (!(elevation_m[cell] <= level))
                 continue;
             const double rise = static_cast<double>(level) - static_cast<double>(elevation_m[cell]);
             if (terrain > 0.0 && rise > terrain)
+            {
+                // S2.8's flood: a deeper dry cell beside the water (outside the flood's reach) is
+                // raised to just above its surface, so no dry cell stands below the water beside it.
+                if (inheritance.flood && elevation_m[cell] <= beside)
+                {
+                    raised[cell] = std::nextafter(beside, above);
+                    raise[cell] = 1;
+                    water.rimraise_m[cell] =
+                        static_cast<float>(static_cast<double>(raised[cell]) - static_cast<double>(elevation_m[cell]));
+                }
                 continue;
+            }
             raised[cell] = std::max(std::nextafter(level, above), static_cast<float>(static_cast<double>(level) + rise));
             raise[cell] = 1;
         }
@@ -451,10 +523,19 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
 
 FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const FineWarp& warp,
                         const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
-                        const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth)
+                        const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth,
+                        const LakeInheritance& inheritance)
 {
     if (!(parameters.shores.shorenoise > 0.0))
         return phaseewater(inputs, window, sea, channels, elevation_m);
-    return shorewater(inputs, window, warp, parameters, sea, channels, elevation_m, globaldepth);
+    const std::size_t count =
+        static_cast<std::size_t>(window.domainfinewidth()) * static_cast<std::size_t>(window.domainfineheight());
+    if ((inheritance.parentsurface_m == nullptr) != (inheritance.parentreach == nullptr) ||
+        (inheritance.parentsurface_m != nullptr &&
+         (inheritance.parentsurface_m->size() != count || inheritance.parentreach->size() != count)))
+        throw std::invalid_argument("regionalwater: the parent's lake masks must both hold one value per domain cell");
+    if (inheritance.startsurface_m != nullptr && inheritance.startsurface_m->size() != count)
+        throw std::invalid_argument("regionalwater: the start surface must hold one value per domain cell");
+    return shorewater(inputs, window, warp, parameters, sea, channels, elevation_m, globaldepth, inheritance);
 }
 }

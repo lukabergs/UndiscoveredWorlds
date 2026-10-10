@@ -50,7 +50,7 @@ void printregionusage(ostream& out)
     out << "  --bundle <dir>          The regional bundle (new or empty directory; required).\n";
     out << "  --set <name=value>, --parameters <file>  As for run (landscape.regional.* sets the pass,\n";
     out << "                           halo_cells the halo, for the hierarchy at least 2 x mean_passes + 2 +\n";
-    out << "                           2 x landscape.refinement.smooth_passes); the manifest records every\n";
+    out << "                           2 x landscape.refinement.smooth_passes + 2); the manifest records every\n";
     out << "                           value. The stream power\n";
     out << "                           law (landscape.stream_power.erodibility, area_exponent) and the glacial\n";
     out << "                           cooling (landscape.glacial.cooling_c) are first set to the world bundle's\n";
@@ -405,12 +405,13 @@ int runregioncommand(const vector<string>& arguments)
     }
     // A power of the refinement factor runs the hierarchy (multiscale plan S2.3); any other
     // scale the single pass. The hierarchy's halo also covers the smoothing before each
-    // projection (S2.7: 2 x mean_passes + 2 + 2 x smooth_passes global cells, 26 at the
-    // defaults); the single pass keeps regional.halo_cells.
+    // projection (S2.7) and the lake flood (S2.8): refinementhalo, 2 x mean_passes + 2 + 2 x
+    // smooth_passes + 2 global cells, 28 at the defaults; the single pass keeps regional.halo_cells.
     const int levels = landscape::levelofscale(options.scale, refinement.factor);
     const bool hierarchy = levels >= 1;
     const int halo = hierarchy ? std::max(tuning::landscape::regional::haloCells,
-                                          2 * tuning::landscape::regional::meanPasses + 2 + 2 * refinement.smoothpasses)
+                                          landscape::refinementhalo(tuning::landscape::regional::meanPasses,
+                                                                    refinement.smoothpasses))
                                : tuning::landscape::regional::haloCells;
     landscape::RegionalWindow window;
     try

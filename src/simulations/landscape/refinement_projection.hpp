@@ -80,6 +80,13 @@ struct ProjectionReport
     // without the line has d near 0, so the step is that lift.
     double maxborderstep_m = 0.0;
     double borderstep99_m = 0.0;
+    // Where (S2.8): the absolute column and row, at the parent level, of the parent of the
+    // largest border step's west or north cell and of the parent of the largest forced move
+    // (-1 when there is none; ties: the first in row-major order of the kept box).
+    std::int64_t maxborderstepcolumn = -1;
+    std::int64_t maxbordersteprow = -1;
+    std::int64_t maxforcedcolumn = -1;
+    std::int64_t maxforcedrow = -1;
 };
 
 // Projects `field` (the level window's domainsize() candidates F*, row-major) onto the

@@ -340,7 +340,12 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
                         if (counted)
                         {
                             report.forcedparents++;
-                            report.maxforcedmove_m = std::max(report.maxforcedmove_m, std::fabs(remainder / children));
+                            if (std::fabs(remainder / children) > report.maxforcedmove_m)
+                            {
+                                report.maxforcedmove_m = std::fabs(remainder / children);
+                                report.maxforcedcolumn = wraplevel(level.domaincolumn0 / f + p, level.levelwidth() / f);
+                                report.maxforcedrow = level.domainrow0 / f + q;
+                            }
                         }
                     }
                 }
@@ -377,16 +382,25 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
     const int x0 = level.keptcolumnoffset(), y0 = level.keptrowoffset();
     const int x1 = x0 + level.columns, y1 = y0 + level.rows;
     std::vector<double> steps;
-    auto addpair = [&](std::size_t a, std::size_t b) {
-        if (moved[a] != 0 && moved[b] != 0)
-            steps.push_back(std::fabs(correction[a] - correction[b]));
+    double largeststep = -1.0;
+    auto addpair = [&](int x, int y, std::size_t a, std::size_t b) {
+        if (moved[a] == 0 || moved[b] == 0)
+            return;
+        const double step = std::fabs(correction[a] - correction[b]);
+        steps.push_back(step);
+        if (step > largeststep)
+        {
+            largeststep = step;
+            report.maxborderstepcolumn = wraplevel(level.domaincolumn0 / f + x / f, level.levelwidth() / f);
+            report.maxbordersteprow = level.domainrow0 / f + y / f;
+        }
     };
     for (int y = y0; y < y1; y++)
         for (int x = x0 + f - 1; x + 1 < x1; x += f)
-            addpair(level.index(x, y), level.index(x + 1, y));
+            addpair(x, y, level.index(x, y), level.index(x + 1, y));
     for (int y = y0 + f - 1; y + 1 < y1; y += f)
         for (int x = x0; x < x1; x++)
-            addpair(level.index(x, y), level.index(x, y + 1));
+            addpair(x, y, level.index(x, y), level.index(x, y + 1));
     if (!steps.empty())
     {
         const std::size_t n = steps.size();

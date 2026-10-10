@@ -956,13 +956,15 @@ void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& win
 
 std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                  const FineWarp& warp, const RegionalParameters& parameters,
-                                 std::vector<float>& surface_m)
+                                 std::vector<float>& surface_m, const std::vector<uint8_t>* parentgate)
 {
     const int width = inputs.width;
     const int k = window.scale;
     const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
     const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
     const bool centrerule = !(parameters.coast.landshare > 0.0);
+    if (parentgate != nullptr && parentgate->size() != count)
+        throw std::invalid_argument("regionalsea: the parent gate must hold one value per domain cell");
 
     // At or below the sea level, with a global sea cell among the global cell and its
     // 8 neighbours. Then (Phase E, centre rule) each global cell's centre fine cell
@@ -990,7 +992,10 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
                 else if (surface_m[cell] <= inputs.sealevel && gate[cell] != 0)
                     surface_m[cell] = abovesea;
             }
-            sea[cell] = surface_m[cell] <= inputs.sealevel && gate[cell] != 0 ? 1 : 0;
+            // S2.8: at level >= 2 the sea is inherited from the parent level within one parent
+            // cell; every other cell is land at its own height (the surface is not written).
+            const bool open = gate[cell] != 0 && (parentgate == nullptr || (*parentgate)[cell] != 0);
+            sea[cell] = surface_m[cell] <= inputs.sealevel && open ? 1 : 0;
         }
     }
     return sea;

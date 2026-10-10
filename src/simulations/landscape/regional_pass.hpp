@@ -90,6 +90,12 @@ struct RegionalDetails
     double detailcells = 0.0;
     // Item 2: the lakes' bed depth is the global lake depth, uncapped (regionalwater).
     bool globallakedepth = false;
+    // S2.8 (masks inherited and refined within one parent cell): at level >= 2 the parent's
+    // sea gate (regionalsea's parentgate; null at level 1 and in the single pass) and the lake
+    // flood with the parent's lake masks (regionalwater's LakeInheritance; flood off in the
+    // single pass). The pointed-to vectors hold one value per domain cell and outlive the call.
+    const std::vector<uint8_t>* parentseagate = nullptr;
+    LakeInheritance lakes;
 };
 
 // The domain fields of one pass after the lakes (domainfinewidth() x domainfineheight(),

@@ -216,8 +216,23 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Smoothing passes', 'smoothpasses'), ('λ max before smoothing (m)', 'maxlambdabefore_m'),
                  ('λ step max before smoothing (m)', 'maxlambdastepbefore_m'), ('Smoothing move max (m)', 'maxsmoothmove_m'),
                  ('λ max (m)', 'maxlambda_m'), ('λ step max (m)', 'maxlambdastep_m'), ('Beds moved', 'bedsmovedparents'),
-                 ('Forced', 'forcedparents'), ('Forced move max (m)', 'maxforcedmove_m'), ('Dried', 'driedcells'), ('Shores below lakes', 'shoresbelowlake'), ('Land below sea', 'landbelowsea'),
+                 ('Forced', 'forcedparents'), ('Forced move max (m)', 'maxforcedmove_m'), ('Dried', 'driedcells'), ('Shores below lakes', 'shoresbelowlake'), ('Land below sea', 'landbelowsea'), ('Land below sea max depth (m)', 'maxlandbelowsea_m'),
+                 ('Deepest land below sea (column, row)', 'maxlandbelowsea_position'),
+                 ('Rim raised', 'rimraised'), ('Rim raise max (m)', 'maxrimraise_m'),
+                 ('Border step max at parent (column, row)', 'maxborderstep_parent'),
+                 ('Forced move max at parent (column, row)', 'maxforced_parent'),
+                 ('Sea in land parents', 'seainlandparents'), ('Sea beyond one parent cell', 'seabeyondparent'),
+                 ('Dry below a lake', 'drybelowlake'),
                  ('Seconds', 'seconds'))
+
+
+def level_value(entry, key):
+    """A level diagnostic; the positions (S2.8) as 'column, row', None when absent or -1."""
+    if key.endswith('_position') or key.endswith('_parent'):
+        stem = key[:-len('_position')] if key.endswith('_position') else key
+        column, row = entry.get(stem + '_column'), entry.get(stem + '_row')
+        return None if column is None or column < 0 else f'{column}, {row}'
+    return entry.get(key)
 
 
 def level_rows(levels):
@@ -225,7 +240,7 @@ def level_rows(levels):
     if not levels:
         return None
     return {'columns': [title for title, _ in LEVEL_COLUMNS],
-            'rows': [[entry.get(key) for _, key in LEVEL_COLUMNS] for entry in levels],
+            'rows': [[level_value(entry, key) for _, key in LEVEL_COLUMNS] for entry in levels],
             'note': 'Per level of the refinement hierarchy, from the bundle\'s diagnostics.levels: the largest parent-mean '
                     'error against its bound (half a float step of the kept box\'s largest |elevation|), the global-mean '
                     'error, the block-mean error the presmoothing left before the projection, the border steps, the '
@@ -233,7 +248,9 @@ def level_rows(levels):
                     'move), λ and the largest λ step between neighbouring parents at the projection (from S2.7 on after the '
                     'smoothing; bundles without smoothing, regional runs 16 to 25, have no "before" columns and there λ '
                     'before = after), the parents whose beds moved or that were forced (with the '
-                    'largest forced move), and the dried cells, shores below lakes and land below sea after it.'}
+                    'largest forced move), and the dried cells, shores below lakes and land below sea after it; S2.8\'s '
+                    'mask checks: sea cells in land parents (level 1: global cells), those beyond one parent cell of the '
+                    'parent\'s sea, and dry cells below a 4-neighbouring lake surface (empty before S2.8).'}
 
 
 def run_data(evaluation_dir):

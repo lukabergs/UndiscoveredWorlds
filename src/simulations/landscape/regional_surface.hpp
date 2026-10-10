@@ -145,7 +145,13 @@ void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& win
 // raised to the next float above it). With coast.landshare > 0 the start surface already
 // carries the land-share mask in its sign (regionalstartsurface) and `surface_m` is not
 // changed. R1 calls it before the channels are drawn, so the channels end at the fine coast.
+// `parentgate` (multiscale plan S2.8, §3 "S2.8: masks without walls"; the refinement loop at
+// level >= 2, null elsewhere): one value per domain cell, 1 where the cell's parent or one of the
+// parent's 8 neighbours is sea at the parent level, 0 otherwise. The sea is then inherited and
+// refined within one parent cell: a cell is sea where its surface lies at or below the sea level
+// and both gates allow it; every other cell is land at its own height (land below the sea level
+// is allowed, and the loop counts it); `surface_m` is not written by this rule.
 std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                  const FineWarp& warp, const RegionalParameters& parameters,
-                                 std::vector<float>& surface_m);
+                                 std::vector<float>& surface_m, const std::vector<uint8_t>* parentgate = nullptr);
 }

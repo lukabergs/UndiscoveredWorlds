@@ -175,6 +175,55 @@
       "run": "runs/regional/25",
       "date": "2026-10-10T04:21:25+00:00",
       "label": "multiscale S2.6: window A, k 64, factor 4"
+    },
+    {
+      "id": 26,
+      "status": "complete",
+      "run": "runs/regional/26",
+      "date": "2026-10-10T12:24:19+00:00",
+      "label": "multiscale S2.8: window A, k 4"
+    },
+    {
+      "id": 27,
+      "status": "complete",
+      "run": "runs/regional/27",
+      "date": "2026-10-10T12:24:23+00:00",
+      "label": "multiscale S2.8: window B, k 4"
+    },
+    {
+      "id": 28,
+      "status": "complete",
+      "run": "runs/regional/28",
+      "date": "2026-10-10T12:24:27+00:00",
+      "label": "multiscale S2.8: window C, k 4"
+    },
+    {
+      "id": 29,
+      "status": "complete",
+      "run": "runs/regional/29",
+      "date": "2026-10-10T12:24:32+00:00",
+      "label": "multiscale S2.8: window A, k 16"
+    },
+    {
+      "id": 30,
+      "status": "complete",
+      "run": "runs/regional/30",
+      "date": "2026-10-10T12:24:40+00:00",
+      "label": "multiscale S2.8: window B, k 16"
+    },
+    {
+      "id": 31,
+      "status": "complete",
+      "run": "runs/regional/31",
+      "date": "2026-10-10T12:24:50+00:00",
+      "label": "multiscale S2.8: window C, k 16"
+    },
+    {
+      "id": 32,
+      "status": "complete",
+      "run": "runs/regional/32",
+      "date": "2026-10-10T12:25:10+00:00",
+      "label": "multiscale S2.8: window A, k 64"
     }
   ]
 }

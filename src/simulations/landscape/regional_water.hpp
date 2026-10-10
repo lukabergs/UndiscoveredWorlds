@@ -3,8 +3,9 @@
 // Lakes and present-day ice of the regional pass (docs/architecture/erosion-hydrology-plan.md,
 // Phase E, step E3, and Phase R: R0 moved the rules here from regional_pass.cpp
 // unchanged; R1 fixes the channel cells inside lakes; R4 owns the shores and the ice
-// edges). Local rules only (no flood fill), each a pure function of the global
-// fields, the seed and the fine cell's absolute position. Planet-free.
+// edges). Local rules only (no flood fill but the refinement loop's, bounded by a lake cell's
+// 3 x 3 global cells, S2.8), each a pure function of the global fields, the seed and the fine
+// cell's absolute position. Planet-free.
 
 #include <cstdint>
 #include <vector>
@@ -21,6 +22,9 @@ struct FineWater
 {
     std::vector<float> lakesurface_m;   // 0 where no lake water
     std::vector<float> icethickness_m;
+    // S2.8's rim raise (LakeInheritance::flood only, else empty): per domain cell the lift of a
+    // dry cell more than D below a wet 8-neighbour's surface raised to just above it, 0 elsewhere.
+    std::vector<float> rimraise_m;
 };
 
 // Phase E's rules (kept while shores.shorenoise is 0): lake water stands on a fine
@@ -74,7 +78,39 @@ struct FineWater
 // and no terrain term, on the fine cells of ice cells and their neighbours; the thickness is
 // the thickness upsampled at the warped position, at least 1 m; a fine sea cell carries ice
 // only where its global cell is sea and iced.
+//
+// The lake flood of the refinement loop (multiscale plan S2.8, §3 "S2.7: smooth before exact",
+// item 3; R4's rules only, shorenoise > 0; inactive in the single pass). A lake's water is its
+// core and every cell below its surface S 4-connected to the core through cells below S of the
+// same zone (so inside the lake cell's 3 x 3 global cells), not sea, where the lake cells
+// dominate (their mask interpolated at the warped position, w >= 0.5: the barrier against a lower
+// non-lake neighbour, an outlet valley or a low plain, lies on that warped contour, not on the
+// cell boundary) or in a global cell above S (the lake's rim), and below S on the start surface
+// when one is given. Reach: a component inside one lake cell's 3 x 3 zone (2 global cells beyond
+// a kept box at level 1; 1 parent cell + 3 level cells at level >= 2, which is at most 2
+// global cells too), read on the solved elevation, so a kept cell depends on it up to 2 global
+// cells farther than on the solve: the loop's halo adds them (refinement_levels.hpp). The
+// core: at level 1 (no parent masks) the water of the sum above, so the indicator shapes the core
+// only; at level >= 2 the cells below S whose parent is wet with the zone's surface, the flood
+// kept to the cells whose parent or a parent 8-neighbour is wet (refined within one parent cell).
+// The steps from the dam rule on (2 to 5) then act on that water as on the sum's; step 5 raises
+// the dry rest, and a dry cell more than D below a wet 8-neighbour's surface (left by step 5
+// without the flood) to the next float above that surface. The connected set does not depend on the order of the cells.
+struct LakeInheritance
+{
+    bool flood = false;
+    // Level >= 2: one value per domain cell, the parent's lake surface (0: the parent is dry)
+    // and 1 where the parent or one of its 8 neighbours is wet. Null at level 1.
+    const std::vector<float>* parentsurface_m = nullptr;
+    const std::vector<uint8_t>* parentreach = nullptr;
+    // The level's start surface (before the solve, its parent means kept; regionallevelsteps
+    // sets it): the flood enters only cells below S on it too, so a parent above S keeps a dry
+    // child (the projection stays feasible where the solve lowered the land below S).
+    const std::vector<float>* startsurface_m = nullptr;
+};
+
 FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const FineWarp& warp,
                         const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
-                        const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth = false);
+                        const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth = false,
+                        const LakeInheritance& inheritance = LakeInheritance{});
 }

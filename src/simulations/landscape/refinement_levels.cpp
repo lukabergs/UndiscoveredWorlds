@@ -259,9 +259,9 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
     if (refinement.smoothpasses < 0 || !std::isfinite(refinement.smoothrelaxation) || !(refinement.smoothrelaxation > 0.0))
         throw std::invalid_argument("runrefinement: refinement.smooth_passes must not be negative and "
                                     "refinement.smooth_relaxation must be positive and finite");
-    if (parameters.meanpasses < 0 || target.window.halo < 2 * parameters.meanpasses + 2 + 2 * refinement.smoothpasses)
-        throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 + 2 x smooth_passes "
-                                    "global cells");
+    if (parameters.meanpasses < 0 || target.window.halo < refinementhalo(parameters.meanpasses, refinement.smoothpasses))
+        throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 + 2 x smooth_passes + "
+                                    "2 (the lake flood) global cells");
     std::int64_t finest = 1;
     for (int level = 0; level < levels; level++)
     {
@@ -291,6 +291,21 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
             parentfield[chain[0].index(x, y)] =
                 inputs.elevation_m[at(static_cast<int>(chain[0].absolutecolumn(x)), static_cast<int>(chain[0].absoluterow(y)),
                                       inputs.width)];
+
+    // The parent level's sea (1 or 0) and lake surface on its domain (S2.8); level 0's are the
+    // global sea and the global lake cells' surfaces (read for the diagnostics only: level 1
+    // keeps the single pass's sea and its lakes have no parent core).
+    std::vector<float> parentsea(chain[0].domainsize()), parentlake(chain[0].domainsize());
+    for (int y = 0; y < chain[0].domainrows; y++)
+        for (int x = 0; x < chain[0].domaincolumns; x++)
+        {
+            const std::size_t global = at(static_cast<int>(chain[0].absolutecolumn(x)),
+                                          static_cast<int>(chain[0].absoluterow(y)), inputs.width);
+            const bool sea = inputs.network.sea[global] != 0;
+            parentsea[chain[0].index(x, y)] = sea ? 1.0f : 0.0f;
+            parentlake[chain[0].index(x, y)] = !sea && inputs.lakesurface_m[global] > 0.0f ? inputs.lakesurface_m[global] : 0.0f;
+        }
+    details.lakes.flood = true;
 
     RefinementResult result;
     RegionalLevel state;
@@ -338,14 +353,45 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         if (details.troughs || details.cirques)
             diagnostics.steps.push_back(LevelStep::glacialforms);
         diagnostics.steps.push_back(LevelStep::lakes);
+
+        // The parent's masks per domain cell (S2.8): its parent and the parent's 8 neighbours
+        // read from the parent's kept box; given to the sea and the lakes at level >= 2.
+        const std::size_t count = level.domainsize();
+        const ParentPatch seapatch = parentpatch(parent, parentsea, level, 1, "runrefinement (parent sea)");
+        const ParentPatch lakepatch = parentpatch(parent, parentlake, level, 1, "runrefinement (parent lakes)");
+        std::vector<uint8_t> seagate(count, 0), ownseaparent(count, 0), lakereach(count, 0);
+        std::vector<float> lakeparent(count, 0.0f);
+        for (int y = 0; y < level.domainrows; y++)
+            for (int x = 0; x < level.domaincolumns; x++)
+            {
+                const std::size_t cell = level.index(x, y);
+                const int pc = x / factor + 1, pr = y / factor + 1;
+                bool sea = false, wet = false;
+                for (int dr = -1; dr <= 1; dr++)
+                    for (int dc = -1; dc <= 1; dc++)
+                    {
+                        const std::size_t neighbour = at(pc + dc, pr + dr, seapatch.columns);
+                        sea = sea || seapatch.values[neighbour] != 0.0f;
+                        wet = wet || lakepatch.values[neighbour] > 0.0f;
+                    }
+                seagate[cell] = sea ? 1 : 0;
+                lakereach[cell] = wet ? 1 : 0;
+                ownseaparent[cell] = seapatch.values[at(pc, pr, seapatch.columns)] != 0.0f ? 1 : 0;
+                lakeparent[cell] = lakepatch.values[at(pc, pr, lakepatch.columns)];
+            }
+        details.parentseagate = l >= 2 ? &seagate : nullptr;
+        details.lakes.parentsurface_m = l >= 2 ? &lakeparent : nullptr;
+        details.lakes.parentreach = l >= 2 ? &lakereach : nullptr;
         state = regionallevelsteps(inputs, window, parameters, warp, std::move(start), incision, details);
+        details.parentseagate = nullptr;
+        details.lakes.parentsurface_m = nullptr;
+        details.lakes.parentreach = nullptr;
         diagnostics.reliefconverged = state.reliefconverged;
         diagnostics.changedreceivers = state.changedreceivers;
 
         // The projection by bounds: sea and wet cells may sink but not rise past their water,
         // dry land may rise but not sink to the sea level or the water beside it (its own
         // global lake cell's surface included), land channel beds take the channel rate.
-        const std::size_t count = level.domainsize();
         std::vector<float>& elevation = state.elevation_m;
         std::vector<float>& lakesurface = state.water.lakesurface_m;
         std::vector<uint8_t> wet(count, 0);
@@ -415,7 +461,39 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
                 const std::size_t cell = level.index(x, y);
                 largest = std::max(largest, std::fabs(elevation[cell]));
                 if (lakesurface[cell] <= 0.0f && state.sea[cell] == 0 && elevation[cell] <= inputs.sealevel)
+                {
                     diagnostics.landbelowsea++;
+                    const double depth = static_cast<double>(inputs.sealevel) - static_cast<double>(elevation[cell]);
+                    if (depth > diagnostics.maxlandbelowsea_m || diagnostics.maxlandbelowseacolumn < 0)
+                    {
+                        diagnostics.maxlandbelowsea_m = depth;
+                        diagnostics.maxlandbelowseacolumn = level.absolutecolumn(x);
+                        diagnostics.maxlandbelowsearow = level.absoluterow(y);
+                    }
+                }
+                if (!state.water.rimraise_m.empty() && state.water.rimraise_m[cell] > 0.0f)
+                {
+                    diagnostics.rimraised++;
+                    diagnostics.maxrimraise_m = std::max(diagnostics.maxrimraise_m, static_cast<double>(state.water.rimraise_m[cell]));
+                }
+                if (state.sea[cell] != 0 && ownseaparent[cell] == 0)
+                {
+                    diagnostics.seainlandparents++;
+                    diagnostics.seabeyondparent += seagate[cell] == 0 ? 1 : 0;
+                }
+                if (lakesurface[cell] > 0.0f || state.sea[cell] != 0 || state.channels.channel[cell] != 0)
+                    continue;
+                const int offsets[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                bool below = false;
+                for (const auto& offset : offsets)
+                {
+                    const int nx = x + offset[0], ny = y + offset[1];
+                    if (nx < 0 || ny < 0 || nx >= level.domaincolumns || ny >= level.domainrows)
+                        continue;
+                    const float surface = lakesurface[level.index(nx, ny)];
+                    below = below || (surface > 0.0f && elevation[cell] < surface);
+                }
+                diagnostics.drybelowlake += below ? 1 : 0;
             }
         diagnostics.meanbound_m = largest > 0.0f ? std::ldexp(1.0, std::ilogb(largest) - 24) : 0.0;
         diagnostics.globalmeanerror_m = globalmeanerror(level, elevation, inputs);
@@ -427,6 +505,20 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
                 for (int x = 0; x < level.columns; x++)
                     keptfield[at(x, y, level.columns)] = elevation[level.index(keptx0 + x, kepty0 + y)];
             result.coarserelevation_m.push_back(std::move(keptfield));
+            std::vector<uint8_t> keptsea(level.keptsize());
+            std::vector<float> keptlake(level.keptsize());
+            for (int y = 0; y < level.rows; y++)
+                for (int x = 0; x < level.columns; x++)
+                {
+                    keptsea[at(x, y, level.columns)] = state.sea[level.index(keptx0 + x, kepty0 + y)];
+                    keptlake[at(x, y, level.columns)] = lakesurface[level.index(keptx0 + x, kepty0 + y)];
+                }
+            result.coarsersea.push_back(std::move(keptsea));
+            result.coarserlakesurface_m.push_back(std::move(keptlake));
+            parentsea.assign(count, 0.0f);
+            for (std::size_t cell = 0; cell < count; cell++)
+                parentsea[cell] = state.sea[cell] != 0 ? 1.0f : 0.0f;
+            parentlake = lakesurface;
             parentfield = std::move(elevation);
         }
         else
