@@ -58,6 +58,7 @@ const vector<GenerationStageDefinition>& getgenerationstages()
         { GenerationStageId::climates_and_biomes, "Climates and biomes", "Generate climate classes and biome distributions.", GenerationStageDomain::climate, true, false },
         { GenerationStageId::arid_features, "Arid features", "Optionally add dunes, salt pans, and other arid-land features.", GenerationStageDomain::hydrology, true, true },
         { GenerationStageId::deltas_wetlands_and_roughness, "Deltas, wetlands, and roughness", "Optionally add deltas, wetlands, and final roughness refinements.", GenerationStageDomain::hydrology, true, true },
+        { GenerationStageId::subgrid_statistics, "Sub-grid statistics", "Relief amplitude and valley spacing below the grid scale from the erosion run's laws.", GenerationStageDomain::terrain, false, true },
         { GenerationStageId::finalize_layers, "Finalize layers", "Build the remaining physical and social layers for the finished world.", GenerationStageDomain::finalization, false, false }
     };
 

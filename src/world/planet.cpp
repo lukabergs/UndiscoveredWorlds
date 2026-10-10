@@ -125,6 +125,8 @@ void planet::resizegrids()
     geosphere_.aggradationmap.resize(columns, rows);
     geosphere_.progradedmap.resize(columns, rows);
     geosphere_.glacialdenudationmap.resize(columns, rows);
+    geosphere_.reliefamplitudemap.resize(columns, rows);
+    geosphere_.valleyspacingmap.resize(columns, rows);
     cryosphere_.equilibriumlinemap.resize(columns, rows);
     cryosphere_.glaciationmap.resize(columns, rows);
     cryosphere_.icethicknessmap.resize(columns, rows);
@@ -698,6 +700,8 @@ void planet::clear()
     geosphere_.aggradationmap.fill(0.0f);
     geosphere_.progradedmap.fill(0);
     geosphere_.glacialdenudationmap.fill(0.0f);
+    geosphere_.reliefamplitudemap.fill(0.0f);
+    geosphere_.valleyspacingmap.fill(0.0f);
     cryosphere_.equilibriumlinemap.fill(0.0f);
     cryosphere_.glaciationmap.fill(0.0f);
     cryosphere_.icethicknessmap.fill(0.0f);

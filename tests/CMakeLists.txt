@@ -61,6 +61,7 @@ if(TARGET uw_climate_world)
         simulations/landscape/spherical_noise_tests.cpp
         simulations/landscape/landscape_tests.cpp
         simulations/landscape/stream_power_tests.cpp
+        simulations/landscape/subgrid_statistics_tests.cpp
         simulations/landscape/torus_metric_tests.cpp
         simulations/landscape/upsampling_tests.cpp
     )

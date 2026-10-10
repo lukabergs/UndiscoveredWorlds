@@ -110,6 +110,32 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
         anyela = anyela || value != 0.0f;
     if (!anyela)
         inputs.equilibriumline_m.clear();
+
+    // Multiscale plan S3.6: the sub-grid statistics of terrain.subgrid_statistics. A world
+    // without the diagnoser (another recipe, a bundle written before S3.6) carries zeros:
+    // each field is passed only when some cell is not zero, and is otherwise left empty
+    // (absent: the pass's fallbacks apply).
+    const worldgrid<float>& relief = world.reliefamplitude();
+    const worldgrid<float>& spacing = world.valleyspacing();
+    inputs.reliefamplitude_m.resize(size);
+    inputs.valleyspacing_km.resize(size);
+    bool anyrelief = false;
+    bool anyspacing = false;
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(y) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(x);
+            inputs.reliefamplitude_m[cell] = relief[x][y];
+            inputs.valleyspacing_km[cell] = spacing[x][y];
+            anyrelief = anyrelief || relief[x][y] != 0.0f;
+            anyspacing = anyspacing || spacing[x][y] != 0.0f;
+        }
+    }
+    if (!anyrelief)
+        inputs.reliefamplitude_m.clear();
+    if (!anyspacing)
+        inputs.valleyspacing_km.clear();
     return inputs;
 }
 

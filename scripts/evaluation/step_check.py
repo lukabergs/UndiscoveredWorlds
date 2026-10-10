@@ -30,7 +30,8 @@ RECIPES = {
 }
 SOCIAL = {'social': RECIPES['procedural-world'] + ['--social']}
 ACCESS_SETS = ('phase4-access', 'phase4b-access', 'phase4c-access', 'erosion-a-access', 'erosion-b-access',
-               'erosion-c-access', 'erosion-d-access', 'erosion-g-access')
+               'erosion-c-access', 'erosion-d-access', 'erosion-g-access',
+               'multiscale-s3-access')
 
 
 def logged(command, log):

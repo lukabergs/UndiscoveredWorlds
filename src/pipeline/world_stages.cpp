@@ -18,6 +18,7 @@
 #include "simulations/hydrology/lake_levels.hpp"
 #include "simulations/hydrology/rivers.hpp"
 #include "simulations/terrain/fluvial_erosion.hpp"
+#include "simulations/terrain/subgrid_statistics.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
 
 using namespace std;
@@ -1059,6 +1060,10 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 
     case GenerationStageId::deltas_wetlands_and_roughness:
         applydeltawetlandstage(world, context);
+        return true;
+
+    case GenerationStageId::subgrid_statistics:
+        applysubgridstatisticsstage(world);
         return true;
 
     case GenerationStageId::finalize_layers:

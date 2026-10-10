@@ -129,6 +129,8 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(aggradation, geosphere, f32, grid, "m", "Cumulative aggradation of the erosion run") \
     X(glacial_denudation, geosphere, f32, grid, "m", "Glacial part of the denudation of the erosion run") \
     X(prograded, geosphere, u8, grid, "0/1", "Land built by marine deposition over the erosion run: sea at its start, land at its end") \
+    X(relief_amplitude, geosphere, f32, grid, "m", "Grid-scale relief of a cell (terrain.subgrid_statistics): the steady-state relief E l^2 / (2 D) of the erosion run's rate E and grid-scale hillslope diffusivity D over half the cell size l, at most the cell's local relief; 0 at sea") \
+    X(valley_spacing, geosphere, f32, grid, "km", "First-order valley spacing of Perron et al. 2009 (terrain.subgrid_statistics): c (D/K)^(1/(2 m_ref + 1)) m, D/K calibrated to a Table 1 site (terrain.subgrid.reference_*) and scaled per cell by K_A (erodibility x runoff^m_ref) relative to the reference, c terrain.subgrid.spacing_coefficient; a value equal to the cell size (sqrt of its area) means no sub-grid valleys resolved; 0 at sea and where no runoff or erodibility") \
     X(erosion_duration, geosphere, f32, scalar, "Myr", "Duration of the erosion run") \
     X(eroded_volume, geosphere, f32, scalar, "km3", "Volume eroded over the erosion run") \
     X(land_deposited_volume, geosphere, f32, scalar, "km3", "Volume deposited on land over the erosion run") \

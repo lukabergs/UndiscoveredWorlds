@@ -74,6 +74,9 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::arid_features, "terrain.arid_features", K::detailer, false, {}, {}, {}, {}, "" },
         { S::deltas_wetlands_and_roughness, "hydrology.deltas_and_wetlands", K::detailer, false, {}, {}, {}, {},
           "Also recomputes climate classes and biomes and writes the climate diagnostics. In an eroded world it clears the distributaries of hydrology.rivers when deltas are turned off (erosion plan C5b)." },
+        { S::subgrid_statistics, "terrain.subgrid_statistics", K::diagnoser, false, {}, {}, {}, {},
+          "The sub-grid statistics the regional levels reproduce (multiscale plan S3.6): the relief amplitude "
+          "and Perron's valley spacing from the erosion run's stream-power and hillslope laws, on the final terrain." },
         { S::finalize_layers, "layers.finalize", K::diagnoser, true, {}, {}, {}, {},
           "Physical resource layers, gold placers and optional society. In an eroded world it applies the erosion run's exhumation to the deposits, so it runs once per world." },
     };

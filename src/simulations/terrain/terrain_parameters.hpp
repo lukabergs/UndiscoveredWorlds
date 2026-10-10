@@ -52,6 +52,15 @@ inline int faultVariation = 3;
 inline int faultLookDistance = 4;
 }
 
+namespace subgrid
+{
+inline float spacingCoefficient = 8.0f;
+inline float referenceDOverK = 86.0f;
+inline float referenceM = 0.35f;
+inline float referenceRunoffMmYr = 400.0f;
+inline float referenceErodibility = 1.0f;
+}
+
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -93,6 +102,11 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "terrain.oceanridges.fault_step", &oceanridges::faultStep },
         { "terrain.oceanridges.fault_variation", &oceanridges::faultVariation },
         { "terrain.oceanridges.fault_look_distance", &oceanridges::faultLookDistance },
+        { "terrain.subgrid.spacing_coefficient", &subgrid::spacingCoefficient },
+        { "terrain.subgrid.reference_d_over_k", &subgrid::referenceDOverK },
+        { "terrain.subgrid.reference_m", &subgrid::referenceM },
+        { "terrain.subgrid.reference_runoff_mm_yr", &subgrid::referenceRunoffMmYr },
+        { "terrain.subgrid.reference_erodibility", &subgrid::referenceErodibility },
     };
     return entries;
 }

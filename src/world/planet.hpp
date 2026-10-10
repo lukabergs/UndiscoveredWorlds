@@ -571,6 +571,11 @@ public:
     worldgrid<float>& glaciation() { return cryosphere_.glaciationmap; }
     const worldgrid<float>& icethickness() const { UW_FIELD_READ(ice_thickness); return cryosphere_.icethicknessmap; }
     worldgrid<float>& icethickness() { return cryosphere_.icethicknessmap; }
+    // Multiscale plan S3.6: the sub-grid statistics of terrain.subgrid_statistics (m, km).
+    const worldgrid<float>& reliefamplitude() const { UW_FIELD_READ(relief_amplitude); return geosphere_.reliefamplitudemap; }
+    worldgrid<float>& reliefamplitude() { return geosphere_.reliefamplitudemap; }
+    const worldgrid<float>& valleyspacing() const { UW_FIELD_READ(valley_spacing); return geosphere_.valleyspacingmap; }
+    worldgrid<float>& valleyspacing() { return geosphere_.valleyspacingmap; }
     float radius() const { UW_FIELD_READ(radius); return body_.itsradius_m; }
     void setradius(float amount) { body_.itsradius_m = amount; }
     float erosionduration() const { UW_FIELD_READ(erosion_duration); return geosphere_.itserosionduration; }

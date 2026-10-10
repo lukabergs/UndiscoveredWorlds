@@ -4,6 +4,7 @@ add_library(uw_terrain STATIC
     fluvial_erosion.cpp
     import_elements.cpp
     shape_templates.cpp
+    subgrid_statistics.cpp
     surface_potentials.cpp
     terrain_coasts.cpp
     terrain_craters.cpp

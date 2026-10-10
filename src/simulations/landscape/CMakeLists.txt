@@ -32,6 +32,7 @@ add_library(uw_landscape STATIC
     sphere_metric.cpp
     spherical_noise.cpp
     stream_power.cpp
+    subgrid_statistics.cpp
     upsampling.cpp
 )
 target_link_libraries(uw_landscape PUBLIC uw_includes PRIVATE uw_core)

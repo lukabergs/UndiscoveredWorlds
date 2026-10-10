@@ -269,8 +269,10 @@ WorldRecipe proceduralworldrecipe()
     appendsteps(recipe.steps, { S::flow_routing }, "after-climate");
     appendsteps(recipe.steps, { S::rivers });
     appendsteps(recipe.steps, { S::lake_levels }, "after-climate");
+    // terrain.subgrid_statistics (multiscale plan S3.6) after the last step that edits the base
+    // elevation, so that its local-relief bound is the final terrain's.
     appendsteps(recipe.steps, { S::mountain_temperature_lapse, S::climates_and_biomes, S::arid_features,
-                                S::deltas_wetlands_and_roughness, S::finalize_layers });
+                                S::deltas_wetlands_and_roughness, S::subgrid_statistics, S::finalize_layers });
     recipe.inputs = worldpropertyinputs();
     // hydrology.lake_levels reads the imported lake mask: all zero in a procedural world.
     recipe.inputs.push_back(FieldId::imported_lake);

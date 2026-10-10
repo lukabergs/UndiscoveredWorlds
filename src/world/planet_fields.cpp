@@ -143,6 +143,8 @@ struct planetfieldaccess
         case FieldId::aggradation: return op.grid(id, world.geosphere_.aggradationmap);
         case FieldId::prograded: return op.grid(id, world.geosphere_.progradedmap);
         case FieldId::glacial_denudation: return op.grid(id, world.geosphere_.glacialdenudationmap);
+        case FieldId::relief_amplitude: return op.grid(id, world.geosphere_.reliefamplitudemap);
+        case FieldId::valley_spacing: return op.grid(id, world.geosphere_.valleyspacingmap);
         case FieldId::equilibrium_line_altitude: return op.grid(id, world.cryosphere_.equilibriumlinemap);
         case FieldId::glaciation: return op.grid(id, world.cryosphere_.glaciationmap);
         case FieldId::ice_thickness: return op.grid(id, world.cryosphere_.icethicknessmap);

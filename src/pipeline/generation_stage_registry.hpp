@@ -48,6 +48,7 @@ enum class GenerationStageId
     climates_and_biomes,
     arid_features,
     deltas_wetlands_and_roughness,
+    subgrid_statistics,
     finalize_layers
 };
 
