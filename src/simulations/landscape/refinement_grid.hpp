@@ -55,16 +55,21 @@ inline int levelofscale(std::int64_t scale, int factor)
 constexpr int channelreachglobalcells = 2;
 
 // The halo of level L >= 1 in parent cells for a target whose halo is targethalo global
-// cells: targethalo + channelreachglobalcells (factor^(L - 1) - 1). Level 1 takes
-// targethalo (today's single-scale domain); deeper levels keep the block-mean passes' reach
-// of 2 parent cells per pass (targethalo - 2 of it) and the channels' reach of 2 global
-// cells (factor 4: level 2 targethalo + 6, level 3 targethalo + 30). Level 0: 0 (the global
-// fields are given, not computed).
+// cells: factor^(L - 1) (channelreachglobalcells + ceil((targethalo -
+// channelreachglobalcells) / factor^(L - 1))), a whole number of global cells at every
+// level. The pre-smoothing's reach (targethalo - 2 parent cells at level 1, the
+// 2 x meanpasses + 2 rule), rounded up to whole global cells, plus the channels' and the
+// solve's 2 global cells. Level 1 takes targethalo (today's single-scale domain); factor 4,
+// targethalo 16: level 2 24 parent cells (6 global cells), level 3 48 (3 global cells).
+// Level 0: 0 (the global fields are given, not computed).
 inline int levelhalo(int targethalo, int factor, int level)
 {
     if (level < 1)
         return 0;
-    return targethalo + channelreachglobalcells * static_cast<int>(levelscale(factor, level - 1) - 1);
+    const std::int64_t scale = levelscale(factor, level - 1);
+    const std::int64_t excess = targethalo - channelreachglobalcells;
+    const std::int64_t globalcells = excess >= 0 ? (excess + scale - 1) / scale : -(-excess / scale);  // ceil
+    return static_cast<int>(scale * (channelreachglobalcells + globalcells));
 }
 
 // The absolute key of level cell (column, row) on a level grid of levelwidth columns:
@@ -181,8 +186,9 @@ LevelSpan snapoutwards(LevelSpan span, int factor);
 // global.column0 s_L, columns = global.columns s_L, row0 = global.row0 s_L, rows =
 // global.rows s_L (whole global cells are whole parent cells at every level), halo =
 // levelhalo(global.halo, factor, level) parent cells (at level 1 global.halo: the domain is
-// the global window's domain; at level L >= 2 it reaches channelreachglobalcells + (global.halo
-// - channelreachglobalcells) / factor^(L - 1) global cells; at level 0 halo 0), the domain by
+// the global window's domain; at level L >= 2 it reaches channelreachglobalcells +
+// ceil((global.halo - channelreachglobalcells) / factor^(L - 1)) global cells; at level 0
+// halo 0), the domain by
 // the rule of LevelWindow. global.scale is not read. Throws std::invalid_argument when
 // factor < 2, level < 0, global is not a window of regionalwindow's rules (worldwidth
 // >= 4 and even, worldheight = worldwidth / 2, the kept box inside the grid, halo >= 0),
@@ -196,12 +202,13 @@ LevelWindow levelwindow(const RegionalWindow& global, int factor, int level);
 // spans the parent cells of c's domain widened by `reach` level-l cells on every side
 // (columns c.domaincolumn0 / factor - reach, count c.domaincolumns / factor + 2 reach;
 // rows c.domainrow0 / factor - reach, count c.domainrows / factor + 2 reach, then
-// clipped to 0 .. levelheight(l)), snapped outwards to whole level-(l - 1) cells by
-// snapoutwards, the column wrapped modulo levelwidth(l), rows clipped again to the grid;
-// its halo is levelhalo(target.halo, factor, l) parent cells and its domain follows by the
-// rule of LevelWindow.
-// Window 0 is built from window 1 the same way without the snap (level-0 cells have no
-// parent) and with halo 0: the global fields are given, not computed, so level 0's
+// clipped to 0 .. levelheight(l)), snapped outwards to whole global cells (multiples of
+// factor^l, as snapoutwards does for one factor), the column wrapped modulo levelwidth(l),
+// rows clipped again to the grid; its halo is levelhalo(target.halo, factor, l) parent
+// cells and its domain follows by the rule of LevelWindow. So every window of the chain
+// has its kept box and its domain in whole global cells (regionalwindowof).
+// Window 0 is built from window 1 the same way without the snap (level-0 cells are global
+// cells) and with halo 0: the global fields are given, not computed, so level 0's
 // domain is its kept box. `reach` is the parent cells the prolongation reads beyond a
 // child's parent cell (2 for upsampling.hpp's Catmull-Rom). So every level's domain lies
 // inside its parent's kept box, and the parent's halo protects that kept box from the
@@ -209,6 +216,15 @@ LevelWindow levelwindow(const RegionalWindow& global, int factor, int level);
 // level < 1 or reach < 0, and when a level's domain is wider than its grid (whole-planet
 // chains are not supported, as regionalwindow refuses a domain wider than the planet).
 std::vector<LevelWindow> halochain(const RegionalWindow& target, int factor, int level, int reach);
+
+// The RegionalWindow of a level window whose kept box and domain are whole global cells
+// (every window of a halo chain at level >= 1): scale = factor^level, worldwidth and
+// worldheight copied, the kept box and the domain in global cells (column0 =
+// window.column0 / scale, columns = window.columns / scale, likewise the rows and the
+// domain fields) and halo = halocells() / scale global cells, so its fine grid is the level
+// window's domain. Throws std::invalid_argument when level < 1, factor^level does not fit
+// an int, or a position, an extent or halocells() is not a multiple of factor^level.
+RegionalWindow regionalwindowof(const LevelWindow& window);
 
 // The extent of one level of a halo chain, for the run's report.
 struct HaloChainLevel
@@ -221,8 +237,8 @@ struct HaloChainLevel
     // domaincolumns - west - target.columns s_L, north = target.row0 s_L - domainrow0,
     // south = domainrows - north - target.rows s_L (smaller at a pole, where rows clip).
     // Each level's halo is levelhalo(target.halo, factor, level) parent cells, so the
-    // target level's own domain reaches channelreachglobalcells + (target.halo -
-    // channelreachglobalcells) / factor^(L - 1) global cells, and the coarser levels reach
+    // target level's own domain reaches channelreachglobalcells + ceil((target.halo -
+    // channelreachglobalcells) / factor^(L - 1)) global cells, and the coarser levels reach
     // further by the prolongation's reach and their own halos.
     int halo = 0;                           // the level's halo in parent cells
     double west_cells = 0.0, east_cells = 0.0, north_cells = 0.0, south_cells = 0.0;
