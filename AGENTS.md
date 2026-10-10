@@ -4,7 +4,7 @@ Procedural planetary simulation (terrain, tectonics, climate, hydrology, early s
 
 ## Working conventions
 
-- The prompt for the next session is printed in the chat, never saved in the plan or another document (user, 2026-10-08).
+- The prompt for the next session is printed in the chat, never saved in the plan or another document (user, 2026-10-08). One exception, asked by the user on 2026-10-10: `docs/architecture/multiscale-plan.md` is run by an orchestrating session that keeps its own handoff in its section 7 "Next"; the user restarts it by pointing a session there.
 - Before ending a phase or printing the prompt for the next one, write what the session learned where the next agent will read it (this file, the plan, the ledger, the guides, memory): nothing stays only in the conversation.
 - Work directly on `main`; uncommitted changes in the working tree are current work, so build on them and never reset, stash or revert them.
 - Never link `refs/` (or any data directory) into a git worktree, and never remove a worktree that may hold a link: a recursive delete follows junctions (2026-10-07, most of `refs/processed` lost). Workers read `refs/` by absolute path; `D:/dev/bak` holds the copy of `refs/` and the other untracked data (`scripts/uwtools/backup.py`).
