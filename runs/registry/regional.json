@@ -105,6 +105,76 @@
       "run": "runs/regional/15",
       "date": "2026-10-09T18:08:40+00:00",
       "label": "wide window around A and B, k 4 (Phase E5; run 11 before)"
+    },
+    {
+      "id": 16,
+      "status": "complete",
+      "run": "runs/regional/16",
+      "date": "2026-10-10T04:20:02+00:00",
+      "label": "multiscale S2.6: window A, k 4, factor 4"
+    },
+    {
+      "id": 17,
+      "status": "complete",
+      "run": "runs/regional/17",
+      "date": "2026-10-10T04:20:05+00:00",
+      "label": "multiscale S2.6: window B, k 4, factor 4"
+    },
+    {
+      "id": 18,
+      "status": "complete",
+      "run": "runs/regional/18",
+      "date": "2026-10-10T04:20:07+00:00",
+      "label": "multiscale S2.6: window C, k 4, factor 4"
+    },
+    {
+      "id": 19,
+      "status": "complete",
+      "run": "runs/regional/19",
+      "date": "2026-10-10T04:20:11+00:00",
+      "label": "multiscale S2.6: window A, k 16, factor 4"
+    },
+    {
+      "id": 20,
+      "status": "complete",
+      "run": "runs/regional/20",
+      "date": "2026-10-10T04:20:16+00:00",
+      "label": "multiscale S2.6: window B, k 16, factor 4"
+    },
+    {
+      "id": 21,
+      "status": "complete",
+      "run": "runs/regional/21",
+      "date": "2026-10-10T04:20:22+00:00",
+      "label": "multiscale S2.6: window C, k 16, factor 4"
+    },
+    {
+      "id": 22,
+      "status": "complete",
+      "run": "runs/regional/22",
+      "date": "2026-10-10T04:20:37+00:00",
+      "label": "multiscale S2.6: window A, k 16, factor 2"
+    },
+    {
+      "id": 23,
+      "status": "complete",
+      "run": "runs/regional/23",
+      "date": "2026-10-10T04:20:42+00:00",
+      "label": "multiscale S2.6: window B, k 16, factor 2"
+    },
+    {
+      "id": 24,
+      "status": "complete",
+      "run": "runs/regional/24",
+      "date": "2026-10-10T04:20:49+00:00",
+      "label": "multiscale S2.6: window C, k 16, factor 2"
+    },
+    {
+      "id": 25,
+      "status": "complete",
+      "run": "runs/regional/25",
+      "date": "2026-10-10T04:21:25+00:00",
+      "label": "multiscale S2.6: window A, k 64, factor 4"
     }
   ]
 }
