@@ -22,6 +22,7 @@
 #include "simulations/landscape/regional_glacial.hpp"
 #include "simulations/landscape/regional_grid.hpp"
 #include "simulations/landscape/regional_surface.hpp"
+#include "simulations/landscape/regional_tributaries.hpp"
 #include "simulations/landscape/regional_types.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/regional_water.hpp"
@@ -62,10 +63,18 @@ struct RegionalFields
     int sharemisses = 0;
 };
 
+// The single pass's smallest halo in global cells: 2 x meanpasses + 2 (the block-mean
+// correction reaches 2 global cells per pass; two more keep the channels and the solve's edge
+// out of the kept window), plus tributaryreach (regional_tributaries.hpp; the single pass's
+// parent cell is the global cell) when the tributaries are on (multiscale plan S3.3).
+constexpr int regionalhalo(int meanpasses, bool tributaries)
+{
+    return 2 * meanpasses + 2 + (tributaries ? tributaryreach : 0);
+}
+
 // Throws std::invalid_argument when the window is not on the inputs' grid, a global
 // field has the wrong size, the radius is not positive, the sea level not finite, or
-// window.halo < 2 x meanpasses + 2 (the block-mean correction reaches 2 global cells
-// per pass; two more keep the channels and the solve's edge out of the kept window);
+// window.halo < regionalhalo(meanpasses, tributaries.enabled != 0);
 // rasterisechannels and solveanalyticalrelief throw on their own bad inputs.
 // runregionalpass is checkregionalinputs, regionalwarp, globalincision, regionallevelsteps
 // (whose noise step is regionalstartsurface) and finishregionallevel in that order.
@@ -190,6 +199,7 @@ struct LevelState : RegionalLevel
                                          // channel cells' means kept, the parent's lift not added; solvelevel)
     int tributaries = 0;                 // tributarieslevel's count (0: none)
     int tributarycells = 0;              // the domain cells its tributaries pinned
+    int tributarybedsabove = 0;          // of them, those whose bed stands above state.surface_m (S3.3: 0 by rule)
     // Refinement loop only (empty in the single pass):
     ProjectionBounds bounds;             // smoothinglevel's, rebuilt after the smoothing; projectionlevel's
     std::vector<float> ownlake_m;        // the own global lake cell's surface per cell (projectionbounds' ownlake_m)

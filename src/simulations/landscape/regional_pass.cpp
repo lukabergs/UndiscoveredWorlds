@@ -112,8 +112,10 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     // two cells kept here leave the solve one global cell between a kept cell and the
     // pinned cells it depends on (Phase E allowed it two). As in Phase E, the overlap
     // tests at this smallest halo (k 4, 5 and 8, low relief) are what establish it.
-    if (parameters.meanpasses < 0 || window.halo < 2 * parameters.meanpasses + 2)
-        throw std::invalid_argument("runregionalpass: the halo must be at least 2 x meanpasses + 2 global cells");
+    // Multiscale plan S3.3: with tributaries on, tributaryreach more (regionalhalo).
+    if (parameters.meanpasses < 0 || window.halo < regionalhalo(parameters.meanpasses, parameters.tributaries.enabled != 0))
+        throw std::invalid_argument("runregionalpass: the halo must be at least 2 x meanpasses + 2 global cells (plus "
+                                    "tributaryreach with tributaries on)");
 
     // 1. The warp (regional_surface.hpp) and the incision (regional_valleys.hpp); the start
     // surface is the noise step's (regionalstartsurface).

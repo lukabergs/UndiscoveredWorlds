@@ -154,18 +154,21 @@ struct ValleyParameters
     double reach_km = 0.0;
 };
 
-// Tributaries per level (multiscale plan S3.3, regional_tributaries.hpp; contract of S3.0, not
-// read yet): grown from the level's channels, hashed by the absolute key, Hack-law lengths in
-// [2 level cells, one parent cell), junction angles, Strahler order; the density target is
-// spacing_km until S3.6's valley-spacing field. enabled 0: no tributaries (the S2 pass exactly).
+// Tributaries per level (multiscale plan S3.3, regional_tributaries.hpp): grown from the level's
+// channels, hashed by the absolute key, Hack-law lengths in [2 level cells, one parent cell),
+// junction angles, Strahler order as the growth priority; the density target is spacing_km until
+// S3.6's valley-spacing field. enabled 0: no tributaries (the S2 pass exactly); enabled 1 also
+// widens the halo rules by tributaryreach (regional_tributaries.hpp).
 struct TributaryParameters
 {
     int enabled = 0;
     double spacing_km = 0.13;            // the target valley spacing on the ground (Perron et al. 2009: 30 to 320 m)
     double hackexponent = 0.57;          // h in L = C A^h (0.55 to 0.7, Tarboton 1996)
     double hackcoefficient = 1.27;       // C in km per km2^h
-    double junctionangle_deg = 72.0;     // the mean angle between a tributary and its receiving channel
-    double bifurcationratio = 4.0;       // tributaries of order o per tributary of order o + 1 (3 to 5)
+    double junctionangle_deg = 72.0;     // the mean angle between a tributary and its receiving channel's upstream
+    double anglespread = 0.2;            // the angle is the mean x (1 + anglespread x a hashed value in [-1, 1))
+    double nodemargin = 0.25;            // an inherited node lies floor(nodemargin x factor) cells inside its parent cell
+    double lengthminfraction = 0.75;     // the target length is the capped Hack length x [lengthminfraction, 1)
 };
 
 // Glacial troughs (Phase E5, step E5.1, regional_troughs.hpp): a land channel cell of a

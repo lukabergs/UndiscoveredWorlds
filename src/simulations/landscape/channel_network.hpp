@@ -116,7 +116,8 @@ struct FineChannels
     std::vector<float> discharge_m3s;    // the upstream global cell's discharge
     std::vector<int32_t> januaryflow;    // the upstream global cell's legacy flows
     std::vector<int32_t> julyflow;
-    std::vector<int32_t> globalcell;     // the upstream global cell's index, -1 off the network
+    std::vector<int32_t> globalcell;     // the upstream global cell's index, -1 off the network and on the
+                                         // tributaries (regional_tributaries.hpp: a channel cell with -1 is one)
 };
 
 // Phase R, R1 (empty vectors keep the rules without them): `start_m` is the regional

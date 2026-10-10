@@ -344,9 +344,10 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         throw std::invalid_argument("runrefinement: refinement.parent_lift must be 0, 1 or 2");
     if (!std::isfinite(refinement.channelcellslope) || refinement.channelcellslope < 0.0)
         throw std::invalid_argument("runrefinement: refinement.channel_cell_slope must be finite and not negative");
-    if (parameters.meanpasses < 0 || target.window.halo < refinementhalo(parameters.meanpasses, refinement.smoothpasses))
+    if (parameters.meanpasses < 0 || target.window.halo < refinementhalo(parameters.meanpasses, refinement.smoothpasses,
+                                                                                         parameters.tributaries.enabled != 0))
         throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 + 2 x smooth_passes + "
-                                    "2 (the lake flood) global cells");
+                                    "2 (the lake flood) global cells, plus tributaryreach with tributaries on");
     std::int64_t finest = 1;
     for (int level = 0; level < levels; level++)
     {
@@ -543,6 +544,7 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         // cell boundaries, the land roughness; the tributaries are tributarieslevel's.
         diagnostics.tributaries = state.tributaries;
         diagnostics.tributarycells = state.tributarycells;
+        diagnostics.tributarybedsabove = state.tributarybedsabove;
         {
             const std::int64_t scale = level.scale();
             const auto boundary = [scale](std::int64_t absolute) { return ((absolute % scale) + scale) % scale == 0; };

@@ -188,7 +188,9 @@ inline float tributarySpacingKm = 0.13f;
 inline float tributaryHackExponent = 0.57f;
 inline float tributaryHackCoefficient = 1.27f;
 inline float tributaryJunctionAngleDeg = 72.0f;
-inline float tributaryBifurcationRatio = 4.0f;
+inline float tributaryAngleSpread = 0.2f;
+inline float tributaryNodeMargin = 0.25f;
+inline float tributaryLengthMinFraction = 0.75f;
 }
 
 namespace refinement
@@ -333,7 +335,9 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.tributary_hack_exponent", &regional::tributaryHackExponent },
         { "landscape.regional.tributary_hack_coefficient", &regional::tributaryHackCoefficient },
         { "landscape.regional.tributary_junction_angle_deg", &regional::tributaryJunctionAngleDeg },
-        { "landscape.regional.tributary_bifurcation_ratio", &regional::tributaryBifurcationRatio },
+        { "landscape.regional.tributary_angle_spread", &regional::tributaryAngleSpread },
+        { "landscape.regional.tributary_node_margin", &regional::tributaryNodeMargin },
+        { "landscape.regional.tributary_length_min_fraction", &regional::tributaryLengthMinFraction },
         { "landscape.refinement.factor", &refinement::factor },
         { "landscape.refinement.projection_weight_channel", &refinement::projectionWeightChannel },
         { "landscape.refinement.stored_scale_max", &refinement::storedScaleMax },

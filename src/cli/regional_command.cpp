@@ -409,10 +409,14 @@ int runregioncommand(const vector<string>& arguments)
     // smooth_passes + 2 global cells, 28 at the defaults; the single pass keeps regional.halo_cells.
     const int levels = landscape::levelofscale(options.scale, refinement.factor);
     const bool hierarchy = levels >= 1;
+    // With the tributaries on, both rules widen by landscape::tributaryreach (multiscale plan S3.3).
+    const bool tributaries = tuning::landscape::regional::tributaryEnabled != 0;
     const int halo = hierarchy ? std::max(tuning::landscape::regional::haloCells,
                                           landscape::refinementhalo(tuning::landscape::regional::meanPasses,
-                                                                    refinement.smoothpasses))
-                               : tuning::landscape::regional::haloCells;
+                                                                    refinement.smoothpasses, tributaries))
+                               : (tributaries ? std::max(tuning::landscape::regional::haloCells,
+                                                         landscape::regionalhalo(tuning::landscape::regional::meanPasses, true))
+                                              : tuning::landscape::regional::haloCells);
     landscape::RegionalWindow window;
     try
     {
@@ -548,7 +552,11 @@ int runregioncommand(const vector<string>& arguments)
              << projection.maxborderstep_m << " m, p99 " << projection.borderstep99_m << " m; beds moved in "
              << projection.bedsmovedparents << " parents, forced " << projection.forcedparents << " (largest "
              << projection.maxforcedmove_m << " m); dried cells " << level.driedcells << ", shores below lakes "
-             << level.shoresbelowlake << ", dry land below the sea level " << level.landbelowsea << '\n';
+             << level.shoresbelowlake << ", dry land below the sea level " << level.landbelowsea;
+        if (level.tributarycells > 0)  // multiscale plan S3.3 (tributaries on)
+            cout << "; tributaries: " << level.tributaries << " grown, " << level.tributarycells << " cells, "
+                 << level.tributarybedsabove << " beds above the start surface";
+        cout << '\n';
     }
     cout << "Regional bundle: " << options.bundlePath << '\n';
     return 0;

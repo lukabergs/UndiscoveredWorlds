@@ -186,7 +186,9 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.tributaries.hackexponent = regional::tributaryHackExponent;
     parameters.tributaries.hackcoefficient = regional::tributaryHackCoefficient;
     parameters.tributaries.junctionangle_deg = regional::tributaryJunctionAngleDeg;
-    parameters.tributaries.bifurcationratio = regional::tributaryBifurcationRatio;
+    parameters.tributaries.anglespread = regional::tributaryAngleSpread;
+    parameters.tributaries.nodemargin = regional::tributaryNodeMargin;
+    parameters.tributaries.lengthminfraction = regional::tributaryLengthMinFraction;
     parameters.troughs.width_km = regional::troughWidthKm;
     parameters.troughs.reference_km2 = regional::troughReferenceKm2;
     parameters.troughs.widthexponent = regional::troughWidthExponent;

@@ -105,8 +105,13 @@ constexpr int prolongationreach = 2;
 constexpr int lakefloodreach = 2;
 
 // The halo in global cells the loop requires: 2 x meanpasses + 2 (the single pass's rule), 2 x
-// smoothpasses (S2.7's smoothing) and lakefloodreach (S2.8).
-constexpr int refinementhalo(int meanpasses, int smoothpasses) { return 2 * meanpasses + 2 + 2 * smoothpasses + lakefloodreach; }
+// smoothpasses (S2.7's smoothing) and lakefloodreach (S2.8); with the tributaries on (S3.3),
+// tributaryreach more (regional_tributaries.hpp: parent cells; levelhalo turns the target's
+// extra global cells into at least as many parent cells at every level).
+constexpr int refinementhalo(int meanpasses, int smoothpasses, bool tributaries = false)
+{
+    return 2 * meanpasses + 2 + 2 * smoothpasses + lakefloodreach + (tributaries ? tributaryreach : 0);
+}
 
 // The steps of a level in their fixed order (section 3, "S2.3's level placement", item 5),
 // after the prolongation.
@@ -274,6 +279,7 @@ struct LevelDiagnostics
     double drainagedensity_per_km = 0.0;
     int tributaries = 0;
     int tributarycells = 0;
+    int tributarybedsabove = 0;          // domain tributary cells whose bed stands above the start surface (0 by rule)
     // S3.4: the lake edges (pairs of east-west or north-south neighbours in the kept box, one wet,
     // lake surface > 0, the other not) and the share of them on a global cell's boundary
     // (lakeedgealigned; about 1 / k_l for an edge that ignores the global grid, 1 for square lakes);
