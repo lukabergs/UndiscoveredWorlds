@@ -194,7 +194,7 @@ std::size_t finezone(const RegionalGlobalInputs& inputs, const std::vector<uint8
 
 FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const FineWarp& warp,
                      const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
-                     const FineChannels& channels, std::vector<float>& elevation_m)
+                     const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth)
 {
     const int width = inputs.width, height = inputs.height;
     const int k = window.scale;
@@ -361,7 +361,8 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
     // (surface minus the zone's base elevation), terrain_m) where the sum reaches minus the
     // zone's magnitude, and to at least the next float below the surface; a wet cell
     // already below its surface keeps its elevation. So no cell is lowered by more than
-    // 2 x terrain_m (it lay below the surface plus terrain_m).
+    // 2 x terrain_m (it lay below the surface plus terrain_m). With `globaldepth` (the
+    // refinement loop, multiscale plan S2.3) the depth is the global lake depth uncapped.
     for (std::size_t cell = 0; cell < count; cell++)
     {
         if (water3[cell] == 0)
@@ -373,7 +374,7 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
             continue;
         const double magnitude = std::fabs(static_cast<double>(lakemagnitude[lake]));
         double depth = std::max(0.0, static_cast<double>(level) - static_cast<double>(inputs.elevation_m[lake]));
-        if (terrain > 0.0)
+        if (terrain > 0.0 && !globaldepth)
             depth = std::min(depth, terrain);
         const double share = std::clamp(-lakesum[cell] / magnitude, 0.0, 1.0);
         elevation_m[cell] = std::min(std::nextafter(level, below), static_cast<float>(static_cast<double>(level) - share * depth));
@@ -450,10 +451,10 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
 
 FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const FineWarp& warp,
                         const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
-                        const FineChannels& channels, std::vector<float>& elevation_m)
+                        const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth)
 {
     if (!(parameters.shores.shorenoise > 0.0))
         return phaseewater(inputs, window, sea, channels, elevation_m);
-    return shorewater(inputs, window, warp, parameters, sea, channels, elevation_m);
+    return shorewater(inputs, window, warp, parameters, sea, channels, elevation_m, globaldepth);
 }
 }

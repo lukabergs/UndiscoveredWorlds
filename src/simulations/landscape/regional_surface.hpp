@@ -118,6 +118,23 @@ struct StartSurface
 StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                   const FineWarp& warp, const RegionalParameters& parameters);
 
+// The octave band of a refinement level (docs/architecture/multiscale-plan.md, section 3,
+// "S2.3's level placement", item 1), added in place to `surface_m`, the level's prolonged
+// elevation on the window's domain (window.scale = k_l, parentscale = k_(l-1), k_l a
+// multiple of parentscale and larger): Phase E's noise of regionalstartsurface's first
+// branch (seed, persistence, amplitude noiseamplitude_m + noiserelieffraction x the local
+// global relief upsampled at the level, taper over coastband_m plus that amplitude) with
+// 1 + floor(log2 k_l) octaves of the first wavelength 2 pi R / H, weighted only in the band
+// [longest / k_l, longest / k_(l-1)), so level l adds the octaves log2 k_(l-1) + 1 ..
+// log2 k_l with the seeds a single pass at k_l gives them, normalised over octaves
+// 0 .. log2 k_l (a function of the level, not of the finest level run); the taper reads
+// the prolonged elevation as the base. At parentscale 1 the band is regionalstartsurface's
+// at k_l. A pure function of the global fields, the seed and the fine cell's absolute
+// position. Throws std::invalid_argument when parentscale < 1, window.scale is not a
+// larger multiple of it, or surface_m does not cover the domain.
+void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& window, int parentscale,
+                   const RegionalParameters& parameters, std::vector<float>& surface_m);
+
 // The fine sea of the domain, by local rules only (no flood fill): a fine cell is
 // sea when its surface is at or below the sea level and its global cell or one of
 // the eight neighbours is sea (R8: where the gate allows it, regional_edges.hpp, seagate,

@@ -23,7 +23,7 @@ constexpr std::int64_t cirquesalt = 0x43495251;  // "CIRQ"
 
 void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
                   const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
-                  std::vector<float>& elevation_m)
+                  std::vector<float>& elevation_m, double bandlower, double bandupper)
 {
     if (!(parameters.cirques.radius_km > 0.0) || !glacial.active)
         return;
@@ -44,6 +44,8 @@ void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     const double radius = std::min(static_cast<double>(k), cirques.radius_km * 1000.0 / cell_m);
     if (!(radius > 0.0))
         return;
+    if (bandupper > 0.0 && (radius < bandlower || radius >= bandupper))
+        return;  // carved at another level of the refinement
     const int extent = static_cast<int>(std::floor(radius));
     const double radius2 = radius * radius;
     const float floorlevel = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());

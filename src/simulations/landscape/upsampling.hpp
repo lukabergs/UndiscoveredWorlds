@@ -11,6 +11,13 @@
 
 namespace landscape
 {
+// The Catmull-Rom spline through p0 .. p3 at t in [0, 1] between p1 and p2, in the
+// form p1 + t/2 (p2 - p0 + t (2 p0 - 5 p1 + 4 p2 - p3 + t (3 (p1 - p2) + p3 - p0))):
+// for four equal values every bracket is exactly 0, so a constant is reproduced
+// bit for bit. bicubic's kernel; the refinement's prolongation and parent-mean
+// correction use it too (refinement_levels.hpp).
+double catmullrom(double p0, double p1, double p2, double p3, double t);
+
 // Catmull-Rom bicubic interpolation of a W x H row-major global field at a point
 // in global cell units, where cell (i, j)'s centre is (i + 0.5, j + 0.5): the
 // column index wraps, the row index is clamped to 0 .. H - 1. Reproduces a field

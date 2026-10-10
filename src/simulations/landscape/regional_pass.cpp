@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "simulations/landscape/regional_cirques.hpp"
 #include "simulations/landscape/regional_glacial.hpp"
@@ -22,7 +23,9 @@
 // Phase R2 step R6 wired the incision and the valleys (regional_valleys.cpp), which R9
 // implemented with the solve's uplift term; Phase E5 step E5.0 wired the glacial forms
 // (regional_glacial.cpp, regional_troughs.cpp, regional_cirques.cpp, regional_ice.cpp),
-// inert at the defaults.
+// inert at the defaults. Multiscale plan step S2.3 split the pass into the parts the
+// refinement loop calls (regionallevelsteps, finishregionallevel), unchanged in order and
+// arithmetic.
 
 namespace landscape
 {
@@ -65,8 +68,7 @@ std::vector<T> cut(const std::vector<T>& domain, const RegionalWindow& window)
 }
 }
 
-RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
-                               const RegionalParameters& parameters)
+void checkregionalinputs(const RegionalGlobalInputs& inputs, const RegionalWindow& window)
 {
     const int width = inputs.width, height = inputs.height;
     if (width < 1 || height < 1 || window.worldwidth != width || window.worldheight != height || window.scale < 1)
@@ -90,6 +92,12 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     checkoptional(inputs.island, globalsize, "island");
     checkoptional(inputs.mountainisland, globalsize, "mountainisland");
     checkoptional(inputs.equilibriumline_m, globalsize, "equilibriumline_m");
+}
+
+RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                               const RegionalParameters& parameters)
+{
+    checkregionalinputs(inputs, window);
 
     // The block-mean correction reaches 2 global cells per pass beyond any fine cell it
     // changes, so the start surface and the fine sea agree between windows from
@@ -102,26 +110,36 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     if (parameters.meanpasses < 0 || window.halo < 2 * parameters.meanpasses + 2)
         throw std::invalid_argument("runregionalpass: the halo must be at least 2 x meanpasses + 2 global cells");
 
-    const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
-    const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
-    const double sealevel = static_cast<double>(inputs.sealevel);
-    const std::int64_t planetfinewidth = static_cast<std::int64_t>(width) * window.scale;
-
     // 1. The warp and the start surface (regional_surface.hpp).
     const FineWarp warp = regionalwarp(window, inputs.seed, parameters);
-    const StartSurface start = regionalstartsurface(inputs, window, warp, parameters);
-    const std::vector<float>& base = start.lapsebase_m;
-    std::vector<float> surface = start.start_m;
+    StartSurface start = regionalstartsurface(inputs, window, warp, parameters);
+    const GlobalIncision incision = globalincision(inputs, parameters);
+    RegionalLevel level = regionallevelsteps(inputs, window, parameters, warp, std::move(start), incision, RegionalDetails{});
+    return finishregionallevel(inputs, window, parameters, level);
+}
 
-    RegionalFields fields;
-    fields.window = window;
-    fields.blockmeanerror_m = start.blockmeanerror_m;
-    fields.sharepasses = start.sharepasses;
-    fields.sharemisses = start.sharemisses;
+RegionalLevel regionallevelsteps(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                                 const RegionalParameters& parameters, const FineWarp& warp, StartSurface start,
+                                 const GlobalIncision& incision, const RegionalDetails& details)
+{
+    const int width = inputs.width, height = inputs.height;
+    const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
+    const std::int64_t planetfinewidth = static_cast<std::int64_t>(width) * window.scale;
+    if (start.start_m.size() != count || start.lapsebase_m.size() != count)
+        throw std::invalid_argument("regionallevelsteps: the start surface must cover the window's domain");
+
+    RegionalLevel level;
+    level.blockmeanerror_m = start.blockmeanerror_m;
+    level.sharepasses = start.sharepasses;
+    level.sharemisses = start.sharemisses;
+    level.lapsebase_m = std::move(start.lapsebase_m);
+    std::vector<float> surface = std::move(start.start_m);
 
     // 2. The sea by local rules on the start surface (regional_surface.hpp), before the
     // channels (R1), so the channels end at the fine coast and never change the mask.
-    const std::vector<uint8_t> sea = regionalsea(inputs, window, warp, parameters, surface);
+    level.sea = regionalsea(inputs, window, warp, parameters, surface);
+    const std::vector<uint8_t>& sea = level.sea;
 
     // 3. The pinned channels: they end at their first fine sea cell, and their beds
     // follow the start surface's running minimum (channel_network.hpp). Beds are
@@ -130,7 +148,6 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     // with the incision active the bed law reads the network's incised filled elevations
     // and the start surface lowered by the upsampled incision, so the channels cut below
     // the land by the world's uplift over the elapsed time; inactive, the inputs as they are.
-    const GlobalIncision incision = globalincision(inputs, parameters);
     GlobalNetwork incisednetwork;
     std::vector<float> bedsurface;
     if (incision.active)
@@ -142,9 +159,10 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
         for (std::size_t cell = 0; cell < count; cell++)
             bedsurface[cell] = static_cast<float>(static_cast<double>(surface[cell]) - std::max(0.0f, fineincision[cell]));
     }
-    const FineChannels channels = rasterisechannels(window, incision.active ? incisednetwork : inputs.network,
-                                                    parameters.channels, inputs.sealevel,
-                                                    incision.active ? bedsurface : surface, sea);
+    level.channels = rasterisechannels(window, incision.active ? incisednetwork : inputs.network,
+                                       parameters.channels, inputs.sealevel,
+                                       incision.active ? bedsurface : surface, sea);
+    const FineChannels& channels = level.channels;
     for (std::size_t cell = 0; cell < count; cell++)
         if (channels.channel[cell] != 0 && sea[cell] == 0)
             surface[cell] = channels.bed_m[cell];
@@ -179,10 +197,11 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
         for (float& rate : solveinput.uplift_m_myr)
             rate = std::max(0.0f, rate);
     }
-    const AnalyticalReliefResult solved = solveanalyticalrelief(metric, solveinput, parameters.relief);
-    fields.reliefconverged = solved.converged;
-    fields.changedreceivers = solved.changedreceivers;
-    std::vector<float> elevation = surface;
+    AnalyticalReliefResult solved = solveanalyticalrelief(metric, solveinput, parameters.relief);
+    level.reliefconverged = solved.converged;
+    level.changedreceivers = solved.changedreceivers;
+    std::vector<float>& elevation = level.elevation_m;
+    elevation = surface;
     for (std::size_t cell = 0; cell < count; cell++)
         if (solveinput.pinned[cell] == 0)
             elevation[cell] = solved.elevation_m[cell];
@@ -202,26 +221,59 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
                 largest = std::max(largest, lowering);
                 cells++;
             }
-        fields.meanlowering_m = cells > 0 ? total / static_cast<double>(cells) : 0.0;
-        fields.maxlowering_m = largest;
+        level.meanlowering_m = cells > 0 ? total / static_cast<double>(cells) : 0.0;
+        level.maxlowering_m = largest;
     }
+    level.solveddischarge_m3_yr = std::move(solved.discharge_m3_yr);
 
     // 4b. The valley floors around the channels (regional_valleys.hpp; R9, a no-op while
     // valley_floor_km is 0), after the solve's diagnostics and before the lakes, which
     // read the result.
-    carvevalleys(inputs, window, parameters, channels, sea, elevation);
+    const bool band = details.factor >= 2;
+    const double bandlower = band ? details.detailcells / 2.0 : 0.0;
+    const double bandupper = band ? details.detailcells * details.factor / 2.0 : 0.0;
+    if (details.valleys)
+        carvevalleys(inputs, window, parameters, channels, sea, elevation, bandlower, bandupper);
 
     // 4c. The glacial forms (Phase E5): the fine ELA and glaciation fields (inactive, and
     // no field read, unless a glacial feature is on: regional_glacial.hpp), then the
     // troughs (E5.1) and the cirques (E5.2), each a no-op at its defaults.
-    const FineGlacial glacial = regionalglacialfields(inputs, window, parameters);
-    carvetroughs(inputs, window, parameters, glacial, channels, sea, elevation);
-    carvecirques(inputs, window, parameters, glacial, channels, sea, elevation);
+    level.glacial = regionalglacialfields(inputs, window, parameters);
+    if (details.troughs)
+        carvetroughs(inputs, window, parameters, level.glacial, channels, sea, elevation, bandlower, bandupper);
+    if (details.cirques)
+        carvecirques(inputs, window, parameters, level.glacial, channels, sea, elevation, bandlower, bandupper);
 
-    // 5. Lakes and ice (regional_water.hpp); 5b. ice above the present ELA (E5.3, a no-op
-    // at its defaults), added to the ice of 5.
-    FineWater water = regionalwater(inputs, window, warp, parameters, sea, channels, elevation);
-    iceabovetheela(inputs, window, parameters, glacial, sea, elevation, water.icethickness_m);
+    // 5. Lakes and ice (regional_water.hpp).
+    level.water = regionalwater(inputs, window, warp, parameters, sea, channels, elevation, details.globallakedepth);
+    return level;
+}
+
+RegionalFields finishregionallevel(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                                   const RegionalParameters& parameters, RegionalLevel& level)
+{
+    const int width = inputs.width, height = inputs.height;
+    const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    if (level.elevation_m.size() != count || level.lapsebase_m.size() != count)
+        throw std::invalid_argument("finishregionallevel: the level's fields must cover the window's domain");
+    const std::vector<float>& base = level.lapsebase_m;
+    const std::vector<float>& elevation = level.elevation_m;
+    const FineChannels& channels = level.channels;
+
+    // 5b. Ice above the present ELA (E5.3, a no-op at its defaults), added to the ice of 5.
+    iceabovetheela(inputs, window, parameters, level.glacial, level.sea, elevation, level.water.icethickness_m);
+
+    RegionalFields fields;
+    fields.window = window;
+    fields.blockmeanerror_m = level.blockmeanerror_m;
+    fields.sharepasses = level.sharepasses;
+    fields.sharemisses = level.sharemisses;
+    fields.reliefconverged = level.reliefconverged;
+    fields.changedreceivers = level.changedreceivers;
+    fields.meanlowering_m = level.meanlowering_m;
+    fields.maxlowering_m = level.maxlowering_m;
 
     // 6.-7. Rivers and climate on the fine grid.
     const std::vector<float> januarytemperature = upsample(inputs.januarytemperature_c, width, height, window);
@@ -250,7 +302,7 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
                 julyflow[cell] = channels.julyflow[cell];
             }
             else
-                discharge[cell] = static_cast<float>(solved.discharge_m3_yr[cell] / secondsperyear);
+                discharge[cell] = static_cast<float>(level.solveddischarge_m3_yr[cell] / secondsperyear);
             // Heights above the sea level only (the climate's rule, climate_elevation.hpp):
             // a sea cell whose interpolated elevation is below the sea level keeps the
             // interpolated temperature exactly.
@@ -268,17 +320,17 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
 
     // 8. The kept window.
     fields.elevation_m = cut(elevation, window);
-    fields.sea = cut(sea, window);
+    fields.sea = cut(level.sea, window);
     fields.riverdirection = cut(riverdirection, window);
     fields.discharge_m3s = cut(discharge, window);
     fields.januaryflow = cut(januaryflow, window);
     fields.julyflow = cut(julyflow, window);
-    fields.lakesurface_m = cut(water.lakesurface_m, window);
+    fields.lakesurface_m = cut(level.water.lakesurface_m, window);
     fields.januarytemperature_c = cut(januarytemp, window);
     fields.julytemperature_c = cut(julytemp, window);
     fields.januaryprecipitation_mm = cut(januaryrain, window);
     fields.julyprecipitation_mm = cut(julyrain, window);
-    fields.icethickness_m = cut(water.icethickness_m, window);
+    fields.icethickness_m = cut(level.water.icethickness_m, window);
     fields.climate = cut(climate, window);
     return fields;
 }

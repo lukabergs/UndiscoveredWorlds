@@ -14,7 +14,7 @@ namespace landscape
 {
 void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
                   const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
-                  std::vector<float>& elevation_m)
+                  std::vector<float>& elevation_m, double bandlower, double bandupper)
 {
     const TroughParameters& troughs = parameters.troughs;
     if (!(troughs.width_km > 0.0) || !glacial.active)
@@ -60,6 +60,8 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
             const double halfwidth = std::min(widthmax, widthcells * std::pow(area / reference, troughs.widthexponent));
             if (!(halfwidth >= 1.0))
                 continue;  // under one fine cell: only the axis, which is a channel
+            if (bandupper > 0.0 && (halfwidth < bandlower || halfwidth >= bandupper))
+                continue;  // carved at another level of the refinement
             const int extent = std::min(k, static_cast<int>(std::floor(halfwidth)));
             const double bed = static_cast<double>(elevation_m[cell]);
             if (!std::isfinite(bed))

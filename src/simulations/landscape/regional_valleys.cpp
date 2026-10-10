@@ -168,7 +168,8 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
 }
 
 void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
-                  const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m)
+                  const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m,
+                  double bandlower, double bandupper)
 {
     const ValleyParameters& valleys = parameters.valleys;
     if (!(valleys.floor_km > 0.0))
@@ -198,6 +199,11 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
                 continue;
             const double discharge = std::max(0.0, static_cast<double>(channels.discharge_m3s[cell]));
             const double halfwidth = std::min(floormax, floorcells * std::sqrt(discharge / reference));
+            // The band (multiscale plan S2.3): the full width (the floor or the sides' reach,
+            // whichever is wider) decides the lower end, so a sub-cell floor with sides is
+            // carved; the floor half-width the upper end (under one parent cell).
+            if (bandupper > 0.0 && (std::max(halfwidth, static_cast<double>(reach)) < bandlower || halfwidth >= bandupper))
+                continue;  // carved at another level of the refinement
             const int extent = std::min(k, std::max(static_cast<int>(std::floor(halfwidth)), reach));
             if (extent < 1)
                 continue;

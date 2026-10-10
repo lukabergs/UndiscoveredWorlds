@@ -74,6 +74,13 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
 // the channels agree between windows from 2 x meanpasses + 1 global cells inside the
 // domain's edge, the kept window starts one cell further in. R9 keeps the overlap tests
 // bit-identical with the valleys on.
+// Multiscale plan S2.3 (the refinement loop): with bandupper > 0 a form is carved only where
+// its full width in fine cells, max(floor half-width, the sides' reach min(k, reachcells)), is
+// at least bandlower (detail_cells / 2: resolved) and its floor half-width below bandupper
+// (detail_cells x factor / 2: under one parent cell), so a sub-cell floor with sides is carved
+// at every level whose floor stays under one parent cell (each a minimum: it only refines);
+// bandupper 0 (the single pass) keeps the rule above.
 void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
-                  const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m);
+                  const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m,
+                  double bandlower = 0.0, double bandupper = 0.0);
 }

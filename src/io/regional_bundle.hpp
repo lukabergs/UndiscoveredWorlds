@@ -13,8 +13,10 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "io/run_bundle.hpp"
+#include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 
 namespace regionalbundle
@@ -40,6 +42,9 @@ struct Metadata
     std::optional<int> factor;             // refinement.factor
     std::optional<double> metresperpixel;  // a resampled output's requested metres per pixel
     std::optional<bool> resampled;         // true when the output is not a level grid
+    // A refinement's per-level diagnostics (RefinementResult::levels, step S2.3): written as
+    // the diagnostics block's "levels" array only when not empty.
+    std::vector<landscape::LevelDiagnostics> levels;
 };
 
 // Throws std::invalid_argument when a field's size is not the kept window's fine grid,

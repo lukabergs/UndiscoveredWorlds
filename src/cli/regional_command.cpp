@@ -10,10 +10,13 @@
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include "io/regional_bundle.hpp"
 #include "pipeline/recipe_parameters.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
+#include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/regional/regional_inputs.hpp"
 #include "world/planet.hpp"
@@ -32,7 +35,10 @@ void printregionusage(ostream& out)
     out << "                           top-left cell (column from the west edge at -180 degrees, row from the north),\n";
     out << "                           x1,y1 the bottom-right cell, both inclusive; x0 > x1 crosses the date line.\n";
     out << "                           Exactly one of --window and --pixels.\n";
-    out << "  --scale <k>             Fine cells per global cell edge, a whole number >= 1 (required).\n";
+    out << "  --scale <k>             Fine cells per global cell edge, a whole number >= 1 (required). A power of\n";
+    out << "                           landscape.refinement.factor (4, 16, 64, ... at factor 4; at most\n";
+    out << "                           refinement.stored_scale_max) runs the refinement hierarchy: log_factor k\n";
+    out << "                           levels, each projected exactly onto its parent; any other k one pass.\n";
     out << "  --bundle <dir>          The regional bundle (new or empty directory; required).\n";
     out << "  --set <name=value>, --parameters <file>  As for run (landscape.regional.* sets the pass,\n";
     out << "                           halo_cells the halo); the manifest records every value. The stream power\n";
@@ -348,13 +354,36 @@ int runregioncommand(const vector<string>& arguments)
         return 1;
     }
 
+    // A power of the refinement factor runs the hierarchy (multiscale plan S2.3); any other
+    // scale the single pass.
+    const landscape::RefinementParameters refinement = refinementparameters();
+    const int levels = landscape::levelofscale(options.scale, refinement.factor);
+    const bool hierarchy = levels >= 1;
+    if (hierarchy && options.scale > refinement.storedscalemax)
+    {
+        cerr << "region: --scale " << options.scale << " is above landscape.refinement.stored_scale_max ("
+             << refinement.storedscalemax << "), the finest scale written as a bundle.\n";
+        return 1;
+    }
+
     const landscape::RegionalGlobalInputs inputs = gatherregionalinputs(*world);
     const landscape::RegionalParameters parameters = regionalparameters(inputs.seed);
     landscape::RegionalFields fields;
+    vector<landscape::LevelDiagnostics> leveldiagnostics;
     const auto started = chrono::steady_clock::now();
     try
     {
-        fields = landscape::runregionalpass(inputs, window, parameters);
+        if (hierarchy)
+        {
+            landscape::LevelTarget target;
+            target.window = window;
+            target.level = levels;
+            landscape::RefinementResult refined = landscape::runrefinement(inputs, target, parameters, refinement);
+            fields = std::move(refined.fields);
+            leveldiagnostics = std::move(refined.levels);
+        }
+        else
+            fields = landscape::runregionalpass(inputs, window, parameters);
     }
     catch (const exception& error)
     {
@@ -387,6 +416,12 @@ int runregioncommand(const vector<string>& arguments)
     metadata.sourcemanifestsha256 = manifesthash;
     metadata.sourceseed = world->seed();
     metadata.sealevel = world->sealevel();
+    if (hierarchy)
+    {
+        metadata.level = levels;
+        metadata.factor = refinement.factor;
+        metadata.levels = leveldiagnostics;
+    }
     try
     {
         regionalbundle::writeregionalbundle(options.bundlePath, fields, metadata);
@@ -408,6 +443,19 @@ int runregioncommand(const vector<string>& arguments)
     else if (fields.sharemisses > 0)
         cout << "; land share not met: " << fields.sharemisses << " blocks missing after every pass";
     cout << '\n';
+    for (const landscape::LevelDiagnostics& level : leveldiagnostics)
+    {
+        const landscape::ProjectionReport& projection = level.projection;
+        cout << "Level " << level.level << " (" << level.cellsize_km << " km cells, domain " << level.window.domaincolumns
+             << " x " << level.window.domainrows << "): " << level.seconds << " s; block-mean error "
+             << level.blockmeanerror_m << " m after the presmoothing; parent-mean error " << projection.maxparentmeanerror_m
+             << " m (bound " << level.meanbound_m << " m), global-mean error " << level.globalmeanerror_m
+             << " m after the projection; lambda max " << projection.maxlambda_m << " m, border step max "
+             << projection.maxborderstep_m << " m, p99 " << projection.borderstep99_m << " m; beds moved in "
+             << projection.bedsmovedparents << " parents, forced " << projection.forcedparents << " (largest "
+             << projection.maxforcedmove_m << " m); dried cells " << level.driedcells << ", shores below lakes "
+             << level.shoresbelowlake << ", dry land below the sea level " << level.landbelowsea << '\n';
+    }
     cout << "Regional bundle: " << options.bundlePath << '\n';
     return 0;
 }

@@ -59,7 +59,10 @@ struct FineWater
 // - Beds: a wet cell with z >= S is lowered to S minus a depth growing from 0 where the sum
 //   is 0 to min(the global lake depth (S minus the zone's base elevation), D) where the sum
 //   reaches minus the zone's magnitude, and to at least the next float below S; a wet cell
-//   with z < S keeps z. So the lowering is below 2 D.
+//   with z < S keeps z. So the lowering is below 2 D. With `globaldepth` (the refinement
+//   loop, multiscale plan S2.3) the depth is the global lake depth S minus the zone's base
+//   elevation uncapped, so a deep global lake's fine bed reaches it; false (the single
+//   pass) keeps the cap.
 // - Shores: a dry fine cell (not sea, not a channel) at or below the level L, the highest
 //   surface of its wet 8-neighbours and of its own global cell if that is a lake cell, and
 //   at most D below it, is raised to L + (L - z) (mirrored about L), at least the next float
@@ -73,5 +76,5 @@ struct FineWater
 // only where its global cell is sea and iced.
 FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const FineWarp& warp,
                         const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
-                        const FineChannels& channels, std::vector<float>& elevation_m);
+                        const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth = false);
 }

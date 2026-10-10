@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
 // The projection, its error measure and the resample (step S2.2,
-// docs/architecture/multiscale-plan.md; contracts in the header, written in S0.4). A
+// docs/architecture/multiscale-plan.md; contracts in the header, written in S0.4; the
+// bounds that replaced S2.2's weights are S2.3's rework, plan section 3, "S2.3's projection
+// weights and detail levels"). A
 // parent's children are visited in row-major order of their absolute position: the
 // domain of a level window is whole parent cells and its columns never split a parent
 // across the date line (the level width is a multiple of factor), so the local order
@@ -84,6 +87,47 @@ KeptParents keptparents(const LevelWindow& level)
     return kept;
 }
 
+// A headroom in metres stored as a float no larger than the double value (so a child moved
+// by its whole headroom never passes its bound after the store), at least 0.
+float headroom(double metres)
+{
+    if (!(metres > 0.0))
+        return 0.0f;
+    float value = static_cast<float>(metres);
+    if (static_cast<double>(value) > metres)
+        value = std::nextafter(value, 0.0f);
+    return value;
+}
+
+// The headroom of a child at `value` whose stored result must stay at or above `floor`
+// (down) or at or below `ceiling` (up): the difference as a float, reduced while the stored
+// float(value -+ h) would pass the bound (the difference rounds when the bound is far smaller
+// in magnitude than the value, e.g. the next float above a sea level of 0); 0 if a few steps
+// do not suffice.
+float roomdown(double value, float floor)
+{
+    float room = headroom(value - static_cast<double>(floor));
+    for (int step = 0; step < 4 && room > 0.0f; step++)
+    {
+        if (static_cast<float>(value - static_cast<double>(room)) >= floor)
+            return room;
+        room = std::nextafter(room, 0.0f);
+    }
+    return room > 0.0f && static_cast<float>(value - static_cast<double>(room)) >= floor ? room : 0.0f;
+}
+
+float roomup(double value, float ceiling)
+{
+    float room = headroom(static_cast<double>(ceiling) - value);
+    for (int step = 0; step < 4 && room > 0.0f; step++)
+    {
+        if (static_cast<float>(value + static_cast<double>(room)) <= ceiling)
+            return room;
+        room = std::nextafter(room, 0.0f);
+    }
+    return room > 0.0f && static_cast<float>(value + static_cast<double>(room)) <= ceiling ? room : 0.0f;
+}
+
 double largestmeanerror(const LevelWindow& level, const std::vector<float>& field, const LevelWindow& parent,
                         const std::vector<float>& parentfield)
 {
@@ -96,38 +140,75 @@ double largestmeanerror(const LevelWindow& level, const std::vector<float>& fiel
 }
 }
 
-std::vector<float> projectionweights(const LevelWindow& window, const std::vector<std::uint8_t>& channel,
-                                     const std::vector<std::uint8_t>& sea, const std::vector<std::uint8_t>& lakebed,
-                                     double channelweight)
+ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<std::uint8_t>& channel,
+                                  const std::vector<std::uint8_t>& sea, const std::vector<float>& lakesurface_m,
+                                  const std::vector<float>& elevation_m, float sealevel, double channelrate,
+                                  const std::vector<float>& ownlake_m)
 {
     const std::size_t size = window.domainsize();
     if ((!channel.empty() && channel.size() != size) || (!sea.empty() && sea.size() != size) ||
-        (!lakebed.empty() && lakebed.size() != size))
-        throw std::invalid_argument("projectionweights: a non-empty mask must cover the window's domain");
-    if (!std::isfinite(channelweight) || channelweight < 0.0)
-        throw std::invalid_argument("projectionweights: the channel weight must be finite and not negative");
-    std::vector<float> weights(size, 1.0f);
-    for (std::size_t cell = 0; cell < size; cell++)
-    {
-        if ((!sea.empty() && sea[cell] != 0) || (!lakebed.empty() && lakebed[cell] != 0))
-            weights[cell] = 0.0f;
-        else if (!channel.empty() && channel[cell] != 0)
-            weights[cell] = static_cast<float>(channelweight);
-    }
-    return weights;
+        (!lakesurface_m.empty() && lakesurface_m.size() != size) || elevation_m.size() != size ||
+        (!ownlake_m.empty() && ownlake_m.size() != size))
+        throw std::invalid_argument("projectionbounds: every field must cover the window's domain");
+    if (!std::isfinite(channelrate) || channelrate < 0.0)
+        throw std::invalid_argument("projectionbounds: the channel rate must be finite and not negative");
+    const float infinity = std::numeric_limits<float>::infinity();
+    const float seabelow = std::nextafter(sealevel, -infinity);
+    const float seaabove = std::nextafter(sealevel, infinity);
+    auto wet = [&](std::size_t cell) {
+        return !lakesurface_m.empty() && lakesurface_m[cell] > 0.0f && (sea.empty() || sea[cell] == 0);
+    };
+    ProjectionBounds bounds;
+    bounds.rate.assign(size, 1.0f);
+    bounds.up_m.assign(size, infinity);
+    bounds.down_m.assign(size, infinity);
+    for (int y = 0; y < window.domainrows; y++)
+        for (int x = 0; x < window.domaincolumns; x++)
+        {
+            const std::size_t cell = window.index(x, y);
+            const double value = static_cast<double>(elevation_m[cell]);
+            if (!sea.empty() && sea[cell] != 0)
+                bounds.up_m[cell] = roomup(value, seabelow);
+            else if (wet(cell))
+                bounds.up_m[cell] = roomup(value, std::nextafter(lakesurface_m[cell], -infinity));
+            else
+            {
+                if (!channel.empty() && channel[cell] != 0)
+                    bounds.rate[cell] = static_cast<float>(channelrate);
+                // The floor: above the sea level and above the water beside the cell.
+                float level = -infinity;
+                if (!ownlake_m.empty() && ownlake_m[cell] > 0.0f)
+                    level = ownlake_m[cell];
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        const int nx = x + dx, ny = y + dy;
+                        if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= window.domaincolumns || ny >= window.domainrows)
+                            continue;
+                        if (wet(window.index(nx, ny)))
+                            level = std::max(level, lakesurface_m[window.index(nx, ny)]);
+                    }
+                const float floor = level > -infinity ? std::max(seaabove, std::nextafter(level, infinity)) : seaabove;
+                bounds.down_m[cell] = roomdown(value, floor);
+            }
+        }
+    return bounds;
 }
 
-ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& field, const std::vector<float>& weights,
+ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& field, const ProjectionBounds& bounds,
                               const LevelWindow& parent, const std::vector<float>& parentfield)
 {
     checkpair(level, field.size(), parent, parentfield.size(), "projectlevel");
-    if (weights.size() != level.domainsize())
-        throw std::invalid_argument("projectlevel: the weights must have the level's domain size");
-    for (const float weight : weights)
-        if (!std::isfinite(weight) || weight < 0.0f)
-            throw std::invalid_argument("projectlevel: a weight is negative or not finite");
+    const std::size_t size = level.domainsize();
+    if (bounds.rate.size() != size || bounds.up_m.size() != size || bounds.down_m.size() != size)
+        throw std::invalid_argument("projectlevel: the bounds must have the level's domain size");
+    for (std::size_t cell = 0; cell < size; cell++)
+        if (!std::isfinite(bounds.rate[cell]) || bounds.rate[cell] < 0.0f || std::isnan(bounds.up_m[cell]) ||
+            std::isnan(bounds.down_m[cell]) || bounds.up_m[cell] < 0.0f || bounds.down_m[cell] < 0.0f)
+            throw std::invalid_argument("projectlevel: a rate is negative or not finite, or a headroom negative or NaN");
 
     const int f = level.factor;
+    const int count = f * f;
     const double children = static_cast<double>(f) * f;
     const int pcolumns = level.domainparentcolumns(), prows = level.domainparentrows();
     const KeptParents kept = keptparents(level);
@@ -138,31 +219,102 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
     ProjectionReport report;
     report.parents = kept.columns * kept.rows;
     std::vector<double> lambda(static_cast<std::size_t>(pcolumns) * static_cast<std::size_t>(prows), 0.0);
-    // The correction d of every domain cell and whether its weight was positive.
-    std::vector<double> correction(level.domainsize(), 0.0);
-    std::vector<std::uint8_t> moved(level.domainsize(), 0);
+    // The shift of every domain cell and whether it moved (rated, or shifted by a fallback).
+    std::vector<double> correction(size, 0.0);
+    std::vector<std::uint8_t> moved(size, 0);
+    std::vector<std::size_t> cells(static_cast<std::size_t>(count));
+    std::vector<double> shift(static_cast<std::size_t>(count));
+    std::vector<int> active, next;
+    active.reserve(static_cast<std::size_t>(count));
+    next.reserve(static_cast<std::size_t>(count));
     for (int q = 0; q < prows; q++)
         for (int p = 0; p < pcolumns; p++)
         {
+            // The children in row-major absolute order.
+            int n = 0;
+            for (int y = q * f; y < (q + 1) * f; y++)
+                for (int x = p * f; x < (p + 1) * f; x++)
+                    cells[static_cast<std::size_t>(n++)] = level.index(x, y);
             const double lambdac = parentvalue(level, parent, parentfield, p, q) - childmean(level, field, p, q);
-            double sumw = 0.0;
-            for (int y = q * f; y < (q + 1) * f; y++)
-                for (int x = p * f; x < (p + 1) * f; x++)
-                    sumw += static_cast<double>(weights[level.index(x, y)]);
-            const bool allpinned = sumw == 0.0;
-            const double meanw = allpinned ? 1.0 : sumw / children;
-            if (allpinned && inkept(p, q))
-                report.allpinnedparents++;
-            for (int y = q * f; y < (q + 1) * f; y++)
-                for (int x = p * f; x < (p + 1) * f; x++)
+            std::fill(shift.begin(), shift.end(), 0.0);
+            if (lambdac != 0.0)
+            {
+                const bool up = lambdac > 0.0;
+                auto room = [&](int i) {
+                    const std::size_t cell = cells[static_cast<std::size_t>(i)];
+                    return static_cast<double>(up ? bounds.up_m[cell] : bounds.down_m[cell]);
+                };
+                auto rate = [&](int i) { return static_cast<double>(bounds.rate[cells[static_cast<std::size_t>(i)]]); };
+                double remainder = lambdac * children;
+                active.clear();
+                for (int i = 0; i < count; i++)
+                    if (rate(i) > 0.0 && room(i) > 0.0)
+                        active.push_back(i);
+                // The common shift, capped: each round the children whose headroom is below
+                // their share take it and leave; a round that caps none ends it.
+                while (!active.empty())
                 {
-                    const std::size_t cell = level.index(x, y);
-                    const double w = allpinned ? 1.0 : static_cast<double>(weights[cell]);
-                    const double d = lambdac * w / meanw;
-                    field[cell] = static_cast<float>(static_cast<double>(field[cell]) + d);
-                    correction[cell] = d;
-                    moved[cell] = w > 0.0 ? 1 : 0;
+                    double rates = 0.0;
+                    for (const int i : active)
+                        rates += rate(i);
+                    const double delta = remainder / rates;
+                    next.clear();
+                    for (const int i : active)
+                    {
+                        const double want = rate(i) * delta;
+                        if (std::fabs(want) >= room(i))
+                        {
+                            shift[static_cast<std::size_t>(i)] = up ? room(i) : -room(i);
+                            remainder -= shift[static_cast<std::size_t>(i)];
+                        }
+                        else
+                            next.push_back(i);
+                    }
+                    if (next.size() == active.size())
+                    {
+                        for (const int i : active)
+                            shift[static_cast<std::size_t>(i)] = rate(i) * delta;
+                        remainder = 0.0;
+                        active.clear();
+                    }
+                    else
+                        active.swap(next);
                 }
+                // The headrooms exhausted: the rest on the beds (the unrated children), or
+                // with none on every child, so the mean is exact.
+                if (remainder != 0.0)
+                {
+                    const bool counted = inkept(p, q) && std::fabs(remainder) > 1.0e-6 * children;
+                    int beds = 0;
+                    for (int i = 0; i < count; i++)
+                        beds += rate(i) > 0.0 ? 0 : 1;
+                    if (beds > 0)
+                    {
+                        for (int i = 0; i < count; i++)
+                            if (!(rate(i) > 0.0))
+                                shift[static_cast<std::size_t>(i)] += remainder / beds;
+                        report.bedsmovedparents += counted ? 1 : 0;
+                    }
+                    else
+                    {
+                        for (int i = 0; i < count; i++)
+                            shift[static_cast<std::size_t>(i)] += remainder / children;
+                        if (counted)
+                        {
+                            report.forcedparents++;
+                            report.maxforcedmove_m = std::max(report.maxforcedmove_m, std::fabs(remainder / children));
+                        }
+                    }
+                }
+            }
+            for (int i = 0; i < count; i++)
+            {
+                const std::size_t cell = cells[static_cast<std::size_t>(i)];
+                const double d = shift[static_cast<std::size_t>(i)];
+                field[cell] = static_cast<float>(static_cast<double>(field[cell]) + d);
+                correction[cell] = d;
+                moved[cell] = bounds.rate[cell] > 0.0f || d != 0.0 ? 1 : 0;
+            }
             lambda[static_cast<std::size_t>(q) * static_cast<std::size_t>(pcolumns) + static_cast<std::size_t>(p)] = lambdac;
         }
 

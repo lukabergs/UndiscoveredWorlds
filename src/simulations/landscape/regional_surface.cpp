@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 
 #include "core/deterministic_random.hpp"
 #include "simulations/landscape/regional_coast.hpp"
@@ -906,6 +907,51 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
         result.blockmeanerror_m = largest;
     }
     return result;
+}
+
+void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& window, int parentscale,
+                   const RegionalParameters& parameters, std::vector<float>& surface_m)
+{
+    const int width = inputs.width, height = inputs.height;
+    const int k = window.scale;
+    const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
+    if (parentscale < 1 || k <= parentscale || k % parentscale != 0)
+        throw std::invalid_argument("addlevelnoise: the level's scale must be a larger multiple of its parent's");
+    if (surface_m.size() != static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight))
+        throw std::invalid_argument("addlevelnoise: the surface must cover the window's domain");
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    // Phase E's noise (the first branch of regionalstartsurface), its band cut at the parent's scale.
+    FractalNoise noise;
+    noise.seed = deterministiccombine(inputs.seed, noisesalt);
+    noise.radius_km = inputs.radius_m / 1000.0;
+    const double longest = 2.0 * pi * inputs.radius_m / height / 1000.0;
+    noise.wavelength_km = longest;
+    noise.longest_km = longest / parentscale;
+    noise.shortest_km = longest / k;
+    noise.octaves = 1;
+    while ((1 << noise.octaves) <= k)
+        noise.octaves++;
+    noise.persistence = parameters.noisepersistence;
+    const FractalNoiseField field(noise);
+    if (field.resolved() == 0)
+        return;
+    const std::vector<float> relief = upsample(localrelief(inputs.elevation_m, width, height), width, height, window);
+    for (int y = 0; y < domainheight; y++)
+    {
+        const double latitude = window.finelatitude_rad(y);
+        for (int x = 0; x < domainwidth; x++)
+        {
+            const std::size_t cell = at(x, y, domainwidth);
+            double px = 0.0, py = 0.0, pz = 0.0;
+            unitvector(latitude, window.finelongitude_rad(x), px, py, pz);
+            const double amplitude =
+                parameters.noiseamplitude_m + parameters.noiserelieffraction * std::max(0.0, static_cast<double>(relief[cell]));
+            const double base = static_cast<double>(surface_m[cell]);
+            const double band = parameters.coastband_m + amplitude;
+            const double taper = band > 0.0 ? std::clamp(std::fabs(base - sealevel) / band, 0.0, 1.0) : 1.0;
+            surface_m[cell] = static_cast<float>(base + taper * amplitude * field.sum(px, py, pz) / field.normalisation());
+        }
+    }
 }
 
 std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const RegionalWindow& window,

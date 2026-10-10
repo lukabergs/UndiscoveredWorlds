@@ -304,7 +304,45 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                 << ", \"changedreceivers\": " << fields.changedreceivers
                 << ", \"meanlowering_m\": " << jsonnumber(fields.meanlowering_m)
                 << ", \"maxlowering_m\": " << jsonnumber(fields.maxlowering_m)
-                << ", \"sharepasses\": " << fields.sharepasses << ", \"sharemisses\": " << fields.sharemisses << "}";
+                << ", \"sharepasses\": " << fields.sharepasses << ", \"sharemisses\": " << fields.sharemisses;
+    // A refinement's levels (multiscale plan S2.3), only when there are any, so a single
+    // pass's block is the one written before them.
+    if (!metadata.levels.empty())
+    {
+        diagnostics << ", \"levels\": [";
+        for (std::size_t index = 0; index < metadata.levels.size(); index++)
+        {
+            const landscape::LevelDiagnostics& level = metadata.levels[index];
+            const landscape::ProjectionReport& projection = level.projection;
+            diagnostics << (index > 0 ? ", " : "") << "{\"level\": " << level.level
+                        << ", \"cellsize_km\": " << jsonnumber(level.cellsize_km)
+                        << ", \"kept_columns\": " << level.window.columns << ", \"kept_rows\": " << level.window.rows
+                        << ", \"domain_columns\": " << level.window.domaincolumns
+                        << ", \"domain_rows\": " << level.window.domainrows << ", \"halo\": " << level.window.halo
+                        << ", \"blockmeanerror_m\": " << jsonnumber(level.blockmeanerror_m)
+                        << ", \"parents\": " << projection.parents
+                        << ", \"maxparentmeanerror_m\": " << jsonnumber(projection.maxparentmeanerror_m)
+                        << ", \"globalmeanerror_m\": " << jsonnumber(level.globalmeanerror_m)
+                        << ", \"maxlambda_m\": " << jsonnumber(projection.maxlambda_m)
+                        << ", \"maxlambdastep_m\": " << jsonnumber(projection.maxlambdastep_m)
+                        << ", \"maxborderstep_m\": " << jsonnumber(projection.maxborderstep_m)
+                        << ", \"borderstep99_m\": " << jsonnumber(projection.borderstep99_m)
+                        << ", \"meanbound_m\": " << jsonnumber(level.meanbound_m)
+                        << ", \"bedsmovedparents\": " << projection.bedsmovedparents
+                        << ", \"forcedparents\": " << projection.forcedparents
+                        << ", \"maxforcedmove_m\": " << jsonnumber(projection.maxforcedmove_m)
+                        << ", \"driedcells\": " << level.driedcells << ", \"shoresbelowlake\": " << level.shoresbelowlake
+                        << ", \"landbelowsea\": " << level.landbelowsea
+                        << ", \"reliefconverged\": " << (level.reliefconverged ? "true" : "false")
+                        << ", \"changedreceivers\": " << level.changedreceivers
+                        << ", \"seconds\": " << jsonnumber(level.seconds) << ", \"steps\": [";
+            for (std::size_t step = 0; step < level.steps.size(); step++)
+                diagnostics << (step > 0 ? ", " : "") << runbundle::jsonstring(landscape::levelstepname(level.steps[step]));
+            diagnostics << "]}";
+        }
+        diagnostics << "]";
+    }
+    diagnostics << "}";
     manifest.blocks.push_back({"diagnostics", diagnostics.str()});
     writer.finish(manifest);
 }

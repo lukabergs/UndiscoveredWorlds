@@ -1,16 +1,133 @@
 #include "simulations/landscape/refinement_levels.hpp"
 
+#include <algorithm>
+#include <chrono>
+#include <climits>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
-// The cell size and the level assignment are step S0.4; the loop is step S2.3
-// (docs/architecture/multiscale-plan.md).
+#include "simulations/landscape/regional_surface.hpp"
+#include "simulations/landscape/regional_valleys.hpp"
+#include "simulations/landscape/upsampling.hpp"
+
+// The cell size and the level assignment are step S0.4; the prolongation, the parent-mean
+// correction and the loop are step S2.3 (docs/architecture/multiscale-plan.md, section 3,
+// "S2.3's level placement").
 
 namespace landscape
 {
 namespace
 {
 constexpr double pi = 3.14159265358979323846;
+
+std::size_t at(int x, int y, int width)
+{
+    return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+}
+
+// The interpolation position of a child at offset o (0 .. factor - 1) inside its parent:
+// t = (o + 0.5) / factor - 0.5 parent cells from the parent's centre; the stencil's second
+// point is the parent itself (lower 0) or its predecessor (lower -1, t < 0), at fraction
+// t or t + 1 between it and the next. A function of the offset only, so every window
+// interpolates a child alike.
+struct ChildOffsets
+{
+    std::vector<int> lower;
+    std::vector<double> fraction;
+};
+
+ChildOffsets childoffsets(int factor)
+{
+    ChildOffsets offsets;
+    offsets.lower.resize(static_cast<std::size_t>(factor));
+    offsets.fraction.resize(static_cast<std::size_t>(factor));
+    for (int o = 0; o < factor; o++)
+    {
+        const double t = (o + 0.5) / factor - 0.5;
+        offsets.lower[static_cast<std::size_t>(o)] = t < 0.0 ? -1 : 0;
+        offsets.fraction[static_cast<std::size_t>(o)] = t < 0.0 ? t + 1.0 : t;
+    }
+    return offsets;
+}
+
+void checkpair(const LevelWindow& parent, const LevelWindow& level, const char* name)
+{
+    if (level.level < 1 || level.factor < 2 || parent.level != level.level - 1 || parent.factor != level.factor ||
+        parent.worldwidth != level.worldwidth || parent.worldheight != level.worldheight)
+        throw std::invalid_argument(std::string(name) + ": the windows are not a level and its parent");
+}
+
+// The parent values over the parents of a level window's domain widened by `ring` parent
+// cells on every side: (domainparentcolumns() + 2 ring) x (domainparentrows() + 2 ring),
+// row-major; patch row r holds the parent row domainrow0 / factor - ring + r clamped to
+// the parent level's grid, patch column c the parent column domaincolumn0 / factor - ring + c
+// wrapped. Every value read lies in the parent window's kept box, or this throws.
+struct ParentPatch
+{
+    int columns = 0;
+    int rows = 0;
+    std::vector<float> values;
+};
+
+ParentPatch parentpatch(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level,
+                        int ring, const char* name)
+{
+    checkpair(parent, level, name);
+    if (parentfield.size() != parent.domainsize())
+        throw std::invalid_argument(std::string(name) + ": the parent field must hold the parent window's domain");
+    const int factor = level.factor;
+    const std::int64_t parentwidth = parent.levelwidth(), parentheight = parent.levelheight();
+    const std::int64_t column0 = level.domaincolumn0 / factor - ring;
+    const std::int64_t row0 = level.domainrow0 / factor - ring;
+    ParentPatch patch;
+    patch.columns = level.domainparentcolumns() + 2 * ring;
+    patch.rows = level.domainparentrows() + 2 * ring;
+    patch.values.resize(static_cast<std::size_t>(patch.columns) * static_cast<std::size_t>(patch.rows));
+    const int keptx = parent.keptcolumnoffset(), kepty = parent.keptrowoffset();
+    for (int r = 0; r < patch.rows; r++)
+    {
+        const std::int64_t row = std::clamp<std::int64_t>(row0 + r, 0, parentheight - 1);
+        const std::int64_t localrow = parent.localrow(row);
+        if (localrow < kepty || localrow >= kepty + parent.rows)
+            throw std::invalid_argument(std::string(name) + ": a parent row read lies outside the parent's kept box");
+        for (int c = 0; c < patch.columns; c++)
+        {
+            const int localcolumn = parent.localcolumn(wraplevel(column0 + c, parentwidth));
+            if (localcolumn < keptx || localcolumn >= keptx + parent.columns)
+                throw std::invalid_argument(std::string(name) + ": a parent column read lies outside the parent's kept box");
+            patch.values[at(c, r, patch.columns)] = parentfield[parent.index(localcolumn, static_cast<int>(localrow))];
+        }
+    }
+    return patch;
+}
+
+// The level's projected field averaged over every global cell of its kept box, against
+// the global elevation: the largest absolute difference.
+double globalmeanerror(const LevelWindow& window, const std::vector<float>& field, const RegionalGlobalInputs& inputs)
+{
+    const std::int64_t scale = window.scale();
+    const int s = static_cast<int>(scale);
+    const int x0 = window.keptcolumnoffset(), y0 = window.keptrowoffset();
+    const double cells = static_cast<double>(s) * static_cast<double>(s);
+    double largest = 0.0;
+    for (int r = 0; r < window.rows / s; r++)
+        for (int c = 0; c < window.columns / s; c++)
+        {
+            double sum = 0.0;
+            for (int y = y0 + r * s; y < y0 + (r + 1) * s; y++)
+                for (int x = x0 + c * s; x < x0 + (c + 1) * s; x++)
+                    sum += static_cast<double>(field[window.index(x, y)]);
+            const int column = static_cast<int>(wraplevel(window.column0 / scale + c, inputs.width));
+            const int row = static_cast<int>(window.row0 / scale + r);
+            const double global = static_cast<double>(inputs.elevation_m[at(column, row, inputs.width)]);
+            largest = std::max(largest, std::fabs(sum / cells - global));
+        }
+    return largest;
+}
 }
 
 double levelcellsize_km(double radius_m, int worldwidth, int factor, int level)
@@ -40,9 +157,278 @@ int detaillevel(double size_km, double detailcells, double radius_m, int worldwi
     return levels;
 }
 
-RefinementResult runrefinement(const RegionalGlobalInputs&, const LevelTarget&, const RegionalParameters&,
-                               const RefinementParameters&)
+std::vector<float> prolong(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level)
 {
-    throw std::logic_error("not implemented: S2.3");
+    const ParentPatch patch = parentpatch(parent, parentfield, level, prolongationreach, "prolong");
+    const int factor = level.factor;
+    const ChildOffsets offsets = childoffsets(factor);
+    std::vector<float> fine(level.domainsize());
+    for (int y = 0; y < level.domainrows; y++)
+    {
+        const std::size_t oy = static_cast<std::size_t>(y % factor);
+        const int rowbase = y / factor + prolongationreach + offsets.lower[oy];
+        const double ty = offsets.fraction[oy];
+        for (int x = 0; x < level.domaincolumns; x++)
+        {
+            const std::size_t ox = static_cast<std::size_t>(x % factor);
+            const int columnbase = x / factor + prolongationreach + offsets.lower[ox];
+            const double tx = offsets.fraction[ox];
+            double rows[4];
+            for (int b = 0; b < 4; b++)
+            {
+                const std::size_t base = static_cast<std::size_t>(rowbase - 1 + b) * static_cast<std::size_t>(patch.columns);
+                const auto value = [&](int a) {
+                    return static_cast<double>(patch.values[base + static_cast<std::size_t>(columnbase - 1 + a)]);
+                };
+                rows[b] = catmullrom(value(0), value(1), value(2), value(3), tx);
+            }
+            fine[level.index(x, y)] = static_cast<float>(catmullrom(rows[0], rows[1], rows[2], rows[3], ty));
+        }
+    }
+    return fine;
+}
+
+void correctparentmeans(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level,
+                        int passes, std::vector<float>& fine)
+{
+    const ParentPatch patch = parentpatch(parent, parentfield, level, 0, "correctparentmeans");
+    if (passes < 0 || fine.size() != level.domainsize())
+        throw std::invalid_argument("correctparentmeans: passes must not be negative and fine must cover the domain");
+    const int factor = level.factor;
+    const int columns = patch.columns, rows = patch.rows;
+    const bool wholeturn = static_cast<std::int64_t>(level.domaincolumns) >= level.levelwidth();
+    const ChildOffsets offsets = childoffsets(factor);
+    const double children = static_cast<double>(factor) * factor;
+    std::vector<float> residual(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows));
+    const auto column = [&](int c) { return wholeturn ? ((c % columns) + columns) % columns : std::clamp(c, 0, columns - 1); };
+    for (int pass = 0; pass < passes; pass++)
+    {
+        // The residual of every domain parent: the mean of its children, summed in row-major
+        // order (the absolute order inside a parent), minus the parent value.
+        for (int pr = 0; pr < rows; pr++)
+            for (int pc = 0; pc < columns; pc++)
+            {
+                double sum = 0.0;
+                for (int y = pr * factor; y < (pr + 1) * factor; y++)
+                    for (int x = pc * factor; x < (pc + 1) * factor; x++)
+                        sum += static_cast<double>(fine[level.index(x, y)]);
+                residual[at(pc, pr, columns)] =
+                    static_cast<float>(sum / children - static_cast<double>(patch.values[at(pc, pr, columns)]));
+            }
+        // Interpolated at the child centres (the two parents beyond the domain's edge take
+        // the nearest domain parent's residual) and subtracted.
+        for (int y = 0; y < level.domainrows; y++)
+        {
+            const std::size_t oy = static_cast<std::size_t>(y % factor);
+            const int rowbase = y / factor + offsets.lower[oy];
+            const double ty = offsets.fraction[oy];
+            for (int x = 0; x < level.domaincolumns; x++)
+            {
+                const std::size_t ox = static_cast<std::size_t>(x % factor);
+                const int columnbase = x / factor + offsets.lower[ox];
+                const double tx = offsets.fraction[ox];
+                double interpolated[4];
+                for (int b = 0; b < 4; b++)
+                {
+                    const std::size_t base = static_cast<std::size_t>(std::clamp(rowbase - 1 + b, 0, rows - 1)) *
+                                             static_cast<std::size_t>(columns);
+                    const auto value = [&](int a) {
+                        return static_cast<double>(residual[base + static_cast<std::size_t>(column(columnbase - 1 + a))]);
+                    };
+                    interpolated[b] = catmullrom(value(0), value(1), value(2), value(3), tx);
+                }
+                float& cell = fine[level.index(x, y)];
+                cell = static_cast<float>(static_cast<double>(cell) -
+                                          catmullrom(interpolated[0], interpolated[1], interpolated[2], interpolated[3], ty));
+            }
+        }
+    }
+}
+
+RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTarget& target,
+                               const RegionalParameters& parameters, const RefinementParameters& refinement)
+{
+    const int factor = refinement.factor, levels = target.level;
+    if (levels < 1 || factor < 2)
+        throw std::invalid_argument("runrefinement: the level must be at least 1 and the factor at least 2");
+    {
+        RegionalWindow check = target.window;
+        check.scale = 1;  // the target's scale is not read
+        checkregionalinputs(inputs, check);
+    }
+    if (parameters.meanpasses < 0 || target.window.halo < 2 * parameters.meanpasses + 2)
+        throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 global cells");
+    std::int64_t finest = 1;
+    for (int level = 0; level < levels; level++)
+    {
+        finest *= factor;
+        if (finest > INT_MAX)
+            throw std::invalid_argument("runrefinement: factor^level must fit an int");
+    }
+
+    const std::vector<LevelWindow> chain = halochain(target.window, factor, levels, prolongationreach);
+    const GlobalIncision incision = globalincision(inputs, parameters);
+    // Every detail unit runs at every level when its size key is above 0; each form is
+    // carved where its size in level cells lies in the band (RegionalDetails).
+    RegionalDetails details;
+    details.valleys = parameters.valleys.floor_km > 0.0;
+    details.troughs = parameters.troughs.width_km > 0.0;
+    details.cirques = parameters.cirques.radius_km > 0.0;
+    details.factor = factor;
+    details.detailcells = refinement.detailcells;
+    details.globallakedepth = true;
+    if (!std::isfinite(refinement.detailcells) || !(refinement.detailcells > 0.0))
+        throw std::invalid_argument("runrefinement: refinement.detail_cells must be positive and finite");
+
+    // Level 0: the global elevation on the chain's level-0 window.
+    std::vector<float> parentfield(chain[0].domainsize());
+    for (int y = 0; y < chain[0].domainrows; y++)
+        for (int x = 0; x < chain[0].domaincolumns; x++)
+            parentfield[chain[0].index(x, y)] =
+                inputs.elevation_m[at(static_cast<int>(chain[0].absolutecolumn(x)), static_cast<int>(chain[0].absoluterow(y)),
+                                      inputs.width)];
+
+    RefinementResult result;
+    RegionalLevel state;
+    RegionalWindow window;
+    int sharepasses = -1, sharemisses = 0;
+    for (int l = 1; l <= levels; l++)
+    {
+        const auto started = std::chrono::steady_clock::now();
+        const LevelWindow& level = chain[static_cast<std::size_t>(l)];
+        const LevelWindow& parent = chain[static_cast<std::size_t>(l - 1)];
+        window = regionalwindowof(level);
+        LevelDiagnostics diagnostics;
+        diagnostics.level = l;
+        diagnostics.cellsize_km = levelcellsize_km(inputs.radius_m, inputs.width, factor, l);
+        diagnostics.window = level;
+
+        // The start surface: level 1 the single-scale pass's (its warp, noise, coast decision
+        // and block means against the global grid); deeper levels the parent prolonged, the
+        // level's octave band added and the parent means corrected. The warp of a deeper level
+        // is only the sea gate's and the lakes' position warp.
+        const FineWarp warp = regionalwarp(window, inputs.seed, parameters);
+        StartSurface start;
+        if (l == 1)
+        {
+            start = regionalstartsurface(inputs, window, warp, parameters);
+            sharepasses = start.sharepasses;
+            sharemisses = start.sharemisses;
+        }
+        else
+        {
+            start.start_m = prolong(parent, parentfield, level);
+            addlevelnoise(inputs, window, static_cast<int>(levelscale(factor, l - 1)), parameters, start.start_m);
+            correctparentmeans(parent, parentfield, level, parameters.meanpasses, start.start_m);
+            start.blockmeanerror_m = levelparentmeanerror(level, start.start_m, parent, parentfield);
+            start.lapsebase_m = upsample(inputs.elevation_m, inputs.width, inputs.height, window);
+        }
+        diagnostics.blockmeanerror_m = start.blockmeanerror_m;
+        diagnostics.steps = {LevelStep::noiseoctave, LevelStep::presmoothing, LevelStep::coast};
+        if (incision.active)
+            diagnostics.steps.push_back(LevelStep::incision);
+        diagnostics.steps.push_back(LevelStep::channels);
+        diagnostics.steps.push_back(LevelStep::solve);
+        if (details.valleys)
+            diagnostics.steps.push_back(LevelStep::valleyfloors);
+        if (details.troughs || details.cirques)
+            diagnostics.steps.push_back(LevelStep::glacialforms);
+        diagnostics.steps.push_back(LevelStep::lakes);
+        state = regionallevelsteps(inputs, window, parameters, warp, std::move(start), incision, details);
+        diagnostics.reliefconverged = state.reliefconverged;
+        diagnostics.changedreceivers = state.changedreceivers;
+
+        // The projection by bounds: sea and wet cells may sink but not rise past their water,
+        // dry land may rise but not sink to the sea level or the water beside it (its own
+        // global lake cell's surface included), land channel beds take the channel rate.
+        const std::size_t count = level.domainsize();
+        std::vector<float>& elevation = state.elevation_m;
+        std::vector<float>& lakesurface = state.water.lakesurface_m;
+        std::vector<uint8_t> wet(count, 0);
+        for (std::size_t cell = 0; cell < count; cell++)
+            wet[cell] = lakesurface[cell] > 0.0f ? 1 : 0;
+        std::vector<float> ownlake(count, 0.0f);
+        for (int y = 0; y < level.domainrows; y++)
+            for (int x = 0; x < level.domaincolumns; x++)
+            {
+                const std::size_t global = at(level.globalcolumn(x), level.globalrow(y), inputs.width);
+                if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
+                    ownlake[level.index(x, y)] = inputs.lakesurface_m[global];
+            }
+        const ProjectionBounds bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation,
+                                                         inputs.sealevel, refinement.projectionweightchannel, ownlake);
+        diagnostics.projection = projectlevel(level, elevation, bounds, parent, parentfield);
+        diagnostics.steps.push_back(LevelStep::projection);
+
+        // After the projection: wet non-channel cells at or above their surface dried, dry
+        // cells at or below a wet neighbour's surface counted (kept box only).
+        const int keptx0 = level.keptcolumnoffset(), kepty0 = level.keptrowoffset();
+        const auto kept = [&](int x, int y) {
+            return x >= keptx0 && x < keptx0 + level.columns && y >= kepty0 && y < kepty0 + level.rows;
+        };
+        for (int y = 0; y < level.domainrows; y++)
+            for (int x = 0; x < level.domaincolumns; x++)
+            {
+                const std::size_t cell = level.index(x, y);
+                if (wet[cell] == 0 || state.channels.channel[cell] != 0 || elevation[cell] < lakesurface[cell])
+                    continue;
+                lakesurface[cell] = 0.0f;
+                if (kept(x, y))
+                    diagnostics.driedcells++;
+            }
+        for (int y = kepty0; y < kepty0 + level.rows; y++)
+            for (int x = keptx0; x < keptx0 + level.columns; x++)
+            {
+                const std::size_t cell = level.index(x, y);
+                if (lakesurface[cell] > 0.0f || state.sea[cell] != 0 || state.channels.channel[cell] != 0)
+                    continue;
+                bool below = false;
+                for (int dy = -1; dy <= 1 && !below; dy++)
+                    for (int dx = -1; dx <= 1 && !below; dx++)
+                    {
+                        const int nx = x + dx, ny = y + dy;
+                        if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= level.domaincolumns || ny >= level.domainrows)
+                            continue;
+                        const float surface = lakesurface[level.index(nx, ny)];
+                        below = surface > 0.0f && elevation[cell] <= surface;
+                    }
+                diagnostics.shoresbelowlake += below ? 1 : 0;
+            }
+        float largest = 0.0f;
+        for (int y = kepty0; y < kepty0 + level.rows; y++)
+            for (int x = keptx0; x < keptx0 + level.columns; x++)
+            {
+                const std::size_t cell = level.index(x, y);
+                largest = std::max(largest, std::fabs(elevation[cell]));
+                if (lakesurface[cell] <= 0.0f && state.sea[cell] == 0 && elevation[cell] <= inputs.sealevel)
+                    diagnostics.landbelowsea++;
+            }
+        diagnostics.meanbound_m = largest > 0.0f ? std::ldexp(1.0, std::ilogb(largest) - 24) : 0.0;
+        diagnostics.globalmeanerror_m = globalmeanerror(level, elevation, inputs);
+
+        if (l < levels)
+        {
+            std::vector<float> keptfield(level.keptsize());
+            for (int y = 0; y < level.rows; y++)
+                for (int x = 0; x < level.columns; x++)
+                    keptfield[at(x, y, level.columns)] = elevation[level.index(keptx0 + x, kepty0 + y)];
+            result.coarserelevation_m.push_back(std::move(keptfield));
+            parentfield = std::move(elevation);
+        }
+        else
+            diagnostics.steps.push_back(LevelStep::ice);
+        diagnostics.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        result.levels.push_back(std::move(diagnostics));
+    }
+
+    // The ice above the ELA, the rivers and the climate at the final level.
+    const auto started = std::chrono::steady_clock::now();
+    result.fields = finishregionallevel(inputs, window, parameters, state);
+    result.levels.back().seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    result.fields.window = target.window;
+    result.fields.window.scale = static_cast<int>(finest);
+    result.fields.sharepasses = sharepasses;
+    result.fields.sharemisses = sharemisses;
+    return result;
 }
 }

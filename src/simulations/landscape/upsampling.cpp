@@ -19,15 +19,6 @@ int wrapcolumn(std::int64_t column, int width)
     return static_cast<int>(((column % width) + width) % width);
 }
 
-// The Catmull-Rom spline through p0 .. p3 at t in [0, 1] between p1 and p2, in the
-// form p1 + t/2 (p2 - p0 + t (2 p0 - 5 p1 + 4 p2 - p3 + t (3 (p1 - p2) + p3 - p0))):
-// for four equal values every bracket is exactly 0, so a constant is reproduced
-// bit for bit.
-double catmullrom(double p0, double p1, double p2, double p3, double t)
-{
-    return p1 + 0.5 * t * ((p2 - p0) + t * ((2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) + t * (3.0 * (p1 - p2) + p3 - p0)));
-}
-
 void checkfield(const std::vector<float>& field, int width, int height, const char* name)
 {
     if (width < 1 || height < 1 || field.size() != static_cast<std::size_t>(width) * static_cast<std::size_t>(height))
@@ -43,6 +34,11 @@ void checkwindow(const RegionalWindow& window, int width, int height, const char
 // A fine cell centre in global cell units: (I + 0.5) / k, a function of the
 // absolute index only.
 double globalunits(std::int64_t fine, int scale) { return (static_cast<double>(fine) + 0.5) / scale; }
+}
+
+double catmullrom(double p0, double p1, double p2, double p3, double t)
+{
+    return p1 + 0.5 * t * ((p2 - p0) + t * ((2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) + t * (3.0 * (p1 - p2) + p3 - p0)));
 }
 
 double bicubic(const std::vector<float>& field, int width, int height, double gx, double gy)

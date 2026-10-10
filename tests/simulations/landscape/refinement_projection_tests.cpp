@@ -2,7 +2,8 @@
 // section 3, "Tests"), suite Landscape: Landscape.RefinementProjection*. S0.4 shows that
 // a child and a parent window built by hand (refinement_test_windows.hpp) find each other's
 // cells, which is all the projection needs from refinement_grid.hpp; S2.2 adds exactness,
-// the weights, the border step, the bit identity in two windows and the resample.
+// the weights, the border step, the bit identity in two windows and the resample; S2.3's
+// rework replaces the weights by bounds (the caps, exactness under them, both fallbacks).
 
 #include <gtest/gtest.h>
 
@@ -116,31 +117,23 @@ std::vector<float> nearest(const LevelWindow& child, const LevelWindow& parent, 
 
 void printreport(const char* label, int factor, int level, const landscape::ProjectionReport& report)
 {
-    std::printf("[projection] %s, factor %d, level %d: %d parents, parent-mean error %.3g m, %d all-pinned, "
-                "lambda max %.3f m, lambda step max %.3f m, border step max %.3f m, 99th percentile %.3f m\n",
-                label, factor, level, report.parents, report.maxparentmeanerror_m, report.allpinnedparents, report.maxlambda_m,
-                report.maxlambdastep_m, report.maxborderstep_m, report.borderstep99_m);
+    std::printf("[projection] %s, factor %d, level %d: %d parents, parent-mean error %.3g m, beds moved in %d, "
+                "forced %d (%.3f m), lambda max %.3f m, lambda step max %.3f m, border step max %.3f m, 99th percentile "
+                "%.3f m\n",
+                label, factor, level, report.parents, report.maxparentmeanerror_m, report.bedsmovedparents,
+                report.forcedparents, report.maxforcedmove_m, report.maxlambda_m, report.maxlambdastep_m,
+                report.maxborderstep_m, report.borderstep99_m);
 }
 
-// The border step recomputed from the projected field (d = F - F*, cells with a positive
-// effective weight), for a cross-check of the report: the largest and the nearest-rank 99th
-// percentile.
+// The border step recomputed from the projected field (d = F - F*, cells that are rated or
+// moved), for a cross-check of the report: the largest and the nearest-rank 99th percentile.
 std::pair<double, double> borderstepof(const LevelWindow& level, const std::vector<float>& before, const std::vector<float>& after,
-                                       const std::vector<float>& weights)
+                                       const landscape::ProjectionBounds& bounds)
 {
     const int f = level.factor;
     std::vector<std::uint8_t> moved(level.domainsize(), 0);
-    for (int q = 0; q < level.domainparentrows(); q++)
-        for (int p = 0; p < level.domainparentcolumns(); p++)
-        {
-            double sum = 0.0;
-            for (int y = q * f; y < (q + 1) * f; y++)
-                for (int x = p * f; x < (p + 1) * f; x++)
-                    sum += weights[level.index(x, y)];
-            for (int y = q * f; y < (q + 1) * f; y++)
-                for (int x = p * f; x < (p + 1) * f; x++)
-                    moved[level.index(x, y)] = sum == 0.0 || weights[level.index(x, y)] > 0.0f ? 1 : 0;
-        }
+    for (std::size_t cell = 0; cell < level.domainsize(); cell++)
+        moved[cell] = bounds.rate[cell] > 0.0f || after[cell] != before[cell] ? 1 : 0;
     std::vector<double> steps;
     const int x0 = level.keptcolumnoffset(), y0 = level.keptrowoffset();
     for (int y = y0; y < y0 + level.rows; y++)
@@ -174,14 +167,14 @@ std::pair<double, double> borderstepof(const LevelWindow& level, const std::vect
 // 2799 m), the continent across the date line: level 0 keeps global columns 26 .. 37 (mod
 // 32) by rows 2 .. 13; level 1 keeps 28 .. 35 by 4 .. 11 with a halo of 1 parent cell;
 // level 2 keeps 29 .. 34 by 5 .. 10 with a halo of 2 parent cells. Each level is the
-// bilinear prolongation of the projected level above plus the detail, projected with
-// weights 0 on the sea and the hashed channels.
+// bilinear prolongation of the projected level above plus the detail, projected with the
+// bounds of the sea (the sea level 0) and the hashed channels (rate 0).
 struct Chain
 {
     std::vector<LevelWindow> windows;
     std::vector<std::vector<float>> fields;
     std::vector<std::vector<float>> candidates;  // F* of levels 1 and 2 (index = level)
-    std::vector<std::vector<float>> weights;
+    std::vector<landscape::ProjectionBounds> bounds;
     std::vector<landscape::ProjectionReport> reports;  // index = level, [0] unused
     std::vector<float> global;
     double before[3] = {0.0, 0.0, 0.0};  // parent-mean errors before the projection
@@ -196,7 +189,7 @@ Chain buildchain(int f)
     chain.windows.push_back(handlevelwindow(32, f, 2, 2, 29 * f * f, 6 * f * f, 5 * f * f, 6 * f * f));
     chain.fields.push_back(globalvalues(chain.windows[0], chain.global));
     chain.candidates.emplace_back();
-    chain.weights.emplace_back();
+    chain.bounds.emplace_back();
     chain.reports.emplace_back();
     for (int level = 1; level <= 2; level++)
     {
@@ -206,8 +199,8 @@ Chain buildchain(int f)
         std::vector<float> field = bilinear(window, parent, parentfield);
         chain.before[level] = landscape::levelparentmeanerror(window, field, parent, parentfield);
         chain.candidates.push_back(field);
-        chain.weights.push_back(landscape::projectionweights(window, channelmask(window), seamask(field), {}, 0.0));
-        chain.reports.push_back(landscape::projectlevel(window, field, chain.weights.back(), parent, parentfield));
+        chain.bounds.push_back(landscape::projectionbounds(window, channelmask(window), seamask(field), {}, field, 0.0f, 0.0));
+        chain.reports.push_back(landscape::projectlevel(window, field, chain.bounds.back(), parent, parentfield));
         chain.fields.push_back(std::move(field));
     }
     return chain;
@@ -242,7 +235,7 @@ void checkexactness(int f)
         EXPECT_LE(report.borderstep99_m, report.maxborderstep_m);
         const std::pair<double, double> step =
             borderstepof(window, chain.candidates[static_cast<std::size_t>(level)], chain.fields[static_cast<std::size_t>(level)],
-                         chain.weights[static_cast<std::size_t>(level)]);
+                         chain.bounds[static_cast<std::size_t>(level)]);
         EXPECT_NEAR(report.maxborderstep_m, step.first, 1.0e-2);
         EXPECT_NEAR(report.borderstep99_m, step.second, 1.0e-2);
     }
@@ -331,76 +324,154 @@ TEST_F(Landscape, RefinementProjectionExactFactor2) { checkexactness(2); }
 
 TEST_F(Landscape, RefinementProjectionExactFactor4) { checkexactness(4); }
 
-// The weights: 0 on sea, lake beds and (at weight 0) channel beds, which the projection
-// leaves unchanged bit for bit; an all-sea parent takes the uniform fallback and is counted.
-TEST_F(Landscape, RefinementProjectionWeights)
+// The bounds (S2.3's rework): sea cells may sink but not rise past the sea level, wet cells
+// not past their surface, dry land may rise but not sink to the sea level or the water beside
+// it (a wet 8-neighbour's surface or its own global lake cell's), land channel beds take the
+// channel rate.
+TEST_F(Landscape, RefinementProjectionBounds)
 {
     const int f = 4;
-    const LevelWindow parent = handlevelwindow(16, f, 0, 0, 4, 2, 2, 1);
     const LevelWindow level = handlevelwindow(16, f, 1, 0, 4 * f, 2 * f, 2 * f, f);
     ASSERT_EQ(level.domainsize(), 32u);
-    std::vector<float> parentfield = {100.0f, -50.0f};
-    std::vector<float> field(level.domainsize());
-    std::vector<std::uint8_t> channel(level.domainsize(), 0), sea(level.domainsize(), 0), lake(level.domainsize(), 0);
-    for (int y = 0; y < f; y++)
-        for (int x = 0; x < 2 * f; x++)
-        {
-            const std::size_t cell = level.index(x, y);
-            field[cell] = x < f ? static_cast<float>(80.0 + 3.0 * x - 2.0 * y) : static_cast<float>(-70.0 + x + y);
-            sea[cell] = x >= f ? 1 : 0;
-        }
-    channel[level.index(1, 0)] = channel[level.index(1, 1)] = channel[level.index(2, 2)] = 1;
-    sea[level.index(3, 3)] = 1;
-    channel[level.index(3, 3)] = 1;  // sea and channel: 0
-    channel[level.index(5, 1)] = 1;  // sea and channel: 0
-    lake[level.index(0, 3)] = 1;
+    const float sealevel = 10.0f;
+    std::vector<float> elevation(level.domainsize(), 200.0f), lake(level.domainsize(), 0.0f), own(level.domainsize(), 0.0f);
+    std::vector<std::uint8_t> channel(level.domainsize(), 0), sea(level.domainsize(), 0);
+    sea[level.index(7, 0)] = 1;
+    elevation[level.index(7, 0)] = -50.0f;
+    sea[level.index(7, 1)] = 1;
+    channel[level.index(7, 1)] = 1;  // a link's last cell in the sea: sea bounds, rate 1
+    elevation[level.index(7, 1)] = 10.0f;
+    lake[level.index(2, 2)] = 120.0f;  // wet, 20 m deep
+    elevation[level.index(2, 2)] = 100.0f;
+    lake[level.index(3, 3)] = 120.0f;  // a wet channel: wet bounds, rate 1
+    channel[level.index(3, 3)] = 1;
+    elevation[level.index(3, 3)] = 119.0f;
+    channel[level.index(0, 0)] = 1;    // a land channel bed
+    elevation[level.index(0, 0)] = 150.0f;
+    elevation[level.index(1, 1)] = 130.0f;  // beside the lake at (2, 2)
+    own[level.index(5, 3)] = 180.0f;        // its own global cell is a lake cell at 180 m
+    elevation[level.index(6, 3)] = 5.0f;    // dry land below the sea level: no room down
 
-    const std::vector<float> zero = landscape::projectionweights(level, channel, sea, lake, 0.0);
-    const std::vector<float> half = landscape::projectionweights(level, channel, sea, lake, 0.5);
-    for (std::size_t cell = 0; cell < level.domainsize(); cell++)
+    const landscape::ProjectionBounds zero = landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.0, own);
+    const landscape::ProjectionBounds half = landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.5, own);
+    const float inf = std::numeric_limits<float>::infinity();
+    const auto at = [&](int x, int y) { return level.index(x, y); };
+    // Sea: up to the next float below the sea level, down unbounded, rate 1 (also on a channel).
+    EXPECT_EQ(zero.rate[at(7, 0)], 1.0f);
+    EXPECT_NEAR(zero.up_m[at(7, 0)], 60.0, 1.0e-4);
+    EXPECT_EQ(zero.down_m[at(7, 0)], inf);
+    EXPECT_EQ(zero.rate[at(7, 1)], 1.0f);
+    EXPECT_EQ(zero.up_m[at(7, 1)], 0.0f);
+    // Wet: up to the next float below the surface, a wet channel too.
+    EXPECT_NEAR(zero.up_m[at(2, 2)], 20.0, 1.0e-4);
+    EXPECT_EQ(zero.down_m[at(2, 2)], inf);
+    EXPECT_EQ(zero.rate[at(3, 3)], 1.0f);
+    EXPECT_NEAR(zero.up_m[at(3, 3)], 1.0, 1.0e-4);
+    EXPECT_LE(119.0 + static_cast<double>(zero.up_m[at(3, 3)]), static_cast<double>(std::nextafter(120.0f, 0.0f)));
+    // Land: the channel bed at the channel rate; the floors.
+    EXPECT_EQ(zero.rate[at(0, 0)], 0.0f);
+    EXPECT_EQ(half.rate[at(0, 0)], 0.5f);
+    EXPECT_EQ(zero.up_m[at(0, 0)], inf);
+    EXPECT_NEAR(zero.down_m[at(0, 0)], 140.0, 1.0e-4);  // to the sea level
+    EXPECT_NEAR(zero.down_m[at(1, 1)], 10.0, 1.0e-4);   // to the lake beside it
+    EXPECT_NEAR(zero.down_m[at(5, 3)], 20.0, 1.0e-4);   // to its own global lake cell's surface
+    EXPECT_NEAR(zero.down_m[at(5, 0)], 190.0, 1.0e-4);
+    EXPECT_EQ(zero.down_m[at(6, 3)], 0.0f);
+    EXPECT_EQ(zero.rate[at(5, 0)], 1.0f);
+    EXPECT_EQ(zero.up_m[at(5, 0)], inf);
+}
+
+namespace
+{
+// One parent of factor 2 (global cell 4, 2) and its four children (row-major), the sea level 0.
+struct OneParent
+{
+    LevelWindow parent = handlevelwindow(16, 2, 0, 0, 4, 1, 2, 1);
+    LevelWindow level = handlevelwindow(16, 2, 1, 0, 8, 2, 4, 2);
+    std::vector<float> field;
+    landscape::ProjectionReport report;
+};
+
+OneParent projectone(std::vector<float> field, float value, const std::vector<std::uint8_t>& channel,
+                     const std::vector<std::uint8_t>& sea)
+{
+    OneParent one;
+    one.field = std::move(field);
+    const landscape::ProjectionBounds bounds = landscape::projectionbounds(one.level, channel, sea, {}, one.field, 0.0f, 0.0);
+    one.report = landscape::projectlevel(one.level, one.field, bounds, one.parent, {value});
+    return one;
+}
+
+double meanof(const std::vector<float>& field)
+{
+    double sum = 0.0;
+    for (const float value : field)
+        sum += value;
+    return sum / static_cast<double>(field.size());
+}
+}
+
+// The capped iteration: a common shift, children with less headroom take theirs and leave;
+// the mean is exact under the caps; the fallbacks (the beds, then every child) only when the
+// headrooms are exhausted.
+TEST_F(Landscape, RefinementProjectionCaps)
+{
+    // Just above (below) the sea level 0: the headroom keeps the stored value on its side.
+    const auto justabove = [](float value) { return value > 0.0f && value < 1.0e-5f; };
+    const auto justbelow = [](float value) { return value < 0.0f && value > -1.0e-5f; };
     {
-        const bool pinned = sea[cell] != 0 || lake[cell] != 0;
-        EXPECT_EQ(zero[cell], pinned || channel[cell] != 0 ? 0.0f : 1.0f) << cell;
-        EXPECT_EQ(half[cell], pinned ? 0.0f : (channel[cell] != 0 ? 0.5f : 1.0f)) << cell;
+        // Lambda -11.5: the common shift -11.5 would sink 5 and 1 below the sea level, so they
+        // stop just above it and the other two take -20 each.
+        const OneParent one = projectone({50.0f, 5.0f, 30.0f, 1.0f}, 10.0f, {}, {});
+        EXPECT_NEAR(one.field[0], 30.0, 1.0e-4);
+        EXPECT_TRUE(justabove(one.field[1])) << one.field[1];
+        EXPECT_NEAR(one.field[2], 10.0, 1.0e-4);
+        EXPECT_TRUE(justabove(one.field[3])) << one.field[3];
+        EXPECT_NEAR(meanof(one.field), 10.0, 1.0e-5);
+        EXPECT_LT(one.report.maxparentmeanerror_m, 1.0e-5);
+        EXPECT_EQ(one.report.bedsmovedparents, 0);
+        EXPECT_EQ(one.report.forcedparents, 0);
+        EXPECT_NEAR(one.report.maxlambda_m, 11.5, 1.0e-5);
     }
-    EXPECT_EQ(landscape::projectionweights(level, {}, {}, {}, 0.0), std::vector<float>(level.domainsize(), 1.0f));
-    EXPECT_THROW(landscape::projectionweights(level, std::vector<std::uint8_t>(31, 0), {}, {}, 0.0), std::invalid_argument);
-    EXPECT_THROW(landscape::projectionweights(level, {}, std::vector<std::uint8_t>(33, 0), {}, 0.0), std::invalid_argument);
-    EXPECT_THROW(landscape::projectionweights(level, {}, {}, std::vector<std::uint8_t>(1, 0), 0.0), std::invalid_argument);
-    EXPECT_THROW(landscape::projectionweights(level, {}, {}, {}, -0.1), std::invalid_argument);
-    EXPECT_THROW(landscape::projectionweights(level, {}, {}, {}, std::nan("")), std::invalid_argument);
-    EXPECT_THROW(landscape::projectionweights(level, {}, {}, {}, std::numeric_limits<double>::infinity()),
-                 std::invalid_argument);
-
-    const std::vector<float> before = field;
-    const landscape::ProjectionReport report = landscape::projectlevel(level, field, zero, parent, parentfield);
-    printreport("weights", f, 1, report);
-    EXPECT_EQ(report.parents, 2);
-    EXPECT_EQ(report.allpinnedparents, 1);
-    EXPECT_LT(report.maxparentmeanerror_m, 1.0e-4);
-    int unchanged = 0, changed = 0;
-    for (int y = 0; y < f; y++)
-        for (int x = 0; x < f; x++)
-        {
-            const std::size_t cell = level.index(x, y);
-            if (zero[cell] == 0.0f)
-            {
-                EXPECT_TRUE(samebits(field[cell], before[cell])) << "pinned cell " << x << ", " << y;
-                unchanged++;
-            }
-            else
-            {
-                EXPECT_FALSE(samebits(field[cell], before[cell])) << "land cell " << x << ", " << y;
-                changed++;
-            }
-        }
-    EXPECT_EQ(unchanged, 5);
-    EXPECT_EQ(changed, 11);
-    // The all-sea parent: every child lifted by the same lambda.
-    double lift = static_cast<double>(field[level.index(f, 0)]) - before[level.index(f, 0)];
-    for (int y = 0; y < f; y++)
-        for (int x = f; x < 2 * f; x++)
-            EXPECT_NEAR(static_cast<double>(field[level.index(x, y)]) - before[level.index(x, y)], lift, 1.0e-4);
+    {
+        // The land's headroom exhausted: the rest on the channel bed.
+        const OneParent one = projectone({5.0f, 5.0f, 5.0f, -100.0f}, -40.0f, {0, 0, 0, 1}, {});
+        for (int i = 0; i < 3; i++)
+            EXPECT_TRUE(justabove(one.field[static_cast<std::size_t>(i)])) << one.field[static_cast<std::size_t>(i)];
+        EXPECT_NEAR(one.field[3], -160.0, 1.0e-4);
+        EXPECT_NEAR(meanof(one.field), -40.0, 1.0e-5);
+        EXPECT_EQ(one.report.bedsmovedparents, 1);
+        EXPECT_EQ(one.report.forcedparents, 0);
+    }
+    {
+        // No bed: every child takes the rest, headrooms ignored.
+        const OneParent one = projectone({5.0f, 5.0f, 5.0f, 5.0f}, -10.0f, {}, {});
+        for (const float value : one.field)
+            EXPECT_NEAR(value, -10.0, 1.0e-4);
+        EXPECT_NEAR(meanof(one.field), -10.0, 1.0e-5);
+        EXPECT_EQ(one.report.bedsmovedparents, 0);
+        EXPECT_EQ(one.report.forcedparents, 1);
+        EXPECT_NEAR(one.report.maxforcedmove_m, 10.0, 1.0e-4);
+    }
+    {
+        // Lambda 45 in a coastal parent: the sea rises only to just below the sea level, the
+        // land takes the rest (80 m each instead of 16 x lambda / 2 on its two cells by weights).
+        const OneParent one = projectone({-10.0f, 20.0f, -10.0f, 20.0f}, 50.0f, {}, {1, 0, 1, 0});
+        EXPECT_TRUE(justbelow(one.field[0])) << one.field[0];
+        EXPECT_TRUE(justbelow(one.field[2])) << one.field[2];
+        EXPECT_NEAR(one.field[1], 100.0, 1.0e-4);
+        EXPECT_NEAR(one.field[3], 100.0, 1.0e-4);
+        EXPECT_NEAR(meanof(one.field), 50.0, 1.0e-5);
+        EXPECT_EQ(one.report.forcedparents, 0);
+    }
+    {
+        // Uncapped: every rated child the same shift, the bed unchanged (S2.2's weights).
+        const OneParent one = projectone({100.0f, 120.0f, 80.0f, 40.0f}, 100.0f, {0, 0, 0, 1}, {});
+        EXPECT_NEAR(one.field[0], 120.0, 1.0e-4);
+        EXPECT_NEAR(one.field[1], 140.0, 1.0e-4);
+        EXPECT_NEAR(one.field[2], 100.0, 1.0e-4);
+        EXPECT_EQ(one.field[3], 40.0f);
+    }
 }
 
 TEST_F(Landscape, RefinementProjectionRejectsBadInput)
@@ -409,19 +480,33 @@ TEST_F(Landscape, RefinementProjectionRejectsBadInput)
     const LevelWindow parent = handlevelwindow(16, f, 0, 0, 2, 5, 1, 5);
     const LevelWindow level = handlevelwindow(16, f, 1, 1, 3 * f, 3 * f, 2 * f, 3 * f);
     std::vector<float> field(level.domainsize(), 1.0f);
-    const std::vector<float> weights(level.domainsize(), 1.0f), parentfield(parent.domainsize(), 2.0f);
-    EXPECT_NO_THROW(landscape::projectlevel(level, field, weights, parent, parentfield));
+    const std::vector<float> parentfield(parent.domainsize(), 2.0f);
+    const landscape::ProjectionBounds bounds = landscape::projectionbounds(level, {}, {}, {}, field, 0.0f, 0.0);
+    EXPECT_NO_THROW(landscape::projectlevel(level, field, bounds, parent, parentfield));
 
-    std::vector<float> bad = weights;
-    bad[3] = -1.0f;
+    landscape::ProjectionBounds bad = bounds;
+    bad.rate[3] = -1.0f;
     EXPECT_THROW(landscape::projectlevel(level, field, bad, parent, parentfield), std::invalid_argument);
-    bad[3] = std::numeric_limits<float>::quiet_NaN();
+    bad.rate[3] = std::numeric_limits<float>::quiet_NaN();
     EXPECT_THROW(landscape::projectlevel(level, field, bad, parent, parentfield), std::invalid_argument);
-    bad[3] = std::numeric_limits<float>::infinity();
+    bad.rate[3] = std::numeric_limits<float>::infinity();
     EXPECT_THROW(landscape::projectlevel(level, field, bad, parent, parentfield), std::invalid_argument);
-    EXPECT_THROW(landscape::projectlevel(level, field, std::vector<float>(3, 1.0f), parent, parentfield), std::invalid_argument);
+    bad = bounds;
+    bad.up_m[3] = -1.0f;
+    EXPECT_THROW(landscape::projectlevel(level, field, bad, parent, parentfield), std::invalid_argument);
+    bad = bounds;
+    bad.down_m[3] = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_THROW(landscape::projectlevel(level, field, bad, parent, parentfield), std::invalid_argument);
+    bad = bounds;
+    bad.rate.pop_back();
+    EXPECT_THROW(landscape::projectlevel(level, field, bad, parent, parentfield), std::invalid_argument);
     std::vector<float> shortfield(level.domainsize() - 1, 1.0f);
-    EXPECT_THROW(landscape::projectlevel(level, shortfield, weights, parent, parentfield), std::invalid_argument);
+    EXPECT_THROW(landscape::projectlevel(level, shortfield, bounds, parent, parentfield), std::invalid_argument);
+    EXPECT_THROW(landscape::projectionbounds(level, {}, {}, {}, shortfield, 0.0f, 0.0), std::invalid_argument);
+    EXPECT_THROW(landscape::projectionbounds(level, std::vector<std::uint8_t>(3, 0), {}, {}, field, 0.0f, 0.0),
+                 std::invalid_argument);
+    EXPECT_THROW(landscape::projectionbounds(level, {}, {}, {}, field, 0.0f, -0.1), std::invalid_argument);
+    EXPECT_THROW(landscape::projectionbounds(level, {}, {}, {}, field, 0.0f, std::nan("")), std::invalid_argument);
     EXPECT_THROW(landscape::levelparentmeanerror(level, shortfield, parent, parentfield), std::invalid_argument);
     EXPECT_THROW(landscape::levelparentmeanerror(level, field, parent, std::vector<float>(2, 0.0f)), std::invalid_argument);
     // Level 0 has no parent; the parent must be one level coarser, of the same factor and world.
@@ -493,9 +578,9 @@ TEST_F(Landscape, RefinementProjectionBorderStep)
                 field[level.index(2 * f, y)] = static_cast<float>(-incision);
                 channel[level.index(2 * f, y)] = 1;
             }
-            const std::vector<float> weights = landscape::projectionweights(level, channel, {}, {}, 0.0);
+            const landscape::ProjectionBounds bounds = landscape::projectionbounds(level, channel, {}, {}, field, -1.0e4f, 0.0);
             const std::vector<float> before = field;
-            const landscape::ProjectionReport report = landscape::projectlevel(level, field, weights, parent, parentfield);
+            const landscape::ProjectionReport report = landscape::projectlevel(level, field, bounds, parent, parentfield);
             printreport(delta == 0.0 ? "channel line" : "channel line beside lifted parents", f, 1, report);
             const double lambda = delta + incision / f;
             const double lift = lambda * f / (f - 1.0);
@@ -508,7 +593,8 @@ TEST_F(Landscape, RefinementProjectionBorderStep)
             // cell is pinned), none west.
             EXPECT_NEAR(report.borderstep99_m, expectedpercentile(pairs - f, 3 * f - 2, lift - delta), 1.0e-4);
             EXPECT_LT(report.maxparentmeanerror_m, 1.0e-4);
-            EXPECT_EQ(report.allpinnedparents, 0);
+            EXPECT_EQ(report.bedsmovedparents, 0);
+            EXPECT_EQ(report.forcedparents, 0);
             for (int y = 2 * f; y < 3 * f; y++)
             {
                 EXPECT_TRUE(samebits(field[level.index(2 * f, y)], before[level.index(2 * f, y)]));
@@ -523,8 +609,8 @@ TEST_F(Landscape, RefinementProjectionBorderStep)
             std::vector<std::uint8_t> channel(level.domainsize(), 0);
             field[level.index(2 * f + 1, 2 * f + 1)] = static_cast<float>(-incision);
             channel[level.index(2 * f + 1, 2 * f + 1)] = 1;
-            const std::vector<float> weights = landscape::projectionweights(level, channel, {}, {}, 0.0);
-            const landscape::ProjectionReport report = landscape::projectlevel(level, field, weights, parent, parentfield);
+            const landscape::ProjectionBounds bounds = landscape::projectionbounds(level, channel, {}, {}, field, -1.0e4f, 0.0);
+            const landscape::ProjectionReport report = landscape::projectlevel(level, field, bounds, parent, parentfield);
             printreport("single incised cell", f, 1, report);
             const double lift = incision / (f * f - 1.0);
             EXPECT_NEAR(report.maxlambda_m, incision / (f * f), 1.0e-4);
@@ -552,11 +638,13 @@ TEST_F(Landscape, RefinementProjectionBitIdenticalInTwoWindows)
     auto run = [&](const LevelWindow& w0, const LevelWindow& w1, const LevelWindow& w2) {
         Windows windows{w0, w1, w2, globalvalues(w0, global), {}, {}};
         windows.f1 = nearest(w1, w0, windows.f0);
-        landscape::projectlevel(w1, windows.f1, landscape::projectionweights(w1, channelmask(w1), seamask(windows.f1), {}, 0.0),
+        landscape::projectlevel(w1, windows.f1,
+                                landscape::projectionbounds(w1, channelmask(w1), seamask(windows.f1), {}, windows.f1, 0.0f, 0.0),
                                 w0, windows.f0);
         windows.f2 = nearest(w2, w1, windows.f1);
         const landscape::ProjectionReport report = landscape::projectlevel(
-            w2, windows.f2, landscape::projectionweights(w2, channelmask(w2), seamask(windows.f2), {}, 0.0), w1, windows.f1);
+            w2, windows.f2, landscape::projectionbounds(w2, channelmask(w2), seamask(windows.f2), {}, windows.f2, 0.0f, 0.0),
+            w1, windows.f1);
         EXPECT_LT(report.maxparentmeanerror_m, 1.0e-3);
         return windows;
     };
