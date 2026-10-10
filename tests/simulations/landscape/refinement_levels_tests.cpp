@@ -7,7 +7,8 @@
 // box-averaged equals k = 4) and the parity of one level with the single pass; S2.3's
 // rework (the bounds, the detail band, the global lake depth) the valleys at level 2; S2.4
 // the resample of the final level to a requested metres per pixel; S2.7 the overlap and the
-// consistency with the smoothing before the projection on; S2.8 the inherited masks.
+// consistency with the smoothing before the projection on; S2.8 the inherited masks; S3.1 the
+// limited prolongation.
 
 #include <gtest/gtest.h>
 
@@ -16,8 +17,11 @@
 #include "regional_test_world.hpp"
 
 #include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/upsampling.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
 #include <stdexcept>
 #include <string>
 
@@ -918,4 +922,170 @@ TEST_F(Landscape, RefinementLevelsResampledFields)
     EXPECT_THROW(landscape::resampleregionalfields(result, radius_m, 0.5 * cell_m), std::invalid_argument);
     RefinementResult empty;
     EXPECT_THROW(landscape::resampleregionalfields(empty, radius_m, cell_m), std::invalid_argument);
+}
+
+namespace
+{
+// A parent field over the parent window's domain, a function of the local indices.
+std::vector<float> parentfield(const LevelWindow& parent, const std::function<float(int, int)>& value)
+{
+    std::vector<float> field(parent.domainsize());
+    for (int y = 0; y < parent.domainrows; y++)
+        for (int x = 0; x < parent.domaincolumns; x++)
+            field[parent.index(x, y)] = value(x, y);
+    return field;
+}
+}
+
+// Step S3.1: the limited prolongation (refinement.prolongation_limit 1). On window C's chain at
+// factor 4 (level-1 parents, level-2 children): a 6 km notch (two parent columns of 1,000 m in a
+// ridge of 7,000 m) undershoots below its floor and overshoots above the ridge without the limit,
+// which is S2.3's Catmull-Rom bit for bit; with it every child lies in the range of its 2 x 2
+// bracketing parents, children already inside it keep their value, and the report counts the
+// kept cells changed and the largest move; linear fields are unchanged. Then the loop: a limit
+// other than 0 or 1 is refused; with the limit on, every feature on, P and Q (Q across the date
+// line) are bit-identical on their overlap at both levels and exact, and level 2 clamps.
+TEST_F(Landscape, RefinementLevelsLimitedProlongation)
+{
+    const std::vector<LevelWindow> chain = landscape::halochain(windowc(16), 4, 2, landscape::prolongationreach);
+    const LevelWindow& parent = chain[1];
+    const LevelWindow& level = chain[2];
+    const int factor = level.factor;
+    // As prolong: the child at offset o lies t = (o + 0.5) / factor - 0.5 parent cells from its
+    // parent's centre; the stencil's second point is the parent (t >= 0) or its predecessor.
+    const auto lower = [factor](int o) { return (o + 0.5) / factor - 0.5 < 0.0 ? -1 : 0; };
+    const auto fraction = [factor](int o) {
+        const double t = (o + 0.5) / factor - 0.5;
+        return t < 0.0 ? t + 1.0 : t;
+    };
+    const auto parentx = [&](int x) { return parent.localcolumn(level.parentcolumn(x)) + lower(x % factor); };
+    const auto parenty = [&](int y) { return static_cast<int>(parent.localrow(level.parentrow(y))) + lower(y % factor); };
+    const auto reference = [&](const std::vector<float>& field, int x, int y) {
+        const int px = parentx(x), py = parenty(y);
+        double rows[4];
+        for (int b = 0; b < 4; b++)
+        {
+            const auto value = [&](int a) { return static_cast<double>(field[parent.index(px - 1 + a, py - 1 + b)]); };
+            rows[b] = landscape::catmullrom(value(0), value(1), value(2), value(3), fraction(x % factor));
+        }
+        return static_cast<float>(landscape::catmullrom(rows[0], rows[1], rows[2], rows[3], fraction(y % factor)));
+    };
+    const auto bracket = [&](const std::vector<float>& field, int x, int y) {
+        const int px = parentx(x), py = parenty(y);
+        float lowest = field[parent.index(px, py)], highest = lowest;
+        for (int b = 0; b < 2; b++)
+            for (int a = 0; a < 2; a++)
+            {
+                lowest = std::min(lowest, field[parent.index(px + a, py + b)]);
+                highest = std::max(highest, field[parent.index(px + a, py + b)]);
+            }
+        return std::make_pair(lowest, highest);
+    };
+    const int keptx0 = level.keptcolumnoffset(), kepty0 = level.keptrowoffset();
+    const auto kept = [&](int x, int y) {
+        return x >= keptx0 && x < keptx0 + level.columns && y >= kepty0 && y < kepty0 + level.rows;
+    };
+
+    constexpr float floor_m = 1000.0f, ridge_m = 7000.0f;
+    const std::vector<float> notch =
+        parentfield(parent, [&](int x, int) { return x % 16 == 7 || x % 16 == 8 ? floor_m : ridge_m; });
+    const landscape::Prolongation plain = landscape::prolong(parent, notch, level, false);
+    const landscape::Prolongation limited = landscape::prolong(parent, notch, level, true);
+    ASSERT_EQ(plain.values.size(), level.domainsize());
+    ASSERT_EQ(limited.values.size(), level.domainsize());
+    int mismatched = 0, below = 0, above = 0, outside = 0, insidechanged = 0, keptchanged = 0;
+    double keptmove = 0.0;
+    float lowest = limited.values[0], highest = limited.values[0];
+    for (int y = 0; y < level.domainrows; y++)
+        for (int x = 0; x < level.domaincolumns; x++)
+        {
+            const std::size_t cell = level.index(x, y);
+            const float before = plain.values[cell], after = limited.values[cell];
+            mismatched += before != reference(notch, x, y) ? 1 : 0;
+            below += before < floor_m ? 1 : 0;
+            above += before > ridge_m ? 1 : 0;
+            const auto [low, high] = bracket(notch, x, y);
+            outside += after < low || after > high ? 1 : 0;
+            insidechanged += before >= low && before <= high && after != before ? 1 : 0;
+            lowest = std::min(lowest, after);
+            highest = std::max(highest, after);
+            if (kept(x, y) && after != before)
+            {
+                keptchanged++;
+                keptmove = std::max(keptmove, std::fabs(static_cast<double>(after) - static_cast<double>(before)));
+            }
+        }
+    std::printf("[refinement] limited prolongation, notch: without the limit %d children below the floor, %d above the "
+                "ridge; with it %.1f .. %.1f m, %d kept cells clamped (largest %.1f m)\n",
+                below, above, static_cast<double>(lowest), static_cast<double>(highest), limited.clamped, limited.maxclamp_m);
+    EXPECT_EQ(mismatched, 0);
+    EXPECT_GT(below, 0);
+    EXPECT_GT(above, 0);
+    EXPECT_EQ(plain.clamped, 0);
+    EXPECT_EQ(plain.maxclamp_m, 0.0);
+    EXPECT_EQ(outside, 0);
+    EXPECT_EQ(insidechanged, 0);
+    EXPECT_GE(lowest, floor_m);
+    EXPECT_LE(highest, ridge_m);
+    EXPECT_GT(limited.clamped, 0);
+    EXPECT_EQ(limited.clamped, keptchanged);
+    EXPECT_EQ(limited.maxclamp_m, keptmove);
+    EXPECT_GT(limited.maxclamp_m, 0.0);
+
+    // Linear fields (exact in float) and a constant: the limit changes nothing.
+    const std::vector<std::function<float(int, int)>> linear = {
+        [](int x, int y) { return static_cast<float>(31000.0 + 37.5 * x - 12.25 * y); },
+        [](int x, int) { return static_cast<float>(-250.0 + 512.0 * x); },
+        [](int, int y) { return static_cast<float>(4000.0 - 64.0 * y); },
+        [](int, int) { return 31043.0f; }};
+    for (std::size_t index = 0; index < linear.size(); index++)
+    {
+        const std::vector<float> field = parentfield(parent, linear[index]);
+        const landscape::Prolongation a = landscape::prolong(parent, field, level, false);
+        const landscape::Prolongation b = landscape::prolong(parent, field, level, true);
+        EXPECT_EQ(a.values, b.values) << "linear field " << index;
+        EXPECT_EQ(b.clamped, 0) << "linear field " << index;
+    }
+
+    // The loop refuses a limit other than 0 or 1.
+    {
+        const RegionalGlobalInputs inputs = syntheticworld(64);
+        LevelTarget target;
+        target.window = windowc(4);
+        target.window.halo = landscape::refinementhalo(2, 0);
+        target.level = 1;
+        RefinementParameters refinement;
+        refinement.prolongationlimit = 2;
+        EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, refinement), std::invalid_argument);
+        refinement.prolongationlimit = 1;
+        EXPECT_NO_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, refinement));
+    }
+
+    // The overlap identity and exactness with the limit on.
+    const RegionalGlobalInputs inputs = wideworld();
+    const RegionalParameters parameters = everyfeature();
+    RefinementParameters refinement;
+    refinement.prolongationlimit = 1;
+    const auto run = [&](const RegionalWindow& window, const std::string& name) {
+        LevelTarget target;
+        target.window = window;
+        target.level = 2;
+        RefinementResult result = landscape::runrefinement(inputs, target, parameters, refinement);
+        for (const LevelDiagnostics& diagnostics : result.levels)
+            std::printf("[refinement] %s, level %d: %d kept cells clamped (largest %.1f m); land below the sea level %d "
+                        "(deepest %.1f m); forced %d\n",
+                        name.c_str(), diagnostics.level, diagnostics.prolongationclamped,
+                        diagnostics.maxprolongationclamp_m, diagnostics.landbelowsea, diagnostics.maxlandbelowsea_m,
+                        diagnostics.projection.forcedparents);
+        return result;
+    };
+    const RefinementResult a = run(windowp(), "limited P");
+    const RefinementResult b = run(windowq(), "limited Q");
+    expectexact(a, "limited P");
+    expectexact(b, "limited Q");
+    const OverlapCounts counts = compareoverlaplevels(a, b, "limited prolongation P/Q");
+    EXPECT_GT(counts.lake, 0);
+    EXPECT_GT(counts.channel, 0);
+    EXPECT_EQ(a.levels[0].prolongationclamped, 0);
+    EXPECT_GT(a.levels[1].prolongationclamped, 0);
 }

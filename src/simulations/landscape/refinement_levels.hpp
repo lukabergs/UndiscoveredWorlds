@@ -84,9 +84,11 @@ struct RefinementParameters
     // its passes (0: none, the S2.3 loop bit for bit; the parameter file sets 6) and relaxation.
     int smoothpasses = 0;
     double smoothrelaxation = 1.4;
-    // Phase S3's keys (contracts of S3.0, at behaviour-keeping values; not read yet):
+    // Phase S3's keys (contracts of S3.0; the struct keeps the behaviour-keeping values, the
+    // parameter file sets the defaults):
     int prolongationlimit = 0;        // S3.1: 1 clamps each prolonged child to the range of its 2 x 2 bracketing
-                                      // parents (prolong); 0: the plain Catmull-Rom
+                                      // parents (prolong); 0: the plain Catmull-Rom (the parameter file's
+                                      // value until S3.2's measurement)
     double channelcellslope = 0.0;    // S3.2: theta, a channel cell's elevation b + min(h, theta c_l); 0: the bed
     int smoothbasis = 0;              // S3.2's fallback: smoothparentmeans' basis, 0 Catmull-Rom (C1), 1 the cubic
                                       // B-spline (C2)
@@ -174,10 +176,25 @@ int detaillevel(double size_km, double detailcells, double radius_m, int worldwi
 // rows are clamped to the parent level's grid (as bicubic clamps at the poles). The stencil
 // reads the parents of the level's domain and `prolongationreach` beyond, which must lie in
 // the parent window's kept box (the halo chain guarantees it). A pure function of the
-// parent values and the child's absolute position. Throws std::invalid_argument when the
-// windows do not fit together, parentfield is not parent.domainsize() long, or a stencil
-// cell lies outside the parent's kept box.
-std::vector<float> prolong(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level);
+// parent values and the child's absolute position. With `limit` (refinement.prolongation_limit
+// 1, step S3.1) each child is clamped to the range [min, max] of its 2 x 2 bracketing parents
+// (the stencil's two middle rows and columns, the parents whose centres enclose the child's
+// centre), in double before the rounding to float, so the Catmull-Rom undershoot digs no pit
+// below a trench's floor and its overshoot raises no child above a ridge; still a pure function
+// of the parent values and the child's absolute position (window-independent). A linear field
+// is not changed (its interpolant lies inside the bracket). Without it the plain Catmull-Rom of
+// S2.3, bit for bit. Throws std::invalid_argument when the windows do not fit together,
+// parentfield is not parent.domainsize() long, or a stencil cell lies outside the parent's kept
+// box.
+struct Prolongation
+{
+    std::vector<float> values;  // level.domainsize(), row-major
+    // The clamp report over the level's kept box: the cells whose float value the limit changed
+    // and the largest |change| (0 without the limit).
+    int clamped = 0;
+    double maxclamp_m = 0.0;
+};
+Prolongation prolong(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level, bool limit);
 
 // The parent-mean correction (upsampling.hpp's correctblockmeans against the parent level
 // instead of the global grid), `passes` times on `fine` (level.domainsize() values): per
@@ -236,7 +253,8 @@ struct LevelDiagnostics
     int seabeyondparent = 0;
     int drybelowlake = 0;
     // Phase S3's diagnostics (written by S3.0's hooks; kept box, after the projection unless said):
-    // S3.1, the limited prolongation: the kept cells it clamped and its largest move (0 until S3.1).
+    // S3.1, the limited prolongation (level >= 2; Prolongation's report): the kept cells it clamped
+    // and its largest move (0 at level 1 and with refinement.prolongation_limit 0).
     int prolongationclamped = 0;
     double maxprolongationclamp_m = 0.0;
     // S3.2: the 99th percentile (nearest rank) of the kept cells' |move| by the smoothing, and the

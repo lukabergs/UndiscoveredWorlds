@@ -157,12 +157,15 @@ int detaillevel(double size_km, double detailcells, double radius_m, int worldwi
     return levels;
 }
 
-std::vector<float> prolong(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level)
+Prolongation prolong(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level, bool limit)
 {
     const ParentPatch patch = parentpatch(parent, parentfield, level, prolongationreach, "prolong");
     const int factor = level.factor;
     const ChildOffsets offsets = childoffsets(factor);
-    std::vector<float> fine(level.domainsize());
+    const int keptx0 = level.keptcolumnoffset(), kepty0 = level.keptrowoffset();
+    Prolongation result;
+    std::vector<float>& fine = result.values;
+    fine.resize(level.domainsize());
     for (int y = 0; y < level.domainrows; y++)
     {
         const std::size_t oy = static_cast<std::size_t>(y % factor);
@@ -182,10 +185,35 @@ std::vector<float> prolong(const LevelWindow& parent, const std::vector<float>& 
                 };
                 rows[b] = catmullrom(value(0), value(1), value(2), value(3), tx);
             }
-            fine[level.index(x, y)] = static_cast<float>(catmullrom(rows[0], rows[1], rows[2], rows[3], ty));
+            const double interpolated = catmullrom(rows[0], rows[1], rows[2], rows[3], ty);
+            float& cell = fine[level.index(x, y)];
+            cell = static_cast<float>(interpolated);
+            if (!limit)
+                continue;
+            // The 2 x 2 bracketing parents: the stencil's middle points (rows and columns
+            // rowbase, rowbase + 1 and columnbase, columnbase + 1 of the patch).
+            double lowest = 0.0, highest = 0.0;
+            for (int b = 0; b < 2; b++)
+                for (int a = 0; a < 2; a++)
+                {
+                    const double value = static_cast<double>(
+                        patch.values[at(columnbase + a, rowbase + b, patch.columns)]);
+                    lowest = a == 0 && b == 0 ? value : std::min(lowest, value);
+                    highest = a == 0 && b == 0 ? value : std::max(highest, value);
+                }
+            const float clamped = static_cast<float>(std::clamp(interpolated, lowest, highest));
+            if (clamped == cell)
+                continue;
+            const double move = std::fabs(static_cast<double>(clamped) - static_cast<double>(cell));
+            cell = clamped;
+            if (x >= keptx0 && x < keptx0 + level.columns && y >= kepty0 && y < kepty0 + level.rows)
+            {
+                result.clamped++;
+                result.maxclamp_m = std::max(result.maxclamp_m, move);
+            }
         }
     }
-    return fine;
+    return result;
 }
 
 void correctparentmeans(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level,
@@ -308,6 +336,8 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
     if (refinement.smoothpasses < 0 || !std::isfinite(refinement.smoothrelaxation) || !(refinement.smoothrelaxation > 0.0))
         throw std::invalid_argument("runrefinement: refinement.smooth_passes must not be negative and "
                                     "refinement.smooth_relaxation must be positive and finite");
+    if (refinement.prolongationlimit != 0 && refinement.prolongationlimit != 1)
+        throw std::invalid_argument("runrefinement: refinement.prolongation_limit must be 0 or 1");
     if (parameters.meanpasses < 0 || target.window.halo < refinementhalo(parameters.meanpasses, refinement.smoothpasses))
         throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 + 2 x smooth_passes + "
                                     "2 (the lake flood) global cells");
@@ -381,7 +411,12 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         state = LevelState{};
         state.diagnostics = &diagnostics;
         if (l >= 2)
-            state.start.start_m = prolong(parent, parentfields.elevation_m, level);
+        {
+            Prolongation prolonged = prolong(parent, parentfields.elevation_m, level, refinement.prolongationlimit == 1);
+            state.start.start_m = std::move(prolonged.values);
+            diagnostics.prolongationclamped = prolonged.clamped;
+            diagnostics.maxprolongationclamp_m = prolonged.maxclamp_m;
+        }
 
         // The parent's masks per domain cell (S2.8): its parent and the parent's 8 neighbours
         // read from the parent's kept box; given to the sea and the lakes at level >= 2.
