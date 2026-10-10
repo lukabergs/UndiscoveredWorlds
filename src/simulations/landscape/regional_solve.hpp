@@ -38,8 +38,18 @@ struct LevelState;
 //   mean b + min(h, theta c_l), b its bed (state.bed_m, unchanged), h the mean height above b of its
 //   non-channel, non-sea 8-neighbours in the domain after the lift (at least 0; 0 without one), c_l
 //   the level's north-south cell size; so b <= elevation <= b + theta c_l on land channel cells.
+// - S3.9, bounded catchments (regional.catchment_reach_global_cells r >= 1, read from
+//   parameters.relief.catchmentreach; the single pass always solves with r = 0): each cell's
+//   global cell is its absolute fine position over k_l, the solve's catchments are capped at r
+//   global cells from their outlet's (analytical_relief.hpp), and an unpinned cell no catchment
+//   reached keeps its start (the de-lifted start with the parent's lift: its elevation and solved_m
+//   follow the unpinned cells' rules; it stays out of state.pinned). In the loop, state.unreachedcells
+//   counts those in the kept box and state.ringbasincells the kept cells whose outlet on the last
+//   pass is a cell of the domain's outer ring on a window edge (not a polar row), with any r: a
+//   guard, 0 by construction with r >= 1 whenever the halo holds 2r global cells, not evidence of
+//   window independence.
 // state.solved_m is the result without the parent's lift (the channel cells' means kept): the next
-// level's ParentFields::solved_m. Outside the loop, and with both keys 0, the solve as before bit for
+// level's ParentFields::solved_m. Outside the loop, and with the three keys 0, the solve as before bit for
 // bit (state.solved_m a copy of the elevation). Every rule a pure function of the level's fields and
 // the parent's kept box. Throws as solveanalyticalrelief and as prolong.
 void solvelevel(const LevelContext& context, LevelState& state);

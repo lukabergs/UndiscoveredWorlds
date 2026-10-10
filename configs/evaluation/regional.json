@@ -28,7 +28,9 @@
       {"key": "smoothmove99_m", "max": 30, "from_level": 2, "step": "S3.2"},
       {"key": "maxsmoothmove_m", "max": 300, "from_level": 2, "step": "S3.2"},
       {"key": "lakeedgealigned", "max_per_scale": 2, "from_level": 2, "step": "S3.4 (the plan's target is lake (169, 60); this is every lake of the kept box)"},
-      {"key": "maxrimraise_m", "max": 100, "from_level": 2, "step": "S3.4"}
+      {"key": "maxrimraise_m", "max": 100, "from_level": 2, "step": "S3.4"},
+      {"key": "unreachedcells", "max": 0, "step": "S3.9"},
+      {"key": "ringbasincells", "max": 0, "step": "S3.9"}
     ]},
     {"check": "level-consistency", "elevation": "geosphere.base_elevation"},
     {"check": "resolution-invariance", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level", "sea": "geosphere.sea", "channel": "hydrosphere.channel_direction"},

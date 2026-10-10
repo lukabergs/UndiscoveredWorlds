@@ -218,6 +218,7 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.relief.thresholdslope = regional::thresholdSlope;
     parameters.relief.maxiterations = regional::maxIterations;
     parameters.relief.damping = regional::damping;
+    parameters.relief.catchmentreach = regional::catchmentReachGlobalCells;
     return parameters;
 }
 

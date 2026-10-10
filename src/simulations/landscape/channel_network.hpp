@@ -51,6 +51,12 @@ struct ChannelParameters
     double junctionjitter = 0.25;      // the junction lies within this fraction of k of the block's centre
     double edgemargin = 0.1875;        // edge points stay this fraction of k away from the cell's corners
     int springspercell = 0;            // springs from hashed points into a source cell's junction (0: none)
+    // Multiscale plan S3.9 (set by channelslevel in the refinement loop with bounded catchments,
+    // regional.catchment_reach_global_cells >= 1; 0: none): 1 pins the junction of every land sink of
+    // the domain (a land cell without a receiver on the grid) that no link reached and that is not fine
+    // sea, as a link's last cell (direction 0) with the sink's junction bed, discharge, flows and global
+    // cell, so that every land block holds a pinned cell.
+    int pinsinks = 0;
 };
 
 // The pinned channels on the window's domain grid (domainfinewidth() x
@@ -82,7 +88,8 @@ struct ChannelParameters
 //
 // Ends. A link ends at its first fine cell inside a global sea cell's block (its sea
 // receiver's entry point) without `finesea`; with it, see below. A land sink's
-// junction ends the links into it. The rest of a path is not drawn.
+// junction ends the links into it (with pinsinks it is pinned without them too). The rest
+// of a path is not drawn.
 //
 // Beds. The junction bed of a land cell with junction J is b = max(lo, min(F, s(J)))
 // with F its filled elevation, s(J) the start surface at J (F where `start_m` is empty,
@@ -118,6 +125,7 @@ struct FineChannels
     std::vector<int32_t> julyflow;
     std::vector<int32_t> globalcell;     // the upstream global cell's index, -1 off the network and on the
                                          // tributaries (regional_tributaries.hpp: a channel cell with -1 is one)
+    int sinkjunctions = 0;               // ChannelParameters::pinsinks: the land-sink junctions it pinned in the kept box
 };
 
 // Phase R, R1 (empty vectors keep the rules without them): `start_m` is the regional
@@ -170,7 +178,8 @@ struct LevelState;
 // LevelStep::channels: rasterisechannels on the level's window with the incision's network and
 // bed surface when the incision is active (state.incisednetwork, state.bedsurface_m;
 // incisionlevel), else the inputs' network and state.surface_m, ending at the fine coast
-// (state.sea); then the tributaries (tributarieslevel, regional_tributaries.hpp); then every
+// (state.sea), with pinsinks set in the refinement loop when parameters.relief.catchmentreach >= 1
+// (S3.9); then the tributaries (tributarieslevel, regional_tributaries.hpp); then every
 // land channel cell's bed pinned into state.surface_m. Writes state.channels and state.bed_m
 // (a copy of the channels' beds).
 void channelslevel(const LevelContext& context, LevelState& state);

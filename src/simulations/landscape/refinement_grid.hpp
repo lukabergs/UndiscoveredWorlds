@@ -54,39 +54,55 @@ inline int levelofscale(std::int64_t scale, int factor)
 // meanpasses + 2 (regional_pass.hpp). At level L that is 2 factor^(L - 1) parent cells.
 constexpr int channelreachglobalcells = 2;
 
-// The solve's margin in global cells beyond channelreachglobalcells at every level (S3.8), found
-// by trial, not derived: the solve's reach is not bounded (its sub-basins, the unpinned cells
-// connected between the pinned channels, reach the domain's outer ring at every level;
-// LevelDiagnostics::ringbasincells). On the synthetic world's P'/Q' pair at k 64 with the
-// valleys on (regional_tributaries_tests.cpp, halo 13) a level-3 domain of 3 global cells beyond
-// the kept box failed (263 kept elevations off, the solve's) and 4 passed; this margin gives 5.
-constexpr int solvemarginglobalcells = 2;
+// The solve's margin in global cells beyond channelreachglobalcells at every level.
+// - With bounded catchments (S3.9, regional.catchment_reach_global_cells r >= 1; analytical_relief.hpp)
+//   the solve's reach is bounded by construction, not by trial: a cell's label is a function of the
+//   cells within 2r global cells (one flood per global cell within r of it, each confined to r around
+//   its own); its catchment lies within r of its outlet's global cell, so within 2r of it, and the
+//   catchment's extent reads the labels of those cells: the solve at a cell reads the cells within 4r
+//   global cells (the outlet's bed, its link's two cells, lies within that too). Beyond the channels'
+//   reach that is max(0, 4r - channelreachglobalcells): 2 at r = 1 (the design's "within 2" counted
+//   the catchment, not the labels deciding it).
+// - Without them (r = 0, the solve up to S3.8) the margin of S3.8, found by trial, not derived
+//   (unboundedsolvemarginglobalcells): the unbounded solve's sub-basins, the unpinned cells
+//   connected between the pinned channels, reach the domain's outer ring at every level. On the
+//   synthetic world's P'/Q' pair at k 64 with the valleys on (regional_tributaries_tests.cpp, halo 13)
+//   a level-3 domain of 3 global cells beyond the kept box failed (263 kept elevations off, the
+//   solve's) and 4 passed; that margin gives 5.
+constexpr int unboundedsolvemarginglobalcells = 2;
+constexpr int solvemargin(int catchmentreach)
+{
+    return catchmentreach < 1 ? unboundedsolvemarginglobalcells
+                              : (4 * catchmentreach > channelreachglobalcells ? 4 * catchmentreach - channelreachglobalcells : 0);
+}
+constexpr int solvemarginglobalcells = solvemargin(1);  // the default key's
 
 // The reaches kept in global cells at every level: the channels' and the solve's with its
-// margin. The others are parent cells at every level: the presmoothing's and the smoothing's 2
-// per pass, the tributaries' tributaryreach, the lake flood's (2 global cells at level 1, 1 parent
-// cell + 3 level cells at level >= 2; refinement_levels.hpp, lakefloodreach), the forms' and the
-// channel-cell mean's (refinement_levels.hpp, formreach and channelmeanreach).
+// margin (here the default key's; levelhalo takes the margin). The others are parent cells at
+// every level: the presmoothing's and the smoothing's 2 per pass, the tributaries' tributaryreach,
+// the lake flood's (2 global cells at level 1, 1 parent cell + 3 level cells at level >= 2;
+// refinement_levels.hpp, lakefloodreach), the forms' and the channel-cell mean's
+// (refinement_levels.hpp, formreach and channelmeanreach).
 constexpr int globalreachcells = channelreachglobalcells + solvemarginglobalcells;
 
 // The halo of level L >= 1 in parent cells for a target whose halo is targethalo global
-// cells: factor^(L - 1) (globalreachcells + ceil((targethalo - globalreachcells) /
+// cells, with g = channelreachglobalcells + solvemargin: factor^(L - 1) (g + ceil((targethalo - g) /
 // factor^(L - 1))), a whole number of global cells at every level: the reaches in global cells
-// (globalreachcells) kept in global cells, the rest of the target's halo (targethalo -
-// globalreachcells: the reaches in parent cells) as parent cells, rounded up to whole global
-// cells. Level 1 takes targethalo (today's single-scale domain); factor 4, targethalo 16: level 2
-// 28 parent cells (7 global cells), level 3 80 (5 global cells). Up to S3.8 only the channels'
-// 2 global cells were kept (factor 4, targethalo 13: level 3 3 global cells, which the level-3
-// solve on the synthetic world outreached).
+// (g) kept in global cells, the rest of the target's halo (targethalo - g: the reaches in parent
+// cells) as parent cells, rounded up to whole global cells. Level 1 takes targethalo (today's
+// single-scale domain); factor 4, targethalo 16, margin 0 (S3.9): level 2 24 parent cells (6
+// global cells), level 3 48 (3 global cells); margin 2 (S3.8, the unbounded solve): 28 (7) and 80 (5).
+// Up to S3.8 only the channels' 2 global cells were kept with no margin.
 // Level 0: 0 (the global fields are given, not computed).
-inline int levelhalo(int targethalo, int factor, int level)
+inline int levelhalo(int targethalo, int factor, int level, int solvemargin = solvemarginglobalcells)
 {
     if (level < 1)
         return 0;
+    const std::int64_t reach = channelreachglobalcells + solvemargin;
     const std::int64_t scale = levelscale(factor, level - 1);
-    const std::int64_t excess = targethalo - globalreachcells;
+    const std::int64_t excess = targethalo - reach;
     const std::int64_t globalcells = excess >= 0 ? (excess + scale - 1) / scale : -(-excess / scale);  // ceil
-    return static_cast<int>(scale * (globalreachcells + globalcells));
+    return static_cast<int>(scale * (reach + globalcells));
 }
 
 // The absolute key of level cell (column, row) on a level grid of levelwidth columns:
@@ -202,26 +218,26 @@ LevelSpan snapoutwards(LevelSpan span, int factor);
 // The level window of the global window's kept box at `level`: column0 =
 // global.column0 s_L, columns = global.columns s_L, row0 = global.row0 s_L, rows =
 // global.rows s_L (whole global cells are whole parent cells at every level), halo =
-// levelhalo(global.halo, factor, level) parent cells (at level 1 global.halo: the domain is
-// the global window's domain; at level L >= 2 it reaches globalreachcells +
-// ceil((global.halo - globalreachcells) / factor^(L - 1)) global cells; at level 0
+// levelhalo(global.halo, factor, level, solvemargin) parent cells (at level 1 global.halo: the
+// domain is the global window's domain; at level L >= 2 it reaches g + ceil((global.halo - g) /
+// factor^(L - 1)) global cells, g = channelreachglobalcells + solvemargin; at level 0
 // halo 0), the domain by
 // the rule of LevelWindow. global.scale is not read. Throws std::invalid_argument when
-// factor < 2, level < 0, global is not a window of regionalwindow's rules (worldwidth
+// factor < 2, level < 0, solvemargin < 0, global is not a window of regionalwindow's rules (worldwidth
 // >= 4 and even, worldheight = worldwidth / 2, the kept box inside the grid, halo >= 0),
 // the domain is wider than the level grid (domaincolumns > levelwidth()), or
 // levelwidth() x levelheight() does not fit below 2^63.
-LevelWindow levelwindow(const RegionalWindow& global, int factor, int level);
+LevelWindow levelwindow(const RegionalWindow& global, int factor, int level, int solvemargin = solvemarginglobalcells);
 
 // The halo chain of a target: the windows of levels 0 .. level a pass at that level
-// computes, index = level. Element `level` is levelwindow(target, factor, level). For
+// computes, index = level. Element `level` is levelwindow(target, factor, level, solvemargin). For
 // l = level - 1 down to 1, window l is built from window l + 1 (call it c): its kept box
 // spans the parent cells of c's domain widened by `reach` level-l cells on every side
 // (columns c.domaincolumn0 / factor - reach, count c.domaincolumns / factor + 2 reach;
 // rows c.domainrow0 / factor - reach, count c.domainrows / factor + 2 reach, then
 // clipped to 0 .. levelheight(l)), snapped outwards to whole global cells (multiples of
 // factor^l, as snapoutwards does for one factor), the column wrapped modulo levelwidth(l),
-// rows clipped again to the grid; its halo is levelhalo(target.halo, factor, l) parent
+// rows clipped again to the grid; its halo is levelhalo(target.halo, factor, l, solvemargin) parent
 // cells and its domain follows by the rule of LevelWindow. So every window of the chain
 // has its kept box and its domain in whole global cells (regionalwindowof).
 // Window 0 is built from window 1 the same way without the snap (level-0 cells are global
@@ -232,7 +248,8 @@ LevelWindow levelwindow(const RegionalWindow& global, int factor, int level);
 // parent's own edge. level >= 1; throws std::invalid_argument as levelwindow, when
 // level < 1 or reach < 0, and when a level's domain is wider than its grid (whole-planet
 // chains are not supported, as regionalwindow refuses a domain wider than the planet).
-std::vector<LevelWindow> halochain(const RegionalWindow& target, int factor, int level, int reach);
+std::vector<LevelWindow> halochain(const RegionalWindow& target, int factor, int level, int reach,
+                                   int solvemargin = solvemarginglobalcells);
 
 // The RegionalWindow of a level window whose kept box and domain are whole global cells
 // (every window of a halo chain at level >= 1): scale = factor^level, worldwidth and

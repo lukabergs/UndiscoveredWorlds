@@ -24,7 +24,9 @@
 // it, the inputs and the keys' order there. No receiver, flood step or depression's
 // spill path leaves the sub-basin in any pass, so the passes do not widen it, and
 // two windows that both hold a sub-basin and its border give it bit-identical
-// results. Planet-free.
+// results. Sub-basins are unbounded (a forest of pinned lines does not cut the plane);
+// with AnalyticalReliefParameters::catchmentreach r (S3.9) each cell's result reads only the
+// cells within 4r global cells (the bound is stated there). Planet-free.
 
 #include <cstdint>
 #include <vector>
@@ -47,6 +49,22 @@ struct AnalyticalReliefParameters
     // + (1 - damping) z_route(i - 1), z_route(0) = the start. 0 < damping <= 1; 1 is
     // no damping. The solution itself is always solved from the start surface.
     double damping = 0.5;
+    // Multiscale plan S3.9 (§3, "Seamless solve: a bounded catchment", with the review's local
+    // labelling; regional.catchment_reach_global_cells): r >= 1 bounds every catchment. Labels, once,
+    // on the start surface: one Priority-Flood per global cell g (AnalyticalReliefInput::globalcolumn,
+    // globalrow), seeded at the pinned cells inside g's block and confined to the unpinned cells whose
+    // global cell lies within r of g (Chebyshev, columns wrapped modulo globalwidth); each unpinned cell
+    // takes the seed with the smallest (filled level, hashed absolute key of the seed) over the floods
+    // reaching it: its catchment's outlet. Every pass routes inside the label only: steepest descent to
+    // a neighbour of the same label (or to the outlet), else the receiver of a flood that steps only
+    // into cells of its seed's label; every queue of the bounded solve ties by a hashed key, not the
+    // row-major one. A cell no flood reaches, or whose path in its winning flood leaves its label,
+    // keeps its start elevation (AnalyticalReliefResult::unreached). Bound: a label reads the cells
+    // within 2r global cells (the floods of the global cells within r, each confined to r around its
+    // own); a catchment lies within r of its outlet's global cell, so within 2r of any of its cells,
+    // and which cells belong to it reads their labels: a cell's result reads the cells within 4r
+    // global cells. 0: the solve up to S3.8, bit for bit (its sub-basins are unbounded).
+    int catchmentreach = 0;
 };
 
 struct AnalyticalReliefInput
@@ -72,6 +90,12 @@ struct AnalyticalReliefInput
     // elevation, where uplift appears as the pinned channels' incision (regional_valleys.hpp),
     // not as a lift of the land. The threshold slope applies after it as before.
     std::vector<float> uplift_m_myr;
+    // S3.9 (AnalyticalReliefParameters::catchmentreach >= 1 only, read nowhere else): the global
+    // cell of each cell, its column (0 .. globalwidth - 1) and row on the world grid, and the
+    // world's width in global cells, at least 1 (columns wrap modulo it).
+    std::vector<std::int32_t> globalcolumn;
+    std::vector<std::int32_t> globalrow;
+    int globalwidth = 0;
 };
 
 struct AnalyticalReliefResult
@@ -87,12 +111,21 @@ struct AnalyticalReliefResult
     int iterations = 0;                  // routing passes run: maxiterations
     bool converged = false;              // the last two passes' receivers are equal (false with one pass)
     int changedreceivers = 0;            // cells whose receiver differs between the last two passes (0 with one pass)
+    // The pinned cell each cell drains to on the last pass's receivers (itself on a pinned cell);
+    // with catchmentreach >= 1 an unpinned cell's catchment label.
+    std::vector<int32_t> outlet;
+    // catchmentreach >= 1: 1 on the unpinned cells no catchment reached or cut from their outlet,
+    // kept at their start elevation (direction 0, discharge 0); empty with catchmentreach 0.
+    // unreachedcells counts them.
+    std::vector<uint8_t> unreached;
+    int unreachedcells = 0;
 };
 
 // Throws std::invalid_argument when the input sizes differ from the metric's (key and
-// uplift_m_myr: empty or one per cell), two keys are equal, a parameter is out of range (K <= 0,
+// uplift_m_myr: empty or one per cell; with catchmentreach >= 1 globalcolumn and globalrow one per
+// cell and globalwidth >= 1), two keys are equal, a parameter is out of range (K <= 0,
 // m < 0, t < 0 or not finite, threshold slope <= 0, no iteration, damping outside
-// 0 < damping <= 1), or no cell of a non-empty patch is pinned. No cell ends above its start elevation: the
+// 0 < damping <= 1, catchmentreach < 0), or no cell of a non-empty patch is pinned. No cell ends above its start elevation: the
 // advected value is min(z0(x), the rule's value), since with no uplift the erosion
 // term K A^m |grad z| never raises a cell (it would where the receivers run uphill on
 // the start surface: in a depression, or after the routing changed). Receivers: steepest

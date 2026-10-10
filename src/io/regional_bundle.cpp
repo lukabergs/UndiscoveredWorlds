@@ -371,6 +371,10 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                         << ", \"valleycells\": " << level.valleycells << ", \"troughcells\": " << level.troughcells
                         << ", \"cirquecells\": " << level.cirquecells
                         << ", \"ringbasincells\": " << level.ringbasincells
+                        << ", \"unreachedcells\": " << level.unreachedcells
+                        << ", \"sinkjunctions\": " << level.sinkjunctions
+                        << ", \"solvelowering50_m\": " << jsonnumber(level.solvelowering50_m)
+                        << ", \"solvelowering99_m\": " << jsonnumber(level.solvelowering99_m)
                         << ", \"reliefconverged\": " << (level.reliefconverged ? "true" : "false")
                         << ", \"changedreceivers\": " << level.changedreceivers
                         << ", \"seconds\": " << jsonnumber(level.seconds) << ", \"steps\": [";

@@ -57,18 +57,18 @@
 //   up to 2 global cells beyond it (level 1; 1 parent cell + 3 level cells at level >= 2, also
 //   within 2 global cells), on top of the smoothing's reach, so the loop's halo adds
 //   lakefloodreach, 2 parent cells at every level (2 global cells at level 1).
-// - The halo budget per level (S3.8), in parent cells at level L (s = factor^(L - 1) parent cells
-//   per global cell), each reach on top of the one before: the presmoothing 2 x meanpasses; the
+// - The halo budget per level (S3.8, S3.9), in parent cells at level L (s = factor^(L - 1) parent
+//   cells per global cell), each reach on top of the one before: the presmoothing 2 x meanpasses; the
 //   channels and the solve channelreachglobalcells s plus the solve's margin
-//   solvemarginglobalcells s (refinement_grid.hpp; found by trial: the solve's reach is not
-//   bounded, LevelDiagnostics::ringbasincells), the forms beside the solve (a form's extent is
-//   at most one parent cell: k level cells at level 1, under factor level cells deeper) counted
-//   on top as formreach; the channel-cell mean's one level cell (channelmeanreach, one parent
-//   cell); the lake flood lakefloodreach; the smoothing 2 x smooth_passes; the tributaries
-//   tributaryreach. levelhalo gives s (4 + ceil((halo - 4) / s)): the global-cell reaches kept,
-//   the parent-cell ones rounded up to whole global cells. At the defaults (halo 30, factor 4)
-//   levels 1, 2, 3 take 30, 44, 96 parent cells (30, 11, 6 global cells; 28, 36, 64 parent
-//   cells at halo 28 before S3.8).
+//   solvemargin(regional.catchment_reach_global_cells) s (refinement_grid.hpp: 2 with bounded
+//   catchments at reach 1, the bound 4r - 2; S3.8's 2, found by trial, without them), the
+//   forms beside the solve (a form's extent is at most one parent cell: k level cells at level 1,
+//   under factor level cells deeper) counted on top as formreach; the channel-cell mean's one level
+//   cell (channelmeanreach, one parent cell); the lake flood lakefloodreach; the smoothing 2 x
+//   smooth_passes; the tributaries tributaryreach. levelhalo gives s (g + ceil((halo - g) / s)), g
+//   = 2 + the margin: the global-cell reaches kept, the parent-cell ones rounded up to whole global
+//   cells. At the defaults (halo 30, factor 4) levels 1, 2, 3 take 30, 44, 96 parent cells (30, 11, 6
+//   global cells; 30, 36, 64 with a margin of 0; 28, 36, 64 parent cells at halo 28 before S3.8).
 // Planet-free: the parameters are filled from tuning::landscape::refinement by the planet
 // adapter (src/simulations/regional/regional_inputs.hpp, refinementparameters).
 
@@ -127,7 +127,7 @@ constexpr int channelmeanreach = 1;
 // The halo in global cells the loop requires: 2 x meanpasses + channelreachglobalcells (the single
 // pass's rule), formreach and channelmeanreach (S3.8), lakefloodreach (S2.8), 2 x smoothpasses
 // (S2.7's smoothing); with the tributaries on (S3.3), tributaryreach more (regional_tributaries.hpp:
-// parent cells). levelhalo keeps globalreachcells in global cells at every level and turns the rest
+// parent cells). levelhalo keeps the channels' reach and the solve's margin in global cells at every level and turns the rest
 // into at least as many parent cells. 30 at the defaults (meanpasses 6, smoothpasses 6).
 constexpr int refinementhalo(int meanpasses, int smoothpasses, bool tributaries = false)
 {
@@ -314,12 +314,23 @@ struct LevelDiagnostics
     int valleycells = 0;
     int troughcells = 0;
     int cirquecells = 0;
-    // S3.8: the kept cells whose solve sub-basin (the unpinned cells connected to it by orthogonal
-    // steps and diagonal steps not between two pinned corners, analytical_relief.hpp) touches the
-    // domain's outer ring on a window edge (not at a pole, where every window clips alike). The
-    // solve's result there may depend on the window: bit identity with another window is not
-    // guaranteed there, only found by the overlap tests (refinement_grid.hpp, solvemarginglobalcells).
+    // S3.9 (redefined from S3.8's sub-basins touching the ring): the kept cells whose outlet on the
+    // solve's last pass (AnalyticalReliefResult::outlet) is a cell of the domain's outer ring on a
+    // window edge (not at a pole, where every window clips alike). A guard, not evidence: with bounded
+    // catchments (regional.catchment_reach_global_cells r >= 1) it is 0 automatically when the halo
+    // holds 2r global cells (an outlet's catchment lies within 2r of it), and it was 0 for the unbounded
+    // solve too on erosion run 9; window independence is the bound of refinement_grid.hpp
+    // (solvemargin) and the overlap tests. The kept cells no catchment reached or that were cut from
+    // their outlet, kept at their start (unreachedcells; 0 with r = 0); the kept land-sink junctions
+    // pinned with r >= 1 (sinkjunctions, ChannelParameters::pinsinks).
     int ringbasincells = 0;
+    int unreachedcells = 0;
+    int sinkjunctions = 0;
+    // S3.9: the 50th and 99th percentiles (nearest rank) of the solve's lowering over the kept unpinned
+    // cells (the start surface less the solve's result with the parent's lift added back: the cells of
+    // RegionalLevel::meanlowering_m).
+    double solvelowering50_m = 0.0;
+    double solvelowering99_m = 0.0;
     bool reliefconverged = false;        // the level's solve (AnalyticalReliefResult)
     int changedreceivers = 0;
     double seconds = 0.0;                // the level's wall-clock time

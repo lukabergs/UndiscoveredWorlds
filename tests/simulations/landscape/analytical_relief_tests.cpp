@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -791,4 +793,203 @@ TEST_F(Landscape, AnalyticalReliefRejectsBadInput)
     EXPECT_THROW(landscape::solveanalyticalrelief(metric, good, parameters), std::invalid_argument);
     parameters.damping = 1.0;
     EXPECT_NO_THROW(landscape::solveanalyticalrelief(metric, good, parameters));
+
+    // S3.9: a negative catchment reach, or a positive one without the global cells.
+    parameters = defaults;
+    parameters.catchmentreach = -1;
+    EXPECT_THROW(landscape::solveanalyticalrelief(metric, good, parameters), std::invalid_argument);
+    parameters.catchmentreach = 1;
+    EXPECT_THROW(landscape::solveanalyticalrelief(metric, good, parameters), std::invalid_argument);
+    input = good;
+    input.globalcolumn.assign(good.start_m.size(), 0);
+    input.globalrow.assign(good.start_m.size(), 0);
+    EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, parameters), std::invalid_argument);  // globalwidth 0
+    input.globalwidth = 4;
+    EXPECT_NO_THROW(landscape::solveanalyticalrelief(metric, input, parameters));
+    input.globalrow.pop_back();
+    EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, parameters), std::invalid_argument);
+}
+
+namespace
+{
+// S3.9: a patch solved whole and as its sub-patch of the columns from `subcolumn` on (its own ring
+// pinned at the start, keys and global cells the whole patch's), compared on the unpinned cells at
+// least `blocks` global cells east of the cut (columns from subcolumn + blocks x block to the last
+// but one).
+struct CutComparison
+{
+    int compared = 0, elevations = 0, directions = 0, discharges = 0;
+    int unreachedwhole = 0, unreachedcut = 0;
+};
+
+CutComparison comparecut(const PatchMetric& whole, const AnalyticalReliefInput& input, int subcolumn, int block,
+                         const AnalyticalReliefParameters& parameters, const std::vector<int>& distances,
+                         std::vector<CutComparison>& results, AnalyticalReliefResult* wholeresult = nullptr)
+{
+    const int width = whole.width, height = whole.height, subwidth = width - subcolumn;
+    const PatchMetric sub = squaremetric(subwidth, height, whole.dy_m);
+    AnalyticalReliefInput part;
+    part.pinned = ring(sub);
+    part.globalwidth = input.globalwidth;
+    for (int y = 0; y < height; y++)
+        for (int x = 0; x < subwidth; x++)
+        {
+            const std::size_t cell = whole.index(subcolumn + x, y);
+            part.start_m.push_back(input.start_m[cell]);
+            part.runoff_m_yr.push_back(input.runoff_m_yr[cell]);
+            part.key.push_back(input.key[cell]);
+            if (!input.globalcolumn.empty())
+            {
+                part.globalcolumn.push_back(input.globalcolumn[cell]);
+                part.globalrow.push_back(input.globalrow[cell]);
+            }
+            if (input.pinned[cell] != 0)
+                part.pinned[sub.index(x, y)] = 1;
+        }
+    const AnalyticalReliefResult full = landscape::solveanalyticalrelief(whole, input, parameters);
+    const AnalyticalReliefResult cut = landscape::solveanalyticalrelief(sub, part, parameters);
+    results.clear();
+    for (int blocks : distances)
+    {
+        CutComparison counts;
+        counts.unreachedwhole = full.unreachedcells;
+        counts.unreachedcut = cut.unreachedcells;
+        for (int y = 1; y < height - 1; y++)
+            for (int x = subcolumn + blocks * block; x < width - 1; x++)
+            {
+                const std::size_t cell = whole.index(x, y), other = sub.index(x - subcolumn, y);
+                if (input.pinned[cell] != 0)
+                    continue;
+                counts.compared++;
+                counts.elevations += full.elevation_m[cell] != cut.elevation_m[other] ? 1 : 0;
+                counts.directions += full.direction[cell] != cut.direction[other] ? 1 : 0;
+                counts.discharges += full.discharge_m3_yr[cell] != cut.discharge_m3_yr[other] ? 1 : 0;
+            }
+        results.push_back(counts);
+    }
+    if (wholeresult != nullptr)
+        *wholeresult = full;
+    return results.back();
+}
+}
+
+TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsCutAWindowIndependentTrough)
+{
+    // S3.9 (multiscale plan §3, "Seamless solve: a bounded catchment", verify (a)). A 96 x 40 patch
+    // of 1,000 m cells in blocks of 8 x 8 cells (the global cells): a trough along row 20 sloping
+    // down westwards across eleven blocks to one pinned cell at (4, 20), walled to its west; pinned
+    // lines at 600 m along rows 8 and 31 above its rims; slopes of 650 m and more beyond them
+    // falling towards the lines; the ring pinned. Solved whole and as the sub-patch of columns
+    // 32 .. 95, whose ring (column 32) cuts the trough. With catchment reach 0 the trough drains to the
+    // far cell in the whole patch and to the cut in the sub-patch, so the cells two blocks inside the cut
+    // differ; with reach 1 the cells at least 4 blocks inside (the bound, 4r) are identical, and
+    // every outlet lies within one block of its cell's block.
+    constexpr int block = 8, width = 96, height = 40, subcolumn = 32;
+    const PatchMetric whole = squaremetric(width, height, 1000.0);
+    AnalyticalReliefInput input;
+    input.pinned = ring(whole);
+    input.globalwidth = 1000;
+    for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+        {
+            double z = 0.0;
+            if (y == 8 || y == 31)
+                z = 600.0;
+            else if (y < 8)
+                z = 650.0 + 5.0 * (8 - y) + 3.0 * wobble(x, y);
+            else if (y > 31)
+                z = 650.0 + 5.0 * (y - 31) + 3.0 * wobble(x, y);
+            else if (x < 4)
+                z = 700.0 + 3.0 * wobble(x, y);
+            else
+                z = 10.0 + 2.0 * (x - 4) + 20.0 * std::abs(y - 20) + 3.0 * wobble(x, y);
+            input.start_m.push_back(static_cast<float>(z));
+            input.runoff_m_yr.push_back(1.0f);
+            input.key.push_back(whole.index(x, y));
+            input.globalcolumn.push_back(x / block);
+            input.globalrow.push_back(y / block);
+            if (y == 8 || y == 31 || (x == 4 && y == 20))
+                input.pinned[whole.index(x, y)] = 1;
+        }
+
+    AnalyticalReliefParameters parameters;
+    parameters.elapsed_myr = 200.0;
+    const std::vector<int> distances{ 2, 3, 4 };
+    std::vector<CutComparison> results;
+    for (int reach : { 0, 1 })
+    {
+        parameters.catchmentreach = reach;
+        AnalyticalReliefResult full;
+        comparecut(whole, input, subcolumn, block, parameters, distances, results, &full);
+        for (std::size_t d = 0; d < distances.size(); d++)
+            std::printf("[relief] trough, catchment reach %d, %d blocks inside the cut: %d cells compared, %d elevations, "
+                        "%d directions and %d discharges differ; unreached %d whole, %d cut\n",
+                        reach, distances[d], results[d].compared, results[d].elevations, results[d].directions,
+                        results[d].discharges, results[d].unreachedwhole, results[d].unreachedcut);
+        if (reach == 0)
+        {
+            EXPECT_GT(results[0].elevations, 0) << "the unbounded solve: the cut changes the trough two blocks inside it";
+            EXPECT_TRUE(full.unreached.empty());
+            continue;
+        }
+        const CutComparison& bound = results.back();
+        EXPECT_GT(bound.compared, 0);
+        EXPECT_EQ(bound.elevations, 0) << "catchment reach " << reach;
+        EXPECT_EQ(bound.directions, 0) << "catchment reach " << reach;
+        EXPECT_EQ(bound.discharges, 0) << "catchment reach " << reach;
+        EXPECT_EQ(full.unreached.size(), whole.size());
+        for (std::size_t cell = 0; cell < whole.size(); cell++)
+        {
+            const std::size_t outlet = static_cast<std::size_t>(full.outlet[cell]);
+            EXPECT_LE(std::abs(input.globalcolumn[cell] - input.globalcolumn[outlet]), reach);
+            EXPECT_LE(std::abs(input.globalrow[cell] - input.globalrow[outlet]), reach);
+        }
+    }
+}
+
+TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsDominoCorridor)
+{
+    // S3.9's review: the adversarial case of a labelling race. A 96 x 24 patch of 1,000 m cells in
+    // blocks of 8 x 8: walls of 1,000 m, the ring pinned, a flat corridor at 100 m along row 12 (columns
+    // 1 .. 94) and one pinned cell at 200 m above it at the west end of every block ((8b + 1, 11)). A race
+    // seeded at all pinned cells in the order of the row-major key lets the west-most seed fill the
+    // corridor up to its reach, the next block's seed find its entry taken and the one after start
+    // again, so the labels alternate block by block from the patch's west end and a cut flips them
+    // all, at any distance. With one flood per global cell and the hashed tie the labels are local:
+    // solved whole and as the sub-patch of the columns 16 .. 95 (its ring cutting the corridor), the
+    // cells at least 4 blocks east of the cut (the bound, 4r) are identical.
+    constexpr int block = 8, width = 96, height = 24, subcolumn = 16;
+    const PatchMetric whole = squaremetric(width, height, 1000.0);
+    AnalyticalReliefInput input;
+    input.pinned = ring(whole);
+    input.globalwidth = 1000;
+    for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+        {
+            const bool corridor = y == 12 && x >= 1 && x <= width - 2;
+            const bool seed = y == 11 && x % block == 1;
+            input.start_m.push_back(corridor ? 100.0f : (seed ? 200.0f : 1000.0f));
+            input.runoff_m_yr.push_back(1.0f);
+            input.key.push_back(whole.index(x, y));
+            input.globalcolumn.push_back(x / block);
+            input.globalrow.push_back(y / block);
+            if (seed)
+                input.pinned[whole.index(x, y)] = 1;
+        }
+    AnalyticalReliefParameters parameters;
+    parameters.elapsed_myr = 5.0;
+    parameters.catchmentreach = 1;
+    const std::vector<int> distances{ 1, 2, 3, 4 };
+    std::vector<CutComparison> results;
+    comparecut(whole, input, subcolumn, block, parameters, distances, results);
+    for (std::size_t d = 0; d < distances.size(); d++)
+        std::printf("[relief] domino corridor, %d blocks east of the cut: %d cells compared, %d elevations, %d directions "
+                    "and %d discharges differ; unreached %d whole, %d cut\n",
+                    distances[d], results[d].compared, results[d].elevations, results[d].directions, results[d].discharges,
+                    results[d].unreachedwhole, results[d].unreachedcut);
+    const CutComparison& bound = results.back();
+    EXPECT_GT(bound.compared, 0);
+    EXPECT_EQ(bound.elevations, 0);
+    EXPECT_EQ(bound.directions, 0);
+    EXPECT_EQ(bound.discharges, 0);
 }

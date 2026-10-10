@@ -131,6 +131,7 @@ inline float elapsedMyr = 20.0f;
 inline float thresholdSlope = 0.6f;
 inline int maxIterations = 20;
 inline float damping = 0.5f;
+inline int catchmentReachGlobalCells = 0;
 inline float warpAmplitudeCells = 0.5f;
 inline float warpWavelengthCells = 2.0f;
 inline float warpFadeM = 300.0f;
@@ -278,6 +279,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.threshold_slope", &regional::thresholdSlope },
         { "landscape.regional.max_iterations", &regional::maxIterations },
         { "landscape.regional.damping", &regional::damping },
+        { "landscape.regional.catchment_reach_global_cells", &regional::catchmentReachGlobalCells },
         { "landscape.regional.warp_amplitude_cells", &regional::warpAmplitudeCells },
         { "landscape.regional.warp_wavelength_cells", &regional::warpWavelengthCells },
         { "landscape.regional.warp_fade_m", &regional::warpFadeM },

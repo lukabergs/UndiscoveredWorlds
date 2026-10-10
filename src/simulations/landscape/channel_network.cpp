@@ -694,6 +694,32 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
             }
         }
 
+    // S3.9 (pinsinks): the junction of every land sink inside the domain that no link reached, so that
+    // every land block holds a pinned cell (its outflow link's junction, else this one).
+    if (parameters.pinsinks != 0)
+        for (int jj = 0; jj < window.domainrows; jj++)
+            for (int ii = 0; ii < window.domaincolumns; ii++)
+            {
+                const int j = window.domainrow0 + jj;
+                const int i = (window.domaincolumn0 + ii) % width;
+                const std::size_t cell = static_cast<std::size_t>(j) * width + i;
+                if (network.sea[cell] != 0 || globalreceiver(network, cell) != cell ||
+                    !std::isfinite(network.filledelevation_m[cell]))
+                    continue;
+                const FineCell offset = junctionoffset(k, cell, parameters);
+                const FineCell junction{ static_cast<std::int64_t>(k) * i + offset.x, static_cast<std::int64_t>(k) * j + offset.y };
+                std::size_t index = 0;
+                if (!domainindex(junction, index) || out.channel[index] != 0 || (usesea && finesea[index] != 0))
+                    continue;
+                write(index, true, junction, nullptr, junctionbed(cell), cell, outletdistance(network, cell, distance), 0,
+                      true);
+                const int x = static_cast<int>(index % static_cast<std::size_t>(domainwidth));
+                const int y = static_cast<int>(index / static_cast<std::size_t>(domainwidth));
+                const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
+                if (x >= x0 && x < x0 + window.finewidth() && y >= y0 && y < y0 + window.fineheight())
+                    out.sinkjunctions++;
+            }
+
     // Springs of the source cells inside the domain (they lie in their own cell's block).
     if (parameters.springspercell > 0)
         for (int jj = 0; jj < window.domainrows; jj++)
@@ -781,8 +807,11 @@ void channelslevel(const LevelContext& context, LevelState& state)
     const std::vector<uint8_t>& sea = state.sea;
     std::vector<float>& surface = state.surface_m;
     const std::size_t count = surface.size();
+    // S3.9: with bounded catchments in the refinement loop every land sink's junction is pinned.
+    ChannelParameters channelparameters = context.parameters.channels;
+    channelparameters.pinsinks = context.refinement != nullptr && context.parameters.relief.catchmentreach > 0 ? 1 : 0;
     state.channels = rasterisechannels(context.window, incised ? state.incisednetwork : inputs.network,
-                                       context.parameters.channels, inputs.sealevel,
+                                       channelparameters, inputs.sealevel,
                                        incised ? state.bedsurface_m : surface, sea);
     tributarieslevel(context, state);
     const FineChannels& channels = state.channels;
@@ -790,6 +819,7 @@ void channelslevel(const LevelContext& context, LevelState& state)
         if (channels.channel[cell] != 0 && sea[cell] == 0)
             surface[cell] = channels.bed_m[cell];
     state.bed_m = channels.bed_m;
+    state.sinkjunctions = channels.sinkjunctions;
     recordlevelstep(state, LevelStep::channels);
 }
 }

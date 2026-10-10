@@ -62,14 +62,15 @@ LevelWindow buildwindow(int worldwidth, int factor, int level, std::int64_t halo
 }
 
 // levelhalo in 64 bits (levelhalo's int overflows at deep levels before the domain check
-// can refuse the window): factor^(L - 1) (4 + ceil((targethalo - 4) / factor^(L - 1))), 4 =
-// globalreachcells.
-std::int64_t levelhalo64(int targethalo, int factor, int level)
+// can refuse the window): factor^(L - 1) (g + ceil((targethalo - g) / factor^(L - 1))), g =
+// channelreachglobalcells + solvemargin.
+std::int64_t levelhalo64(int targethalo, int factor, int level, int solvemargin)
 {
     if (level < 1)
         return 0;
+    const std::int64_t reach = channelreachglobalcells + solvemargin;
     const std::int64_t scale = levelscale(factor, level - 1);
-    return scale * (globalreachcells + ceildivide(targethalo - globalreachcells, scale));
+    return scale * (reach + ceildivide(targethalo - reach, scale));
 }
 
 // The span snapped outwards to multiples of unit (unit >= 1), the rule of snapoutwards.
@@ -94,7 +95,7 @@ LevelSpan snapoutwards(LevelSpan span, int factor)
     return snapto(span, factor);
 }
 
-LevelWindow levelwindow(const RegionalWindow& global, int factor, int level)
+LevelWindow levelwindow(const RegionalWindow& global, int factor, int level, int solvemargin)
 {
     if (factor < 2)
         throw std::invalid_argument("levelwindow: the factor must be at least 2");
@@ -108,6 +109,8 @@ LevelWindow levelwindow(const RegionalWindow& global, int factor, int level)
         throw std::invalid_argument("levelwindow: the kept box must lie inside the grid");
     if (global.halo < 0)
         throw std::invalid_argument("levelwindow: the halo must not be negative");
+    if (solvemargin < 0)
+        throw std::invalid_argument("levelwindow: the solve's margin must not be negative");
 
     // s_L, then width_L x height_L below 2^63, checked step by step against overflow.
     constexpr std::int64_t largest = INT64_MAX;
@@ -124,18 +127,18 @@ LevelWindow levelwindow(const RegionalWindow& global, int factor, int level)
     if (levelwidth > largest / levelheight)
         throw std::invalid_argument("levelwindow: the level grid does not fit below 2^63 cells");
 
-    return buildwindow(width, factor, level, levelhalo64(global.halo, factor, level), global.column0 * scale,
+    return buildwindow(width, factor, level, levelhalo64(global.halo, factor, level, solvemargin), global.column0 * scale,
                        global.columns * scale, global.row0 * scale, global.rows * scale, "levelwindow");
 }
 
-std::vector<LevelWindow> halochain(const RegionalWindow& target, int factor, int level, int reach)
+std::vector<LevelWindow> halochain(const RegionalWindow& target, int factor, int level, int reach, int solvemargin)
 {
     if (level < 1)
         throw std::invalid_argument("halochain: the level must be at least 1");
     if (reach < 0)
         throw std::invalid_argument("halochain: the reach must not be negative");
     std::vector<LevelWindow> chain(static_cast<std::size_t>(level) + 1);
-    chain[static_cast<std::size_t>(level)] = levelwindow(target, factor, level);
+    chain[static_cast<std::size_t>(level)] = levelwindow(target, factor, level, solvemargin);
     for (int l = level - 1; l >= 0; l--)
     {
         const LevelWindow& child = chain[static_cast<std::size_t>(l) + 1];
@@ -162,7 +165,7 @@ std::vector<LevelWindow> halochain(const RegionalWindow& target, int factor, int
         if (columns.count > levelwidth)
             throw std::invalid_argument("halochain: a level's kept box is wider than its grid");
         chain[static_cast<std::size_t>(l)] =
-            buildwindow(target.worldwidth, factor, l, levelhalo64(target.halo, factor, l),
+            buildwindow(target.worldwidth, factor, l, levelhalo64(target.halo, factor, l, solvemargin),
                         wraplevel(columns.first, levelwidth), columns.count, rows.first, rows.count, "halochain");
     }
     return chain;

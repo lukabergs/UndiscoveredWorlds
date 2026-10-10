@@ -554,7 +554,8 @@ int runregioncommand(const vector<string>& arguments)
              << projection.bedsmovedparents << " parents, forced " << projection.forcedparents << " (largest "
              << projection.maxforcedmove_m << " m); dried cells " << level.driedcells << ", shores below lakes "
              << level.shoresbelowlake << ", dry land below the sea level " << level.landbelowsea
-             << ", kept cells in solve sub-basins reaching the domain ring " << level.ringbasincells;
+             << ", kept cells draining to the domain ring " << level.ringbasincells << ", unreached by a catchment "
+             << level.unreachedcells << ", sink junctions pinned " << level.sinkjunctions;
         if (level.tributarycells > 0)  // multiscale plan S3.3 (tributaries on)
             cout << "; tributaries: " << level.tributaries << " grown, " << level.tributarycells << " cells, "
                  << level.tributarybedsabove << " beds above the start surface";

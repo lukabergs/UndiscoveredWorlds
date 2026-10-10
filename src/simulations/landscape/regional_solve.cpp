@@ -62,6 +62,24 @@ void solvelevel(const LevelContext& context, LevelState& state)
             solveinput.key[cell] = static_cast<std::uint64_t>(window.absolutefinecolumn(x) +
                                                               window.absolutefinerow(y) * planetfinewidth);
         }
+    // S3.9: bounded catchments in the refinement loop only (the single pass keeps the unbounded solve);
+    // each cell's global cell from its absolute fine position.
+    AnalyticalReliefParameters relief = context.parameters.relief;
+    if (context.refinement == nullptr)
+        relief.catchmentreach = 0;
+    if (relief.catchmentreach > 0)
+    {
+        solveinput.globalcolumn.resize(count);
+        solveinput.globalrow.resize(count);
+        solveinput.globalwidth = width;
+        for (int y = 0; y < domainheight; y++)
+            for (int x = 0; x < domainwidth; x++)
+            {
+                const std::size_t cell = at(x, y, domainwidth);
+                solveinput.globalcolumn[cell] = static_cast<std::int32_t>(window.absolutefinecolumn(x) / window.scale);
+                solveinput.globalrow[cell] = static_cast<std::int32_t>(window.absolutefinerow(y) / window.scale);
+            }
+    }
     // R9: the solve's uplift term from the incision's rate (analytical_relief.hpp), only
     // with the incision active; empty otherwise (the solve without uplift exactly).
     if (incision.active)
@@ -108,9 +126,38 @@ void solvelevel(const LevelContext& context, LevelState& state)
         }
     }
 
-    AnalyticalReliefResult solved = solveanalyticalrelief(metric, solveinput, context.parameters.relief);
+    AnalyticalReliefResult solved = solveanalyticalrelief(metric, solveinput, relief);
     state.reliefconverged = solved.converged;
     state.changedreceivers = solved.changedreceivers;
+    // S3.9's unreached cells stay unpinned here: the solve returned their start (with the parent's
+    // lift, the de-lifted start), so their elevation and solved_m follow the unpinned cells' rules
+    // below and the parent's lift of the next level is the one they really carry.
+    // S3.9's diagnostics over the kept box (refinement loop only): the unreached cells, and the cells
+    // whose outlet on the last pass's receivers is a cell of the domain's outer ring on a window edge
+    // (the west and east columns; the north and south rows unless they lie on a pole, where every
+    // window clips alike).
+    state.unreachedcells = 0;
+    state.ringbasincells = 0;
+    if (context.levelwindow != nullptr)
+    {
+        const LevelWindow& level = *context.levelwindow;
+        const bool north = level.domainrow0 > 0;
+        const bool south = level.domainrow0 + domainheight < level.levelheight();
+        const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
+        for (int y = y0; y < y0 + window.fineheight(); y++)
+            for (int x = x0; x < x0 + window.finewidth(); x++)
+            {
+                const std::size_t cell = at(x, y, domainwidth);
+                if (!solved.unreached.empty() && solved.unreached[cell] != 0)
+                    state.unreachedcells++;
+                const int32_t outlet = solved.outlet[cell];
+                if (outlet < 0)
+                    continue;
+                const int ox = outlet % domainwidth, oy = outlet / domainwidth;
+                if (ox == 0 || ox == domainwidth - 1 || (north && oy == 0) || (south && oy == domainheight - 1))
+                    state.ringbasincells++;
+            }
+    }
     std::vector<float>& elevation = state.elevation_m;
     elevation = surface;
     // A negative lift takes no land cell below the sea level (the projection's floor for land) unless
@@ -142,6 +189,7 @@ void solvelevel(const LevelContext& context, LevelState& state)
         const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
         double total = 0.0, largest = 0.0;
         std::size_t cells = 0;
+        std::vector<double> lowerings;
         for (int y = y0; y < y0 + window.fineheight(); y++)
             for (int x = x0; x < x0 + window.finewidth(); x++)
             {
@@ -152,9 +200,22 @@ void solvelevel(const LevelContext& context, LevelState& state)
                 total += lowering;
                 largest = std::max(largest, lowering);
                 cells++;
+                if (state.diagnostics != nullptr)
+                    lowerings.push_back(lowering);
             }
         state.meanlowering_m = cells > 0 ? total / static_cast<double>(cells) : 0.0;
         state.maxlowering_m = largest;
+        // S3.9: the loop's record of the lowering's 50th and 99th percentiles (nearest rank).
+        if (state.diagnostics != nullptr && !lowerings.empty())
+        {
+            std::sort(lowerings.begin(), lowerings.end());
+            const auto rank = [&](double share) {
+                const std::size_t index = static_cast<std::size_t>(std::ceil(share * static_cast<double>(lowerings.size())));
+                return lowerings[std::min(lowerings.size(), std::max<std::size_t>(index, 1)) - 1];
+            };
+            state.diagnostics->solvelowering50_m = rank(0.5);
+            state.diagnostics->solvelowering99_m = rank(0.99);
+        }
     }
     state.solveddischarge_m3_yr = std::move(solved.discharge_m3_yr);
     state.pinned = std::move(solveinput.pinned);

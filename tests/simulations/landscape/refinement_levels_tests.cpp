@@ -358,8 +358,8 @@ TEST_F(Landscape, RefinementLevelsOverlapAtThreeLevels)
 {
     // Three levels at factor 4 (k = 64) with every feature on (tributaries off) and the tuned
     // refinement (smooth_passes 6, parent_lift 2, prolongation_limit 1, channel_cell_slope 0.3)
-    // at the loop's smallest halo for them, refinementhalo(2, 6) (S3.8: levelhalo keeps
-    // globalreachcells at every level, so level 3 has 6 global cells here): T (global columns
+    // at the loop's smallest halo for them, refinementhalo(2, 6) (S3.8: levelhalo keeps the channels'
+    // reach and the unbounded solve's margin at every level, so level 3 has 6 global cells here): T (global columns
     // 245 .. 251, rows 71 .. 75) and U (columns 248 .. 0 across the date line, rows 70 .. 73)
     // differ in column and row origin; their overlap (columns 248 .. 251, rows 71 .. 73) holds
     // the lake cell (248, 71) on U's west and T's north edge. Every level's shared kept cells
@@ -396,7 +396,7 @@ TEST_F(Landscape, RefinementLevelsOverlapAtThreeLevels)
     const RefinementResult a = run(t, "tuned, every feature T");
     const RefinementResult b = run(u, "tuned, every feature U");
     ASSERT_EQ(a.levels.size(), 3u);
-    EXPECT_EQ(a.levels[2].window.halo, landscape::levelhalo(halo, 4, 3));
+    EXPECT_EQ(a.levels[2].window.halo, landscape::levelhalo(halo, 4, 3, landscape::solvemargin(parameters.relief.catchmentreach)));
     const OverlapCounts counts = compareoverlaplevels(a, b, "tuned, every feature T/U at k 64");
     EXPECT_GT(counts.lake, 0);
     EXPECT_GT(counts.channel, 0);

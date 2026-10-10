@@ -478,9 +478,10 @@ TEST_F(Landscape, RegionalTributariesOverlapAtThreeLevels)
     const int channels = compareoverlaplevels(p, q, "tributaries P'/Q' at k 64");
     const RefinementResult plainp = refine(inputs, windowpsmall(64), 3, off, "no tributaries P'");
     const RefinementResult plainq = refine(inputs, windowqsmall(64), 3, off, "no tributaries Q'");
-    // S3.8's regression test: bit-identical with tributaries off too. Without the solve's margin
-    // (solvemarginglobalcells 0, globalreachcells 2) level 3 has 3 global cells of halo here and
-    // 263 elevations and 82 discharges differ at P's north edge: the level-3 solve reaches farther.
+    // S3.8's regression test: bit-identical with tributaries off too. The unbounded solve (catchment
+    // reach 0) takes the margin of 2 (unboundedsolvemarginglobalcells); without it level 3 has 3 global
+    // cells of halo here and 263 elevations and 82 discharges differ at P's north edge: the level-3
+    // solve reaches farther (S3.9's bounded catchments: RegionalTributariesOverlapAtThreeLevelsBoundedCatchments).
     const int without = compareoverlaplevels(plainp, plainq, "no tributaries P'/Q' at k 64");
     std::printf("[tributaries] P'/Q' at k 64: %d shared channel cells, %d without tributaries\n", channels, without);
     EXPECT_GT(channels, without);
@@ -489,6 +490,38 @@ TEST_F(Landscape, RegionalTributariesOverlapAtThreeLevels)
         EXPECT_GT(level.tributarycells, 0) << "level " << level.level;
         EXPECT_EQ(level.tributarybedsabove, 0) << "level " << level.level;
     }
+}
+
+TEST_F(Landscape, RegionalTributariesOverlapAtThreeLevelsBoundedCatchments)
+{
+    // S3.9 (multiscale plan §3, "Seamless solve: a bounded catchment", verify (b)): the pair above
+    // with bounded catchments (catchment reach 1) at their solve margin, the bound's 2 (level 3 keeps 5
+    // global cells of halo here): P' and Q' bit-identical on their overlap at every level with
+    // tributaries off and on, and no kept cell drains to a domain's ring (a guard: 0 whenever the halo
+    // holds 2 global cells).
+    const RegionalGlobalInputs inputs = wideworld();
+    RegionalParameters parameters = tributarieswithvalleys();
+    parameters.relief.catchmentreach = 1;
+    RegionalParameters off = parameters;
+    off.tributaries.enabled = 0;
+    const int margin = landscape::solvemargin(parameters.relief.catchmentreach);
+    const RefinementResult plainp = refine(inputs, windowpsmall(64), 3, off, "bounded, no tributaries P'");
+    const RefinementResult plainq = refine(inputs, windowqsmall(64), 3, off, "bounded, no tributaries Q'");
+    const int without = compareoverlaplevels(plainp, plainq, "bounded, no tributaries P'/Q' at k 64");
+    const RefinementResult p = refine(inputs, windowpsmall(64), 3, parameters, "bounded, tributaries P'");
+    const RefinementResult q = refine(inputs, windowqsmall(64), 3, parameters, "bounded, tributaries Q'");
+    const int channels = compareoverlaplevels(p, q, "bounded, tributaries P'/Q' at k 64");
+    EXPECT_GT(channels, without);
+    for (const RefinementResult* result : {&plainp, &plainq, &p, &q})
+        for (const LevelDiagnostics& level : result->levels)
+        {
+            std::printf("[tributaries]   bounded level %d: halo %d parent cells, ring-draining %d, unreached %d, "
+                        "sink junctions %d\n",
+                        level.level, level.window.halo, level.ringbasincells, level.unreachedcells, level.sinkjunctions);
+            EXPECT_EQ(level.window.halo, landscape::levelhalo(loophalo, 4, level.level, margin)) << "level " << level.level;
+            EXPECT_EQ(level.ringbasincells, 0) << "level " << level.level;
+        }
+    std::printf("[tributaries] bounded: margin %d, level-3 halo %d parent cells\n", margin, plainp.levels[2].window.halo);
 }
 
 TEST_F(Landscape, RegionalTributariesOverlapSinglePass)
