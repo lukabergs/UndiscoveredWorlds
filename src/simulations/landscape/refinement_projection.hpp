@@ -51,7 +51,8 @@ struct ProjectionReport
     double maxlambdastep_m = 0.0;       // largest |lambda_c - lambda_c'| over kept parents adjacent east-west or north-south
     // The border step a cell sees: the correction of a child is d = lambda_c w / mean_C(c)(w)
     // (0 where w = 0). Over the pairs of edge-adjacent child cells (east-west or
-    // north-south) in different parents, both in the kept box and both with weight > 0,
+    // north-south) in different parents, both in the kept box and both with weight > 0 as applied (the
+    // children of an all-pinned parent count with their fallback weight 1),
     // |d - d'|: the largest, and the 99th percentile by nearest rank (the sorted value at
     // index ceil(0.99 n) - 1 of n pairs); both 0 when there is no pair. Adjacency is in the
     // kept box's local indices, so a pair across the date line inside the kept box counts;
@@ -95,7 +96,8 @@ struct ResampleReport
     int sourcelevel = 0;            // the level whose kept box was averaged
     double metresperpixel = 0.0;    // as requested
     double sourcecell_m = 0.0;      // the source level's north-south cell size, pi R / levelheight()
-    double pixelcells = 0.0;        // n = metresperpixel / sourcecell_m, source cells per pixel edge
+    double pixelcells = 0.0;        // n = metresperpixel / sourcecell_m, source cells per pixel edge, as computed
+                                    // (an aligned output's pixels use round(n))
     bool aligned = false;           // n is whole and divides factor^sourcelevel: pixels tile whole global cells
     bool resampled() const { return !aligned; }
 };
@@ -124,14 +126,15 @@ struct ResampledField
 // mean, accumulated in double in row-major order, of the round(n) x round(n) source cells
 // p round(n) .. (p + 1) round(n) - 1 by q round(n) .. (q + 1) round(n) - 1 of the target's
 // kept box, so the means of the level grids, and the global values, are preserved exactly.
-// Otherwise resampled (a whole n that does not divide factor^sourcelevel included): pixel (p, q) covers the source-cell interval [p n, (p + 1) n) x
-// [q n, (q + 1) n) of the target's kept box and is the sum of each overlapped source cell
-// times its overlap lengths in cell units, divided by n^2 (double; the mean over the
-// pixel's box, not exact against the level grids). Throws std::invalid_argument when
+// Otherwise resampled (a whole n that does not divide factor^sourcelevel included): pixel
+// (p, q) covers the source-cell interval [p n, (p + 1) n) x [q n, (q + 1) n) of the
+// target's kept box and is the sum of each overlapped source cell times its overlap
+// lengths in cell units, divided by n^2 (double; the mean over the pixel's box, not exact against the level grids). Throws std::invalid_argument when
 // metresperpixel or radius_m is not positive and finite, the chain is empty, malformed
 // (element l not at level l, sizes wrong) or has no level fine enough (metresperpixel
-// below the finest level's cell size: no output finer than the data), or the output would
-// have no pixel. Implemented in S2.2.
+// below the finest level's cell size: no output finer than the data), the target's kept box
+// is not whole cells of the source level or the source level's kept box does not cover it,
+// or the output would have no pixel. Implemented in S2.2.
 ResampledField resampleto(const std::vector<LevelWindow>& windows, const std::vector<std::vector<float>>& fields,
                           double radius_m, double metresperpixel);
 }
