@@ -224,6 +224,62 @@
       "run": "runs/regional/32",
       "date": "2026-10-10T12:25:10+00:00",
       "label": "multiscale S2.8: window A, k 64"
+    },
+    {
+      "id": 33,
+      "status": "complete",
+      "run": "runs/regional/33",
+      "date": "2026-10-10T21:33:09+00:00",
+      "label": "multiscale S3.7: window A, k 4"
+    },
+    {
+      "id": 34,
+      "status": "complete",
+      "run": "runs/regional/34",
+      "date": "2026-10-10T21:33:12+00:00",
+      "label": "multiscale S3.7: window B, k 4"
+    },
+    {
+      "id": 35,
+      "status": "complete",
+      "run": "runs/regional/35",
+      "date": "2026-10-10T21:33:16+00:00",
+      "label": "multiscale S3.7: window C, k 4"
+    },
+    {
+      "id": 36,
+      "status": "complete",
+      "run": "runs/regional/36",
+      "date": "2026-10-10T21:33:20+00:00",
+      "label": "multiscale S3.7: window A, k 16"
+    },
+    {
+      "id": 37,
+      "status": "complete",
+      "run": "runs/regional/37",
+      "date": "2026-10-10T21:33:30+00:00",
+      "label": "multiscale S3.7: window B, k 16"
+    },
+    {
+      "id": 38,
+      "status": "complete",
+      "run": "runs/regional/38",
+      "date": "2026-10-10T21:33:40+00:00",
+      "label": "multiscale S3.7: window C, k 16"
+    },
+    {
+      "id": 39,
+      "status": "complete",
+      "run": "runs/regional/39",
+      "date": "2026-10-10T21:34:02+00:00",
+      "label": "multiscale S3.7: window A, k 64"
+    },
+    {
+      "id": 40,
+      "status": "complete",
+      "run": "runs/regional/40",
+      "date": "2026-10-10T21:35:04+00:00",
+      "label": "multiscale S3.7: window A, k 64, tributaries on"
     }
   ]
 }
