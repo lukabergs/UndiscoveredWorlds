@@ -5,6 +5,10 @@
 #include <cstddef>
 #include <limits>
 
+#include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_cirques.hpp"
+#include "simulations/landscape/regional_pass.hpp"
+#include "simulations/landscape/regional_troughs.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
@@ -112,5 +116,43 @@ std::vector<double> glacialcatchment_km2(const RegionalGlobalInputs& inputs)
         if (network.sea[cell] != 0)
             catchment[cell] = 0.0;
     return catchment;
+}
+
+void glacialformslevel(const LevelContext& context, LevelState& state)
+{
+    // 4c. The glacial forms (Phase E5): the fine ELA and glaciation fields (inactive, and
+    // no field read, unless a glacial feature is on), then the troughs (E5.1) and the cirques
+    // (E5.2), each a no-op at its defaults (regional_pass.cpp's step 4c, moved here unchanged
+    // in S3.0).
+    const RegionalGlobalInputs& inputs = context.inputs;
+    const RegionalWindow& window = context.window;
+    const RegionalParameters& parameters = context.parameters;
+    const RegionalDetails& details = context.details;
+    const bool band = details.factor >= 2;
+    const double bandlower = band ? details.detailcells / 2.0 : 0.0;
+    const double bandupper = band ? details.detailcells * details.factor / 2.0 : 0.0;
+    state.glacial = regionalglacialfields(inputs, window, parameters);
+    const bool record = state.diagnostics != nullptr;
+    std::vector<float> before;
+    if (details.troughs)
+    {
+        if (record)
+            before = state.elevation_m;
+        carvetroughs(inputs, window, parameters, state.glacial, state.channels, state.sea, state.elevation_m, bandlower,
+                     bandupper);
+        if (record)
+            state.diagnostics->troughcells = keptcellschanged(window, before, state.elevation_m);
+    }
+    if (details.cirques)
+    {
+        if (record)
+            before = state.elevation_m;
+        carvecirques(inputs, window, parameters, state.glacial, state.channels, state.sea, state.elevation_m, bandlower,
+                     bandupper);
+        if (record)
+            state.diagnostics->cirquecells = keptcellschanged(window, before, state.elevation_m);
+    }
+    if (details.troughs || details.cirques)
+        recordlevelstep(state, LevelStep::glacialforms);
 }
 }

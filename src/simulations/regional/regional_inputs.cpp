@@ -121,6 +121,7 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.noiseamplitude_m = regional::noiseAmplitudeM;
     parameters.noiserelieffraction = regional::noiseReliefFraction;
     parameters.noisepersistence = regional::noisePersistence;
+    parameters.noiserelieffield = regional::noiseReliefField;
     parameters.coastband_m = regional::coastBandM;
     parameters.meanpasses = regional::meanPasses;
     parameters.warp.amplitude_cells = regional::warpAmplitudeCells;
@@ -153,6 +154,13 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.valleys.floormax_km = regional::valleyFloorMaxKm;
     parameters.valleys.sideslope = regional::valleySideSlope;
     parameters.valleys.reachcells = regional::valleyReachCells;
+    parameters.valleys.reach_km = regional::valleyReachKm;
+    parameters.tributaries.enabled = regional::tributaryEnabled;
+    parameters.tributaries.spacing_km = regional::tributarySpacingKm;
+    parameters.tributaries.hackexponent = regional::tributaryHackExponent;
+    parameters.tributaries.hackcoefficient = regional::tributaryHackCoefficient;
+    parameters.tributaries.junctionangle_deg = regional::tributaryJunctionAngleDeg;
+    parameters.tributaries.bifurcationratio = regional::tributaryBifurcationRatio;
     parameters.troughs.width_km = regional::troughWidthKm;
     parameters.troughs.reference_km2 = regional::troughReferenceKm2;
     parameters.troughs.widthexponent = regional::troughWidthExponent;
@@ -196,5 +204,8 @@ landscape::RefinementParameters refinementparameters()
     parameters.tilecells = refinement::tileCells;
     parameters.smoothpasses = refinement::smoothPasses;
     parameters.smoothrelaxation = refinement::smoothRelaxation;
+    parameters.smoothbasis = refinement::smoothBasis;
+    parameters.prolongationlimit = refinement::prolongationLimit;
+    parameters.channelcellslope = refinement::channelCellSlope;
     return parameters;
 }

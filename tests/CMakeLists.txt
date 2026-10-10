@@ -49,7 +49,9 @@ if(TARGET uw_climate_world)
         simulations/landscape/regional_grid_tests.cpp
         simulations/landscape/regional_ice_tests.cpp
         simulations/landscape/regional_pass_tests.cpp
+        simulations/landscape/regional_solve_tests.cpp
         simulations/landscape/regional_surface_tests.cpp
+        simulations/landscape/regional_tributaries_tests.cpp
         simulations/landscape/regional_troughs_tests.cpp
         simulations/landscape/regional_valleys_tests.cpp
         simulations/landscape/regional_water_tests.cpp

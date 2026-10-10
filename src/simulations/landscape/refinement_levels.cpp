@@ -245,6 +245,55 @@ void correctparentmeans(const LevelWindow& parent, const std::vector<float>& par
     }
 }
 
+void recordlevelstep(LevelState& state, LevelStep step)
+{
+    if (state.diagnostics != nullptr)
+        state.diagnostics->steps.push_back(step);
+}
+
+void presmoothinglevel(const LevelContext& context, LevelState& state)
+{
+    // The deeper levels' parent-mean correction (S2.3), moved here from runrefinement in S3.0;
+    // level 1 and the single pass corrected the block means in regionalstartsurface.
+    StartSurface& start = state.start;
+    if (context.parent != nullptr)
+    {
+        const ParentFields& parent = *context.parent;
+        const LevelWindow& level = *context.levelwindow;
+        correctparentmeans(parent.window, parent.elevation_m, level, context.parameters.meanpasses, start.start_m);
+        start.blockmeanerror_m = levelparentmeanerror(level, start.start_m, parent.window, parent.elevation_m);
+        start.lapsebase_m = upsample(context.inputs.elevation_m, context.inputs.width, context.inputs.height, context.window);
+    }
+    if (state.diagnostics != nullptr)
+        state.diagnostics->blockmeanerror_m = start.blockmeanerror_m;
+    recordlevelstep(state, LevelStep::presmoothing);
+
+    // The start surface handed on (regional_pass.cpp's regionallevelsteps up to S2.8).
+    const std::size_t count = static_cast<std::size_t>(context.window.domainfinewidth()) *
+                              static_cast<std::size_t>(context.window.domainfineheight());
+    if (start.start_m.size() != count || start.lapsebase_m.size() != count)
+        throw std::invalid_argument("regionallevelsteps: the start surface must cover the window's domain");
+    state.blockmeanerror_m = start.blockmeanerror_m;
+    state.sharepasses = start.sharepasses;
+    state.sharemisses = start.sharemisses;
+    state.lapsebase_m = std::move(start.lapsebase_m);
+    state.surface_m = std::move(start.start_m);
+}
+
+int keptcellschanged(const RegionalWindow& window, const std::vector<float>& before, const std::vector<float>& after)
+{
+    const int domainwidth = window.domainfinewidth();
+    const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
+    int changed = 0;
+    for (int y = y0; y < y0 + window.fineheight(); y++)
+        for (int x = x0; x < x0 + window.finewidth(); x++)
+        {
+            const std::size_t cell = at(x, y, domainwidth);
+            changed += before[cell] != after[cell] ? 1 : 0;
+        }
+    return changed;
+}
+
 RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTarget& target,
                                const RegionalParameters& parameters, const RefinementParameters& refinement)
 {
@@ -284,11 +333,11 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
     if (!std::isfinite(refinement.detailcells) || !(refinement.detailcells > 0.0))
         throw std::invalid_argument("runrefinement: refinement.detail_cells must be positive and finite");
 
-    // Level 0: the global elevation on the chain's level-0 window.
-    std::vector<float> parentfield(chain[0].domainsize());
+    // Level 0: the global elevation on the chain's level-0 window (level 1's projection parent).
+    std::vector<float> levelzero(chain[0].domainsize());
     for (int y = 0; y < chain[0].domainrows; y++)
         for (int x = 0; x < chain[0].domaincolumns; x++)
-            parentfield[chain[0].index(x, y)] =
+            levelzero[chain[0].index(x, y)] =
                 inputs.elevation_m[at(static_cast<int>(chain[0].absolutecolumn(x)), static_cast<int>(chain[0].absoluterow(y)),
                                       inputs.width)];
 
@@ -308,7 +357,8 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
     details.lakes.flood = true;
 
     RefinementResult result;
-    RegionalLevel state;
+    LevelState state;
+    ParentFields parentfields;  // the parent level's fields at level >= 2 (the hook interface, S3.0)
     RegionalWindow window;
     int sharepasses = -1, sharemisses = 0;
     for (int l = 1; l <= levels; l++)
@@ -323,36 +373,15 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         diagnostics.window = level;
 
         // The start surface: level 1 the single-scale pass's (its warp, noise, coast decision
-        // and block means against the global grid); deeper levels the parent prolonged, the
-        // level's octave band added and the parent means corrected. The warp of a deeper level
-        // is only the sea gate's and the lakes' position warp.
+        // and block means against the global grid: noiselevel); deeper levels the parent
+        // prolonged here, the level's octave band added (noiselevel) and the parent means
+        // corrected (presmoothinglevel). The warp of a deeper level is only the sea gate's and
+        // the lakes' position warp.
         const FineWarp warp = regionalwarp(window, inputs.seed, parameters);
-        StartSurface start;
-        if (l == 1)
-        {
-            start = regionalstartsurface(inputs, window, warp, parameters);
-            sharepasses = start.sharepasses;
-            sharemisses = start.sharemisses;
-        }
-        else
-        {
-            start.start_m = prolong(parent, parentfield, level);
-            addlevelnoise(inputs, window, static_cast<int>(levelscale(factor, l - 1)), parameters, start.start_m);
-            correctparentmeans(parent, parentfield, level, parameters.meanpasses, start.start_m);
-            start.blockmeanerror_m = levelparentmeanerror(level, start.start_m, parent, parentfield);
-            start.lapsebase_m = upsample(inputs.elevation_m, inputs.width, inputs.height, window);
-        }
-        diagnostics.blockmeanerror_m = start.blockmeanerror_m;
-        diagnostics.steps = {LevelStep::noiseoctave, LevelStep::presmoothing, LevelStep::coast};
-        if (incision.active)
-            diagnostics.steps.push_back(LevelStep::incision);
-        diagnostics.steps.push_back(LevelStep::channels);
-        diagnostics.steps.push_back(LevelStep::solve);
-        if (details.valleys)
-            diagnostics.steps.push_back(LevelStep::valleyfloors);
-        if (details.troughs || details.cirques)
-            diagnostics.steps.push_back(LevelStep::glacialforms);
-        diagnostics.steps.push_back(LevelStep::lakes);
+        state = LevelState{};
+        state.diagnostics = &diagnostics;
+        if (l >= 2)
+            state.start.start_m = prolong(parent, parentfields.elevation_m, level);
 
         // The parent's masks per domain cell (S2.8): its parent and the parent's 8 neighbours
         // read from the parent's kept box; given to the sea and the lakes at level >= 2.
@@ -382,60 +411,30 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         details.parentseagate = l >= 2 ? &seagate : nullptr;
         details.lakes.parentsurface_m = l >= 2 ? &lakeparent : nullptr;
         details.lakes.parentreach = l >= 2 ? &lakereach : nullptr;
-        state = regionallevelsteps(inputs, window, parameters, warp, std::move(start), incision, details);
+
+        // The level's steps from the noise to the projection (regional_pass.hpp's hook
+        // interface): the projection onto the parent level (level 1: the global elevation).
+        const LevelContext context{inputs, window, parameters, warp, incision, details, l, factor, &refinement, &level,
+                                   &parent, l == 1 ? &levelzero : &parentfields.elevation_m,
+                                   l >= 2 ? &parentfields : nullptr};
+        regionallevelsteps(context, state);
+        state.diagnostics = nullptr;
+        if (l == 1)
+        {
+            sharepasses = state.sharepasses;
+            sharemisses = state.sharemisses;
+        }
         details.parentseagate = nullptr;
         details.lakes.parentsurface_m = nullptr;
         details.lakes.parentreach = nullptr;
         diagnostics.reliefconverged = state.reliefconverged;
         diagnostics.changedreceivers = state.changedreceivers;
-
-        // The projection by bounds: sea and wet cells may sink but not rise past their water,
-        // dry land may rise but not sink to the sea level or the water beside it (its own
-        // global lake cell's surface included), land channel beds take the channel rate.
         std::vector<float>& elevation = state.elevation_m;
         std::vector<float>& lakesurface = state.water.lakesurface_m;
-        std::vector<uint8_t> wet(count, 0);
-        for (std::size_t cell = 0; cell < count; cell++)
-            wet[cell] = lakesurface[cell] > 0.0f ? 1 : 0;
-        std::vector<float> ownlake(count, 0.0f);
-        for (int y = 0; y < level.domainrows; y++)
-            for (int x = 0; x < level.domaincolumns; x++)
-            {
-                const std::size_t global = at(level.globalcolumn(x), level.globalrow(y), inputs.width);
-                if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
-                    ownlake[level.index(x, y)] = inputs.lakesurface_m[global];
-            }
-        ProjectionBounds bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation,
-                                                   inputs.sealevel, refinement.projectionweightchannel, ownlake);
-        // The smoothing before the projection (S2.7) with the same bounds; the projection's
-        // bounds are then rebuilt on the smoothed field (the same floors and ceilings).
-        diagnostics.smoothing = smoothparentmeans(level, elevation, bounds, parent, parentfield, refinement.smoothpasses,
-                                                  refinement.smoothrelaxation);
-        if (refinement.smoothpasses > 0)
-        {
-            diagnostics.steps.push_back(LevelStep::smoothing);
-            bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation, inputs.sealevel,
-                                      refinement.projectionweightchannel, ownlake);
-        }
-        diagnostics.projection = projectlevel(level, elevation, bounds, parent, parentfield);
-        diagnostics.steps.push_back(LevelStep::projection);
 
-        // After the projection: wet non-channel cells at or above their surface dried, dry
-        // cells at or below a wet neighbour's surface counted (kept box only).
+        // After the projection (projectionlevel dried the wet cells at or above their surface):
+        // dry cells at or below a wet neighbour's surface counted (kept box only).
         const int keptx0 = level.keptcolumnoffset(), kepty0 = level.keptrowoffset();
-        const auto kept = [&](int x, int y) {
-            return x >= keptx0 && x < keptx0 + level.columns && y >= kepty0 && y < kepty0 + level.rows;
-        };
-        for (int y = 0; y < level.domainrows; y++)
-            for (int x = 0; x < level.domaincolumns; x++)
-            {
-                const std::size_t cell = level.index(x, y);
-                if (wet[cell] == 0 || state.channels.channel[cell] != 0 || elevation[cell] < lakesurface[cell])
-                    continue;
-                lakesurface[cell] = 0.0f;
-                if (kept(x, y))
-                    diagnostics.driedcells++;
-            }
         for (int y = kepty0; y < kepty0 + level.rows; y++)
             for (int x = keptx0; x < keptx0 + level.columns; x++)
             {
@@ -498,6 +497,65 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         diagnostics.meanbound_m = largest > 0.0f ? std::ldexp(1.0, std::ilogb(largest) - 24) : 0.0;
         diagnostics.globalmeanerror_m = globalmeanerror(level, elevation, inputs);
 
+        // Phase S3's diagnostics (S3.0; LevelDiagnostics): the land and its channels (the
+        // drainage density, the channel cells' rise above their beds), the lake edges on global
+        // cell boundaries, the land roughness; the tributaries are tributarieslevel's.
+        diagnostics.tributaries = state.tributaries;
+        diagnostics.tributarycells = state.tributarycells;
+        {
+            const std::int64_t scale = level.scale();
+            const auto boundary = [scale](std::int64_t absolute) { return ((absolute % scale) + scale) % scale == 0; };
+            const auto dryland = [&](std::size_t cell) { return state.sea[cell] == 0 && !(lakesurface[cell] > 0.0f); };
+            int aligned = 0, roughcells = 0;
+            double roughness = 0.0;
+            for (int y = kepty0; y < kepty0 + level.rows; y++)
+                for (int x = keptx0; x < keptx0 + level.columns; x++)
+                {
+                    const std::size_t cell = level.index(x, y);
+                    const bool wet = lakesurface[cell] > 0.0f;
+                    if (state.sea[cell] == 0)
+                    {
+                        diagnostics.landcells++;
+                        if (state.channels.channel[cell] != 0)
+                        {
+                            diagnostics.channelcells++;
+                            if (!wet)  // a wet channel cell is a lake bed, which the projection moves (rate 1)
+                                diagnostics.maxchannelrise_m =
+                                    std::max(diagnostics.maxchannelrise_m,
+                                             static_cast<double>(elevation[cell]) - static_cast<double>(state.bed_m[cell]));
+                        }
+                    }
+                    if (x + 1 < keptx0 + level.columns && wet != (lakesurface[level.index(x + 1, y)] > 0.0f))
+                    {
+                        diagnostics.lakeedges++;
+                        aligned += boundary(level.absolutecolumn(x + 1)) ? 1 : 0;
+                    }
+                    if (y + 1 < kepty0 + level.rows && wet != (lakesurface[level.index(x, y + 1)] > 0.0f))
+                    {
+                        diagnostics.lakeedges++;
+                        aligned += boundary(level.absoluterow(y + 1)) ? 1 : 0;
+                    }
+                    if (!dryland(cell) || x < 1 || y < 1 || x + 1 >= level.domaincolumns || y + 1 >= level.domainrows)
+                        continue;
+                    const std::size_t east = level.index(x + 1, y), west = level.index(x - 1, y);
+                    const std::size_t north = level.index(x, y - 1), south = level.index(x, y + 1);
+                    if (!dryland(east) || !dryland(west) || !dryland(north) || !dryland(south))
+                        continue;
+                    const double laplacian = static_cast<double>(elevation[east]) + static_cast<double>(elevation[west]) +
+                                             static_cast<double>(elevation[north]) + static_cast<double>(elevation[south]) -
+                                             4.0 * static_cast<double>(elevation[cell]);
+                    roughness += laplacian * laplacian;
+                    roughcells++;
+                }
+            diagnostics.drainagedensity_per_km =
+                diagnostics.landcells > 0
+                    ? static_cast<double>(diagnostics.channelcells) / (static_cast<double>(diagnostics.landcells) * diagnostics.cellsize_km)
+                    : 0.0;
+            diagnostics.lakeedgealigned =
+                diagnostics.lakeedges > 0 ? static_cast<double>(aligned) / static_cast<double>(diagnostics.lakeedges) : 0.0;
+            diagnostics.landroughness_m = roughcells > 0 ? std::sqrt(roughness / static_cast<double>(roughcells)) : 0.0;
+        }
+
         if (l < levels)
         {
             std::vector<float> keptfield(level.keptsize());
@@ -519,7 +577,14 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
             for (std::size_t cell = 0; cell < count; cell++)
                 parentsea[cell] = state.sea[cell] != 0 ? 1.0f : 0.0f;
             parentlake = lakesurface;
-            parentfield = std::move(elevation);
+            parentfields.window = level;
+            parentfields.elevation_m = std::move(elevation);
+            parentfields.lift_m = std::move(state.lift_m);
+            parentfields.solved_m = std::move(state.solved_m);
+            parentfields.sea = std::move(state.sea);
+            parentfields.lakesurface_m = std::move(lakesurface);
+            parentfields.channels = std::move(state.channels);
+            parentfields.bed_m = std::move(state.bed_m);
         }
         else
             diagnostics.steps.push_back(LevelStep::ice);

@@ -55,4 +55,14 @@ FineGlacial regionalglacialfields(const RegionalGlobalInputs& inputs, const Regi
 // loop (bad input) takes its own term. A pure function of the global fields, so every
 // window agrees. Empty when the glaciation field is not W x H.
 std::vector<double> glacialcatchment_km2(const RegionalGlobalInputs& inputs);
+
+struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
+struct LevelState;
+
+// LevelStep::glacialforms: state.glacial = regionalglacialfields, then with details.troughs
+// carvetroughs and with details.cirques carvecirques (regional_troughs.hpp, regional_cirques.hpp)
+// on state.elevation_m with the details' band (as valleyfloorslevel). The loop's diagnostics
+// count the kept cells each changed (LevelDiagnostics::troughcells, cirquecells). S3.5 places
+// troughs and cirques by width and radius per level.
+void glacialformslevel(const LevelContext& context, LevelState& state);
 }

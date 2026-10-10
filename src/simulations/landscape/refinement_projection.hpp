@@ -208,4 +208,24 @@ struct ResampledField
 // or the output would have no pixel. Implemented in S2.2.
 ResampledField resampleto(const std::vector<LevelWindow>& windows, const std::vector<std::vector<float>>& fields,
                           double radius_m, double metresperpixel);
+
+// --- The level steps of the refinement loop (the hook interface, multiscale plan S3.0;
+// regional_pass.hpp). Both do nothing in the single pass (context.refinement null). ---
+struct LevelContext;
+struct LevelState;
+
+// LevelStep::smoothing: state.ownlake_m (each cell's own global lake cell's surface, 0 when it
+// is not a lake cell or is sea), state.bounds = projectionbounds on state.elevation_m with
+// refinement.projection_weight_channel; state.lift_m = the elevation entering the smoothing;
+// smoothparentmeans onto context.projectionparent / projectionfield with refinement.smooth_passes
+// and smooth_relaxation (its report and the kept cells' 99th-percentile move,
+// LevelDiagnostics::smoothing and smoothmove99_m); with passes > 0 the bounds rebuilt on the
+// smoothed field. S3.2's fallback: a C2 basis (refinement.smooth_basis).
+void smoothinglevel(const LevelContext& context, LevelState& state);
+
+// LevelStep::projection: projectlevel with state.bounds (LevelDiagnostics::projection), then
+// every wet non-channel cell at or above its lake surface dried (lake surface 0; kept ones
+// counted, LevelDiagnostics::driedcells), then state.lift_m = the final elevation less the
+// elevation entering the smoothing.
+void projectionlevel(const LevelContext& context, LevelState& state);
 }

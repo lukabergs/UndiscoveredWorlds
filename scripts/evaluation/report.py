@@ -223,6 +223,14 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Forced move max at parent (column, row)', 'maxforced_parent'),
                  ('Sea in land parents', 'seainlandparents'), ('Sea beyond one parent cell', 'seabeyondparent'),
                  ('Dry below a lake', 'drybelowlake'),
+                 ('Prolongation clamped', 'prolongationclamped'), ('Prolongation clamp max (m)', 'maxprolongationclamp_m'),
+                 ('Smoothing move p99 (m)', 'smoothmove99_m'), ('Channel rise above bed max (m)', 'maxchannelrise_m'),
+                 ('Land cells', 'landcells'), ('Channel cells', 'channelcells'),
+                 ('Drainage density (1/km)', 'drainagedensity_per_km'), ('Tributaries', 'tributaries'),
+                 ('Tributary cells', 'tributarycells'), ('Lake edges', 'lakeedges'),
+                 ('Lake edges on global cell boundaries (share)', 'lakeedgealigned'),
+                 ('Land roughness, RMS Laplacian (m)', 'landroughness_m'), ('Valley cells', 'valleycells'),
+                 ('Trough cells', 'troughcells'), ('Cirque cells', 'cirquecells'),
                  ('Seconds', 'seconds'))
 
 
@@ -250,7 +258,13 @@ def level_rows(levels):
                     'before = after), the parents whose beds moved or that were forced (with the '
                     'largest forced move), and the dried cells, shores below lakes and land below sea after it; S2.8\'s '
                     'mask checks: sea cells in land parents (level 1: global cells), those beyond one parent cell of the '
-                    'parent\'s sea, and dry cells below a 4-neighbouring lake surface (empty before S2.8).'}
+                    'parent\'s sea, and dry cells below a 4-neighbouring lake surface (empty before S2.8). Phase S3\'s '
+                    '(empty before S3.0): the cells the limited prolongation clamped and its largest move (S3.1), the '
+                    'smoothing\'s 99th-percentile move and the largest rise of a dry channel cell above its bed (S3.2), '
+                    'the land and channel cells, the drainage density (channel cells over land cells times the cell size) '
+                    'and the tributaries (S3.3), the lake edges and their share on global cell boundaries (about 1 / k for '
+                    'an edge that ignores the global grid) and the land\'s RMS Laplacian at the level\'s cell size (S3.4), '
+                    'the cells the valley floors, troughs and cirques changed (S3.5).'}
 
 
 def run_data(evaluation_dir):

@@ -408,6 +408,48 @@ class HierarchyCheckTests(unittest.TestCase):
         del fields["hydrosphere.channel_direction"]
         self.assertEqual(self.check("resolution-invariance", self.bundle(fields, hierarchy_blocks(1)))["status"], "skip")
 
+    def test_resolution_invariance_reports_drainage_density_per_level(self):
+        """S3.0: each level's drainagedensity_per_km from diagnostics.levels, in the values and a detail line."""
+        fine = fine_elevation(2, 1, 16)
+        levels = level_entries(2)
+        levels[0]["drainagedensity_per_km"], levels[1]["drainagedensity_per_km"] = 0.006, 0.0047
+        outcome = self.check("resolution-invariance", self.bundle(regional_fields(fine), hierarchy_blocks(2, levels)))
+        self.assertEqual(outcome["status"], "reported")
+        self.assertEqual(outcome["values"]["run"]["drainage_density_per_km"], {"1": 0.006, "2": 0.0047})
+        self.assertTrue(any("drainage density per level" in line and "level 2 0.0047" in line for line in outcome["details"]))
+        before = self.check("resolution-invariance", self.bundle(regional_fields(fine), hierarchy_blocks(2, level_entries(2))))
+        self.assertFalse(any("drainage density" in line for line in before["details"]))
+
+    def test_level_targets(self):
+        """S3.0: a level's diagnostic against 'max' or 'max_per_scale' / factor^level, restricted by 'level' or
+        'from_level'; an absent key is a detail, not a problem; 'report' turns a miss into 'reported'."""
+        fields = regional_fields(fine_elevation(2, 1, 16))
+        levels = level_entries(2)
+        levels[0].update({"maxlandbelowsea_m": 900.0, "lakeedgealigned": 0.4})
+        levels[1].update({"maxlandbelowsea_m": 100.0, "lakeedgealigned": 0.2})
+        run = self.bundle(fields, hierarchy_blocks(2, levels))
+        targets = [{"key": "maxlandbelowsea_m", "max": 150, "from_level": 2, "step": "S3.1"},
+                   {"key": "lakeedgealigned", "max_per_scale": 2, "level": 1},
+                   {"key": "smoothmove99_m", "max": 30}]
+        spec = {"check": "level-targets", "targets": targets}
+        passing = CHECKS["level-targets"](run, spec, {})
+        self.assertEqual(passing["status"], "pass", passing)
+        self.assertEqual(passing["summary"], "2 of 2 level targets met")
+        self.assertTrue(any("smoothmove99_m absent" in line for line in passing["details"]))
+        levels[1]["lakeedgealigned"] = 0.2
+        targets[1]["level"] = 2  # 2 / 16 = 0.125 < 0.2
+        failing = CHECKS["level-targets"](run, spec, {})
+        self.assertEqual(failing["status"], "fail")
+        self.assertIn("level 2: lakeedgealigned 0.2 (limit 0.125)", failing["details"][0])
+        reported = run_checks(run, [dict(spec, report=True)], {})[0]
+        self.assertEqual(reported["status"], "reported")
+        self.assertEqual(self.check("level-targets", self.bundle(fields, hierarchy_blocks(2)))["status"], "skip")
+        del levels[0]["level"]  # an entry without its level: a problem, the other levels still checked
+        unnumbered = CHECKS["level-targets"](self.bundle(fields, hierarchy_blocks(2, levels)), spec, {})
+        self.assertEqual(unnumbered["status"], "fail")
+        self.assertIn("level entries without a level number: 1", unnumbered["details"])
+        self.assertIn("level 2: lakeedgealigned 0.2 (limit 0.125)", unnumbered["details"])
+
 
 if __name__ == "__main__":
     unittest.main()

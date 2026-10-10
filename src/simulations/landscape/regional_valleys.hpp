@@ -83,4 +83,18 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
 void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
                   const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m,
                   double bandlower = 0.0, double bandupper = 0.0);
+
+struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
+struct LevelState;
+
+// LevelStep::incision: with context.incision active, state.incisednetwork (the inputs' network
+// with the incised filled elevations) and state.bedsurface_m (state.surface_m lowered by the
+// incision upsampled, at least 0) for channelslevel; nothing otherwise.
+void incisionlevel(const LevelContext& context, LevelState& state);
+
+// LevelStep::valleyfloors: with details.valleys, carvevalleys on state.elevation_m with the
+// details' band ([detailcells / 2, detailcells x factor / 2) when factor >= 2; 0, 0 otherwise).
+// The loop's diagnostics count the kept cells it changed (LevelDiagnostics::valleycells).
+// S3.5 replaces valleys.reachcells by valleys.reach_km, tested against the band like the floor.
+void valleyfloorslevel(const LevelContext& context, LevelState& state);
 }

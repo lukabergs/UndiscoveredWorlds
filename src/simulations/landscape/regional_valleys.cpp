@@ -5,7 +5,10 @@
 #include <cstddef>
 #include <limits>
 
+#include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
+#include "simulations/landscape/upsampling.hpp"
 
 // Erosion plan Phase R2: the R6 contract, which step R9 implements (regional_valleys.hpp):
 // the incision of the pinned channels by the world's uplift or denudation rate over the
@@ -239,5 +242,47 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
         const float value = std::max(floorlevel, static_cast<float>(target[cell]));
         elevation_m[cell] = std::min(elevation_m[cell], value);
     }
+}
+
+void incisionlevel(const LevelContext& context, LevelState& state)
+{
+    // R9 (regional_pass.cpp's step 3, moved here unchanged in S3.0): with the incision active
+    // the bed law reads the network's incised filled elevations and the start surface lowered
+    // by the upsampled incision; inactive, the channels read the inputs as they are.
+    const GlobalIncision& incision = context.incision;
+    if (!incision.active)
+        return;
+    const RegionalGlobalInputs& inputs = context.inputs;
+    const std::vector<float>& surface = state.surface_m;
+    const std::size_t count = surface.size();
+    state.incisednetwork = inputs.network;
+    state.incisednetwork.filledelevation_m = incision.filledelevation_m;
+    const std::vector<float> fineincision = upsample(incision.incision_m, inputs.width, inputs.height, context.window);
+    std::vector<float>& bedsurface = state.bedsurface_m;
+    bedsurface = surface;
+    for (std::size_t cell = 0; cell < count; cell++)
+        bedsurface[cell] = static_cast<float>(static_cast<double>(surface[cell]) - std::max(0.0f, fineincision[cell]));
+    recordlevelstep(state, LevelStep::incision);
+}
+
+void valleyfloorslevel(const LevelContext& context, LevelState& state)
+{
+    // 4b. The valley floors around the channels (R9, a no-op while valley_floor_km is 0),
+    // after the solve's diagnostics and before the lakes, which read the result
+    // (regional_pass.cpp's step 4b, moved here unchanged in S3.0).
+    const RegionalDetails& details = context.details;
+    if (!details.valleys)
+        return;
+    const bool band = details.factor >= 2;
+    const double bandlower = band ? details.detailcells / 2.0 : 0.0;
+    const double bandupper = band ? details.detailcells * details.factor / 2.0 : 0.0;
+    std::vector<float> before;
+    if (state.diagnostics != nullptr)
+        before = state.elevation_m;
+    carvevalleys(context.inputs, context.window, context.parameters, state.channels, state.sea, state.elevation_m,
+                 bandlower, bandupper);
+    if (state.diagnostics != nullptr)
+        state.diagnostics->valleycells = keptcellschanged(context.window, before, state.elevation_m);
+    recordlevelstep(state, LevelStep::valleyfloors);
 }
 }

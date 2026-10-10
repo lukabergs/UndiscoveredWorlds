@@ -166,6 +166,7 @@ inline float valleyReferenceM3s = 1000.0f;
 inline float valleyFloorMaxKm = 40.0f;
 inline float valleySideSlope = 0.05f;
 inline int valleyReachCells = 16;
+inline float valleyReachKm = 0.0f;
 inline float troughWidthKm = 5.0f;
 inline float troughReferenceKm2 = 1000.0f;
 inline float troughWidthExponent = 0.5f;
@@ -181,6 +182,13 @@ inline float cirqueGlaciationMin = 0.5f;
 inline float iceElaThicknessFraction = 0.3f;
 inline float iceElaThicknessMaxM = 1000.0f;
 inline float iceElaEdgeNoiseM = 100.0f;
+inline int noiseReliefField = 0;
+inline int tributaryEnabled = 0;
+inline float tributarySpacingKm = 0.13f;
+inline float tributaryHackExponent = 0.57f;
+inline float tributaryHackCoefficient = 1.27f;
+inline float tributaryJunctionAngleDeg = 72.0f;
+inline float tributaryBifurcationRatio = 4.0f;
 }
 
 namespace refinement
@@ -192,6 +200,9 @@ inline float detailCells = 2.0f;
 inline int tileCells = 1024;
 inline float smoothRelaxation = 1.4f;
 inline int smoothPasses = 6;
+inline int smoothBasis = 0;
+inline int prolongationLimit = 0;
+inline float channelCellSlope = 0.0f;
 }
 
 // Every value above, by its recipe name.
@@ -299,6 +310,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.valley_floor_max_km", &regional::valleyFloorMaxKm },
         { "landscape.regional.valley_side_slope", &regional::valleySideSlope },
         { "landscape.regional.valley_reach_cells", &regional::valleyReachCells },
+        { "landscape.regional.valley_reach_km", &regional::valleyReachKm },
         { "landscape.regional.trough_width_km", &regional::troughWidthKm },
         { "landscape.regional.trough_reference_km2", &regional::troughReferenceKm2 },
         { "landscape.regional.trough_width_exponent", &regional::troughWidthExponent },
@@ -314,6 +326,13 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.ice_ela_thickness_fraction", &regional::iceElaThicknessFraction },
         { "landscape.regional.ice_ela_thickness_max_m", &regional::iceElaThicknessMaxM },
         { "landscape.regional.ice_ela_edge_noise_m", &regional::iceElaEdgeNoiseM },
+        { "landscape.regional.noise_relief_field", &regional::noiseReliefField },
+        { "landscape.regional.tributary_enabled", &regional::tributaryEnabled },
+        { "landscape.regional.tributary_spacing_km", &regional::tributarySpacingKm },
+        { "landscape.regional.tributary_hack_exponent", &regional::tributaryHackExponent },
+        { "landscape.regional.tributary_hack_coefficient", &regional::tributaryHackCoefficient },
+        { "landscape.regional.tributary_junction_angle_deg", &regional::tributaryJunctionAngleDeg },
+        { "landscape.regional.tributary_bifurcation_ratio", &regional::tributaryBifurcationRatio },
         { "landscape.refinement.factor", &refinement::factor },
         { "landscape.refinement.projection_weight_channel", &refinement::projectionWeightChannel },
         { "landscape.refinement.stored_scale_max", &refinement::storedScaleMax },
@@ -321,6 +340,9 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.refinement.tile_cells", &refinement::tileCells },
         { "landscape.refinement.smooth_relaxation", &refinement::smoothRelaxation },
         { "landscape.refinement.smooth_passes", &refinement::smoothPasses },
+        { "landscape.refinement.smooth_basis", &refinement::smoothBasis },
+        { "landscape.refinement.prolongation_limit", &refinement::prolongationLimit },
+        { "landscape.refinement.channel_cell_slope", &refinement::channelCellSlope },
     };
     return entries;
 }

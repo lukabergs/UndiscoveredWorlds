@@ -154,4 +154,19 @@ void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& win
 std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                  const FineWarp& warp, const RegionalParameters& parameters,
                                  std::vector<float>& surface_m, const std::vector<uint8_t>* parentgate = nullptr);
+
+struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
+struct LevelState;
+
+// LevelStep::noiseoctave. Without a parent level (level 1, the single pass): state.start =
+// regionalstartsurface (the warp, the noise, the coast decision and the block means against the
+// global grid). At level >= 2: addlevelnoise on state.start.start_m, the prolonged parent the
+// loop put there, with parentscale factor^(level - 1). Then state.noiseband_m, the amplitude per
+// cell (noiseamplitude_m + noiserelieffraction x the local global relief upsampled, before the
+// taper). S3.4 sets the amplitude per level (regional.noise_relief_field, inputs.reliefamplitude_m).
+void noiselevel(const LevelContext& context, LevelState& state);
+
+// LevelStep::coast: state.sea = regionalsea on state.surface_m with the context's warp and
+// details.parentseagate (null at level 1 and in the single pass).
+void coastlevel(const LevelContext& context, LevelState& state);
 }

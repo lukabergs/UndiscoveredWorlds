@@ -113,4 +113,11 @@ FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow
                         const RegionalParameters& parameters, const std::vector<uint8_t>& sea,
                         const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth = false,
                         const LakeInheritance& inheritance = LakeInheritance{});
+
+struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
+struct LevelState;
+
+// LevelStep::lakes: state.water = regionalwater on state.elevation_m with details.lakes (its
+// start surface state.surface_m when the flood is on) and details.globallakedepth.
+void lakeslevel(const LevelContext& context, LevelState& state);
 }

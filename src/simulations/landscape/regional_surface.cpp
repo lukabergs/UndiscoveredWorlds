@@ -8,8 +8,10 @@
 #include <stdexcept>
 
 #include "core/deterministic_random.hpp"
+#include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_coast.hpp"
 #include "simulations/landscape/regional_edges.hpp"
+#include "simulations/landscape/regional_pass.hpp"
 
 // Erosion plan steps E3, R0, R2 and R6 (docs/architecture/erosion-hydrology-plan.md, Phase E,
 // Phase R and Phase R2): the Phase E start surface and sea moved from regional_pass.cpp by
@@ -999,5 +1001,36 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
         }
     }
     return sea;
+}
+
+void noiselevel(const LevelContext& context, LevelState& state)
+{
+    // Multiscale plan S3.0: the start surface of regional_pass.cpp's step 1 (level 1, the
+    // single pass) and the loop's octave band (level >= 2), moved here unchanged.
+    if (context.parent == nullptr)
+        state.start = regionalstartsurface(context.inputs, context.window, context.warp, context.parameters);
+    else
+        addlevelnoise(context.inputs, context.window, static_cast<int>(levelscale(context.factor, context.level - 1)),
+                      context.parameters, state.start.start_m);
+    // The level's noise amplitude per cell (S3.0: data for S3.4; the expression of the noise
+    // above, before the taper, at the unwarped cell centres).
+    const RegionalGlobalInputs& inputs = context.inputs;
+    const RegionalParameters& parameters = context.parameters;
+    state.noiseband_m = upsample(localrelief(inputs.elevation_m, inputs.width, inputs.height), inputs.width, inputs.height,
+                                 context.window);
+    for (float& band : state.noiseband_m)
+        band = static_cast<float>(parameters.noiseamplitude_m +
+                                  parameters.noiserelieffraction * std::max(0.0, static_cast<double>(band)));
+    recordlevelstep(state, LevelStep::noiseoctave);
+}
+
+void coastlevel(const LevelContext& context, LevelState& state)
+{
+    // 2. The sea by local rules on the start surface, before the channels (R1), so the
+    // channels end at the fine coast and never change the mask (regional_pass.cpp's step 2,
+    // moved here unchanged in S3.0).
+    state.sea = regionalsea(context.inputs, context.window, context.warp, context.parameters, state.surface_m,
+                            context.details.parentseagate);
+    recordlevelstep(state, LevelStep::coast);
 }
 }

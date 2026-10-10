@@ -357,6 +357,19 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                         << ", \"seainlandparents\": " << level.seainlandparents
                         << ", \"seabeyondparent\": " << level.seabeyondparent
                         << ", \"drybelowlake\": " << level.drybelowlake
+                        // Phase S3's diagnostics (multiscale plan S3.0; refinement_levels.hpp).
+                        << ", \"prolongationclamped\": " << level.prolongationclamped
+                        << ", \"maxprolongationclamp_m\": " << jsonnumber(level.maxprolongationclamp_m)
+                        << ", \"smoothmove99_m\": " << jsonnumber(level.smoothmove99_m)
+                        << ", \"maxchannelrise_m\": " << jsonnumber(level.maxchannelrise_m)
+                        << ", \"landcells\": " << level.landcells << ", \"channelcells\": " << level.channelcells
+                        << ", \"drainagedensity_per_km\": " << jsonnumber(level.drainagedensity_per_km)
+                        << ", \"tributaries\": " << level.tributaries << ", \"tributarycells\": " << level.tributarycells
+                        << ", \"lakeedges\": " << level.lakeedges
+                        << ", \"lakeedgealigned\": " << jsonnumber(level.lakeedgealigned)
+                        << ", \"landroughness_m\": " << jsonnumber(level.landroughness_m)
+                        << ", \"valleycells\": " << level.valleycells << ", \"troughcells\": " << level.troughcells
+                        << ", \"cirquecells\": " << level.cirquecells
                         << ", \"reliefconverged\": " << (level.reliefconverged ? "true" : "false")
                         << ", \"changedreceivers\": " << level.changedreceivers
                         << ", \"seconds\": " << jsonnumber(level.seconds) << ", \"steps\": [";

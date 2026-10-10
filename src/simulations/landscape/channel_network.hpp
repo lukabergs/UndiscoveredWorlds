@@ -162,4 +162,15 @@ struct FinePosition
     std::int64_t row = 0;
 };
 FinePosition channeljunction(const RegionalWindow& window, const ChannelParameters& parameters, int i, int j);
+
+struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
+struct LevelState;
+
+// LevelStep::channels: rasterisechannels on the level's window with the incision's network and
+// bed surface when the incision is active (state.incisednetwork, state.bedsurface_m;
+// incisionlevel), else the inputs' network and state.surface_m, ending at the fine coast
+// (state.sea); then the tributaries (tributarieslevel, regional_tributaries.hpp); then every
+// land channel cell's bed pinned into state.surface_m. Writes state.channels and state.bed_m
+// (a copy of the channels' beds).
+void channelslevel(const LevelContext& context, LevelState& state);
 }

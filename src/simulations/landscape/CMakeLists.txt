@@ -21,7 +21,9 @@ add_library(uw_landscape STATIC
     regional_grid.cpp
     regional_ice.cpp
     regional_pass.cpp
+    regional_solve.cpp
     regional_surface.cpp
+    regional_tributaries.cpp
     regional_troughs.cpp
     regional_valleys.cpp
     regional_water.cpp

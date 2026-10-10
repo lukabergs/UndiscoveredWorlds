@@ -516,6 +516,51 @@ def check_border_step(bundle, spec, context):
                   problems + details)
 
 
+def check_level_targets(bundle, spec, context):
+    """The numeric targets of the multiscale plan's Phase S3 rows (S3.0) against each level's diagnostics:
+    spec 'targets' is a list of {'key', 'max' or 'max_per_scale' (the limit divided by the level's scale
+    factor^level), optional 'level' (that level only) or 'from_level' (that level and finer), 'step' (the
+    plan step, for the message)}. A value above its limit is a problem; a key absent from a level (a bundle
+    made before the key existed) is reported in the details, not a problem. Profiles mark it 'report' (a
+    miss is reported, not a failure). A single pass is not applicable."""
+    name = 'level-targets'
+    levels = (bundle.manifest.get('diagnostics') or {}).get('levels') or None  # unsorted: an entry may lack its level
+    if levels is None:
+        return result(name, 'skip', 'not applicable: a single pass (no diagnostics.levels)')
+    factor = (bundle.manifest.get('window') or {}).get('factor')
+    problems, details, met, checked = [], [], 0, 0
+    whole = lambda value: isinstance(value, int) and not isinstance(value, bool)
+    if any(not whole(entry.get('level')) for entry in levels):
+        problems.append(f"level entries without a level number: {sum(not whole(entry.get('level')) for entry in levels)}")
+        levels = [entry for entry in levels if whole(entry.get('level'))]
+    for target in spec.get('targets', []):
+        key, step = target['key'], target.get('step', '')
+        for entry in levels:
+            level = entry['level']
+            if ('level' in target and level != target['level']) or level < target.get('from_level', 1):
+                continue
+            if 'max_per_scale' in target:
+                if not factor:
+                    problems.append(f'{key}: the window block has no factor')
+                    continue
+                limit = float(target['max_per_scale']) / float(factor) ** level
+            else:
+                limit = float(target['max'])
+            value = entry.get(key)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                details.append(f'level {level}: {key} absent ({step})')
+                continue
+            checked += 1
+            line = f'level {level}: {key} {float(value):.4g} (limit {limit:.4g}{", " + step if step else ""})'
+            if float(value) > limit:
+                problems.append(line)
+            else:
+                met += 1
+                details.append(line)
+    summary = f'{met} of {checked} level targets met' + (f'; {len(problems)} above' if problems else '')
+    return result(name, 'fail' if problems else 'pass', summary, problems + details)
+
+
 def box_average(values, factor):
     """Unweighted means of factor x factor blocks, in float64 (rows and columns divisible by factor)."""
     rows, columns = values.shape
@@ -618,15 +663,19 @@ def landscape_summary(bundle, spec):
     count = int(np.count_nonzero(land))
     percentiles = np.percentile(elevation[land], HYPSOMETRY_PERCENTILES) if count else [None] * len(HYPSOMETRY_PERCENTILES)
     window = bundle.manifest.get('window') or {}
+    density = {str(entry['level']): entry['drainagedensity_per_km'] for entry in hierarchy_levels(bundle) or []
+               if entry.get('drainagedensity_per_km') is not None}
     return {'scale': window.get('scale'), 'level': window.get('level'), 'cells': int(land.size), 'land_cells': count,
             'hypsometry_m': {f'p{p}': None if value is None else float(value) for p, value in zip(HYPSOMETRY_PERCENTILES, percentiles)},
-            'channel_share': float(np.count_nonzero(channel & land)) / count if count else None}
+            'channel_share': float(np.count_nonzero(channel & land)) / count if count else None,
+            'drainage_density_per_km': density}
 
 
 def check_resolution_invariance(bundle, spec, context):
     """Report only (status 'reported', never a failure): the land's hypsometry and channel share of the
     run and, with evaluate --coarser, of the coarser run beside it (multiscale plan section 6: the channel
-    share and the valley spacing depend on the level until S3.2)."""
+    share and the valley spacing depend on the level until S3.2), and each level's drainage density from
+    the manifest's diagnostics.levels (S3.0; none for a single pass or a bundle before S3.0)."""
     name = 'resolution-invariance'
     identifiers = [spec.get('elevation', 'geosphere.base_elevation'), spec.get('sea_level', 'geosphere.sea_level'),
                    spec.get('sea', 'geosphere.sea'), spec.get('channel', 'hydrosphere.channel_direction')]
@@ -645,6 +694,10 @@ def check_resolution_invariance(bundle, spec, context):
                'channel share (channel cells / land cells): ' +
                '; '.join(f"{label(key, entry)} {number(entry['channel_share'], '{:.4f}')} of {entry['land_cells']}"
                          for key, entry in entries.items())]
+    density = lambda entry: ', '.join(f"level {level} {number(value, '{:.4g}')}" for level, value in entry['drainage_density_per_km'].items())
+    if any(entry['drainage_density_per_km'] for entry in entries.values()):
+        details.append('drainage density per level (land channel cells / (land cells x cell size), 1/km): ' +
+                       '; '.join(f"{label(key, entry)} {density(entry) or '–'}" for key, entry in entries.items()))
     summary = 'channel share ' + ', '.join(f"{label(key, entry)} {number(entry['channel_share'], '{:.4f}')}"
                                            for key, entry in entries.items()) + \
         '; median land height ' + ', '.join(f"{key} {number(entry['hypsometry_m']['p50'], '{:.0f}')} m" for key, entry in entries.items())
@@ -660,7 +713,7 @@ CHECKS = {'grid': check_grid, 'required': check_required, 'finite': check_finite
           'monotone': check_monotone, 'lake-above-terrain': check_lake_above_terrain,
           'regional-window': check_regional_window, 'parent-mean-exact': check_parent_mean_exact,
           'level-consistency': check_level_consistency, 'resolution-invariance': check_resolution_invariance,
-          'border-step': check_border_step}
+          'border-step': check_border_step, 'level-targets': check_level_targets}
 
 
 def run_checks(bundle, specs, context):

@@ -20,6 +20,9 @@
 #include <vector>
 
 #include "core/deterministic_random.hpp"
+#include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_pass.hpp"
+#include "simulations/landscape/regional_tributaries.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 
 namespace landscape
@@ -761,5 +764,32 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                 }
             }
     return out;
+}
+
+void channelslevel(const LevelContext& context, LevelState& state)
+{
+    // Multiscale plan S3.0: regional_pass.cpp's step 3 moved here unchanged.
+    // 3. The pinned channels: they end at their first fine sea cell, and their beds
+    // follow the start surface's running minimum (channel_network.hpp). Beds are
+    // pinned on land; a link's last cell in the sea keeps its own (seabed) elevation,
+    // since the solve pins every sea cell at the sea level anyway. R9 (regional_valleys.hpp):
+    // with the incision active the bed law reads the network's incised filled elevations
+    // and the start surface lowered by the upsampled incision, so the channels cut below
+    // the land by the world's uplift over the elapsed time; inactive, the inputs as they are.
+    const RegionalGlobalInputs& inputs = context.inputs;
+    const bool incised = context.incision.active;
+    const std::vector<uint8_t>& sea = state.sea;
+    std::vector<float>& surface = state.surface_m;
+    const std::size_t count = surface.size();
+    state.channels = rasterisechannels(context.window, incised ? state.incisednetwork : inputs.network,
+                                       context.parameters.channels, inputs.sealevel,
+                                       incised ? state.bedsurface_m : surface, sea);
+    tributarieslevel(context, state);
+    const FineChannels& channels = state.channels;
+    for (std::size_t cell = 0; cell < count; cell++)
+        if (channels.channel[cell] != 0 && sea[cell] == 0)
+            surface[cell] = channels.bed_m[cell];
+    state.bed_m = channels.bed_m;
+    recordlevelstep(state, LevelStep::channels);
 }
 }

@@ -9,8 +9,11 @@
 // octave band (regional_surface.hpp, addlevelnoise) with its parent means corrected
 // (correctparentmeans), then the same units at k_l = factor^l. Every level ends with the
 // exact projection onto its parent (level 1 onto the global elevation) and its diagnostics.
-// The hook interface through which parallel detail steps (S3.x, S5.2) add their units is
-// fixed at S3.0, not here.
+// The hook interface through which the detail steps (S3.x, S5.2) add their units (S3.0):
+// LevelContext, LevelState, ParentFields and regionallevelsteps in regional_pass.hpp, one
+// function per LevelStep in its unit's header; the loop builds the context per level, puts the
+// prolonged parent into state.start at level >= 2, calls regionallevelsteps and keeps the
+// level's fields as the next level's ParentFields.
 // Contracts of the order:
 // - Prolonged from the parent: the elevation only. Recomputed at every level from the
 //   global fields and the level's elevation: the sea, the channels and their discharge,
@@ -81,6 +84,12 @@ struct RefinementParameters
     // its passes (0: none, the S2.3 loop bit for bit; the parameter file sets 6) and relaxation.
     int smoothpasses = 0;
     double smoothrelaxation = 1.4;
+    // Phase S3's keys (contracts of S3.0, at behaviour-keeping values; not read yet):
+    int prolongationlimit = 0;        // S3.1: 1 clamps each prolonged child to the range of its 2 x 2 bracketing
+                                      // parents (prolong); 0: the plain Catmull-Rom
+    double channelcellslope = 0.0;    // S3.2: theta, a channel cell's elevation b + min(h, theta c_l); 0: the bed
+    int smoothbasis = 0;              // S3.2's fallback: smoothparentmeans' basis, 0 Catmull-Rom (C1), 1 the cubic
+                                      // B-spline (C2)
 };
 
 // The prolongation's reach in parent cells beyond a child's parent cell (Catmull-Rom:
@@ -105,8 +114,9 @@ enum class LevelStep : int
     coast,            // the sea by local rules (regional_surface.hpp's regionalsea: regional_coast.hpp,
                       // regional_edges.hpp), before the channels, which end at the fine coast
     incision,         // the channels' incision (regional_valleys.hpp, globalincision upsampled)
-    channels,         // the pinned channels (channel_network.hpp) and their tributaries (S3.1)
-    solve,            // the analytical relief from the pinned channels (analytical_relief.hpp)
+    channels,         // the pinned channels (channel_network.hpp) and their tributaries (S3.3,
+                      // regional_tributaries.hpp)
+    solve,            // the analytical relief from the pinned channels (regional_solve.hpp, analytical_relief.hpp)
     valleyfloors,     // valley floors and sides (regional_valleys.hpp, carvevalleys)
     glacialforms,     // glacial troughs and cirques (regional_troughs.hpp, regional_cirques.hpp)
     foldfabric,       // fold trains (regional_folds.hpp, S5.2)
@@ -225,11 +235,59 @@ struct LevelDiagnostics
     int seainlandparents = 0;
     int seabeyondparent = 0;
     int drybelowlake = 0;
+    // Phase S3's diagnostics (written by S3.0's hooks; kept box, after the projection unless said):
+    // S3.1, the limited prolongation: the kept cells it clamped and its largest move (0 until S3.1).
+    int prolongationclamped = 0;
+    double maxprolongationclamp_m = 0.0;
+    // S3.2: the 99th percentile (nearest rank) of the kept cells' |move| by the smoothing, and the
+    // largest elevation above its bed (LevelState::bed_m) of a dry land channel cell (not sea, not
+    // wet; 0 at least): 0 at S3.0 unless a step after the channels moved a bed (the projection's
+    // bedsmoved and forced fallbacks).
+    double smoothmove99_m = 0.0;
+    double maxchannelrise_m = 0.0;
+    // S3.3: the land cells (not sea), the land channel cells and the drainage density, channel
+    // cells / (land cells x cellsize_km) in 1/km (each channel cell one cell size of channel, each
+    // cell the square of the north-south cell size); the tributaries and the domain cells they pinned.
+    int landcells = 0;
+    int channelcells = 0;
+    double drainagedensity_per_km = 0.0;
+    int tributaries = 0;
+    int tributarycells = 0;
+    // S3.4: the lake edges (pairs of east-west or north-south neighbours in the kept box, one wet,
+    // lake surface > 0, the other not) and the share of them on a global cell's boundary
+    // (lakeedgealigned; about 1 / k_l for an edge that ignores the global grid, 1 for square lakes);
+    // the land roughness, the RMS of z_E + z_W + z_N + z_S - 4 z over the kept dry land cells (not
+    // sea, not wet) whose four neighbours are dry land, in m at the level's cell size.
+    int lakeedges = 0;
+    double lakeedgealigned = 0.0;
+    double landroughness_m = 0.0;
+    // S3.5: the kept cells the valley floors, the troughs and the cirques changed at this level.
+    int valleycells = 0;
+    int troughcells = 0;
+    int cirquecells = 0;
     bool reliefconverged = false;        // the level's solve (AnalyticalReliefResult)
     int changedreceivers = 0;
     double seconds = 0.0;                // the level's wall-clock time
     std::vector<LevelStep> steps;        // the steps this level ran, in order
 };
+
+// The hook interface's bookkeeping (regional_pass.hpp): records `step` in
+// state.diagnostics->steps (nothing in the single pass, whose state has no diagnostics).
+void recordlevelstep(LevelState& state, LevelStep step);
+
+// LevelStep::presmoothing. At level >= 2 (context.parent set): correctparentmeans of
+// state.start.start_m against the parent's elevation (regional.mean_passes), its
+// levelparentmeanerror as state.start.blockmeanerror_m, and the lapse-rate base (the global
+// elevation upsampled at the level); at level 1 and in the single pass the correction is
+// regionalstartsurface's (noiselevel). Then the start surface is handed on: the level's
+// blockmeanerror_m (also LevelDiagnostics::blockmeanerror_m), sharepasses, sharemisses and
+// lapsebase_m, and state.surface_m. Throws std::invalid_argument when the start surface does
+// not cover the window's domain.
+void presmoothinglevel(const LevelContext& context, LevelState& state);
+
+// The kept cells of `window` (its finewidth() x fineheight() box in the domain) whose value
+// differs between two domain fields (the forms' cell counts of LevelDiagnostics).
+int keptcellschanged(const RegionalWindow& window, const std::vector<float>& before, const std::vector<float>& after);
 
 struct RefinementResult
 {

@@ -9,6 +9,8 @@
 #include <utility>
 
 #include "core/deterministic_random.hpp"
+#include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/regional_surface.hpp"
 
 // Erosion plan steps E3, R0, R1 and R4 (docs/architecture/erosion-hydrology-plan.md,
@@ -537,5 +539,16 @@ FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow
     if (inheritance.startsurface_m != nullptr && inheritance.startsurface_m->size() != count)
         throw std::invalid_argument("regionalwater: the start surface must hold one value per domain cell");
     return shorewater(inputs, window, warp, parameters, sea, channels, elevation_m, globaldepth, inheritance);
+}
+
+void lakeslevel(const LevelContext& context, LevelState& state)
+{
+    // 5. Lakes and ice (regional_pass.cpp's step 5, moved here unchanged in S3.0).
+    LakeInheritance lakes = context.details.lakes;
+    if (lakes.flood)
+        lakes.startsurface_m = &state.surface_m;  // the start surface with the beds pinned (S2.8)
+    state.water = regionalwater(context.inputs, context.window, context.warp, context.parameters, state.sea,
+                                state.channels, state.elevation_m, context.details.globallakedepth, lakes);
+    recordlevelstep(state, LevelStep::lakes);
 }
 }

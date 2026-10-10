@@ -54,6 +54,13 @@ struct RegionalGlobalInputs
     // (the adapter computes it; 0 when unknown).
     std::vector<float> equilibriumline_m;
     double presentelaoffset_m = 0.0;
+
+    // Multiscale plan Phase S3 (contracts of S3.0): the world's sub-grid statistics from S3.6's
+    // diagnoser (geosphere.relief_amplitude, m; geosphere.valley_spacing, km), W x H or empty
+    // (absent: S3.4's noise falls back to the local relief, S3.3's density to
+    // regional.tributary_spacing_km). The adapter fills them from S3.6 on.
+    std::vector<float> reliefamplitude_m;
+    std::vector<float> valleyspacing_km;
 };
 
 // The domain warp (Phase R, R2): a smooth vector noise that displaces the sampling
@@ -142,6 +149,23 @@ struct ValleyParameters
     double floormax_km = 40.0;           // the half-width's cap, km (and at most k fine cells)
     double sideslope = 0.0;              // rise over run of the valley sides beyond the floor (0: no sides)
     int reachcells = 0;                  // the farthest fine cell a channel shapes; at most k (the halo rule)
+    // Multiscale plan S3.5 (contract of S3.0, not read yet): the sides' reach on the ground, km,
+    // tested against the level's band like the floor; 0 keeps reachcells.
+    double reach_km = 0.0;
+};
+
+// Tributaries per level (multiscale plan S3.3, regional_tributaries.hpp; contract of S3.0, not
+// read yet): grown from the level's channels, hashed by the absolute key, Hack-law lengths in
+// [2 level cells, one parent cell), junction angles, Strahler order; the density target is
+// spacing_km until S3.6's valley-spacing field. enabled 0: no tributaries (the S2 pass exactly).
+struct TributaryParameters
+{
+    int enabled = 0;
+    double spacing_km = 0.13;            // the target valley spacing on the ground (Perron et al. 2009: 30 to 320 m)
+    double hackexponent = 0.57;          // h in L = C A^h (0.55 to 0.7, Tarboton 1996)
+    double hackcoefficient = 1.27;       // C in km per km2^h
+    double junctionangle_deg = 72.0;     // the mean angle between a tributary and its receiving channel
+    double bifurcationratio = 4.0;       // tributaries of order o per tributary of order o + 1 (3 to 5)
 };
 
 // Glacial troughs (Phase E5, step E5.1, regional_troughs.hpp): a land channel cell of a
@@ -190,11 +214,15 @@ struct RegionalParameters
     double noisepersistence = 0.6;
     double coastband_m = 50.0;           // the noise tapers to zero within this height of the sea level
     int meanpasses = 2;                  // block-mean correction passes (upsampling.hpp)
+    // Multiscale plan S3.4 (contract of S3.0, not read yet): 1 takes the noise amplitude per level
+    // from inputs.reliefamplitude_m (S3.6's field; localrelief without it); 0: the local relief.
+    int noiserelieffield = 0;
     WarpParameters warp;
     CoastParameters coast;
     EdgeParameters edges;
     ShoreParameters shores;
     ValleyParameters valleys;
+    TributaryParameters tributaries;
     TroughParameters troughs;
     CirqueParameters cirques;
     IceParameters ice;

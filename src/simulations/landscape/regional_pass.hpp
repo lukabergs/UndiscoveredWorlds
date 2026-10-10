@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "simulations/landscape/channel_network.hpp"
+#include "simulations/landscape/refinement_grid.hpp"
+#include "simulations/landscape/refinement_projection.hpp"
 #include "simulations/landscape/regional_glacial.hpp"
 #include "simulations/landscape/regional_grid.hpp"
 #include "simulations/landscape/regional_surface.hpp"
@@ -65,8 +67,8 @@ struct RegionalFields
 // window.halo < 2 x meanpasses + 2 (the block-mean correction reaches 2 global cells
 // per pass; two more keep the channels and the solve's edge out of the kept window);
 // rasterisechannels and solveanalyticalrelief throw on their own bad inputs.
-// runregionalpass is checkregionalinputs, regionalwarp, regionalstartsurface,
-// globalincision, regionallevelsteps and finishregionallevel in that order.
+// runregionalpass is checkregionalinputs, regionalwarp, globalincision, regionallevelsteps
+// (whose noise step is regionalstartsurface) and finishregionallevel in that order.
 RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                const RegionalParameters& parameters);
 
@@ -119,15 +121,84 @@ struct RegionalLevel
     double maxlowering_m = 0.0;
 };
 
-// Steps 2 to 5 of the pass on a start surface (StartSurface's start_m, lapsebase_m and
-// diagnostics; start_m is the surface the sea, the channels and the solve start from):
-// the sea (regionalsea, with `warp` for its gate), the pinned channels on the incision's
-// bed surface, the solve, the details `details` selects (valleys, troughs, cirques), the
-// lakes and the present-day ice of regionalwater. `incision` is globalincision's for these
-// inputs and parameters (computed once by the caller).
-RegionalLevel regionallevelsteps(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
-                                 const RegionalParameters& parameters, const FineWarp& warp, StartSurface start,
-                                 const GlobalIncision& incision, const RegionalDetails& details);
+// --- The hook interface of a level (multiscale plan S3.0, §3 "Phase S3 re-planned"). ---
+// Each LevelStep (refinement_levels.hpp) is one function `void <step>level(const LevelContext&,
+// LevelState&)` declared in its unit's header: noiselevel and coastlevel (regional_surface.hpp),
+// presmoothinglevel (refinement_levels.hpp), incisionlevel and valleyfloorslevel
+// (regional_valleys.hpp), channelslevel (channel_network.hpp; it calls tributarieslevel,
+// regional_tributaries.hpp), solvelevel (regional_solve.hpp), glacialformslevel
+// (regional_glacial.hpp), lakeslevel (regional_water.hpp), smoothinglevel and projectionlevel
+// (refinement_projection.hpp). regionallevelsteps calls them in LevelStep order; the ice is
+// finishregionallevel's. A step reads the context and the state's fields the earlier steps
+// wrote, writes its own, and records itself in the level's diagnostics when it acts
+// (recordlevelstep, refinement_levels.hpp). Every rule stays a pure function of absolute position, the seed and the
+// parent window within the level's halo.
+
+struct RefinementParameters;  // refinement_levels.hpp
+struct LevelDiagnostics;      // refinement_levels.hpp
+
+// The parent level's fields after its projection, on its domain (window.domainsize() values
+// each, row-major; a level reads them inside the parent's kept box only, as prolong does).
+// Null in the context at level 1 (its parent is the global grid) and in the single pass.
+struct ParentFields
+{
+    LevelWindow window;                  // the parent level's window in the halo chain
+    std::vector<float> elevation_m;      // the projected elevation (the next level's prolongation source)
+    std::vector<float> lift_m;           // its LevelState::lift_m
+    std::vector<float> solved_m;         // its elevation after the solve (LevelState::solved_m)
+    std::vector<uint8_t> sea;
+    std::vector<float> lakesurface_m;    // after the projection's drying (0: dry)
+    FineChannels channels;               // channel, direction, bed, discharge, flows and global cell
+    std::vector<float> bed_m;            // its LevelState::bed_m
+};
+
+// What a level step reads: the inputs and the level's place in the hierarchy.
+struct LevelContext
+{
+    const RegionalGlobalInputs& inputs;
+    const RegionalWindow& window;        // the level's window as the units take it (scale k_l; the single pass's)
+    const RegionalParameters& parameters;
+    const FineWarp& warp;                // regionalwarp's for `window`
+    const GlobalIncision& incision;      // globalincision's, computed once per pass
+    const RegionalDetails& details;
+    int level = 0;                       // 1 .. L in the refinement loop; 0 in the single pass
+    int factor = 0;                      // refinement.factor in the loop; 0 in the single pass
+    const RefinementParameters* refinement = nullptr;     // null in the single pass (no smoothing, no projection)
+    const LevelWindow* levelwindow = nullptr;            // the level's window in the halo chain (null: single pass)
+    const LevelWindow* projectionparent = nullptr;       // the window projected onto (level 1: the global level 0)
+    const std::vector<float>* projectionfield = nullptr;  // its elevation on its domain
+    const ParentFields* parent = nullptr;                // null at level 1 and in the single pass
+};
+
+// What the steps of a level write: RegionalLevel's fields (the domain fields
+// finishregionallevel reads) and the steps' intermediate fields, each on the window's domain.
+struct LevelState : RegionalLevel
+{
+    StartSurface start;                  // noiselevel's (level 1, single pass: regionalstartsurface; deeper: the
+                                         // prolongation with the octave band added), handed on by presmoothinglevel
+    std::vector<float> noiseband_m;      // noiselevel's: the level's noise amplitude per cell, noise_amplitude_m +
+                                         // noise_relief_fraction x the local global relief upsampled (before the
+                                         // taper; S3.4 sets it per level and caps the lakes' rim raise with it)
+    std::vector<float> surface_m;        // the working surface: the start surface, its sea centres set by the coast
+                                         // rule, then the land channel beds pinned (the lakes' start surface)
+    GlobalNetwork incisednetwork;        // incisionlevel's (incision active only): the network's incised filled elevations
+    std::vector<float> bedsurface_m;     // incisionlevel's: surface_m lowered by the upsampled incision (empty: inactive)
+    std::vector<float> bed_m;            // the channel beds (FineChannels::bed_m, meaningful on channel cells; S3.2
+                                         // keeps them here when a channel cell's elevation becomes its cell mean)
+    std::vector<uint8_t> pinned;         // the solve's pinned cells (channels, sea, the domain's outer ring)
+    std::vector<float> solved_m;         // the elevation after the solve, before the forms and the lakes
+    int tributaries = 0;                 // tributarieslevel's count (0: none)
+    int tributarycells = 0;              // the domain cells its tributaries pinned
+    // Refinement loop only (empty in the single pass):
+    ProjectionBounds bounds;             // smoothinglevel's, rebuilt after the smoothing; projectionlevel's
+    std::vector<float> ownlake_m;        // the own global lake cell's surface per cell (projectionbounds' ownlake_m)
+    std::vector<float> lift_m;           // final elevation - the elevation entering the smoothing
+    LevelDiagnostics* diagnostics = nullptr;  // the loop's record of the level (null: the single pass)
+};
+
+// The steps of a level from the noise to the projection, in LevelStep order (the single pass:
+// the noise is regionalstartsurface's, and the smoothing and the projection do nothing).
+void regionallevelsteps(const LevelContext& context, LevelState& state);
 
 // Steps 5b to 8: the ice above the ELA (iceabovetheela, adding to level.water), the rivers
 // and the lapse-rate climate from level.elevation_m, and the kept window's fields with the

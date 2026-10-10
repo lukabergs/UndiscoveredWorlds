@@ -19,6 +19,17 @@
     {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation"},
     {"check": "parent-mean-exact"},
     {"check": "border-step", "p99_max_m": 50, "report": true},
+    {"check": "level-targets", "report": true, "targets": [
+      {"key": "maxlandbelowsea_m", "max": 150, "from_level": 2, "step": "S3.1"},
+      {"key": "maxrimraise_m", "max": 200, "from_level": 2, "step": "S3.1"},
+      {"key": "forcedparents", "max": 0, "from_level": 2, "step": "S3.1"},
+      {"key": "maxlambdabefore_m", "max": 700, "level": 2, "step": "S3.2"},
+      {"key": "maxlambdabefore_m", "max": 300, "from_level": 3, "step": "S3.2"},
+      {"key": "smoothmove99_m", "max": 30, "from_level": 2, "step": "S3.2"},
+      {"key": "maxsmoothmove_m", "max": 300, "from_level": 2, "step": "S3.2"},
+      {"key": "lakeedgealigned", "max_per_scale": 2, "from_level": 2, "step": "S3.4 (the plan's target is lake (169, 60); this is every lake of the kept box)"},
+      {"key": "maxrimraise_m", "max": 100, "from_level": 2, "step": "S3.4"}
+    ]},
     {"check": "level-consistency", "elevation": "geosphere.base_elevation"},
     {"check": "resolution-invariance", "elevation": "geosphere.base_elevation", "sea_level": "geosphere.sea_level", "sea": "geosphere.sea", "channel": "hydrosphere.channel_direction"},
     {"check": "repeat"}

@@ -8,11 +8,13 @@
 #include <string>
 #include <utility>
 
-#include "simulations/landscape/regional_cirques.hpp"
+#include "simulations/landscape/channel_network.hpp"
+#include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/refinement_projection.hpp"
 #include "simulations/landscape/regional_glacial.hpp"
 #include "simulations/landscape/regional_ice.hpp"
+#include "simulations/landscape/regional_solve.hpp"
 #include "simulations/landscape/regional_surface.hpp"
-#include "simulations/landscape/regional_troughs.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/regional_water.hpp"
 #include "simulations/landscape/upsampling.hpp"
@@ -25,7 +27,8 @@
 // (regional_glacial.cpp, regional_troughs.cpp, regional_cirques.cpp, regional_ice.cpp),
 // inert at the defaults. Multiscale plan step S2.3 split the pass into the parts the
 // refinement loop calls (regionallevelsteps, finishregionallevel), unchanged in order and
-// arithmetic.
+// arithmetic; S3.0 moved regionallevelsteps' parts into one function per LevelStep in its
+// unit (the hook interface, regional_pass.hpp), unchanged likewise.
 
 namespace landscape
 {
@@ -92,6 +95,8 @@ void checkregionalinputs(const RegionalGlobalInputs& inputs, const RegionalWindo
     checkoptional(inputs.island, globalsize, "island");
     checkoptional(inputs.mountainisland, globalsize, "mountainisland");
     checkoptional(inputs.equilibriumline_m, globalsize, "equilibriumline_m");
+    checkoptional(inputs.reliefamplitude_m, globalsize, "reliefamplitude_m");
+    checkoptional(inputs.valleyspacing_km, globalsize, "valleyspacing_km");
 }
 
 RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
@@ -110,147 +115,33 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     if (parameters.meanpasses < 0 || window.halo < 2 * parameters.meanpasses + 2)
         throw std::invalid_argument("runregionalpass: the halo must be at least 2 x meanpasses + 2 global cells");
 
-    // 1. The warp and the start surface (regional_surface.hpp).
+    // 1. The warp (regional_surface.hpp) and the incision (regional_valleys.hpp); the start
+    // surface is the noise step's (regionalstartsurface).
     const FineWarp warp = regionalwarp(window, inputs.seed, parameters);
-    StartSurface start = regionalstartsurface(inputs, window, warp, parameters);
     const GlobalIncision incision = globalincision(inputs, parameters);
-    RegionalLevel level = regionallevelsteps(inputs, window, parameters, warp, std::move(start), incision, RegionalDetails{});
+    const RegionalDetails details{};
+    const LevelContext context{inputs, window, parameters, warp, incision, details};
+    LevelState level;
+    regionallevelsteps(context, level);
     return finishregionallevel(inputs, window, parameters, level);
 }
 
-RegionalLevel regionallevelsteps(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
-                                 const RegionalParameters& parameters, const FineWarp& warp, StartSurface start,
-                                 const GlobalIncision& incision, const RegionalDetails& details)
+void regionallevelsteps(const LevelContext& context, LevelState& state)
 {
-    const int width = inputs.width, height = inputs.height;
-    const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
-    const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
-    const std::int64_t planetfinewidth = static_cast<std::int64_t>(width) * window.scale;
-    if (start.start_m.size() != count || start.lapsebase_m.size() != count)
-        throw std::invalid_argument("regionallevelsteps: the start surface must cover the window's domain");
-
-    RegionalLevel level;
-    level.blockmeanerror_m = start.blockmeanerror_m;
-    level.sharepasses = start.sharepasses;
-    level.sharemisses = start.sharemisses;
-    level.lapsebase_m = std::move(start.lapsebase_m);
-    std::vector<float> surface = std::move(start.start_m);
-
-    // 2. The sea by local rules on the start surface (regional_surface.hpp), before the
-    // channels (R1), so the channels end at the fine coast and never change the mask.
-    level.sea = regionalsea(inputs, window, warp, parameters, surface, details.parentseagate);
-    const std::vector<uint8_t>& sea = level.sea;
-
-    // 3. The pinned channels: they end at their first fine sea cell, and their beds
-    // follow the start surface's running minimum (channel_network.hpp). Beds are
-    // pinned on land; a link's last cell in the sea keeps its own (seabed) elevation,
-    // since the solve pins every sea cell at the sea level anyway. R9 (regional_valleys.hpp):
-    // with the incision active the bed law reads the network's incised filled elevations
-    // and the start surface lowered by the upsampled incision, so the channels cut below
-    // the land by the world's uplift over the elapsed time; inactive, the inputs as they are.
-    GlobalNetwork incisednetwork;
-    std::vector<float> bedsurface;
-    if (incision.active)
-    {
-        incisednetwork = inputs.network;
-        incisednetwork.filledelevation_m = incision.filledelevation_m;
-        const std::vector<float> fineincision = upsample(incision.incision_m, width, height, window);
-        bedsurface = surface;
-        for (std::size_t cell = 0; cell < count; cell++)
-            bedsurface[cell] = static_cast<float>(static_cast<double>(surface[cell]) - std::max(0.0f, fineincision[cell]));
-    }
-    level.channels = rasterisechannels(window, incision.active ? incisednetwork : inputs.network,
-                                       parameters.channels, inputs.sealevel,
-                                       incision.active ? bedsurface : surface, sea);
-    const FineChannels& channels = level.channels;
-    for (std::size_t cell = 0; cell < count; cell++)
-        if (channels.channel[cell] != 0 && sea[cell] == 0)
-            surface[cell] = channels.bed_m[cell];
-
-    // 4. The analytical relief: channels, sea and the domain's outer ring pinned. A
-    // sea cell enters the solve at the sea level (the base level of the rivers), so
-    // the solve never lowers land below it through the sea; it keeps its own elevation.
-    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
-    const std::vector<float> runoff = upsample(inputs.runoff_mm_yr, width, height, window);
-    AnalyticalReliefInput solveinput;
-    solveinput.start_m = surface;
-    solveinput.pinned.assign(count, 0);
-    solveinput.runoff_m_yr.resize(count);
-    solveinput.key.resize(count);
-    for (int y = 0; y < domainheight; y++)
-        for (int x = 0; x < domainwidth; x++)
-        {
-            const std::size_t cell = at(x, y, domainwidth);
-            const bool ring = x == 0 || y == 0 || x == domainwidth - 1 || y == domainheight - 1;
-            solveinput.pinned[cell] = channels.channel[cell] != 0 || sea[cell] != 0 || ring ? 1 : 0;
-            if (sea[cell] != 0)
-                solveinput.start_m[cell] = inputs.sealevel;
-            solveinput.runoff_m_yr[cell] = std::max(0.0f, runoff[cell]) / 1000.0f;
-            solveinput.key[cell] = static_cast<std::uint64_t>(window.absolutefinecolumn(x) +
-                                                              window.absolutefinerow(y) * planetfinewidth);
-        }
-    // R9: the solve's uplift term from the incision's rate (analytical_relief.hpp), only
-    // with the incision active; empty otherwise (the solve without uplift exactly).
-    if (incision.active)
-    {
-        solveinput.uplift_m_myr = upsample(incision.rate_m_myr, width, height, window);
-        for (float& rate : solveinput.uplift_m_myr)
-            rate = std::max(0.0f, rate);
-    }
-    AnalyticalReliefResult solved = solveanalyticalrelief(metric, solveinput, parameters.relief);
-    level.reliefconverged = solved.converged;
-    level.changedreceivers = solved.changedreceivers;
-    std::vector<float>& elevation = level.elevation_m;
-    elevation = surface;
-    for (std::size_t cell = 0; cell < count; cell++)
-        if (solveinput.pinned[cell] == 0)
-            elevation[cell] = solved.elevation_m[cell];
-    {
-        // The lowering by the solve over the kept window's unpinned (so land) cells.
-        const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
-        double total = 0.0, largest = 0.0;
-        std::size_t cells = 0;
-        for (int y = y0; y < y0 + window.fineheight(); y++)
-            for (int x = x0; x < x0 + window.finewidth(); x++)
-            {
-                const std::size_t cell = at(x, y, domainwidth);
-                if (solveinput.pinned[cell] != 0)
-                    continue;
-                const double lowering = static_cast<double>(surface[cell]) - static_cast<double>(elevation[cell]);
-                total += lowering;
-                largest = std::max(largest, lowering);
-                cells++;
-            }
-        level.meanlowering_m = cells > 0 ? total / static_cast<double>(cells) : 0.0;
-        level.maxlowering_m = largest;
-    }
-    level.solveddischarge_m3_yr = std::move(solved.discharge_m3_yr);
-
-    // 4b. The valley floors around the channels (regional_valleys.hpp; R9, a no-op while
-    // valley_floor_km is 0), after the solve's diagnostics and before the lakes, which
-    // read the result.
-    const bool band = details.factor >= 2;
-    const double bandlower = band ? details.detailcells / 2.0 : 0.0;
-    const double bandupper = band ? details.detailcells * details.factor / 2.0 : 0.0;
-    if (details.valleys)
-        carvevalleys(inputs, window, parameters, channels, sea, elevation, bandlower, bandupper);
-
-    // 4c. The glacial forms (Phase E5): the fine ELA and glaciation fields (inactive, and
-    // no field read, unless a glacial feature is on: regional_glacial.hpp), then the
-    // troughs (E5.1) and the cirques (E5.2), each a no-op at its defaults.
-    level.glacial = regionalglacialfields(inputs, window, parameters);
-    if (details.troughs)
-        carvetroughs(inputs, window, parameters, level.glacial, channels, sea, elevation, bandlower, bandupper);
-    if (details.cirques)
-        carvecirques(inputs, window, parameters, level.glacial, channels, sea, elevation, bandlower, bandupper);
-
-    // 5. Lakes and ice (regional_water.hpp).
-    LakeInheritance lakes = details.lakes;
-    if (lakes.flood)
-        lakes.startsurface_m = &surface;  // the start surface with the beds pinned (S2.8)
-    level.water = regionalwater(inputs, window, warp, parameters, sea, channels, elevation, details.globallakedepth,
-                                lakes);
-    return level;
+    // The steps in LevelStep order (refinement_levels.hpp); each unit's function is the code
+    // the pass ran here up to S2.8, unchanged in its operations and their order (S3.0).
+    noiselevel(context, state);         // the start surface (level 1, the single pass) or the octave band
+    presmoothinglevel(context, state);  // the parent-mean correction; hands the start surface on
+    coastlevel(context, state);         // 2. the sea by local rules, before the channels (R1)
+    incisionlevel(context, state);      // 3. the incision's bed surface (R9)
+    channelslevel(context, state);      // 3. the pinned channels and their tributaries
+    solvelevel(context, state);         // 4. the analytical relief
+    valleyfloorslevel(context, state);  // 4b. the valley floors
+    glacialformslevel(context, state);  // 4c. the glacial troughs and cirques
+    // LevelStep::foldfabric: none yet (S5.2).
+    lakeslevel(context, state);         // 5. lakes and ice
+    smoothinglevel(context, state);     // the refinement loop only
+    projectionlevel(context, state);    // the refinement loop only
 }
 
 RegionalFields finishregionallevel(const RegionalGlobalInputs& inputs, const RegionalWindow& window,

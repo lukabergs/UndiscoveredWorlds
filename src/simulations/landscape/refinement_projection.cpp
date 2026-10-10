@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
 // The projection, its error measure and the resample (step S2.2,
@@ -635,5 +637,108 @@ ResampledField resampleto(const std::vector<LevelWindow>& windows, const std::ve
                 static_cast<float>(mean);
         }
     return result;
+}
+
+void smoothinglevel(const LevelContext& context, LevelState& state)
+{
+    // The refinement loop's smoothing before the projection (S2.7), moved here from
+    // refinement_levels.cpp unchanged in S3.0: the projection by bounds (sea and wet cells may
+    // sink but not rise past their water, dry land may rise but not sink to the sea level or the
+    // water beside it, its own global lake cell's surface included, land channel beds take the
+    // channel rate), the smoothing with the same bounds, then the bounds rebuilt on the smoothed
+    // field (the same floors and ceilings).
+    if (context.refinement == nullptr)
+        return;
+    const RegionalGlobalInputs& inputs = context.inputs;
+    const RefinementParameters& refinement = *context.refinement;
+    const LevelWindow& level = *context.levelwindow;
+    const std::size_t count = level.domainsize();
+    std::vector<float>& elevation = state.elevation_m;
+    const std::vector<float>& lakesurface = state.water.lakesurface_m;
+    std::vector<float>& ownlake = state.ownlake_m;
+    ownlake.assign(count, 0.0f);
+    for (int y = 0; y < level.domainrows; y++)
+        for (int x = 0; x < level.domaincolumns; x++)
+        {
+            const std::size_t global = static_cast<std::size_t>(level.globalrow(y)) * static_cast<std::size_t>(inputs.width) +
+                                       static_cast<std::size_t>(level.globalcolumn(x));
+            if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
+                ownlake[level.index(x, y)] = inputs.lakesurface_m[global];
+        }
+    state.bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation, inputs.sealevel,
+                                    refinement.projectionweightchannel, ownlake);
+    state.lift_m = elevation;  // the elevation entering the smoothing (lift_m's reference)
+    const SmoothingReport smoothing = smoothparentmeans(level, elevation, state.bounds, *context.projectionparent,
+                                                        *context.projectionfield, refinement.smoothpasses,
+                                                        refinement.smoothrelaxation);
+    if (state.diagnostics != nullptr)
+    {
+        state.diagnostics->smoothing = smoothing;
+        // The 99th percentile (nearest rank) of the kept cells' |move| by the smoothing (S3.2's check).
+        std::vector<double> moves;
+        moves.reserve(level.keptsize());
+        const int x0 = level.keptcolumnoffset(), y0 = level.keptrowoffset();
+        for (int y = y0; y < y0 + level.rows; y++)
+            for (int x = x0; x < x0 + level.columns; x++)
+            {
+                const std::size_t cell = level.index(x, y);
+                moves.push_back(std::fabs(static_cast<double>(elevation[cell]) - static_cast<double>(state.lift_m[cell])));
+            }
+        if (!moves.empty())
+        {
+            const std::size_t rank = static_cast<std::size_t>(std::ceil(0.99 * static_cast<double>(moves.size()))) - 1;
+            std::nth_element(moves.begin(), moves.begin() + static_cast<std::ptrdiff_t>(rank), moves.end());
+            state.diagnostics->smoothmove99_m = moves[rank];
+        }
+    }
+    if (refinement.smoothpasses > 0)
+    {
+        recordlevelstep(state, LevelStep::smoothing);
+        state.bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation, inputs.sealevel,
+                                        refinement.projectionweightchannel, ownlake);
+    }
+}
+
+void projectionlevel(const LevelContext& context, LevelState& state)
+{
+    // The refinement loop's exact projection and the drying after it (S2.3), moved here from
+    // refinement_levels.cpp unchanged in S3.0; then lift_m.
+    if (context.refinement == nullptr)
+        return;
+    const LevelWindow& level = *context.levelwindow;
+    const std::size_t count = level.domainsize();
+    std::vector<float>& elevation = state.elevation_m;
+    std::vector<float>& lakesurface = state.water.lakesurface_m;
+    std::vector<uint8_t> wet(count, 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+        wet[cell] = lakesurface[cell] > 0.0f ? 1 : 0;
+    const ProjectionReport projection =
+        projectlevel(level, elevation, state.bounds, *context.projectionparent, *context.projectionfield);
+    if (state.diagnostics != nullptr)
+        state.diagnostics->projection = projection;
+    recordlevelstep(state, LevelStep::projection);
+
+    // After the projection: wet non-channel cells at or above their surface dried (counted in
+    // the kept box).
+    const int keptx0 = level.keptcolumnoffset(), kepty0 = level.keptrowoffset();
+    const auto kept = [&](int x, int y) {
+        return x >= keptx0 && x < keptx0 + level.columns && y >= kepty0 && y < kepty0 + level.rows;
+    };
+    for (int y = 0; y < level.domainrows; y++)
+        for (int x = 0; x < level.domaincolumns; x++)
+        {
+            const std::size_t cell = level.index(x, y);
+            if (wet[cell] == 0 || state.channels.channel[cell] != 0 || elevation[cell] < lakesurface[cell])
+                continue;
+            lakesurface[cell] = 0.0f;
+            if (kept(x, y) && state.diagnostics != nullptr)
+                state.diagnostics->driedcells++;
+        }
+
+    // The level's lift: the final elevation less the elevation entering the smoothing (S3.2
+    // prolongs it to the next level).
+    for (std::size_t cell = 0; cell < count; cell++)
+        state.lift_m[cell] =
+            static_cast<float>(static_cast<double>(elevation[cell]) - static_cast<double>(state.lift_m[cell]));
 }
 }
