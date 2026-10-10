@@ -35,6 +35,8 @@ const uint8_t* tectonics_get_crust_class_map(void*);
 const uint8_t* tectonics_get_surface_crust_type_map(void*);
 const float* tectonics_get_uplift_tendency_map(void*);
 const float* tectonics_get_rock_uplift_rate_map(void*); // m/Myr, signed; tectonic sub-steps only, in the plate's frame (semi-Lagrangian: carried with the rock by the engine's own remap, exact for translation where one column field varies, approximate at plate boundaries; columns::Model::upliftRate)
+const float* tectonics_get_shortening_map(void*); // m across one native cell width, >= 0; cumulative over the run, in the plate's frame (columns::Model::strain, shortening_m)
+const float* tectonics_get_shortening_direction_map(void*); // radians in [0, pi) from x toward y, the shortening axis (columns::shortening_direction)
 const float* tectonics_get_subsidence_tendency_map(void*);
 const float* tectonics_get_accumulated_strain_map(void*);
 const float* tectonics_get_tension_map(void*);

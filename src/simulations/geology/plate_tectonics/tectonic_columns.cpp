@@ -53,6 +53,20 @@ double removeRock(Cell& c, double mass) {
     return removed;
 }
 }
+double shortening_m(const Strain& s, double cell_m) {
+    const double least = (s.xx + s.yy) / 2 - std::hypot((s.xx - s.yy) / 2, s.xy);
+    return std::max(0.0, -least) * cell_m;
+}
+
+double shortening_direction(const Strain& s) {
+    constexpr double pi = 3.14159265358979323846;
+    if (std::hypot((s.xx - s.yy) / 2, s.xy) == 0) return 0;
+    // The largest component's axis is atan2(2 xy, xx - yy) / 2; the least is normal to it.
+    double angle = std::atan2(2 * s.xy, s.xx - s.yy) / 2 + pi / 2;
+    if (angle >= pi) angle -= pi;
+    return angle < 0 ? angle + pi : angle;
+}
+
 double mass_per_area(const Cell& c) {
     return continental_density * c.continent + oceanic_density * c.ocean
         + sediment_density * c.sediment;
@@ -129,6 +143,7 @@ void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vect
     }
     budget_ = {}; budget_.enabled = true;
     uplift_rate_m_myr_.assign(cells_.size(), 0.0);
+    strain_.assign(cells_.size(), Strain{});
     for (const auto& c : cells_) { validate(c); budget_.initial_mass_kg += mass_per_area(c) * cell_m * cell_m; }
     budget_.mass_kg = budget_.initial_mass_kg;
     subdivision_ = subdivision;
@@ -504,12 +519,40 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     const auto parent = [&](size_t f) {
         return static_cast<size_t>(f / fine_width / subdivision_) * width_ + (f % fine_width) / subdivision_;
     };
-    std::vector<std::vector<double>> carried(3, std::vector<double>(transport_cells_.size(), 1.0));
+    // Strain of this update on the rock before it moves (strain()): rotate the tensor by
+    // the local spin, add sym(grad u); derivatives by one-sided differences within the plate.
+    const auto same_plate = [&](size_t a, size_t b) { return !forcing || forcing->owners[a] == forcing->owners[b]; };
+    const auto derivative = [&](size_t i, size_t behind, size_t ahead, double Displacement::* component) {
+        const bool back = same_plate(i, behind), front = same_plate(i, ahead);
+        const double db = velocity[i].*component - velocity[behind].*component;
+        const double df = velocity[ahead].*component - velocity[i].*component;
+        if (back && front) return std::abs(db) < std::abs(df) ? db : std::abs(df) < std::abs(db) ? df : (db + df) / 2;
+        return back ? db : front ? df : 0.0;
+    };
+    for (uint32_t y = 0; y < height_; ++y) for (uint32_t x = 0; x < width_; ++x) {
+        const int ix = static_cast<int>(x), iy = static_cast<int>(y);
+        const auto i = index(ix, iy), west = index(ix - 1, iy), east = index(ix + 1, iy);
+        const auto north = index(ix, iy - 1), south = index(ix, iy + 1);
+        const double dux_dx = derivative(i, west, east, &Displacement::x);
+        const double duy_dx = derivative(i, west, east, &Displacement::y);
+        const double dux_dy = derivative(i, north, south, &Displacement::x);
+        const double duy_dy = derivative(i, north, south, &Displacement::y);
+        const double spin = (duy_dx - dux_dy) / 2, c = std::cos(spin), s = std::sin(spin);
+        const Strain old = strain_[i];
+        strain_[i].xx = c * c * old.xx - 2 * c * s * old.xy + s * s * old.yy + dux_dx;
+        strain_[i].yy = s * s * old.xx + 2 * c * s * old.xy + c * c * old.yy + duy_dy;
+        strain_[i].xy = c * s * (old.xx - old.yy) + (c * c - s * s) * old.xy + (dux_dy + duy_dx) / 2;
+    }
+    // Carried with the rock: 0 elevation, 1 uplift rate, 2 coverage, 3 to 5 strain xx, yy, xy.
+    std::vector<std::vector<double>> carried(6, std::vector<double>(transport_cells_.size(), 1.0));
     for (size_t f = 0; f < transport_cells_.size(); ++f) {
         carried[0][f] = elevation_m(transport_cells_[f], thermal_strength);
         carried[1][f] = uplift_rate_m_myr_[parent(f)];
+        carried[3][f] = strain_[parent(f)].xx;
+        carried[4][f] = strain_[parent(f)].yy;
+        carried[5][f] = strain_[parent(f)].xy;
     }
-    for (int k = 0; k < 2; ++k) {
+    for (int k : {0, 1, 3, 4, 5}) {
         const auto [low, high] = std::minmax_element(carried[k].begin(), carried[k].end());
         const double shift = 4 * (*high - *low) - *low + 1;
         for (double& value : carried[k]) value += shift;
@@ -521,9 +564,11 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         return mean;
     };
     const auto elevation_stay = coarse_mean(carried[0]), rate_stay = coarse_mean(carried[1]);
+    const auto xx_stay = coarse_mean(carried[3]), yy_stay = coarse_mean(carried[4]), xy_stay = coarse_mean(carried[5]);
     auto next = transportColumns(velocity, dt, carried);
     const double area = cell_m_ * cell_m_;
     std::vector<double> arc_source(next.size());
+    std::vector<double> created_area(next.size(), 0.0); // New ocean floor of this update, share of the cell.
     for (size_t i=0; i<next.size(); ++i) {
         auto& c=next[i];
         double coverage = c.continental_area + c.oceanic_area;
@@ -556,6 +601,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
             }
             const double opening=1-coverage;
             const double generated_area = opening*ocean_share;
+            created_area[i] = generated_area;
             const double generated = newborn_ocean_crust_[i] * generated_area;
             c.ocean += generated;
             budget_.generated_ocean_kg += generated * oceanic_density * area;
@@ -659,6 +705,16 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         const double source_rate = uplift_rate_m_myr_[i] + (rate_moved[i] / coverage[i] - rate_stay[i]);
         const double rate = (elevation[i] - source_elevation) / dt;
         uplift_rate_m_myr_[i] = source_rate + (rate - source_rate) * uplift_weight;
+    }
+    // The strain of the rock now in the cell, carried as the mean above; the ocean floor
+    // created in the opening has none, so the cell keeps the arriving rock's tensor on
+    // the rest of its area only (rigid plates parting leave the ridge and its floor at 0).
+    const auto xx_moved = coarse_mean(carried[3]), yy_moved = coarse_mean(carried[4]), xy_moved = coarse_mean(carried[5]);
+    for (size_t i = 0; i < next.size(); ++i) {
+        const double kept = 1 - created_area[i];
+        strain_[i].xx = (strain_[i].xx + xx_moved[i] / coverage[i] - xx_stay[i]) * kept;
+        strain_[i].yy = (strain_[i].yy + yy_moved[i] / coverage[i] - yy_stay[i]) * kept;
+        strain_[i].xy = (strain_[i].xy + xy_moved[i] / coverage[i] - xy_stay[i]) * kept;
     }
     for (uint32_t y = 0; y < height_; ++y) for (uint32_t x = 0; x < width_; ++x) {
         const auto i = index(x, y);

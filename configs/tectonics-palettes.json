@@ -1,5 +1,5 @@
 {
-  "version": "tectonics-v6-erosion-rates",
+  "version": "tectonics-v7-shortening",
   "missing": [15, 19, 27],
   "sequential": [[0, [22, 25, 67]], [0.25, [50, 91, 140]], [0.5, [38, 154, 149]], [0.75, [136, 204, 92]], [1, [250, 232, 96]]],
   "fields": {
@@ -22,6 +22,8 @@
     "uplift_tendency": {"title": "Uplift tendency", "units": "normalized signal, not m/Myr", "range": [0, 1]},
     "subsidence_tendency": {"title": "Subsidence tendency", "units": "normalized signal, not m/Myr", "range": [0, 1]},
     "accumulated_strain": {"title": "Strain memory", "units": "normalized signal", "range": [0, 1]},
+    "shortening": {"title": "Cumulative shortening", "units": "m: strain x the native cell width (resolution-dependent; divide by it for the strain); small-strain measure; in the plate's frame", "range": [0, 150000]},
+    "shortening_direction": {"title": "Shortening axis", "units": "rad from east toward south; an axis (pi equals 0); cyclic", "stops": [[0, [214, 69, 65]], [0.7853981633974483, [230, 190, 70]], [1.5707963267948966, [70, 170, 110]], [2.356194490192345, [70, 110, 210]], [3.141592653589793, [214, 69, 65]]]},
     "deformation_rate": {"title": "Deformation intensity", "units": "normalized signal", "range": [0, 1]},
     "convergence_score": {"title": "Convergence", "units": "score", "range": [0, 100]},
     "divergence_score": {"title": "Divergence", "units": "score", "range": [0, 100]},

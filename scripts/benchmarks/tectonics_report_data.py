@@ -26,9 +26,10 @@ DTYPES = {
     "deformation_rate": "<f4", "deformation_velocity_x": "<f4", "deformation_velocity_y": "<f4",
     "convergence_score": "u1", "divergence_score": "u1", "shear_score": "u1", "geologic_regime": "u1",
 }
-# rock_uplift_rate (m/Myr, erosion plan D1) is in run bundles only, never in the former snapshot files.
+# rock_uplift_rate (m/Myr, erosion plan D1) and shortening, shortening_direction (m, rad; multiscale
+# plan S5.1) are in run bundles only, never in the former snapshot files.
 OPTIONAL_DTYPES = {"rift_damage": "<f4", "plume_influence": "<f4", "continental_crust_m": "<f4", "oceanic_crust_m": "<f4", "sediment_m": "<f4",
-                   "rock_uplift_rate": "<f4"}
+                   "rock_uplift_rate": "<f4", "shortening": "<f4", "shortening_direction": "<f4"}
 
 
 def elevation_m(height, sea_level):

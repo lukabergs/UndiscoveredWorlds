@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <limits>
+#include <utility>
 
 using namespace tectonics::columns;
 
@@ -560,4 +562,252 @@ TEST(TectonicColumns, RockUpliftRateCountsThermalSubsidence) {
         EXPECT_NEAR(rate, -sinking * -std::expm1(-1.0 / 5), 1e-9);
         EXPECT_NEAR(rate, -7.160247204961215, 1e-9);
     }
+}
+
+// Cumulative shortening (multiscale plan S5.1): the export of a strain tensor. The
+// shortening is minus the least principal component times the cell width; the
+// direction is that component's axis in [0, pi) from x toward y. Simple shear xy = g/2
+// has components +-g/2 and shortens along (1, -1) (3 pi / 4) for g > 0, along (1, 1)
+// for g < 0; extension alone shortens nothing; equal components have direction 0.
+TEST(TectonicColumns, ShorteningAndDirectionOfExplicitStrains) {
+    const double pi = std::acos(-1.0);
+    EXPECT_NEAR(shortening_m({-.1, 0, 0}, 1000), 100, 1e-12);
+    EXPECT_EQ(shortening_direction({-.1, 0, 0}), 0);
+    EXPECT_NEAR(shortening_m({0, -.1, 0}, 1000), 100, 1e-12);
+    EXPECT_NEAR(shortening_direction({0, -.1, 0}), pi / 2, 1e-15);
+    EXPECT_NEAR(shortening_m({0, 0, .05}, 1000), 50, 1e-12);
+    EXPECT_NEAR(shortening_direction({0, 0, .05}), 3 * pi / 4, 1e-15);
+    EXPECT_NEAR(shortening_direction({0, 0, -.05}), pi / 4, 1e-15);
+    EXPECT_EQ(shortening_m({.1, .2, 0}, 1000), 0);
+    EXPECT_NEAR(shortening_direction({.1, .2, 0}), 0, 1e-15); // the least extension's axis
+    EXPECT_NEAR(shortening_m({-.1, -.1, 0}, 1000), 100, 1e-12);
+    EXPECT_EQ(shortening_direction({-.1, -.1, 0}), 0);
+    EXPECT_EQ(shortening_m({}, 1000), 0);
+    EXPECT_EQ(shortening_direction({}), 0);
+}
+
+namespace {
+// Land columns at rest except for the displacement: no erosion, no roots, no forcing.
+Model strained_world(uint32_t subdivision) {
+    Model world;
+    world.initialize(16, 8, 100000, std::vector<Cell>(128, seed(500, true, 100)), subdivision);
+    return world;
+}
+void advance_still(Model& world, const std::vector<Displacement>& u, const tectonics::margins::Forcing* forcing = nullptr) {
+    tectonics::margins::Parameters still;
+    still.root_mobility = 0;
+    world.advance(u, 1, 0, 1, 1, forcing, still, {}, false, nullptr, 5);
+}
+// Periodic triangle profile of period 2 n: v at 0, -v at n, slope -v / (n / 2) between.
+double triangle(int x, int n, double v) {
+    const int p = ((x % (2 * n)) + 2 * n) % (2 * n);
+    return p <= n ? v - 2 * v * p / n : -v + 2 * v * (p - n) / n;
+}
+}
+
+// A uniform convergence along x: u_x a periodic triangle (0.2 at x = 4, -0.2 at x = 12,
+// slope -0.05 cell per cell between), so each update shortens the rock of x = 5..11 by
+// 0.05 along x: 5 km per 100 km cell, direction 0, nothing along y. Rock arriving from
+// the kinks (x = 4, 12: derivative 0) mixes into x = 5 and 11, so x = 6..10 after one
+// update, x = 7..9 after two (10 km); the diverging half x = 13..3 shortens nothing.
+// Along y the same with period 8 (0.1 at y = 2, -0.1 at y = 6): row 4 shortens by 5 km
+// per update at direction pi / 2. Subdivisions 1 and 4.
+TEST(TectonicColumns, ShorteningOfAUniformConvergence) {
+    const double pi = std::acos(-1.0);
+    for (uint32_t subdivision : {1u, 4u}) {
+        std::vector<Displacement> u(128), v(128);
+        for (int i = 0; i < 128; ++i) {
+            u[i].x = triangle(i % 16 - 4, 8, .2);
+            v[i].y = triangle(i / 16 - 2, 4, .1);
+        }
+        EXPECT_NEAR(u[5].x - u[4].x, -.05, 1e-15);
+        EXPECT_NEAR(v[3 * 16].y - v[2 * 16].y, -.05, 1e-15);
+        auto world = strained_world(subdivision);
+        advance_still(world, u);
+        for (size_t i = 0; i < 128; ++i) {
+            const auto x = i % 16;
+            const auto& s = world.strain()[i];
+            if (x >= 6 && x <= 10) {
+                EXPECT_NEAR(s.xx, -.05, 1e-12) << "subdivision " << subdivision << " cell " << i;
+                EXPECT_NEAR(shortening_m(s, 100000), 5000, 1e-7);
+                EXPECT_NEAR(shortening_direction(s), 0, 1e-12);
+            }
+            if (x >= 14 || x <= 2) EXPECT_EQ(shortening_m(s, 100000), 0) << "cell " << i;
+            EXPECT_NEAR(s.yy, 0, 1e-12);
+            EXPECT_NEAR(s.xy, 0, 1e-12);
+        }
+        advance_still(world, u);
+        for (size_t x = 7; x <= 9; ++x) for (size_t y = 0; y < 8; ++y)
+            EXPECT_NEAR(shortening_m(world.strain()[y * 16 + x], 100000), 10000, 1e-7)
+                << "subdivision " << subdivision << " x " << x << " y " << y;
+        auto column = strained_world(subdivision);
+        advance_still(column, v);
+        for (size_t x = 0; x < 16; ++x) {
+            const auto& s = column.strain()[4 * 16 + x];
+            EXPECT_NEAR(shortening_m(s, 100000), 5000, 1e-7) << "subdivision " << subdivision << " x " << x;
+            EXPECT_NEAR(shortening_direction(s), pi / 2, 1e-12);
+        }
+    }
+}
+
+// The tensor moves with the rock. u_x = 0.1 for x <= 4, 0 at x = 5, -0.1 for x >= 6
+// strains column 5 alone (its two one-sided differences are -0.1; elsewhere one of
+// them is 0); converging rock dilutes it. A second update translates everything by
+// 0.25 cell east (no strain, no spin): the sum over a row is conserved and the
+// shortening moves east by the translation (its centroid by 0.25 cell), keeping its
+// direction 0. Subdivision 1.
+TEST(TectonicColumns, ShorteningIsCarriedWithTheRock) {
+    std::vector<Displacement> u(128);
+    for (size_t i = 0; i < 128; ++i) u[i].x = i % 16 <= 4 ? .1 : i % 16 == 5 ? 0 : -.1;
+    auto world = strained_world(1);
+    advance_still(world, u);
+    const auto row = [&](size_t y) {
+        double total = 0, moment = 0;
+        for (size_t x = 0; x < 16; ++x) {
+            const double amount = shortening_m(world.strain()[y * 16 + x], 100000);
+            total += amount; moment += amount * x;
+        }
+        return std::pair{total, moment / total};
+    };
+    const auto [first, before] = row(3);
+    EXPECT_GT(shortening_m(world.strain()[3 * 16 + 5], 100000), 8000);
+    for (size_t x : {0u, 1u, 2u, 3u, 9u, 10u, 11u, 12u, 13u, 14u, 15u})
+        EXPECT_EQ(shortening_m(world.strain()[3 * 16 + x], 100000), 0) << "x " << x;
+    advance_still(world, std::vector<Displacement>(128, {.25, 0}));
+    for (size_t y = 0; y < 8; ++y) {
+        const auto [total, centroid] = row(y);
+        EXPECT_NEAR(total, first, 1e-6) << "row " << y;
+        EXPECT_NEAR(centroid, before + .25, 1e-9) << "row " << y;
+    }
+    for (const auto& s : world.strain()) if (shortening_m(s, 100000) > 1) EXPECT_NEAR(shortening_direction(s), 0, 1e-12);
+}
+
+// The tensor turns with the plate. After one update of the uniform convergence along x
+// (x = 6..10 shortened by 0.05 at direction 0), a rigid rotation by w = 0.05 rad about
+// (8, 4) (u = w (-(y - 4), x - 8), with its jumps at the wrap seams inside the plate)
+// adds no strain and turns the axis by w: x = 7..9 keep 5 km at direction 0.05 in
+// every row, also next to the seam between rows 7 and 0, where the smaller one-sided
+// difference ignores the jump of 8 w.
+TEST(TectonicColumns, ShorteningTurnsWithAPlateRotation) {
+    const double w = .05;
+    for (uint32_t subdivision : {1u, 4u}) {
+        std::vector<Displacement> u(128), rotation(128);
+        for (int i = 0; i < 128; ++i) {
+            u[i].x = triangle(i % 16 - 4, 8, .2);
+            rotation[i] = {-w * (i / 16 - 4), w * (i % 16 - 8)};
+        }
+        auto world = strained_world(subdivision);
+        advance_still(world, u);
+        advance_still(world, rotation);
+        for (size_t x = 7; x <= 9; ++x) for (size_t y = 0; y < 8; ++y) {
+            const auto& s = world.strain()[y * 16 + x];
+            EXPECT_NEAR(shortening_m(s, 100000), 5000, 1e-7) << "subdivision " << subdivision << " x " << x << " y " << y;
+            EXPECT_NEAR(shortening_direction(s), w, 1e-12) << "subdivision " << subdivision << " x " << x << " y " << y;
+        }
+    }
+}
+
+// Plate edges: a jump of velocity to another plate is not strain. Plate 0 (x = 0..7)
+// moves east by 0.2 cell and slows to 0.1 at x = 6 and 0 at x = 7; plate 1 (x = 8..15)
+// moves east by 0.1. With the owners, x = 6 and 7 take the in-plate difference -0.1
+// (10 km; x = 6 keeps 9 / 11 of it, mixed with unstrained rock arriving from x = 5),
+// plate 1 and the rest of plate 0 nothing, though the boundary opens between x = 7
+// and 8 and closes across the wrap. Without the owners (one plate) the smaller
+// difference at x = 7 is the mean of -0.1 and +0.1, 0: only x = 6 is strained, and
+// part of its rock reaches x = 7. Rigid plates converging shorten nothing.
+TEST(TectonicColumns, ShorteningIgnoresJumpsBetweenPlates) {
+    tectonics::margins::Forcing plates;
+    plates.thermal_age_myr.assign(128, -1);
+    plates.trench_m.assign(128, 0);
+    plates.arc_receiver.assign(128, std::numeric_limits<uint32_t>::max());
+    plates.owners.resize(128);
+    std::vector<Displacement> u(128), rigid(128);
+    for (size_t i = 0; i < 128; ++i) {
+        const size_t x = i % 16;
+        plates.owners[i] = x < 8 ? 0 : 1;
+        u[i].x = x < 6 ? .2 : x == 6 ? .1 : x == 7 ? 0 : .1;
+        rigid[i].x = x < 8 ? .2 : -.2;
+    }
+    auto owned = strained_world(1), single = strained_world(1), converging = strained_world(1);
+    advance_still(owned, u, &plates);
+    advance_still(single, u);
+    advance_still(converging, rigid, &plates);
+    for (size_t y = 0; y < 8; ++y) {
+        const auto at = [&](const Model& world, size_t x) { return shortening_m(world.strain()[y * 16 + x], 100000); };
+        EXPECT_NEAR(at(owned, 7), 10000, 1e-6) << "row " << y;
+        EXPECT_NEAR(at(owned, 6), 10000. * 9 / 11, 1e-6) << "row " << y; // 0.9 of its rock stays, 0.2 of x = 5's arrives
+        for (size_t x : {0u, 1u, 2u, 3u, 4u, 8u, 9u, 10u, 11u, 12u, 13u, 14u, 15u})
+            EXPECT_NEAR(at(owned, x), 0, 1e-6) << "x " << x; // rounding of the carried shift
+        EXPECT_NEAR(at(single, 7), 10000. / 11, 1e-6) << "row " << y; // 0.1 of x = 6's rock, coverage 1.1
+        for (size_t x = 0; x < 16; ++x) EXPECT_EQ(at(converging, x), 0) << "x " << x;
+    }
+}
+
+// New crust has no strain. Ocean floor is first shortened by 0.05 along y in row 4 and
+// partly in rows 3 and 5 (the triangle profile of ShorteningOfAUniformConvergence, one
+// plate), across every column, the future ridge included. Then two rigid plates part
+// for 50 updates at subdivision 4: x = 0..7 moves west and x = 8..15 east by 0.2 cell,
+// so a ridge opens between x = 7 and 8 and the floor subducts across the wrap. The
+// crust the ridge creates carries no strain and the rock that stayed is diluted by it,
+// so the ridge columns and the floor they made (x = 4..11, all of it created in the
+// last 20 updates) keep almost none of the 5 km: below 1 m at the ridge, at most
+// 28.3 m (0.6 percent) in the new floor, where the remap smears in the older rock that
+// left the ridge first. Without the zero strain of the created floor both keep 5 km.
+TEST(TectonicColumns, ShorteningOfNewCrustAtADivergentBoundaryIsZero) {
+    tectonics::margins::Forcing plates;
+    plates.thermal_age_myr.assign(128, -1);
+    plates.trench_m.assign(128, 0);
+    plates.arc_receiver.assign(128, std::numeric_limits<uint32_t>::max());
+    plates.owners.resize(128);
+    std::vector<Displacement> squeeze(128), apart(128);
+    for (size_t i = 0; i < 128; ++i) {
+        plates.owners[i] = i % 16 < 8 ? 0 : 1;
+        squeeze[i].y = triangle(static_cast<int>(i / 16) - 2, 4, .1);
+        apart[i].x = i % 16 < 8 ? -.2 : .2;
+    }
+    Model world;
+    world.initialize(16, 8, 100000, std::vector<Cell>(128, seed(-4000, false, 20)), 4);
+    advance_still(world, squeeze);
+    for (size_t x = 0; x < 16; ++x) ASSERT_NEAR(shortening_m(world.strain()[4 * 16 + x], 100000), 5000, 1e-6);
+    for (int step = 0; step < 50; ++step) advance_still(world, apart, &plates);
+    double ridge = 0, floor = 0;
+    for (size_t i = 0; i < 128; ++i) {
+        const auto x = i % 16;
+        const double amount = shortening_m(world.strain()[i], 100000);
+        if (x == 7 || x == 8) ridge = std::max(ridge, amount);
+        else if (x >= 4 && x <= 11) floor = std::max(floor, amount);
+    }
+    EXPECT_LT(ridge, 1) << "largest shortening at the ridge, m";
+    EXPECT_LT(floor, 40) << "largest shortening of the new floor, m"; // measured 28.3 m
+}
+
+// Over several updates of a varied displacement (two plates, subdivision 4) the
+// shortening stays finite and non-negative and the direction in [0, pi).
+TEST(TectonicColumns, ShorteningIsNonNegativeAndItsDirectionInRange) {
+    const double pi = std::acos(-1.0);
+    tectonics::margins::Forcing plates;
+    plates.thermal_age_myr.assign(128, -1);
+    plates.trench_m.assign(128, 0);
+    plates.arc_receiver.assign(128, std::numeric_limits<uint32_t>::max());
+    plates.owners.resize(128);
+    std::vector<Displacement> u(128);
+    for (size_t i = 0; i < 128; ++i) {
+        const double x = static_cast<double>(i % 16), y = static_cast<double>(i / 16);
+        plates.owners[i] = (i % 16 + i / 16) % 16 < 8 ? 0 : 1;
+        u[i] = {.3 * std::sin(2 * pi * x / 16 + y), .2 * std::cos(2 * pi * y / 8 - x / 3)};
+    }
+    auto world = strained_world(4);
+    double largest = 0;
+    for (int step = 0; step < 6; ++step) {
+        advance_still(world, u, &plates);
+        for (const auto& s : world.strain()) {
+            const double amount = shortening_m(s, 100000), direction = shortening_direction(s);
+            ASSERT_TRUE(std::isfinite(amount));
+            EXPECT_GE(amount, 0);
+            EXPECT_GE(direction, 0);
+            EXPECT_LT(direction, pi);
+            largest = std::max(largest, amount);
+        }
+    }
+    EXPECT_GT(largest, 0);
 }

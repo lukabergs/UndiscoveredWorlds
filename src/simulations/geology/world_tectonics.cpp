@@ -271,6 +271,8 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
     const std::uint8_t* crustclassmap = tectonics_get_crust_class_map(simulation.pointer);
     const float* uplifttendencymap = tectonics_get_uplift_tendency_map(simulation.pointer);
     const float* rockupliftratemap = tectonics_get_rock_uplift_rate_map(simulation.pointer);
+    const float* shorteningmap = tectonics_get_shortening_map(simulation.pointer);
+    const float* shorteningdirectionmap = tectonics_get_shortening_direction_map(simulation.pointer);
     const float* subsidencetendencymap = tectonics_get_subsidence_tendency_map(simulation.pointer);
     const float* accumulatedstrainmap = tectonics_get_accumulated_strain_map(simulation.pointer);
     const std::uint8_t* boundarytypemap = tectonics_get_boundary_type_map(simulation.pointer);
@@ -286,6 +288,7 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
     if (convergencemap == nullptr || divergencemap == nullptr || shearmap == nullptr || regimemap == nullptr
         || crustagemyrmap == nullptr || crustthicknessmap == nullptr || crustclassmap == nullptr
         || uplifttendencymap == nullptr || rockupliftratemap == nullptr || subsidencetendencymap == nullptr
+        || shorteningmap == nullptr || shorteningdirectionmap == nullptr
         || accumulatedstrainmap == nullptr
         || boundarytypemap == nullptr || boundarydistancemap == nullptr || boundarysegmentidmap == nullptr
         || nearestboundaryidmap == nullptr || deformingregionidmap == nullptr || deformingregiontypemap == nullptr
@@ -370,6 +373,10 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
             world.settectonicuplifttendency(x, y, uplifttendencymap[index]);
             // A rate of elevation change: sampled bilinearly as the heights are, no length scale.
             world.settectonicrockupliftrate(x, y, grid.height(rockupliftratemap, x, y));
+            // An axis wraps at pi, so the nearest engine cell, never a bilinear mean; the
+            // shortening with it, so the pair stays one cell's.
+            world.settectonicshortening(x, y, shorteningmap[index]);
+            world.settectonicshorteningdirection(x, y, shorteningdirectionmap[index]);
             world.settectonicsubsidencetendency(x, y, subsidencetendencymap[index]);
             world.settectonicaccumulatedstrain(x, y, accumulatedstrainmap[index]);
             world.settectonicboundarytype(x, y, boundarytype);

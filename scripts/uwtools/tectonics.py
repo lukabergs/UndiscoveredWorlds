@@ -17,6 +17,7 @@ BUNDLE_FIELDS = {
     "crust_thickness": "geosphere.crust_thickness", "crust_class": "geosphere.crust_class",
     "uplift_tendency": "geosphere.uplift_tendency", "subsidence_tendency": "geosphere.subsidence_tendency",
     "rock_uplift_rate": "geosphere.rock_uplift_rate",
+    "shortening": "geosphere.shortening", "shortening_direction": "geosphere.shortening_direction",
     "accumulated_strain": "geosphere.accumulated_strain", "boundary_type": "geosphere.boundary_type",
     "boundary_distance": "geosphere.boundary_distance", "boundary_segment_id": "geosphere.boundary_segment",
     "nearest_boundary_id": "geosphere.nearest_boundary", "deforming_region_id": "geosphere.deforming_region",

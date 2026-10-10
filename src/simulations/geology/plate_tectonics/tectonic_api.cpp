@@ -68,6 +68,16 @@ const float* tectonics_get_rock_uplift_rate_map(void* pointer) {
     return litho->getRockUpliftRateMap();
 }
 
+const float* tectonics_get_shortening_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getShorteningMap();
+}
+
+const float* tectonics_get_shortening_direction_map(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getShorteningDirectionMap();
+}
+
 const float* tectonics_get_subsidence_tendency_map(void* pointer) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
     return litho->getSubsidenceTendencyMap();

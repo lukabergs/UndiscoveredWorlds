@@ -395,6 +395,8 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
                           0.0f),
       rock_uplift_rate_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height),
                            0.0f),
+      shortening_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
+      shortening_direction_map(static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
       subsidence_tendency_map(
           static_cast<size_t>(params.width) * static_cast<size_t>(params.height), 0.0f),
       accumulated_strain_map(
@@ -923,6 +925,14 @@ const float* lithosphere::getRockUpliftRateMap() const noexcept {
     return rock_uplift_rate_map.data();
 }
 
+const float* lithosphere::getShorteningMap() const noexcept {
+    return shortening_map.data();
+}
+
+const float* lithosphere::getShorteningDirectionMap() const noexcept {
+    return shortening_direction_map.data();
+}
+
 const float* lithosphere::getSubsidenceTendencyMap() const noexcept {
     return subsidence_tendency_map.data();
 }
@@ -1051,6 +1061,8 @@ void lithosphere::resetSimulationState() {
               static_cast<uint8_t>(tectonics::contract::CrustClass::None));
     std::fill(uplift_tendency_map.begin(), uplift_tendency_map.end(), 0.0f);
     std::fill(rock_uplift_rate_map.begin(), rock_uplift_rate_map.end(), 0.0f);
+    std::fill(shortening_map.begin(), shortening_map.end(), 0.0f);
+    std::fill(shortening_direction_map.begin(), shortening_direction_map.end(), 0.0f);
     std::fill(subsidence_tendency_map.begin(), subsidence_tendency_map.end(), 0.0f);
     std::fill(accumulated_strain_map.begin(), accumulated_strain_map.end(), 0.0f);
     std::fill(boundary_type_map.begin(), boundary_type_map.end(),
@@ -2444,6 +2456,15 @@ void lithosphere::publishColumns() {
     const auto& uplift_rate = column_model.upliftRate();
     for (size_t i = 0; i < rock_uplift_rate_map.size(); ++i)
         rock_uplift_rate_map[i] = i < uplift_rate.size() ? static_cast<float>(uplift_rate[i]) : 0.0f;
+    const auto& strain = column_model.strain();
+    const double cell_m = scenario.world_width_km * 1000 / _worldDimension.getWidth();
+    for (size_t i = 0; i < shortening_map.size(); ++i) {
+        const auto s = i < strain.size() ? strain[i] : tectonics::columns::Strain{};
+        shortening_map[i] = static_cast<float>(tectonics::columns::shortening_m(s, cell_m));
+        // An axis just below pi rounds to the float pi, the same axis as 0.
+        const auto direction = static_cast<float>(tectonics::columns::shortening_direction(s));
+        shortening_direction_map[i] = direction >= static_cast<float>(3.14159265358979323846) ? 0.0f : direction;
+    }
 }
 
 void lithosphere::updateColumns() {

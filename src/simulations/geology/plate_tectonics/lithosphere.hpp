@@ -116,6 +116,10 @@ class lithosphere {
     const float* getUpliftTendencyMap() const noexcept;
     /// Rock uplift rate, m/Myr, signed (columns::Model::upliftRate), republished each update.
     const float* getRockUpliftRateMap() const noexcept;
+    /// Cumulative shortening, m across one native cell width, and its axis, radians in [0, pi)
+    /// from x toward y (columns::Model::strain, shortening_m, shortening_direction), republished each update.
+    const float* getShorteningMap() const noexcept;
+    const float* getShorteningDirectionMap() const noexcept;
     const float* getSubsidenceTendencyMap() const noexcept;
     const float* getAccumulatedStrainMap() const noexcept;
     const float* getTensionMap() const noexcept;
@@ -243,6 +247,8 @@ class lithosphere {
     std::vector<uint8_t> crust_class_map;
     std::vector<float> uplift_tendency_map;
     std::vector<float> rock_uplift_rate_map;
+    std::vector<float> shortening_map;
+    std::vector<float> shortening_direction_map;
     std::vector<float> subsidence_tendency_map;
     std::vector<float> accumulated_strain_map;
     std::vector<uint8_t> boundary_type_map;

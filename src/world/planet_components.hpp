@@ -198,6 +198,8 @@ struct geospherestate
     worldgrid<std::uint8_t> tectoniccrustclassmap;
     worldgrid<float> tectonicuplifttendencymap;
     worldgrid<float> tectonicrockupliftratemap; // m/Myr, signed; bundle only, not in the .uww
+    worldgrid<float> tectonicshorteningmap; // m; bundle only, not in the .uww
+    worldgrid<float> tectonicshorteningdirectionmap; // radians in [0, pi); bundle only, not in the .uww
     worldgrid<float> tectonicsubsidencetendencymap;
     worldgrid<float> tectonicaccumulatedstrainmap;
     worldgrid<std::uint8_t> tectonicboundarytypemap;

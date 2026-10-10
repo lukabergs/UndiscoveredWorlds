@@ -44,6 +44,17 @@ struct Budget {
     uint64_t river_unsupplied_cells = 0; // Implicit rivers: cell updates whose column could not supply the erosion.
     double relative_mass_residual = 0;
 };
+// Cumulative horizontal strain of the rock: a symmetric 2D tensor on the grid's axes
+// (x east, y the row direction), dimensionless, the sum of the per-update strains
+// (negative is shortening). Measurement only.
+struct Strain { double xx = 0, yy = 0, xy = 0; };
+// Shortening, m: minus the most compressive principal component of the strain, times
+// cell_m (the length lost across one native cell width, so it scales with the
+// resolution; strain = shortening / cell_m); 0 where no axis shortens.
+double shortening_m(const Strain& s, double cell_m);
+// Axis of the most compressive principal component, radians in [0, pi), from the x
+// axis toward the y axis; 0 where the two principal components are equal.
+double shortening_direction(const Strain& s);
 double mass_per_area(const Cell& c);
 double elevation_m(const Cell& c, double thermal_strength = 1);
 double mountain_force_n_m(const Cell& c, bool sediment_feedback = false);
@@ -79,6 +90,24 @@ public:
     // a divergent cell keeps the rock that stayed on its own side; new crust has no
     // history of its own. Zero at start.
     const std::vector<double>& upliftRate() const { return uplift_rate_m_myr_; }
+    // Cumulative strain per cell (multiscale plan S5.1), in the plate's frame. Each
+    // update first rotates the rock's tensor by the local spin and adds the strain of
+    // the update's displacement field u (cells/update): E = sym(grad u), W = (duy/dx -
+    // dux/dy) / 2. Each derivative along an axis uses the cell's two neighbours on that
+    // axis: when only one is on the same plate (forcing owners; one plate without
+    // forcing), the one-sided difference toward it; when both are, the smaller of the two
+    // differences in magnitude (their mean when equal); when neither is, 0. So a velocity
+    // jump to another plate (subduction, ridge, transform) is never strain; a jump inside
+    // a plate (the rotation seam of plate::surfaceVelocityAt) is skipped only where the
+    // other difference on that axis is the smaller one. Distributed deformation and
+    // rift opening inside a plate count. Exact for a velocity linear on both sides of a
+    // cell; a rigid rotation gives E = 0 and W = its angle. The tensor is then carried
+    // with the rock as the uplift rate is (same remap, sub-steps and limits; converging
+    // rock mixes); the ocean floor created in an opening has zero strain, so a divergent
+    // cell keeps the tensor of the rock that stayed on the rest of its area only.
+    // Small-strain sum: valid while the strain is small (it reaches about 1.4 at 256
+    // columns). Cumulative over the run, no decay; zero at start.
+    const std::vector<Strain>& strain() const { return strain_; }
     const Budget& budget() const { return budget_; }
 private:
     void spreadRoots(std::vector<Cell>& cells, double dt_myr, double thermal_strength, bool sediment_feedback);
@@ -100,6 +129,7 @@ private:
     std::vector<double> newborn_ocean_crust_; // Fixed mantle-space birth pattern; rock then advects.
     Budget budget_;
     std::vector<double> uplift_rate_m_myr_; // Measurement only; never feeds back into the columns.
+    std::vector<Strain> strain_; // Measurement only; never feeds back into the columns.
 };
 } // namespace tectonics::columns
 #endif

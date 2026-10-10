@@ -46,6 +46,50 @@ elapsed time and `crust_age_myr` for consumers.
   geometry quality and stability. Their diagnostics also inform local processes;
   they do not constitute a spherical plate mesh.
 
+Three column measurements are runtime arrays of `tectonic_api.hpp` only, outside
+`Snapshot` and the snapshot files (the schema stays 7); the world stores them as
+`geosphere.rock_uplift_rate`, `geosphere.shortening` and
+`geosphere.shortening_direction`, in run bundles only (not in the `.uww`). All three
+are measurements in the plate's frame: the column model carries them with the rock
+through its own remap of the material (on the transport subcells, with the
+material's sub-steps), never feeding back into the columns. Converging rock mixes;
+a divergent cell keeps the rock that stayed. New crust has no history of its own:
+the uplift rate's mean continues the stayed rock's, the strain of new ocean floor is 0.
+
+- `rock_uplift_rate` (`tectonics_get_rock_uplift_rate_map`, m/Myr, signed): the
+  exponential mean (e-folding time `uplift_rate_window_myr`, 10 Myr) of the
+  elevation change of the tectonic sub-steps (transport, subduction, rifting,
+  trench flexure, arcs, plumes, roots, thermal subsidence), before diffusion,
+  rivers and noise- `shortening` (`tectonics_get_shortening_map`, m, >= 0) and `shortening_direction`
+  (`tectonics_get_shortening_direction_map`, radians in [0, pi)): derived at export
+  from a cumulative strain tensor (xx, yy, xy, dimensionless). Each update first
+  rotates the rock's tensor by the local spin W = (duy/dx - dux/dy) / 2 and adds
+  the strain E = sym(grad u) of the displacement actually applied (`material_displacement`,
+  cells/update). Each derivative along an axis looks at the cell's two neighbours on
+  that axis: when only one is on the same plate, it is the one-sided difference
+  toward that neighbour; when both are, the smaller of the two differences in
+  magnitude (their mean when equal); when neither is, 0. A velocity jump to another
+  plate (subduction, ridges, transforms) is therefore never strain. A jump inside a
+  plate (the rotation seam of `plate::surfaceVelocityAt`, where the offset from the
+  mass centre wraps) is skipped only where the other difference on that axis is the
+  smaller one, which holds where the plate's velocity is smooth on that side.
+  Distributed deformation and rift opening inside a plate count; a rigid rotation
+  turns the tensor and adds none. The ocean floor created in an opening starts at
+  0, so a divergent cell keeps the stayed rock's tensor on the rest of its area
+  only. Cumulative over the run, no decay; a sum of small strains (the strain
+  reaches about 1.4 at 256 columns, seed 1, 600 Myr), so a small-strain measure.
+  `shortening` is minus the least principal component times the native cell width
+  (`world_width_km / width`), 0 where no axis shortens: strain x the native cell
+  width, metres that depend on the engine's resolution, so a consumer that needs
+  the strain divides by the native cell width. `shortening_direction` is that
+  component's axis from the x axis toward y (east toward south in the world), an
+  axis rather than a vector (pi equals 0), 0 where the principal components are
+  equal and meaningful only where `shortening` is positive. Both are taken from the
+  nearest native cell into the world, never interpolated.
+
+ive. Both are taken from the nearest native cell into the world, never
+  interpolated.
+
 Column budgets expose initial/current mass, ocean/arc/plume generation,
 subduction, erosion, deposition and internal redistribution in kg. Arc and plume
 generation are subsets of total generated oceanic material; river erosion is a
@@ -78,8 +122,8 @@ erosion histories and physical climate coupling remain unfinished work.
 
 `geology/world_tectonics.cpp` runs the native recipe and ingests its output into
 `planet`. `tectonic_world_grid.hpp` defines the cell-centred sampling: bilinear
-terrain with longitude wrapping and clamped polar rows; nearest-cell categories
-and diagnostic fields. Coordinates, distances, lengths and kinematics convert
+terrain and the rock uplift rate with longitude wrapping and clamped polar rows;
+nearest-cell categories, diagnostic fields and the shortening and its direction. Coordinates, distances, lengths and kinematics convert
 to world-grid cells. Object counts scale by cell area. Planet save storage is
 unchanged. The world raster is interpreted by spherical climate/hydrology;
 this sampling is not spherical tectonic physics. Later terrain stages may alter

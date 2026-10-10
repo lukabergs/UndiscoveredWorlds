@@ -876,6 +876,12 @@ public:
     float tectonicrockupliftrate(int x, int y) const; // m/Myr, signed
     void settectonicrockupliftrate(int x, int y, float amount);
 
+    float tectonicshortening(int x, int y) const; // m
+    void settectonicshortening(int x, int y, float amount);
+
+    float tectonicshorteningdirection(int x, int y) const; // radians in [0, pi), an axis
+    void settectonicshorteningdirection(int x, int y, float amount);
+
     float tectonicsubsidencetendency(int x, int y) const;
     void settectonicsubsidencetendency(int x, int y, float amount);
 
@@ -2422,6 +2428,40 @@ inline void planet::settectonicrockupliftrate(int x, int y, float amount)
         return;
 
     geosphere_.tectonicrockupliftratemap[x][y] = amount;
+}
+
+inline float planet::tectonicshortening(int x, int y) const
+{
+    UW_FIELD_READ(shortening);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
+    return geosphere_.tectonicshorteningmap[x][y];
+}
+
+inline void planet::settectonicshortening(int x, int y, float amount)
+{
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return;
+
+    geosphere_.tectonicshorteningmap[x][y] = amount;
+}
+
+inline float planet::tectonicshorteningdirection(int x, int y) const
+{
+    UW_FIELD_READ(shortening_direction);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
+    return geosphere_.tectonicshorteningdirectionmap[x][y];
+}
+
+inline void planet::settectonicshorteningdirection(int x, int y, float amount)
+{
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return;
+
+    geosphere_.tectonicshorteningdirectionmap[x][y] = amount;
 }
 
 inline float planet::tectonicsubsidencetendency(int x, int y) const
