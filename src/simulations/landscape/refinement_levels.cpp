@@ -338,6 +338,12 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
                                     "refinement.smooth_relaxation must be positive and finite");
     if (refinement.prolongationlimit != 0 && refinement.prolongationlimit != 1)
         throw std::invalid_argument("runrefinement: refinement.prolongation_limit must be 0 or 1");
+    if (refinement.smoothbasis != 0 && refinement.smoothbasis != 1)
+        throw std::invalid_argument("runrefinement: refinement.smooth_basis must be 0 or 1");
+    if (refinement.parentlift < 0 || refinement.parentlift > 2)
+        throw std::invalid_argument("runrefinement: refinement.parent_lift must be 0, 1 or 2");
+    if (!std::isfinite(refinement.channelcellslope) || refinement.channelcellslope < 0.0)
+        throw std::invalid_argument("runrefinement: refinement.channel_cell_slope must be finite and not negative");
     if (parameters.meanpasses < 0 || target.window.halo < refinementhalo(parameters.meanpasses, refinement.smoothpasses))
         throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 + 2 x smooth_passes + "
                                     "2 (the lake flood) global cells");

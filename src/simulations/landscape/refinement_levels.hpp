@@ -92,6 +92,9 @@ struct RefinementParameters
     double channelcellslope = 0.0;    // S3.2: theta, a channel cell's elevation b + min(h, theta c_l); 0: the bed
     int smoothbasis = 0;              // S3.2's fallback: smoothparentmeans' basis, 0 Catmull-Rom (C1), 1 the cubic
                                       // B-spline (C2)
+    int parentlift = 0;               // S3.2: the solve against its parent at level >= 2 (solvelevel): 0 none; 1 the
+                                      // parent's lift_m prolonged onto the unpinned cells; 2 the parent's final
+                                      // elevation less its solved elevation (ParentFields::solved_m) prolonged
 };
 
 // The prolongation's reach in parent cells beyond a child's parent cell (Catmull-Rom:

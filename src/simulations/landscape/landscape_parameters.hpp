@@ -201,8 +201,9 @@ inline int tileCells = 1024;
 inline float smoothRelaxation = 1.4f;
 inline int smoothPasses = 6;
 inline int smoothBasis = 0;
-inline int prolongationLimit = 0;
-inline float channelCellSlope = 0.0f;
+inline int prolongationLimit = 1;
+inline float channelCellSlope = 0.3f;
+inline int parentLift = 2;
 }
 
 // Every value above, by its recipe name.
@@ -343,6 +344,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.refinement.smooth_basis", &refinement::smoothBasis },
         { "landscape.refinement.prolongation_limit", &refinement::prolongationLimit },
         { "landscape.refinement.channel_cell_slope", &refinement::channelCellSlope },
+        { "landscape.refinement.parent_lift", &refinement::parentLift },
     };
     return entries;
 }

@@ -191,6 +191,9 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     const double floormax = std::min(static_cast<double>(k), std::max(0.0, valleys.floormax_km * 1000.0 / cell_m));
     const double rise = valleys.sideslope * cell_m;  // per fine cell beyond the floor
     const float floorlevel = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    // S3.2: the beds are the channels' (FineChannels::bed_m, LevelState::bed_m), not the channel
+    // cells' elevations, which the refinement loop sets to their cell means (regional_solve.hpp).
+    const bool withbeds = channels.bed_m.size() == count;
 
     // The lowest target per cell over every channel that reaches it.
     std::vector<double> target(count, std::numeric_limits<double>::infinity());
@@ -210,7 +213,7 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
             const int extent = std::min(k, std::max(static_cast<int>(std::floor(halfwidth)), reach));
             if (extent < 1)
                 continue;
-            const double bed = static_cast<double>(elevation_m[cell]);
+            const double bed = static_cast<double>(withbeds ? channels.bed_m[cell] : elevation_m[cell]);
             for (int dy = -extent; dy <= extent; dy++)
             {
                 const int ny = y + dy;
@@ -237,9 +240,17 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
 
     for (std::size_t cell = 0; cell < count; cell++)
     {
-        if (channels.channel[cell] != 0 || sea[cell] != 0 || !std::isfinite(target[cell]))
+        if (sea[cell] != 0 || !std::isfinite(target[cell]))
             continue;
         const float value = std::max(floorlevel, static_cast<float>(target[cell]));
+        if (channels.channel[cell] != 0)
+        {
+            // S3.2: a channel cell's mean is lowered with the floor around it, never below its own
+            // bed (a channel cell at its bed, as in the single pass, keeps it).
+            if (withbeds)
+                elevation_m[cell] = std::max(channels.bed_m[cell], std::min(elevation_m[cell], value));
+            continue;
+        }
         elevation_m[cell] = std::min(elevation_m[cell], value);
     }
 }

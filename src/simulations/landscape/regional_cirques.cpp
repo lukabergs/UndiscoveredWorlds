@@ -116,11 +116,21 @@ void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     if (!any)
         return;
 
+    // S3.2: a channel cell (its elevation its cell mean in the refinement loop, regional_solve.hpp)
+    // is lowered with the bowl around it, never below its own bed (FineChannels::bed_m,
+    // LevelState::bed_m); a channel cell at its bed, as in the single pass, keeps it.
+    const bool withbeds = channels.bed_m.size() == count;
     for (std::size_t cell = 0; cell < count; cell++)
     {
-        if (channels.channel[cell] != 0 || sea[cell] != 0 || !std::isfinite(target[cell]))
+        if (sea[cell] != 0 || !std::isfinite(target[cell]))
             continue;
         const float value = std::max(floorlevel, static_cast<float>(target[cell]));
+        if (channels.channel[cell] != 0)
+        {
+            if (withbeds)
+                elevation_m[cell] = std::max(channels.bed_m[cell], std::min(elevation_m[cell], value));
+            continue;
+        }
         elevation_m[cell] = std::min(elevation_m[cell], value);
     }
 }

@@ -38,10 +38,13 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     const double widthcells = troughs.width_km * 1000.0 / cell_m;
     const double widthmax = std::min(static_cast<double>(k), std::max(0.0, troughs.widthmax_km * 1000.0 / cell_m));
     const float floorlevel = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    // S3.2: the beds are the channels' (FineChannels::bed_m, LevelState::bed_m), not the channel
+    // cells' elevations, which the refinement loop sets to their cell means (regional_solve.hpp).
+    const bool withbeds = channels.bed_m.size() == count;
 
     // The lowest target per cell over every axis that reaches it. The beds are the channel
-    // cells' elevations, which no trough changes, and the targets are applied after every
-    // axis is visited, so the order of the axes does not matter.
+    // beds, which no trough changes, and the targets are applied after every axis is visited,
+    // so the order of the axes does not matter.
     std::vector<double> target(count, std::numeric_limits<double>::infinity());
     for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
@@ -63,7 +66,7 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
             if (bandupper > 0.0 && (halfwidth < bandlower || halfwidth >= bandupper))
                 continue;  // carved at another level of the refinement
             const int extent = std::min(k, static_cast<int>(std::floor(halfwidth)));
-            const double bed = static_cast<double>(elevation_m[cell]);
+            const double bed = static_cast<double>(withbeds ? channels.bed_m[cell] : elevation_m[cell]);
             if (!std::isfinite(bed))
                 continue;
             for (int dy = -extent; dy <= extent; dy++)
@@ -88,9 +91,17 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
 
     for (std::size_t cell = 0; cell < count; cell++)
     {
-        if (channels.channel[cell] != 0 || sea[cell] != 0 || !std::isfinite(target[cell]))
+        if (sea[cell] != 0 || !std::isfinite(target[cell]))
             continue;
         const float value = std::max(floorlevel, static_cast<float>(target[cell]));
+        if (channels.channel[cell] != 0)
+        {
+            // S3.2: a channel cell's mean is lowered with the trough around it, never below its own
+            // bed (a channel cell at its bed, as in the single pass, keeps it).
+            if (withbeds)
+                elevation_m[cell] = std::max(channels.bed_m[cell], std::min(elevation_m[cell], value));
+            continue;
+        }
         elevation_m[cell] = std::min(elevation_m[cell], value);
     }
 }

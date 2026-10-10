@@ -547,8 +547,28 @@ void lakeslevel(const LevelContext& context, LevelState& state)
     LakeInheritance lakes = context.details.lakes;
     if (lakes.flood)
         lakes.startsurface_m = &state.surface_m;  // the start surface with the beds pinned (S2.8)
+    // S3.2: the lakes read a land channel cell at its bed (state.bed_m), not at its cell mean (the
+    // refinement loop's refinement.channel_cell_slope, regional_solve.hpp): a wet channel cell is a lake
+    // bed (the lakes' result), a dry one keeps its mean. With every land channel cell at its bed (the
+    // single pass, theta 0) this is regionalwater on state.elevation_m itself.
+    std::vector<float>& elevation = state.elevation_m;
+    const std::size_t count = elevation.size();
+    std::vector<std::size_t> means;
+    if (state.bed_m.size() == count && state.channels.channel.size() == count && state.sea.size() == count)
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (state.channels.channel[cell] != 0 && state.sea[cell] == 0 && elevation[cell] != state.bed_m[cell])
+                means.push_back(cell);
+    std::vector<float> mean(means.size());
+    for (std::size_t index = 0; index < means.size(); index++)
+    {
+        mean[index] = elevation[means[index]];
+        elevation[means[index]] = state.bed_m[means[index]];
+    }
     state.water = regionalwater(context.inputs, context.window, context.warp, context.parameters, state.sea,
-                                state.channels, state.elevation_m, context.details.globallakedepth, lakes);
+                                state.channels, elevation, context.details.globallakedepth, lakes);
+    for (std::size_t index = 0; index < means.size(); index++)
+        if (!(state.water.lakesurface_m[means[index]] > 0.0f))
+            elevation[means[index]] = mean[index];
     recordlevelstep(state, LevelStep::lakes);
 }
 }

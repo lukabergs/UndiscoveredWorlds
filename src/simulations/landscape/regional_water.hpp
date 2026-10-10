@@ -118,6 +118,8 @@ struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan 
 struct LevelState;
 
 // LevelStep::lakes: state.water = regionalwater on state.elevation_m with details.lakes (its
-// start surface state.surface_m when the flood is on) and details.globallakedepth.
+// start surface state.surface_m when the flood is on) and details.globallakedepth. S3.2: every
+// land channel cell is read at its bed (state.bed_m) instead of its cell mean; one the lakes leave
+// dry takes its mean back, a wet one keeps the lakes' bed.
 void lakeslevel(const LevelContext& context, LevelState& state);
 }

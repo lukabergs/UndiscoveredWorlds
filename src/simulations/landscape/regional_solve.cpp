@@ -1,8 +1,11 @@
 #include "simulations/landscape/regional_solve.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -11,7 +14,8 @@
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
-// Multiscale plan S3.0: regional_pass.cpp's step 4 moved here unchanged (S3.2 changes it).
+// Multiscale plan S3.0: regional_pass.cpp's step 4 moved here unchanged; S3.2 adds the solve against
+// its parent and the channel cells' means (regional_solve.hpp).
 
 namespace landscape
 {
@@ -66,16 +70,75 @@ void solvelevel(const LevelContext& context, LevelState& state)
         for (float& rate : solveinput.uplift_m_myr)
             rate = std::max(0.0f, rate);
     }
+
+    // S3.2 (refinement loop, level >= 2): the solve against its parent. The parent's lift (1: its
+    // lift_m, the final elevation less the elevation entering its smoothing; 2: its final elevation less
+    // its solved elevation) prolonged as the start was (refinement.prolongation_limit): the solve starts
+    // from the start surface less it on the unpinned cells (the parent's solved frame); the lift is added back to the
+    // unpinned cells after it, F* = Z_l + lift (pinned cells keep their surface), so the level's solve
+    // from its own beds keeps what the parent's later steps put on its solve.
+    const RefinementParameters* refinement = context.refinement;
+    std::vector<float> added;
+    if (refinement != nullptr && refinement->parentlift != 0 && context.parent != nullptr && context.levelwindow != nullptr)
+    {
+        const ParentFields& parent = *context.parent;
+        std::vector<float> parentlift;
+        if (refinement->parentlift == 1)
+            parentlift = parent.lift_m;
+        else
+        {
+            parentlift.resize(parent.elevation_m.size());
+            for (std::size_t cell = 0; cell < parentlift.size(); cell++)
+                parentlift[cell] = static_cast<float>(static_cast<double>(parent.elevation_m[cell]) -
+                                                      static_cast<double>(parent.solved_m[cell]));
+        }
+        added = prolong(parent.window, parentlift, *context.levelwindow, refinement->prolongationlimit == 1).values;
+        if (added.size() != count)
+            throw std::invalid_argument("solvelevel: the parent's lift must prolong onto the window's domain");
+        // Only the unpinned cells are de-lifted: de-lifting the pinned beds too (all of them, or those
+        // below their link's filled elevation) raised level-2 lambda with the forms off from 1,172 to
+        // 2,034 m and level-3 land below the sea level from 62 to 135 m on erosion run 9 (S3.2's review).
+        for (std::size_t cell = 0; cell < count; cell++)
+        {
+            if (solveinput.pinned[cell] == 0)
+                solveinput.start_m[cell] =
+                    static_cast<float>(static_cast<double>(solveinput.start_m[cell]) - static_cast<double>(added[cell]));
+            if (solveinput.pinned[cell] != 0)
+                added[cell] = 0.0f;
+        }
+    }
+
     AnalyticalReliefResult solved = solveanalyticalrelief(metric, solveinput, context.parameters.relief);
     state.reliefconverged = solved.converged;
     state.changedreceivers = solved.changedreceivers;
     std::vector<float>& elevation = state.elevation_m;
     elevation = surface;
-    for (std::size_t cell = 0; cell < count; cell++)
-        if (solveinput.pinned[cell] == 0)
-            elevation[cell] = solved.elevation_m[cell];
+    // A negative lift takes no land cell below the sea level (the projection's floor for land) unless
+    // the solve put it there or its parent cell lies there.
+    const float abovesea = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    for (int y = 0; y < domainheight; y++)
+        for (int x = 0; x < domainwidth; x++)
+        {
+            const std::size_t cell = at(x, y, domainwidth);
+            if (solveinput.pinned[cell] != 0)
+                continue;
+            const float value = solved.elevation_m[cell];
+            if (added.empty())
+            {
+                elevation[cell] = value;
+                continue;
+            }
+            const LevelWindow& parentwindow = context.parent->window;
+            const LevelWindow& levelwindow = *context.levelwindow;
+            const float parentvalue = context.parent->elevation_m[parentwindow.index(
+                parentwindow.localcolumn(levelwindow.parentcolumn(x)),
+                static_cast<int>(parentwindow.localrow(levelwindow.parentrow(y))))];
+            elevation[cell] = std::max(static_cast<float>(static_cast<double>(value) + static_cast<double>(added[cell])),
+                                       std::min({value, abovesea, parentvalue}));
+        }
     {
-        // The lowering by the solve over the kept window's unpinned (so land) cells.
+        // The lowering by the solve over the kept window's unpinned (so land) cells (with the parent's
+        // lift: the start surface less the result with the lift added back).
         const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
         double total = 0.0, largest = 0.0;
         std::size_t cells = 0;
@@ -95,7 +158,46 @@ void solvelevel(const LevelContext& context, LevelState& state)
     }
     state.solveddischarge_m3_yr = std::move(solved.discharge_m3_yr);
     state.pinned = std::move(solveinput.pinned);
+
+    if (refinement != nullptr && refinement->channelcellslope > 0.0)
+    {
+        // A land channel cell's elevation becomes its cell mean m = b + min(h, theta c_l): b its bed
+        // (kept in state.bed_m), h the mean height above b of its non-channel land 8-neighbours in the
+        // domain (at least 0; 0 without such neighbours), c_l the level's north-south cell size. Read on
+        // the field before any channel cell is written, so the order of the cells does not matter.
+        const double cap = refinement->channelcellslope * metric.dy_m;
+        const std::vector<float> field = elevation;
+        for (int y = 0; y < domainheight; y++)
+            for (int x = 0; x < domainwidth; x++)
+            {
+                const std::size_t cell = at(x, y, domainwidth);
+                if (channels.channel[cell] == 0 || sea[cell] != 0)
+                    continue;
+                const double bed = static_cast<double>(state.bed_m[cell]);
+                double sum = 0.0;
+                int neighbours = 0;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        const int nx = x + dx, ny = y + dy;
+                        if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= domainwidth || ny >= domainheight)
+                            continue;
+                        const std::size_t other = at(nx, ny, domainwidth);
+                        if (channels.channel[other] != 0 || sea[other] != 0)
+                            continue;
+                        sum += static_cast<double>(field[other]) - bed;
+                        neighbours++;
+                    }
+                const double height_m = neighbours > 0 ? std::max(0.0, sum / neighbours) : 0.0;
+                elevation[cell] = static_cast<float>(bed + std::min(height_m, cap));
+            }
+    }
+    // The solved elevation: without the parent's lift (the next level's ParentFields::solved_m).
     state.solved_m = elevation;
+    if (!added.empty())
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (state.pinned[cell] == 0)
+                state.solved_m[cell] = solved.elevation_m[cell];
     recordlevelstep(state, LevelStep::solve);
 }
 }

@@ -207,5 +207,6 @@ landscape::RefinementParameters refinementparameters()
     parameters.smoothbasis = refinement::smoothBasis;
     parameters.prolongationlimit = refinement::prolongationLimit;
     parameters.channelcellslope = refinement::channelCellSlope;
+    parameters.parentlift = refinement::parentLift;
     return parameters;
 }

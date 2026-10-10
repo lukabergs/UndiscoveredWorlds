@@ -381,6 +381,62 @@ TEST_F(Landscape, RefinementProjectionBounds)
     EXPECT_EQ(zero.down_m[at(6, 3)], 0.0f);
     EXPECT_EQ(zero.rate[at(5, 0)], 1.0f);
     EXPECT_EQ(zero.up_m[at(5, 0)], inf);
+
+    // S3.2: with the beds given, a land channel cell (its elevation its cell mean) takes rate 1 and
+    // its bed as a further floor; the sea, wet and other land cells keep their bounds.
+    std::vector<float> beds(level.domainsize(), 0.0f);
+    beds[at(0, 0)] = 120.0f;         // the mean 150 m, its bed 120 m: 30 m of room down
+    channel[at(6, 0)] = 1;
+    elevation[at(6, 0)] = 60.0f;
+    beds[at(6, 0)] = 5.0f;           // a bed below the sea level: the sea level is the floor
+    const landscape::ProjectionBounds withbeds =
+        landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.0, own, beds);
+    EXPECT_EQ(withbeds.rate[at(0, 0)], 1.0f);
+    EXPECT_EQ(withbeds.up_m[at(0, 0)], inf);
+    EXPECT_NEAR(withbeds.down_m[at(0, 0)], 30.0, 1.0e-4);
+    EXPECT_LE(150.0 - static_cast<double>(withbeds.down_m[at(0, 0)]), 120.0 + 1.0e-4);
+    EXPECT_GE(static_cast<float>(150.0 - static_cast<double>(withbeds.down_m[at(0, 0)])), 120.0f);
+    EXPECT_EQ(withbeds.rate[at(6, 0)], 1.0f);
+    EXPECT_NEAR(withbeds.down_m[at(6, 0)], 50.0, 1.0e-4);
+    const landscape::ProjectionBounds plain = landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.0, own);
+    for (const std::size_t cell : {at(7, 0), at(7, 1), at(2, 2), at(3, 3), at(1, 1), at(5, 3), at(5, 0), at(6, 3)})
+    {
+        EXPECT_EQ(withbeds.rate[cell], plain.rate[cell]) << cell;
+        EXPECT_EQ(withbeds.up_m[cell], plain.up_m[cell]) << cell;
+        EXPECT_EQ(withbeds.down_m[cell], plain.down_m[cell]) << cell;
+    }
+    EXPECT_THROW(landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.0, own,
+                                             std::vector<float>(3, 0.0f)),
+                 std::invalid_argument);
+    // The land channel cells are the beds of the fallback (bounds.bed); a sea or wet channel is not.
+    EXPECT_TRUE(plain.bed.empty());
+    ASSERT_EQ(withbeds.bed.size(), level.domainsize());
+    EXPECT_EQ(withbeds.bed[at(0, 0)], 1);
+    EXPECT_EQ(withbeds.bed[at(6, 0)], 1);
+    EXPECT_EQ(withbeds.bed[at(7, 1)], 0);
+    EXPECT_EQ(withbeds.bed[at(3, 3)], 0);
+    EXPECT_EQ(withbeds.bed[at(5, 0)], 0);
+
+    // The fallback with the beds given: one parent of factor 2 at -10 m over three land children 1 m
+    // above the sea level (0) and a channel cell at 1 m on a bed of 0.5 m: the headrooms (3 x 1 m and
+    // 0.5 m) are exhausted, the rest goes to the channel cell (beds moved), no parent is forced, the
+    // mean is exact.
+    const LevelWindow parent = handlevelwindow(16, 2, 0, 0, 4, 1, 2, 1);
+    const LevelWindow child = handlevelwindow(16, 2, 1, 0, 8, 2, 4, 2);
+    std::vector<float> field(4, 1.0f);
+    std::vector<std::uint8_t> channelmask(4, 0);
+    channelmask[3] = 1;
+    std::vector<float> childbeds(4, 0.0f);
+    childbeds[3] = 0.5f;
+    const landscape::ProjectionBounds fallback =
+        landscape::projectionbounds(child, channelmask, {}, {}, field, 0.0f, 0.0, {}, childbeds);
+    const landscape::ProjectionReport report = landscape::projectlevel(child, field, fallback, parent, {-10.0f});
+    EXPECT_EQ(report.forcedparents, 0);
+    EXPECT_EQ(report.bedsmovedparents, 1);
+    EXPECT_LE(report.maxparentmeanerror_m, 1.0e-5);
+    for (int i = 0; i < 3; i++)
+        EXPECT_GE(field[static_cast<std::size_t>(i)], 0.0f) << i;
+    EXPECT_LT(field[3], 0.0f);
 }
 
 namespace

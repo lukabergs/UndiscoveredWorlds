@@ -137,7 +137,8 @@ float roomup(double value, float ceiling)
 void checkbounds(const LevelWindow& level, const ProjectionBounds& bounds, const char* name)
 {
     const std::size_t size = level.domainsize();
-    if (bounds.rate.size() != size || bounds.up_m.size() != size || bounds.down_m.size() != size)
+    if (bounds.rate.size() != size || bounds.up_m.size() != size || bounds.down_m.size() != size ||
+        (!bounds.bed.empty() && bounds.bed.size() != size))
         throw std::invalid_argument(std::string(name) + ": the bounds must have the level's domain size");
     for (std::size_t cell = 0; cell < size; cell++)
         if (!std::isfinite(bounds.rate[cell]) || bounds.rate[cell] < 0.0f || std::isnan(bounds.up_m[cell]) ||
@@ -188,12 +189,12 @@ void lambdastatistics(const LevelWindow& level, const std::vector<float>& field,
 ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<std::uint8_t>& channel,
                                   const std::vector<std::uint8_t>& sea, const std::vector<float>& lakesurface_m,
                                   const std::vector<float>& elevation_m, float sealevel, double channelrate,
-                                  const std::vector<float>& ownlake_m)
+                                  const std::vector<float>& ownlake_m, const std::vector<float>& bed_m)
 {
     const std::size_t size = window.domainsize();
     if ((!channel.empty() && channel.size() != size) || (!sea.empty() && sea.size() != size) ||
         (!lakesurface_m.empty() && lakesurface_m.size() != size) || elevation_m.size() != size ||
-        (!ownlake_m.empty() && ownlake_m.size() != size))
+        (!ownlake_m.empty() && ownlake_m.size() != size) || (!bed_m.empty() && bed_m.size() != size))
         throw std::invalid_argument("projectionbounds: every field must cover the window's domain");
     if (!std::isfinite(channelrate) || channelrate < 0.0)
         throw std::invalid_argument("projectionbounds: the channel rate must be finite and not negative");
@@ -207,6 +208,8 @@ ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<s
     bounds.rate.assign(size, 1.0f);
     bounds.up_m.assign(size, infinity);
     bounds.down_m.assign(size, infinity);
+    if (!bed_m.empty())
+        bounds.bed.assign(size, 0);
     for (int y = 0; y < window.domainrows; y++)
         for (int x = 0; x < window.domaincolumns; x++)
         {
@@ -218,8 +221,13 @@ ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<s
                 bounds.up_m[cell] = roomup(value, std::nextafter(lakesurface_m[cell], -infinity));
             else
             {
-                if (!channel.empty() && channel[cell] != 0)
+                // A land channel cell: the channel rate on its bed, or (S3.2, with the beds given) rate 1
+                // on its cell mean with its bed as a floor.
+                const bool channelcell = !channel.empty() && channel[cell] != 0;
+                if (channelcell && bed_m.empty())
                     bounds.rate[cell] = static_cast<float>(channelrate);
+                if (channelcell && !bed_m.empty())
+                    bounds.bed[cell] = 1;
                 // The floor: above the sea level and above the water beside the cell.
                 float level = -infinity;
                 if (!ownlake_m.empty() && ownlake_m[cell] > 0.0f)
@@ -233,7 +241,9 @@ ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<s
                         if (wet(window.index(nx, ny)))
                             level = std::max(level, lakesurface_m[window.index(nx, ny)]);
                     }
-                const float floor = level > -infinity ? std::max(seaabove, std::nextafter(level, infinity)) : seaabove;
+                float floor = level > -infinity ? std::max(seaabove, std::nextafter(level, infinity)) : seaabove;
+                if (channelcell && !bed_m.empty())
+                    floor = std::max(floor, bed_m[cell]);
                 bounds.down_m[cell] = roomdown(value, floor);
             }
         }
@@ -285,6 +295,10 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
                     return static_cast<double>(up ? bounds.up_m[cell] : bounds.down_m[cell]);
                 };
                 auto rate = [&](int i) { return static_cast<double>(bounds.rate[cells[static_cast<std::size_t>(i)]]); };
+                // The beds of the fallback: the unrated children, or those bounds.bed marks.
+                auto isbed = [&](int i) {
+                    return bounds.bed.empty() ? !(rate(i) > 0.0) : bounds.bed[cells[static_cast<std::size_t>(i)]] != 0;
+                };
                 double remainder = lambdac * children;
                 active.clear();
                 for (int i = 0; i < count; i++)
@@ -327,11 +341,11 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
                     const bool counted = inkept(p, q) && std::fabs(remainder) > 1.0e-6 * children;
                     int beds = 0;
                     for (int i = 0; i < count; i++)
-                        beds += rate(i) > 0.0 ? 0 : 1;
+                        beds += isbed(i) ? 1 : 0;
                     if (beds > 0)
                     {
                         for (int i = 0; i < count; i++)
-                            if (!(rate(i) > 0.0))
+                            if (isbed(i))
                                 shift[static_cast<std::size_t>(i)] += remainder / beds;
                         report.bedsmovedparents += counted ? 1 : 0;
                     }
@@ -416,12 +430,23 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
 
 SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& field, const ProjectionBounds& bounds,
                                   const LevelWindow& parent, const std::vector<float>& parentfield, int passes,
-                                  double relaxation)
+                                  double relaxation, int basis)
 {
     checkpair(level, field.size(), parent, parentfield.size(), "smoothparentmeans");
     checkbounds(level, bounds, "smoothparentmeans");
     if (passes < 0 || !std::isfinite(relaxation) || !(relaxation > 0.0))
         throw std::invalid_argument("smoothparentmeans: passes must not be negative and the relaxation positive and finite");
+    if (basis != 0 && basis != 1)
+        throw std::invalid_argument("smoothparentmeans: the basis must be 0 (Catmull-Rom) or 1 (the cubic B-spline)");
+    // The interpolation of mu between p1 and p2 at the fraction t: Catmull-Rom (C1, through the
+    // values) or the uniform cubic B-spline (C2, approximating; S3.2's fallback).
+    const auto spline = [basis](double p0, double p1, double p2, double p3, double t) {
+        if (basis == 0)
+            return catmullrom(p0, p1, p2, p3, t);
+        const double u = 1.0 - t, t2 = t * t, t3 = t2 * t;
+        return (u * u * u * p0 + (3.0 * t3 - 6.0 * t2 + 4.0) * p1 + (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) * p2 + t3 * p3) /
+               6.0;
+    };
     SmoothingReport report;
     report.passes = passes;
     lambdastatistics(level, field, parent, parentfield, report.maxlambdabefore_m, report.maxlambdastepbefore_m);
@@ -498,10 +523,10 @@ SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& 
                     const std::size_t base = static_cast<std::size_t>(std::clamp(rowbase - 1 + b, 0, prows - 1)) *
                                              static_cast<std::size_t>(pcolumns);
                     const auto value = [&](int a) { return mu[base + static_cast<std::size_t>(column(columnbase - 1 + a))]; };
-                    interpolated[b] = catmullrom(value(0), value(1), value(2), value(3), tx);
+                    interpolated[b] = spline(value(0), value(1), value(2), value(3), tx);
                 }
                 const double move =
-                    relaxation * rate * catmullrom(interpolated[0], interpolated[1], interpolated[2], interpolated[3], ty);
+                    relaxation * rate * spline(interpolated[0], interpolated[1], interpolated[2], interpolated[3], ty);
                 const double moved = std::clamp(total[cell] + move, -static_cast<double>(bounds.down_m[cell]),
                                                 static_cast<double>(bounds.up_m[cell]));
                 if (moved == total[cell])
@@ -665,12 +690,15 @@ void smoothinglevel(const LevelContext& context, LevelState& state)
             if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
                 ownlake[level.index(x, y)] = inputs.lakesurface_m[global];
         }
+    // S3.2: with the channel cells at their cell means, the beds are their floors (rate 1).
+    static const std::vector<float> nobeds;
+    const std::vector<float>& beds = refinement.channelcellslope > 0.0 ? state.bed_m : nobeds;
     state.bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation, inputs.sealevel,
-                                    refinement.projectionweightchannel, ownlake);
+                                    refinement.projectionweightchannel, ownlake, beds);
     state.lift_m = elevation;  // the elevation entering the smoothing (lift_m's reference)
     const SmoothingReport smoothing = smoothparentmeans(level, elevation, state.bounds, *context.projectionparent,
                                                         *context.projectionfield, refinement.smoothpasses,
-                                                        refinement.smoothrelaxation);
+                                                        refinement.smoothrelaxation, refinement.smoothbasis);
     if (state.diagnostics != nullptr)
     {
         state.diagnostics->smoothing = smoothing;
@@ -695,7 +723,7 @@ void smoothinglevel(const LevelContext& context, LevelState& state)
     {
         recordlevelstep(state, LevelStep::smoothing);
         state.bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation, inputs.sealevel,
-                                        refinement.projectionweightchannel, ownlake);
+                                        refinement.projectionweightchannel, ownlake, beds);
     }
 }
 

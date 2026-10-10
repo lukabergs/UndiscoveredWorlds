@@ -186,7 +186,8 @@ struct LevelState : RegionalLevel
     std::vector<float> bed_m;            // the channel beds (FineChannels::bed_m, meaningful on channel cells; S3.2
                                          // keeps them here when a channel cell's elevation becomes its cell mean)
     std::vector<uint8_t> pinned;         // the solve's pinned cells (channels, sea, the domain's outer ring)
-    std::vector<float> solved_m;         // the elevation after the solve, before the forms and the lakes
+    std::vector<float> solved_m;         // the elevation after the solve, before the forms and the lakes (S3.2: the
+                                         // channel cells' means kept, the parent's lift not added; solvelevel)
     int tributaries = 0;                 // tributarieslevel's count (0: none)
     int tributarycells = 0;              // the domain cells its tributaries pinned
     // Refinement loop only (empty in the single pass):

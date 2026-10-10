@@ -8,7 +8,7 @@
 // rework (the bounds, the detail band, the global lake depth) the valleys at level 2; S2.4
 // the resample of the final level to a requested metres per pixel; S2.7 the overlap and the
 // consistency with the smoothing before the projection on; S2.8 the inherited masks; S3.1 the
-// limited prolongation.
+// limited prolongation; S3.2 the solve against its parent with the channel cells' means.
 
 #include <gtest/gtest.h>
 
@@ -1088,4 +1088,73 @@ TEST_F(Landscape, RefinementLevelsLimitedProlongation)
     EXPECT_GT(counts.channel, 0);
     EXPECT_EQ(a.levels[0].prolongationclamped, 0);
     EXPECT_GT(a.levels[1].prolongationclamped, 0);
+}
+
+// Step S3.2: the solve against its parent (refinement.parent_lift 2) with the channel cells' means
+// (refinement.channel_cell_slope 0.3) and the smoothing (6 passes), every feature on: P and Q (Q
+// across the date line) bit-identical on their overlap at both levels and exact; level 1 of two
+// levels is one level bit for bit; the land channel cells lie at or above their beds after the
+// projection; level 2's lambda before the smoothing is below the run without the two keys.
+TEST_F(Landscape, RefinementLevelsSolveAgainstParent)
+{
+    const RegionalGlobalInputs inputs = wideworld();
+    const RegionalParameters parameters = everyfeature();
+    RefinementParameters refinement;
+    refinement.smoothpasses = 6;
+    refinement.parentlift = 2;
+    refinement.channelcellslope = 0.3;
+    const int halo = landscape::refinementhalo(2, refinement.smoothpasses);
+    const RegionalWindow p = landscape::regionalwindow(256, 16, halo, 160.0, -15.0, 180.0, 10.0);
+    const RegionalWindow q = landscape::regionalwindow(256, 16, halo, 170.0, -10.0, -170.0, 15.0);
+    const auto run = [&](const RegionalWindow& window, int level, const RefinementParameters& settings,
+                         const std::string& name) {
+        LevelTarget target;
+        target.window = window;
+        target.level = level;
+        RefinementResult result = landscape::runrefinement(inputs, target, parameters, settings);
+        for (const LevelDiagnostics& diagnostics : result.levels)
+            std::printf("[refinement] %s, level %d: lambda %.1f -> %.2f m, smoothing move p99 %.1f m; border step max "
+                        "%.2f m; land below the sea level %d (deepest %.1f m); channel rise max %.1f m; forced %d\n",
+                        name.c_str(), diagnostics.level, diagnostics.smoothing.maxlambdabefore_m,
+                        diagnostics.smoothing.maxlambdaafter_m, diagnostics.smoothmove99_m,
+                        diagnostics.projection.maxborderstep_m, diagnostics.landbelowsea, diagnostics.maxlandbelowsea_m,
+                        diagnostics.maxchannelrise_m, diagnostics.projection.forcedparents);
+        return result;
+    };
+    const RefinementResult a = run(p, 2, refinement, "against the parent P");
+    const RefinementResult b = run(q, 2, refinement, "against the parent Q");
+    expectexact(a, "against the parent P");
+    expectexact(b, "against the parent Q");
+    const OverlapCounts counts = compareoverlaplevels(a, b, "against the parent P/Q");
+    EXPECT_GT(counts.lake, 0);
+    EXPECT_GT(counts.channel, 0);
+    for (const LevelDiagnostics& level : a.levels)
+        EXPECT_GE(level.maxchannelrise_m, 0.0);
+
+    // The level consistency: level 1 of two levels is one level bit for bit.
+    const RefinementResult one = run(p, 1, refinement, "against the parent P, one level");
+    const auto cells = sharedcells(one.levels[0].window, a.levels[0].window);
+    ASSERT_EQ(cells.size(), one.levels[0].window.keptsize());
+    EXPECT_EQ(differing(one.fields.elevation_m, a.coarserelevation_m[0], cells), 0);
+
+    // Against the S2 loop (both keys 0): level 2's lambda before the smoothing is smaller.
+    RefinementParameters plain = refinement;
+    plain.parentlift = 0;
+    plain.channelcellslope = 0.0;
+    const RefinementResult before = run(p, 2, plain, "S2 loop P");
+    EXPECT_LT(a.levels[1].smoothing.maxlambdabefore_m, before.levels[1].smoothing.maxlambdabefore_m);
+
+    // The keys' range.
+    LevelTarget target;
+    target.window = p;
+    target.level = 1;
+    RefinementParameters bad = refinement;
+    bad.parentlift = 3;
+    EXPECT_THROW(landscape::runrefinement(inputs, target, parameters, bad), std::invalid_argument);
+    bad = refinement;
+    bad.channelcellslope = -0.1;
+    EXPECT_THROW(landscape::runrefinement(inputs, target, parameters, bad), std::invalid_argument);
+    bad = refinement;
+    bad.smoothbasis = 2;
+    EXPECT_THROW(landscape::runrefinement(inputs, target, parameters, bad), std::invalid_argument);
 }

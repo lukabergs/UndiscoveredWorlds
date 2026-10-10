@@ -35,6 +35,10 @@ struct ProjectionBounds
     std::vector<float> rate;    // the share of the common shift a child takes (0: it stays)
     std::vector<float> up_m;    // how far the child may rise
     std::vector<float> down_m;  // how far the child may sink
+    // The children that take the remainder when the headrooms are exhausted (projectlevel's beds
+    // fallback); empty: the unrated children (rate 0). S3.2: the land channel cells when they hold
+    // their cell means at rate 1 (projectionbounds with bed_m).
+    std::vector<std::uint8_t> bed;
 };
 
 // The bounds of a level's children. With s the sea level, s+ and s- the next floats above
@@ -48,12 +52,17 @@ struct ProjectionBounds
 //   domain and of `ownlake_m[cell]` (the lake surface of its own global cell when that is a
 //   lake cell, 0 otherwise; empty: none), L+ the next float above it (the dry shore stays
 //   above the water beside it, regional_water.hpp's step 5).
+// - S3.2: with `bed_m` given (the channel beds, LevelState::bed_m; the loop passes them when
+//   refinement.channel_cell_slope > 0, a land channel cell then holding its cell mean), a land
+//   channel cell takes rate 1 (channelrate is not read) and its floor is also its bed: down
+//   max(0, F* - max(s+, L+, b)); bounds.bed marks the land channel cells, which take projectlevel's
+//   beds fallback as the beds at rate 0 do without bed_m.
 // F* is `elevation_m`. Throws std::invalid_argument when a field is not domainsize() long
-// (ownlake_m may be empty) or channelrate is negative or not finite.
+// (ownlake_m and bed_m may be empty) or channelrate is negative or not finite.
 ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<std::uint8_t>& channel,
                                   const std::vector<std::uint8_t>& sea, const std::vector<float>& lakesurface_m,
                                   const std::vector<float>& elevation_m, float sealevel, double channelrate,
-                                  const std::vector<float>& ownlake_m = {});
+                                  const std::vector<float>& ownlake_m = {}, const std::vector<float>& bed_m = {});
 
 // What a projection did. The statistics are taken over the parent cells of the level
 // window's kept box (whole parent cells: columns / factor by rows / factor), so they do not
@@ -98,7 +107,8 @@ struct ProjectionReport
 // in row-major absolute order, double, at most factor^2 rounds: delta = remainder / the
 // uncapped children's rates, children whose headroom is less take it and leave). When the
 // headrooms are exhausted the remainder goes uniformly to the unrated children (the beds;
-// bedsmovedparents), or with none to every child ignoring the headrooms (forcedparents,
+// bedsmovedparents; with bounds.bed given, to the children it marks), or with none to every child
+// ignoring the headrooms (forcedparents,
 // maxforcedmove_m): the mean is exact always. F = float(double(F*) + shift). Requires
 // level.level >= 1, parent.level == level.level - 1, the same world grid and factor, every
 // parent cell of the level's domain inside the parent window's kept box (the halo chain of
@@ -145,11 +155,15 @@ struct SmoothingReport
 // Sums in double, the children of a parent in row-major order. relaxation is
 // refinement.smooth_relaxation (1.4: the parent mean of an interpolated mode lies in
 // [0.39, 1], so every mode shrinks by at most 0.44 per pass). passes 0 changes nothing and
-// reports lambda only. The same requirements and exceptions as projectlevel, and throws
-// std::invalid_argument when passes < 0 or relaxation is not positive and finite.
+// reports lambda only. basis (refinement.smooth_basis, S3.2's fallback) 0 is the Catmull-Rom
+// interpolation above, S2.7's bit for bit; 1 the uniform cubic B-spline through the same 4 x 4
+// stencil (C2: no curvature jump on the lines through the parent centres; approximating, so a
+// pass removes less of the shortest modes). The same requirements and exceptions as projectlevel,
+// and throws std::invalid_argument when passes < 0, relaxation is not positive and finite or
+// basis is not 0 or 1.
 SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& field, const ProjectionBounds& bounds,
                                   const LevelWindow& parent, const std::vector<float>& parentfield, int passes,
-                                  double relaxation);
+                                  double relaxation, int basis = 0);
 
 // The largest |mean_C(c)(field) - v_c| over the parent cells of the level window's kept
 // box, the mean unweighted and accumulated in double in the order above, v_c read as in
@@ -216,7 +230,9 @@ struct LevelState;
 
 // LevelStep::smoothing: state.ownlake_m (each cell's own global lake cell's surface, 0 when it
 // is not a lake cell or is sea), state.bounds = projectionbounds on state.elevation_m with
-// refinement.projection_weight_channel; state.lift_m = the elevation entering the smoothing;
+// refinement.projection_weight_channel (S3.2: with refinement.channel_cell_slope > 0 the beds state.bed_m
+// given, so a land channel cell takes rate 1 with its bed as a floor); state.lift_m = the elevation
+// entering the smoothing;
 // smoothparentmeans onto context.projectionparent / projectionfield with refinement.smooth_passes
 // and smooth_relaxation (its report and the kept cells' 99th-percentile move,
 // LevelDiagnostics::smoothing and smoothmove99_m); with passes > 0 the bounds rebuilt on the
