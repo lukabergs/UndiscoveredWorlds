@@ -1,5 +1,5 @@
 // Tests of landscape/channel_network.hpp (erosion plan Phase E, step E2b; Phase R, steps
-// R1 and R3), suite Landscape: TEST_F(Landscape, ChannelNetwork<What>) on synthetic
+// R1 and R3; multiscale plan S3.10, the transit blocks), suite Landscape: TEST_F(Landscape, ChannelNetwork<What>) on synthetic
 // 16 x 8 worlds with hand-made receiver trees, at scales 1 to 16.
 
 #include "landscape_fixture.hpp"
@@ -174,9 +174,14 @@ RegionalWindow domainwindow(int scale, int column0, int columns, int row0, int r
 
 RegionalWindow worldwindow(int scale) { return domainwindow(scale, 0, worldwidth, 0, worldheight); }
 
+// The geometry of Phase R, R3 (junctions within 0.25 k of the centre, edge margin 0.1875,
+// every diagonal through the shared corner): the tests before S3.10 test it as it was.
 ChannelParameters parameters(double meanderamplitude, std::uint64_t seed, double pinarea_km2 = 0.0, int springs = 0)
 {
     ChannelParameters result;
+    result.junctionjitter = 0.25;
+    result.edgemargin = 0.1875;
+    result.diagonaltransit = 0;
     result.pinarea_km2 = pinarea_km2;
     result.meanderamplitude = meanderamplitude;
     result.seed = seed;
@@ -1110,7 +1115,7 @@ TEST_F(Landscape, ChannelNetworkRejectsBadInput)
     shortnetwork.julyflow.pop_back();
     EXPECT_THROW(rasterisechannels(worldwindow(4), shortnetwork, parameters(0.3, 1), sealevel), std::invalid_argument);
     // Bad geometry parameters.
-    for (int bad = 0; bad < 6; bad++)
+    for (int bad = 0; bad < 7; bad++)
     {
         ChannelParameters settings = parameters(0.3, 1);
         switch (bad)
@@ -1120,6 +1125,7 @@ TEST_F(Landscape, ChannelNetworkRejectsBadInput)
         case 2: settings.junctionjitter = -0.1; break;
         case 3: settings.edgemargin = 0.6; break;
         case 4: settings.edgemargin = std::numeric_limits<double>::quiet_NaN(); break;
+        case 5: settings.diagonaltransit = 2; break;
         default: settings.springspercell = -1; break;
         }
         EXPECT_THROW(rasterisechannels(worldwindow(4), network, settings, sealevel), std::invalid_argument) << bad;
@@ -1560,4 +1566,524 @@ TEST_F(Landscape, ChannelNetworkNaNInTheStartSurfaceLowersNothing)
                              .bed_m)
             EXPECT_FALSE(std::isnan(bed));
     }
+}
+
+// Multiscale plan S3.10: diagonal links through a transit block (channel_network.hpp).
+namespace
+{
+// S3.10's geometry (the ChannelParameters defaults: junctions anywhere in their block, edge
+// margin 0, diagonals through a transit block where one qualifies).
+ChannelParameters transitparameters(double meanderamplitude, std::uint64_t seed, double pinarea_km2 = 0.0,
+                                    int springs = 0)
+{
+    ChannelParameters result;
+    result.pinarea_km2 = pinarea_km2;
+    result.meanderamplitude = meanderamplitude;
+    result.seed = seed;
+    result.springspercell = springs;
+    return result;
+}
+
+// The global cell (i + ox, j + oy), columns wrapped (the row must lie on the grid).
+std::size_t offsetglobal(std::size_t cell, int ox, int oy)
+{
+    const int i = static_cast<int>(cell % worldwidth);
+    const int j = static_cast<int>(cell / worldwidth);
+    return globalindex((i + ox + worldwidth) % worldwidth, j + oy);
+}
+
+// Whether `neighbour` qualifies as the transit block of the diagonal link from `owner`
+// (channel_network.hpp): land, filled between the receiver and the owner, neither the
+// receiver's receiver nor a donor of the owner, draining to the receiver's outlet.
+// With the default transittolerance_m a side cell missing that range by at most the tolerance
+// may be chosen when neither lies inside it, so this admits a miss up to the tolerance (a link
+// goes through its corner exactly when both side cells miss by more).
+bool qualifiedtransit(const GlobalNetwork& network, std::size_t owner, std::size_t neighbour)
+{
+    const std::size_t receiver = globalreceiver(network, owner);
+    const double filled = network.filledelevation_m[neighbour];
+    const double miss = std::max({ 0.0, static_cast<double>(network.filledelevation_m[receiver]) - filled,
+                                   filled - static_cast<double>(network.filledelevation_m[owner]) });
+    return neighbour != owner && neighbour != receiver && network.sea[neighbour] == 0 &&
+           miss <= ChannelParameters{}.transittolerance_m && globalreceiver(network, receiver) != neighbour &&
+           globalreceiver(network, neighbour) != owner && globaloutlet(network, neighbour) == globaloutlet(network, receiver);
+}
+
+// The diagonal links of a network (land cells with a diagonal direction) and those with no
+// qualifying transit block (drawn through their corner).
+void diagonalcounts(const GlobalNetwork& network, int& diagonals, int& corners)
+{
+    diagonals = corners = 0;
+    for (std::size_t cell = 0; cell < network.sea.size(); cell++)
+    {
+        const int direction = network.direction[cell];
+        if (network.sea[cell] != 0 || direction == 0)
+            continue;
+        const int ox = landscape::directionoffsetx(direction);
+        const int oy = landscape::directionoffsety(direction);
+        if (ox == 0 || oy == 0)
+            continue;
+        diagonals++;
+        corners += qualifiedtransit(network, cell, offsetglobal(cell, ox, 0)) ||
+                           qualifiedtransit(network, cell, offsetglobal(cell, 0, oy))
+                       ? 0
+                       : 1;
+    }
+}
+
+// Whether `block` may hold cells of `owner`'s link (or springs): the owner's block, its
+// receiver's or, for a diagonal link, a qualifying transit block (`transit` set).
+bool linkblock(const GlobalNetwork& network, std::size_t owner, std::size_t block, bool& transit)
+{
+    transit = false;
+    const std::size_t receiver = globalreceiver(network, owner);
+    if (block == owner || block == receiver)
+        return true;
+    const int direction = network.direction[owner];
+    const int ox = landscape::directionoffsetx(direction);
+    const int oy = landscape::directionoffsety(direction);
+    if (receiver == owner || ox == 0 || oy == 0)
+        return false;
+    if (block != offsetglobal(owner, ox, 0) && block != offsetglobal(owner, 0, oy))
+        return false;
+    transit = qualifiedtransit(network, owner, block);
+    return transit;
+}
+
+// Channel cells outside their link's blocks, cells in a transit block, and the steps along
+// one owner's path from one block into another by an owner with cells in a transit block:
+// through a corner (diagonal) or across an edge (4-connected).
+struct TransitReport
+{
+    int outside = 0;
+    int transitcells = 0;
+    int cornersteps = 0;
+    int edgesteps = 0;
+};
+
+TransitReport transitreport(const GlobalNetwork& network, const RegionalWindow& window, const FineChannels& channels)
+{
+    TransitReport report;
+    std::set<int32_t> transitowners;
+    for (std::size_t cell = 0; cell < channels.channel.size(); cell++)
+    {
+        if (channels.channel[cell] == 0)
+            continue;
+        bool transit = false;
+        if (!linkblock(network, static_cast<std::size_t>(channels.globalcell[cell]), globalof(window, cell), transit))
+            report.outside++;
+        else if (transit)
+        {
+            report.transitcells++;
+            transitowners.insert(channels.globalcell[cell]);
+        }
+    }
+    for (std::size_t cell = 0; cell < channels.channel.size(); cell++)
+    {
+        std::size_t next = 0;
+        if (channels.channel[cell] == 0 || channels.direction[cell] == 0 ||
+            !nextcell(window, cell, channels.direction[cell], next) ||
+            channels.globalcell[next] != channels.globalcell[cell] || globalof(window, next) == globalof(window, cell) ||
+            transitowners.count(channels.globalcell[cell]) == 0)
+            continue;
+        const bool diagonal = channels.direction[cell] % 2 == 0;  // 2, 4, 6, 8: NE, SE, SW, NW
+        (diagonal ? report.cornersteps : report.edgesteps)++;
+    }
+    return report;
+}
+
+// Walks the directions from every pinned global cell's junction (the window must be the
+// whole world, no fine sea): the junction belongs to a piece of the cell's outlet (its own
+// link, or a transit leg with a lower bed there: `takenjunctions`), every owner on the way
+// drains to that outlet (`foreign` counts the others), and the walk ends in it (a sea
+// block or a land sink's junction) without a loop (`wrongoutlet` counts the others).
+struct OutletReport
+{
+    int walks = 0;
+    int foreign = 0;
+    int wrongoutlet = 0;
+    int takenjunctions = 0;
+};
+
+OutletReport walkoutlets(const GlobalNetwork& network, const RegionalWindow& window, const ChannelParameters& settings,
+                         const FineChannels& channels)
+{
+    OutletReport report;
+    const int limit = static_cast<int>(channels.channel.size());
+    for (int j = 0; j < worldheight; j++)
+        for (int i = 0; i < worldwidth; i++)
+        {
+            const std::size_t start = globalindex(i, j);
+            if (network.sea[start] != 0 || network.direction[start] == 0 ||
+                !(network.drainagearea_km2[start] >= settings.pinarea_km2))
+                continue;
+            report.walks++;
+            const std::size_t outlet = globaloutlet(network, start);
+            std::size_t walk = junctioncell(window, settings, i, j);
+            bool ok = channels.channel[walk] == 1 &&
+                      globaloutlet(network, static_cast<std::size_t>(channels.globalcell[walk])) == outlet;
+            report.takenjunctions += ok && channels.globalcell[walk] != static_cast<int32_t>(start) ? 1 : 0;
+            int steps = 0;
+            while (ok && channels.direction[walk] != 0 && steps <= limit)
+            {
+                std::size_t next = 0;
+                ok = nextcell(window, walk, channels.direction[walk], next) && channels.channel[next] == 1;
+                if (!ok)
+                    break;
+                if (globaloutlet(network, static_cast<std::size_t>(channels.globalcell[next])) != outlet)
+                    report.foreign++;
+                walk = next;
+                steps++;
+            }
+            if (!ok || steps > limit || globalof(window, walk) != outlet || !isend(network, window, settings, walk))
+                report.wrongoutlet++;
+        }
+    return report;
+}
+
+// Channel cells whose chain does not end at an end cell (a sea block or a land sink's
+// junction) within the channel count's steps: a loop or a broken chain (no fine sea).
+int badchains(const GlobalNetwork& network, const RegionalWindow& window, const ChannelParameters& settings,
+              const FineChannels& channels)
+{
+    const int count = channelcount(channels);
+    int bad = 0;
+    for (std::size_t cell = 0; cell < channels.channel.size(); cell++)
+    {
+        if (channels.channel[cell] == 0)
+            continue;
+        std::size_t walk = cell;
+        int steps = 0;
+        bool ok = true;
+        while (ok && channels.direction[walk] != 0 && steps <= count)
+        {
+            ok = nextcell(window, walk, channels.direction[walk], walk) && channels.channel[walk] == 1;
+            steps++;
+        }
+        bad += !ok || steps > count || !isend(network, window, settings, walk) ? 1 : 0;
+    }
+    return bad;
+}
+
+// A flat world: every land cell (columns 1 .. 15) filled at 50 m and draining to the previous
+// column (west, north-west or south-west by a hash of the cell and `seed`), column 0 sea.
+// Many diagonals, whose side cells drain to the same outlet or to a neighbouring one; on the
+// flat every bed is 50 m without a start surface, so ownership goes by rank alone and
+// transit legs cross other cells' junctions at equal beds.
+GlobalNetwork flatnetwork(std::uint64_t seed)
+{
+    GlobalNetwork network = seaworld();
+    for (int j = 0; j < worldheight; j++)
+        for (int i = 1; i < worldwidth; i++)
+        {
+            std::uint64_t hash = static_cast<std::uint64_t>(i) * 73856093u ^ static_cast<std::uint64_t>(j) * 19349663u ^
+                                 seed * 83492791u;
+            hash ^= hash >> 13;
+            hash *= 0x9E3779B97F4A7C15ull;
+            hash ^= hash >> 29;
+            int direction = hash % 3 == 0 ? west : (hash % 3 == 1 ? northwest : southwest);
+            if ((j == 0 && direction == northwest) || (j == worldheight - 1 && direction == southwest))
+                direction = west;
+            setland(network, i, j, direction, 50.0f, 100.0f);
+        }
+    return network;
+}
+
+std::vector<float> hashedstart(const RegionalWindow& window, std::uint64_t seed)
+{
+    std::vector<float> start(static_cast<std::size_t>(window.domainfinewidth()) * window.domainfineheight());
+    for (std::size_t cell = 0; cell < start.size(); cell++)
+        start[cell] = static_cast<float>((cell * 2654435761u + seed) % 400) - 50.0f;
+    return start;
+}
+}
+
+TEST_F(Landscape, ChannelNetworkTransitBlocks)
+{
+    // A diagonal link's cells lie in its upstream cell's block, its receiver's and a transit
+    // block that is land and drains to the receiver's outlet only (never a sea side cell or
+    // one of another basin), and a link with cells in a transit block crosses each block
+    // edge by a 4-connected step, never through a corner. The main world's 28
+    // diagonal links go through a qualifying side cell where one exists, else through their
+    // corner (with the default tolerance every one has one; with none, some keep their
+    // corner); with diagonaltransit 0 all 28 go through their corner. With and without a start
+    // surface and a speckled fine sea.
+    const GlobalNetwork network = syntheticnetwork();
+    int diagonals = 0, cornerlinks = 0;
+    diagonalcounts(network, diagonals, cornerlinks);
+    EXPECT_EQ(diagonals, 28);
+    int transitcells = 0, edgesteps = 0;
+    for (const Case& c : cases)
+    {
+        SCOPED_TRACE(testing::Message() << "k " << c.scale << ", meander " << c.meanderamplitude << ", seed " << c.seed
+                                        << ", springs " << c.springs);
+        const RegionalWindow window = worldwindow(c.scale);
+        const ChannelParameters settings = transitparameters(c.meanderamplitude, c.seed, 0.0, c.springs);
+        const std::vector<float> start = hashedstart(window, c.seed);
+        std::vector<uint8_t> finesea(start.size());
+        for (std::size_t cell = 0; cell < start.size(); cell++)
+            finesea[cell] = network.sea[globalof(window, cell)] != 0 || (cell * 40503u) % 97 == 0 ? 1 : 0;
+        for (const bool surfaces : { false, true })
+        {
+            const FineChannels channels = surfaces ? rasterisechannels(window, network, settings, sealevel, start, finesea)
+                                                   : rasterisechannels(window, network, settings, sealevel);
+            const TransitReport report = transitreport(network, window, channels);
+            EXPECT_EQ(report.outside, 0) << (surfaces ? "with surfaces" : "");
+            EXPECT_EQ(report.cornersteps, 0) << (surfaces ? "with surfaces" : "");
+            EXPECT_EQ(risingsteps(window, channels), 0) << (surfaces ? "with surfaces" : "");
+            EXPECT_EQ(channels.diagonallinks, diagonals);
+            EXPECT_EQ(channels.cornerlinks, cornerlinks);
+            transitcells += report.transitcells;
+            edgesteps += report.edgesteps;
+        }
+    }
+    EXPECT_GT(transitcells, 0);
+    EXPECT_GT(edgesteps, 0);
+    const FineChannels corners = rasterisechannels(worldwindow(8), network, parameters(0.3, 1), sealevel);
+    EXPECT_EQ(corners.diagonallinks, 28);
+    EXPECT_EQ(corners.cornerlinks, 28);
+    ChannelParameters strict = transitparameters(0.3, 1);
+    strict.transittolerance_m = 0.0;
+    const FineChannels strictcorners = rasterisechannels(worldwindow(8), network, strict, sealevel);
+    EXPECT_EQ(strictcorners.diagonallinks, 28);
+    EXPECT_GT(strictcorners.cornerlinks, cornerlinks);
+    EXPECT_LT(strictcorners.cornerlinks, 28);
+}
+
+TEST_F(Landscape, ChannelNetworkTransitCornerFallback)
+{
+    // A diagonal with no qualifying side cell keeps the shared corner: on the X of
+    // ChannelNetworkCrossingDiagonalsOnAFlat each diagonal's side cells drain to the other
+    // basin's outlet, so both links are drawn exactly as with diagonaltransit 0 (the same
+    // junctions and edge margins) and counted as corner links. Along a coast (the network of
+    // ChannelNetworkDiagonalsAlongACoastStayOnLand) a sea side cell is never a transit block:
+    // (8, 3) -> (9, 4) crosses its land side cell (8, 4), which drains into the receiver;
+    // (5, 3) -> (6, 4) keeps its corner, since its land side cell (5, 4) is the receiver's
+    // receiver and lies below it; no channel cell lies in the sea side blocks.
+    GlobalNetwork cross = seaworld();
+    setland(cross, 6, 3, southeast, 50.0f, 100.0f);
+    setland(cross, 7, 4, east, 50.0f, 200.0f);
+    setland(cross, 8, 4, east, 50.0f, 300.0f);
+    setland(cross, 7, 3, southwest, 50.0f, 100.0f);
+    setland(cross, 6, 4, west, 50.0f, 200.0f);
+    setland(cross, 5, 4, west, 50.0f, 300.0f);
+    GlobalNetwork coast = seaworld();
+    setland(coast, 5, 4, west, 10.0f, 300.0f);
+    setland(coast, 6, 4, west, 20.0f, 200.0f);
+    setland(coast, 5, 3, southeast, 40.0f, 100.0f);
+    setland(coast, 8, 4, east, 10.0f, 100.0f);
+    setland(coast, 8, 3, southeast, 30.0f, 100.0f);
+    int coasttransit = 0;
+    for (int k : { 1, 2, 4, 5, 8, 16 })
+        for (std::uint64_t seed = 1; seed <= 16; seed++)
+        {
+            SCOPED_TRACE(testing::Message() << "k " << k << ", seed " << seed);
+            const RegionalWindow window = worldwindow(k);
+            const ChannelParameters on = transitparameters(0.3, seed, 0.0, static_cast<int>(seed % 3));
+            ChannelParameters off = on;
+            off.diagonaltransit = 0;
+            const FineChannels a = rasterisechannels(window, cross, on, sealevel);
+            const FineChannels b = rasterisechannels(window, cross, off, sealevel);
+            EXPECT_EQ(a.channel, b.channel);
+            EXPECT_EQ(a.direction, b.direction);
+            EXPECT_EQ(a.bed_m, b.bed_m);
+            EXPECT_EQ(a.globalcell, b.globalcell);
+            EXPECT_EQ(a.diagonallinks, 2);
+            EXPECT_EQ(a.cornerlinks, 2);
+            const OutletReport crossreport = walkoutlets(cross, window, on, a);
+            EXPECT_EQ(crossreport.walks, 6);
+            EXPECT_EQ(crossreport.wrongoutlet, 0);
+
+            const FineChannels shore = rasterisechannels(window, coast, on, sealevel);
+            EXPECT_EQ(shore.diagonallinks, 2);
+            EXPECT_EQ(shore.cornerlinks, 1);
+            for (std::size_t cell = 0; cell < shore.channel.size(); cell++)
+            {
+                if (shore.channel[cell] == 0)
+                    continue;
+                const std::size_t block = globalof(window, cell);
+                ASSERT_TRUE(block != globalindex(6, 3) && block != globalindex(9, 3)) << "fine cell " << cell;
+                coasttransit += (block == globalindex(5, 4) && shore.globalcell[cell] == static_cast<int32_t>(globalindex(5, 3))) ||
+                                        (block == globalindex(8, 4) &&
+                                         shore.globalcell[cell] == static_cast<int32_t>(globalindex(8, 3)))
+                                    ? 1
+                                    : 0;
+            }
+            const OutletReport shorereport = walkoutlets(coast, window, on, shore);
+            EXPECT_EQ(shorereport.walks, 5);
+            EXPECT_EQ(shorereport.foreign, 0);
+            EXPECT_EQ(shorereport.wrongoutlet, 0);
+        }
+    EXPECT_GT(coasttransit, 0);
+}
+
+TEST_F(Landscape, ChannelNetworkTransitNoLoop)
+{
+    // With transit legs the bed never rises along the directions, no direction loops, every
+    // chain ends at a sea block or a land sink's junction, and every owner a walk from a
+    // junction meets drains to that junction's outlet (no capture across a divide): on the
+    // main world and on flat worlds of many diagonals, where every bed is equal without a
+    // start surface and transit legs take other cells' junctions by rank (the case a
+    // junction-first rule would turn into a loop), with and without a start surface.
+    int taken = 0, corners = 0, diagonals = 0;
+    for (std::uint64_t world = 0; world <= 4; world++)
+    {
+        const GlobalNetwork network = world == 0 ? syntheticnetwork() : flatnetwork(world);
+        for (const Case& c : cases)
+            for (const bool withstart : { false, true })
+            {
+                SCOPED_TRACE(testing::Message() << "world " << world << ", k " << c.scale << ", meander "
+                                                << c.meanderamplitude << ", seed " << c.seed << ", springs " << c.springs
+                                                << (withstart ? ", start" : ""));
+                const RegionalWindow window = worldwindow(c.scale);
+                const ChannelParameters settings = transitparameters(c.meanderamplitude, c.seed, 0.0, c.springs);
+                const FineChannels channels =
+                    withstart ? rasterisechannels(window, network, settings, sealevel, hashedstart(window, c.seed + world))
+                              : rasterisechannels(window, network, settings, sealevel);
+                ASSERT_EQ(risingsteps(window, channels), 0);
+                ASSERT_EQ(badchains(network, window, settings, channels), 0);
+                const OutletReport report = walkoutlets(network, window, settings, channels);
+                ASSERT_EQ(report.walks, 120);
+                ASSERT_EQ(report.foreign, 0);
+                ASSERT_EQ(report.wrongoutlet, 0);
+                const TransitReport blocks = transitreport(network, window, channels);
+                ASSERT_EQ(blocks.outside, 0);
+                ASSERT_EQ(blocks.cornersteps, 0);
+                taken += report.takenjunctions;
+                corners += channels.cornerlinks;
+                diagonals += channels.diagonallinks;
+            }
+    }
+    std::printf("[channels] transit worlds: %d diagonal links, %d through a corner, %d junctions taken by a transit\n",
+                diagonals, corners, taken);
+    EXPECT_GT(taken, 0);
+    EXPECT_GT(corners, 0);
+    EXPECT_LT(corners, diagonals);
+}
+
+TEST_F(Landscape, ChannelNetworkTransitWindowsAgree)
+{
+    // Every window draws the links within one global cell of its domain, and a transit link
+    // lies in the 2 x 2 blocks around its corner: windows agree with the whole world on
+    // every fine cell, including windows whose edge column or row is a transit block of a
+    // link whose upstream cell lies outside them (counted: `edgetransit`).
+    int edgetransit = 0;
+    for (std::uint64_t world = 0; world <= 2; world++)
+    {
+        const GlobalNetwork network = world == 0 ? syntheticnetwork() : flatnetwork(world);
+        for (const Case& c : cases)
+        {
+            SCOPED_TRACE(testing::Message() << "world " << world << ", k " << c.scale << ", meander "
+                                            << c.meanderamplitude << ", seed " << c.seed << ", springs " << c.springs);
+            const ChannelParameters settings = transitparameters(c.meanderamplitude, c.seed, 0.0, c.springs);
+            const RegionalWindow whole = worldwindow(c.scale);
+            const FineChannels reference = rasterisechannels(whole, network, settings, sealevel);
+            const RegionalWindow windows[] = {
+                domainwindow(c.scale, 2, 4, 4, 2),   // row 4's diagonal from (1, 4) through (2, 4)
+                domainwindow(c.scale, 3, 6, 1, 3),   // rows 1 .. 3: row 1's diagonals into row 2
+                domainwindow(c.scale, 4, 5, 5, 3),   // rows 5 .. 7: row 6's diagonals, row 4 outside
+                domainwindow(c.scale, 13, 8, 1, 5),  // across the date line
+                domainwindow(c.scale, 9, 5, 3, 4),
+            };
+            for (const RegionalWindow& window : windows)
+            {
+                const FineChannels channels = rasterisechannels(window, network, settings, sealevel);
+                for (int y = 0; y < window.domainfineheight(); y++)
+                    for (int x = 0; x < window.domainfinewidth(); x++)
+                    {
+                        std::size_t other = 0;
+                        ASSERT_TRUE(domaincell(whole, absolutecolumn(window, x), absoluterow(window, y), other));
+                        const std::size_t cell =
+                            static_cast<std::size_t>(y) * static_cast<std::size_t>(window.domainfinewidth()) + x;
+                        ASSERT_EQ(channels.channel[cell], reference.channel[other]) << cell;
+                        ASSERT_EQ(channels.direction[cell], reference.direction[other]) << cell;
+                        ASSERT_EQ(channels.bed_m[cell], reference.bed_m[other]) << cell;
+                        ASSERT_EQ(channels.discharge_m3s[cell], reference.discharge_m3s[other]) << cell;
+                        ASSERT_EQ(channels.globalcell[cell], reference.globalcell[other]) << cell;
+                        if (channels.channel[cell] == 0)
+                            continue;
+                        const std::size_t owner = static_cast<std::size_t>(channels.globalcell[cell]);
+                        const int ownerrow = static_cast<int>(owner / worldwidth);
+                        const int ownercolumn =
+                            ((static_cast<int>(owner % worldwidth) - window.domaincolumn0) % worldwidth + worldwidth) %
+                            worldwidth;
+                        const bool outside = ownerrow < window.domainrow0 ||
+                                             ownerrow >= window.domainrow0 + window.domainrows ||
+                                             ownercolumn >= window.domaincolumns;
+                        bool transit = false;
+                        if (outside && linkblock(network, owner, globalof(window, cell), transit) && transit)
+                            edgetransit++;
+                    }
+            }
+        }
+    }
+    EXPECT_GT(edgetransit, 0);
+}
+
+TEST_F(Landscape, ChannelNetworkTransitWindowsAgreeWithSurfaces)
+{
+    // ChannelNetworkWindowsAgreeAwayFromTheirEdges with transit legs: given the same start
+    // surface and fine sea (functions of the absolute fine cell, sea specks cutting links
+    // anywhere), windows agree on every channel field at the fine cells at least one global
+    // cell inside both domains, since a transit link lies in the 2 x 2 blocks around its
+    // corner and its junction beds, running minimum and fine-sea cut read only cells there;
+    // including transit cells whose link starts outside the smaller window (counted).
+    int compared = 0, comparedtransit = 0;
+    for (std::uint64_t world = 0; world <= 2; world++)
+    {
+        const GlobalNetwork network = world == 0 ? syntheticnetwork() : flatnetwork(world);
+        for (const Case& c : cases)
+        {
+            SCOPED_TRACE(testing::Message() << "world " << world << ", k " << c.scale << ", meander "
+                                            << c.meanderamplitude << ", seed " << c.seed);
+            const int k = c.scale;
+            const ChannelParameters settings = transitparameters(c.meanderamplitude, c.seed, 0.0, c.springs);
+            const RegionalWindow windows[] = {
+                worldwindow(k),
+                domainwindow(k, 1, 6, 3, 4),
+                domainwindow(k, 3, 7, 0, 4),
+                domainwindow(k, 13, 8, 1, 5),
+                domainwindow(k, 9, 5, 3, 4),
+            };
+            std::vector<FineChannels> results;
+            for (const RegionalWindow& window : windows)
+            {
+                const std::vector<uint8_t> finesea = finemask(window, [&](std::int64_t x, std::int64_t y) {
+                    return x < k + k / 2 || hashunit(x, y, 77) < 0.03;
+                });
+                results.push_back(rasterisechannels(window, network, settings, sealevel,
+                                                    noisesurface(window, -50.0f, 400.0f), finesea));
+            }
+            const RegionalWindow& whole = windows[0];
+            for (std::size_t q = 1; q < results.size(); q++)
+            {
+                const RegionalWindow& window = windows[q];
+                for (int y = k; y < window.domainfineheight() - k; y++)
+                    for (int x = k; x < window.domainfinewidth() - k; x++)
+                    {
+                        std::size_t other = 0;
+                        ASSERT_TRUE(domaincell(whole, absolutecolumn(window, x), absoluterow(window, y), other));
+                        const std::size_t cell =
+                            static_cast<std::size_t>(y) * static_cast<std::size_t>(window.domainfinewidth()) + x;
+                        const FineChannels& a = results[q];
+                        const FineChannels& b = results[0];
+                        compared++;
+                        ASSERT_EQ(a.channel[cell], b.channel[other]) << q << " fine cell " << cell;
+                        ASSERT_EQ(a.direction[cell], b.direction[other]) << q << " fine cell " << cell;
+                        ASSERT_EQ(a.bed_m[cell], b.bed_m[other]) << q << " fine cell " << cell;
+                        ASSERT_EQ(a.discharge_m3s[cell], b.discharge_m3s[other]) << q << " fine cell " << cell;
+                        ASSERT_EQ(a.globalcell[cell], b.globalcell[other]) << q << " fine cell " << cell;
+                        if (a.channel[cell] == 0)
+                            continue;
+                        bool transit = false;
+                        if (linkblock(network, static_cast<std::size_t>(a.globalcell[cell]), globalof(window, cell),
+                                      transit) &&
+                            transit)
+                            comparedtransit++;
+                    }
+            }
+        }
+    }
+    EXPECT_GT(compared, 0);
+    EXPECT_GT(comparedtransit, 0);
 }

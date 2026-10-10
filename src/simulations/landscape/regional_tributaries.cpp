@@ -794,6 +794,22 @@ TributaryReport growtributaries(const LevelContext& context, LevelState& state)
                 }
                 if (touches)
                     break;
+                // No crossing: a diagonal first step from the junction must not cross a channel's
+                // step between the two cells beside it (which the touch rule allows next to the
+                // junction; multiscale plan S3.10's legs meet at block edges in such corners).
+                if (m == 1 && diagonal)
+                {
+                    const Cell a{ cell.x, ray[0].y }, b{ ray[0].x, cell.y };
+                    std::size_t ia = 0, ib = 0;
+                    auto stepsinto = [&](const Cell& from, std::size_t fromindex, const Cell& to) {
+                        const int d = channels.direction[fromindex];
+                        return d >= 1 && d <= directioncount && grid.dx(from.x + directionoffsetx(d), to.x) == 0 &&
+                               from.y + directionoffsety(d) == to.y;
+                    };
+                    if (grid.index(a.x, a.y, ia) && grid.index(b.x, b.y, ib) && channels.channel[ia] != 0 &&
+                        channels.channel[ib] != 0 && (stepsinto(a, ia, b) || stepsinto(b, ib, a)))
+                        break;
+                }
                 along = length;
                 candidate.path.push_back(index);
                 candidate.along.push_back(along);

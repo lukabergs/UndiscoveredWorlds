@@ -746,8 +746,12 @@ void projectionlevel(const LevelContext& context, LevelState& state)
         state.diagnostics->projection = projection;
     recordlevelstep(state, LevelStep::projection);
 
-    // After the projection: wet non-channel cells at or above their surface dried (counted in
-    // the kept box).
+    // After the projection: wet non-channel cells above their surface dried (counted in the
+    // kept box). A cell exactly at its surface stays wet (depth 0, which the lake-above-terrain
+    // check allows): a wet cell's headroom ends at the float below its surface, so a parent
+    // whose children have no headroom left (all wet, no bed) and whose mean misses by a rounding
+    // residue is forced up by one float step, onto the surface (multiscale plan S3.10: erosion
+    // run 9's level-1 parent (200, 41), 0.00195 m).
     const int keptx0 = level.keptcolumnoffset(), kepty0 = level.keptrowoffset();
     const auto kept = [&](int x, int y) {
         return x >= keptx0 && x < keptx0 + level.columns && y >= kepty0 && y < kepty0 + level.rows;
@@ -756,7 +760,7 @@ void projectionlevel(const LevelContext& context, LevelState& state)
         for (int x = 0; x < level.domaincolumns; x++)
         {
             const std::size_t cell = level.index(x, y);
-            if (wet[cell] == 0 || state.channels.channel[cell] != 0 || elevation[cell] < lakesurface[cell])
+            if (wet[cell] == 0 || state.channels.channel[cell] != 0 || elevation[cell] <= lakesurface[cell])
                 continue;
             lakesurface[cell] = 0.0f;
             if (kept(x, y) && state.diagnostics != nullptr)

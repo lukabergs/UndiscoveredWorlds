@@ -433,15 +433,44 @@ TEST_F(Landscape, RefinementLevelsOverlapValleysAtLevelTwo)
 
 TEST_F(Landscape, RefinementLevelsOutletDischarge)
 {
-    // At the final level, a channel cell whose direction leaves its global cell is that
-    // cell's pinned outlet: its discharge is the global cell's discharge exactly.
+    // At the final level, a channel cell whose direction leaves its global cell is the
+    // outlet of the piece that owns it: its discharge is that piece's global cell's
+    // discharge exactly. The owner is the cell's own outgoing link, or (S3.10) a diagonal
+    // link u -> c through this cell as its transit block (u and c orthogonal neighbours of
+    // the cell, u's receiver diagonal to u), whose step leads into c's block.
     const RegionalGlobalInputs inputs = wideworld();
     const RefinementResult result = refine(inputs, windowp(), 2, valleysatlevelone(), "outlets P");
     const RegionalFields& fields = result.fields;
     const RegionalWindow& window = fields.window;
     ASSERT_EQ(window.scale, 16);
+    const landscape::GlobalNetwork& network = inputs.network;
+    const auto neighbour = [&](std::size_t cell, int ox, int oy, std::size_t& next) {
+        const int i = static_cast<int>(cell % static_cast<std::size_t>(inputs.width));
+        const int j = static_cast<int>(cell / static_cast<std::size_t>(inputs.width)) + oy;
+        if (j < 0 || j >= inputs.height)
+            return false;
+        next = at((i + ox + inputs.width) % inputs.width, j, inputs.width);
+        return true;
+    };
+    // The discharge of a transit link through `block` whose step leads into `into`, if any.
+    const auto transitowner = [&](std::size_t block, std::size_t into, float discharge) {
+        for (int direction = 1; direction <= landscape::directioncount; direction++)
+        {
+            const int ox = landscape::directionoffsetx(direction), oy = landscape::directionoffsety(direction);
+            std::size_t upstream = 0, receiver = 0;
+            if ((ox != 0 && oy != 0) || !neighbour(block, ox, oy, upstream) || network.sea[upstream] != 0)
+                continue;
+            const int link = network.direction[upstream];
+            if (link < 1 || landscape::directionoffsetx(link) == 0 || landscape::directionoffsety(link) == 0 ||
+                !neighbour(upstream, landscape::directionoffsetx(link), landscape::directionoffsety(link), receiver))
+                continue;
+            if (receiver == into && network.discharge_m3s[upstream] == discharge)
+                return true;
+        }
+        return false;
+    };
     const int width = window.finewidth(), height = window.fineheight();
-    int outlets = 0, mismatches = 0;
+    int outlets = 0, mismatches = 0, transits = 0;
     for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
         {
@@ -453,13 +482,21 @@ TEST_F(Landscape, RefinementLevelsOutletDischarge)
             if (nx < 0 || ny < 0 || nx >= width || ny >= height)
                 continue;
             const std::size_t own = globalcell(window, inputs.width, x, y);
-            if (globalcell(window, inputs.width, nx, ny) == own)
+            const std::size_t into = globalcell(window, inputs.width, nx, ny);
+            if (into == own)
                 continue;
             outlets++;
-            mismatches += fields.discharge_m3s[cell] != inputs.network.discharge_m3s[own] ? 1 : 0;
+            if (fields.discharge_m3s[cell] == network.discharge_m3s[own])
+                continue;
+            if (transitowner(own, into, fields.discharge_m3s[cell]))
+                transits++;
+            else
+                mismatches++;
         }
-    std::printf("[refinement] outlets P: %d outlet cells, %d discharges differ from the global cell's\n", outlets, mismatches);
+    std::printf("[refinement] outlets P: %d outlet cells, %d of transit links, %d discharges differ from the owning "
+                "piece's global cell's\n", outlets, transits, mismatches);
     EXPECT_GT(outlets, 0);
+    EXPECT_GT(transits, 0);
     EXPECT_EQ(mismatches, 0);
 }
 

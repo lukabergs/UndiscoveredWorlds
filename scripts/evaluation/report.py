@@ -234,6 +234,7 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Kept cells draining to the domain ring (a guard)', 'ringbasincells'),
                  ('Kept cells no bounded catchment reached (kept at the start)', 'unreachedcells'),
                  ('Land-sink junctions pinned', 'sinkjunctions'),
+                 ('Diagonal links', 'diagonallinks'), ('Diagonal links through the corner', 'cornerlinks'),
                  ('Solve lowering p50 (m)', 'solvelowering50_m'), ('Solve lowering p99 (m)', 'solvelowering99_m'),
                  ('Seconds', 'seconds'))
 

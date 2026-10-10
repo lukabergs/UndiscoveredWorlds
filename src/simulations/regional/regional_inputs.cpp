@@ -211,6 +211,8 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.channels.junctionjitter = regional::jitterJunction;
     parameters.channels.edgemargin = regional::jitterEdgeMargin;
     parameters.channels.springspercell = regional::springsPerCell;
+    parameters.channels.diagonaltransit = regional::diagonalTransit;
+    parameters.channels.transittolerance_m = regional::diagonalTransitToleranceM;
     parameters.channels.seed = deterministiccontextseed(static_cast<long>(seed), channelseedsalt);
     parameters.relief.erodibility = streampower::erodibility;
     parameters.relief.areaexponent = streampower::areaExponent;

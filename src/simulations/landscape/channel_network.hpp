@@ -10,9 +10,12 @@
 // receiver's inflow leg from the entry point (the fine cell across the edge) to the
 // receiver's junction. A cardinal link crosses the shared edge at an offset drawn from
 // a hash of the edge (both cells draw the same), a diagonal link through the shared
-// corner. Each leg is a Catmull-Rom curve through its two ends and a midpoint displaced
+// corner or (multiscale plan S3.10, diagonaltransit) through a transit block: one of the
+// two cells orthogonal to both, crossed by a third leg between two hashed edge points.
+// Each leg is a Catmull-Rom curve through its two ends and a midpoint displaced
 // sideways (a hash of the leg), rasterised 8-connected inside its own global cell's
-// k x k block, so a link occupies only its two cells' blocks. Every value is a pure
+// k x k block, so a link occupies only its two cells' blocks (and its transit block's).
+// Every value is a pure
 // function of the global cells, the seed and the absolute fine position, so a link that
 // two windows share is drawn identically in both. Planet-free.
 
@@ -48,9 +51,19 @@ struct ChannelParameters
                                        // discharge; exponent 0: no dependence), kept inside the block
     double meanderdischargeexponent = 0.0;
     double meanderreference_m3s = 1000.0;
-    double junctionjitter = 0.25;      // the junction lies within this fraction of k of the block's centre
-    double edgemargin = 0.1875;        // edge points stay this fraction of k away from the cell's corners
+    double junctionjitter = 0.5;       // the junction lies within this fraction of k of the block's centre
+                                       // (0.5: anywhere in the block; R3: 0.25)
+    double edgemargin = 0.0;           // edge points stay this fraction of k away from the cell's corners (R3: 0.1875;
+                                       // 0: every fine cell of the edge equally likely at every k)
     int springspercell = 0;            // springs from hashed points into a source cell's junction (0: none)
+    // Multiscale plan S3.10: 1 draws a diagonal link through a transit block (an orthogonal
+    // neighbour of both cells that is land, filled between the link's two cells, not the receiver's
+    // receiver nor the upstream cell's donor, and drains to the receiver's outlet on the global tree;
+    // the corner where none does), 0 through the shared corner (R3).
+    int diagonaltransit = 1;
+    // S3.10: when neither side cell's filled elevation lies between the link's two cells', the one
+    // missing that range by less is the transit block if the miss is at most this (m; 0: none).
+    double transittolerance_m = 100.0;
     // Multiscale plan S3.9 (set by channelslevel in the refinement loop with bounded catchments,
     // regional.catchment_reach_global_cells >= 1; 0: none): 1 pins the junction of every land sink of
     // the domain (a land cell without a receiver on the grid) that no link reached and that is not fine
@@ -66,8 +79,16 @@ struct ChannelParameters
 // its outflow leg in the upstream cell's block followed by the receiver's inflow leg in
 // the receiver's block, each an 8-connected chain of distinct fine cells (loops erased),
 // so consecutive path cells are 8-neighbours and the step across the shared edge goes
-// from the exit point to the entry point. The curve's tangent at the edge point is the
-// link's direction, so the two legs join smoothly; at a junction, the outflow leg and
+// from the exit point to the entry point. A diagonal link u -> c with a transit block n
+// (S3.10: n = u + (ox, 0) or u + (0, oy), land, filled between c and u, neither c's
+// receiver nor u's donor, with the receiver's outlet on the global tree; both qualify: a
+// hash of the link) runs u's outflow leg to a point on the edge
+// u | n, a transit leg across n's block from the fine cell across that edge to a point on
+// the edge n | c, then c's inflow leg from the fine cell across it, each edge point at an
+// offset drawn from the link between edgemargin x k and (1 - edgemargin) x k, so both
+// steps across an edge are 4-connected; without one (neither neighbour qualifies, or
+// diagonaltransit 0) it steps diagonally through the shared corner. The curve's tangent
+// at an edge point is the link's direction, so the legs join smoothly; at a junction, the outflow leg and
 // the inflow leg of the main upstream cell (the largest drainage area among the drawn
 // links into the cell, ties to the smaller index) share one tangent (from the main
 // entry point towards the exit point), and other inflows join at their own angle. A
@@ -75,16 +96,17 @@ struct ChannelParameters
 // springs: legs from hashed points of its block (away from the block's edge, upstream
 // of the junction) to its junction, carrying the cell's discharge and flows.
 //
-// Ownership. A junction belongs to its own cell's outgoing link; any other fine cell
-// on several pieces (links and springs) to the piece with the lower bed there, equal
-// beds to the link whose upstream cell is fewer links from its outlet on the global
-// tree, then to the smaller absolute index of the upstream global cell, then to the
-// link before its springs (spring 1 before spring 2 ...), so that the bed never rises
-// along the directions and the directions hold no loop whatever the drainage areas
-// (.cpp). A block holds only its cell's outflow leg, its springs and the inflow legs of
-// the links into it, so only links adjacent on the global tree (the same receiver, or
-// one's receiver the other's upstream cell) share fine cells, and a chain that runs onto
-// another link reaches the same outlet; no capture across a divide can arise.
+// Ownership. A fine cell on several pieces (links and springs) belongs to the piece
+// with the lower bed there, equal beds to the link whose upstream cell is fewer links
+// from its outlet on the global tree, then to the smaller absolute index of the upstream
+// global cell, then to the link before its springs (spring 1 before spring 2 ...), so
+// that the bed never rises along the directions and the directions hold no loop whatever
+// the drainage areas (.cpp). A junction is reached at the same bed by its cell's outgoing
+// link, the links into it and its springs, so it belongs to the outgoing link; a transit
+// leg with a lower bed there takes it. A block holds only its cell's outflow leg, its
+// springs, the inflow legs of the links into it and the transit legs through it, all
+// draining to the block's outlet on the global tree, so a chain that runs onto another
+// piece reaches the same outlet; no capture across a divide can arise.
 //
 // Ends. A link ends at its first fine cell inside a global sea cell's block (its sea
 // receiver's entry point) without `finesea`; with it, see below. A land sink's
@@ -109,8 +131,9 @@ struct ChannelParameters
 // world grid, a domain off it, a negative or non-finite meanderamplitude,
 // meanderdischargeexponent or junctionjitter, a meanderreference_m3s that is not
 // positive and finite, an edgemargin outside 0 .. 0.5, a negative springspercell, a
-// non-finite sea level, receivers that form a loop downstream of a link within reach of
-// the domain (loops elsewhere go unseen), and, on a link within reach of the domain, a
+// diagonaltransit other than 0 and 1, a non-finite sea level, receivers that form a loop
+// downstream of a link within reach of the domain or of a transit candidate (loops
+// elsewhere go unseen), and, on a link within reach of the domain, a
 // filled elevation that is not finite or a receiver (the sea level for a sea receiver;
 // checked whether or not the link is cut at the fine coast) or, for a link that ends in
 // the sea, the sea level above the upstream cell's filled elevation.
@@ -126,6 +149,9 @@ struct FineChannels
     std::vector<int32_t> globalcell;     // the upstream global cell's index, -1 off the network and on the
                                          // tributaries (regional_tributaries.hpp: a channel cell with -1 is one)
     int sinkjunctions = 0;               // ChannelParameters::pinsinks: the land-sink junctions it pinned in the kept box
+    int diagonallinks = 0;               // S3.10: drawn diagonal links whose upstream cell lies in the kept box
+    int cornerlinks = 0;                 // of them, those through the shared corner (no transit block, or
+                                         // diagonaltransit 0)
 };
 
 // Phase R, R1 (empty vectors keep the rules without them): `start_m` is the regional
@@ -150,8 +176,9 @@ struct FineChannels
 //   follow the same law with their own top and end.
 // Seams: a channel cell's values depend on the pieces crossing it and on `start_m` and
 // `finesea` at the cells of those pieces' paths (and their two junctions). A link lies
-// inside its two global cells' blocks, so those cells lie at most one global cell nearer
-// the domain's edge than the channel cell. The regional pass's start surface and fine
+// inside its two global cells' blocks (with a transit block, inside the 2 x 2 blocks
+// around its corner, mutual 8-neighbours), so those cells lie at most one global cell
+// nearer the domain's edge than the channel cell. The regional pass's start surface and fine
 // sea agree between windows from 2 x meanpasses global cells inside the domain's edge
 // (each block-mean pass spoils the residuals of the outer two), so its channels agree
 // from 2 x meanpasses + 1 cells inside it.

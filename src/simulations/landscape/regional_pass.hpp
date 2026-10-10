@@ -198,6 +198,8 @@ struct LevelState : RegionalLevel
     int unreachedcells = 0;              // solvelevel's (S3.9): kept cells no bounded catchment reached
     int ringbasincells = 0;              // solvelevel's (S3.9): kept cells draining to the domain's ring on a window edge
     int sinkjunctions = 0;               // channelslevel's (S3.9): kept land-sink junctions pinned by pinsinks
+    int diagonallinks = 0;               // channelslevel's (S3.10): kept diagonal links (FineChannels)
+    int cornerlinks = 0;                 // of them, those through the shared corner
     std::vector<float> solved_m;         // the elevation after the solve, before the forms and the lakes (S3.2: the
                                          // channel cells' means kept, the parent's lift not added; solvelevel)
     int tributaries = 0;                 // tributarieslevel's count (0: none)

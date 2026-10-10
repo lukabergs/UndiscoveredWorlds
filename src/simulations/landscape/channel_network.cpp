@@ -5,7 +5,8 @@
 // solve"; Phase R, step R1: the fine coast and the start surface's running minimum;
 // step R3: the legacy geometry of junctions, edge points and Catmull-Rom legs). Every
 // quantity below is computed in a global cell's own block coordinates from that cell,
-// its edges, its neighbours on the global network and the seed, and only mapped to the
+// its edges, its neighbours on the global network (and their outlets on the global tree,
+// S3.10's transit blocks) and the seed, and only mapped to the
 // window's domain when a fine cell is written, so a link is the same fine path in every
 // window, and a fine cell's values depend only on the pieces whose paths cross it.
 
@@ -31,13 +32,20 @@ namespace
 {
 constexpr double pi = 3.14159265358979323846;
 // Global cells around the domain whose outgoing links are drawn: a link lies inside
-// its two cells' blocks, so only a link with an end in the domain reaches it.
+// its two cells' blocks (a diagonal through a transit block, S3.10, inside the 2 x 2
+// blocks around its corner, mutual 8-neighbours), so only a link whose upstream cell is
+// within one cell of the domain reaches it.
 constexpr int linkreach = 1;
 // Hash salts of the geometry's pieces.
 constexpr std::int64_t junctionsalt = 0x4a554e43;
 constexpr std::int64_t edgesalt = 0x45444745;
 constexpr std::int64_t legsalt = 0x4c454753;
 constexpr std::int64_t springsalt = 0x53505247;
+constexpr std::int64_t transitsalt = 0x5452414e;
+// The edge hashes' first value: 0 and 1 a cardinal link's vertical and horizontal edge, 2 and 3 a
+// transit link's first edge (upstream | transit block) and second (transit block | receiver).
+constexpr std::int64_t transitfirstedge = 2;
+constexpr std::int64_t transitsecondedge = 3;
 // A spring starts within this angle of the direction opposite the junction's tangent
 // (upstream of the junction), between springnear and springfar x k from it.
 constexpr double springspread = 2.0 * pi / 3.0;
@@ -117,49 +125,6 @@ FineCell junctionoffset(int k, std::size_t cell, const ChannelParameters& parame
              blockindex(centre + reach * signedunit(deterministicmix64(hash)), k) };
 }
 
-// The exit point of a link in its upstream cell's block and the entry point in its
-// receiver's block (block coordinates), across their shared edge: a diagonal link
-// through the shared corner, a cardinal link at an offset along the edge drawn from
-// the edge's two cells in a canonical order (west then east, north then south), so the
-// two cells agree whichever drains into the other, between edgemargin x k and
-// (1 - edgemargin) x k.
-struct LinkEnds
-{
-    FineCell exit;
-    FineCell entry;
-};
-
-LinkEnds linkends(int k, std::size_t upstream, std::size_t receiver, int ox, int oy, const ChannelParameters& parameters)
-{
-    const std::int64_t last = k - 1;
-    LinkEnds ends;
-    if (ox != 0 && oy != 0)
-    {
-        ends.exit = { ox > 0 ? last : 0, oy > 0 ? last : 0 };
-        ends.entry = { ox > 0 ? 0 : last, oy > 0 ? 0 : last };
-        return ends;
-    }
-    const bool vertical = ox != 0;  // the shared edge runs north to south
-    const bool forward = vertical ? ox > 0 : oy > 0;
-    const std::size_t first = forward ? upstream : receiver;
-    const std::size_t second = forward ? receiver : upstream;
-    const std::uint64_t hash = deterministiccombine(parameters.seed, edgesalt, vertical ? 0 : 1,
-                                                    static_cast<std::int64_t>(first), static_cast<std::int64_t>(second));
-    const std::int64_t offset =
-        blockindex(parameters.edgemargin * k + (1.0 - 2.0 * parameters.edgemargin) * k * unitinterval(hash), k);
-    if (vertical)
-    {
-        ends.exit = { forward ? last : 0, offset };
-        ends.entry = { forward ? 0 : last, offset };
-    }
-    else
-    {
-        ends.exit = { offset, forward ? last : 0 };
-        ends.entry = { offset, forward ? 0 : last };
-    }
-    return ends;
-}
-
 // The receiver of a global cell on the drainage tree, or the cell itself for an
 // outlet: a sea cell, a land cell without a direction (a sink), or one whose
 // direction points beyond a pole.
@@ -174,6 +139,172 @@ std::size_t globalreceiver(const GlobalNetwork& network, std::size_t cell)
         return cell;
     return static_cast<std::size_t>(j) * static_cast<std::size_t>(network.width) +
            static_cast<std::size_t>((i + directionoffsetx(direction) + network.width) % network.width);
+}
+
+// The outlet of a global cell on the drainage tree (where globalreceiver stops: a sea
+// cell, a land sink, a direction beyond a pole), memoised in `outlet` (nocell unknown).
+// Receivers that form a loop throw.
+std::size_t outletcell(const GlobalNetwork& network, std::size_t cell, std::vector<std::size_t>& outlet)
+{
+    std::vector<std::size_t> pending;
+    std::size_t current = cell;
+    while (outlet[current] == nocell)
+    {
+        const std::size_t next = globalreceiver(network, current);
+        if (next == current)
+        {
+            outlet[current] = current;
+            break;
+        }
+        pending.push_back(current);
+        if (pending.size() > outlet.size())
+            throw std::invalid_argument("rasterisechannels: the global receivers form a loop");
+        current = next;
+    }
+    for (const std::size_t waiting : pending)
+        outlet[waiting] = outlet[current];
+    return outlet[cell];
+}
+
+// The global cell (i + ox, j + oy), columns wrapped (the row must lie on the grid).
+std::size_t offsetcell(const GlobalNetwork& network, std::size_t cell, int ox, int oy)
+{
+    const int width = network.width;
+    const int i = static_cast<int>(cell % static_cast<std::size_t>(width));
+    const int j = static_cast<int>(cell / static_cast<std::size_t>(width));
+    return static_cast<std::size_t>(j + oy) * static_cast<std::size_t>(width) +
+           static_cast<std::size_t>(((i + ox) % width + width) % width);
+}
+
+// The transit block of a diagonal link from `upstream` to `receiver` (offsets ox, oy, both
+// non-zero; multiscale plan S3.10): 1 the orthogonal neighbour across the link's column step
+// (upstream + (ox, 0)), 2 the one across its row step (upstream + (0, oy)), 0 the shared corner.
+// With diagonaltransit on, a neighbour qualifies when it is land, its filled elevation lies
+// between the receiver's and the upstream cell's (inclusive), it is neither the receiver's
+// receiver nor a donor of the upstream cell, and its outlet on the global tree is the
+// receiver's, so every piece in a block drains to that block's outlet; both qualify: a hash
+// of the link; neither (a neck between basins, an X on a flat, a block above or below the
+// link) or diagonaltransit 0: the corner.
+int transitside(const GlobalNetwork& network, std::size_t upstream, std::size_t receiver, int ox, int oy,
+                const ChannelParameters& parameters, std::vector<std::size_t>& outlet)
+{
+    if (parameters.diagonaltransit == 0)
+        return 0;
+    const std::size_t target = outletcell(network, receiver, outlet);
+    const float top = network.filledelevation_m[upstream];
+    const float bottom = network.filledelevation_m[receiver];
+    // The miss of a candidate: how far its filled elevation lies outside [bottom, top] (0
+    // between the link's ends: no pinned trench through a higher block, no levee or dam across
+    // a lower one); infinity for one that is the upstream cell or the receiver, sea, the
+    // receiver's receiver or the upstream cell's donor (a hairpin), or of another outlet.
+    const double infinity = std::numeric_limits<double>::infinity();
+    auto miss = [&](std::size_t neighbour) {
+        if (neighbour == upstream || neighbour == receiver || network.sea[neighbour] != 0 ||
+            globalreceiver(network, receiver) == neighbour || globalreceiver(network, neighbour) == upstream ||
+            outletcell(network, neighbour, outlet) != target)
+            return infinity;
+        const double filled = network.filledelevation_m[neighbour];
+        const double value = std::max({ 0.0, static_cast<double>(bottom) - filled, filled - static_cast<double>(top) });
+        return std::isnan(value) ? infinity : value;
+    };
+    const double first = miss(offsetcell(network, upstream, ox, 0));
+    const double second = miss(offsetcell(network, upstream, 0, oy));
+    // Between the ends (miss 0) qualifies; when neither does, the smaller miss within
+    // transittolerance_m; equal misses: a hash of the link; none: the corner.
+    const double limit = std::min(first, second) > 0.0 ? parameters.transittolerance_m : 0.0;
+    const bool firstok = first <= limit, secondok = second <= limit;
+    if (firstok && secondok && first == second)
+        return (deterministiccombine(parameters.seed, transitsalt, static_cast<std::int64_t>(upstream),
+                                     static_cast<std::int64_t>(receiver)) & 1u) != 0 ? 2 : 1;
+    if (firstok && (!secondok || first < second))
+        return 1;
+    return secondok ? 2 : 0;
+}
+
+// The exit point of a link in its upstream cell's block and the entry point in its
+// receiver's block (block coordinates): a cardinal link across their shared edge at an
+// offset along the edge drawn from the edge's two cells in a canonical order (west then
+// east, north then south), so the two cells agree whichever drains into the other, between
+// edgemargin x k and (1 - edgemargin) x k; a diagonal link through the shared corner, or
+// (transitside, S3.10) through the transit block: the exit on the edge between the upstream
+// cell and the transit block, the entry on the edge between the transit block and the
+// receiver, each at an offset drawn from the link (edgesalt, upstream, receiver) between
+// the same margins, with the transit leg's two ends across those edges.
+struct LinkEnds
+{
+    FineCell exit;
+    FineCell entry;
+    int transit = 0;          // transitside: 0 a cardinal link or a diagonal through the corner
+    FineCell transitentry;    // in the transit block, across the first edge from `exit`
+    FineCell transitexit;     // in the transit block, across the second edge from `entry`
+};
+
+std::int64_t edgeoffset(int k, std::uint64_t hash, const ChannelParameters& parameters)
+{
+    return blockindex(parameters.edgemargin * k + (1.0 - 2.0 * parameters.edgemargin) * k * unitinterval(hash), k);
+}
+
+LinkEnds linkends(int k, const GlobalNetwork& network, std::size_t upstream, std::size_t receiver, int ox, int oy,
+                  const ChannelParameters& parameters, std::vector<std::size_t>& outlet)
+{
+    const std::int64_t last = k - 1;
+    LinkEnds ends;
+    if (ox != 0 && oy != 0)
+    {
+        ends.transit = transitside(network, upstream, receiver, ox, oy, parameters, outlet);
+        if (ends.transit == 0)
+        {
+            ends.exit = { ox > 0 ? last : 0, oy > 0 ? last : 0 };
+            ends.entry = { ox > 0 ? 0 : last, oy > 0 ? 0 : last };
+            return ends;
+        }
+        const std::int64_t first = edgeoffset(
+            k,
+            deterministiccombine(parameters.seed, edgesalt, transitfirstedge, static_cast<std::int64_t>(upstream),
+                                 static_cast<std::int64_t>(receiver)),
+            parameters);
+        const std::int64_t second = edgeoffset(
+            k,
+            deterministiccombine(parameters.seed, edgesalt, transitsecondedge, static_cast<std::int64_t>(upstream),
+                                 static_cast<std::int64_t>(receiver)),
+            parameters);
+        if (ends.transit == 1)
+        {
+            // The transit block lies across the upstream cell's east or west edge, the
+            // receiver across the transit block's south or north edge.
+            ends.exit = { ox > 0 ? last : 0, first };
+            ends.transitentry = { ox > 0 ? 0 : last, first };
+            ends.transitexit = { second, oy > 0 ? last : 0 };
+            ends.entry = { second, oy > 0 ? 0 : last };
+        }
+        else
+        {
+            // Across the upstream cell's south or north edge, then the transit block's east or west.
+            ends.exit = { first, oy > 0 ? last : 0 };
+            ends.transitentry = { first, oy > 0 ? 0 : last };
+            ends.transitexit = { ox > 0 ? last : 0, second };
+            ends.entry = { ox > 0 ? 0 : last, second };
+        }
+        return ends;
+    }
+    const bool vertical = ox != 0;  // the shared edge runs north to south
+    const bool forward = vertical ? ox > 0 : oy > 0;
+    const std::size_t first = forward ? upstream : receiver;
+    const std::size_t second = forward ? receiver : upstream;
+    const std::uint64_t hash = deterministiccombine(parameters.seed, edgesalt, vertical ? 0 : 1,
+                                                    static_cast<std::int64_t>(first), static_cast<std::int64_t>(second));
+    const std::int64_t offset = edgeoffset(k, hash, parameters);
+    if (vertical)
+    {
+        ends.exit = { forward ? last : 0, offset };
+        ends.entry = { forward ? 0 : last, offset };
+    }
+    else
+    {
+        ends.exit = { offset, forward ? last : 0 };
+        ends.entry = { offset, forward ? 0 : last };
+    }
+    return ends;
 }
 
 // Whether a global cell's link is drawn (land, a receiver on the grid, the drainage
@@ -196,7 +327,8 @@ struct CellGeometry
     Point tangent;
 };
 
-CellGeometry cellgeometry(int k, const GlobalNetwork& network, std::size_t cell, const ChannelParameters& parameters)
+CellGeometry cellgeometry(int k, const GlobalNetwork& network, std::size_t cell, const ChannelParameters& parameters,
+                          std::vector<std::size_t>& outlet)
 {
     CellGeometry geometry;
     geometry.junction = junctionoffset(k, cell, parameters);
@@ -229,15 +361,16 @@ CellGeometry cellgeometry(int k, const GlobalNetwork& network, std::size_t cell,
     if (receiver != cell)
     {
         const int direction = network.direction[cell];
-        exit = middle(
-            linkends(k, cell, receiver, directionoffsetx(direction), directionoffsety(direction), parameters).exit);
+        exit = middle(linkends(k, network, cell, receiver, directionoffsetx(direction), directionoffsety(direction),
+                               parameters, outlet)
+                          .exit);
         hasexit = true;
     }
     if (geometry.mainupstream != nocell)
     {
         const int direction = network.direction[geometry.mainupstream];
-        entry = middle(linkends(k, geometry.mainupstream, cell, directionoffsetx(direction),
-                                directionoffsety(direction), parameters)
+        entry = middle(linkends(k, network, geometry.mainupstream, cell, directionoffsetx(direction),
+                                directionoffsety(direction), parameters, outlet)
                            .entry);
         hasentry = true;
     }
@@ -387,13 +520,14 @@ FinePosition channeljunction(const RegionalWindow& window, const ChannelParamete
     return { static_cast<std::int64_t>(k) * i + offset.x, static_cast<std::int64_t>(k) * j + offset.y };
 }
 
-// Ownership of a fine cell on several pieces (links and springs): a junction belongs to
-// its own cell's outgoing link; any other fine cell to the piece with the lowest bed
-// there, equal beds to the piece whose upstream cell is fewer links from its outlet on
-// the global tree, then to the smaller absolute index of the upstream global cell, then
-// to the link before its springs and to the lower spring number. Each cell's direction
-// is its owner's step to the owner's next cell. A chain that crosses a cell taken by
-// another piece therefore runs into it and on along the owner's path:
+// Ownership of a fine cell on several pieces (links and springs): the piece with the
+// lowest bed there, equal beds to the piece whose upstream cell is fewer links from its
+// outlet on the global tree, then to the smaller absolute index of the upstream global
+// cell, then to the link before its springs and to the lower spring number (a strict
+// order of the pieces at a cell, so the result does not depend on the drawing order).
+// Each cell's direction is its owner's step to the owner's next cell. A chain that
+// crosses a cell taken by another piece therefore runs into it and on along the owner's
+// path:
 // - the bed never rises: the next cell's owner holds it at or below this piece's bed
 //   there, which is at or below this cell's, because each piece's bed never rises along
 //   its own path: the junction beds satisfy b(c) <= F(c) <= lo(u) <= b(u) for a link
@@ -410,22 +544,30 @@ FinePosition channeljunction(const RegionalWindow& window, const ChannelParamete
 //   grows) or changes to a piece that ranks strictly higher in (outlet distance, index,
 //   piece), a fixed order of the pieces; equal beds are common under the R1 bed (a
 //   running minimum is flat between the start surface's new lows, and the floor is
-//   flat), and each such step is one of these two; the junction rule agrees with it,
-//   because the only pieces that reach a junction are its cell's outgoing link (at
+//   flat), and each such step is one of these two. A junction needs no rule of its own
+//   (until S3.10 it went to its cell's outgoing link first, which gave the same owners):
+//   without transit legs the only pieces that reach it are its cell's outgoing link (at
 //   b(u), the first cell), the links into the cell and the cell's springs, which end
 //   there (a chain holds each cell once, so the junction is their last cell) at the
 //   same bed b(u), and rank lower (one link further from the outlet, or the same link's
 //   springs); where a fine sea makes the junction sea, the outgoing link ends at its
-//   first cell and every piece that reaches it ends there too, all at the sea level;
+//   first cell and every piece that reaches it ends there too, all at the sea level. A
+//   transit leg crossing a junction takes it where its bed is lower (then the cell's
+//   outgoing link starts on the transit's path, which reaches the same outlet); a rule
+//   that gave the junction to the outgoing link first would let a lower transit cell
+//   step up onto it and back (a loop);
 // - every chain ends at a piece's last cell, where the direction is 0: its first fine
 //   cell in a sea block (no fine sea) or its first fine sea cell (R1), or a land sink's
 //   junction. A link cut at a fine coast before its receiver drops to the sea level
 //   there, which is a descent.
-// A block holds only its cell's outflow leg and springs and the inflow legs of the links
-// into the cell, so only links adjacent on the global tree (the same receiver, or one's
-// receiver the other's upstream cell) share fine cells, and a chain that runs onto
-// another link reaches the same outlet: no capture across a divide, and two diagonals
-// crossing in an X (flats routed by flood order) pass through different corner cells.
+// A block holds only its cell's outflow leg and springs, the inflow legs of the links
+// into the cell and the transit legs through it (S3.10), and every one of those pieces
+// drains to the block's outlet on the global tree (a transit block's outlet is its
+// receiver's, transitside), so a chain that runs onto another piece reaches the same
+// outlet: no capture across a divide. Without transits only links adjacent on the global
+// tree (the same receiver, or one's receiver the other's upstream cell) share fine cells,
+// and two diagonals crossing in an X (flats routed by flood order) pass through different
+// corner cells.
 FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork& network,
                                const ChannelParameters& parameters, float sealevel,
                                const std::vector<float>& start_m, const std::vector<uint8_t>& finesea)
@@ -452,6 +594,10 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                                     "in 0 .. 0.5");
     if (parameters.springspercell < 0)
         throw std::invalid_argument("rasterisechannels: springspercell must not be negative");
+    if (parameters.diagonaltransit != 0 && parameters.diagonaltransit != 1)
+        throw std::invalid_argument("rasterisechannels: diagonaltransit must be 0 or 1");
+    if (!(parameters.transittolerance_m >= 0.0))
+        throw std::invalid_argument("rasterisechannels: transittolerance_m must not be negative");
     if (!std::isfinite(sealevel))
         throw std::invalid_argument("rasterisechannels: the sea level must be finite");
     const std::size_t cells = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -481,10 +627,10 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
     out.januaryflow.assign(finecells, 0);
     out.julyflow.assign(finecells, 0);
     out.globalcell.assign(finecells, -1);
-    std::vector<uint8_t> ownjunction(finecells, 0);
     std::vector<int32_t> ownerdistance(finecells, 0);
     std::vector<int32_t> ownerpiece(finecells, 0);
     std::vector<int32_t> distance(cells, -1);
+    std::vector<std::size_t> outlet(cells, nocell);
 
     // Domain fine cell of an unwrapped absolute fine cell: the absolute column
     // wrapped to 0 .. kW - 1, then counted eastwards from the domain's first fine
@@ -551,14 +697,12 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
     };
     // Writes a piece's cell where it takes the cell (the ownership rules above).
     auto write = [&](std::size_t index, bool lastcell, const FineCell& cell, const FineCell* next, float bed,
-                     std::size_t upstream, int32_t rank, int32_t piece, bool own) {
+                     std::size_t upstream, int32_t rank, int32_t piece) {
         const int32_t upstreamindex = static_cast<int32_t>(upstream);
         if (out.channel[index] != 0)
         {
             bool better = false;
-            if (static_cast<uint8_t>(own) != ownjunction[index])
-                better = own;
-            else if (bed != out.bed_m[index])
+            if (bed != out.bed_m[index])
                 better = bed < out.bed_m[index];
             else if (rank != ownerdistance[index])
                 better = rank < ownerdistance[index];
@@ -577,9 +721,14 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
         out.januaryflow[index] = network.januaryflow[upstream];
         out.julyflow[index] = network.julyflow[upstream];
         out.globalcell[index] = upstreamindex;
-        ownjunction[index] = own ? 1 : 0;
         ownerdistance[index] = rank;
         ownerpiece[index] = piece;
+    };
+
+    // Whether a global cell lies in the window's kept box (the link counts).
+    auto keptcell = [&](int i, int j) {
+        const int column = ((i - window.column0) % width + width) % width;
+        return column < window.columns && j >= window.row0 && j < window.row0 + window.rows;
     };
 
     // Upstream global cells within linkreach of the domain, each column once.
@@ -608,11 +757,16 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
             const int ox = directionoffsetx(direction);
             const int oy = directionoffsety(direction);
 
-            // The two legs, each in its own cell's block coordinates, then moved to the
-            // blocks' unwrapped absolute positions.
-            const CellGeometry from = cellgeometry(k, network, upstream, parameters);
-            const CellGeometry to = cellgeometry(k, network, receiver, parameters);
-            const LinkEnds ends = linkends(k, upstream, receiver, ox, oy, parameters);
+            // The two legs (three with a transit block), each in its own cell's block
+            // coordinates, then moved to the blocks' unwrapped absolute positions.
+            const CellGeometry from = cellgeometry(k, network, upstream, parameters, outlet);
+            const CellGeometry to = cellgeometry(k, network, receiver, parameters, outlet);
+            const LinkEnds ends = linkends(k, network, upstream, receiver, ox, oy, parameters, outlet);
+            if (ox != 0 && oy != 0 && keptcell(i, j))
+            {
+                out.diagonallinks++;
+                out.cornerlinks += ends.transit == 0 ? 1 : 0;
+            }
             const double displacement = meanderdisplacement(parameters, k, network.discharge_m3s[upstream]);
             const Point flow = unitvector({ static_cast<double>(ox), static_cast<double>(oy) });
             const std::uint64_t outhash = deterministiccombine(parameters.seed, legsalt, static_cast<std::int64_t>(upstream),
@@ -628,6 +782,19 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
             {
                 cell.x += originx;
                 cell.y += originy;
+            }
+            if (ends.transit != 0)
+            {
+                // S3.10: the transit leg across the transit block, from the first edge
+                // point to the second, along the link's direction at both ends.
+                const std::uint64_t transithash = deterministiccombine(
+                    parameters.seed, legsalt, static_cast<std::int64_t>(upstream), static_cast<std::int64_t>(receiver), 2);
+                const std::int64_t tx = ends.transit == 1 ? ox : 0;
+                const std::int64_t ty = ends.transit == 1 ? 0 : oy;
+                for (const FineCell& cell :
+                     legpath(k, ends.transitentry, ends.transitexit, displacement, transithash, flow, flow))
+                    path.push_back({ cell.x + originx + static_cast<std::int64_t>(k) * tx,
+                                     cell.y + originy + static_cast<std::int64_t>(k) * ty });
             }
             for (const FineCell& cell : inflow)
                 path.push_back({ cell.x + originx + static_cast<std::int64_t>(k) * ox,
@@ -690,7 +857,7 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                     bed = std::max(running, bedfloor);
                 else
                     bed = static_cast<float>(top + (static_cast<double>(end) - top) * along[m] / total);
-                write(index, lastcell, path[m], lastcell ? nullptr : &path[m + 1], bed, upstream, rank, 0, m == 0);
+                write(index, lastcell, path[m], lastcell ? nullptr : &path[m + 1], bed, upstream, rank, 0);
             }
         }
 
@@ -711,8 +878,7 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                 std::size_t index = 0;
                 if (!domainindex(junction, index) || out.channel[index] != 0 || (usesea && finesea[index] != 0))
                     continue;
-                write(index, true, junction, nullptr, junctionbed(cell), cell, outletdistance(network, cell, distance), 0,
-                      true);
+                write(index, true, junction, nullptr, junctionbed(cell), cell, outletdistance(network, cell, distance), 0);
                 const int x = static_cast<int>(index % static_cast<std::size_t>(domainwidth));
                 const int y = static_cast<int>(index / static_cast<std::size_t>(domainwidth));
                 const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
@@ -731,7 +897,7 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                 std::size_t receiver = nocell;
                 if (!drawnlink(network, cell, parameters.pinarea_km2, receiver))
                     continue;
-                const CellGeometry geometry = cellgeometry(k, network, cell, parameters);
+                const CellGeometry geometry = cellgeometry(k, network, cell, parameters, outlet);
                 if (geometry.mainupstream != nocell)
                     continue;  // not a source
                 const int32_t rank = outletdistance(network, cell, distance);
@@ -784,8 +950,7 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                             running = std::min(running, start_m[index]);
                         const bool lastcell = m + 1 == path.size();
                         const float bed = lastcell ? end : (usestart ? std::max(running, bedfloor) : top);
-                        write(index, lastcell, path[m], lastcell ? nullptr : &path[m + 1], bed, cell, rank, spring,
-                              false);
+                        write(index, lastcell, path[m], lastcell ? nullptr : &path[m + 1], bed, cell, rank, spring);
                     }
                 }
             }
@@ -820,6 +985,8 @@ void channelslevel(const LevelContext& context, LevelState& state)
             surface[cell] = channels.bed_m[cell];
     state.bed_m = channels.bed_m;
     state.sinkjunctions = channels.sinkjunctions;
+    state.diagonallinks = channels.diagonallinks;
+    state.cornerlinks = channels.cornerlinks;
     recordlevelstep(state, LevelStep::channels);
 }
 }

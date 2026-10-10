@@ -267,7 +267,7 @@ struct LevelDiagnostics
     // max |F|) - 24) m; the parent-mean error is at most it, the global-mean error at most
     // the sum of the levels' bounds.
     double meanbound_m = 0.0;
-    int driedcells = 0;                  // kept wet non-channel cells at or above their surface after the projection
+    int driedcells = 0;                  // kept wet non-channel cells above their surface after the projection
     int shoresbelowlake = 0;             // kept dry cells (not sea, not channel) at or below a wet 8-neighbour's surface
     int landbelowsea = 0;                // kept dry cells (not sea, not wet) at or below the sea level
     double maxlandbelowsea_m = 0.0;      // the largest depth of such a cell below the sea level (S2.8)
@@ -326,6 +326,10 @@ struct LevelDiagnostics
     int ringbasincells = 0;
     int unreachedcells = 0;
     int sinkjunctions = 0;
+    // S3.10: the kept diagonal links of the level's channels and those through the shared corner
+    // (FineChannels::diagonallinks, cornerlinks).
+    int diagonallinks = 0;
+    int cornerlinks = 0;
     // S3.9: the 50th and 99th percentiles (nearest rank) of the solve's lowering over the kept unpinned
     // cells (the start surface less the solve's result with the parent's lift added back: the cells of
     // RegionalLevel::meanlowering_m).

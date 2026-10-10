@@ -476,12 +476,14 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         diagnostics.ringbasincells = state.ringbasincells;
         diagnostics.unreachedcells = state.unreachedcells;
         diagnostics.sinkjunctions = state.sinkjunctions;
+        diagnostics.diagonallinks = state.diagonallinks;
+        diagnostics.cornerlinks = state.cornerlinks;
         diagnostics.reliefconverged = state.reliefconverged;
         diagnostics.changedreceivers = state.changedreceivers;
         std::vector<float>& elevation = state.elevation_m;
         std::vector<float>& lakesurface = state.water.lakesurface_m;
 
-        // After the projection (projectionlevel dried the wet cells at or above their surface):
+        // After the projection (projectionlevel dried the wet cells above their surface):
         // dry cells at or below a wet neighbour's surface counted (kept box only).
         const int keptx0 = level.keptcolumnoffset(), kepty0 = level.keptrowoffset();
         for (int y = kepty0; y < kepty0 + level.rows; y++)
