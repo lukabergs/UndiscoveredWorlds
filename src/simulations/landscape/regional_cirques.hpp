@@ -51,7 +51,9 @@ namespace landscape
 // Multiscale plan S2.3 (the refinement loop): with bandupper > 0 a form is carved only where
 // its radius (no centre-only bowl) in fine cells lies in [bandlower, bandupper) (detail_cells / 2 .. detail_cells x
 // factor / 2: resolved by two cells, under one parent cell); bandupper 0 (the single pass) keeps
-// the rule above.
+// the rule above. S3.5: bandupper is infinite at level 1 (formband, regional_valleys.hpp: bowls
+// above its band, clamped to one global cell); no channel cell is changed (the loop lowers the
+// channel cells' means with channelcellmeans, regional_valleys.hpp).
 void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
                   const FineGlacial& glacial, const FineChannels& channels, const std::vector<uint8_t>& sea,
                   std::vector<float>& elevation_m, double bandlower = 0.0, double bandupper = 0.0);

@@ -61,8 +61,9 @@ struct LevelState;
 
 // LevelStep::glacialforms: state.glacial = regionalglacialfields, then with details.troughs
 // carvetroughs and with details.cirques carvecirques (regional_troughs.hpp, regional_cirques.hpp)
-// on state.elevation_m with the details' band (as valleyfloorslevel). The loop's diagnostics
-// count the kept cells each changed (LevelDiagnostics::troughcells, cirquecells). S3.5 places
-// troughs and cirques by width and radius per level.
+// on state.elevation_m with the level's band (formband, regional_valleys.hpp: each form at the
+// level where its half-width or radius in level cells lies in the band, level 1 also above it),
+// each followed by channelcellmeans with channelcellcap_m (multiscale plan S3.5). The loop's
+// diagnostics count the kept cells each changed (LevelDiagnostics::troughcells, cirquecells).
 void glacialformslevel(const LevelContext& context, LevelState& state);
 }

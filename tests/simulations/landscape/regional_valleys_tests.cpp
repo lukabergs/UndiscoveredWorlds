@@ -7,7 +7,11 @@
 
 #include "regional_test_world.hpp"
 
+#include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
+
+#include <limits>
+#include <utility>
 
 TEST_F(Landscape, RegionalValleysAreOffByDefault)
 {
@@ -342,4 +346,413 @@ TEST_F(Landscape, RegionalValleysLowestTargetSeaAndChannelsKept)
     for (int y : { 30, 31, 33, 34 })
         EXPECT_EQ(elevation[at(x, y, width)], above) << "row " << y;
     EXPECT_EQ(elevation[at(x, 32, width)], -5.0f);
+}
+
+namespace
+{
+// One channel cell at the domain's centre (bed 100 m, Q = 1000 m3/s), every other cell at 1000 m.
+struct PointChannel
+{
+    RegionalWindow window;
+    int width = 0;
+    int x = 0, y = 0;
+    landscape::FineChannels channels;
+    std::vector<float> elevation;
+    std::vector<uint8_t> sea;
+    double dy = 0.0;
+};
+
+PointChannel pointchannel(const RegionalGlobalInputs& inputs, int scale, int row = -1)
+{
+    PointChannel point;
+    point.window = windowa(scale);
+    point.width = point.window.domainfinewidth();
+    const std::size_t count = static_cast<std::size_t>(point.width) * static_cast<std::size_t>(point.window.domainfineheight());
+    point.channels = nochannels(count);
+    point.elevation.assign(count, 1000.0f);
+    point.sea.assign(count, 0);
+    point.x = point.width / 2;
+    point.y = row >= 0 ? row : point.window.domainfineheight() / 2;
+    const std::size_t cell = at(point.x, point.y, point.width);
+    point.channels.channel[cell] = 1;
+    point.channels.direction[cell] = 7;
+    point.channels.bed_m[cell] = 100.0f;
+    point.channels.discharge_m3s[cell] = 1000.0f;
+    point.elevation[cell] = 100.0f;
+    point.dy = landscape::finepatchmetric(point.window, inputs.radius_m).dy_m;
+    return point;
+}
+}
+
+TEST_F(Landscape, RegionalValleysRoundFloorInTheLoop)
+{
+    // Multiscale plan S3.5: in the refinement loop (bandupper > 0) the floor is a disc of radius
+    // w on the ground: a cell (dx, dy) away lies on it when (dx r)^2 + dy^2 <= w^2, r the axis
+    // row's east-west over north-south cell size (the cosine of its latitude), so at high latitude
+    // the floor spans more columns than rows (up to k); the single pass keeps R9's Chebyshev
+    // square in cells. w = 3.5 cells (Q at the reference), no sides; at the domain's middle row and
+    // at a row where r <= 0.8.
+    const RegionalGlobalInputs inputs = syntheticworld(32);
+    const landscape::PatchMetric metric = landscape::finepatchmetric(windowa(4), inputs.radius_m);
+    int northern = -1;
+    for (int y = 6; y < metric.height - 6 && northern < 0; y++)
+        if (landscape::eastwestratio(metric, y) <= 0.8 && landscape::eastwestratio(metric, y) > 0.6)
+            northern = y;
+    ASSERT_GE(northern, 0);
+    for (const int row : { -1, northern })
+    {
+        PointChannel point = pointchannel(inputs, 4, row);
+        const double ratio = landscape::eastwestratio(metric, point.y);
+        SCOPED_TRACE("row " + std::to_string(point.y) + ", ratio " + std::to_string(ratio));
+        RegionalParameters parameters;
+        parameters.valleys.floor_km = 3.5 * point.dy / 1000.0;
+        parameters.valleys.reference_m3s = 1000.0;
+        parameters.valleys.floormax_km = 3.9 * point.dy / 1000.0;
+        std::vector<float> loop = point.elevation, single = point.elevation;
+        landscape::carvevalleys(inputs, point.window, parameters, point.channels, point.sea, loop, 1.0,
+                                std::numeric_limits<double>::infinity());
+        landscape::carvevalleys(inputs, point.window, parameters, point.channels, point.sea, single);
+        int floorloop = 0, floorsingle = 0, expected = 0;
+        for (int dy = -6; dy <= 6; dy++)
+            for (int dx = -6; dx <= 6; dx++)
+            {
+                const double east = dx * ratio;
+                const bool disc = east * east + dy * dy <= 3.5 * 3.5 && std::abs(dx) <= 4;
+                const bool square = std::abs(dx) <= 3 && std::abs(dy) <= 3;
+                const float inloop = loop[at(point.x + dx, point.y + dy, point.width)];
+                const float insingle = single[at(point.x + dx, point.y + dy, point.width)];
+                EXPECT_EQ(inloop, disc ? 100.0f : 1000.0f) << "loop " << dx << ", " << dy;
+                EXPECT_EQ(insingle, square ? 100.0f : 1000.0f) << "single " << dx << ", " << dy;
+                expected += disc ? 1 : 0;
+                floorloop += inloop == 100.0f ? 1 : 0;
+                floorsingle += insingle == 100.0f ? 1 : 0;
+            }
+        EXPECT_EQ(floorloop, expected);
+        EXPECT_EQ(floorsingle, 49);  // the 7 x 7 square
+        // Round: (3, 3) at 4.2 north-south cells is off the floor in the loop.
+        EXPECT_EQ(loop[at(point.x + 3, point.y + 3, point.width)], 1000.0f);
+        if (row >= 0)
+            EXPECT_EQ(loop[at(point.x + 4, point.y, point.width)], 100.0f);  // 4 r <= 3.2 cells east
+    }
+}
+
+TEST_F(Landscape, RegionalValleysReachInKmAgainstTheBand)
+{
+    // Multiscale plan S3.5: in the loop valleys.reach_km replaces reachcells (40 here, ignored)
+    // and the full width max(floor half-width, reach) is tested against both ends of the band.
+    // A channel row with a floor of 0.2 cells and sides of slope s reaching 2.6 cells at k = 4:
+    // carved in the band [1, 4) (rows 1 and 2 away at the bed + (d - 0.2) s dy, row 3 kept), not
+    // in [4, 16) nor [0.25, 1). The reach is km on the ground: at k = 8 the same reach is 5.2 cells,
+    // carved in [4, 16) only. The single pass never reads reach_km (reachcells clamped to k).
+    const RegionalGlobalInputs inputs = syntheticworld(32);
+    double reach = 2.6;  // in fine cells of k = 4
+    const auto run = [&](int scale, double lower, double upper, double& dy, int& width, int& middle) {
+        const RegionalWindow window = windowa(scale);
+        width = window.domainfinewidth();
+        const std::size_t count = static_cast<std::size_t>(width) * static_cast<std::size_t>(window.domainfineheight());
+        landscape::FineChannels channels = nochannels(count);
+        std::vector<float> elevation(count, 1000.0f);
+        middle = window.domainfineheight() / 2;
+        addchannelrow(channels, elevation, width, middle, 100.0f, 1000.0f);
+        const double cell_m = landscape::finepatchmetric(windowa(4), inputs.radius_m).dy_m;
+        dy = landscape::finepatchmetric(window, inputs.radius_m).dy_m;
+        RegionalParameters parameters;
+        parameters.valleys.floor_km = 0.2 * cell_m / 1000.0;
+        parameters.valleys.reference_m3s = 1000.0;
+        parameters.valleys.floormax_km = 4.0 * cell_m / 1000.0;
+        parameters.valleys.sideslope = 0.0005;
+        parameters.valleys.reachcells = 40;
+        parameters.valleys.reach_km = reach * cell_m / 1000.0;
+        landscape::carvevalleys(inputs, window, parameters, channels, std::vector<uint8_t>(count, 0), elevation, lower,
+                                upper);
+        return elevation;
+    };
+    double dy = 0.0;
+    int width = 0, middle = 0;
+    {
+        const std::vector<float> carved = run(4, 1.0, 4.0, dy, width, middle);
+        const int x = width / 2;
+        const double w = 0.2;
+        for (int d = 1; d <= 2; d++)
+            for (int side : { -1, 1 })
+                EXPECT_NEAR(carved[at(x, middle + side * d, width)], 100.0 + (d - w) * 0.0005 * dy, 1e-3) << "row " << d;
+        EXPECT_EQ(carved[at(x, middle + 3, width)], 1000.0f);
+        EXPECT_EQ(carved[at(x, middle - 3, width)], 1000.0f);
+        EXPECT_EQ(carved[at(x, middle, width)], 100.0f);
+    }
+    for (const auto& [lower, upper] : std::vector<std::pair<double, double>>{{4.0, 16.0}, {0.25, 1.0}})
+    {
+        const std::vector<float> carved = run(4, lower, upper, dy, width, middle);
+        int changed = 0;
+        for (float value : carved)
+            changed += value != 1000.0f && value != 100.0f ? 1 : 0;
+        EXPECT_EQ(changed, 0) << "band [" << lower << ", " << upper << ")";
+    }
+    {
+        const std::vector<float> carved = run(8, 1.0, 4.0, dy, width, middle);
+        int changed = 0;
+        for (float value : carved)
+            changed += value != 1000.0f && value != 100.0f ? 1 : 0;
+        EXPECT_EQ(changed, 0) << "k 8, band [1, 4)";
+    }
+    {
+        const std::vector<float> carved = run(8, 4.0, 16.0, dy, width, middle);
+        const int x = width / 2;
+        const double w = 0.4;  // the same floor in km: twice the cells at k = 8
+        for (int d = 1; d <= 5; d++)
+            EXPECT_NEAR(carved[at(x, middle + d, width)], 100.0 + (d - w) * 0.0005 * dy, 1e-3) << "k 8, row " << d;
+        EXPECT_EQ(carved[at(x, middle + 6, width)], 1000.0f);
+    }
+    {
+        // The single pass: reachcells 40 clamped to k = 4, reach_km not read.
+        const std::vector<float> carved = run(4, 0.0, 0.0, dy, width, middle);
+        const int x = width / 2;
+        EXPECT_LT(carved[at(x, middle + 4, width)], 1000.0f);
+        EXPECT_EQ(carved[at(x, middle + 5, width)], 1000.0f);
+    }
+    {
+        // Level 1 (upper end infinite): a reach of 6 cells, above any band, is carved and clamped to
+        // k = 4 cells (one global cell, the halo rule); with the upper end 4 it is not carved.
+        reach = 6.0;
+        const std::vector<float> carved = run(4, 1.0, std::numeric_limits<double>::infinity(), dy, width, middle);
+        const int x = width / 2;
+        for (int d = 1; d <= 4; d++)
+            EXPECT_NEAR(carved[at(x, middle + d, width)], 100.0 + (d - 0.2) * 0.0005 * dy, 1e-3) << "level 1, row " << d;
+        EXPECT_EQ(carved[at(x, middle + 5, width)], 1000.0f);
+        const std::vector<float> above = run(4, 1.0, 4.0, dy, width, middle);
+        int changed = 0;
+        for (float value : above)
+            changed += value != 1000.0f && value != 100.0f ? 1 : 0;
+        EXPECT_EQ(changed, 0) << "reach above the band [1, 4)";
+    }
+}
+
+TEST_F(Landscape, RegionalValleysChannelCellKeepsItsMean)
+{
+    // Multiscale plan S3.5: a form never changes a channel cell; channelcellmeans then lowers a land
+    // channel cell next to a carved cell to its cell mean on the carved field, b + min(h, cap)
+    // (regional_solve.cpp's), never back to its bed under sloping sides and never up. A channel
+    // row at bed 100 m whose cells sit at their mean 100 + min(900, 300) = 400 m before the form;
+    // sides of slope s within 2.5 cells and a floor of 0.2 cells put rows 1 away at 100 + 0.8 s dy,
+    // so the channel cells' mean is 100 + 0.8 s dy, above the bed.
+    const RegionalGlobalInputs inputs = syntheticworld(32);
+    const RegionalWindow window = windowa(4);
+    const int width = window.domainfinewidth(), height = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    landscape::FineChannels channels = nochannels(count);
+    std::vector<float> elevation(count, 1000.0f);
+    const int middle = height / 2;
+    addchannelrow(channels, elevation, width, middle, 100.0f, 1000.0f);
+    const double cap = 300.0;
+    for (int x = 0; x < width; x++)
+        elevation[at(x, middle, width)] = 400.0f;
+    elevation[at(3, middle, width)] = 150.0f;  // below its mean: never raised
+    const std::vector<uint8_t> sea(count, 0);
+    const double dy = landscape::finepatchmetric(window, inputs.radius_m).dy_m;
+    RegionalParameters parameters;
+    parameters.valleys.floor_km = 0.2 * dy / 1000.0;
+    parameters.valleys.reference_m3s = 1000.0;
+    parameters.valleys.floormax_km = 4.0 * dy / 1000.0;
+    parameters.valleys.sideslope = 0.0005;
+    parameters.valleys.reach_km = 2.5 * dy / 1000.0;
+    const std::vector<float> before = elevation;
+    std::vector<float> carved = elevation;
+    landscape::carvevalleys(inputs, window, parameters, channels, sea, carved, 1.0, 4.0);
+    for (int x = 0; x < width; x++)
+        EXPECT_EQ(carved[at(x, middle, width)], before[at(x, middle, width)]) << "the form keeps channel column " << x;
+    std::vector<float> nocap = carved;
+    landscape::channelcellmeans(window, channels, sea, 0.0, before, nocap);
+    EXPECT_EQ(nocap, carved);
+    landscape::channelcellmeans(window, channels, sea, cap, before, carved);
+    const double side = 0.8 * 0.0005 * dy;
+    ASSERT_LT(side, cap);
+    for (int x = 0; x < width; x++)
+    {
+        // The cell mean on the final field: the non-channel 8-neighbours' mean height above the bed.
+        double sum = 0.0;
+        int neighbours = 0;
+        for (int dy8 = -1; dy8 <= 1; dy8 += 2)
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                if (x + dx < 0 || x + dx >= width)
+                    continue;
+                sum += static_cast<double>(carved[at(x + dx, middle + dy8, width)]) - 100.0;
+                neighbours++;
+            }
+        const float mean = static_cast<float>(100.0 + std::min(std::max(0.0, sum / neighbours), cap));
+        const float value = carved[at(x, middle, width)];
+        if (x == 3)
+        {
+            EXPECT_EQ(value, 150.0f);
+            continue;
+        }
+        EXPECT_EQ(value, mean) << "column " << x;
+        EXPECT_GE(value, mean) << "column " << x;
+        EXPECT_NEAR(value, 100.0 + side, 1e-3) << "column " << x;
+        EXPECT_GT(value, 100.0f) << "column " << x;
+    }
+}
+
+namespace
+{
+// The cells two level windows' kept boxes share, as index pairs into their kept fields.
+std::vector<std::pair<std::size_t, std::size_t>> sharedlevelcells(const landscape::LevelWindow& a, const landscape::LevelWindow& b)
+{
+    std::vector<std::pair<std::size_t, std::size_t>> shared;
+    const std::int64_t width = a.levelwidth();
+    for (int y = 0; y < a.rows; y++)
+        for (int x = 0; x < a.columns; x++)
+        {
+            const std::int64_t column = landscape::wraplevel(a.column0 + x, width), row = a.row0 + y;
+            const std::int64_t xb = landscape::wraplevel(column - b.column0, width), yb = row - b.row0;
+            if (xb >= b.columns || yb < 0 || yb >= b.rows)
+                continue;
+            shared.push_back({at(x, y, a.columns), at(static_cast<int>(xb), static_cast<int>(yb), b.columns)});
+        }
+    return shared;
+}
+
+template<typename T>
+int differingcells(const std::vector<T>& a, const std::vector<T>& b,
+                   const std::vector<std::pair<std::size_t, std::size_t>>& cells)
+{
+    int count = 0;
+    for (const auto& [ca, cb] : cells)
+        count += std::memcmp(&a[ca], &b[cb], sizeof(T)) != 0 ? 1 : 0;
+    return count;
+}
+}
+
+TEST_F(Landscape, RegionalValleysOverlapFormsPerLevel)
+{
+    // Multiscale plan S3.5: two levels at factor 4 (k = 16) on the 256-column synthetic world with
+    // R9's incision, the valleys by reach in km (floors of 20 km x sqrt(Q / 1e3 m3/s) up to 40 km,
+    // sides reaching 25 km: 2.56 level-2 cells), troughs (30 km), cirques (15 km: 1.54 level-2
+    // cells), the channel cells' means (theta 0.3), the solve against its parent and the smoothing:
+    // on windows P and Q (different column and row origins, Q across the date line) every level's
+    // shared kept elevation and the final level's sea, lakes and rivers bit-identical; the forms act.
+    RegionalGlobalInputs inputs = withglacialfields(syntheticworld(256));
+    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    inputs.upliftrate_m_myr.resize(size);
+    inputs.denudation_m.resize(size);
+    inputs.erosionduration_myr = 20.0;
+    for (int j = 0; j < inputs.height; j++)
+        for (int i = 0; i < inputs.width; i++)
+        {
+            const double c = std::cos(latitude_rad(j, inputs.height));
+            inputs.upliftrate_m_myr[at(i, j, inputs.width)] = static_cast<float>(40.0 * c * c - 5.0);
+            inputs.denudation_m[at(i, j, inputs.width)] = static_cast<float>(300.0 + 200.0 * std::sin(longitude_rad(i, inputs.width)));
+        }
+    RegionalParameters parameters;
+    parameters.relief.elapsed_myr = 20.0;
+    parameters.valleys.upliftscale = 1.0;
+    parameters.valleys.denudationratescale = 1.0;
+    parameters.valleys.floor_km = 20.0;
+    parameters.valleys.reference_m3s = 1.0e3;
+    parameters.valleys.floormax_km = 40.0;
+    parameters.valleys.sideslope = 0.02;
+    parameters.valleys.reachcells = 16;
+    parameters.valleys.reach_km = 25.0;
+    parameters.troughs.width_km = 30.0;
+    parameters.troughs.widthmax_km = 38.0;  // 3.9 level-2 cells: the capped troughs at level 2
+    parameters.troughs.glaciationmin = 0.1;
+    parameters.cirques.radius_km = 15.0;
+    parameters.cirques.candidates = 4;
+    landscape::RefinementParameters refinement;
+    refinement.smoothpasses = 6;
+    refinement.parentlift = 2;
+    refinement.channelcellslope = 0.3;
+    refinement.prolongationlimit = 1;
+    const int halo = landscape::refinementhalo(2, refinement.smoothpasses);
+    const RegionalWindow windowp = landscape::regionalwindow(256, 16, halo, 160.0, -15.0, 180.0, 10.0);
+    const RegionalWindow windowq = landscape::regionalwindow(256, 16, halo, 170.0, -10.0, -170.0, 15.0);
+    const auto run = [&](const RegionalWindow& window, const RegionalParameters& settings) {
+        landscape::LevelTarget target;
+        target.window = window;
+        target.level = 2;
+        return landscape::runrefinement(inputs, target, settings, refinement);
+    };
+    const auto report = [](const landscape::RefinementResult& result, const char* label) {
+        for (const landscape::LevelDiagnostics& level : result.levels)
+            std::printf("[valleys] %s, level %d: valley %d, trough %d, cirque %d cells; lambda before %.1f m; forced %d\n",
+                        label, level.level, level.valleycells, level.troughcells, level.cirquecells,
+                        level.smoothing.maxlambdabefore_m, level.projection.forcedparents);
+    };
+    // Every level's shared kept elevation and the final level's fields bit-identical; returns the
+    // final level's shared cells.
+    const auto compare = [](const landscape::RefinementResult& p, const landscape::RefinementResult& q,
+                            const std::string& label) {
+        EXPECT_EQ(p.levels.size(), 2u) << label;
+        EXPECT_EQ(q.levels.size(), 2u) << label;
+        const auto first = sharedlevelcells(p.levels[0].window, q.levels[0].window);
+        EXPECT_GT(first.size(), 0u) << label;
+        EXPECT_EQ(differingcells(p.coarserelevation_m[0], q.coarserelevation_m[0], first), 0) << label << ": level 1";
+        const auto cells = sharedlevelcells(p.levels[1].window, q.levels[1].window);
+        EXPECT_GT(cells.size(), 0u) << label;
+        int channels = 0;
+        for (const auto& [ca, cb] : cells)
+            channels += p.fields.riverdirection[ca] != 0 ? 1 : 0;
+        EXPECT_GT(channels, 0) << label;
+        EXPECT_EQ(differingcells(p.fields.elevation_m, q.fields.elevation_m, cells), 0) << label << ": elevation";
+        EXPECT_EQ(differingcells(p.fields.sea, q.fields.sea, cells), 0) << label << ": sea";
+        EXPECT_EQ(differingcells(p.fields.lakesurface_m, q.fields.lakesurface_m, cells), 0) << label << ": lakes";
+        EXPECT_EQ(differingcells(p.fields.riverdirection, q.fields.riverdirection, cells), 0) << label << ": rivers";
+        EXPECT_EQ(differingcells(p.fields.discharge_m3s, q.fields.discharge_m3s, cells), 0) << label << ": discharge";
+        EXPECT_EQ(differingcells(p.fields.icethickness_m, q.fields.icethickness_m, cells), 0) << label << ": ice";
+        return cells;
+    };
+    {
+        const landscape::RefinementResult p = run(windowp, parameters);
+        const landscape::RefinementResult q = run(windowq, parameters);
+        report(p, "every form P");
+        ASSERT_EQ(p.levels.size(), 2u);
+        int valleys = 0, troughs = 0, cirques = 0;
+        for (const landscape::LevelDiagnostics& level : p.levels)
+        {
+            valleys += level.valleycells;
+            troughs += level.troughcells;
+            cirques += level.cirquecells;
+        }
+        EXPECT_GT(p.levels[1].valleycells, 0);
+        EXPECT_GT(p.levels[1].troughcells, 0);
+        EXPECT_GT(troughs, 0);
+        EXPECT_GT(cirques, 0);
+        EXPECT_GT(valleys, 0);
+        const auto cells = compare(p, q, "every form P/Q");
+        // The troughs act inside the shared box: shared land cells more than 1 m below the run without them
+        // (the projection puts most of a level-2 trough's volume back inside its parent cell, so few stay 50 m lower).
+        RegionalParameters notroughs = parameters;
+        notroughs.troughs.width_km = 0.0;
+        const landscape::RefinementResult plain = run(windowp, notroughs);
+        int lowered = 0, lowered1 = 0, raised1 = 0;
+        for (const auto& [ca, cb] : cells)
+        {
+            const float with = p.fields.elevation_m[ca], without = plain.fields.elevation_m[ca];
+            lowered += p.fields.sea[ca] == 0 && with < without - 50.0f ? 1 : 0;
+            lowered1 += p.fields.sea[ca] == 0 && with < without - 1.0f ? 1 : 0;
+            raised1 += p.fields.sea[ca] == 0 && with > without + 1.0f ? 1 : 0;
+        }
+        int keptlowered = 0;
+        for (std::size_t cell = 0; cell < p.fields.elevation_m.size(); cell++)
+            keptlowered += p.fields.sea[cell] == 0 && p.fields.elevation_m[cell] < plain.fields.elevation_m[cell] - 50.0f ? 1 : 0;
+        std::printf("[valleys] every form P: %d of %zu shared cells more than 50 m below the run without troughs (1 m: %d "
+                    "lowered, %d raised; the whole kept box: %d of %zu more than 50 m)\n",
+                    lowered, cells.size(), lowered1, raised1, keptlowered, p.fields.elevation_m.size());
+        EXPECT_GT(lowered1, 1000);
+    }
+    {
+        // The level-1 clamp: sides reaching 200 km (5.1 level-1 cells, above every band) are carved at
+        // level 1 only (its band has no upper end), clamped to one global cell, and the overlap holds.
+        RegionalParameters wide = parameters;
+        wide.valleys.reach_km = 200.0;
+        wide.troughs.width_km = 0.0;
+        wide.cirques.radius_km = 0.0;
+        const landscape::RefinementResult p = run(windowp, wide);
+        const landscape::RefinementResult q = run(windowq, wide);
+        report(p, "valleys reaching 200 km P");
+        ASSERT_EQ(p.levels.size(), 2u);
+        EXPECT_GT(p.levels[0].valleycells, 0);
+        EXPECT_EQ(p.levels[1].valleycells, 0);
+        compare(p, q, "valleys reaching 200 km P/Q");
+    }
 }

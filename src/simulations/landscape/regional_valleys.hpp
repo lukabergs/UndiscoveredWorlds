@@ -80,12 +80,49 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
 // (detail_cells x factor / 2: under one parent cell), so a sub-cell floor with sides is carved
 // at every level whose floor stays under one parent cell (each a minimum: it only refines);
 // bandupper 0 (the single pass) keeps the rule above.
+// Multiscale plan S3.5 (the loop, bandupper > 0): the floor and the sides by Euclidean distance
+// on the ground (column offsets scaled by eastwestratio, the column extent columnextent), not
+// Chebyshev squares; with
+// valleys.reach_km > 0 the sides reach reach_km on the ground (in fine cells over the fine
+// north-south spacing, at most k) instead of reachcells, and the full width max(floor
+// half-width, reach) decides both ends of the band, so the whole form is carved at the one level
+// where it lies in [bandlower, bandupper) (bandupper infinite at level 1: the forms above its
+// band, clamped to one global cell); reach_km 0 keeps reachcells and S2.3's test. The single pass
+// never reads reach_km. In every mode a channel cell keeps its value (its bed in the single pass,
+// its cell mean in the loop: channelcellmeans lowers it with the floor around it).
 void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
                   const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m,
                   double bandlower = 0.0, double bandupper = 0.0);
 
+// Multiscale plan S3.5: a land channel cell (not sea) with a non-channel, non-sea 8-neighbour
+// whose elevation differs from `before` (a form changed it) takes min(its elevation, its cell mean
+// on the changed field), the mean as regional_solve.cpp's: b + min(h, cap_m), b its bed
+// (channels.bed_m), h the smaller of the mean height above b of those neighbours and of the changed
+// ones alone (at least 0), so the axis never stands above its carved flanks' mean (a form narrower
+// than the diagonal leaves the diagonal neighbours high). So a form lowers a channel cell only
+// towards its cell mean, never back to its bed under a sloping side, and never raises it. cap_m <= 0
+// (the single pass, refinement.channel_cell_slope 0): nothing.
+void channelcellmeans(const RegionalWindow& window, const FineChannels& channels, const std::vector<uint8_t>& sea,
+                      double cap_m, const std::vector<float>& before, std::vector<float>& elevation_m);
+
+// Distances on the ground for the forms in the loop (S3.5): the east-west over the north-south
+// fine cell size of domain row y (metric.rowdx_m / dy_m, the cosine of the row's latitude: a pure
+// function of the absolute row; 1 outside the metric), by which a form scales its column offsets,
+// and the column extent of a form of `radius` fine cells (north-south) at that ratio, at most k.
+double eastwestratio(const PatchMetric& metric, int y);
+int columnextent(double radius, double ratio, int k);
+
 struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
 struct LevelState;
+
+// The band of a level's forms in its cells (S2.3, S3.5): [detailcells / 2, detailcells x factor
+// / 2) in the loop, the upper end infinite at level 1 (the forms above its band, each clamped to
+// one global cell); 0, 0 in the single pass (factor < 2).
+void formband(const LevelContext& context, double& bandlower, double& bandupper);
+
+// The cap of a channel cell's mean, refinement.channel_cell_slope x the level's north-south cell
+// size (regional_solve.hpp); 0 in the single pass.
+double channelcellcap_m(const LevelContext& context);
 
 // LevelStep::incision: with context.incision active, state.incisednetwork (the inputs' network
 // with the incised filled elevations) and state.bedsurface_m (state.surface_m lowered by the
@@ -93,8 +130,7 @@ struct LevelState;
 void incisionlevel(const LevelContext& context, LevelState& state);
 
 // LevelStep::valleyfloors: with details.valleys, carvevalleys on state.elevation_m with the
-// details' band ([detailcells / 2, detailcells x factor / 2) when factor >= 2; 0, 0 otherwise).
-// The loop's diagnostics count the kept cells it changed (LevelDiagnostics::valleycells).
-// S3.5 replaces valleys.reachcells by valleys.reach_km, tested against the band like the floor.
+// level's band (formband), then channelcellmeans with channelcellcap_m. The loop's diagnostics
+// count the kept cells it changed (LevelDiagnostics::valleycells).
 void valleyfloorslevel(const LevelContext& context, LevelState& state);
 }

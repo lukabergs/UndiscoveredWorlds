@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "core/deterministic_random.hpp"
+#include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
 // Erosion plan Phase E5: the E5.0 contract (regional_cirques.hpp), which step E5.2
@@ -40,7 +41,9 @@ void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
 
     // The bowl's radius in fine cells: kilometres on the ground over the fine north-south
     // spacing, at most k (the halo rule); under one cell the centre alone.
-    const double cell_m = finepatchmetric(window, inputs.radius_m).dy_m;
+    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
+    const double cell_m = metric.dy_m;
+    const bool loop = bandupper > 0.0;
     const double radius = std::min(static_cast<double>(k), cirques.radius_km * 1000.0 / cell_m);
     if (!(radius > 0.0))
         return;
@@ -92,17 +95,22 @@ void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
                     continue;
                 const double floor = std::max(static_cast<double>(floorlevel), std::max(ela, z - cirques.depth_m));
                 any = true;
+                // S3.5: in the loop the distance on the ground, the column offsets scaled by the
+                // centre row's east-west over north-south cell size; the single pass keeps R9's cells.
+                const double ratio = loop ? eastwestratio(metric, y) : 1.0;
+                const int columns = loop ? columnextent(radius, ratio, k) : extent;
                 for (int dy = -extent; dy <= extent; dy++)
                 {
                     const int ny = y + dy;
                     if (ny < 0 || ny >= height)
                         continue;
-                    for (int dx = -extent; dx <= extent; dx++)
+                    for (int dx = -columns; dx <= columns; dx++)
                     {
                         const int nx = x + dx;
                         if (nx < 0 || nx >= width)
                             continue;
-                        const double d2 = static_cast<double>(dx * dx + dy * dy);
+                        const double east = static_cast<double>(dx) * ratio;
+                        const double d2 = east * east + static_cast<double>(dy * dy);
                         if (d2 > radius2)
                             continue;
                         const std::size_t next = static_cast<std::size_t>(ny) * static_cast<std::size_t>(width) + static_cast<std::size_t>(nx);
@@ -116,21 +124,14 @@ void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     if (!any)
         return;
 
-    // S3.2: a channel cell (its elevation its cell mean in the refinement loop, regional_solve.hpp)
-    // is lowered with the bowl around it, never below its own bed (FineChannels::bed_m,
-    // LevelState::bed_m); a channel cell at its bed, as in the single pass, keeps it.
-    const bool withbeds = channels.bed_m.size() == count;
+    // S3.5: a channel cell keeps its value (its bed in the single pass; its cell mean in the loop,
+    // which channelcellmeans, regional_valleys.hpp, lowers with the bowl around it, never back to
+    // the bed).
     for (std::size_t cell = 0; cell < count; cell++)
     {
-        if (sea[cell] != 0 || !std::isfinite(target[cell]))
+        if (sea[cell] != 0 || !std::isfinite(target[cell]) || channels.channel[cell] != 0)
             continue;
         const float value = std::max(floorlevel, static_cast<float>(target[cell]));
-        if (channels.channel[cell] != 0)
-        {
-            if (withbeds)
-                elevation_m[cell] = std::max(channels.bed_m[cell], std::min(elevation_m[cell], value));
-            continue;
-        }
         elevation_m[cell] = std::min(elevation_m[cell], value);
     }
 }

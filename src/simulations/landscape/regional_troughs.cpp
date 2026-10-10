@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <limits>
 
+#include "simulations/landscape/regional_valleys.hpp"
+
 
 // Erosion plan Phase E5: the E5.0 contract (regional_troughs.hpp), which step E5.1
 // implements: glacial troughs, a power-law cross-section about every glaciated land channel
@@ -30,9 +32,11 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
         return;
     const int k = window.scale;
     const double reference = troughs.reference_km2 > 0.0 ? troughs.reference_km2 : 1.0;
-    const double cell_m = finepatchmetric(window, inputs.radius_m).dy_m;
+    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
+    const double cell_m = metric.dy_m;
     if (!(cell_m > 0.0))
         return;
+    const bool loop = bandupper > 0.0;
     // The half-width in fine cells: kilometres on the ground over the fine north-south
     // spacing, capped at widthmax_km and at k (one global cell, the halo rule).
     const double widthcells = troughs.width_km * 1000.0 / cell_m;
@@ -63,23 +67,28 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
             const double halfwidth = std::min(widthmax, widthcells * std::pow(area / reference, troughs.widthexponent));
             if (!(halfwidth >= 1.0))
                 continue;  // under one fine cell: only the axis, which is a channel
-            if (bandupper > 0.0 && (halfwidth < bandlower || halfwidth >= bandupper))
+            if (loop && (halfwidth < bandlower || halfwidth >= bandupper))
                 continue;  // carved at another level of the refinement
             const int extent = std::min(k, static_cast<int>(std::floor(halfwidth)));
             const double bed = static_cast<double>(withbeds ? channels.bed_m[cell] : elevation_m[cell]);
             if (!std::isfinite(bed))
                 continue;
+            // S3.5: in the loop the distance on the ground, the column offsets scaled by the axis row's
+            // east-west over north-south cell size; the single pass keeps R9's cells.
+            const double ratio = loop ? eastwestratio(metric, y) : 1.0;
+            const int columns = loop ? columnextent(halfwidth, ratio, k) : extent;
             for (int dy = -extent; dy <= extent; dy++)
             {
                 const int ny = y + dy;
                 if (ny < 0 || ny >= height)
                     continue;
-                for (int dx = -extent; dx <= extent; dx++)
+                for (int dx = -columns; dx <= columns; dx++)
                 {
                     const int nx = x + dx;
                     if (nx < 0 || nx >= width)
                         continue;
-                    const double distance = std::sqrt(static_cast<double>(dx * dx + dy * dy));
+                    const double east = static_cast<double>(dx) * ratio;
+                    const double distance = std::sqrt(east * east + static_cast<double>(dy * dy));
                     if (distance > halfwidth)
                         continue;
                     const double value = bed + troughs.wall_m * std::pow(distance / halfwidth, troughs.exponent);
@@ -93,15 +102,11 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     {
         if (sea[cell] != 0 || !std::isfinite(target[cell]))
             continue;
-        const float value = std::max(floorlevel, static_cast<float>(target[cell]));
+        // S3.5: a channel cell keeps its value (its bed in the single pass; its cell mean in the
+        // loop, which channelcellmeans lowers with the trough around it, never back to the bed).
         if (channels.channel[cell] != 0)
-        {
-            // S3.2: a channel cell's mean is lowered with the trough around it, never below its own
-            // bed (a channel cell at its bed, as in the single pass, keeps it).
-            if (withbeds)
-                elevation_m[cell] = std::max(channels.bed_m[cell], std::min(elevation_m[cell], value));
             continue;
-        }
+        const float value = std::max(floorlevel, static_cast<float>(target[cell]));
         elevation_m[cell] = std::min(elevation_m[cell], value);
     }
 }

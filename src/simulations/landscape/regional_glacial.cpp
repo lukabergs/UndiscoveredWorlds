@@ -9,6 +9,7 @@
 #include "simulations/landscape/regional_cirques.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/regional_troughs.hpp"
+#include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
@@ -128,27 +129,32 @@ void glacialformslevel(const LevelContext& context, LevelState& state)
     const RegionalWindow& window = context.window;
     const RegionalParameters& parameters = context.parameters;
     const RegionalDetails& details = context.details;
-    const bool band = details.factor >= 2;
-    const double bandlower = band ? details.detailcells / 2.0 : 0.0;
-    const double bandupper = band ? details.detailcells * details.factor / 2.0 : 0.0;
+    double bandlower = 0.0, bandupper = 0.0;
+    formband(context, bandlower, bandupper);
+    // S3.5: the channel cells next to a carved cell are lowered towards their cell means
+    // (channelcellmeans, regional_valleys.hpp), never back to their beds.
+    const double cap = channelcellcap_m(context);
     state.glacial = regionalglacialfields(inputs, window, parameters);
     const bool record = state.diagnostics != nullptr;
+    const bool keep = record || cap > 0.0;
     std::vector<float> before;
     if (details.troughs)
     {
-        if (record)
+        if (keep)
             before = state.elevation_m;
         carvetroughs(inputs, window, parameters, state.glacial, state.channels, state.sea, state.elevation_m, bandlower,
                      bandupper);
+        channelcellmeans(window, state.channels, state.sea, cap, before, state.elevation_m);
         if (record)
             state.diagnostics->troughcells = keptcellschanged(window, before, state.elevation_m);
     }
     if (details.cirques)
     {
-        if (record)
+        if (keep)
             before = state.elevation_m;
         carvecirques(inputs, window, parameters, state.glacial, state.channels, state.sea, state.elevation_m, bandlower,
                      bandupper);
+        channelcellmeans(window, state.channels, state.sea, cap, before, state.elevation_m);
         if (record)
             state.diagnostics->cirquecells = keptcellschanged(window, before, state.elevation_m);
     }

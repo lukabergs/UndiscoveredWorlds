@@ -183,9 +183,17 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
         return;
     const int k = window.scale;
     const double reference = valleys.reference_m3s > 0.0 ? valleys.reference_m3s : 1.0;
-    const bool sides = valleys.sideslope > 0.0 && valleys.reachcells > 0;
-    const int reach = sides ? std::min(k, valleys.reachcells) : 0;
-    const double cell_m = finepatchmetric(window, inputs.radius_m).dy_m;
+    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
+    const double cell_m = metric.dy_m;
+    // The refinement loop (bandupper > 0, multiscale plan S3.5): floors by Euclidean distance and,
+    // with valleys.reach_km > 0, the sides' reach in km on the ground over the level's cell size,
+    // its full width tested against the band; the single pass keeps R9's Chebyshev rule in cells.
+    const bool loop = bandupper > 0.0;
+    const bool reachkm = loop && valleys.reach_km > 0.0;
+    const bool sides = valleys.sideslope > 0.0 && (reachkm || valleys.reachcells > 0);
+    const double reach = !sides ? 0.0
+                         : reachkm ? std::min(static_cast<double>(k), valleys.reach_km * 1000.0 / cell_m)
+                                   : static_cast<double>(std::min(k, valleys.reachcells));
     // The floor in fine cells: kilometres on the ground over the fine north-south spacing.
     const double floorcells = valleys.floor_km * 1000.0 / cell_m;
     const double floormax = std::min(static_cast<double>(k), std::max(0.0, valleys.floormax_km * 1000.0 / cell_m));
@@ -207,29 +215,37 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
             const double halfwidth = std::min(floormax, floorcells * std::sqrt(discharge / reference));
             // The band (multiscale plan S2.3): the full width (the floor or the sides' reach,
             // whichever is wider) decides the lower end, so a sub-cell floor with sides is
-            // carved; the floor half-width the upper end (under one parent cell).
-            if (bandupper > 0.0 && (std::max(halfwidth, static_cast<double>(reach)) < bandlower || halfwidth >= bandupper))
+            // carved; the floor half-width the upper end (under one parent cell). S3.5: with the
+            // reach in km the full width decides both ends (the whole form at one level).
+            const double fullwidth = std::max(halfwidth, reach);
+            if (loop && (fullwidth < bandlower || (reachkm ? fullwidth : halfwidth) >= bandupper))
                 continue;  // carved at another level of the refinement
-            const int extent = std::min(k, std::max(static_cast<int>(std::floor(halfwidth)), reach));
+            const int extent = std::min(k, static_cast<int>(std::floor(fullwidth)));
             if (extent < 1)
                 continue;
             const double bed = static_cast<double>(withbeds ? channels.bed_m[cell] : elevation_m[cell]);
+            // Chebyshev in cells in the single pass (R9); in the loop Euclidean on the ground (S3.5), the
+            // east-west offset scaled by the axis row's east-west over north-south cell size.
+            const double ratio = loop ? eastwestratio(metric, y) : 1.0;
+            const int columns = loop ? columnextent(fullwidth, ratio, k) : extent;
             for (int dy = -extent; dy <= extent; dy++)
             {
                 const int ny = y + dy;
                 if (ny < 0 || ny >= height)
                     continue;
-                for (int dx = -extent; dx <= extent; dx++)
+                for (int dx = -columns; dx <= columns; dx++)
                 {
                     const int nx = x + dx;
                     if (nx < 0 || nx >= width)
                         continue;
-                    const int distance = std::max(std::abs(dx), std::abs(dy));
+                    const double east = static_cast<double>(dx) * ratio;
+                    const double distance = loop ? std::sqrt(east * east + static_cast<double>(dy * dy))
+                                                 : static_cast<double>(std::max(std::abs(dx), std::abs(dy)));
                     double value;
-                    if (static_cast<double>(distance) <= halfwidth)
+                    if (distance <= halfwidth)
                         value = bed;
                     else if (distance <= reach)
-                        value = bed + (static_cast<double>(distance) - halfwidth) * rise;
+                        value = bed + (distance - halfwidth) * rise;
                     else
                         continue;
                     const std::size_t next = static_cast<std::size_t>(ny) * static_cast<std::size_t>(width) + static_cast<std::size_t>(nx);
@@ -242,17 +258,81 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     {
         if (sea[cell] != 0 || !std::isfinite(target[cell]))
             continue;
-        const float value = std::max(floorlevel, static_cast<float>(target[cell]));
+        // S3.5: a channel cell keeps its value (its bed in the single pass; its cell mean in the
+        // loop, which channelcellmeans lowers with the floor around it, never back to the bed).
         if (channels.channel[cell] != 0)
-        {
-            // S3.2: a channel cell's mean is lowered with the floor around it, never below its own
-            // bed (a channel cell at its bed, as in the single pass, keeps it).
-            if (withbeds)
-                elevation_m[cell] = std::max(channels.bed_m[cell], std::min(elevation_m[cell], value));
             continue;
-        }
+        const float value = std::max(floorlevel, static_cast<float>(target[cell]));
         elevation_m[cell] = std::min(elevation_m[cell], value);
     }
+}
+
+double eastwestratio(const PatchMetric& metric, int y)
+{
+    if (y < 0 || static_cast<std::size_t>(y) >= metric.rowdx_m.size() || !(metric.dy_m > 0.0))
+        return 1.0;
+    return std::max(0.0, metric.rowdx_m[static_cast<std::size_t>(y)] / metric.dy_m);
+}
+
+int columnextent(double radius, double ratio, int k)
+{
+    if (!(radius > 0.0))
+        return 0;
+    if (!(ratio > 0.0))
+        return k;
+    return static_cast<int>(std::min(static_cast<double>(k), std::floor(radius / ratio)));
+}
+
+void channelcellmeans(const RegionalWindow& window, const FineChannels& channels, const std::vector<uint8_t>& sea,
+                      double cap_m, const std::vector<float>& before, std::vector<float>& elevation_m)
+{
+    if (!(cap_m > 0.0))
+        return;
+    const int width = window.domainfinewidth(), height = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    if (count == 0 || channels.channel.size() != count || channels.bed_m.size() != count || sea.size() != count ||
+        before.size() != count || elevation_m.size() != count)
+        return;
+    const auto index = [width](int x, int y) {
+        return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+    };
+    // Only non-channel cells are read and only channel cells written, so the order does not matter.
+    for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+        {
+            const std::size_t cell = index(x, y);
+            if (channels.channel[cell] == 0 || sea[cell] != 0)
+                continue;
+            const double bed = static_cast<double>(channels.bed_m[cell]);
+            double sum = 0.0, carvedsum = 0.0;
+            int neighbours = 0, carved = 0;
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    const int nx = x + dx, ny = y + dy;
+                    if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= width || ny >= height)
+                        continue;
+                    const std::size_t other = index(nx, ny);
+                    if (channels.channel[other] != 0 || sea[other] != 0)
+                        continue;
+                    const double above = static_cast<double>(elevation_m[other]) - bed;
+                    sum += above;
+                    neighbours++;
+                    if (elevation_m[other] != before[other])
+                    {
+                        carvedsum += above;
+                        carved++;
+                    }
+                }
+            if (carved == 0)
+                continue;
+            // regional_solve.cpp's cell mean on the carved field, and never above the carved neighbours'
+            // mean: under a form narrower than the diagonal (half-width below sqrt 2 cells) the uncarved
+            // diagonal neighbours would otherwise hold the axis above its flanks.
+            const double height_m = std::max(0.0, std::min(sum / neighbours, carvedsum / carved));
+            const float mean = static_cast<float>(bed + std::min(height_m, cap_m));
+            elevation_m[cell] = std::min(elevation_m[cell], mean);
+        }
 }
 
 void incisionlevel(const LevelContext& context, LevelState& state)
@@ -284,16 +364,37 @@ void valleyfloorslevel(const LevelContext& context, LevelState& state)
     const RegionalDetails& details = context.details;
     if (!details.valleys)
         return;
-    const bool band = details.factor >= 2;
-    const double bandlower = band ? details.detailcells / 2.0 : 0.0;
-    const double bandupper = band ? details.detailcells * details.factor / 2.0 : 0.0;
+    double bandlower = 0.0, bandupper = 0.0;
+    formband(context, bandlower, bandupper);
+    const double cap = channelcellcap_m(context);
     std::vector<float> before;
-    if (state.diagnostics != nullptr)
+    if (state.diagnostics != nullptr || cap > 0.0)
         before = state.elevation_m;
     carvevalleys(context.inputs, context.window, context.parameters, state.channels, state.sea, state.elevation_m,
                  bandlower, bandupper);
+    channelcellmeans(context.window, state.channels, state.sea, cap, before, state.elevation_m);
     if (state.diagnostics != nullptr)
         state.diagnostics->valleycells = keptcellschanged(context.window, before, state.elevation_m);
     recordlevelstep(state, LevelStep::valleyfloors);
+}
+
+void formband(const LevelContext& context, double& bandlower, double& bandupper)
+{
+    const RegionalDetails& details = context.details;
+    bandlower = 0.0;
+    bandupper = 0.0;
+    if (details.factor < 2)
+        return;
+    bandlower = details.detailcells / 2.0;
+    // S3.5: level 1 also carves the forms above its band (their extent clamped to one global cell
+    // by each unit), since no coarser level of the loop carves them.
+    bandupper = context.level == 1 ? std::numeric_limits<double>::infinity() : details.detailcells * details.factor / 2.0;
+}
+
+double channelcellcap_m(const LevelContext& context)
+{
+    if (context.refinement == nullptr || !(context.refinement->channelcellslope > 0.0))
+        return 0.0;
+    return context.refinement->channelcellslope * finepatchmetric(context.window, context.inputs.radius_m).dy_m;
 }
 }
