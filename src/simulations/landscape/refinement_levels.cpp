@@ -128,6 +128,65 @@ double globalmeanerror(const LevelWindow& window, const std::vector<float>& fiel
         }
     return largest;
 }
+
+// LevelDiagnostics::ringbasincells: the kept cells reached from the unpinned cells beside the
+// domain's outer ring on a window edge (the west and east columns; the north and south rows unless
+// they lie on a pole) by the solve's moves (analytical_relief.hpp: orthogonal steps, diagonal steps
+// not between two pinned corner cells) over unpinned cells.
+int ringbasincells(const LevelWindow& level, const std::vector<uint8_t>& pinned)
+{
+    const int width = level.domaincolumns, height = level.domainrows;
+    if (pinned.size() != level.domainsize() || width < 3 || height < 3)
+        return 0;
+    std::vector<uint8_t> reached(pinned.size(), 0);
+    std::vector<std::size_t> stack;
+    const auto seed = [&](int x, int y) {
+        const std::size_t cell = level.index(x, y);
+        if (pinned[cell] == 0 && reached[cell] == 0)
+        {
+            reached[cell] = 1;
+            stack.push_back(cell);
+        }
+    };
+    for (int y = 1; y < height - 1; y++)
+    {
+        seed(1, y);
+        seed(width - 2, y);
+    }
+    if (level.domainrow0 > 0)
+        for (int x = 1; x < width - 1; x++)
+            seed(x, 1);
+    if (level.domainrow0 + height < level.levelheight())
+        for (int x = 1; x < width - 1; x++)
+            seed(x, height - 2);
+    while (!stack.empty())
+    {
+        const std::size_t cell = stack.back();
+        stack.pop_back();
+        const int x = static_cast<int>(cell % static_cast<std::size_t>(width));
+        const int y = static_cast<int>(cell / static_cast<std::size_t>(width));
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                const int nx = x + dx, ny = y + dy;
+                if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= width || ny >= height)
+                    continue;
+                const std::size_t next = level.index(nx, ny);
+                if (pinned[next] != 0 || reached[next] != 0)
+                    continue;
+                if (dx != 0 && dy != 0 && pinned[level.index(nx, y)] != 0 && pinned[level.index(x, ny)] != 0)
+                    continue;
+                reached[next] = 1;
+                stack.push_back(next);
+            }
+    }
+    const int x0 = level.keptcolumnoffset(), y0 = level.keptrowoffset();
+    int count = 0;
+    for (int y = y0; y < y0 + level.rows; y++)
+        for (int x = x0; x < x0 + level.columns; x++)
+            count += reached[level.index(x, y)] != 0 ? 1 : 0;
+    return count;
+}
 }
 
 double levelcellsize_km(double radius_m, int worldwidth, int factor, int level)
@@ -346,8 +405,8 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         throw std::invalid_argument("runrefinement: refinement.channel_cell_slope must be finite and not negative");
     if (parameters.meanpasses < 0 || target.window.halo < refinementhalo(parameters.meanpasses, refinement.smoothpasses,
                                                                                          parameters.tributaries.enabled != 0))
-        throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 + 2 x smooth_passes + "
-                                    "2 (the lake flood) global cells, plus tributaryreach with tributaries on");
+        throw std::invalid_argument("runrefinement: the halo must be at least refinementhalo, 2 x meanpasses + 6 + 2 x "
+                                    "smooth_passes global cells, plus tributaryreach with tributaries on");
     std::int64_t finest = 1;
     for (int level = 0; level < levels; level++)
     {
@@ -469,6 +528,7 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         details.parentseagate = nullptr;
         details.lakes.parentsurface_m = nullptr;
         details.lakes.parentreach = nullptr;
+        diagnostics.ringbasincells = ringbasincells(level, state.pinned);
         diagnostics.reliefconverged = state.reliefconverged;
         diagnostics.changedreceivers = state.changedreceivers;
         std::vector<float>& elevation = state.elevation_m;

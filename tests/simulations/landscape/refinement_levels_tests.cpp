@@ -354,6 +354,54 @@ TEST_F(Landscape, RefinementLevelsOverlap)
     }
 }
 
+TEST_F(Landscape, RefinementLevelsOverlapAtThreeLevels)
+{
+    // Three levels at factor 4 (k = 64) with every feature on (tributaries off) and the tuned
+    // refinement (smooth_passes 6, parent_lift 2, prolongation_limit 1, channel_cell_slope 0.3)
+    // at the loop's smallest halo for them, refinementhalo(2, 6) (S3.8: levelhalo keeps
+    // globalreachcells at every level, so level 3 has 6 global cells here): T (global columns
+    // 245 .. 251, rows 71 .. 75) and U (columns 248 .. 0 across the date line, rows 70 .. 73)
+    // differ in column and row origin; their overlap (columns 248 .. 251, rows 71 .. 73) holds
+    // the lake cell (248, 71) on U's west and T's north edge. Every level's shared kept cells
+    // bit-identical.
+    const RegionalGlobalInputs inputs = wideworld();
+    const RegionalParameters parameters = everyfeature();
+    RefinementParameters refinement;
+    refinement.smoothpasses = 6;
+    refinement.parentlift = 2;
+    refinement.prolongationlimit = 1;
+    refinement.channelcellslope = 0.3;
+    const int halo = landscape::refinementhalo(2, refinement.smoothpasses);
+    const RegionalWindow t = landscape::regionalwindow(256, 64, halo, 164.6, -15.4, 174.3, -9.9);
+    const RegionalWindow u = landscape::regionalwindow(256, 64, halo, 168.9, -14.0, -179.0, -8.5);
+    ASSERT_EQ(t.column0, 245);
+    ASSERT_EQ(t.row0, 71);
+    ASSERT_EQ(u.column0, 248);
+    ASSERT_EQ(u.row0, 70);
+    ASSERT_GT(u.column0 + u.columns, 256);
+    const auto run = [&](const RegionalWindow& window, const std::string& name) {
+        LevelTarget target;
+        target.window = window;
+        target.level = 3;
+        const auto start = std::chrono::steady_clock::now();
+        RefinementResult result = landscape::runrefinement(inputs, target, parameters, refinement);
+        std::printf("[refinement] %s: L 3, %.3f s\n", name.c_str(),
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+        for (const LevelDiagnostics& diagnostics : result.levels)
+            std::printf("[refinement]   level %d: domain %d x %d, halo %d parent cells; ring sub-basin cells %d; forced %d\n",
+                        diagnostics.level, diagnostics.window.domaincolumns, diagnostics.window.domainrows,
+                        diagnostics.window.halo, diagnostics.ringbasincells, diagnostics.projection.forcedparents);
+        return result;
+    };
+    const RefinementResult a = run(t, "tuned, every feature T");
+    const RefinementResult b = run(u, "tuned, every feature U");
+    ASSERT_EQ(a.levels.size(), 3u);
+    EXPECT_EQ(a.levels[2].window.halo, landscape::levelhalo(halo, 4, 3));
+    const OverlapCounts counts = compareoverlaplevels(a, b, "tuned, every feature T/U at k 64");
+    EXPECT_GT(counts.lake, 0);
+    EXPECT_GT(counts.channel, 0);
+}
+
 TEST_F(Landscape, RefinementLevelsOverlapValleysAtLevelTwo)
 {
     // The valleys carved at level 2 (half-widths of 1 to 4 level-2 cells, the band rule) on P

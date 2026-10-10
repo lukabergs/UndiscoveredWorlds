@@ -55,9 +55,20 @@
 //   after the projection's drying). Reach: the flood is a component inside one lake cell's
 //   3 x 3 zone, read on the solved elevation: a kept cell's water depends on the solved field
 //   up to 2 global cells beyond it (level 1; 1 parent cell + 3 level cells at level >= 2, also
-//   within 2 global cells), on top of the smoothing's reach, so the loop's halo adds 2 global
-//   cells (refinementhalo: 2 x meanpasses + 2 + 2 x smooth_passes + lakefloodreach, 28 at the
-//   defaults).
+//   within 2 global cells), on top of the smoothing's reach, so the loop's halo adds
+//   lakefloodreach, 2 parent cells at every level (2 global cells at level 1).
+// - The halo budget per level (S3.8), in parent cells at level L (s = factor^(L - 1) parent cells
+//   per global cell), each reach on top of the one before: the presmoothing 2 x meanpasses; the
+//   channels and the solve channelreachglobalcells s plus the solve's margin
+//   solvemarginglobalcells s (refinement_grid.hpp; found by trial: the solve's reach is not
+//   bounded, LevelDiagnostics::ringbasincells), the forms beside the solve (a form's extent is
+//   at most one parent cell: k level cells at level 1, under factor level cells deeper) counted
+//   on top as formreach; the channel-cell mean's one level cell (channelmeanreach, one parent
+//   cell); the lake flood lakefloodreach; the smoothing 2 x smooth_passes; the tributaries
+//   tributaryreach. levelhalo gives s (4 + ceil((halo - 4) / s)): the global-cell reaches kept,
+//   the parent-cell ones rounded up to whole global cells. At the defaults (halo 30, factor 4)
+//   levels 1, 2, 3 take 30, 44, 96 parent cells (30, 11, 6 global cells; 28, 36, 64 parent
+//   cells at halo 28 before S3.8).
 // Planet-free: the parameters are filled from tuning::landscape::refinement by the planet
 // adapter (src/simulations/regional/regional_inputs.hpp, refinementparameters).
 
@@ -101,16 +112,27 @@ struct RefinementParameters
 // the halo chain's `reach`, refinement_grid.hpp).
 constexpr int prolongationreach = 2;
 
-// The lake flood's reach in global cells (S2.8: a component inside one lake cell's 3 x 3 zone).
+// The lake flood's reach in parent cells (S2.8: a component inside one lake cell's 3 x 3 zone: 2
+// global cells at level 1, 1 parent cell + 3 level cells at level >= 2).
 constexpr int lakefloodreach = 2;
 
-// The halo in global cells the loop requires: 2 x meanpasses + 2 (the single pass's rule), 2 x
-// smoothpasses (S2.7's smoothing) and lakefloodreach (S2.8); with the tributaries on (S3.3),
-// tributaryreach more (regional_tributaries.hpp: parent cells; levelhalo turns the target's
-// extra global cells into at least as many parent cells at every level).
+// The forms' reach in parent cells (S3.8): a valley floor, trough or cirque reaches at most k
+// level cells (one global cell) at level 1 and under factor level cells (the band) deeper.
+constexpr int formreach = 1;
+
+// The channel-cell mean's reach in parent cells (S3.8): one level cell (channelcellmeans and
+// solvelevel's cell mean, refinement.channel_cell_slope), counted as one parent cell.
+constexpr int channelmeanreach = 1;
+
+// The halo in global cells the loop requires: 2 x meanpasses + channelreachglobalcells (the single
+// pass's rule), formreach and channelmeanreach (S3.8), lakefloodreach (S2.8), 2 x smoothpasses
+// (S2.7's smoothing); with the tributaries on (S3.3), tributaryreach more (regional_tributaries.hpp:
+// parent cells). levelhalo keeps globalreachcells in global cells at every level and turns the rest
+// into at least as many parent cells. 30 at the defaults (meanpasses 6, smoothpasses 6).
 constexpr int refinementhalo(int meanpasses, int smoothpasses, bool tributaries = false)
 {
-    return 2 * meanpasses + 2 + 2 * smoothpasses + lakefloodreach + (tributaries ? tributaryreach : 0);
+    return 2 * meanpasses + channelreachglobalcells + formreach + channelmeanreach + lakefloodreach + 2 * smoothpasses +
+           (tributaries ? tributaryreach : 0);
 }
 
 // The steps of a level in their fixed order (section 3, "S2.3's level placement", item 5),
@@ -220,8 +242,8 @@ void correctparentmeans(const LevelWindow& parent, const std::vector<float>& par
 // The target of a refinement: the global window's kept box and halo in global cells
 // (window.scale is not read) and the finest level computed, at least 1; level l's halo is
 // levelhalo(window.halo, factor, l) parent cells (refinement_grid.hpp: window.halo at level 1,
-// a whole number of global cells reaching channelreachglobalcells plus the presmoothing's
-// share at deeper levels).
+// a whole number of global cells reaching globalreachcells plus the parent-cell reaches' share
+// at deeper levels).
 struct LevelTarget
 {
     RegionalWindow window;
@@ -292,6 +314,12 @@ struct LevelDiagnostics
     int valleycells = 0;
     int troughcells = 0;
     int cirquecells = 0;
+    // S3.8: the kept cells whose solve sub-basin (the unpinned cells connected to it by orthogonal
+    // steps and diagonal steps not between two pinned corners, analytical_relief.hpp) touches the
+    // domain's outer ring on a window edge (not at a pole, where every window clips alike). The
+    // solve's result there may depend on the window: bit identity with another window is not
+    // guaranteed there, only found by the overlap tests (refinement_grid.hpp, solvemarginglobalcells).
+    int ringbasincells = 0;
     bool reliefconverged = false;        // the level's solve (AnalyticalReliefResult)
     int changedreceivers = 0;
     double seconds = 0.0;                // the level's wall-clock time

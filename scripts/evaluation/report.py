@@ -231,6 +231,7 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Lake edges on global cell boundaries (share)', 'lakeedgealigned'),
                  ('Land roughness, RMS Laplacian (m)', 'landroughness_m'), ('Valley cells', 'valleycells'),
                  ('Trough cells', 'troughcells'), ('Cirque cells', 'cirquecells'),
+                 ('Kept cells whose solve sub-basin reaches the domain ring (identity not guaranteed)', 'ringbasincells'),
                  ('Seconds', 'seconds'))
 
 

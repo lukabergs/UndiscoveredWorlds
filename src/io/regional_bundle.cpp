@@ -370,6 +370,7 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                         << ", \"landroughness_m\": " << jsonnumber(level.landroughness_m)
                         << ", \"valleycells\": " << level.valleycells << ", \"troughcells\": " << level.troughcells
                         << ", \"cirquecells\": " << level.cirquecells
+                        << ", \"ringbasincells\": " << level.ringbasincells
                         << ", \"reliefconverged\": " << (level.reliefconverged ? "true" : "false")
                         << ", \"changedreceivers\": " << level.changedreceivers
                         << ", \"seconds\": " << jsonnumber(level.seconds) << ", \"steps\": [";

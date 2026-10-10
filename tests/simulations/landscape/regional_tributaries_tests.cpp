@@ -466,9 +466,9 @@ TEST_F(Landscape, RegionalTributariesOverlap)
 
 TEST_F(Landscape, RegionalTributariesOverlapAtThreeLevels)
 {
-    // The loop at three levels (k 64) with tributaries on at its smallest halo: P' and Q' (Q'
-    // across the date line) bit-identical on their overlap at every level, with more shared
-    // channel cells than without tributaries.
+    // The loop at three levels (k 64) with tributaries on and off at its smallest halo with them on:
+    // P' and Q' (Q' across the date line) bit-identical on their overlap at every level, with more
+    // shared channel cells than without tributaries.
     const RegionalGlobalInputs inputs = wideworld();
     const RegionalParameters parameters = tributarieswithvalleys();
     RegionalParameters off = parameters;
@@ -478,9 +478,10 @@ TEST_F(Landscape, RegionalTributariesOverlapAtThreeLevels)
     const int channels = compareoverlaplevels(p, q, "tributaries P'/Q' at k 64");
     const RefinementResult plainp = refine(inputs, windowpsmall(64), 3, off, "no tributaries P'");
     const RefinementResult plainq = refine(inputs, windowqsmall(64), 3, off, "no tributaries Q'");
-    // (Not compared: with tributaries off this pair at this halo is not bit-identical at level 3,
-    // 208 elevations and 59 discharges on c800eea's loop, an S2 matter outside S3.3.)
-    const int without = sharedchannels(plainp, plainq);
+    // S3.8's regression test: bit-identical with tributaries off too. Without the solve's margin
+    // (solvemarginglobalcells 0, globalreachcells 2) level 3 has 3 global cells of halo here and
+    // 263 elevations and 82 discharges differ at P's north edge: the level-3 solve reaches farther.
+    const int without = compareoverlaplevels(plainp, plainq, "no tributaries P'/Q' at k 64");
     std::printf("[tributaries] P'/Q' at k 64: %d shared channel cells, %d without tributaries\n", channels, without);
     EXPECT_GT(channels, without);
     for (const LevelDiagnostics& level : p.levels)

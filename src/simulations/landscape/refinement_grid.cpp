@@ -62,13 +62,14 @@ LevelWindow buildwindow(int worldwidth, int factor, int level, std::int64_t halo
 }
 
 // levelhalo in 64 bits (levelhalo's int overflows at deep levels before the domain check
-// can refuse the window): factor^(L - 1) (2 + ceil((targethalo - 2) / factor^(L - 1))).
+// can refuse the window): factor^(L - 1) (4 + ceil((targethalo - 4) / factor^(L - 1))), 4 =
+// globalreachcells.
 std::int64_t levelhalo64(int targethalo, int factor, int level)
 {
     if (level < 1)
         return 0;
     const std::int64_t scale = levelscale(factor, level - 1);
-    return scale * (channelreachglobalcells + ceildivide(targethalo - channelreachglobalcells, scale));
+    return scale * (globalreachcells + ceildivide(targethalo - globalreachcells, scale));
 }
 
 // The span snapped outwards to multiples of unit (unit >= 1), the rule of snapoutwards.
