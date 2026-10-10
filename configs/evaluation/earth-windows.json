@@ -1,0 +1,244 @@
+{
+  "schema": "uw-earth-windows/v1",
+  "description": "Earth reference windows from ETOPO 2022 (60 and 15 arc-seconds) shown beside regional maps at the same metres per pixel. Comparison inputs only, never forcing. box is [west, south, east, north] in degrees (west > east crosses the date line), centre is [lon, lat], metres_per_pixel is [min, max] where the features show. There is no water mask: the largest lakes carry their bed (Lake Superior to -180 m, the Caspian), most others a flat surface (checked on the 15 arc-second tiles: Geneva, Garda, Como, Constance, General Carrera, Lake of the Woods, Nipigon); ground below 0 m connected to the window's edge is drawn as sea, enclosed basins below 0 m as land; no rivers or ice are marked.",
+  "windows": [
+    {
+      "name": "zagros",
+      "title": "Zagros simply folded belt, Iran",
+      "centre": [52.5, 29.5],
+      "box": [47.0, 26.5, 58.0, 34.5],
+      "metres_per_pixel": [450, 2000],
+      "features": [
+        "whaleback (periclinal) anticlines 10-20 km apart and 50-150 km long, en echelon, parallel to the belt's NW-SE trend",
+        "eroded anticline cores: breached crests with inward-facing flatirons and inverted relief",
+        "salt plugs (Hormuz salt diapirs) as round domes a few km across in the Fars arc and on the Gulf coast",
+        "the High Zagros and the Main Zagros Reverse Fault as the belt's highest, northeastern edge above 3 km",
+        "the Dezful embayment and the Mesopotamian foreland as flat lowland to the southwest",
+        "the Kazerun fault's north-south offset of the fold trains near 51.5 E",
+        "the Persian Gulf as a shallow (under 100 m) foreland sea"
+      ]
+    },
+    {
+      "name": "eastern_tibet_three_rivers",
+      "title": "Eastern Tibet and the Three Parallel Rivers",
+      "centre": [99.5, 28.5],
+      "box": [94.0, 23.5, 106.0, 34.0],
+      "metres_per_pixel": [450, 3000],
+      "features": [
+        "the Salween, Mekong and Yangtze (Jinsha) gorges running north-south within about 70 km of each other, 2-3 km deep",
+        "the low-relief plateau surface at 4-5 km between and north of the gorges",
+        "the Longmen Shan front rising about 4 km over 50 km above the flat Sichuan Basin near 31 N, 103-104 E",
+        "Gongga Shan (7.5 km) on the plateau's eastern margin near 29.6 N, 101.9 E",
+        "the Red River valley as a straight NW-SE fault-controlled trough in the south",
+        "dendritic dissection of the plateau margin where the rivers leave it"
+      ]
+    },
+    {
+      "name": "bolivian_orocline",
+      "title": "Bolivian orocline, Salar de Uyuni to Santa Cruz",
+      "centre": [-65.5, -19.0],
+      "box": [-70.0, -23.0, -61.0, -15.0],
+      "metres_per_pixel": [450, 3000],
+      "features": [
+        "the Altiplano: an internally drained plateau at 3.6-4 km with dead-flat salars (Uyuni, Coipasa)",
+        "the Western Cordillera's volcanic cones above 5.5 km on the plateau's western edge",
+        "the Eastern Cordillera: deeply incised high ranges (Cordillera Real, near 6.4 km) on the plateau's eastern edge",
+        "the Subandean fold-thrust belt: long narrow anticline ridges 15-30 km apart, curving with the orocline",
+        "the bend of the Andes from NW-SE to N-S trend between 18 and 20 S",
+        "the flat Chaco foreland plain below 500 m to the east around Santa Cruz"
+      ]
+    },
+    {
+      "name": "norwegian_fjords",
+      "title": "Western Norway's fjords",
+      "centre": [7.0, 61.0],
+      "box": [4.0, 58.5, 13.0, 63.5],
+      "metres_per_pixel": [450, 1500],
+      "features": [
+        "Sognefjord: a 200 km branching trough, 2-5 km wide and over 1.2 km deep, with a shallow sill at its mouth",
+        "Hardangerfjord and the fjords of Sunnmore as overdeepened U-shaped troughs cut into a plateau",
+        "steep fjord walls rising 1-1.5 km from the water to a high-level plateau surface",
+        "Hardangervidda and the Jostedalsbreen plateau: low relief at 1-2 km between the troughs",
+        "the strandflat and skerry coast at the outer coast",
+        "hanging valleys entering the main troughs high on their walls"
+      ]
+    },
+    {
+      "name": "patagonian_fjords",
+      "title": "Patagonian fjords and icefields, Chile",
+      "centre": [-74.0, -46.5],
+      "box": [-77.0, -51.5, -71.0, -42.0],
+      "metres_per_pixel": [450, 2000],
+      "features": [
+        "a maze of fjords, channels and drowned valleys with islands (Chonos archipelago, Wellington Island)",
+        "straight north-south channels along the Liquine-Ofqui fault zone",
+        "the Northern Patagonian Icefield's plateau (San Valentin, 4 km) near 46.6 S and the Southern Icefield south of 48 S (ice surfaces, unmarked)",
+        "glacial lake basins east of the range (General Carrera, O'Higgins) as flat patches at their surface (about 200 m; no bed in the data)",
+        "the Taitao peninsula and the Golfo de Penas as the coast's large western bulge and bay",
+        "the narrow continental shelf dropping to the Chile trench in the west"
+      ]
+    },
+    {
+      "name": "aleutian_arc",
+      "title": "Central Aleutian arc across the date line",
+      "centre": [-177.5, 52.0],
+      "box": [175.0, 49.0, -170.0, 55.0],
+      "metres_per_pixel": [450, 3000],
+      "features": [
+        "the Aleutian trench about 7 km deep, about 150 km south of the islands and parallel to them",
+        "the chain of volcanic islands (Adak, Atka, Amchitka) on a narrow ridge crest",
+        "the forearc terrace and slope between the islands and the trench",
+        "the Bowers Ridge curving north from the arc near 180 into the Bering Sea",
+        "the flat Aleutian abyssal plain of the Bering Sea at about 3.5-4 km to the north",
+        "the Pacific plate's seafloor with seamounts south of the trench"
+      ]
+    },
+    {
+      "name": "mariana_arc",
+      "title": "Mariana trench and arc",
+      "centre": [145.0, 16.5],
+      "box": [140.0, 10.0, 150.0, 23.0],
+      "metres_per_pixel": [450, 4000],
+      "features": [
+        "the Mariana trench, convex to the east, with the Challenger Deep (about 10.9 km) near 11.3 N, 142.2 E",
+        "the frontal arc islands (Guam, Rota, Saipan) on the forearc's crest",
+        "the active volcanic arc's small islands and seamounts west of the frontal arc",
+        "the Mariana Trough back-arc basin opening behind the arc",
+        "the West Mariana Ridge, a remnant arc on the trough's western side",
+        "seamounts of the old Pacific plate entering the trench from the east"
+      ]
+    },
+    {
+      "name": "indonesian_arcs",
+      "title": "Banda arc and the eastern Sunda arc, Indonesia",
+      "centre": [125.5, -6.5],
+      "box": [118.0, -11.5, 133.0, -2.0],
+      "metres_per_pixel": [450, 4000],
+      "features": [
+        "the Banda arc's horseshoe: an inner volcanic arc (Flores, Alor, Wetar, the Banda islands) and an outer non-volcanic arc (Timor, Tanimbar, Seram)",
+        "the Timor trough (about 3 km) between Timor and the Australian shelf",
+        "the Weber Deep, a forearc basin over 7 km deep near 5.5 S, 131.5 E",
+        "the Banda Sea's deep basins inside the arc",
+        "the Lesser Sunda chain of volcanic islands from Sumbawa to Flores in the west",
+        "the shallow Sahul shelf of northern Australia in the south"
+      ]
+    },
+    {
+      "name": "scottish_highlands",
+      "title": "Scottish Highlands",
+      "centre": [-5.0, 57.2],
+      "box": [-8.5, 55.5, -1.5, 59.0],
+      "metres_per_pixel": [450, 1000],
+      "features": [
+        "the Great Glen: a straight NE-SW fault valley about 100 km long with Loch Ness",
+        "the NE-SW Caledonian grain of ridges and valleys",
+        "glacial troughs and sea lochs on the west coast (Loch Linnhe, Loch Hourn)",
+        "the Cairngorm plateau: a high (about 1.2 km) low-relief surface",
+        "the Highland Boundary Fault's straight front above the Midland Valley in the south",
+        "the Inner Hebrides (Skye, Mull) and the Outer Hebrides' low island chain"
+      ]
+    },
+    {
+      "name": "appalachian_fold_belt",
+      "title": "Appalachian Valley and Ridge, Pennsylvania to Virginia",
+      "centre": [-78.0, 39.8],
+      "box": [-82.0, 37.0, -74.0, 42.5],
+      "metres_per_pixel": [450, 1000],
+      "features": [
+        "the Valley and Ridge: long parallel ridges 5-10 km apart, a few hundred metres high, NE-SW",
+        "zig-zag ridges at plunging fold noses in central Pennsylvania",
+        "water gaps where the Susquehanna and the Potomac cut across the ridges",
+        "the Allegheny Front escarpment and the dendritic, deeply dissected Appalachian Plateau to the northwest",
+        "the Great Valley and the Blue Ridge to the southeast",
+        "the Piedmont and the flat Atlantic Coastal Plain in the east"
+      ]
+    },
+    {
+      "name": "canadian_shield_lakes",
+      "title": "Canadian Shield lakes, northwestern Ontario and Manitoba",
+      "centre": [-91.0, 50.5],
+      "box": [-97.0, 47.5, -85.0, 55.0],
+      "metres_per_pixel": [450, 1500],
+      "features": [
+        "low relief (under about 150 m) knobby scoured bedrock at 300-500 m",
+        "deranged drainage: lakes in structural lows as flat patches at their surface (Lake of the Woods, Lac Seul, Lake Nipigon; no bed in the data)",
+        "E-W and NE-SW lineaments of the greenstone belts and faults",
+        "the flat glacial Lake Agassiz plain around Lake Winnipeg in the west",
+        "the Hudson Bay Lowland's flat plain sloping to the northeast",
+        "Lake Superior's north shore escarpment in the southeast, with the lake's bed (to about -180 m) in the data: an enclosed basin below 0 m, drawn as land"
+      ]
+    },
+    {
+      "name": "dalmatian_coast",
+      "title": "Dalmatian coast and the Dinarides, Croatia",
+      "centre": [16.5, 43.8],
+      "box": [13.0, 41.5, 20.0, 46.0],
+      "metres_per_pixel": [450, 1500],
+      "features": [
+        "a concordant coast: long NW-SE islands (Brac, Hvar, Korcula) and channels parallel to the mountain grain",
+        "drowned valleys and the Kornati archipelago as a partly submerged ridge-and-valley landscape",
+        "karst ridges rising straight from the sea (Velebit, Biokovo, about 1.7-1.9 km)",
+        "poljes: flat-floored closed karst basins inland (Livanjsko polje)",
+        "the Dinaric ranges' parallel ridges continuing inland",
+        "the shallow Adriatic shelf"
+      ]
+    },
+    {
+      "name": "hawaii",
+      "title": "Hawaiian Islands",
+      "centre": [-157.5, 20.5],
+      "box": [-161.0, 18.0, -154.0, 23.0],
+      "metres_per_pixel": [450, 3000],
+      "features": [
+        "the shield volcanoes Mauna Loa and Mauna Kea (4.2 km above sea, about 9 km above the seafloor) with gentle flanks of a few degrees",
+        "rift zones as ridges radiating from the summits and continuing under the sea (Puna ridge)",
+        "the age progression to the northwest: eroded older islands with deep canyons (Kauai's Waimea) and sea cliffs (Molokai's north coast)",
+        "giant submarine landslide deposits (Nuuanu, north of Oahu)",
+        "the Hawaiian Deep, a moat around the islands about 5.5 km deep",
+        "the insular shelves of the older islands"
+      ]
+    },
+    {
+      "name": "himalaya_nepal",
+      "title": "Central Himalaya, Nepal",
+      "centre": [84.5, 28.5],
+      "box": [80.0, 26.0, 89.0, 31.0],
+      "metres_per_pixel": [450, 2000],
+      "features": [
+        "the flat Gangetic foreland below 200 m",
+        "the Siwalik hills: narrow ridges along the Main Frontal Thrust",
+        "the High Himalaya above 8 km (Everest, Kangchenjunga, Dhaulagiri, Annapurna) about 100 km from the foreland",
+        "transverse gorges cutting through the range (Kali Gandaki between Dhaulagiri and Annapurna)",
+        "the southern Tibetan plateau at 4.5-5 km with the Yarlung Tsangpo valley along its southern edge"
+      ]
+    },
+    {
+      "name": "alps",
+      "title": "Alps, Jura and Po plain",
+      "centre": [10.0, 46.2],
+      "box": [5.0, 43.5, 16.0, 48.5],
+      "metres_per_pixel": [450, 1500],
+      "features": [
+        "the arcuate range with peaks above 4 km (Mont Blanc, Monte Rosa)",
+        "glacial troughs: the Rhone, Rhine, Inn and Adige valleys",
+        "perialpine lakes as flat patches at their surface (Geneva, Constance, Como, Garda; no bed in the data)",
+        "the Jura's arcuate fold belt in the northwest: anticline ridges 5-10 km apart",
+        "the Molasse basin north of the range and the flat Po plain to the south"
+      ]
+    },
+    {
+      "name": "basin_and_range",
+      "title": "Basin and Range, Nevada and Utah",
+      "centre": [-115.5, 39.0],
+      "box": [-120.5, 35.5, -111.0, 42.0],
+      "metres_per_pixel": [450, 2000],
+      "features": [
+        "alternating N-S ranges and flat basins about 20-30 km apart: tilted fault blocks",
+        "playas and the Bonneville Salt Flats as dead-flat basin floors",
+        "Death Valley near 36.3 N, 116.8 W: an enclosed basin down to about -86 m, drawn as land",
+        "the Sierra Nevada's steep eastern escarpment in the southwest",
+        "the Wasatch front's straight escarpment in the east"
+      ]
+    }
+  ]
+}
