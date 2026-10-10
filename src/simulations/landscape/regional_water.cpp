@@ -10,6 +10,7 @@
 
 #include "core/deterministic_random.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_edges.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/regional_surface.hpp"
 
@@ -290,6 +291,10 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
     if (inheritance.flood)
     {
         const bool inherited = inheritance.parentsurface_m != nullptr;
+        // S3.4, the lake-sea contact at a sill: where the sea gate is open (regional_edges.hpp,
+        // seagate, and at level >= 2 the parent's sea gate, so only where the level's own sea could
+        // be), a cell between the sea level and S is passable whatever the lake mask says.
+        const std::vector<uint8_t> gate = seagate(inputs, window, warp, parameters, &lakeweight);
         const auto passable = [&](std::size_t cell, int x, int y) {
             if (sea[cell] != 0 || zone[cell] == none || !(elevation_m[cell] < surface[cell]))
                 return false;
@@ -297,6 +302,9 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
                 return false;
             if (inherited && (*inheritance.parentreach)[cell] == 0)
                 return false;
+            if (gate[cell] != 0 && (inheritance.parentseagate == nullptr || (*inheritance.parentseagate)[cell] != 0) &&
+                elevation_m[cell] > inputs.sealevel)
+                return true;
             const std::size_t global = at(window.globalcolumn(x), window.globalrow(y), width);
             return lakeweight[cell] >= 0.5f || inputs.elevation_m[global] > surface[cell];
         };
@@ -414,6 +422,44 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
                     }))
                     water3[cell] = 0;
             }
+    }
+
+    // 3c. S3.4, the rim raise capped at the level's noise band (LakeInheritance::rimcap_m): a dry
+    // cell (not sea, not a channel) beside the water of its own lake (8-neighbour, the zone's
+    // surface S) that step 5 would raise by more than terrain_m and more than its cap joins the
+    // water instead, within the flood's bounds (the lake's zone; below S on the start surface, so a
+    // parent above S keeps a dry child; at level >= 2 within one parent cell of the parent's water)
+    // and not beside water of a lower surface (steps 2 and 3b: adjacent water has one surface), in rounds until no cell joins (each round decided on the water
+    // of the one before, so the order of the cells does not matter). Reach: inside the lake
+    // cell's 3 x 3 zone, as the flood's. A deeper dry cell beyond those bounds keeps step 5's
+    // raise (counted in rimraise_m).
+    if (inheritance.flood && inheritance.rimcap_m != nullptr)
+    {
+        const std::vector<float>& cap = *inheritance.rimcap_m;
+        for (;;)
+        {
+            std::vector<std::size_t> joins;
+            for (int y = 0; y < domainheight; y++)
+                for (int x = 0; x < domainwidth; x++)
+                {
+                    const std::size_t cell = at(x, y, domainwidth);
+                    if (water3[cell] != 0 || sea[cell] != 0 || channels.channel[cell] != 0 || zone[cell] == none ||
+                        (inheritance.parentreach != nullptr && (*inheritance.parentreach)[cell] == 0) ||
+                        (inheritance.startsurface_m != nullptr && !((*inheritance.startsurface_m)[cell] < surface[cell])))
+                        continue;
+                    const double rise = static_cast<double>(surface[cell]) - static_cast<double>(elevation_m[cell]);
+                    if (!(rise > terrain) || !(rise > static_cast<double>(cap[cell])))
+                        continue;
+                    if (neighbour(x, y, [&](std::size_t other) { return water3[other] != 0 && surface[other] < surface[cell]; }))
+                        continue;
+                    if (neighbour(x, y, [&](std::size_t other) { return water3[other] != 0 && surface[other] == surface[cell]; }))
+                        joins.push_back(cell);
+                }
+            if (joins.empty())
+                break;
+            for (const std::size_t cell : joins)
+                water3[cell] = 1;
+        }
     }
 
     // 4. The beds: a wet cell at or above its surface is lowered to the surface minus a
@@ -536,6 +582,9 @@ FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow
         (inheritance.parentsurface_m != nullptr &&
          (inheritance.parentsurface_m->size() != count || inheritance.parentreach->size() != count)))
         throw std::invalid_argument("regionalwater: the parent's lake masks must both hold one value per domain cell");
+    if ((inheritance.parentseagate != nullptr && inheritance.parentseagate->size() != count) ||
+        (inheritance.rimcap_m != nullptr && inheritance.rimcap_m->size() != count))
+        throw std::invalid_argument("regionalwater: the parent sea gate and the rim cap must hold one value per domain cell");
     if (inheritance.startsurface_m != nullptr && inheritance.startsurface_m->size() != count)
         throw std::invalid_argument("regionalwater: the start surface must hold one value per domain cell");
     return shorewater(inputs, window, warp, parameters, sea, channels, elevation_m, globaldepth, inheritance);
@@ -546,7 +595,12 @@ void lakeslevel(const LevelContext& context, LevelState& state)
     // 5. Lakes and ice (regional_pass.cpp's step 5, moved here unchanged in S3.0).
     LakeInheritance lakes = context.details.lakes;
     if (lakes.flood)
+    {
         lakes.startsurface_m = &state.surface_m;  // the start surface with the beds pinned (S2.8)
+        if (state.noiseband_m.size() == state.surface_m.size())
+            lakes.rimcap_m = &state.noiseband_m;  // S3.4: the rim raise capped at the level's noise band
+        lakes.parentseagate = context.details.parentseagate;  // S3.4: the sill rule within the level's sea gate
+    }
     // S3.2: the lakes read a land channel cell at its bed (state.bed_m), not at its cell mean (the
     // refinement loop's refinement.channel_cell_slope, regional_solve.hpp): a wet channel cell is a lake
     // bed (the lakes' result), a dry one keeps its mean. With every land channel cell at its bed (the

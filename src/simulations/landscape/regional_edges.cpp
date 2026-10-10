@@ -104,13 +104,27 @@ std::vector<float> inlandcells(const RegionalGlobalInputs& inputs, const Regiona
     return inland;
 }
 
+std::vector<float> lakecellweight(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const FineWarp& warp)
+{
+    std::vector<float> mask(inputs.lakesurface_m.size());
+    for (std::size_t global = 0; global < mask.size(); global++)
+        mask[global] = lakecell(inputs, global) ? 1.0f : 0.0f;
+    return upsample(mask, inputs.width, inputs.height, box, warp);
+}
+
 std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const FineWarp& warp,
-                             const RegionalParameters& parameters)
+                             const RegionalParameters& parameters, const std::vector<float>* lakeweight)
 {
     const int width = inputs.width, height = inputs.height, k = box.scale;
     const int domainwidth = box.domainfinewidth(), domainheight = box.domainfineheight();
     const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
+    if (lakeweight != nullptr && lakeweight->size() != count)
+        throw std::invalid_argument("seagate: the lake weight must hold one value per fine cell of the box");
     const std::vector<uint8_t> nearsea = nearseacells(inputs);
+    // S3.4: with a lake weight a lake cell's block is not excluded as a whole; a cell is excluded
+    // where the lake cells dominate (weight >= 0.5) and a lake cell's block is gated by the rule of
+    // the other cells (the 3 x 3 rule on its own global cell, or the smooth gate's reach).
+    const auto lakeside = [&](std::size_t cell) { return lakeweight != nullptr && (*lakeweight)[cell] >= 0.5f; };
     std::vector<uint8_t> gate(count, 0);
     if (parameters.edges.smoothgate <= 0)
     {
@@ -118,7 +132,15 @@ std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const RegionalW
         {
             const int row = box.globalrow(y);
             for (int x = 0; x < domainwidth; x++)
-                gate[at(x, y, domainwidth)] = nearsea[at(box.globalcolumn(x), row, inputs.width)];
+            {
+                const std::size_t cell = at(x, y, domainwidth);
+                const int column = box.globalcolumn(x);
+                if (lakeweight == nullptr)
+                    gate[cell] = nearsea[at(column, row, inputs.width)];
+                else if (!lakeside(cell))
+                    gate[cell] = aroundcell(width, height, column, row,
+                                            [&](std::size_t other) { return inputs.network.sea[other] != 0; }) ? 1 : 0;
+            }
         }
         return gate;
     }
@@ -141,12 +163,14 @@ std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const RegionalW
         {
             const std::size_t cell = at(x, y, domainwidth);
             const std::size_t global = at(box.globalcolumn(x), row, width);
+            if (lakeside(cell))
+                continue;
             if (nearsea[global] != 0)
             {
                 gate[cell] = 1;
                 continue;
             }
-            if (lakecell(inputs, global))
+            if (lakeweight == nullptr && lakecell(inputs, global))
                 continue;
             const double gx = globalunits(box.absolutefinecolumn(x), k);
             double wx = gx, wy = gy;

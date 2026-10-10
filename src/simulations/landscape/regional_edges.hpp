@@ -35,6 +35,11 @@ std::vector<uint8_t> nearseacells(const RegionalGlobalInputs& inputs);
 // reach 3 and this lift it moved one to three cells off it).
 std::vector<float> inlandcells(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters);
 
+// The lake cells' mask (1 where the lake surface is above zero and the cell is not sea, 0
+// elsewhere) interpolated (upsample, bicubic) at the warped fine positions of `box`'s domain:
+// regional_water.cpp's lake weight (the flood's half-mask barrier) and seagate's below.
+std::vector<float> lakecellweight(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const FineWarp& warp);
+
 // The gate: one value per fine cell of `box`'s domain (domainfinewidth() x
 // domainfineheight(), row-major), 1 where the cell may be sea. `warp` is the box's warp
 // (regionalwarp; empty without one).
@@ -63,8 +68,14 @@ std::vector<float> inlandcells(const RegionalGlobalInputs& inputs, const Regiona
 //   clamp. R8 chose n = 3 (landscape.json's note): with n = 2 the far halves of cells two
 //   cells from the sea stayed outside the gate, so their fine cells below the sea level stayed
 //   land (window A: 158 such cells, 24 with n = 3).
+// - `lakeweight` (multiscale plan S3.4, the refinement loop at level >= 2; null elsewhere): the
+//   lake cells' mask (1 on lake cells, 0 elsewhere) interpolated at the box's warped positions,
+//   one value per fine cell. A lake cell's block is then not excluded as a whole: a cell is 0
+//   where the weight is at least 0.5, and a cell of a lake cell's block below that follows the
+//   rule of the other cells (with smoothgate 0 the 3 x 3 rule on its own global cell), so the
+//   gate's edge at a lake beside the sea is the warped half-mask contour, not the block edge.
 std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const FineWarp& warp,
-                             const RegionalParameters& parameters);
+                             const RegionalParameters& parameters, const std::vector<float>* lakeweight = nullptr);
 
 // The straight-run breaker (R8, after the legacy removestraights): no-op while
 // edges.straightmax <= 0. `mask` is the box's mask (1 = sea; domainfinewidth() x

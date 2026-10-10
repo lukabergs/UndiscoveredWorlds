@@ -176,9 +176,9 @@ struct LevelState : RegionalLevel
 {
     StartSurface start;                  // noiselevel's (level 1, single pass: regionalstartsurface; deeper: the
                                          // prolongation with the octave band added), handed on by presmoothinglevel
-    std::vector<float> noiseband_m;      // noiselevel's: the level's noise amplitude per cell, noise_amplitude_m +
-                                         // noise_relief_fraction x the local global relief upsampled (before the
-                                         // taper; S3.4 sets it per level and caps the lakes' rim raise with it)
+    std::vector<float> noiseband_m;      // noiselevel's: the level's share of the noise amplitude per cell (S3.4:
+                                         // the band share times noise_amplitude_m + noise_relief_fraction x the
+                                         // relief, before the taper); lakeslevel caps its rim raise with it
     std::vector<float> surface_m;        // the working surface: the start surface, its sea centres set by the coast
                                          // rule, then the land channel beds pinned (the lakes' start surface)
     GlobalNetwork incisednetwork;        // incisionlevel's (incision active only): the network's incised filled elevations

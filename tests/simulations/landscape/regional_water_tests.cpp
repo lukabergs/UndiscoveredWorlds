@@ -4,15 +4,23 @@
 // shoreparameters()), at the smallest halo the pass allows (`testhalo`, two block-mean
 // passes): the shores are pure functions of the fine cell's absolute position, and the
 // neighbourhood rules (the step between two lakes, the channel cells, the raised shore)
-// read up to three fine cells.
+// read up to three fine cells. Multiscale plan S3.4 adds the refinement loop's rim cap
+// (RegionalWaterRimCap), the lake-sea contact at a sill (RegionalWaterSillContact) and both at a kept
+// edge cutting a lake's zone (RegionalWaterOverlapSillAndRimCap).
 
 #include "landscape_fixture.hpp"
 
 #include "regional_test_world.hpp"
 
+#include "simulations/landscape/channel_network.hpp"
+#include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_edges.hpp"
+#include "simulations/landscape/regional_surface.hpp"
+#include "simulations/landscape/regional_water.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
 #include <limits>
+#include <utility>
 
 namespace
 {
@@ -588,4 +596,325 @@ TEST_F(Landscape, RegionalOverlapShores)
     EXPECT_GT(sill.lake, 0);
     const OverlapCounts two = compareoverlap(twolakes(), windowc(8), windowd(8), "shores two lakes C/D", parameters);
     EXPECT_GT(two.lake, 0);
+}
+
+namespace
+{
+// The 64-column synthetic world with its lake cell (62, 17) between a sea cell on its west, (61, 17)
+// at -100 m, and a low land cell on its east, (63, 17) at 5 m; the lake's surface 30 m above the sea
+// level, its bed at 10 m. The east cell lies below the surface, so beyond the lake's warped half-mask
+// its fine cells are the flood's barrier; the west cell gates the sea (the sill rule).
+constexpr float barrierlakesurface = 30.0f;
+
+RegionalGlobalInputs barrierlake()
+{
+    RegionalGlobalInputs inputs = syntheticworld(64);
+    const int width = inputs.width;
+    inputs.network.sea[at(61, 17, width)] = 1;
+    inputs.elevation_m[at(61, 17, width)] = -100.0f;
+    inputs.elevation_m[at(63, 17, width)] = 5.0f;
+    inputs.elevation_m[at(62, 17, width)] = 10.0f;
+    inputs.lakesurface_m[at(62, 17, width)] = barrierlakesurface;
+    return inputs;
+}
+
+// A window of the 64-column world keeping global columns c0 .. c1 (c1 may pass the date line) and rows
+// r0 .. r1 at the refinement loop's smallest halo.
+RegionalWindow barrierwindow(int scale, int c0, int c1, int r0, int r1)
+{
+    const auto longitude = [](int i) { return -180.0 + 360.0 * ((i % 64) + 0.5) / 64.0; };
+    const auto latitude = [](int j) { return 90.0 - 180.0 * (j + 0.5) / 32.0; };
+    return landscape::regionalwindow(64, scale, landscape::refinementhalo(2, 0), longitude(c0), latitude(r1),
+                                     longitude(c1), latitude(r0));
+}
+
+// The loop's level-1 sea and lakes on one window (lakegate on, the flood with the start surface): the
+// fine cells of (63, 17) with a lake weight below 0.5 and a start surface below S, not sea, are lowered
+// 300 m below S (a pure function of the absolute position), so only 3c can wet them; a cap below 0:
+// none.
+struct BarrierPass
+{
+    std::vector<float> start, weight, elevation;
+    std::vector<uint8_t> sea, gate, pit;
+    landscape::FineWater water;
+};
+
+BarrierPass barrierpass(const RegionalGlobalInputs& inputs, const RegionalWindow& window, double cap)
+{
+    RegionalParameters parameters = shoreparameters(0.3);
+    const landscape::FineWarp warp = landscape::regionalwarp(window, inputs.seed, parameters);
+    BarrierPass pass;
+    pass.start = landscape::regionalstartsurface(inputs, window, warp, parameters, true).start_m;
+    pass.sea = landscape::regionalsea(inputs, window, warp, parameters, pass.start, nullptr, true);
+    pass.weight = landscape::lakecellweight(inputs, window, warp);
+    pass.gate = landscape::seagate(inputs, window, warp, parameters, &pass.weight);
+    const std::size_t count = pass.start.size();
+    pass.elevation = pass.start;
+    pass.pit.assign(count, 0);
+    const std::size_t east = at(63, 17, inputs.width);
+    for (int y = 0; y < window.domainfineheight(); y++)
+        for (int x = 0; x < window.domainfinewidth(); x++)
+        {
+            const std::size_t cell = at(x, y, window.domainfinewidth());
+            if (at(window.globalcolumn(x), window.globalrow(y), inputs.width) == east && pass.weight[cell] < 0.5f &&
+                pass.sea[cell] == 0 && pass.start[cell] < barrierlakesurface)
+            {
+                pass.elevation[cell] = barrierlakesurface - 300.0f;
+                pass.pit[cell] = 1;
+            }
+        }
+    landscape::FineChannels channels;
+    channels.channel.assign(count, 0);
+    const std::vector<float> caps(count, static_cast<float>(cap));
+    landscape::LakeInheritance flood;
+    flood.flood = true;
+    flood.startsurface_m = &pass.start;
+    flood.rimcap_m = cap >= 0.0 ? &caps : nullptr;
+    pass.water = landscape::regionalwater(inputs, window, warp, parameters, pass.sea, channels, pass.elevation, true, flood);
+    return pass;
+}
+
+struct BarrierCounts
+{
+    int pits = 0, wetpits = 0, sill = 0, wet = 0;
+    float largestraise = 0.0f;
+};
+
+// The lowered cells and how many are wet; the wet cells only the sill rule lets the flood reach (gated,
+// lake weight below 0.5, between the sea level and S, in the sea cell's block); the wet cells; the
+// largest rim raise of the lake's zone (global columns 61 .. 63, rows 16 .. 18).
+BarrierCounts barriercounts(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const BarrierPass& pass)
+{
+    BarrierCounts counts;
+    const std::size_t west = at(61, 17, inputs.width);
+    for (int y = 0; y < window.domainfineheight(); y++)
+        for (int x = 0; x < window.domainfinewidth(); x++)
+        {
+            const std::size_t cell = at(x, y, window.domainfinewidth());
+            const int i = window.globalcolumn(x), j = window.globalrow(y);
+            const bool wet = pass.water.lakesurface_m[cell] > 0.0f;
+            counts.wet += wet ? 1 : 0;
+            counts.pits += pass.pit[cell];
+            counts.wetpits += pass.pit[cell] != 0 && wet ? 1 : 0;
+            counts.sill += wet && at(i, j, inputs.width) == west && pass.gate[cell] != 0 && pass.weight[cell] < 0.5f &&
+                                   pass.elevation[cell] > sealevel
+                               ? 1
+                               : 0;
+            if (i >= 61 && i <= 63 && j >= 16 && j <= 18 && !pass.water.rimraise_m.empty())
+                counts.largestraise = std::max(counts.largestraise, pass.water.rimraise_m[cell]);
+        }
+    return counts;
+}
+}
+
+// Multiscale plan S3.4, the rim cap (the refinement loop's flood, LakeInheritance::rimcap_m), on window
+// C at k 8 (barrierlake): the lowered cells of (63, 17) lie below S on the start surface and behind the
+// flood's barrier. Without a cap the rim raise lifts those beside the water about 300 m; a cap of 1e9 m
+// changes nothing; with a cap of 100 m they join the water (step 3c) and no cell of the lake's zone is
+// raised by more than the cap.
+TEST_F(Landscape, RegionalWaterRimCap)
+{
+    const RegionalGlobalInputs inputs = barrierlake();
+    const RegionalWindow window = windowc(8);
+    const BarrierPass none = barrierpass(inputs, window, -1.0);
+    const BarrierPass huge = barrierpass(inputs, window, 1.0e9);
+    const BarrierPass capped = barrierpass(inputs, window, 100.0);
+    const std::size_t count = none.elevation.size();
+    EXPECT_EQ(std::memcmp(none.elevation.data(), huge.elevation.data(), count * sizeof(float)), 0);
+    EXPECT_EQ(std::memcmp(none.water.lakesurface_m.data(), huge.water.lakesurface_m.data(), count * sizeof(float)), 0);
+    EXPECT_EQ(std::memcmp(none.water.rimraise_m.data(), huge.water.rimraise_m.data(), count * sizeof(float)), 0);
+    const BarrierCounts a = barriercounts(inputs, window, none), b = barriercounts(inputs, window, capped);
+    std::printf("[regional] rim cap: %d lowered cells; uncapped: %d wet, rim raise %.1f m, %d wet cells; capped at 100 m: "
+                "%d wet, rim raise %.1f m, %d wet cells; sill-only wet cells %d\n",
+                a.pits, a.wetpits, a.largestraise, a.wet, b.wetpits, b.largestraise, b.wet, b.sill);
+    ASSERT_GT(a.pits, 0);
+    EXPECT_EQ(a.wetpits, 0);
+    EXPECT_GT(a.largestraise, 250.0f);
+    EXPECT_GT(b.wetpits, 0);
+    EXPECT_LE(b.largestraise, 100.0f);
+    EXPECT_GT(b.wet, a.wet);
+}
+
+// Multiscale plan S3.4 review: two windows whose kept edge cuts the lake's zone at the loop's smallest
+// halo (refinementhalo), E keeping columns 58 .. 62 (the zone's column 63 in its halo) and F columns
+// 62 .. 66 across the date line (column 61 in its halo), rows 14 .. 19 and 15 .. 20, with the sill
+// rule and 3c both acting (barrierlake, cap 20 m): the elevation, the lake surface and the rim raise
+// bit-identical on the shared kept cells.
+TEST_F(Landscape, RegionalWaterOverlapSillAndRimCap)
+{
+    const RegionalGlobalInputs inputs = barrierlake();
+    const RegionalWindow e = barrierwindow(8, 58, 62, 14, 19);
+    const RegionalWindow f = barrierwindow(8, 62, 66, 15, 20);
+    ASSERT_EQ(e.column0, 58);
+    ASSERT_EQ(e.columns, 5);
+    ASSERT_EQ(f.column0, 62);
+    ASSERT_EQ(f.row0, 15);
+    const BarrierPass a = barrierpass(inputs, e, 20.0), b = barrierpass(inputs, f, 20.0);
+    const BarrierCounts ca = barriercounts(inputs, e, a), cb = barriercounts(inputs, f, b);
+    const std::int64_t finewidth = static_cast<std::int64_t>(inputs.width) * 8;
+    int shared = 0, differ = 0, wet = 0;
+    for (int y = 0; y < e.fineheight(); y++)
+        for (int x = 0; x < e.finewidth(); x++)
+        {
+            const int dx = x + e.keptfinecolumnoffset(), dy = y + e.keptfinerowoffset();
+            const std::int64_t column = e.absolutefinecolumn(dx), row = e.absolutefinerow(dy);
+            const std::int64_t fx = ((column - f.absolutefinecolumn(0)) % finewidth + finewidth) % finewidth;
+            const std::int64_t fy = row - f.absolutefinerow(0);
+            if (fx < f.keptfinecolumnoffset() || fx >= f.keptfinecolumnoffset() + f.finewidth() || fy < f.keptfinerowoffset() ||
+                fy >= f.keptfinerowoffset() + f.fineheight())
+                continue;
+            const std::size_t cellf = at(static_cast<int>(fx), static_cast<int>(fy), f.domainfinewidth());
+            const std::size_t celle = at(dx, dy, e.domainfinewidth());
+            shared++;
+            differ += std::memcmp(&a.elevation[celle], &b.elevation[cellf], sizeof(float)) != 0 ? 1 : 0;
+            differ += std::memcmp(&a.water.lakesurface_m[celle], &b.water.lakesurface_m[cellf], sizeof(float)) != 0 ? 1 : 0;
+            differ += std::memcmp(&a.water.rimraise_m[celle], &b.water.rimraise_m[cellf], sizeof(float)) != 0 ? 1 : 0;
+            wet += a.water.lakesurface_m[celle] > 0.0f ? 1 : 0;
+        }
+    std::printf("[regional] sill and rim cap overlap E/F: %d shared cells, %d differences, %d wet; E: %d of %d lowered "
+                "cells wet, %d sill-only wet; F: %d of %d lowered cells wet, %d sill-only wet\n",
+                shared, differ, wet, ca.wetpits, ca.pits, ca.sill, cb.wetpits, cb.pits, cb.sill);
+    EXPECT_EQ(shared, 8 * 5 * 8);
+    EXPECT_EQ(differ, 0);
+    EXPECT_GT(wet, 0);
+    EXPECT_GT(ca.wetpits, 0);
+    EXPECT_GT(cb.wetpits, 0);
+    EXPECT_GT(ca.sill, 0);
+    EXPECT_GT(cb.sill, 0);
+}
+
+namespace
+{
+// The 256-column synthetic world with a lake at its sill height beside the sea (S3.4): the first
+// coastal land cell of rows 58 .. 66, columns 214 .. 230 (the continent's west coast, about 132 E)
+// whose west neighbour is sea and east neighbour land becomes a lake cell 2 m above the sea level
+// with its bed 10 m below it, as global cell (169, 60) of erosion run 9.
+RegionalGlobalInputs coastallake(int& lakei, int& lakej)
+{
+    RegionalGlobalInputs inputs = syntheticworld(256);
+    lakei = lakej = -1;
+    for (int j = 58; j <= 66 && lakei < 0; j++)
+        for (int i = 214; i <= 230 && lakei < 0; i++)
+        {
+            const std::size_t cell = at(i, j, inputs.width);
+            if (inputs.network.sea[cell] == 0 && inputs.lakesurface_m[cell] <= 0.0f &&
+                inputs.network.sea[at(i - 1, j, inputs.width)] != 0 && inputs.network.sea[at(i + 1, j, inputs.width)] == 0)
+            {
+                lakei = i;
+                lakej = j;
+                inputs.lakesurface_m[cell] = sealevel + 2.0f;
+                inputs.elevation_m[cell] = sealevel - 10.0f;
+            }
+        }
+    return inputs;
+}
+
+// A window of the 256-column world keeping global columns c0 .. c1 and rows r0 .. r1 (centres in degrees).
+RegionalWindow keptwindow(int c0, int c1, int r0, int r1)
+{
+    const auto longitude = [](int i) { return -180.0 + 360.0 * (i + 0.5) / 256.0; };
+    const auto latitude = [](int j) { return 90.0 - 180.0 * (j + 0.5) / 128.0; };
+    return landscape::regionalwindow(256, 16, landscape::refinementhalo(2, 0), longitude(c0), latitude(r1), longitude(c1),
+                                     latitude(r0));
+}
+
+landscape::RefinementResult refinecoast(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                                        const RegionalParameters& parameters)
+{
+    landscape::LevelTarget target;
+    target.window = window;
+    target.level = 2;
+    return landscape::runrefinement(inputs, target, parameters, landscape::RefinementParameters{});
+}
+
+// The shared kept cells of two level windows, as index pairs into their kept fields.
+std::vector<std::pair<std::size_t, std::size_t>> sharedlevelcells(const landscape::LevelWindow& a, const landscape::LevelWindow& b)
+{
+    std::vector<std::pair<std::size_t, std::size_t>> shared;
+    const std::int64_t width = a.levelwidth();
+    for (int y = 0; y < a.rows; y++)
+        for (int x = 0; x < a.columns; x++)
+        {
+            const std::int64_t column = landscape::wraplevel(a.column0 + x, width), row = a.row0 + y;
+            const std::int64_t xb = landscape::wraplevel(column - b.column0, width), yb = row - b.row0;
+            if (xb < b.columns && yb >= 0 && yb < b.rows)
+                shared.push_back({at(x, y, a.columns), at(static_cast<int>(xb), static_cast<int>(yb), b.columns)});
+        }
+    return shared;
+}
+}
+
+// Multiscale plan S3.4, the lake-sea contact at a sill, in the refinement loop (two levels at
+// factor 4, k 16): a lake cell 2 m above the sea level beside a sea cell (coastallake) meets the sea
+// off the block edge between them (the gate's lake exclusion on the warped half-mask, the flood
+// across the sea-gated block): at most a quarter of the level-2 rows of the shared block edge hold
+// a lake cell beside a sea cell across it (the lake edges on global cell boundaries are only printed:
+// this lake fills its block, whose land neighbours rise above S at the block edge). Two windows with
+// different column and row origins holding the lake and the sea are bit-identical on their overlap
+// at both levels. (The overlap across the date line
+// with the lakes and the sea on is RefinementLevelsOverlap's, P/Q and R/S, whose loop runs S3.4's
+// rules too.)
+TEST_F(Landscape, RegionalWaterSillContact)
+{
+    int lakei = -1, lakej = -1;
+    const RegionalGlobalInputs inputs = coastallake(lakei, lakej);
+    ASSERT_GE(lakei, 0);
+    RegionalParameters parameters = shoreparameters(0.15);
+    parameters.edges.smoothgate = 3;
+    const RegionalWindow first = keptwindow(lakei - 4, lakei + 3, lakej - 3, lakej + 3);
+    const RegionalWindow second = keptwindow(lakei - 3, lakei + 4, lakej - 2, lakej + 4);
+    ASSERT_EQ(first.column0, lakei - 4);
+    ASSERT_EQ(first.row0, lakej - 3);
+    const landscape::RefinementResult a = refinecoast(inputs, first, parameters);
+    const landscape::RefinementResult b = refinecoast(inputs, second, parameters);
+    ASSERT_EQ(a.levels.size(), 2u);
+    const landscape::LevelDiagnostics& two = a.levels[1];
+    const RegionalFields& fields = a.fields;
+    const int columns = two.window.columns, k = 16;
+    const int x0 = (lakei - first.column0) * k, y0 = (lakej - first.row0) * k;
+    int contact = 0;
+    for (int y = y0; y < y0 + k; y++)
+    {
+        const std::size_t west = at(x0 - 1, y, columns), east = at(x0, y, columns);
+        const bool wetwest = fields.lakesurface_m[west] > 0.0f, weteast = fields.lakesurface_m[east] > 0.0f;
+        contact += (weteast && fields.sea[west] != 0) || (wetwest && fields.sea[east] != 0) ? 1 : 0;
+    }
+    int lake = 0;
+    for (int y = y0; y < y0 + k; y++)
+        for (int x = x0; x < x0 + k; x++)
+            lake += fields.lakesurface_m[at(x, y, columns)] > 0.0f ? 1 : 0;
+    std::printf("[regional] sill contact at global cell (%d, %d): level 2 lake edges %d, on boundaries %.4f (2 / k %.4f); "
+                "%d wet cells in the lake cell; lake beside sea across the west block edge in %d of %d rows\n",
+                lakei, lakej, two.lakeedges, two.lakeedgealigned, 2.0 / k, lake, contact, k);
+    EXPECT_GT(lake, 0);
+    EXPECT_GT(two.lakeedges, 0);
+    EXPECT_LE(contact, k / 4);
+
+    for (std::size_t level = 0; level < 2; level++)
+    {
+        const auto cells = sharedlevelcells(a.levels[level].window, b.levels[level].window);
+        ASSERT_GT(cells.size(), 0u);
+        int differ = 0, sea = 0, wet = 0;
+        for (const auto& [ca, cb] : cells)
+        {
+            if (level == 0)
+                differ += std::memcmp(&a.coarserelevation_m[0][ca], &b.coarserelevation_m[0][cb], sizeof(float)) != 0 ? 1 : 0;
+            else
+            {
+                differ += std::memcmp(&a.fields.elevation_m[ca], &b.fields.elevation_m[cb], sizeof(float)) != 0 ? 1 : 0;
+                differ += a.fields.sea[ca] != b.fields.sea[cb] ? 1 : 0;
+                differ += std::memcmp(&a.fields.lakesurface_m[ca], &b.fields.lakesurface_m[cb], sizeof(float)) != 0 ? 1 : 0;
+                sea += a.fields.sea[ca] != 0 ? 1 : 0;
+                wet += a.fields.lakesurface_m[ca] > 0.0f ? 1 : 0;
+            }
+        }
+        std::printf("[regional] sill contact overlap, level %zu: %zu shared cells, %d differences, %d sea, %d wet\n", level + 1,
+                    cells.size(), differ, sea, wet);
+        EXPECT_EQ(differ, 0) << "level " << level + 1;
+        if (level == 1)
+        {
+            EXPECT_GT(sea, 0);
+            EXPECT_GT(wet, 0);
+        }
+    }
 }

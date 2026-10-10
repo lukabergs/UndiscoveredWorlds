@@ -3,7 +3,8 @@
 // regional_test_world.hpp with the warp, the coast noise and the land-share rule on (test
 // values, coastparameters()), at the smallest halo the pass allows (`testhalo`, two
 // block-mean passes): the land-share decision reads nothing of the window, so the rule
-// halo >= 2 x meanpasses + 2 stays sufficient.
+// halo >= 2 x meanpasses + 2 stays sufficient. Multiscale plan S3.4 adds the level's noise share and
+// the relief-amplitude field (RegionalSurfaceLevelNoiseShare, RegionalSurfaceNoiseReliefField).
 
 #include "landscape_fixture.hpp"
 
@@ -452,4 +453,58 @@ TEST_F(Landscape, RegionalOverlapCoastWideWorld)
         EXPECT_GT(counts.sea, 0);
         EXPECT_LT(counts.sea, counts.shared);
     }
+}
+
+// Multiscale plan S3.4: the share of a level's octave band in the noise (persistence p: octaves
+// 0 .. log2 k weigh p^o; level 1 adds octaves 1 and 2 at k 4, level 2 octaves 3 and 4 at k 16).
+TEST_F(Landscape, RegionalSurfaceLevelNoiseShare)
+{
+    const double p = 0.6;
+    const auto squares = [p](int first, int last) {
+        double sum = 0.0;
+        for (int o = first; o <= last; o++)
+            sum += std::pow(p, 2 * o);
+        return sum;
+    };
+    EXPECT_NEAR(landscape::levelnoiseshare(4, 1, p), std::sqrt(squares(1, 2) / squares(0, 2)), 1e-12);
+    EXPECT_NEAR(landscape::levelnoiseshare(16, 4, p), std::sqrt(squares(3, 4) / squares(0, 4)), 1e-12);
+    EXPECT_NEAR(landscape::levelnoiseshare(64, 16, p), std::sqrt(squares(5, 6) / squares(0, 6)), 1e-12);
+    // A scale that is not a power of two: k 8 over 1 adds octaves 1 .. 3; the same scale adds none.
+    EXPECT_NEAR(landscape::levelnoiseshare(8, 1, p), std::sqrt(squares(1, 3) / squares(0, 3)), 1e-12);
+    EXPECT_EQ(landscape::levelnoiseshare(16, 16, p), 0.0);
+    EXPECT_THROW(landscape::levelnoiseshare(4, 0, p), std::invalid_argument);
+    EXPECT_THROW(landscape::levelnoiseshare(4, 8, p), std::invalid_argument);
+}
+
+// Multiscale plan S3.4: regional.noise_relief_field 1 takes Phase E's noise amplitude from
+// inputs.reliefamplitude_m: without the field the noise is the local relief's bit for bit; with a
+// zero field it is the noise of noise_relief_fraction 0 (the amplitude noise_amplitude_m alone), in
+// the start surface and in a level's octave band.
+TEST_F(Landscape, RegionalSurfaceNoiseReliefField)
+{
+    const RegionalGlobalInputs inputs = syntheticworld(64);
+    const RegionalWindow window = windowc(16);
+    RegionalParameters plain = coastparameters();
+    RegionalParameters field = plain;
+    field.noiserelieffield = 1;
+    RegionalParameters flat = plain;
+    flat.noiserelieffraction = 0.0;
+    RegionalGlobalInputs zero = inputs;
+    zero.reliefamplitude_m.assign(inputs.elevation_m.size(), 0.0f);
+    const auto start = [&](const RegionalGlobalInputs& in, const RegionalParameters& parameters) {
+        return landscape::regionalstartsurface(in, window, landscape::regionalwarp(window, in.seed, parameters), parameters).start_m;
+    };
+    const auto band = [&](const RegionalGlobalInputs& in, const RegionalParameters& parameters) {
+        std::vector<float> surface(static_cast<std::size_t>(window.domainfinewidth()) * window.domainfineheight(), 100.0f);
+        landscape::addlevelnoise(in, window, 4, parameters, surface);
+        return surface;
+    };
+    const auto same = [](const std::vector<float>& a, const std::vector<float>& b) {
+        return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+    };
+    EXPECT_TRUE(same(start(inputs, field), start(inputs, plain)));
+    EXPECT_TRUE(same(band(inputs, field), band(inputs, plain)));
+    EXPECT_TRUE(same(start(zero, field), start(inputs, flat)));
+    EXPECT_TRUE(same(band(zero, field), band(inputs, flat)));
+    EXPECT_FALSE(same(band(zero, field), band(inputs, plain)));
 }

@@ -80,7 +80,9 @@ struct StartSurface
 //   valleys stay under the pinned channels; base_m is the base elevation at that position;
 // - Phase E's noise: the band from twice the global north-south spacing (exclusive) down
 //   to twice the fine one, amplitude noiseamplitude_m + noiserelieffraction x the local
-//   global relief, tapered within coastband_m plus the amplitude of the sea level;
+//   global relief (S3.4: inputs.reliefamplitude_m instead when noiserelieffield is 1 and the
+//   field is present; also in addlevelnoise), tapered within coastband_m plus the amplitude of
+//   the sea level;
 // - the coast noise (coast.noiseamplitude_m > 0): RegionalNoise (persistence
 //   coast.noisepersistence) times a = coast.noiseamplitude_m + coast.noiserelieffraction x
 //   the local global relief, times the coastal weight (the global cells whose 3 x 3
@@ -115,8 +117,17 @@ struct StartSurface
 // pass's reach: 1 for k >= 3, 2 for k <= 2), so the domain's values depend on the window
 // only within 2 x meanpasses global cells of its edge, as in Phase E: the halo rule
 // halo >= 2 x meanpasses + 2 holds.
+// `lakegate` (multiscale plan S3.4; the refinement loop, false in the single pass): the land-share
+// rule's gate takes the lake cells' warped half-mask (regional_edges.hpp, seagate's lakeweight)
+// instead of excluding a lake cell's block.
 StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
-                                  const FineWarp& warp, const RegionalParameters& parameters);
+                                  const FineWarp& warp, const RegionalParameters& parameters, bool lakegate = false);
+
+// The share of a level's octave band in the noise's standard deviation (multiscale plan S3.4): the
+// octaves o = 0 .. floor(log2 scale) of addlevelnoise's set weigh persistence^o, the level adds those
+// with parentscale < 2^o <= scale, so the share is sqrt(sum of their squared weights / sum of all).
+// Throws std::invalid_argument when parentscale < 1 or scale < parentscale.
+double levelnoiseshare(int scale, int parentscale, double persistence);
 
 // The octave band of a refinement level (docs/architecture/multiscale-plan.md, section 3,
 // "S2.3's level placement", item 1), added in place to `surface_m`, the level's prolonged
@@ -151,9 +162,13 @@ void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& win
 // refined within one parent cell: a cell is sea where its surface lies at or below the sea level
 // and both gates allow it; every other cell is land at its own height (land below the sea level
 // is allowed, and the loop counts it); `surface_m` is not written by this rule.
+// `lakegate` (S3.4; the refinement loop at every level, false in the single pass): the gate's lake
+// exclusion is the lake cells' warped half-mask (regional_edges.hpp, seagate's lakeweight), not a
+// lake cell's whole block, so a lake beside the sea meets it off the block edge.
 std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                  const FineWarp& warp, const RegionalParameters& parameters,
-                                 std::vector<float>& surface_m, const std::vector<uint8_t>* parentgate = nullptr);
+                                 std::vector<float>& surface_m, const std::vector<uint8_t>* parentgate = nullptr,
+                                 bool lakegate = false);
 
 struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
 struct LevelState;
@@ -161,12 +176,15 @@ struct LevelState;
 // LevelStep::noiseoctave. Without a parent level (level 1, the single pass): state.start =
 // regionalstartsurface (the warp, the noise, the coast decision and the block means against the
 // global grid). At level >= 2: addlevelnoise on state.start.start_m, the prolonged parent the
-// loop put there, with parentscale factor^(level - 1). Then state.noiseband_m, the amplitude per
-// cell (noiseamplitude_m + noiserelieffraction x the local global relief upsampled, before the
-// taper). S3.4 sets the amplitude per level (regional.noise_relief_field, inputs.reliefamplitude_m).
+// loop put there, with parentscale factor^(level - 1) (1 at level 1 and in the single pass); in
+// the loop the start surface takes regionalstartsurface's lakegate. Then state.noiseband_m (S3.4),
+// the level's noise band per cell: levelnoiseshare(k_l, parentscale, noisepersistence) times the
+// amplitude, noiseamplitude_m + noiserelieffraction x the relief upsampled at the unwarped cell
+// centres (before the taper; the relief is inputs.reliefamplitude_m with regional.noise_relief_field
+// 1 when present, else the local global relief); the lakes cap their rim raise with it.
 void noiselevel(const LevelContext& context, LevelState& state);
 
 // LevelStep::coast: state.sea = regionalsea on state.surface_m with the context's warp and
-// details.parentseagate (null at level 1 and in the single pass).
+// details.parentseagate (null at level 1 and in the single pass), lakegate in the loop.
 void coastlevel(const LevelContext& context, LevelState& state);
 }

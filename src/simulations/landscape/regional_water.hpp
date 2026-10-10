@@ -96,6 +96,14 @@ struct FineWater
 // The steps from the dam rule on (2 to 5) then act on that water as on the sum's; step 5 raises
 // the dry rest, and a dry cell more than D below a wet 8-neighbour's surface (left by step 5
 // without the flood) to the next float above that surface. The connected set does not depend on the order of the cells.
+// S3.4: the lake-sea contact at a sill: a cell where the sea gate is open (regional_edges.hpp,
+// seagate with the lake weight; at level >= 2 also parentseagate) and the elevation lies between
+// the sea level and S is passable whatever the lake mask says, so the flood crosses into a
+// sea-gated block. The rim cap (rimcap_m, the level's noise band): a dry cell (not sea, not a
+// channel) of the lake's zone, below S on the start surface (at level >= 2 within the parent
+// reach), beside its lake's water and not beside water of a lower surface, that step 5 would raise
+// by more than D and more than its cap joins the water instead, in rounds until none joins; a
+// deeper dry cell beyond those bounds keeps the raise to the next float above the surface (rimraise_m).
 struct LakeInheritance
 {
     bool flood = false;
@@ -107,6 +115,12 @@ struct LakeInheritance
     // sets it): the flood enters only cells below S on it too, so a parent above S keeps a dry
     // child (the projection stays feasible where the solve lowered the land below S).
     const std::vector<float>* startsurface_m = nullptr;
+    // S3.4: the rim raise's cap per domain cell (lakeslevel sets it to LevelState::noiseband_m, the
+    // level's noise band); null: no cap.
+    const std::vector<float>* rimcap_m = nullptr;
+    // S3.4: at level >= 2 the parent's sea gate per domain cell (RegionalDetails::parentseagate; lakeslevel
+    // sets it): the sill rule passes only where it is 1. Null at level 1.
+    const std::vector<uint8_t>* parentseagate = nullptr;
 };
 
 FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const FineWarp& warp,

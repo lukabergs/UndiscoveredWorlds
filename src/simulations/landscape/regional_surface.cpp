@@ -79,6 +79,22 @@ std::vector<float> localrelief(const std::vector<float>& elevation, int width, i
     return relief;
 }
 
+// Whether Phase E's noise takes its amplitude from the world's relief amplitude (multiscale plan
+// S3.4: regional.noise_relief_field 1 and inputs.reliefamplitude_m present).
+bool relieffield(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters)
+{
+    return parameters.noiserelieffield == 1 && !inputs.reliefamplitude_m.empty();
+}
+
+// The relief Phase E's noise amplitude grows with (noise_amplitude_m + noise_relief_fraction x it):
+// the world's relief amplitude where relieffield, else the local global relief.
+std::vector<float> noiserelief(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters)
+{
+    if (relieffield(inputs, parameters))
+        return inputs.reliefamplitude_m;
+    return localrelief(inputs.elevation_m, inputs.width, inputs.height);
+}
+
 // The coastal indicator: 1 where the global cell's 3 x 3 neighbourhood holds a cell of
 // the other kind (sea or land), else 0.
 std::vector<float> coastalcells(const std::vector<uint8_t>& sea, int width, int height)
@@ -184,6 +200,7 @@ public:
     Surfacer(const RegionalGlobalInputs& inputs, int scale, const RegionalParameters& parameters)
         : inputs_(inputs), parameters_(parameters), scale_(scale),
           relief_(localrelief(inputs.elevation_m, inputs.width, inputs.height)),
+          noiserelief_(relieffield(inputs, parameters) ? inputs.reliefamplitude_m : std::vector<float>{}),
           coastal_(coastalcells(inputs.network.sea, inputs.width, inputs.height)),
           inland_(inlandcells(inputs, parameters)),
           factors_(coastfactors(inputs, parameters)),
@@ -224,6 +241,10 @@ public:
         cell.base = warpx == 0.0 && warpy == 0.0 ? cell.lapsebase
                                                  : static_cast<float>(bicubic(inputs_.elevation_m, width, height, wx, wy));
         const float relief = static_cast<float>(bicubic(relief_, width, height, gx, gy));
+        // S3.4: Phase E's noise grows with the world's relief amplitude when it is used (the coast
+        // noise keeps the local global relief).
+        const float noiserelief =
+            noiserelief_.empty() ? relief : static_cast<float>(bicubic(noiserelief_, width, height, gx, gy));
 
         // Phase E's noise, tapered at the sea level (regional_pass.cpp's expression of E3).
         float banded = cell.base;
@@ -232,7 +253,7 @@ public:
             double px = 0.0, py = 0.0, pz = 0.0;
             unitvector(finelatitude(finerow, height * scale_), finelongitude(finecolumn, width * scale_), px, py, pz);
             const double amplitude =
-                parameters_.noiseamplitude_m + parameters_.noiserelieffraction * std::max(0.0, static_cast<double>(relief));
+                parameters_.noiseamplitude_m + parameters_.noiserelieffraction * std::max(0.0, static_cast<double>(noiserelief));
             const double height_m = std::fabs(static_cast<double>(cell.base) - sealevel);
             const double band = parameters_.coastband_m + amplitude;
             const double taper = band > 0.0 ? std::clamp(height_m / band, 0.0, 1.0) : 1.0;
@@ -260,7 +281,7 @@ public:
             if (weight > 0.0 && amplitude > 0.0)
             {
                 const double inlandamplitude = std::max(
-                    0.0, parameters_.noiseamplitude_m + parameters_.noiserelieffraction * std::max(0.0, static_cast<double>(relief)));
+                    0.0, parameters_.noiseamplitude_m + parameters_.noiserelieffraction * std::max(0.0, static_cast<double>(noiserelief)));
                 const double height_m = std::fabs(static_cast<double>(cell.base) - sealevel);
                 const double band = parameters_.coastband_m + inlandamplitude;
                 const double inlandtaper = band > 0.0 ? std::clamp(height_m / band, 0.0, 1.0) : 1.0;
@@ -286,6 +307,7 @@ private:
     const RegionalParameters& parameters_;
     int scale_ = 1;
     std::vector<float> relief_;
+    std::vector<float> noiserelief_;  // the world's relief amplitude when relieffield, else empty (relief_ is used)
     std::vector<float> coastal_;
     std::vector<float> inland_;
     CoastFactors factors_;
@@ -407,7 +429,7 @@ void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const RegionalW
 // (regional_coast.hpp) and the straight-run breaker (regional_edges.hpp), both no-ops at
 // their defaults, and the coast factors scale the push (Surfacer).
 void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters,
-                      const Surfacer& surfacer, StartSurface& start)
+                      const Surfacer& surfacer, StartSurface& start, bool lakegate)
 {
     const int width = inputs.width, height = inputs.height;
     const int k = window.scale;
@@ -443,7 +465,9 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
 
     // The samples and Phase E's block means on the box.
     const FineWarp warp = regionalwarp(box, inputs.seed, parameters);
-    const std::vector<uint8_t> gate = seagate(inputs, box, warp, parameters);
+    // S3.4: in the refinement loop the gate's lake exclusion is the lake cells' warped half-mask.
+    const std::vector<float> lakeweight = lakegate ? lakecellweight(inputs, box, warp) : std::vector<float>{};
+    const std::vector<uint8_t> gate = seagate(inputs, box, warp, parameters, lakegate ? &lakeweight : nullptr);
     // A block may hold sea when any of its cells may (with the 3 x 3 gate: its global cell's
     // nearseacells value); the land-share rule and the shore apply to those blocks only.
     std::vector<uint8_t> blockgate(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows), 0);
@@ -800,7 +824,7 @@ FineWarp regionalwarp(const RegionalWindow& window, std::uint64_t seed, const Re
 }
 
 StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
-                                  const FineWarp& warp, const RegionalParameters& parameters)
+                                  const FineWarp& warp, const RegionalParameters& parameters, bool lakegate)
 {
     const int width = inputs.width, height = inputs.height;
     const int k = window.scale;
@@ -820,7 +844,7 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
         result.base_m = upsample(inputs.elevation_m, width, height, window);
         result.lapsebase_m = result.base_m;
         const std::vector<float>& base = result.base_m;
-        const std::vector<float> relief = upsample(localrelief(inputs.elevation_m, width, height), width, height, window);
+        const std::vector<float> relief = upsample(noiserelief(inputs, parameters), width, height, window);
         FractalNoise noise;
         noise.seed = deterministiccombine(inputs.seed, noisesalt);
         noise.radius_km = inputs.radius_m / 1000.0;
@@ -888,7 +912,7 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
         {
             // The warp is evaluated again on the widened box (regionalwarp's values, a pure
             // function of position, so `warp` is not read).
-            landsharesurface(inputs, window, parameters, surfacer, result);
+            landsharesurface(inputs, window, parameters, surfacer, result, lakegate);
         }
     }
 
@@ -909,6 +933,23 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
         result.blockmeanerror_m = largest;
     }
     return result;
+}
+
+double levelnoiseshare(int scale, int parentscale, double persistence)
+{
+    if (parentscale < 1 || scale < parentscale)
+        throw std::invalid_argument("levelnoiseshare: the scale must be at least its parent's, which is at least 1");
+    // The octaves o = 0 .. floor(log2 scale) of addlevelnoise's set, weight persistence^o; in the band
+    // when parentscale < 2^o <= scale (the wavelength longest / 2^o in [longest / scale, longest / parentscale)).
+    double all = 0.0, band = 0.0;
+    for (int o = 0; (std::int64_t{1} << o) <= scale; o++)
+    {
+        const double weight = std::pow(persistence, o);
+        all += weight * weight;
+        if ((std::int64_t{1} << o) > parentscale)
+            band += weight * weight;
+    }
+    return all > 0.0 ? std::sqrt(band / all) : 0.0;
 }
 
 void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& window, int parentscale,
@@ -937,7 +978,7 @@ void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& win
     const FractalNoiseField field(noise);
     if (field.resolved() == 0)
         return;
-    const std::vector<float> relief = upsample(localrelief(inputs.elevation_m, width, height), width, height, window);
+    const std::vector<float> relief = upsample(noiserelief(inputs, parameters), width, height, window);
     for (int y = 0; y < domainheight; y++)
     {
         const double latitude = window.finelatitude_rad(y);
@@ -958,7 +999,7 @@ void addlevelnoise(const RegionalGlobalInputs& inputs, const RegionalWindow& win
 
 std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
                                  const FineWarp& warp, const RegionalParameters& parameters,
-                                 std::vector<float>& surface_m, const std::vector<uint8_t>* parentgate)
+                                 std::vector<float>& surface_m, const std::vector<uint8_t>* parentgate, bool lakegate)
 {
     const int width = inputs.width;
     const int k = window.scale;
@@ -971,12 +1012,18 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
     // At or below the sea level, with a global sea cell among the global cell and its
     // 8 neighbours. Then (Phase E, centre rule) each global cell's centre fine cell
     // follows the global mask: a sea centre above the sea level is lowered to the sea
-    // level, a land centre counted as sea is raised to the next float above it. A fine
-    // cell of a global lake cell (lake surface above zero) is never sea unless its global
-    // cell is sea: a lake below the sea level beside the ocean stays a lake. R8: the global
-    // rule is the gate's (regional_edges.hpp, seagate; the 3 x 3 rule at edges.smoothgate 0),
-    // so the sea agrees with the start surface's mask.
-    const std::vector<uint8_t> gate = seagate(inputs, window, warp, parameters);
+    // level, a land centre counted as sea is raised to the next float above it. Without
+    // `lakegate` a fine cell of a global lake cell (lake surface above zero) is never sea unless
+    // its global cell is sea: a lake below the sea level beside the ocean stays a lake. With it
+    // (S3.4, the loop) a lake cell's fringe cells, where the warped lake weight is below 0.5, may
+    // be sea when the gate's rule (a global sea cell in the 3 x 3, or the smooth gate's reach)
+    // allows it; cells where the weight is at least 0.5 never are. R8: the global rule is the
+    // gate's (regional_edges.hpp, seagate; the 3 x 3 rule at edges.smoothgate 0), so the sea
+    // agrees with the start surface's mask.
+    // S3.4: in the refinement loop the gate's lake exclusion follows the lake cells' warped half-mask
+    // (regional_edges.hpp, seagate's lakeweight), so a lake beside the sea meets it off the block edge.
+    const std::vector<float> lakeweight = lakegate ? lakecellweight(inputs, window, warp) : std::vector<float>{};
+    const std::vector<uint8_t> gate = seagate(inputs, window, warp, parameters, lakegate ? &lakeweight : nullptr);
     const float abovesea = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
     std::vector<uint8_t> sea(count, 0);
     for (int y = 0; y < domainheight; y++)
@@ -1008,19 +1055,21 @@ void noiselevel(const LevelContext& context, LevelState& state)
     // Multiscale plan S3.0: the start surface of regional_pass.cpp's step 1 (level 1, the
     // single pass) and the loop's octave band (level >= 2), moved here unchanged.
     if (context.parent == nullptr)
-        state.start = regionalstartsurface(context.inputs, context.window, context.warp, context.parameters);
+        state.start = regionalstartsurface(context.inputs, context.window, context.warp, context.parameters,
+                                           context.levelwindow != nullptr);
     else
         addlevelnoise(context.inputs, context.window, static_cast<int>(levelscale(context.factor, context.level - 1)),
                       context.parameters, state.start.start_m);
-    // The level's noise amplitude per cell (S3.0: data for S3.4; the expression of the noise
-    // above, before the taper, at the unwarped cell centres).
+    // The level's noise band per cell (S3.4): the amplitude of the noise above (before the taper,
+    // at the unwarped cell centres) times the share of the level's octaves in it.
     const RegionalGlobalInputs& inputs = context.inputs;
     const RegionalParameters& parameters = context.parameters;
-    state.noiseband_m = upsample(localrelief(inputs.elevation_m, inputs.width, inputs.height), inputs.width, inputs.height,
-                                 context.window);
+    const int parentscale = context.parent == nullptr ? 1 : static_cast<int>(levelscale(context.factor, context.level - 1));
+    const double share = levelnoiseshare(context.window.scale, parentscale, parameters.noisepersistence);
+    state.noiseband_m = upsample(noiserelief(inputs, parameters), inputs.width, inputs.height, context.window);
     for (float& band : state.noiseband_m)
-        band = static_cast<float>(parameters.noiseamplitude_m +
-                                  parameters.noiserelieffraction * std::max(0.0, static_cast<double>(band)));
+        band = static_cast<float>(share * (parameters.noiseamplitude_m +
+                                           parameters.noiserelieffraction * std::max(0.0, static_cast<double>(band))));
     recordlevelstep(state, LevelStep::noiseoctave);
 }
 
@@ -1030,7 +1079,7 @@ void coastlevel(const LevelContext& context, LevelState& state)
     // channels end at the fine coast and never change the mask (regional_pass.cpp's step 2,
     // moved here unchanged in S3.0).
     state.sea = regionalsea(context.inputs, context.window, context.warp, context.parameters, state.surface_m,
-                            context.details.parentseagate);
+                            context.details.parentseagate, context.levelwindow != nullptr);
     recordlevelstep(state, LevelStep::coast);
 }
 }
