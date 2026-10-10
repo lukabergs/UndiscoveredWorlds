@@ -19,7 +19,7 @@ fields (COMPOSITES: regional_terrain, the elevation with sea, ice, lakes and riv
 regional_terrain_fade, the same with rivers fading in with their flow; regional_relief,
 regional_terrain's layers with the sea and land multiplied by a hillshade); the map's "options"
 are passed to the composite's function as keyword arguments (regional_terrain's minimum_flow,
-regional_relief's vertical_exaggeration). The Earth reference windows beside a regional map
+regional_relief's vertical_exaggeration and azimuth_deg). The Earth reference windows beside a regional map
 (kind "earth") are drawn by earth_windows.py with terrain_base, hillshade and shade_factor.
 """
 import json
@@ -190,17 +190,19 @@ def regional_terrain(bundle, minimum_flow=None):
     return regional_layers(bundle, minimum_flow)
 
 
-def regional_relief(bundle, minimum_flow=None, vertical_exaggeration=RELIEF_EXAGGERATION):
+def regional_relief(bundle, minimum_flow=None, vertical_exaggeration=RELIEF_EXAGGERATION, azimuth_deg=RELIEF_AZIMUTH):
     """(RGB, legend note) of a regional bundle: regional_terrain with its sea and land (before the
     ice, rivers, lakes and outlines) multiplied by shade_factor of the hillshade of the elevation
-    relative to sea level (azimuth 315 degrees, altitude 45 degrees, the cell size in metres from
-    the window block and the planet radius, the vertical exaggeration a map option of the profile;
-    multiscale plan S1.2). The Earth window's relief style (earth_windows.py) is the same product."""
+    relative to sea level (azimuth 315 degrees unless the map's azimuth_deg option sets another,
+    altitude 45 degrees, the cell size in metres from the window block and the planet radius, the
+    vertical exaggeration a map option of the profile; multiscale plan S1.2; the maps lit from the NE
+    and SW beside the NW one, S3.7, tell the terrain's striping from the light's). The Earth window's
+    relief style (earth_windows.py) is the same product."""
     sea_level = float(bundle.scalar('geosphere.sea_level'))
     elevation = bundle.load('geosphere.base_elevation').astype(float) - sea_level
     north, pixel_deg, radius_m = pixel_geometry(bundle)
     dy, dx = pixel_sizes_m(north, pixel_deg, elevation.shape[0], radius_m)
-    factor = shade_factor(hillshade(elevation, dy, dx, vertical_exaggeration))
+    factor = shade_factor(hillshade(elevation, dy, dx, vertical_exaggeration, azimuth_deg))
     # The legend note is regional_terrain's: the map's title states the hillshade (a longer note is cut off).
     return regional_layers(bundle, minimum_flow, factor)
 

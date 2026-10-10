@@ -14,6 +14,7 @@ sys.path.insert(0, str(SCRIPTS / "evaluation"))
 
 from uwtools.bundle import SCHEMA, Bundle  # noqa: E402
 from checks import CHECKS, box_average, land_mask, ocean_mask, run_checks  # noqa: E402
+import spectrum  # noqa: E402
 
 COLUMNS, ROWS = 4, 2
 
@@ -449,6 +450,105 @@ class HierarchyCheckTests(unittest.TestCase):
         self.assertEqual(unnumbered["status"], "fail")
         self.assertIn("level entries without a level number: 1", unnumbered["details"])
         self.assertIn("level 2: lakeedgealigned 0.2 (limit 0.125)", unnumbered["details"])
+
+
+def ripples(size, period, amplitudes):
+    """Cosines of `period` pixels on a size x size grid (rows south, columns east) by crest orientation:
+    crests SW-NE run along column + row = constant (going east, the row number falls: north)."""
+    row, column = np.indices((size, size), dtype=np.float64)
+    phase = {"SW-NE": column + row, "NW-SE": column - row, "E-W": row, "N-S": column}
+    return sum(amplitude * np.cos(2.0 * np.pi * phase[name] / period) for name, amplitude in amplitudes.items())
+
+
+class AnisotropyTests(unittest.TestCase):
+    """The slope-spectrum anisotropy (spectrum.py, check 'anisotropy'; multiscale plan S3.7) on synthetic fields
+    of square 1 km pixels (seed 1 for the noise)."""
+
+    def test_diagonal_and_axis_ripples_give_their_power_ratios(self):
+        """Ripples of one period on exact bins: the ratios are the squared amplitude ratios (2 / 1 on the
+        diagonals, 3 / 1 on the axes), overall and in the parent band; the strongest lattice point is the
+        SW-NE one, at the diagonal period 8 / sqrt 2 km."""
+        field = 100.0 * ripples(256, 8, {"SW-NE": 2.0, "NW-SE": 1.0, "E-W": 3.0, "N-S": 1.0})
+        values = spectrum.spectral_anisotropy(field, np.ones(field.shape, dtype=bool), 1.0, 1.0, [(1, 8.0)])
+        self.assertAlmostEqual(values["overall"]["diagonal_ratio"], 4.0, places=6)
+        self.assertAlmostEqual(values["overall"]["axis_ratio"], 9.0, places=6)
+        level = values["levels"][0]
+        self.assertTrue(level["resolved"])
+        self.assertAlmostEqual(level["diagonal_ratio"], 4.0, places=6)
+        self.assertAlmostEqual(level["axis_ratio"], 9.0, places=6)
+        self.assertEqual(level["peak"]["crests"], "SW-NE")
+        self.assertAlmostEqual(level["peak"]["period_km"], 8.0 / np.sqrt(2.0))
+        self.assertAlmostEqual(level["peaks"]["E-W"]["period_km"], 8.0)
+
+    def test_a_diagonal_ripple_over_noise_is_a_peak(self):
+        noise = np.random.default_rng(1).normal(size=(256, 256))
+        field = ripples(256, 8, {"SW-NE": 1.0}) + noise
+        values = spectrum.spectral_anisotropy(field, np.ones(field.shape, dtype=bool), 1.0, 1.0, [(1, 8.0)])
+        self.assertGreater(values["overall"]["diagonal_ratio"], 1.3)  # the noise fills every scale of the overall band
+        self.assertAlmostEqual(values["overall"]["axis_ratio"], 1.0, delta=0.1)
+        level = values["levels"][0]
+        self.assertGreater(level["diagonal_ratio"], 10.0)
+        self.assertAlmostEqual(level["axis_ratio"], 1.0, delta=0.15)
+        self.assertEqual(level["peak"]["crests"], "SW-NE")
+        self.assertGreater(level["peak"]["strength"], 100.0)
+        self.assertLess(level["peaks"]["NW-SE"]["strength"], 2.0)
+
+    def test_isotropic_noise_gives_ratios_near_one(self):
+        """White noise on 512 x 512 pixels, and on half its land (a sea of zeros on the west half): ratios
+        within 10 % of 1 overall and in the band of an 8 km parent period, no lattice peak above 2."""
+        noise = np.random.default_rng(1).normal(size=(512, 512))
+        land = np.ones(noise.shape, dtype=bool)
+        half = land.copy()
+        half[:, :256] = False
+        for mask in (land, half):
+            values = spectrum.spectral_anisotropy(noise, mask, 1.0, 1.0, [(1, 8.0)])
+            level = values["levels"][0]
+            for ratio in (values["overall"]["diagonal_ratio"], values["overall"]["axis_ratio"],
+                          level["diagonal_ratio"], level["axis_ratio"]):
+                self.assertAlmostEqual(ratio, 1.0, delta=0.1)
+            self.assertLess(max(item["strength"] for item in level["peaks"].values()), 2.0)
+
+    def test_unresolved_parent_periods(self):
+        field = np.random.default_rng(1).normal(size=(64, 64))
+        values = spectrum.spectral_anisotropy(field, np.ones(field.shape, dtype=bool), 1.0, 1.0, [(1, 1.5), (2, 32.0)])
+        self.assertEqual([entry["resolved"] for entry in values["levels"]], [False, False])
+
+    def test_check_on_a_hierarchy_bundle(self):
+        """A level-2 bundle (factor 4) of 8 x 4 global cells at scale 16 whose 64 rows span 64 pixels of level 2's
+        cellsize_km (9.775 km) north of the equator: the parent periods are each level's cellsize_km times 4; a
+        SW-NE ripple of 4 pixels over noise is level 2's parent-lattice peak. Without the sea field the check is
+        skipped."""
+        size = 64
+        noise = np.random.default_rng(1).normal(scale=5.0, size=(size, 2 * size))
+        row, column = np.indices(noise.shape, dtype=np.float64)
+        elevation = 1000.0 + 300.0 + 100.0 * np.cos(2.0 * np.pi * (column + row) / 4.0) + noise
+        sea = np.zeros(noise.shape, dtype=np.uint8)
+        sea[:, :8] = 1
+        elevation[:, :8] = 900.0
+        blocks = hierarchy_blocks(2, level_entries(2), column0=0, columns=8, row0=0, rows=4)
+        north = size * np.degrees(9.775 / 6371.0)
+        blocks["window"].update({"north": north, "south": 0.0})
+        with tempfile.TemporaryDirectory() as directory:
+            run = write_bundle(Path(directory) / "run", regional_fields(elevation, sea), 2 * size, size, blocks=blocks)
+            outcome = CHECKS["anisotropy"](run, {"check": "anisotropy"}, {})
+            fields = regional_fields(elevation, sea)
+            del fields["geosphere.sea"]
+            absent = CHECKS["anisotropy"](write_bundle(Path(directory) / "absent", fields, 2 * size, size, blocks=blocks),
+                                          {"check": "anisotropy"}, {})
+        self.assertEqual(outcome["status"], "reported", outcome)
+        values = outcome["values"]
+        middle = np.cos(np.radians(north / 2.0))
+        self.assertAlmostEqual(values["pixel_km"][0], 9.775)
+        self.assertAlmostEqual(values["pixel_km"][1], 9.775 * middle)
+        self.assertAlmostEqual(values["ew_spread"], (middle - np.cos(np.radians(north))) / middle)
+        np.testing.assert_allclose([entry["parent_period_km"] for entry in values["levels"]], [39.1 * 4, 39.1])
+        level = values["levels"][1]
+        self.assertTrue(level["resolved"])
+        self.assertGreater(level["diagonal_ratio"], 10.0)
+        self.assertEqual(level["peak"]["crests"], "SW-NE")
+        self.assertIn("level 2 (parent 39.1 km)", outcome["summary"])
+        self.assertIn("peak SW-NE", outcome["summary"])
+        self.assertEqual(absent["status"], "skip")
 
 
 if __name__ == "__main__":

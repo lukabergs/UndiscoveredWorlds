@@ -2,7 +2,7 @@
 
 Each check returns {'check', 'status' ('pass' | 'fail' | 'skip' | 'reported'), 'summary', 'details'}.
 A check with "report": true in the profile is 'reported' where it would fail: shown, not failing; a
-check that only reports numbers (resolution-invariance) is always 'reported'.
+check that only reports numbers (resolution-invariance, anisotropy) is always 'reported'.
 A check is skipped, not failed, when its input is absent (for example no repeat run) or it does not
 apply (a hierarchy check on a single pass; its summary says "not applicable").
 """
@@ -11,6 +11,8 @@ import json
 import math
 
 import numpy as np
+
+import spectrum
 
 SPATIAL_LAYOUTS = {'grid', 'seasonal', 'monthly', 'levelseasonal'}
 
@@ -706,6 +708,80 @@ def check_resolution_invariance(bundle, spec, context):
     return outcome
 
 
+def pixel_km(bundle):
+    """(north-south pixel size in km, east-west size in km at the central latitude, central latitude, the
+    east-west sizes' largest relative spread over the rows) of a bundle's grid, pixels square in degrees as
+    maps.pixel_geometry and pixel_sizes_m read them: a resampled window's metres_per_pixel, else the window
+    block's degrees over its rows, else the last level's cellsize_km at the equator, else the whole sphere."""
+    window = bundle.manifest.get('window') or {}
+    radius_km = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0))
+    levels = hierarchy_levels(bundle)
+    has_extent = 'north' in window and 'south' in window
+    if 'metres_per_pixel' in window:
+        dy = float(window['metres_per_pixel']) / 1000.0
+    elif has_extent:
+        dy = radius_km * math.radians((float(window['north']) - float(window['south'])) / bundle.rows)
+    elif levels and levels[-1].get('cellsize_km'):
+        dy = float(levels[-1]['cellsize_km'])
+    else:
+        dy = radius_km * math.pi / bundle.rows
+    north, south = (float(window['north']), float(window['south'])) if has_extent else (0.0, 0.0)
+    if not window:
+        north, south = 90.0, -90.0
+    latitude = 0.5 * (north + south)
+    cosine = math.cos(math.radians(latitude))
+    return dy, dy * cosine, latitude, spectrum.ew_spread(north, south, cosine)
+
+
+def check_anisotropy(bundle, spec, context):
+    """Report only (status 'reported', never a failure; multiscale plan S3.7): the directional anisotropy of
+    the land's slope spectrum (spectrum.py), independent of the relief map's light: the ratio of the mean
+    slope power of crests running SW-NE over NW-SE (diagonal) and E-W over N-S (axes), overall and in the
+    band around each level's parent period (the level's cellsize_km times the factor: level 1's parent is
+    the global cell), with the strongest first-order point of the parent lattice (its crests, period in km
+    and strength over its ring). A ratio near 1 is isotropic; a strength near 1 is no peak."""
+    name = 'anisotropy'
+    identifiers = [spec.get('elevation', 'geosphere.base_elevation'), spec.get('sea_level', 'geosphere.sea_level'),
+                   spec.get('sea', 'geosphere.sea')]
+    missing = absent_fields(bundle, identifiers)
+    if missing:
+        return result(name, 'skip', f"{', '.join(missing)} absent")
+    elevation = bundle.load(identifiers[0]).astype(np.float64) - float(bundle.scalar(identifiers[1]))
+    land = bundle.load(identifiers[2]) == 0
+    if not land.any():
+        return result(name, 'skip', 'no land')
+    dy, dx, latitude, spread = pixel_km(bundle)
+    factor = (bundle.manifest.get('window') or {}).get('factor')
+    parents = [(entry['level'], float(entry['cellsize_km']) * float(factor)) for entry in hierarchy_levels(bundle) or []
+               if factor and entry.get('cellsize_km')]
+    band = tuple(spec.get('band', spectrum.PARENT_BAND))
+    values = spectrum.spectral_anisotropy(elevation, land, dy, dx, parents, band)
+    values.update({'pixel_km': [dy, dx], 'latitude': latitude, 'ew_spread': spread})
+    number = lambda value: '–' if value is None else f'{value:.3g}'
+    overall = values['overall']
+    parts = [f"overall SW-NE/NW-SE {number(overall['diagonal_ratio'])}, E-W/N-S {number(overall['axis_ratio'])}"]
+    details = [f"slope spectrum of the land (sea 0, plane removed, Hann taper), land share {values['land_share']:.3f}; pixels "
+               f"{dy:.4g} km N-S x {dx:.4g} km E-W at latitude {latitude:.3g} (one E-W size for every row: the rows "
+               f"differ from it by up to {100 * spread:.2g} %); band |k| x parent period {band[0]:g} to {band[1]:g}",
+               f"overall ({overall['band_km'][0]:.3g} to {overall['band_km'][1]:.4g} km): sector means " +
+               ', '.join(f'{key} {number(value)}' for key, value in overall['sector_means'].items())]
+    for entry in values['levels']:
+        label = f"level {entry['level']} (parent {entry['parent_period_km']:.4g} km)"
+        if not entry['resolved']:
+            parts.append(f'{label} not resolved')
+            continue
+        peak = entry['peak']
+        peak_text = '–' if peak is None else f"{peak['crests']} {number(peak['strength'])} at {peak['period_km']:.3g} km"
+        parts.append(f"{label} {number(entry['diagonal_ratio'])} / {number(entry['axis_ratio'])}, peak {peak_text}")
+        details.append(f"{label}, band {entry['band_km'][0]:.3g} to {entry['band_km'][1]:.3g} km: SW-NE/NW-SE "
+                       f"{number(entry['diagonal_ratio'])}, E-W/N-S {number(entry['axis_ratio'])}; lattice peaks " +
+                       ', '.join(f"{key} " + ('–' if item is None else f"{number(item['strength'])} at {item['period_km']:.3g} km")
+                                 for key, item in entry['peaks'].items()))
+    outcome = result(name, 'reported', '; '.join(parts), details)
+    outcome['values'] = values
+    return outcome
+
+
 CHECKS = {'grid': check_grid, 'required': check_required, 'finite': check_finite, 'range': check_range,
           'written': check_written, 'frozen': check_frozen, 'repeat': check_repeat,
           'recipe-equality': check_recipe_equality, 'record': check_record, 'budget': check_budget,
@@ -713,7 +789,7 @@ CHECKS = {'grid': check_grid, 'required': check_required, 'finite': check_finite
           'monotone': check_monotone, 'lake-above-terrain': check_lake_above_terrain,
           'regional-window': check_regional_window, 'parent-mean-exact': check_parent_mean_exact,
           'level-consistency': check_level_consistency, 'resolution-invariance': check_resolution_invariance,
-          'border-step': check_border_step, 'level-targets': check_level_targets}
+          'border-step': check_border_step, 'level-targets': check_level_targets, 'anisotropy': check_anisotropy}
 
 
 def run_checks(bundle, specs, context):

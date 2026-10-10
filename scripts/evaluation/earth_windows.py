@@ -24,7 +24,8 @@ same staleness rule). Basins below 0 m off the ocean (the Caspian, the Dead Sea,
 Qattara depression, Lake Superior's bed) are drawn as land; there are no lakes, rivers or ice.
 Each window is drawn in the style of the profile's regional maps it stands beside: `terrain`
 (regional_terrain's sea and land on tectonics:elevation and the landmass outline) and `relief`
-(the same times the hillshade of maps.regional_relief, the map's vertical exaggeration).
+(the same times the hillshade of maps.regional_relief, the map's vertical exaggeration and light
+azimuth).
 Map entries have kind "earth" (never "reference", the climate validation's).
 """
 import datetime
@@ -38,7 +39,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import map_rendering, palettes
-from maps import RELIEF_EXAGGERATION, hillshade, legend, pixel_sizes_m, shade_factor, shore, terrain_base
+from maps import RELIEF_AZIMUTH, RELIEF_EXAGGERATION, hillshade, legend, pixel_sizes_m, shade_factor, shore, terrain_base
 
 ROOT = Path(__file__).resolve().parents[2]
 CATALOGUE = 'configs/evaluation/earth-windows.json'
@@ -361,10 +362,11 @@ def window_sea(elevation, record, ocean):
     return below & (np.asarray(mask[np.ix_(rows, columns)]) != 0)
 
 
-def render_window(elevation, record, style, vertical_exaggeration=RELIEF_EXAGGERATION, ocean=None):
+def render_window(elevation, record, style, vertical_exaggeration=RELIEF_EXAGGERATION, ocean=None, azimuth_deg=RELIEF_AZIMUTH):
     """(RGB, legend note) of an Earth window: sea (window_sea: the world ocean of `ocean`) and land (lake
     beds included) on tectonics:elevation as regional_terrain draws them, times the hillshade of
-    maps.regional_relief in the relief style, and the landmass outline in black."""
+    maps.regional_relief in the relief style (light from azimuth_deg, the map's option), and the landmass
+    outline in black."""
     elevation = np.asarray(elevation, dtype=float)
     sea = window_sea(elevation, record, ocean)
     rgb = terrain_base(elevation, sea)
@@ -372,7 +374,7 @@ def render_window(elevation, record, style, vertical_exaggeration=RELIEF_EXAGGER
             'on the 60 arc-second globe); lake beds as land; no rivers or ice; black: the landmass outline')
     if style == 'relief':
         dy, dx = pixel_sizes_m(record['extent']['north'], record['pixel_deg'], elevation.shape[0], EARTH_RADIUS_M)
-        rgb = rgb * shade_factor(hillshade(elevation, dy, dx, vertical_exaggeration))[..., None]
+        rgb = rgb * shade_factor(hillshade(elevation, dy, dx, vertical_exaggeration, azimuth_deg))[..., None]
     elif style != 'terrain':
         raise ValueError(f'Unknown Earth window style {style!r}; known: terrain, relief')
     rgb[shore(~sea)] = 0.0
@@ -429,8 +431,9 @@ def render_maps(bundle, profile, directory, name=None, reader=None, catalogue=No
     written = []
     for spec in earth_specs(profile):
         style = STYLES[spec['composite']]
-        rgb, note = render_window(elevation, record, style, spec.get('options', {}).get('vertical_exaggeration', RELIEF_EXAGGERATION),
-                                  ocean)
+        options = spec.get('options', {})
+        rgb, note = render_window(elevation, record, style, options.get('vertical_exaggeration', RELIEF_EXAGGERATION),
+                                  ocean, options.get('azimuth_deg', RELIEF_AZIMUTH))
         relative = Path('maps') / f"{spec['name']}-earth{tag}.png"
         (Path(directory) / relative).parent.mkdir(parents=True, exist_ok=True)
         image = map_rendering.frame(rgb, title, legend(spec['palette'], note), width=factor * record['pixels'][0], extent=extent)

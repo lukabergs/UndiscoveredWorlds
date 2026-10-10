@@ -218,6 +218,8 @@ class RenderTests(unittest.TestCase):
         np.testing.assert_array_equal(relief[:, :19], expected[:, :19])  # a flat sea floor keeps its colour
         self.assertTrue(np.all(terrain[:, 20] == 0))     # the landmass outline
         self.assertFalse(np.array_equal(terrain[:, 25:], relief[:, 25:]))  # the slope is shaded
+        opposite, _ = render_window(elevation, record, "relief", azimuth_deg=135.0)
+        self.assertFalse(np.array_equal(relief[:, 25:], opposite[:, 25:]))  # the light's azimuth is the map's option
 
     def test_no_entry_is_said(self):
         catalogue = {"schema": "uw-earth-windows/v1", "windows": [entry(metres=(100.0, 1000.0))]}
@@ -396,6 +398,23 @@ class RegionalReliefTests(unittest.TestCase):
         np.testing.assert_array_equal(relief[0, 4], terrain[0, 4])        # flat land
         self.assertFalse(np.array_equal(relief[4, 6], terrain[4, 6]))     # the slope
         self.assertNotIn("hillshade", note)                               # the title states it; the legend stays short
+
+    def test_the_light_azimuth_option(self):
+        """S3.7: a slope rising east faces west: brighter lit from the south-west (225) than from the north-east
+        (45); flat land keeps its colour under every light; the default is the north-west light (315)."""
+        elevation = np.full((6, 8), 200.0)
+        elevation[:, :3] = -50.0
+        elevation[3:, 5:] = 200.0 + 300.0 * np.indices((3, 3))[1]
+        with tempfile.TemporaryDirectory() as directory:
+            item = regional_bundle(directory, elevation)
+            default, _ = regional_relief(item, vertical_exaggeration=10)
+            north_west, _ = regional_relief(item, vertical_exaggeration=10, azimuth_deg=315)
+            north_east, _ = regional_relief(item, vertical_exaggeration=10, azimuth_deg=45)
+            south_west, _ = regional_relief(item, vertical_exaggeration=10, azimuth_deg=225)
+        np.testing.assert_array_equal(default, north_west)
+        self.assertGreater(int(south_west[4, 6].sum()), int(north_east[4, 6].sum()))  # the west-facing slope
+        np.testing.assert_array_equal(north_east[0, 4], default[0, 4])                 # flat land keeps its colour
+        np.testing.assert_array_equal(south_west[0, 4], default[0, 4])
 
 
 if __name__ == "__main__":
