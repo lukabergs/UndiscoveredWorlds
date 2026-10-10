@@ -190,6 +190,8 @@ inline float projectionWeightChannel = 0.0f;
 inline int storedScaleMax = 256;
 inline float detailCells = 2.0f;
 inline int tileCells = 1024;
+inline float smoothRelaxation = 1.4f;
+inline int smoothPasses = 6;
 }
 
 // Every value above, by its recipe name.
@@ -317,6 +319,8 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.refinement.stored_scale_max", &refinement::storedScaleMax },
         { "landscape.refinement.detail_cells", &refinement::detailCells },
         { "landscape.refinement.tile_cells", &refinement::tileCells },
+        { "landscape.refinement.smooth_relaxation", &refinement::smoothRelaxation },
+        { "landscape.refinement.smooth_passes", &refinement::smoothPasses },
     };
     return entries;
 }

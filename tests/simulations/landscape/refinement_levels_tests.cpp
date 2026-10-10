@@ -6,7 +6,8 @@
 // error against its bound, the outlet discharge, the level consistency (k = 16
 // box-averaged equals k = 4) and the parity of one level with the single pass; S2.3's
 // rework (the bounds, the detail band, the global lake depth) the valleys at level 2; S2.4
-// the resample of the final level to a requested metres per pixel.
+// the resample of the final level to a requested metres per pixel; S2.7 the overlap and the
+// consistency with the smoothing before the projection on.
 
 #include <gtest/gtest.h>
 
@@ -291,7 +292,8 @@ TEST_F(Landscape, RefinementLevelsCellSizesAndAssignment)
     EXPECT_EQ(static_cast<int>(landscape::LevelStep::incision), 3);
     EXPECT_EQ(static_cast<int>(landscape::LevelStep::solve), 5);
     EXPECT_EQ(static_cast<int>(landscape::LevelStep::lakes), 9);
-    EXPECT_EQ(static_cast<int>(landscape::LevelStep::projection), 10);
+    EXPECT_EQ(static_cast<int>(landscape::LevelStep::smoothing), 10);
+    EXPECT_EQ(static_cast<int>(landscape::LevelStep::projection), 11);
     EXPECT_EQ(static_cast<int>(landscape::LevelStep::ice), landscape::levelstepcount - 1);
     EXPECT_EQ(std::string(landscape::levelstepname(landscape::LevelStep::glacialforms)), "glacial_forms");
 }
@@ -539,6 +541,72 @@ TEST_F(Landscape, RefinementLevelsRejects)
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, one), std::invalid_argument);
     target.window.halo = 5;  // below 2 x meanpasses + 2
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, RefinementParameters{}), std::invalid_argument);
+    // The smoothing's passes widen the rule: 6 is below 2 x 2 + 2 + 2 x 1.
+    target.window.halo = testhalo;
+    RefinementParameters smoothing;
+    smoothing.smoothpasses = 1;
+    EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, smoothing), std::invalid_argument);
+    target.window.halo = testhalo + 2;
+    smoothing.smoothpasses = -1;
+    EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, smoothing), std::invalid_argument);
+    smoothing.smoothpasses = 1;
+    smoothing.smoothrelaxation = 0.0;
+    EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, smoothing), std::invalid_argument);
+}
+
+// Step S2.7: the smoothing before every projection (6 passes, relaxation 1.4) with every
+// feature on, the halo widened by 2 x 6 global cells: the overlap identity at both levels
+// (P and Q, Q across the date line), every level exact, level 1 of two levels equal to one
+// level bit for bit, the smoothing's step recorded and lambda reduced.
+TEST_F(Landscape, RefinementLevelsSmoothing)
+{
+    const RegionalGlobalInputs inputs = wideworld();
+    const RegionalParameters parameters = everyfeature();
+    RefinementParameters refinement;
+    refinement.smoothpasses = 6;
+    const int halo = testhalo + 2 * refinement.smoothpasses;
+    const RegionalWindow p = landscape::regionalwindow(256, 16, halo, 160.0, -15.0, 180.0, 10.0);
+    const RegionalWindow q = landscape::regionalwindow(256, 16, halo, 170.0, -10.0, -170.0, 15.0);
+    const auto run = [&](const RegionalWindow& window, int level, const std::string& name) {
+        LevelTarget target;
+        target.window = window;
+        target.level = level;
+        const auto start = std::chrono::steady_clock::now();
+        RefinementResult result = landscape::runrefinement(inputs, target, parameters, refinement);
+        std::printf("[refinement] %s: L %d, %.3f s\n", name.c_str(), level,
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+        for (const LevelDiagnostics& diagnostics : result.levels)
+            std::printf("[refinement]   level %d: lambda %.1f -> %.2f m (step %.1f -> %.2f m), largest move %.1f m; "
+                        "border step max %.2f m p99 %.2f m; parent-mean %.3g m (bound %.3g m); beds moved %d, forced %d; "
+                        "land below the sea level %d\n",
+                        diagnostics.level, diagnostics.smoothing.maxlambdabefore_m, diagnostics.smoothing.maxlambdaafter_m,
+                        diagnostics.smoothing.maxlambdastepbefore_m, diagnostics.smoothing.maxlambdastepafter_m,
+                        diagnostics.smoothing.maxmove_m, diagnostics.projection.maxborderstep_m,
+                        diagnostics.projection.borderstep99_m, diagnostics.projection.maxparentmeanerror_m,
+                        diagnostics.meanbound_m, diagnostics.projection.bedsmovedparents,
+                        diagnostics.projection.forcedparents, diagnostics.landbelowsea);
+        return result;
+    };
+    const RefinementResult a = run(p, 2, "smoothing P");
+    const RefinementResult b = run(q, 2, "smoothing Q");
+    expectexact(a, "smoothing P");
+    expectexact(b, "smoothing Q");
+    const OverlapCounts counts = compareoverlaplevels(a, b, "smoothing P/Q");
+    EXPECT_GT(counts.lake, 0);
+    EXPECT_GT(counts.channel, 0);
+    for (const LevelDiagnostics& level : a.levels)
+    {
+        EXPECT_NE(std::find(level.steps.begin(), level.steps.end(), landscape::LevelStep::smoothing), level.steps.end());
+        EXPECT_EQ(level.smoothing.passes, 6);
+        EXPECT_NEAR(level.smoothing.maxlambdaafter_m, level.projection.maxlambda_m, 1.0e-6);
+        EXPECT_LT(level.smoothing.maxlambdaafter_m, level.smoothing.maxlambdabefore_m);
+    }
+
+    // The level consistency: level 1 of two levels is one level bit for bit.
+    const RefinementResult one = run(p, 1, "smoothing P, one level");
+    const auto cells = sharedcells(one.levels[0].window, a.levels[0].window);
+    ASSERT_EQ(cells.size(), one.levels[0].window.keptsize());
+    EXPECT_EQ(differing(one.fields.elevation_m, a.coarserelevation_m[0], cells), 0);
 }
 
 // Step S2.4: the source level of a request and the resample of a refinement's final level,

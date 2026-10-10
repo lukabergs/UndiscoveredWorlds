@@ -331,6 +331,10 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                         << ", \"parents\": " << projection.parents
                         << ", \"maxparentmeanerror_m\": " << jsonnumber(projection.maxparentmeanerror_m)
                         << ", \"globalmeanerror_m\": " << jsonnumber(level.globalmeanerror_m)
+                        << ", \"smoothpasses\": " << level.smoothing.passes
+                        << ", \"maxlambdabefore_m\": " << jsonnumber(level.smoothing.maxlambdabefore_m)
+                        << ", \"maxlambdastepbefore_m\": " << jsonnumber(level.smoothing.maxlambdastepbefore_m)
+                        << ", \"maxsmoothmove_m\": " << jsonnumber(level.smoothing.maxmove_m)
                         << ", \"maxlambda_m\": " << jsonnumber(projection.maxlambda_m)
                         << ", \"maxlambdastep_m\": " << jsonnumber(projection.maxlambdastep_m)
                         << ", \"maxborderstep_m\": " << jsonnumber(projection.maxborderstep_m)

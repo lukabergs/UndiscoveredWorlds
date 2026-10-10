@@ -7,10 +7,13 @@
 #include <stdexcept>
 #include <string>
 
+#include "simulations/landscape/upsampling.hpp"
+
 // The projection, its error measure and the resample (step S2.2,
 // docs/architecture/multiscale-plan.md; contracts in the header, written in S0.4; the
 // bounds that replaced S2.2's weights are S2.3's rework, plan section 3, "S2.3's projection
-// weights and detail levels"). A
+// weights and detail levels"; the smoothing before the projection is S2.7's, "S2.7: smooth
+// before exact"). A
 // parent's children are visited in row-major order of their absolute position: the
 // domain of a level window is whole parent cells and its columns never split a parent
 // across the date line (the level width is a multiple of factor), so the local order
@@ -128,6 +131,19 @@ float roomup(double value, float ceiling)
     return room > 0.0f && static_cast<float>(value + static_cast<double>(room)) <= ceiling ? room : 0.0f;
 }
 
+// The bounds' sizes and values, as projectlevel and smoothparentmeans require them.
+void checkbounds(const LevelWindow& level, const ProjectionBounds& bounds, const char* name)
+{
+    const std::size_t size = level.domainsize();
+    if (bounds.rate.size() != size || bounds.up_m.size() != size || bounds.down_m.size() != size)
+        throw std::invalid_argument(std::string(name) + ": the bounds must have the level's domain size");
+    for (std::size_t cell = 0; cell < size; cell++)
+        if (!std::isfinite(bounds.rate[cell]) || bounds.rate[cell] < 0.0f || std::isnan(bounds.up_m[cell]) ||
+            std::isnan(bounds.down_m[cell]) || bounds.up_m[cell] < 0.0f || bounds.down_m[cell] < 0.0f)
+            throw std::invalid_argument(std::string(name) +
+                                        ": a rate is negative or not finite, or a headroom negative or NaN");
+}
+
 double largestmeanerror(const LevelWindow& level, const std::vector<float>& field, const LevelWindow& parent,
                         const std::vector<float>& parentfield)
 {
@@ -137,6 +153,33 @@ double largestmeanerror(const LevelWindow& level, const std::vector<float>& fiel
         for (int p = kept.column0; p < kept.column0 + kept.columns; p++)
             largest = std::max(largest, std::fabs(childmean(level, field, p, q) - parentvalue(level, parent, parentfield, p, q)));
     return largest;
+}
+
+// The largest |lambda_c| and |lambda_c - lambda_c'| (kept parents adjacent east-west or
+// north-south) over the kept box's parents, lambda_c = v_c - mean_C(c)(field).
+void lambdastatistics(const LevelWindow& level, const std::vector<float>& field, const LevelWindow& parent,
+                      const std::vector<float>& parentfield, double& largest, double& largeststep)
+{
+    const KeptParents kept = keptparents(level);
+    std::vector<double> lambda(static_cast<std::size_t>(kept.columns) * static_cast<std::size_t>(kept.rows));
+    auto lambdaat = [&](int i, int j) -> double& {
+        return lambda[static_cast<std::size_t>(j) * static_cast<std::size_t>(kept.columns) + static_cast<std::size_t>(i)];
+    };
+    for (int j = 0; j < kept.rows; j++)
+        for (int i = 0; i < kept.columns; i++)
+            lambdaat(i, j) = parentvalue(level, parent, parentfield, kept.column0 + i, kept.row0 + j) -
+                             childmean(level, field, kept.column0 + i, kept.row0 + j);
+    largest = 0.0;
+    largeststep = 0.0;
+    for (int j = 0; j < kept.rows; j++)
+        for (int i = 0; i < kept.columns; i++)
+        {
+            largest = std::max(largest, std::fabs(lambdaat(i, j)));
+            if (i + 1 < kept.columns)
+                largeststep = std::max(largeststep, std::fabs(lambdaat(i, j) - lambdaat(i + 1, j)));
+            if (j + 1 < kept.rows)
+                largeststep = std::max(largeststep, std::fabs(lambdaat(i, j) - lambdaat(i, j + 1)));
+        }
 }
 }
 
@@ -200,12 +243,7 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
 {
     checkpair(level, field.size(), parent, parentfield.size(), "projectlevel");
     const std::size_t size = level.domainsize();
-    if (bounds.rate.size() != size || bounds.up_m.size() != size || bounds.down_m.size() != size)
-        throw std::invalid_argument("projectlevel: the bounds must have the level's domain size");
-    for (std::size_t cell = 0; cell < size; cell++)
-        if (!std::isfinite(bounds.rate[cell]) || bounds.rate[cell] < 0.0f || std::isnan(bounds.up_m[cell]) ||
-            std::isnan(bounds.down_m[cell]) || bounds.up_m[cell] < 0.0f || bounds.down_m[cell] < 0.0f)
-            throw std::invalid_argument("projectlevel: a rate is negative or not finite, or a headroom negative or NaN");
+    checkbounds(level, bounds, "projectlevel");
 
     const int f = level.factor;
     const int count = f * f;
@@ -357,6 +395,111 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
         report.borderstep99_m = steps[rank];
         report.maxborderstep_m = *std::max_element(steps.begin() + static_cast<std::ptrdiff_t>(rank), steps.end());
     }
+    return report;
+}
+
+SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& field, const ProjectionBounds& bounds,
+                                  const LevelWindow& parent, const std::vector<float>& parentfield, int passes,
+                                  double relaxation)
+{
+    checkpair(level, field.size(), parent, parentfield.size(), "smoothparentmeans");
+    checkbounds(level, bounds, "smoothparentmeans");
+    if (passes < 0 || !std::isfinite(relaxation) || !(relaxation > 0.0))
+        throw std::invalid_argument("smoothparentmeans: passes must not be negative and the relaxation positive and finite");
+    SmoothingReport report;
+    report.passes = passes;
+    lambdastatistics(level, field, parent, parentfield, report.maxlambdabefore_m, report.maxlambdastepbefore_m);
+    if (passes == 0)
+    {
+        report.maxlambdaafter_m = report.maxlambdabefore_m;
+        report.maxlambdastepafter_m = report.maxlambdastepbefore_m;
+        return report;
+    }
+
+    const int f = level.factor;
+    const double children = static_cast<double>(f) * f;
+    const std::size_t size = level.domainsize();
+    const int pcolumns = level.domainparentcolumns(), prows = level.domainparentrows();
+    const bool wholeturn = static_cast<std::int64_t>(level.domaincolumns) >= level.levelwidth();
+    // The interpolation position of a child at offset o inside its parent (correctparentmeans's):
+    // t = (o + 0.5) / f - 0.5 parent cells from the parent's centre, from the parent itself
+    // (lower 0) or its predecessor (lower -1, t < 0).
+    std::vector<int> lower(static_cast<std::size_t>(f));
+    std::vector<double> fraction(static_cast<std::size_t>(f));
+    for (int o = 0; o < f; o++)
+    {
+        const double t = (o + 0.5) / f - 0.5;
+        lower[static_cast<std::size_t>(o)] = t < 0.0 ? -1 : 0;
+        fraction[static_cast<std::size_t>(o)] = t < 0.0 ? t + 1.0 : t;
+    }
+    const auto column = [&](int c) {
+        return wholeturn ? ((c % pcolumns) + pcolumns) % pcolumns : std::clamp(c, 0, pcolumns - 1);
+    };
+
+    std::vector<double> origin(size), total(size, 0.0);
+    for (std::size_t cell = 0; cell < size; cell++)
+        origin[cell] = static_cast<double>(field[cell]);
+    std::vector<double> mu(static_cast<std::size_t>(pcolumns) * static_cast<std::size_t>(prows));
+    for (int pass = 0; pass < passes; pass++)
+    {
+        // mu_c = lambda_c f^2 / the rates of the children with room in lambda_c's direction.
+        for (int q = 0; q < prows; q++)
+            for (int p = 0; p < pcolumns; p++)
+            {
+                const double lambdac = parentvalue(level, parent, parentfield, p, q) - childmean(level, field, p, q);
+                double rates = 0.0;
+                if (lambdac != 0.0)
+                    for (int y = q * f; y < (q + 1) * f; y++)
+                        for (int x = p * f; x < (p + 1) * f; x++)
+                        {
+                            const std::size_t cell = level.index(x, y);
+                            const double room = lambdac > 0.0 ? static_cast<double>(bounds.up_m[cell]) - total[cell]
+                                                              : static_cast<double>(bounds.down_m[cell]) + total[cell];
+                            if (bounds.rate[cell] > 0.0f && room > 0.0)
+                                rates += static_cast<double>(bounds.rate[cell]);
+                        }
+                mu[static_cast<std::size_t>(q) * static_cast<std::size_t>(pcolumns) + static_cast<std::size_t>(p)] =
+                    rates > 0.0 ? lambdac * children / rates : 0.0;
+            }
+        // Lambda at the child centres; each rated child moves rate x Lambda, its total capped.
+        for (int y = 0; y < level.domainrows; y++)
+        {
+            const std::size_t oy = static_cast<std::size_t>(y % f);
+            const int rowbase = y / f + lower[oy];
+            const double ty = fraction[oy];
+            for (int x = 0; x < level.domaincolumns; x++)
+            {
+                const std::size_t cell = level.index(x, y);
+                const double rate = static_cast<double>(bounds.rate[cell]);
+                if (!(rate > 0.0))
+                    continue;
+                const std::size_t ox = static_cast<std::size_t>(x % f);
+                const int columnbase = x / f + lower[ox];
+                const double tx = fraction[ox];
+                double interpolated[4];
+                for (int b = 0; b < 4; b++)
+                {
+                    const std::size_t base = static_cast<std::size_t>(std::clamp(rowbase - 1 + b, 0, prows - 1)) *
+                                             static_cast<std::size_t>(pcolumns);
+                    const auto value = [&](int a) { return mu[base + static_cast<std::size_t>(column(columnbase - 1 + a))]; };
+                    interpolated[b] = catmullrom(value(0), value(1), value(2), value(3), tx);
+                }
+                const double move =
+                    relaxation * rate * catmullrom(interpolated[0], interpolated[1], interpolated[2], interpolated[3], ty);
+                const double moved = std::clamp(total[cell] + move, -static_cast<double>(bounds.down_m[cell]),
+                                                static_cast<double>(bounds.up_m[cell]));
+                if (moved == total[cell])
+                    continue;
+                total[cell] = moved;
+                field[cell] = static_cast<float>(origin[cell] + moved);
+            }
+        }
+    }
+    lambdastatistics(level, field, parent, parentfield, report.maxlambdaafter_m, report.maxlambdastepafter_m);
+    const int x0 = level.keptcolumnoffset(), y0 = level.keptrowoffset();
+    for (int y = y0; y < y0 + level.rows; y++)
+        for (int x = x0; x < x0 + level.columns; x++)
+            report.maxmove_m = std::max(report.maxmove_m, std::fabs(total[level.index(x, y)]));
     return report;
 }
 

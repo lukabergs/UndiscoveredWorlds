@@ -194,5 +194,7 @@ landscape::RefinementParameters refinementparameters()
     parameters.storedscalemax = refinement::storedScaleMax;
     parameters.detailcells = refinement::detailCells;
     parameters.tilecells = refinement::tileCells;
+    parameters.smoothpasses = refinement::smoothPasses;
+    parameters.smoothrelaxation = refinement::smoothRelaxation;
     return parameters;
 }

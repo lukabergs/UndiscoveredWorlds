@@ -23,6 +23,11 @@
 //   its surface is dried (its lake surface set to 0; LevelDiagnostics::driedcells), and the
 //   dry cells at or below a wet 8-neighbour's surface (shoresbelowlake) and at or below the
 //   sea level (landbelowsea) are counted. Nothing writes the elevation after the projection.
+// - Between the lakes and the projection, with refinement.smooth_passes > 0, the per-parent
+//   correction is smoothed (LevelStep::smoothing, smoothparentmeans with the projection's
+//   bounds built on the level's field; S2.7), and the projection's bounds are rebuilt on the
+//   smoothed field. Each pass reaches 2 parent cells: the target's halo must be at least
+//   2 x meanpasses + 2 + 2 x smooth_passes global cells.
 // - The ice above the ELA (iceabovetheela) and the lapse-rate climate (temperature,
 //   precipitation, climate class) run after the loop, at the final level only, from its
 //   projected elevation.
@@ -56,6 +61,10 @@ struct RefinementParameters
                                             // render tiles computed on demand
     double detailcells = 2.0;               // a detail is resolved by at least this many cells of its level
     int tilecells = 1024;                   // a render tile's edge in level cells
+    // The smoothing before the projection (S2.7, refinement_projection.hpp, smoothparentmeans):
+    // its passes (0: none, the S2.3 loop bit for bit; the parameter file sets 6) and relaxation.
+    int smoothpasses = 0;
+    double smoothrelaxation = 1.4;
 };
 
 // The prolongation's reach in parent cells beyond a child's parent cell (Catmull-Rom:
@@ -79,10 +88,12 @@ enum class LevelStep : int
     glacialforms,     // glacial troughs and cirques (regional_troughs.hpp, regional_cirques.hpp)
     foldfabric,       // fold trains (regional_folds.hpp, S5.2)
     lakes,            // lakes (regional_water.hpp, regionalwater): writes the elevation, gives the lake beds
+    smoothing,        // the per-parent correction smoothed with the projection's bounds (refinement_projection.hpp,
+                      // smoothparentmeans; S2.7), when refinement.smooth_passes > 0
     projection,       // the exact projection onto the parent level (refinement_projection.hpp)
     ice,              // ice above the ELA (regional_ice.hpp, iceabovetheela): the final level, reads the elevation
 };
-constexpr int levelstepcount = 12;
+constexpr int levelstepcount = 13;
 
 inline const char* levelstepname(LevelStep step)
 {
@@ -98,6 +109,7 @@ inline const char* levelstepname(LevelStep step)
     case LevelStep::glacialforms: return "glacial_forms";
     case LevelStep::foldfabric: return "fold_fabric";
     case LevelStep::lakes: return "lakes";
+    case LevelStep::smoothing: return "smoothing";
     case LevelStep::projection: return "projection";
     case LevelStep::ice: return "ice";
     }
@@ -165,6 +177,7 @@ struct LevelDiagnostics
     double cellsize_km = 0.0;
     LevelWindow window;                  // the level's window in the halo chain
     double blockmeanerror_m = 0.0;       // measured after LevelStep::presmoothing (kept box's parents)
+    SmoothingReport smoothing;           // the smoothing before the projection (lambda before and after it)
     ProjectionReport projection;         // the exact projection's report
     // The largest |mean over a global cell - the global elevation| of the projected level
     // field over the global cells of the kept box (the accumulated error of levels 1 .. l).
@@ -204,8 +217,9 @@ struct RefinementResult
 };
 
 // The loop. Throws std::invalid_argument when the target is not a window on the inputs'
-// grid (as runregionalpass), its halo is below 2 x meanpasses + 2, target.level < 1,
-// refinement.factor < 2, factor^level does not fit an int, a global field has the wrong
+// grid (as runregionalpass), its halo is below 2 x meanpasses + 2 + 2 x smoothpasses,
+// target.level < 1, refinement.factor < 2, refinement.smoothpasses < 0 or
+// refinement.smoothrelaxation not positive and finite, factor^level does not fit an int, a global field has the wrong
 // size, the radius is not positive or the sea level not finite, and as halochain (a level's
 // domain wider than its grid).
 RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTarget& target,

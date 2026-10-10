@@ -3,7 +3,8 @@
 // a child and a parent window built by hand (refinement_test_windows.hpp) find each other's
 // cells, which is all the projection needs from refinement_grid.hpp; S2.2 adds exactness,
 // the weights, the border step, the bit identity in two windows and the resample; S2.3's
-// rework replaces the weights by bounds (the caps, exactness under them, both fallbacks).
+// rework replaces the weights by bounds (the caps, exactness under them, both fallbacks);
+// S2.7 adds the smoothing before the projection (smoothparentmeans).
 
 #include <gtest/gtest.h>
 
@@ -22,6 +23,7 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -674,6 +676,190 @@ TEST_F(Landscape, RefinementProjectionBitIdenticalInTwoWindows)
     };
     compare(a.w1, a.f1, b.w1, b.f1, 1);
     compare(a.w2, a.f2, b.w2, b.f2, 2);
+}
+
+namespace
+{
+// S2.7's fixture: the 64-column synthetic world (continent centred at 180, 5 N: global
+// columns 55 .. 8 across the date line) at factor 4.
+// Level 1 keeps `columns` x `rows` global cells from (column0, row0) with a halo of 13
+// parent cells (6 smoothing passes reach 12); its parent at level 0 keeps exactly the
+// level's domain parents. The candidate F* is the nearest prolongation plus the detail
+// (a function of the absolute position), every land child (F* above the sea level 0 before
+// the lowering) moved by its parent's hashed share of `shift`: by default a lowering in
+// [0, 500] m (the solve's per-parent lowering of section 3, "S2.7", lambda > 0), with a
+// positive shift a raise (lambda < 0, the land sinking towards its floors), held at least
+// 1 m above the sea level; the
+// hashed channels are beds (rate 0). Projected once without and once with the smoothing.
+struct SmoothingCase
+{
+    LevelWindow parent, level;
+    std::vector<float> parentfield, candidate, plain, smoothed, field;  // smoothed: before the projection
+    std::vector<std::uint8_t> sea, channel;
+    landscape::ProjectionReport unsmoothed, report;
+    landscape::SmoothingReport smoothing;
+};
+
+SmoothingCase smoothingcase(int column0, int row0, int columns, int rows, int passes, double shift = -500.0)
+{
+    const int f = 4, halo = 13, width = 64;
+    const std::vector<float> global = syntheticworld(width).elevation_m;
+    SmoothingCase s;
+    s.level = handlevelwindow(width, f, 1, halo, static_cast<std::int64_t>(column0) * f, columns * f,
+                              static_cast<std::int64_t>(row0) * f, rows * f);
+    s.parent = handlevelwindow(width, f, 0, 0, s.level.domaincolumn0 / f, s.level.domaincolumns / f, s.level.domainrow0 / f,
+                               s.level.domainrows / f);
+    s.parentfield = globalvalues(s.parent, global);
+    s.candidate = nearest(s.level, s.parent, s.parentfield);
+    s.sea = seamask(s.candidate);
+    s.channel = channelmask(s.level);
+    for (int y = 0; y < s.level.domainrows; y++)
+        for (int x = 0; x < s.level.domaincolumns; x++)
+        {
+            const std::size_t cell = s.level.index(x, y);
+            if (s.sea[cell] != 0)
+                continue;
+            const std::uint64_t key = landscape::levelkey(s.level.parentcolumn(x), s.level.parentrow(y), width);
+            const double unit = static_cast<double>(mixkey(key + 0x57ULL) >> 11) * 0x1.0p-53;
+            s.candidate[cell] = std::max(1.0f, static_cast<float>(static_cast<double>(s.candidate[cell]) + shift * unit));
+        }
+    s.plain = s.candidate;
+    const landscape::ProjectionBounds before =
+        landscape::projectionbounds(s.level, s.channel, s.sea, {}, s.candidate, sealevel, 0.0);
+    s.unsmoothed = landscape::projectlevel(s.level, s.plain, before, s.parent, s.parentfield);
+    s.field = s.candidate;
+    s.smoothing = landscape::smoothparentmeans(s.level, s.field, before, s.parent, s.parentfield, passes, 1.4);
+    s.smoothed = s.field;
+    const landscape::ProjectionBounds after =
+        landscape::projectionbounds(s.level, s.channel, s.sea, {}, s.field, sealevel, 0.0);
+    s.report = landscape::projectlevel(s.level, s.field, after, s.parent, s.parentfield);
+    return s;
+}
+
+// Half a float ulp of the kept box's largest |F| (the loop's meanbound_m).
+double meanbound(const LevelWindow& level, const std::vector<float>& field)
+{
+    float largest = 0.0f;
+    for (int y = level.keptrowoffset(); y < level.keptrowoffset() + level.rows; y++)
+        for (int x = level.keptcolumnoffset(); x < level.keptcolumnoffset() + level.columns; x++)
+            largest = std::max(largest, std::fabs(field[level.index(x, y)]));
+    return std::ldexp(1.0, std::ilogb(largest) - 24);
+}
+}
+
+// The smoothing before the projection (S2.7) on a per-parent lowering or raise of up to 500 m: the
+// border step falls to at most 2 % of the unsmoothed projection's, inland and on a coast; the means stay
+// exact; sea stays below the sea level and land above it; beds never move; on a coast the
+// caps hold every class. passes 0 changes nothing.
+TEST_F(Landscape, RefinementProjectionSmoothing)
+{
+    // Inland (global columns 60 .. 3 across the date line, rows 11 .. 16) and across the
+    // western coast (48 .. 59, rows 8 .. 19); a lowering of up to 500 m (lambda > 0) and a
+    // raise of up to 500 m (lambda < 0).
+    for (const double shift : {-500.0, 500.0})
+    for (const bool inland : {true, false})
+    {
+        const SmoothingCase s = inland ? smoothingcase(60, 11, 8, 6, 6, shift) : smoothingcase(48, 8, 12, 12, 6, shift);
+        const std::string name = std::string(inland ? "inland" : "on the coast") + (shift < 0.0 ? ", lowered" : ", raised");
+        SCOPED_TRACE(name);
+        const std::string smoothed = "smoothing " + name, unsmoothedlabel = "unsmoothed " + name;
+        const char* label = smoothed.c_str();
+        printreport(unsmoothedlabel.c_str(), 4, 1, s.unsmoothed);
+        printreport(label, 4, 1, s.report);
+        std::printf("[projection] %s: lambda %.1f -> %.2f m, lambda step %.1f -> %.2f m, largest move %.1f m\n", label,
+                    s.smoothing.maxlambdabefore_m, s.smoothing.maxlambdaafter_m, s.smoothing.maxlambdastepbefore_m,
+                    s.smoothing.maxlambdastepafter_m, s.smoothing.maxmove_m);
+        EXPECT_EQ(s.smoothing.passes, 6);
+        EXPECT_GT(s.unsmoothed.maxlambda_m, 200.0);
+        EXPECT_NEAR(s.smoothing.maxlambdabefore_m, s.unsmoothed.maxlambda_m, 1.0e-6);
+        EXPECT_NEAR(s.smoothing.maxlambdaafter_m, s.report.maxlambda_m, 1.0e-6);
+        // A raise on the coast sinks the land onto its floor at the sea level: where every
+        // rated child of a parent reaches it the smoothing stops there and the projection puts
+        // the rest on the beds, as without the smoothing; elsewhere the 2 % bound holds.
+        const bool floored = !inland && shift > 0.0;
+        EXPECT_LT(s.smoothing.maxlambdaafter_m, (floored ? 0.2 : 0.05) * s.smoothing.maxlambdabefore_m);
+        if (floored)
+            EXPECT_LE(s.report.borderstep99_m, 0.05 * s.unsmoothed.borderstep99_m);
+        else
+            EXPECT_LE(s.report.maxborderstep_m, 0.02 * s.unsmoothed.maxborderstep_m);
+        EXPECT_LE(s.report.maxparentmeanerror_m, meanbound(s.level, s.field));
+        EXPECT_EQ(s.report.forcedparents, 0);
+        EXPECT_EQ(s.report.bedsmovedparents, s.unsmoothed.bedsmovedparents);
+        if (!floored)
+            EXPECT_EQ(s.report.bedsmovedparents, 0);
+        int sea = 0, keptsea = 0, seaabove = 0, landbelow = 0, beds = 0, bedsmoved = 0;
+        for (int y = s.level.keptrowoffset(); y < s.level.keptrowoffset() + s.level.rows; y++)
+            for (int x = s.level.keptcolumnoffset(); x < s.level.keptcolumnoffset() + s.level.columns; x++)
+                keptsea += s.sea[s.level.index(x, y)];
+        for (std::size_t cell = 0; cell < s.field.size(); cell++)
+        {
+            if (s.sea[cell] != 0)
+            {
+                sea++;
+                seaabove += s.field[cell] < sealevel ? 0 : 1;
+                continue;
+            }
+            landbelow += s.field[cell] > sealevel ? 0 : 1;
+            if (s.channel[cell] != 0)
+            {
+                beds++;
+                bedsmoved += samebits(s.smoothed[cell], s.candidate[cell]) ? 0 : 1;  // the smoothing never moves a bed
+            }
+        }
+        std::printf("[projection] %s: %d sea cells in the domain (%d at or above the sea level; %d kept), %d land at or "
+                    "below it, %d beds (%d moved)\n", label, sea, seaabove, keptsea, landbelow, beds, bedsmoved);
+        EXPECT_GT(sea, 0);
+        EXPECT_EQ(keptsea > 0, !inland);
+        EXPECT_EQ(seaabove, 0);
+        EXPECT_EQ(landbelow, 0);
+        EXPECT_GT(beds, 0);
+        EXPECT_EQ(bedsmoved, 0);
+    }
+
+    // No pass: the field as given, lambda reported.
+    {
+        const SmoothingCase s = smoothingcase(60, 11, 8, 6, 0);
+        EXPECT_EQ(s.smoothing.maxlambdabefore_m, s.smoothing.maxlambdaafter_m);
+        EXPECT_EQ(s.smoothing.maxmove_m, 0.0);
+        int differing = 0;
+        for (std::size_t cell = 0; cell < s.field.size(); cell++)
+            differing += samebits(s.field[cell], s.plain[cell]) ? 0 : 1;
+        EXPECT_EQ(differing, 0);
+    }
+
+    // Two origins (B three global cells east and two south of A): the shared kept cells are
+    // bit-identical after the smoothing and the projection.
+    {
+        const SmoothingCase a = smoothingcase(60, 11, 8, 6, 6);
+        const SmoothingCase b = smoothingcase(63, 13, 8, 6, 6);
+        int shared = 0, differing = 0;
+        for (int y = a.level.keptrowoffset(); y < a.level.keptrowoffset() + a.level.rows; y++)
+            for (int x = a.level.keptcolumnoffset(); x < a.level.keptcolumnoffset() + a.level.columns; x++)
+            {
+                const std::int64_t column = a.level.absolutecolumn(x), row = a.level.absoluterow(y);
+                const int xb = b.level.localcolumn(column);
+                const std::int64_t yb = b.level.localrow(row);
+                if (xb < b.level.keptcolumnoffset() || xb >= b.level.keptcolumnoffset() + b.level.columns ||
+                    yb < b.level.keptrowoffset() || yb >= b.level.keptrowoffset() + b.level.rows)
+                    continue;
+                shared++;
+                differing += samebits(a.field[a.level.index(x, y)], b.field[b.level.index(xb, static_cast<int>(yb))]) ? 0 : 1;
+            }
+        std::printf("[projection] smoothing in two windows: %d shared kept cells, %d differ\n", shared, differing);
+        EXPECT_EQ(shared, 5 * 4 * 16);
+        EXPECT_EQ(differing, 0);
+    }
+
+    // The arguments.
+    SmoothingCase s = smoothingcase(60, 11, 8, 6, 0);
+    const landscape::ProjectionBounds bounds = landscape::projectionbounds(s.level, s.channel, s.sea, {}, s.field, sealevel, 0.0);
+    EXPECT_THROW(landscape::smoothparentmeans(s.level, s.field, bounds, s.parent, s.parentfield, -1, 1.4), std::invalid_argument);
+    EXPECT_THROW(landscape::smoothparentmeans(s.level, s.field, bounds, s.parent, s.parentfield, 2, 0.0), std::invalid_argument);
+    EXPECT_THROW(landscape::smoothparentmeans(s.level, s.field, bounds, s.parent, s.parentfield, 2, std::nan("")),
+                 std::invalid_argument);
+    landscape::ProjectionBounds bad = bounds;
+    bad.up_m.pop_back();
+    EXPECT_THROW(landscape::smoothparentmeans(s.level, s.field, bad, s.parent, s.parentfield, 2, 1.4), std::invalid_argument);
 }
 
 // The resample, aligned: at factor 4 a pixel of 2 level-2 cells divides factor^2, so each

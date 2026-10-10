@@ -1,5 +1,6 @@
 #include "cli/regional_command.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <exception>
@@ -48,7 +49,9 @@ void printregionusage(ostream& out)
     out << "                           the global cell size and below the cells of refinement.stored_scale_max.\n";
     out << "  --bundle <dir>          The regional bundle (new or empty directory; required).\n";
     out << "  --set <name=value>, --parameters <file>  As for run (landscape.regional.* sets the pass,\n";
-    out << "                           halo_cells the halo); the manifest records every value. The stream power\n";
+    out << "                           halo_cells the halo, for the hierarchy at least 2 x mean_passes + 2 +\n";
+    out << "                           2 x landscape.refinement.smooth_passes); the manifest records every\n";
+    out << "                           value. The stream power\n";
     out << "                           law (landscape.stream_power.erodibility, area_exponent) and the glacial\n";
     out << "                           cooling (landscape.glacial.cooling_c) are first set to the world bundle's\n";
     out << "                           recorded values; --set and --parameters override them.\n";
@@ -362,7 +365,6 @@ int runregioncommand(const vector<string>& arguments)
     }
 
     const int worldwidth = world->width() + 1;
-    const int halo = tuning::landscape::regional::haloCells;
     const landscape::RefinementParameters refinement = refinementparameters();
     const landscape::RegionalGlobalInputs inputs = gatherregionalinputs(*world);
     const bool resample = options.metresPerPixel > 0.0;
@@ -401,6 +403,15 @@ int runregioncommand(const vector<string>& arguments)
         }
         options.scale = static_cast<int>(landscape::levelscale(refinement.factor, source));
     }
+    // A power of the refinement factor runs the hierarchy (multiscale plan S2.3); any other
+    // scale the single pass. The hierarchy's halo also covers the smoothing before each
+    // projection (S2.7: 2 x mean_passes + 2 + 2 x smooth_passes global cells, 26 at the
+    // defaults); the single pass keeps regional.halo_cells.
+    const int levels = landscape::levelofscale(options.scale, refinement.factor);
+    const bool hierarchy = levels >= 1;
+    const int halo = hierarchy ? std::max(tuning::landscape::regional::haloCells,
+                                          2 * tuning::landscape::regional::meanPasses + 2 + 2 * refinement.smoothpasses)
+                               : tuning::landscape::regional::haloCells;
     landscape::RegionalWindow window;
     try
     {
@@ -416,10 +427,6 @@ int runregioncommand(const vector<string>& arguments)
         return 1;
     }
 
-    // A power of the refinement factor runs the hierarchy (multiscale plan S2.3); any other
-    // scale the single pass.
-    const int levels = landscape::levelofscale(options.scale, refinement.factor);
-    const bool hierarchy = levels >= 1;
     if (hierarchy && options.scale > refinement.storedscalemax)
     {
         cerr << "region: --scale " << options.scale << " is above landscape.refinement.stored_scale_max ("
@@ -534,7 +541,9 @@ int runregioncommand(const vector<string>& arguments)
              << " x " << level.window.domainrows << "): " << level.seconds << " s; block-mean error "
              << level.blockmeanerror_m << " m after the presmoothing; parent-mean error " << projection.maxparentmeanerror_m
              << " m (bound " << level.meanbound_m << " m), global-mean error " << level.globalmeanerror_m
-             << " m after the projection; lambda max " << projection.maxlambda_m << " m, border step max "
+             << " m after the projection; lambda max " << level.smoothing.maxlambdabefore_m << " m before the "
+             << level.smoothing.passes << " smoothing passes, " << projection.maxlambda_m << " m after (step "
+             << level.smoothing.maxlambdastepbefore_m << " -> " << projection.maxlambdastep_m << " m), border step max "
              << projection.maxborderstep_m << " m, p99 " << projection.borderstep99_m << " m; beds moved in "
              << projection.bedsmovedparents << " parents, forced " << projection.forcedparents << " (largest "
              << projection.maxforcedmove_m << " m); dried cells " << level.driedcells << ", shores below lakes "

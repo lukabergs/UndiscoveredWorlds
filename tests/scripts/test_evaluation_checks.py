@@ -13,7 +13,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "evaluation"))
 
 from uwtools.bundle import SCHEMA, Bundle  # noqa: E402
-from checks import CHECKS, box_average, land_mask, ocean_mask  # noqa: E402
+from checks import CHECKS, box_average, land_mask, ocean_mask, run_checks  # noqa: E402
 
 COLUMNS, ROWS = 4, 2
 
@@ -231,6 +231,30 @@ class HierarchyCheckTests(unittest.TestCase):
         single = self.check("parent-mean-exact", self.bundle(fields, hierarchy_blocks(2)))
         self.assertEqual(single["status"], "skip")
         self.assertTrue(single["summary"].startswith("not applicable"))
+
+    def test_border_step(self):
+        """Each level's borderstep99_m against p99_max_m (default 50 m); a missing value fails; a single pass
+        is not applicable; the profile's 'report' turns a miss into 'reported'."""
+        fields = regional_fields(fine_elevation(2, 1, 16))
+        levels = level_entries(2)
+        for entry, p99 in zip(levels, (12.0, 49.5)):
+            entry.update({"borderstep99_m": p99, "maxborderstep_m": 4 * p99, "maxlambdabefore_m": 3000.0,
+                          "maxlambda_m": 40.0, "smoothpasses": 6, "forcedparents": 0})
+        passing = self.check("border-step", self.bundle(fields, hierarchy_blocks(2, levels)))
+        self.assertEqual(passing["status"], "pass", passing)
+        self.assertIn("level 2 49.5 m (max 198 m)", passing["summary"])
+        self.assertIn("3000 m before 6 smoothing pass(es), 40 m after", passing["details"][1])
+        levels[1]["borderstep99_m"] = 51.0
+        run = self.bundle(fields, hierarchy_blocks(2, levels))
+        above = self.check("border-step", run)
+        self.assertEqual(above["status"], "fail")
+        self.assertIn("level 2: border step p99 51 m above 50 m", above["details"][0])
+        self.assertEqual(CHECKS["border-step"](run, {"check": "border-step", "p99_max_m": 60}, {})["status"], "pass")
+        reported = run_checks(run, [{"check": "border-step", "p99_max_m": 50, "report": True}], {})[0]
+        self.assertEqual(reported["status"], "reported")
+        levels[0]["borderstep99_m"] = None
+        self.assertEqual(self.check("border-step", self.bundle(fields, hierarchy_blocks(2, levels)))["status"], "fail")
+        self.assertEqual(self.check("border-step", self.bundle(fields, hierarchy_blocks(2)))["status"], "skip")
 
     def test_box_average_factors_4_and_16(self):
         """Blocks of 4 and of 16 cells per side holding a block value plus a zero-mean pattern average to the

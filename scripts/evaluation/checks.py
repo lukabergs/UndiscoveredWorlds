@@ -487,6 +487,35 @@ def check_parent_mean_exact(bundle, spec, context):
                   problems + details)
 
 
+def check_border_step(bundle, spec, context):
+    """The border step of every level of a hierarchy bundle (multiscale plan S2.7): the projection's
+    99th-percentile step across parent edges (borderstep99_m) at most spec 'p99_max_m' (default 50 m);
+    the largest step, lambda before the smoothing and after it (the projection's) are reported beside
+    it. Profiles mark it 'report' (a miss is reported, not a failure). A single pass is not applicable."""
+    name = 'border-step'
+    levels = hierarchy_levels(bundle)
+    if levels is None:
+        return result(name, 'skip', 'not applicable: a single pass (no diagnostics.levels)')
+    limit = float(spec.get('p99_max_m', 50.0))
+    number = lambda value: f'{float(value):.4g}' if isinstance(value, (int, float)) and not isinstance(value, bool) else '–'
+    problems, details, parts = [], [], []
+    for entry in levels:
+        level, p99, largest = entry.get('level'), entry.get('borderstep99_m'), entry.get('maxborderstep_m')
+        if not isinstance(p99, (int, float)) or isinstance(p99, bool) or not np.isfinite(p99):
+            problems.append(f'level {level}: borderstep99_m missing or null')
+            continue
+        if float(p99) > limit:
+            problems.append(f'level {level}: border step p99 {float(p99):.4g} m above {limit:.4g} m')
+        parts.append(f'level {level} {float(p99):.4g} m (max {number(largest)} m)')
+        details.append(f"level {level}: border step max {number(largest)} m, p99 {float(p99):.4g} m; lambda max "
+                       f"{number(entry.get('maxlambdabefore_m'))} m before {entry.get('smoothpasses', '–')} smoothing "
+                       f"pass(es), {number(entry.get('maxlambda_m'))} m after; forced parents "
+                       f"{entry.get('forcedparents', '–')}")
+    summary = f'border step p99 (limit {limit:.4g} m): ' + ', '.join(parts) if parts else 'no level reports a border step'
+    return result(name, 'fail' if problems else 'pass', summary if not problems else f'{len(problems)} problem(s); ' + summary,
+                  problems + details)
+
+
 def box_average(values, factor):
     """Unweighted means of factor x factor blocks, in float64 (rows and columns divisible by factor)."""
     rows, columns = values.shape
@@ -630,7 +659,8 @@ CHECKS = {'grid': check_grid, 'required': check_required, 'finite': check_finite
           'minerals': check_minerals, 'volume-budget': check_volume_budget, 'drained': check_drained,
           'monotone': check_monotone, 'lake-above-terrain': check_lake_above_terrain,
           'regional-window': check_regional_window, 'parent-mean-exact': check_parent_mean_exact,
-          'level-consistency': check_level_consistency, 'resolution-invariance': check_resolution_invariance}
+          'level-consistency': check_level_consistency, 'resolution-invariance': check_resolution_invariance,
+          'border-step': check_border_step}
 
 
 def run_checks(bundle, specs, context):

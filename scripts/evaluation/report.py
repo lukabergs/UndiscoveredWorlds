@@ -213,6 +213,8 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Bound (m)', 'meanbound_m'), ('Global-mean error (m)', 'globalmeanerror_m'),
                  ('Block-mean error before projection (m)', 'blockmeanerror_m'),
                  ('Border step max (m)', 'maxborderstep_m'), ('Border step p99 (m)', 'borderstep99_m'),
+                 ('Smoothing passes', 'smoothpasses'), ('λ max before smoothing (m)', 'maxlambdabefore_m'),
+                 ('λ step max before smoothing (m)', 'maxlambdastepbefore_m'), ('Smoothing move max (m)', 'maxsmoothmove_m'),
                  ('λ max (m)', 'maxlambda_m'), ('λ step max (m)', 'maxlambdastep_m'), ('Beds moved', 'bedsmovedparents'),
                  ('Forced', 'forcedparents'), ('Forced move max (m)', 'maxforcedmove_m'), ('Dried', 'driedcells'), ('Shores below lakes', 'shoresbelowlake'), ('Land below sea', 'landbelowsea'),
                  ('Seconds', 'seconds'))
@@ -226,8 +228,11 @@ def level_rows(levels):
             'rows': [[entry.get(key) for _, key in LEVEL_COLUMNS] for entry in levels],
             'note': 'Per level of the refinement hierarchy, from the bundle\'s diagnostics.levels: the largest parent-mean '
                     'error against its bound (half a float step of the kept box\'s largest |elevation|), the global-mean '
-                    'error, the block-mean error the presmoothing left before the projection, the border steps, λ and the '
-                    'largest λ step between neighbouring parents, the parents whose beds moved or that were forced (with the '
+                    'error, the block-mean error the presmoothing left before the projection, the border steps, the '
+                    'smoothing before the projection (S2.7: its passes, λ and the largest λ step before it, its largest '
+                    'move), λ and the largest λ step between neighbouring parents at the projection (from S2.7 on after the '
+                    'smoothing; bundles without smoothing, regional runs 16 to 25, have no "before" columns and there λ '
+                    'before = after), the parents whose beds moved or that were forced (with the '
                     'largest forced move), and the dried cells, shores below lakes and land below sea after it.'}
 
 

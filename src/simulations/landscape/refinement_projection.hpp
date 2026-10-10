@@ -101,6 +101,49 @@ struct ProjectionReport
 ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& field, const ProjectionBounds& bounds,
                               const LevelWindow& parent, const std::vector<float>& parentfield);
 
+// What the smoothing before the projection did (smoothparentmeans). lambda_c = v_c -
+// mean_C(c)(F) over the kept box's parents, as ProjectionReport's maxlambda_m and
+// maxlambdastep_m: before the first pass and after the last.
+struct SmoothingReport
+{
+    int passes = 0;
+    double maxlambdabefore_m = 0.0;
+    double maxlambdaafter_m = 0.0;
+    double maxlambdastepbefore_m = 0.0;
+    double maxlambdastepafter_m = 0.0;
+    double maxmove_m = 0.0;  // the largest |total move| of a kept child
+};
+
+// The smoothing of the per-parent correction before the exact projection (plan section 3,
+// "S2.7: smooth before exact", item 2). The projection puts back each parent's lambda_c
+// as a uniform shift of its children, which prints the parent grid where lambda varies by
+// kilometres between neighbours (the solve's lowering); this moves most of lambda first as a
+// C1 spline, so the projection only removes the small rest. Per pass, on `field` (the level
+// window's domainsize() values) in place:
+// - for every parent cell c of the domain: lambda_c = v_c - mean_C(c)(F) (v_c and the mean
+//   as in projectlevel) and mu_c = lambda_c factor^2 / the sum of the rates of the children
+//   with room left in lambda_c's direction (0 when none has);
+// - at every child centre Lambda = relaxation x the Catmull-Rom interpolation of mu
+//   (correctparentmeans's stencil: the child at offset o lies (o + 0.5) / factor - 0.5
+//   parent cells from its parent's centre, rows first; the parents beyond the domain's edge
+//   take the nearest domain parent's mu, columns wrap when the domain spans the level's
+//   whole width), and the child moves rate x Lambda, its total move since the first pass
+//   capped at its headrooms (`bounds`, built on `field` as given: -down_m <= total <= up_m),
+//   F = float(double(F as given) + total).
+// So beds (rate 0) never move and every class stays on its side of its water (the bounds'
+// rules), and the mean is left to projectlevel, which runs after it with bounds rebuilt on the
+// smoothed field. A pure function of the level's field, the parent values and the absolute
+// position: each pass reaches 2 parent cells, so `passes` passes need 2 x passes parent cells
+// of halo beyond the other steps' reach (refinement.smooth_passes; the loop's halo rule).
+// Sums in double, the children of a parent in row-major order. relaxation is
+// refinement.smooth_relaxation (1.4: the parent mean of an interpolated mode lies in
+// [0.39, 1], so every mode shrinks by at most 0.44 per pass). passes 0 changes nothing and
+// reports lambda only. The same requirements and exceptions as projectlevel, and throws
+// std::invalid_argument when passes < 0 or relaxation is not positive and finite.
+SmoothingReport smoothparentmeans(const LevelWindow& level, std::vector<float>& field, const ProjectionBounds& bounds,
+                                  const LevelWindow& parent, const std::vector<float>& parentfield, int passes,
+                                  double relaxation);
+
 // The largest |mean_C(c)(field) - v_c| over the parent cells of the level window's kept
 // box, the mean unweighted and accumulated in double in the order above, v_c read as in
 // projectlevel; 0 to float rounding after projectlevel (the S2.2 test: below 1e-3 m on

@@ -256,8 +256,12 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         check.scale = 1;  // the target's scale is not read
         checkregionalinputs(inputs, check);
     }
-    if (parameters.meanpasses < 0 || target.window.halo < 2 * parameters.meanpasses + 2)
-        throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 global cells");
+    if (refinement.smoothpasses < 0 || !std::isfinite(refinement.smoothrelaxation) || !(refinement.smoothrelaxation > 0.0))
+        throw std::invalid_argument("runrefinement: refinement.smooth_passes must not be negative and "
+                                    "refinement.smooth_relaxation must be positive and finite");
+    if (parameters.meanpasses < 0 || target.window.halo < 2 * parameters.meanpasses + 2 + 2 * refinement.smoothpasses)
+        throw std::invalid_argument("runrefinement: the halo must be at least 2 x meanpasses + 2 + 2 x smooth_passes "
+                                    "global cells");
     std::int64_t finest = 1;
     for (int level = 0; level < levels; level++)
     {
@@ -355,8 +359,18 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
                 if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
                     ownlake[level.index(x, y)] = inputs.lakesurface_m[global];
             }
-        const ProjectionBounds bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation,
-                                                         inputs.sealevel, refinement.projectionweightchannel, ownlake);
+        ProjectionBounds bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation,
+                                                   inputs.sealevel, refinement.projectionweightchannel, ownlake);
+        // The smoothing before the projection (S2.7) with the same bounds; the projection's
+        // bounds are then rebuilt on the smoothed field (the same floors and ceilings).
+        diagnostics.smoothing = smoothparentmeans(level, elevation, bounds, parent, parentfield, refinement.smoothpasses,
+                                                  refinement.smoothrelaxation);
+        if (refinement.smoothpasses > 0)
+        {
+            diagnostics.steps.push_back(LevelStep::smoothing);
+            bounds = projectionbounds(level, state.channels.channel, state.sea, lakesurface, elevation, inputs.sealevel,
+                                      refinement.projectionweightchannel, ownlake);
+        }
         diagnostics.projection = projectlevel(level, elevation, bounds, parent, parentfield);
         diagnostics.steps.push_back(LevelStep::projection);
 
