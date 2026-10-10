@@ -87,6 +87,12 @@ page.append(table(['Check', 'Status', 'Summary'], D.checks.map(c => h('tr', {},
   h('td', {}, c.summary, c.details && c.details.length && (c.status === 'fail' || c.status === 'reported')
     ? h('details', {}, h('summary', {}, `${c.details.length} details`), h('ul', {}, c.details.slice(0, 50).map(x => h('li', {}, x)))) : null)))));
 
+if (D.levels && D.levels.rows.length) {
+  page.append(h('h2', {}, 'Refinement levels'));
+  page.append(h('p', {class: 'muted'}, D.levels.note));
+  page.append(table(D.levels.columns, D.levels.rows.map(r => h('tr', {}, r.map(x => h('td', {class: 'num'}, fmt(x))))), 0));
+}
+
 if (D.scores.length || D.rows.length || D.distributions.length) {
   page.append(h('h2', {}, 'Validation'));
   if (D.scores.length) page.append(h('ul', {}, D.scores.map(s => h('li', {},

@@ -23,6 +23,7 @@ regional_relief's vertical_exaggeration). The Earth reference windows beside a r
 (kind "earth") are drawn by earth_windows.py with terrain_base, hillshade and shade_factor.
 """
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -121,14 +122,18 @@ def terrain_base(elevation, sea):
 def pixel_geometry(bundle):
     """(north edge in degrees, pixel size in degrees, planet radius in metres) of a bundle's grid:
     the window block of a regional bundle (its cells are square in degrees), else the whole sphere;
-    the radius is the manifest's world.body.radius_km (6371 km when it records none)."""
+    the radius is the manifest's world.body.radius_km (6371 km when it records none). A resampled bundle
+    (window pixel_columns, multiscale plan S2.4) has pixels of metres_per_pixel from the kept box's
+    north-west corner; its partial edge pixels are dropped, so the box divided by the rows is not its size."""
     window = bundle.manifest.get('window')
     rows = bundle.load('geosphere.base_elevation').shape[0]
+    radius_km = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', PLANET_RADIUS_KM))
     if window is None:
         north, pixel_deg = 90.0, 180.0 / rows
+    elif 'pixel_columns' in window:
+        north, pixel_deg = float(window['north']), math.degrees(float(window['metres_per_pixel']) / (radius_km * 1000.0))
     else:
         north, pixel_deg = float(window['north']), (float(window['north']) - float(window['south'])) / rows
-    radius_km = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', PLANET_RADIUS_KM))
     return north, pixel_deg, radius_km * 1000.0
 
 

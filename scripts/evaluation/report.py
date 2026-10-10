@@ -191,6 +191,8 @@ def run_facts(document, run):
               ['Bundle', bundle['bundle']]]
     if document.get('baseline'):
         facts.append(['Baseline bundle', document['baseline']['bundle']])
+    if document.get('coarser'):
+        facts.append(['Coarser bundle', document['coarser']['bundle']])
     code = (run or {}).get('code') or document['code']
     revision = (code.get('revision') or 'unknown')[:12]
     facts.append(['Code', revision + (f" + diff {code['diff_sha256'][:12]}" if code.get('dirty') else '')])
@@ -203,6 +205,30 @@ def run_facts(document, run):
                   for step in steps if 'seconds' in step]
     facts.append(['Evaluated', document['evaluated']])
     return facts
+
+
+# The per-level diagnostics of a refinement hierarchy bundle (multiscale plan S2.3): column title and
+# manifest key, in the order of the run page's table.
+LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent-mean error (m)', 'maxparentmeanerror_m'),
+                 ('Bound (m)', 'meanbound_m'), ('Global-mean error (m)', 'globalmeanerror_m'),
+                 ('Block-mean error before projection (m)', 'blockmeanerror_m'),
+                 ('Border step max (m)', 'maxborderstep_m'), ('Border step p99 (m)', 'borderstep99_m'),
+                 ('λ max (m)', 'maxlambda_m'), ('λ step max (m)', 'maxlambdastep_m'), ('Beds moved', 'bedsmovedparents'),
+                 ('Forced', 'forcedparents'), ('Forced move max (m)', 'maxforcedmove_m'), ('Dried', 'driedcells'), ('Shores below lakes', 'shoresbelowlake'), ('Land below sea', 'landbelowsea'),
+                 ('Seconds', 'seconds'))
+
+
+def level_rows(levels):
+    """The run page's per-level table {'columns', 'rows'} from evaluation.json's levels, or None (a single pass)."""
+    if not levels:
+        return None
+    return {'columns': [title for title, _ in LEVEL_COLUMNS],
+            'rows': [[entry.get(key) for _, key in LEVEL_COLUMNS] for entry in levels],
+            'note': 'Per level of the refinement hierarchy, from the bundle\'s diagnostics.levels: the largest parent-mean '
+                    'error against its bound (half a float step of the kept box\'s largest |elevation|), the global-mean '
+                    'error, the block-mean error the presmoothing left before the projection, the border steps, λ and the '
+                    'largest λ step between neighbouring parents, the parents whose beds moved or that were forced (with the '
+                    'largest forced move), and the dried cells, shores below lakes and land below sea after it.'}
 
 
 def run_data(evaluation_dir):
@@ -231,6 +257,7 @@ def run_data(evaluation_dir):
             'skipped': validation['skipped'], 'reviews': reviews,
             'groups': groups, 'animations': animations, 'files': files, 'earth': document.get('earth'),
             'earth_text': earth_text(document['earth']) if document.get('earth') else None,
+            'levels': level_rows(document.get('levels')),
             'provenance': {'profile': document['profile'], 'code': document['code'], 'references': document['references']}}
 
 
@@ -243,8 +270,13 @@ def markdown(data):
              '| Check | Status | Summary |', '|---|---|---|']
     lines += [f"| {item['check']} | {item['status']} | {item['summary']} |" for item in data['checks']]
     for item in data['checks']:
-        if item['details'] and item['status'] == 'fail':
+        if item['details'] and item['status'] in ('fail', 'reported'):
             lines += ['', f"{item['check']}:", *[f'- {detail}' for detail in item['details'][:20]]]
+    if data.get('levels'):
+        table = data['levels']
+        lines += ['', '## Refinement levels', '', table['note'], '', '| ' + ' | '.join(table['columns']) + ' |',
+                  '|---|' + '---|' * (len(table['columns']) - 1)]
+        lines += ['| ' + ' | '.join(fmt(value) for value in row) + ' |' for row in table['rows']]
     if data['rows'] or data['distributions']:
         lines += ['', '## Validation', '']
         for entry in data['scores']:

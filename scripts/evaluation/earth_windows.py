@@ -60,15 +60,24 @@ EPSILON = 1e-9
 def map_request(manifest):
     """The regional map's grid from its bundle manifest: columns, rows, pixel size in degrees (north-south),
     north-south metres per pixel on the planet's radius (parameters world.body.radius_km, 6371 km when
-    absent), the window's centre latitude and extent."""
+    absent), the window's centre latitude and extent. A resampled bundle (window pixel_columns, multiscale
+    plan S2.4) has pixels of metres_per_pixel from the kept box's north-west corner with the partial edge
+    pixels dropped: its extent and centre are the pixels', not the box's."""
     window, grid = manifest['window'], manifest['grid']
     columns, rows = int(grid['columns']), int(grid['rows'])
     north, south = float(window['north']), float(window['south'])
-    pixel_deg = (north - south) / rows
     radius_m = 1000.0 * float(manifest.get('parameters', {}).get('world.body.radius_km', EARTH_RADIUS_M / 1000.0))
+    extent = {key: float(window[key]) for key in ('west', 'south', 'east', 'north')}
+    if 'pixel_columns' in window:
+        pixel_deg = math.degrees(float(window['metres_per_pixel']) / radius_m)
+        south = north - rows * pixel_deg
+        east = extent['west'] + columns * pixel_deg
+        extent.update(south=south, east=east - 360.0 if east > 180.0 else east)  # west > east across the date line
+    else:
+        pixel_deg = (north - south) / rows
     return {'columns': columns, 'rows': rows, 'pixel_deg': pixel_deg, 'radius_m': radius_m,
             'metres_per_pixel': radius_m * math.radians(pixel_deg), 'latitude': 0.5 * (north + south),
-            'extent': {key: float(window[key]) for key in ('west', 'south', 'east', 'north')}}
+            'extent': extent}
 
 
 def source_for(metres_per_pixel):

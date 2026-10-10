@@ -68,6 +68,20 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(grid["pixels"], [36, 24])       # 16 columns west of the centre, 20 east; 16 rows north, 8 south
         self.assertEqual(grid["extent"], {"west": 51.875, "south": 31.9375, "east": 52.15625, "north": 32.125})
 
+    def test_a_resampled_map_takes_its_pixel_size_and_extent_from_its_pixels(self):
+        """A kept box of 8 x 8 degrees in 20 km pixels (0.17986 degrees): 44 x 44 pixels, the partial edge
+        pixel dropped, so the pixels end 0.0861 degrees short of the box's south and east edges."""
+        resampled = manifest(44, 44, 0.0, 10.0, 8.0 / 44)
+        resampled["window"].update({"east": 8.0, "north": 18.0, "pixel_columns": 44, "pixel_rows": 44,
+                                    "pixel_cells": 1.11, "resampled": True, "metres_per_pixel": 20000.0})
+        request = map_request(resampled)
+        pixel = math.degrees(20000.0 / 6371000.0)
+        self.assertAlmostEqual(request["metres_per_pixel"], 20000.0, places=6)
+        self.assertAlmostEqual(request["pixel_deg"], pixel, places=12)
+        self.assertAlmostEqual(request["extent"]["south"], 18.0 - 44 * pixel)
+        self.assertAlmostEqual(request["extent"]["east"], 44 * pixel)
+        self.assertAlmostEqual(request["latitude"], 18.0 - 22 * pixel)
+
     def test_across_the_date_line(self):
         request = map_request(manifest(40, 32, 0.0, 0.0, 0.5))
         grid = window_grid(entry(centre=(178.0, 52.0), box=(160.0, 46.0, -160.0, 64.0)), request)

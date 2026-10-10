@@ -140,6 +140,17 @@ class RegionalOverlapTest(unittest.TestCase):
         with self.assertRaisesRegex(regional_overlap.Refused, "elapsed_myr"):
             regional_overlap.overlap(a, other)
 
+    def test_refuses_a_resampled_bundle(self):
+        a = write_regional(self.root / "a", 1, 4, 0, 3)
+        b = write_regional(self.root / "b", 1, 4, 0, 3)
+        manifest = json.loads((b / "manifest.json").read_text(encoding="utf-8"))
+        manifest["window"].update({"pixel_columns": 8, "pixel_rows": 6, "pixel_cells": 1, "resampled": False,
+                                   "metres_per_pixel": 20000.0})
+        (b / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertEqual(run(a, b)[0], 2)
+        with self.assertRaisesRegex(regional_overlap.Refused, "resampled"):
+            regional_overlap.overlap(a, b)
+
 
 if __name__ == "__main__":
     unittest.main()

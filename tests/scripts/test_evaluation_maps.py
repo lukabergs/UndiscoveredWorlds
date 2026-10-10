@@ -2,6 +2,7 @@
 the outlines of the regional terrain map."""
 
 import json
+import math
 from pathlib import Path
 import sys
 import tempfile
@@ -15,7 +16,7 @@ import numpy as np  # noqa: E402
 
 from uwtools.bundle import Bundle, FieldInfo  # noqa: E402
 from maps import (FADE_FLOW_OPAQUE, FADE_RIVER, LAKE_OUTLINE, SNAPSHOT_TABLE, checkpoint_time,  # noqa: E402
-                  regional_terrain, regional_terrain_fade)
+                  pixel_geometry, regional_terrain, regional_terrain_fade)
 
 
 def bundle(directory, properties, snapshot_time=None):
@@ -51,6 +52,20 @@ def regional_bundle(directory, values):
         result.fields[identifier] = FieldInfo(identifier, identifier.split(".")[0], "grid", str(array.dtype),
                                               array.shape, "", relative, "", "", "")
     return result
+
+
+class PixelGeometryTests(unittest.TestCase):
+    def test_a_resampled_bundle_takes_metres_per_pixel(self):
+        """44 rows of 20 km pixels in an 8-degree box: the pixel is 20 km, not 8/44 degrees."""
+        with tempfile.TemporaryDirectory() as directory:
+            item = regional_bundle(directory, {"geosphere.base_elevation": np.zeros((44, 44), dtype=np.float32)})
+            item.manifest["window"] = {"north": 18.0, "south": 10.0, "west": 0.0, "east": 8.0, "pixel_columns": 44,
+                                       "pixel_rows": 44, "pixel_cells": 1.11, "resampled": True, "metres_per_pixel": 20000.0}
+            north, pixel_deg, radius_m = pixel_geometry(item)
+            self.assertEqual((north, radius_m), (18.0, 6371000.0))
+            self.assertAlmostEqual(pixel_deg, math.degrees(20000.0 / 6371000.0), places=12)
+            del item.manifest["window"]["pixel_columns"]
+            self.assertAlmostEqual(pixel_geometry(item)[1], 8.0 / 44, places=12)
 
 
 class RegionalTerrainOutlineTests(unittest.TestCase):

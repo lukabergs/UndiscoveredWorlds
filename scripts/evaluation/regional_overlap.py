@@ -57,6 +57,11 @@ def overlap(path_a, path_b):
     """{'columns', 'rows', 'fields': {id: {...}}} of two regional bundles; raises Refused."""
     manifest_a, window_a = window_of(path_a)
     manifest_b, window_b = window_of(path_b)
+    for path, window in ((path_a, window_a), (path_b, window_b)):
+        if 'pixel_columns' in window:
+            raise Refused(f'{path} is resampled to {window.get("metres_per_pixel")} m pixels (--metres-per-pixel): its pixels '
+                          'are anchored at its own window, so two windows are not comparable cell by cell; compare the '
+                          'level bundles they were resampled from')
     for key in ('scale', 'world_columns', 'world_rows', 'halo'):
         if window_a.get(key) != window_b.get(key):
             raise Refused(f'the bundles differ in {key}: {window_a.get(key)} and {window_b.get(key)}')
