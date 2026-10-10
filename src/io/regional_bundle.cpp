@@ -280,7 +280,19 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
     manifest.rows = static_cast<int>(rows);
     for (runbundle::StepRecord& step : manifest.steps)
         step.writes = written;
-    manifest.blocks.push_back({"window", windowjson(window)});
+    // The refinement fields, each only when set, before the window block's closing brace.
+    std::string windowblock = windowjson(window);
+    std::ostringstream refinement;
+    if (metadata.level)
+        refinement << ", \"level\": " << *metadata.level;
+    if (metadata.factor)
+        refinement << ", \"factor\": " << *metadata.factor;
+    if (metadata.metresperpixel)
+        refinement << ", \"metres_per_pixel\": " << jsonnumber(*metadata.metresperpixel);
+    if (metadata.resampled)
+        refinement << ", \"resampled\": " << (*metadata.resampled ? "true" : "false");
+    windowblock.insert(windowblock.size() - 1, refinement.str());
+    manifest.blocks.push_back({"window", windowblock});
     std::ostringstream source;
     source << "{\"bundle\": " << runbundle::jsonstring(metadata.sourcebundle)
            << ", \"manifest_sha256\": " << runbundle::jsonstring(metadata.sourcemanifestsha256)

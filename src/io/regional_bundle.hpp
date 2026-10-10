@@ -11,6 +11,7 @@
 // diagnostics; every step record lists the fields written. Planet-free.
 
 #include <filesystem>
+#include <optional>
 #include <string>
 
 #include "io/run_bundle.hpp"
@@ -28,6 +29,17 @@ struct Metadata
     long sourceseed = 0;
     int sealevel = 0;                  // the world's geosphere.sea_level, stored as that scalar
     std::string writtenby = "region";  // written_by of every field
+
+    // The refinement hierarchy (docs/architecture/multiscale-plan.md, section 3, "Fields
+    // and units"; step S0.4): appended to the window block as level, factor,
+    // metres_per_pixel and resampled, each only when set, so a bundle that sets none is
+    // the one written before them. For a refinement (refinement_levels.hpp) the window
+    // block's halo is the target's halo in global cells (level 1's); the deeper levels'
+    // halos are larger (refinement_grid.hpp, levelhalo) and are not written.
+    std::optional<int> level;              // the level the fields are on (k = factor^level)
+    std::optional<int> factor;             // refinement.factor
+    std::optional<double> metresperpixel;  // a resampled output's requested metres per pixel
+    std::optional<bool> resampled;         // true when the output is not a level grid
 };
 
 // Throws std::invalid_argument when a field's size is not the kept window's fine grid,

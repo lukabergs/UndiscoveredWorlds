@@ -184,3 +184,15 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.relief.damping = regional::damping;
     return parameters;
 }
+
+landscape::RefinementParameters refinementparameters()
+{
+    namespace refinement = tuning::landscape::refinement;
+    landscape::RefinementParameters parameters;
+    parameters.factor = refinement::factor;
+    parameters.projectionweightchannel = refinement::projectionWeightChannel;
+    parameters.storedscalemax = refinement::storedScaleMax;
+    parameters.detailcells = refinement::detailCells;
+    parameters.tilecells = refinement::tileCells;
+    return parameters;
+}

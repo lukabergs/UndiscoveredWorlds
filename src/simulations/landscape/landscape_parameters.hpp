@@ -183,6 +183,15 @@ inline float iceElaThicknessMaxM = 1000.0f;
 inline float iceElaEdgeNoiseM = 100.0f;
 }
 
+namespace refinement
+{
+inline int factor = 4;
+inline float projectionWeightChannel = 0.0f;
+inline int storedScaleMax = 256;
+inline float detailCells = 2.0f;
+inline int tileCells = 1024;
+}
+
 // Every value above, by its recipe name.
 inline const std::vector<parameters::Entry>& parameterentries()
 {
@@ -303,6 +312,11 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.ice_ela_thickness_fraction", &regional::iceElaThicknessFraction },
         { "landscape.regional.ice_ela_thickness_max_m", &regional::iceElaThicknessMaxM },
         { "landscape.regional.ice_ela_edge_noise_m", &regional::iceElaEdgeNoiseM },
+        { "landscape.refinement.factor", &refinement::factor },
+        { "landscape.refinement.projection_weight_channel", &refinement::projectionWeightChannel },
+        { "landscape.refinement.stored_scale_max", &refinement::storedScaleMax },
+        { "landscape.refinement.detail_cells", &refinement::detailCells },
+        { "landscape.refinement.tile_cells", &refinement::tileCells },
     };
     return entries;
 }

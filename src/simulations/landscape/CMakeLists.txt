@@ -11,6 +11,9 @@ add_library(uw_landscape STATIC
     isostasy.cpp
     lake_balance.cpp
     ocean_mask.cpp
+    refinement_grid.cpp
+    refinement_levels.cpp
+    refinement_projection.cpp
     regional_cirques.cpp
     regional_coast.cpp
     regional_edges.cpp
