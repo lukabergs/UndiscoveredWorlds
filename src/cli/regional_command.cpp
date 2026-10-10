@@ -35,10 +35,17 @@ void printregionusage(ostream& out)
     out << "                           top-left cell (column from the west edge at -180 degrees, row from the north),\n";
     out << "                           x1,y1 the bottom-right cell, both inclusive; x0 > x1 crosses the date line.\n";
     out << "                           Exactly one of --window and --pixels.\n";
-    out << "  --scale <k>             Fine cells per global cell edge, a whole number >= 1 (required). A power of\n";
+    out << "  --scale <k>             Fine cells per global cell edge, a whole number >= 1. A power of\n";
     out << "                           landscape.refinement.factor (4, 16, 64, ... at factor 4; at most\n";
     out << "                           refinement.stored_scale_max) runs the refinement hierarchy: log_factor k\n";
     out << "                           levels, each projected exactly onto its parent; any other k one pass.\n";
+    out << "  --metres-per-pixel <m>  Instead of --scale (exactly one of the two): the pixel's north-south size on\n";
+    out << "                           the ground. The hierarchy runs to the coarsest level whose cells are at most\n";
+    out << "                           m and is box-averaged to m. Aligned (no resample) when m is a whole number n\n";
+    out << "                           of that level's cells and n divides its k; otherwise resampled, partial\n";
+    out << "                           pixels at the east and south edges dropped. The window block records level,\n";
+    out << "                           factor, metres_per_pixel, resampled and the pixel grid. Refused at or above\n";
+    out << "                           the global cell size and below the cells of refinement.stored_scale_max.\n";
     out << "  --bundle <dir>          The regional bundle (new or empty directory; required).\n";
     out << "  --set <name=value>, --parameters <file>  As for run (landscape.regional.* sets the pass,\n";
     out << "                           halo_cells the halo); the manifest records every value. The stream power\n";
@@ -60,6 +67,7 @@ struct RegionOptions
     double window[4] = {};  // west, south, east, north
     int pixels[4] = {};     // x0, y0, x1, y1
     int scale = 0;
+    double metresPerPixel = 0.0;  // 0: not given
     bool hasSeed = false;
     long seed = 0;
     vector<string> commandArguments;
@@ -168,7 +176,8 @@ bool parseregionoptions(const vector<string>& arguments, RegionOptions& options)
             return false;
         }
         if (argument != "--from-bundle" && argument != "--bundle" && argument != "--window" && argument != "--pixels" &&
-            argument != "--scale" && argument != "--seed" && argument != "--set" && argument != "--parameters")
+            argument != "--scale" && argument != "--metres-per-pixel" && argument != "--seed" && argument != "--set" &&
+            argument != "--parameters")
         {
             cerr << "region: unknown option " << argument << '\n';
             return false;
@@ -223,6 +232,16 @@ bool parseregionoptions(const vector<string>& arguments, RegionOptions& options)
             }
             options.scale = static_cast<int>(scale);
         }
+        else if (argument == "--metres-per-pixel")
+        {
+            double metres = 0.0;
+            if (!parsereal(value, metres) || !(metres > 0.0))
+            {
+                cerr << "region: --metres-per-pixel takes a positive number of metres, not " << value << '\n';
+                return false;
+            }
+            options.metresPerPixel = metres;
+        }
         else if (argument == "--seed")
         {
             long long seed = 0;
@@ -248,9 +267,14 @@ bool parseregionoptions(const vector<string>& arguments, RegionOptions& options)
     }
     if (options.showHelp)
         return true;
+    if (options.scale != 0 && options.metresPerPixel > 0.0)
+    {
+        cerr << "region: give one of --scale and --metres-per-pixel, not both.\n";
+        return false;
+    }
     const char* missing = options.fromBundlePath.empty() ? "--from-bundle"
                         : options.bundlePath.empty()     ? "--bundle"
-                        : options.scale == 0             ? "--scale"
+                        : options.scale == 0 && !(options.metresPerPixel > 0.0) ? "--scale or --metres-per-pixel"
                         : !options.hasWindow && !options.hasPixels ? "--window or --pixels"
                                                          : nullptr;
     if (missing != nullptr)
@@ -339,6 +363,44 @@ int runregioncommand(const vector<string>& arguments)
 
     const int worldwidth = world->width() + 1;
     const int halo = tuning::landscape::regional::haloCells;
+    const landscape::RefinementParameters refinement = refinementparameters();
+    const landscape::RegionalGlobalInputs inputs = gatherregionalinputs(*world);
+    const bool resample = options.metresPerPixel > 0.0;
+    if (resample)
+    {
+        // The source level of the resample (multiscale plan S2.4): the coarsest whose cells are
+        // at most the pixel, computed and no finer; at most the finest stored level.
+        int finest = 0;
+        while (landscape::levelscale(refinement.factor, finest + 1) <= refinement.storedscalemax)
+            finest++;
+        int source = -1;
+        try
+        {
+            source = landscape::resamplesourcelevel(options.metresPerPixel, inputs.radius_m, worldwidth,
+                                                    refinement.factor, finest);
+        }
+        catch (const exception& error)
+        {
+            cerr << "region: --metres-per-pixel: " << error.what() << '\n';
+            return 1;
+        }
+        const double global_m = 1000.0 * landscape::levelcellsize_km(inputs.radius_m, worldwidth, refinement.factor, 0);
+        if (source == 0)
+        {
+            cerr << "region: --metres-per-pixel " << options.metresPerPixel << " is not finer than the global cells ("
+                 << global_m << " m): the world bundle's own grid serves it.\n";
+            return 1;
+        }
+        if (source < 0)
+        {
+            cerr << "region: --metres-per-pixel " << options.metresPerPixel << " is finer than the finest stored level ("
+                 << finest << ", k = " << landscape::levelscale(refinement.factor, finest) << ", cells of "
+                 << global_m / static_cast<double>(landscape::levelscale(refinement.factor, finest))
+                 << " m; landscape.refinement.stored_scale_max " << refinement.storedscalemax << ").\n";
+            return 1;
+        }
+        options.scale = static_cast<int>(landscape::levelscale(refinement.factor, source));
+    }
     landscape::RegionalWindow window;
     try
     {
@@ -356,7 +418,6 @@ int runregioncommand(const vector<string>& arguments)
 
     // A power of the refinement factor runs the hierarchy (multiscale plan S2.3); any other
     // scale the single pass.
-    const landscape::RefinementParameters refinement = refinementparameters();
     const int levels = landscape::levelofscale(options.scale, refinement.factor);
     const bool hierarchy = levels >= 1;
     if (hierarchy && options.scale > refinement.storedscalemax)
@@ -366,10 +427,10 @@ int runregioncommand(const vector<string>& arguments)
         return 1;
     }
 
-    const landscape::RegionalGlobalInputs inputs = gatherregionalinputs(*world);
     const landscape::RegionalParameters parameters = regionalparameters(inputs.seed);
     landscape::RegionalFields fields;
     vector<landscape::LevelDiagnostics> leveldiagnostics;
+    landscape::ResampledRegionalFields resampled;
     const auto started = chrono::steady_clock::now();
     try
     {
@@ -379,7 +440,13 @@ int runregioncommand(const vector<string>& arguments)
             target.window = window;
             target.level = levels;
             landscape::RefinementResult refined = landscape::runrefinement(inputs, target, parameters, refinement);
-            fields = std::move(refined.fields);
+            if (resample)
+            {
+                resampled = landscape::resampleregionalfields(refined, inputs.radius_m, options.metresPerPixel);
+                fields = std::move(resampled.fields);
+            }
+            else
+                fields = std::move(refined.fields);
             leveldiagnostics = std::move(refined.levels);
         }
         else
@@ -422,6 +489,14 @@ int runregioncommand(const vector<string>& arguments)
         metadata.factor = refinement.factor;
         metadata.levels = leveldiagnostics;
     }
+    if (resample)
+    {
+        metadata.metresperpixel = options.metresPerPixel;
+        metadata.resampled = resampled.report.resampled();
+        metadata.pixelcolumns = resampled.width;
+        metadata.pixelrows = resampled.height;
+        metadata.pixelcells = resampled.report.pixelcells;
+    }
     try
     {
         regionalbundle::writeregionalbundle(options.bundlePath, fields, metadata);
@@ -435,6 +510,15 @@ int runregioncommand(const vector<string>& arguments)
     cout << "Regional window: columns " << window.column0 << " + " << window.columns << ", rows " << window.row0 << " + "
          << window.rows << " of " << worldwidth << " x " << window.worldheight << "; scale " << window.scale << ", halo "
          << window.halo << "; fine grid " << window.finewidth() << " x " << window.fineheight() << '\n';
+    if (resample)
+    {
+        const landscape::ResampleReport& report = resampled.report;
+        cout << "Resample: " << options.metresPerPixel << " m per pixel from level " << report.sourcelevel << " ("
+             << report.sourcecell_m << " m cells, " << report.pixelcells << " cells per pixel edge); "
+             << resampled.width << " x " << resampled.height << " pixels, "
+             << (report.aligned ? "aligned (box means of whole cells, exact)" : "resampled (overlap-weighted, not exact)")
+             << '\n';
+    }
     cout << "Regional pass: " << seconds << " s; block-mean error " << fields.blockmeanerror_m << " m, relief "
          << (fields.reliefconverged ? "converged" : "not converged") << ", " << fields.changedreceivers
          << " receivers changed, lowering mean " << fields.meanlowering_m << " m, largest " << fields.maxlowering_m << " m";

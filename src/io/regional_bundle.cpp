@@ -186,13 +186,18 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                          const Metadata& metadata)
 {
     const landscape::RegionalWindow& window = fields.window;
-    const std::size_t columns = static_cast<std::size_t>(window.finewidth());
-    const std::size_t rows = static_cast<std::size_t>(window.fineheight());
+    const bool pixelgrid = metadata.pixelcolumns.has_value();
+    if (pixelgrid != metadata.pixelrows.has_value() || pixelgrid != metadata.pixelcells.has_value() ||
+        (pixelgrid && (*metadata.pixelcolumns < 1 || *metadata.pixelrows < 1)))
+        throw std::invalid_argument("writeregionalbundle: the pixel grid needs its columns, rows and cells, all positive");
+    const std::size_t columns = static_cast<std::size_t>(pixelgrid ? *metadata.pixelcolumns : window.finewidth());
+    const std::size_t rows = static_cast<std::size_t>(pixelgrid ? *metadata.pixelrows : window.fineheight());
     const std::size_t size = columns * rows;
     const auto checksize = [&](std::size_t count, const char* name)
     {
         if (count != size)
-            throw std::invalid_argument(std::string("writeregionalbundle: ") + name + " is not the kept window's size");
+            throw std::invalid_argument(std::string("writeregionalbundle: ") + name +
+                                    (pixelgrid ? " is not the pixel grid's size" : " is not the kept window's size"));
     };
     checksize(fields.elevation_m.size(), "elevation");
     checksize(fields.sea.size(), "sea");
@@ -291,6 +296,9 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
         refinement << ", \"metres_per_pixel\": " << jsonnumber(*metadata.metresperpixel);
     if (metadata.resampled)
         refinement << ", \"resampled\": " << (*metadata.resampled ? "true" : "false");
+    if (pixelgrid)
+        refinement << ", \"pixel_columns\": " << *metadata.pixelcolumns << ", \"pixel_rows\": " << *metadata.pixelrows
+                   << ", \"pixel_cells\": " << jsonnumber(*metadata.pixelcells);
     windowblock.insert(windowblock.size() - 1, refinement.str());
     manifest.blocks.push_back({"window", windowblock});
     std::ostringstream source;

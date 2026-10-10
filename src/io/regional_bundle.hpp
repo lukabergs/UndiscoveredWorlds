@@ -42,13 +42,23 @@ struct Metadata
     std::optional<int> factor;             // refinement.factor
     std::optional<double> metresperpixel;  // a resampled output's requested metres per pixel
     std::optional<bool> resampled;         // true when the output is not a level grid
+    // A resampled output's pixel grid (refinement_levels.hpp, resampleregionalfields; step
+    // S2.4): the fields are pixelcolumns x pixelrows instead of the window's fine grid, and
+    // the window block gains pixel_columns, pixel_rows and pixel_cells (the source level's
+    // cells per pixel edge, n). The pixels start at the kept box's north-west corner; a
+    // partial pixel at the east and south edges is dropped, so they may cover less than the
+    // box. All three or none.
+    std::optional<int> pixelcolumns;
+    std::optional<int> pixelrows;
+    std::optional<double> pixelcells;
     // A refinement's per-level diagnostics (RefinementResult::levels, step S2.3): written as
     // the diagnostics block's "levels" array only when not empty.
     std::vector<landscape::LevelDiagnostics> levels;
 };
 
-// Throws std::invalid_argument when a field's size is not the kept window's fine grid,
-// and as runbundle::Writer (an existing non-empty directory is refused).
+// Throws std::invalid_argument when a field's size is not the kept window's fine grid (or
+// the pixel grid when Metadata sets one), when the pixel grid is set in part, and as
+// runbundle::Writer (an existing non-empty directory is refused).
 void writeregionalbundle(const std::filesystem::path& directory, const landscape::RegionalFields& fields,
                          const Metadata& metadata);
 

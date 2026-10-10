@@ -429,6 +429,154 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
     result.fields.window.scale = static_cast<int>(finest);
     result.fields.sharepasses = sharepasses;
     result.fields.sharemisses = sharemisses;
+    result.chain = chain;
     return result;
+}
+
+int resamplesourcelevel(double metresperpixel, double radius_m, int worldwidth, int factor, int maxlevel)
+{
+    if (!std::isfinite(metresperpixel) || !(metresperpixel > 0.0) || !std::isfinite(radius_m) || !(radius_m > 0.0))
+        throw std::invalid_argument("resamplesourcelevel: metres per pixel and the radius must be positive and finite");
+    if (worldwidth < 4 || worldwidth % 2 != 0 || factor < 2 || maxlevel < 0)
+        throw std::invalid_argument("resamplesourcelevel: an even world width of at least 4, a factor of at least 2 "
+                                    "and a level not negative");
+    // resampleto's expression: pi R / levelheight.
+    for (int level = 0; level <= maxlevel; level++)
+    {
+        const std::int64_t rows = static_cast<std::int64_t>(worldwidth / 2) * levelscale(factor, level);
+        if (pi * radius_m / static_cast<double>(rows) <= metresperpixel * (1.0 + 1.0e-9))
+            return level;
+    }
+    return -1;
+}
+
+ResampledRegionalFields resampleregionalfields(const RefinementResult& result, double radius_m, double metresperpixel)
+{
+    const std::vector<LevelWindow>& chain = result.chain;
+    if (chain.empty())
+        throw std::invalid_argument("resampleregionalfields: the chain is empty");
+    const LevelWindow& level = chain.back();
+    const RegionalFields& source = result.fields;
+    const std::size_t kept = level.keptsize();
+    for (const std::size_t size : {source.elevation_m.size(), source.sea.size(), source.riverdirection.size(),
+                                   source.discharge_m3s.size(), source.januaryflow.size(), source.julyflow.size(),
+                                   source.lakesurface_m.size(), source.januarytemperature_c.size(),
+                                   source.julytemperature_c.size(), source.januaryprecipitation_mm.size(),
+                                   source.julyprecipitation_mm.size(), source.icethickness_m.size(), source.climate.size()})
+        if (size != kept)
+            throw std::invalid_argument("resampleregionalfields: a field is not the final level's kept size");
+
+    // resampleto reads the source level's kept box only; the coarser levels' fields are
+    // placeholders of their domain sizes, and the final level's kept field is placed in its
+    // domain.
+    std::vector<std::vector<float>> stack(chain.size());
+    for (std::size_t l = 0; l < chain.size(); l++)
+        stack[l].assign(chain[l].domainsize(), 0.0f);
+    const int keptx0 = level.keptcolumnoffset(), kepty0 = level.keptrowoffset();
+    const auto average = [&](const std::vector<float>& field)
+    {
+        std::vector<float>& domain = stack.back();
+        for (int y = 0; y < level.rows; y++)
+            for (int x = 0; x < level.columns; x++)
+                domain[level.index(keptx0 + x, kepty0 + y)] = field[at(x, y, level.columns)];
+        return resampleto(chain, stack, radius_m, metresperpixel);
+    };
+
+    ResampledRegionalFields resampled;
+    ResampledField elevation = average(source.elevation_m);
+    if (elevation.report.sourcelevel != level.level)
+        throw std::invalid_argument("resampleregionalfields: the source level of " + std::to_string(metresperpixel) +
+                                    " m per pixel is " + std::to_string(elevation.report.sourcelevel) +
+                                    ", not the final level " + std::to_string(level.level));
+    resampled.width = elevation.width;
+    resampled.height = elevation.height;
+    resampled.report = elevation.report;
+    RegionalFields& fields = resampled.fields;
+    fields.window = source.window;
+    fields.blockmeanerror_m = source.blockmeanerror_m;
+    fields.reliefconverged = source.reliefconverged;
+    fields.changedreceivers = source.changedreceivers;
+    fields.meanlowering_m = source.meanlowering_m;
+    fields.maxlowering_m = source.maxlowering_m;
+    fields.sharepasses = source.sharepasses;
+    fields.sharemisses = source.sharemisses;
+    fields.elevation_m = std::move(elevation.values);
+    fields.januarytemperature_c = average(source.januarytemperature_c).values;
+    fields.julytemperature_c = average(source.julytemperature_c).values;
+    fields.januaryprecipitation_mm = average(source.januaryprecipitation_mm).values;
+    fields.julyprecipitation_mm = average(source.julyprecipitation_mm).values;
+    fields.icethickness_m = average(source.icethickness_m).values;
+
+    // The discrete fields on resampleto's geometry: pixel (p, q) covers [p e, (p + 1) e) x
+    // [q e, (q + 1) e) of the kept box in source cells, e = round(n) when n is whole, else n.
+    const double n = resampled.report.pixelcells;
+    const double whole = std::round(n);
+    const double edge = std::fabs(n - whole) <= 1.0e-9 * n ? whole : n;
+    const std::size_t pixels = static_cast<std::size_t>(resampled.width) * static_cast<std::size_t>(resampled.height);
+    fields.sea.assign(pixels, 0);
+    fields.riverdirection.assign(pixels, 0);
+    fields.discharge_m3s.assign(pixels, 0.0f);
+    fields.januaryflow.assign(pixels, 0);
+    fields.julyflow.assign(pixels, 0);
+    fields.lakesurface_m.assign(pixels, 0.0f);
+    fields.climate.assign(pixels, 0);
+    const int columns = level.columns, rows = level.rows;
+    for (int q = 0; q < resampled.height; q++)
+        for (int p = 0; p < resampled.width; p++)
+        {
+            const double west = p * edge, east = (p + 1) * edge, north = q * edge, south = (q + 1) * edge;
+            const int ifirst = static_cast<int>(std::floor(west));
+            const int ilast = std::min(columns - 1, static_cast<int>(std::ceil(east)) - 1);
+            const int jfirst = static_cast<int>(std::floor(north));
+            const int jlast = std::min(rows - 1, static_cast<int>(std::ceil(south)) - 1);
+            double total = 0.0, seaweight = 0.0, wetweight = 0.0, surface = 0.0;
+            float discharge = 0.0f;
+            std::size_t largest = at(ifirst, jfirst, columns);
+            bool found = false;
+            int32_t january = 0, july = 0;
+            for (int j = jfirst; j <= jlast; j++)
+            {
+                const double oy = std::min(static_cast<double>(j + 1), south) - std::max(static_cast<double>(j), north);
+                if (oy <= 0.0)
+                    continue;
+                for (int i = ifirst; i <= ilast; i++)
+                {
+                    const double ox = std::min(static_cast<double>(i + 1), east) - std::max(static_cast<double>(i), west);
+                    if (ox <= 0.0)
+                        continue;
+                    const double weight = ox * oy;
+                    const std::size_t cell = at(i, j, columns);
+                    total += weight;
+                    if (source.sea[cell] != 0)
+                        seaweight += weight;
+                    else if (source.lakesurface_m[cell] > 0.0f)
+                    {
+                        wetweight += weight;
+                        surface += weight * static_cast<double>(source.lakesurface_m[cell]);
+                    }
+                    if (!found || source.discharge_m3s[cell] > discharge)
+                    {
+                        discharge = source.discharge_m3s[cell];
+                        largest = cell;
+                    }
+                    january = found ? std::max(january, source.januaryflow[cell]) : source.januaryflow[cell];
+                    july = found ? std::max(july, source.julyflow[cell]) : source.julyflow[cell];
+                    found = true;
+                }
+            }
+            const std::size_t pixel = at(p, q, resampled.width);
+            const bool sea = 2.0 * seaweight >= total;
+            fields.sea[pixel] = sea ? 1 : 0;
+            if (!sea && wetweight > 0.0 && 2.0 * wetweight >= total)
+                fields.lakesurface_m[pixel] = static_cast<float>(surface / wetweight);
+            fields.discharge_m3s[pixel] = discharge;
+            fields.riverdirection[pixel] = source.riverdirection[largest];
+            fields.januaryflow[pixel] = january;
+            fields.julyflow[pixel] = july;
+            const int ci = std::min(columns - 1, static_cast<int>(std::floor((p + 0.5) * edge)));
+            const int cj = std::min(rows - 1, static_cast<int>(std::floor((q + 0.5) * edge)));
+            fields.climate[pixel] = source.climate[at(ci, cj, columns)];
+        }
+    return resampled;
 }
 }

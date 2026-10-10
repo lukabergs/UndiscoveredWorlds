@@ -11,8 +11,10 @@ Modules and commands:
                        and checks that the bundles are identical
     climate|tectonics|world|erosion|hydrology evaluate    evaluate an existing bundle (--bundle DIR [--baseline DIR] [--checkpoints DIR])
     regional  run      registered regional bundle (world_pipeline region, profile configs/evaluation/regional.json):
-                       uw.py regional run --from-bundle WORLD (--window W,S,E,N | --pixels X0,Y0,X1,Y1) --scale K
-                       [--set ...]; seed and grid from the world bundle (no --resolution); compare two regional
+                       uw.py regional run --from-bundle WORLD (--window W,S,E,N | --pixels X0,Y0,X1,Y1)
+                       (--scale K | --metres-per-pixel M) [--set ...]; seed and grid from the world bundle (no
+                       --resolution); M: the hierarchy box-averaged to M, the window block records
+                       metres_per_pixel and resampled (world_pipeline region --help); compare two regional
                        bundles on their overlap with scripts/evaluation/regional_overlap.py A B
     regional  evaluate|review|report|ledger  as for the other modules; evaluate and a comparison report take
                        --earth NAME, the Earth reference window of configs/evaluation/earth-windows.json beside

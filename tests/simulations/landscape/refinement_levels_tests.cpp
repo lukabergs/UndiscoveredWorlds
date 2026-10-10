@@ -5,7 +5,8 @@
 // feature on (the Phase R rule: on a world wider than the widened boxes), the parent-mean
 // error against its bound, the outlet discharge, the level consistency (k = 16
 // box-averaged equals k = 4) and the parity of one level with the single pass; S2.3's
-// rework (the bounds, the detail band, the global lake depth) the valleys at level 2.
+// rework (the bounds, the detail band, the global lake depth) the valleys at level 2; S2.4
+// the resample of the final level to a requested metres per pixel.
 
 #include <gtest/gtest.h>
 
@@ -15,6 +16,7 @@
 
 #include "simulations/landscape/refinement_levels.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -537,4 +539,178 @@ TEST_F(Landscape, RefinementLevelsRejects)
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, one), std::invalid_argument);
     target.window.halo = 5;  // below 2 x meanpasses + 2
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, RefinementParameters{}), std::invalid_argument);
+}
+
+// Step S2.4: the source level of a request and the resample of a refinement's final level,
+// planet-free: a result built by hand on window C's chain at factor 4, one level (kept 96 x
+// 28 cells of pi R / 128).
+TEST_F(Landscape, RefinementLevelsResampledFields)
+{
+    const double cell_m = pi * radius_m / 128.0;
+    EXPECT_EQ(landscape::resamplesourcelevel(cell_m, radius_m, 64, 4, 4), 1);
+    EXPECT_EQ(landscape::resamplesourcelevel(4.0 * cell_m, radius_m, 64, 4, 4), 0);
+    EXPECT_EQ(landscape::resamplesourcelevel(cell_m * 0.999, radius_m, 64, 4, 4), 2);
+    EXPECT_EQ(landscape::resamplesourcelevel(cell_m / 4.0, radius_m, 64, 4, 2), 2);
+    EXPECT_EQ(landscape::resamplesourcelevel(cell_m / 4.5, radius_m, 64, 4, 2), -1);
+    EXPECT_THROW(landscape::resamplesourcelevel(0.0, radius_m, 64, 4, 2), std::invalid_argument);
+
+    RefinementResult result;
+    result.chain = landscape::halochain(windowc(4), 4, 1, landscape::prolongationreach);
+    const LevelWindow& level = result.chain.back();
+    const int columns = level.columns, rows = level.rows;
+    ASSERT_EQ(columns, 96);
+    ASSERT_EQ(rows, 28);
+    landscape::RegionalFields& f = result.fields;
+    f.window = windowc(4);
+    const std::size_t size = level.keptsize();
+    for (std::vector<float>* field : {&f.elevation_m, &f.discharge_m3s, &f.lakesurface_m, &f.januarytemperature_c,
+                                      &f.julytemperature_c, &f.januaryprecipitation_mm, &f.julyprecipitation_mm,
+                                      &f.icethickness_m})
+        field->resize(size);
+    f.sea.resize(size);
+    f.riverdirection.resize(size);
+    f.januaryflow.resize(size);
+    f.julyflow.resize(size);
+    f.climate.resize(size);
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t cell = at(x, y, columns);
+            f.elevation_m[cell] = static_cast<float>(100 * y + x);
+            // Rows 0..9 a checkerboard of sea (a tie in every 2 x 2 block), below one cell in four.
+            const bool sea = y < 10 ? (x + y) % 2 == 0 : x % 2 == 0 && y % 2 == 0;
+            f.sea[cell] = sea ? 1 : 0;
+            // Rows 20.. lakes on the odd columns (half of every 2 x 2 block, never sea).
+            f.lakesurface_m[cell] = y >= 20 && x % 2 == 1 ? static_cast<float>(300 + x) : 0.0f;
+            f.discharge_m3s[cell] = static_cast<float>((7 * x + 13 * y) % 17);
+            f.riverdirection[cell] = static_cast<uint8_t>(1 + (x + 3 * y) % 8);
+            f.januaryflow[cell] = x * y;
+            f.julyflow[cell] = x + y;
+            f.climate[cell] = static_cast<int16_t>(100 * y + x);
+            f.januarytemperature_c[cell] = 10.0f + 0.5f * static_cast<float>(x);
+            f.julytemperature_c[cell] = 20.0f - 0.25f * static_cast<float>(y);
+            f.januaryprecipitation_mm[cell] = static_cast<float>(y);
+            f.julyprecipitation_mm[cell] = static_cast<float>(x + y);
+            f.icethickness_m[cell] = static_cast<float>(x % 3);
+        }
+
+    // n = 1: aligned, the level grid itself.
+    const landscape::ResampledRegionalFields one = landscape::resampleregionalfields(result, radius_m, cell_m);
+    EXPECT_FALSE(one.report.resampled());
+    EXPECT_EQ(one.report.sourcelevel, 1);
+    EXPECT_EQ(one.width, columns);
+    EXPECT_EQ(one.height, rows);
+    EXPECT_EQ(one.fields.elevation_m, f.elevation_m);
+    EXPECT_EQ(one.fields.sea, f.sea);
+    EXPECT_EQ(one.fields.lakesurface_m, f.lakesurface_m);
+    EXPECT_EQ(one.fields.discharge_m3s, f.discharge_m3s);
+    EXPECT_EQ(one.fields.riverdirection, f.riverdirection);
+    EXPECT_EQ(one.fields.januaryflow, f.januaryflow);
+    EXPECT_EQ(one.fields.julyflow, f.julyflow);
+    EXPECT_EQ(one.fields.climate, f.climate);
+    EXPECT_EQ(one.fields.januarytemperature_c, f.januarytemperature_c);
+    EXPECT_EQ(one.fields.icethickness_m, f.icethickness_m);
+
+    // n = 2 divides k = 4: aligned, 2 x 2 blocks.
+    const landscape::ResampledRegionalFields two = landscape::resampleregionalfields(result, radius_m, 2.0 * cell_m);
+    EXPECT_FALSE(two.report.resampled());
+    ASSERT_EQ(two.width, 48);
+    ASSERT_EQ(two.height, 14);
+    for (int q = 0; q < two.height; q++)
+        for (int p = 0; p < two.width; p++)
+        {
+            double elevation = 0.0, surface = 0.0;
+            int seacells = 0, wetcells = 0, january = 0, july = 0;
+            float discharge = -1.0f;
+            uint8_t direction = 0;
+            for (int j = 2 * q; j < 2 * q + 2; j++)
+                for (int i = 2 * p; i < 2 * p + 2; i++)
+                {
+                    const std::size_t cell = at(i, j, columns);
+                    elevation += f.elevation_m[cell];
+                    seacells += f.sea[cell];
+                    if (f.sea[cell] == 0 && f.lakesurface_m[cell] > 0.0f)
+                    {
+                        wetcells++;
+                        surface += f.lakesurface_m[cell];
+                    }
+                    if (f.discharge_m3s[cell] > discharge)
+                    {
+                        discharge = f.discharge_m3s[cell];
+                        direction = f.riverdirection[cell];
+                    }
+                    january = std::max(january, f.januaryflow[cell]);
+                    july = std::max(july, f.julyflow[cell]);
+                }
+            const std::size_t pixel = at(p, q, two.width);
+            const std::string where = "pixel " + std::to_string(p) + ", " + std::to_string(q);
+            EXPECT_EQ(two.fields.elevation_m[pixel], static_cast<float>(elevation / 4.0)) << where;
+            EXPECT_EQ(two.fields.sea[pixel], seacells >= 2 ? 1 : 0) << where;
+            EXPECT_EQ(two.fields.sea[pixel], q < 5 ? 1 : 0) << where;
+            const float lake = seacells < 2 && wetcells >= 2 ? static_cast<float>(surface / wetcells) : 0.0f;
+            EXPECT_EQ(two.fields.lakesurface_m[pixel], lake) << where;
+            EXPECT_EQ(two.fields.lakesurface_m[pixel], q >= 10 ? static_cast<float>(300 + 2 * p + 1) : 0.0f) << where;
+            EXPECT_EQ(two.fields.discharge_m3s[pixel], discharge) << where;
+            EXPECT_EQ(two.fields.riverdirection[pixel], direction) << where;
+            EXPECT_EQ(two.fields.januaryflow[pixel], january) << where;
+            EXPECT_EQ(two.fields.julyflow[pixel], july) << where;
+            EXPECT_EQ(two.fields.climate[pixel], f.climate[at(2 * p + 1, 2 * q + 1, columns)]) << where;
+        }
+
+    // n = 1.5: resampled, partial pixels dropped; overlap weights 1 and 0.5 on the first pixel.
+    const landscape::ResampledRegionalFields unaligned = landscape::resampleregionalfields(result, radius_m, 1.5 * cell_m);
+    EXPECT_TRUE(unaligned.report.resampled());
+    EXPECT_EQ(unaligned.width, 64);
+    EXPECT_EQ(unaligned.height, 18);
+    EXPECT_NEAR(unaligned.fields.elevation_m[0], (100.0 * 0.5 * 1.5 + 0.5 * 1.5) / 2.25, 1e-4);
+    EXPECT_EQ(unaligned.fields.climate[at(1, 1, unaligned.width)], f.climate[at(2, 2, columns)]);  // centre 2.25, 2.25
+    EXPECT_EQ(unaligned.fields.elevation_m.size(), unaligned.fields.climate.size());
+
+    // Pixel (0, 0) at n = 1.5 covers cells (0, 0), (1, 0), (0, 1), (1, 1) with weights 1, 0.5,
+    // 0.5, 0.25 (half the total: 1.125). Two cells of four are a tie by count, decided by weight.
+    struct Corner
+    {
+        const char* name;
+        int sea[4];         // cells (0, 0), (1, 0), (0, 1), (1, 1)
+        float lake[4];
+        uint8_t sea_expected;
+        float lake_expected;
+    };
+    const Corner corners[] = {
+        {"sea on the two half cells (1.0): not sea; lakes on the others (1.25): wet", {0, 1, 1, 0},
+         {400.0f, 0.0f, 0.0f, 500.0f}, 0, (400.0f * 1.0f + 500.0f * 0.25f) / 1.25f},
+        {"sea on the whole and the quarter cell (1.25): sea", {1, 0, 0, 1}, {0.0f, 0.0f, 0.0f, 0.0f}, 1, 0.0f},
+        {"lakes on the two half cells (1.0): dry", {0, 0, 0, 0}, {0.0f, 450.0f, 460.0f, 0.0f}, 0, 0.0f}};
+    for (const Corner& corner : corners)
+    {
+        RefinementResult crafted = result;
+        landscape::RegionalFields& c = crafted.fields;
+        const std::size_t cells[4] = {at(0, 0, columns), at(1, 0, columns), at(0, 1, columns), at(1, 1, columns)};
+        for (int index = 0; index < 4; index++)
+        {
+            c.sea[cells[index]] = static_cast<uint8_t>(corner.sea[index]);
+            c.lakesurface_m[cells[index]] = corner.lake[index];
+            c.discharge_m3s[cells[index]] = 1.0f;
+            c.riverdirection[cells[index]] = 1;
+            c.januaryflow[cells[index]] = 0;
+            c.julyflow[cells[index]] = 0;
+        }
+        c.discharge_m3s[cells[3]] = 50.0f;  // the largest discharge on the quarter-cell sliver
+        c.riverdirection[cells[3]] = 7;
+        c.januaryflow[cells[1]] = 900;      // the largest flows on half-cell slivers
+        c.julyflow[cells[2]] = 800;
+        const landscape::ResampledRegionalFields out = landscape::resampleregionalfields(crafted, radius_m, 1.5 * cell_m);
+        EXPECT_EQ(out.fields.sea[0], corner.sea_expected) << corner.name;
+        EXPECT_FLOAT_EQ(out.fields.lakesurface_m[0], corner.lake_expected) << corner.name;
+        EXPECT_EQ(out.fields.discharge_m3s[0], 50.0f) << corner.name;
+        EXPECT_EQ(out.fields.riverdirection[0], 7) << corner.name;
+        EXPECT_EQ(out.fields.januaryflow[0], 900) << corner.name;
+        EXPECT_EQ(out.fields.julyflow[0], 800) << corner.name;
+    }
+
+    // The source level must be the final level, and no output finer than the data.
+    EXPECT_THROW(landscape::resampleregionalfields(result, radius_m, 5.0 * cell_m), std::invalid_argument);
+    EXPECT_THROW(landscape::resampleregionalfields(result, radius_m, 0.5 * cell_m), std::invalid_argument);
+    RefinementResult empty;
+    EXPECT_THROW(landscape::resampleregionalfields(empty, radius_m, cell_m), std::invalid_argument);
 }

@@ -198,6 +198,9 @@ struct RefinementResult
     // window's kept box (levels[l - 1].window: columns x rows, row-major, north row first),
     // index = level - 1; the final level's is fields.elevation_m.
     std::vector<std::vector<float>> coarserelevation_m;
+    // The halo chain of levels 0 .. target.level (refinement_grid.hpp, halochain), index =
+    // level; the resample of resampleregionalfields reads it (step S2.4).
+    std::vector<LevelWindow> chain;
 };
 
 // The loop. Throws std::invalid_argument when the target is not a window on the inputs'
@@ -207,4 +210,44 @@ struct RefinementResult
 // domain wider than its grid).
 RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTarget& target,
                                const RegionalParameters& parameters, const RefinementParameters& refinement);
+
+// --- Output at a requested resolution (section 1, "Output at any resolution"; step S2.4). ---
+
+// The source level of a request for metresperpixel, as resampleto chooses it: the coarsest
+// level l in 0 .. maxlevel whose cell size pi R / (worldheight factor^l) is at most
+// metresperpixel (1 + 1e-9); -1 when level maxlevel is still coarser. Throws
+// std::invalid_argument when metresperpixel or radius_m is not positive and finite,
+// worldwidth < 4 or odd, factor < 2 or maxlevel < 0.
+int resamplesourcelevel(double metresperpixel, double radius_m, int worldwidth, int factor, int maxlevel);
+
+// A refinement's final-level fields resampled to a requested metres per pixel.
+struct ResampledRegionalFields
+{
+    // width x height pixels each, row-major, north row first; window and diagnostics are the
+    // refinement's (window.scale the source level's factor^level), so window.finewidth() is
+    // not the pixel grid.
+    RegionalFields fields;
+    int width = 0;
+    int height = 0;
+    ResampleReport report;
+};
+
+// result.fields resampled to metresperpixel on resampleto's pixel grid (its source level
+// must be result's final level: compute the refinement to resamplesourcelevel's level). The
+// pixel's source cells are those resampleto averages (aligned: the round(n) x round(n) block;
+// otherwise every cell its box overlaps, weighted by the overlap area). The pixels are
+// anchored at the kept box's north-west corner: aligned pixels tile whole global cells, so
+// two windows give the same pixels where they overlap; unaligned pixels do not, so two
+// windows give different pixel grids (no overlap identity for a resampled output). Per field:
+// - elevation, temperatures, precipitations, ice thickness: resampleto's box average;
+// - sea: 1 when the sea cells hold at least half the pixel's weight (ties: sea);
+// - lake surface: when not sea and the wet cells (lake surface > 0) hold at least half the
+//   weight, their weighted mean surface; 0 otherwise;
+// - discharge, January and July flow: the largest value of the pixel's cells;
+// - river direction: the direction of the cell of the largest discharge (the first in
+//   row-major order on a tie);
+// - climate class: the class of the cell holding the pixel's centre.
+// Throws std::invalid_argument when the chain is empty, a field is not the final level's
+// kept size, the source level is not the final level, and as resampleto.
+ResampledRegionalFields resampleregionalfields(const RefinementResult& result, double radius_m, double metresperpixel);
 }
