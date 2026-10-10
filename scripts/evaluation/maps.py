@@ -16,8 +16,11 @@ to frame (track_identities), because the engine's plate index is not persistent.
 A regional bundle (a manifest with a window block, `world_pipeline region`) is framed with
 the graticule of its window. A map with "composite": "<name>" is an RGB image of several
 fields (COMPOSITES: regional_terrain, the elevation with sea, ice, lakes and rivers;
-regional_terrain_fade, the same with rivers fading in with their flow); the map's "options"
-are passed to the composite's function as keyword arguments (regional_terrain's minimum_flow).
+regional_terrain_fade, the same with rivers fading in with their flow; regional_relief,
+regional_terrain's layers with the sea and land multiplied by a hillshade); the map's "options"
+are passed to the composite's function as keyword arguments (regional_terrain's minimum_flow,
+regional_relief's vertical_exaggeration). The Earth reference windows beside a regional map
+(kind "earth") are drawn by earth_windows.py with terrain_base, hillshade and shade_factor.
 """
 import json
 import sys
@@ -96,6 +99,74 @@ def window_extent(bundle):
     return None if window is None else tuple(float(window[key]) for key in ('west', 'south', 'east', 'north'))
 
 
+# The hillshade of the relief maps (multiscale plan S1.2): light from the north-west, 45 degrees up.
+# The default vertical exaggeration (the profile's relief map sets its own, configs/evaluation/regional.json)
+# is chosen so 300 m of relief shows at 10 km pixels: a 300 m hill one pixel wide has a central-difference
+# gradient of 300 / 20000 = 0.015 beside its top, 0.15 when exaggerated 10 times, which brightens the lit
+# side and darkens the other by about 15 % (shade_factor of a flat cell is 1). Slopes steeper than about
+# 1 in 10 (exaggerated: 45 degrees) turn black on the side away from the light.
+RELIEF_AZIMUTH = 315.0
+RELIEF_ALTITUDE = 45.0
+RELIEF_EXAGGERATION = 10.0
+PLANET_RADIUS_KM = 6371.0
+
+
+def terrain_base(elevation, sea):
+    """Float RGB of the sea and land of the terrain maps on tectonics:elevation: sea cells clamped to
+    at most -1 m (the sea colours), the others to at least 0 m (the land colours). NaN elevations take
+    the palette's missing colour."""
+    return palette_rgb(np.where(sea, np.minimum(elevation, -1.0), np.maximum(elevation, 0.0)), 'tectonics:elevation').astype(float)
+
+
+def pixel_geometry(bundle):
+    """(north edge in degrees, pixel size in degrees, planet radius in metres) of a bundle's grid:
+    the window block of a regional bundle (its cells are square in degrees), else the whole sphere;
+    the radius is the manifest's world.body.radius_km (6371 km when it records none)."""
+    window = bundle.manifest.get('window')
+    rows = bundle.load('geosphere.base_elevation').shape[0]
+    if window is None:
+        north, pixel_deg = 90.0, 180.0 / rows
+    else:
+        north, pixel_deg = float(window['north']), (float(window['north']) - float(window['south'])) / rows
+    radius_km = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', PLANET_RADIUS_KM))
+    return north, pixel_deg, radius_km * 1000.0
+
+
+def pixel_sizes_m(north, pixel_deg, rows, radius_m):
+    """(north-south size in metres, east-west size in metres per row) of pixels square in degrees,
+    rows from the north edge; the east-west size is the north-south size times the cosine of the row's
+    central latitude (at least 1e-6 of it, so a row at a pole stays finite)."""
+    dy = radius_m * np.radians(pixel_deg)
+    latitude = north - (np.arange(rows) + 0.5) * pixel_deg
+    return dy, dy * np.maximum(np.cos(np.radians(latitude)), 1e-6)
+
+
+def hillshade(elevation, dy_m, dx_m, vertical_exaggeration, azimuth_deg=RELIEF_AZIMUTH, altitude_deg=RELIEF_ALTITUDE):
+    """Illumination 0..1 of a surface (rows north first, columns east) lit from azimuth_deg (clockwise
+    from north) at altitude_deg: the cosine between the surface normal and the light, with central
+    differences inside and one-sided ones at the edges. dy_m: north-south cell size (m); dx_m: east-west
+    cell size (m), a number or one per row. NaN cells are treated as flat and shade as flat ground."""
+    z = np.asarray(elevation, dtype=float)
+    finite = np.isfinite(z)
+    z = np.where(finite, z, np.nanmean(z) if finite.any() else 0.0) * float(vertical_exaggeration)
+    rows, columns = z.shape
+    dz_row = np.gradient(z, axis=0) if rows > 1 else np.zeros_like(z)
+    dz_column = np.gradient(z, axis=1) if columns > 1 else np.zeros_like(z)
+    dx = np.broadcast_to(np.asarray(dx_m, dtype=float).reshape(-1, 1) if np.ndim(dx_m) else float(dx_m), z.shape)
+    east = dz_column / dx
+    north = -dz_row / float(dy_m)  # rows run south
+    azimuth, altitude = np.radians(azimuth_deg), np.radians(altitude_deg)
+    light = (np.sin(azimuth) * np.cos(altitude), np.cos(azimuth) * np.cos(altitude), np.sin(altitude))
+    shade = (-east * light[0] - north * light[1] + light[2]) / np.sqrt(1.0 + east * east + north * north)
+    return np.where(finite, np.clip(shade, 0.0, 1.0), np.sin(altitude))
+
+
+def shade_factor(shade, altitude_deg=RELIEF_ALTITUDE):
+    """The multiplier of the terrain colours: the hillshade over that of flat ground, so flat cells keep
+    their colour, lit slopes brighten (up to 1 / sin(altitude)) and slopes away from the light darken."""
+    return shade / np.sin(np.radians(altitude_deg))
+
+
 def regional_terrain(bundle, minimum_flow=None):
     """(RGB, legend note) of a regional bundle: sea and land on the elevation palette (cells of
     geosphere.sea on its sea colours, the others on its land colours), present-day ice whitened,
@@ -111,11 +182,33 @@ def regional_terrain(bundle, minimum_flow=None):
     the rivers (the user, 2026-10-09). Over both (erosion plan R1): the lake shores (lake cells with a 4-neighbour that is not lake) in
     LAKE_OUTLINE, then the landmass outline (cells that are not sea with a sea 4-neighbour) in
     black; the window's edge is not a boundary."""
+    return regional_layers(bundle, minimum_flow)
+
+
+def regional_relief(bundle, minimum_flow=None, vertical_exaggeration=RELIEF_EXAGGERATION):
+    """(RGB, legend note) of a regional bundle: regional_terrain with its sea and land (before the
+    ice, rivers, lakes and outlines) multiplied by shade_factor of the hillshade of the elevation
+    relative to sea level (azimuth 315 degrees, altitude 45 degrees, the cell size in metres from
+    the window block and the planet radius, the vertical exaggeration a map option of the profile;
+    multiscale plan S1.2). The Earth window's relief style (earth_windows.py) is the same product."""
+    sea_level = float(bundle.scalar('geosphere.sea_level'))
+    elevation = bundle.load('geosphere.base_elevation').astype(float) - sea_level
+    north, pixel_deg, radius_m = pixel_geometry(bundle)
+    dy, dx = pixel_sizes_m(north, pixel_deg, elevation.shape[0], radius_m)
+    factor = shade_factor(hillshade(elevation, dy, dx, vertical_exaggeration))
+    # The legend note is regional_terrain's: the map's title states the hillshade (a longer note is cut off).
+    return regional_layers(bundle, minimum_flow, factor)
+
+
+def regional_layers(bundle, minimum_flow=None, factor=None):
+    """regional_terrain's image; factor (rows x columns), when given, multiplies the sea and land
+    colours before the ice, rivers, lakes and outlines are drawn."""
     sea_level = float(bundle.scalar('geosphere.sea_level'))
     elevation = bundle.load('geosphere.base_elevation').astype(float) - sea_level
     sea = bundle.load('geosphere.sea') != 0
-    rgb = palette_rgb(np.where(sea, np.minimum(elevation, -1.0), np.maximum(elevation, 0.0)), 'tectonics:elevation')
-    rgb = rgb.astype(float)
+    rgb = terrain_base(elevation, sea)
+    if factor is not None:
+        rgb = rgb * factor[..., None]
     ice = (bundle.load('cryosphere.ice_thickness') > 0) & ~sea
     rgb[ice] = 0.3 * rgb[ice] + 0.7 * 250.0
     surface = bundle.load('hydrosphere.lake_surface').astype(float)
@@ -205,12 +298,14 @@ def shore(mask):
 
 
 # Composite maps (an RGB image of several fields): the function and the fields it reads.
-COMPOSITES = {'regional_terrain': regional_terrain, 'regional_terrain_fade': regional_terrain_fade}
+COMPOSITES = {'regional_terrain': regional_terrain, 'regional_terrain_fade': regional_terrain_fade,
+              'regional_relief': regional_relief}
 COMPOSITE_FIELDS = {'regional_terrain': ['geosphere.base_elevation', 'geosphere.sea_level', 'geosphere.sea',
                                          'cryosphere.ice_thickness', 'hydrosphere.lake_surface',
                                          'hydrosphere.channel_direction', 'hydrosphere.discharge',
                                          'hydrosphere.river_flow_january', 'hydrosphere.river_flow_july']}
 COMPOSITE_FIELDS['regional_terrain_fade'] = COMPOSITE_FIELDS['regional_terrain']
+COMPOSITE_FIELDS['regional_relief'] = COMPOSITE_FIELDS['regional_terrain']
 
 # Derived maps: the function and the fields it reads.
 DERIVED = {'surface_elevation': surface_elevation, 'lake_elevation': lake_elevation, 'lake_depth': lake_depth,

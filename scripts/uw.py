@@ -14,7 +14,10 @@ Modules and commands:
                        uw.py regional run --from-bundle WORLD (--window W,S,E,N | --pixels X0,Y0,X1,Y1) --scale K
                        [--set ...]; seed and grid from the world bundle (no --resolution); compare two regional
                        bundles on their overlap with scripts/evaluation/regional_overlap.py A B
-    regional  evaluate|review|report|ledger  as for the other modules
+    regional  evaluate|review|report|ledger  as for the other modules; evaluate and a comparison report take
+                       --earth NAME, the Earth reference window of configs/evaluation/earth-windows.json beside
+                       the terrain and relief maps (default on evaluate: the entry holding the map's metres per
+                       pixel with the nearest centre latitude; scripts/evaluation/earth_windows.py)
     tectonics report   comparison page of the evaluations of registered runs (--runs A B ...), in runs/reports/tectonics/
     geology   run      tectonics bundles at each width, scored against Earth references (out/bench/geology)
     climate|tectonics|world|erosion|hydrology report --evaluation DIR [DIR ...] [--output DIR]
@@ -78,9 +81,12 @@ def evaluation(args, extra):
         if not args.bundle:
             raise SystemExit(f'{args.module} evaluate requires --bundle DIR')
         output = runs.refuse_archive(args.output or args.bundle.parent / 'evaluation')
+        earth = ['--earth', args.earth] if args.earth else []
         call([UV, 'run', '--offline', EVALUATION / 'evaluate.py', '--profile', args.module,
-              '--bundle', args.bundle, '--output', output, *extra])
+              '--bundle', args.bundle, '--output', output, *earth, *extra])
         return
+    if args.earth:
+        raise SystemExit('--earth belongs to evaluate and to a comparison report')
     options = ['--register'] if args.command == 'run' else []
     options += ['--seed', args.seed] if args.seed is not None else []
     options += ['--resolution', args.resolution] if args.resolution is not None else []
@@ -118,6 +124,9 @@ def pages(args, extra):
     if extra:
         raise SystemExit(f"Unexpected arguments: {' '.join(extra)}")
     script = EVALUATION / 'report.py'
+    if args.earth and (args.command == 'dashboard' or len(args.evaluation) == 1):
+        raise SystemExit('--earth: a run page shows the Earth window chosen when it was evaluated (evaluate --earth NAME; '
+                         'evaluations are never overwritten); --earth belongs to a comparison of several evaluations')
     if args.command == 'dashboard':
         output = args.output or ROOT / 'out/evaluation' / args.module / 'dashboard'
         call([UV, 'run', '--offline', script, 'dashboard', args.module, '--output', output])
@@ -125,7 +134,8 @@ def pages(args, extra):
         call([UV, 'run', '--offline', script, 'run', args.evaluation[0]])
     else:
         output = args.output or ROOT / 'out/evaluation' / args.module / 'comparison'
-        call([UV, 'run', '--offline', script, 'compare', *args.evaluation, '--output', output])
+        earth = ['--earth', args.earth] if args.earth else []
+        call([UV, 'run', '--offline', script, 'compare', *args.evaluation, '--output', output, *earth])
 
 
 def tectonics_bundle(exe, seed, resolution, extra, output):
@@ -197,6 +207,8 @@ def main():
     parser.add_argument('--topic', help='Ledger entries naming this text (ledger; printed before an experiment)')
     parser.add_argument('--draft', action='store_true', help='ledger: print a new entry to fill in')
     parser.add_argument('--add', type=Path, help='ledger: JSON file of one entry to append')
+    parser.add_argument('--earth', metavar='NAME',
+                        help='Earth reference window beside regional maps (evaluate; report with several evaluations)')
     parser.add_argument('--reference-width', type=int, default=512, help='Earth reference width (geology)')
     args, extra = parser.parse_known_args()
     if args.seed is None and args.module != 'regional':

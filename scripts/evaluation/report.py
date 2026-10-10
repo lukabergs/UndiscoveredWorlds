@@ -1,7 +1,7 @@
 """Report pages rendered from JSON: run page, comparison page and module dashboard.
 
     uv run --offline python scripts/evaluation/report.py run <evaluation-dir>
-    uv run --offline python scripts/evaluation/report.py compare <evaluation-dir> <evaluation-dir>... --output DIR
+    uv run --offline python scripts/evaluation/report.py compare <evaluation-dir> <evaluation-dir>... --output DIR [--earth NAME]
     uv run --offline python scripts/evaluation/report.py dashboard <module> --output DIR
 
 Each page is a template of scripts/evaluation/templates/ (run.html, comparison.html,
@@ -10,6 +10,9 @@ page. Data come from a run's evaluation/evaluation.json, evaluation/review.json 
 run.json, the module registry (runs/registry/<module>.json) and the ledger
 (runs/ledger/<module>.jsonl). Images are linked by relative path. The run page writes
 report.md from the same data, the comparison page a Markdown metric table.
+Map entries of kind "earth" (Earth reference windows beside regional maps, earth_windows.py) get
+their own column on both pages; `compare --earth NAME` draws that catalogue entry for the first
+run's map into the comparison's directory and shows it instead of the runs' own windows.
 """
 import argparse
 import datetime
@@ -31,7 +34,7 @@ PROFILES = ROOT / 'configs/evaluation'
 METRIC_NAMES = {'rmse': ('RMSE', 'Vector RMSE'), 'bias': ('Bias', 'Speed bias'),
                 'correlation': ('Spatial correlation', 'Speed spatial correlation'),
                 'variance_ratio': ('Variance ratio', 'Speed variance ratio')}
-KINDS = ('model', 'reference', 'difference')
+KINDS = ('model', 'reference', 'difference', 'earth')
 
 
 def fmt(value, digits=4):
@@ -157,6 +160,8 @@ def map_groups(maps):
     for item in maps:
         kind = item.get('kind', 'model')
         record = {'title': item['title'], 'path': item['path'], 'half_range': item.get('half_range')}
+        if 'display_fraction' in item:
+            record['display_fraction'] = item['display_fraction']
         if kind == 'animation':
             animations.append(dict(record, map=item.get('map'), season=item.get('season'), frames=item.get('frames', [])))
             continue
@@ -224,7 +229,8 @@ def run_data(evaluation_dir):
             'distributions': distribution_tables(validation), 'regions': regional_tables(validation),
             'features': validation.get('features'), 'footprint': validation.get('footprint'),
             'skipped': validation['skipped'], 'reviews': reviews,
-            'groups': groups, 'animations': animations, 'files': files,
+            'groups': groups, 'animations': animations, 'files': files, 'earth': document.get('earth'),
+            'earth_text': earth_text(document['earth']) if document.get('earth') else None,
             'provenance': {'profile': document['profile'], 'code': document['code'], 'references': document['references']}}
 
 
@@ -281,11 +287,22 @@ def markdown(data):
             lines.append(f"- {group['title']}: " + ' · '.join(f"[{kind}]({group['images'][kind]['path']})" for kind in KINDS
                                                               if kind in group['images']))
         lines += [f"- {item['title']}: [APNG]({item['path']})" for item in data['animations']]
+    if data.get('earth'):
+        lines += ['', earth_text(data['earth'])]
     provenance = data['provenance']
     lines += ['', '## Provenance', '', f"- Profile: `{provenance['profile']['path']}` ({provenance['profile']['sha256'][:16]})",
               f"- Code: {provenance['code']['revision']} (dirty: {provenance['code']['dirty']})",
               *[f'- Reference `{name}`: {digest[:16]}' for name, digest in provenance['references'].items()]]
     return '\n'.join(lines) + '\n'
+
+
+def earth_text(earth):
+    """One line on a run's Earth reference window: what it is and the features to look for, or why there is none."""
+    if not earth.get('entry') or 'caption' not in earth:
+        return earth['note']
+    features = '; '.join(earth.get('features') or [])
+    return (f"{earth['caption']}. {earth['note']} {earth['pixels'][0]} × {earth['pixels'][1]} pixels "
+            f"(the map: {earth['map_pixels'][0]} × {earth['map_pixels'][1]})." + (f' Features to look for: {features}.' if features else ''))
 
 
 def run_page(evaluation_dir):
@@ -305,7 +322,30 @@ def season_order(season):
     return -1 if season is None else SEASONS.index(season) if season in SEASONS else len(SEASONS)
 
 
-def comparison_data(evaluation_dirs, output_dir):
+def comparison_earth(runs, module, output, name):
+    """(map entries, earth block) of catalogue entry `name` drawn for the first run's regional map into output."""
+    import earth_windows
+    from uwtools.bundle import Bundle
+    profile = read_json(PROFILES / f'{module}.json') or {}
+    if not profile.get('earth'):
+        raise SystemExit(f'--earth: the {module} profile draws no Earth windows')
+    bundles = []
+    for _, document, _ in runs:
+        path = Path(document['run']['bundle'])
+        bundles.append(Bundle.open(path if path.is_absolute() else ROOT / path))
+    if any(bundle.manifest.get('window') is None for bundle in bundles):
+        raise SystemExit('--earth: every run of the comparison must be a regional map (a bundle with a window block)')
+    metres = [earth_windows.map_request(bundle.manifest)['metres_per_pixel'] for bundle in bundles]
+    if max(metres) - min(metres) > 1e-6 * max(metres):
+        raise SystemExit('--earth: the runs have different metres per pixel (' + ', '.join(f'{value:,.0f}' for value in metres) +
+                         '); each keeps the Earth window of its evaluation (evaluate --earth NAME)')
+    try:
+        return earth_windows.render_maps(bundles[0], profile, output, name, tag=f'-{name}')
+    except ValueError as error:
+        raise SystemExit(f'--earth: {error}')
+
+
+def comparison_data(evaluation_dirs, output_dir, earth=None):
     if len(evaluation_dirs) < 2:
         raise SystemExit('A comparison needs at least two evaluation directories (the first is the baseline)')
     output = Path(output_dir).absolute()
@@ -358,18 +398,39 @@ def comparison_data(evaluation_dirs, output_dir):
     specs = load_profile_maps(module)
     order = list(specs)
     options, index = [], {}
-    for position, (directory, document, _) in enumerate(runs):
-        for item in document['maps']:
+    # Earth windows: the one named by --earth (drawn here for the first run), else each run's own, one column
+    # per distinct window (by caption, which names the entry and the metres per pixel, and pixel count).
+    earth_note = None
+    sources = [(directory, document['maps']) for directory, document, _ in runs]
+    if earth is not None:
+        drawn, block = comparison_earth(runs, module, output, earth)
+        earth_note = block['note'] if block else None
+        sources = [(directory, [item for item in maps if item.get('kind') != 'earth']) for directory, maps in sources]
+        sources.append((output, drawn))
+    else:
+        notes = [f"{name}: {document['earth']['note']}" for name, (_, document, _) in zip(names, runs) if document.get('earth')]
+        earth_note = ' '.join(notes) or None
+    for position, (directory, items) in enumerate(sources):
+        for item in items:
             key = (item.get('map', item['title']), item.get('season'))
             if key not in index:
                 spec = specs.get(key[0], {})
                 index[key] = {'map': key[0], 'season': key[1], 'season_label': item.get('season_label', key[1]),
                               'title': spec.get('title', item['title']),
-                              'runs': [{} for _ in runs], 'reference': None}
+                              'runs': [{} for _ in runs], 'reference': None, 'earth': []}
                 options.append(index[key])
             kind = item.get('kind', 'model')
             path = link(directory / item['path'], output)
-            if kind == 'reference':
+            run_name = names[position] if position < len(names) else 'all runs (--earth)'
+            if kind == 'earth':
+                shown = next((image for image in index[key]['earth']
+                              if (image['title'], image['pixels']) == (item['title'], item.get('pixels'))), None)
+                if shown is None:
+                    index[key]['earth'].append({'path': path, 'title': item['title'], 'pixels': item.get('pixels'),
+                                                'display_fraction': item.get('display_fraction'), 'runs': [run_name]})
+                else:
+                    shown['runs'].append(run_name)
+            elif kind == 'reference':
                 if index[key]['reference'] is None:
                     index[key]['reference'] = {'path': path, 'title': item['title'], 'run': names[position]}
             else:
@@ -377,7 +438,8 @@ def comparison_data(evaluation_dirs, output_dir):
                                                       'frames': len(item.get('frames', []))}
     options.sort(key=lambda item: (order.index(item['map']) if item['map'] in order else len(order), season_order(item['season'])))
     return {'schema': 'uw-comparison-page/v1', 'generated': now(), 'module': module, 'runs': header, 'metrics': metrics,
-            'options': options, 'note': 'The first run is the baseline; deltas are against it (lower loss is better).'}
+            'options': options, 'note': 'The first run is the baseline; deltas are against it (lower loss is better).',
+            'earth_note': earth_note}
 
 
 def comparison_markdown(data):
@@ -394,10 +456,11 @@ def comparison_markdown(data):
     return '\n'.join(lines) + '\n'
 
 
-def comparison_page(evaluation_dirs, output_dir):
-    """Write index.html and report.md comparing evaluations (the first is the baseline) into output_dir."""
+def comparison_page(evaluation_dirs, output_dir, earth=None):
+    """Write index.html and report.md comparing evaluations (the first is the baseline) into output_dir;
+    earth: a catalogue entry drawn beside every run's regional maps instead of their own Earth windows."""
     output = runs.refuse_archive(output_dir)
-    data = comparison_data(evaluation_dirs, output)
+    data = comparison_data(evaluation_dirs, output, earth)
     output.mkdir(parents=True, exist_ok=True)
     (output / 'report.md').write_text(comparison_markdown(data), encoding='utf-8')
     return write_page('comparison.html', data, output / 'index.html')
@@ -507,6 +570,7 @@ def main():
     compare = commands.add_parser('compare', help='Comparison page; the first evaluation is the baseline')
     compare.add_argument('evaluations', type=Path, nargs='+')
     compare.add_argument('--output', type=Path, required=True)
+    compare.add_argument('--earth', metavar='NAME', help='Earth reference window (catalogue entry) drawn for the first run')
     board = commands.add_parser('dashboard', help='Module dashboard over the registry and the ledger')
     board.add_argument('module')
     board.add_argument('--output', type=Path, required=True)
@@ -514,7 +578,7 @@ def main():
     if args.command == 'run':
         path = run_page(args.evaluation)
     elif args.command == 'compare':
-        path = comparison_page(args.evaluations, args.output)
+        path = comparison_page(args.evaluations, args.output, args.earth)
     else:
         path = dashboard(args.module, args.output)
     print(f'Page: {path}')

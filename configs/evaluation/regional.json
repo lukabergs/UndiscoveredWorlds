@@ -22,6 +22,7 @@
   "validation": [],
   "maps": [
     {"name": "terrain", "title": "Regional terrain: elevation (m relative to sea level) with sea, ice, lakes and the rivers of an annual flow of at least 150 (legacy units, the legacy map's default)", "composite": "regional_terrain", "options": {"minimum_flow": 150}, "palette": "tectonics:elevation"},
+    {"name": "relief", "title": "Regional relief: the terrain map times a hillshade (light from the north-west, 45 degrees up; vertical exaggeration 10, so 300 m of relief shows at 10 km pixels)", "composite": "regional_relief", "options": {"minimum_flow": 150, "vertical_exaggeration": 10}, "palette": "tectonics:elevation"},
     {"name": "terrain-fade", "title": "Regional terrain with rivers fading in with their flow (legacy river colour)", "composite": "regional_terrain_fade", "palette": "tectonics:elevation"},
     {"name": "elevation", "title": "Elevation (m relative to sea level)", "derived": "elevation_above_sea", "palette": "tectonics:elevation"},
     {"name": "discharge", "title": "Discharge (log10 m3/s; dark where there is none)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log"},
@@ -32,6 +33,8 @@
     {"name": "precipitation-january", "title": "Precipitation in January (mm/day: mm/month x 12/365.25)", "field": "atmosphere.precipitation_january", "scale": 0.0328542, "palette": "climate:rain"},
     {"name": "precipitation-july", "title": "Precipitation in July (mm/day: mm/month x 12/365.25)", "field": "atmosphere.precipitation_july", "scale": 0.0328542, "palette": "climate:rain"}
   ],
+  "earth": {"catalogue": "configs/evaluation/earth-windows.json", "maps": ["terrain", "relief"],
+            "note": "Earth reference windows (multiscale plan S1.2, scripts/evaluation/earth_windows.py): an ETOPO 2022 window at the map's pixel count and metres per pixel beside the terrain and relief maps, kind earth; --earth NAME on evaluate chooses the catalogue entry, otherwise the entry whose metres_per_pixel range holds the map's and whose centre latitude is nearest the window's."},
   "review_status": "Draft written by an agent on 2026-10-08 (erosion plan, step E2d). The user rewrites it; until then a verdict on it is a reading aid, not a judgement of the map.",
   "review": [
     {"id": "faithful", "question": "Is the regional map the global map zoomed in: the same coasts, ranges, rivers and lakes, with detail added and none contradicted?", "maps": ["terrain", "elevation"], "seasons": "all", "region": "window", "good": "every global coast, range, river and lake in its place; detail inside global cells, not new features at the global scale", "severity": "blocker"},

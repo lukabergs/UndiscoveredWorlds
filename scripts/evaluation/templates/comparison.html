@@ -53,7 +53,9 @@ function status(value) {
 }
 function figure(image, caption) {
   if (!image) return h('div', {class: 'empty'}, caption + ': none');
-  return h('figure', {}, h('a', {href: image.path}, h('img', {src: image.path, alt: image.title, loading: 'lazy'})), h('figcaption', {}, caption));
+  // An Earth window narrower than its map (cut to its box) keeps the map's scale: a fraction of the map's width.
+  const style = image.display_fraction ? `width:${(100 * image.display_fraction).toFixed(3)}%` : null;
+  return h('figure', {}, h('a', {href: image.path}, h('img', {src: image.path, alt: image.title, loading: 'lazy', style})), h('figcaption', {}, caption));
 }
 
 const names = D.runs.map(r => r.name);
@@ -86,6 +88,7 @@ if (D.options.length) {
   const view = h('div', {});
   page.append(h('div', {class: 'controls'}, h('label', {}, 'Map ', mapSelect), h('label', {}, 'Season ', seasonSelect),
     h('span', {class: 'muted'}, 'Keys: ←/→ map, ↑/↓ season')));
+  if (D.earth_note) page.append(h('p', {class: 'muted'}, D.earth_note));
   page.append(view);
   function seasons() { return D.options.filter(o => o.map === mapSelect.value); }
   let currentSeason = null;
@@ -98,10 +101,12 @@ if (D.options.length) {
   function draw() {
     const option = seasons()[Number(seasonSelect.value)] || seasons()[0];
     currentSeason = option.season;
-    const columns = names.length + (option.reference ? 1 : 0);
+    const earth = option.earth || [];
+    const columns = names.length + (option.reference ? 1 : 0) + earth.length;
     const grid = `repeat(${columns}, minmax(0, 1fr))`;
     const models = option.runs.map((r, i) => figure(r.model, `${names[i]}${i === 0 ? ' (baseline)' : ''}`));
     if (option.reference) models.push(figure(option.reference, `reference (grid of ${option.reference.run})`));
+    for (const e of earth) models.push(figure(e, `${e.title} · beside ${e.runs.join(', ')}`));
     const rows = [h('div', {class: 'label'}, option.title + (option.season_label ? ` · ${option.season_label}` : '')), h('div', {class: 'row', style: `grid-template-columns:${grid}`}, models)];
     if (option.runs.some(r => r.difference)) {
       const first = option.runs.find(r => r.difference).difference;

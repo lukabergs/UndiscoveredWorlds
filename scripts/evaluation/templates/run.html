@@ -24,10 +24,11 @@ dl.facts dt{color:var(--muted)}dl.facts dd{margin:0;overflow-wrap:anywhere}
 details{margin:2px 0}summary{cursor:pointer;color:var(--muted)}
 .group{margin:0 0 20px}.group h3{margin:0 0 6px;font-size:1rem;font-weight:600}
 .triple{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .maps{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
 figure{margin:0}img{width:100%;image-rendering:pixelated;border:1px solid var(--line);display:block}
 .review{border-left:3px solid var(--line);padding:4px 10px;margin:8px 0}
-@media (max-width:760px){.triple{grid-template-columns:1fr}.maps{grid-template-columns:1fr}}
+@media (max-width:760px){.triple,.pair{grid-template-columns:1fr}.maps{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -64,7 +65,9 @@ function table(headers, rows, numericFrom = Infinity) {
   return h('div', {class: 'scroll'}, h('table', {}, h('thead', {}, h('tr', {}, headers.map((x, i) => h('th', {class: i >= numericFrom ? 'num' : null}, x)))), h('tbody', {}, rows)));
 }
 function figure(image, caption) {
-  return h('figure', {}, h('a', {href: image.path}, h('img', {src: image.path, alt: image.title, loading: 'lazy'})), h('figcaption', {}, caption || image.title));
+  // An Earth window narrower than its map (cut to its box) keeps the map's scale: a fraction of the map's width.
+  const style = image.display_fraction ? `width:${(100 * image.display_fraction).toFixed(3)}%` : null;
+  return h('figure', {}, h('a', {href: image.path}, h('img', {src: image.path, alt: image.title, loading: 'lazy', style})), h('figcaption', {}, caption || image.title));
 }
 
 document.title = `${D.module} · ${D.name} · evaluation`;
@@ -146,8 +149,13 @@ for (const r of D.reviews.slice().reverse()) page.append(h('div', {class: 'revie
 
 if (D.groups.length || D.animations.length) {
   page.append(h('h2', {}, 'Maps'));
+  if (D.earth_text) page.append(h('p', {class: 'muted'}, D.earth_text));
   const linked = D.groups.filter(g => g.images.reference || g.images.difference);
-  const plain = D.groups.filter(g => !(g.images.reference || g.images.difference));
+  const beside = D.groups.filter(g => !(g.images.reference || g.images.difference) && g.images.earth);
+  const plain = D.groups.filter(g => !(g.images.reference || g.images.difference || g.images.earth));
+  for (const g of beside) page.append(h('div', {class: 'group'}, h('h3', {}, g.title),
+    h('div', {class: 'pair'}, g.images.model ? figure(g.images.model, 'map') : h('div', {}), figure(g.images.earth, g.images.earth.title)),
+    g.images.parent ? h('div', {class: 'pair'}, figure(g.images.parent, 'parent run')) : null));
   for (const g of linked) page.append(h('div', {class: 'group'}, h('h3', {}, g.title, g.validation ? h('span', {class: 'muted'}, ` · validation ${g.validation}`) : null),
     h('div', {class: 'triple'}, ['model', 'reference', 'difference'].map(kind => g.images[kind] ? figure(g.images[kind], kind === 'difference' ? `model − reference (blue lower, red higher; ±${fmt(g.images[kind].half_range)})` : kind) : h('div', {}))),
     g.images.parent ? h('div', {class: 'triple'}, figure(g.images.parent, 'parent run')) : null));

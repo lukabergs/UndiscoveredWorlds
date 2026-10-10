@@ -3,11 +3,14 @@
     uv run --offline python scripts/evaluation/evaluate.py \\
         --profile climate --bundle <run>/bundle --output <run>/evaluation \\
         [--baseline <bundle>] [--repeat <bundle>] [--explicit <bundle>] [--input <bundle>] [--checkpoints DIR] [--no-maps]
+        [--earth NAME]
 
 Profiles are configs/evaluation/<module>.json. Writes evaluation.json and maps/ to a new
 or empty output directory, then the run page (index.html) and report.md from it with
 report.py; evaluations are evidence and are never overwritten. Checkpoint bundles
-(--checkpoints, default <bundle>/../checkpoints when present) give map animations.
+(--checkpoints, default <bundle>/../checkpoints when present) give map animations. A profile with an
+"earth" block draws an Earth reference window beside a regional map (earth_windows.py; --earth NAME
+chooses the catalogue entry, otherwise the nearest-latitude rule).
 Exit code 1 when a check fails.
 """
 import argparse
@@ -98,14 +101,15 @@ def checkpoint_bundles(directory):
 
 
 def evaluate(profile, profile_path, bundle, output, baseline=None, repeat=None, input_bundle=None, maps=True,
-             checkpoints=None, explicit=None):
+             checkpoints=None, explicit=None, earth=None):
     output = runs.refuse_archive(output)
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         failed = f' (it holds a failed evaluation: {FAILED})' if (output / FAILED).is_file() else ''
         raise SystemExit(f'{output} is not empty{failed}; evaluations are never overwritten: use another --output')
     try:
-        return evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input_bundle, maps, checkpoints, explicit)
+        return evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input_bundle, maps, checkpoints, explicit,
+                             earth)
     except BaseException as error:
         # What an interrupted or failed evaluation left behind stays as evidence, marked as incomplete.
         (output / FAILED).write_text(json.dumps({
@@ -115,7 +119,7 @@ def evaluate(profile, profile_path, bundle, output, baseline=None, repeat=None, 
         raise
 
 
-def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input_bundle, maps, checkpoints, explicit):
+def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input_bundle, maps, checkpoints, explicit, earth=None):
     context = {'input': input_bundle, 'repeat': repeat, 'explicit': explicit}
     checks = run_checks(bundle, profile.get('checks', []), context)
     references = References()
@@ -131,6 +135,11 @@ def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input
             checkpoints = bundle.path.parent / 'checkpoints'
         rendered = render(bundle, profile['maps'], output, profile.get('validation', []), validation['maps'], references,
                           checkpoint_bundles(checkpoints), baseline, validation['distributions'])
+    earth_window = None
+    if maps and profile.get('earth'):
+        import earth_windows
+        written, earth_window = earth_windows.render_maps(bundle, profile, output, earth)
+        rendered += written
     document = {
         'schema': SCHEMA,
         'evaluated': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
@@ -138,7 +147,8 @@ def evaluate_into(profile, profile_path, bundle, output, baseline, repeat, input
                     'sha256': sha256_bytes(profile_path.read_bytes())},
         'evidence': profile['evidence'], 'run': describe(bundle), 'baseline': describe(baseline),
         'repeat': describe(repeat), 'explicit': describe(explicit), 'input': describe(input_bundle), 'code': code_state(),
-        'checks': checks, 'validation': validation, 'references': references.provenance(), 'maps': rendered}
+        'checks': checks, 'validation': validation, 'references': references.provenance(), 'maps': rendered,
+        'earth': earth_window}
     document['verdict'] = verdict(profile, checks, validation, review.latest(output))
     (output / 'evaluation.json').write_text(json.dumps(document, indent=2, allow_nan=False) + '\n', encoding='utf-8')
     if profile.get('review'):
@@ -158,12 +168,23 @@ def main():
     parser.add_argument('--input', type=Path, help='Bundle holding the inputs of frozen components')
     parser.add_argument('--checkpoints', type=Path, help='Directory of checkpoint bundles (default <bundle>/../checkpoints)')
     parser.add_argument('--no-maps', action='store_true')
+    parser.add_argument('--earth', metavar='NAME', help='Earth reference window of the catalogue beside a regional map '
+                        '(profiles with an "earth" block; default: the nearest-latitude entry holding the map\'s metres per pixel)')
     args = parser.parse_args()
     profile, path = load_profile(args.profile)
+    if args.earth is not None:
+        if not profile.get('earth'):
+            raise SystemExit(f"--earth: the {profile['module']} profile draws no Earth windows")
+        import earth_windows
+        try:
+            earth_windows.choose_entry(earth_windows.load_catalogue(ROOT / profile['earth'].get('catalogue', earth_windows.CATALOGUE)),
+                                       0.0, 0.0, args.earth)
+        except (ValueError, OSError) as error:
+            raise SystemExit(f'--earth: {error}')
     open_bundle = lambda p: Bundle.open(p) if p else None
     document = evaluate(profile, path, Bundle.open(args.bundle), args.output.absolute(), open_bundle(args.baseline),
                         open_bundle(args.repeat), open_bundle(args.input), not args.no_maps, args.checkpoints,
-                        open_bundle(args.explicit))
+                        open_bundle(args.explicit), args.earth)
     print(json.dumps(document['verdict'], indent=2))
     for key, entry in document['validation']['scores'].items():
         if 'score' in entry:
