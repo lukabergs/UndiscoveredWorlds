@@ -330,31 +330,6 @@ std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const Region
     return filled;
 }
 
-std::vector<float> lakepockets(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const std::vector<uint8_t>& filled,
-                               const std::vector<float>& surface)
-{
-    const int width = inputs.width, k = box.scale;
-    const int finewidth = box.domainfinewidth(), fineheight = box.domainfineheight();
-    const std::size_t count = static_cast<std::size_t>(finewidth) * static_cast<std::size_t>(fineheight);
-    if (filled.size() != count || surface.size() != count)
-        throw std::invalid_argument("lakepockets: the filled cells and the surface must cover the box's fine cells");
-    std::vector<float> lake(count, 0.0f);
-    const GlobalLakes lakes = globallakes(inputs);
-    if (lakes.empty())
-        return lake;
-    for (int y = 0; y < fineheight; y++)
-        for (int x = 0; x < finewidth; x++)
-        {
-            const std::size_t cell = at(x, y, finewidth);
-            if (filled[cell] == 0)
-                continue;
-            const float level = lakes.surface[at(wrapcolumn(box.domaincolumn0 + x / k, width), box.domainrow0 + y / k, width)];
-            if (level > inputs.sealevel && surface[cell] < level)
-                lake[cell] = level;
-        }
-    return lake;
-}
-
 std::vector<uint8_t> pocketbasins(const RegionalGlobalInputs& inputs, const RegionalWindow& box, int reach,
                                   const std::vector<uint8_t>& sea, const std::vector<uint8_t>& filled,
                                   const std::vector<float>& surface, float level)

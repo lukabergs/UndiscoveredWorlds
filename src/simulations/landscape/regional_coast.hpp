@@ -108,15 +108,6 @@ std::vector<double> displacedsample(const std::vector<float>& field, const Regio
 std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const RegionalWindow& box, int reach,
                                 const std::vector<uint8_t>& sea, const std::vector<uint8_t>& core = {});
 
-// The filled pocket cells that belong to a lake (S3.15, round 5: a pocket filled at a lake's sill
-// printed the lake's 3 x 3 zone as straight edges): one value per fine cell of `box`'s domain, the lake's
-// surface S on a `filled` cell of a global lake cell or of its 8-neighbours (the highest neighbour's S)
-// whose `surface` lies below S when S lies above the sea level; 0 elsewhere. The callers raise such a
-// cell only to the next float above the sea level, so the lake flood (regional_water.hpp, the
-// sill-crossing rule) wets it at S, and keep it below S. A pure function of the global lakes and the cell.
-std::vector<float> lakepockets(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const std::vector<uint8_t>& filled,
-                               const std::vector<float>& surface);
-
 // The basins of filled pockets (S3.15 b): one value per fine cell of `box`'s domain, 1 on the cells
 // reached from a global cell's `filled` cells through 4-connected land cells (`sea` 0) that are
 // filled or whose `surface` lies below `level` (the callers: the next float above the sea level),
