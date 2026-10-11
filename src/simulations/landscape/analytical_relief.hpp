@@ -76,7 +76,8 @@ struct AnalyticalReliefInput
     // the regional pass, distinct per cell (else a throw); empty: the local index. Every tie of the
     // flood's order (equal levels) is broken by it, never by the local index, so two
     // windows that cross the date line differently order the same cells the same way;
-    // the other ties (steepest descent, donors) go by direction code.
+    // the flat resolution's ties (S3.12) go by a hash of it, the other ties (steepest
+    // descent, donors) by direction code.
     std::vector<std::uint64_t> key;
     // Erosion plan Phase R2 (the R6 contract, implemented by R9): the rock uplift rate per cell,
     // m/Myr, at least 0; empty: no uplift (the solution above exactly). With it, a cell
@@ -131,8 +132,11 @@ struct AnalyticalReliefResult
 // the start surface: in a depression, or after the routing changed). Receivers: steepest
 // descent to a neighbour lower on both the surface and the filled surface of a
 // Priority-Flood seeded at the pinned cells (on a surface without depressions: to
-// any lower neighbour), otherwise the neighbour from which that flood reached the
-// cell (Barnes' directions, as depressions.cpp gives them), so every unpinned cell
+// any lower neighbour), otherwise (multiscale plan S3.12) the flat resolution of
+// Barnes, Lehman and Mulla 2014 on the flood's pits and flats, with metric (Dijkstra)
+// distances and ties by a hash of the key: steepest descent of an increment that falls
+// towards the flat's low edges and away from higher terrain; a cell it does not reach
+// takes the neighbour from which that flood reached it. Every unpinned cell
 // has a path to a pinned cell and no receiver loop exists (steepest descent to any
 // lower neighbour would loop between a pit and the rim cell its flood came from);
 // the surface is not filled. Neither rule takes a diagonal step whose two corner

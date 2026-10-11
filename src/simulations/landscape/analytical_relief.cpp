@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <limits>
@@ -279,6 +280,250 @@ Catchments labelcatchments(const PatchMetric& metric, const std::vector<float>& 
     return catchments;
 }
 
+// S3.12 (multiscale plan §3, the addendum of 2026-10-11): route's flood receivers resolved as
+// resolveflatcells (flow_graph.cpp) resolves the global grid's (Barnes, Lehman and Mulla 2014), with
+// metric distances and hashed ties. A step is allowed as in route: not a diagonal between two pinned
+// corner cells of the input, and with catchments inside one label. A flat is a connected set (allowed
+// steps) of the unpinned cells that take a flood receiver (`flooded`) at one filled elevation L; its low
+// edges are the cells an allowed step away from it that are pinned or drain by steepest descent, at a
+// filled elevation at most L (route's flood makes it exactly L). Two Dijkstra distances in metres over
+// each flat's cells (steps of distance_m; the heap ties by the hashed key): towards, from the low edges
+// (a flat cell next to one starts at its step to the nearest), and away, from the flat cells next to
+// higher terrain (a neighbour outside the flat higher on the filled surface; on the surface across a
+// pinned corner or a label, where the filled surface is another catchment's). The increment
+// 2 towards + (height - away), height the flat's largest away (the term 0 in a flat without higher
+// terrain), decreases towards the low edges, whose value is 0; a flat cell drains by steepest descent of
+// the increment over the step's distance to a cell of its flat or a low edge, a tie to the neighbour
+// with the smaller hashed key, so no raster order prints a direction. The level sets are octagons (an
+// 8-neighbour Dijkstra), not the Chebyshev squares of breadth-first distances; on them a cardinal and a
+// diagonal step off the axes drop the towards term equally per metre, so the away term or rounding
+// decides there, and in a long flat Barnes' 2 : 1 weights send the cells diagonally onto the flat's
+// axis (a diagonal step drops 3 / sqrt 2 per cell size against 2). Every reached flat cell has a strictly lower
+// neighbour: the predecessor p on its towards path (the low edge, for a seed) has towards(c) =
+// towards(p) + d and |away(c) - away(p)| <= d (a shortest-path distance), so the increment drops by at
+// least d. No loop: a resolved link lowers the increment strictly inside one flat, so its chain ends at
+// a low edge, which is pinned or drains by steepest descent to a strictly lower filled elevation, and no
+// resolved link points to an unreached cell; route's argument covers the other links. A flat cell the
+// towards distance does not reach keeps its flood receiver (none should: the flood chain of a flat cell
+// stays at L inside the flat until it meets a low edge). The resolution reads the flat and the cells
+// next to it, which the flood's sub-basin or label holds, so the seam property is unchanged. Returns
+// whether a receiver changed.
+bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, const std::vector<float>& filled,
+                  const std::vector<uint8_t>& inputpinned, const std::vector<std::uint64_t>& key,
+                  const Catchments* catchments, const std::vector<uint8_t>& flooded, Routing& routing)
+{
+    const std::size_t count = metric.size();
+    const int width = metric.width, height = metric.height;
+    const auto tieof = [&](std::size_t cell) {
+        return hashedkey(key.empty() ? static_cast<std::uint64_t>(cell) : key[cell]);
+    };
+    // The neighbour offsets and, per row, the steps' distances (PatchMetric::distance_m's values).
+    std::ptrdiff_t offset[directioncount + 1] = {};
+    for (int direction = 1; direction <= directioncount; direction++)
+        offset[direction] = directionoffsetx(direction)
+                            + static_cast<std::ptrdiff_t>(directionoffsety(direction)) * static_cast<std::ptrdiff_t>(width);
+    std::vector<double> step(static_cast<std::size_t>(height) * (directioncount + 1), 0.0);
+    for (int y = 0; y < height; y++)
+        for (int direction = 1; direction <= directioncount; direction++)
+        {
+            const int x = directionoffsetx(direction) < 0 ? width - 1 : 0;  // a column with the neighbour inside
+            step[static_cast<std::size_t>(y) * (directioncount + 1) + static_cast<std::size_t>(direction)]
+                = metric.distance_m(metric.index(x, y), direction);
+        }
+    const auto distance = [&](std::size_t cell, int direction) {
+        return step[(cell / static_cast<std::size_t>(width)) * (directioncount + 1) + static_cast<std::size_t>(direction)];
+    };
+    const auto neighbourof = [&](std::size_t cell, int direction) {
+        return static_cast<std::size_t>(static_cast<std::ptrdiff_t>(cell) + offset[direction]);
+    };
+
+    // The flats: their cells (members) contiguous, flat by flat; per member the flat, the directions
+    // whose neighbour lies inside the patch and those of an allowed step.
+    std::vector<int32_t> slot(count, -1);
+    std::vector<int32_t> members, flatof, flatstart;
+    std::vector<uint8_t> insidemask, allowedmask;
+    for (std::size_t seed = 0; seed < count; seed++)
+    {
+        if (flooded[seed] == 0 || slot[seed] >= 0)
+            continue;
+        const int32_t id = static_cast<int32_t>(flatstart.size());
+        flatstart.push_back(static_cast<int32_t>(members.size()));
+        slot[seed] = static_cast<int32_t>(members.size());
+        members.push_back(static_cast<int32_t>(seed));
+        for (std::size_t head = static_cast<std::size_t>(flatstart.back()); head < members.size(); head++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(members[head]);
+            const int x = static_cast<int>(cell % static_cast<std::size_t>(width));
+            const int y = static_cast<int>(cell / static_cast<std::size_t>(width));
+            uint8_t inside = 0, allowed = 0;
+            for (int direction = 1; direction <= directioncount; direction++)
+            {
+                const int ox = directionoffsetx(direction), oy = directionoffsety(direction);
+                if (x + ox < 0 || x + ox >= width || y + oy < 0 || y + oy >= height)
+                    continue;
+                const uint8_t bit = static_cast<uint8_t>(1u << (direction - 1));
+                inside |= bit;
+                const std::size_t next = neighbourof(cell, direction);
+                // crossespinnedcorner and the label, as route's steps
+                if (ox != 0 && oy != 0 && inputpinned[cell + static_cast<std::size_t>(static_cast<std::ptrdiff_t>(ox))] != 0
+                    && inputpinned[static_cast<std::size_t>(static_cast<std::ptrdiff_t>(cell) + offset[oy < 0 ? 1 : 5])] != 0)
+                    continue;
+                if (catchments != nullptr && catchments->label[next] != catchments->label[cell])
+                    continue;
+                allowed |= bit;
+                if (flooded[next] == 0 || slot[next] >= 0 || filled[next] != filled[cell])
+                    continue;
+                slot[next] = static_cast<int32_t>(members.size());
+                members.push_back(static_cast<int32_t>(next));
+            }
+            insidemask.push_back(inside);
+            allowedmask.push_back(allowed);
+            flatof.push_back(id);
+        }
+    }
+    if (members.empty())
+        return false;
+    flatstart.push_back(static_cast<int32_t>(members.size()));
+    const std::size_t size = members.size();
+    const auto inflat = [&](std::size_t next, int32_t id) {
+        return slot[next] >= 0 && flatof[static_cast<std::size_t>(slot[next])] == id;
+    };
+    // A low edge: outside the flats (pinned or draining by steepest descent), not higher.
+    const auto lowedge = [&](std::size_t cell, std::size_t next) { return slot[next] < 0 && filled[next] <= filled[cell]; };
+
+    const double infinity = std::numeric_limits<double>::infinity();
+    using Entry = std::tuple<double, std::uint64_t, int32_t>;  // (distance, hashed key, member)
+    std::vector<Entry> heap;
+    // Dijkstra over one flat's members from the seeds in `heap` (their distances already set).
+    const auto spread = [&](std::vector<double>& reached, int32_t id) {
+        std::make_heap(heap.begin(), heap.end(), std::greater<Entry>());
+        while (!heap.empty())
+        {
+            std::pop_heap(heap.begin(), heap.end(), std::greater<Entry>());
+            const double at = std::get<0>(heap.back());
+            const std::size_t member = static_cast<std::size_t>(std::get<2>(heap.back()));
+            heap.pop_back();
+            if (at > reached[member])
+                continue;  // superseded
+            const std::size_t cell = static_cast<std::size_t>(members[member]);
+            for (int direction = 1; direction <= directioncount; direction++)
+            {
+                if ((allowedmask[member] & (1u << (direction - 1))) == 0)
+                    continue;
+                const std::size_t next = neighbourof(cell, direction);
+                if (!inflat(next, id))
+                    continue;
+                const std::size_t other = static_cast<std::size_t>(slot[next]);
+                const double candidate = at + distance(cell, direction);
+                if (candidate < reached[other])
+                {
+                    reached[other] = candidate;
+                    heap.push_back(Entry{ candidate, tieof(next), static_cast<int32_t>(other) });
+                    std::push_heap(heap.begin(), heap.end(), std::greater<Entry>());
+                }
+            }
+        }
+    };
+
+    std::vector<double> towards(size, infinity), away(size, infinity);
+    bool changed = false;
+    for (std::size_t flat = 0; flat + 1 < flatstart.size(); flat++)
+    {
+        const int32_t id = static_cast<int32_t>(flat);
+        const std::size_t first = static_cast<std::size_t>(flatstart[flat]), last = static_cast<std::size_t>(flatstart[flat + 1]);
+        // Towards the low edges: a member next to one starts at its step to the nearest.
+        heap.clear();
+        for (std::size_t member = first; member < last; member++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(members[member]);
+            for (int direction = 1; direction <= directioncount; direction++)
+            {
+                if ((allowedmask[member] & (1u << (direction - 1))) == 0)
+                    continue;
+                const std::size_t next = neighbourof(cell, direction);
+                if (lowedge(cell, next))
+                    towards[member] = std::min(towards[member], distance(cell, direction));
+            }
+            if (towards[member] < infinity)
+                heap.push_back(Entry{ towards[member], tieof(cell), static_cast<int32_t>(member) });
+        }
+        spread(towards, id);
+        // Away from higher terrain: 0 on the members next to it.
+        heap.clear();
+        for (std::size_t member = first; member < last; member++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(members[member]);
+            for (int direction = 1; direction <= directioncount; direction++)
+            {
+                const unsigned bit = 1u << (direction - 1);
+                if ((insidemask[member] & bit) == 0)
+                    continue;
+                const std::size_t next = neighbourof(cell, direction);
+                if (inflat(next, id))
+                    continue;
+                const float level = (allowedmask[member] & bit) != 0 ? filled[next] : surface[next];
+                if (level > filled[cell])
+                {
+                    away[member] = 0.0;
+                    heap.push_back(Entry{ 0.0, tieof(cell), static_cast<int32_t>(member) });
+                    break;
+                }
+            }
+        }
+        spread(away, id);
+        double top = 0.0;  // the flat's height
+        for (std::size_t member = first; member < last; member++)
+            if (away[member] < infinity)
+                top = std::max(top, away[member]);
+        // The increment, in place of towards (infinite where towards is).
+        for (std::size_t member = first; member < last; member++)
+            if (towards[member] < infinity)
+                towards[member] = 2.0 * towards[member] + (away[member] < infinity ? top - away[member] : 0.0);
+        const std::vector<double>& increment = towards;
+
+        for (std::size_t member = first; member < last; member++)
+        {
+            const double own = increment[member];
+            if (!(own < infinity))
+                continue;  // not reached from a low edge: keeps its flood receiver
+            const std::size_t cell = static_cast<std::size_t>(members[member]);
+            int best = 0;
+            double steepest = 0.0;
+            std::uint64_t besttie = 0;
+            for (int direction = 1; direction <= directioncount; direction++)
+            {
+                if ((allowedmask[member] & (1u << (direction - 1))) == 0)
+                    continue;
+                const std::size_t next = neighbourof(cell, direction);
+                double value;
+                if (inflat(next, id))
+                    value = increment[static_cast<std::size_t>(slot[next])];  // infinite where unreached
+                else if (lowedge(cell, next))
+                    value = 0.0;
+                else
+                    continue;
+                if (!(value < own))
+                    continue;
+                const double gradient = (own - value) / distance(cell, direction);
+                const std::uint64_t tie = tieof(next);
+                if (gradient > steepest || (best != 0 && gradient == steepest && tie < besttie))
+                {
+                    steepest = gradient;
+                    best = direction;
+                    besttie = tie;
+                }
+            }
+            if (best == 0)
+                continue;
+            const int32_t receiver = static_cast<int32_t>(neighbourof(cell, best));
+            changed = changed || routing.receiver[cell] != receiver;
+            routing.receiver[cell] = receiver;
+            routing.direction[cell] = static_cast<uint8_t>(best);
+        }
+    }
+    return changed;
+}
+
 // Receivers on `surface`. A Priority-Flood seeded at the pinned cells (Barnes et al.
 // 2014, Algorithm 2: a min-queue on (filled elevation, key) and a first-in first-out
 // pit queue, as depressions.cpp, which ties by the local index instead) gives every
@@ -286,13 +531,18 @@ Catchments labelcatchments(const PatchMetric& metric, const std::vector<float>& 
 // it was taken; the key (the absolute fine index) makes that order the same in every
 // window, and neighbours are visited in direction-code order. A cell drains
 // by steepest descent (drop over metric distance, the lowest code on a tie) to a
-// neighbour lower on both the surface and the filled surface; with none, to its
-// flood receiver. The plain rule (steepest descent to any lower neighbour) loops:
+// neighbour lower on both the surface and the filled surface; with none, by the flat
+// resolution (S3.12, resolveflats: the flood's pits and flats drain along a metric
+// gradient towards their low edges, ties by the hashed key), and to its flood receiver
+// where that does not reach. The plain rule (steepest descent to any lower neighbour) loops:
 // a rim cell descending into a pit whose flood receiver is that rim cell. Here a
 // steepest-descent link lowers the filled elevation strictly and a flood link never
-// raises it, while flood links alone form a tree towards the pinned cells, so no
-// loop exists; the flood takes cells in non-decreasing filled elevation, so its order
-// lists every receiver before its donors. On a surface without depressions the
+// raises it, while flood links alone form a tree towards the pinned cells and a resolved
+// link ends at a low edge (resolveflats), so no loop exists; the flood takes cells in
+// non-decreasing filled elevation, so its order lists every receiver before its donors,
+// and when the resolution changes a receiver the order is rebuilt breadth-first from the
+// pinned cells over the final receivers' donors (the solve reads only that property:
+// its sums and walks are the same in any such order). On a surface without depressions the
 // filled surface is the surface and every cell with a lower neighbour drains by
 // steepest descent. Neither the flood nor the steepest descent takes a diagonal step
 // between two pinned corner cells (crossespinnedcorner, on the input's pinned cells), so
@@ -360,6 +610,7 @@ Routing route(const PatchMetric& metric, const std::vector<float>& surface, cons
                 queue.push(Entry{ surface[next], keyof(next), static_cast<int32_t>(next) });
         }
     }
+    std::vector<uint8_t> flooded(count, 0);  // takes a flood receiver: no lower neighbour on both surfaces
     for (std::size_t cell = 0; cell < count; cell++)
     {
         if (pinned[cell] != 0)
@@ -391,8 +642,40 @@ Routing route(const PatchMetric& metric, const std::vector<float>& surface, cons
         {
             routing.receiver[cell] = floodreceiver[cell];
             routing.direction[cell] = directionto(metric, cell, static_cast<std::size_t>(floodreceiver[cell]));
+            flooded[cell] = 1;
         }
     }
+    if (!resolveflats(metric, surface, filled, inputpinned, key, catchments, flooded, routing))
+        return routing;
+    // The order on the final receivers: the pinned cells, then breadth-first each listed cell's
+    // donors (in increasing index, from a count of donors per cell); every cell is listed, since
+    // every chain ends at a pinned cell.
+    std::vector<int32_t> firstdonor(count + 1, 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+        if (routing.receiver[cell] >= 0)
+            firstdonor[static_cast<std::size_t>(routing.receiver[cell]) + 1]++;
+    for (std::size_t cell = 0; cell < count; cell++)
+        firstdonor[cell + 1] += firstdonor[cell];
+    std::vector<int32_t> donors(static_cast<std::size_t>(firstdonor[count]));
+    {
+        std::vector<int32_t> cursor(firstdonor.begin(), firstdonor.end() - 1);
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (routing.receiver[cell] >= 0)
+                donors[static_cast<std::size_t>(cursor[static_cast<std::size_t>(routing.receiver[cell])]++)]
+                    = static_cast<int32_t>(cell);
+    }
+    std::vector<int32_t>& order = routing.order;
+    order.clear();
+    for (std::size_t cell = 0; cell < count; cell++)
+        if (pinned[cell] != 0)
+            order.push_back(static_cast<int32_t>(cell));
+    for (std::size_t head = 0; head < order.size(); head++)
+    {
+        const std::size_t cell = static_cast<std::size_t>(order[head]);
+        order.insert(order.end(), donors.begin() + firstdonor[cell], donors.begin() + firstdonor[cell + 1]);
+    }
+    if (order.size() != count)
+        throw std::logic_error("analytical relief: a receiver chain does not reach a pinned cell");
     return routing;
 }
 

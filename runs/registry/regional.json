@@ -280,6 +280,20 @@
       "run": "runs/regional/40",
       "date": "2026-10-10T21:35:04+00:00",
       "label": "multiscale S3.7: window A, k 64, tributaries on"
+    },
+    {
+      "id": 41,
+      "status": "complete",
+      "run": "runs/regional/41",
+      "date": "2026-10-11T00:11:37+00:00",
+      "label": "multiscale S3.11: window A, k 64, confluences and leg roughness"
+    },
+    {
+      "id": 42,
+      "status": "complete",
+      "run": "runs/regional/42",
+      "date": "2026-10-11T00:15:01+00:00",
+      "label": "multiscale S3.12: window A, k 64, S3.11 plus the solve's pits and flats resolved"
     }
   ]
 }

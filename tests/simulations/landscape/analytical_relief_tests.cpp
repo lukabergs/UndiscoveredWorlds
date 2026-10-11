@@ -474,7 +474,9 @@ TEST_F(Landscape, AnalyticalReliefSubBasinsMatchAcrossOverlappingPatches)
     // channel network: full columns x = 8, 20, 38, 50, the row y = 14 between x = 20
     // and 38, and the 8-connected diagonal (21 + i, 15 + i), i = 0..16, below it.
     // Solved whole and as two sub-patches, columns 0..41 and 18..59, each with its own
-    // ring pinned at the start, keys the whole patch's indices.
+    // ring pinned at the start, keys the whole patch's indices. S3.12: a flat-floored pit,
+    // the square x = 25..31, y = 4..10 at 100 m (its surroundings 112 m and more), lies in
+    // the basin above y = 14, so the flat resolution's cells are compared too.
     const int width = 60, height = 40;
     const PatchMetric whole = squaremetric(width, height, 500.0);
     AnalyticalReliefInput input;
@@ -482,7 +484,9 @@ TEST_F(Landscape, AnalyticalReliefSubBasinsMatchAcrossOverlappingPatches)
     for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
         {
-            input.start_m.push_back(static_cast<float>(4.0 * (height - 1 - y) + 60.0 * wobble(x, y)));
+            const bool square = x >= 25 && x <= 31 && y >= 4 && y <= 10;
+            input.start_m.push_back(square ? 100.0f
+                                           : static_cast<float>(4.0 * (height - 1 - y) + 60.0 * wobble(x, y)));
             input.runoff_m_yr.push_back(static_cast<float>(0.3 + wobble(y + 3, x)));
             input.key.push_back(whole.index(x, y));
             if (x == 8 || x == 20 || x == 38 || x == 50 || (y == 14 && x >= 20 && x <= 38))
@@ -547,7 +551,7 @@ TEST_F(Landscape, AnalyticalReliefSubBasinsMatchAcrossOverlappingPatches)
         }
         inside.push_back(contained ? 1 : 0);
     }
-    int compared = 0, differing = 0;
+    int compared = 0, differing = 0, squarecompared = 0;
     for (int y = 0; y < height; y++)
         for (int x = rightcolumn; x < leftcolumn + subwidth; x++)
         {
@@ -556,6 +560,7 @@ TEST_F(Landscape, AnalyticalReliefSubBasinsMatchAcrossOverlappingPatches)
             if (input.pinned[cell] == 0 && inside[static_cast<std::size_t>(basin[cell])] != 0)
             {
                 compared++;
+                squarecompared += x >= 25 && x <= 31 && y >= 4 && y <= 10 ? 1 : 0;
                 EXPECT_EQ(full.elevation_m[cell], left.elevation_m[l]) << "(" << x << ", " << y << ")";
                 EXPECT_EQ(full.elevation_m[cell], right.elevation_m[r]) << "(" << x << ", " << y << ")";
                 EXPECT_EQ(full.direction[cell], left.direction[l]) << "(" << x << ", " << y << ")";
@@ -570,6 +575,7 @@ TEST_F(Landscape, AnalyticalReliefSubBasinsMatchAcrossOverlappingPatches)
     // 17 diagonal cells). Outside them, the two sub-patches differ on 102 of the 190
     // unpinned overlap cells (columns 18, 19 and 39..41), whose sub-basins each cut.
     EXPECT_EQ(compared, 221 + 391);
+    EXPECT_EQ(squarecompared, 49);
     EXPECT_GT(differing, 0);
 }
 
@@ -708,12 +714,12 @@ TEST_F(Landscape, AnalyticalReliefKeysWithoutTiesChangeNothing)
 
 TEST_F(Landscape, AnalyticalReliefFlatTiesFollowTheKey)
 {
-    // A flat chain of five cells at 0 m with both ends pinned: the flood takes equal
-    // levels in key order. Keys equal to the local index: the flood leaves cell 0
-    // first and reaches cells 1, 2, 3 from the west, so all drain west (7). As a window
-    // crossing the date line (absolute columns 61, 62, 63, 0, 1 of kW = 64), cell 4
-    // comes first, then cell 3 (key 0) and cell 2 from the east (3), and cell 1 from
-    // cell 0 (7).
+    // A flat chain of five cells at 0 m with both ends pinned: cells 1 to 3 are one flat whose low
+    // edges are the pinned ends (S3.12). Cells 1 and 3 drain to their end (increment 2,000 m to 0);
+    // cell 2 (4,000 m) ties between them and takes the neighbour with the smaller hashed key (the
+    // splitmix64 finaliser of hashedkey). Keys equal to the local index: h(3) < h(1), so cell 2
+    // drains east (3). As a window crossing the date line (absolute columns 60, 61, 62, 63, 0 of
+    // kW = 64): h(61) < h(63), so it drains west (7).
     const PatchMetric metric = squaremetric(5, 1, 1000.0);
     AnalyticalReliefInput input;
     input.start_m.assign(5, 0.0f);
@@ -723,13 +729,189 @@ TEST_F(Landscape, AnalyticalReliefFlatTiesFollowTheKey)
     parameters.elapsed_myr = 1.0;
     input.key = { 0, 1, 2, 3, 4 };
     const AnalyticalReliefResult byindex = landscape::solveanalyticalrelief(metric, input, parameters);
-    EXPECT_EQ(byindex.direction, (std::vector<uint8_t>{ 0, 7, 7, 7, 0 }));
-    EXPECT_EQ(byindex.discharge_m3_yr, (std::vector<double>{ 0.0, 3.0e6, 2.0e6, 1.0e6, 0.0 }));
-    input.key = { 61, 62, 63, 0, 1 };
+    EXPECT_EQ(byindex.direction, (std::vector<uint8_t>{ 0, 7, 3, 3, 0 }));
+    EXPECT_EQ(byindex.discharge_m3_yr, (std::vector<double>{ 0.0, 1.0e6, 1.0e6, 2.0e6, 0.0 }));
+    input.key = { 60, 61, 62, 63, 0 };
     const AnalyticalReliefResult bykey = landscape::solveanalyticalrelief(metric, input, parameters);
-    EXPECT_EQ(bykey.direction, (std::vector<uint8_t>{ 0, 7, 3, 3, 0 }));
-    EXPECT_EQ(bykey.discharge_m3_yr, (std::vector<double>{ 0.0, 1.0e6, 1.0e6, 2.0e6, 0.0 }));
+    EXPECT_EQ(bykey.direction, (std::vector<uint8_t>{ 0, 7, 7, 3, 0 }));
+    EXPECT_EQ(bykey.discharge_m3_yr, (std::vector<double>{ 0.0, 2.0e6, 1.0e6, 1.0e6, 0.0 }));
     EXPECT_EQ(bykey.elevation_m, input.start_m);
+}
+
+TEST_F(Landscape, AnalyticalReliefPitDrainsToItsSpillAlongShortChains)
+{
+    // S3.12. A plane falling west (20 m + 0.5 m per column, 100 m cells, the ring pinned) with a
+    // round pit of radius 9 cells around (30, 20), 5 m + 0.05 m per squared cell of radius: the
+    // flood fills it to the spill level 30 m, whose cells (20, 19..21) drain west; the pit's only
+    // cell next to them is its west tip (21, 20). Every pit cell's chain converges on the tip and
+    // leaves the pit to the spill (20, 20), along a length at most 1.5 x the straight distance to it
+    // (the resolution's gradient towards the spill and away from the rim).
+    const PatchMetric metric = squaremetric(48, 40, 100.0);
+    const int cx = 30, cy = 20, radius = 9;
+    const auto inpit = [&](int x, int y) { return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= radius * radius; };
+    AnalyticalReliefInput input;
+    input.pinned = ring(metric);
+    for (int y = 0; y < metric.height; y++)
+        for (int x = 0; x < metric.width; x++)
+        {
+            const int r2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+            input.start_m.push_back(static_cast<float>(inpit(x, y) ? 5.0 + 0.05 * r2 : 20.0 + 0.5 * x));
+            input.runoff_m_yr.push_back(1.0f);
+        }
+    AnalyticalReliefParameters parameters;
+    parameters.elapsed_myr = 0.0;
+    parameters.maxiterations = 1;
+    const AnalyticalReliefResult result = landscape::solveanalyticalrelief(metric, input, parameters);
+    ASSERT_TRUE(everypathreachesapinnedcell(metric, input.pinned, result.direction));
+    int cells = 0;
+    double worst = 0.0;
+    for (int y = 0; y < metric.height; y++)
+        for (int x = 0; x < metric.width; x++)
+        {
+            if (!inpit(x, y))
+                continue;
+            cells++;
+            std::size_t current = metric.index(x, y);
+            double length = 0.0;
+            int cxl = x, cyl = y;
+            while (inpit(cxl, cyl))
+            {
+                length += metric.distance_m(current, result.direction[current]);
+                current = metric.neighbour(current, result.direction[current]);
+                cxl = static_cast<int>(current % static_cast<std::size_t>(metric.width));
+                cyl = static_cast<int>(current / static_cast<std::size_t>(metric.width));
+            }
+            EXPECT_EQ(cxl, cx - radius - 1) << "(" << x << ", " << y << ") leaves the pit at (" << cxl << ", " << cyl << ")";
+            EXPECT_EQ(cyl, cy) << "(" << x << ", " << y << ") leaves the pit at (" << cxl << ", " << cyl << ")";
+            const double straight = 100.0 * std::hypot(x - (cx - radius - 1), y - cy);
+            EXPECT_LE(length, 1.5 * straight) << "(" << x << ", " << y << ")";
+            worst = std::max(worst, length / straight);
+        }
+    EXPECT_GT(cells, 200);
+    std::printf("[relief] pit: %d cells, longest chain %.3f x the straight distance to the spill\n", cells, worst);
+}
+
+TEST_F(Landscape, AnalyticalReliefFlatBetweenSlopesDrainsInsideItself)
+{
+    // S3.12. A valley floor at 10 m (rows 5..9, columns 1..23, 100 m cells) between hillsides
+    // rising 10 m per row away from it (20 m and more), draining to column 0 (pinned; 5 m on the
+    // floor). Columns 2..23 of the floor are one flat; its low edges are the floor cells of
+    // column 1, which drain west. Every flat cell's chain stays on the floor, never steps up and
+    // reaches column 0; away from the low edges the gradient away from the hillsides (Barnes et
+    // al. 2014) turns rows 5 and 6 south-west, rows 8 and 9 north-west, and row 7 runs west.
+    const PatchMetric metric = squaremetric(24, 15, 100.0);
+    const auto onfloor = [](int x, int y) { return x >= 1 && y >= 5 && y <= 9; };
+    AnalyticalReliefInput input;
+    for (int y = 0; y < metric.height; y++)
+        for (int x = 0; x < metric.width; x++)
+        {
+            double z = 20.0 + 10.0 * (std::abs(y - 7) - 3) + 0.1 * x;
+            if (y >= 5 && y <= 9)
+                z = x == 0 ? 5.0 : 10.0;
+            input.start_m.push_back(static_cast<float>(z));
+            input.pinned.push_back(x == 0 ? 1 : 0);
+            input.runoff_m_yr.push_back(1.0f);
+        }
+    AnalyticalReliefParameters parameters;
+    parameters.elapsed_myr = 0.0;
+    parameters.maxiterations = 1;
+    const AnalyticalReliefResult result = landscape::solveanalyticalrelief(metric, input, parameters);
+    ASSERT_TRUE(everypathreachesapinnedcell(metric, input.pinned, result.direction));
+    for (int y = 5; y <= 9; y++)
+        for (int x = 2; x < metric.width; x++)
+        {
+            std::size_t current = metric.index(x, y);
+            while (input.pinned[current] == 0)
+            {
+                const std::size_t next = metric.neighbour(current, result.direction[current]);
+                const int nx = static_cast<int>(next % static_cast<std::size_t>(metric.width));
+                const int ny = static_cast<int>(next / static_cast<std::size_t>(metric.width));
+                EXPECT_TRUE(onfloor(nx, ny) || nx == 0) << "(" << x << ", " << y << ") leaves the floor at (" << nx << ", " << ny << ")";
+                EXPECT_LE(input.start_m[next], input.start_m[current]) << "(" << x << ", " << y << ") steps up";
+                if (!(onfloor(nx, ny) || nx == 0))
+                    break;
+                current = next;
+            }
+            if (x >= 4)
+            {
+                const int expected = y < 7 ? 6 : (y > 7 ? 8 : 7);
+                EXPECT_EQ(result.direction[metric.index(x, y)], expected) << "(" << x << ", " << y << ")";
+            }
+        }
+}
+
+TEST_F(Landscape, AnalyticalReliefSquareFlatTiesFollowTheHashedKey)
+{
+    // S3.12. A 15 x 15 patch of 100 m cells at 0 m, its ring pinned: the interior is one flat whose
+    // low edges are the ring. The increment is twice the distance to the ring, so each cell drains
+    // to a nearest side by a cardinal step; on the square's diagonals two sides (four at the centre)
+    // tie, and the hashed key decides: not the lowest code everywhere (a raster order), not one code
+    // everywhere. The same cells (same absolute keys) at an offset inside a larger patch whose other
+    // cells are pinned give the same result: the resolution reads only the flat and its edges.
+    constexpr int size = 15, offsetx = 4, offsety = 3, bigwidth = 21, bigheight = 19;
+    const auto absolutekey = [](int x, int y) {
+        return static_cast<std::uint64_t>(y + 200) * 1000u + static_cast<std::uint64_t>(x + 100);
+    };
+    const PatchMetric metric = squaremetric(size, size, 100.0);
+    AnalyticalReliefInput input;
+    input.pinned = ring(metric);
+    input.start_m.assign(metric.size(), 0.0f);
+    input.runoff_m_yr.assign(metric.size(), 1.0f);
+    for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+            input.key.push_back(absolutekey(x, y));
+    const PatchMetric big = squaremetric(bigwidth, bigheight, 100.0);
+    AnalyticalReliefInput shifted;
+    shifted.start_m.assign(big.size(), 0.0f);
+    shifted.runoff_m_yr.assign(big.size(), 1.0f);
+    for (int y = 0; y < bigheight; y++)
+        for (int x = 0; x < bigwidth; x++)
+        {
+            const int sx = x - offsetx, sy = y - offsety;
+            const bool interior = sx >= 1 && sx <= size - 2 && sy >= 1 && sy <= size - 2;
+            shifted.pinned.push_back(interior ? 0 : 1);
+            shifted.key.push_back(absolutekey(sx + 50, sy + 50) + (interior ? 0u : 1000000u));
+        }
+    for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+            shifted.key[big.index(x + offsetx, y + offsety)] = absolutekey(x, y);
+    AnalyticalReliefParameters parameters;
+    parameters.maxiterations = 1;
+    const AnalyticalReliefResult result = landscape::solveanalyticalrelief(metric, input, parameters);
+    const AnalyticalReliefResult moved = landscape::solveanalyticalrelief(big, shifted, parameters);
+    ASSERT_TRUE(everypathreachesapinnedcell(metric, input.pinned, result.direction));
+    int lowest = 0, other = 0, tied = 0;
+    std::vector<int> codes(9, 0);
+    for (int y = 1; y < size - 1; y++)
+        for (int x = 1; x < size - 1; x++)
+        {
+            const std::size_t cell = metric.index(x, y), there = big.index(x + offsetx, y + offsety);
+            EXPECT_EQ(result.direction[cell], moved.direction[there]) << "(" << x << ", " << y << ")";
+            EXPECT_EQ(result.discharge_m3_yr[cell], moved.discharge_m3_yr[there]) << "(" << x << ", " << y << ")";
+            const int nearest = std::min(std::min(x, y), std::min(size - 1 - x, size - 1 - y));
+            std::vector<int> options;  // cardinal codes towards a nearest side, increasing
+            if (y == nearest)
+                options.push_back(1);
+            if (size - 1 - x == nearest)
+                options.push_back(3);
+            if (size - 1 - y == nearest)
+                options.push_back(5);
+            if (x == nearest)
+                options.push_back(7);
+            const int code = result.direction[cell];
+            codes[static_cast<std::size_t>(code)]++;
+            EXPECT_NE(std::find(options.begin(), options.end(), code), options.end()) << "(" << x << ", " << y << ")";
+            if (options.size() < 2)
+                continue;
+            tied++;
+            (code == options.front() ? lowest : other)++;
+        }
+    EXPECT_EQ(tied, 25);
+    EXPECT_GT(lowest, 0);
+    EXPECT_GT(other, 0);
+    for (int code = 1; code <= 8; code++)
+        EXPECT_LT(codes[static_cast<std::size_t>(code)], (size - 2) * (size - 2)) << "code " << code;
+    std::printf("[relief] square flat: %d tied cells, %d take the lowest code, %d another\n", tied, lowest, other);
 }
 
 TEST_F(Landscape, AnalyticalReliefRejectsBadInput)
