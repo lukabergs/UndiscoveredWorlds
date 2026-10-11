@@ -232,6 +232,9 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Lake edges on global cell boundaries (share)', 'lakeedgealigned'),
                  ('Land roughness, RMS Laplacian (m)', 'landroughness_m'), ('Valley cells', 'valleycells'),
                  ('Trough cells', 'troughcells'), ('Cirque cells', 'cirquecells'),
+                 ('Fold cells', 'foldcells'), ('Fold cells raised to the shore floor', 'foldfloorclamped'),
+                 ('Fold amplitude p50 (m)', 'foldamplitude_p50_m'),
+                 ('Fold amplitude p99 (m)', 'foldamplitude_p99_m'),
                  ('Kept cells draining to the domain ring (a guard)', 'ringbasincells'),
                  ('Kept cells no bounded catchment reached (kept at the start)', 'unreachedcells'),
                  ('Land-sink junctions pinned', 'sinkjunctions'),
@@ -279,7 +282,8 @@ def level_rows(levels):
                     'the land and channel cells, the drainage density (channel cells over land cells times the cell size) '
                     'and the tributaries (S3.3), the lake edges and their share on global cell boundaries (about 1 / k for '
                     'an edge that ignores the global grid) and the land\'s RMS Laplacian at the level\'s cell size (S3.4), '
-                    'the cells the valley floors, troughs and cirques changed (S3.5).'}
+                    'the cells the valley floors, troughs and cirques changed (S3.5), the cells the fold fabric changed '
+                    'and the 50th and 99th percentiles of its |change| (S5.2; empty before it).'}
 
 
 def run_data(evaluation_dir):

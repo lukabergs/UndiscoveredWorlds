@@ -882,6 +882,8 @@ public:
     float tectonicshorteningdirection(int x, int y) const; // radians in [0, pi), an axis
     void settectonicshorteningdirection(int x, int y, float amount);
 
+    float tectonicsediment(int x, int y) const; // m, the engine's sediment cover (set with settectonicsnapshotcell)
+
     float tectonicsubsidencetendency(int x, int y) const;
     void settectonicsubsidencetendency(int x, int y, float amount);
 
@@ -2462,6 +2464,15 @@ inline void planet::settectonicshorteningdirection(int x, int y, float amount)
         return;
 
     geosphere_.tectonicshorteningdirectionmap[x][y] = amount;
+}
+
+inline float planet::tectonicsediment(int x, int y) const
+{
+    UW_FIELD_READ(sediment);
+    if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
+        return 0.0f;
+
+    return geosphere_.tectonicsedimentmap[x][y];
 }
 
 inline float planet::tectonicsubsidencetendency(int x, int y) const

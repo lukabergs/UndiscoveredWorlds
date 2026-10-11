@@ -11,6 +11,7 @@
 #include "simulations/landscape/channel_network.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/refinement_projection.hpp"
+#include "simulations/landscape/regional_folds.hpp"
 #include "simulations/landscape/regional_glacial.hpp"
 #include "simulations/landscape/regional_ice.hpp"
 #include "simulations/landscape/regional_solve.hpp"
@@ -97,6 +98,9 @@ void checkregionalinputs(const RegionalGlobalInputs& inputs, const RegionalWindo
     checkoptional(inputs.equilibriumline_m, globalsize, "equilibriumline_m");
     checkoptional(inputs.reliefamplitude_m, globalsize, "reliefamplitude_m");
     checkoptional(inputs.valleyspacing_km, globalsize, "valleyspacing_km");
+    checkoptional(inputs.foldstrain, globalsize, "foldstrain");
+    checkoptional(inputs.folddirection_rad, globalsize, "folddirection_rad");
+    checkoptional(inputs.sediment_m, globalsize, "sediment_m");
 }
 
 RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
@@ -138,9 +142,9 @@ void regionallevelsteps(const LevelContext& context, LevelState& state)
     incisionlevel(context, state);      // 3. the incision's bed surface (R9)
     channelslevel(context, state);      // 3. the pinned channels and their tributaries
     solvelevel(context, state);         // 4. the analytical relief
+    foldfabriclevel(context, state);    // 4a. the fold fabric (S5.2), cut by the forms after it
     valleyfloorslevel(context, state);  // 4b. the valley floors
     glacialformslevel(context, state);  // 4c. the glacial troughs and cirques
-    // LevelStep::foldfabric: none yet (S5.2).
     lakeslevel(context, state);         // 5. lakes and ice
     smoothinglevel(context, state);     // the refinement loop only
     projectionlevel(context, state);    // the refinement loop only

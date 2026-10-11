@@ -136,6 +136,39 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
         inputs.reliefamplitude_m.clear();
     if (!anyspacing)
         inputs.valleyspacing_km.clear();
+
+    // Multiscale plan S5.2: the fold fabric's fields. The strain is the shortening over the native
+    // cell width 2 pi R / W (the engine runs at the world's column count); a world without the
+    // tectonic exports (erosion run 9, another recipe) carries zeros: each field is passed only when
+    // some cell is not zero, and the fold fabric is inert without the strain.
+    inputs.foldstrain.resize(size);
+    inputs.folddirection_rad.resize(size);
+    inputs.sediment_m.resize(size);
+    const double cellwidth_m = 2.0 * 3.14159265358979323846 * inputs.radius_m / static_cast<double>(columns);
+    bool anystrain = false;
+    bool anydirection = false;
+    bool anysediment = false;
+    for (int y = 0; y < rows; y++)
+    {
+        for (int x = 0; x < columns; x++)
+        {
+            const std::size_t cell = static_cast<std::size_t>(y) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(x);
+            const float shortening = world.tectonicshortening(x, y);
+            inputs.foldstrain[cell] =
+                cellwidth_m > 0.0 ? static_cast<float>(static_cast<double>(shortening) / cellwidth_m) : 0.0f;
+            inputs.folddirection_rad[cell] = world.tectonicshorteningdirection(x, y);
+            inputs.sediment_m[cell] = world.tectonicsediment(x, y);
+            anystrain = anystrain || inputs.foldstrain[cell] != 0.0f;
+            anydirection = anydirection || inputs.folddirection_rad[cell] != 0.0f;
+            anysediment = anysediment || inputs.sediment_m[cell] != 0.0f;
+        }
+    }
+    if (!anystrain)
+        inputs.foldstrain.clear();
+    if (!anydirection)
+        inputs.folddirection_rad.clear();
+    if (!anysediment)
+        inputs.sediment_m.clear();
     return inputs;
 }
 
@@ -207,6 +240,18 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.ice.thicknessfraction = regional::iceElaThicknessFraction;
     parameters.ice.thicknessmax_m = regional::iceElaThicknessMaxM;
     parameters.ice.edgenoise_m = regional::iceElaEdgeNoiseM;
+    parameters.folds.amplitudemax_m = regional::foldAmplitudeMaxM;
+    parameters.folds.relieffraction = regional::foldReliefFraction;
+    parameters.folds.reliefelevationfraction = regional::foldReliefElevationFraction;
+    parameters.folds.strainmin = regional::foldStrainMin;
+    parameters.folds.wavelengthmin_km = regional::foldWavelengthMinKm;
+    parameters.folds.wavelengthmax_km = regional::foldWavelengthMaxKm;
+    parameters.folds.wavelengthpercover_km = regional::foldWavelengthPerCoverKm;
+    parameters.folds.wavelengthbase_km = regional::foldWavelengthBaseKm;
+    parameters.folds.kernelspertile = regional::foldKernelsPerTile;
+    parameters.folds.gapfraction = regional::foldGapFraction;
+    parameters.folds.phasor = regional::foldPhasor;
+    parameters.folds.kernelwidth_km = regional::foldKernelWidthKm;
     parameters.channels.pinarea_km2 = regional::pinAreaKm2;
     parameters.channels.meanderamplitude = regional::meanderAmplitude;
     parameters.channels.meanderdischargeexponent = regional::meanderDischargeExponent;

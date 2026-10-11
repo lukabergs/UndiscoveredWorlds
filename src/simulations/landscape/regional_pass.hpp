@@ -141,7 +141,7 @@ struct RegionalLevel
 // LevelState&)` declared in its unit's header: noiselevel and coastlevel (regional_surface.hpp),
 // presmoothinglevel (refinement_levels.hpp), incisionlevel and valleyfloorslevel
 // (regional_valleys.hpp), channelslevel (channel_network.hpp; it calls tributarieslevel,
-// regional_tributaries.hpp), solvelevel (regional_solve.hpp), glacialformslevel
+// regional_tributaries.hpp), solvelevel (regional_solve.hpp), foldfabriclevel (regional_folds.hpp, S5.2), glacialformslevel
 // (regional_glacial.hpp), lakeslevel (regional_water.hpp), smoothinglevel and projectionlevel
 // (refinement_projection.hpp). regionallevelsteps calls them in LevelStep order; the ice is
 // finishregionallevel's. A step reads the context and the state's fields the earlier steps

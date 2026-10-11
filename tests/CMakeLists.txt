@@ -45,6 +45,7 @@ if(TARGET uw_climate_world)
         simulations/landscape/regional_cirques_tests.cpp
         simulations/landscape/regional_coast_tests.cpp
         simulations/landscape/regional_edges_tests.cpp
+        simulations/landscape/regional_folds_tests.cpp
         simulations/landscape/regional_glacial_tests.cpp
         simulations/landscape/regional_grid_tests.cpp
         simulations/landscape/regional_ice_tests.cpp

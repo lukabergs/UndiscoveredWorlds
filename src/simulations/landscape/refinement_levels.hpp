@@ -42,6 +42,12 @@
 //   (deeper levels: regionalsea on the level's surface, the warp only as the position warp of
 //   the sea gate and the lakes), the channels, the solve and the lakes run at every level; the
 //   incision is globalincision, computed once and upsampled per level.
+// - The fold fabric (S5.2, regional_folds.hpp) runs after the solve and before the valley floors,
+//   at every level, on the cells whose wavelength lies in the level's octave band [2 c_l, 2 c_(l-1))
+//   (level 1: no upper end); finer levels inherit it by the prolongation. Its kernels are a pure
+//   function of the global fields, the seed and absolute position; its water gaps read the
+//   level's channel cells within gapfraction x L, under half a parent cell at level >= 2 (the band)
+//   and at most one global cell at level 1, inside formreach.
 // - LevelDiagnostics::blockmeanerror_m is measured after `presmoothing`.
 // - Masks inherited and refined within one parent cell (S2.8; §3 "S2.7: smooth before exact",
 //   item 3, and "S2.8: masks without walls"): at level >= 2 a cell may be sea only where its
@@ -150,9 +156,9 @@ enum class LevelStep : int
     channels,         // the pinned channels (channel_network.hpp) and their tributaries (S3.3,
                       // regional_tributaries.hpp)
     solve,            // the analytical relief from the pinned channels (regional_solve.hpp, analytical_relief.hpp)
+    foldfabric,       // fold trains (regional_folds.hpp, S5.2): after the solve, so the forms below cut the folded land
     valleyfloors,     // valley floors and sides (regional_valleys.hpp, carvevalleys)
     glacialforms,     // glacial troughs and cirques (regional_troughs.hpp, regional_cirques.hpp)
-    foldfabric,       // fold trains (regional_folds.hpp, S5.2)
     lakes,            // lakes (regional_water.hpp, regionalwater): writes the elevation, gives the lake beds
     smoothing,        // the per-parent correction smoothed with the projection's bounds (refinement_projection.hpp,
                       // smoothparentmeans; S2.7), when refinement.smooth_passes > 0
@@ -171,9 +177,9 @@ inline const char* levelstepname(LevelStep step)
     case LevelStep::incision: return "incision";
     case LevelStep::channels: return "channels";
     case LevelStep::solve: return "solve";
+    case LevelStep::foldfabric: return "fold_fabric";
     case LevelStep::valleyfloors: return "valley_floors";
     case LevelStep::glacialforms: return "glacial_forms";
-    case LevelStep::foldfabric: return "fold_fabric";
     case LevelStep::lakes: return "lakes";
     case LevelStep::smoothing: return "smoothing";
     case LevelStep::projection: return "projection";
@@ -319,6 +325,13 @@ struct LevelDiagnostics
     int valleycells = 0;
     int troughcells = 0;
     int cirquecells = 0;
+    // S5.2: the kept cells the fold fabric changed at this level (regional_folds.hpp, before the forms
+    // and the channel cells' means) and the 50th and 99th percentiles (nearest rank) of |the change|
+    // over them (0 without fold cells).
+    int foldcells = 0;
+    int foldfloorclamped = 0;            // of the kept cells, those whose fabric the shore floor raised
+    double foldamplitude_p50_m = 0.0;
+    double foldamplitude_p99_m = 0.0;
     // S3.9 (redefined from S3.8's sub-basins touching the ring): the kept cells whose outlet on the
     // solve's last pass (AnalyticalReliefResult::outlet) is a cell of the domain's outer ring on a
     // window edge (not at a pole, where every window clips alike). A guard, not evidence: with bounded

@@ -20,6 +20,7 @@ add_library(uw_landscape STATIC
     regional_cirques.cpp
     regional_coast.cpp
     regional_edges.cpp
+    regional_folds.cpp
     regional_glacial.cpp
     regional_grid.cpp
     regional_ice.cpp

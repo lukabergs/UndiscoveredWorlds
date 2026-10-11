@@ -58,6 +58,9 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0089`: a pocket core anchored on the interpolated global elevation alone (103 enclosed components) or a core 20 m deep (91): the one-sided rule's base is the anchor
 - `erosion-0090`: raising filled pocket cells beside a lake to the shore floor (the lake loses its bed)
 - `erosion-0091`: handing a filled pocket's cells to the lake by any per-cell or per-component rule in the coast step while the levels >= 2 flood through the parent's sea gate: level 1's coarse flood is inherited as rectangles
+- `erosion-0093`: kernels of width L on a 78 km tile with 8 kernels (28 km apart): the fabric breaks into patches with abrupt fold offsets
+- `erosion-0093`: the wavelength from the sediment cover alone: a bare orogen gets the minimum wavelength, a corduroy at two pixels at k 64
+- `erosion-0093`: a per-kernel phase origin shared per global cell as the remedy for the along-strike steps: p99 529 -> 520 m on the belt
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
@@ -184,6 +187,7 @@ Lessons:
 | `erosion-0090` | 2026-10-11 | fix done; the user's look at runs 49 and 50 pending | keep | multiscale plan, step S3.15's rounds four and five and the lake flood's at-S rule (the orchestrator, from the judging run 47): a filled sea pocket beside a lake belongs to the lake below its surface; the basin raise never touches a global lake cell; a cell at exactly S inside a lake cell's own block is the lake's |
 | `erosion-0091` | 2026-10-11 | closed; the user's look at runs 51 and 52 pending | keep | multiscale plan, S3.15 closed: the lake-pocket rule of erosion-0090 reverted (a filled sea pocket beside a lake is land at the floor like every pocket); the basin and pocket exclusion of lake cells and the flood's at-S rule kept |
 | `erosion-0092` | 2026-10-11 | done | keep | multiscale plan, the user's notes of 2026-10-11 (evening) on the S3.16 pages: the maps' subgrid at 1 degree under whole-degree graticules; window A read against the Himalaya (a preferred Earth window per window block in the regional profile) |
+| `erosion-0093` | 2026-10-11 | done; S5.3 judging runs next (A at k 64 on run 10 beside the Himalaya; the belt beside the Zagros and the Subandean belt; phasor and Gabor) | keep | multiscale plan, S5.2: the fold fabric (regional_folds.{hpp,cpp}): phasor-normalised Gabor stripes from kernels hashed per absolute tile, the wavelength from a 10 km base plus the sediment cover clamped to 5-20 km, the amplitude from the strain and the cell's height above the sea, drawn at the level whose octave band holds the wavelength, channel cells untouched, water gaps within 0.25 L, hook after the solve before the valley floors |
 
 Lessons:
 
@@ -327,6 +331,9 @@ Lessons:
 - `erosion-0090`: Three separate rules (the basin raise, the flood's strict inequality, the pocket fill's floor) each left the lake's edge on a block boundary: a mask rule that touches a lake's neighbourhood must say what it does to the lake.
 - `erosion-0091`: When two rounds in a row move an artefact without removing it, the cause is in another unit: trace the levels' inheritance before a third rule.
 - `erosion-0092`: A subgrid must divide the graticule step, not merely be finer: the next finer catalogue step (2 under 5) prints lines the labels cannot place.
+- `erosion-0093`: A design's calibration from one field (the sediment) needs the field's distribution in the target windows before the step: run 10's belts carry almost no sediment.
+- `erosion-0093`: A relief map of the scratch run before the review catches what the diagnostics cannot name (the corduroy, the patches).
+- `erosion-0093`: A reviewer's causal explanation is a hypothesis: the round that tests it costs 30 min; the test was right to run, the explanation was wrong.
 
 ## tectonics
 

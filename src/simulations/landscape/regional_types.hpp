@@ -4,7 +4,8 @@
 // Phase E, step E3, Phase R, step R0, Phase R2, step R6, and Phase E5, step E5.0): shared by
 // regional_pass.hpp, which composes the pass, and the parts it calls (regional_surface.hpp,
 // regional_coast.hpp, regional_edges.hpp, regional_water.hpp, regional_valleys.hpp,
-// regional_glacial.hpp, regional_troughs.hpp, regional_cirques.hpp, regional_ice.hpp).
+// regional_glacial.hpp, regional_troughs.hpp, regional_cirques.hpp, regional_ice.hpp,
+// regional_folds.hpp).
 // Planet-free: the planet adapter is src/simulations/regional/regional_inputs.hpp.
 
 #include <cstdint>
@@ -61,6 +62,16 @@ struct RegionalGlobalInputs
     // regional.tributary_spacing_km). The adapter fills them from S3.6 on.
     std::vector<float> reliefamplitude_m;
     std::vector<float> valleyspacing_km;
+
+    // Multiscale plan S5.2 (the fold fabric, regional_folds.hpp): the strain per global cell,
+    // geosphere.shortening over the native cell width 2 pi R / W (the adapter computes it); the
+    // shortening axis geosphere.shortening_direction, radians in [0, pi) from east toward south
+    // (an axis: averaged on doubled angles, never interpolated linearly); the sediment cover
+    // geosphere.sediment, m. W x H or empty (the adapter leaves a field empty when every value is
+    // zero); the fold fabric is inert without foldstrain.
+    std::vector<float> foldstrain;
+    std::vector<float> folddirection_rad;
+    std::vector<float> sediment_m;
 };
 
 // The domain warp (Phase R, R2): a smooth vector noise that displaces the sampling
@@ -216,6 +227,27 @@ struct IceParameters
     double edgenoise_m = 100.0;          // the threshold's noise: ice where surface >= ELA + edgenoise_m x noise (own salt)
 };
 
+// The fold fabric (multiscale plan S5.2, regional_folds.hpp): fold trains across the shortening
+// direction where the strain reaches strainmin, phasor-normalised Gabor stripes whose wavelength
+// comes from the sediment cover and whose amplitude from the strain, capped by the cap and by a
+// fraction of the elevation above the sea level. amplitudemax_m 0: off (the S4 pass exactly).
+struct FoldParameters
+{
+    double amplitudemax_m = 0.0;            // the amplitude's cap (0: no folds)
+    double relieffraction = 0.5;            // the relief's share of the structural amplitude (L / pi) sqrt(eps)
+    double reliefelevationfraction = 0.5;   // the amplitude at most this x the global elevation above the sea level
+    double strainmin = 0.1;                 // the weight smoothstep(eps; strainmin, 2 strainmin)
+    double wavelengthmin_km = 5.0;          // L = clamp(wavelengthbase_km + wavelengthpercover_km x the cover in km,
+                                            // min, max), the cover 0 without the sediment field
+    double wavelengthmax_km = 20.0;
+    double wavelengthpercover_km = 2.0;
+    double wavelengthbase_km = 10.0;        // the bare crust's wavelength
+    int kernelspertile = 8;                 // hashed Gabor kernels per tile (a tile at least 2 wavelengthmax_km)
+    double gapfraction = 0.25;              // water gaps within gapfraction x L of a channel cell
+    int phasor = 1;                         // 1: A sin(arg z); 0: A Re z / sum g
+    double kernelwidth_km = 20.0;           // the Gaussian envelope's width (0: the kernel's own L)
+};
+
 struct RegionalParameters
 {
     double noiseamplitude_m = 20.0;      // noise amplitude where the global relief is zero
@@ -235,6 +267,7 @@ struct RegionalParameters
     TroughParameters troughs;
     CirqueParameters cirques;
     IceParameters ice;
+    FoldParameters folds;
     ChannelParameters channels;
     AnalyticalReliefParameters relief;
 };
