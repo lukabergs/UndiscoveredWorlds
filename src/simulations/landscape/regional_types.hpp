@@ -227,14 +227,16 @@ struct IceParameters
     double edgenoise_m = 100.0;          // the threshold's noise: ice where surface >= ELA + edgenoise_m x noise (own salt)
 };
 
-// The fold fabric (multiscale plan S5.2, regional_folds.hpp): fold trains across the shortening
-// direction where the strain reaches strainmin, phasor-normalised Gabor stripes whose wavelength
-// comes from the sediment cover and whose amplitude from the strain, capped by the cap and by a
-// fraction of the elevation above the sea level. amplitudemax_m 0: off (the S4 pass exactly).
+// The fold fabric (multiscale plan S5.2 and S5.3b, regional_folds.hpp): fold trains across the
+// shortening direction where the strain reaches strainmin, phasor-normalised stripes from one splat
+// per cell of a jittered lattice, whose wavelength comes from the sediment cover and whose amplitude
+// from the strain, capped by the cap and by a fraction of the elevation above the sea level; none
+// under the ice cover above icemax nor in a lake cell's block. amplitudemax_m 0: off (the S4 pass
+// exactly).
 struct FoldParameters
 {
     double amplitudemax_m = 0.0;            // the amplitude's cap (0: no folds)
-    double relieffraction = 0.5;            // the relief's share of the structural amplitude (L / pi) sqrt(eps)
+    double relieffraction = 0.15;           // the relief's share of the structural amplitude (L / pi) sqrt(eps)
     double reliefelevationfraction = 0.5;   // the amplitude at most this x the global elevation above the sea level
     double strainmin = 0.1;                 // the weight smoothstep(eps; strainmin, 2 strainmin)
     double wavelengthmin_km = 5.0;          // L = clamp(wavelengthbase_km + wavelengthpercover_km x the cover in km,
@@ -242,10 +244,12 @@ struct FoldParameters
     double wavelengthmax_km = 20.0;
     double wavelengthpercover_km = 2.0;
     double wavelengthbase_km = 10.0;        // the bare crust's wavelength
-    int kernelspertile = 8;                 // hashed Gabor kernels per tile (a tile at least 2 wavelengthmax_km)
+    double splatspacing_km = 10.0;          // the splat lattice's cell: the power-of-two subdivision of the global
+                                            // cell nearest this on the ground (0: no folds)
     double gapfraction = 0.25;              // water gaps within gapfraction x L of a channel cell
     int phasor = 1;                         // 1: A sin(arg z); 0: A Re z / sum g
-    double kernelwidth_km = 20.0;           // the Gaussian envelope's width (0: the kernel's own L)
+    double kernelwidth_km = 20.0;           // the compact weight's width sigma (0: the splat's own L)
+    double icemax = 0.5;                    // no fabric where the glaciation (0 to 1) upsampled is above this
 };
 
 struct RegionalParameters

@@ -14,16 +14,19 @@
 #include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
-// Multiscale plan S5.2 (regional_folds.hpp): the fold fabric, phasor-normalised Gabor stripes from
-// kernels hashed per absolute tile, across the exported shortening direction.
+// Multiscale plan S5.2 and S5.3b (regional_folds.hpp): the fold fabric, phasor-normalised stripes
+// from one splat per cell of a jittered absolute lattice (Phacelle's layout and compact weight),
+// across the exported shortening direction interpolated at each splat.
 
 namespace landscape
 {
 namespace
 {
 constexpr double pi = 3.14159265358979323846;
-// Salt of the fold kernels' draws (deterministiccombine(seed, salt, tile column, tile row, n)).
+// Salt of the splats' draws (deterministiccombine(seed, salt, lattice column, lattice row)).
 constexpr std::int64_t foldsalt = 0x464f4c44;  // "FOLD"
+// The compact weight's cutoff in lattice cells (Phacelle: the splats of the cells within two).
+constexpr double cutoffcells = 2.0;
 
 std::size_t at(int x, int y, int width)
 {
@@ -43,25 +46,30 @@ double strainweight(const FoldParameters& folds, double strain)
     return smoothstep(strain, folds.strainmin, 2.0 * folds.strainmin);
 }
 
-// A Gabor kernel: its centre in absolute global coordinates (columns, rows; global cell (i, j)
-// spans [i, i + 1) x [j, j + 1)), its wavelength and its across-strike unit axis (east, south).
-struct Kernel
+// A splat: its centre in absolute global coordinates (columns, rows; global cell (i, j) spans
+// [i, i + 1) x [j, j + 1)), the phase origin; its wavelength and its across-strike unit axis (east,
+// south), interpolated at the centre.
+struct Splat
 {
     double u = 0.0, v = 0.0;
-    double originu = 0.0, originv = 0.0;  // the phase origin: the centre of the global cell that owns it
     double wavelength_km = 0.0;
     double east = 1.0, south = 0.0;
 };
 
-// The kernels of the absolute lattice, drawn once per tile and kept for the call.
-class KernelLattice
+// The global fields a splat interpolates: the strain-weighted and the plain doubled-angle axis and the
+// wavelength, one value per global cell.
+struct SplatFields
+{
+    std::vector<float> weightedcos, weightedsin, plaincos, plainsin, wavelength_km;
+};
+
+// The splats of the absolute lattice, drawn once per lattice cell and kept for the call.
+class SplatLattice
 {
 public:
-    KernelLattice(const RegionalGlobalInputs& inputs, const FoldParameters& folds, std::int64_t subdivision,
-                  const std::vector<double>& wavelength_km, const std::vector<double>& axiseast,
-                  const std::vector<double>& axissouth)
-        : inputs_(inputs), folds_(folds), subdivision_(subdivision), wavelength_(wavelength_km), axiseast_(axiseast),
-          axissouth_(axissouth)
+    SplatLattice(const RegionalGlobalInputs& inputs, const FoldParameters& folds, std::int64_t subdivision,
+                 const SplatFields& fields)
+        : inputs_(inputs), folds_(folds), subdivision_(subdivision), fields_(fields)
     {
         columns_ = static_cast<std::int64_t>(inputs.width) * subdivision;
         rows_ = static_cast<std::int64_t>(inputs.height) * subdivision;
@@ -70,38 +78,38 @@ public:
     std::int64_t columns() const { return columns_; }
     std::int64_t rows() const { return rows_; }
 
-    // The kernels of tile (column, row), column wrapped to 0 .. columns() - 1, row in 0 .. rows() - 1.
-    const std::vector<Kernel>& tile(std::int64_t column, std::int64_t row)
+    // The splat of lattice cell (column, row), column wrapped to 0 .. columns() - 1, row in 0 .. rows() - 1.
+    const Splat& splat(std::int64_t column, std::int64_t row)
     {
         const std::int64_t key = row * columns_ + column;
-        const auto found = tiles_.find(key);
-        if (found != tiles_.end())
+        const auto found = splats_.find(key);
+        if (found != splats_.end())
             return found->second;
-        std::vector<Kernel>& kernels = tiles_[key];
-        const int count = std::max(0, folds_.kernelspertile);
-        kernels.reserve(static_cast<std::size_t>(count));
+        Splat& splat = splats_[key];
+        const std::uint64_t hash = deterministiccombine(inputs_.seed, foldsalt, column, row);
+        const double fx = static_cast<double>(hash & 0xffffffffull) / 4294967296.0;
+        const double fy = static_cast<double>(hash >> 32) / 4294967296.0;
         const double scale = static_cast<double>(subdivision_);
-        for (int n = 0; n < count; n++)
+        splat.u = (static_cast<double>(column) + fx) / scale;
+        splat.v = (static_cast<double>(row) + fy) / scale;
+        const int width = inputs_.width, height = inputs_.height;
+        // The axis on doubled angles, interpolated at the splat: the strain-weighted field where it does
+        // not vanish there, else the plain one (east without either).
+        double c = bicubic(fields_.weightedcos, width, height, splat.u, splat.v);
+        double s = bicubic(fields_.weightedsin, width, height, splat.u, splat.v);
+        if (!(std::hypot(c, s) > 1.0e-9))
         {
-            const std::uint64_t hash = deterministiccombine(inputs_.seed, foldsalt, column, row, n);
-            const double fx = static_cast<double>(hash & 0xffffffffull) / 4294967296.0;
-            const double fy = static_cast<double>(hash >> 32) / 4294967296.0;
-            Kernel kernel;
-            kernel.u = (static_cast<double>(column) + fx) / scale;
-            kernel.v = (static_cast<double>(row) + fy) / scale;
-            const int i = std::clamp(static_cast<int>(std::floor(kernel.u)), 0, inputs_.width - 1);
-            const int j = std::clamp(static_cast<int>(std::floor(kernel.v)), 0, inputs_.height - 1);
-            // The kernels of one global cell share its d, L and phase origin, so they add coherently and
-            // interfere only where d or L change, at the cell boundaries (S5.2's review).
-            kernel.originu = static_cast<double>(i) + 0.5;
-            kernel.originv = static_cast<double>(j) + 0.5;
-            const std::size_t global = at(i, j, inputs_.width);
-            kernel.wavelength_km = wavelength_[global];
-            kernel.east = axiseast_[global];
-            kernel.south = axissouth_[global];
-            kernels.push_back(kernel);
+            c = bicubic(fields_.plaincos, width, height, splat.u, splat.v);
+            s = bicubic(fields_.plainsin, width, height, splat.u, splat.v);
         }
-        return kernels;
+        const double theta = std::hypot(c, s) > 0.0 ? 0.5 * std::atan2(s, c) : 0.0;
+        splat.east = std::cos(theta);
+        splat.south = std::sin(theta);
+        const double lower = std::min(folds_.wavelengthmin_km, folds_.wavelengthmax_km);
+        const double upper = std::max(folds_.wavelengthmin_km, folds_.wavelengthmax_km);
+        const double wavelength = bicubic(fields_.wavelength_km, width, height, splat.u, splat.v);
+        splat.wavelength_km = std::clamp(std::isfinite(wavelength) ? wavelength : lower, lower, upper);
+        return splat;
     }
 
 private:
@@ -109,10 +117,8 @@ private:
     const FoldParameters& folds_;
     std::int64_t subdivision_ = 1;
     std::int64_t columns_ = 0, rows_ = 0;
-    const std::vector<double>& wavelength_;
-    const std::vector<double>& axiseast_;
-    const std::vector<double>& axissouth_;
-    std::unordered_map<std::int64_t, std::vector<Kernel>> tiles_;
+    const SplatFields& fields_;
+    std::unordered_map<std::int64_t, Splat> splats_;
 };
 
 // The nearest-rank percentile of `values` (sorted in place; 0 when empty).
@@ -130,7 +136,7 @@ double nearestrank(std::vector<double>& values, double fraction)
 bool foldfabricon(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters)
 {
     const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
-    return parameters.folds.amplitudemax_m > 0.0 && parameters.folds.kernelspertile >= 1 && size > 0 &&
+    return parameters.folds.amplitudemax_m > 0.0 && parameters.folds.splatspacing_km > 0.0 && size > 0 &&
            inputs.foldstrain.size() == size;
 }
 
@@ -180,86 +186,63 @@ void addfoldfabric(const RegionalGlobalInputs& inputs, const RegionalWindow& win
     const double bandupper = parentscale > 0 ? longest_km / static_cast<double>(parentscale)
                                              : std::numeric_limits<double>::infinity();
 
-    // The global fields: the wavelength and the strain-weighted doubled-angle axis per global cell.
+    // The global fields: the wavelength and the doubled-angle axis per global cell, strain-weighted and plain.
     const bool withsediment = inputs.sediment_m.size() == globalsize;
     const bool withdirection = inputs.folddirection_rad.size() == globalsize;
-    std::vector<double> wavelength(globalsize), axiseast(globalsize, 1.0), axissouth(globalsize, 0.0);
-    std::vector<float> wavelengthfield(globalsize), heightfield(globalsize);
+    SplatFields fields;
+    fields.weightedcos.assign(globalsize, 0.0f);
+    fields.weightedsin.assign(globalsize, 0.0f);
+    fields.plaincos.assign(globalsize, 1.0f);
+    fields.plainsin.assign(globalsize, 0.0f);
+    fields.wavelength_km.resize(globalsize);
+    std::vector<float> heightfield(globalsize);
     const double sealevel = static_cast<double>(inputs.sealevel);
     for (std::size_t cell = 0; cell < globalsize; cell++)
     {
-        wavelength[cell] = foldwavelength_km(folds, withsediment ? static_cast<double>(inputs.sediment_m[cell]) : 0.0,
-                                             withsediment);
-        wavelengthfield[cell] = static_cast<float>(wavelength[cell]);
+        fields.wavelength_km[cell] = static_cast<float>(
+            foldwavelength_km(folds, withsediment ? static_cast<double>(inputs.sediment_m[cell]) : 0.0, withsediment));
         heightfield[cell] = static_cast<float>(std::max(0.0, static_cast<double>(inputs.elevation_m[cell]) - sealevel));
-    }
-    if (withdirection)
-    {
-        for (int j = 0; j < globalheight; j++)
-            for (int i = 0; i < globalwidth; i++)
-            {
-                double weighted[2] = {0.0, 0.0}, plain[2] = {0.0, 0.0}, weights = 0.0;
-                for (int dj = -1; dj <= 1; dj++)
-                {
-                    const int nj = j + dj;
-                    if (nj < 0 || nj >= globalheight)
-                        continue;
-                    for (int di = -1; di <= 1; di++)
-                    {
-                        const std::size_t other = at((i + di + globalwidth) % globalwidth, nj, globalwidth);
-                        const double angle = 2.0 * static_cast<double>(inputs.folddirection_rad[other]);
-                        const double weight = strainweight(folds, static_cast<double>(inputs.foldstrain[other]));
-                        const double c = std::cos(angle), s = std::sin(angle);
-                        weighted[0] += weight * c;
-                        weighted[1] += weight * s;
-                        plain[0] += c;
-                        plain[1] += s;
-                        weights += weight;
-                    }
-                }
-                const double* sum = weights > 0.0 ? weighted : plain;
-                const double theta = sum[0] == 0.0 && sum[1] == 0.0
-                                         ? static_cast<double>(inputs.folddirection_rad[at(i, j, globalwidth)])
-                                         : 0.5 * std::atan2(sum[1], sum[0]);
-                axiseast[at(i, j, globalwidth)] = std::cos(theta);
-                axissouth[at(i, j, globalwidth)] = std::sin(theta);
-            }
+        const double angle = withdirection ? 2.0 * static_cast<double>(inputs.folddirection_rad[cell]) : 0.0;
+        const double weight = strainweight(folds, static_cast<double>(inputs.foldstrain[cell]));
+        const double c = std::cos(angle), s = std::sin(angle);
+        fields.plaincos[cell] = static_cast<float>(c);
+        fields.plainsin[cell] = static_cast<float>(s);
+        fields.weightedcos[cell] = static_cast<float>(weight * c);
+        fields.weightedsin[cell] = static_cast<float>(weight * s);
     }
 
-    // The lattice: the largest subdivision whose tile is at least r = 2 max(L_max, the kernel width) on the
-    // ground (the envelope's width is the kernel width, or the kernel's own L at most L_max with width 0).
-    const double kernelwidth = folds.kernelwidth_km > 0.0 ? folds.kernelwidth_km : 0.0;
-    const double reach_km = 2.0 * std::max(kernelwidth, std::max(folds.wavelengthmin_km, folds.wavelengthmax_km));
-    if (!(reach_km > 0.0))
-        return;
-    std::int64_t subdivision = 1;
-    while (subdivision < (std::int64_t{1} << 20) && globalcell_km / static_cast<double>(2 * subdivision) >= reach_km)
-        subdivision *= 2;
-    const double tile_km = globalcell_km / static_cast<double>(subdivision);
-    KernelLattice lattice(inputs, folds, subdivision, wavelength, axiseast, axissouth);
-    const std::int64_t rowreach = std::max<std::int64_t>(1, static_cast<std::int64_t>(std::ceil(reach_km / tile_km)));
-    const std::int64_t columnreachmax = std::max<std::int64_t>(0, (lattice.columns() - 1) / 2);
+    // The lattice: the global grid subdivided by the power of two whose cell is nearest the spacing.
+    const double ratiolog = std::log2(globalcell_km / folds.splatspacing_km);
+    const int exponent = std::clamp(static_cast<int>(std::lround(std::isfinite(ratiolog) ? ratiolog : 0.0)), 0, 20);
+    const std::int64_t subdivision = std::int64_t{1} << exponent;
+    const double lattice_km = globalcell_km / static_cast<double>(subdivision);
+    const double cutoff_km = cutoffcells * lattice_km;
+    SplatLattice lattice(inputs, folds, subdivision, fields);
+    const double worldcolumns = static_cast<double>(globalwidth);
+    const double scale = static_cast<double>(subdivision);
 
     // The cell fields, interpolated as the noise amplitude's relief is.
     const std::vector<float> strain = upsample(inputs.foldstrain, globalwidth, globalheight, window);
-    const std::vector<float> cellwavelength = upsample(wavelengthfield, globalwidth, globalheight, window);
+    const std::vector<float> cellwavelength = upsample(fields.wavelength_km, globalwidth, globalheight, window);
     const std::vector<float> above = upsample(heightfield, globalwidth, globalheight, window);
+    const bool withice = inputs.glaciation.size() == globalsize;
+    const std::vector<float> glaciation = withice ? upsample(inputs.glaciation, globalwidth, globalheight, window)
+                                                  : std::vector<float>{};
+    const bool withlakes = inputs.lakesurface_m.size() == globalsize && inputs.network.sea.size() == globalsize;
     const double wavelengthlower = std::min(folds.wavelengthmin_km, folds.wavelengthmax_km);
     const double wavelengthupper = std::max(folds.wavelengthmin_km, folds.wavelengthmax_km);
     const float floorlevel = std::max(std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity()),
                                       static_cast<float>(sealevel + std::max(0.0, parameters.coast.shorefloor_m)));
-    const double worldcolumns = static_cast<double>(globalwidth);
 
     // Every cell reads the elevation before the fabric only at itself, so the order does not matter.
     for (int y = 0; y < height; y++)
     {
         const double ratio = eastwestratio(metric, y);
+        const int globalrow = window.globalrow(y);
         const double v = (static_cast<double>(window.absolutefinerow(y)) + 0.5) / static_cast<double>(k);
-        const std::int64_t tilerow = static_cast<std::int64_t>(std::floor(v * static_cast<double>(subdivision)));
-        const std::int64_t columnreach =
-            ratio > 0.0 ? std::min(columnreachmax, std::max<std::int64_t>(1, static_cast<std::int64_t>(
-                                                                                  std::ceil(reach_km / (tile_km * ratio)))))
-                        : columnreachmax;
+        const std::int64_t latticerow = static_cast<std::int64_t>(std::floor(v * scale));
+        // The lattice columns within the cutoff on the ground: 2 / ratio lattice cells either side.
+        const double columnreach = ratio > 0.0 ? cutoffcells / ratio : std::numeric_limits<double>::infinity();
         for (int x = 0; x < width; x++)
         {
             const std::size_t cell = at(x, y, width);
@@ -270,6 +253,15 @@ void addfoldfabric(const RegionalGlobalInputs& inputs, const RegionalWindow& win
             // other children (the first judging run forced parents there).
             if (!(elevation_m[cell] > floorlevel))
                 continue;
+            // The gates (S5.3b): under the global ice cover, and in a global lake cell's block.
+            if (withice && std::clamp(static_cast<double>(glaciation[cell]), 0.0, 1.0) > folds.icemax)
+                continue;
+            if (withlakes)
+            {
+                const std::size_t global = at(window.globalcolumn(x), globalrow, globalwidth);
+                if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
+                    continue;
+            }
             const double epsilon = std::max(0.0, static_cast<double>(strain[cell]));
             if (!(strainweight(folds, epsilon) > 0.0))
                 continue;
@@ -310,37 +302,41 @@ void addfoldfabric(const RegionalGlobalInputs& inputs, const RegionalWindow& win
             if (!(gap > 0.0))
                 continue;
 
-            // The phasor sum over the kernels of the tiles within r of the cell's centre.
+            // The phasor sum over the splats within the cutoff of the cell's centre.
             const double u = (static_cast<double>(window.absolutefinecolumn(x)) + 0.5) / static_cast<double>(k);
-            const std::int64_t tilecolumn = static_cast<std::int64_t>(std::floor(u * static_cast<double>(subdivision)));
+            const double latticeu = u * scale;
+            std::int64_t firstcolumn = 0, lastcolumn = lattice.columns() - 1;
+            if (2.0 * columnreach + 2.0 < static_cast<double>(lattice.columns()))
+            {
+                firstcolumn = static_cast<std::int64_t>(std::floor(latticeu - columnreach));
+                lastcolumn = static_cast<std::int64_t>(std::floor(latticeu + columnreach));
+            }
             double real = 0.0, imaginary = 0.0, weights = 0.0;
-            for (std::int64_t row = tilerow - rowreach; row <= tilerow + rowreach; row++)
+            for (std::int64_t row = latticerow - 2; row <= latticerow + 2; row++)
             {
                 if (row < 0 || row >= lattice.rows())
                     continue;
-                for (std::int64_t column = tilecolumn - columnreach; column <= tilecolumn + columnreach; column++)
+                for (std::int64_t column = firstcolumn; column <= lastcolumn; column++)
                 {
-                    for (const Kernel& kernel : lattice.tile(wraplevel(column, lattice.columns()), row))
-                    {
-                        if (!(kernel.wavelength_km > 0.0))
-                            continue;
-                        double du = u - kernel.u;
-                        du -= worldcolumns * std::round(du / worldcolumns);
-                        const double east = du * globalcell_km * ratio;
-                        const double south = (v - kernel.v) * globalcell_km;
-                        const double distance2 = east * east + south * south;
-                        const double envelope = kernelwidth > 0.0 ? kernelwidth : kernel.wavelength_km;
-                        const double weight = std::exp(-distance2 / (2.0 * envelope * envelope));
-                        double originu = u - kernel.originu;
-                        originu -= worldcolumns * std::round(originu / worldcolumns);
-                        const double origineast = originu * globalcell_km * ratio;
-                        const double originsouth = (v - kernel.originv) * globalcell_km;
-                        const double phase =
-                            2.0 * pi * (kernel.east * origineast + kernel.south * originsouth) / kernel.wavelength_km;
-                        real += weight * std::cos(phase);
-                        imaginary += weight * std::sin(phase);
-                        weights += weight;
-                    }
+                    const Splat& splat = lattice.splat(wraplevel(column, lattice.columns()), row);
+                    if (!(splat.wavelength_km > 0.0))
+                        continue;
+                    double du = u - splat.u;
+                    du -= worldcolumns * std::round(du / worldcolumns);
+                    const double east = du * globalcell_km * ratio;
+                    const double south = (v - splat.v) * globalcell_km;
+                    const double distance2 = east * east + south * south;
+                    if (!(distance2 < cutoff_km * cutoff_km))
+                        continue;
+                    const double width_km = folds.kernelwidth_km > 0.0 ? folds.kernelwidth_km : splat.wavelength_km;
+                    const double sigma2 = width_km * width_km;
+                    const double weight = std::exp(-distance2 / sigma2) - std::exp(-cutoff_km * cutoff_km / sigma2);
+                    if (!(weight > 0.0))
+                        continue;
+                    const double phase = 2.0 * pi * (splat.east * east + splat.south * south) / splat.wavelength_km;
+                    real += weight * std::cos(phase);
+                    imaginary += weight * std::sin(phase);
+                    weights += weight;
                 }
             }
             double unit = 0.0;
@@ -372,9 +368,7 @@ void foldfabriclevel(const LevelContext& context, LevelState& state)
     const int parentscale = context.parent != nullptr ? static_cast<int>(levelscale(context.factor, context.level - 1)) : 0;
     const double cap = channelcellcap_m(context);
     const bool record = state.diagnostics != nullptr;
-    std::vector<float> before;
-    if (record || cap > 0.0)
-        before = state.elevation_m;
+    std::vector<float> before = state.elevation_m;
     std::vector<uint8_t> floorclamped;
     addfoldfabric(context.inputs, window, context.parameters, state.channels, state.sea, state.elevation_m, parentscale,
                   record ? &floorclamped : nullptr);
@@ -397,6 +391,81 @@ void foldfabriclevel(const LevelContext& context, LevelState& state)
         state.diagnostics->foldamplitude_p99_m = nearestrank(changes, 0.99);
     }
     channelcellmeans(window, state.channels, state.sea, cap, before, state.elevation_m);
+    // S5.3b: the surfaces before and after the fabric, for the lakes step (unfoldforlakes).
+    state.folded_m = state.elevation_m;
+    state.unfolded_m = std::move(before);
     recordlevelstep(state, LevelStep::foldfabric);
+}
+
+void unfoldforlakes(const LevelContext& context, LevelState& state)
+{
+    (void)context;
+    std::vector<float>& elevation = state.elevation_m;
+    const std::size_t count = elevation.size();
+    if (state.folded_m.size() != count || state.unfolded_m.size() != count || state.sea.size() != count ||
+        state.channels.channel.size() != count)
+    {
+        state.folded_m.clear();
+        state.unfolded_m.clear();
+        return;
+    }
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        const float folded = state.folded_m[cell], prior = state.unfolded_m[cell];
+        if (folded == prior)
+            continue;
+        if (state.sea[cell] != 0 || state.channels.channel[cell] != 0)
+        {
+            state.unfolded_m[cell] = folded;  // a channel cell's mean: left, and not refolded
+            continue;
+        }
+        const float present = elevation[cell];
+        const float unfolded = present == folded ? prior : std::min(present, prior);
+        state.folded_m[cell] = present;
+        state.unfolded_m[cell] = unfolded;
+        elevation[cell] = unfolded;
+    }
+}
+
+void refoldafterlakes(const LevelContext& context, LevelState& state)
+{
+    std::vector<float>& elevation = state.elevation_m;
+    const std::size_t count = elevation.size();
+    const int width = context.window.domainfinewidth(), height = context.window.domainfineheight();
+    if (state.folded_m.size() == count && state.unfolded_m.size() == count &&
+        count == static_cast<std::size_t>(width) * static_cast<std::size_t>(height))
+    {
+        const std::vector<float>& surface = state.water.lakesurface_m;
+        const bool withwater = surface.size() == count;
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                const std::size_t cell = at(x, y, width);
+                const float folded = state.folded_m[cell], unfolded = state.unfolded_m[cell];
+                if (folded == unfolded || elevation[cell] != unfolded)
+                    continue;  // not folded, or changed by the lakes (a lake bed, a shore raise, a rim)
+                float level = 0.0f;
+                if (withwater)
+                {
+                    if (surface[cell] > 0.0f)
+                        continue;  // under the water
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            const int nx = x + dx, ny = y + dy;
+                            if ((dx != 0 || dy != 0) && nx >= 0 && nx < width && ny >= 0 && ny < height)
+                                level = std::max(level, surface[at(nx, ny, width)]);
+                        }
+                }
+                if (level > 0.0f && !(unfolded > level))
+                    continue;  // already at or below the water beside it: no fabric on the shore
+                elevation[cell] =
+                    level > 0.0f && !(folded > level) ? std::nextafter(level, std::numeric_limits<float>::infinity()) : folded;
+            }
+    }
+    state.folded_m.clear();
+    state.folded_m.shrink_to_fit();
+    state.unfolded_m.clear();
+    state.unfolded_m.shrink_to_fit();
 }
 }

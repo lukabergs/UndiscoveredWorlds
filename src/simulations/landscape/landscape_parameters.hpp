@@ -208,17 +208,18 @@ inline float tributaryAngleSpread = 0.2f;
 inline float tributaryNodeMargin = 0.25f;
 inline float tributaryLengthMinFraction = 0.75f;
 inline float foldAmplitudeMaxM = 1000.0f;
-inline float foldReliefFraction = 0.5f;
+inline float foldReliefFraction = 0.15f;
 inline float foldReliefElevationFraction = 0.5f;
 inline float foldStrainMin = 0.1f;
 inline float foldWavelengthMinKm = 5.0f;
 inline float foldWavelengthMaxKm = 20.0f;
 inline float foldWavelengthPerCoverKm = 2.0f;
-inline int foldKernelsPerTile = 8;
+inline float foldSplatSpacingKm = 10.0f;
 inline float foldGapFraction = 0.25f;
 inline int foldPhasor = 1;
 inline float foldKernelWidthKm = 20.0f;
 inline float foldWavelengthBaseKm = 10.0f;
+inline float foldIceMax = 0.5f;
 }
 
 namespace refinement
@@ -385,11 +386,12 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.fold_wavelength_min_km", &regional::foldWavelengthMinKm },
         { "landscape.regional.fold_wavelength_max_km", &regional::foldWavelengthMaxKm },
         { "landscape.regional.fold_wavelength_per_cover_km", &regional::foldWavelengthPerCoverKm },
-        { "landscape.regional.fold_kernels_per_tile", &regional::foldKernelsPerTile },
+        { "landscape.regional.fold_splat_spacing_km", &regional::foldSplatSpacingKm },
         { "landscape.regional.fold_gap_fraction", &regional::foldGapFraction },
         { "landscape.regional.fold_phasor", &regional::foldPhasor },
         { "landscape.regional.fold_kernel_width_km", &regional::foldKernelWidthKm },
         { "landscape.regional.fold_wavelength_base_km", &regional::foldWavelengthBaseKm },
+        { "landscape.regional.fold_ice_max", &regional::foldIceMax },
         { "landscape.refinement.factor", &refinement::factor },
         { "landscape.refinement.projection_weight_channel", &refinement::projectionWeightChannel },
         { "landscape.refinement.stored_scale_max", &refinement::storedScaleMax },

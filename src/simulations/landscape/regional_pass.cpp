@@ -145,7 +145,9 @@ void regionallevelsteps(const LevelContext& context, LevelState& state)
     foldfabriclevel(context, state);    // 4a. the fold fabric (S5.2), cut by the forms after it
     valleyfloorslevel(context, state);  // 4b. the valley floors
     glacialformslevel(context, state);  // 4c. the glacial troughs and cirques
+    unfoldforlakes(context, state);     // S5.3b: the lakes decide on the surface without the fabric,
     lakeslevel(context, state);         // 5. lakes and ice
+    refoldafterlakes(context, state);   // and the fabric goes back on the dry land they left
     smoothinglevel(context, state);     // the refinement loop only
     projectionlevel(context, state);    // the refinement loop only
 }

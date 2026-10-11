@@ -44,10 +44,12 @@
 //   incision is globalincision, computed once and upsampled per level.
 // - The fold fabric (S5.2, regional_folds.hpp) runs after the solve and before the valley floors,
 //   at every level, on the cells whose wavelength lies in the level's octave band [2 c_l, 2 c_(l-1))
-//   (level 1: no upper end); finer levels inherit it by the prolongation. Its kernels are a pure
-//   function of the global fields, the seed and absolute position; its water gaps read the
+//   (level 1: no upper end); finer levels inherit it by the prolongation. Its splats (S5.3b) are a
+//   pure function of the global fields, the seed and absolute position; its water gaps read the
 //   level's channel cells within gapfraction x L, under half a parent cell at level >= 2 (the band)
-//   and at most one global cell at level 1, inside formreach.
+//   and at most one global cell at level 1, inside formreach. S5.3b: the lakes decide on the level's
+//   surface without its own fabric (unfoldforlakes before them, refoldafterlakes after, on the dry
+//   cells they left; a parent level's fabric is in the prolonged surface and stays).
 // - LevelDiagnostics::blockmeanerror_m is measured after `presmoothing`.
 // - Masks inherited and refined within one parent cell (S2.8; §3 "S2.7: smooth before exact",
 //   item 3, and "S2.8: masks without walls"): at level >= 2 a cell may be sea only where its

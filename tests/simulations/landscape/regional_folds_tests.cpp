@@ -1,9 +1,11 @@
-// Tests of landscape/regional_folds.hpp (multiscale plan step S5.2: the fold fabric), suite
-// Landscape: TEST_F(Landscape, RegionalFolds<What>) on a hand-built bench on window A's domain at
-// k 8 and the synthetic world of regional_test_world.hpp with withfoldfields: off by default and
+// Tests of landscape/regional_folds.hpp (multiscale plan steps S5.2 and S5.3b: the fold fabric),
+// suite Landscape: TEST_F(Landscape, RegionalFolds<What>) on a hand-built bench on window A's domain
+// at k 8 and the synthetic world of regional_test_world.hpp with withfoldfields: off by default and
 // at zero strain bit-identical, the amplitude and wavelength laws, a uniform field's wavelength,
-// bearing and amplitude, the water gap of a channel line, the overlaps A/B and C/D with the folds
-// on, and the refinement loop's level consistency and overlap with the folds drawn at two levels.
+// bearing and amplitude, the water gap of a channel line, a direction turning by 90 degrees over 8
+// global cells (S5.3b), the ice and lake gates, the lakes decided on the surface without the fabric,
+// the overlaps A/B and C/D with the folds on (phasor, Gabor, the ice gate acting), and the refinement
+// loop's level consistency and overlap with the folds drawn at two levels.
 
 #include "landscape_fixture.hpp"
 
@@ -53,6 +55,7 @@ RegionalParameters foldparameters()
     parameters.folds.wavelengthpercover_km = 150.0;
     parameters.folds.wavelengthbase_km = 0.0;
     parameters.folds.kernelwidth_km = 1350.0;
+    parameters.folds.splatspacing_km = 625.0;  // half the shortest wavelength: a 625 km lattice on 32 and 64 columns
     return parameters;
 }
 
@@ -73,8 +76,9 @@ void expectsamefields(const RegionalFields& a, const RegionalFields& b, const st
 }
 
 // A hand-built bench on the domain of window A at k 8 (156 km cells): land at 1,000 m, no sea, no
-// channel; a uniform strain, axis and cover; the global elevation 2,000 m everywhere (the
-// elevation term 0.5 x 2,000 m does not bind the 100 m cap).
+// channel, no lake cell; a uniform strain, axis and cover; the global elevation 2,000 m everywhere
+// (the elevation term 0.5 x 2,000 m does not bind the 100 m cap); the splat lattice at half the
+// wavelength.
 struct FoldBench
 {
     RegionalGlobalInputs inputs = syntheticworld(32);
@@ -94,6 +98,7 @@ struct FoldBench
         inputs.foldstrain.assign(size, strain);
         inputs.folddirection_rad.assign(size, direction_rad);
         inputs.sediment_m.clear();
+        inputs.lakesurface_m.assign(size, 0.0f);
         channels.channel.assign(count, 0);
         sea.assign(count, 0);
         elevation.assign(count, 1000.0f);
@@ -103,6 +108,7 @@ struct FoldBench
         parameters.folds.wavelengthmax_km = wavelength_cells * cell_km;
         parameters.folds.gapfraction = 0.0;
         parameters.folds.kernelwidth_km = 0.0;
+        parameters.folds.splatspacing_km = 0.5 * wavelength_cells * cell_km;
     }
 
     std::size_t cell(int x, int y) const { return at(x, y, width); }
@@ -168,6 +174,13 @@ TEST_F(Landscape, RegionalFoldsAmplitudeAndWavelengthLaws)
 {
     landscape::FoldParameters folds;
     folds.amplitudemax_m = 1000.0;
+    // S5.3b's relief fraction 0.15: A = 0.15 x 10,000 / pi x sqrt(eps) = 477 m x sqrt(eps) at L 10 km,
+    // under the cap: 151 m at eps 0.1 (the weight then 0), 261 m at 0.3, 427 m at 0.8.
+    EXPECT_NEAR(folds.relieffraction, 0.15, 1.0e-12);
+    EXPECT_NEAR(landscape::foldamplitude_m(folds, 0.3, 10.0, 5000.0), 1500.0 / pi * std::sqrt(0.3), 1.0e-9);
+    EXPECT_NEAR(landscape::foldamplitude_m(folds, 0.8, 10.0, 5000.0), 1500.0 / pi * std::sqrt(0.8), 1.0e-9);
+    // The laws below at S5.2's fraction 0.5.
+    folds.relieffraction = 0.5;
     // L = clamp(10 + 2 x the cover in km, 5, 20); the base 10 km without the cover.
     EXPECT_NEAR(landscape::foldwavelength_km(folds, 4000.0, true), 18.0, 1.0e-12);
     EXPECT_NEAR(landscape::foldwavelength_km(folds, 1000.0, true), 12.0, 1.0e-12);
@@ -346,34 +359,282 @@ TEST_F(Landscape, RegionalFoldsChannelGap)
 TEST_F(Landscape, RegionalOverlapFolds)
 {
     // The folds on at the smallest halo the pass allows: the overlaps stay bit-identical (compareoverlap
-    // asserts it), and the folds act on the shared cells.
-    const RegionalParameters parameters = foldparameters();
-    const RegionalGlobalInputs columns = withfoldfields(syntheticworld(32));
-    for (int scale : {4, 5})
+    // asserts it), and the folds act on the shared cells. Variants: the phasor form, the Gabor form
+    // (phasor 0), and the phasor form with the glaciation of withglacialfields gating the fabric (S5.3b).
+    for (const int variant : {0, 1, 2})
     {
-        SCOPED_TRACE("k = " + std::to_string(scale));
-        const OverlapCounts counts = compareoverlap(columns, windowa(scale), windowb(scale), "folds A/B", parameters);
-        EXPECT_EQ(counts.shared, 4 * 5 * scale * scale);
+        SCOPED_TRACE(variant == 0 ? "phasor" : variant == 1 ? "Gabor" : "ice gate");
+        RegionalParameters parameters = foldparameters();
+        if (variant == 1)
+            parameters.folds.phasor = 0;
+        const auto world = [variant](int width) {
+            RegionalGlobalInputs inputs = withfoldfields(syntheticworld(width));
+            if (variant == 2)
+            {
+                const RegionalGlobalInputs glacial = withglacialfields(inputs);
+                inputs.glaciation = glacial.glaciation;
+            }
+            return inputs;
+        };
+        const RegionalGlobalInputs columns = world(32);
+        for (int scale : {4, 5})
+        {
+            SCOPED_TRACE("k = " + std::to_string(scale));
+            const OverlapCounts counts = compareoverlap(columns, windowa(scale), windowb(scale), "folds A/B", parameters);
+            EXPECT_EQ(counts.shared, 4 * 5 * scale * scale);
+            EXPECT_GT(counts.channel, 0);
+            const RegionalFields on = landscape::runregionalpass(columns, windowb(scale), parameters);
+            const RegionalFields off = landscape::runregionalpass(columns, windowb(scale), RegionalParameters{});
+            const auto [changed, onoverlap] = foldchangedcells(on, off, windowa(scale));
+            std::printf("[regional] folds B, k %d: %d of %zu kept cells changed, %d on the overlap with A\n", scale, changed,
+                        on.elevation_m.size(), onoverlap);
+            EXPECT_GT(changed, 0);
+            EXPECT_GT(onoverlap, 0);
+        }
+        const RegionalGlobalInputs rows = world(64);
+        const OverlapCounts counts = compareoverlap(rows, windowc(4), windowd(4), "folds C/D", parameters);
+        EXPECT_GT(counts.sea, 0);
         EXPECT_GT(counts.channel, 0);
-        const RegionalFields on = landscape::runregionalpass(columns, windowb(scale), parameters);
-        const RegionalFields off = landscape::runregionalpass(columns, windowb(scale), RegionalParameters{});
-        const auto [changed, onoverlap] = foldchangedcells(on, off, windowa(scale));
-        std::printf("[regional] folds B, k %d: %d of %zu kept cells changed, %d on the overlap with A\n", scale, changed,
+        const RegionalFields on = landscape::runregionalpass(rows, windowd(4), parameters);
+        const RegionalFields off = landscape::runregionalpass(rows, windowd(4), RegionalParameters{});
+        const auto [changed, onoverlap] = foldchangedcells(on, off, windowc(4));
+        std::printf("[regional] folds D, k 4: %d of %zu kept cells changed, %d on the overlap with C\n", changed,
                     on.elevation_m.size(), onoverlap);
         EXPECT_GT(changed, 0);
         EXPECT_GT(onoverlap, 0);
     }
-    const RegionalGlobalInputs rows = withfoldfields(syntheticworld(64));
-    const OverlapCounts counts = compareoverlap(rows, windowc(4), windowd(4), "folds C/D", parameters);
-    EXPECT_GT(counts.sea, 0);
-    EXPECT_GT(counts.channel, 0);
-    const RegionalFields on = landscape::runregionalpass(rows, windowd(4), parameters);
-    const RegionalFields off = landscape::runregionalpass(rows, windowd(4), RegionalParameters{});
-    const auto [changed, onoverlap] = foldchangedcells(on, off, windowc(4));
-    std::printf("[regional] folds D, k 4: %d of %zu kept cells changed, %d on the overlap with C\n", changed,
-                on.elevation_m.size(), onoverlap);
-    EXPECT_GT(changed, 0);
-    EXPECT_GT(onoverlap, 0);
+}
+
+TEST_F(Landscape, RegionalFoldsTurningDirection)
+{
+    // S5.3b: the across-strike axis turns by 90 degrees over 8 global cells (east of global column 130,
+    // from 0, crests north-south, to pi / 2, crests east-west) on the 256-column world near the equator,
+    // at k 64 (2.44 km cells) with L = 64 cells (one global cell), the lattice at L / 2 and sigma = 2 L
+    // (the defaults' proportions: 10 km, 9.77 km, 20 km). Each splat interpolates the axis at its own
+    // position, so the crests turn smoothly: between a cell and its 8-neighbour nearest the local strike
+    // (the strike's angle as the field's, at most 22.5 degrees off it: an ideal sinusoid steps by at most
+    // 2 pi x 0.54 / 64 A = 0.053 A there) the fabric steps by at most 0.1 A at p90, and the turn adds at
+    // most 0.1 A to the uniform axis' p99. Not at every cell: with each splat's phase origin its own
+    // position, the phasor sum has isolated zeros (the fold trains' dislocations), around which the
+    // phase winds by 2 pi; the uniform axis' own along-strike steps (p99 about 0.17 A, the largest about
+    // 1.8 A) are theirs.
+    RegionalGlobalInputs inputs = syntheticworld(256);
+    const RegionalWindow window = landscape::regionalwindow(256, 64, 1, 0.0, -2.8125, 16.875, 2.8125);
+    const int width = window.domainfinewidth(), height = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    const double cell_km = landscape::finepatchmetric(window, inputs.radius_m).dy_m / 1000.0;
+    inputs.elevation_m.assign(size, 2000.0f);
+    inputs.foldstrain.assign(size, 0.3f);
+    inputs.sediment_m.clear();
+    inputs.lakesurface_m.assign(size, 0.0f);
+    const double first = 130.0;  // the turn's first global column (window columns 128 to 139)
+    const auto axis = [first](double column) { return 0.5 * pi * std::clamp((column - first) / 8.0, 0.0, 1.0); };
+    RegionalParameters parameters;
+    parameters.folds.amplitudemax_m = 100.0;
+    parameters.folds.wavelengthmin_km = 64.0 * cell_km;
+    parameters.folds.wavelengthmax_km = 64.0 * cell_km;
+    parameters.folds.gapfraction = 0.0;
+    parameters.folds.splatspacing_km = 32.0 * cell_km;
+    parameters.folds.kernelwidth_km = 128.0 * cell_km;
+    landscape::FineChannels channels;
+    channels.channel.assign(count, 0);
+    const std::vector<uint8_t> sea(count, 0);
+
+    struct Steps
+    {
+        double p50 = 0.0, p90 = 0.0, p99 = 0.0, largest = 0.0;
+        int cells = 0;
+    };
+    const auto measure = [&](bool turning) {
+        inputs.folddirection_rad.assign(size, 0.0f);
+        if (turning)
+            for (int j = 0; j < inputs.height; j++)
+                for (int i = 0; i < inputs.width; i++)
+                    inputs.folddirection_rad[at(i, j, inputs.width)] = static_cast<float>(axis(static_cast<double>(i)));
+        std::vector<float> elevation(count, 1000.0f);
+        landscape::addfoldfabric(inputs, window, parameters, channels, sea, elevation);
+        std::vector<double> steps;
+        const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
+        for (int y = y0; y < y0 + window.fineheight(); y++)
+            for (int x = x0; x < x0 + window.finewidth(); x++)
+            {
+                // The strike (crests at the axis + pi / 2) at the cell's centre, in global columns.
+                const double u = (static_cast<double>(window.absolutefinecolumn(x)) + 0.5) / 64.0 - 0.5;
+                const double theta = turning ? axis(u) : 0.0;
+                const double east = -std::sin(theta), south = std::cos(theta);
+                int bestx = 0, besty = 0;
+                double best = -2.0;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0)
+                            continue;
+                        const double alignment = (dx * east + dy * south) / std::hypot(dx, dy);
+                        if (alignment > best)
+                        {
+                            best = alignment;
+                            bestx = dx;
+                            besty = dy;
+                        }
+                    }
+                const int nx = x + bestx, ny = y + besty;
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height)
+                    continue;
+                steps.push_back(std::fabs(static_cast<double>(elevation[at(nx, ny, width)]) -
+                                          static_cast<double>(elevation[at(x, y, width)])));
+            }
+        Steps result;
+        std::sort(steps.begin(), steps.end());
+        const auto rank = [&](double fraction) { return steps[static_cast<std::size_t>(fraction * (steps.size() - 1))]; };
+        result.cells = static_cast<int>(steps.size());
+        result.p50 = rank(0.5);
+        result.p90 = rank(0.9);
+        result.p99 = rank(0.99);
+        result.largest = steps.back();
+        return result;
+    };
+    const Steps uniform = measure(false);
+    const Steps turning = measure(true);
+    for (const auto& [label, steps] : {std::make_pair("uniform", uniform), std::make_pair("turning", turning)})
+        std::printf("[folds] along-strike steps, %s axis: %d cells, p50 %.2f, p90 %.2f, p99 %.2f, max %.2f m of A 100 m\n",
+                    label, steps.cells, steps.p50, steps.p90, steps.p99, steps.largest);
+    EXPECT_LE(uniform.p90, 10.0);
+    EXPECT_LE(turning.p90, 10.0);
+    EXPECT_LE(turning.p99, uniform.p99 + 10.0);
+}
+
+TEST_F(Landscape, RegionalFoldsIceGate)
+{
+    // S5.3b: no fabric where the glaciation upsampled is above folds.icemax (0.5): a 3 x 3 group of
+    // global cells at glaciation 1 leaves its cells above 0.5 unchanged; every other cell is folded as
+    // without the field; icemax 1 is no gate.
+    FoldBench plain(8.0, 0.3f, 0.0f);
+    plain.fold();
+    FoldBench iced(8.0, 0.3f, 0.0f);
+    const std::size_t size = static_cast<std::size_t>(iced.inputs.width) * static_cast<std::size_t>(iced.inputs.height);
+    iced.inputs.glaciation.assign(size, 0.0f);
+    const int x0 = iced.width / 2, y0 = iced.equatorialrows()[iced.equatorialrows().size() / 2];
+    const int i0 = iced.window.globalcolumn(x0), j0 = iced.window.globalrow(y0);
+    for (int dj = -1; dj <= 1; dj++)
+        for (int di = -1; di <= 1; di++)
+            iced.inputs.glaciation[at((i0 + di + iced.inputs.width) % iced.inputs.width, j0 + dj, iced.inputs.width)] = 1.0f;
+    const std::vector<float> cover =
+        landscape::upsample(iced.inputs.glaciation, iced.inputs.width, iced.inputs.height, iced.window);
+    FoldBench open = iced;
+    open.parameters.folds.icemax = 1.0;
+    iced.fold();
+    open.fold();
+    EXPECT_TRUE(samebits(open.elevation, plain.elevation)) << "icemax 1";
+    int gated = 0, folded = 0;
+    for (std::size_t cell = 0; cell < iced.count; cell++)
+    {
+        if (cover[cell] > 0.5f)
+        {
+            gated++;
+            EXPECT_EQ(iced.elevation[cell], 1000.0f) << "cell " << cell;
+        }
+        else
+        {
+            EXPECT_EQ(iced.elevation[cell], plain.elevation[cell]) << "cell " << cell;
+            folded += iced.elevation[cell] != 1000.0f ? 1 : 0;
+        }
+    }
+    std::printf("[folds] ice gate: %d cells under the cover above 0.5 unchanged, %d others folded\n", gated, folded);
+    EXPECT_GT(gated, 64);
+    EXPECT_GT(folded, 0);
+}
+
+TEST_F(Landscape, RegionalFoldsLakeGate)
+{
+    // S5.3b: no fabric in the block of a global lake cell (lake surface above 0, not sea); the cells of
+    // the other blocks are folded as without the lake.
+    FoldBench plain(8.0, 0.3f, 0.0f);
+    plain.fold();
+    FoldBench lake(8.0, 0.3f, 0.0f);
+    const int x0 = lake.width / 2, y0 = lake.equatorialrows()[lake.equatorialrows().size() / 2];
+    const int i0 = lake.window.globalcolumn(x0), j0 = lake.window.globalrow(y0);
+    const std::size_t global = at(i0, j0, lake.inputs.width);
+    lake.inputs.lakesurface_m[global] = 500.0f;
+    lake.inputs.network.sea[global] = 0;
+    lake.fold();
+    int inside = 0, changedinside = 0, foldedwithout = 0, outside = 0;
+    for (int y = 0; y < lake.height; y++)
+        for (int x = 0; x < lake.width; x++)
+        {
+            const std::size_t cell = lake.cell(x, y);
+            if (lake.window.globalcolumn(x) == i0 && lake.window.globalrow(y) == j0)
+            {
+                inside++;
+                changedinside += lake.elevation[cell] != 1000.0f ? 1 : 0;
+                foldedwithout += plain.elevation[cell] != 1000.0f ? 1 : 0;
+            }
+            else
+            {
+                EXPECT_EQ(lake.elevation[cell], plain.elevation[cell]) << "x = " << x << ", y = " << y;
+                outside += lake.elevation[cell] != 1000.0f ? 1 : 0;
+            }
+        }
+    std::printf("[folds] lake gate: %d cells of the lake block, %d changed (%d without the lake); %d folded outside\n",
+                inside, changedinside, foldedwithout, outside);
+    EXPECT_EQ(inside, 64);
+    EXPECT_EQ(changedinside, 0);
+    EXPECT_GT(foldedwithout, 0);
+    EXPECT_GT(outside, 0);
+}
+
+TEST_F(Landscape, RegionalFoldsLakesOnTheUnfoldedSurface)
+{
+    // S5.3b: the lakes step decides on the surface without the fabric, so in the single pass the lake
+    // water of the synthetic world is the same with the folds on as with them off, and no folded dry cell
+    // stands at or below the surface of a wet 8-neighbour.
+    const RegionalGlobalInputs inputs = withfoldfields(syntheticworld(32));
+    RegionalParameters off = RegionalParameters{};
+    RegionalParameters on = foldparameters();
+    for (RegionalParameters* parameters : {&off, &on})
+        parameters->shores.shorenoise = 0.5;  // R4's lakes: the indicator, the terrain term and the shores
+    for (int scale : {4, 8})
+    {
+        SCOPED_TRACE("k = " + std::to_string(scale));
+        const RegionalWindow window = windowa(scale);
+        const RegionalFields without = landscape::runregionalpass(inputs, window, off);
+        const RegionalFields with = landscape::runregionalpass(inputs, window, on);
+        int wet = 0, differing = 0;
+        for (std::size_t cell = 0; cell < with.lakesurface_m.size(); cell++)
+        {
+            wet += with.lakesurface_m[cell] > 0.0f ? 1 : 0;
+            differing += with.lakesurface_m[cell] != without.lakesurface_m[cell] ? 1 : 0;
+        }
+        const auto [changed, unused] = foldchangedcells(with, without, window);
+        (void)unused;
+        // A folded dry cell never at or below the surface of a wet 8-neighbour.
+        const int width = window.finewidth(), height = window.fineheight();
+        int shorecells = 0, sunk = 0;
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                const std::size_t cell = at(x, y, width);
+                if (with.lakesurface_m[cell] > 0.0f || with.elevation_m[cell] == without.elevation_m[cell])
+                    continue;
+                float level = 0.0f;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                        if (x + dx >= 0 && x + dx < width && y + dy >= 0 && y + dy < height)
+                            level = std::max(level, with.lakesurface_m[at(x + dx, y + dy, width)]);
+                if (level > 0.0f)
+                {
+                    shorecells++;
+                    sunk += with.elevation_m[cell] > level ? 0 : 1;
+                }
+            }
+        std::printf("[folds] lakes on the unfolded surface, k %d: %d wet cells, %d differ; %d cells folded, %d of them "
+                    "beside the water, %d at or below it\n",
+                    scale, wet, differing, changed, shorecells, sunk);
+        EXPECT_GT(wet, 0);
+        EXPECT_GT(changed, 0);
+        EXPECT_EQ(differing, 0);
+        EXPECT_EQ(sunk, 0);
+    }
 }
 
 TEST_F(Landscape, RegionalFoldsRefinementConsistency)
@@ -391,6 +652,7 @@ TEST_F(Landscape, RegionalFoldsRefinementConsistency)
     parameters.folds.wavelengthpercover_km = 15.0;
     parameters.folds.wavelengthbase_km = 0.0;
     parameters.folds.kernelwidth_km = 120.0;
+    parameters.folds.splatspacing_km = 40.0;  // the 156 km global cell by 4: a 39 km lattice
     const int halo = landscape::refinementhalo(2, 0);
     const RegionalWindow windowp = landscape::regionalwindow(256, 16, halo, 160.0, -15.0, 180.0, 10.0);
     const RegionalWindow windowq = landscape::regionalwindow(256, 16, halo, 170.0, -10.0, -170.0, 15.0);

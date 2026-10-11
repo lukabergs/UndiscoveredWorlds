@@ -210,6 +210,8 @@ struct LevelState : RegionalLevel
     int drytails = 0;                    // channelslevel's (S3.11): kept pieces whose chain leaves the painted cells
     std::vector<float> solved_m;        // the elevation after the solve, before the forms and the lakes (S3.2: the
                                          // channel cells' means kept, the parent's lift not added; solvelevel)
+    std::vector<float> unfolded_m;      // foldfabriclevel's (S5.3b, folds on only): the elevation before the fabric,
+    std::vector<float> folded_m;        // and after it; unfoldforlakes and refoldafterlakes use and empty them
     int tributaries = 0;                 // tributarieslevel's count (0: none)
     int tributarycells = 0;              // the domain cells its tributaries pinned
     int tributarybedsabove = 0;          // of them, those whose bed stands above state.surface_m (S3.3: 0 by rule)
