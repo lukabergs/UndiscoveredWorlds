@@ -54,9 +54,13 @@ struct ChannelParameters
     double meanderreference_m3s = 1000.0;
     // Multiscale plan S3.11: a leg's roughness, octaves i = 2, 3, ... of value noise along its
     // normal with amplitude meanderroughness x k x meanderroughnesspersistence^(i - 2) fine cells
-    // (0: the smooth arc of S3.10).
-    double meanderroughness = 0.05;
+    // (0: the smooth arc of S3.10), times (S3.14) 1 + meanderroughnessreliefgain x min(1, R /
+    // meanderroughnessrelief_m), R the local relief of the piece's upstream global cell
+    // (rasterisechannels' relief_m; gain 0: the plain roughness).
+    double meanderroughness = 0.08;
     double meanderroughnesspersistence = 0.5;
+    double meanderroughnessreliefgain = 1.0;
+    double meanderroughnessrelief_m = 500.0;
     double junctionjitter = 0.5;       // the junction lies within this fraction of k of the block's centre
                                        // (0.5: anywhere in the block; R3: 0.25)
     double edgemargin = 0.0;           // edge points stay this fraction of k away from the cell's corners (R3: 0.1875;
@@ -99,9 +103,11 @@ struct ChannelParameters
 // still) by d(t), the sum over octaves i = 2, 3, ... of a_i v_i(t): v_i a cosine-interpolated
 // value noise with 2^i intervals over t, node values in [-1, 1) from a hash of (the leg's
 // hash, i, node), 0 at t = 0 and t = 1, so legs still meet at their edge points and
-// junctions; a_i = meanderroughness x k x meanderroughnesspersistence^(i - 2); octaves while
-// chord / 2^i is at least 2 fine cells. A leg at a finer k is the same curve with more
-// octaves; samples stay clamped inside the block, a gap between two samples' cells is filled
+// junctions; a_i = meanderroughness x k x meanderroughnesspersistence^(i - 2) x (S3.14)
+// (1 + meanderroughnessreliefgain x min(1, R / meanderroughnessrelief_m)), R the local relief of
+// the piece's upstream global cell (relief_m; 0 without it), the same for every leg of a link and
+// for a cell's springs; octaves while chord / 2^i is at least 2 fine cells. A leg at a finer k is
+// the same curve with more octaves; samples stay clamped inside the block, a gap between two samples' cells is filled
 // by diagonal-first steps and the chain's loop erasure removes self-crossings. The curve's tangent
 // at an edge point is the link's direction, so the legs join smoothly; at a junction, the outflow leg and
 // the inflow leg of the main upstream cell (the largest drainage area among the drawn
@@ -133,15 +139,24 @@ struct ChannelParameters
 // prefix needs no suffix: the water runs on along the prefix, and a suffix from there would
 // paint the piece past its first lost cell again). A painted cell carries its owner's values; a path
 // cell in no prefix or suffix is not painted (channel 0), so the crossing a piece made past its
-// first lost cell (S3.10) is gone. A chain that steps from a painted cell onto an unpainted one
-// (a suffix cell owned by a piece whose own prefix ended earlier) leaves the pinned network
-// there and the solve routes the water on (counted: drytails). A junction is reached by its
+// first lost cell (S3.10) is gone. The network is then closed (S3.14): a suffix can run over a
+// cell that a third piece owns past that piece's own prefix end, and the chain there steps on
+// along the third piece's path onto a cell no prefix or suffix paints (S3.11's dry tail, where
+// the water left the pinned network); every painted cell's chain is followed along the
+// directions over such cells, each painted, until it meets a painted cell or a piece's last
+// cell. So every painted chain runs on painted cells to its last cell (a sea cell, a land
+// sink's junction) or off the domain; a painting without dry tails is unchanged, and drytails
+// counts what is left (0). A junction is reached by its
 // cell's outflow leg (its first cell); an inflow leg that meets another piece before the
 // junction merges there, and from there to the junction the painted discharge is the owner's
 // alone (recorded, not corrected). Reach: a cell's painting depends on its owner's first lost
 // cell and on the first lost cells of the pieces crossing the owner's path, each decided by the
 // ownership on that piece's own cells: pieces within two global cells of the cell's block, whose
-// owners involve pieces starting up to three cells away. So the links and springs of the global
+// owners involve pieces starting up to three cells away; a cell the closure paints depends also
+// on the suffix painted upstream on its owner's path, that is on one more piece crossing it
+// (measured on windows A, B, C at k 16 and A at k 64 of erosion run 9: every walk stays within
+// one global cell, at most 22 fine cells and one change of owner, and the two-window tests hold
+// with the same reach). So the links and springs of the global
 // cells up to three cells outside the domain are drawn: they compete for ownership and end
 // prefixes there and are never painted (about 7 % more time at level 2 of window B at k 16).
 //
@@ -193,7 +208,8 @@ struct FineChannels
     int mergedpieces = 0;                // S3.11: pieces (links and springs) whose upstream cell lies in the kept
                                          // box and whose prefix ends before their last cell (a confluence)
     int drytails = 0;                    // S3.11: of the same pieces, those that own a painted cell whose next path
-                                         // cell is not painted (the chain leaves the pinned network there)
+                                         // cell is not painted (the chain leaves the pinned network there); 0 since
+                                         // S3.14's closure
 };
 
 // Phase R, R1 (empty vectors keep the rules without them): `start_m` is the regional
@@ -224,14 +240,19 @@ struct FineChannels
 // sea agree between windows from 2 x meanpasses global cells inside the domain's edge
 // (each block-mean pass spoils the residuals of the outer two), so its channels agree from
 // 2 x meanpasses + 2 cells inside it (2 x meanpasses + 1 until S3.10): a prefix end reads the
-// owners along the piece's path, whose beds read the start surface one global cell beyond.
+// owners along the piece's path, whose beds read the start surface one global cell beyond
+// (unchanged by S3.14's closure, whose walks stay within a global cell of a painted cell).
 // regionalhalo and refinementhalo cover it (channelreachglobalcells, refinement_grid.hpp).
 // Without a start surface and fine sea every window agrees to its edge.
+// `relief_m` (multiscale plan S3.14; empty: 0 everywhere) is the local relief of the global cells
+// (W x H, m: the regional noise amplitude's), which scales the legs' roughness (ChannelParameters).
 // Throws std::invalid_argument also for a non-empty `start_m` or `finesea` whose size
-// is not the domain's.
+// is not the domain's, a non-empty `relief_m` whose size is not the world grid's, a negative or
+// non-finite meanderroughnessreliefgain and a meanderroughnessrelief_m that is not positive and finite.
 FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork& network,
                                const ChannelParameters& parameters, float sealevel,
-                               const std::vector<float>& start_m = {}, const std::vector<uint8_t>& finesea = {});
+                               const std::vector<float>& start_m = {}, const std::vector<uint8_t>& finesea = {},
+                               const std::vector<float>& relief_m = {});
 
 // The junction of global cell (i, j), 0 <= i < worldwidth and 0 <= j < worldheight, at
 // the window's scale: its absolute fine column k i + x and row k j + y, with x and y in
@@ -251,7 +272,9 @@ struct LevelState;
 // bed surface when the incision is active (state.incisednetwork, state.bedsurface_m;
 // incisionlevel), else the inputs' network and state.surface_m, ending at the fine coast
 // (state.sea), with pinsinks set in the refinement loop when parameters.relief.catchmentreach >= 1
-// (S3.9); then the tributaries (tributarieslevel, regional_tributaries.hpp); then every
+// (S3.9), the legs' roughness scaled by the local relief of the inputs' elevation (S3.14: the
+// regional noise amplitude's relief, the world's relief amplitude with regional.noise_relief_field 1);
+// then the tributaries (tributarieslevel, regional_tributaries.hpp); then every
 // land channel cell's bed pinned into state.surface_m. Writes state.channels and state.bed_m
 // (a copy of the channels' beds).
 void channelslevel(const LevelContext& context, LevelState& state);

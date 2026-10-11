@@ -210,6 +210,8 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.channels.meanderreference_m3s = regional::meanderReferenceM3s;
     parameters.channels.meanderroughness = regional::meanderRoughness;
     parameters.channels.meanderroughnesspersistence = regional::meanderRoughnessPersistence;
+    parameters.channels.meanderroughnessreliefgain = regional::meanderRoughnessReliefGain;
+    parameters.channels.meanderroughnessrelief_m = regional::meanderRoughnessReliefM;
     parameters.channels.junctionjitter = regional::jitterJunction;
     parameters.channels.edgemargin = regional::jitterEdgeMargin;
     parameters.channels.springspercell = regional::springsPerCell;

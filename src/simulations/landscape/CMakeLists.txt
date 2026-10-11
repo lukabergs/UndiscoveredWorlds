@@ -1,6 +1,8 @@
 # Erosion and drainage kernels on a cell-centred sphere grid, planet-free: no
-# world class, no tuning header (the processes that call them pass the values).
-# world_tests links this library (tests/CMakeLists.txt).
+# world class, no tuning header (the processes that call them pass the values;
+# one exception: spherical_noise.cpp reads landscape.noise.* for a FractalNoise left
+# at "configured", multi-scale plan S3.16). world_tests links this library
+# (tests/CMakeLists.txt).
 add_library(uw_landscape STATIC
     analytical_relief.cpp
     channel_network.cpp
@@ -11,6 +13,7 @@ add_library(uw_landscape STATIC
     isostasy.cpp
     lake_balance.cpp
     ocean_mask.cpp
+    opensimplex2s.cpp
     refinement_grid.cpp
     refinement_levels.cpp
     refinement_projection.cpp

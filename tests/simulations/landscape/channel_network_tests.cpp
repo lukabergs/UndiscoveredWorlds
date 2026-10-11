@@ -2219,6 +2219,60 @@ TEST_F(Landscape, ChannelNetworkConfluences)
     EXPECT_GT(merged, 0);
 }
 
+TEST_F(Landscape, ChannelNetworkNoDryTails)
+{
+    // Multiscale plan S3.14: the painted network is connected. Every painted cell's direction leads
+    // to a painted cell (or it is a last cell), every link's walk from its junction reaches its
+    // outlet without leaving the pinned network, and no kept piece counts a dry tail; on the
+    // matrix of ChannelNetworkConfluences, where the rule of S3.11 alone left 2 dry tails (a
+    // suffix that runs over a cell a third piece owns past that piece's own prefix end; window A
+    // at k 16, level 1: the piece of global cell (170, 72)), and with rough legs at k 32.
+    int runs = 0, merged = 0;
+    for (std::uint64_t world = 0; world <= 2; world++)
+    {
+        const GlobalNetwork network = world == 0 ? syntheticnetwork() : flatnetwork(world);
+        for (const Case& c : cases)
+            for (const bool transit : { false, true })
+                for (const bool withstart : { false, true })
+                {
+                    if (world != 0 && !transit)
+                        continue;
+                    SCOPED_TRACE(testing::Message() << "world " << world << ", k " << c.scale << ", meander "
+                                                    << c.meanderamplitude << ", seed " << c.seed
+                                                    << (transit ? ", transit" : ", R3") << (withstart ? ", start" : ""));
+                    const RegionalWindow window = worldwindow(c.scale);
+                    const ChannelParameters settings =
+                        transit ? transitparameters(c.meanderamplitude, c.seed) : parameters(c.meanderamplitude, c.seed);
+                    const FineChannels channels =
+                        withstart ? rasterisechannels(window, network, settings, sealevel, hashedstart(window, c.seed + world))
+                                  : rasterisechannels(window, network, settings, sealevel);
+                    EXPECT_EQ(channels.drytails, 0);
+                    EXPECT_EQ(confluencereport(network, window, settings, channels).drysteps, 0);
+                    const OutletReport outlets = walkoutlets(network, window, settings, channels);
+                    EXPECT_EQ(outlets.dry, 0);
+                    EXPECT_EQ(outlets.wrongoutlet, 0);
+                    EXPECT_EQ(badchains(network, window, settings, channels), 0);
+                    merged += channels.mergedpieces;
+                    runs++;
+                }
+    }
+    for (std::uint64_t seed = 1; seed <= 4; seed++)
+    {
+        SCOPED_TRACE(testing::Message() << "rough, seed " << seed);
+        const RegionalWindow window = worldwindow(32);
+        ChannelParameters rough = transitparameters(0.2, seed);
+        rough.meanderroughness = 0.2;
+        rough.meanderroughnesspersistence = 0.7;
+        const FineChannels channels = rasterisechannels(window, flatnetwork(seed), rough, sealevel);
+        EXPECT_EQ(channels.drytails, 0);
+        EXPECT_EQ(confluencereport(flatnetwork(seed), window, rough, channels).drysteps, 0);
+        merged += channels.mergedpieces;
+        runs++;
+    }
+    std::printf("[channels] no dry tails: %d pieces merged in %d rasterisations\n", merged, runs);
+    EXPECT_GT(merged, 0);
+}
+
 TEST_F(Landscape, ChannelNetworkRoughLegs)
 {
     // Leg roughness at k 32 and 64 with a large roughness (0.2, persistence 0.7): the confluence
@@ -2264,6 +2318,63 @@ TEST_F(Landscape, ChannelNetworkRoughLegs)
                     }
             }
     }
+
+    // S3.14, the relief term: the same link (6, 4) west into a land sink at k 128, once in zero
+    // relief and once at the reference relief (500 m at its upstream cell, gain 1): every octave's
+    // amplitude doubles, so the walk's largest distance from the smooth arc's walk doubles (within
+    // the raster's cell). Relief above the reference adds nothing, gain 0 keeps the plain roughness
+    // and no relief field is zero relief, cell for cell.
+    GlobalNetwork single = seaworld();
+    setland(single, 6, 4, west, 100.0f, 200.0f);
+    setland(single, 5, 4, 0, 50.0f, 300.0f);
+    const int k = 128;
+    const RegionalWindow window = domainwindow(k, 4, 3, 3, 3);
+    std::vector<float> flat(static_cast<std::size_t>(worldwidth) * worldheight, 0.0f);
+    std::vector<float> reference = flat, steep = flat;
+    reference[globalindex(6, 4)] = 500.0f;
+    steep[globalindex(6, 4)] = 1000.0f;
+    double plainsum = 0.0, reliefsum = 0.0;
+    for (std::uint64_t seed = 1; seed <= 8; seed++)
+    {
+        SCOPED_TRACE(testing::Message() << "relief, seed " << seed);
+        ChannelParameters settings = transitparameters(0.2, seed);
+        settings.meanderroughness = 0.05;
+        settings.meanderroughnessreliefgain = 1.0;
+        settings.meanderroughnessrelief_m = 500.0;
+        ChannelParameters smooth = settings;
+        smooth.meanderroughness = 0.0;
+        ChannelParameters nogain = settings;
+        nogain.meanderroughnessreliefgain = 0.0;
+        const std::size_t start = junctioncell(window, settings, 6, 4);
+        const FineChannels arc = rasterisechannels(window, single, smooth, sealevel, {}, {}, reference);
+        const FineChannels plain = rasterisechannels(window, single, settings, sealevel, {}, {}, flat);
+        const FineChannels relief = rasterisechannels(window, single, settings, sealevel, {}, {}, reference);
+        EXPECT_EQ(rasterisechannels(window, single, settings, sealevel).channel, plain.channel);
+        EXPECT_EQ(rasterisechannels(window, single, nogain, sealevel, {}, {}, reference).channel, plain.channel);
+        EXPECT_EQ(rasterisechannels(window, single, settings, sealevel, {}, {}, steep).channel, relief.channel);
+        const std::vector<std::size_t> arcwalk = walkfrom(window, arc, start);
+        auto displacement = [&](const FineChannels& channels) {
+            double largest = 0.0;
+            for (const std::size_t cell : walkfrom(window, channels, start))
+            {
+                double nearest = std::numeric_limits<double>::infinity();
+                for (const std::size_t other : arcwalk)
+                    nearest = std::min(nearest, std::hypot(static_cast<double>(columnof(window, cell) - columnof(window, other)),
+                                                           static_cast<double>(rowof(window, cell) - rowof(window, other))));
+                largest = std::max(largest, nearest);
+            }
+            return largest;
+        };
+        const double plaindisplacement = displacement(plain);
+        const double reliefdisplacement = displacement(relief);
+        std::printf("[channels] relief term, seed %llu: largest displacement %.2f cells in zero relief, %.2f at the "
+                    "reference\n",
+                    static_cast<unsigned long long>(seed), plaindisplacement, reliefdisplacement);
+        EXPECT_GT(plaindisplacement, 1.0);
+        plainsum += plaindisplacement;
+        reliefsum += reliefdisplacement;
+    }
+    EXPECT_NEAR(reliefsum / plainsum, 2.0, 0.2);
 }
 
 TEST_F(Landscape, ChannelNetworkRoughnessOffKeepsTheArcs)

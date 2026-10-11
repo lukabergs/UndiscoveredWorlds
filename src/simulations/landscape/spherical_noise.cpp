@@ -5,11 +5,15 @@
 #include <stdexcept>
 
 #include "core/deterministic_random.hpp"
+#include "simulations/landscape/landscape_parameters.hpp"
+#include "simulations/landscape/opensimplex2s.hpp"
 
 // The noise of relief_roughness.cpp (step C3), moved here in erosion plan step E2a
 // (docs/architecture/erosion-hydrology-plan.md, Phase E, section 6, "Noise band"):
 // every operation is the one it was there, in the same order, so the roughness's
-// results stay bit-identical.
+// results stay bit-identical. Multi-scale plan S3.16 adds the OpenSimplex2S kernel
+// and the per-octave rotation; with the Perlin kernel and no rotation every
+// operation is still the one of C3.
 
 namespace landscape
 {
@@ -70,11 +74,42 @@ void unitvector(double latitude_rad, double longitude_rad, double& px, double& p
     pz = std::sin(latitude_rad);
 }
 
+std::array<double, 9> octaverotation(std::uint64_t octaveseed)
+{
+    // Shoemake's uniform unit quaternion from three uniform numbers, normalised again
+    // against rounding, and its rotation matrix.
+    const double twopi = 6.28318530717958647692;
+    const double u1 = unit(deterministiccombine(octaveseed, 0, -2));
+    const double u2 = unit(deterministiccombine(octaveseed, 1, -2));
+    const double u3 = unit(deterministiccombine(octaveseed, 2, -2));
+    double w = std::sqrt(1.0 - u1) * std::sin(twopi * u2);
+    double x = std::sqrt(1.0 - u1) * std::cos(twopi * u2);
+    double y = std::sqrt(u1) * std::sin(twopi * u3);
+    double z = std::sqrt(u1) * std::cos(twopi * u3);
+    const double length = std::sqrt(w * w + x * x + y * y + z * z);
+    w /= length;
+    x /= length;
+    y /= length;
+    z /= length;
+    return { 1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w),       2.0 * (x * z + y * w),
+             2.0 * (x * y + z * w),       1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w),
+             2.0 * (x * z - y * w),       2.0 * (y * z + x * w),       1.0 - 2.0 * (x * x + y * y) };
+}
+
 FractalNoiseField::FractalNoiseField(const FractalNoise& noise)
 {
     if (!(noise.wavelength_km > 0.0) || noise.octaves < 1 || !(noise.radius_km >= 0.0))
         throw std::invalid_argument(
             "FractalNoiseField: wavelength_km must be positive, octaves at least 1 and radius_km not negative");
+    // The kernel and the rotation, from landscape.noise when left at configured.
+    const int kernel = noise.kernel == NoiseKernel::configured ? tuning::landscape::noise::kernel
+                                                               : static_cast<int>(noise.kernel);
+    if (kernel != static_cast<int>(NoiseKernel::perlin) && kernel != static_cast<int>(NoiseKernel::opensimplex2s))
+        throw std::invalid_argument("FractalNoiseField: the kernel must be 0 (Perlin) or 1 (OpenSimplex2S)");
+    kernel_ = static_cast<NoiseKernel>(kernel);
+    const int rotate = noise.rotateoctaves < 0 ? tuning::landscape::noise::rotateOctaves : noise.rotateoctaves;
+    if (rotate != 0 && rotate != 1)
+        throw std::invalid_argument("FractalNoiseField: rotate_octaves must be 0 or 1");
 
     // Octave k samples the noise at the position on the sphere in units of its
     // wavelength (wavelength_km / 2^k is the lattice spacing), with its own seed and
@@ -89,6 +124,8 @@ FractalNoiseField::FractalNoiseField(const FractalNoise& noise)
     scale_.resize(count);
     weight_.resize(count);
     offset_.resize(3 * count);
+    if (rotate == 1)
+        rotation_.resize(9 * count);
     double squaredweights = 0.0;
     int resolved = 0;
     for (int k = 0; k < octaves; k++)
@@ -104,9 +141,15 @@ FractalNoiseField::FractalNoiseField(const FractalNoise& noise)
         resolved += weight_[o] != 0.0 ? 1 : 0;
         for (int axis = 0; axis < 3; axis++)
             offset_[3 * o + static_cast<std::size_t>(axis)] = 256.0 * unit(deterministiccombine(seeds_[o], axis, -1));
+        if (!rotation_.empty())
+        {
+            const std::array<double, 9> matrix = octaverotation(seeds_[o]);
+            for (std::size_t i = 0; i < 9; i++)
+                rotation_[9 * o + i] = matrix[i];
+        }
     }
     squaredweights_ = squaredweights;
-    normalisation_ = octavedeviation * std::sqrt(squaredweights);
+    normalisation_ = deviation() * std::sqrt(squaredweights);
     resolved_ = resolved;
 }
 
@@ -115,12 +158,35 @@ double FractalNoiseField::sum(double px, double py, double pz) const
     // Accumulated octave by octave in order; an octave of weight 0 is skipped.
     double total = 0.0;
     const std::size_t count = weight_.size();
+    if (kernel_ == NoiseKernel::perlin && rotation_.empty())
+    {
+        // The operations of step C3.
+        for (std::size_t o = 0; o < count; o++)
+        {
+            if (weight_[o] == 0.0)
+                continue;
+            total += weight_[o] * gradientnoise(seeds_[o], px * scale_[o] + offset_[3 * o], py * scale_[o] + offset_[3 * o + 1],
+                                                pz * scale_[o] + offset_[3 * o + 2]);
+        }
+        return total;
+    }
     for (std::size_t o = 0; o < count; o++)
     {
         if (weight_[o] == 0.0)
             continue;
-        total += weight_[o] * gradientnoise(seeds_[o], px * scale_[o] + offset_[3 * o], py * scale_[o] + offset_[3 * o + 1],
-                                            pz * scale_[o] + offset_[3 * o + 2]);
+        // The position rotated (a unit vector stays one), then scaled and offset.
+        double qx = px, qy = py, qz = pz;
+        if (!rotation_.empty())
+        {
+            const double* m = &rotation_[9 * o];
+            qx = m[0] * px + m[1] * py + m[2] * pz;
+            qy = m[3] * px + m[4] * py + m[5] * pz;
+            qz = m[6] * px + m[7] * py + m[8] * pz;
+        }
+        const double x = qx * scale_[o] + offset_[3 * o], y = qy * scale_[o] + offset_[3 * o + 1],
+                     z = qz * scale_[o] + offset_[3 * o + 2];
+        total += weight_[o] * (kernel_ == NoiseKernel::opensimplex2s ? opensimplex2s(seeds_[o], x, y, z)
+                                                                     : gradientnoise(seeds_[o], x, y, z));
     }
     return total;
 }

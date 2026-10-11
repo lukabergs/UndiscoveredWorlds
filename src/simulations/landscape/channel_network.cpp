@@ -647,7 +647,8 @@ FinePosition channeljunction(const RegionalWindow& window, const ChannelParamete
 // corner cells.
 FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork& network,
                                const ChannelParameters& parameters, float sealevel,
-                               const std::vector<float>& start_m, const std::vector<uint8_t>& finesea)
+                               const std::vector<float>& start_m, const std::vector<uint8_t>& finesea,
+                               const std::vector<float>& relief_m)
 {
     const int k = window.scale;
     const int width = network.width;
@@ -669,6 +670,10 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
         !(parameters.meanderroughnesspersistence >= 0.0) || !(parameters.meanderroughnesspersistence <= 1.0))
         throw std::invalid_argument("rasterisechannels: meanderroughness must be finite and non-negative, "
                                     "meanderroughnesspersistence in 0 .. 1");
+    if (!(parameters.meanderroughnessreliefgain >= 0.0) || !std::isfinite(parameters.meanderroughnessreliefgain) ||
+        !(parameters.meanderroughnessrelief_m > 0.0) || !std::isfinite(parameters.meanderroughnessrelief_m))
+        throw std::invalid_argument("rasterisechannels: meanderroughnessreliefgain must be finite and non-negative, "
+                                    "meanderroughnessrelief_m positive and finite");
     if (!(parameters.junctionjitter >= 0.0) || !std::isfinite(parameters.junctionjitter) ||
         !(parameters.edgemargin >= 0.0) || !(parameters.edgemargin <= 0.5))
         throw std::invalid_argument("rasterisechannels: junctionjitter must be finite and non-negative, edgemargin "
@@ -689,6 +694,19 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
     requiresize(network.filledelevation_m.size(), cells, "filledelevation_m");
     requiresize(network.januaryflow.size(), cells, "januaryflow");
     requiresize(network.julyflow.size(), cells, "julyflow");
+    if (!relief_m.empty() && relief_m.size() != cells)
+        throw std::invalid_argument("rasterisechannels: the relief must be empty or hold the world grid's cells");
+    // S3.14: the roughness of a piece's legs, meanderroughness x (1 + meanderroughnessreliefgain x
+    // min(1, R / meanderroughnessrelief_m)), R the local relief of its upstream global cell (0 without
+    // relief_m, for a non-finite value or below 0); roughness 0 stays 0, gain 0 the plain roughness.
+    auto roughnessof = [&](std::size_t upstream) {
+        if (parameters.meanderroughness == 0.0 || relief_m.empty())
+            return parameters.meanderroughness;
+        const double relief = relief_m[upstream];
+        const double share =
+            std::isfinite(relief) && relief > 0.0 ? std::min(1.0, relief / parameters.meanderroughnessrelief_m) : 0.0;
+        return parameters.meanderroughness * (1.0 + parameters.meanderroughnessreliefgain * share);
+    };
 
     const int domainwidth = window.domaincolumns * k;
     const int domainheight = window.domainrows * k;
@@ -883,7 +901,7 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                                                                static_cast<std::int64_t>(receiver), 0);
             const std::uint64_t inhash = deterministiccombine(parameters.seed, legsalt, static_cast<std::int64_t>(upstream),
                                                               static_cast<std::int64_t>(receiver), 1);
-            const double roughness = parameters.meanderroughness;
+            const double roughness = roughnessof(upstream);
             const double persistence = parameters.meanderroughnesspersistence;
             std::vector<FineCell> path = legpath(k, from.junction, ends.exit, displacement, outhash, from.tangent, flow,
                                                  roughness, persistence);
@@ -1010,7 +1028,7 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                         blockindex(std::clamp(centre.y + radius * std::sin(angle), margin, k - margin), k) };
                     std::vector<FineCell> path =
                         legpath(k, start, geometry.junction, displacement, deterministicmix64(radiushash), Point{},
-                                Point{}, parameters.meanderroughness, parameters.meanderroughnesspersistence);
+                                Point{}, roughnessof(cell), parameters.meanderroughnesspersistence);
                     if (path.size() < 2)
                         continue;
                     for (FineCell& fine : path)
@@ -1106,6 +1124,26 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
         for (std::size_t m = piece.suffix; m < piece.slot.size(); m++)
             painted[piece.slot[m]] = 1;
     }
+    // S3.14, the painted network connected (header): a painted cell's chain runs on along its owner's
+    // path. Where the owner's next cell is not painted (a suffix ran over a cell that a third piece
+    // owns past that piece's own prefix end), the chain is followed over the unpainted cells, each
+    // painted, until it meets a painted cell or reaches a piece's last cell. The directions hold no
+    // loop, so every walk ends; cells are only added, so a painting without dry tails is unchanged,
+    // and the result is the set of cells the painted cells' chains reach, whatever the order.
+    for (std::size_t slot = 0; slot < slots; slot++)
+    {
+        if (painted[slot] == 0)
+            continue;
+        for (std::size_t at = slot;;)
+        {
+            const Piece& piece = pieces[static_cast<std::size_t>(owner[at])];
+            const std::size_t m = ownerat[at];
+            if (m + 1 >= piece.slot.size() || painted[piece.slot[m + 1]] != 0)
+                break;
+            at = piece.slot[m + 1];
+            painted[at] = 1;
+        }
+    }
     for (std::size_t index = 0; index < finecells; index++)
     {
         if (owner[index] < 0 || painted[index] == 0)
@@ -1176,9 +1214,44 @@ void channelslevel(const LevelContext& context, LevelState& state)
     // S3.9: with bounded catchments in the refinement loop every land sink's junction is pinned.
     ChannelParameters channelparameters = context.parameters.channels;
     channelparameters.pinsinks = context.refinement != nullptr && context.parameters.relief.catchmentreach > 0 ? 1 : 0;
+    // S3.14: the legs' roughness grows with the relief the regional noise amplitude reads
+    // (regional_surface.cpp's noiserelief: the world's relief amplitude with noise_relief_field 1,
+    // else the local relief, the largest absolute difference between a global cell's elevation and
+    // its 8 neighbours', columns wrapped, no rows beyond the poles), not needed without roughness or gain.
+    std::vector<float> relief;
+    if (channelparameters.meanderroughness > 0.0 && channelparameters.meanderroughnessreliefgain > 0.0)
+    {
+        if (context.parameters.noiserelieffield == 1 && !inputs.reliefamplitude_m.empty())
+            relief = inputs.reliefamplitude_m;
+        else
+        {
+            const int width = inputs.width, height = inputs.height;
+            const std::vector<float>& elevation = inputs.elevation_m;
+            relief.assign(elevation.size(), 0.0f);
+            for (int j = 0; j < height; j++)
+                for (int i = 0; i < width; i++)
+                {
+                    const float own = elevation[static_cast<std::size_t>(j) * width + i];
+                    float largest = 0.0f;
+                    for (int dj = -1; dj <= 1; dj++)
+                    {
+                        const int row = j + dj;
+                        if (row < 0 || row >= height)
+                            continue;
+                        for (int di = -1; di <= 1; di++)
+                        {
+                            const int column = ((i + di) % width + width) % width;
+                            largest = std::max(largest,
+                                               std::fabs(elevation[static_cast<std::size_t>(row) * width + column] - own));
+                        }
+                    }
+                    relief[static_cast<std::size_t>(j) * width + i] = largest;
+                }
+        }
+    }
     state.channels = rasterisechannels(context.window, incised ? state.incisednetwork : inputs.network,
                                        channelparameters, inputs.sealevel,
-                                       incised ? state.bedsurface_m : surface, sea);
+                                       incised ? state.bedsurface_m : surface, sea, relief);
     tributarieslevel(context, state);
     const FineChannels& channels = state.channels;
     for (std::size_t cell = 0; cell < count; cell++)

@@ -26,12 +26,39 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0051`: straight_max_cells 6 (runs of 5 and 6 stay)
 - `erosion-0054`: trough_width_km 10 or 20 at the 40 km cap (alike; the land's mean falls 63 m on B)
 - `erosion-0055`: the candidate's band test on the solved fine elevation (not seam-safe in the innermost halo ring; the review of E5.0)
+- `erosion-0058`: exporting accumulated_strain or deformation_rate as shortening: both are unitless 0..1 signals on the global grid with no direction and no advection
+- `erosion-0058`: carrying the angle through the remap: angles do not average; carry the tensor components
+- `erosion-0060`: reusing the map kind 'reference' for Earth windows: it is the climate validation's and its caption says 'grid of <run>'
+- `erosion-0061`: a halo of a constant number of parent cells at every level: the channels and the solve reach 2 global cells whatever the level until S3.1
+- `erosion-0066`: sea as below 0 m, or as below 0 m connected to the window's edge: the Caspian is below 0 m and crosses window edges
+- `erosion-0068`: weights of 0 on pinned cells with the remainder on the land children: one dry child in a lake parent took 16 lambda (-5.8 km holes)
+- `erosion-0068`: assigning a detail to the finest level run (detaillevel clamped to L): levels then depend on L and a k = 16 run averaged to k = 4 differs from a k = 4 run
+- `erosion-0068`: the valley band on floor plus side reach: the reach is in level cells, so every valley with sides fell outside [1, factor) at every level
+- `erosion-0071`: factor 2: with 4 children per parent the bounds exhaust (237 forced parents at level 4 on C) and steps reach 21.5 km
+- `erosion-0072`: the projection's per-parent lift without a smooth correction before it: the solve's per-parent lowering of kilometres prints the parent grid
+- `erosion-0073`: a hard clamp of children of land parents to the sea level: their parents (coastal plains about 2 m above the sea) cannot give the volume back, so it makes flats and walls
+- `erosion-0073`: unlimited room down for land below the sea: pits to 3.3 km
+- `erosion-0075`: treating the level-2 pits as the prolongation's undershoot: the bracketing parents bound them far above the pits
+- `erosion-0076`: de-lifting pinned beds (all, or those below the filled cap): the forms-off lambda doubles and level-3 pits pass 150 m
+- `erosion-0076`: the C2 B-spline smoothing basis: borders print (step max 481 m)
+- `erosion-0077`: a strict rim cap: 46 to 149 dry cells below a lake on C16 L2
+- `erosion-0077`: letting the water retreat behind a capped rim: 39 percent of C16's lakes drained
+- `erosion-0078`: a valley reach of 10 or 20 km: stepped double lines at the reach's edge
+- `erosion-0079`: a tributary bed rising to the surface's running minimum along the whole path: border steps to 1.8 km at A64 level 3
+- `erosion-0080`: a halo that lets a global-cell reach shrink with the level (levelhalo before S3.8)
+- `erosion-0081`: one multi-seed Priority-Flood with a reach predicate as the catchment labelling: a race whose labels flip along corridors of any length
+- `erosion-0081`: labelling by (filled level, hashed seed key) over local floods: up to 13 percent of cells unreached
+- `erosion-0082`: transit edge points kept off the shared corner: the peaks rise (C16 6.6 to 8.6)
+- `erosion-0082`: an unqualified transit block: trenches, levees and dams (48 m steps, straight lake arms)
+- `erosion-0084`: a confluence rule that recomputes ownership to a fixed point (no fixed point in a ring of three crossings; dependency depth 3 to 10 global cells on B at k 16)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
+- `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
 - `world-0054`: converting the regional generator to float reads by pattern without launching the desktop application
 - `world-0086`: Creating a junction from a worktree to the main tree's refs/ (or any data directory).
+- `world-0087`: the valley-spacing law with the erosion's grid-scale D and K: spacings of hundreds to millions of km
 
 ## climate
 
@@ -115,6 +142,35 @@ Lessons:
 | `erosion-0055` | 2026-10-09 | pass | keep | erosion plan, step E5.2: cirques on the regional map |
 | `erosion-0056` | 2026-10-09 | pass | keep | erosion plan, step E5.3: present-day ice above the equilibrium line on the regional map |
 | `erosion-0057` | 2026-10-09 | pending user review | keep | erosion plan, step E5.4: the Phase E5 close (regional runs 13 to 15 on erosion run 9, against runs 9 to 11) |
+| `erosion-0058` | 2026-10-10 | survey complete | S5.1's row and its user question are written with this design; the question is asked in section 7 at S0.5. | multiscale plan, step S0.3: survey of the tectonics engine's strain (for S5.1's shortening export) |
+| `erosion-0059` | 2026-10-10 | survey complete | S0.4 briefed with the projection placed after the cirques and before water and climate, unweighted parent means (as correctblockmeans), and the manifest fields optional in the window block. | multiscale plan, step S0.1: survey of the regional pass's data flow |
+| `erosion-0060` | 2026-10-10 | survey complete | S1.2 adds an optional hillshade layer to the regional terrain map and the Earth window alike (recorded in section 6), and Earth windows get their own map kind 'earth' and column, never the climate validation's 'reference'. | multiscale plan, step S0.2: survey of the evaluation renderers and the ETOPO 2022 15-arc-second tiles |
+| `erosion-0061` | 2026-10-10 | contracts in place | LevelStep (not LevelDetail: projection and water are steps, not details); projection_weight_channel and detail_cells are floats; level 0 of a halo chain has halo 0 (the global fields are given); the halo of level L is target.halo + 2 (factor^(L-1) - 1) parent cells, so level 1 is today's domain; detail_cells 2 (a feature resolved by two cells of its level), tunable at S2.6 or S3.0; resample at source level 0 with a whole n >= 2 is reported as resampled although its pixels are exact means of whole global cells (safe; intended). | multiscale plan, step S0.4: contracts of the refinement hierarchy (refinement_grid, refinement_projection, refinement_levels, landscape.refinement, test files, optional manifest fields) |
+| `erosion-0062` | 2026-10-10 | phase closed | S1.1 and S1.2 in the main tree; S2.1 and S2.2 in worktrees; Earth windows get their own map kind 'earth' and a new 'relief' map with a hillshade beside the unchanged 'terrain'; S5.1 route (a), API and world fields like rock_uplift_rate, recommended to the user. | multiscale plan, step S0.5: Phase S0 close (survey findings into the plan, S1 and S2 rows refined, the S5.1 question) |
+| `erosion-0063` | 2026-10-10 | grid implemented | levelwindow also refuses a domain extent above INT_MAX and requires 1 <= columns <= W and rows >= 1 (the worker's addition beyond the contract, so int fields cannot overflow silently). | multiscale plan, step S2.1: refinement_grid implemented and tested (level windows, outward snapping, the halo chain and its report, regionalwindowof) |
+| `erosion-0064` | 2026-10-10 | projection implemented | The orchestrator added comment-only clarifications to refinement_projection.hpp from the worker's open questions (border pairs use the weights as applied, pixelcells is n as computed, the two added resample exceptions). | multiscale plan, step S2.2: refinement_projection implemented and tested (weights, the exact projection with its report, the parent-mean error, the resample) |
+| `erosion-0065` | 2026-10-10 | reference data in place | The three extra catalogue windows stay (Himalaya in Nepal, the Alps, the Basin and Range). | multiscale plan, step S1.1: the ETOPO 2022 tile module, the tile downloader and the first Earth-window catalogue |
+| `erosion-0066` | 2026-10-10 | Earth windows on the pages | The hillshade's vertical exaggeration is 10 (300 m of relief over a 10 km pixel gives about 15 percent brightness); slopes steeper than 1 in 10 saturate, so finer pixels may want a smaller value (a profile option). Sea in an Earth window is the world ocean, not 'below 0 m'. | multiscale plan, step S1.2: Earth reference windows beside the regional maps, and the hillshaded relief map |
+| `erosion-0067` | 2026-10-10 | phase closed | Entries: A mariana_arc (nearest catalogue latitude), B norwegian_fjords (glaciated land), C zagros (the plan's choice). | multiscale plan, step S1.3: Phase S1 close (regional runs 13 to 15 evaluated again with the relief map and Earth windows) |
+| `erosion-0068` | 2026-10-10 | hierarchy in place | The parent-mean bound is half a float step at the kept box's largest |elevation| (1.95e-3 m on run 9, whose sea level is 31,043 m above datum), not 1e-3 m. The valley band uses max(floor half-width, reach) for its lower end and the floor half-width for its upper end. A ground reach for the valley sides, a limited prolongation in extreme relief and the solve per level against its parent are S3.2/S3.3 items. | multiscale plan, step S2.3: the loop over refinement levels (runrefinement), the per-child projection bounds, detail levels by size band; the regional pass calls the loop for powers of the factor |
+| `erosion-0069` | 2026-10-10 | resample in place | Lake surface of a pixel is the weighted mean over its wet cells (zeros would put the surface below the bed); M at or above the global cell size is refused rather than served from level 0. | multiscale plan, step S2.4: world_pipeline region --metres-per-pixel M (the hierarchy to the resample's source level, box-averaged to M) |
+| `erosion-0070` | 2026-10-10 | checks in place | level-consistency's allowance is the sum of the finer run's level bounds over the levels between (the coarser run's own level equals the finer's bit for bit, asserted by S2.3's Consistency test). | multiscale plan, step S2.5: evaluation checks parent-mean-exact, level-consistency, resolution-invariance; the per-level table on the run page; pixel-grid bundles in the Python readers |
+| `erosion-0071` | 2026-10-10 | contract met; visible parent blocks | factor 4 (recommendation and orchestrator's choice; the user's verdict on the factor is requested in section 7 with this evidence). A step S2.7 is added before Phase S3: a smooth correction before the exact projection (design agent launched), and the k 64 defects (sea holes along channels, square lake edge, staircases). | multiscale plan, step S2.6: Phase S2 close (registered judging runs at k 4, 16 and 64, factors 4 and 2) |
+| `erosion-0072` | 2026-10-10 | blocks removed; ripple left | smoothparentmeans's signature and the four bundle keys accepted; 'forced 0' waived to S2.8; registration moved to S2.8. | multiscale plan, step S2.7: smooth before exact (smoothparentmeans before the projection) |
+| `erosion-0073` | 2026-10-10 | phase S2 closed | No unlimited sinking room for land below sea; the counted forced fallback stays (forced moves at most 10 m, located); the straight sea-lake contact and the rim raises go to S3.3. | multiscale plan, step S2.8: sea and lake masks inherited from the parent and refined within one parent cell; the judging runs of S2.7 and S2.8 (Phase S2's close) |
+| `erosion-0074` | 2026-10-10 | contracts in place | Keys under the regional. prefix; the targets apply from level 2; lakeedgealigned over the whole kept box is S3.4's measure; Génevaux et al. 2013 use no Horton ratios (the plan's section 2 corrected in section 6). | multiscale plan, step S3.0: Phase S3's contracts (the per-step hook interface of the refinement loop, new headers, keys, diagnostics), after the survey of the valley-spacing law and the re-plan of Phase S3 |
+| `erosion-0075` | 2026-10-10 | clamp available, off; targets moved to S3.2 | refinement.prolongation_limit 0 until S3.2's measurement; S3.1's pit, rim-raise and forced targets move to S3.2. | multiscale plan, step S3.1: limited prolongation (each child clamped to its 2 x 2 bracketing parents), off by default |
+| `erosion-0076` | 2026-10-10 | pits removed; stripes are the forms' | S3.2's lambda and smoothing-move targets apply with the forms off until S3.5; the rim raise is S3.4's; prolongation_limit 1 (a reversible default: shallower pits, slightly larger rim raise); smooth_basis 0 (the B-spline prints borders); the lift taken off unpinned cells only (the bed double count stays: re-rasterising the beds on the de-lifted surface is a later item). | multiscale plan, step S3.2: the solve against its parent, channel cells at their cell mean, the projection's bed floor |
+| `erosion-0077` | 2026-10-10 | lake edges and rims improved | The overflow rule kept (join the water, else the old raise); the rim-raise target re-judged at S3.7; regional.noise_relief_field stays 0 (S3.6's relief amplitude is not on localrelief's scale). | multiscale plan, step S3.4: noise amplitude per level from the relief field, the lake-sea contact at a sill, the rim raise capped by the level's noise band |
+| `erosion-0078` | 2026-10-10 | stripes and terraces gone | regional.valley_reach_km 40; S3.2's lambda and smoothing-move targets dropped as acceptance criteria (not reachable from the forms' files; forms off already misses them). | multiscale plan, step S3.5: valleys, troughs and cirques by their width on the ground per level |
+| `erosion-0079` | 2026-10-10 | tributaries available, off | regional.tributary_enabled stays 0 until S3.7; the inherited bed min(parent link bed, running minimum) kept. | multiscale plan, step S3.3: tributaries grown per level from the level's channels (off by default) |
+| `erosion-0080` | 2026-10-10 | level-3 overlaps restored; seamlessness by test, not by bound | The solve's margin of 2 global cells kept at every level (by trial); a design question for the solve's catchment at the ring before S4.1. | multiscale plan, step S3.8: the level-3 overlap defect (the halo's global-cell margin for the solve), the forms' reach counted, a ring-basin diagnostic |
+| `erosion-0081` | 2026-10-10 | bounded solve available, off; seamless by test | regional.catchment_reach_global_cells 0 (today's solve) for the judging runs; S4.0 added for a connected local labelling before the tiles; hashed tie keys kept. | multiscale plan, step S3.9: a bounded-catchment solve (catchments labelled by local floods, capped at the outlet's global cell), off by default |
+| `erosion-0082` | 2026-10-10 | lattice removed | jitter_edge_margin 0, jitter_junction 0.5, diagonal_transit 1 with tolerance 100 m; the remaining peaks on A and C recorded, not chased. | multiscale plan, step S3.10: channels without a lattice (diagonal links through a qualifying transit block, anchors spread over a full cell period) |
+| `erosion-0083` | 2026-10-10 | phase S3 closed | Tributaries off for the judging runs (run 40 for the user's comparison); the judging runs 33 to 40 replace 26 to 32. | multiscale plan, step S3.7: Phase S3 close (the anisotropy check, the striping traced and removed, tributaries decided, judging runs 33 to 40) |
+| `erosion-0084` | 2026-10-11 | step done; the user's verdict on run 41 pending | Roughness 0.05 and persistence 0.5 by default until the user's verdict; the island question (S3.13) and the tributaries' default stay open with the user. | multiscale plan, step S3.11 (added from the user's look at run 40's discharge map): confluences of the pinned channel pieces, hashed roughness on the legs, the discharge map masked under lakes, a 1-degree subgrid on the regional graticule |
+| `erosion-0085` | 2026-10-11 | step done; box 1 accepted at 1.45 with its cause; the user's verdict on run 42 pending | S4.0's catchment fill keeps the flooded cells, labels and corner rule, the low edges at the flat's filled level and the order rebuilt from the final receivers. | multiscale plan, step S3.12 (added from the user's second look, 2026-10-11): the regional solve's pits and flats resolved as the global routing's (Barnes et al. 2014) with metric distances and hashed ties |
+| `erosion-0086` | 2026-10-11 | step done | keep | multiscale plan, step S3.14 (added from the user's verdict of 2026-10-11): the painted channel network closed (no dry tails); the leg roughness 0.08 with a relief term |
 
 Lessons:
 
@@ -212,6 +268,40 @@ Lessons:
 - `erosion-0057`: When the implementing model's session limit stops parallel workers whose code and tests are complete, their worktree diffs apply cleanly to the main tree when the contracts gave each its own files: the lead finishes the measurements and commits the steps by their files, and the reviews run on those commits.
 - `erosion-0057`: A sweep variable that saturates at a cap on the judging world (the ice catchments here) is reported with the measured distribution, not inferred from the sweep's shape; the reviews caught an inferred number twice this phase.
 - `erosion-0057`: The registered maps cannot show forms a few hundred metres deep on a 10 km elevation palette: a relief composite (hillshade or on-minus-off) belongs in the evaluation tooling before the next form-cutting step.
+- `erosion-0058`: rock_uplift_rate reaches the world outside the tectonic contract's Snapshot and its snapshot files; a new engine field has two possible routes and the choice is the user's contract decision.
+- `erosion-0059`: The existing block-mean correction never sees the solve: a correction measured on the start surface cannot show the regional pass's real block-mean drop.
+- `erosion-0060`: Check that a renderer feature a plan names exists before planning a step on it (the hillshade).
+- `erosion-0061`: The plan's own worked formula (section 2's border step) was wrong by a factor of 20 at factor 4; a contracts review that derives the plan's numbers from the operator catches what a parity check cannot.
+- `erosion-0061`: A reviewer cites only logged evidence: save the build and ctest output to files the reviewer can read (out/scratch/multiscale/).
+- `erosion-0062`: A plan step that assumes a worktree for a step needing refs/ cannot run there: Python steps that read refs/ run in the main tree on disjoint files.
+- `erosion-0063`: A contract change sent to a running worker (the design answer's halo) landed cleanly because the worker had not yet written the tests that assert the old values; send contract changes as soon as they are decided.
+- `erosion-0064`: An isolated worktree agent cannot edit the main tree: review fixes come back in its worktree and are copied over (here safe because the main tree's files were the worker's own earlier versions).
+- `erosion-0064`: Numbers printed by passing tests reach a log only with ctest -V: ask for the verbose log when an entry will cite them.
+- `erosion-0065`: ETOPO 2022's surface carries the bathymetry of some large lakes (the Caspian, Superior) and only the surface of others: below 0 m is not sea; an Earth window's sea is below 0 m and open to the window's edge.
+- `erosion-0066`: Read the rendered image before accepting a caption's claim: the Caspian stayed sea after a fix whose caption said lake beds were land.
+- `erosion-0067`: A map's note longer than the frame is cut without warning (map_rendering.frame does not wrap): keep legends short or wrap them; left as an open item for the evaluation scripts.
+- `erosion-0068`: Measure a new operator on the judging world before trusting synthetic tests: the first version's weights passed every test on the synthetic world and dug 7.5 km holes on run 9.
+- `erosion-0068`: A rule converting a parameter to a level must check its unit first: the valley reach is in level cells, not on the ground.
+- `erosion-0069`: A bundle on a new grid needs every Python reader checked in the same phase: the window block's scale and fine offsets stayed the source level's while the fields moved to the pixel grid.
+- `erosion-0071`: Exactness checks pass on a map that prints its grid: read the relief image of a judging run before calling a phase closed.
+- `erosion-0072`: A smoothing that changes a parent's values changes its children's masks at the next level: a class-respecting operator still needs masks inherited from the parent.
+- `erosion-0073`: A projection's feasibility argument assumes the parent is on the right side of the sea level; a land parent below the sea breaks it at every level below.
+- `erosion-0074`: A contracts step must reserve every field two parallel workers will read or fill (here the relief amplitude, read by S3.4 and filled by S3.6), or the shared struct becomes their conflict.
+- `erosion-0075`: Locate a defect's cell and read its parent before designing a fix for it: the S2.8 pit's parent was a channel cell, which named the cause.
+- `erosion-0076`: A fix that is right in principle (the bed double count) can be wrong in effect on the judging world: compare variants on the measured targets before keeping one.
+- `erosion-0077`: A rule added to a step must carry the step's existing guards (here the start-surface test that keeps the projection feasible): the review found the new branch skipping it.
+- `erosion-0078`: A distance in index space at the north-south spacing is not a distance on the ground away from the equator: convert east-west offsets by the row's spacing.
+- `erosion-0079`: An overlap test at a new depth (3 levels) found a defect the 2-level tests could not: every guarantee needs a test at the deepest level the runs use.
+- `erosion-0080`: Measure the reach a step actually has (here the solve's sub-basins to the domain ring) before writing it into a halo formula: the declared 2 global cells was not a bound.
+- `erosion-0081`: A design's 'by construction' claim needs its reviewer to look for a counterexample before the code is written: the race was visible in the design text.
+- `erosion-0082`: A new geometric rule needs the same elevation guards as the rule it replaces (here the transit block's filled elevation between the link's ends).
+- `erosion-0083`: A user's visual verdict ('a SW-NE striping') named a real artefact whose cause was three steps away (the channel lattice): an azimuth-independent measure turned the look into a number that a stage trace could follow.
+- `erosion-0084`: A rule stated as 'iterate until nothing moves' needs a locality argument before a worker builds it: the fixed point can fail to exist, and when it exists its reach is the dependency depth, not one cell.
+- `erosion-0084`: The seam bound of a unit must be re-derived whenever a decision reads another piece's bed: the start surface enters through the beds one global cell further than the geometry suggests.
+- `erosion-0085`: A breadth-first sweep in a fixed neighbour order prints its spokes on every flat; the global routing had already learned this (resolveflatcells) and the regional solve had not inherited it.
+- `erosion-0085`: Barnes' 2:1 weights and an 8-neighbour Dijkstra still favour diagonals in deep closed basins: a depression is a lake question, not a routing one.
+- `erosion-0086`: Attribute a visible gap by tracing the chain that should be there, not by the nearest counter: the dry tail was real but elsewhere.
+- `erosion-0086`: A rule that reads one more piece per hop than the rule it extends changes the seam bound; measure it in the step and record it as measured, not derived.
 
 ## tectonics
 
@@ -227,6 +317,7 @@ Lessons:
 | `tectonics-0008` | 2026-10-07 | pending user review | keep | erosion plan, step D3: the Phase D close (tectonics run 78 with implicit engine rivers, erosion run 7 with D0 and D1) and the close documents |
 | `tectonics-0009` | 2026-10-07 | changed as intended | keep | erosion plan, step H1: implicit engine rivers become the tectonics baseline (the user's decision after reviewing run 78) |
 | `tectonics-0010` | 2026-10-07 | changed as intended; measurement only in the engine | keep | erosion plan, step H2: the engine's rock uplift rate in the plate's frame |
+| `tectonics-0011` | 2026-10-10 | fields exported | Route (a) as approved; cumulative (no decay); the tensor turns with the local spin; new ocean floor starts at zero strain. | multiscale plan, step S5.1: the engine accumulates a strain tensor per cell in the plate's frame and exports the cumulative shortening and its direction into the world fields geosphere.shortening and geosphere.shortening_direction (the user approved route (a) on 2026-10-10) |
 
 Lessons:
 
@@ -246,6 +337,7 @@ Lessons:
 - `tectonics-0008`: `uw.py <module> run` without arguments uses the profile's registered settings, which for erosion are the minimal configuration: a judging run repeats the previous judging run's command from its run.json.
 - `tectonics-0008`: A legacy stage whose writes no measured run ever saw can start writing when an upstream change creates the cells it acts on (here new land near the poles): the close's tracked run at the judging size finds it, a minimal run never would.
 - `tectonics-0010`: Sampling cell averages bilinearly is not the same transport as a conservative remap with limited parabolic reconstruction: a 'Lagrangian' measurement must move its fields with the very scheme that moves the material, or curvature turns into spurious uplift.
+- `tectonics-0011`: A carried quantity without decay keeps every error forever: test the source of new material (here new ocean floor) explicitly.
 
 ## world
 
@@ -337,6 +429,7 @@ Lessons:
 | `world-0084` | 2026-10-06 | equivalent | keep | erosion plan, step A3: catalogue fields, stages, the eroded-world recipe and the erosion evaluation module |
 | `world-0085` | 2026-10-06 | kernel tests pass | keep | erosion plan, step A2: the stream power kernel with its tests |
 | `world-0086` | 2026-10-07 | recovered except one hand-written guide | keep | incident during erosion plan Phase D: refs/processed deleted through a worktree junction, regenerated from refs/source; backup, guard hook and reference palettes |
+| `world-0087` | 2026-10-10 | fields added | Valley spacing calibrated to Perron et al. 2009's Napa Valley D/K and scaled per cell by erodibility and runoff (orchestrator's decision; the worker had marked it the user's); U = the erosion rate (steady state); procedural-world only; the parameters in terrain.json (S3.0's rules barred landscape.json in group d). | multiscale plan, step S3.6: the global grid carries subgrid statistics (diagnoser terrain.subgrid_statistics writing geosphere.relief_amplitude and geosphere.valley_spacing; the regional adapter passes them to the refinement) |
 
 Lessons:
 
@@ -475,3 +568,4 @@ Lessons:
 - `world-0085`: Float outputs resolve about 6e-8 relative: a plan tolerance of 1e-9 can only be checked on double accumulators.
 - `world-0086`: A recursive delete follows a junction inside its target: never leave a link to irreplaceable data inside a directory that will be removed, check that a link removal succeeded (Test-Path) before the delete, and keep a copy of every untracked data directory.
 - `world-0086`: When data is regenerated, look for any hash a run recorded (run.json inputs): one surviving hash turns 'probably the same' into 'identical'.
+- `world-0087`: A grid-scale closure's coefficients (here the erosion's D and K) are not physical constants: a sub-grid law needs its own calibration.

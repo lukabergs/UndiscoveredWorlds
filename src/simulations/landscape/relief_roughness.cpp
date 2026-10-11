@@ -11,8 +11,8 @@ namespace landscape
 {
 namespace
 {
-// The octave sum is divided by its own standard deviation (octavedeviation,
-// spherical_noise.hpp) and by `peakdeviations`, so that amplitude_m is the value
+// The octave sum is divided by its own standard deviation (the kernel's one-octave
+// deviation, spherical_noise.hpp) and by `peakdeviations`, so that amplitude_m is the value
 // reached at that many standard deviations: with every octave resolved, the
 // largest magnitude on a grid of 64 to 1024 columns was 0.9 to 1.2 x amplitude_m
 // (C3 measurement, before the band limit below).
@@ -51,9 +51,11 @@ void addreliefroughness(const SphereMetric& metric, const ReliefRoughness& rough
     const FractalNoiseField field(noise);
     if (field.resolved() == 0)
         return;
-    // The operations and their order of step C3 (products are not associative).
+    // The operations and their order of step C3 (products are not associative), with
+    // the kernel's own one-octave deviation (octavedeviation for Perlin, so
+    // bit-identical there; multi-scale plan S3.16).
     const double factor =
-        roughness.amplitude_m / (peakdeviations * octavedeviation * std::sqrt(field.squaredweights()));
+        roughness.amplitude_m / (peakdeviations * field.deviation() * std::sqrt(field.squaredweights()));
 
     const double pi = 3.14159265358979323846;
     const double floor = static_cast<double>(sealevel) + 1.0;

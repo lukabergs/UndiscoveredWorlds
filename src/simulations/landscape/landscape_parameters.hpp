@@ -97,6 +97,12 @@ inline int octaves = 6;
 inline float persistence = 0.6f;
 }
 
+namespace noise
+{
+inline int kernel = 0;
+inline int rotateOctaves = 0;
+}
+
 namespace routing
 {
 inline bool randomised = true;
@@ -145,8 +151,10 @@ inline int sharePasses = 8;
 inline int signedPasses = 12;
 inline float meanderDischargeExponent = 0.0f;
 inline float meanderReferenceM3s = 1000.0f;
-inline float meanderRoughness = 0.05f;
+inline float meanderRoughness = 0.08f;
 inline float meanderRoughnessPersistence = 0.5f;
+inline float meanderRoughnessReliefGain = 1.0f;
+inline float meanderRoughnessReliefM = 500.0f;
 inline float jitterJunction = 0.5f;
 inline float jitterEdgeMargin = 0.0f;
 inline int diagonalTransit = 1;
@@ -259,6 +267,8 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.roughness.wavelength_km", &roughness::wavelengthKm },
         { "landscape.roughness.octaves", &roughness::octaves },
         { "landscape.roughness.persistence", &roughness::persistence },
+        { "landscape.noise.kernel", &noise::kernel },
+        { "landscape.noise.rotate_octaves", &noise::rotateOctaves },
         { "landscape.routing.randomised", &routing::randomised },
         { "landscape.routing.resolve_flats", &routing::resolveFlats },
         { "landscape.routing.ocean_minimum_area_fraction", &routing::oceanMinimumAreaFraction },
@@ -299,6 +309,8 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.meander_reference_m3s", &regional::meanderReferenceM3s },
         { "landscape.regional.meander_roughness", &regional::meanderRoughness },
         { "landscape.regional.meander_roughness_persistence", &regional::meanderRoughnessPersistence },
+        { "landscape.regional.meander_roughness_relief_gain", &regional::meanderRoughnessReliefGain },
+        { "landscape.regional.meander_roughness_relief_m", &regional::meanderRoughnessReliefM },
         { "landscape.regional.jitter_junction", &regional::jitterJunction },
         { "landscape.regional.jitter_edge_margin", &regional::jitterEdgeMargin },
         { "landscape.regional.diagonal_transit", &regional::diagonalTransit },
