@@ -171,6 +171,7 @@ Lessons:
 | `erosion-0084` | 2026-10-11 | step done; the user's verdict on run 41 pending | Roughness 0.05 and persistence 0.5 by default until the user's verdict; the island question (S3.13) and the tributaries' default stay open with the user. | multiscale plan, step S3.11 (added from the user's look at run 40's discharge map): confluences of the pinned channel pieces, hashed roughness on the legs, the discharge map masked under lakes, a 1-degree subgrid on the regional graticule |
 | `erosion-0085` | 2026-10-11 | step done; box 1 accepted at 1.45 with its cause; the user's verdict on run 42 pending | S4.0's catchment fill keeps the flooded cells, labels and corner rule, the low edges at the flat's filled level and the order rebuilt from the final receivers. | multiscale plan, step S3.12 (added from the user's second look, 2026-10-11): the regional solve's pits and flats resolved as the global routing's (Barnes et al. 2014) with metric distances and hashed ties |
 | `erosion-0086` | 2026-10-11 | step done | keep | multiscale plan, step S3.14 (added from the user's verdict of 2026-10-11): the painted channel network closed (no dry tails); the leg roughness 0.08 with a relief term |
+| `erosion-0087` | 2026-10-11 | step done; judging pending | keep | multiscale plan, step S3.16 (added from the user's noise question, docs/architecture/noise-functions.md): the OpenSimplex2S 3D kernel behind landscape.noise.kernel, per-octave rotation behind landscape.noise.rotate_octaves, both off by default |
 
 Lessons:
 
@@ -302,6 +303,8 @@ Lessons:
 - `erosion-0085`: Barnes' 2:1 weights and an 8-neighbour Dijkstra still favour diagonals in deep closed basins: a depression is a lake question, not a routing one.
 - `erosion-0086`: Attribute a visible gap by tracing the chain that should be there, not by the nearest counter: the dry tail was real but elsewhere.
 - `erosion-0086`: A rule that reads one more piece per hop than the rule it extends changes the seam bound; measure it in the step and record it as measured, not derived.
+- `erosion-0087`: A worker without network access cannot read a reference: give it the constants in the brief, or read them yourself and check its port afterwards (done here: the normaliser to 1e-16, then the file).
+- `erosion-0087`: A generated-parameter key cannot be a string in this repository; a plan that names string values is wrong before the worker starts.
 
 ## tectonics
 
