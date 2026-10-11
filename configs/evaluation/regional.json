@@ -54,7 +54,8 @@
     {"name": "precipitation-july", "title": "Precipitation in July (mm/day: mm/month x 12/365.25)", "field": "atmosphere.precipitation_july", "scale": 0.0328542, "palette": "climate:rain"}
   ],
   "earth": {"catalogue": "configs/evaluation/earth-windows.json", "maps": ["terrain", "relief", "relief-ne", "relief-sw"],
-            "preferred": [{"pixels": "164,48,183,63", "entry": "himalaya_nepal", "why": "the user (2026-10-11): window A is read against the Himalaya and the southern Tibetan plateau, not the nearest-latitude arc"}],
+            "preferred": [{"pixels": "164,48,183,63", "entry": "himalaya_nepal", "why": "the user (2026-10-11): window A is read against the Himalaya and the southern Tibetan plateau, not the nearest-latitude arc"},
+                          {"pixels": "192,96,211,111", "entry": "zagros", "why": "multiscale plan S5.3 (2026-10-11): the fold-belt window of erosion run 10 (the largest fold-land block, 90-118 E, 45-66 S) is read against the Zagros; the Subandean belt (bolivian_orocline) on its comparison page"}],
             "note": "Earth reference windows (multiscale plan S1.2, scripts/evaluation/earth_windows.py): an ETOPO 2022 window at the map's pixel count and metres per pixel beside the terrain and relief maps, kind earth; --earth NAME on evaluate chooses the catalogue entry, otherwise the preferred entry for the window block (preferred: pixels c0,r0,c1,r1 as the run's --pixels, entry), otherwise the entry whose metres_per_pixel range holds the map's and whose centre latitude is nearest the window's."},
   "review_status": "Draft written by an agent on 2026-10-08 (erosion plan, step E2d). The user rewrites it; until then a verdict on it is a reading aid, not a judgement of the map.",
   "review": [
