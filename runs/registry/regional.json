@@ -385,6 +385,20 @@
       "run": "runs/regional/55",
       "date": "2026-10-11T20:03:32+00:00",
       "label": "multiscale S5.3 judging: the fold belt, k 64, erosion run 10, the Gabor form (fold_phasor 0)"
+    },
+    {
+      "id": 56,
+      "status": "complete",
+      "run": "runs/regional/56",
+      "date": "2026-10-11T22:29:42+00:00",
+      "label": "multiscale S5.3c judging: window A, k 64, erosion run 10 (the fold fabric as one phase field; against run 53)"
+    },
+    {
+      "id": 57,
+      "status": "complete",
+      "run": "runs/regional/57",
+      "date": "2026-10-11T22:31:08+00:00",
+      "label": "multiscale S5.3c judging: the fold belt (90-118 E, 45-66 S), k 64, erosion run 10 (the phase field; against run 54)"
     }
   ]
 }
