@@ -126,8 +126,10 @@ void ShorelineWarp::at(std::int64_t finecolumn, std::int64_t finerow, double& dx
         return;
     double px = 0.0, py = 0.0, pz = 0.0;
     unitvector(finelatitude(finerow, fineheight_), finelongitude(finecolumn, finewidth_), px, py, pz);
-    const double u = amplitude_ * x_->sum(px, py, pz) / octavedeviation;
-    const double v = amplitude_ * y_->sum(px, py, pz) / octavedeviation;
+    // Normalised by the field's own one-octave deviation (the Perlin or the OpenSimplex2S one), so the
+    // displacement's scale does not depend on landscape.noise.kernel (the noise inventory of 2026-10-11).
+    const double u = amplitude_ * x_->sum(px, py, pz) / x_->deviation();
+    const double v = amplitude_ * y_->sum(px, py, pz) / y_->deviation();
     const double length = std::sqrt(u * u + v * v);
     const double factor = length > 0.0 ? bound_ * std::tanh(length / bound_) / length : 1.0;
     dx = factor * u;

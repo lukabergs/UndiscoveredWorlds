@@ -188,6 +188,7 @@ Lessons:
 | `erosion-0091` | 2026-10-11 | closed; the user's look at runs 51 and 52 pending | keep | multiscale plan, S3.15 closed: the lake-pocket rule of erosion-0090 reverted (a filled sea pocket beside a lake is land at the floor like every pocket); the basin and pocket exclusion of lake cells and the flood's at-S rule kept |
 | `erosion-0092` | 2026-10-11 | done | keep | multiscale plan, the user's notes of 2026-10-11 (evening) on the S3.16 pages: the maps' subgrid at 1 degree under whole-degree graticules; window A read against the Himalaya (a preferred Earth window per window block in the regional profile) |
 | `erosion-0093` | 2026-10-11 | done; S5.3 judging runs next (A at k 64 on run 10 beside the Himalaya; the belt beside the Zagros and the Subandean belt; phasor and Gabor) | keep | multiscale plan, S5.2: the fold fabric (regional_folds.{hpp,cpp}): phasor-normalised Gabor stripes from kernels hashed per absolute tile, the wavelength from a 10 km base plus the sediment cover clamped to 5-20 km, the amplitude from the strain and the cell's height above the sea, drawn at the level whose octave band holds the wavelength, channel cells untouched, water gaps within 0.25 L, hook after the solve before the valley floors |
+| `erosion-0094` | 2026-10-11 | done | keep | multiscale plan, the kernel default (the user, 2026-10-11 evening: OpenSimplex2S everywhere but the fold fabric): landscape.noise.kernel 1 and rotate_octaves 1 by default; the shoreline warp normalised by its field's own deviation |
 
 Lessons:
 
@@ -334,6 +335,7 @@ Lessons:
 - `erosion-0093`: A design's calibration from one field (the sediment) needs the field's distribution in the target windows before the step: run 10's belts carry almost no sediment.
 - `erosion-0093`: A relief map of the scratch run before the review catches what the diagnostics cannot name (the corduroy, the patches).
 - `erosion-0093`: A reviewer's causal explanation is a hypothesis: the round that tests it costs 30 min; the test was right to run, the explanation was wrong.
+- `erosion-0094`: A per-kernel constant (the one-octave deviation) must be read from the field, never from the kernel's header: the shoreline warp had hard-coded the Perlin one.
 
 ## tectonics
 

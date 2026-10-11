@@ -109,7 +109,7 @@ TEST_F(Landscape, SphericalNoiseResolvesTheOctavesInsideItsBand)
         squared += std::pow(0.6, o) * std::pow(0.6, o);
     const landscape::FractalNoiseField banded(noise(100.0, 600.0));
     EXPECT_DOUBLE_EQ(banded.squaredweights(), squared);
-    EXPECT_DOUBLE_EQ(banded.normalisation(), landscape::octavedeviation * std::sqrt(squared));
+    EXPECT_DOUBLE_EQ(banded.normalisation(), banded.deviation() * std::sqrt(squared));
     EXPECT_EQ(banded.normalisation(), landscape::FractalNoiseField(noise(0.0, 0.0)).normalisation());
 
     // An octave outside the band contributes nothing: the banded sum equals the sum
@@ -266,11 +266,14 @@ TEST_F(Landscape, SphericalNoiseOctaveRotationIsOrthonormal)
     EXPECT_EQ(rotated.resolved(), plain.resolved());
     EXPECT_EQ(rotated.normalisation(), plain.normalisation());
     EXPECT_NE(valueat(rotated, 0.3, 2.0), valueat(plain, 0.3, 2.0));
-    // The defaults (landscape.noise.kernel 0, rotate_octaves 0) are Perlin without rotation.
+    // The defaults (landscape.noise.kernel 1, rotate_octaves 1 since 2026-10-11) are OpenSimplex2S with
+    // rotated octaves.
     const landscape::FractalNoiseField configured(noise(100.0, 600.0));
-    EXPECT_EQ(configured.normalisation(), plain.normalisation());
+    const landscape::FractalNoiseField chosen(noisewith(landscape::NoiseKernel::opensimplex2s, 1, 100.0, 600.0));
+    EXPECT_EQ(configured.normalisation(), chosen.normalisation());
+    EXPECT_NE(configured.normalisation(), plain.normalisation());
     for (int i = 0; i < 20; i++)
-        EXPECT_EQ(valueat(configured, -1.3 + 0.13 * i, 0.31 * i), valueat(plain, -1.3 + 0.13 * i, 0.31 * i));
+        EXPECT_EQ(valueat(configured, -1.3 + 0.13 * i, 0.31 * i), valueat(chosen, -1.3 + 0.13 * i, 0.31 * i));
 }
 
 // S3.16: a FractalNoise left at "configured" takes the kernel and the rotation from

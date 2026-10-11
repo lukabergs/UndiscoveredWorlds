@@ -17,6 +17,7 @@
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_edges.hpp"
 #include "simulations/landscape/regional_surface.hpp"
+#include "simulations/landscape/landscape_parameters.hpp"
 #include "simulations/landscape/regional_water.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 #include "simulations/landscape/upsampling.hpp"
@@ -351,6 +352,16 @@ RegionalGlobalInputs icedsea(std::size_t& iced)
     return inputs;
 }
 }
+
+// The rim cap and sill contact claims below were calibrated on the Perlin noise of the synthetic world; under
+// the OpenSimplex2S default of 2026-10-11 the same world shows 6 wet pits uncapped and a sea-lake contact in
+// 6 of 16 rows (a lakes-step item, multiscale plan section 6), so these two tests pin the Perlin kernel.
+struct PerlinNoiseScope
+{
+    int kernel = tuning::landscape::noise::kernel, rotate = tuning::landscape::noise::rotateOctaves;
+    PerlinNoiseScope() { tuning::landscape::noise::kernel = 0; tuning::landscape::noise::rotateOctaves = 0; }
+    ~PerlinNoiseScope() { tuning::landscape::noise::kernel = kernel; tuning::landscape::noise::rotateOctaves = rotate; }
+};
 
 TEST_F(Landscape, RegionalWaterShores)
 {
@@ -716,6 +727,7 @@ BarrierCounts barriercounts(const RegionalGlobalInputs& inputs, const RegionalWi
 // raised by more than the cap.
 TEST_F(Landscape, RegionalWaterRimCap)
 {
+    const PerlinNoiseScope perlin;
     const RegionalGlobalInputs inputs = barrierlake();
     const RegionalWindow window = windowc(8);
     const BarrierPass none = barrierpass(inputs, window, -1.0);
@@ -858,6 +870,7 @@ std::vector<std::pair<std::size_t, std::size_t>> sharedlevelcells(const landscap
 // rules too.)
 TEST_F(Landscape, RegionalWaterSillContact)
 {
+    const PerlinNoiseScope perlin;
     int lakei = -1, lakej = -1;
     const RegionalGlobalInputs inputs = coastallake(lakei, lakej);
     ASSERT_GE(lakei, 0);

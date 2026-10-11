@@ -99,8 +99,8 @@ inline float persistence = 0.6f;
 
 namespace noise
 {
-inline int kernel = 0;
-inline int rotateOctaves = 0;
+inline int kernel = 1;
+inline int rotateOctaves = 1;
 }
 
 namespace routing
