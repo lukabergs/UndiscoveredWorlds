@@ -308,6 +308,62 @@
       "run": "runs/regional/44",
       "date": "2026-10-11T10:59:03+00:00",
       "label": "multiscale S3.16 judging: window A, k 64, OpenSimplex2S kernel with per-octave rotation (the tree of run 43)"
+    },
+    {
+      "id": 45,
+      "status": "complete",
+      "run": "runs/regional/45",
+      "date": "2026-10-11T11:20:59+00:00",
+      "label": "multiscale S3.13 to S3.16 merged (kernel 0): window A, k 64 (the coast displaced, pockets filled, the lake's outline, closed network, rougher legs)"
+    },
+    {
+      "id": 46,
+      "status": "complete",
+      "run": "runs/regional/46",
+      "date": "2026-10-11T11:22:17+00:00",
+      "label": "multiscale S3.13 to S3.16 merged (kernel 0): window B, k 16 (fjord lakes; against run 37)"
+    },
+    {
+      "id": 47,
+      "status": "complete",
+      "run": "runs/regional/47",
+      "date": "2026-10-11T11:51:04+00:00",
+      "label": "multiscale S3.13 to S3.16 merged, S3.15 round three (kernel 0): window A, k 64; the judging run for the user's verdict"
+    },
+    {
+      "id": 48,
+      "status": "complete",
+      "run": "runs/regional/48",
+      "date": "2026-10-11T11:52:21+00:00",
+      "label": "multiscale S3.13 to S3.16 merged, S3.15 round three (kernel 0): window B, k 16; against run 37"
+    },
+    {
+      "id": 49,
+      "status": "complete",
+      "run": "runs/regional/49",
+      "date": "2026-10-11T12:22:34+00:00",
+      "label": "multiscale S3.13 to S3.16 final (kernel 0): window A, k 64; the judging run for the user's verdict"
+    },
+    {
+      "id": 50,
+      "status": "complete",
+      "run": "runs/regional/50",
+      "date": "2026-10-11T12:23:52+00:00",
+      "label": "multiscale S3.13 to S3.16 final (kernel 0): window B, k 16; against run 37"
+    },
+    {
+      "id": 51,
+      "status": "complete",
+      "run": "runs/regional/51",
+      "date": "2026-10-11T14:44:29+00:00",
+      "label": "multiscale S3.13 to S3.16 final (kernel 0): window A, k 64; the judging run for the user's verdict"
+    },
+    {
+      "id": 52,
+      "status": "complete",
+      "run": "runs/regional/52",
+      "date": "2026-10-11T14:45:46+00:00",
+      "label": "multiscale S3.13 to S3.16 final (kernel 0): window B, k 16; against run 37"
     }
   ]
 }
