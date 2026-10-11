@@ -364,6 +364,27 @@
       "run": "runs/regional/52",
       "date": "2026-10-11T14:45:46+00:00",
       "label": "multiscale S3.13 to S3.16 final (kernel 0): window B, k 16; against run 37"
+    },
+    {
+      "id": 53,
+      "status": "complete",
+      "run": "runs/regional/53",
+      "date": "2026-10-11T20:00:03+00:00",
+      "label": "multiscale S5.3 judging: window A, k 64, erosion run 10 (the fold fabric, phasor; OpenSimplex2S rotated by default)"
+    },
+    {
+      "id": 54,
+      "status": "complete",
+      "run": "runs/regional/54",
+      "date": "2026-10-11T20:01:25+00:00",
+      "label": "multiscale S5.3 judging: the fold belt (90-118 E, 45-66 S), k 64, erosion run 10 (phasor form)"
+    },
+    {
+      "id": 55,
+      "status": "complete",
+      "run": "runs/regional/55",
+      "date": "2026-10-11T20:03:32+00:00",
+      "label": "multiscale S5.3 judging: the fold belt, k 64, erosion run 10, the Gabor form (fold_phasor 0)"
     }
   ]
 }
