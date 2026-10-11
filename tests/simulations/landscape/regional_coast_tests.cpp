@@ -2,7 +2,9 @@
 // one-sided coast noise and coast factors), suite Landscape: TEST_F(Landscape,
 // RegionalCoast<What>) and the RegionalOverlapIslands* variants with R7's features on, on the
 // synthetic world of regional_test_world.hpp (one of them wider than the land-share rule's
-// widened box).
+// widened box). Multiscale plan S3.15: the shoreline displacement on a straight contour and the
+// pocket fill (RegionalCoastShorelineDisplaced, RegionalCoastPocketsFilled; the two-window overlap
+// with both on is refinement_levels_tests.cpp's RefinementLevelsOverlapCoastShoreline).
 
 #include "landscape_fixture.hpp"
 
@@ -320,4 +322,247 @@ TEST_F(Landscape, RegionalOverlapIslandsWideWorld)
         EXPECT_GT(counts.sea, 0);
         EXPECT_LT(counts.sea, counts.shared);
     }
+}
+
+namespace
+{
+// Multiscale plan S3.15: a world of 32 x 16 global cells whose coast is a straight meridian, the
+// west half sea at -65 m and the east half land at +14 m (window A's pair at 58 E: global cells
+// (168, 58) and (169, 58) of erosion run 9), no lake.
+RegionalGlobalInputs straightcoast()
+{
+    RegionalGlobalInputs inputs;
+    inputs.width = 32;
+    inputs.height = 16;
+    inputs.radius_m = radius_m;
+    inputs.sealevel = sealevel;
+    inputs.seed = 1;
+    const std::size_t size = 32 * 16;
+    inputs.elevation_m.resize(size);
+    inputs.lakesurface_m.assign(size, 0.0f);
+    inputs.network.width = 32;
+    inputs.network.height = 16;
+    inputs.network.sea.resize(size);
+    for (int j = 0; j < 16; j++)
+        for (int i = 0; i < 32; i++)
+        {
+            inputs.elevation_m[at(i, j, 32)] = i < 16 ? -65.0f : 14.0f;
+            inputs.network.sea[at(i, j, 32)] = i < 16 ? 1 : 0;
+        }
+    return inputs;
+}
+
+// The land-share coast without noise or the R2 warp, so the decision's contour is the straight
+// interpolated one; `warpcells` the shoreline displacement.
+RegionalParameters straightparameters(double warpcells)
+{
+    RegionalParameters parameters;
+    parameters.noiseamplitude_m = 0.0;
+    parameters.noiserelieffraction = 0.0;
+    parameters.coast.seadrop_m = 300.0;
+    parameters.coast.landshare = 0.5;
+    parameters.coast.onesided = 1;
+    parameters.coast.warpcells = warpcells;
+    parameters.coast.warppersistence = 0.7;
+    return parameters;
+}
+
+// The kept window's sea mask (regionalsea on regionalstartsurface's surface), the share misses.
+struct KeptSea
+{
+    std::vector<uint8_t> sea;
+    int misses = 0;
+};
+
+KeptSea keptsea(const RegionalGlobalInputs& inputs, const RegionalWindow& window, const RegionalParameters& parameters)
+{
+    const FineWarp warp = landscape::regionalwarp(window, inputs.seed, parameters);
+    const StartSurface start = landscape::regionalstartsurface(inputs, window, warp, parameters);
+    std::vector<float> surface = start.start_m;
+    const std::vector<uint8_t> domainsea = landscape::regionalsea(inputs, window, warp, parameters, surface);
+    KeptSea result;
+    result.misses = start.sharemisses;
+    for (int y = 0; y < window.fineheight(); y++)
+        for (int x = 0; x < window.finewidth(); x++)
+            result.sea.push_back(
+                domainsea[at(window.keptfinecolumnoffset() + x, window.keptfinerowoffset() + y, window.domainfinewidth())]);
+    return result;
+}
+
+// The longest run of coast cells (land with a 4-neighbour sea cell) down a column of the kept window.
+int longestverticalcoast(const std::vector<uint8_t>& sea, int width, int height)
+{
+    int longest = 0;
+    for (int x = 0; x < width; x++)
+    {
+        int run = 0;
+        for (int y = 0; y < height; y++)
+        {
+            bool coast = false;
+            if (sea[at(x, y, width)] == 0)
+            {
+                const int nx[4] = {x - 1, x + 1, x, x};
+                const int ny[4] = {y, y, y - 1, y + 1};
+                for (int n = 0; n < 4; n++)
+                    coast = coast || (nx[n] >= 0 && nx[n] < width && ny[n] >= 0 && ny[n] < height && sea[at(nx[n], ny[n], width)] != 0);
+            }
+            run = coast ? run + 1 : 0;
+            longest = std::max(longest, run);
+        }
+    }
+    return longest;
+}
+}
+
+TEST_F(Landscape, RegionalCoastShorelineDisplaced)
+{
+    // Multiscale plan S3.15 (a): on a straight interpolated contour (the coast between global columns 15
+    // and 16, window columns 14 .. 17, rows 5 .. 10 at k = 16), the displacement breaks the straight
+    // coast (its longest vertical run under one global cell, against the window's whole height without
+    // it) while every global cell keeps its land share and the window's land share stays within 5 %.
+    const RegionalGlobalInputs inputs = straightcoast();
+    const RegionalWindow window = landscape::regionalwindow(32, 16, testhalo, -22.0, -30.0, 22.0, 30.0);
+    ASSERT_EQ(window.column0, 14);
+    ASSERT_EQ(window.columns, 4);
+    const KeptSea straight = keptsea(inputs, window, straightparameters(0.0));
+    const KeptSea displaced = keptsea(inputs, window, straightparameters(0.25));
+    const int width = window.finewidth(), height = window.fineheight();
+    const int before = longestverticalcoast(straight.sea, width, height);
+    const int after = longestverticalcoast(displaced.sea, width, height);
+    const auto landshare = [&](const std::vector<uint8_t>& sea) {
+        return static_cast<double>(std::count(sea.begin(), sea.end(), uint8_t{0})) / static_cast<double>(sea.size());
+    };
+    std::printf("[regional] straight coast, k 16: longest vertical coast run %d cells without the displacement, %d with "
+                "it; land share %.4f and %.4f\n",
+                before, after, landshare(straight.sea), landshare(displaced.sea));
+    EXPECT_EQ(before, height) << "the undisplaced contour is a straight meridian";
+    EXPECT_LT(after, window.scale);
+    EXPECT_NE(straight.sea, displaced.sea);
+    EXPECT_EQ(straight.misses, 0);
+    EXPECT_EQ(displaced.misses, 0);
+    EXPECT_NEAR(landshare(displaced.sea), landshare(straight.sea), 0.05);
+    // Every block keeps its share (land at least half in a land cell, at most half in a sea cell).
+    for (int r = 0; r < window.rows; r++)
+        for (int c = 0; c < window.columns; c++)
+        {
+            int land = 0;
+            for (int y = r * 16; y < (r + 1) * 16; y++)
+                for (int x = c * 16; x < (c + 1) * 16; x++)
+                    land += displaced.sea[at(x, y, width)] == 0 ? 1 : 0;
+            if (window.column0 + c < 16)
+                EXPECT_LE(land, 128) << "global sea cell (" << window.column0 + c << ", " << window.row0 + r << ")";
+            else
+                EXPECT_GE(land, 128) << "global land cell (" << window.column0 + c << ", " << window.row0 + r << ")";
+        }
+
+    // The displacement's bound and band: |w| < bound() everywhere; a level whose band holds no octave
+    // (k_l = parentscale) and warpcells 0 are inactive; the band of k 64 under k 16 is finer than k 16's.
+    landscape::CoastParameters coast;
+    coast.warpcells = 0.25;
+    coast.warppersistence = 0.7;
+    const landscape::ShorelineWarp first(32, 16, 16, 1, 1, coast), deeper(32, 16, 64, 16, 1, coast), empty(32, 16, 16, 16, 1, coast);
+    ASSERT_TRUE(first.active());
+    ASSERT_TRUE(deeper.active());
+    EXPECT_FALSE(empty.active());
+    EXPECT_LT(deeper.bound(), first.bound());
+    double largest = 0.0;
+    for (std::int64_t row = 0; row < 16 * 16; row += 3)
+        for (std::int64_t column = 0; column < 32 * 16; column += 5)
+        {
+            double dx = 0.0, dy = 0.0;
+            first.at(column, row, dx, dy);
+            largest = std::max(largest, std::hypot(dx, dy));
+        }
+    EXPECT_LT(largest, first.bound());
+    EXPECT_GT(largest, 0.25 * first.bound());
+    coast.warpcells = 0.0;
+    EXPECT_FALSE(landscape::ShorelineWarp(32, 16, 16, 1, 1, coast).active());
+}
+
+TEST_F(Landscape, RegionalCoastPocketsFilled)
+{
+    // Multiscale plan S3.15 (b): global land cells (10 .. 14, 4 .. 8) in an all-sea world, a box of
+    // global columns 8 .. 16 and rows 2 .. 10 at k = 4, the global sea cells' blocks all sea. A pocket in
+    // (12, 6), three global cells from any sea cell, and one in (11, 4) beside the sea cell (11, 3) but
+    // cut from it by land are filled; a bay in (10, 6) open to the sea of (9, 6) and a sea cell of
+    // (11, 4) touching (11, 3)'s sea are kept. Reach 0 fills nothing.
+    RegionalGlobalInputs inputs = seaworld();
+    for (int j = 4; j <= 8; j++)
+        for (int i = 10; i <= 14; i++)
+            inputs.network.sea[at(i, j, 32)] = 0;
+    const RegionalWindow box = sinkbox(8, 9, 2, 9, 4);
+    const int finewidth = box.domainfinewidth(), fineheight = box.domainfineheight();
+    std::vector<uint8_t> sea(static_cast<std::size_t>(finewidth) * static_cast<std::size_t>(fineheight), 0);
+    for (int y = 0; y < fineheight; y++)
+        for (int x = 0; x < finewidth; x++)
+            sea[at(x, y, finewidth)] = inputs.network.sea[at(8 + x / 4, 2 + y / 4, 32)];
+    const std::initializer_list<std::pair<int, int>> pockets = {{17, 17}, {18, 17}, {17, 18}, {13, 9}, {14, 9}};
+    const std::initializer_list<std::pair<int, int>> kept = {{8, 17}, {9, 17}, {12, 8}};
+    for (const auto& [x, y] : pockets)
+        sea[at(x, y, finewidth)] = 1;
+    for (const auto& [x, y] : kept)
+        sea[at(x, y, finewidth)] = 1;
+    const std::vector<uint8_t> filled = landscape::seapockets(inputs, box, 2, sea);
+    std::vector<uint8_t> expected(sea.size(), 0);
+    for (const auto& [x, y] : pockets)
+        expected[at(x, y, finewidth)] = 1;
+    EXPECT_EQ(filled, expected);
+    const landscape::PocketCount count = landscape::countpockets(filled, finewidth, 0, 0, finewidth, fineheight);
+    EXPECT_EQ(count.pockets, 2);
+    EXPECT_EQ(count.pocketcells, 5);
+    // At reach 1 the bay is still open (its sea cell is next door); at reach 0 nothing is filled.
+    EXPECT_EQ(landscape::seapockets(inputs, box, 1, sea), expected);
+    EXPECT_EQ(landscape::seapockets(inputs, box, 0, sea), std::vector<uint8_t>(sea.size(), 0));
+    // With a core that leaves out (9, 6)'s sea the bay is a pocket too.
+    std::vector<uint8_t> core(sea.size(), 0);
+    for (int y = 0; y < fineheight; y++)
+        for (int x = 0; x < finewidth; x++)
+            core[at(x, y, finewidth)] = inputs.network.sea[at(8 + x / 4, 2 + y / 4, 32)] != 0 && x / 4 != 1 ? 1 : 0;
+    const std::vector<uint8_t> strict = landscape::seapockets(inputs, box, 1, sea, core);
+    EXPECT_EQ(strict[at(8, 17, finewidth)], 1);
+    EXPECT_EQ(strict[at(17, 17, finewidth)], 1);
+    EXPECT_EQ(strict[at(12, 8, finewidth)], 0);
+
+    // The basin of the pocket in (12, 6): the land below the level 4-connected to it within the reach
+    // is raised with it; low land cut off by higher land is not.
+    std::vector<uint8_t> after = sea;
+    for (std::size_t cell = 0; cell < sea.size(); cell++)
+        if (filled[cell] != 0)
+            after[cell] = 0;
+    std::vector<float> lowland(sea.size(), 50.0f);
+    lowland[at(16, 17, finewidth)] = lowland[at(15, 17, finewidth)] = 5.0f;  // beside the pocket
+    lowland[at(26, 26, finewidth)] = 5.0f;                                    // cut off
+    const std::vector<uint8_t> basin = landscape::pocketbasins(inputs, box, 2, after, filled, lowland, 20.0f);
+    for (const auto& [x, y] : pockets)
+        EXPECT_EQ(basin[at(x, y, finewidth)], 1);
+    EXPECT_EQ(basin[at(16, 17, finewidth)], 1);
+    EXPECT_EQ(basin[at(15, 17, finewidth)], 1);
+    EXPECT_EQ(basin[at(14, 17, finewidth)], 0);
+    EXPECT_EQ(basin[at(26, 26, finewidth)], 0);
+    EXPECT_EQ(std::count(basin.begin(), basin.end(), uint8_t{1}), 7);
+
+    // Through the land-share rule (the R2 test coast with R7's features on the synthetic world, window
+    // C at k = 8): with the fill on, no kept fine sea cell of a global land cell is cut from the sea of
+    // the global sea cells within two global cells, the shares hold and the surface agrees with the mask.
+    const RegionalGlobalInputs world = syntheticworld(64);
+    const RegionalWindow window = windowc(8);
+    RegionalParameters parameters = islandparameters();
+    parameters.coast.pocketreach = 2;
+    const FineWarp warp = landscape::regionalwarp(window, world.seed, parameters);
+    const StartSurface start = landscape::regionalstartsurface(world, window, warp, parameters);
+    std::vector<float> surface = start.start_m;
+    const std::vector<uint8_t> domainsea = landscape::regionalsea(world, window, warp, parameters, surface);
+    const std::vector<uint8_t> left = landscape::seapockets(world, window, 2, domainsea);
+    int keptleft = 0;
+    for (int y = 0; y < window.fineheight(); y++)
+        for (int x = 0; x < window.finewidth(); x++)
+            keptleft += left[at(window.keptfinecolumnoffset() + x, window.keptfinerowoffset() + y, window.domainfinewidth())];
+    std::printf("[regional] pockets filled on window C, k 8: %d (%d cells), left %d (%d cells); kept cells still pockets "
+                "against the global sea cells' sea: %d\n",
+                start.pocketsfilled, start.pocketcellsfilled, start.pockets, start.pocketcells, keptleft);
+    EXPECT_EQ(start.pockets, 0);
+    EXPECT_EQ(keptleft, 0);
+    EXPECT_EQ(start.sharemisses, 0);
+    const SeaLand check = sealand(world, window, parameters);
+    EXPECT_EQ(check.inconsistent, 0);
 }

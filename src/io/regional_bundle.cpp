@@ -354,6 +354,8 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                         << ", \"maxborderstep_parent_row\": " << projection.maxbordersteprow
                         << ", \"maxforced_parent_column\": " << projection.maxforcedcolumn
                         << ", \"maxforced_parent_row\": " << projection.maxforcedrow
+                        << ", \"maxblockerror_column\": " << level.maxblockerrorcolumn
+                        << ", \"maxblockerror_row\": " << level.maxblockerrorrow
                         << ", \"seainlandparents\": " << level.seainlandparents
                         << ", \"seabeyondparent\": " << level.seabeyondparent
                         << ", \"drybelowlake\": " << level.drybelowlake
@@ -381,6 +383,8 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                         << ", \"driedchannels\": " << level.driedchannels
                         << ", \"wetchannelsabove\": " << level.wetchannelsabove
                         << ", \"wetchannelexcess_m\": " << jsonnumber(level.wetchannelexcess_m)
+                        << ", \"pockets\": " << level.pockets << ", \"pocketcells\": " << level.pocketcells
+                        << ", \"pocketsfilled\": " << level.pocketsfilled << ", \"pocketcellsfilled\": " << level.pocketcellsfilled
                         << ", \"solvelowering50_m\": " << jsonnumber(level.solvelowering50_m)
                         << ", \"solvelowering99_m\": " << jsonnumber(level.solvelowering99_m)
                         << ", \"reliefconverged\": " << (level.reliefconverged ? "true" : "false")

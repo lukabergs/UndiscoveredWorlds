@@ -106,6 +106,12 @@ struct CoastParameters
     double denudationreference_m = 1000.0;
     double islandmargin = 0.0;           // the island sink's ring as a fraction of k (the legacy removesmallislands:
                                          // 8 of 16 fine cells); 0: no sink (regional_coast.hpp)
+    // Multiscale plan S3.15 (regional_coast.hpp; with landshare > 0 only): the shoreline's position
+    // displacement and the sea pockets; 0 for warpcells and pocketreach keeps S3.14's coast bit for bit.
+    double warpcells = 0.0;              // the displacement's first-octave amplitude in global cells (0: none)
+    double warppersistence = 0.7;        // octave o of the displacement weighs warppersistence^o
+    int pocketreach = 0;                 // fine sea in a global land cell is kept only if it connects through fine sea
+                                         // to a global sea cell's fine sea within this many global cells (0: kept)
 };
 
 // The sea gate and the straight-run breaker (Phase R2, R8, regional_edges.hpp): both off

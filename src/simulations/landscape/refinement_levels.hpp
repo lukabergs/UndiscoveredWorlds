@@ -258,6 +258,10 @@ struct LevelDiagnostics
     double cellsize_km = 0.0;
     LevelWindow window;                  // the level's window in the halo chain
     double blockmeanerror_m = 0.0;       // measured after LevelStep::presmoothing (kept box's parents)
+    // S3.15: level 1's worst block, its global cell (the start surface's block-mean error; -1 at level >= 2,
+    // whose error is levelparentmeanerror's).
+    std::int64_t maxblockerrorcolumn = -1;
+    std::int64_t maxblockerrorrow = -1;
     SmoothingReport smoothing;           // the smoothing before the projection (lambda before and after it)
     ProjectionReport projection;         // the exact projection's report
     // The largest |mean over a global cell - the global elevation| of the projected level
@@ -352,6 +356,13 @@ struct LevelDiagnostics
     // cell (regional_water.hpp); 0 at the levels below the last by the drying rule.
     int wetchannelsabove = 0;
     double wetchannelexcess_m = 0.0;
+    // S3.15: the sea pockets of the level's kept box (regional_coast.hpp, seapockets and countpockets: 4-connected
+    // components and cells) left after the fill, and those the fill turned into land (level 1 the land-share
+    // rule's, deeper levels coastlevel's; 0 with regional.coast_pocket_reach_global_cells 0).
+    int pockets = 0;
+    int pocketcells = 0;
+    int pocketsfilled = 0;
+    int pocketcellsfilled = 0;
     // S3.9: the 50th and 99th percentiles (nearest rank) of the solve's lowering over the kept unpinned
     // cells (the start surface less the solve's result with the parent's lift added back: the cells of
     // RegionalLevel::meanlowering_m).

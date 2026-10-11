@@ -54,6 +54,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0088`: flooring the lake cell at S (b(lake cell) = S) with the lake depth applied to the lake-block channel cells: a cliff at the block edge (98 m level-2 border steps on B)
 - `erosion-0088`: holding a coarse wet channel cell at its bed (332 m steps): the mean law at every level
 - `erosion-0088`: capping a wet channel cell's mean at its surface at the final level: it would carve B's fjord walls into trenches
+- `erosion-0089`: coast_warp_persistence above 0.5 with the finest octaves on (specks); 0.25 cells of displacement (dimension 1.52, block-mean error 13.6 m)
+- `erosion-0089`: a pocket core anchored on the interpolated global elevation alone (103 enclosed components) or a core 20 m deep (91): the one-sided rule's base is the anchor
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
@@ -176,6 +178,7 @@ Lessons:
 | `erosion-0086` | 2026-10-11 | step done | keep | multiscale plan, step S3.14 (added from the user's verdict of 2026-10-11): the painted channel network closed (no dry tails); the leg roughness 0.08 with a relief term |
 | `erosion-0087` | 2026-10-11 | step done; judging pending | keep | multiscale plan, step S3.16 (added from the user's noise question, docs/architecture/noise-functions.md): the OpenSimplex2S 3D kernel behind landscape.noise.kernel, per-octave rotation behind landscape.noise.rotate_octaves, both off by default |
 | `erosion-0088` | 2026-10-11 | step done; the user's look at the lake's outline pending | keep | multiscale plan, step S3.13: rivers through lakes (the incision floored at the lake surfaces downstream, the wet rule for channel cells in every block, the drychannelinlake and channelbetweenlakes diagnostics) |
+| `erosion-0089` | 2026-10-11 | step done with open items; the user's verdict pending | keep | multiscale plan, step S3.15 (added from the user's verdict of 2026-10-11): the coast's shoreline displaced by a fractal position warp under the level band rule; sea pockets not connected to the core sea filled with their basins; the straight coast at 58 E and the blobby coast |
 
 Lessons:
 
@@ -312,6 +315,9 @@ Lessons:
 - `erosion-0088`: A design that writes b(lake cell) = S for a lake a kilometre deep has not looked at the lake's bed: check the field's range in the fixture before fixing a law.
 - `erosion-0088`: A rule that is right at the finest level (a wet cell is at the water's bed) can pin a coarse cell to a wrong mean: every per-cell rule must say what it means for a 39 km cell, and water on a channel cell is a mask over a mean, not a surface.
 - `erosion-0088`: Six rounds on one step: when the second round contradicts the design's law, stop and re-derive the law from the fixture's numbers before the third.
+- `erosion-0089`: A fill at a floor that the mean-keeping passes cannot lower moves a block's mean for good: every mask rule that raises cells needs a lowering partner or a block-mean check.
+- `erosion-0089`: A displacement under an inherited mask is only as free as the parent's share rule; the levels' consistency and the shoreline's freedom pull against each other, and the plan must say which wins before the worker starts.
+- `erosion-0089`: A worker's probe and an earlier phase's probe measure 'the dimension' differently (1.156 against 1.02 on the same bundle): record the probe with the number.
 
 ## tectonics
 

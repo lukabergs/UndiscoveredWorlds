@@ -65,11 +65,19 @@ struct StartSurface
     std::vector<float> start_m;   // base_m plus the regional noise, block means corrected
     double blockmeanerror_m = 0.0;  // the largest |block mean - global value| over the kept window's
                                     // global cells (RegionalFields::blockmeanerror_m)
+    int maxblockerrorcolumn = -1;   // its global cell (multiscale plan S3.15; -1: every block exact)
+    int maxblockerrorrow = -1;
     // The land-share rule's diagnostics: the offset passes after which no block of the
     // domain missed its share (-1: some still missed at the cap), and the domain's blocks
     // that miss it in the final mask (0 unless the cap was reached).
     int sharepasses = -1;
     int sharemisses = 0;
+    // Multiscale plan S3.15: the sea pockets in the kept window (regional_coast.hpp, seapockets and
+    // countpockets) left after the land-share rule's fill and those it filled (0 with coast.pocketreach 0).
+    int pockets = 0;
+    int pocketcells = 0;
+    int pocketsfilled = 0;
+    int pocketcellsfilled = 0;
 };
 
 // The start surface on the window's domain (domainfinewidth() x domainfineheight()).
@@ -117,6 +125,18 @@ struct StartSurface
 // pass's reach: 1 for k >= 3, 2 for k <= 2), so the domain's values depend on the window
 // only within 2 x meanpasses global cells of its edge, as in Phase E: the halo rule
 // halo >= 2 x meanpasses + 2 holds.
+// Multiscale plan S3.15: with coast.warpcells > 0 the decision surface (after the push, the lift
+// and the one-sided rule) is sampled at the displaced position p + w(p) (regional_coast.hpp,
+// ShorelineWarp at parent scale 1, displacedsample) before the share passes, which read it as
+// before; with coast.pocketreach > 0 the final mask's sea pockets (regional_coast.hpp, seapockets,
+// anchored on the core sea: the cells of global sea cells whose decision without the coast noise and the
+// displacement lies at or below the sea level) become land after the share passes (a global sea cell's
+// only while its block keeps at most 1 - landshare land), and their basins in global land cells
+// (pocketbasins: the land at or below the sea level around them within the reach) the shore floor
+// (StartSurface::pockets and pocketcells count the pockets left in the kept window, pocketsfilled and
+// pocketcellsfilled the filled ones). The box grows by the displacement's reach
+// (ceil(ShorelineWarp::reachcells() / k) global cells: 1 at the defaults, |w| < 0.61 global cells)
+// and by coast.pocketreach, so the halo rule above is unchanged.
 // `lakegate` (multiscale plan S3.4; the refinement loop, false in the single pass): the land-share
 // rule's gate takes the lake cells' warped half-mask (regional_edges.hpp, seagate's lakeweight)
 // instead of excluding a lake cell's block.
@@ -186,5 +206,23 @@ void noiselevel(const LevelContext& context, LevelState& state);
 
 // LevelStep::coast: state.sea = regionalsea on state.surface_m with the context's warp and
 // details.parentseagate (null at level 1 and in the single pass), lakegate in the loop.
+// Multiscale plan S3.15, at level >= 2 with coast.landshare > 0 and coast.warpcells > 0 or
+// coast.pocketreach > 0 (level 1 does both in regionalstartsurface): (a) the sea is regionalsea's
+// rule on the surface sampled at the displaced position (ShorelineWarp with the level's band, parent
+// scale k_l / factor, displacedsample), per parent cell only while the parent's land-share rule holds
+// for its factor^2 children (a parent sea cell at most 1 - landshare land, a land cell at least
+// landshare and, if it lies at most four float steps above the sea level and held sea, not all land:
+// the projection could not bring such children down to its mean), else regionalsea's sea; a cell that
+// changes side takes the displaced surface (a sea cell at most the sea level, a land cell at least the
+// next float above it); (b) the sea pockets (seapockets, anchored on the undisplaced sea of the global
+// sea cells) become land, a parent sea cell's only while its children stay at most 1 - landshare land
+// (where they would not, the displacement is undone around the parent and the pockets found again), a
+// land parent's at that floor only while some sea is left among its children; their basins
+// (pocketbasins: the land at or below the sea level around them) are raised to the sea level +
+// coast.shorefloor_m in every parent;
+// LevelDiagnostics::pockets and pocketcells count the pockets left in the kept box, pocketsfilled and
+// pocketcellsfilled the filled ones. The step then reads the surface within ShorelineWarp::reachcells() level cells and the
+// sea within coast.pocketreach global cells beyond regionalsea's reach (the halo budget of
+// refinement_levels.hpp does not count them; the overlap tests hold).
 void coastlevel(const LevelContext& context, LevelState& state);
 }

@@ -447,7 +447,14 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     const int hookreach = std::max(parameters.coast.islandmargin > 0.0 ? std::max(1, static_cast<int>(std::lround(parameters.coast.islandmargin * k))) : 0,
                                    parameters.edges.straightmax > 0 ? 1 : 0);
     const int sharereach = hookreach > 0 ? 1 + (std::max(0, k + hookreach + 2 - k / 2) + k - 1) / k : (k <= 2 ? 2 : 1);
-    const int margin = sharereach * sharecount + 2 + 2 * signedcount;
+    // S3.15: the shoreline's displacement reads the decision surface within warpreach global cells
+    // (its bound and the bilinear stencil, ShorelineWarp::reachcells) before the share passes, and
+    // the pocket fill the final mask within coast.pocketreach global cells after them, so the
+    // margin grows by both (0 and 0 without them: the R2 box).
+    const ShorelineWarp shorewarp(width, height, k, 1, inputs.seed, parameters.coast);
+    const int warpreach = (shorewarp.reachcells() + k - 1) / k;
+    const int pocketreach = std::max(0, parameters.coast.pocketreach);
+    const int margin = sharereach * sharecount + 2 + 2 * signedcount + warpreach + pocketreach;
     const double sealevel = static_cast<double>(inputs.sealevel);
 
     RegionalWindow box = window;
@@ -512,6 +519,10 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     // the noise inside a global sea cell may not lift the decision above the sea level: where
     // it would, the cell takes the decision without the noise (the legacy's rule).
     std::vector<double> decision(finecount);
+    // S3.15 (b): the core sea of the pocket rule, the cells of global sea cells whose decision without
+    // the coast noise (and before the displacement below) lies at or below the sea level (the one-sided
+    // rule's `base`).
+    std::vector<uint8_t> core(pocketreach > 0 ? finecount : 0, 0);
     for (int y = 0; y < fineheight; y++)
         for (int x = 0; x < finewidth; x++)
         {
@@ -533,7 +544,16 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
                 if (base <= sealevel && decision[cell] > sealevel)
                     decision[cell] = base;
             }
+            if (!core.empty() && inputs.network.sea[globalof(x / k, y / k)] != 0)
+            {
+                const double base = value - static_cast<double>(noise[cell]) - push + parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
+                core[cell] = base <= sealevel ? 1 : 0;
+            }
         }
+    // S3.15 (a): the shoreline's position, the decision sampled at the displaced position (the
+    // elevation keeps its own warp and noise; the share rule, the passes and the shore read this one).
+    if (shorewarp.active())
+        decision = displacedsample(decision, box, shorewarp);
 
     // The offset: one value per block, interpolated bilinearly between block centres
     // (clamped at the box's edges, wrapped around a whole turn), so it is continuous
@@ -703,6 +723,56 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
             offset[b] += increment[b];
     }
 
+    // S3.15 (b): the sea pockets of the final mask (regional_coast.hpp, seapockets, anchored on the core
+    // sea) filled after the shares are counted, a global sea cell's only while its block keeps at most
+    // 1 - landshare land (a global land cell's fill only adds land), and a filled 4-connected component
+    // leaves no pinch or one-cell hole behind. The pocket's basin (pocketbasins: the land at or below the
+    // sea level around it within the reach) takes the shore floor in full (below). A basin bounded by the
+    // sea level + coast.shorefloor_m instead spread over the low plains and raised them to 20 m: on window A
+    // at k 64 a 67 m block-mean error at global cell (189, 46), a 96 m border step at level 1 and 494 m at
+    // level 2.
+    std::vector<uint8_t> basin;
+    if (pocketreach > 0)
+    {
+        std::vector<uint8_t> filled = seapockets(inputs, box, pocketreach, mask, core);
+        for (int by = 0; by < rows; by++)
+            for (int bx = 0; bx < columns; bx++)
+            {
+                if (inputs.network.sea[globalof(bx, by)] == 0)
+                    continue;
+                int land = 0, fill = 0;
+                for (int y = by * k; y < (by + 1) * k; y++)
+                    for (int x = bx * k; x < (bx + 1) * k; x++)
+                    {
+                        land += mask[at(x, y, finewidth)] == 0 ? 1 : 0;
+                        fill += filled[at(x, y, finewidth)] != 0 ? 1 : 0;
+                    }
+                if (fill > 0 && land + fill > mostland)
+                    for (int y = by * k; y < (by + 1) * k; y++)
+                        for (int x = bx * k; x < (bx + 1) * k; x++)
+                            filled[at(x, y, finewidth)] = 0;
+            }
+        for (std::size_t cell = 0; cell < finecount; cell++)
+            if (filled[cell] != 0)
+                mask[cell] = 0;
+        const int keptx = domainx + window.keptfinecolumnoffset(), kepty = domainy + window.keptfinerowoffset();
+        const PocketCount done = countpockets(filled, finewidth, keptx, kepty, window.finewidth(), window.fineheight());
+        const PocketCount left = countpockets(seapockets(inputs, box, pocketreach, mask, core), finewidth, keptx, kepty,
+                                              window.finewidth(), window.fineheight());
+        start.pocketsfilled = done.pockets;
+        start.pocketcellsfilled = done.pocketcells;
+        start.pockets = left.pockets;
+        start.pocketcells = left.pocketcells;
+        basin = pocketbasins(inputs, box, pocketreach, mask, filled, surface,
+                             std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity()));
+        // In global land cells only: a pocket filled in a global sea cell takes the ordinary shore (the clamp
+        // above the sea level), so the sea block's mean stays within the sign-keeping passes' reach.
+        for (int y = 0; y < fineheight; y++)
+            for (int x = 0; x < finewidth; x++)
+                if (inputs.network.sea[globalof(x / k, y / k)] != 0)
+                    basin[at(x, y, finewidth)] = 0;
+    }
+
     // The elevation made to agree with the mask and given a shore, then its block means
     // corrected without crossing the sea level, the shore kept after every pass; the domain's
     // part kept. The shore: a sea cell is at least as deep as the decision surface there and a
@@ -720,6 +790,13 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
         {
             const std::size_t cell = at(x, y, finewidth);
             const std::size_t global = globalof(x / k, y / k);
+            // S3.15: a filled pocket's basin, gated or not, raised to the shore floor in full.
+            if (!basin.empty() && basin[cell] != 0 && mask[cell] == 0)
+            {
+                shoreheight[cell] = static_cast<float>(std::max(
+                    0.0, std::min(parameters.coast.shorefloor_m, std::fabs(static_cast<double>(inputs.elevation_m[global]) - sealevel))));
+                continue;
+            }
             if (gate[cell] == 0)
                 continue;
             const double value = decision[cell] + field[cell] - sealevel;
@@ -928,7 +1005,13 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
                     for (int x = x0 + c * k; x < x0 + (c + 1) * k; x++)
                         sum += static_cast<double>(surface[at(x, y, domainwidth)]);
                 const float global = inputs.elevation_m[at(wrapcolumn(window.column0 + c, width), window.row0 + r, width)];
-                largest = std::max(largest, std::fabs(sum / (static_cast<double>(k) * k) - static_cast<double>(global)));
+                const double error = std::fabs(sum / (static_cast<double>(k) * k) - static_cast<double>(global));
+                if (error > largest)
+                {
+                    largest = error;
+                    result.maxblockerrorcolumn = wrapcolumn(window.column0 + c, width);
+                    result.maxblockerrorrow = window.row0 + r;
+                }
             }
         result.blockmeanerror_m = largest;
     }
@@ -1055,8 +1138,20 @@ void noiselevel(const LevelContext& context, LevelState& state)
     // Multiscale plan S3.0: the start surface of regional_pass.cpp's step 1 (level 1, the
     // single pass) and the loop's octave band (level >= 2), moved here unchanged.
     if (context.parent == nullptr)
+    {
         state.start = regionalstartsurface(context.inputs, context.window, context.warp, context.parameters,
                                            context.levelwindow != nullptr);
+        // S3.15: level 1's pockets are filled by the land-share rule (coastlevel fills the deeper levels').
+        if (state.diagnostics != nullptr)
+        {
+            state.diagnostics->pockets = state.start.pockets;
+            state.diagnostics->pocketcells = state.start.pocketcells;
+            state.diagnostics->pocketsfilled = state.start.pocketsfilled;
+            state.diagnostics->pocketcellsfilled = state.start.pocketcellsfilled;
+            state.diagnostics->maxblockerrorcolumn = state.start.maxblockerrorcolumn;
+            state.diagnostics->maxblockerrorrow = state.start.maxblockerrorrow;
+        }
+    }
     else
         addlevelnoise(context.inputs, context.window, static_cast<int>(levelscale(context.factor, context.level - 1)),
                       context.parameters, state.start.start_m);
@@ -1073,13 +1168,217 @@ void noiselevel(const LevelContext& context, LevelState& state)
     recordlevelstep(state, LevelStep::noiseoctave);
 }
 
+namespace
+{
+// S3.15 at level >= 2 (regional_surface.hpp, coastlevel): the inherited sea with the level's band of
+// the shoreline displacement, the parent-share guard and the pocket fill.
+void refinedcoast(const LevelContext& context, LevelState& state)
+{
+    const RegionalGlobalInputs& inputs = context.inputs;
+    const RegionalWindow& window = context.window;
+    const RegionalParameters& parameters = context.parameters;
+    const LevelWindow& level = *context.levelwindow;
+    const ParentFields& parent = *context.parent;
+    const int k = window.scale, factor = context.factor, width = inputs.width;
+    const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    const float abovesea = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    std::vector<float>& surface = state.surface_m;
+
+    // The cells the sea may hold: regionalsea's gates (its result on a surface below the sea level
+    // everywhere; with the land-share rule it writes no surface), and its sea on the level's surface.
+    std::vector<float> below(count, std::nextafter(inputs.sealevel, -std::numeric_limits<float>::infinity()));
+    const std::vector<uint8_t> open =
+        regionalsea(inputs, window, context.warp, parameters, below, context.details.parentseagate, true);
+    std::vector<uint8_t> sea(count, 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+        sea[cell] = surface[cell] <= inputs.sealevel && open[cell] != 0 ? 1 : 0;
+
+    // The parent's own sea per parent cell of the domain (the domain is whole parent cells), and its land
+    // at the projection's floor (at most four float steps above the sea level: the level-1 clamp and the
+    // projection leave land there), whose children cannot all be land (they may not sink to the sea level,
+    // so their mean cannot come down to the parent's: the synthetic coast windows of the tests forced one).
+    const int parentcolumns = domainwidth / factor, parentrows = domainheight / factor;
+    const std::size_t parents = static_cast<std::size_t>(parentcolumns) * static_cast<std::size_t>(parentrows);
+    std::vector<uint8_t> parentsea(parents), parentfloor(parents);
+    float floorlevel = inputs.sealevel;
+    for (int step = 0; step < 4; step++)
+        floorlevel = std::nextafter(floorlevel, std::numeric_limits<float>::infinity());
+    for (int py = 0; py < parentrows; py++)
+        for (int px = 0; px < parentcolumns; px++)
+        {
+            const std::int64_t pc = level.absolutecolumn(px * factor) / factor, pr = level.absoluterow(py * factor) / factor;
+            const std::size_t index = parent.window.index(parent.window.localcolumn(pc), static_cast<int>(parent.window.localrow(pr)));
+            parentsea[at(px, py, parentcolumns)] = parent.sea[index];
+            parentfloor[at(px, py, parentcolumns)] = parent.sea[index] == 0 && parent.elevation_m[index] <= floorlevel ? 1 : 0;
+        }
+
+    // (a) The level's band of the displacement: a cell is sea where the surface at its displaced
+    // position lies at or below the sea level (and the gates allow it). Per parent cell the result is
+    // kept only while the parent's share rule holds for its children (a parent sea cell at most
+    // 1 - landshare land, a land cell at least landshare) and a land parent at the floor that held sea
+    // keeps some, else the undisplaced sea stays. A cell that changes side takes the displaced surface
+    // (a sea cell at most the sea level, a land cell at least the next float above it; the least move
+    // instead left window A's level-3 border step at 13 m and raised its land below the sea level).
+    const int children = factor * factor;
+    const double share = parameters.coast.landshare;
+    const int leastland = static_cast<int>(std::ceil(share * children - 1.0e-9));
+    const int mostland = static_cast<int>(std::floor((1.0 - share) * children + 1.0e-9));
+    const std::vector<uint8_t> undisplaced = sea;
+    const std::vector<float> original = surface;
+    const ShorelineWarp warp(width, inputs.height, k, k / factor, inputs.seed, parameters.coast);
+    if (warp.active())
+    {
+        const std::vector<double> displaced = displacedsample(surface, window, warp);
+        std::vector<uint8_t> moved(static_cast<std::size_t>(children));
+        for (int py = 0; py < parentrows; py++)
+            for (int px = 0; px < parentcolumns; px++)
+            {
+                const bool seaparent = parentsea[at(px, py, parentcolumns)] != 0;
+                int land = 0, seabefore = 0;
+                for (int y = py * factor; y < (py + 1) * factor; y++)
+                    for (int x = px * factor; x < (px + 1) * factor; x++)
+                    {
+                        const std::size_t cell = at(x, y, domainwidth);
+                        const uint8_t value = open[cell] != 0 && displaced[cell] <= sealevel ? 1 : 0;
+                        moved[at(x - px * factor, y - py * factor, factor)] = value;
+                        land += value == 0 ? 1 : 0;
+                        seabefore += sea[cell] != 0 ? 1 : 0;
+                    }
+                if (seaparent ? land > mostland
+                              : land < leastland || (parentfloor[at(px, py, parentcolumns)] != 0 && seabefore > 0 && land == children))
+                    continue;
+                for (int y = py * factor; y < (py + 1) * factor; y++)
+                    for (int x = px * factor; x < (px + 1) * factor; x++)
+                    {
+                        const std::size_t cell = at(x, y, domainwidth);
+                        const uint8_t value = moved[at(x - px * factor, y - py * factor, factor)];
+                        if (value == sea[cell])
+                            continue;
+                        surface[cell] = value != 0 ? std::min(inputs.sealevel, static_cast<float>(displaced[cell]))
+                                                   : std::max(abovesea, static_cast<float>(displaced[cell]));
+                        sea[cell] = value;
+                    }
+            }
+    }
+
+    // (b) The sea pockets (seapockets, anchored on the core sea: the undisplaced sea of the global sea
+    // cells, the level's decision without the displacement; the interpolated global elevation as the core
+    // left 103 enclosed components on window A at k 64 against 47) filled per parent cell under the same
+    // rule: a parent sea cell's pocket cells only while its
+    // children stay at most 1 - landshare land, a land parent's at the floor only while some sea is left
+    // among its children (the test's forced parent was a land parent at the next float above the sea
+    // level whose one sea child was a pocket). The filled pockets' basins (pocketbasins: the land at or
+    // below the sea level around them within the reach) are raised to the sea level + coast.shorefloor_m.
+    if (parameters.coast.pocketreach > 0)
+    {
+        const int reach = parameters.coast.pocketreach;
+        std::vector<uint8_t> core(count, 0);
+        for (int y = 0; y < domainheight; y++)
+            for (int x = 0; x < domainwidth; x++)
+            {
+                const std::size_t cell = at(x, y, domainwidth);
+                core[cell] = undisplaced[cell] != 0 && inputs.network.sea[at(window.globalcolumn(x), window.globalrow(y), width)] != 0 ? 1 : 0;
+            }
+        std::vector<uint8_t> filled = seapockets(inputs, window, reach, sea, core);
+        // A pocket the share rule keeps in a parent sea cell is most often sea the displacement cut off:
+        // around such parents (and their 8 neighbours) the displacement is undone and the pockets found again.
+        if (warp.active())
+        {
+            std::vector<uint8_t> undo(parents, 0);
+            bool any = false;
+            for (int py = 0; py < parentrows; py++)
+                for (int px = 0; px < parentcolumns; px++)
+                {
+                    if (parentsea[at(px, py, parentcolumns)] == 0)
+                        continue;
+                    int land = 0, fill = 0;
+                    for (int y = py * factor; y < (py + 1) * factor; y++)
+                        for (int x = px * factor; x < (px + 1) * factor; x++)
+                        {
+                            land += sea[at(x, y, domainwidth)] == 0 ? 1 : 0;
+                            fill += filled[at(x, y, domainwidth)] != 0 ? 1 : 0;
+                        }
+                    if (fill == 0 || land + fill <= mostland)
+                        continue;
+                    any = true;
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                            if (py + dy >= 0 && py + dy < parentrows && px + dx >= 0 && px + dx < parentcolumns)
+                                undo[at(px + dx, py + dy, parentcolumns)] = 1;
+                }
+            if (any)
+            {
+                for (int y = 0; y < domainheight; y++)
+                    for (int x = 0; x < domainwidth; x++)
+                        if (undo[at(x / factor, y / factor, parentcolumns)] != 0)
+                        {
+                            const std::size_t cell = at(x, y, domainwidth);
+                            sea[cell] = undisplaced[cell];
+                            surface[cell] = original[cell];
+                        }
+                filled = seapockets(inputs, window, reach, sea, core);
+            }
+        }
+        for (int py = 0; py < parentrows; py++)
+            for (int px = 0; px < parentcolumns; px++)
+            {
+                int land = 0, fill = 0;
+                for (int y = py * factor; y < (py + 1) * factor; y++)
+                    for (int x = px * factor; x < (px + 1) * factor; x++)
+                    {
+                        land += sea[at(x, y, domainwidth)] == 0 ? 1 : 0;
+                        fill += filled[at(x, y, domainwidth)] != 0 ? 1 : 0;
+                    }
+                const bool keep = fill > 0 && (parentsea[at(px, py, parentcolumns)] != 0 ? land + fill > mostland
+                                                                                          : parentfloor[at(px, py, parentcolumns)] != 0 && land + fill == children);
+                for (int y = py * factor; y < (py + 1) * factor; y++)
+                    for (int x = px * factor; x < (px + 1) * factor; x++)
+                    {
+                        const std::size_t cell = at(x, y, domainwidth);
+                        if (keep)
+                            filled[cell] = 0;
+                        else if (filled[cell] != 0)
+                            sea[cell] = 0;
+                    }
+            }
+        const float raised = std::max(abovesea, static_cast<float>(sealevel + parameters.coast.shorefloor_m));
+        const std::vector<uint8_t> basin = pocketbasins(inputs, window, reach, sea, filled, surface, abovesea);
+        // In every parent (a land parent at the floor whose children end all land above it is the
+        // projection's to force, counted by its forcedparents: a filled bed left hundreds of metres below
+        // the sea level as dry land made a 411 m border step on window A at level 2).
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (basin[cell] != 0)
+                surface[cell] = std::max(surface[cell], raised);
+        if (state.diagnostics != nullptr)
+        {
+            const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
+            const PocketCount done = countpockets(filled, domainwidth, x0, y0, window.finewidth(), window.fineheight());
+            const PocketCount left = countpockets(seapockets(inputs, window, reach, sea, core), domainwidth, x0, y0,
+                                                  window.finewidth(), window.fineheight());
+            state.diagnostics->pocketsfilled = done.pockets;
+            state.diagnostics->pocketcellsfilled = done.pocketcells;
+            state.diagnostics->pockets = left.pockets;
+            state.diagnostics->pocketcells = left.pocketcells;
+        }
+    }
+    state.sea = std::move(sea);
+}
+}
+
 void coastlevel(const LevelContext& context, LevelState& state)
 {
     // 2. The sea by local rules on the start surface, before the channels (R1), so the
     // channels end at the fine coast and never change the mask (regional_pass.cpp's step 2,
     // moved here unchanged in S3.0).
-    state.sea = regionalsea(context.inputs, context.window, context.warp, context.parameters, state.surface_m,
-                            context.details.parentseagate, context.levelwindow != nullptr);
+    const CoastParameters& coast = context.parameters.coast;
+    if (context.parent != nullptr && context.levelwindow != nullptr && coast.landshare > 0.0 &&
+        (coast.warpcells > 0.0 || coast.pocketreach > 0))
+        refinedcoast(context, state);
+    else
+        state.sea = regionalsea(context.inputs, context.window, context.warp, context.parameters, state.surface_m,
+                                context.details.parentseagate, context.levelwindow != nullptr);
     recordlevelstep(state, LevelStep::coast);
 }
 }

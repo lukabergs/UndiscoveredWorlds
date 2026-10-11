@@ -221,6 +221,7 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Rim raised', 'rimraised'), ('Rim raise max (m)', 'maxrimraise_m'),
                  ('Border step max at parent (column, row)', 'maxborderstep_parent'),
                  ('Forced move max at parent (column, row)', 'maxforced_parent'),
+                 ('Block-mean error max at global cell (column, row)', 'maxblockerror_position'),
                  ('Sea in land parents', 'seainlandparents'), ('Sea beyond one parent cell', 'seabeyondparent'),
                  ('Dry below a lake', 'drybelowlake'),
                  ('Prolongation clamped', 'prolongationclamped'), ('Prolongation clamp max (m)', 'maxprolongationclamp_m'),
@@ -242,6 +243,8 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Wet channel cells dried, their mean above the water', 'driedchannels'),
                  ('Wet channel cells above their surface', 'wetchannelsabove'),
                  ('Wet channel excess above the surface max (m)', 'wetchannelexcess_m'),
+                 ('Sea pockets left', 'pockets'), ('Sea pocket cells left', 'pocketcells'),
+                 ('Sea pockets filled', 'pocketsfilled'), ('Sea pocket cells filled', 'pocketcellsfilled'),
                  ('Solve lowering p50 (m)', 'solvelowering50_m'), ('Solve lowering p99 (m)', 'solvelowering99_m'),
                  ('Seconds', 'seconds'))
 

@@ -8,7 +8,8 @@
 // rework (the bounds, the detail band, the global lake depth) the valleys at level 2; S2.4
 // the resample of the final level to a requested metres per pixel; S2.7 the overlap and the
 // consistency with the smoothing before the projection on; S2.8 the inherited masks; S3.1 the
-// limited prolongation; S3.2 the solve against its parent with the channel cells' means.
+// limited prolongation; S3.2 the solve against its parent with the channel cells' means; S3.15 the
+// overlap with the shoreline displacement and the pocket fill on.
 
 #include <gtest/gtest.h>
 
@@ -1250,4 +1251,42 @@ TEST_F(Landscape, RefinementLevelsSolveAgainstParent)
     bad = refinement;
     bad.smoothbasis = 2;
     EXPECT_THROW(landscape::runrefinement(inputs, target, parameters, bad), std::invalid_argument);
+}
+
+TEST_F(Landscape, RefinementLevelsOverlapCoastShoreline)
+{
+    // Multiscale plan S3.15: every feature on with the shoreline displacement (0.25 global cells,
+    // persistence 0.7) and the pocket fill (reach 2) at two levels on the coast windows R and S (they
+    // differ in column and row origin): every level's shared kept cells bit-identical, every level exact
+    // within its bound. A filled pocket's basin is raised in every parent, so a land parent at the
+    // projection's floor whose children end all land above it is forced (the reviewer's decision of
+    // S3.15: counted, not avoided); here by a few micrometres.
+    const RegionalGlobalInputs inputs = wideworld();
+    RegionalParameters parameters = everyfeature();
+    parameters.coast.warpcells = 0.25;
+    parameters.coast.warppersistence = 0.7;
+    parameters.coast.pocketreach = 2;
+    const RefinementResult r = refine(inputs, coastwest(), 2, parameters, "shoreline R");
+    const RefinementResult s = refine(inputs, coasteast(), 2, parameters, "shoreline S");
+    for (const RefinementResult* result : {&r, &s})
+    {
+        double bounds = 0.0;
+        for (const LevelDiagnostics& diagnostics : result->levels)
+        {
+            bounds += diagnostics.meanbound_m;
+            EXPECT_LE(diagnostics.projection.maxparentmeanerror_m, diagnostics.meanbound_m) << "level " << diagnostics.level;
+            EXPECT_LE(diagnostics.globalmeanerror_m, bounds) << "level " << diagnostics.level;
+            EXPECT_LE(diagnostics.projection.forcedparents, 2) << "level " << diagnostics.level;
+            EXPECT_LT(diagnostics.projection.maxforcedmove_m, 1.0e-3) << "level " << diagnostics.level;
+        }
+    }
+    const OverlapCounts counts = compareoverlaplevels(r, s, "shoreline R/S");
+    EXPECT_GT(counts.sea, 0);
+    EXPECT_LT(counts.sea, counts.shared);
+    for (const LevelDiagnostics& level : r.levels)
+        std::printf("[refinement] shoreline R, level %d: pockets filled %d (%d cells), left %d (%d cells), land below the "
+                    "sea level %d\n",
+                    level.level, level.pocketsfilled, level.pocketcellsfilled, level.pockets, level.pocketcells, level.landbelowsea);
+    const RefinementResult plain = refine(inputs, coastwest(), 2, everyfeature(), "every feature R");
+    EXPECT_NE(r.fields.sea, plain.fields.sea);
 }

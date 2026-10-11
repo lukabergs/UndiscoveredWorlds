@@ -168,6 +168,9 @@ inline float coastGlacialDropFraction = 0.9f;
 inline float coastDenudationAmplitudeM = 0.0f;
 inline float coastDenudationReferenceM = 1000.0f;
 inline float islandMargin = 0.125f;
+inline float coastWarpCells = 0.15f;
+inline float coastWarpPersistence = 0.6f;
+inline int coastPocketReachGlobalCells = 2;
 inline int gateSmooth = 3;
 inline int straightMaxCells = 4;
 inline int straightChunkMinCells = 2;
@@ -324,6 +327,9 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.coast_denudation_amplitude_m", &regional::coastDenudationAmplitudeM },
         { "landscape.regional.coast_denudation_reference_m", &regional::coastDenudationReferenceM },
         { "landscape.regional.island_margin", &regional::islandMargin },
+        { "landscape.regional.coast_warp_cells", &regional::coastWarpCells },
+        { "landscape.regional.coast_warp_persistence", &regional::coastWarpPersistence },
+        { "landscape.regional.coast_pocket_reach_global_cells", &regional::coastPocketReachGlobalCells },
         { "landscape.regional.gate_smooth", &regional::gateSmooth },
         { "landscape.regional.straight_max_cells", &regional::straightMaxCells },
         { "landscape.regional.straight_chunk_min_cells", &regional::straightChunkMinCells },

@@ -167,6 +167,9 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.coast.denudationamplitude_m = regional::coastDenudationAmplitudeM;
     parameters.coast.denudationreference_m = regional::coastDenudationReferenceM;
     parameters.coast.islandmargin = regional::islandMargin;
+    parameters.coast.warpcells = regional::coastWarpCells;
+    parameters.coast.warppersistence = regional::coastWarpPersistence;
+    parameters.coast.pocketreach = regional::coastPocketReachGlobalCells;
     parameters.edges.smoothgate = regional::gateSmooth;
     parameters.edges.straightmax = regional::straightMaxCells;
     parameters.edges.chunkmin = regional::straightChunkMinCells;

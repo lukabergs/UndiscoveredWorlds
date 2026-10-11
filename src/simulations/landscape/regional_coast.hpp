@@ -6,11 +6,14 @@
 // the global fields, the seed and the fine cell's absolute position. Called by
 // regional_surface.cpp (the Surfacer and the land-share rule's widened box). Planet-free.
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "simulations/landscape/regional_grid.hpp"
 #include "simulations/landscape/regional_types.hpp"
+#include "simulations/landscape/spherical_noise.hpp"
 
 namespace landscape
 {
@@ -44,4 +47,82 @@ CoastFactors coastfactors(const RegionalGlobalInputs& inputs, const RegionalPara
 // margin for the ring (its margin comment).
 void sinksmallislands(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const RegionalParameters& parameters,
                       const std::vector<uint8_t>& gate, std::vector<uint8_t>& mask);
+
+// --- Multiscale plan S3.15 (§3 "The user's verdict on runs 41 and 42", S3.15): the coast. ---
+
+// The shoreline's displacement at one level (S3.15 a): a fractal vector noise of two components
+// (gradient noise on the unit sphere, spherical_noise.hpp, salts of their own) whose octave o has
+// the wavelength of one global north-south spacing divided by 2^o and the standard deviation
+// coast.warpcells x coast.warppersistence^o global cells per component (the octave's sum divided
+// by octavedeviation), with the octaves of the level's band only: o with 2^(o + 1) <= scale (at
+// least two fine cells) and 2^(o + 1) > parentscale (those the parent level does not draw; 1 at
+// level 1 and in the single pass, so the levels of a hierarchy add up to the octaves of a single
+// pass at the finest scale). The vector u of the band's octaves is shortened to
+// b tanh(|u| / b) u / |u| with b = 2 x the band's standard deviation per component
+// (coast.warpcells x sqrt(sum of warppersistence^(2 o) over the band); a method constant), so
+// |displacement| < bound() = b global cells and a small displacement is kept nearly whole. Inactive
+// (0 everywhere) when coast.warpcells <= 0 or the band holds no octave. A pure function of the fine
+// cell's absolute position and the seed; dx eastwards, dy southwards, in global cells.
+class ShorelineWarp
+{
+public:
+    ShorelineWarp(int worldwidth, int worldheight, int scale, int parentscale, std::uint64_t seed,
+                  const CoastParameters& coast);
+    bool active() const { return active_; }
+    double bound() const { return bound_; }
+    // At the fine cell (I, J) of the kW x kH grid (I taken modulo kW).
+    void at(std::int64_t finecolumn, std::int64_t finerow, double& dx, double& dy) const;
+    // The fine cells beyond its own that a displaced sample reads: ceil(bound() x scale) + 1
+    // (the bilinear stencil); 0 when inactive.
+    int reachcells() const;
+
+private:
+    bool active_ = false;
+    int scale_ = 1;
+    int finewidth_ = 0;
+    int fineheight_ = 0;
+    double amplitude_ = 0.0;
+    double bound_ = 0.0;
+    std::optional<FractalNoiseField> x_, y_;
+};
+
+// A field on `box`'s domain (domainfinewidth() x domainfineheight(), row-major) sampled at every
+// cell's displaced position p + warp(p): bilinear between the fine cell centres, the stencil's
+// columns wrapped when the domain spans the whole turn and clamped to the domain otherwise, rows
+// clamped to the domain (window-independent wherever the stencil lies inside the window-independent
+// part of the field: the callers' margins count warp.reachcells()). The field itself where the warp
+// is inactive.
+std::vector<double> displacedsample(const std::vector<double>& field, const RegionalWindow& box, const ShorelineWarp& warp);
+std::vector<double> displacedsample(const std::vector<float>& field, const RegionalWindow& box, const ShorelineWarp& warp);
+
+// The sea pockets (S3.15 b): one value per fine cell of `box`'s domain, 1 on a sea cell of `sea`
+// (1 = sea) of any global cell that does not connect through fine sea (4-connected) to a core sea
+// cell (`core` 1 and sea) within `reach` global cells of its own global cell (Chebyshev), the path
+// inside those (2 reach + 1)^2 global cells; 0 elsewhere. `core` (the callers: the cells of global
+// sea cells whose decision without the coast noise and the displacement lies at or below the sea
+// level) holds one value per fine cell; empty: the sea cells of global sea cells. Decided per global
+// cell on `sea` as it comes, so the result is a pure function of `sea` and `core` within `reach`
+// global cells of each block (blocks beyond the box do not exist; columns wrap around a whole turn).
+// All zero when reach <= 0.
+std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const RegionalWindow& box, int reach,
+                                const std::vector<uint8_t>& sea, const std::vector<uint8_t>& core = {});
+
+// The basins of filled pockets (S3.15 b): one value per fine cell of `box`'s domain, 1 on the cells
+// reached from a global cell's `filled` cells through 4-connected land cells (`sea` 0) that are
+// filled or whose `surface` lies below `level` (the callers: the next float above the sea level),
+// inside the global cells within `reach` of that global cell (the filled cells included); 0 elsewhere.
+// Decided on the inputs as they come (a pure function of them within `reach` global cells).
+std::vector<uint8_t> pocketbasins(const RegionalGlobalInputs& inputs, const RegionalWindow& box, int reach,
+                                  const std::vector<uint8_t>& sea, const std::vector<uint8_t>& filled,
+                                  const std::vector<float>& surface, float level);
+
+// The pockets of a mask in a rectangle of a domain (the kept box): its cells with `pockets` 1 and
+// their 4-connected components inside the rectangle.
+struct PocketCount
+{
+    int pockets = 0;
+    int pocketcells = 0;
+};
+PocketCount countpockets(const std::vector<uint8_t>& filled, int domainwidth, int x0, int y0, int width, int height);
+
 }
