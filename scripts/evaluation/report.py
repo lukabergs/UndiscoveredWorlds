@@ -237,6 +237,11 @@ LEVEL_COLUMNS = (('Level', 'level'), ('Cell size (km)', 'cellsize_km'), ('Parent
                  ('Diagonal links', 'diagonallinks'), ('Diagonal links through the corner', 'cornerlinks'),
                  ('Channel pieces merged into another', 'mergedpieces'),
                  ('Channel pieces leaving the pinned network (dry tails)', 'drytails'),
+                 ('Dry channel cells at or below their lake level', 'drychannelinlake'),
+                 ('Dry channel cells at or below their lake level beside another lake', 'channelbetweenlakes'),
+                 ('Wet channel cells dried, their mean above the water', 'driedchannels'),
+                 ('Wet channel cells above their surface', 'wetchannelsabove'),
+                 ('Wet channel excess above the surface max (m)', 'wetchannelexcess_m'),
                  ('Solve lowering p50 (m)', 'solvelowering50_m'), ('Solve lowering p99 (m)', 'solvelowering99_m'),
                  ('Seconds', 'seconds'))
 

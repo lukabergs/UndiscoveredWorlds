@@ -55,6 +55,18 @@ struct GlobalIncision
 // F'(r) <= F'(u) exactly after rounding; I' = F - F'. Receivers as channel_network.cpp
 // decodes them (a direction beyond a pole: none); cells on a receiver loop (bad input,
 // which rasterisechannels rejects near a window) take their own capped I.
+// Multiscale plan S3.13 (amended 2026-10-11): a lake is the base level of the land draining
+// into it, and a river entering it descends into its basin. With S the lake surface of a lake
+// cell (inputs.lakesurface_m > 0, not sea): on a land cell u, Λ(u) = max(s+, Λ(receiver), S of
+// u's receiver when that is a lake cell); on a lake cell c, Λ(c) = max(s+, Λ(receiver), min(c's
+// own base elevation (inputs.elevation_m; s+ without the field), S)); receivers first. I is
+// capped at F - Λ instead of F - s+ and F'(r) = max(Λ(r), min(F(r) - I(r), min over the donors
+// F'(u))), at most F(r). Λ(c) <= S <= F'(u) and Λ never increases downstream, so F' never rises
+// and the bed law's order holds: a link into a lake runs at S or above to the lake's block and
+// descends inside it towards the lake cell's F' (at least its bed). The sill takes no S from its
+// lake donor and may be cut below S as without lakes (a rising outlet needs the lake surfaces in
+// rasterisechannels: an open item). Without a lake cell (or with lakesurface_m empty) Λ = s+ and
+// the result is the rule above bit for bit.
 GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters);
 
 // The valley floors (R9, after the legacy expandrivers and pasterivercircle): no-op while

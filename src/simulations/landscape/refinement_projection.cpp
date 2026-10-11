@@ -215,24 +215,30 @@ ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<s
         {
             const std::size_t cell = window.index(x, y);
             const double value = static_cast<double>(elevation_m[cell]);
+            const bool channelcell = !channel.empty() && channel[cell] != 0;
+            // S3.13: with the beds given, a wet land channel cell outside a lake cell's block holds its
+            // cell mean (lakeslevel) and takes a dry channel cell's bounds from its bed: the water is a
+            // mask the projection ignores there; inside a lake cell's block it keeps the lake's bounds.
+            const bool ownlake = !ownlake_m.empty() && ownlake_m[cell] > 0.0f;
+            const bool wetchannel = channelcell && !bed_m.empty() && wet(cell) && !ownlake;
             if (!sea.empty() && sea[cell] != 0)
                 bounds.up_m[cell] = roomup(value, seabelow);
-            else if (wet(cell))
+            else if (wet(cell) && !wetchannel)
                 bounds.up_m[cell] = roomup(value, std::nextafter(lakesurface_m[cell], -infinity));
             else
             {
                 // A land channel cell: the channel rate on its bed, or (S3.2, with the beds given) rate 1
                 // on its cell mean with its bed as a floor.
-                const bool channelcell = !channel.empty() && channel[cell] != 0;
                 if (channelcell && bed_m.empty())
                     bounds.rate[cell] = static_cast<float>(channelrate);
                 if (channelcell && !bed_m.empty())
                     bounds.bed[cell] = 1;
-                // The floor: above the sea level and above the water beside the cell.
+                // The floor: above the sea level and above the water beside the cell (not for a wet
+                // channel cell, which is that water: its bed and the sea level only).
                 float level = -infinity;
-                if (!ownlake_m.empty() && ownlake_m[cell] > 0.0f)
+                if (!wetchannel && !ownlake_m.empty() && ownlake_m[cell] > 0.0f)
                     level = ownlake_m[cell];
-                for (int dy = -1; dy <= 1; dy++)
+                for (int dy = -1; dy <= 1 && !wetchannel; dy++)
                     for (int dx = -1; dx <= 1; dx++)
                     {
                         const int nx = x + dx, ny = y + dy;
@@ -756,15 +762,23 @@ void projectionlevel(const LevelContext& context, LevelState& state)
     const auto kept = [&](int x, int y) {
         return x >= keptx0 && x < keptx0 + level.columns && y >= kepty0 && y < kepty0 + level.rows;
     };
+    // S3.13: a wet channel cell outside a lake cell's block takes a dry channel cell's bounds (no
+    // ceiling at its surface, projectionbounds), so at the levels below the last the water follows its
+    // elevation here too: above its surface it is dry (LevelDiagnostics::driedchannels, with
+    // lakeslevel's); at the final level it keeps its water (RegionalDetails::coarselevel).
+    const bool channelbounds = !state.bounds.bed.empty() && context.details.coarselevel;
     for (int y = 0; y < level.domainrows; y++)
         for (int x = 0; x < level.domaincolumns; x++)
         {
             const std::size_t cell = level.index(x, y);
-            if (wet[cell] == 0 || state.channels.channel[cell] != 0 || elevation[cell] <= lakesurface[cell])
+            if (wet[cell] == 0 || elevation[cell] <= lakesurface[cell])
                 continue;
+            const bool channelcell = state.channels.channel[cell] != 0;
+            if (channelcell && !(channelbounds && state.bounds.bed[cell] != 0))
+                continue;  // a wet channel cell with the lake's bounds stays below its surface
             lakesurface[cell] = 0.0f;
             if (kept(x, y) && state.diagnostics != nullptr)
-                state.diagnostics->driedcells++;
+                (channelcell ? state.diagnostics->driedchannels : state.diagnostics->driedcells)++;
         }
 
     // The level's lift: the final elevation less the elevation entering the smoothing (S3.2

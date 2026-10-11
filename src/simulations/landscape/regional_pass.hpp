@@ -108,6 +108,11 @@ struct RegionalDetails
     // single pass). The pointed-to vectors hold one value per domain cell and outlive the call.
     const std::vector<uint8_t>* parentseagate = nullptr;
     LakeInheritance lakes;
+    // Multiscale plan S3.13: a level below the last of the refinement loop, where a wet channel cell
+    // whose elevation stands above its surface is dry (the water follows the cell mean; regional_water.hpp,
+    // channelmeansafterlakes, and the drying after the projection); false at the final level (the river
+    // keeps its water at its bed) and in the single pass.
+    bool coarselevel = false;
 };
 
 // The domain fields of one pass after the lakes (domainfinewidth() x domainfineheight(),

@@ -13,6 +13,7 @@
 #include "simulations/landscape/regional_edges.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/regional_surface.hpp"
+#include "simulations/landscape/sphere_metric.hpp"
 
 // Erosion plan steps E3, R0, R1 and R4 (docs/architecture/erosion-hydrology-plan.md,
 // Phase E and Phase R): moved from regional_pass.cpp; R1 wets the channel cells in lakes;
@@ -46,6 +47,22 @@ std::size_t at(int x, int y, int width)
 }
 
 int wrapcolumn(int column, int width) { return ((column % width) + width) % width; }
+
+// The receiver of global cell `cell` on the global network (channel_network.cpp's
+// globalreceiver): none for a sea cell, a sink and a direction beyond a pole.
+std::size_t globalreceiver(const GlobalNetwork& network, std::size_t cell)
+{
+    if (cell >= network.direction.size() || cell >= network.sea.size())
+        return none;
+    const int direction = network.direction[cell];
+    if (network.sea[cell] != 0 || direction < 1 || direction > directioncount)
+        return none;
+    const int i = static_cast<int>(cell % static_cast<std::size_t>(network.width));
+    const int j = static_cast<int>(cell / static_cast<std::size_t>(network.width)) + directionoffsety(direction);
+    if (j < 0 || j >= network.height)
+        return none;
+    return at(wrapcolumn(i + directionoffsetx(direction), network.width), j, network.width);
+}
 
 // True when global cell (i, j) or one of its 8 neighbours satisfies `test` (columns
 // wrap, rows beyond the poles do not exist).
@@ -380,7 +397,15 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
     // wet, or when the bed lies strictly below the surface (no dry channel cell stands
     // below the water), unless a wet 8-neighbour has another surface (the outlet between
     // two lakes stays a river); a bed at or above the surface away from the water stays a
-    // river.
+    // river. S3.13: in every block, a channel cell left dry whose lake level Λ (channellakelevels:
+    // the lake its owner piece runs into or out of) is positive and whose bed lies at or below Λ
+    // is wet at the surface Λ, under the same guard (no wet 8-neighbour of 2 with another surface);
+    // step 4 lowers such a cell at Λ as every wet cell inside a lake cell's block whose zone has the
+    // surface Λ, elsewhere to the next float below Λ only (outside the lake's block the zone's depth
+    // would dig a trench; zone may be none there). Each candidate reads
+    // the water of 2 and its own values only, so the order of the cells does not matter.
+    const std::vector<float> lakelevel = channellakelevels(inputs, window, channels);
+    std::vector<uint8_t> atlevel(count, 0);
     std::vector<uint8_t> water3 = water2;
     for (int y = 0; y < domainheight; y++)
     {
@@ -389,15 +414,30 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
         {
             const std::size_t cell = at(x, y, domainwidth);
             const std::size_t global = at(window.globalcolumn(x), row, width);
-            if (water2[cell] != 0 || zone[cell] == none || channels.channel[cell] == 0 || lakecell[global] == 0)
+            if (water2[cell] != 0 || sea[cell] != 0 || channels.channel[cell] == 0)
                 continue;
-            const double height_m = static_cast<double>(elevation_m[cell]) - static_cast<double>(surface[cell]);
-            const bool meets = (terrain <= 0.0 || height_m < terrain) &&
-                               neighbour(x, y, [&](std::size_t other) { return water2[other] != 0 && channels.channel[other] == 0; });
-            const bool otherlake = neighbour(x, y, [&](std::size_t other) {
-                return water2[other] != 0 && surface[other] != surface[cell];
-            });
-            water3[cell] = (meets || height_m < 0.0) && !otherlake ? 1 : 0;
+            if (zone[cell] != none && lakecell[global] != 0)
+            {
+                const double height_m = static_cast<double>(elevation_m[cell]) - static_cast<double>(surface[cell]);
+                const bool meets = (terrain <= 0.0 || height_m < terrain) &&
+                                   neighbour(x, y, [&](std::size_t other) { return water2[other] != 0 && channels.channel[other] == 0; });
+                const bool otherlake = neighbour(x, y, [&](std::size_t other) {
+                    return water2[other] != 0 && surface[other] != surface[cell];
+                });
+                water3[cell] = (meets || height_m < 0.0) && !otherlake ? 1 : 0;
+                if (water3[cell] != 0)
+                    continue;
+            }
+            const float level = lakelevel[cell];
+            if (!(level > 0.0f) || !(elevation_m[cell] <= level))
+                continue;
+            if (neighbour(x, y, [&](std::size_t other) { return water2[other] != 0 && surface[other] != level; }))
+                continue;
+            // Inside a lake cell's block, a cell of the zone's own surface is lowered as every wet
+            // cell of that block (step 4's depth); elsewhere only to the next float below Λ.
+            atlevel[cell] = lakecell[global] != 0 && zone[cell] != none && surface[cell] == level ? 0 : 1;
+            water3[cell] = 1;
+            surface[cell] = level;
         }
     }
 
@@ -478,6 +518,11 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
         water.lakesurface_m[cell] = level;
         if (elevation_m[cell] < level)
             continue;
+        if (atlevel[cell] != 0)
+        {
+            elevation_m[cell] = std::nextafter(level, below);  // S3.13: a channel cell at its lake level
+            continue;
+        }
         const double magnitude = std::fabs(static_cast<double>(lakemagnitude[lake]));
         double depth = std::max(0.0, static_cast<double>(level) - static_cast<double>(inputs.elevation_m[lake]));
         if (terrain > 0.0 && !globaldepth)
@@ -590,6 +635,76 @@ FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow
     return shorewater(inputs, window, warp, parameters, sea, channels, elevation_m, globaldepth, inheritance);
 }
 
+std::vector<float> channellakelevels(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                                     const FineChannels& channels)
+{
+    const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
+    const std::size_t globalsize = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    std::vector<float> level(count, 0.0f);
+    if (channels.channel.size() != count || channels.globalcell.size() != count || inputs.lakesurface_m.size() != globalsize ||
+        inputs.network.sea.size() != globalsize || inputs.network.direction.size() != globalsize)
+        return level;
+    const auto lake = [&](std::size_t global) {
+        return inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0;
+    };
+    for (int y = 0; y < domainheight; y++)
+    {
+        const int row = window.globalrow(y);
+        for (int x = 0; x < domainwidth; x++)
+        {
+            const std::size_t cell = at(x, y, domainwidth);
+            if (channels.channel[cell] == 0 || channels.globalcell[cell] < 0 ||
+                static_cast<std::size_t>(channels.globalcell[cell]) >= globalsize)
+                continue;
+            const std::size_t upstream = static_cast<std::size_t>(channels.globalcell[cell]);
+            const std::size_t next = globalreceiver(inputs.network, upstream);
+            if (next != none && lake(next))
+                level[cell] = inputs.lakesurface_m[next];
+            else if (lake(upstream) && at(window.globalcolumn(x), row, inputs.width) == upstream)
+                level[cell] = inputs.lakesurface_m[upstream];
+        }
+    }
+    return level;
+}
+
+std::vector<std::size_t> channelmeansafterlakes(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                                                const FineChannels& channels, const std::vector<uint8_t>& sea,
+                                                const std::vector<float>& bed_m, const std::vector<float>& means_m,
+                                                std::vector<float>& elevation_m, FineWater& water, bool drymeans)
+{
+    std::vector<std::size_t> dried;
+    const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
+    if (channels.channel.size() != count || sea.size() != count || bed_m.size() != count || means_m.size() != count ||
+        elevation_m.size() != count || water.lakesurface_m.size() != count)
+        return dried;
+    for (int y = 0; y < domainheight; y++)
+    {
+        const int row = window.globalrow(y);
+        for (int x = 0; x < domainwidth; x++)
+        {
+            const std::size_t cell = at(x, y, domainwidth);
+            if (channels.channel[cell] == 0 || sea[cell] != 0 || means_m[cell] == bed_m[cell])
+                continue;
+            const float surface = water.lakesurface_m[cell];
+            if (surface > 0.0f)
+            {
+                const std::size_t global = at(window.globalcolumn(x), row, inputs.width);
+                if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
+                    continue;  // a lake bed of its own lake cell's block
+            }
+            elevation_m[cell] = means_m[cell];
+            if (drymeans && surface > 0.0f && means_m[cell] > surface)
+            {
+                water.lakesurface_m[cell] = 0.0f;  // land at this level: its mean stands above the water
+                dried.push_back(cell);
+            }
+        }
+    }
+    return dried;
+}
+
 void lakeslevel(const LevelContext& context, LevelState& state)
 {
     // 5. Lakes and ice (regional_pass.cpp's step 5, moved here unchanged in S3.0).
@@ -602,27 +717,41 @@ void lakeslevel(const LevelContext& context, LevelState& state)
         lakes.parentseagate = context.details.parentseagate;  // S3.4: the sill rule within the level's sea gate
     }
     // S3.2: the lakes read a land channel cell at its bed (state.bed_m), not at its cell mean (the
-    // refinement loop's refinement.channel_cell_slope, regional_solve.hpp): a wet channel cell is a lake
-    // bed (the lakes' result), a dry one keeps its mean. With every land channel cell at its bed (the
-    // single pass, theta 0) this is regionalwater on state.elevation_m itself.
+    // refinement loop's refinement.channel_cell_slope, regional_solve.hpp), so the water decision reads
+    // the bed; then channelmeansafterlakes (S3.13). With every land channel cell at its bed (the single
+    // pass, theta 0) this is regionalwater on state.elevation_m itself.
     std::vector<float>& elevation = state.elevation_m;
     const std::size_t count = elevation.size();
-    std::vector<std::size_t> means;
-    if (state.bed_m.size() == count && state.channels.channel.size() == count && state.sea.size() == count)
-        for (std::size_t cell = 0; cell < count; cell++)
-            if (state.channels.channel[cell] != 0 && state.sea[cell] == 0 && elevation[cell] != state.bed_m[cell])
-                means.push_back(cell);
-    std::vector<float> mean(means.size());
-    for (std::size_t index = 0; index < means.size(); index++)
+    const bool withbeds = state.bed_m.size() == count && state.channels.channel.size() == count && state.sea.size() == count;
+    std::vector<float> means;
+    if (withbeds)
     {
-        mean[index] = elevation[means[index]];
-        elevation[means[index]] = state.bed_m[means[index]];
+        means = elevation;
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (state.channels.channel[cell] != 0 && state.sea[cell] == 0)
+                elevation[cell] = state.bed_m[cell];
     }
     state.water = regionalwater(context.inputs, context.window, context.warp, context.parameters, state.sea,
                                 state.channels, elevation, context.details.globallakedepth, lakes);
-    for (std::size_t index = 0; index < means.size(); index++)
-        if (!(state.water.lakesurface_m[means[index]] > 0.0f))
-            elevation[means[index]] = mean[index];
+    if (withbeds)
+    {
+        const std::vector<std::size_t> dried = channelmeansafterlakes(context.inputs, context.window, state.channels, state.sea,
+                                                                      state.bed_m, means, elevation, state.water,
+                                                                      context.details.coarselevel);
+        if (state.diagnostics != nullptr && context.levelwindow != nullptr)
+        {
+            const LevelWindow& level = *context.levelwindow;
+            const int domainwidth = context.window.domainfinewidth();
+            const int x0 = level.keptcolumnoffset(), y0 = level.keptrowoffset();
+            for (const std::size_t cell : dried)
+            {
+                const int x = static_cast<int>(cell % static_cast<std::size_t>(domainwidth));
+                const int y = static_cast<int>(cell / static_cast<std::size_t>(domainwidth));
+                if (x >= x0 && x < x0 + level.columns && y >= y0 && y < y0 + level.rows)
+                    state.diagnostics->driedchannels++;
+            }
+        }
+    }
     recordlevelstep(state, LevelStep::lakes);
 }
 }

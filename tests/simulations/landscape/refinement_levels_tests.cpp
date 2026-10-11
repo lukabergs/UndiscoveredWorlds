@@ -722,7 +722,8 @@ TEST_F(Landscape, RefinementLevelsSmoothing)
 // lake) and R (the coast), two levels. Level 2's sea lies inside level 1's sea dilated by one
 // level-1 cell; no dry cell (not sea, not channel) lies below the surface of a wet 4-neighbour at
 // either level (the flood wets every cell below a lake's surface connected to its water, step 5
-// raises the rest, the projection keeps dry land above the water beside it). The overlap identity
+// raises the rest, the projection keeps dry land above the water beside it), and (S3.13) no dry land
+// channel cell at or below its lake level (LevelDiagnostics::drychannelinlake). The overlap identity
 // with the inherited masks on is RefinementLevelsOverlap's (every feature on: P and Q across the
 // date line, differing in column and row origin, with the lake; R and S with the coast).
 TEST_F(Landscape, RefinementLevelsInheritedMasks)
@@ -807,6 +808,13 @@ TEST_F(Landscape, RefinementLevelsInheritedMasks)
         EXPECT_EQ(drytwo, 0) << name;
         EXPECT_EQ(result.levels[0].drybelowlake, 0) << name;
         EXPECT_EQ(result.levels[1].drybelowlake, 0) << name;
+        // S3.13: no dry land channel cell at or below its lake level at either level.
+        std::printf("[refinement] %s: dry channel cells in a lake: level 1 %d, level 2 %d; beside another lake: level 1 "
+                    "%d, level 2 %d\n",
+                    name.c_str(), result.levels[0].drychannelinlake, result.levels[1].drychannelinlake,
+                    result.levels[0].channelbetweenlakes, result.levels[1].channelbetweenlakes);
+        EXPECT_EQ(result.levels[0].drychannelinlake, 0) << name;
+        EXPECT_EQ(result.levels[1].drychannelinlake, 0) << name;
         if (window.column0 == windowp().column0)
             EXPECT_GT(wet, 0) << name;
         else

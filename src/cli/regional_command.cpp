@@ -557,7 +557,11 @@ int runregioncommand(const vector<string>& arguments)
              << ", kept cells draining to the domain ring " << level.ringbasincells << ", unreached by a catchment "
              << level.unreachedcells << ", sink junctions pinned " << level.sinkjunctions << ", diagonal links "
              << level.diagonallinks << " (through the corner " << level.cornerlinks << "), pieces merged "
-             << level.mergedpieces << ", dry tails " << level.drytails;
+             << level.mergedpieces << ", dry tails " << level.drytails << ", dry channel cells in a lake "
+             << level.drychannelinlake << ", channel cells between lakes " << level.channelbetweenlakes
+             << ", wet channel cells dried above their water " << level.driedchannels
+             << ", wet channel cells above their surface " << level.wetchannelsabove << " (largest "
+             << level.wetchannelexcess_m << " m)";
         if (level.tributarycells > 0)  // multiscale plan S3.3 (tributaries on)
             cout << "; tributaries: " << level.tributaries << " grown, " << level.tributarycells << " cells, "
                  << level.tributarybedsabove << " beds above the start surface";

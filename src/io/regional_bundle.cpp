@@ -376,6 +376,11 @@ void writeregionalbundle(const std::filesystem::path& directory, const landscape
                         << ", \"diagonallinks\": " << level.diagonallinks
                         << ", \"cornerlinks\": " << level.cornerlinks
                         << ", \"mergedpieces\": " << level.mergedpieces << ", \"drytails\": " << level.drytails
+                        << ", \"drychannelinlake\": " << level.drychannelinlake
+                        << ", \"channelbetweenlakes\": " << level.channelbetweenlakes
+                        << ", \"driedchannels\": " << level.driedchannels
+                        << ", \"wetchannelsabove\": " << level.wetchannelsabove
+                        << ", \"wetchannelexcess_m\": " << jsonnumber(level.wetchannelexcess_m)
                         << ", \"solvelowering50_m\": " << jsonnumber(level.solvelowering50_m)
                         << ", \"solvelowering99_m\": " << jsonnumber(level.solvelowering99_m)
                         << ", \"reliefconverged\": " << (level.reliefconverged ? "true" : "false")

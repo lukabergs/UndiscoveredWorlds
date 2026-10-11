@@ -44,7 +44,7 @@ struct ProjectionBounds
 // The bounds of a level's children. With s the sea level, s+ and s- the next floats above
 // and below it, S a wet cell's lake surface and S- the next float below it:
 // - sea (sea[cell] != 0): rate 1, up max(0, s- - F*), down unbounded (it stays sea);
-// - wet (lakesurface_m[cell] > 0, not sea, a channel or not): rate 1, up max(0, S- - F*),
+// - wet (lakesurface_m[cell] > 0, not sea; a channel cell without bed_m or in a lake cell's block): rate 1, up max(0, S- - F*),
 //   down unbounded (it stays below its surface);
 // - land: rate channelrate on channel beds (channel[cell] != 0;
 //   refinement.projection_weight_channel, 0 by default) and 1 elsewhere, up unbounded, down
@@ -56,7 +56,10 @@ struct ProjectionBounds
 //   refinement.channel_cell_slope > 0, a land channel cell then holding its cell mean), a land
 //   channel cell takes rate 1 (channelrate is not read) and its floor is also its bed: down
 //   max(0, F* - max(s+, L+, b)); bounds.bed marks the land channel cells, which take projectlevel's
-//   beds fallback as the beds at rate 0 do without bed_m.
+//   beds fallback as the beds at rate 0 do without bed_m. S3.13: with bed_m given, a wet land
+//   channel cell outside a lake cell's block (ownlake_m 0: it holds its cell mean, regional_water.hpp's
+//   lakeslevel) takes these bounds too, its floor max(s+, b) (the water beside it is its own lake,
+//   so L is not read).
 // F* is `elevation_m`. Throws std::invalid_argument when a field is not domainsize() long
 // (ownlake_m and bed_m may be empty) or channelrate is negative or not finite.
 ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<std::uint8_t>& channel,
@@ -241,7 +244,9 @@ void smoothinglevel(const LevelContext& context, LevelState& state);
 
 // LevelStep::projection: projectlevel with state.bounds (LevelDiagnostics::projection), then
 // every wet non-channel cell at or above its lake surface dried (lake surface 0; kept ones
-// counted, LevelDiagnostics::driedcells), then state.lift_m = the final elevation less the
-// elevation entering the smoothing.
+// counted, LevelDiagnostics::driedcells) and (S3.13), at the levels below the last
+// (RegionalDetails::coarselevel), every wet channel cell with a dry channel cell's bounds (outside
+// a lake cell's block) above its surface likewise (driedchannels), then
+// state.lift_m = the final elevation less the elevation entering the smoothing.
 void projectionlevel(const LevelContext& context, LevelState& state);
 }

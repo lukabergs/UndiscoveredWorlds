@@ -389,6 +389,7 @@ TEST_F(Landscape, RefinementProjectionBounds)
     channel[at(6, 0)] = 1;
     elevation[at(6, 0)] = 60.0f;
     beds[at(6, 0)] = 5.0f;           // a bed below the sea level: the sea level is the floor
+    beds[at(3, 3)] = 100.0f;         // S3.13: the wet channel outside a lake cell's block, its bed 100 m
     const landscape::ProjectionBounds withbeds =
         landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.0, own, beds);
     EXPECT_EQ(withbeds.rate[at(0, 0)], 1.0f);
@@ -399,7 +400,20 @@ TEST_F(Landscape, RefinementProjectionBounds)
     EXPECT_EQ(withbeds.rate[at(6, 0)], 1.0f);
     EXPECT_NEAR(withbeds.down_m[at(6, 0)], 50.0, 1.0e-4);
     const landscape::ProjectionBounds plain = landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.0, own);
-    for (const std::size_t cell : {at(7, 0), at(7, 1), at(2, 2), at(3, 3), at(1, 1), at(5, 3), at(5, 0), at(6, 3)})
+    // S3.13: a wet channel cell outside a lake cell's block holds its cell mean and takes a dry channel
+    // cell's bounds (rate 1, no ceiling, its bed as the floor, not its own water); inside one (its own
+    // global cell a lake cell) it keeps the wet bounds.
+    EXPECT_EQ(withbeds.rate[at(3, 3)], 1.0f);
+    EXPECT_EQ(withbeds.up_m[at(3, 3)], inf);
+    EXPECT_NEAR(withbeds.down_m[at(3, 3)], 19.0, 1.0e-4);
+    std::vector<float> ownlake = own;
+    ownlake[at(3, 3)] = 120.0f;
+    const landscape::ProjectionBounds inlake =
+        landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.0, ownlake, beds);
+    EXPECT_EQ(inlake.up_m[at(3, 3)], plain.up_m[at(3, 3)]);
+    EXPECT_EQ(inlake.down_m[at(3, 3)], inf);
+    EXPECT_EQ(inlake.bed[at(3, 3)], 0);
+    for (const std::size_t cell : {at(7, 0), at(7, 1), at(2, 2), at(1, 1), at(5, 3), at(5, 0), at(6, 3)})
     {
         EXPECT_EQ(withbeds.rate[cell], plain.rate[cell]) << cell;
         EXPECT_EQ(withbeds.up_m[cell], plain.up_m[cell]) << cell;
@@ -408,13 +422,14 @@ TEST_F(Landscape, RefinementProjectionBounds)
     EXPECT_THROW(landscape::projectionbounds(level, channel, sea, lake, elevation, sealevel, 0.0, own,
                                              std::vector<float>(3, 0.0f)),
                  std::invalid_argument);
-    // The land channel cells are the beds of the fallback (bounds.bed); a sea or wet channel is not.
+    // The land channel cells are the beds of the fallback (bounds.bed); a sea channel is not, nor a wet
+    // channel inside a lake cell's block (S3.13).
     EXPECT_TRUE(plain.bed.empty());
     ASSERT_EQ(withbeds.bed.size(), level.domainsize());
     EXPECT_EQ(withbeds.bed[at(0, 0)], 1);
     EXPECT_EQ(withbeds.bed[at(6, 0)], 1);
     EXPECT_EQ(withbeds.bed[at(7, 1)], 0);
-    EXPECT_EQ(withbeds.bed[at(3, 3)], 0);
+    EXPECT_EQ(withbeds.bed[at(3, 3)], 1);  // S3.13: a wet channel outside a lake cell's block
     EXPECT_EQ(withbeds.bed[at(5, 0)], 0);
 
     // The fallback with the beds given: one parent of factor 2 at -10 m over three land children 1 m

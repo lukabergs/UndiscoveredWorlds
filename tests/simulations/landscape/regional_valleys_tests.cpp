@@ -206,6 +206,54 @@ TEST_F(Landscape, RegionalValleysIncisionStopsAtTheLocalRelief)
     EXPECT_EQ(chainvalues(incision.incision_m), (std::vector<float>{ 5.0f, 50.0f, 50.0f, 10.0f, 10.0f }));
 }
 
+TEST_F(Landscape, RegionalValleysIncisionFloorsAtLakes)
+{
+    // Multiscale plan S3.13 (amended): a lake is the base level of the land draining into it, and a
+    // river entering it descends into its basin. The chain with filled elevations 5, 30, 30, 60, 80 m:
+    // cell 3 a lake (S = 30 m, its filled elevation the spill, its bed 10 m), cell 2 its sill.
+    // 1 km/Myr over 1 Myr cuts every cell to s+ without the lake (the relief against the -100 m sea
+    // does not bind); with it the cells upstream of the lake stop at S, the lake cell at its bed, the
+    // sill (no floor from its lake donor) and cell 1 below it reach s+, and F' never rises downstream.
+    RegionalGlobalInputs inputs = chainworld();
+    const float filled[] = { 5.0f, 30.0f, 30.0f, 60.0f, 80.0f };
+    for (int i = 1; i <= 5; i++)
+        inputs.network.filledelevation_m[at(i, 1, 8)] = filled[i - 1];
+    inputs.elevation_m = inputs.network.filledelevation_m;
+    inputs.upliftrate_m_myr.assign(32, 1000.0f);
+    RegionalParameters parameters;
+    parameters.relief.elapsed_myr = 1.0;
+    parameters.valleys.upliftscale = 1.0;
+    const float above = std::nextafter(0.0f, 1.0f);
+
+    // Lake-free: the lake field empty or all zero gives the same result bit for bit.
+    const landscape::GlobalIncision none = landscape::globalincision(inputs, parameters);
+    ASSERT_TRUE(none.active);
+    EXPECT_EQ(chainvalues(none.filledelevation_m), (std::vector<float>{ above, above, above, above, above }));
+    inputs.lakesurface_m.assign(32, 0.0f);
+    const landscape::GlobalIncision zero = landscape::globalincision(inputs, parameters);
+    EXPECT_EQ(zero.filledelevation_m, none.filledelevation_m);
+    EXPECT_EQ(zero.incision_m, none.incision_m);
+
+    const float surface = 30.0f, bed = 10.0f;
+    inputs.lakesurface_m[at(3, 1, 8)] = surface;
+    inputs.elevation_m[at(3, 1, 8)] = bed;
+    const landscape::GlobalIncision lake = landscape::globalincision(inputs, parameters);
+    ASSERT_TRUE(lake.active);
+    const std::vector<float> incised = chainvalues(lake.filledelevation_m);
+    EXPECT_EQ(incised, (std::vector<float>{ above, above, bed, surface, surface }));
+    EXPECT_EQ(chainvalues(lake.incision_m), (std::vector<float>{ 5.0f, 30.0f, 20.0f, 30.0f, 50.0f }));
+    for (std::size_t i = 1; i < incised.size(); i++)
+        EXPECT_LE(incised[i - 1], incised[i]) << "cell " << i + 1;
+
+    // A gentler rate (10 m/Myr): the cells upstream cut by their own depth (70 and 50 m, above S);
+    // the lake cell by its own 10 m (20 m, above its bed), the sill to the lake cell's level; cell 1
+    // below the sill cut to s+ by its cap.
+    inputs.upliftrate_m_myr.assign(32, 10.0f);
+    const landscape::GlobalIncision gentle = landscape::globalincision(inputs, parameters);
+    ASSERT_TRUE(gentle.active);
+    EXPECT_EQ(chainvalues(gentle.filledelevation_m), (std::vector<float>{ above, 20.0f, 20.0f, 50.0f, 70.0f }));
+}
+
 TEST_F(Landscape, RegionalValleysIncisionInactiveWithoutItsFields)
 {
     RegionalGlobalInputs inputs = chainworld();

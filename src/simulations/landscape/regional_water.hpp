@@ -58,8 +58,17 @@ struct FineWater
 //   like any cell; a channel cell of a lake cell outside it is wet when z < S + D and an
 //   8-neighbour that is not a channel is wet, or when z < S, unless a wet 8-neighbour has
 //   another surface; otherwise (a bed at or above the surface away from the water, or the
-//   outlet between two lakes) it stays a river. Of two adjacent channel cells this rule
-//   wets at different surfaces, the higher stays a river too.
+//   outlet between two lakes) it stays a river. S3.13: in every block, a channel cell this
+//   leaves dry is wet at its lake level Λ (channellakelevels) when Λ > 0 and z <= Λ, unless a
+//   wet 8-neighbour has another surface, so a river into a lake is lake water from its first
+//   cell at or below the surface (across an island of a transit block too). Of two adjacent
+//   channel cells this rule wets at different surfaces, the higher stays a river too. The
+//   contract of a wet channel cell in the refinement loop (lakeslevel, channelmeansafterlakes):
+//   its bed lies at or below its surface; inside a lake cell's block its elevation is the lakes'
+//   bed; elsewhere it is its cell mean, which at the final level may stand above the surface by
+//   the channel's bank term (the lake drawn over the cell, one cell wide, as rivers are; counted,
+//   LevelDiagnostics::wetchannelsabove and wetchannelexcess_m), while at the levels below the last
+//   a cell whose elevation stands above its surface is dry (driedchannels).
 // - Beds: a wet cell with z >= S is lowered to S minus a depth growing from 0 where the sum
 //   is 0 to min(the global lake depth (S minus the zone's base elevation), D) where the sum
 //   reaches minus the zone's magnitude, and to at least the next float below S; a wet cell
@@ -128,12 +137,40 @@ FineWater regionalwater(const RegionalGlobalInputs& inputs, const RegionalWindow
                         const FineChannels& channels, std::vector<float>& elevation_m, bool globaldepth = false,
                         const LakeInheritance& inheritance = LakeInheritance{});
 
+// Multiscale plan S3.13, rivers through lakes: the lake level Λ of each domain cell's channel
+// (domainfinewidth() x domainfineheight()), from its owner piece alone: with u the piece's
+// upstream global cell (channels.globalcell) and c u's receiver on the global network (its
+// flow direction; none beyond a pole or for a sea u), Λ = S(c) when c is a lake cell (lake
+// surface above 0, not sea), else S(u) when u is one and the fine cell lies in u's block, else 0
+// (off the channels, tributaries with globalcell -1, the sill block's inflow leg of a lake's
+// outlet). A pure function of the piece, the global cells and the cell's absolute position, the
+// same at every level. R4's step 3 (shorewater) wets a land channel cell with Λ > 0 and its bed
+// at or below Λ at the surface Λ in any block, unless a wet 8-neighbour of the water of step 2
+// carries another surface (the guard of step 3; 3b as before); the loop's diagnostics count the
+// kept dry ones (LevelDiagnostics::drychannelinlake).
+std::vector<float> channellakelevels(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                                     const FineChannels& channels);
+
+// Multiscale plan S3.13, after the lakes read the land channel cells at their beds (lakeslevel):
+// every land channel cell (not sea) whose mean (`means_m`, the elevation before the lakes) differs
+// from its bed takes its mean back into `elevation_m`, except a wet one inside a lake cell's block
+// (its own global cell a lake cell), which keeps the lakes' bed. With `drymeans` (the refinement
+// loop's levels below the last, RegionalDetails::coarselevel) the water follows the elevation: a
+// wet one whose mean stands above its surface loses its water (land at this level; the finer level
+// decides again from its piece); without it (the final level) it keeps its water at its bed and its
+// mean, which may stand above the surface by the channel's bank term. Returns the cells it dried.
+// Domain fields; a size mismatch changes nothing.
+std::vector<std::size_t> channelmeansafterlakes(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                                                const FineChannels& channels, const std::vector<uint8_t>& sea,
+                                                const std::vector<float>& bed_m, const std::vector<float>& means_m,
+                                                std::vector<float>& elevation_m, FineWater& water, bool drymeans = true);
+
 struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)
 struct LevelState;
 
 // LevelStep::lakes: state.water = regionalwater on state.elevation_m with details.lakes (its
 // start surface state.surface_m when the flood is on) and details.globallakedepth. S3.2: every
-// land channel cell is read at its bed (state.bed_m) instead of its cell mean; one the lakes leave
-// dry takes its mean back, a wet one keeps the lakes' bed.
+// land channel cell is read at its bed (state.bed_m) instead of its cell mean, then
+// channelmeansafterlakes (S3.13); the kept cells it dried are LevelDiagnostics::driedchannels.
 void lakeslevel(const LevelContext& context, LevelState& state);
 }

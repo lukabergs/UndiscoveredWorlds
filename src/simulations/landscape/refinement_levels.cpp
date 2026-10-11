@@ -12,6 +12,7 @@
 
 #include "simulations/landscape/regional_surface.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
+#include "simulations/landscape/regional_water.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
 // The cell size and the level assignment are step S0.4; the prolongation, the parent-mean
@@ -455,6 +456,7 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
                 lakeparent[cell] = lakepatch.values[at(pc, pr, lakepatch.columns)];
             }
         details.parentseagate = l >= 2 ? &seagate : nullptr;
+        details.coarselevel = l < levels;  // S3.13
         details.lakes.parentsurface_m = l >= 2 ? &lakeparent : nullptr;
         details.lakes.parentreach = l >= 2 ? &lakereach : nullptr;
 
@@ -506,6 +508,48 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
                     }
                 diagnostics.shoresbelowlake += below ? 1 : 0;
             }
+        // S3.13: the kept dry land channel cells at or below their lake level and the kept wet channel
+        // cells above their surface (LevelDiagnostics).
+        {
+            const std::vector<float> lakelevel = channellakelevels(inputs, window, state.channels);
+            const bool withbeds = state.bed_m.size() == elevation.size();
+            for (int y = kepty0; y < kepty0 + level.rows; y++)
+                for (int x = keptx0; x < keptx0 + level.columns; x++)
+                {
+                    const std::size_t cell = level.index(x, y);
+                    if (state.sea[cell] != 0 || state.channels.channel[cell] == 0)
+                        continue;
+                    if (lakesurface[cell] > 0.0f)
+                    {
+                        if (elevation[cell] > lakesurface[cell])
+                        {
+                            diagnostics.wetchannelsabove++;
+                            diagnostics.wetchannelexcess_m =
+                                std::max(diagnostics.wetchannelexcess_m,
+                                         static_cast<double>(elevation[cell]) - static_cast<double>(lakesurface[cell]));
+                        }
+                        continue;
+                    }
+                    const float bed = withbeds ? state.bed_m[cell] : elevation[cell];
+                    if (!(lakelevel[cell] > 0.0f) || !(bed <= lakelevel[cell]))
+                        continue;
+                    // shorewater's guard: a wet 8-neighbour of another surface keeps the cell a river.
+                    bool guarded = false;
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            const int nx = x + dx, ny = y + dy;
+                            if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= level.domaincolumns || ny >= level.domainrows)
+                                continue;
+                            const float surface = lakesurface[level.index(nx, ny)];
+                            guarded = guarded || (surface > 0.0f && surface != lakelevel[cell]);
+                        }
+                    if (guarded)
+                        diagnostics.channelbetweenlakes++;
+                    else if (elevation[cell] <= lakelevel[cell])  // above it: land at this level (driedchannels)
+                        diagnostics.drychannelinlake++;
+                }
+        }
         float largest = 0.0f;
         for (int y = kepty0; y < kepty0 + level.rows; y++)
             for (int x = keptx0; x < keptx0 + level.columns; x++)

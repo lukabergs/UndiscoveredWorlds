@@ -335,6 +335,23 @@ struct LevelDiagnostics
     // whose chain steps from a painted cell onto an unpainted one (FineChannels::mergedpieces, drytails).
     int mergedpieces = 0;
     int drytails = 0;
+    // S3.13: the kept dry land channel cells (not sea, not wet) whose lake level Λ (regional_water.hpp,
+    // channellakelevels) is positive and whose bed (LevelState::bed_m) lies at or below it, after the
+    // projection, with no wet 8-neighbour of another surface and an elevation at or below Λ: a river
+    // standing dry inside the lake it runs into or out of (0 by rule unless a step after the lakes moved
+    // its bed); the same cells beside water of another surface (shorewater's guard: the outlet between
+    // two lakes) in channelbetweenlakes; the kept wet channel cells dried because their elevation stands
+    // above their surface, by lakeslevel (their cell mean, regional_water.hpp's channelmeansafterlakes)
+    // or after the projection (refinement_projection.hpp: outside a lake cell's block), in driedchannels
+    // (the levels below the last only: 0 at the final level, where the river keeps its water at its bed).
+    int drychannelinlake = 0;
+    int channelbetweenlakes = 0;
+    int driedchannels = 0;
+    // S3.13: the kept wet channel cells whose elevation (their cell mean) exceeds their lake surface after
+    // the projection, and the largest excess (m): the final level's river drawn as lake water over its
+    // cell (regional_water.hpp); 0 at the levels below the last by the drying rule.
+    int wetchannelsabove = 0;
+    double wetchannelexcess_m = 0.0;
     // S3.9: the 50th and 99th percentiles (nearest rank) of the solve's lowering over the kept unpinned
     // cells (the start surface less the solve's result with the parent's lift added back: the cells of
     // RegionalLevel::meanlowering_m).

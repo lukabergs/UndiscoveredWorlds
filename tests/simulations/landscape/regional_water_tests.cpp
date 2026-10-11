@@ -6,7 +6,8 @@
 // neighbourhood rules (the step between two lakes, the channel cells, the raised shore)
 // read up to three fine cells. Multiscale plan S3.4 adds the refinement loop's rim cap
 // (RegionalWaterRimCap), the lake-sea contact at a sill (RegionalWaterSillContact) and both at a kept
-// edge cutting a lake's zone (RegionalWaterOverlapSillAndRimCap).
+// edge cutting a lake's zone (RegionalWaterOverlapSillAndRimCap); S3.13 the channels through a
+// lake by their lake level (RegionalWaterChannelThroughLake).
 
 #include "landscape_fixture.hpp"
 
@@ -17,6 +18,7 @@
 #include "simulations/landscape/regional_edges.hpp"
 #include "simulations/landscape/regional_surface.hpp"
 #include "simulations/landscape/regional_water.hpp"
+#include "simulations/landscape/sphere_metric.hpp"
 #include "simulations/landscape/upsampling.hpp"
 
 #include <limits>
@@ -917,4 +919,208 @@ TEST_F(Landscape, RegionalWaterSillContact)
             EXPECT_GT(wet, 0);
         }
     }
+}
+
+namespace
+{
+// The flow-direction code of the offset (dx, dy) (sphere_metric.hpp; south positive).
+uint8_t directioncode(int dx, int dy)
+{
+    for (int code = 1; code <= landscape::directioncount; code++)
+        if (landscape::directionoffsetx(code) == dx && landscape::directionoffsety(code) == dy)
+            return static_cast<uint8_t>(code);
+    return 0;
+}
+
+// The domain cell of the top-left fine cell of global cell (i, j)'s block (-1: not in the domain).
+std::pair<int, int> blockorigin(const RegionalWindow& window, int i, int j)
+{
+    for (int y = 0; y < window.domainfineheight(); y++)
+        for (int x = 0; x < window.domainfinewidth(); x++)
+            if (window.globalcolumn(x) == i && window.globalrow(y) == j)
+                return {x, y};
+    return {-1, -1};
+}
+
+// The lakes of RegionalWaterChannelThroughLake on one channel layout: the shore rules with the noise
+// on (no flood), every cell's elevation its channel bed or the given terrain.
+landscape::FineWater channellakes(const RegionalGlobalInputs& inputs, const RegionalWindow& window,
+                                  const landscape::FineChannels& channels, std::vector<float>& elevation)
+{
+    const RegionalParameters parameters = shoreparameters(0.3);
+    const landscape::FineWarp warp = landscape::regionalwarp(window, inputs.seed, parameters);
+    const std::vector<uint8_t> sea(elevation.size(), 0);
+    return landscape::regionalwater(inputs, window, warp, parameters, sea, channels, elevation);
+}
+}
+
+// Multiscale plan S3.13, rivers through lakes (shorewater's step 3 in every block): on the 64-column
+// world, lake L (62, 17) at S = 300 m in a dry block (every non-channel cell 200 m above S), its
+// donor U (62, 18) south of it, its outlet R (61, 17) west of it and a second lake L2 (62, 19) at
+// S - 60 m south of U with its block 40 m below its surface (wet). Window keeping columns 58 .. 62,
+// rows 14 .. 21 at k 8. The link U -> L: a chain up U's block at bed S (then S + 1 m upstream) and
+// on into L's block at S - 2 m; the outflow leg L -> R in L's block at S - 2 m and R's inflow leg at
+// S - 3 m. Against the same layout with every globalcell -1 (no lake level): the link's cells at or
+// below S are wet at S and lowered to at most the next float below it, while some of U's are dry
+// without the rule (a dry block); the cells at S + 1 m and R's inflow leg are as without the rule
+// (lake level 0 there); a cell of U's block at bed S beside L2's water stays dry (another surface).
+// After the lakes (channelmeansafterlakes) a wet channel cell outside a lake cell's block whose mean
+// stands above S is dry, one below S stays wet, one in L's block keeps the lakes' bed.
+// At the final level (drymeans false) the one above S keeps its water.
+TEST_F(Landscape, RegionalWaterChannelThroughLake)
+{
+    RegionalGlobalInputs inputs = syntheticworld(64);
+    const int width = inputs.width;
+    const float surface = 300.0f, second = surface - 60.0f;
+    const std::size_t lake = at(62, 17, width), donor = at(62, 18, width), outlet = at(61, 17, width),
+                      other = at(62, 19, width);
+    std::fill(inputs.lakesurface_m.begin(), inputs.lakesurface_m.end(), 0.0f);
+    for (const std::size_t cell : {lake, donor, outlet, other})
+        inputs.network.sea[cell] = 0;
+    inputs.lakesurface_m[lake] = surface;
+    inputs.elevation_m[lake] = surface - 60.0f;
+    inputs.lakesurface_m[other] = second;
+    inputs.elevation_m[other] = second - 40.0f;
+    inputs.network.direction[donor] = directioncode(0, -1);
+    inputs.network.direction[lake] = directioncode(-1, 0);
+    ASSERT_NE(inputs.network.direction[donor], 0);
+    ASSERT_NE(inputs.network.direction[lake], 0);
+
+    const RegionalWindow window = barrierwindow(8, 58, 62, 14, 21);
+    const int k = window.scale, columns = window.domainfinewidth();
+    const std::size_t count = static_cast<std::size_t>(columns) * static_cast<std::size_t>(window.domainfineheight());
+    const auto [ux, uy] = blockorigin(window, 62, 18);
+    const auto [lx, ly] = blockorigin(window, 62, 17);
+    const auto [rx, ry] = blockorigin(window, 61, 17);
+    const auto [ox, oy] = blockorigin(window, 62, 19);
+    ASSERT_GE(ux, 0);
+    ASSERT_GE(rx, 0);
+    ASSERT_GE(ox, 0);
+
+    std::vector<float> terrain(count, surface + 200.0f);
+    for (int y = oy; y < oy + k; y++)
+        for (int x = ox; x < ox + k; x++)
+            terrain[at(x, y, columns)] = second - 40.0f;
+    landscape::FineChannels channels;
+    channels.channel.assign(count, 0);
+    channels.direction.assign(count, 0);
+    channels.bed_m.assign(count, 0.0f);
+    channels.discharge_m3s.assign(count, 0.0f);
+    channels.januaryflow.assign(count, 0);
+    channels.julyflow.assign(count, 0);
+    channels.globalcell.assign(count, -1);
+    enum Kind { atlake, aboveit, inflow };
+    std::vector<std::pair<std::size_t, Kind>> chain;
+    const auto add = [&](int x, int y, std::size_t owner, float bed, Kind kind) {
+        const std::size_t cell = at(x, y, columns);
+        channels.channel[cell] = 1;
+        channels.direction[cell] = 1;
+        channels.bed_m[cell] = bed;
+        channels.globalcell[cell] = static_cast<int32_t>(owner);
+        terrain[cell] = bed;
+        chain.push_back({cell, kind});
+    };
+    const int column = ux + k / 2;
+    for (int y = uy; y < uy + 4; y++)
+        add(column, y, donor, surface, atlake);
+    for (int y = uy + 4; y < uy + k - 2; y++)
+        add(column, y, donor, surface + 1.0f, aboveit);
+    for (int y = ly + 4; y < ly + k; y++)
+        add(column, y, donor, surface - 2.0f, atlake);
+    for (int x = lx; x < column; x++)
+        add(x, ly + 3, lake, surface - 2.0f, atlake);
+    for (int x = rx + k - 4; x < rx + k; x++)
+        add(x, ry + 3, lake, surface - 3.0f, inflow);
+
+    // The lake levels: S on the link and on the outflow leg in L's block, 0 on R's inflow leg.
+    const std::vector<float> levels = landscape::channellakelevels(inputs, window, channels);
+    for (const auto& [cell, kind] : chain)
+        EXPECT_EQ(levels[cell], kind == inflow ? 0.0f : surface) << "cell " << cell;
+
+    landscape::FineChannels plain = channels;
+    std::fill(plain.globalcell.begin(), plain.globalcell.end(), -1);
+    std::vector<float> withrule = terrain, without = terrain;
+    const landscape::FineWater water = channellakes(inputs, window, channels, withrule);
+    const landscape::FineWater control = channellakes(inputs, window, plain, without);
+    const float below = std::nextafter(surface, -std::numeric_limits<float>::infinity());
+    int linked = 0, wet = 0, drywithout = 0;
+    for (const auto& [cell, kind] : chain)
+    {
+        if (kind == atlake)
+        {
+            linked++;
+            EXPECT_EQ(water.lakesurface_m[cell], surface) << "cell " << cell;
+            EXPECT_LE(withrule[cell], below) << "cell " << cell;
+            wet += water.lakesurface_m[cell] > 0.0f ? 1 : 0;
+            drywithout += control.lakesurface_m[cell] > 0.0f ? 0 : 1;
+        }
+        else
+        {
+            EXPECT_EQ(water.lakesurface_m[cell], control.lakesurface_m[cell]) << "cell " << cell;
+            EXPECT_EQ(withrule[cell], without[cell]) << "cell " << cell;
+        }
+    }
+
+    // The means after the lakes (channelmeansafterlakes): the water follows the elevation. A wet cell of
+    // U's block (not a lake cell's) whose mean stands 5 m above S is dry at its mean; one whose mean lies
+    // below S stays wet at its mean; a wet cell of L's block keeps the lakes' bed and its water.
+    {
+        std::vector<float> means = withrule, elevation = withrule;
+        landscape::FineWater after = water;
+        const std::size_t high = chain[0].first, low = chain[1].first, inlake = chain[6].first;
+        means[high] = surface + 5.0f;
+        means[low] = surface - 1.0f;
+        means[inlake] = surface + 5.0f;
+        ASSERT_GT(water.lakesurface_m[high], 0.0f);
+        ASSERT_GT(water.lakesurface_m[low], 0.0f);
+        ASSERT_GT(water.lakesurface_m[inlake], 0.0f);
+        std::vector<float> lakebeds = channels.bed_m;
+        lakebeds[high] = lakebeds[low] = lakebeds[inlake] = surface - 2.0f;  // means differ from the beds
+        const std::vector<std::size_t> dried = landscape::channelmeansafterlakes(
+            inputs, window, channels, std::vector<uint8_t>(count, 0), lakebeds, means, elevation, after);
+        EXPECT_EQ(after.lakesurface_m[high], 0.0f);
+        EXPECT_EQ(elevation[high], surface + 5.0f);
+        EXPECT_EQ(after.lakesurface_m[low], surface);
+        EXPECT_EQ(elevation[low], surface - 1.0f);
+        EXPECT_EQ(after.lakesurface_m[inlake], surface);
+        EXPECT_EQ(elevation[inlake], withrule[inlake]);
+        EXPECT_EQ(dried, (std::vector<std::size_t>{ high }));
+        // At the final level (drymeans false) the river keeps its water at its bed and its mean.
+        std::vector<float> finalelevation = withrule;
+        landscape::FineWater finalwater = water;
+        const std::vector<std::size_t> none = landscape::channelmeansafterlakes(
+            inputs, window, channels, std::vector<uint8_t>(count, 0), lakebeds, means, finalelevation, finalwater, false);
+        EXPECT_TRUE(none.empty());
+        EXPECT_EQ(finalwater.lakesurface_m[high], surface);
+        EXPECT_EQ(finalelevation[high], surface + 5.0f);
+    }
+
+    // A cell of U's block 8-adjacent to L2's water (surface S - 60 m), made a channel cell of the link
+    // at bed S: dry (the guard against water of another surface).
+    int candidate = -1;
+    for (int x = ux; x < ux + k && candidate < 0; x++)
+    {
+        const int y = uy + k - 1;
+        bool beside = false;
+        for (int dx = -1; dx <= 1; dx++)
+            if (x + dx >= 0 && x + dx < columns)
+                beside = beside || water.lakesurface_m[at(x + dx, y + 1, columns)] == second;
+        if (beside && channels.channel[at(x, y, columns)] == 0)
+            candidate = static_cast<int>(at(x, y, columns));
+    }
+    std::printf("[regional] channel through a lake: %d of %d cells of the link and the outflow leg wet at S (%d dry without "
+                "the lake level); candidate beside the second lake %d\n",
+                wet, linked, drywithout, candidate);
+    EXPECT_GT(drywithout, 0);
+    ASSERT_GE(candidate, 0);
+    landscape::FineChannels besides = channels;
+    std::vector<float> beside = terrain;
+    const std::size_t cell = static_cast<std::size_t>(candidate);
+    besides.channel[cell] = 1;
+    besides.bed_m[cell] = surface;
+    besides.globalcell[cell] = static_cast<int32_t>(donor);
+    beside[cell] = surface;
+    EXPECT_EQ(landscape::channellakelevels(inputs, window, besides)[cell], surface);
+    const landscape::FineWater guarded = channellakes(inputs, window, besides, beside);
+    EXPECT_EQ(guarded.lakesurface_m[cell], 0.0f);
 }

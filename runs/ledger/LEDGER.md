@@ -51,6 +51,9 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0082`: transit edge points kept off the shared corner: the peaks rise (C16 6.6 to 8.6)
 - `erosion-0082`: an unqualified transit block: trenches, levees and dams (48 m steps, straight lake arms)
 - `erosion-0084`: a confluence rule that recomputes ownership to a fixed point (no fixed point in a ring of three crossings; dependency depth 3 to 10 global cells on B at k 16)
+- `erosion-0088`: flooring the lake cell at S (b(lake cell) = S) with the lake depth applied to the lake-block channel cells: a cliff at the block edge (98 m level-2 border steps on B)
+- `erosion-0088`: holding a coarse wet channel cell at its bed (332 m steps): the mean law at every level
+- `erosion-0088`: capping a wet channel cell's mean at its surface at the final level: it would carve B's fjord walls into trenches
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
@@ -172,6 +175,7 @@ Lessons:
 | `erosion-0085` | 2026-10-11 | step done; box 1 accepted at 1.45 with its cause; the user's verdict on run 42 pending | S4.0's catchment fill keeps the flooded cells, labels and corner rule, the low edges at the flat's filled level and the order rebuilt from the final receivers. | multiscale plan, step S3.12 (added from the user's second look, 2026-10-11): the regional solve's pits and flats resolved as the global routing's (Barnes et al. 2014) with metric distances and hashed ties |
 | `erosion-0086` | 2026-10-11 | step done | keep | multiscale plan, step S3.14 (added from the user's verdict of 2026-10-11): the painted channel network closed (no dry tails); the leg roughness 0.08 with a relief term |
 | `erosion-0087` | 2026-10-11 | step done; judging pending | keep | multiscale plan, step S3.16 (added from the user's noise question, docs/architecture/noise-functions.md): the OpenSimplex2S 3D kernel behind landscape.noise.kernel, per-octave rotation behind landscape.noise.rotate_octaves, both off by default |
+| `erosion-0088` | 2026-10-11 | step done; the user's look at the lake's outline pending | keep | multiscale plan, step S3.13: rivers through lakes (the incision floored at the lake surfaces downstream, the wet rule for channel cells in every block, the drychannelinlake and channelbetweenlakes diagnostics) |
 
 Lessons:
 
@@ -305,6 +309,9 @@ Lessons:
 - `erosion-0086`: A rule that reads one more piece per hop than the rule it extends changes the seam bound; measure it in the step and record it as measured, not derived.
 - `erosion-0087`: A worker without network access cannot read a reference: give it the constants in the brief, or read them yourself and check its port afterwards (done here: the normaliser to 1e-16, then the file).
 - `erosion-0087`: A generated-parameter key cannot be a string in this repository; a plan that names string values is wrong before the worker starts.
+- `erosion-0088`: A design that writes b(lake cell) = S for a lake a kilometre deep has not looked at the lake's bed: check the field's range in the fixture before fixing a law.
+- `erosion-0088`: A rule that is right at the finest level (a wet cell is at the water's bed) can pin a coarse cell to a wrong mean: every per-cell rule must say what it means for a 39 km cell, and water on a channel cell is a mask over a mean, not a surface.
+- `erosion-0088`: Six rounds on one step: when the second round contradicts the design's law, stop and re-derive the law from the fixture's numbers before the third.
 
 ## tectonics
 

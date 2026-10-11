@@ -80,9 +80,66 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
     const float floorlevel = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
     const bool withrelief = inputs.elevation_m.size() == size;
 
-    // The rate and the capped depth I per land cell: at most F minus the lowest level and at
-    // most the cell's local global relief, where the relief saturates once the plateau
-    // itself lies within the knickpoint wave's reach (regional_valleys.hpp).
+    // Multiscale plan S3.13 (amended 2026-10-11): the base level per cell, so a lake is the base
+    // level of the land draining into it while a river entering it descends into its basin (a
+    // delta front, not a shelf at the surface): Λ(u) = max(s+, Λ(receiver), S of u's receiver when
+    // that is a lake cell) on a land cell, Λ(c) = max(s+, Λ(receiver), min(c's own base elevation,
+    // S)) on a lake cell. The sill takes no S from its lake donor (as without lakes: it may be cut
+    // below S; a rising outlet needs the lake surfaces in rasterisechannels, an open item). Λ(c) <=
+    // S <= F'(u), so F' never rises; with no lake cell Λ is s+ everywhere (the rule of R9 exactly).
+    std::vector<std::size_t> receiver(size, nocell);
+    for (std::size_t cell = 0; cell < size; cell++)
+        receiver[cell] = receiverof(network, cell);
+    std::vector<float> base(size, floorlevel);
+    if (inputs.lakesurface_m.size() == size)
+    {
+        const auto lake = [&](std::size_t cell) { return inputs.lakesurface_m[cell] > 0.0f && network.sea[cell] == 0; };
+        for (std::size_t cell = 0; cell < size; cell++)
+        {
+            if (network.sea[cell] != 0)
+                continue;
+            if (lake(cell))
+            {
+                // The lake cell's own bed (its base elevation; none without the field), at most S.
+                if (withrelief)
+                    base[cell] = std::max(base[cell], std::min(inputs.elevation_m[cell], inputs.lakesurface_m[cell]));
+                continue;
+            }
+            const std::size_t next = receiver[cell];
+            if (next != nocell && lake(next))
+                base[cell] = std::max(base[cell], inputs.lakesurface_m[next]);
+        }
+        // Receivers first, as channel_network.cpp's outletdistance: each chain walked once to a
+        // finished cell (or its end, or a cell already on the walk: a receiver loop, bad input,
+        // whose cells keep the maximum along the walk), then finished from its far end.
+        std::vector<uint8_t> state(size, 0);  // 0 not reached, 1 on the walk, 2 finished
+        std::vector<std::size_t> walk;
+        for (std::size_t start = 0; start < size; start++)
+        {
+            if (state[start] != 0)
+                continue;
+            walk.clear();
+            std::size_t cell = start;
+            while (cell != nocell && state[cell] == 0)
+            {
+                state[cell] = 1;
+                walk.push_back(cell);
+                cell = network.sea[cell] != 0 ? nocell : receiver[cell];
+            }
+            float below = cell != nocell && state[cell] == 2 ? base[cell] : floorlevel;
+            for (auto it = walk.rbegin(); it != walk.rend(); ++it)
+            {
+                if (network.sea[*it] == 0)
+                    base[*it] = std::max(base[*it], below);
+                below = base[*it];
+                state[*it] = 2;
+            }
+        }
+    }
+
+    // The rate and the capped depth I per land cell: at most F minus the base level Λ (s+ away
+    // from lakes) and at most the cell's local global relief, where the relief saturates once
+    // the plateau itself lies within the knickpoint wave's reach (regional_valleys.hpp).
     std::vector<float> rate(size, 0.0f);
     std::vector<double> depth(size, 0.0);
     for (std::size_t cell = 0; cell < size; cell++)
@@ -99,24 +156,20 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
             value = 0.0;
         rate[cell] = static_cast<float>(value);
         const double filled = static_cast<double>(network.filledelevation_m[cell]);
-        double cap = filled - static_cast<double>(floorlevel);
+        double cap = filled - static_cast<double>(base[cell]);
         if (withrelief)
             cap = std::min(cap, static_cast<double>(localrelief(inputs.elevation_m, inputs.width, inputs.height, cell)));
         depth[cell] = std::max(0.0, std::min(value * elapsed, cap));
     }
 
     // Kahn's order over the forest of land links: a cell after all its donors.
-    std::vector<std::size_t> receiver(size, nocell);
     std::vector<int> donors(size, 0);
     for (std::size_t cell = 0; cell < size; cell++)
-    {
-        receiver[cell] = receiverof(network, cell);
         if (receiver[cell] != nocell)
             donors[receiver[cell]]++;
-    }
-    // F'(r) = max(s+, min(F(r) - I(r), min over donors F'(u))) with s+ the next float above
-    // the sea level, or F(r) where F(r) < s+; `lowest` holds the donors' minimum F' as they
-    // are finished.
+    // F'(r) = max(Λ(r), min(F(r) - I(r), min over donors F'(u))) with Λ the base level (s+, the
+    // next float above the sea level, away from lakes), at most F(r), or F(r) where F(r) < s+;
+    // `lowest` holds the donors' minimum F' as they are finished.
     std::vector<float> incised(network.filledelevation_m);
     std::vector<float> lowest(size, std::numeric_limits<float>::infinity());
     std::vector<uint8_t> done(size, 0);
@@ -134,7 +187,7 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
         float value = static_cast<float>(static_cast<double>(filled) - depth[cell]);
         if (withdonors)
             value = std::min(value, lowest[cell]);
-        incised[cell] = std::min(filled, std::max(floorlevel, value));
+        incised[cell] = std::min(filled, std::max(base[cell], value));
     };
     while (!ready.empty())
     {
