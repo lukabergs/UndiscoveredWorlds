@@ -257,9 +257,11 @@ def draw_markers(canvas, columns, rows, scale, rings=(), squares=(), links=(), d
 
 
 GRATICULE_STEPS = (0.25, 0.5, 1, 2, 5, 10, 15, 30)
-# The subgrid of a regional graticule (multiscale plan S3.11, the user's request of 2026-10-11): unlabelled
-# lines at the next finer step of GRATICULE_STEPS, at a quarter of the graticule's alpha, when at least
-# SUBGRID_MIN_PIXELS apart.
+# The subgrid of a regional graticule (multiscale plan S3.11, the user's requests of 2026-10-11): unlabelled
+# lines at a quarter of the graticule's alpha on a step that divides the graticule's, so every labelled
+# line lies on a subgrid line and each whole degree can be located: 1 degree under a whole-degree
+# graticule (never 2 under 5), the finest dividing step of GRATICULE_STEPS under a finer one; a coarser
+# divisor when the lines would be closer than SUBGRID_MIN_PIXELS.
 SUBGRID = GRID[:3] + (GRID[3] // 4,)
 SUBGRID_MIN_PIXELS = 24
 
@@ -269,10 +271,15 @@ def _graticule_step(span):
     return next((step for step in GRATICULE_STEPS if span / step <= 8), 30)
 
 
-def _subgrid_step(step):
-    """The step of the unlabelled subgrid under a graticule step: the next finer of GRATICULE_STEPS, or None."""
-    finer = [candidate for candidate in GRATICULE_STEPS if candidate < step]
-    return finer[-1] if finer else None
+def _subgrid_step(step, pixels_per_degree):
+    """The step of the unlabelled subgrid under a graticule step: the finest step of GRATICULE_STEPS that
+    divides it (whole degrees only under a whole-degree step, so 1 under 2, 5, 10, 15 and 30) and keeps its
+    lines at least SUBGRID_MIN_PIXELS apart, or None."""
+    divides = [candidate for candidate in GRATICULE_STEPS
+               if candidate < step and abs(step / candidate - round(step / candidate)) < 1e-9
+               and (candidate >= 1 or step < 1)]
+    fitting = [candidate for candidate in divides if candidate * pixels_per_degree >= SUBGRID_MIN_PIXELS]
+    return fitting[0] if fitting else None
 
 
 def _degree_label(value, positive, negative):
@@ -289,8 +296,8 @@ def _regional_graticule(draw, raster, extent, total, font):
     west, south, east, north = extent
     east = east + 360 if east <= west else east
     step = _graticule_step(max(east - west, north - south))
-    sub = _subgrid_step(step)
-    if sub is not None and sub / (east - west) * raster.width >= SUBGRID_MIN_PIXELS:
+    sub = _subgrid_step(step, raster.width / (east - west))
+    if sub is not None:
         longitude = math.ceil(west / sub) * sub
         while longitude <= east + 1e-9:
             if west < longitude < east and abs(longitude / step - round(longitude / step)) > 1e-9:

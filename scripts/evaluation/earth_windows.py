@@ -55,6 +55,19 @@ SOURCE_LABELS = {'etopo60': '60 arc-second', 'etopo15': '15 arc-second'}
 # Composite of a profile map -> style of the Earth window beside it.
 STYLES = {'regional_terrain': 'terrain', 'regional_relief': 'relief'}
 NEAREST = "the entry whose metres_per_pixel range holds the map's and whose centre latitude is nearest the window's"
+PREFERRED = "the profile's preferred entry for the window block (earth.preferred)"
+
+
+def preferred_name(config, window):
+    """The catalogue entry the profile prefers for a window block: the "entry" of the item of config["preferred"]
+    whose "pixels" ("c0,r0,c1,r1", the run's --pixels: inclusive global cells) equals the window's, else None.
+    The user chooses these (window A against the Himalaya, 2026-10-11); --earth NAME still overrides."""
+    pixels = (f"{window['column0']},{window['row0']},{window['column0'] + window['columns'] - 1},"
+              f"{window['row0'] + window['rows'] - 1}")
+    for item in config.get('preferred', ()):
+        if item.get('pixels') == pixels:
+            return item['entry']
+    return None
 EPSILON = 1e-9
 
 
@@ -417,6 +430,10 @@ def render_maps(bundle, profile, directory, name=None, reader=None, catalogue=No
         if not path.is_file():
             return [], {'entry': None, 'note': f'No Earth window: the catalogue {path.relative_to(ROOT).as_posix()} does not exist.'}
         catalogue = load_catalogue(path)
+    chosen_by = '--earth' if name else NEAREST
+    if name is None:
+        name = preferred_name(config, bundle.manifest['window'])
+        chosen_by = PREFERRED if name else NEAREST
     entry = choose_entry(catalogue, metres, request['latitude'], name)
     if entry is None:
         return [], {'entry': None, 'note': f'No Earth window: no catalogue entry holds {metres:,.0f} m per pixel.'}
@@ -447,10 +464,10 @@ def render_maps(bundle, profile, directory, name=None, reader=None, catalogue=No
     if written:
         palettes.write_sidecar(Path(directory) / 'maps')
     cache = Path(record['cache'])
-    info = {'entry': entry['name'], 'title': entry['title'], 'caption': title, 'chosen_by': '--earth' if name else NEAREST,
+    info = {'entry': entry['name'], 'title': entry['title'], 'caption': title, 'chosen_by': chosen_by,
             'source': record['source'], 'source_label': record['source_label'], 'metres_per_pixel': metres,
             'pixels': record['pixels'], 'map_pixels': record['map_pixels'], 'extent': record['extent'],
             'cache': cache.relative_to(ROOT).as_posix() if cache.is_relative_to(ROOT) else cache.as_posix(),
             'reused': record['reused'], 'features': entry.get('features', []),
-            'note': f"Earth window {entry['name']} ({entry['title']}), chosen by {'--earth' if name else NEAREST}."}
+            'note': f"Earth window {entry['name']} ({entry['title']}), chosen by {chosen_by}."}
     return written, info

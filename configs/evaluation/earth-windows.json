@@ -203,7 +203,7 @@
       "title": "Central Himalaya, Nepal",
       "centre": [84.5, 28.5],
       "box": [80.0, 26.0, 89.0, 31.0],
-      "metres_per_pixel": [450, 2000],
+      "metres_per_pixel": [450, 3000],
       "features": [
         "the flat Gangetic foreland below 200 m",
         "the Siwalik hills: narrow ridges along the Main Frontal Thrust",
