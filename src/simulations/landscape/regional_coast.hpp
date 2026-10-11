@@ -103,14 +103,28 @@ std::vector<double> displacedsample(const std::vector<float>& field, const Regio
 // level) holds one value per fine cell; empty: the sea cells of global sea cells. Decided per global
 // cell on `sea` as it comes, so the result is a pure function of `sea` and `core` within `reach`
 // global cells of each block (blocks beyond the box do not exist; columns wrap around a whole turn).
-// All zero when reach <= 0.
+// The path never enters a global lake cell (lake surface above zero, not sea), and a lake cell's own
+// sea is never a pocket. All zero when reach <= 0.
 std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const RegionalWindow& box, int reach,
                                 const std::vector<uint8_t>& sea, const std::vector<uint8_t>& core = {});
+
+// The filled pocket cells that belong to a lake (S3.15, round 5: a pocket filled at a lake's sill
+// printed the lake's 3 x 3 zone as straight edges): one value per fine cell of `box`'s domain, the lake's
+// surface S on a `filled` cell of a global lake cell or of its 8-neighbours (the highest neighbour's S)
+// whose `surface` lies below S when S lies above the sea level; 0 elsewhere. The callers raise such a
+// cell only to the next float above the sea level, so the lake flood (regional_water.hpp, the
+// sill-crossing rule) wets it at S, and keep it below S. A pure function of the global lakes and the cell.
+std::vector<float> lakepockets(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const std::vector<uint8_t>& filled,
+                               const std::vector<float>& surface);
 
 // The basins of filled pockets (S3.15 b): one value per fine cell of `box`'s domain, 1 on the cells
 // reached from a global cell's `filled` cells through 4-connected land cells (`sea` 0) that are
 // filled or whose `surface` lies below `level` (the callers: the next float above the sea level),
 // inside the global cells within `reach` of that global cell (the filled cells included); 0 elsewhere.
+// A cell of a global lake cell, or of a global cell beside one (8-neighbours) lying below that lake's
+// surface (the highest such), is never a basin cell: it is the lake's bed, which the lake flood fills
+// after the coast (the merged run 47 lifted it out of the lake at 58-59 E, 4-5.5 N). The global lake
+// mask is absolute, so the rule stays seamless.
 // Decided on the inputs as they come (a pure function of them within `reach` global cells).
 std::vector<uint8_t> pocketbasins(const RegionalGlobalInputs& inputs, const RegionalWindow& box, int reach,
                                   const std::vector<uint8_t>& sea, const std::vector<uint8_t>& filled,

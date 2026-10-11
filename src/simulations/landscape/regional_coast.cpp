@@ -170,6 +170,53 @@ struct Region
 
 // The breadth-first search of seapockets and pocketbasins: from the cells in `queue` (marked `id`)
 // through the 4-neighbours that `pass` admits inside the region of block (bx, by).
+// The global lakes as the pocket search and the basins see them (S3.15, the merged run 47: a basin took
+// a lake's bed below the sea level and lifted it out of the lake): per global cell of the world, the
+// lake's surface where it is a lake cell (lake surface above zero and not sea), else the highest
+// surface of a lake cell among its 8 neighbours, else 0; and whether it is a lake cell. A pure function
+// of the global fields, so the rules that read it stay seamless.
+struct GlobalLakes
+{
+    std::vector<uint8_t> own;
+    std::vector<float> surface;
+    bool empty() const { return own.empty(); }
+};
+
+GlobalLakes globallakes(const RegionalGlobalInputs& inputs)
+{
+    GlobalLakes lakes;
+    const int width = inputs.width, height = inputs.height;
+    const std::size_t size = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    if (inputs.lakesurface_m.size() != size)
+        return lakes;
+    auto lake = [&](std::size_t cell) { return inputs.lakesurface_m[cell] > 0.0f && inputs.network.sea[cell] == 0; };
+    bool any = false;
+    lakes.own.assign(size, 0);
+    lakes.surface.assign(size, 0.0f);
+    for (int j = 0; j < height; j++)
+        for (int i = 0; i < width; i++)
+        {
+            const std::size_t cell = at(i, j, width);
+            if (lake(cell))
+            {
+                lakes.own[cell] = 1;
+                lakes.surface[cell] = inputs.lakesurface_m[cell];
+                any = true;
+                continue;
+            }
+            float highest = 0.0f;
+            regionaldetail::aroundcell(width, height, i, j, [&](std::size_t other) {
+                if (lake(other))
+                    highest = std::max(highest, inputs.lakesurface_m[other]);
+                return false;
+            });
+            lakes.surface[cell] = highest;
+        }
+    if (!any)
+        lakes = GlobalLakes{};
+    return lakes;
+}
+
 template<typename Pass>
 void spread(std::vector<std::size_t>& queue, std::vector<int>& mark, int id, int finewidth, int fineheight,
             const Region& region, int bx, int by, Pass pass)
@@ -213,6 +260,11 @@ std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const Region
     if (reach <= 0)
         return filled;
     const Region region{reach, columns, rows, k, columns >= width};
+    // The search never enters a global lake cell (lakes are the lake flood's, run after the coast).
+    const GlobalLakes lakes = globallakes(inputs);
+    auto lakecell = [&](int x, int y) {
+        return !lakes.empty() && lakes.own[at(wrapcolumn(box.domaincolumn0 + x / k, width), box.domainrow0 + y / k, width)] != 0;
+    };
     auto seablock = [&](int bx, int by) {
         return inputs.network.sea[at(wrapcolumn(box.domaincolumn0 + bx, width), box.domainrow0 + by, width)] != 0;
     };
@@ -225,7 +277,10 @@ std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const Region
     for (int by = 0; by < rows; by++)
         for (int bx = 0; bx < columns; bx++)
         {
-            // Only a block holding sea that is not core can hold a pocket.
+            // Only a block holding sea that is not core can hold a pocket; a lake cell's block holds none
+            // (its fringe of sea meets the lake by S3.4's gate and is left alone).
+            if (lakecell(bx * k, by * k))
+                continue;
             bool any = false;
             for (int y = by * k; y < (by + 1) * k && !any; y++)
                 for (int x = bx * k; x < (bx + 1) * k && !any; x++)
@@ -260,7 +315,10 @@ std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const Region
                 }
             }
             // Through fine sea (4-connected), inside the blocks within the reach.
-            spread(queue, mark, id, finewidth, fineheight, region, bx, by, [&](std::size_t cell) { return sea[cell] != 0; });
+            spread(queue, mark, id, finewidth, fineheight, region, bx, by, [&](std::size_t cell) {
+                return sea[cell] != 0 && !lakecell(static_cast<int>(cell % static_cast<std::size_t>(finewidth)),
+                                                   static_cast<int>(cell / static_cast<std::size_t>(finewidth)));
+            });
             for (int y = by * k; y < (by + 1) * k; y++)
                 for (int x = bx * k; x < (bx + 1) * k; x++)
                 {
@@ -270,6 +328,31 @@ std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const Region
                 }
         }
     return filled;
+}
+
+std::vector<float> lakepockets(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const std::vector<uint8_t>& filled,
+                               const std::vector<float>& surface)
+{
+    const int width = inputs.width, k = box.scale;
+    const int finewidth = box.domainfinewidth(), fineheight = box.domainfineheight();
+    const std::size_t count = static_cast<std::size_t>(finewidth) * static_cast<std::size_t>(fineheight);
+    if (filled.size() != count || surface.size() != count)
+        throw std::invalid_argument("lakepockets: the filled cells and the surface must cover the box's fine cells");
+    std::vector<float> lake(count, 0.0f);
+    const GlobalLakes lakes = globallakes(inputs);
+    if (lakes.empty())
+        return lake;
+    for (int y = 0; y < fineheight; y++)
+        for (int x = 0; x < finewidth; x++)
+        {
+            const std::size_t cell = at(x, y, finewidth);
+            if (filled[cell] == 0)
+                continue;
+            const float level = lakes.surface[at(wrapcolumn(box.domaincolumn0 + x / k, width), box.domainrow0 + y / k, width)];
+            if (level > inputs.sealevel && surface[cell] < level)
+                lake[cell] = level;
+        }
+    return lake;
 }
 
 std::vector<uint8_t> pocketbasins(const RegionalGlobalInputs& inputs, const RegionalWindow& box, int reach,
@@ -286,6 +369,17 @@ std::vector<uint8_t> pocketbasins(const RegionalGlobalInputs& inputs, const Regi
     if (reach <= 0)
         return basin;
     const Region region{reach, columns, rows, k, columns >= width};
+    // Never a global lake cell's fine cells, nor those of its 8 neighbours below its surface (the lake's
+    // bed, which the lake flood fills after the coast).
+    const GlobalLakes lakes = globallakes(inputs);
+    auto lakebed = [&](std::size_t cell) {
+        if (lakes.empty())
+            return false;
+        const int x = static_cast<int>(cell % static_cast<std::size_t>(finewidth));
+        const int y = static_cast<int>(cell / static_cast<std::size_t>(finewidth));
+        const std::size_t global = at(wrapcolumn(box.domaincolumn0 + x / k, width), box.domainrow0 + y / k, width);
+        return lakes.own[global] != 0 || surface[cell] < lakes.surface[global];
+    };
     std::vector<int> mark(count, -1);
     std::vector<std::size_t> queue;
     for (int by = 0; by < rows; by++)
@@ -306,7 +400,7 @@ std::vector<uint8_t> pocketbasins(const RegionalGlobalInputs& inputs, const Regi
             if (queue.empty())
                 continue;
             spread(queue, mark, id, finewidth, fineheight, region, bx, by,
-                   [&](std::size_t cell) { return sea[cell] == 0 && (filled[cell] != 0 || surface[cell] < level); });
+                   [&](std::size_t cell) { return sea[cell] == 0 && (filled[cell] != 0 || (surface[cell] < level && !lakebed(cell))); });
             for (const std::size_t cell : queue)
                 basin[cell] = 1;
         }

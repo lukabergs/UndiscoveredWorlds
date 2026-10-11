@@ -312,17 +312,22 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
         // seagate, and at level >= 2 the parent's sea gate, so only where the level's own sea could
         // be), a cell between the sea level and S is passable whatever the lake mask says.
         const std::vector<uint8_t> gate = seagate(inputs, window, warp, parameters, &lakeweight);
+        // A cell at exactly S inside a lake cell's own block is the lake's too (S3.15's judging run 47:
+        // two level-1 cells of a lake cell at its surface printed a 32 x 16 land rectangle at k 64).
+        const auto atorbelow = [&](float value, std::size_t cell, std::size_t global) {
+            return value < surface[cell] || (value == surface[cell] && lakecell[global] != 0);
+        };
         const auto passable = [&](std::size_t cell, int x, int y) {
-            if (sea[cell] != 0 || zone[cell] == none || !(elevation_m[cell] < surface[cell]))
+            const std::size_t global = at(window.globalcolumn(x), window.globalrow(y), width);
+            if (sea[cell] != 0 || zone[cell] == none || !atorbelow(elevation_m[cell], cell, global))
                 return false;
-            if (inheritance.startsurface_m != nullptr && !((*inheritance.startsurface_m)[cell] < surface[cell]))
+            if (inheritance.startsurface_m != nullptr && !atorbelow((*inheritance.startsurface_m)[cell], cell, global))
                 return false;
             if (inherited && (*inheritance.parentreach)[cell] == 0)
                 return false;
             if (gate[cell] != 0 && (inheritance.parentseagate == nullptr || (*inheritance.parentseagate)[cell] != 0) &&
                 elevation_m[cell] > inputs.sealevel)
                 return true;
-            const std::size_t global = at(window.globalcolumn(x), window.globalrow(y), width);
             return lakeweight[cell] >= 0.5f || inputs.elevation_m[global] > surface[cell];
         };
         std::vector<uint8_t> flooded(count, 0);
@@ -333,7 +338,8 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
                 const std::size_t cell = at(x, y, domainwidth);
                 const bool core = inherited ? sea[cell] == 0 && zone[cell] != none &&
                                                   (*inheritance.parentsurface_m)[cell] == surface[cell] &&
-                                                  elevation_m[cell] < surface[cell]
+                                                  atorbelow(elevation_m[cell], cell,
+                                                            at(window.globalcolumn(x), window.globalrow(y), width))
                                             : wet[cell] != 0;
                 if (core)
                 {

@@ -541,6 +541,34 @@ TEST_F(Landscape, RegionalCoastPocketsFilled)
     EXPECT_EQ(basin[at(26, 26, finewidth)], 0);
     EXPECT_EQ(std::count(basin.begin(), basin.end(), uint8_t{1}), 7);
 
+    // A global lake cell at (11, 6), surface 10 m, beside the pocket's (12, 6): the lake's bed is never a
+    // basin, neither in the lake cell (15, 17) nor below its surface in the neighbour (16, 17); the pocket
+    // itself is still filled and raised; the pocket search does not cross the lake cell.
+    RegionalGlobalInputs laked = inputs;
+    laked.lakesurface_m.assign(32 * 16, 0.0f);
+    laked.lakesurface_m[at(11, 6, 32)] = 10.0f;
+    EXPECT_EQ(landscape::seapockets(laked, box, 2, sea), expected);
+    const std::vector<uint8_t> lakebasin = landscape::pocketbasins(laked, box, 2, after, filled, lowland, 20.0f);
+    for (const auto& [x, y] : pockets)
+        EXPECT_EQ(lakebasin[at(x, y, finewidth)], 1);
+    EXPECT_EQ(lakebasin[at(15, 17, finewidth)], 0);
+    EXPECT_EQ(lakebasin[at(16, 17, finewidth)], 0);
+    EXPECT_EQ(std::count(lakebasin.begin(), lakebasin.end(), uint8_t{1}), 5);
+    // The pocket in (12, 6) beside that lake, its bed at -5 m below the lake's 10 m: its cells belong to the
+    // lake (lakepockets gives S; the callers set them just above the sea level, below S); the pocket in
+    // (11, 4), two rows from the lake, does not; a bed above S does not.
+    std::vector<float> beds(sea.size(), 50.0f);
+    for (const auto& [x, y] : pockets)
+        beds[at(x, y, finewidth)] = -5.0f;
+    beds[at(18, 17, finewidth)] = 12.0f;
+    const std::vector<float> lakecells = landscape::lakepockets(laked, box, filled, beds);
+    EXPECT_EQ(lakecells[at(17, 17, finewidth)], 10.0f);
+    EXPECT_EQ(lakecells[at(17, 18, finewidth)], 10.0f);
+    EXPECT_EQ(lakecells[at(18, 17, finewidth)], 0.0f);
+    EXPECT_EQ(lakecells[at(13, 9, finewidth)], 0.0f);
+    EXPECT_EQ(lakecells[at(14, 9, finewidth)], 0.0f);
+    EXPECT_EQ(landscape::lakepockets(inputs, box, filled, beds), std::vector<float>(sea.size(), 0.0f));
+
     // Through the land-share rule (the R2 test coast with R7's features on the synthetic world, window
     // C at k = 8): with the fill on, no kept fine sea cell of a global land cell is cut from the sea of
     // the global sea cells within two global cells, the shares hold and the surface agrees with the mask.

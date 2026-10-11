@@ -732,6 +732,7 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     // at k 64 a 67 m block-mean error at global cell (189, 46), a 96 m border step at level 1 and 494 m at
     // level 2.
     std::vector<uint8_t> basin;
+    std::vector<float> lakepocket;  // a filled cell of a lake's bed: its lake's surface (regional_coast.hpp, lakepockets)
     if (pocketreach > 0)
     {
         std::vector<uint8_t> filled = seapockets(inputs, box, pocketreach, mask, core);
@@ -763,13 +764,14 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
         start.pocketcellsfilled = done.pocketcells;
         start.pockets = left.pockets;
         start.pocketcells = left.pocketcells;
+        lakepocket = lakepockets(inputs, box, filled, surface);
         basin = pocketbasins(inputs, box, pocketreach, mask, filled, surface,
                              std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity()));
         // In global land cells only: a pocket filled in a global sea cell takes the ordinary shore (the clamp
         // above the sea level), so the sea block's mean stays within the sign-keeping passes' reach.
         for (int y = 0; y < fineheight; y++)
             for (int x = 0; x < finewidth; x++)
-                if (inputs.network.sea[globalof(x / k, y / k)] != 0)
+                if (inputs.network.sea[globalof(x / k, y / k)] != 0 || lakepocket[at(x, y, finewidth)] > 0.0f)
                     basin[at(x, y, finewidth)] = 0;
     }
 
@@ -828,6 +830,11 @@ void landsharesurface(const RegionalGlobalInputs& inputs, const RegionalWindow& 
                 surface[cell] = std::max(surface[cell], static_cast<float>(sealevel + static_cast<double>(shoreheight[cell])));
         }
         clamptomask(inputs, box, gate, mask, surface);
+        // S3.15: a filled cell of a lake's bed stays below the lake's surface (the lake flood wets it).
+        for (std::size_t cell = 0; cell < lakepocket.size(); cell++)
+            if (lakepocket[cell] > 0.0f && mask[cell] == 0)
+                surface[cell] = std::max(std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity()),
+                                         std::min(surface[cell], std::nextafter(lakepocket[cell], -std::numeric_limits<float>::infinity())));
     };
     keepshore();
     // The sign-keeping passes may not bring a cell nearer the sea level than it is now or
@@ -1344,7 +1351,16 @@ void refinedcoast(const LevelContext& context, LevelState& state)
                     }
             }
         const float raised = std::max(abovesea, static_cast<float>(sealevel + parameters.coast.shorefloor_m));
-        const std::vector<uint8_t> basin = pocketbasins(inputs, window, reach, sea, filled, surface, abovesea);
+        std::vector<uint8_t> basin = pocketbasins(inputs, window, reach, sea, filled, surface, abovesea);
+        // A filled cell of a lake's bed (lakepockets) belongs to the lake: the next float above the sea
+        // level, which the lake flood's sill crossing wets at the lake's surface.
+        const std::vector<float> lakepocket = lakepockets(inputs, window, filled, surface);
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (lakepocket[cell] > 0.0f)
+            {
+                basin[cell] = 0;
+                surface[cell] = std::max(surface[cell], abovesea);
+            }
         // In every parent (a land parent at the floor whose children end all land above it is the
         // projection's to force, counted by its forcedparents: a filled bed left hundreds of metres below
         // the sea level as dry land made a 411 m border step on window A at level 2).

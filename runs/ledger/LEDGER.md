@@ -56,6 +56,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0088`: capping a wet channel cell's mean at its surface at the final level: it would carve B's fjord walls into trenches
 - `erosion-0089`: coast_warp_persistence above 0.5 with the finest octaves on (specks); 0.25 cells of displacement (dimension 1.52, block-mean error 13.6 m)
 - `erosion-0089`: a pocket core anchored on the interpolated global elevation alone (103 enclosed components) or a core 20 m deep (91): the one-sided rule's base is the anchor
+- `erosion-0090`: raising filled pocket cells beside a lake to the shore floor (the lake loses its bed)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
@@ -179,6 +180,7 @@ Lessons:
 | `erosion-0087` | 2026-10-11 | step done; judging pending | keep | multiscale plan, step S3.16 (added from the user's noise question, docs/architecture/noise-functions.md): the OpenSimplex2S 3D kernel behind landscape.noise.kernel, per-octave rotation behind landscape.noise.rotate_octaves, both off by default |
 | `erosion-0088` | 2026-10-11 | step done; the user's look at the lake's outline pending | keep | multiscale plan, step S3.13: rivers through lakes (the incision floored at the lake surfaces downstream, the wet rule for channel cells in every block, the drychannelinlake and channelbetweenlakes diagnostics) |
 | `erosion-0089` | 2026-10-11 | step done with open items; the user's verdict pending | keep | multiscale plan, step S3.15 (added from the user's verdict of 2026-10-11): the coast's shoreline displaced by a fractal position warp under the level band rule; sea pockets not connected to the core sea filled with their basins; the straight coast at 58 E and the blobby coast |
+| `erosion-0090` | 2026-10-11 | fix done; the user's look at runs 49 and 50 pending | keep | multiscale plan, step S3.15's rounds four and five and the lake flood's at-S rule (the orchestrator, from the judging run 47): a filled sea pocket beside a lake belongs to the lake below its surface; the basin raise never touches a global lake cell; a cell at exactly S inside a lake cell's own block is the lake's |
 
 Lessons:
 
@@ -318,6 +320,8 @@ Lessons:
 - `erosion-0089`: A fill at a floor that the mean-keeping passes cannot lower moves a block's mean for good: every mask rule that raises cells needs a lowering partner or a block-mean check.
 - `erosion-0089`: A displacement under an inherited mask is only as free as the parent's share rule; the levels' consistency and the shoreline's freedom pull against each other, and the plan must say which wins before the worker starts.
 - `erosion-0089`: A worker's probe and an earlier phase's probe measure 'the dimension' differently (1.156 against 1.02 on the same bundle): record the probe with the number.
+- `erosion-0090`: A worktree without the sibling steps' changes cannot judge their interaction: the judging run on the merged tree is part of every step's acceptance, with a look at the maps.
+- `erosion-0090`: Three separate rules (the basin raise, the flood's strict inequality, the pocket fill's floor) each left the lake's edge on a block boundary: a mask rule that touches a lake's neighbourhood must say what it does to the lake.
 
 ## tectonics
 
