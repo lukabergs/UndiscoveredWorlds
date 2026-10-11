@@ -16,7 +16,7 @@
     {"check": "range", "field": "cryosphere.ice_thickness", "min": 0},
     {"check": "range", "field": "atmosphere.precipitation_january", "min": 0},
     {"check": "range", "field": "atmosphere.precipitation_july", "min": 0},
-    {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation"},
+    {"check": "lake-above-terrain", "lake": "hydrosphere.lake_surface", "elevation": "geosphere.base_elevation", "channel": "hydrosphere.channel_direction"},
     {"check": "parent-mean-exact"},
     {"check": "border-step", "p99_max_m": 50, "report": true},
     {"check": "level-targets", "report": true, "targets": [

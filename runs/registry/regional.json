@@ -294,6 +294,20 @@
       "run": "runs/regional/42",
       "date": "2026-10-11T00:15:01+00:00",
       "label": "multiscale S3.12: window A, k 64, S3.11 plus the solve's pits and flats resolved"
+    },
+    {
+      "id": 43,
+      "status": "complete",
+      "run": "runs/regional/43",
+      "date": "2026-10-11T10:57:48+00:00",
+      "label": "multiscale S3.13, S3.14 and S3.16 at its defaults: window A, k 64 (the lake's outline, closed network, rougher legs)"
+    },
+    {
+      "id": 44,
+      "status": "complete",
+      "run": "runs/regional/44",
+      "date": "2026-10-11T10:59:03+00:00",
+      "label": "multiscale S3.16 judging: window A, k 64, OpenSimplex2S kernel with per-octave rotation (the tree of run 43)"
     }
   ]
 }

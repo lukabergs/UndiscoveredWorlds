@@ -338,14 +338,23 @@ def check_drained(bundle, spec, context):
 
 def check_lake_above_terrain(bundle, spec, context):
     """Every lake cell (a nonzero lake surface) lies at or above its terrain: no lake surface below
-    its bed. Compared in float32, as the fields are stored."""
+    its bed. Compared in float32, as the fields are stored. A pinned channel cell (spec 'channel',
+    a direction field, present on regional bundles) is exempt: its elevation is its cell mean,
+    bed plus bank, and a river that is lake water from its bed up keeps that mean (multiscale plan
+    S3.13: the bank term, 13 m at 2.4 km cells, kilometres on fjord walls at 10 km cells), so such
+    cells are counted in the summary, not failed."""
     missing = absent_fields(bundle, [spec['lake'], spec['elevation']])
     if missing:
         return result('lake-above-terrain', 'skip', f"{', '.join(missing)} absent")
     surface = bundle.load(spec['lake']).astype(np.float32)
     elevation = bundle.load(spec['elevation']).astype(np.float32)
     lake = surface != 0
-    below = lake & (surface < elevation)
+    above = lake & (surface < elevation)
+    channel = np.zeros_like(lake)
+    if spec.get('channel') and bundle.has(spec['channel']):
+        channel = bundle.load(spec['channel']) != 0
+    exempt = above & channel
+    below = above & ~channel
     rows, columns = np.nonzero(below)
     depth = (elevation - surface)[below]
     order = np.argsort(-depth, kind='stable')[:10]
@@ -354,6 +363,9 @@ def check_lake_above_terrain(bundle, spec, context):
     summary = f'{int(below.sum())} of {int(lake.sum())} lake cells below their terrain'
     if below.any():
         summary += f' (deepest {float(depth.max()):.2f} m)'
+    if exempt.any():
+        summary += (f'; {int(exempt.sum())} wet channel cells with their mean above the surface '
+                    f'(largest excess {float((elevation - surface)[exempt].max()):.2f} m), exempt')
     return result('lake-above-terrain', 'fail' if below.any() else 'pass', summary, details)
 
 
