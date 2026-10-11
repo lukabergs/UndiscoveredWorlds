@@ -248,10 +248,10 @@ landscape::RegionalParameters regionalparameters(std::uint64_t seed)
     parameters.folds.wavelengthmax_km = regional::foldWavelengthMaxKm;
     parameters.folds.wavelengthpercover_km = regional::foldWavelengthPerCoverKm;
     parameters.folds.wavelengthbase_km = regional::foldWavelengthBaseKm;
-    parameters.folds.splatspacing_km = regional::foldSplatSpacingKm;
     parameters.folds.gapfraction = regional::foldGapFraction;
-    parameters.folds.phasor = regional::foldPhasor;
-    parameters.folds.kernelwidth_km = regional::foldKernelWidthKm;
+    parameters.folds.axissmoothing_cells = regional::foldAxisSmoothingCells;
+    parameters.folds.misfitfadestart = regional::foldMisfitFadeStart;
+    parameters.folds.misfitfadeend = regional::foldMisfitFadeEnd;
     parameters.folds.icemax = regional::foldIceMax;
     parameters.channels.pinarea_km2 = regional::pinAreaKm2;
     parameters.channels.meanderamplitude = regional::meanderAmplitude;

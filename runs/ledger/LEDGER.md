@@ -62,6 +62,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0093`: the wavelength from the sediment cover alone: a bare orogen gets the minimum wavelength, a corduroy at two pixels at k 64
 - `erosion-0093`: a per-kernel phase origin shared per global cell as the remedy for the along-strike steps: p99 529 -> 520 m on the belt
 - `erosion-0095`: a kernel sum with per-splat phases as the fold fabric, whatever the kernel layout or weight: the crests break at 0.17 A on a uniform field
+- `erosion-0096`: a vergence sign on k from the strain gradient: a kink drawn as an 80 km fold at every flip
+- `erosion-0096`: chasing the along-strike steps with the axis smoothing above 3.5 cells: 2.5 to 3.5 moved p99 by 1 m
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
@@ -191,6 +193,7 @@ Lessons:
 | `erosion-0093` | 2026-10-11 | done; S5.3 judging runs next (A at k 64 on run 10 beside the Himalaya; the belt beside the Zagros and the Subandean belt; phasor and Gabor) | keep | multiscale plan, S5.2: the fold fabric (regional_folds.{hpp,cpp}): phasor-normalised Gabor stripes from kernels hashed per absolute tile, the wavelength from a 10 km base plus the sediment cover clamped to 5-20 km, the amplitude from the strain and the cell's height above the sea, drawn at the level whose octave band holds the wavelength, channel cells untouched, water gaps within 0.25 L, hook after the solve before the valley floors |
 | `erosion-0094` | 2026-10-11 | done | keep | multiscale plan, the kernel default (the user, 2026-10-11 evening: OpenSimplex2S everywhere but the fold fabric): landscape.noise.kernel 1 and rotate_octaves 1 by default; the shoreline warp normalised by its field's own deviation |
 | `erosion-0095` | 2026-10-11 | merged as the base of S5.3c; the steps acceptance open | keep | multiscale plan, S5.3b: the fold fabric's second round (Phacelle's jittered splat lattice and compact weight, direction and wavelength interpolated per splat, the relief fraction 0.15, no fabric under the ice or in lake blocks, the lakes flooded on the un-folded surface) |
+| `erosion-0096` | 2026-10-12 | merged; the judging round registered next | keep | multiscale plan, S5.3c: the coherent fold phase: the fabric as one phase field (the least-squares potential of the wavevector field on the global grid, oriented by a continuity flood, the axis smoothed on doubled angles, bicubic Hermite at the fine cells, dislocations faded into fold terminations, every fold drawn at the coarsest level with at least 4 cells per wavelength); the kernel sums retired |
 
 Lessons:
 
@@ -340,6 +343,8 @@ Lessons:
 - `erosion-0094`: A per-kernel constant (the one-octave deviation) must be read from the field, never from the kernel's header: the shoreline warp had hard-coded the Perlin one.
 - `erosion-0095`: A uniform-field unit test with an along-strike step bound would have caught the kernel sum's dislocations at S5.2; the overlap and bearing tests did not.
 - `erosion-0095`: The brief's acceptance figures must come from the same tree as the runs: the belt's 35 forced parents were a Perlin figure, the current tree's no-fold run has 93.
+- `erosion-0096`: A fabric at 15 wavelengths per global cell needs a direction field smoother than the engine's per-cell tensor: the field's resolution, not the kernel, sets the coherence.
+- `erosion-0096`: Keep the before/after figures on one tree: the no-fold baselines moved with the kernel default.
 
 ## tectonics
 

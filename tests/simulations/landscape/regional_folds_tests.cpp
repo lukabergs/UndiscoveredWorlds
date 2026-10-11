@@ -1,11 +1,13 @@
-// Tests of landscape/regional_folds.hpp (multiscale plan steps S5.2 and S5.3b: the fold fabric),
+// Tests of landscape/regional_folds.hpp (multiscale plan steps S5.2, S5.3b and S5.3c: the fold fabric),
 // suite Landscape: TEST_F(Landscape, RegionalFolds<What>) on a hand-built bench on window A's domain
-// at k 8 and the synthetic world of regional_test_world.hpp with withfoldfields: off by default and
-// at zero strain bit-identical, the amplitude and wavelength laws, a uniform field's wavelength,
-// bearing and amplitude, the water gap of a channel line, a direction turning by 90 degrees over 8
-// global cells (S5.3b), the ice and lake gates, the lakes decided on the surface without the fabric,
-// the overlaps A/B and C/D with the folds on (phasor, Gabor, the ice gate acting), and the refinement
-// loop's level consistency and overlap with the folds drawn at two levels.
+// at k 8, the synthetic world of regional_test_world.hpp with withfoldfields, and the phase field
+// (foldphasefield, foldphase_rad) on the 256-column synthetic world sampled at k 64 near the equator:
+// off by default and at zero strain bit-identical, the amplitude and wavelength laws, a uniform field's
+// wavelength, bearing and amplitude, the water gap of a channel line, the phase of a uniform field, of a
+// belt turning by 90 degrees, of a wavelength ramp and of a mask with a hole (S5.3c), the orientation
+// flood (by continuity alone), the ice and lake gates, the lakes decided on the surface without the fabric, the overlaps A/B
+// and C/D with the folds on (with and without the ice gate acting), and the refinement loop's level
+// consistency and overlap with the folds drawn at two levels.
 
 #include "landscape_fixture.hpp"
 
@@ -14,6 +16,8 @@
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_folds.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -45,17 +49,16 @@ RegionalGlobalInputs withfoldfields(RegionalGlobalInputs inputs)
 }
 
 // The folds on the synthetic worlds, whose fine cells are 156 to 313 km at k 4: wavelengths of
-// 150 x the cover in km clamped to 700 to 1,350 km (2.2 to 8.6 fine cells), amplitudes up to 300 m.
+// 300 x the cover in km clamped to 1,300 to 2,600 km (at least 4 cells of 313 km per wavelength: drawn
+// in the single pass at k 4, 5 and 8), amplitudes up to 300 m.
 RegionalParameters foldparameters()
 {
     RegionalParameters parameters;
     parameters.folds.amplitudemax_m = 300.0;
-    parameters.folds.wavelengthmin_km = 700.0;
-    parameters.folds.wavelengthmax_km = 1350.0;
-    parameters.folds.wavelengthpercover_km = 150.0;
+    parameters.folds.wavelengthmin_km = 1300.0;
+    parameters.folds.wavelengthmax_km = 2600.0;
+    parameters.folds.wavelengthpercover_km = 300.0;
     parameters.folds.wavelengthbase_km = 0.0;
-    parameters.folds.kernelwidth_km = 1350.0;
-    parameters.folds.splatspacing_km = 625.0;  // half the shortest wavelength: a 625 km lattice on 32 and 64 columns
     return parameters;
 }
 
@@ -76,9 +79,14 @@ void expectsamefields(const RegionalFields& a, const RegionalFields& b, const st
 }
 
 // A hand-built bench on the domain of window A at k 8 (156 km cells): land at 1,000 m, no sea, no
-// channel, no lake cell; a uniform strain, axis and cover; the global elevation 2,000 m everywhere
-// (the elevation term 0.5 x 2,000 m does not bind the 100 m cap); the splat lattice at half the
-// wavelength.
+// channel, no lake cell; the global elevation 2,000 m everywhere (the elevation term 0.5 x 2,000 m does
+// not bind the 100 m cap). Crests east-west: the axis north-south (pi / 2) and a strain of 0.3 over the
+// whole planet (the phase is the latitude's, Phi = k y). Crests north-south: the axis east (0) on a band
+// of global columns from 4 west of the domain to 2 east of it and the four global rows within 22.5
+// degrees of the equator, the strain falling eastward from 0.25 + 0.03 (n - 1) to 0.25, so every cell
+// but the band's two westernmost verges east (a band over every column would wind around the planet,
+// which a single-valued phase cannot follow, and one from pole to pole would make its crests meridians:
+// the converging meridians leave no uniform wavelength to north-south crests).
 struct FoldBench
 {
     RegionalGlobalInputs inputs = syntheticworld(32);
@@ -91,14 +99,29 @@ struct FoldBench
     double cell_km = 0.0;
     RegionalParameters parameters;
 
-    FoldBench(double wavelength_cells, float strain, float direction_rad)
+    FoldBench(double wavelength_cells, bool crestseastwest)
     {
         const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
         inputs.elevation_m.assign(size, 2000.0f);
-        inputs.foldstrain.assign(size, strain);
-        inputs.folddirection_rad.assign(size, direction_rad);
         inputs.sediment_m.clear();
         inputs.lakesurface_m.assign(size, 0.0f);
+        if (crestseastwest)
+        {
+            inputs.foldstrain.assign(size, 0.3f);
+            inputs.folddirection_rad.assign(size, static_cast<float>(pi / 2.0));
+        }
+        else
+        {
+            inputs.foldstrain.assign(size, 0.0f);
+            inputs.folddirection_rad.assign(size, 0.0f);
+            const int band = window.domaincolumns + 6;
+            for (int offset = 0; offset < band; offset++)
+            {
+                const int column = ((window.domaincolumn0 - 4 + offset) % inputs.width + inputs.width) % inputs.width;
+                for (int j = inputs.height / 2 - 2; j < inputs.height / 2 + 2; j++)
+                    inputs.foldstrain[at(column, j, inputs.width)] = static_cast<float>(0.25 + 0.03 * (band - 1 - offset));
+            }
+        }
         channels.channel.assign(count, 0);
         sea.assign(count, 0);
         elevation.assign(count, 1000.0f);
@@ -107,8 +130,6 @@ struct FoldBench
         parameters.folds.wavelengthmin_km = wavelength_cells * cell_km;
         parameters.folds.wavelengthmax_km = wavelength_cells * cell_km;
         parameters.folds.gapfraction = 0.0;
-        parameters.folds.kernelwidth_km = 0.0;
-        parameters.folds.splatspacing_km = 0.5 * wavelength_cells * cell_km;
     }
 
     std::size_t cell(int x, int y) const { return at(x, y, width); }
@@ -146,6 +167,53 @@ std::pair<int, int> foldchangedcells(const RegionalFields& a, const RegionalFiel
     }
     return {changed, onoverlap};
 }
+
+// The 256-column bench of the phase field (156 km global cells, 2.44 km fine cells at k 64): a uniform global
+// elevation of 2,000 m, no lakes, no sediment unless a test sets it; the strain and the axis set by the test.
+RegionalGlobalInputs phaseworld()
+{
+    RegionalGlobalInputs inputs = syntheticworld(256);
+    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    inputs.elevation_m.assign(size, 2000.0f);
+    inputs.foldstrain.assign(size, 0.0f);
+    inputs.folddirection_rad.assign(size, 0.0f);
+    inputs.sediment_m.clear();
+    inputs.lakesurface_m.assign(size, 0.0f);
+    return inputs;
+}
+
+// Samples of a phase field in global cell units with the ground metric of its world.
+struct PhaseProbe
+{
+    const landscape::FoldPhaseField& field;
+    double column_km = 0.0;
+
+    explicit PhaseProbe(const landscape::FoldPhaseField& f)
+        : field(f), column_km(2.0 * field.dy_km * static_cast<double>(field.height) / static_cast<double>(field.width))
+    {
+    }
+
+    // The ground width of a global column at v (km).
+    double eastkm(double v) const { return column_km * std::cos(0.5 * pi - pi * v / static_cast<double>(field.height)); }
+    bool phase(double u, double v, double& value) const { return landscape::foldphase_rad(field, u, v, value); }
+    // The local wavelength 2 pi / |grad Phi| (km) by central differences over h global cells; 0 where undefined.
+    double wavelength(double u, double v, double h = 1.0 / 256.0) const
+    {
+        double west = 0.0, east = 0.0, north = 0.0, south = 0.0;
+        if (!phase(u - h, v, west) || !phase(u + h, v, east) || !phase(u, v - h, north) || !phase(u, v + h, south))
+            return 0.0;
+        const double gradeast = (east - west) / (2.0 * h * eastkm(v)), gradsouth = (south - north) / (2.0 * h * field.dy_km);
+        return 2.0 * pi / std::hypot(gradeast, gradsouth);
+    }
+    // |sin Phi(p + d (east, south)) - sin Phi(p)| for a ground step of d km along the unit (east, south); -1 where undefined.
+    double step(double u, double v, double east, double south, double distance_km) const
+    {
+        double here = 0.0, there = 0.0;
+        if (!phase(u, v, here) || !phase(u + distance_km * east / eastkm(v), v + distance_km * south / field.dy_km, there))
+            return -1.0;
+        return std::fabs(std::sin(there) - std::sin(here));
+    }
+};
 }
 
 TEST_F(Landscape, RegionalFoldsAreOffByDefault)
@@ -164,6 +232,7 @@ TEST_F(Landscape, RegionalFoldsAreOffByDefault)
     RegionalGlobalInputs zero = folded;
     std::fill(zero.foldstrain.begin(), zero.foldstrain.end(), 0.0f);
     EXPECT_TRUE(landscape::foldfabricon(zero, on));
+    EXPECT_EQ(landscape::foldphasefield(zero, on.folds).maskcells, 0);
     expectsamefields(landscape::runregionalpass(zero, window, on), reference, "zero strain");
     // And the folds on with the strain act.
     const RegionalFields active = landscape::runregionalpass(folded, window, on);
@@ -208,95 +277,119 @@ TEST_F(Landscape, RegionalFoldsAmplitudeAndWavelengthLaws)
 
 TEST_F(Landscape, RegionalFoldsUniformStripes)
 {
-    // A uniform strain of 0.3 with the axis east (direction 0) and L = 8 fine cells: the crests run
-    // north-south, so near the equator (cells about square) the row autocorrelation peaks at about
-    // 8 cells and the fabric hardly changes along a column; the amplitude is A = min(0.5 (L / pi)
-    // sqrt(0.3), 100, 0.5 x 2,000) = 100 m: the largest |fabric| within 10 percent of it, none above.
-    // At the kernel width 0 (the design's form: each kernel's envelope its own L) and at twice L.
-    const std::vector<int> rows = FoldBench(8.0, 0.3f, 0.0f).equatorialrows();
-    ASSERT_GT(rows.size(), 4u);
-    for (const double widthcells : {0.0, 16.0})
+    // L = 8 fine cells and A = min(0.15 (L / pi) sqrt(eps), 100, 0.5 x 2,000) = 100 m. Crests north-south
+    // (FoldBench's band) and east-west (the whole planet): across the crests the autocorrelation near the
+    // equator peaks at about 8 cells, along them the fabric hardly changes; the largest |fabric| is within 10
+    // percent of A, none above; every cell's fabric is A sin of the phase field at its centre.
+    for (const bool eastwest : {false, true})
     {
-        SCOPED_TRACE("kernel width " + std::to_string(widthcells) + " cells");
-        FoldBench bench(8.0, 0.3f, 0.0f);
-        bench.parameters.folds.kernelwidth_km = widthcells * bench.cell_km;
+        SCOPED_TRACE(eastwest ? "crests east-west" : "crests north-south");
+        FoldBench bench(8.0, eastwest);
+        const std::vector<int> rows = bench.equatorialrows();
+        ASSERT_GT(rows.size(), 4u);
         const double amplitude = landscape::foldamplitude_m(bench.parameters.folds, 0.3, 8.0 * bench.cell_km, 2000.0);
         ASSERT_NEAR(amplitude, 100.0, 1.0e-9);
         bench.fold();
-        double largest = 0.0;
+        const landscape::FoldPhaseField field = landscape::foldphasefield(bench.inputs, bench.parameters.folds);
+        const std::vector<float> strain = landscape::upsample(bench.inputs.foldstrain, bench.inputs.width, bench.inputs.height, bench.window);
+        double largest = 0.0, mismatch = 0.0;
         for (int y = 0; y < bench.height; y++)
             for (int x = 0; x < bench.width; x++)
+            {
+                if (bench.inputs.foldstrain[at(bench.window.globalcolumn(x), bench.window.globalrow(y), bench.inputs.width)] <= 0.0f)
+                    continue;  // the band's edge
                 largest = std::max(largest, std::fabs(bench.fabric(x, y)));
+                double phase = 0.0;
+                const double u = (static_cast<double>(bench.window.absolutefinecolumn(x)) + 0.5) / 8.0;
+                const double v = (static_cast<double>(bench.window.absolutefinerow(y)) + 0.5) / 8.0;
+                const double own = landscape::foldamplitude_m(bench.parameters.folds, strain[bench.cell(x, y)], 8.0 * bench.cell_km, 2000.0);
+                if (landscape::foldphase_rad(field, u, v, phase))
+                    mismatch = std::max(mismatch, std::fabs(bench.fabric(x, y) - own * std::sin(phase)));
+            }
         EXPECT_LE(largest, amplitude * (1.0 + 1.0e-6));
         EXPECT_GE(largest, 0.9 * amplitude);
+        EXPECT_LE(mismatch, 1.0e-3);
 
+        // Across and along the crests near the equator.
         std::vector<double> correlation(25, 0.0);
-        double alongrow = 0.0, alongcolumn = 0.0;
-        int rowpairs = 0, columnpairs = 0;
-        for (int y : rows)
+        double alongcrest = 0.0, acrosscrest = 0.0;
+        int alongpairs = 0, acrosspairs = 0, lines = 0;
+        // Lines across the crests: rows (north-south crests) or the columns of the equatorial rows' span.
+        const int linecount = eastwest ? bench.width : static_cast<int>(rows.size());
+        const int linelength = eastwest ? static_cast<int>(rows.size()) : bench.width;
+        const auto value = [&](int line, int position) {
+            return eastwest ? bench.fabric(line, rows[static_cast<std::size_t>(position)]) : bench.fabric(position, rows[static_cast<std::size_t>(line)]);
+        };
+        // The east-west crests' lines run over the equatorial rows only: lengthen them to the domain's rows within 30
+        // degrees of the equator for the autocorrelation.
+        std::vector<int> longrows;
+        for (int y = 0; y < bench.height; y++)
+            if (std::fabs(bench.window.finelatitude_rad(y)) < pi / 6.0)
+                longrows.push_back(y);
+        for (int line = 0; line < linecount; line++)
         {
+            if (!eastwest && bench.inputs.foldstrain[at(bench.window.globalcolumn(0), bench.window.globalrow(rows[static_cast<std::size_t>(line)]), bench.inputs.width)] <= 0.0f)
+                continue;
+            lines++;
             for (int lag = 1; lag < static_cast<int>(correlation.size()); lag++)
             {
                 double sum = 0.0;
                 int pairs = 0;
-                for (int x = 0; x + lag < bench.width; x++)
-                {
-                    sum += bench.fabric(x, y) * bench.fabric(x + lag, y);
-                    pairs++;
-                }
+                if (eastwest)
+                    for (std::size_t p = 0; p + static_cast<std::size_t>(lag) < longrows.size(); p++)
+                    {
+                        sum += bench.fabric(line, longrows[p]) * bench.fabric(line, longrows[p + static_cast<std::size_t>(lag)]);
+                        pairs++;
+                    }
+                else
+                    for (int x = 0; x + lag < bench.width; x++)
+                    {
+                        sum += value(line, x) * value(line, x + lag);
+                        pairs++;
+                    }
                 correlation[static_cast<std::size_t>(lag)] += sum / pairs;
             }
+            for (int p = 0; p + 1 < linelength; p++)
+            {
+                acrosscrest += std::fabs(value(line, p + 1) - value(line, p));
+                acrosspairs++;
+            }
+        }
+        // Along the crests: between neighbours along columns (north-south crests) or rows (east-west).
+        for (int y : rows)
             for (int x = 0; x + 1 < bench.width; x++)
             {
-                alongrow += std::fabs(bench.fabric(x + 1, y) - bench.fabric(x, y));
-                rowpairs++;
+                if (eastwest)
+                    alongcrest += std::fabs(bench.fabric(x + 1, y) - bench.fabric(x, y));
+                else if (y + 1 < bench.height)
+                    alongcrest += std::fabs(bench.fabric(x, y + 1) - bench.fabric(x, y));
+                alongpairs++;
             }
-            if (y + 1 < bench.height)
-                for (int x = 0; x < bench.width; x++)
-                {
-                    alongcolumn += std::fabs(bench.fabric(x, y + 1) - bench.fabric(x, y));
-                    columnpairs++;
-                }
-        }
-        // The first peak after the first trough of the autocorrelation.
+        ASSERT_GT(lines, 0);
         int trough = 1;
         while (trough + 1 < static_cast<int>(correlation.size()) && correlation[static_cast<std::size_t>(trough + 1)] <
                                                                         correlation[static_cast<std::size_t>(trough)])
             trough++;
-        // (the first local maximum: a coherent sinusoid repeats its peak at 2 L, 3 L with equal height)
         int peak = trough;
         while (peak + 1 < static_cast<int>(correlation.size()) &&
                correlation[static_cast<std::size_t>(peak + 1)] > correlation[static_cast<std::size_t>(peak)])
             peak++;
-        alongrow /= rowpairs;
-        alongcolumn /= columnpairs;
-        std::printf("[folds] uniform stripes, kernel width %.0f cells: largest |fabric| %.3f m of A %.1f m; row autocorrelation trough at %d, peak at "
-                    "%d cells (L 8); mean |step| along rows %.2f m, along columns %.2f m\n",
-                    widthcells, largest, amplitude, trough, peak, alongrow, alongcolumn);
+        alongcrest /= alongpairs;
+        acrosscrest /= acrosspairs;
+        std::printf("[folds] uniform stripes, %s: largest |fabric| %.3f m of A %.1f m (A sin phase within %.2g m); "
+                    "autocorrelation across the crests: trough at %d, peak at %d cells (L 8); mean |step| across %.2f m, along %.2f m\n",
+                    eastwest ? "crests east-west" : "crests north-south", largest, amplitude, mismatch, trough, peak, acrosscrest,
+                    alongcrest);
         EXPECT_NEAR(peak, 8, 1);
         EXPECT_NEAR(trough, 4, 1);
-        EXPECT_LT(alongcolumn, 0.3 * alongrow);
-
-        // The axis north-south (direction pi / 2): the crests run east-west, the steps swap.
-        FoldBench turned(8.0, 0.3f, static_cast<float>(pi / 2.0));
-        turned.parameters.folds.kernelwidth_km = widthcells * turned.cell_km;
-        turned.fold();
-        double turnedrow = 0.0, turnedcolumn = 0.0;
-        for (int y : rows)
-        {
-            for (int x = 0; x + 1 < turned.width; x++)
-                turnedrow += std::fabs(turned.fabric(x + 1, y) - turned.fabric(x, y));
-            if (y + 1 < turned.height)
-                for (int x = 0; x < turned.width; x++)
-                    turnedcolumn += std::fabs(turned.fabric(x, y + 1) - turned.fabric(x, y));
-        }
-        EXPECT_LT(turnedrow / rowpairs, 0.3 * turnedcolumn / columnpairs);
+        EXPECT_LT(alongcrest, 0.3 * acrosscrest);
     }
 
     // Sea, channels and the shore floor: a sea cell and a channel cell keep their values; land at
     // 30 m above the sea level is never lowered below the shore floor of 20 m; land at 10 m (below
     // the floor) is not changed.
-    FoldBench kept(8.0, 0.3f, 0.0f);
+    FoldBench kept(8.0, false);
+    const std::vector<int> rows = kept.equatorialrows();
     const int x0 = kept.width / 2, y0 = rows[rows.size() / 2];
     kept.sea[kept.cell(x0, y0)] = 1;
     kept.channels.channel[kept.cell(x0 + 1, y0)] = 1;
@@ -325,8 +418,8 @@ TEST_F(Landscape, RegionalFoldsChannelGap)
     // An east-west channel line across north-south crests (L = 10 cells, gap 0.25 L = 2.5 cells): the
     // channel cells keep their values, the fabric of the cells within 2.5 cells of the line is
     // reduced (rows 1 and 2 away), and the cells farther away are unchanged.
-    FoldBench open(10.0, 0.3f, 0.0f);
-    FoldBench gapped(10.0, 0.3f, 0.0f);
+    FoldBench open(10.0, false);
+    FoldBench gapped(10.0, false);
     gapped.parameters.folds.gapfraction = 0.25;
     open.parameters.folds.gapfraction = 0.25;
     const std::vector<int> rows = gapped.equatorialrows();
@@ -359,17 +452,15 @@ TEST_F(Landscape, RegionalFoldsChannelGap)
 TEST_F(Landscape, RegionalOverlapFolds)
 {
     // The folds on at the smallest halo the pass allows: the overlaps stay bit-identical (compareoverlap
-    // asserts it), and the folds act on the shared cells. Variants: the phasor form, the Gabor form
-    // (phasor 0), and the phasor form with the glaciation of withglacialfields gating the fabric (S5.3b).
-    for (const int variant : {0, 1, 2})
+    // asserts it), and the folds act on the shared cells. Variants: the folds alone, and with the
+    // glaciation of withglacialfields gating the fabric (S5.3b).
+    for (const int variant : {0, 1})
     {
-        SCOPED_TRACE(variant == 0 ? "phasor" : variant == 1 ? "Gabor" : "ice gate");
-        RegionalParameters parameters = foldparameters();
-        if (variant == 1)
-            parameters.folds.phasor = 0;
+        SCOPED_TRACE(variant == 0 ? "folds" : "ice gate");
+        const RegionalParameters parameters = foldparameters();
         const auto world = [variant](int width) {
             RegionalGlobalInputs inputs = withfoldfields(syntheticworld(width));
-            if (variant == 2)
+            if (variant == 1)
             {
                 const RegionalGlobalInputs glacial = withglacialfields(inputs);
                 inputs.glaciation = glacial.glaciation;
@@ -405,103 +496,360 @@ TEST_F(Landscape, RegionalOverlapFolds)
     }
 }
 
-TEST_F(Landscape, RegionalFoldsTurningDirection)
+TEST_F(Landscape, RegionalFoldsPhaseUniform)
 {
-    // S5.3b: the across-strike axis turns by 90 degrees over 8 global cells (east of global column 130,
-    // from 0, crests north-south, to pi / 2, crests east-west) on the 256-column world near the equator,
-    // at k 64 (2.44 km cells) with L = 64 cells (one global cell), the lattice at L / 2 and sigma = 2 L
-    // (the defaults' proportions: 10 km, 9.77 km, 20 km). Each splat interpolates the axis at its own
-    // position, so the crests turn smoothly: between a cell and its 8-neighbour nearest the local strike
-    // (the strike's angle as the field's, at most 22.5 degrees off it: an ideal sinusoid steps by at most
-    // 2 pi x 0.54 / 64 A = 0.053 A there) the fabric steps by at most 0.1 A at p90, and the turn adds at
-    // most 0.1 A to the uniform axis' p99. Not at every cell: with each splat's phase origin its own
-    // position, the phasor sum has isolated zeros (the fold trains' dislocations), around which the
-    // phase winds by 2 pi; the uniform axis' own along-strike steps (p99 about 0.17 A, the largest about
-    // 1.8 A) are theirs.
-    RegionalGlobalInputs inputs = syntheticworld(256);
-    const RegionalWindow window = landscape::regionalwindow(256, 64, 1, 0.0, -2.8125, 16.875, 2.8125);
-    const int width = window.domainfinewidth(), height = window.domainfineheight();
-    const std::size_t count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
-    const double cell_km = landscape::finepatchmetric(window, inputs.radius_m).dy_m / 1000.0;
-    inputs.elevation_m.assign(size, 2000.0f);
-    inputs.foldstrain.assign(size, 0.3f);
-    inputs.sediment_m.clear();
-    inputs.lakesurface_m.assign(size, 0.0f);
-    const double first = 130.0;  // the turn's first global column (window columns 128 to 139)
-    const auto axis = [first](double column) { return 0.5 * pi * std::clamp((column - first) / 8.0, 0.0, 1.0); };
+    // S5.3c: a uniform field, L = 10 km (4.1 fine cells at k 64) and a strain of 0.3. The axis north-south
+    // over the whole planet (crests east-west): the phase is k times the distance south, so on the k 64
+    // centres of 4 x 12 global cells at the equator the stripes are straight (along-strike steps of one fine
+    // cell below 1e-3 A) and the local wavelength is L within 1 percent. The axis east on a band of 32 x 24
+    // global cells about the equator (crests north-south; the strain falling eastward orients it, the band's
+    // west edge verging west): reported over the same box, the sphere's meridians converging (a uniform
+    // wavelength north-south crests cannot keep).
+    for (const bool eastwest : {true, false})
+    {
+        SCOPED_TRACE(eastwest ? "crests east-west" : "crests north-south");
+        RegionalGlobalInputs inputs = phaseworld();
+        landscape::FoldParameters folds;
+        folds.amplitudemax_m = 100.0;
+        if (eastwest)
+        {
+            std::fill(inputs.foldstrain.begin(), inputs.foldstrain.end(), 0.3f);
+            std::fill(inputs.folddirection_rad.begin(), inputs.folddirection_rad.end(), static_cast<float>(pi / 2.0));
+        }
+        else
+            for (int j = 52; j < 76; j++)
+                for (int i = 116; i < 148; i++)
+                    inputs.foldstrain[at(i, j, inputs.width)] = static_cast<float>(0.25 + 0.025 * (147 - i));
+        const landscape::FoldPhaseField field = landscape::foldphasefield(inputs, folds);
+        const PhaseProbe probe(field);
+        const double fine_km = field.dy_km / 64.0;
+        double steplargest = 0.0, wavelengthlow = 1.0e9, wavelengthhigh = 0.0;
+        int samples = 0;
+        for (int y = 0; y < 4 * 64; y++)
+            for (int x = 0; x < 12 * 64; x++)
+            {
+                const double u = 128.0 + (x + 0.5) / 64.0, v = 62.0 + (y + 0.5) / 64.0;
+                const double step = eastwest ? probe.step(u, v, 1.0, 0.0, fine_km) : probe.step(u, v, 0.0, 1.0, fine_km);
+                const double wavelength = probe.wavelength(u, v);
+                ASSERT_GE(step, 0.0);
+                ASSERT_GT(wavelength, 0.0);
+                steplargest = std::max(steplargest, step);
+                wavelengthlow = std::min(wavelengthlow, wavelength);
+                wavelengthhigh = std::max(wavelengthhigh, wavelength);
+                samples++;
+            }
+        std::printf("[folds] phase, uniform field, %s: %d samples; along-strike steps at most %.2e A; local wavelength %.4f to %.4f "
+                    "km (L 10); mask %d, oriented by the flood %d, north %d; %d sweeps, last change %.2g rad, misfit "
+                    "%.4f, %d reversal edges, %.3f s\n",
+                    eastwest ? "crests east-west" : "crests north-south", samples, steplargest, wavelengthlow, wavelengthhigh,
+                    field.maskcells, field.orientedbyflood, field.orientedbynorth, field.sweeps,
+                    field.lastchange_rad, field.misfit, field.reversaledges, field.seconds);
+        if (eastwest)
+        {
+            EXPECT_LT(steplargest, 1.0e-3);
+            EXPECT_NEAR(wavelengthlow, 10.0, 0.1);
+            EXPECT_NEAR(wavelengthhigh, 10.0, 0.1);
+        }
+        else
+        {
+            EXPECT_LT(steplargest, 0.02);
+            EXPECT_NEAR(wavelengthlow, 10.0, 0.5);
+            EXPECT_NEAR(wavelengthhigh, 10.0, 0.5);
+        }
+    }
+}
+
+TEST_F(Landscape, RegionalFoldsPhaseTurning)
+{
+    // S5.3c: a belt turning by 90 degrees over about 8 global cells, an orocline: the global cells whose centres
+    // lie 3 to 8 cells (on the ground) from a centre at (128, 60), from 10 degrees north of east to 10 degrees
+    // west of south of it; the axis across the belt (radial), the strain falling outward from 0.5 to 0.25, oriented
+    // by the flood (no reversal); L one global cell (64 fine cells). The arc-shaped belt (an orocline) is the turning
+    // test the orchestrator confirmed on 2026-10-11: an axis that varies only east-west with a uniform L has a curl
+    // no single-valued phase can follow over a tall mask (the solve fans the crests out). Over the k 64 positions 5 to 7 cells from the centre between east and
+    // south: no step above
+    // 0.02 A along the strike (one fine cell along the circle), the local wavelength within 10 percent of L.
+    RegionalGlobalInputs inputs = phaseworld();
+    const double uc = 128.0, vc = 60.0;
+    const auto local = [&](double u, double v, double& x, double& y) {
+        x = (u - uc) * std::cos(0.5 * pi - pi * v / static_cast<double>(inputs.height));
+        y = v - vc;
+    };
+    for (int j = 0; j < inputs.height; j++)
+        for (int i = 0; i < inputs.width; i++)
+        {
+            double x = 0.0, y = 0.0;
+            local(i + 0.5, j + 0.5, x, y);
+            const double r = std::hypot(x, y), angle = std::atan2(y, x);
+            if (r < 3.0 || r > 8.0 || angle < -pi / 18.0 || angle > pi / 2.0 + pi / 18.0)
+                continue;
+            inputs.foldstrain[at(i, j, inputs.width)] = static_cast<float>(0.25 + 0.05 * (8.0 - r));
+            inputs.folddirection_rad[at(i, j, inputs.width)] = static_cast<float>(std::fmod(angle + pi, pi));
+        }
+    landscape::FoldParameters folds;
+    folds.amplitudemax_m = 100.0;
+    const double length_km = pi * inputs.radius_m / static_cast<double>(inputs.height) / 1000.0;
+    folds.wavelengthmin_km = length_km;
+    folds.wavelengthmax_km = length_km;
+    const landscape::FoldPhaseField field = landscape::foldphasefield(inputs, folds);
+    EXPECT_EQ(field.reversaledges, 0);
+    const PhaseProbe probe(field);
+    const double fine_km = field.dy_km / 64.0;
+    double steplargest = 0.0, wavelengthlow = 1.0e18, wavelengthhigh = 0.0;
+    int samples = 0;
+    for (int y = 0; y < 12 * 64; y++)
+        for (int x = 0; x < 12 * 64; x++)
+        {
+            const double u = uc - 2.0 + (x + 0.5) / 64.0, v = vc - 2.0 + (y + 0.5) / 64.0;
+            double ex = 0.0, ey = 0.0;
+            local(u, v, ex, ey);
+            const double r = std::hypot(ex, ey), angle = std::atan2(ey, ex);
+            if (r < 5.0 || r > 7.0 || angle < 0.0 || angle > pi / 2.0)
+                continue;
+            const double step = probe.step(u, v, -std::sin(angle), std::cos(angle), fine_km);
+            const double wavelength = probe.wavelength(u, v);
+            ASSERT_GE(step, 0.0);
+            ASSERT_GT(wavelength, 0.0);
+            steplargest = std::max(steplargest, step);
+            wavelengthlow = std::min(wavelengthlow, wavelength);
+            wavelengthhigh = std::max(wavelengthhigh, wavelength);
+            samples++;
+        }
+    std::printf("[folds] phase, turning belt: %d samples; along-strike steps at most %.4f A; local wavelength %.1f to %.1f km (L %.1f); "
+                "mask %d, oriented by the flood %d; %d sweeps, misfit %.4f, %d reversal edges\n",
+                samples, steplargest, wavelengthlow, wavelengthhigh, length_km, field.maskcells,
+                field.orientedbyflood, field.sweeps, field.misfit, field.reversaledges);
+    EXPECT_GT(samples, 10000);
+    EXPECT_LE(steplargest, 0.02);
+    EXPECT_GE(wavelengthlow, 0.9 * length_km);
+    EXPECT_LE(wavelengthhigh, 1.1 * length_km);
+}
+
+TEST_F(Landscape, RegionalFoldsPhaseWavelengthRamp)
+{
+    // S5.3c: the axis east on a band of 32 x 24 global cells about the equator, the strain falling eastward (the
+    // band verges east), L from 10 to 20 km across it (the sediment cover 0 to 5 km over global columns 124 to 140:
+    // L = 10 + 2 x the cover in km). On every k 64 row of 4 global rows at the equator, between global columns
+    // 124.5 and 139.5: the phase rises by less than pi from one fine centre to the next (no jump), the local
+    // wavelength never falls (monotone within 0.1 percent), and every row crosses as many crests (no dislocation).
+    RegionalGlobalInputs inputs = phaseworld();
+    inputs.sediment_m.assign(inputs.foldstrain.size(), 0.0f);
+    for (int j = 52; j < 76; j++)
+        for (int i = 116; i < 148; i++)
+        {
+            inputs.foldstrain[at(i, j, inputs.width)] = static_cast<float>(0.25 + 0.025 * (147 - i));
+            inputs.sediment_m[at(i, j, inputs.width)] = static_cast<float>(5000.0 * std::clamp((i + 0.5 - 124.5) / 16.0, 0.0, 1.0));
+        }
+    landscape::FoldParameters folds;
+    folds.amplitudemax_m = 100.0;
+    const landscape::FoldPhaseField field = landscape::foldphasefield(inputs, folds);
+    const PhaseProbe probe(field);
+    int jumps = 0, falls = 0, rows = 0, crestslow = 1 << 30, crestshigh = 0;
+    double first = 0.0, last = 0.0;
+    for (int y = 0; y < 4 * 64; y++)
+    {
+        const double v = 62.0 + (y + 0.5) / 64.0;
+        double previous = 0.0, previouswavelength = 0.0;
+        int crests = 0;
+        for (int x = 0; x <= 15 * 64; x++)
+        {
+            const double u = 124.5 + x / 64.0;
+            double phase = 0.0;
+            ASSERT_TRUE(probe.phase(u, v, phase));
+            const double wavelength = probe.wavelength(u, v);
+            if (x > 0)
+            {
+                jumps += !(phase > previous && phase - previous < pi) ? 1 : 0;
+                falls += wavelength < previouswavelength * (1.0 - 1.0e-3) ? 1 : 0;
+                crests += static_cast<int>(std::floor((phase - pi / 2.0) / (2.0 * pi)) - std::floor((previous - pi / 2.0) / (2.0 * pi)));
+            }
+            if (y == 128 && x == 0)
+                first = wavelength;
+            if (y == 128 && x == 15 * 64)
+                last = wavelength;
+            previous = phase;
+            previouswavelength = wavelength;
+        }
+        rows++;
+        crestslow = std::min(crestslow, crests);
+        crestshigh = std::max(crestshigh, crests);
+    }
+    std::printf("[folds] phase, wavelength ramp: %d rows, %d to %d crests per row, %d jumps, %d falls of the local wavelength; "
+                "L %.2f km at column 124.5, %.2f km at 139.5; %d sweeps, misfit %.4f, %d reversal edges\n",
+                rows, crestslow, crestshigh, jumps, falls, first, last, field.sweeps, field.misfit, field.reversaledges);
+    EXPECT_EQ(jumps, 0);
+    EXPECT_EQ(falls, 0);
+    EXPECT_EQ(crestslow, crestshigh);
+    EXPECT_NEAR(first, 10.0, 0.5);
+    EXPECT_NEAR(last, 20.0, 1.0);
+}
+
+TEST_F(Landscape, RegionalFoldsPhaseAroundAHole)
+{
+    // S5.3c: a disk of strain 0.3 (the global cells within 8 cells on the ground of (128, 64)) with a hole of 2.5
+    // cells at its centre, the axis radial, L one global cell; the flood orients every cell from the first (north) and must carry one sign around the hole: the crests are rings
+    // about it. Over the k 64 positions 3.5 to 7 cells from the centre at every angle: no step above 0.02 A
+    // along the strike, the local wavelength within 10 percent of L, and the phase rising by 3.5 wavelengths within
+    // 10 percent along every radius from 3.5 to 7 cells.
+    RegionalGlobalInputs inputs = phaseworld();
+    const double uc = 128.0, vc = 64.0;
+    const auto local = [&](double u, double v, double& x, double& y) {
+        x = (u - uc) * std::cos(0.5 * pi - pi * v / static_cast<double>(inputs.height));
+        y = v - vc;
+    };
+    for (int j = 0; j < inputs.height; j++)
+        for (int i = 0; i < inputs.width; i++)
+        {
+            double x = 0.0, y = 0.0;
+            local(i + 0.5, j + 0.5, x, y);
+            const double r = std::hypot(x, y);
+            if (r < 2.5 || r > 8.0)
+                continue;
+            inputs.foldstrain[at(i, j, inputs.width)] = 0.3f;
+            inputs.folddirection_rad[at(i, j, inputs.width)] = static_cast<float>(std::fmod(std::atan2(y, x) + pi, pi));
+        }
+    landscape::FoldParameters folds;
+    folds.amplitudemax_m = 100.0;
+    const double length_km = pi * inputs.radius_m / static_cast<double>(inputs.height) / 1000.0;
+    folds.wavelengthmin_km = length_km;
+    folds.wavelengthmax_km = length_km;
+    const landscape::FoldPhaseField field = landscape::foldphasefield(inputs, folds);
+    EXPECT_EQ(field.orientedbynorth, 1);
+    EXPECT_EQ(field.components, 1);
+    // One sign around the hole: every mask cell's oriented axis points the same way along the radius.
+    int outward = 0, inward = 0;
+    for (int j = 0; j < inputs.height; j++)
+        for (int i = 0; i < inputs.width; i++)
+        {
+            const std::size_t cell = at(i, j, inputs.width);
+            if (field.state[cell] != 1)
+                continue;
+            double x = 0.0, y = 0.0;
+            local(i + 0.5, j + 0.5, x, y);
+            const double radial = field.wavenumbereast[cell] * x + field.wavenumbersouth[cell] * y;
+            outward += radial > 0.0 ? 1 : 0;
+            inward += radial < 0.0 ? 1 : 0;
+        }
+    EXPECT_TRUE(outward == 0 || inward == 0) << outward << " outward, " << inward << " inward";
+    const PhaseProbe probe(field);
+    const double fine_km = field.dy_km / 64.0;
+    double steplargest = 0.0, wavelengthlow = 1.0e18, wavelengthhigh = 0.0;
+    int samples = 0;
+    for (int y = 0; y < 16 * 64; y++)
+        for (int x = 0; x < 16 * 64; x++)
+        {
+            const double u = uc - 8.0 + (x + 0.5) / 64.0, v = vc - 8.0 + (y + 0.5) / 64.0;
+            double ex = 0.0, ey = 0.0;
+            local(u, v, ex, ey);
+            const double r = std::hypot(ex, ey), angle = std::atan2(ey, ex);
+            if (r < 3.5 || r > 7.0)
+                continue;
+            const double step = probe.step(u, v, -std::sin(angle), std::cos(angle), fine_km);
+            const double wavelength = probe.wavelength(u, v);
+            ASSERT_GE(step, 0.0);
+            ASSERT_GT(wavelength, 0.0);
+            steplargest = std::max(steplargest, step);
+            wavelengthlow = std::min(wavelengthlow, wavelength);
+            wavelengthhigh = std::max(wavelengthhigh, wavelength);
+            samples++;
+        }
+    // The phase's rise from r 3.5 to 7 along 64 radii: 3.5 wavelengths on every one (no crest ends between them).
+    double riselow = 1.0e18, risehigh = 0.0;
+    for (int ray = 0; ray < 64; ray++)
+    {
+        const double angle = 2.0 * pi * (ray + 0.5) / 64.0;
+        double ends[2] = {0.0, 0.0};
+        for (int end = 0; end < 2; end++)
+        {
+            const double r = end == 0 ? 3.5 : 7.0;
+            const double v = vc + r * std::sin(angle);
+            const double u = uc + r * std::cos(angle) / std::cos(0.5 * pi - pi * v / static_cast<double>(inputs.height));
+            ASSERT_TRUE(probe.phase(u, v, ends[end]));
+        }
+        const double rise = std::fabs(ends[1] - ends[0]) / (2.0 * pi);
+        riselow = std::min(riselow, rise);
+        risehigh = std::max(risehigh, rise);
+    }
+    std::printf("[folds] phase around a hole: %d samples; along-strike steps at most %.4f A; local wavelength %.1f to %.1f km (L %.1f); "
+                "%.3f to %.3f wavelengths from r 3.5 to 7 (3.5); %d sweeps, misfit %.4f, %d reversal edges\n",
+                samples, steplargest, wavelengthlow, wavelengthhigh, length_km, riselow, risehigh, field.sweeps, field.misfit,
+                field.reversaledges);
+    EXPECT_LE(steplargest, 0.02);
+    EXPECT_GE(wavelengthlow, 0.9 * length_km);
+    EXPECT_LE(wavelengthhigh, 1.1 * length_km);
+    EXPECT_NEAR(riselow, 3.5, 0.35);
+    EXPECT_NEAR(risehigh, 3.5, 0.35);
+    EXPECT_EQ(field.reversaledges, 0);
+}
+
+TEST_F(Landscape, RegionalFoldsOrientation)
+{
+    // S5.3c (round two: by continuity alone). A belt over every column, rows 56 to 71 (16 rows about the equator),
+    // the strain rising from 0.2 at its edges by 0.15 per row to a plateau of 0.8, the axis wandering about north-south
+    // (pi / 2 + 0.5 sin(4 pi i / W)): the flood from the first cell, pointed north, carries one sign over the whole
+    // belt (every oriented axis points north, no reversal edge). The fabric of two overlapping windows (P, Q across
+    // the date line) at k 16 is bit-identical on their overlap.
+    RegionalGlobalInputs inputs = phaseworld();
+    const float profile[16] = {0.2f, 0.35f, 0.5f, 0.65f, 0.8f, 0.8f, 0.8f, 0.8f, 0.8f, 0.8f, 0.8f, 0.8f, 0.65f, 0.5f, 0.35f, 0.2f};
+    for (int j = 56; j < 72; j++)
+        for (int i = 0; i < inputs.width; i++)
+        {
+            inputs.foldstrain[at(i, j, inputs.width)] = profile[j - 56];
+            inputs.folddirection_rad[at(i, j, inputs.width)] =
+                static_cast<float>(pi / 2.0 + 0.5 * std::sin(4.0 * pi * i / static_cast<double>(inputs.width)));
+        }
     RegionalParameters parameters;
     parameters.folds.amplitudemax_m = 100.0;
-    parameters.folds.wavelengthmin_km = 64.0 * cell_km;
-    parameters.folds.wavelengthmax_km = 64.0 * cell_km;
-    parameters.folds.gapfraction = 0.0;
-    parameters.folds.splatspacing_km = 32.0 * cell_km;
-    parameters.folds.kernelwidth_km = 128.0 * cell_km;
-    landscape::FineChannels channels;
-    channels.channel.assign(count, 0);
-    const std::vector<uint8_t> sea(count, 0);
+    parameters.folds.wavelengthmin_km = 40.0;  // drawn in the single pass at k 16 (9.77 km cells: L / 4 = 10 km)
+    parameters.folds.wavelengthmax_km = 40.0;
+    const landscape::FoldPhaseField field = landscape::foldphasefield(inputs, parameters.folds);
+    int wrong = 0;
+    for (int j = 56; j < 72; j++)
+        for (int i = 0; i < inputs.width; i++)
+            wrong += field.wavenumbersouth[at(i, j, inputs.width)] < 0.0 ? 0 : 1;
+    std::printf("[folds] orientation: oriented by the flood %d, north %d of %d; %d not pointing north; %d reversal edges\n",
+                field.orientedbyflood, field.orientedbynorth, field.maskcells, wrong, field.reversaledges);
+    EXPECT_EQ(field.orientedbyflood, field.maskcells - 1);
+    EXPECT_EQ(field.orientedbynorth, 1);
+    EXPECT_EQ(wrong, 0);
+    EXPECT_EQ(field.reversaledges, 0);
 
-    struct Steps
-    {
-        double p50 = 0.0, p90 = 0.0, p99 = 0.0, largest = 0.0;
-        int cells = 0;
-    };
-    const auto measure = [&](bool turning) {
-        inputs.folddirection_rad.assign(size, 0.0f);
-        if (turning)
-            for (int j = 0; j < inputs.height; j++)
-                for (int i = 0; i < inputs.width; i++)
-                    inputs.folddirection_rad[at(i, j, inputs.width)] = static_cast<float>(axis(static_cast<double>(i)));
+    // Two windows over the belt, the second across the date line, sharing global columns 0 to 3 of rows 60 to 67.
+    const RegionalWindow windowp = landscape::regionalwindow(256, 16, 1, -180.0, -5.625, -168.75, 5.625);
+    const RegionalWindow windowq = landscape::regionalwindow(256, 16, 1, 174.375, -5.625, -174.375, 5.625);
+    const auto fold = [&](const RegionalWindow& window) {
+        const std::size_t count = static_cast<std::size_t>(window.domainfinewidth()) * static_cast<std::size_t>(window.domainfineheight());
+        landscape::FineChannels channels;
+        channels.channel.assign(count, 0);
+        const std::vector<uint8_t> sea(count, 0);
         std::vector<float> elevation(count, 1000.0f);
         landscape::addfoldfabric(inputs, window, parameters, channels, sea, elevation);
-        std::vector<double> steps;
-        const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
-        for (int y = y0; y < y0 + window.fineheight(); y++)
-            for (int x = x0; x < x0 + window.finewidth(); x++)
-            {
-                // The strike (crests at the axis + pi / 2) at the cell's centre, in global columns.
-                const double u = (static_cast<double>(window.absolutefinecolumn(x)) + 0.5) / 64.0 - 0.5;
-                const double theta = turning ? axis(u) : 0.0;
-                const double east = -std::sin(theta), south = std::cos(theta);
-                int bestx = 0, besty = 0;
-                double best = -2.0;
-                for (int dy = -1; dy <= 1; dy++)
-                    for (int dx = -1; dx <= 1; dx++)
-                    {
-                        if (dx == 0 && dy == 0)
-                            continue;
-                        const double alignment = (dx * east + dy * south) / std::hypot(dx, dy);
-                        if (alignment > best)
-                        {
-                            best = alignment;
-                            bestx = dx;
-                            besty = dy;
-                        }
-                    }
-                const int nx = x + bestx, ny = y + besty;
-                if (nx < 0 || nx >= width || ny < 0 || ny >= height)
-                    continue;
-                steps.push_back(std::fabs(static_cast<double>(elevation[at(nx, ny, width)]) -
-                                          static_cast<double>(elevation[at(x, y, width)])));
-            }
-        Steps result;
-        std::sort(steps.begin(), steps.end());
-        const auto rank = [&](double fraction) { return steps[static_cast<std::size_t>(fraction * (steps.size() - 1))]; };
-        result.cells = static_cast<int>(steps.size());
-        result.p50 = rank(0.5);
-        result.p90 = rank(0.9);
-        result.p99 = rank(0.99);
-        result.largest = steps.back();
-        return result;
+        return elevation;
     };
-    const Steps uniform = measure(false);
-    const Steps turning = measure(true);
-    for (const auto& [label, steps] : {std::make_pair("uniform", uniform), std::make_pair("turning", turning)})
-        std::printf("[folds] along-strike steps, %s axis: %d cells, p50 %.2f, p90 %.2f, p99 %.2f, max %.2f m of A 100 m\n",
-                    label, steps.cells, steps.p50, steps.p90, steps.p99, steps.largest);
-    EXPECT_LE(uniform.p90, 10.0);
-    EXPECT_LE(turning.p90, 10.0);
-    EXPECT_LE(turning.p99, uniform.p99 + 10.0);
+    const std::vector<float> p = fold(windowp), q = fold(windowq);
+    int shared = 0, differing = 0, folded = 0;
+    for (int y = 0; y < windowp.domainfineheight(); y++)
+        for (int x = 0; x < windowp.domainfinewidth(); x++)
+        {
+            const std::int64_t column = windowp.absolutefinecolumn(x), row = windowp.absolutefinerow(y);
+            for (int yq = 0; yq < windowq.domainfineheight(); yq++)
+            {
+                if (windowq.absolutefinerow(yq) != row)
+                    continue;
+                for (int xq = 0; xq < windowq.domainfinewidth(); xq++)
+                    if (windowq.absolutefinecolumn(xq) == column)
+                    {
+                        shared++;
+                        const float a = p[at(x, y, windowp.domainfinewidth())], b = q[at(xq, yq, windowq.domainfinewidth())];
+                        differing += std::memcmp(&a, &b, sizeof(float)) != 0 ? 1 : 0;
+                        folded += a != 1000.0f ? 1 : 0;
+                    }
+            }
+        }
+    std::printf("[folds] orientation, windows P and Q at k 16: %d shared domain cells, %d folded, %d differ\n", shared, folded, differing);
+    EXPECT_GT(shared, 0);
+    EXPECT_GT(folded, 0);
+    EXPECT_EQ(differing, 0);
 }
 
 TEST_F(Landscape, RegionalFoldsIceGate)
@@ -509,9 +857,9 @@ TEST_F(Landscape, RegionalFoldsIceGate)
     // S5.3b: no fabric where the glaciation upsampled is above folds.icemax (0.5): a 3 x 3 group of
     // global cells at glaciation 1 leaves its cells above 0.5 unchanged; every other cell is folded as
     // without the field; icemax 1 is no gate.
-    FoldBench plain(8.0, 0.3f, 0.0f);
+    FoldBench plain(8.0, true);
     plain.fold();
-    FoldBench iced(8.0, 0.3f, 0.0f);
+    FoldBench iced(8.0, true);
     const std::size_t size = static_cast<std::size_t>(iced.inputs.width) * static_cast<std::size_t>(iced.inputs.height);
     iced.inputs.glaciation.assign(size, 0.0f);
     const int x0 = iced.width / 2, y0 = iced.equatorialrows()[iced.equatorialrows().size() / 2];
@@ -549,9 +897,9 @@ TEST_F(Landscape, RegionalFoldsLakeGate)
 {
     // S5.3b: no fabric in the block of a global lake cell (lake surface above 0, not sea); the cells of
     // the other blocks are folded as without the lake.
-    FoldBench plain(8.0, 0.3f, 0.0f);
+    FoldBench plain(8.0, true);
     plain.fold();
-    FoldBench lake(8.0, 0.3f, 0.0f);
+    FoldBench lake(8.0, true);
     const int x0 = lake.width / 2, y0 = lake.equatorialrows()[lake.equatorialrows().size() / 2];
     const int i0 = lake.window.globalcolumn(x0), j0 = lake.window.globalrow(y0);
     const std::size_t global = at(i0, j0, lake.inputs.width);
@@ -640,19 +988,17 @@ TEST_F(Landscape, RegionalFoldsLakesOnTheUnfoldedSurface)
 TEST_F(Landscape, RegionalFoldsRefinementConsistency)
 {
     // The folds in the refinement loop on the 256-column synthetic world (levels 1 and 2 of 39.1 and
-    // 9.77 km): wavelengths of 15 x the cover in km clamped to 20 to 120 km, so level 1 draws L >= 78 km
-    // and level 2 the rest. Level 1 of two levels is the one-level result bit for bit; the k = 16 result
+    // 9.77 km): wavelengths of 30 x the cover in km clamped to 40 to 300 km, so level 1 draws L >= 156 km
+    // (4 cells per wavelength) and level 2 the rest. Level 1 of two levels is the one-level result bit for bit; the k = 16 result
     // box-averaged equals both within the level-2 bound; windows P and Q (Q across the date line) agree
     // bit for bit on their overlap at both levels; both levels draw folds.
     const RegionalGlobalInputs inputs = withfoldfields(syntheticworld(256));
     RegionalParameters parameters;
     parameters.folds.amplitudemax_m = 500.0;
-    parameters.folds.wavelengthmin_km = 20.0;
-    parameters.folds.wavelengthmax_km = 120.0;
-    parameters.folds.wavelengthpercover_km = 15.0;
+    parameters.folds.wavelengthmin_km = 40.0;
+    parameters.folds.wavelengthmax_km = 300.0;
+    parameters.folds.wavelengthpercover_km = 30.0;
     parameters.folds.wavelengthbase_km = 0.0;
-    parameters.folds.kernelwidth_km = 120.0;
-    parameters.folds.splatspacing_km = 40.0;  // the 156 km global cell by 4: a 39 km lattice
     const int halo = landscape::refinementhalo(2, 0);
     const RegionalWindow windowp = landscape::regionalwindow(256, 16, halo, 160.0, -15.0, 180.0, 10.0);
     const RegionalWindow windowq = landscape::regionalwindow(256, 16, halo, 170.0, -10.0, -170.0, 15.0);
