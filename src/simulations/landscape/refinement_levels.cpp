@@ -347,7 +347,7 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         throw std::invalid_argument("runrefinement: refinement.channel_cell_slope must be finite and not negative");
     if (parameters.meanpasses < 0 || target.window.halo < refinementhalo(parameters.meanpasses, refinement.smoothpasses,
                                                                                          parameters.tributaries.enabled != 0))
-        throw std::invalid_argument("runrefinement: the halo must be at least refinementhalo, 2 x meanpasses + 6 + 2 x "
+        throw std::invalid_argument("runrefinement: the halo must be at least refinementhalo, 2 x meanpasses + 7 + 2 x "
                                     "smooth_passes global cells, plus tributaryreach with tributaries on");
     std::int64_t finest = 1;
     for (int level = 0; level < levels; level++)
@@ -478,6 +478,8 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
         diagnostics.sinkjunctions = state.sinkjunctions;
         diagnostics.diagonallinks = state.diagonallinks;
         diagnostics.cornerlinks = state.cornerlinks;
+        diagnostics.mergedpieces = state.mergedpieces;
+        diagnostics.drytails = state.drytails;
         diagnostics.reliefconverged = state.reliefconverged;
         diagnostics.changedreceivers = state.changedreceivers;
         std::vector<float>& elevation = state.elevation_m;

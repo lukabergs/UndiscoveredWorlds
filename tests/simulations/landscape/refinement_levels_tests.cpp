@@ -645,12 +645,12 @@ TEST_F(Landscape, RefinementLevelsRejects)
     RefinementParameters one;
     one.factor = 1;
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, one), std::invalid_argument);
-    target.window.halo = 5;  // below 2 x meanpasses + 2
+    target.window.halo = 5;  // below 2 x meanpasses + 3
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, RefinementParameters{}), std::invalid_argument);
-    // The lake flood's reach (S2.8): 6 is below 2 x 2 + 2 + 2.
+    // The lake flood's reach (S2.8): 7 is below 2 x 2 + 3 + 2.
     target.window.halo = testhalo;
     EXPECT_THROW(landscape::runrefinement(inputs, target, RegionalParameters{}, RefinementParameters{}), std::invalid_argument);
-    // The smoothing's passes widen the rule: 6 is below 2 x 2 + 2 + 2 x 1 + 2.
+    // The smoothing's passes widen the rule: 7 is below 2 x 2 + 3 + 2 x 1 + 2.
     target.window.halo = testhalo;
     RefinementParameters smoothing;
     smoothing.smoothpasses = 1;

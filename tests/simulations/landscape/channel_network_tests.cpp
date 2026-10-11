@@ -1130,6 +1130,20 @@ TEST_F(Landscape, ChannelNetworkRejectsBadInput)
         }
         EXPECT_THROW(rasterisechannels(worldwindow(4), network, settings, sealevel), std::invalid_argument) << bad;
     }
+    // S3.11: a negative or non-finite roughness, a persistence outside 0 .. 1.
+    for (int bad = 0; bad < 5; bad++)
+    {
+        ChannelParameters settings = parameters(0.3, 1);
+        switch (bad)
+        {
+        case 0: settings.meanderroughness = -0.01; break;
+        case 1: settings.meanderroughness = std::numeric_limits<double>::infinity(); break;
+        case 2: settings.meanderroughness = std::numeric_limits<double>::quiet_NaN(); break;
+        case 3: settings.meanderroughnesspersistence = -0.1; break;
+        default: settings.meanderroughnesspersistence = 1.5; break;
+        }
+        EXPECT_THROW(rasterisechannels(worldwindow(4), network, settings, sealevel), std::invalid_argument) << bad;
+    }
     // A land receiver above its upstream cell on the filled surface.
     GlobalNetwork rising = seaworld();
     setland(rising, 6, 4, west, 30.0f, 200.0f);
@@ -1703,6 +1717,7 @@ struct OutletReport
     int foreign = 0;
     int wrongoutlet = 0;
     int takenjunctions = 0;
+    int dry = 0;  // S3.11: walks that step onto an unpainted cell (a dry tail), not counted as wrong
 };
 
 OutletReport walkoutlets(const GlobalNetwork& network, const RegionalWindow& window, const ChannelParameters& settings,
@@ -1724,25 +1739,30 @@ OutletReport walkoutlets(const GlobalNetwork& network, const RegionalWindow& win
                       globaloutlet(network, static_cast<std::size_t>(channels.globalcell[walk])) == outlet;
             report.takenjunctions += ok && channels.globalcell[walk] != static_cast<int32_t>(start) ? 1 : 0;
             int steps = 0;
+            bool dry = false;
             while (ok && channels.direction[walk] != 0 && steps <= limit)
             {
                 std::size_t next = 0;
-                ok = nextcell(window, walk, channels.direction[walk], next) && channels.channel[next] == 1;
-                if (!ok)
+                ok = nextcell(window, walk, channels.direction[walk], next);
+                dry = ok && channels.channel[next] == 0;  // S3.11: a dry tail leaves the pinned network
+                if (!ok || dry)
                     break;
                 if (globaloutlet(network, static_cast<std::size_t>(channels.globalcell[next])) != outlet)
                     report.foreign++;
                 walk = next;
                 steps++;
             }
-            if (!ok || steps > limit || globalof(window, walk) != outlet || !isend(network, window, settings, walk))
+            report.dry += dry ? 1 : 0;
+            if (!dry && (!ok || steps > limit || globalof(window, walk) != outlet || !isend(network, window, settings, walk)))
                 report.wrongoutlet++;
         }
     return report;
 }
 
 // Channel cells whose chain does not end at an end cell (a sea block or a land sink's
-// junction) within the channel count's steps: a loop or a broken chain (no fine sea).
+// junction) within the channel count's steps: a loop or a broken chain (no fine sea). A chain
+// that steps onto an unpainted cell (a dry tail of the confluences, multiscale plan S3.11) ends
+// there and is not counted.
 int badchains(const GlobalNetwork& network, const RegionalWindow& window, const ChannelParameters& settings,
               const FineChannels& channels)
 {
@@ -1754,13 +1774,14 @@ int badchains(const GlobalNetwork& network, const RegionalWindow& window, const 
             continue;
         std::size_t walk = cell;
         int steps = 0;
-        bool ok = true;
-        while (ok && channels.direction[walk] != 0 && steps <= count)
+        bool ok = true, dry = false;
+        while (ok && !dry && channels.direction[walk] != 0 && steps <= count)
         {
-            ok = nextcell(window, walk, channels.direction[walk], walk) && channels.channel[walk] == 1;
+            ok = nextcell(window, walk, channels.direction[walk], walk);
+            dry = ok && channels.channel[walk] == 0;
             steps++;
         }
-        bad += !ok || steps > count || !isend(network, window, settings, walk) ? 1 : 0;
+        bad += !ok || steps > count || (!dry && !isend(network, window, settings, walk)) ? 1 : 0;
     }
     return bad;
 }
@@ -2024,10 +2045,12 @@ TEST_F(Landscape, ChannelNetworkTransitWindowsAgreeWithSurfaces)
 {
     // ChannelNetworkWindowsAgreeAwayFromTheirEdges with transit legs: given the same start
     // surface and fine sea (functions of the absolute fine cell, sea specks cutting links
-    // anywhere), windows agree on every channel field at the fine cells at least one global
-    // cell inside both domains, since a transit link lies in the 2 x 2 blocks around its
-    // corner and its junction beds, running minimum and fine-sea cut read only cells there;
-    // including transit cells whose link starts outside the smaller window (counted).
+    // anywhere), windows agree on every channel field at the fine cells at least two global
+    // cells inside both domains (one until S3.10): a transit link lies in the 2 x 2 blocks around
+    // its corner and its junction beds, running minimum and fine-sea cut read only cells there,
+    // and with the confluences (S3.11) a piece's prefix end reads the owners along its path, whose
+    // beds read the start surface one global cell beyond (channel_network.hpp, Seams); including
+    // transit cells whose link starts outside the smaller window (counted).
     int compared = 0, comparedtransit = 0;
     for (std::uint64_t world = 0; world <= 2; world++)
     {
@@ -2058,8 +2081,8 @@ TEST_F(Landscape, ChannelNetworkTransitWindowsAgreeWithSurfaces)
             for (std::size_t q = 1; q < results.size(); q++)
             {
                 const RegionalWindow& window = windows[q];
-                for (int y = k; y < window.domainfineheight() - k; y++)
-                    for (int x = k; x < window.domainfinewidth() - k; x++)
+                for (int y = 2 * k; y < window.domainfineheight() - 2 * k; y++)
+                    for (int x = 2 * k; x < window.domainfinewidth() - 2 * k; x++)
                     {
                         std::size_t other = 0;
                         ASSERT_TRUE(domaincell(whole, absolutecolumn(window, x), absoluterow(window, y), other));
@@ -2086,4 +2109,224 @@ TEST_F(Landscape, ChannelNetworkTransitWindowsAgreeWithSurfaces)
     }
     EXPECT_GT(compared, 0);
     EXPECT_GT(comparedtransit, 0);
+}
+// Multiscale plan S3.11: confluences and leg roughness (channel_network.hpp).
+namespace
+{
+// What the confluence rule leaves visible on a whole-world window without springs.
+struct ConfluenceReport
+{
+    int openprefixes = 0;  // links whose walk from their junction, while they own the cells, steps onto an
+                           // unpainted cell: a prefix that does not reach its first lost cell
+    int orphans = 0;       // painted cells, not a land cell's junction, that no painted 8-neighbour steps onto
+                           // (a suffix that runs on past a cell another piece owns)
+    int loops = 0;         // channel cells whose walk along the directions does not stop
+    int drysteps = 0;      // channel cells whose direction leads to an unpainted cell (dry tails)
+};
+
+ConfluenceReport confluencereport(const GlobalNetwork& network, const RegionalWindow& window,
+                                  const ChannelParameters& settings, const FineChannels& channels)
+{
+    ConfluenceReport report;
+    std::vector<uint8_t> entered(channels.channel.size(), 0), junction(channels.channel.size(), 0);
+    for (int j = 0; j < worldheight; j++)
+        for (int i = 0; i < worldwidth; i++)
+            junction[junctioncell(window, settings, i, j)] = 1;
+    const int count = channelcount(channels);
+    for (std::size_t cell = 0; cell < channels.channel.size(); cell++)
+    {
+        std::size_t next = 0;
+        if (channels.channel[cell] == 0 || channels.direction[cell] == 0 ||
+            !nextcell(window, cell, channels.direction[cell], next))
+            continue;
+        if (channels.channel[next] != 0)
+            entered[next] = 1;
+        else
+            report.drysteps++;
+        std::size_t walk = cell;
+        int steps = 0;
+        while (channels.channel[walk] != 0 && channels.direction[walk] != 0 && steps <= count &&
+               nextcell(window, walk, channels.direction[walk], walk))
+            steps++;
+        report.loops += steps > count ? 1 : 0;
+    }
+    for (std::size_t cell = 0; cell < channels.channel.size(); cell++)
+        report.orphans += channels.channel[cell] != 0 && entered[cell] == 0 && junction[cell] == 0 ? 1 : 0;
+    for (int j = 0; j < worldheight; j++)
+        for (int i = 0; i < worldwidth; i++)
+        {
+            const std::size_t start = globalindex(i, j);
+            if (network.sea[start] != 0 || network.direction[start] == 0 ||
+                !(network.drainagearea_km2[start] >= settings.pinarea_km2))
+                continue;
+            std::size_t walk = junctioncell(window, settings, i, j);
+            int steps = 0;
+            while (channels.channel[walk] != 0 && channels.globalcell[walk] == static_cast<int32_t>(start) &&
+                   channels.direction[walk] != 0 && steps <= count &&
+                   nextcell(window, walk, channels.direction[walk], walk))
+                steps++;
+            report.openprefixes += channels.channel[walk] == 0 ? 1 : 0;
+        }
+    return report;
+}
+}
+
+TEST_F(Landscape, ChannelNetworkConfluences)
+{
+    // A piece is painted on its prefix (to its first lost cell, included) and its suffix (from
+    // another piece's first lost cell after its prefix): every link's walk from its junction
+    // reaches its first lost cell painted, the beds never rise along the directions and no
+    // direction loops; every owner a walk meets drains to the walk's outlet, and links stay in
+    // their blocks; on the main world (R3's geometry and S3.10's) and on flat worlds of many
+    // diagonals, with and without a start surface. Pieces do merge (mergedpieces); chains leaving
+    // the pinned network (drytails) and painted cells nothing steps onto (a suffix that runs on past
+    // a cell another piece owns) are counted, not asserted.
+    int merged = 0, dry = 0, drysteps = 0, orphans = 0, runs = 0;
+    for (std::uint64_t world = 0; world <= 2; world++)
+    {
+        const GlobalNetwork network = world == 0 ? syntheticnetwork() : flatnetwork(world);
+        for (const Case& c : cases)
+            for (const bool transit : { false, true })
+                for (const bool withstart : { false, true })
+                {
+                    if (world != 0 && !transit)
+                        continue;
+                    SCOPED_TRACE(testing::Message() << "world " << world << ", k " << c.scale << ", meander "
+                                                    << c.meanderamplitude << ", seed " << c.seed
+                                                    << (transit ? ", transit" : ", R3") << (withstart ? ", start" : ""));
+                    const RegionalWindow window = worldwindow(c.scale);
+                    const ChannelParameters settings =
+                        transit ? transitparameters(c.meanderamplitude, c.seed) : parameters(c.meanderamplitude, c.seed);
+                    const FineChannels channels =
+                        withstart ? rasterisechannels(window, network, settings, sealevel, hashedstart(window, c.seed + world))
+                                  : rasterisechannels(window, network, settings, sealevel);
+                    const ConfluenceReport report = confluencereport(network, window, settings, channels);
+                    ASSERT_EQ(report.openprefixes, 0);
+                    ASSERT_EQ(report.loops, 0);
+                    ASSERT_EQ(risingsteps(window, channels), 0);
+                    ASSERT_EQ(walkoutlets(network, window, settings, channels).foreign, 0);
+                    ASSERT_EQ(transitreport(network, window, channels).outside, 0);
+                    merged += channels.mergedpieces;
+                    dry += channels.drytails;
+                    drysteps += report.drysteps;
+                    orphans += report.orphans;
+                    runs++;
+                }
+    }
+    std::printf("[channels] confluences: %d pieces merged, %d dry tails (%d dry steps), %d unentered suffix cells in %d "
+                "rasterisations\n",
+                merged, dry, drysteps, orphans, runs);
+    EXPECT_GT(merged, 0);
+}
+
+TEST_F(Landscape, ChannelNetworkRoughLegs)
+{
+    // Leg roughness at k 32 and 64 with a large roughness (0.2, persistence 0.7): the confluence
+    // report stays clean, the beds never rise, every channel cell lies in its link's blocks with
+    // 4-connected block crossings, and the legs move (the owners differ from the smooth arcs').
+    // Overlapping windows agree on every shared cell.
+    for (std::uint64_t world = 0; world <= 1; world++)
+    {
+        const GlobalNetwork network = world == 0 ? syntheticnetwork() : flatnetwork(1);
+        for (int k : { 32, 64 })
+            for (std::uint64_t seed = 1; seed <= 2; seed++)
+            {
+                SCOPED_TRACE(testing::Message() << "world " << world << ", k " << k << ", seed " << seed);
+                const RegionalWindow window = worldwindow(k);
+                ChannelParameters rough = transitparameters(0.2, seed);
+                rough.meanderroughness = 0.2;
+                rough.meanderroughnesspersistence = 0.7;
+                ChannelParameters smooth = rough;
+                smooth.meanderroughness = 0.0;
+                const FineChannels channels = rasterisechannels(window, network, rough, sealevel);
+                const ConfluenceReport report = confluencereport(network, window, rough, channels);
+                ASSERT_EQ(report.openprefixes, 0);
+                ASSERT_EQ(report.loops, 0);
+                ASSERT_EQ(risingsteps(window, channels), 0);
+                ASSERT_EQ(walkoutlets(network, window, rough, channels).foreign, 0);
+                const TransitReport blocks = transitreport(network, window, channels);
+                ASSERT_EQ(blocks.outside, 0);
+                ASSERT_EQ(blocks.cornersteps, 0);
+                EXPECT_NE(channels.globalcell, rasterisechannels(window, network, smooth, sealevel).globalcell);
+                const RegionalWindow part = domainwindow(k, 3, 6, 1, 3);
+                const FineChannels windowed = rasterisechannels(part, network, rough, sealevel);
+                for (int y = 0; y < part.domainfineheight(); y++)
+                    for (int x = 0; x < part.domainfinewidth(); x++)
+                    {
+                        std::size_t other = 0;
+                        ASSERT_TRUE(domaincell(window, absolutecolumn(part, x), absoluterow(part, y), other));
+                        const std::size_t cell =
+                            static_cast<std::size_t>(y) * static_cast<std::size_t>(part.domainfinewidth()) + x;
+                        ASSERT_EQ(windowed.channel[cell], channels.channel[other]) << cell;
+                        ASSERT_EQ(windowed.globalcell[cell], channels.globalcell[other]) << cell;
+                        ASSERT_EQ(windowed.direction[cell], channels.direction[other]) << cell;
+                        ASSERT_EQ(windowed.bed_m[cell], channels.bed_m[other]) << cell;
+                    }
+            }
+    }
+}
+
+TEST_F(Landscape, ChannelNetworkRoughnessOffKeepsTheArcs)
+{
+    // meanderroughness 0 draws S3.10's smooth arcs: the walk of a single link (no other piece, so
+    // no confluence) from (6, 4) west, or (6, 3) south-west through the corner, into a land sink,
+    // with S3.10's geometry, pinned as its length and an FNV-1a hash of its absolute fine cells.
+    // The values were printed by this code and match S3.10 because, with the confluences switched
+    // off by a temporary hook, roughness 0 reproduced the S3.10 binary's regional bundle of
+    // window B at k 16 (erosion run 9) file for file (2026-10-11). Roughness 0.05 moves the k 64 legs.
+    GlobalNetwork cardinal = seaworld();
+    setland(cardinal, 6, 4, west, 100.0f, 200.0f);
+    setland(cardinal, 5, 4, 0, 50.0f, 300.0f);
+    GlobalNetwork diagonal = seaworld();
+    setland(diagonal, 6, 3, southwest, 100.0f, 200.0f);
+    setland(diagonal, 5, 4, 0, 50.0f, 300.0f);
+    setland(diagonal, 5, 3, 0, 80.0f, 100.0f);
+    struct Pinned
+    {
+        int world;
+        int k;
+        std::uint64_t seed;
+        std::size_t cells;
+        std::uint64_t hash;
+    };
+    const Pinned pinned[] = {
+        { 0, 4, 1, 4, 11359039419027424115ull },  { 0, 4, 2, 7, 1674562202105952313ull },
+        { 0, 4, 3, 4, 3720837384589586742ull },   { 0, 16, 1, 15, 12990339599241022070ull },
+        { 0, 16, 2, 23, 13287087815768985187ull }, { 0, 16, 3, 13, 15329570031918160423ull },
+        { 0, 64, 1, 68, 13916128713388234474ull }, { 0, 64, 2, 91, 18007080842466672190ull },
+        { 0, 64, 3, 52, 2286038539570859934ull },  { 1, 4, 1, 6, 10692345346872103989ull },
+        { 1, 4, 2, 7, 1888782723492141791ull },    { 1, 4, 3, 6, 9773813615215116780ull },
+        { 1, 16, 1, 22, 2647325632442881105ull },  { 1, 16, 2, 26, 6896447059521687915ull },
+        { 1, 16, 3, 24, 4645429708154544421ull },  { 1, 64, 1, 88, 606380696182006003ull },
+        { 1, 64, 2, 106, 5046840530215962682ull }, { 1, 64, 3, 95, 1148829669704141986ull },
+    };
+    int moved = 0;
+    for (const Pinned& p : pinned)
+    {
+        SCOPED_TRACE(testing::Message() << "world " << p.world << ", k " << p.k << ", seed " << p.seed);
+        const RegionalWindow window = worldwindow(p.k);
+        ChannelParameters settings = transitparameters(0.2, p.seed);
+        auto walkhash = [&](double roughness, std::size_t& cells) {
+            settings.meanderroughness = roughness;
+            const FineChannels channels =
+                rasterisechannels(window, p.world == 0 ? cardinal : diagonal, settings, sealevel);
+            const std::vector<std::size_t> walk =
+                walkfrom(window, channels, junctioncell(window, settings, 6, p.world == 0 ? 4 : 3));
+            std::uint64_t hash = 1469598103934665603ull;
+            for (const std::size_t cell : walk)
+            {
+                hash = (hash ^ static_cast<std::uint64_t>(absolutecolumn(window, columnof(window, cell)))) *
+                       1099511628211ull;
+                hash = (hash ^ static_cast<std::uint64_t>(absoluterow(window, rowof(window, cell)))) * 1099511628211ull;
+            }
+            cells = walk.size();
+            return hash;
+        };
+        std::size_t cells = 0;
+        EXPECT_EQ(walkhash(0.0, cells), p.hash);
+        EXPECT_EQ(cells, p.cells);
+        if (p.k == 64)
+            moved += walkhash(0.05, cells) != p.hash ? 1 : 0;
+    }
+    EXPECT_GT(moved, 0);
 }

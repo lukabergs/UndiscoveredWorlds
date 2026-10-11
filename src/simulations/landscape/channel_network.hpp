@@ -13,7 +13,8 @@
 // corner or (multiscale plan S3.10, diagonaltransit) through a transit block: one of the
 // two cells orthogonal to both, crossed by a third leg between two hashed edge points.
 // Each leg is a Catmull-Rom curve through its two ends and a midpoint displaced
-// sideways (a hash of the leg), rasterised 8-connected inside its own global cell's
+// sideways (a hash of the leg), roughened by hashed value-noise octaves along its normal
+// (multiscale plan S3.11), rasterised 8-connected inside its own global cell's
 // k x k block, so a link occupies only its two cells' blocks (and its transit block's).
 // Every value is a pure
 // function of the global cells, the seed and the absolute fine position, so a link that
@@ -51,6 +52,11 @@ struct ChannelParameters
                                        // discharge; exponent 0: no dependence), kept inside the block
     double meanderdischargeexponent = 0.0;
     double meanderreference_m3s = 1000.0;
+    // Multiscale plan S3.11: a leg's roughness, octaves i = 2, 3, ... of value noise along its
+    // normal with amplitude meanderroughness x k x meanderroughnesspersistence^(i - 2) fine cells
+    // (0: the smooth arc of S3.10).
+    double meanderroughness = 0.05;
+    double meanderroughnesspersistence = 0.5;
     double junctionjitter = 0.5;       // the junction lies within this fraction of k of the block's centre
                                        // (0.5: anywhere in the block; R3: 0.25)
     double edgemargin = 0.0;           // edge points stay this fraction of k away from the cell's corners (R3: 0.1875;
@@ -87,7 +93,16 @@ struct ChannelParameters
 // the edge n | c, then c's inflow leg from the fine cell across it, each edge point at an
 // offset drawn from the link between edgemargin x k and (1 - edgemargin) x k, so both
 // steps across an edge are 4-connected; without one (neither neighbour qualifies, or
-// diagonaltransit 0) it steps diagonally through the shared corner. The curve's tangent
+// diagonaltransit 0) it steps diagonally through the shared corner. Roughness (S3.11): each
+// sample of a leg's curve at its parameter t (0 .. 1/2 over the first Hermite segment, 1/2 .. 1
+// over the second) moves along the curve's left normal (the chord's where the curve stands
+// still) by d(t), the sum over octaves i = 2, 3, ... of a_i v_i(t): v_i a cosine-interpolated
+// value noise with 2^i intervals over t, node values in [-1, 1) from a hash of (the leg's
+// hash, i, node), 0 at t = 0 and t = 1, so legs still meet at their edge points and
+// junctions; a_i = meanderroughness x k x meanderroughnesspersistence^(i - 2); octaves while
+// chord / 2^i is at least 2 fine cells. A leg at a finer k is the same curve with more
+// octaves; samples stay clamped inside the block, a gap between two samples' cells is filled
+// by diagonal-first steps and the chain's loop erasure removes self-crossings. The curve's tangent
 // at an edge point is the link's direction, so the legs join smoothly; at a junction, the outflow leg and
 // the inflow leg of the main upstream cell (the largest drainage area among the drawn
 // links into the cell, ties to the smaller index) share one tangent (from the main
@@ -107,6 +122,28 @@ struct ChannelParameters
 // springs, the inflow legs of the links into it and the transit legs through it, all
 // draining to the block's outlet on the global tree, so a chain that runs onto another
 // piece reaches the same outlet; no capture across a divide can arise.
+//
+// Confluences (multiscale plan S3.11), without iteration. Ownership and the directions are
+// decided on the full paths as above (every cell a drawn piece crosses, also outside the domain,
+// where only the drawn pieces compete with the beds this window knows; painted only inside it).
+// A piece is painted on its prefix, from its first cell up to and including its first lost cell
+// (the first cell of its path another piece owns, where the chain continues on the owner; its
+// last cell if it loses none), and on its suffix, from the earliest of its cells after its own
+// prefix end that is another piece's first lost cell to its last cell (a prefix end on its
+// prefix needs no suffix: the water runs on along the prefix, and a suffix from there would
+// paint the piece past its first lost cell again). A painted cell carries its owner's values; a path
+// cell in no prefix or suffix is not painted (channel 0), so the crossing a piece made past its
+// first lost cell (S3.10) is gone. A chain that steps from a painted cell onto an unpainted one
+// (a suffix cell owned by a piece whose own prefix ended earlier) leaves the pinned network
+// there and the solve routes the water on (counted: drytails). A junction is reached by its
+// cell's outflow leg (its first cell); an inflow leg that meets another piece before the
+// junction merges there, and from there to the junction the painted discharge is the owner's
+// alone (recorded, not corrected). Reach: a cell's painting depends on its owner's first lost
+// cell and on the first lost cells of the pieces crossing the owner's path, each decided by the
+// ownership on that piece's own cells: pieces within two global cells of the cell's block, whose
+// owners involve pieces starting up to three cells away. So the links and springs of the global
+// cells up to three cells outside the domain are drawn: they compete for ownership and end
+// prefixes there and are never painted (about 7 % more time at level 2 of window B at k 16).
 //
 // Ends. A link ends at its first fine cell inside a global sea cell's block (its sea
 // receiver's entry point) without `finesea`; with it, see below. A land sink's
@@ -130,7 +167,8 @@ struct ChannelParameters
 // Throws std::invalid_argument for a scale below 1, a network not on the window's
 // world grid, a domain off it, a negative or non-finite meanderamplitude,
 // meanderdischargeexponent or junctionjitter, a meanderreference_m3s that is not
-// positive and finite, an edgemargin outside 0 .. 0.5, a negative springspercell, a
+// positive and finite, a negative or non-finite meanderroughness, a
+// meanderroughnesspersistence outside 0 .. 1, an edgemargin outside 0 .. 0.5, a negative springspercell, a
 // diagonaltransit other than 0 and 1, a non-finite sea level, receivers that form a loop
 // downstream of a link within reach of the domain or of a transit candidate (loops
 // elsewhere go unseen), and, on a link within reach of the domain, a
@@ -152,6 +190,10 @@ struct FineChannels
     int diagonallinks = 0;               // S3.10: drawn diagonal links whose upstream cell lies in the kept box
     int cornerlinks = 0;                 // of them, those through the shared corner (no transit block, or
                                          // diagonaltransit 0)
+    int mergedpieces = 0;                // S3.11: pieces (links and springs) whose upstream cell lies in the kept
+                                         // box and whose prefix ends before their last cell (a confluence)
+    int drytails = 0;                    // S3.11: of the same pieces, those that own a painted cell whose next path
+                                         // cell is not painted (the chain leaves the pinned network there)
 };
 
 // Phase R, R1 (empty vectors keep the rules without them): `start_m` is the regional
@@ -180,8 +222,11 @@ struct FineChannels
 // around its corner, mutual 8-neighbours), so those cells lie at most one global cell
 // nearer the domain's edge than the channel cell. The regional pass's start surface and fine
 // sea agree between windows from 2 x meanpasses global cells inside the domain's edge
-// (each block-mean pass spoils the residuals of the outer two), so its channels agree
-// from 2 x meanpasses + 1 cells inside it.
+// (each block-mean pass spoils the residuals of the outer two), so its channels agree from
+// 2 x meanpasses + 2 cells inside it (2 x meanpasses + 1 until S3.10): a prefix end reads the
+// owners along the piece's path, whose beds read the start surface one global cell beyond.
+// regionalhalo and refinementhalo cover it (channelreachglobalcells, refinement_grid.hpp).
+// Without a start surface and fine sea every window agrees to its edge.
 // Throws std::invalid_argument also for a non-empty `start_m` or `finesea` whose size
 // is not the domain's.
 FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork& network,

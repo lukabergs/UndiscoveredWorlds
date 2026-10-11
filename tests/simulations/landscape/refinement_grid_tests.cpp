@@ -166,30 +166,32 @@ TEST_F(Landscape, RefinementGridAccessorsWrapAndKeysExceed32Bits)
     EXPECT_EQ(landscape::levelofscale(8, 4), -1);
 
     // The halo per level in parent cells, whole global cells: the target's halo at level 1;
-    // deeper, the parent-cell reaches (16 - 4 = 12) rounded up to whole global cells plus the
-    // channels' 2 global cells and the solve's margin of 2 (S3.8 by trial; S3.9's bound 4r - 2 at
-    // catchment reach r = 1; factor 4: 7 and 5 global cells; factor 2, level 3: 3 + 4 = 7; a target
-    // halo under 4 keeps 4 global cells deeper, 3 at level 2 of halo 0).
-    EXPECT_EQ(landscape::globalreachcells, 4);
+    // deeper, the parent-cell reaches (16 - 5 = 11) rounded up to whole global cells plus the
+    // channels' 3 global cells (2 until the S3.11 confluences) and the solve's margin of 2 (S3.8 by
+    // trial; S3.9's bound 4r - 2 at catchment reach r = 1, beyond the link's 2 cells; factor 4: 8
+    // and 6 global cells; factor 2, level 3: 3 + 5 = 8; a target halo under 5 keeps 5 global cells
+    // deeper, 4 at level 2 of halo 0).
+    EXPECT_EQ(landscape::channelreachglobalcells, 3);
+    EXPECT_EQ(landscape::globalreachcells, 5);
     EXPECT_EQ(landscape::solvemargin(1), 2);
     EXPECT_EQ(landscape::solvemargin(2), 6);
     EXPECT_EQ(landscape::solvemargin(0), landscape::unboundedsolvemarginglobalcells);
     EXPECT_EQ(landscape::levelhalo(16, 4, 0), 0);
     EXPECT_EQ(landscape::levelhalo(16, 4, 1), 16);
-    EXPECT_EQ(landscape::levelhalo(16, 4, 2), 28);
-    EXPECT_EQ(landscape::levelhalo(16, 4, 3), 80);
-    EXPECT_EQ(landscape::levelhalo(16, 2, 3), 28);
-    EXPECT_EQ(landscape::levelhalo(2, 4, 3), 64);
-    EXPECT_EQ(landscape::levelhalo(0, 4, 2), 12);
+    EXPECT_EQ(landscape::levelhalo(16, 4, 2), 32);
+    EXPECT_EQ(landscape::levelhalo(16, 4, 3), 96);
+    EXPECT_EQ(landscape::levelhalo(16, 2, 3), 32);
+    EXPECT_EQ(landscape::levelhalo(2, 4, 3), 80);
+    EXPECT_EQ(landscape::levelhalo(0, 4, 2), 16);
     EXPECT_EQ(landscape::levelhalo(3, 4, 1), 3);
-    // The loop's defaults (refinementhalo 30): 30, 44 and 96 parent cells (30, 11, 6 global cells).
-    EXPECT_EQ(landscape::levelhalo(30, 4, 2), 44);
-    EXPECT_EQ(landscape::levelhalo(30, 4, 3), 96);
-    // A margin of 0: 16 - 2 = 14 rounded up plus 2 global cells (factor 4: 6 and 3 global cells).
-    EXPECT_EQ(landscape::levelhalo(16, 4, 2, 0), 24);
-    EXPECT_EQ(landscape::levelhalo(16, 4, 3, 0), 48);
-    EXPECT_EQ(landscape::levelhalo(30, 4, 2, 0), 36);
-    EXPECT_EQ(landscape::levelhalo(30, 4, 3, 0), 64);
+    // The loop's defaults (refinementhalo 31): 31, 48 and 112 parent cells (31, 12, 7 global cells).
+    EXPECT_EQ(landscape::levelhalo(31, 4, 2), 48);
+    EXPECT_EQ(landscape::levelhalo(31, 4, 3), 112);
+    // A margin of 0: 16 - 3 = 13 rounded up plus 3 global cells (factor 4: 7 and 4 global cells).
+    EXPECT_EQ(landscape::levelhalo(16, 4, 2, 0), 28);
+    EXPECT_EQ(landscape::levelhalo(16, 4, 3, 0), 64);
+    EXPECT_EQ(landscape::levelhalo(31, 4, 2, 0), 40);
+    EXPECT_EQ(landscape::levelhalo(31, 4, 3, 0), 80);
     constexpr int unbounded = landscape::unboundedsolvemarginglobalcells;
     EXPECT_EQ(unbounded, 2);
 
@@ -238,9 +240,9 @@ TEST_F(Landscape, RefinementGridLevelWindowScalesTheKeptBox)
 {
     const landscape::RegionalWindow global = landscape::regionalwindow(16, 1, 2, 10.0, 5.0, 30.0, 20.0);
     // The hand-computed deeper levels take the unbounded solve's margin (S3.8, catchment reach 0);
-    // a margin of 0 keeps 2 global cells at level 2: halo 8 parent cells.
+    // a margin of 0 keeps the channels' 3 global cells at level 2 (S3.11; 2 before): halo 12 parent cells.
     constexpr int unbounded = landscape::unboundedsolvemarginglobalcells;
-    EXPECT_EQ(landscape::levelwindow(global, 4, 2, 0).halo, 8);
+    EXPECT_EQ(landscape::levelwindow(global, 4, 2, 0).halo, 12);
 
     // Level 0: the kept box itself, halo 0.
     const landscape::LevelWindow zero = landscape::levelwindow(global, 4, 0);
@@ -254,28 +256,28 @@ TEST_F(Landscape, RefinementGridLevelWindowScalesTheKeptBox)
     EXPECT_EQ(one.domainrow0, 4);
     EXPECT_EQ(one.domainrows, 20);
 
-    // Level 2 at factor 4: s 16, halo 4 (4 + ceil((2 - 4) / 4)) = 16 parent cells (64 level
-    // cells, 4 global cells: the rows clip at both poles).
+    // Level 2 at factor 4: s 16, halo 4 (5 + ceil((2 - 5) / 4)) = 20 parent cells (80 level
+    // cells, 5 global cells: the channels' 3 and the margin's 2; the rows clip at both poles).
     const landscape::LevelWindow two = landscape::levelwindow(global, 4, 2, unbounded);
-    expectsamewindow(two, handlevelwindow(16, 4, 2, 16, 128, 32, 48, 16));
-    EXPECT_EQ(two.domaincolumn0, 64);
-    EXPECT_EQ(two.domaincolumns, 160);
+    expectsamewindow(two, handlevelwindow(16, 4, 2, 20, 128, 32, 48, 16));
+    EXPECT_EQ(two.domaincolumn0, 48);
+    EXPECT_EQ(two.domaincolumns, 192);
     EXPECT_EQ(two.domainrow0, 0);
     EXPECT_EQ(two.domainrows, 128);
 
-    // Level 3 at factor 4: s 64, halo 16 (4 + ceil((2 - 4) / 16)) = 64 parent cells (256 level
-    // cells, 4 global cells).
+    // Level 3 at factor 4: s 64, halo 16 (5 + ceil((2 - 5) / 16)) = 80 parent cells (320 level
+    // cells, 5 global cells).
     const landscape::LevelWindow three = landscape::levelwindow(global, 4, 3, unbounded);
-    expectsamewindow(three, handlevelwindow(16, 4, 3, 64, 512, 128, 192, 64));
+    expectsamewindow(three, handlevelwindow(16, 4, 3, 80, 512, 128, 192, 64));
     EXPECT_EQ(three.levelwidth(), 1024);
-    EXPECT_EQ(three.domaincolumn0, 256);
-    EXPECT_EQ(three.domaincolumns, 640);
+    EXPECT_EQ(three.domaincolumn0, 192);
+    EXPECT_EQ(three.domaincolumns, 768);
     EXPECT_EQ(three.domainrow0, 0);
     EXPECT_EQ(three.domainrows, 512);
 
-    // Level 2 at factor 2: s 4, halo 2 (4 + ceil((2 - 4) / 2)) = 6 parent cells (12 level cells).
+    // Level 2 at factor 2: s 4, halo 2 (5 + ceil((2 - 5) / 2)) = 8 parent cells (16 level cells).
     const landscape::LevelWindow twobytwo = landscape::levelwindow(global, 2, 2, unbounded);
-    expectsamewindow(twobytwo, handlevelwindow(16, 2, 2, 6, 32, 8, 12, 4));
+    expectsamewindow(twobytwo, handlevelwindow(16, 2, 2, 8, 32, 8, 12, 4));
 
     // At level 1 the domain is regionalwindow's domain, also across the date line and at
     // the poles.
@@ -436,7 +438,9 @@ TEST_F(Landscape, RefinementGridRefusesInvalidWindowsAndChains)
     // 18 global cells at level 1; at level 2 with the unbounded solve's margin (S3.8) the halo is 4 (4 + ceil(2 / 4)) = 20 parent
     // cells, 5 global cells, so the domain just fits (256 of 256 columns), but the chain's
     // level 1 does not.
-    const landscape::RegionalWindow wide = handtarget(16, 6, 0, 6, 2, 2);
+    // S3.11 (the channels keep 3 global cells): 4 columns and a halo of 7, 18 global cells at
+    // level 1; at level 2 4 (5 + ceil(2 / 4)) = 24 parent cells, 6 global cells, 16 of 16.
+    const landscape::RegionalWindow wide = handtarget(16, 7, 0, 4, 2, 2);
     EXPECT_THROW(landscape::levelwindow(wide, 4, 1), std::invalid_argument);
     EXPECT_EQ(landscape::levelwindow(wide, 4, 2, landscape::unboundedsolvemarginglobalcells).domaincolumns, 256);
     EXPECT_THROW(landscape::halochain(wide, 4, 2, 2, landscape::unboundedsolvemarginglobalcells), std::invalid_argument);
@@ -482,11 +486,13 @@ TEST_F(Landscape, RefinementGridHaloChainReportOfWindowA)
         EXPECT_EQ(outsideparentkeptbox(sixteen[l], sixteen[l - 1], 2), 0u);
     const landscape::HaloChainReport sixteenreport = landscape::halochainreport(target, sixteen);
     ASSERT_EQ(sixteenreport.levels.size(), 3u);
-    expectlevel(sixteenreport.levels[0], 72, 68, 72, 68, 0, 26.0);
-    expectlevel(sixteenreport.levels[1], 144, 128, 272, 256, 16, 24.0);
-    expectlevel(sixteenreport.levels[2], 320, 256, 544, 480, 28, 7.0);
-    EXPECT_EQ(sixteenreport.domaincells, 4896 + 69632 + 261120);
-    EXPECT_EQ(sixteenreport.domaincells, 335648);
+    // S3.11: the channels keep 3 global cells (2 before): level 2's halo 4 (5 + ceil(11 / 4)) = 32
+    // parent cells (8 global cells); the coarser levels reach 25 and 27 global cells.
+    expectlevel(sixteenreport.levels[0], 74, 70, 74, 70, 0, 27.0);
+    expectlevel(sixteenreport.levels[1], 152, 136, 280, 264, 16, 25.0);
+    expectlevel(sixteenreport.levels[2], 320, 256, 576, 512, 32, 8.0);
+    EXPECT_EQ(sixteenreport.domaincells, 5180 + 73920 + 294912);
+    EXPECT_EQ(sixteenreport.domaincells, 374012);
 
     // At k = 64 (level 3) the halo is 16 (4 + ceil(12 / 16)) = 80 parent cells (320 level
     // cells, 5 global cells; 48 and 3 before S3.8); the coarser levels reach 13, 30 and 32
@@ -498,12 +504,14 @@ TEST_F(Landscape, RefinementGridHaloChainReportOfWindowA)
         EXPECT_EQ(outsideparentkeptbox(sixtyfour[l], sixtyfour[l - 1], 2), 0u);
     const landscape::HaloChainReport sixtyfourreport = landscape::halochainreport(target, sixtyfour);
     ASSERT_EQ(sixtyfourreport.levels.size(), 4u);
-    expectlevel(sixtyfourreport.levels[0], 84, 80, 84, 80, 0, 32.0);
-    expectlevel(sixtyfourreport.levels[1], 192, 176, 320, 304, 16, 30.0);
-    expectlevel(sixtyfourreport.levels[2], 512, 448, 736, 672, 28, 13.0);
-    expectlevel(sixtyfourreport.levels[3], 1280, 1024, 1920, 1664, 80, 5.0);
-    EXPECT_EQ(sixtyfourreport.domaincells, 6720 + 97280 + 494592 + 3194880);
-    EXPECT_EQ(sixtyfourreport.domaincells, 3793472);
+    // S3.11: level 3's halo 16 (5 + ceil(11 / 16)) = 96 parent cells (6 global cells); the
+    // coarser levels reach 15, 32 and 34 global cells.
+    expectlevel(sixtyfourreport.levels[0], 88, 84, 88, 84, 0, 34.0);
+    expectlevel(sixtyfourreport.levels[1], 208, 192, 336, 320, 16, 32.0);
+    expectlevel(sixtyfourreport.levels[2], 544, 480, 800, 736, 32, 15.0);
+    expectlevel(sixtyfourreport.levels[3], 1280, 1024, 2048, 1792, 96, 6.0);
+    EXPECT_EQ(sixtyfourreport.domaincells, 7392 + 107520 + 588800 + 3670016);
+    EXPECT_EQ(sixtyfourreport.domaincells, 4373728);
     for (int l = 0; l <= 3; l++)
         EXPECT_EQ(sixtyfourreport.levels[static_cast<std::size_t>(l)].level, l);
 }

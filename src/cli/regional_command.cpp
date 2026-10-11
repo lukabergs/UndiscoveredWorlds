@@ -49,7 +49,7 @@ void printregionusage(ostream& out)
     out << "                           the global cell size and below the cells of refinement.stored_scale_max.\n";
     out << "  --bundle <dir>          The regional bundle (new or empty directory; required).\n";
     out << "  --set <name=value>, --parameters <file>  As for run (landscape.regional.* sets the pass,\n";
-    out << "                           halo_cells the halo, for the hierarchy at least 2 x mean_passes + 6 +\n";
+    out << "                           halo_cells the halo, for the hierarchy at least 2 x mean_passes + 7 +\n";
     out << "                           2 x landscape.refinement.smooth_passes); the manifest records every\n";
     out << "                           value. The stream power\n";
     out << "                           law (landscape.stream_power.erodibility, area_exponent) and the glacial\n";
@@ -406,7 +406,7 @@ int runregioncommand(const vector<string>& arguments)
     // A power of the refinement factor runs the hierarchy (multiscale plan S2.3); any other
     // scale the single pass. The hierarchy's halo also covers the smoothing before each
     // projection (S2.7), the lake flood (S2.8), the forms and the channel-cell mean (S3.8):
-    // refinementhalo, 2 x mean_passes + 6 + 2 x smooth_passes global cells, 30 at the defaults;
+    // refinementhalo, 2 x mean_passes + 7 + 2 x smooth_passes global cells, 31 at the defaults;
     // the single pass keeps regional.halo_cells.
     const int levels = landscape::levelofscale(options.scale, refinement.factor);
     const bool hierarchy = levels >= 1;
@@ -556,7 +556,8 @@ int runregioncommand(const vector<string>& arguments)
              << level.shoresbelowlake << ", dry land below the sea level " << level.landbelowsea
              << ", kept cells draining to the domain ring " << level.ringbasincells << ", unreached by a catchment "
              << level.unreachedcells << ", sink junctions pinned " << level.sinkjunctions << ", diagonal links "
-             << level.diagonallinks << " (through the corner " << level.cornerlinks << ")";
+             << level.diagonallinks << " (through the corner " << level.cornerlinks << "), pieces merged "
+             << level.mergedpieces << ", dry tails " << level.drytails;
         if (level.tributarycells > 0)  // multiscale plan S3.3 (tributaries on)
             cout << "; tributaries: " << level.tributaries << " grown, " << level.tributarycells << " cells, "
                  << level.tributarybedsabove << " beds above the start surface";

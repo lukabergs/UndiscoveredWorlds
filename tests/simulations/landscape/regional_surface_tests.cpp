@@ -431,14 +431,16 @@ TEST_F(Landscape, RegionalOverlapCoastWideWorld)
     // On a 256 x 128 world the land-share box (the domain widened by its margin) is neither
     // a whole turn nor at a pole, so its edge is exercised: two windows across the western
     // coast of the continent (about 132 E), overlapping in 130 .. 140 E, bit-identical at
-    // the smallest halo, at k = 4 (share reach 1 global cell per pass) and k = 2 (2 cells).
+    // the smallest halo, at k = 4 (share reach 1 global cell per pass) and k = 2 (2 cells). The
+    // windows lie 2 degrees further south than until S3.10, so that the land-share box of the
+    // halo widened by the S3.11 confluences (testhalo 7) still stops short of the north pole.
     const RegionalParameters parameters = coastparameters();
     const RegionalGlobalInputs inputs = syntheticworld(256);
     for (int scale : {4, 2})
     {
         SCOPED_TRACE("k = " + std::to_string(scale));
-        const RegionalWindow wa = landscape::regionalwindow(256, scale, testhalo, 120.0, -5.0, 140.0, 15.0);
-        const RegionalWindow wb = landscape::regionalwindow(256, scale, testhalo, 130.0, 0.0, 150.0, 20.0);
+        const RegionalWindow wa = landscape::regionalwindow(256, scale, testhalo, 120.0, -7.0, 140.0, 13.0);
+        const RegionalWindow wb = landscape::regionalwindow(256, scale, testhalo, 130.0, -2.0, 150.0, 18.0);
         const int margin = (scale <= 2 ? 2 : 1) * parameters.coast.sharepasses + 2 + 2 * parameters.coast.signedpasses;
         for (const RegionalWindow& window : {wa, wb})
         {

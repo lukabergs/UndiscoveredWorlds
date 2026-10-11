@@ -145,6 +145,8 @@ inline int sharePasses = 8;
 inline int signedPasses = 12;
 inline float meanderDischargeExponent = 0.0f;
 inline float meanderReferenceM3s = 1000.0f;
+inline float meanderRoughness = 0.05f;
+inline float meanderRoughnessPersistence = 0.5f;
 inline float jitterJunction = 0.5f;
 inline float jitterEdgeMargin = 0.0f;
 inline int diagonalTransit = 1;
@@ -295,6 +297,8 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "landscape.regional.signed_passes", &regional::signedPasses },
         { "landscape.regional.meander_discharge_exponent", &regional::meanderDischargeExponent },
         { "landscape.regional.meander_reference_m3s", &regional::meanderReferenceM3s },
+        { "landscape.regional.meander_roughness", &regional::meanderRoughness },
+        { "landscape.regional.meander_roughness_persistence", &regional::meanderRoughnessPersistence },
         { "landscape.regional.jitter_junction", &regional::jitterJunction },
         { "landscape.regional.jitter_edge_margin", &regional::jitterEdgeMargin },
         { "landscape.regional.diagonal_transit", &regional::diagonalTransit },

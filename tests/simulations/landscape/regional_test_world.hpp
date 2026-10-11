@@ -7,7 +7,7 @@
 // steepest descent on the Priority-Flood surface, a lake on one cell, climate varying
 // with latitude; the windows A to D, the timed pass and the overlap comparison.
 // `testhalo` is the smallest halo the pass accepts with two block-mean passes
-// (2 x meanpasses + 2): a test with other parameters builds its windows with the
+// (2 x meanpasses + 3, regionalhalo): a test with other parameters builds its windows with the
 // halo they need.
 
 #include "simulations/landscape/regional_grid.hpp"
@@ -41,10 +41,10 @@ constexpr double radius_m = 6371.0e3;
 constexpr double secondsperyear = 365.25 * 86400.0;
 constexpr float sealevel = 0.0f;
 // The halo of these tests: two block-mean passes reach 4 global cells; the channels
-// read the start surface and the fine sea up to one global cell nearer the edge
-// (channel_network.hpp, R1), so 6 leaves the solve one global cell (the plan's
-// default is 16 with six passes).
-constexpr int testhalo = 6;
+// read the start surface and the fine sea up to two global cells nearer the edge
+// (channel_network.hpp, R1 and the S3.11 confluences), so 7 leaves the solve one global cell
+// (6 until S3.11; the plan's default is 16 with six passes).
+constexpr int testhalo = landscape::regionalhalo(2, false);
 
 std::size_t at(int x, int y, int width)
 {

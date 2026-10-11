@@ -50,9 +50,13 @@ inline int levelofscale(std::int64_t scale, int factor)
 }
 
 // The global cells around a cell whose pinned channels the channels and the solve of a
-// level depend on, at every level: the "+ 2" of the single-scale rule halo >= 2 x
-// meanpasses + 2 (regional_pass.hpp). At level L that is 2 factor^(L - 1) parent cells.
-constexpr int channelreachglobalcells = 2;
+// level depend on, at every level: the "+ 3" of the single-scale rule halo >= 2 x
+// meanpasses + 3 (regional_pass.hpp). At level L that is 3 factor^(L - 1) parent cells.
+// linkreachglobalcells: a link's two cells (2 until S3.10, which the bounded solve's 4r covers);
+// multiscale plan S3.11's confluences add one: a piece's prefix end reads the owners along its
+// path, whose beds read the start surface one global cell beyond (channel_network.hpp, Seams).
+constexpr int linkreachglobalcells = 2;
+constexpr int channelreachglobalcells = linkreachglobalcells + 1;
 
 // The solve's margin in global cells beyond channelreachglobalcells at every level.
 // - With bounded catchments (S3.9, regional.catchment_reach_global_cells r >= 1; analytical_relief.hpp)
@@ -60,9 +64,9 @@ constexpr int channelreachglobalcells = 2;
 //   cells within 2r global cells (one flood per global cell within r of it, each confined to r around
 //   its own); its catchment lies within r of its outlet's global cell, so within 2r of it, and the
 //   catchment's extent reads the labels of those cells: the solve at a cell reads the cells within 4r
-//   global cells (the outlet's bed, its link's two cells, lies within that too). Beyond the channels'
-//   reach that is max(0, 4r - channelreachglobalcells): 2 at r = 1 (the design's "within 2" counted
-//   the catchment, not the labels deciding it).
+//   global cells (the outlet's bed, its link's two cells, lies within that too). Beyond the link's
+//   reach that is max(0, 4r - linkreachglobalcells): 2 at r = 1 (the design's "within 2" counted
+//   the catchment, not the labels deciding it); S3.11's confluence cell comes on top of it.
 // - Without them (r = 0, the solve up to S3.8) the margin of S3.8, found by trial, not derived
 //   (unboundedsolvemarginglobalcells): the unbounded solve's sub-basins, the unpinned cells
 //   connected between the pinned channels, reach the domain's outer ring at every level. On the
@@ -73,7 +77,7 @@ constexpr int unboundedsolvemarginglobalcells = 2;
 constexpr int solvemargin(int catchmentreach)
 {
     return catchmentreach < 1 ? unboundedsolvemarginglobalcells
-                              : (4 * catchmentreach > channelreachglobalcells ? 4 * catchmentreach - channelreachglobalcells : 0);
+                              : (4 * catchmentreach > linkreachglobalcells ? 4 * catchmentreach - linkreachglobalcells : 0);
 }
 constexpr int solvemarginglobalcells = solvemargin(1);  // the default key's
 
@@ -90,8 +94,9 @@ constexpr int globalreachcells = channelreachglobalcells + solvemarginglobalcell
 // factor^(L - 1))), a whole number of global cells at every level: the reaches in global cells
 // (g) kept in global cells, the rest of the target's halo (targethalo - g: the reaches in parent
 // cells) as parent cells, rounded up to whole global cells. Level 1 takes targethalo (today's
-// single-scale domain); factor 4, targethalo 16, margin 0 (S3.9): level 2 24 parent cells (6
-// global cells), level 3 48 (3 global cells); margin 2 (S3.8, the unbounded solve): 28 (7) and 80 (5).
+// single-scale domain); factor 4, targethalo 16, margin 0 (S3.9): level 2 28 parent cells (7
+// global cells), level 3 64 (4 global cells); margin 2 (S3.8, the unbounded solve): 32 (8) and 96 (6)
+// (S3.11: the channels keep 3 global cells; until S3.10 2: 24, 48, 28, 80).
 // Up to S3.8 only the channels' 2 global cells were kept with no margin.
 // Level 0: 0 (the global fields are given, not computed).
 inline int levelhalo(int targethalo, int factor, int level, int solvemargin = solvemarginglobalcells)

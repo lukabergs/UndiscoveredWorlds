@@ -379,9 +379,15 @@ def available(bundle, spec):
 
 
 def masked(bundle, spec, values):
+    """Map spec option "mask": "sea" or "land" keep that side; "lake" hides the cells under a lake
+    (hydrosphere.lake_surface > 0; multiscale plan S3.11: the raw discharge field drew the flat
+    resolution's routing of lake beds as streams)."""
     if spec.get('mask') in ('sea', 'land'):
         sea = bundle.sea_fraction(*values.shape[-2:]) > 0.9
         values = np.where(sea if spec['mask'] == 'sea' else ~sea, values, np.nan)
+    elif spec.get('mask') == 'lake' and bundle.has('hydrosphere.lake_surface'):
+        lake = bundle.load('hydrosphere.lake_surface') > 0
+        values = np.where(lake, np.nan, values)
     return values
 
 

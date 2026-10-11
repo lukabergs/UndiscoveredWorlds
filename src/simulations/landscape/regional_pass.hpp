@@ -63,13 +63,14 @@ struct RegionalFields
     int sharemisses = 0;
 };
 
-// The single pass's smallest halo in global cells: 2 x meanpasses + 2 (the block-mean
-// correction reaches 2 global cells per pass; two more keep the channels and the solve's edge
+// The single pass's smallest halo in global cells: 2 x meanpasses + channelreachglobalcells, 3
+// (the block-mean correction reaches 2 global cells per pass; three more keep the channels, whose
+// confluences read one global cell further since multiscale plan S3.11, and the solve's edge
 // out of the kept window), plus tributaryreach (regional_tributaries.hpp; the single pass's
 // parent cell is the global cell) when the tributaries are on (multiscale plan S3.3).
 constexpr int regionalhalo(int meanpasses, bool tributaries)
 {
-    return 2 * meanpasses + 2 + (tributaries ? tributaryreach : 0);
+    return 2 * meanpasses + channelreachglobalcells + (tributaries ? tributaryreach : 0);
 }
 
 // Throws std::invalid_argument when the window is not on the inputs' grid, a global
@@ -200,7 +201,9 @@ struct LevelState : RegionalLevel
     int sinkjunctions = 0;               // channelslevel's (S3.9): kept land-sink junctions pinned by pinsinks
     int diagonallinks = 0;               // channelslevel's (S3.10): kept diagonal links (FineChannels)
     int cornerlinks = 0;                 // of them, those through the shared corner
-    std::vector<float> solved_m;         // the elevation after the solve, before the forms and the lakes (S3.2: the
+    int mergedpieces = 0;                // channelslevel's (S3.11): kept pieces ending on another (FineChannels)
+    int drytails = 0;                    // channelslevel's (S3.11): kept pieces whose chain leaves the painted cells
+    std::vector<float> solved_m;        // the elevation after the solve, before the forms and the lakes (S3.2: the
                                          // channel cells' means kept, the parent's lift not added; solvelevel)
     int tributaries = 0;                 // tributarieslevel's count (0: none)
     int tributarycells = 0;              // the domain cells its tributaries pinned

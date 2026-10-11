@@ -45,7 +45,7 @@
     {"name": "relief-sw", "title": "Regional relief lit from the south-west (azimuth 225 degrees, 45 degrees up; vertical exaggeration 10): the north-east light's opposite, so ridges swap their lit and dark sides", "composite": "regional_relief", "options": {"minimum_flow": 150, "vertical_exaggeration": 10, "azimuth_deg": 225}, "palette": "tectonics:elevation"},
     {"name": "terrain-fade", "title": "Regional terrain with rivers fading in with their flow (legacy river colour)", "composite": "regional_terrain_fade", "palette": "tectonics:elevation"},
     {"name": "elevation", "title": "Elevation (m relative to sea level)", "derived": "elevation_above_sea", "palette": "tectonics:elevation"},
-    {"name": "discharge", "title": "Discharge (log10 m3/s; dark where there is none)", "field": "hydrosphere.discharge", "transform": "log10", "palette": "tectonics:discharge_log"},
+    {"name": "discharge", "title": "Discharge (log10 m3/s; dark: none, sea, lakes)", "field": "hydrosphere.discharge", "transform": "log10", "mask": "lake", "palette": "tectonics:discharge_log"},
     {"name": "lakes", "title": "Lake surface elevation (m above sea level; dark where there is no lake)", "derived": "lake_elevation", "palette": "tectonics:lake_surface_m"},
     {"name": "ice-thickness", "title": "Present-day ice thickness (m; dark where there is none)", "field": "cryosphere.ice_thickness", "hide_zero": true, "palette": "tectonics:lake_surface_m"},
     {"name": "temperature-january", "title": "Air temperature in January (°C)", "field": "atmosphere.temperature_january", "palette": "climate:air_temperature"},

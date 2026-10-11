@@ -436,7 +436,7 @@ TEST_F(Landscape, RegionalPassCoastSpeckle)
 
 TEST_F(Landscape, RegionalPassRejectsASmallHalo)
 {
-    // The halo must be at least 2 x meanpasses + 2 global cells (6 with the default 2).
+    // The halo must be at least 2 x meanpasses + 3 global cells (7 with the default 2; 5 with one pass).
     const RegionalGlobalInputs inputs = syntheticworld(32);
     const RegionalWindow small = landscape::regionalwindow(32, 4, 5, 112.5, -22.5, -135.0, 56.25);
     EXPECT_THROW(landscape::runregionalpass(inputs, small, RegionalParameters{}), std::invalid_argument);

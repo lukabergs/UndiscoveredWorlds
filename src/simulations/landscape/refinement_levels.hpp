@@ -30,7 +30,7 @@
 //   correction is smoothed (LevelStep::smoothing, smoothparentmeans with the projection's
 //   bounds built on the level's field; S2.7), and the projection's bounds are rebuilt on the
 //   smoothed field. Each pass reaches 2 parent cells: the target's halo must be at least
-//   2 x meanpasses + 2 + 2 x smooth_passes global cells.
+//   2 x meanpasses + 3 + 2 x smooth_passes global cells (+ 2 until S3.11).
 // - The ice above the ELA (iceabovetheela) and the lapse-rate climate (temperature,
 //   precipitation, climate class) run after the loop, at the final level only, from its
 //   projected elevation.
@@ -128,7 +128,8 @@ constexpr int channelmeanreach = 1;
 // pass's rule), formreach and channelmeanreach (S3.8), lakefloodreach (S2.8), 2 x smoothpasses
 // (S2.7's smoothing); with the tributaries on (S3.3), tributaryreach more (regional_tributaries.hpp:
 // parent cells). levelhalo keeps the channels' reach and the solve's margin in global cells at every level and turns the rest
-// into at least as many parent cells. 30 at the defaults (meanpasses 6, smoothpasses 6).
+// into at least as many parent cells. 31 at the defaults (meanpasses 6, smoothpasses 6; 30 until
+// S3.11 raised the channels' reach to 3).
 constexpr int refinementhalo(int meanpasses, int smoothpasses, bool tributaries = false)
 {
     return 2 * meanpasses + channelreachglobalcells + formreach + channelmeanreach + lakefloodreach + 2 * smoothpasses +
@@ -330,6 +331,10 @@ struct LevelDiagnostics
     // (FineChannels::diagonallinks, cornerlinks).
     int diagonallinks = 0;
     int cornerlinks = 0;
+    // S3.11: the kept pieces of the level's channels whose prefix ends on another piece, and those
+    // whose chain steps from a painted cell onto an unpainted one (FineChannels::mergedpieces, drytails).
+    int mergedpieces = 0;
+    int drytails = 0;
     // S3.9: the 50th and 99th percentiles (nearest rank) of the solve's lowering over the kept unpinned
     // cells (the start surface less the solve's result with the parent's lift added back: the cells of
     // RegionalLevel::meanlowering_m).

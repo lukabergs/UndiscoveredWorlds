@@ -256,9 +256,23 @@ def draw_markers(canvas, columns, rows, scale, rings=(), squares=(), links=(), d
     return canvas
 
 
+GRATICULE_STEPS = (0.25, 0.5, 1, 2, 5, 10, 15, 30)
+# The subgrid of a regional graticule (multiscale plan S3.11, the user's request of 2026-10-11): unlabelled
+# lines at the next finer step of GRATICULE_STEPS, at a quarter of the graticule's alpha, when at least
+# SUBGRID_MIN_PIXELS apart.
+SUBGRID = GRID[:3] + (GRID[3] // 4,)
+SUBGRID_MIN_PIXELS = 24
+
+
 def _graticule_step(span):
     """Degrees between graticule lines: at most eight lines across span."""
-    return next((step for step in (0.25, 0.5, 1, 2, 5, 10, 15, 30) if span / step <= 8), 30)
+    return next((step for step in GRATICULE_STEPS if span / step <= 8), 30)
+
+
+def _subgrid_step(step):
+    """The step of the unlabelled subgrid under a graticule step: the next finer of GRATICULE_STEPS, or None."""
+    finer = [candidate for candidate in GRATICULE_STEPS if candidate < step]
+    return finer[-1] if finer else None
 
 
 def _degree_label(value, positive, negative):
@@ -275,6 +289,20 @@ def _regional_graticule(draw, raster, extent, total, font):
     west, south, east, north = extent
     east = east + 360 if east <= west else east
     step = _graticule_step(max(east - west, north - south))
+    sub = _subgrid_step(step)
+    if sub is not None and sub / (east - west) * raster.width >= SUBGRID_MIN_PIXELS:
+        longitude = math.ceil(west / sub) * sub
+        while longitude <= east + 1e-9:
+            if west < longitude < east and abs(longitude / step - round(longitude / step)) > 1e-9:
+                x = LEFT + (longitude - west) / (east - west) * raster.width
+                draw.line([x, TOP, x, TOP + raster.height - 1], fill=SUBGRID)
+            longitude += sub
+        latitude = math.ceil(south / sub) * sub
+        while latitude <= north + 1e-9:
+            if south < latitude < north and abs(latitude / step - round(latitude / step)) > 1e-9:
+                y = TOP + (north - latitude) / (north - south) * raster.height
+                draw.line([LEFT, y, LEFT + raster.width - 1, y], fill=SUBGRID)
+            latitude += sub
     longitude = math.ceil(west / step) * step
     while longitude <= east + 1e-9:
         x = LEFT + (longitude - west) / (east - west) * raster.width
@@ -302,7 +330,8 @@ def frame(rgb, title=None, legend=None, arrows=None, width=1024, markers=None, e
     The grid is cell-centred with rows from north to south and columns east from 180 W.
     extent: (west, south, east, north) in degrees of a raster that covers only that box (a
     regional bundle's window; west > east across the date line): the graticule is drawn
-    over the box at a step that fits it, markers are not drawn.
+    over the box at a step that fits it, with a fainter unlabelled subgrid at the next finer
+    step when its lines are far enough apart; markers are not drawn.
     legend: {"kind": "scale", "stops": [(value, rgb), ...], "units", "ticks", "note"} or
     {"kind": "classes", "entries": [(label, rgb), ...], "note"}. arrows: (east, north)
     components on the grid of the raster. markers: the keyword arguments of draw_markers

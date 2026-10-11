@@ -18,6 +18,8 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "core/deterministic_random.hpp"
@@ -34,8 +36,11 @@ constexpr double pi = 3.14159265358979323846;
 // Global cells around the domain whose outgoing links are drawn: a link lies inside
 // its two cells' blocks (a diagonal through a transit block, S3.10, inside the 2 x 2
 // blocks around its corner, mutual 8-neighbours), so only a link whose upstream cell is
-// within one cell of the domain reaches it.
-constexpr int linkreach = 1;
+// within one cell of the domain reaches it. The confluences (S3.11) read the first lost cells of
+// the pieces crossing a painted piece's path, and those read the owners on their own paths: the
+// links and springs of cells within three cells of the domain are drawn (outside it they compete
+// for ownership and end prefixes, never painted).
+constexpr int linkreach = 3;
 // Hash salts of the geometry's pieces.
 constexpr std::int64_t junctionsalt = 0x4a554e43;
 constexpr std::int64_t edgesalt = 0x45444745;
@@ -412,8 +417,15 @@ double meanderdisplacement(const ChannelParameters& parameters, int k, float dis
 // block; a cell already on the chain cuts the chain back to it (the loop is erased), and
 // a cell that neighbours the cell before the chain's last replaces that last cell (an
 // L-shaped corner becomes a diagonal step). The chain starts at `from` and ends at `to`.
+// Multiscale plan S3.11 (header, "Roughness"): each sample moves along the curve's left
+// normal by the octaves' sum d(t), t = s / 2 over the first segment and 1/2 + s / 2 over the
+// second (s the segment's parameter); the sample bound grows by the octaves' largest speed,
+// sum a_i (pi / 2) 2^i per unit s, and a sample cell that is not an 8-neighbour of the chain's
+// last (the normal turning fast) is reached by diagonal-first steps. With `roughness` 0 there
+// are no octaves and the chain is the smooth arc's.
 std::vector<FineCell> legpath(int k, const FineCell& from, const FineCell& to, double displacement,
-                              std::uint64_t hash, const Point& startdirection, const Point& enddirection)
+                              std::uint64_t hash, const Point& startdirection, const Point& enddirection,
+                              double roughness, double persistence)
 {
     std::vector<FineCell> chain{ from };
     if (samecell(from, to))
@@ -437,7 +449,45 @@ std::vector<FineCell> legpath(int k, const FineCell& from, const FineCell& to, d
     const Point m2 = iszero(enddirection) ? Point{ p2.x - p1.x, p2.y - p1.y }
                                           : Point{ enddirection.x * second, enddirection.y * second };
 
-    auto add = [&](const FineCell& cell) {
+    // S3.11: the octaves (2^i intervals, amplitude a_i, node values; nodes 0 and 2^i are 0).
+    struct Octave
+    {
+        int intervals = 0;
+        double amplitude = 0.0;
+        std::vector<double> nodes;
+    };
+    std::vector<Octave> octaves;
+    double roughspeed = 0.0;
+    if (roughness > 0.0)
+    {
+        double amplitude = roughness * k;
+        for (int i = 2; amplitude > 0.0 && chord / std::ldexp(1.0, i) >= 2.0; i++)
+        {
+            Octave octave;
+            octave.intervals = 1 << i;
+            octave.amplitude = amplitude;
+            octave.nodes.assign(static_cast<std::size_t>(octave.intervals) + 1, 0.0);
+            for (int node = 1; node < octave.intervals; node++)
+                octave.nodes[static_cast<std::size_t>(node)] = signedunit(deterministiccombine(hash, i, node));
+            roughspeed += amplitude * 0.5 * pi * octave.intervals;
+            octaves.push_back(std::move(octave));
+            amplitude *= persistence;
+        }
+    }
+    auto rough = [&](double t) {
+        double sum = 0.0;
+        for (const Octave& octave : octaves)
+        {
+            const double x = t * octave.intervals;
+            const int node = std::clamp(static_cast<int>(std::floor(x)), 0, octave.intervals - 1);
+            const double w = 0.5 - 0.5 * std::cos(pi * (x - node));
+            sum += octave.amplitude * ((1.0 - w) * octave.nodes[static_cast<std::size_t>(node)] +
+                                       w * octave.nodes[static_cast<std::size_t>(node) + 1]);
+        }
+        return sum;
+    };
+
+    auto place = [&](const FineCell& cell) {
         if (samecell(cell, chain.back()))
             return;
         const auto found =
@@ -451,8 +501,20 @@ std::vector<FineCell> legpath(int k, const FineCell& from, const FineCell& to, d
             chain.pop_back();
         chain.push_back(cell);
     };
+    // A cell beyond the chain's last cell's 8-neighbours (only with roughness: without it the
+    // samples step under a quarter of a fine cell) is reached by diagonal-first steps; each
+    // placed step becomes the chain's last cell, one step nearer.
+    auto add = [&](const FineCell& cell) {
+        while (!samecell(cell, chain.back()) && !neighbours8(cell, chain.back()))
+        {
+            const FineCell& last = chain.back();
+            place({ last.x + (cell.x > last.x ? 1 : (cell.x < last.x ? -1 : 0)),
+                    last.y + (cell.y > last.y ? 1 : (cell.y < last.y ? -1 : 0)) });
+        }
+        place(cell);
+    };
     auto segment = [&](const Point& a, const Point& b, const Point& ma, const Point& mb, bool lastsegment) {
-        const double bound = 1.5 * std::hypot(b.x - a.x, b.y - a.y) + length(ma) + length(mb);
+        const double bound = 1.5 * std::hypot(b.x - a.x, b.y - a.y) + length(ma) + length(mb) + roughspeed;
         const int samples = static_cast<int>(std::ceil(4.0 * bound)) + 1;
         for (int s = 1; s <= samples; s++)
         {
@@ -468,8 +530,23 @@ std::vector<FineCell> legpath(int k, const FineCell& from, const FineCell& to, d
             const double h10 = t3 - 2.0 * t2 + t;
             const double h01 = -2.0 * t3 + 3.0 * t2;
             const double h11 = t3 - t2;
-            const double x = h00 * a.x + h10 * ma.x + h01 * b.x + h11 * mb.x;
-            const double y = h00 * a.y + h10 * ma.y + h01 * b.y + h11 * mb.y;
+            double x = h00 * a.x + h10 * ma.x + h01 * b.x + h11 * mb.x;
+            double y = h00 * a.y + h10 * ma.y + h01 * b.y + h11 * mb.y;
+            if (!octaves.empty())
+            {
+                // The curve's derivative (Hermite basis derivatives), its left normal.
+                const double d00 = 6.0 * t2 - 6.0 * t;
+                const double d10 = 3.0 * t2 - 4.0 * t + 1.0;
+                const double d01 = -d00;
+                const double d11 = 3.0 * t2 - 2.0 * t;
+                const double dx = d00 * a.x + d10 * ma.x + d01 * b.x + d11 * mb.x;
+                const double dy = d00 * a.y + d10 * ma.y + d01 * b.y + d11 * mb.y;
+                const double speed = std::hypot(dx, dy);
+                const Point normal = speed > 1e-9 ? Point{ -dy / speed, dx / speed } : Point{ -cy / chord, cx / chord };
+                const double d = rough((lastsegment ? 0.5 : 0.0) + 0.5 * t);
+                x += d * normal.x;
+                y += d * normal.y;
+            }
             add({ blockindex(x, k), blockindex(y, k) });
         }
     };
@@ -588,6 +665,10 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
         !(parameters.meanderreference_m3s > 0.0) || !std::isfinite(parameters.meanderreference_m3s))
         throw std::invalid_argument("rasterisechannels: the meander's discharge exponent must be finite and "
                                     "non-negative, its reference discharge positive and finite");
+    if (!(parameters.meanderroughness >= 0.0) || !std::isfinite(parameters.meanderroughness) ||
+        !(parameters.meanderroughnesspersistence >= 0.0) || !(parameters.meanderroughnesspersistence <= 1.0))
+        throw std::invalid_argument("rasterisechannels: meanderroughness must be finite and non-negative, "
+                                    "meanderroughnesspersistence in 0 .. 1");
     if (!(parameters.junctionjitter >= 0.0) || !std::isfinite(parameters.junctionjitter) ||
         !(parameters.edgemargin >= 0.0) || !(parameters.edgemargin <= 0.5))
         throw std::invalid_argument("rasterisechannels: junctionjitter must be finite and non-negative, edgemargin "
@@ -627,8 +708,6 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
     out.januaryflow.assign(finecells, 0);
     out.julyflow.assign(finecells, 0);
     out.globalcell.assign(finecells, -1);
-    std::vector<int32_t> ownerdistance(finecells, 0);
-    std::vector<int32_t> ownerpiece(finecells, 0);
     std::vector<int32_t> distance(cells, -1);
     std::vector<std::size_t> outlet(cells, nocell);
 
@@ -695,34 +774,65 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
         const float lo = std::max(base, std::min(filled, abovesea));
         return std::max(lo, std::min(filled, start_m[index]));
     };
-    // Writes a piece's cell where it takes the cell (the ownership rules above).
-    auto write = [&](std::size_t index, bool lastcell, const FineCell& cell, const FineCell* next, float bed,
-                     std::size_t upstream, int32_t rank, int32_t piece) {
-        const int32_t upstreamindex = static_cast<int32_t>(upstream);
-        if (out.channel[index] != 0)
+    // The pieces (links and springs) as drawn, before the confluences: per path cell its domain
+    // index (nocell outside the domain), its ownership slot (the domain index, or one of the cells
+    // outside the domain that a drawn piece crosses, numbered from finecells on), its step to the
+    // next cell (0 at the last) and its bed; `end`, `lost` and `suffix` are the confluences' (below).
+    struct Piece
+    {
+        std::vector<std::size_t> index;
+        std::vector<std::size_t> slot;
+        std::vector<uint8_t> direction;
+        std::vector<float> bed;
+        std::size_t upstream = 0;
+        int32_t rank = 0;
+        int32_t number = 0;  // 0 the link, 1, 2, ... its springs
+        bool kept = false;   // the upstream cell lies in the kept box
+        std::size_t end = 0;         // the prefix's last cell (its first lost cell, else the path's last)
+        bool lost = false;           // the prefix ends on a cell another piece owns
+        std::size_t suffix = nocell; // the suffix's first cell (nocell: none)
+    };
+    std::vector<Piece> pieces;
+    std::unordered_map<std::int64_t, std::size_t> outsideslots;  // wrapped absolute fine cell -> slot
+    auto startpiece = [&](const std::vector<FineCell>& path, std::size_t upstream, int32_t rank, int32_t number,
+                          bool kept) -> Piece& {
+        Piece& piece = pieces.emplace_back();
+        piece.index.assign(path.size(), nocell);
+        piece.slot.assign(path.size(), nocell);
+        piece.direction.assign(path.size(), 0);
+        piece.bed.assign(path.size(), 0.0f);
+        for (std::size_t m = 0; m < path.size(); m++)
         {
-            bool better = false;
-            if (bed != out.bed_m[index])
-                better = bed < out.bed_m[index];
-            else if (rank != ownerdistance[index])
-                better = rank < ownerdistance[index];
-            else if (upstreamindex != out.globalcell[index])
-                better = upstreamindex < out.globalcell[index];
+            std::size_t index = 0;
+            if (domainindex(path[m], index))
+                piece.index[m] = piece.slot[m] = index;
             else
-                better = piece < ownerpiece[index];
-            if (!better)
-                return;
+            {
+                const std::int64_t column = ((path[m].x % planetfinewidth) + planetfinewidth) % planetfinewidth;
+                const auto inserted =
+                    outsideslots.try_emplace(path[m].y * planetfinewidth + column, finecells + outsideslots.size());
+                piece.slot[m] = inserted.first->second;
+            }
+            if (m + 1 < path.size())
+                piece.direction[m] =
+                    static_cast<uint8_t>(directioncode(path[m + 1].x - path[m].x, path[m + 1].y - path[m].y));
         }
+        piece.upstream = upstream;
+        piece.rank = rank;
+        piece.number = number;
+        piece.kept = kept;
+        piece.end = path.size() - 1;
+        return piece;
+    };
+    // Writes a channel cell's values (its owner's).
+    auto paint = [&](std::size_t index, uint8_t direction, float bed, std::size_t upstream) {
         out.channel[index] = 1;
-        out.direction[index] =
-            lastcell ? 0 : static_cast<uint8_t>(directioncode(next->x - cell.x, next->y - cell.y));
+        out.direction[index] = direction;
         out.bed_m[index] = bed;
         out.discharge_m3s[index] = network.discharge_m3s[upstream];
         out.januaryflow[index] = network.januaryflow[upstream];
         out.julyflow[index] = network.julyflow[upstream];
-        out.globalcell[index] = upstreamindex;
-        ownerdistance[index] = rank;
-        ownerpiece[index] = piece;
+        out.globalcell[index] = static_cast<int32_t>(upstream);
     };
 
     // Whether a global cell lies in the window's kept box (the link counts).
@@ -773,9 +883,13 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                                                                static_cast<std::int64_t>(receiver), 0);
             const std::uint64_t inhash = deterministiccombine(parameters.seed, legsalt, static_cast<std::int64_t>(upstream),
                                                               static_cast<std::int64_t>(receiver), 1);
-            std::vector<FineCell> path = legpath(k, from.junction, ends.exit, displacement, outhash, from.tangent, flow);
+            const double roughness = parameters.meanderroughness;
+            const double persistence = parameters.meanderroughnesspersistence;
+            std::vector<FineCell> path = legpath(k, from.junction, ends.exit, displacement, outhash, from.tangent, flow,
+                                                 roughness, persistence);
             const std::vector<FineCell> inflow = legpath(k, ends.entry, to.junction, displacement, inhash, flow,
-                                                         to.mainupstream == upstream ? to.tangent : Point{});
+                                                         to.mainupstream == upstream ? to.tangent : Point{}, roughness,
+                                                         persistence);
             const std::int64_t originx = static_cast<std::int64_t>(k) * i;
             const std::int64_t originy = static_cast<std::int64_t>(k) * j;
             for (FineCell& cell : path)
@@ -792,7 +906,8 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                 const std::int64_t tx = ends.transit == 1 ? ox : 0;
                 const std::int64_t ty = ends.transit == 1 ? 0 : oy;
                 for (const FineCell& cell :
-                     legpath(k, ends.transitentry, ends.transitexit, displacement, transithash, flow, flow))
+                     legpath(k, ends.transitentry, ends.transitexit, displacement, transithash, flow, flow, roughness,
+                             persistence))
                     path.push_back({ cell.x + originx + static_cast<std::int64_t>(k) * tx,
                                      cell.y + originy + static_cast<std::int64_t>(k) * ty });
             }
@@ -839,14 +954,14 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
             const float bedfloor = std::max(end, std::min(top, abovesea));
             float running = top;
 
+            Piece& piece = startpiece(path, upstream, rank, 0, keptcell(i, j));
             for (std::size_t m = 0; m < path.size(); m++)
             {
-                std::size_t index = 0;
-                const bool inside = domainindex(path[m], index);
-                if (usestart && inside)
+                // The bed outside the domain too (as this window knows it: no start surface
+                // there), where it competes for ownership but is not painted.
+                const std::size_t index = piece.index[m];
+                if (usestart && index != nocell)
                     running = std::min(running, start_m[index]);  // a NaN start value lowers nothing
-                if (!inside)
-                    continue;
                 const bool lastcell = m + 1 == path.size();
                 float bed = 0.0f;
                 if (lastcell)
@@ -857,42 +972,15 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                     bed = std::max(running, bedfloor);
                 else
                     bed = static_cast<float>(top + (static_cast<double>(end) - top) * along[m] / total);
-                write(index, lastcell, path[m], lastcell ? nullptr : &path[m + 1], bed, upstream, rank, 0);
+                piece.bed[m] = bed;
             }
         }
 
-    // S3.9 (pinsinks): the junction of every land sink inside the domain that no link reached, so that
-    // every land block holds a pinned cell (its outflow link's junction, else this one).
-    if (parameters.pinsinks != 0)
-        for (int jj = 0; jj < window.domainrows; jj++)
-            for (int ii = 0; ii < window.domaincolumns; ii++)
-            {
-                const int j = window.domainrow0 + jj;
-                const int i = (window.domaincolumn0 + ii) % width;
-                const std::size_t cell = static_cast<std::size_t>(j) * width + i;
-                if (network.sea[cell] != 0 || globalreceiver(network, cell) != cell ||
-                    !std::isfinite(network.filledelevation_m[cell]))
-                    continue;
-                const FineCell offset = junctionoffset(k, cell, parameters);
-                const FineCell junction{ static_cast<std::int64_t>(k) * i + offset.x, static_cast<std::int64_t>(k) * j + offset.y };
-                std::size_t index = 0;
-                if (!domainindex(junction, index) || out.channel[index] != 0 || (usesea && finesea[index] != 0))
-                    continue;
-                write(index, true, junction, nullptr, junctionbed(cell), cell, outletdistance(network, cell, distance), 0);
-                const int x = static_cast<int>(index % static_cast<std::size_t>(domainwidth));
-                const int y = static_cast<int>(index / static_cast<std::size_t>(domainwidth));
-                const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
-                if (x >= x0 && x < x0 + window.finewidth() && y >= y0 && y < y0 + window.fineheight())
-                    out.sinkjunctions++;
-            }
-
-    // Springs of the source cells inside the domain (they lie in their own cell's block).
+    // Springs of the source cells within linkreach of the domain (they lie in their own cell's block).
     if (parameters.springspercell > 0)
-        for (int jj = 0; jj < window.domainrows; jj++)
-            for (int ii = 0; ii < window.domaincolumns; ii++)
+        for (int j = rowfirst; j <= rowlast; j++)
+            for (int i : columns)
             {
-                const int j = window.domainrow0 + jj;
-                const int i = (window.domaincolumn0 + ii) % width;
                 const std::size_t cell = static_cast<std::size_t>(j) * width + i;
                 std::size_t receiver = nocell;
                 if (!drawnlink(network, cell, parameters.pinarea_km2, receiver))
@@ -920,8 +1008,9 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                     const FineCell start{
                         blockindex(std::clamp(centre.x + radius * std::cos(angle), margin, k - margin), k),
                         blockindex(std::clamp(centre.y + radius * std::sin(angle), margin, k - margin), k) };
-                    std::vector<FineCell> path = legpath(k, start, geometry.junction, displacement,
-                                                         deterministicmix64(radiushash), Point{}, Point{});
+                    std::vector<FineCell> path =
+                        legpath(k, start, geometry.junction, displacement, deterministicmix64(radiushash), Point{},
+                                Point{}, parameters.meanderroughness, parameters.meanderroughnesspersistence);
                     if (path.size() < 2)
                         continue;
                     for (FineCell& fine : path)
@@ -941,18 +1030,130 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                         }
                     const float bedfloor = std::max(end, std::min(top, abovesea));
                     float running = top;
+                    Piece& piece = startpiece(path, cell, rank, spring, keptcell(i, j));
                     for (std::size_t m = 0; m < path.size(); m++)
                     {
-                        std::size_t index = 0;
-                        if (!domainindex(path[m], index))
-                            continue;
-                        if (usestart)
+                        const std::size_t index = piece.index[m];
+                        if (usestart && index != nocell)
                             running = std::min(running, start_m[index]);
                         const bool lastcell = m + 1 == path.size();
-                        const float bed = lastcell ? end : (usestart ? std::max(running, bedfloor) : top);
-                        write(index, lastcell, path[m], lastcell ? nullptr : &path[m + 1], bed, cell, rank, spring);
+                        piece.bed[m] = lastcell ? end : (usestart ? std::max(running, bedfloor) : top);
                     }
                 }
+            }
+
+    // Ownership on the full paths (the ownership rules above), on every cell a drawn piece
+    // crosses (outside the domain among the drawn pieces, with the beds this window knows; not
+    // painted there): the lowest bed, then the outlet distance, the upstream cell's index and the
+    // piece number (a strict order, so the owners do not depend on the order of the pieces).
+    const std::size_t slots = finecells + outsideslots.size();
+    auto beats = [&](const Piece& a, std::size_t ma, const Piece& b, std::size_t mb) {
+        if (a.bed[ma] != b.bed[mb])
+            return a.bed[ma] < b.bed[mb];
+        if (a.rank != b.rank)
+            return a.rank < b.rank;
+        if (a.upstream != b.upstream)
+            return a.upstream < b.upstream;
+        return a.number < b.number;
+    };
+    std::vector<int32_t> owner(slots, -1);
+    std::vector<std::uint32_t> ownerat(slots, 0);
+    for (std::size_t p = 0; p < pieces.size(); p++)
+    {
+        const Piece& piece = pieces[p];
+        for (std::size_t m = 0; m < piece.slot.size(); m++)
+        {
+            const std::size_t slot = piece.slot[m];
+            if (owner[slot] < 0 || beats(piece, m, pieces[static_cast<std::size_t>(owner[slot])], ownerat[slot]))
+            {
+                owner[slot] = static_cast<int32_t>(p);
+                ownerat[slot] = static_cast<std::uint32_t>(m);
+            }
+        }
+    }
+    // S3.11, the confluences (header), without iteration: a piece's prefix runs from its first cell
+    // to its first lost cell (included; its last cell if it loses none), and its suffix from the
+    // earliest of its own cells after its prefix that is another piece's first lost cell to its
+    // last cell (a prefix end on its own prefix needs none: the water runs on along the prefix,
+    // and a suffix from there would paint the piece past its first lost cell again). Painted
+    // cells carry their owner's values; a path cell in no prefix or suffix is not painted.
+    for (std::size_t p = 0; p < pieces.size(); p++)
+    {
+        Piece& piece = pieces[p];
+        piece.end = piece.slot.size() - 1;
+        piece.lost = false;
+        for (std::size_t m = 0; m < piece.slot.size(); m++)
+            if (owner[piece.slot[m]] != static_cast<int32_t>(p))
+            {
+                piece.end = m;
+                piece.lost = true;
+                break;
+            }
+    }
+    for (const Piece& piece : pieces)
+        if (piece.lost)
+        {
+            const std::size_t slot = piece.slot[piece.end];
+            Piece& taker = pieces[static_cast<std::size_t>(owner[slot])];
+            if (taker.lost && ownerat[slot] > taker.end)
+                taker.suffix = std::min<std::size_t>(taker.suffix, ownerat[slot]);
+        }
+    std::vector<uint8_t> painted(slots, 0);
+    for (const Piece& piece : pieces)
+    {
+        for (std::size_t m = 0; m <= piece.end; m++)
+            painted[piece.slot[m]] = 1;
+        for (std::size_t m = piece.suffix; m < piece.slot.size(); m++)
+            painted[piece.slot[m]] = 1;
+    }
+    for (std::size_t index = 0; index < finecells; index++)
+    {
+        if (owner[index] < 0 || painted[index] == 0)
+            continue;
+        const Piece& piece = pieces[static_cast<std::size_t>(owner[index])];
+        const std::size_t m = ownerat[index];
+        paint(index, piece.direction[m], piece.bed[m], piece.upstream);
+    }
+    // The counters (kept pieces): a prefix that ends before the piece's last cell; a cell the piece
+    // owns and paints whose next path cell is not painted (its chain leaves the pinned network).
+    for (std::size_t p = 0; p < pieces.size(); p++)
+    {
+        const Piece& piece = pieces[p];
+        if (!piece.kept)
+            continue;
+        out.mergedpieces += piece.end + 1 < piece.slot.size() ? 1 : 0;
+        for (std::size_t m = 0; m + 1 < piece.slot.size(); m++)
+            if (painted[piece.slot[m]] != 0 && owner[piece.slot[m]] == static_cast<int32_t>(p) &&
+                painted[piece.slot[m + 1]] == 0)
+            {
+                out.drytails++;
+                break;
+            }
+    }
+
+    // S3.9 (pinsinks): the junction of every land sink inside the domain that no link reached, so that
+    // every land block holds a pinned cell (its outflow link's junction, else this one).
+    if (parameters.pinsinks != 0)
+        for (int jj = 0; jj < window.domainrows; jj++)
+            for (int ii = 0; ii < window.domaincolumns; ii++)
+            {
+                const int j = window.domainrow0 + jj;
+                const int i = (window.domaincolumn0 + ii) % width;
+                const std::size_t cell = static_cast<std::size_t>(j) * width + i;
+                if (network.sea[cell] != 0 || globalreceiver(network, cell) != cell ||
+                    !std::isfinite(network.filledelevation_m[cell]))
+                    continue;
+                const FineCell offset = junctionoffset(k, cell, parameters);
+                const FineCell junction{ static_cast<std::int64_t>(k) * i + offset.x, static_cast<std::int64_t>(k) * j + offset.y };
+                std::size_t index = 0;
+                if (!domainindex(junction, index) || out.channel[index] != 0 || (usesea && finesea[index] != 0))
+                    continue;
+                paint(index, 0, junctionbed(cell), cell);
+                const int x = static_cast<int>(index % static_cast<std::size_t>(domainwidth));
+                const int y = static_cast<int>(index / static_cast<std::size_t>(domainwidth));
+                const int x0 = window.keptfinecolumnoffset(), y0 = window.keptfinerowoffset();
+                if (x >= x0 && x < x0 + window.finewidth() && y >= y0 && y < y0 + window.fineheight())
+                    out.sinkjunctions++;
             }
     return out;
 }
@@ -987,6 +1188,8 @@ void channelslevel(const LevelContext& context, LevelState& state)
     state.sinkjunctions = channels.sinkjunctions;
     state.diagonallinks = channels.diagonallinks;
     state.cornerlinks = channels.cornerlinks;
+    state.mergedpieces = channels.mergedpieces;
+    state.drytails = channels.drytails;
     recordlevelstep(state, LevelStep::channels);
 }
 }
