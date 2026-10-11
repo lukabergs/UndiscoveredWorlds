@@ -183,6 +183,7 @@ Lessons:
 | `erosion-0089` | 2026-10-11 | step done with open items; the user's verdict pending | keep | multiscale plan, step S3.15 (added from the user's verdict of 2026-10-11): the coast's shoreline displaced by a fractal position warp under the level band rule; sea pockets not connected to the core sea filled with their basins; the straight coast at 58 E and the blobby coast |
 | `erosion-0090` | 2026-10-11 | fix done; the user's look at runs 49 and 50 pending | keep | multiscale plan, step S3.15's rounds four and five and the lake flood's at-S rule (the orchestrator, from the judging run 47): a filled sea pocket beside a lake belongs to the lake below its surface; the basin raise never touches a global lake cell; a cell at exactly S inside a lake cell's own block is the lake's |
 | `erosion-0091` | 2026-10-11 | closed; the user's look at runs 51 and 52 pending | keep | multiscale plan, S3.15 closed: the lake-pocket rule of erosion-0090 reverted (a filled sea pocket beside a lake is land at the floor like every pocket); the basin and pocket exclusion of lake cells and the flood's at-S rule kept |
+| `erosion-0092` | 2026-10-11 | done | keep | multiscale plan, the user's notes of 2026-10-11 (evening) on the S3.16 pages: the maps' subgrid at 1 degree under whole-degree graticules; window A read against the Himalaya (a preferred Earth window per window block in the regional profile) |
 
 Lessons:
 
@@ -325,6 +326,7 @@ Lessons:
 - `erosion-0090`: A worktree without the sibling steps' changes cannot judge their interaction: the judging run on the merged tree is part of every step's acceptance, with a look at the maps.
 - `erosion-0090`: Three separate rules (the basin raise, the flood's strict inequality, the pocket fill's floor) each left the lake's edge on a block boundary: a mask rule that touches a lake's neighbourhood must say what it does to the lake.
 - `erosion-0091`: When two rounds in a row move an artefact without removing it, the cause is in another unit: trace the levels' inheritance before a third rule.
+- `erosion-0092`: A subgrid must divide the graticule step, not merely be finer: the next finer catalogue step (2 under 5) prints lines the labels cannot place.
 
 ## tectonics
 
