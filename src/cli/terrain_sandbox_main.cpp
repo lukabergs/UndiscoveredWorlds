@@ -20,6 +20,7 @@
 
 #include "simulations/landscape/depressions.hpp"
 #include "simulations/landscape/flow_graph.hpp"
+#include "simulations/landscape/glacial.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 #include "simulations/landscape/stream_power.hpp"
 
@@ -112,6 +113,30 @@ double limitslopes(const landscape::SphereMetric& metric, const std::vector<uint
     return removed;
 }
 
+// The sea floods every land cell at or below the sea level (0 m) connected to it: a bed cut below the sea
+// by a glacier (a fjord) or a river mouth becomes sea, as the routing's mask requires (depressions.hpp).
+void floodsea(const landscape::SphereMetric& metric, const std::vector<float>& elevation, std::vector<uint8_t>& sea)
+{
+    std::vector<std::size_t> stack;
+    for (std::size_t i = 0; i < sea.size(); i++)
+        if (sea[i])
+            stack.push_back(i);
+    while (!stack.empty())
+    {
+        const std::size_t cell = stack.back();
+        stack.pop_back();
+        for (int direction = 1; direction <= landscape::directioncount; direction++)
+        {
+            const std::size_t next = metric.neighbour(cell, direction);
+            if (next != cell && !sea[next] && elevation[next] <= 0.0f)
+            {
+                sea[next] = 1;
+                stack.push_back(next);
+            }
+        }
+    }
+}
+
 void usage()
 {
     std::cout << "terrain_sandbox --columns W --rows H --elevation FILE --sea FILE --out-elevation FILE --out-discharge FILE\n"
@@ -119,6 +144,8 @@ void usage()
                  "  [--erodibility FILE] (relative K per cell, default 1) [--uplift FILE] (m/Myr per cell, default 0)\n"
                  "  [--runoff M_PER_YR 0.3] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
                  "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--delta-top M 0] [--threshold-slope S 0: off]\n"
+                 "  [--ela FILE] (m per cell: glaciers) [--glacial-ratio 2] [--ice-full-range M 500] [--ice-accumulation 1]\n"
+                 "  [--out-ice FILE]\n"
                  "  [--radius-km 6371]\n";
 }
 }
@@ -173,13 +200,28 @@ int main(int argc, char** argv)
         const double duration = number("--duration", 10.0);
         const double step = number("--step", 0.5);
 
+        // Glaciers (erosion plan Phase G's kernel): an ELA per cell from the sandbox, the ice flux and thickness
+        // on the ice surface's flow graph, the glacial term in the stream-power step (beds may be cut below the
+        // sea: fjords).
+        const bool glacial = options.count("--ela") != 0;
+        const std::vector<float> ela = glacial ? readraster(text("--ela", ""), count) : std::vector<float>();
+        landscape::GlacialParameters glacialparameters;
+        glacialparameters.erodibilityratio = number("--glacial-ratio", 2.0);
+        glacialparameters.fullicerange_m = number("--ice-full-range", 500.0);
+        // The ice's own water supply: the runoff times --ice-accumulation (the wet coasts glaciers grow on; the
+        // sandbox has no precipitation field). The ice flux may then exceed the rivers' discharge.
+        const std::vector<float> snowfall(count, static_cast<float>(number("--runoff", 0.3) * number("--ice-accumulation", 1.0)));
+        std::vector<double> iceflux(count, 0.0);
+        std::vector<float> thickness(count, 0.0f), surface(count);
+
         std::vector<float> erosion(count), deposition(count);
         landscape::FlowGraph graph;
-        const auto route = [&]() {
-            const landscape::Depressions depressions = landscape::filldepressions(metric, elevation, sea, 0.0f);
+        const auto route = [&](const std::vector<float>& terrain) {
+            floodsea(metric, elevation, sea);
+            const landscape::Depressions depressions = landscape::filldepressions(metric, terrain, sea, 0.0f);
             landscape::RoutingOptions routing;
             routing.resolveflats = true;  // flats drain to their low edges, not in straight flood-order lines
-            graph = landscape::buildflowgraph(metric, elevation, sea, 0.0f, depressions, routing);
+            graph = landscape::buildflowgraph(metric, terrain, sea, 0.0f, depressions, routing);
             landscape::accumulateflow(metric, runoff, graph);
         };
         const double thresholdslope = number("--threshold-slope", 0.0);
@@ -188,9 +230,22 @@ int main(int argc, char** argv)
         for (double time = 0.0; time < duration - 1e-9; time += step)
         {
             parameters.step_myr = std::min(step, duration - time);
-            route();
+            for (std::size_t i = 0; i < count; i++)
+                surface[i] = elevation[i] + thickness[i];
+            route(surface);
+            landscape::GlacialInput ice;
+            if (glacial)
+            {
+                landscape::accumulateice(metric, graph, surface, ela, snowfall, glacialparameters.fullicerange_m, iceflux);
+                landscape::icethickness(iceflux, glacialparameters, thickness);
+                ice.iceflux_m3_yr = &iceflux;
+                ice.thickness_m = &thickness;
+                ice.erodibilityratio = glacialparameters.erodibilityratio;
+                ice.flotationratio = glacialparameters.flotationratio;
+            }
             const landscape::StreamPowerBudget budget = landscape::stepstreampower(
-                metric, graph, erodibility, uplift, parameters, elevation, erosion, deposition);
+                metric, graph, erodibility, uplift, parameters, elevation, erosion, deposition, nullptr,
+                glacial ? &ice : nullptr);
             eroded += budget.eroded_km3;
             deposited += budget.landdeposited_km3;
             marine += budget.marinedeposited_km3;
@@ -198,12 +253,14 @@ int main(int argc, char** argv)
                 landslides += limitslopes(metric, sea, thresholdslope, elevation);
             steps++;
         }
-        route();
+        route(elevation);
         std::vector<float> discharge(count, 0.0f);
         for (std::size_t i = 0; i < count; i++)
             discharge[i] = static_cast<float>(graph.discharge_m3_yr[i] / secondsperyear);
         writeraster(text("--out-elevation", ""), elevation);
         writeraster(text("--out-discharge", ""), discharge);
+        if (options.count("--out-ice"))
+            writeraster(text("--out-ice", ""), thickness);
         std::printf("steps %d eroded_km3 %.1f land_deposited_km3 %.1f marine_deposited_km3 %.1f landslides_km3 %.1f\n", steps,
                     eroded, deposited, marine, landslides);
     }

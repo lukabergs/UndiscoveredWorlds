@@ -260,8 +260,19 @@ def procedural(domain, world, config, seed):
         np.clip(np.abs(warp_doubled) / np.maximum(warp_strain, 1e-9), 0.0, 1.0)
     x, y = warped(x, y, 0.5 * np.angle(warp_doubled), warp_alignment, config['warp'], seed, domain)
     stages = {'base': base, 'warp': (x, y)}
+    # The belt's zones (multiscale plan S5.5): the foreland (moderate strain) is folded and layered, the core
+    # (high strain or thick crust) is crystalline: homogeneous rock and a relief stretched less along the
+    # strike, so its rivers can branch (dendritic) instead of following bands.
+    zones = config['zones']
+    crust = sample(world['continental_crust'], domain, mx, my)
+    foreland = smoothstep(strain, *zones['foreland_strain']) * (1 - smoothstep(strain, *zones['core_strain']))
+    core = np.maximum(smoothstep(strain, *zones['core_strain']),
+                      smoothstep(crust, *zones['core_crust_m']) * smoothstep(strain, *zones['foreland_strain']))
+    foreland = foreland * (1 - core)
+    stages['zones'] = (foreland, core)
     relief = config['relief']
-    noise = oriented_fbm(x, y, theta, alignment, {**relief, **structure}, seed + 20, domain)
+    relief_alignment = alignment * (1 - zones['core_isotropy'] * core)
+    noise = oriented_fbm(x, y, theta, relief_alignment, {**relief, **structure}, seed + 20, domain)
     noise = (1 - relief['ridged']) * noise + relief['ridged'] * ridged(noise) / 0.6
     amplitude = relief['base_m'] + relief['elevation_fraction'] * np.maximum(base, 0.0) + \
         relief['strain_m'] * alignment
@@ -276,7 +287,7 @@ def procedural(domain, world, config, seed):
         large = fbm(x, y, uplands, seed + 50, domain)
         surface = surface + uplands['lift_m'] * inland * np.clip(0.5 + 0.5 * large, 0.0, 1.5) * (base > 0)
     stages['uplands'] = surface
-    erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment, mx, my, seed)
+    erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment * foreland, mx, my, seed)
     stages['hardness'] = erodibility
     timings['noise'] = time.perf_counter() - started
 
@@ -315,23 +326,41 @@ def hardness_domains(world, spec):
     shield = normal * (1 - sediment) * (1 - strained)
     core = np.clip((crust - spec['core_crust_m']) / 10000.0, 0.0, 1.0) * strained
     thin = np.clip((spec['thin_crust_m'] - crust) / 8000.0, 0.0, 1.0) * (crust > 0)
+    # Basins the engine leaves without sediment (v9 against GLiM: Earth's soft rock lies in interior basins):
+    # low continental interior away from the belts, and the lowland in front of a belt (a foreland basin).
+    elevation = world['elevation']
+    share = ndimage.gaussian_filter((~world['sea']).astype(float), 2.0, mode=('nearest', 'wrap'))
+    inland = np.clip((share - 0.5) * 2.0, 0.0, 1.0)
+    interior = np.clip((spec['basin_elevation_m'] - elevation) / spec['basin_elevation_m'], 0.0, 1.0) * inland * \
+        (1 - strained)
+    near_belt = ndimage.gaussian_filter(strained, spec['foreland_sigma_cells'], mode=('nearest', 'wrap'))
+    foreland = np.clip(2.0 * (near_belt - strained), 0.0, 1.0) * np.clip((1500.0 - elevation) / 1000.0, 0.0, 1.0) * \
+        (elevation > 0)
     value = spec['sediment_soft'] * sediment - spec['shield_hard'] * shield - spec['core_hard'] * core + \
-        spec['thin_soft'] * thin
+        spec['thin_soft'] * thin + spec['basin_soft'] * interior + spec['foreland_soft'] * foreland
     return ndimage.gaussian_filter(value, 1.0, mode=('nearest', 'wrap'))
 
 
-def hardness(domain, world, spec, structure, x, y, theta, alignment, mx, my, seed):
-    """Relative erodibility K / K0: exp of the rock domains (hardness_domains), a weak large-scale noise
-    and, in the belts, hard and soft bands across the strike (fold-scale layers stretched along it, the
-    material of trellis drainage). Bands finer than a grid shows fade out like every octave."""
+def hardness(domain, world, spec, structure, x, y, theta, banded, mx, my, seed):
+    """Relative erodibility K / K0: exp of the rock domains (hardness_domains), a weak large-scale noise, a
+    mosaic at the scale of map units (about 60 km) and, where `banded` (the belts' foreland alignment), hard
+    and soft bands across the strike (fold-scale layers stretched along it, the material of trellis
+    drainage), their strength varied along the belt. Bands finer than a grid shows fade out like every octave."""
     value = sample(hardness_domains(world, spec), domain, mx, my)
     value += spec['noise']['sigma'] * fbm(x, y, spec['noise'], seed + 30, domain)
+    value += spec['mosaic']['sigma'] * fbm(x, y, spec['mosaic'], seed + 32, domain)
     bands = spec['bands']
-    layered = oriented_fbm(x, y, theta, np.ones_like(alignment), {**bands, 'orientations': structure['orientations'],
-                                                                  'sharpness': structure['sharpness']}, seed + 31, domain)
+    layered = oriented_fbm(x, y, theta, np.ones_like(banded), {**bands, 'orientations': structure['orientations'],
+                                                               'sharpness': structure['sharpness']}, seed + 31, domain)
     contrast = bands['contrast']
-    value += bands['amplitude'] * alignment * np.tanh(contrast * layered) / math.tanh(contrast)
+    variation = np.clip(0.5 + 0.7 * fbm(x, y, bands['variation'], seed + 33, domain), 0.0, 1.0)
+    value += bands['amplitude'] * banded * variation * np.tanh(contrast * layered) / math.tanh(contrast)
     return np.exp(value)
+
+
+def smoothstep(values, low, high):
+    t = np.clip((values - low) / (high - low), 0.0, 1.0)
+    return t * t * (3 - 2 * t)
 
 
 def warped(x, y, theta, alignment, spec, seed, domain):
@@ -409,15 +438,29 @@ def run_physics(domain, fields, config, directory):
                '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge)]
     if not domain.whole:
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
+    glacial = config['glacial']
+    out_ice = stem.with_name(f'{domain.name}-out-ice.f32')
+    if glacial['enabled']:  # a glacial maximum's equilibrium line from the latitude alone (no climate here)
+        latitude = np.abs(domain.north_deg - (np.arange(domain.rows) + 0.5) * domain.pixel_deg)
+        # Flat at ela_equator_m up to ela_flat_latitude (the tropics' glacial-maximum line stays near 4.5 to 5 km),
+        # then down to the sea level at ela_sea_latitude.
+        flat, at_sea = glacial['ela_flat_latitude'], glacial['ela_sea_latitude']
+        line = glacial['ela_equator_m'] * np.clip((at_sea - latitude) / (at_sea - flat), 0.0, 1.0) ** glacial['ela_power']
+        files['ela'] = stem.with_name(f'{domain.name}-ela.f32')
+        np.asarray(np.repeat(line[:, None], domain.columns, axis=1), dtype='<f4').tofile(files['ela'])
+        command += ['--ela', str(files['ela']), '--glacial-ratio', str(glacial['erodibility_ratio']),
+                    '--ice-full-range', str(glacial['full_ice_range_m']),
+                    '--ice-accumulation', str(glacial['ice_accumulation']), '--out-ice', str(out_ice)]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f'terrain_sandbox failed on {domain.name}: {result.stderr.strip()}')
     shape = (domain.rows, domain.columns)
     elevation = np.fromfile(out_elevation, dtype='<f4').reshape(shape).astype(np.float64)
     discharge = np.fromfile(out_discharge, dtype='<f4').reshape(shape).astype(np.float64)
-    for path in list(files.values()) + [out_elevation, out_discharge]:
+    ice = np.fromfile(out_ice, dtype='<f4').reshape(shape).astype(np.float64) if glacial['enabled'] else None
+    for path in list(files.values()) + [out_elevation, out_discharge] + ([out_ice] if glacial['enabled'] else []):
         path.unlink()
-    return elevation, discharge, result.stdout.strip()
+    return elevation, discharge, ice, result.stdout.strip()
 
 
 # ---------------------------------------------------------------- rendering
@@ -478,14 +521,27 @@ def render_stages(domain, fields, final_elevation, config, directory):
     return images
 
 
-def render(domain, elevation, sea, discharge, directory, suffix=''):
+def with_ice(rgb, ice):
+    """Glacier ice thicker than 100 m as a pale blue-white wash on the land colours (thin valley tongues
+    left out: they drew every channel as a white thread)."""
+    if ice is None:
+        return rgb
+    alpha = np.clip((ice - 100.0) / 300.0, 0.0, 0.6)[..., None]
+    return rgb * (1 - alpha) + np.array([236.0, 242.0, 248.0]) * alpha
+
+
+def render(domain, elevation, sea, discharge, directory, suffix='', ice=None):
     elevation, sea = crop(domain, elevation), crop(domain, sea)
-    base_rgb = terrain_base(elevation, sea)
+    ice = None if ice is None else crop(domain, ice)
+    base_rgb = with_ice(terrain_base(elevation, sea), ice)
     names = {}
     names['elevation'] = f'{domain.name}{suffix}-elevation.png'
     save_rgb(directory / names['elevation'], base_rgb)
     names['relief'] = f'{domain.name}{suffix}-relief.png'
-    save_rgb(directory / names['relief'], relief_rgb(domain, elevation, sea))
+    coslat = np.maximum(crop(domain, domain.coslat[:, None] * np.ones((1, domain.columns)))[:, 0], 0.25)
+    dy = domain.fine_km * 1000.0
+    shade = shade_factor(hillshade(elevation, dy, dy * coslat[:elevation.shape[0]], domain.exaggeration))
+    save_rgb(directory / names['relief'], np.clip(base_rgb * shade[..., None], 0, 255))  # the ice shaded too
     if discharge is not None:
         discharge = crop(domain, discharge)
         logarithm = np.where(~sea & (discharge > 0), np.log10(np.maximum(discharge, 1e-9)), np.nan)
@@ -551,12 +607,17 @@ def main():
             images += [('relief before physics', before['relief'])]
         if physics_on:
             physics_started = time.perf_counter()
-            elevation, discharge, report = run_physics(domain, fields, config, directory)
+            elevation, discharge, ice, report = run_physics(domain, fields, config, directory)
             timing['physics'] = time.perf_counter() - physics_started
             timing['physics_report'] = report
             # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
+            # Land cut below the sea and connected to it (a fjord, a drowned river mouth) becomes sea.
             elevation = np.where(fields['sea'], fields['surface'], elevation)
-            after = render(domain, elevation, fields['sea'], discharge, directory)
+            labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
+            touching = np.unique(labels[(labels > 0) & fields['sea']])
+            sea = fields['sea'] | np.isin(labels, touching[touching > 0])
+            fields['sea'] = sea
+            after = render(domain, elevation, sea, discharge, directory, ice=ice)
             images = [('elevation', after['elevation']), ('relief (hillshade, NW light)', after['relief']),
                       ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + images
         else:
