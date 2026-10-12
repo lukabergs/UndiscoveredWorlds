@@ -372,6 +372,7 @@ def run_physics(domain, fields, config, directory):
                '--runoff', str(spec['runoff_m_yr']), '--duration', str(spec['duration_myr']),
                '--step', str(spec['step_myr']), '--k', str(spec['k']), '--m', str(spec['m']),
                '--deposition', str(spec['deposition']), '--diffusivity', str(spec['diffusivity_km2_myr']),
+               '--delta-top', str(spec['delta_top_m']),
                '--radius-km', str(domain.radius_km),
                '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge)]
     if not domain.whole:
