@@ -244,6 +244,7 @@ def procedural(domain, world, config, seed):
     structure = config['structure']
     alignment = np.clip(strain / structure['strain_full'], 0.0, 1.0) * np.clip(coherence, 0.0, 1.0)
     uplift = sample(world['uplift'], domain, mx, my)
+    rain = np.maximum(sample(world['precipitation'], domain, mx, my), 0.0)
     sea_seed = sample(world['sea'].astype(float), domain, mx, my) > 0.5
     timings['base'] = time.perf_counter() - started
 
@@ -289,12 +290,13 @@ def procedural(domain, world, config, seed):
     stages['uplands'] = surface
     erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment * foreland, mx, my, seed)
     stages['hardness'] = erodibility
+    stages['precipitation'] = rain
     timings['noise'] = time.perf_counter() - started
 
     started = time.perf_counter()
     filtered = surface
     spec = config['filter']
-    if spec['enabled']:
+    if spec['enabled'] and spec.get('when', 'before') == 'before':
         filtered = surface + erosion_pass(domain, surface, x, y, amplitude, erodibility, spec, seed)
     stages['filter'] = filtered
     timings['filter'] = time.perf_counter() - started
@@ -309,7 +311,7 @@ def procedural(domain, world, config, seed):
         sea |= ring
         filtered = np.where(ring, np.minimum(filtered, -1.0), filtered)
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
-            'strain': strain, 'stages': stages}, timings
+            'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude}, timings
 
 
 def hardness_domains(world, spec):
@@ -356,6 +358,43 @@ def hardness(domain, world, spec, structure, x, y, theta, banded, mx, my, seed):
     variation = np.clip(0.5 + 0.7 * fbm(x, y, bands['variation'], seed + 33, domain), 0.0, 1.0)
     value += bands['amplitude'] * banded * variation * np.tanh(contrast * layered) / math.tanh(contrast)
     return np.exp(value)
+
+
+def precipitation(world, spec, radius_m):
+    """Annual precipitation (m/yr) on the world grid, a proxy with no climate model: a zonal profile
+    (spec['zonal']: [|latitude|, m/yr] pairs, Earth's zonal means roughly) carried by east-west winds (trade
+    winds and polar easterlies blow west, the westerlies between westerly_band blow east). Along each row,
+    downwind: the air's moisture m recharges over the sea (recharge per cell), rains out a little per 1000 km
+    over land (loss_per_1000_km) and much more where the air rises (orographic_loss per km of rise), and the
+    rain is zonal x m x (1 + orographic_gain x rise in km), less with altitude (exp(-elevation /
+    altitude_scale_m)). So windward coasts and slopes are wet and the lee of a range is dry."""
+    elevation = np.maximum(ndimage.gaussian_filter(world['elevation'], 1.0, mode=('nearest', 'wrap')), 0.0)
+    sea = world['sea']
+    rows, columns = elevation.shape
+    latitude = 90.0 - (np.arange(rows) + 0.5) * 180.0 / rows
+    zonal = np.interp(np.abs(latitude), *np.array(spec['zonal']).T)
+    cell_km = 2.0 * math.pi * radius_m / 1000.0 / columns * np.maximum(np.cos(np.radians(latitude)), 0.05)
+    low, high = spec['westerly_band']
+    rain = np.zeros_like(elevation)
+    for row in range(rows):
+        eastward = low <= abs(latitude[row]) < high
+        order = np.arange(columns) if eastward else np.arange(columns)[::-1]
+        heights, wet = elevation[row, order], sea[row, order]
+        moisture = 1.0
+        for sweep in range(2):  # the second lap starts from the first lap's moisture: periodic rows
+            for i in range(columns):
+                rise = max(0.0, heights[i] - heights[i - 1]) / 1000.0
+                if wet[i]:
+                    moisture += (1.0 - moisture) * spec['recharge']
+                    value = zonal[row] * moisture
+                else:
+                    value = zonal[row] * moisture * (1.0 + spec['orographic_gain'] * rise) * \
+                        math.exp(-heights[i] / spec['altitude_scale_m'])
+                    loss = spec['loss_per_1000_km'] * cell_km[row] / 1000.0 + spec['orographic_loss'] * rise
+                    moisture *= math.exp(-loss)
+                if sweep == 1:
+                    rain[row, order[i]] = value
+    return ndimage.gaussian_filter(rain, (2.5, 1.0), mode=('nearest', 'wrap'))  # across rows too: no row streaks
 
 
 def smoothstep(values, low, high):
@@ -421,8 +460,11 @@ def run_physics(domain, fields, config, directory):
     spec = {**config['physics'], **domain.physics}
     stem = directory / f'{domain.name}'
     files = {}
+    runoff = np.maximum(fields['precipitation'] * config['precipitation']['runoff_fraction'],
+                        config['precipitation']['runoff_min_m_yr'])
     for key, values in (('elevation', fields['surface']), ('sea', fields['sea'].astype(np.float32)),
-                        ('erodibility', fields['erodibility']), ('uplift', fields['uplift'] * spec['uplift_factor'])):
+                        ('erodibility', fields['erodibility']), ('uplift', fields['uplift'] * spec['uplift_factor']),
+                        ('runoff', runoff)):
         files[key] = stem.with_name(f'{domain.name}-{key}.f32')
         np.asarray(values, dtype='<f4').tofile(files[key])
     out_elevation = stem.with_name(f'{domain.name}-out-elevation.f32')
@@ -430,7 +472,7 @@ def run_physics(domain, fields, config, directory):
     command = [str(PHYSICS), '--columns', str(domain.columns), '--rows', str(domain.rows),
                '--elevation', str(files['elevation']), '--sea', str(files['sea']),
                '--erodibility', str(files['erodibility']), '--uplift', str(files['uplift']),
-               '--runoff', str(spec['runoff_m_yr']), '--duration', str(spec['duration_myr']),
+               '--runoff-file', str(files['runoff']), '--duration', str(spec['duration_myr']),
                '--step', str(spec['step_myr']), '--k', str(spec['k']), '--m', str(spec['m']),
                '--deposition', str(spec['deposition']), '--diffusivity', str(spec['diffusivity_km2_myr']),
                '--delta-top', str(spec['delta_top_m']), '--threshold-slope', str(spec['threshold_slope']),
@@ -440,14 +482,11 @@ def run_physics(domain, fields, config, directory):
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
     glacial = config['glacial']
     out_ice = stem.with_name(f'{domain.name}-out-ice.f32')
-    if glacial['enabled']:  # a glacial maximum's equilibrium line from the latitude alone (no climate here)
-        latitude = np.abs(domain.north_deg - (np.arange(domain.rows) + 0.5) * domain.pixel_deg)
-        # Flat at ela_equator_m up to ela_flat_latitude (the tropics' glacial-maximum line stays near 4.5 to 5 km),
-        # then down to the sea level at ela_sea_latitude.
-        flat, at_sea = glacial['ela_flat_latitude'], glacial['ela_sea_latitude']
-        line = glacial['ela_equator_m'] * np.clip((at_sea - latitude) / (at_sea - flat), 0.0, 1.0) ** glacial['ela_power']
+    ela = None
+    if glacial['enabled']:
+        ela = equilibrium_line(domain, fields['precipitation'], glacial)
         files['ela'] = stem.with_name(f'{domain.name}-ela.f32')
-        np.asarray(np.repeat(line[:, None], domain.columns, axis=1), dtype='<f4').tofile(files['ela'])
+        np.asarray(ela, dtype='<f4').tofile(files['ela'])
         command += ['--ela', str(files['ela']), '--glacial-ratio', str(glacial['erodibility_ratio']),
                     '--ice-full-range', str(glacial['full_ice_range_m']),
                     '--ice-accumulation', str(glacial['ice_accumulation']), '--out-ice', str(out_ice)]
@@ -460,7 +499,23 @@ def run_physics(domain, fields, config, directory):
     ice = np.fromfile(out_ice, dtype='<f4').reshape(shape).astype(np.float64) if glacial['enabled'] else None
     for path in list(files.values()) + [out_elevation, out_discharge] + ([out_ice] if glacial['enabled'] else []):
         path.unlink()
+    if ice is not None:  # the maps show today's glaciers: the ice where the surface is above today's line
+        ice = np.where(elevation + ice > ela + glacial['present_shift_m'], ice, 0.0)
     return elevation, discharge, ice, result.stdout.strip()
+
+
+def equilibrium_line(domain, precipitation, spec):
+    """The glacial maximum's equilibrium-line altitude (m) per cell, from the latitude and the precipitation
+    proxy (no climate here): ela_equator_m up to ela_flat_latitude (the tropics' line stays near 4.5 to 5 km),
+    falling linearly to the sea level at ela_sea_latitude; lowered by ela_per_doubling_m for each doubling of
+    the precipitation over ela_reference_m_yr (a wet coast's glaciers reach lower, Ohmura et al. 1992); never
+    below ela_min_m, so polar lowlands carry no ice sheet that would grind them below the sea for the whole
+    run (v10 and v11)."""
+    latitude = np.abs(domain.north_deg - (np.arange(domain.rows) + 0.5) * domain.pixel_deg)
+    flat, at_sea = spec['ela_flat_latitude'], spec['ela_sea_latitude']
+    line = spec['ela_equator_m'] * np.clip((at_sea - latitude) / (at_sea - flat), 0.0, 1.0) ** spec['ela_power']
+    wet = spec['ela_per_doubling_m'] * np.log2(np.maximum(precipitation, 0.05) / spec['ela_reference_m_yr'])
+    return np.maximum(line[:, None] - wet, spec['ela_min_m'])
 
 
 # ---------------------------------------------------------------- rendering
@@ -481,6 +536,7 @@ def relief_rgb(domain, elevation, sea):
 
 
 HARDNESS_STOPS = [(-1.0, (196, 120, 60)), (0.0, (232, 226, 205)), (1.0, (60, 120, 170))]
+PRECIPITATION_STOPS = [(0.0, (170, 120, 70)), (0.3, (220, 200, 140)), (1.0, (90, 160, 80)), (3.0, (40, 90, 170))]
 
 
 def render_stages(domain, fields, final_elevation, config, directory):
@@ -492,6 +548,7 @@ def render_stages(domain, fields, final_elevation, config, directory):
                                             ('warp', 'warp: a grid carried by the displacement'),
                                             ('relief', 'relief noise'), ('uplands', 'uplands lift'),
                                             ('hardness', 'rock hardness: ln erodibility over 0.7 (brown hard, blue soft)'),
+                                            ('precipitation', 'precipitation proxy, m/yr (brown 0, green 1, blue 3 and more)'),
                                             ('filter', 'erosion filter'), ('physics', 'drainage and erosion')), 1):
         if key == 'warp':
             rgb = relief_rgb(domain, crop(domain, stages['base']), sea)
@@ -504,6 +561,9 @@ def render_stages(domain, fields, final_elevation, config, directory):
             values = np.log(crop(domain, stages['hardness'])) / 0.7  # +-0.7 in ln K spans the palette
             rgb = colourize(values, HARDNESS_STOPS)
             rgb[sea] = (18, 22, 30)  # the rock of the sea floor is not judged
+        elif key == 'precipitation':
+            rgb = colourize(crop(domain, stages['precipitation']), PRECIPITATION_STOPS)
+            rgb[sea] = (18, 22, 30)
         elif key == 'physics':
             if final_elevation is None:
                 continue
@@ -595,6 +655,8 @@ def main():
     directory.mkdir(parents=True, exist_ok=True)
     bundle = Bundle.open(ROOT / config['base_bundle'])
     world = world_fields(bundle)
+    radius_m = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0)) * 1000.0
+    world['precipitation'] = precipitation(world, config['precipitation'], radius_m)
     names = arguments.domains.split(',') if arguments.domains else config['default_domains']
     physics_on = config['physics']['enabled'] and not arguments.no_physics
     sections, timings = [], {}
@@ -617,6 +679,12 @@ def main():
             touching = np.unique(labels[(labels > 0) & fields['sea']])
             sea = fields['sea'] | np.isin(labels, touching[touching > 0])
             fields['sea'] = sea
+            spec = config['filter']
+            if spec['enabled'] and spec.get('when', 'before') == 'after':  # fine texture on the eroded surface
+                x, y = fields['coords']
+                detail = erosion_pass(domain, elevation, x, y, fields['amplitude'], fields['erodibility'], spec,
+                                      config['seed'])
+                elevation = np.where(sea, elevation, np.maximum(elevation + detail, 1.0))
             after = render(domain, elevation, sea, discharge, directory, ice=ice)
             images = [('elevation', after['elevation']), ('relief (hillshade, NW light)', after['relief']),
                       ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + images

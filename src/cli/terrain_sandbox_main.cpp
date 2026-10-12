@@ -142,7 +142,7 @@ void usage()
     std::cout << "terrain_sandbox --columns W --rows H --elevation FILE --sea FILE --out-elevation FILE --out-discharge FILE\n"
                  "  [--north DEG --pixel-deg DEG] (a window; default the whole sphere)\n"
                  "  [--erodibility FILE] (relative K per cell, default 1) [--uplift FILE] (m/Myr per cell, default 0)\n"
-                 "  [--runoff M_PER_YR 0.3] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
+                 "  [--runoff M_PER_YR 0.3 | --runoff-file FILE] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
                  "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--delta-top M 0] [--threshold-slope S 0: off]\n"
                  "  [--ela FILE] (m per cell: glaciers) [--glacial-ratio 2] [--ice-full-range M 500] [--ice-accumulation 1]\n"
                  "  [--out-ice FILE]\n"
@@ -190,7 +190,10 @@ int main(int argc, char** argv)
             value = static_cast<float>(value * k);
         const std::vector<float> uplift = options.count("--uplift") ? readraster(text("--uplift", ""), count)
                                                                      : std::vector<float>(count, 0.0f);
-        const std::vector<float> runoff(count, static_cast<float>(number("--runoff", 0.3)));
+        // Runoff per cell (m/yr): a file from the sandbox's precipitation proxy, else uniform --runoff.
+        const std::vector<float> runoff = options.count("--runoff-file")
+            ? readraster(text("--runoff-file", ""), count)
+            : std::vector<float>(count, static_cast<float>(number("--runoff", 0.3)));
 
         landscape::StreamPowerParameters parameters;
         parameters.areaexponent = number("--m", 0.5);
@@ -210,7 +213,9 @@ int main(int argc, char** argv)
         glacialparameters.fullicerange_m = number("--ice-full-range", 500.0);
         // The ice's own water supply: the runoff times --ice-accumulation (the wet coasts glaciers grow on; the
         // sandbox has no precipitation field). The ice flux may then exceed the rivers' discharge.
-        const std::vector<float> snowfall(count, static_cast<float>(number("--runoff", 0.3) * number("--ice-accumulation", 1.0)));
+        std::vector<float> snowfall(runoff);
+        for (float& value : snowfall)
+            value = static_cast<float>(value * number("--ice-accumulation", 1.0));
         std::vector<double> iceflux(count, 0.0);
         std::vector<float> thickness(count, 0.0f), surface(count);
 

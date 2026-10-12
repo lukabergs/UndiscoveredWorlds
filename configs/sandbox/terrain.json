@@ -1,12 +1,13 @@
 {
  "base_bundle": "out/scratch/sandbox/base",
  "seed": 1,
- "default_domains": ["global", "B", "F"],
+ "default_domains": ["global", "B", "F", "G"],
  "domains": {
   "global": {"columns": 2048, "exaggeration": 8.0},
   "A": {"pixels": [164, 48, 183, 63], "scale": 64, "margin": 1, "exaggeration": 3.0},
   "B": {"pixels": [180, 48, 199, 63], "scale": 64, "margin": 1, "exaggeration": 3.0},
-  "F": {"pixels": [176, 94, 195, 109], "scale": 64, "margin": 1, "exaggeration": 3.0}
+  "F": {"pixels": [176, 94, 195, 109], "scale": 64, "margin": 1, "exaggeration": 3.0},
+  "G": {"pixels": [36, 20, 55, 35], "scale": 64, "margin": 1, "exaggeration": 3.0}
  },
  "warp": {"wavelength_km": 1200, "octaves": 3, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5,
           "amplitude_km": 40, "strain_amplitude_km": 150, "across_fraction": 0.3, "smoothing_cells": 2.0},
@@ -25,7 +26,7 @@
               "bands": {"wavelength_km": 12, "octaves": 2, "lacunarity": 2.0, "gain": 0.4, "min_cells": 2.5, "stretch": 6.0,
                         "amplitude": 0.45, "contrast": 1.2,
                         "variation": {"wavelength_km": 600, "octaves": 2, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5}}},
- "filter": {"enabled": false, "scale_km": 30, "octaves": 5, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5,
+ "filter": {"enabled": false, "when": "before", "scale_km": 30, "octaves": 5, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5,
             "strength": 0.35, "gully_weight": 0.5, "detail": 1.5, "rounding": [0.1, 0.0, 0.1, 2.0],
             "onset": [1.25, 1.25, 2.8, 1.5], "assumed_slope": [0.7, 1.0], "cell_scale": 0.7, "normalization": 0.5,
             "vertical_scale": 10.0, "height_offset": [0.0, 1.0], "fade_radius_km": 40, "land_fade_m": 200,
@@ -35,7 +36,11 @@
              "global": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.1},
              "window": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.35}},
  "glacial": {"enabled": true, "ela_equator_m": 5000, "ela_flat_latitude": 25, "ela_sea_latitude": 62, "ela_power": 1.0,
-             "erodibility_ratio": 4.0, "full_ice_range_m": 500, "ice_accumulation": 1.0},
+             "erodibility_ratio": 4.0, "full_ice_range_m": 500, "ice_accumulation": 1.0,
+             "ela_per_doubling_m": 400, "ela_reference_m_yr": 1.0, "ela_min_m": 600, "present_shift_m": 1000},
+ "precipitation": {"zonal": [[0, 2.0], [10, 1.8], [20, 0.9], [30, 0.6], [40, 1.0], [50, 1.2], [60, 0.9], [75, 0.4], [90, 0.2]],
+                   "westerly_band": [30, 60], "recharge": 0.3, "loss_per_1000_km": 0.08, "orographic_gain": 2.0,
+                   "orographic_loss": 0.3, "altitude_scale_m": 9000, "runoff_fraction": 0.5, "runoff_min_m_yr": 0.15},
  "render": {"before_physics": false, "stages": true, "warp_grid_km": 400,
             "earth_hardness": "refs/processed/lithology/glim_erodibility_2048.png"}
 }
