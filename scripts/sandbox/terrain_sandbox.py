@@ -278,7 +278,10 @@ def procedural(domain, world, config, seed):
     noise = (1 - relief['ridged']) * noise + relief['ridged'] * ridged(noise) / 0.6
     amplitude = relief['base_m'] + relief['elevation_fraction'] * np.maximum(base, 0.0) + \
         relief['strain_m'] * alignment
-    amplitude = np.where(base > 0, amplitude, amplitude * relief['sea_fraction'])
+    # The sea's smaller relief fades in with depth (from +200 m down to -500 m): a switch at the base's zero
+    # contour jumped the noise along the smooth old coastline, a crease in the sea floor and the coast.
+    wet = 1.0 - smoothstep(base, -500.0, 200.0)
+    amplitude = amplitude * (1.0 - (1.0 - relief['sea_fraction']) * wet)
     surface = base + amplitude * noise
     stages['relief'] = surface
     uplands = config['uplands']
@@ -287,7 +290,8 @@ def procedural(domain, world, config, seed):
                                                     mode=('nearest', 'wrap')), domain, mx, my)
         inland = np.clip((land_share - 0.5) * 2.0, 0.0, 1.0)
         large = fbm(x, y, uplands, seed + 50, domain)
-        surface = surface + uplands['lift_m'] * inland * np.clip(0.5 + 0.5 * large, 0.0, 1.5) * (base > 0)
+        surface = surface + uplands['lift_m'] * inland * np.clip(0.5 + 0.5 * large, 0.0, 1.5) * \
+            smoothstep(base, 0.0, 300.0)  # faded in above the coast, no step at the base's zero contour
     stages['uplands'] = surface
     erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment * foreland, mx, my, seed)
     stages['hardness'] = erodibility

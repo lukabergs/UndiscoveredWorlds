@@ -190,7 +190,7 @@ void usage()
                  "  [--runoff M_PER_YR 0.3 | --runoff-file FILE] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
                  "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--delta-top M 0] [--threshold-slope S 0: off]\n"
                  "  [--ela FILE] (m per cell: glaciers) [--glacial-ratio 2] [--ice-full-range M 500] [--ice-accumulation 1]\n"
-                 "  [--out-ice FILE] [--pinned FILE] (cells held at their starting height)\n"
+                 "  [--out-ice FILE] [--pinned FILE] (cells held at their starting height) [--sea-cap M 0]\n"
                  "  [--radius-km 6371]\n";
 }
 }
@@ -293,6 +293,7 @@ int main(int argc, char** argv)
             landscape::accumulateflow(metric, runoff, graph);
         };
         const double thresholdslope = number("--threshold-slope", 0.0);
+        const float seacap = static_cast<float>(number("--sea-cap", 0.0));
         double eroded = 0.0, deposited = 0.0, marine = 0.0, landslides = 0.0;
         int steps = 0;
         for (double time = 0.0; time < duration - 1e-9; time += step)
@@ -319,6 +320,12 @@ int main(int argc, char** argv)
             marine += budget.marinedeposited_km3;
             if (thresholdslope > 0.0)
                 landslides += limitslopes(metric, sea, thresholdslope, elevation);
+            // No sea cell is filled above --sea-cap (m, default the sea level): with the delta top lifted (its
+            // fill-and-spill search went quadratic), marine deposits otherwise stacked whole loads on one cell,
+            // towers up to 12 km in glacially cut troughs the sea had flooded (F-troughs, G-coast at k 256).
+            for (std::size_t i = 0; i < count; i++)
+                if (sea[i])
+                    elevation[i] = std::min(elevation[i], seacap);
             holdpinned();
             steps++;
         }
