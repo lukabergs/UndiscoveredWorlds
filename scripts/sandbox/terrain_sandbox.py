@@ -260,8 +260,10 @@ def procedural(domain, world, config, seed):
     warp_doubled = sample(smooth(warp_doubled.real), domain, mx, my) + 1j * sample(smooth(warp_doubled.imag), domain, mx, my)
     warp_alignment = np.clip(warp_strain / structure['strain_full'], 0.0, 1.0) * \
         np.clip(np.abs(warp_doubled) / np.maximum(warp_strain, 1e-9), 0.0, 1.0)
+    x0, y0 = x, y  # the plain coordinates, before the warp
     x, y = warped(x, y, 0.5 * np.angle(warp_doubled), warp_alignment, config['warp'], seed, domain)
-    stages = {'base': base, 'warp': (x, y)}
+    ratio, long_axis = warp_stretch(domain, x, y)
+    stages = {'base': base, 'warp': (x, y), 'stretch': (ratio, long_axis), 'strike': (theta, alignment)}
     # The belt's zones (multiscale plan S5.5): the foreland (moderate strain) is folded and layered, the core
     # (high strain or thick crust) is crystalline: homogeneous rock and a relief stretched less along the
     # strike, so its rivers can branch (dendritic) instead of following bands.
@@ -296,7 +298,14 @@ def procedural(domain, world, config, seed):
     erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment * foreland, mx, my, seed)
     stages['hardness'] = erodibility
     if config['coast']['amplitude_m'] > 0:
-        surface = surface + coast_detail(domain, base, surface, x, y, amplitude, erodibility, config["coast"], seed)
+        # coast.warp_fraction: the share of the warp the coast term's noise follows (1: all, v14; less: its
+        # features keep the trend but vary more along a strike-parallel shore).
+        fraction = config['coast'].get('warp_fraction', 1.0)
+        xc, yc = (x, y) if fraction == 1.0 else (x0 + fraction * (x - x0), y0 + fraction * (y - y0))
+        surface = surface + coast_detail(domain, base, surface, xc, yc, amplitude, erodibility, config["coast"], seed)
+    micro = config.get('micro', {'enabled': False})
+    if micro['enabled'] and micro.get('when', 'after') == 'before':
+        surface = surface + micro_texture(domain, surface, sea_seed, x, y, x0, y0, ratio, micro, seed)
     stages['coast'] = surface
     stages['precipitation'] = rain
     timings['noise'] = time.perf_counter() - started
@@ -331,7 +340,52 @@ def procedural(domain, world, config, seed):
         filtered = np.where(ring, np.minimum(filtered, -1.0), filtered)
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
             'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude,
-            'pinned': pinned}, timings
+            'pinned': pinned, 'warped': (x, y), 'plain': (x0, y0), 'ratio': ratio}, timings
+
+
+def warp_stretch(domain, x, y):
+    """How the warp distorts the noise drawn on its coordinates: the singular values s1 >= s2 of its Jacobian
+    d(x', y') / d(x, y) (the planar kilometres of the grid against the warped ones). A noise feature of size L
+    appears L / s in the map, so the anisotropy is s1 / s2 and features are long along the right singular
+    vector of s2 (the map direction in which the warped coordinates change slowest). Returns (s1 / s2, the
+    long axis's angle from east toward south, radians)."""
+    dx_c, dx_r = np.gradient(x, axis=1) / domain.fine_km, np.gradient(x, axis=0) / domain.fine_km
+    dy_c, dy_r = np.gradient(y, axis=1) / domain.fine_km, np.gradient(y, axis=0) / domain.fine_km
+    p, q, r = dx_c ** 2 + dy_c ** 2, dx_r ** 2 + dy_r ** 2, dx_c * dx_r + dy_c * dy_r  # J^T J = [[p, r], [r, q]]
+    root = np.sqrt(((p - q) / 2.0) ** 2 + r ** 2)
+    largest, smallest = (p + q) / 2.0 + root, np.maximum((p + q) / 2.0 - root, 1e-12)
+    ratio = np.sqrt(largest / smallest)
+    long_axis = 0.5 * np.arctan2(2.0 * r, p - q) + math.pi / 2.0  # perpendicular to the fastest change
+    return ratio, long_axis
+
+
+def micro_texture(domain, surface, sea_seed, x, y, x0, y0, ratio, spec, seed, open_sea=None):
+    """A little fine texture on the shoreline where the warp stretches most (option 1 of the user's
+    2026-10-12 talk). The coast term's displacement is drawn on the fully warped coordinates, where an
+    anisotropy of 4 makes it vary only every 150 km along a strike-parallel shore: it moves a whole arc
+    together. Here the surface within reach_km of the current shoreline (the sea connected to the base's
+    sea) is resampled at positions moved by up to displacement_km, a fine fBm (wavelength_km) drawn at
+    warp_fraction of the warp (features elongated along the trend by about the stretch^warp_fraction, not
+    erased), plus a small vertical part (amplitude_m); both weighted by smoothstep(stretch ratio, ratio)."""
+    fraction = spec['warp_fraction']
+    xm, ym = x0 + fraction * (x - x0), y0 + fraction * (y - y0)
+    if open_sea is None:
+        labels, _ = ndimage.label(surface <= 0.0, structure=np.ones((3, 3)))
+        touching = np.unique(labels[(labels > 0) & sea_seed])
+        sea = np.isin(labels, touching[touching > 0])
+    else:  # after the physics: the open sea's shore only, not the glacial troughs it flooded inland (G-coast)
+        sea = open_sea
+    distance = np.where(sea, ndimage.distance_transform_edt(sea), ndimage.distance_transform_edt(~sea))
+    near = np.exp(-(distance * domain.fine_km / spec['reach_km']) ** 2)
+    weight = smoothstep(ratio, *spec['ratio']) * near
+    scale = spec['displacement_km'] / domain.fine_km * weight
+    dx = scale * fbm(xm, ym, spec, seed + 75, domain)
+    dy = scale * fbm(xm, ym, spec, seed + 76, domain)
+    rows, columns = np.indices(surface.shape, dtype=float)
+    mode = 'grid-wrap' if domain.whole else 'nearest'
+    moved = ndimage.map_coordinates(surface, [rows + dy, columns + dx], order=1, mode=mode)
+    vertical = spec['amplitude_m'] * weight * fbm(xm, ym, spec, seed + 77, domain)
+    return moved + vertical - surface
 
 
 def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed):
@@ -666,6 +720,76 @@ def render_stages(domain, fields, final_elevation, config, directory):
     return images
 
 
+STRETCH_STOPS = [(1.0, (12, 16, 40)), (1.5, (40, 70, 140)), (2.5, (220, 120, 40)), (4.0, (255, 240, 200))]
+
+
+def nice_spacing_km(width_km, lines=12):
+    """A round grid spacing (1, 2, 2.5, 5 x 10^n km) giving about `lines` lines across the width."""
+    target = width_km / lines
+    power = 10.0 ** math.floor(math.log10(target))
+    return min((step * power for step in (1, 2, 2.5, 5, 10)), key=lambda value: abs(value - target))
+
+
+def glyphs(rgb, angle, length_px, every_px, colour=(255, 255, 255)):
+    """Short line marks every `every_px` pixels along `angle` (radians from east toward south), each
+    `length_px` long (an array, so a mark's length can show a strength). Returns uint8 RGB."""
+    from PIL import Image, ImageDraw
+    image = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8))
+    draw = ImageDraw.Draw(image)
+    rows, columns = angle.shape
+    for r in range(every_px // 2, rows, every_px):
+        for c in range(every_px // 2, columns, every_px):
+            half = 0.5 * float(length_px[r, c])
+            if half < 0.5:
+                continue
+            dx, dy = half * math.cos(angle[r, c]), half * math.sin(angle[r, c])
+            draw.line((c - dx, r - dy, c + dx, r + dy), fill=colour, width=2)
+    return np.asarray(image)
+
+
+def render_diagnostics(domain, fields, config, directory):
+    """The fields that give the terrain its direction, for any domain: the warp (a grid carried by the
+    displacement, spaced to the map), the warp's stretch (colour: the anisotropy s1 / s2 a noise drawn on the
+    warped coordinates takes; marks along the direction its features are long, longer where it is stronger),
+    the strike (hue: the strike direction, doubled so opposite directions match; brightness: the alignment
+    that mixes in the stretched noise bank and the bands) and the rock hardness."""
+    stages = fields['stages']
+    sea = crop(domain, fields['sea'])
+    images = []
+    width_km = (domain.crop[3] - domain.crop[2] if domain.crop else domain.columns) * domain.fine_km
+    spacing = config['render']['warp_grid_km'] if domain.whole else nice_spacing_km(width_km)
+    rgb = relief_rgb(domain, crop(domain, stages['base']), sea)
+    line = 0.75 * domain.fine_km / spacing
+    xw, yw = (crop(domain, values) / spacing for values in stages['warp'])
+    rgb[(np.abs(xw - np.round(xw)) < line) | (np.abs(yw - np.round(yw)) < line)] = (255, 255, 255)
+    images.append((f'warp: a {spacing:g} km grid carried by the displacement, on the base relief', 'warp-grid'))
+    maps = [rgb]
+    ratio, axis = (crop(domain, values) for values in stages['stretch'])
+    every = max(16, min(ratio.shape) // 32)
+    strength = np.clip(np.log(ratio) / math.log(4.0), 0.0, 1.0) * every * 0.9
+    maps.append(glyphs(colourize(ratio, STRETCH_STOPS), axis, strength, every))
+    images.append(('warp stretch: anisotropy s1 / s2 (blue 1.5, orange 2.5, white 4 and more); marks along the '
+                   'long axis of the features it draws', 'warp-stretch'))
+    theta, alignment = (crop(domain, values) for values in stages['strike'])
+    strike = theta + math.pi / 2.0
+    hue = (np.mod(2.0 * strike, 2.0 * math.pi) / (2.0 * math.pi))[..., None]
+    wheel = 0.5 + 0.5 * np.cos(2.0 * math.pi * (hue - np.array([0.0, 1.0 / 3.0, 2.0 / 3.0])))
+    maps.append(glyphs(255.0 * wheel * (0.15 + 0.85 * np.clip(alignment, 0, 1))[..., None], strike,
+                       np.clip(alignment, 0, 1) * every * 0.9, every))
+    images.append(('strike: hue the strike direction (doubled), brightness the alignment that mixes in the '
+                   'stretched noise and the bands; marks along the strike', 'strike'))
+    hardness_rgb = colourize(np.log(crop(domain, stages['hardness'])) / 0.7, HARDNESS_STOPS)
+    hardness_rgb[sea] = (18, 22, 30)
+    maps.append(hardness_rgb)
+    images.append(('rock hardness: ln erodibility over 0.7 (brown hard, blue soft)', 'hardness'))
+    out = []
+    for (caption, key), rgb in zip(images, maps):
+        name = f'{domain.name}-diag-{key}.png'
+        save_map(domain, directory / name, rgb)
+        out.append((caption, name))
+    return out
+
+
 def save_map(domain, path, rgb):
     """A map with its scale references (overlays.py): on a window the faint grid of the world cells it was
     refined from (one line every k pixels; the crop starts on a world-cell edge) and on every map a scale
@@ -773,6 +897,7 @@ def main():
             timing['physics_report'] = report
             # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
             # Land cut below the sea and connected to it (a fjord, a drowned river mouth) becomes sea.
+            procedural_sea = fields['sea'].copy()  # the open sea before the physics flooded its troughs
             elevation = np.where(fields['sea'], fields['surface'], elevation)
             labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
             touching = np.unique(labels[(labels > 0) & fields['sea']])
@@ -786,6 +911,21 @@ def main():
                 x, y = fields['coords']
                 elevation = elevation + coast_detail(domain, elevation, elevation, x, y, fields['amplitude'],
                                                      fields['erodibility'], coast, config['seed'] + 1)
+                labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
+                touching = np.unique(labels[(labels > 0) & sea])
+                sea = np.isin(labels, touching[touching > 0])
+                fields['sea'] = sea
+            micro = config.get('micro', {'enabled': False})
+            if micro['enabled'] and micro.get('when', 'after') == 'after':
+                # The shoreline texture on the final coast: drawn before the physics, 20 Myr of erosion and
+                # marine filling took its few-km headlands and pockets back to a smooth arc (F-troughs, v16).
+                (xw, yw), (xp, yp) = fields['warped'], fields['plain']
+                # The open sea: the final sea less every part narrower than about open_width_km (a morphological
+                # opening), so the glacial troughs it flooded inland (G-coast) are not shores, while a bay is.
+                steps = max(1, int(round(micro['open_width_km'] / 2.0 / domain.fine_km)))
+                open_sea = ndimage.binary_opening(sea, structure=np.ones((3, 3)), iterations=steps) & procedural_sea.any()
+                elevation = elevation + micro_texture(domain, elevation, sea, xw, yw, xp, yp, fields['ratio'], micro,
+                                                      config['seed'], open_sea=open_sea)
                 labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
                 touching = np.unique(labels[(labels > 0) & sea])
                 sea = np.isin(labels, touching[touching > 0])
@@ -824,6 +964,9 @@ def main():
         title = 'Whole world' if domain.whole else f'Window {domain.name}'
         sections.append((f'{title} ({domain.columns if domain.whole else domain.crop[3] - domain.crop[2]} columns, '
                          f'{domain.fine_km:.2f} km cells, k {domain.k})', images))
+        if config['render'].get('diagnostics', True):
+            sections.append((f'{title}: what gives the terrain its direction', render_diagnostics(domain, fields, config,
+                                                                                                    directory)))
         if domain.whole and config['render'].get('stages', True):
             stage_images = render_stages(domain, fields, elevation if physics_on else None, config, directory)
             sections.append(('Whole world, stage by stage (each map the surface so far)', stage_images))

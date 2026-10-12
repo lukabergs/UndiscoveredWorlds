@@ -23,7 +23,10 @@
  "coast": {"amplitude_m": 120, "band_m": 250, "wavelength_km": 40, "octaves": 8, "lacunarity": 2.0, "gain": 0.8,
            "min_cells": 2.5, "ridged": 0.5, "hardness_exponent": -0.8, "relief_gain": 1.0,
            "relief_reference_m": 800, "cold_gain": 1.0, "cold_latitude": [40, 60],
-           "warp_km": 20, "warp_wavelength_km": 40, "warp_octaves": 6, "reach_km": 25, "after_physics": false},
+           "warp_km": 20, "warp_wavelength_km": 40, "warp_octaves": 6, "reach_km": 25, "after_physics": false, "warp_fraction": 1.0},
+ "micro": {"enabled": true, "when": "after", "displacement_km": 3, "amplitude_m": 30, "warp_fraction": 0.5, "wavelength_km": 10,
+           "octaves": 4, "lacunarity": 2.0, "gain": 0.6, "min_cells": 2.5, "ratio": [1.3, 2.5], "reach_km": 5,
+           "open_width_km": 6},
  "uplands": {"lift_m": 400, "wavelength_km": 1500, "octaves": 3, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5,
              "coast_sigma_cells": 2.0},
  "hardness": {"sediment_soft": 0.8, "sediment_scale_m": 2000, "shield_hard": 0.6, "shield_crust_m": [30000, 40000],
@@ -53,6 +56,6 @@
  "precipitation": {"zonal": [[0, 2.0], [10, 1.8], [20, 0.9], [30, 0.6], [40, 1.0], [50, 1.2], [60, 0.9], [75, 0.4], [90, 0.2]],
                    "westerly_band": [30, 60], "recharge": 0.3, "loss_per_1000_km": 0.08, "orographic_gain": 2.0,
                    "orographic_loss": 0.3, "altitude_scale_m": 9000, "runoff_fraction": 0.5, "runoff_min_m_yr": 0.15},
- "render": {"before_physics": false, "stages": true, "warp_grid_km": 400,
+ "render": {"before_physics": false, "stages": true, "diagnostics": true, "warp_grid_km": 400,
             "earth_hardness": "refs/processed/lithology/glim_erodibility_2048.png"}
 }
