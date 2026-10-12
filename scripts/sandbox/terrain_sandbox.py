@@ -33,7 +33,7 @@ ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / 'evaluation'))
 from uwtools.bundle import Bundle  # noqa: E402
-from uwtools.map_rendering import save_rgb  # noqa: E402
+from uwtools.map_rendering import colourize, save_rgb  # noqa: E402
 from uwtools.palettes import palette_rgb  # noqa: E402
 from validation import surface_elevation  # noqa: E402
 from maps import hillshade, shade_factor, terrain_base  # noqa: E402
@@ -247,11 +247,17 @@ def procedural(domain, world, config, seed):
 
     started = time.perf_counter()
     x, y = domain.mesh_km()
-    warp = config['warp']
-    if warp['amplitude_km'] > 0:
-        wx = fbm(x, y, warp, seed + 11, domain)
-        wy = fbm(x, y, warp, seed + 12, domain)
-        x, y = x + warp['amplitude_km'] * wx, y + warp['amplitude_km'] * wy
+    # The warp reads the strain smoothed over warp.smoothing_cells world cells: a drag that changes over one
+    # 156 km cell folds the grid over itself (v4's loops along the belts).
+    sigma = config['warp']['smoothing_cells']
+    smooth = lambda field: ndimage.gaussian_filter(field, sigma, mode=('nearest', 'wrap'))  # noqa: E731
+    warp_strain = sample(smooth(world['shortening']), domain, mx, my)
+    warp_doubled = world['shortening'] * np.exp(2j * world['direction'])
+    warp_doubled = sample(smooth(warp_doubled.real), domain, mx, my) + 1j * sample(smooth(warp_doubled.imag), domain, mx, my)
+    warp_alignment = np.clip(warp_strain / structure['strain_full'], 0.0, 1.0) * \
+        np.clip(np.abs(warp_doubled) / np.maximum(warp_strain, 1e-9), 0.0, 1.0)
+    x, y = warped(x, y, 0.5 * np.angle(warp_doubled), warp_alignment, config['warp'], seed, domain)
+    stages = {'base': base, 'warp': (x, y)}
     relief = config['relief']
     noise = oriented_fbm(x, y, theta, alignment, {**relief, **structure}, seed + 20, domain)
     noise = (1 - relief['ridged']) * noise + relief['ridged'] * ridged(noise) / 0.6
@@ -259,6 +265,7 @@ def procedural(domain, world, config, seed):
         relief['strain_m'] * alignment
     amplitude = np.where(base > 0, amplitude, amplitude * relief['sea_fraction'])
     surface = base + amplitude * noise
+    stages['relief'] = surface
     uplands = config['uplands']
     if uplands['lift_m'] > 0:  # continental interiors raised in patches: a non-negative lift, none at the coast
         land_share = sample(ndimage.gaussian_filter((~world['sea']).astype(float), uplands['coast_sigma_cells'],
@@ -266,10 +273,12 @@ def procedural(domain, world, config, seed):
         inland = np.clip((land_share - 0.5) * 2.0, 0.0, 1.0)
         large = fbm(x, y, uplands, seed + 50, domain)
         surface = surface + uplands['lift_m'] * inland * np.clip(0.5 + 0.5 * large, 0.0, 1.5) * (base > 0)
+    stages['uplands'] = surface
     hardness_spec = config['hardness']
     banding = oriented_fbm(x, y, theta, alignment, {**hardness_spec, **structure}, seed + 30, domain)
     contrast = hardness_spec['contrast']
     erodibility = np.exp(hardness_spec['sigma'] * np.tanh(contrast * banding) / math.tanh(contrast))
+    stages['hardness'] = erodibility
     timings['noise'] = time.perf_counter() - started
 
     started = time.perf_counter()
@@ -277,6 +286,7 @@ def procedural(domain, world, config, seed):
     spec = config['filter']
     if spec['enabled']:
         filtered = surface + erosion_pass(domain, surface, x, y, amplitude, erodibility, spec, seed)
+    stages['filter'] = filtered
     timings['filter'] = time.perf_counter() - started
 
     land_or_low = filtered <= 0.0
@@ -289,7 +299,27 @@ def procedural(domain, world, config, seed):
         sea |= ring
         filtered = np.where(ring, np.minimum(filtered, -1.0), filtered)
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
-            'strain': strain}, timings
+            'strain': strain, 'stages': stages}, timings
+
+
+def warped(x, y, theta, alignment, spec, seed, domain):
+    """Positions moved by the warp. Two noise components v = (n1, n2) give a background displacement
+    amplitude_km v everywhere and, in the belts, strain_amplitude_km x alignment x (s (s.v) + across_fraction
+    c (c.v)), s along the strike and c across it: rock dragged along the belt, a little squeezed across it.
+    The projections s (s.v) and c (c.v) do not change when the axis flips sign, so the displacement stays
+    continuous where the shortening angle wraps from pi to 0."""
+    if spec['amplitude_km'] <= 0 and spec['strain_amplitude_km'] <= 0:
+        return x, y
+    n1 = fbm(x, y, spec, seed + 11, domain)
+    n2 = fbm(x, y, spec, seed + 12, domain)
+    cx, cy = np.cos(theta), np.sin(theta)  # across the strike (the shortening axis)
+    sx, sy = -cy, cx                        # along the strike
+    along = sx * n1 + sy * n2
+    across = cx * n1 + cy * n2
+    belt = spec['strain_amplitude_km'] * np.clip(alignment, 0.0, 1.0)
+    dx = spec['amplitude_km'] * n1 + belt * (sx * along + spec['across_fraction'] * cx * across)
+    dy = spec['amplitude_km'] * n2 + belt * (sy * along + spec['across_fraction'] * cy * across)
+    return x + dx, y + dy
 
 
 def erosion_pass(domain, height_m, x, y, amplitude_m, erodibility, spec, seed):
@@ -366,18 +396,57 @@ def crop(domain, values):
     return values[r0:r1, c0:c1]
 
 
-def render(domain, elevation, sea, discharge, directory, suffix=''):
-    elevation, sea = crop(domain, elevation), crop(domain, sea)
-    rows = elevation.shape[0]
+def relief_rgb(domain, elevation, sea):
+    """Elevation colours times the hillshade, on the kept window (cropped already)."""
     coslat = np.maximum(crop(domain, domain.coslat[:, None] * np.ones((1, domain.columns)))[:, 0], 0.25)  # no black poles
     dy = domain.fine_km * 1000.0
+    shade = shade_factor(hillshade(elevation, dy, dy * coslat[:elevation.shape[0]], domain.exaggeration))
+    return np.clip(terrain_base(elevation, sea) * shade[..., None], 0, 255)
+
+
+HARDNESS_STOPS = [(-1.0, (196, 120, 60)), (0.0, (232, 226, 205)), (1.0, (60, 120, 170))]
+
+
+def render_stages(domain, fields, final_elevation, config, directory):
+    """One map per stage of the procedural pass and the physics, each the surface so far."""
+    sea = crop(domain, fields['sea'])
+    stages = fields['stages']
+    images = []
+    for index, (key, caption) in enumerate((('base', 'base: B-spline of the tectonic world'),
+                                            ('warp', 'warp: a grid carried by the displacement'),
+                                            ('relief', 'relief noise'), ('uplands', 'uplands lift'),
+                                            ('hardness', 'rock hardness: log erodibility (brown hard, blue soft)'),
+                                            ('filter', 'erosion filter'), ('physics', 'drainage and erosion')), 1):
+        if key == 'warp':
+            rgb = relief_rgb(domain, crop(domain, stages['base']), sea)
+            spacing = config['render']['warp_grid_km']
+            width = 0.75 * domain.fine_km / spacing
+            xw, yw = (crop(domain, values) / spacing for values in stages['warp'])
+            lines = (np.abs(xw - np.round(xw)) < width) | (np.abs(yw - np.round(yw)) < width)
+            rgb[lines] = (255, 255, 255)
+        elif key == 'hardness':
+            values = np.log(crop(domain, stages['hardness'])) / config['hardness']['sigma']
+            rgb = colourize(values, HARDNESS_STOPS)
+        elif key == 'physics':
+            if final_elevation is None:
+                continue
+            rgb = relief_rgb(domain, crop(domain, final_elevation), sea)
+        else:
+            rgb = relief_rgb(domain, crop(domain, stages[key]), sea)
+        name = f'{domain.name}-stage{index}-{key}.png'
+        save_rgb(directory / name, rgb)
+        images.append((f'{index}. {caption}', name))
+    return images
+
+
+def render(domain, elevation, sea, discharge, directory, suffix=''):
+    elevation, sea = crop(domain, elevation), crop(domain, sea)
     base_rgb = terrain_base(elevation, sea)
     names = {}
     names['elevation'] = f'{domain.name}{suffix}-elevation.png'
     save_rgb(directory / names['elevation'], base_rgb)
-    shade = shade_factor(hillshade(elevation, dy, dy * coslat[:rows], domain.exaggeration))
     names['relief'] = f'{domain.name}{suffix}-relief.png'
-    save_rgb(directory / names['relief'], np.clip(base_rgb * shade[..., None], 0, 255))
+    save_rgb(directory / names['relief'], relief_rgb(domain, elevation, sea))
     if discharge is not None:
         discharge = crop(domain, discharge)
         logarithm = np.where(~sea & (discharge > 0), np.log10(np.maximum(discharge, 1e-9)), np.nan)
@@ -458,6 +527,9 @@ def main():
         title = 'Whole world' if domain.whole else f'Window {domain.name}'
         sections.append((f'{title} ({domain.columns if domain.whole else domain.crop[3] - domain.crop[2]} columns, '
                          f'{domain.fine_km:.2f} km cells, k {domain.k})', images))
+        if domain.whole and config['render'].get('stages', True):
+            stage_images = render_stages(domain, fields, elevation if physics_on else None, config, directory)
+            sections.append(('Whole world, stage by stage (each map the surface so far)', stage_images))
         print(f'{domain.name}: {timings[domain.name]}', flush=True)
     (directory / 'config.json').write_text(json.dumps(config, indent=1), encoding='utf-8')
     write_page(directory, arguments.label, sections, config, timings)

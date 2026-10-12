@@ -7,14 +7,15 @@
   "A": {"pixels": [164, 48, 183, 63], "scale": 64, "margin": 1, "exaggeration": 3.0},
   "B": {"pixels": [180, 48, 199, 63], "scale": 64, "margin": 1, "exaggeration": 3.0}
  },
- "warp": {"wavelength_km": 1200, "octaves": 3, "lacunarity": 2.0, "gain": 0.5, "amplitude_km": 150, "min_cells": 2.5},
+ "warp": {"wavelength_km": 1200, "octaves": 3, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5,
+          "amplitude_km": 40, "strain_amplitude_km": 150, "across_fraction": 0.3, "smoothing_cells": 2.0},
  "structure": {"orientations": 6, "sharpness": 4.0, "stretch": 4.0, "strain_full": 0.3},
  "relief": {"wavelength_km": 300, "octaves": 7, "lacunarity": 2.0, "gain": 0.62, "min_cells": 2.5, "ridged": 0.6,
             "base_m": 60, "elevation_fraction": 0.25, "strain_m": 500, "sea_fraction": 0.3},
  "uplands": {"lift_m": 400, "wavelength_km": 1500, "octaves": 3, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5,
              "coast_sigma_cells": 2.0},
  "hardness": {"wavelength_km": 250, "octaves": 4, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5,
-              "sigma": 0.7, "contrast": 2.5},
+              "sigma": 0.7, "contrast": 1.5},
  "filter": {"enabled": true, "scale_km": 30, "octaves": 5, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5,
             "strength": 0.35, "gully_weight": 0.5, "detail": 1.5, "rounding": [0.1, 0.0, 0.1, 2.0],
             "onset": [1.25, 1.25, 2.8, 1.5], "assumed_slope": [0.7, 1.0], "cell_scale": 0.7, "normalization": 0.5,
@@ -24,5 +25,5 @@
              "uplift_factor": 0.0,
              "global": {"duration_myr": 10, "step_myr": 1.0},
              "window": {"duration_myr": 10, "step_myr": 0.5}},
- "render": {"before_physics": false}
+ "render": {"before_physics": false, "stages": true, "warp_grid_km": 400}
 }
