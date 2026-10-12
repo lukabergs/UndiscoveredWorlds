@@ -20,6 +20,7 @@ import argparse
 import copy
 import json
 import math
+import shutil
 import subprocess
 import sys
 import time
@@ -469,6 +470,11 @@ def render_stages(domain, fields, final_elevation, config, directory):
         name = f'{domain.name}-stage{index}-{key}.png'
         save_rgb(directory / name, rgb)
         images.append((f'{index}. {caption}', name))
+        earth = ROOT / config['render'].get('earth_hardness', '')
+        if key == 'hardness' and earth.is_file():  # the Earth beside it, same palette and scale
+            shutil.copyfile(earth, directory / 'earth-hardness.png')
+            images.append(('5b. Earth: GLiM erodibility (Moosdorf et al. 2018 index; refs/processed/lithology)',
+                           'earth-hardness.png'))
     return images
 
 

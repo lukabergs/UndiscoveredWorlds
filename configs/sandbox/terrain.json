@@ -28,5 +28,6 @@
              "uplift_factor": 1.0,
              "global": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 0.0, "threshold_slope": 0.1},
              "window": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.35}},
- "render": {"before_physics": false, "stages": true, "warp_grid_km": 400}
+ "render": {"before_physics": false, "stages": true, "warp_grid_km": 400,
+            "earth_hardness": "refs/processed/lithology/glim_erodibility_2048.png"}
 }
