@@ -38,6 +38,7 @@ from uwtools import etopo  # noqa: E402
 from uwtools.map_rendering import save_rgb  # noqa: E402
 from maps import hillshade, shade_factor, terrain_base  # noqa: E402
 import earth_windows as ew  # noqa: E402
+import overlays  # noqa: E402  (scripts/sandbox, the script's own directory)
 
 RADIUS_M = ew.EARTH_RADIUS_M
 GLOBE_COLUMNS = (128, 256, 512, 1024, 2048)
@@ -90,9 +91,30 @@ def to_uint8(rgb):
     return np.clip(np.rint(rgb), 0, 255).astype(np.uint8)
 
 
-def save_pair(out, stem, elevation, sea, north, pixel_deg, exaggeration):
-    save_rgb(out / f'{stem}-elevation.png', to_uint8(terrain_base(elevation, sea)))
-    save_rgb(out / f'{stem}-relief.png', to_uint8(relief_rgb(elevation, sea, north, pixel_deg, exaggeration)))
+WORLD_CELL_DEG = 360.0 / 256.0  # the sandbox's world grid: the cells its windows are refined from
+
+
+def annotate(rgb, north, pixel_deg, west=None, centre_latitude=0.0):
+    """The sandbox's scale references (overlays.py): on a window (west given) the faint grid of the
+    256-column world's cells, at their true longitudes and latitudes; on every image a scale bar measured
+    east-west at the centre latitude."""
+    if west is not None:
+        step = WORLD_CELL_DEG / pixel_deg
+        rgb = overlays.grid(rgb, step, ((-180.0 - west) / pixel_deg) % step, ((north - 90.0) / pixel_deg) % step)
+        note = (f'(east-west, {abs(centre_latitude):.0f} {"N" if centre_latitude >= 0 else "S"}; '
+                'grid: 256-column world cells)')
+    else:
+        note = '(east-west, at the equator)'
+    km_per_px = RADIUS_M * math.radians(pixel_deg) * math.cos(math.radians(centre_latitude)) / 1000.0
+    return overlays.scale_bar(rgb, km_per_px, note)
+
+
+def save_pair(out, stem, elevation, sea, north, pixel_deg, exaggeration, west=None, centre_latitude=0.0):
+    save_rgb(out / f'{stem}-elevation.png',
+             annotate(to_uint8(terrain_base(elevation, sea)), north, pixel_deg, west, centre_latitude))
+    save_rgb(out / f'{stem}-relief.png',
+             annotate(to_uint8(relief_rgb(elevation, sea, north, pixel_deg, exaggeration)), north, pixel_deg, west,
+                      centre_latitude))
     return f'{stem}-elevation.png', f'{stem}-relief.png'
 
 
@@ -159,7 +181,8 @@ def window(out, ocean, entries, group, name, title, longitude, latitude, pixel_d
     if source == 'etopo15':  # pixels finer than the mask: below-0 m pixels joined to the ocean are sea
         labels, _ = ndimage.label(elevation < 0.0)
         sea = np.isin(labels, np.unique(labels[sea & (labels > 0)])) & (labels > 0)
-    files = save_pair(out, f'{group}-{name}', elevation, sea, extent['north'], grid['pixel_deg'], exaggeration)
+    files = save_pair(out, f'{group}-{name}', elevation, sea, extent['north'], grid['pixel_deg'], exaggeration,
+                      west=extent['west'], centre_latitude=latitude)
     km = request['metres_per_pixel'] / 1000.0
     caption = (f'{title}; centre {centre_text(longitude, latitude)}; {extent_text(extent)} '
                f'({pixels[0] * pixel_deg:g}° x {pixels[1] * pixel_deg:g}°, {pixels[0]} x {pixels[1]} pixels); '

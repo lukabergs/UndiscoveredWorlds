@@ -137,12 +137,23 @@ double limitslopes(const landscape::SphereMetric& metric, const std::vector<uint
         }
         cut.swap(smoothed);
     }
+    // The averaged cut may exceed a cell's own: never below the lowest capped height around it (itself
+    // included), so the smoothing cannot dig a pit. Without this floor, cuts averaged in from glacier-steep
+    // walls took cells below their neighbours step after step: closed pits down to -15 km in B-core at k 256.
     removed = 0.0;
     for (std::size_t i = 0; i < elevation.size(); i++)
         if (!sea[i] && cut[i] > 0.0f)
         {
-            elevation[i] -= cut[i];
-            removed += cut[i] * metric.area_m2(i) * 1e-9;
+            float floor = height[i];
+            for (int direction = 1; direction <= landscape::directioncount; direction++)
+            {
+                const std::size_t next = metric.neighbour(i, direction);
+                if (next != i)
+                    floor = std::min(floor, sea[next] ? 0.0f : height[next]);
+            }
+            const float lowered = std::max(elevation[i] - cut[i], floor);
+            removed += (elevation[i] - lowered) * metric.area_m2(i) * 1e-9;
+            elevation[i] = lowered;
         }
     return removed;
 }
@@ -179,7 +190,7 @@ void usage()
                  "  [--runoff M_PER_YR 0.3 | --runoff-file FILE] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
                  "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--delta-top M 0] [--threshold-slope S 0: off]\n"
                  "  [--ela FILE] (m per cell: glaciers) [--glacial-ratio 2] [--ice-full-range M 500] [--ice-accumulation 1]\n"
-                 "  [--out-ice FILE]\n"
+                 "  [--out-ice FILE] [--pinned FILE] (cells held at their starting height)\n"
                  "  [--radius-km 6371]\n";
 }
 }
@@ -217,6 +228,24 @@ int main(int argc, char** argv)
         std::vector<uint8_t> sea(count);
         for (std::size_t i = 0; i < count; i++)
             sea[i] = seavalues[i] > 0.5f ? 1 : 0;
+        // Pinned cells (a window's inner boundary ring): held at their starting height after every step, so a
+        // river leaving the window drains to the land's height there, not to the sea level of the outer ring.
+        std::vector<std::size_t> pinned;
+        std::vector<float> pinnedheight;
+        if (options.count("--pinned"))
+        {
+            const std::vector<float> mask = readraster(text("--pinned", ""), count);
+            for (std::size_t i = 0; i < count; i++)
+                if (mask[i] > 0.5f && !sea[i])
+                {
+                    pinned.push_back(i);
+                    pinnedheight.push_back(elevation[i]);
+                }
+        }
+        const auto holdpinned = [&]() {
+            for (std::size_t j = 0; j < pinned.size(); j++)
+                elevation[pinned[j]] = pinnedheight[j];
+        };
         const double k = number("--k", 750.0);
         std::vector<float> erodibility = options.count("--erodibility") ? readraster(text("--erodibility", ""), count)
                                                                          : std::vector<float>(count, 1.0f);
@@ -290,6 +319,7 @@ int main(int argc, char** argv)
             marine += budget.marinedeposited_km3;
             if (thresholdslope > 0.0)
                 landslides += limitslopes(metric, sea, thresholdslope, elevation);
+            holdpinned();
             steps++;
         }
         route(elevation);

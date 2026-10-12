@@ -40,6 +40,7 @@ from validation import surface_elevation  # noqa: E402
 from maps import hillshade, shade_factor, terrain_base  # noqa: E402
 
 import erosion_filter  # noqa: E402
+import overlays  # noqa: E402
 
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'terrain.json'
 PHYSICS = ROOT / 'out' / 'build' / 'headless' / 'bin' / 'Release' / 'terrain_sandbox.exe'
@@ -305,13 +306,25 @@ def procedural(domain, world, config, seed):
     labels, _ = ndimage.label(land_or_low, structure=np.ones((3, 3)))
     sea_labels = np.unique(labels[(labels > 0) & sea_seed])
     sea = np.isin(labels, sea_labels[sea_labels > 0])
-    if not domain.whole:  # the outer ring drains the window: sea at or below -1 m
+    pinned = np.zeros_like(sea)
+    if not domain.whole:
+        # The outer ring drains the window (sea at or below -1 m); the ring inside it is pinned at the lowest
+        # terrain within half a world cell (a valley floor's height), so a river leaving the window keeps the
+        # land's height as its base level. With the sea ring alone, every large river crossing the edge was
+        # graded to the sea level and cut a canyon down to it (the user's "rivers jumping up", v10 to v13).
         ring = np.zeros_like(sea)
         ring[0, :] = ring[-1, :] = ring[:, 0] = ring[:, -1] = True
+        pinned[1:-1, 1:-1] = True
+        pinned[2:-2, 2:-2] = False
+        pinned &= ~sea
+        size = max(3, domain.k // 2) | 1
+        floor = ndimage.minimum_filter(filtered, size=size, mode='nearest')
+        filtered = np.where(pinned, np.maximum(floor, 1.0), filtered)
         sea |= ring
         filtered = np.where(ring, np.minimum(filtered, -1.0), filtered)
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
-            'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude}, timings
+            'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude,
+            'pinned': pinned}, timings
 
 
 def hardness_domains(world, spec):
@@ -422,7 +435,25 @@ def warped(x, y, theta, alignment, spec, seed, domain):
     return x + dx, y + dy
 
 
-def erosion_pass(domain, height_m, x, y, amplitude_m, erodibility, spec, seed):
+def filter_field(domain, fields, ice, spec, seed):
+    """The filter's strength as a field (spec['field']): a slow noise (exp of sigma x fBm, regional variety),
+    the rock (erodibility^hardness_exponent: soft rock carries denser gullies, badlands), the precipitation
+    ((P / reference)^exponent clipped: wetter ground is more dissected) and no gullies under today's ice
+    (1 - ice / ice_full_m: a glacier smooths its bed). 1 where every factor is neutral."""
+    field_spec = spec['field']
+    x, y = fields['coords']
+    noise = field_spec['noise']
+    field = np.exp(noise['sigma'] * fbm(x, y, noise, seed + 60, domain))
+    field = field * fields['erodibility'] ** field_spec['hardness_exponent']
+    low, high = field_spec['precipitation_clip']
+    rain = np.clip(fields['precipitation'] / field_spec['precipitation_reference_m_yr'], low, high)
+    field = field * rain ** field_spec['precipitation_exponent']
+    if ice is not None:
+        field = field * (1.0 - np.clip(ice / field_spec['ice_full_m'], 0.0, 1.0))
+    return field
+
+
+def erosion_pass(domain, height_m, x, y, amplitude_m, erodibility, spec, seed, field=None):
     """The erosion filter on the domain: horizontal unit km, vertical unit km x vertical_scale; the
     slope by central differences; the fade target the height between the local floor and crest (a
     min/max filter over fade_radius_km, smoothed), -1 at the floor and +1 at the crest; the strength
@@ -441,6 +472,8 @@ def erosion_pass(domain, height_m, x, y, amplitude_m, erodibility, spec, seed):
     land = np.clip(height_m / spec['land_fade_m'], 0.0, 1.0)  # no gullies at sea, faded in above the coast
     strength = spec['strength'] * np.clip(amplitude_m / spec['relief_reference_m'], 0.0, spec['relief_cap']) * \
         erodibility ** spec['hardness_exponent'] * land
+    if field is not None:
+        strength = strength * field
     if 'slope_fade' in spec:  # gullies on slopes only: on flats they have no direction and crinkle the plain
         real_slope = np.sqrt(slope_x * slope_x + slope_y * slope_y) / vs
         strength = strength * smoothstep(real_slope, *spec['slope_fade'])
@@ -467,7 +500,7 @@ def run_physics(domain, fields, config, directory):
                         config['precipitation']['runoff_min_m_yr'])
     for key, values in (('elevation', fields['surface']), ('sea', fields['sea'].astype(np.float32)),
                         ('erodibility', fields['erodibility']), ('uplift', fields['uplift'] * spec['uplift_factor']),
-                        ('runoff', runoff)):
+                        ('runoff', runoff), ('pinned', fields['pinned'].astype(np.float32))):
         files[key] = stem.with_name(f'{domain.name}-{key}.f32')
         np.asarray(values, dtype='<f4').tofile(files[key])
     out_elevation = stem.with_name(f'{domain.name}-out-elevation.f32')
@@ -479,7 +512,7 @@ def run_physics(domain, fields, config, directory):
                '--step', str(spec['step_myr']), '--k', str(spec['k']), '--m', str(spec['m']),
                '--deposition', str(spec['deposition']), '--diffusivity', str(spec['diffusivity_km2_myr']),
                '--delta-top', str(spec['delta_top_m']), '--threshold-slope', str(spec['threshold_slope']),
-               '--radius-km', str(domain.radius_km),
+               '--pinned', str(files['pinned']), '--radius-km', str(domain.radius_km),
                '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge)]
     if not domain.whole:
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
@@ -540,6 +573,7 @@ def relief_rgb(domain, elevation, sea):
 
 HARDNESS_STOPS = [(-1.0, (196, 120, 60)), (0.0, (232, 226, 205)), (1.0, (60, 120, 170))]
 PRECIPITATION_STOPS = [(0.0, (170, 120, 70)), (0.3, (220, 200, 140)), (1.0, (90, 160, 80)), (3.0, (40, 90, 170))]
+FIELD_STOPS = [(0.0, (10, 10, 12)), (1.0, (235, 235, 235)), (2.5, (240, 140, 40))]
 
 
 def render_stages(domain, fields, final_elevation, config, directory):
@@ -574,7 +608,7 @@ def render_stages(domain, fields, final_elevation, config, directory):
         else:
             rgb = relief_rgb(domain, crop(domain, stages[key]), sea)
         name = f'{domain.name}-stage{index}-{key}.png'
-        save_rgb(directory / name, rgb)
+        save_map(domain, directory / name, rgb)
         images.append((f'{index}. {caption}', name))
         earth = ROOT / config['render'].get('earth_hardness', '')
         if key == 'hardness' and earth.is_file():  # the Earth beside it, same palette and scale
@@ -582,6 +616,20 @@ def render_stages(domain, fields, final_elevation, config, directory):
             images.append(('5b. Earth: GLiM erodibility (Moosdorf et al. 2018 index; refs/processed/lithology)',
                            'earth-hardness.png'))
     return images
+
+
+def save_map(domain, path, rgb):
+    """A map with its scale references (overlays.py): on a window the faint grid of the world cells it was
+    refined from (one line every k pixels; the crop starts on a world-cell edge) and on every map a scale
+    bar measured east-west at the map's centre latitude."""
+    if not domain.whole:
+        rgb = overlays.grid(rgb, domain.k)
+        latitude = domain.north_deg - domain.rows * domain.pixel_deg / 2.0
+        note = f'(east-west, {abs(latitude):.0f} {"N" if latitude >= 0 else "S"}; grid: world cells)'
+        km_per_px = domain.fine_km * math.cos(math.radians(latitude))
+    else:
+        note, km_per_px = '(east-west, at the equator)', domain.fine_km
+    save_rgb(path, overlays.scale_bar(rgb, km_per_px, note))
 
 
 def with_ice(rgb, ice):
@@ -599,12 +647,12 @@ def render(domain, elevation, sea, discharge, directory, suffix='', ice=None):
     base_rgb = with_ice(terrain_base(elevation, sea), ice)
     names = {}
     names['elevation'] = f'{domain.name}{suffix}-elevation.png'
-    save_rgb(directory / names['elevation'], base_rgb)
+    save_map(domain, directory / names['elevation'], base_rgb)
     names['relief'] = f'{domain.name}{suffix}-relief.png'
     coslat = np.maximum(crop(domain, domain.coslat[:, None] * np.ones((1, domain.columns)))[:, 0], 0.25)
     dy = domain.fine_km * 1000.0
     shade = shade_factor(hillshade(elevation, dy, dy * coslat[:elevation.shape[0]], domain.exaggeration))
-    save_rgb(directory / names['relief'], np.clip(base_rgb * shade[..., None], 0, 255))  # the ice shaded too
+    save_map(domain, directory / names['relief'], np.clip(base_rgb * shade[..., None], 0, 255))  # the ice shaded too
     if discharge is not None:
         discharge = crop(domain, discharge)
         logarithm = np.where(~sea & (discharge > 0), np.log10(np.maximum(discharge, 1e-9)), np.nan)
@@ -614,7 +662,7 @@ def render(domain, elevation, sea, discharge, directory, suffix='', ice=None):
         rgb = palette_rgb(logarithm, 'tectonics:discharge_log').astype(float)
         rgb[sea] = (18, 22, 30)
         names['discharge'] = f'{domain.name}{suffix}-discharge.png'
-        save_rgb(directory / names['discharge'], rgb)
+        save_map(domain, directory / names['discharge'], rgb)
     return names
 
 
@@ -683,14 +731,32 @@ def main():
             sea = fields['sea'] | np.isin(labels, touching[touching > 0])
             fields['sea'] = sea
             spec = config['filter']
+            extra = []
+            np.save(directory / f'{domain.name}-elevation-physics.npy', crop(domain, elevation).astype(np.float32))
             if spec['enabled'] and spec.get('when', 'before') == 'after':  # fine texture on the eroded surface
                 x, y = fields['coords']
+                field = filter_field(domain, fields, ice, spec, config['seed'])
                 detail = erosion_pass(domain, elevation, x, y, fields['amplitude'], fields['erodibility'], spec,
-                                      config['seed'])
+                                      config['seed'], field=field)
+                land = ~sea
+                if spec.get('mean_preserve', 'none') == 'smooth':
+                    # Take out the filter's broad component (its mean over about a world cell, land only), so
+                    # the averages over world cells stay close to the physics' (not exact: the pipeline's
+                    # projection does that).
+                    sigma = domain.k / 2.0
+                    weight = ndimage.gaussian_filter(land.astype(float), sigma, mode='nearest')
+                    broad = ndimage.gaussian_filter(np.where(land, detail, 0.0), sigma, mode='nearest') / \
+                        np.maximum(weight, 1e-6)
+                    detail = detail - broad
                 elevation = np.where(sea, elevation, np.maximum(elevation + detail, 1.0))
+                if not domain.whole:
+                    save_map(domain, directory / f'{domain.name}-filter-field.png',
+                             colourize(crop(domain, field), FIELD_STOPS))
+                    extra = [('filter strength field (black 0, white 1, orange 2 and more)', f'{domain.name}-filter-field.png')]
+            np.save(directory / f'{domain.name}-elevation.npy', crop(domain, elevation).astype(np.float32))
             after = render(domain, elevation, sea, discharge, directory, ice=ice)
             images = [('elevation', after['elevation']), ('relief (hillshade, NW light)', after['relief']),
-                      ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + images
+                      ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + extra + images
         else:
             images = [('elevation (procedural, no physics)', before['elevation'])] + images
         timing['total'] = time.perf_counter() - started
