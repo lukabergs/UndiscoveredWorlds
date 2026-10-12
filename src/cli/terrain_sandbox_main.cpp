@@ -1,0 +1,166 @@
+// terrain_sandbox: the physics of the terrain sandbox (scripts/sandbox/terrain_sandbox.py). Routes and
+// erodes a raster the sandbox writes, with the pipeline's own kernels (Priority-Flood, D8 flow graph,
+// implicit stream power with deposition and hillslope diffusion), so procedural terrain can be judged
+// after real drainage and erosion without running the pipeline. Not a pipeline stage: no world, no
+// bundle, no tuning header. Files are raw little-endian float32, rows north first; elevations are metres
+// relative to the sea level.
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "simulations/landscape/depressions.hpp"
+#include "simulations/landscape/flow_graph.hpp"
+#include "simulations/landscape/sphere_metric.hpp"
+#include "simulations/landscape/stream_power.hpp"
+
+namespace
+{
+constexpr double pi = 3.14159265358979323846;
+constexpr double secondsperyear = 365.25 * 86400.0;
+
+std::vector<float> readraster(const std::string& path, std::size_t count)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        throw std::runtime_error("cannot open " + path);
+    std::vector<float> values(count);
+    in.read(reinterpret_cast<char*>(values.data()), static_cast<std::streamsize>(count * sizeof(float)));
+    if (in.gcount() != static_cast<std::streamsize>(count * sizeof(float)))
+        throw std::runtime_error(path + ": expected " + std::to_string(count) + " float32 values");
+    return values;
+}
+
+void writeraster(const std::string& path, const std::vector<float>& values)
+{
+    std::ofstream out(path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(values.data()), static_cast<std::streamsize>(values.size() * sizeof(float)));
+    if (!out)
+        throw std::runtime_error("cannot write " + path);
+}
+
+// A window of square-in-degree pixels from latitude `north` down, `pixeldeg` per pixel. Longitude still
+// wraps between the window's west and east columns: the caller makes the outer ring sea so nothing flows
+// across that seam.
+landscape::SphereMetric windowmetric(int columns, int rows, double north_deg, double pixel_deg, double radius_m)
+{
+    landscape::SphereMetric metric(columns, rows, radius_m);
+    const double pixel = pixel_deg * pi / 180.0;
+    metric.dy_m = radius_m * pixel;
+    for (int j = 0; j < rows; j++)
+    {
+        const double north = north_deg * pi / 180.0 - j * pixel;
+        const double south = north - pixel;
+        const std::size_t row = static_cast<std::size_t>(j);
+        metric.rowlatitude_rad[row] = 0.5 * (north + south);
+        metric.rowdx_m[row] = radius_m * pixel * std::cos(metric.rowlatitude_rad[row]);
+        metric.rowarea_m2[row] = radius_m * radius_m * pixel * (std::sin(north) - std::sin(south));
+    }
+    return metric;
+}
+
+void usage()
+{
+    std::cout << "terrain_sandbox --columns W --rows H --elevation FILE --sea FILE --out-elevation FILE --out-discharge FILE\n"
+                 "  [--north DEG --pixel-deg DEG] (a window; default the whole sphere)\n"
+                 "  [--erodibility FILE] (relative K per cell, default 1) [--uplift FILE] (m/Myr per cell, default 0)\n"
+                 "  [--runoff M_PER_YR 0.3] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
+                 "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--radius-km 6371]\n";
+}
+}
+
+int main(int argc, char** argv)
+{
+    std::map<std::string, std::string> options;
+    for (int i = 1; i + 1 < argc; i += 2)
+        options[argv[i]] = argv[i + 1];
+    const auto text = [&](const char* key, const char* fallback) {
+        const auto found = options.find(key);
+        return found == options.end() ? std::string(fallback) : found->second;
+    };
+    const auto number = [&](const char* key, double fallback) {
+        const auto found = options.find(key);
+        return found == options.end() ? fallback : std::stod(found->second);
+    };
+    if (argc < 2 || options.count("--columns") == 0 || options.count("--elevation") == 0)
+    {
+        usage();
+        return 2;
+    }
+    try
+    {
+        const int columns = std::stoi(text("--columns", "0"));
+        const int rows = std::stoi(text("--rows", "0"));
+        const double radius_m = number("--radius-km", 6371.0) * 1000.0;
+        const std::size_t count = static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
+        landscape::SphereMetric metric = options.count("--pixel-deg")
+            ? windowmetric(columns, rows, number("--north", 90.0), number("--pixel-deg", 180.0 / rows), radius_m)
+            : landscape::SphereMetric(columns, rows, radius_m);
+
+        std::vector<float> elevation = readraster(text("--elevation", ""), count);
+        const std::vector<float> seavalues = readraster(text("--sea", ""), count);
+        std::vector<uint8_t> sea(count);
+        for (std::size_t i = 0; i < count; i++)
+            sea[i] = seavalues[i] > 0.5f ? 1 : 0;
+        const double k = number("--k", 750.0);
+        std::vector<float> erodibility = options.count("--erodibility") ? readraster(text("--erodibility", ""), count)
+                                                                         : std::vector<float>(count, 1.0f);
+        for (float& value : erodibility)
+            value = static_cast<float>(value * k);
+        const std::vector<float> uplift = options.count("--uplift") ? readraster(text("--uplift", ""), count)
+                                                                     : std::vector<float>(count, 0.0f);
+        const std::vector<float> runoff(count, static_cast<float>(number("--runoff", 0.3)));
+
+        landscape::StreamPowerParameters parameters;
+        parameters.areaexponent = number("--m", 0.5);
+        parameters.depositioncoefficient = number("--deposition", 1.0);
+        parameters.hillslopediffusivity_km2_myr = number("--diffusivity", 1.0);
+        parameters.deltatop_m = number("--delta-top", 0.0);  // no sea cell filled above the sea level
+        const double duration = number("--duration", 10.0);
+        const double step = number("--step", 0.5);
+
+        std::vector<float> erosion(count), deposition(count);
+        landscape::FlowGraph graph;
+        const auto route = [&]() {
+            const landscape::Depressions depressions = landscape::filldepressions(metric, elevation, sea, 0.0f);
+            landscape::RoutingOptions routing;
+            routing.resolveflats = true;  // flats drain to their low edges, not in straight flood-order lines
+            graph = landscape::buildflowgraph(metric, elevation, sea, 0.0f, depressions, routing);
+            landscape::accumulateflow(metric, runoff, graph);
+        };
+        double eroded = 0.0, deposited = 0.0, marine = 0.0;
+        int steps = 0;
+        for (double time = 0.0; time < duration - 1e-9; time += step)
+        {
+            parameters.step_myr = std::min(step, duration - time);
+            route();
+            const landscape::StreamPowerBudget budget = landscape::stepstreampower(
+                metric, graph, erodibility, uplift, parameters, elevation, erosion, deposition);
+            eroded += budget.eroded_km3;
+            deposited += budget.landdeposited_km3;
+            marine += budget.marinedeposited_km3;
+            steps++;
+        }
+        route();
+        std::vector<float> discharge(count, 0.0f);
+        for (std::size_t i = 0; i < count; i++)
+            discharge[i] = static_cast<float>(graph.discharge_m3_yr[i] / secondsperyear);
+        writeraster(text("--out-elevation", ""), elevation);
+        writeraster(text("--out-discharge", ""), discharge);
+        std::printf("steps %d eroded_km3 %.1f land_deposited_km3 %.1f marine_deposited_km3 %.1f\n", steps, eroded, deposited,
+                    marine);
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "terrain_sandbox: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}

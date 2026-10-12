@@ -49,6 +49,9 @@ target_link_libraries(uw_headless INTERFACE
 if(UW_BUILD_WORLD OR UW_BUILD_APP)
     add_executable(world_pipeline src/cli/world_pipeline_main.cpp)
     target_link_libraries(world_pipeline PRIVATE uw_headless)
+    # The physics of the terrain sandbox (scripts/sandbox/terrain_sandbox.py): the landscape kernels only.
+    add_executable(terrain_sandbox src/cli/terrain_sandbox_main.cpp)
+    target_link_libraries(terrain_sandbox PRIVATE uw_landscape uw_includes)
 endif()
 
 if(UW_BUILD_APP)
