@@ -145,7 +145,8 @@ def world_fields(bundle):
     uplift = bundle.load('geosphere.rock_uplift_rate').astype(float) if bundle.has('geosphere.rock_uplift_rate') else \
         np.zeros_like(elevation)
     return {'elevation': elevation, 'sea': sea, 'shortening': np.maximum(strain, 0.0), 'direction': direction,
-            'uplift': uplift}
+            'uplift': uplift, 'sediment': bundle.load('geosphere.sediment').astype(float),
+            'continental_crust': bundle.load('geosphere.continental_crust').astype(float)}
 
 
 # ---------------------------------------------------------------- noise
@@ -274,10 +275,7 @@ def procedural(domain, world, config, seed):
         large = fbm(x, y, uplands, seed + 50, domain)
         surface = surface + uplands['lift_m'] * inland * np.clip(0.5 + 0.5 * large, 0.0, 1.5) * (base > 0)
     stages['uplands'] = surface
-    hardness_spec = config['hardness']
-    banding = oriented_fbm(x, y, theta, alignment, {**hardness_spec, **structure}, seed + 30, domain)
-    contrast = hardness_spec['contrast']
-    erodibility = np.exp(hardness_spec['sigma'] * np.tanh(contrast * banding) / math.tanh(contrast))
+    erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment, mx, my, seed)
     stages['hardness'] = erodibility
     timings['noise'] = time.perf_counter() - started
 
@@ -300,6 +298,39 @@ def procedural(domain, world, config, seed):
         filtered = np.where(ring, np.minimum(filtered, -1.0), filtered)
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
             'strain': strain, 'stages': stages}, timings
+
+
+def hardness_domains(world, spec):
+    """ln relative erodibility of the rock domains on the world grid, from the tectonic fields:
+    sedimentary basins soft (+sediment_soft x tanh(sediment / sediment_scale_m)); shields hard (crust of
+    normal thickness, shield_crust_m, without sediment or shortening: -shield_hard); orogen cores hard
+    (thick crust above core_crust_m under shortening: -core_hard); thinned crust soft (below thin_crust_m:
+    +thin_soft). Smoothed over one world cell so the domains have no cell edges."""
+    sediment = np.tanh(world['sediment'] / spec['sediment_scale_m'])
+    crust = world['continental_crust']
+    strained = np.clip(world['shortening'] / spec['strain_full'], 0.0, 1.0)
+    low, high = spec['shield_crust_m']
+    normal = np.clip((crust - low) / (high - low), 0.0, 1.0) * np.clip((high + 10000.0 - crust) / 10000.0, 0.0, 1.0)
+    shield = normal * (1 - sediment) * (1 - strained)
+    core = np.clip((crust - spec['core_crust_m']) / 10000.0, 0.0, 1.0) * strained
+    thin = np.clip((spec['thin_crust_m'] - crust) / 8000.0, 0.0, 1.0) * (crust > 0)
+    value = spec['sediment_soft'] * sediment - spec['shield_hard'] * shield - spec['core_hard'] * core + \
+        spec['thin_soft'] * thin
+    return ndimage.gaussian_filter(value, 1.0, mode=('nearest', 'wrap'))
+
+
+def hardness(domain, world, spec, structure, x, y, theta, alignment, mx, my, seed):
+    """Relative erodibility K / K0: exp of the rock domains (hardness_domains), a weak large-scale noise
+    and, in the belts, hard and soft bands across the strike (fold-scale layers stretched along it, the
+    material of trellis drainage). Bands finer than a grid shows fade out like every octave."""
+    value = sample(hardness_domains(world, spec), domain, mx, my)
+    value += spec['noise']['sigma'] * fbm(x, y, spec['noise'], seed + 30, domain)
+    bands = spec['bands']
+    layered = oriented_fbm(x, y, theta, np.ones_like(alignment), {**bands, 'orientations': structure['orientations'],
+                                                                  'sharpness': structure['sharpness']}, seed + 31, domain)
+    contrast = bands['contrast']
+    value += bands['amplitude'] * alignment * np.tanh(contrast * layered) / math.tanh(contrast)
+    return np.exp(value)
 
 
 def warped(x, y, theta, alignment, spec, seed, domain):
@@ -372,7 +403,7 @@ def run_physics(domain, fields, config, directory):
                '--runoff', str(spec['runoff_m_yr']), '--duration', str(spec['duration_myr']),
                '--step', str(spec['step_myr']), '--k', str(spec['k']), '--m', str(spec['m']),
                '--deposition', str(spec['deposition']), '--diffusivity', str(spec['diffusivity_km2_myr']),
-               '--delta-top', str(spec['delta_top_m']),
+               '--delta-top', str(spec['delta_top_m']), '--threshold-slope', str(spec['threshold_slope']),
                '--radius-km', str(domain.radius_km),
                '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge)]
     if not domain.whole:
@@ -416,7 +447,7 @@ def render_stages(domain, fields, final_elevation, config, directory):
     for index, (key, caption) in enumerate((('base', 'base: B-spline of the tectonic world'),
                                             ('warp', 'warp: a grid carried by the displacement'),
                                             ('relief', 'relief noise'), ('uplands', 'uplands lift'),
-                                            ('hardness', 'rock hardness: log erodibility (brown hard, blue soft)'),
+                                            ('hardness', 'rock hardness: ln erodibility over 0.7 (brown hard, blue soft)'),
                                             ('filter', 'erosion filter'), ('physics', 'drainage and erosion')), 1):
         if key == 'warp':
             rgb = relief_rgb(domain, crop(domain, stages['base']), sea)
@@ -426,8 +457,9 @@ def render_stages(domain, fields, final_elevation, config, directory):
             lines = (np.abs(xw - np.round(xw)) < width) | (np.abs(yw - np.round(yw)) < width)
             rgb[lines] = (255, 255, 255)
         elif key == 'hardness':
-            values = np.log(crop(domain, stages['hardness'])) / config['hardness']['sigma']
+            values = np.log(crop(domain, stages['hardness'])) / 0.7  # +-0.7 in ln K spans the palette
             rgb = colourize(values, HARDNESS_STOPS)
+            rgb[sea] = (18, 22, 30)  # the rock of the sea floor is not judged
         elif key == 'physics':
             if final_elevation is None:
                 continue

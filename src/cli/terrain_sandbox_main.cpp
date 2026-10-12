@@ -12,6 +12,8 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <queue>
+#include <utility>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -66,13 +68,58 @@ landscape::SphereMetric windowmetric(int columns, int rows, double north_deg, do
     return metric;
 }
 
+// Threshold hillslopes: no land cell stands more than `slope` x distance above any neighbour, the sea
+// counting at the sea level (0 m). A Dijkstra pass from the lowest cells up: each cell, once final, caps its
+// land neighbours at its height plus slope x distance, so valley walls retreat as the rivers cut instead of
+// leaving one-cell slots. Returns the volume removed (km^3); it leaves the system as landslide debris.
+double limitslopes(const landscape::SphereMetric& metric, const std::vector<uint8_t>& sea, double slope,
+                   std::vector<float>& elevation)
+{
+    using entry = std::pair<float, std::size_t>;
+    std::priority_queue<entry, std::vector<entry>, std::greater<entry>> queue;
+    std::vector<float> height(elevation.size());
+    for (std::size_t i = 0; i < elevation.size(); i++)
+    {
+        height[i] = sea[i] ? 0.0f : elevation[i];
+        queue.emplace(height[i], i);
+    }
+    std::vector<uint8_t> done(elevation.size(), 0);
+    double removed = 0.0;
+    while (!queue.empty())
+    {
+        const auto [value, cell] = queue.top();
+        queue.pop();
+        if (done[cell] || value != height[cell])
+            continue;
+        done[cell] = 1;
+        for (int direction = 1; direction <= landscape::directioncount; direction++)
+        {
+            const std::size_t next = metric.neighbour(cell, direction);
+            if (next == cell || done[next] || sea[next])
+                continue;
+            const float cap = static_cast<float>(value + slope * metric.distance_m(cell, direction));
+            if (cap < height[next])
+            {
+                removed += (height[next] - cap) * metric.area_m2(next) * 1e-9;
+                height[next] = cap;
+                queue.emplace(cap, next);
+            }
+        }
+    }
+    for (std::size_t i = 0; i < elevation.size(); i++)
+        if (!sea[i])
+            elevation[i] = height[i];
+    return removed;
+}
+
 void usage()
 {
     std::cout << "terrain_sandbox --columns W --rows H --elevation FILE --sea FILE --out-elevation FILE --out-discharge FILE\n"
                  "  [--north DEG --pixel-deg DEG] (a window; default the whole sphere)\n"
                  "  [--erodibility FILE] (relative K per cell, default 1) [--uplift FILE] (m/Myr per cell, default 0)\n"
                  "  [--runoff M_PER_YR 0.3] [--duration MYR 10] [--step MYR 0.5] [--k 750] [--m 0.5]\n"
-                 "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--radius-km 6371]\n";
+                 "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--delta-top M 0] [--threshold-slope S 0: off]\n"
+                 "  [--radius-km 6371]\n";
 }
 }
 
@@ -135,7 +182,8 @@ int main(int argc, char** argv)
             graph = landscape::buildflowgraph(metric, elevation, sea, 0.0f, depressions, routing);
             landscape::accumulateflow(metric, runoff, graph);
         };
-        double eroded = 0.0, deposited = 0.0, marine = 0.0;
+        const double thresholdslope = number("--threshold-slope", 0.0);
+        double eroded = 0.0, deposited = 0.0, marine = 0.0, landslides = 0.0;
         int steps = 0;
         for (double time = 0.0; time < duration - 1e-9; time += step)
         {
@@ -146,6 +194,8 @@ int main(int argc, char** argv)
             eroded += budget.eroded_km3;
             deposited += budget.landdeposited_km3;
             marine += budget.marinedeposited_km3;
+            if (thresholdslope > 0.0)
+                landslides += limitslopes(metric, sea, thresholdslope, elevation);
             steps++;
         }
         route();
@@ -154,8 +204,8 @@ int main(int argc, char** argv)
             discharge[i] = static_cast<float>(graph.discharge_m3_yr[i] / secondsperyear);
         writeraster(text("--out-elevation", ""), elevation);
         writeraster(text("--out-discharge", ""), discharge);
-        std::printf("steps %d eroded_km3 %.1f land_deposited_km3 %.1f marine_deposited_km3 %.1f\n", steps, eroded, deposited,
-                    marine);
+        std::printf("steps %d eroded_km3 %.1f land_deposited_km3 %.1f marine_deposited_km3 %.1f landslides_km3 %.1f\n", steps,
+                    eroded, deposited, marine, landslides);
     }
     catch (const std::exception& error)
     {
