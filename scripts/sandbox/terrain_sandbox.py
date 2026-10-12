@@ -295,6 +295,9 @@ def procedural(domain, world, config, seed):
     stages['uplands'] = surface
     erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment * foreland, mx, my, seed)
     stages['hardness'] = erodibility
+    if config['coast']['amplitude_m'] > 0:
+        surface = surface + coast_detail(domain, base, surface, x, y, amplitude, erodibility, config["coast"], seed)
+    stages['coast'] = surface
     stages['precipitation'] = rain
     timings['noise'] = time.perf_counter() - started
 
@@ -329,6 +332,45 @@ def procedural(domain, world, config, seed):
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
             'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude,
             'pinned': pinned}, timings
+
+
+def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed):
+    """Relief concentrated around the sea level, so the shoreline is a fractal line rather than a contour of
+    smooth fields: a rough fBm (gain near 0.6 keeps the fine octaves strong, a ridged share makes headlands
+    and skerries) times exp(-(surface / band_m)^2) on the surface so far. Its amplitude follows the terrain:
+    hard rock (erodibility^hardness_exponent, negative: hard coasts are rocky, soft ones smooth), the local
+    relief (1 + relief_gain x relief / relief_reference_m: mountains meeting the sea) and cold coasts (1 +
+    cold_gain x smoothstep(|latitude|, cold_latitude): the skerry and fjord coasts of former ice). Pure
+    function of position, so every zoom draws the same coast down to its grid's resolution."""
+    noise = fbm(x, y, spec, seed + 70, domain)
+    noise = (1 - spec['ridged']) * noise + spec['ridged'] * ridged(noise) / 0.6
+    latitude = np.abs(domain.north_deg - (np.arange(domain.rows) + 0.5) * domain.pixel_deg)[:, None]
+    strength = spec['amplitude_m'] * erodibility ** spec['hardness_exponent'] * \
+        (1.0 + spec['relief_gain'] * np.clip(relief_m / spec['relief_reference_m'], 0.0, 2.0)) * \
+        (1.0 + spec['cold_gain'] * smoothstep(latitude, *spec['cold_latitude']))
+    # Near the coast only: the band by height alone also took every low inland valley (G-coast: valley floors
+    # pushed below the sea and flooded 100 km inland); the distance to the base's coastline (the zero contour
+    # of the smooth base, both sides) fades it beyond reach_km.
+    land = base > 0.0
+    distance = np.where(land, ndimage.distance_transform_edt(land), ndimage.distance_transform_edt(~land))
+    near = np.exp(-(distance * domain.fine_km / spec['reach_km']) ** 2)
+    strength = strength * near
+    band = np.exp(-(surface / spec['band_m']) ** 2)
+    detail = strength * band * noise
+    if spec.get('warp_km', 0) > 0:
+        # A vertical noise moves a steep shoreline by only its amplitude over the slope; a horizontal fractal
+        # displacement of the surface near the coast (twice the band) bends it whatever the slope. The surface
+        # is resampled at the displaced positions (bilinear), the displacement scaled as the vertical term.
+        warp_spec = {**spec, 'wavelength_km': spec['warp_wavelength_km'], 'octaves': spec['warp_octaves']}
+        wide = np.exp(-(surface / (2.0 * spec['band_m'])) ** 2)
+        scale = spec['warp_km'] / domain.fine_km * wide * strength / spec['amplitude_m']
+        dx = scale * fbm(x, y, warp_spec, seed + 71, domain)
+        dy = scale * fbm(x, y, warp_spec, seed + 72, domain)
+        rows, columns = np.indices(surface.shape, dtype=float)
+        mode = 'grid-wrap' if domain.whole else 'nearest'
+        moved = ndimage.map_coordinates(surface + detail, [rows + dy, columns + dx], order=1, mode=mode)
+        return moved - surface
+    return detail
 
 
 def hardness_domains(world, spec):
@@ -517,6 +559,7 @@ def run_physics(domain, fields, config, directory):
                '--deposition', str(spec['deposition']), '--diffusivity', str(spec['diffusivity_km2_myr']),
                '--delta-top', str(spec['delta_top_m']), '--threshold-slope', str(spec['threshold_slope']),
                '--pinned', str(files['pinned']), '--radius-km', str(domain.radius_km),
+               '--random-routing', '1' if spec.get('random_routing', False) else '0', '--seed', str(config['seed']),
                '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge)]
     if not domain.whole:
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
@@ -589,6 +632,7 @@ def render_stages(domain, fields, final_elevation, config, directory):
                                             ('warp', 'warp: a grid carried by the displacement'),
                                             ('relief', 'relief noise'), ('uplands', 'uplands lift'),
                                             ('hardness', 'rock hardness: ln erodibility over 0.7 (brown hard, blue soft)'),
+                                            ('coast', 'coastal detail'),
                                             ('precipitation', 'precipitation proxy, m/yr (brown 0, green 1, blue 3 and more)'),
                                             ('filter', 'erosion filter'), ('physics', 'drainage and erosion')), 1):
         if key == 'warp':
@@ -734,6 +778,18 @@ def main():
             touching = np.unique(labels[(labels > 0) & fields['sea']])
             sea = fields['sea'] | np.isin(labels, touching[touching > 0])
             fields['sea'] = sea
+            coast = config['coast']
+            if coast['amplitude_m'] > 0 and coast.get('after_physics', False):
+                # The coast term again on the final shoreline: troughs the physics cut below the sea and the sea
+                # flooded have the smooth walls of an ice-carved valley (F-troughs' inlet), which the term before
+                # the physics never saw. Then the sea is flooded again from the sea it had.
+                x, y = fields['coords']
+                elevation = elevation + coast_detail(domain, elevation, elevation, x, y, fields['amplitude'],
+                                                     fields['erodibility'], coast, config['seed'] + 1)
+                labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
+                touching = np.unique(labels[(labels > 0) & sea])
+                sea = np.isin(labels, touching[touching > 0])
+                fields['sea'] = sea
             spec = config['filter']
             extra = []
             np.save(directory / f'{domain.name}-elevation-physics.npy', crop(domain, elevation).astype(np.float32))

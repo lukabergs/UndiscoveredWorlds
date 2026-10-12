@@ -191,7 +191,7 @@ void usage()
                  "  [--deposition G 1] [--diffusivity KM2_PER_MYR 1] [--delta-top M 0] [--threshold-slope S 0: off]\n"
                  "  [--ela FILE] (m per cell: glaciers) [--glacial-ratio 2] [--ice-full-range M 500] [--ice-accumulation 1]\n"
                  "  [--out-ice FILE] [--pinned FILE] (cells held at their starting height) [--sea-cap M 0]\n"
-                 "  [--radius-km 6371]\n";
+                 "  [--random-routing 0|1] [--seed N 1] [--radius-km 6371]\n";
 }
 }
 
@@ -284,18 +284,25 @@ int main(int argc, char** argv)
 
         std::vector<float> erosion(count), deposition(count);
         landscape::FlowGraph graph;
+        const bool randomrouting = number("--random-routing", 0.0) > 0.5;
+        const long long routingseed = static_cast<long long>(number("--seed", 1.0)) * 1000003LL;
+        int steps = 0;
         const auto route = [&](const std::vector<float>& terrain) {
             floodsea(metric, elevation, sea);
             const landscape::Depressions depressions = landscape::filldepressions(metric, terrain, sea, 0.0f);
             landscape::RoutingOptions routing;
             routing.resolveflats = true;  // flats drain to their low edges, not in straight flood-order lines
+            // Randomised receivers (flow_graph.hpp, Rho8 on the sphere's metric): the mean flow follows the gradient
+            // instead of the nearest of eight directions, so rivers wander instead of running along the grid's
+            // axes and diagonals; a new draw every step (the seed plus the step), deterministic.
+            routing.randomised = randomrouting;
+            routing.seed = static_cast<std::uint64_t>(routingseed + steps);
             graph = landscape::buildflowgraph(metric, terrain, sea, 0.0f, depressions, routing);
             landscape::accumulateflow(metric, runoff, graph);
         };
         const double thresholdslope = number("--threshold-slope", 0.0);
         const float seacap = static_cast<float>(number("--sea-cap", 0.0));
         double eroded = 0.0, deposited = 0.0, marine = 0.0, landslides = 0.0;
-        int steps = 0;
         for (double time = 0.0; time < duration - 1e-9; time += step)
         {
             parameters.step_myr = std::min(step, duration - time);
