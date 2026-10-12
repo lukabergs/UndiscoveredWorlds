@@ -175,33 +175,14 @@ def octave_fade(wavelength_km, domain, min_cells):
     return float(np.clip((cells - min_cells) / min_cells, 0.0, 1.0))
 
 
-def in_band(wavelength, spec):
-    """spec['band'] = [shortest, longest) wavelength in km of the octaves a sum keeps (default all)."""
-    low, high = spec.get('band', (0.0, float('inf')))
-    return low <= wavelength < high
-
-
-def fbm_energy(spec, domain):
-    """The root of the summed squared octave amplitudes fbm normalises by (its band only): the weight of a
-    band's unit-variance sum when bands are added back together."""
-    norm, wavelength, amplitude = 0.0, spec['wavelength_km'], 1.0
-    for _ in range(spec['octaves']):
-        if in_band(wavelength, spec):
-            norm += (amplitude * octave_fade(wavelength, domain, spec.get('min_cells', 2.5))) ** 2
-        wavelength /= spec.get('lacunarity', 2.0)
-        amplitude *= spec.get('gain', 0.5)
-    return math.sqrt(norm)
-
-
 def fbm(x, y, spec, seed, domain, stretch=1.0):
     """Fractal sum with unit standard deviation (about); x across and y along a stretch of `stretch`.
-    Each octave is rotated by a fixed irrational angle so no lattice direction repeats. With spec['band'],
-    only the octaves in that wavelength band (the amplitudes keep their place in the whole sum)."""
+    Each octave is rotated by a fixed irrational angle so no lattice direction repeats."""
     total = np.zeros_like(x)
     norm = 0.0
     wavelength, amplitude = spec['wavelength_km'], 1.0
     for octave in range(spec['octaves']):
-        fade = octave_fade(wavelength, domain, spec.get('min_cells', 2.5)) if in_band(wavelength, spec) else 0.0
+        fade = octave_fade(wavelength, domain, spec.get('min_cells', 2.5))
         if fade > 0.0:
             if stretch == 1.0:  # each octave rotated by the golden angle
                 angle = 2.399963 * octave
@@ -243,50 +224,6 @@ def oriented_fbm(x, y, theta, alignment, spec, seed, domain):
     return ((1 - a) * isotropic + a * bank) / np.sqrt((1 - a) ** 2 + a ** 2)
 
 
-def transverse_faults(x, y, theta, alignment, spec, seed, domain):
-    """Faults across the strike in the belts: (shift x, shift y, zone). For a bank of strike directions
-    phi_b (weighted as oriented_fbm's members, sharper), faults are lines of constant along-strike
-    coordinate about spacing_km apart (jittered), each present with probability `probability` and over
-    stretches of its length (a 1D noise along it, length_km), each with an offset up to offset_km across the
-    strike. A fault jogs the coordinates it is added to: the shift steps by its offset across the fault
-    (over width_km) and fades back within one spacing, so ridges and bands drawn on the shifted coordinates
-    jump and then straighten (a drag fold at a tear fault). `zone` is 1 on a fault's trace (width_km): the
-    crushed rock rivers cut through. Weighted by `alignment` (belts only)."""
-    shift_x, shift_y = np.zeros_like(x), np.zeros_like(x)
-    zone, weights = np.zeros_like(x), np.zeros_like(x)
-    count, spacing, width = spec['orientations'], spec['spacing_km'], spec['width_km']
-    aligned = alignment > 0
-    for b in range(count):
-        phi = math.pi * b / count
-        w = np.maximum(0.0, np.cos(2.0 * (theta - phi))) ** spec['sharpness']
-        active = aligned & (w > 1e-3)
-        if not np.any(active):
-            continue
-        xa, ya, wa = x[active], y[active], w[active]
-        across = math.cos(phi) * xa + math.sin(phi) * ya
-        along = (-math.sin(phi) * xa + math.cos(phi) * ya) / spacing
-        nearest = np.round(along).astype(np.int64)
-        jog, trace = np.zeros_like(xa), np.zeros_like(xa)
-        for k in (nearest - 1, nearest, nearest + 1):
-            hx, hy = erosion_filter.cell_hash(k, np.full_like(k, b), seed + 80)
-            position = k + spec['jitter'] * hx
-            present = (0.5 + 0.5 * hy < spec['probability']).astype(float)
-            stretch = gradient_noise(across / spec['length_km'], k * 0.618 + 0.3, seed + 81 + b)
-            present = present * smoothstep(stretch, -0.05, 0.15)
-            offset = spec['offset_km'] * erosion_filter.cell_hash(k, np.full_like(k, b + 97), seed + 82)[0]
-            s = along - position  # in spacings
-            step = smoothstep(s * spacing, -width, width) - 0.5
-            jog += present * offset * step * (1.0 - smoothstep(np.abs(s), 0.3, 1.0))
-            trace = np.maximum(trace, present * np.exp(-(s * spacing / width) ** 2))
-        shift_x[active] += wa * jog * math.cos(phi)
-        shift_y[active] += wa * jog * math.sin(phi)
-        zone[active] += wa * trace
-        weights[active] += wa
-    weights = np.maximum(weights, 1e-12)
-    a = np.clip(alignment, 0.0, 1.0)
-    return a * shift_x / weights, a * shift_y / weights, a * zone / weights
-
-
 def ridged(n):
     """Unit-variance noise to sharp-crested noise of mean about 0 (|n| of a unit normal has mean 0.8)."""
     return 0.8 - np.abs(n)
@@ -314,10 +251,6 @@ def procedural(domain, world, config, seed):
 
     started = time.perf_counter()
     x, y = domain.mesh_km()
-    # Structure is deformed, erosion is not: the warp and the faults move the coordinates of what existed
-    # when the crust moved (the large relief, the rock bands); the erosional textures (the fine relief octaves,
-    # the coast, the filter) are drawn on the plain coordinates x0, y0, so they carry no strike-parallel grain.
-    x0, y0 = x, y
     # The warp reads the strain smoothed over warp.smoothing_cells world cells: a drag that changes over one
     # 156 km cell folds the grid over itself (v4's loops along the belts).
     sigma = config['warp']['smoothing_cells']
@@ -328,12 +261,7 @@ def procedural(domain, world, config, seed):
     warp_alignment = np.clip(warp_strain / structure['strain_full'], 0.0, 1.0) * \
         np.clip(np.abs(warp_doubled) / np.maximum(warp_strain, 1e-9), 0.0, 1.0)
     x, y = warped(x, y, 0.5 * np.angle(warp_doubled), warp_alignment, config['warp'], seed, domain)
-    fault_spec = config['faults']
-    fault_x, fault_y, fault_zone = (np.zeros_like(x), np.zeros_like(x), np.zeros_like(x))
-    if fault_spec['enabled']:
-        fault_x, fault_y, fault_zone = transverse_faults(x, y, theta, alignment, fault_spec, seed, domain)
-    xs, ys = x + fault_x, y + fault_y  # the structural coordinates: warped, then jogged at the faults
-    stages = {'base': base, 'warp': (xs, ys)}
+    stages = {'base': base, 'warp': (x, y)}
     # The belt's zones (multiscale plan S5.5): the foreland (moderate strain) is folded and layered, the core
     # (high strain or thick crust) is crystalline: homogeneous rock and a relief stretched less along the
     # strike, so its rivers can branch (dendritic) instead of following bands.
@@ -346,20 +274,10 @@ def procedural(domain, world, config, seed):
     stages['zones'] = (foreland, core)
     relief = config['relief']
     relief_alignment = alignment * (1 - zones['core_isotropy'] * core)
-    split = relief['fine_km']  # octaves at least this long are structure, shorter ones erosional texture
-    coarse_spec = {**relief, **structure, 'band': (split, float('inf'))}
-    fine_spec = {**relief, 'band': (0.0, split)}
-    coarse = oriented_fbm(xs, ys, theta, relief_alignment, coarse_spec, seed + 20, domain)
-    fine = fbm(x0, y0, fine_spec, seed + 21, domain)
-    e_coarse, e_fine = fbm_energy(coarse_spec, domain), fbm_energy(fine_spec, domain)
-    noise = (e_coarse * coarse + e_fine * fine) / max(math.hypot(e_coarse, e_fine), 1e-12)
+    noise = oriented_fbm(x, y, theta, relief_alignment, {**relief, **structure}, seed + 20, domain)
     noise = (1 - relief['ridged']) * noise + relief['ridged'] * ridged(noise) / 0.6
-    # Ridges end along the strike (plunging folds): the belt's share of the relief rises and falls over
-    # plunge.wavelength_km, so a train of ridges dies out and another takes over.
-    plunge = config['plunge']
-    plunging = np.clip(1.0 + plunge['sigma'] * fbm(x0, y0, plunge, seed + 22, domain), 0.0, 2.0)
     amplitude = relief['base_m'] + relief['elevation_fraction'] * np.maximum(base, 0.0) + \
-        relief['strain_m'] * alignment * plunging
+        relief['strain_m'] * alignment
     # The sea's smaller relief fades in with depth (from +200 m down to -500 m): a switch at the base's zero
     # contour jumped the noise along the smooth old coastline, a crease in the sea floor and the coast.
     wet = 1.0 - smoothstep(base, -500.0, 200.0)
@@ -375,11 +293,10 @@ def procedural(domain, world, config, seed):
         surface = surface + uplands['lift_m'] * inland * np.clip(0.5 + 0.5 * large, 0.0, 1.5) * \
             smoothstep(base, 0.0, 300.0)  # faded in above the coast, no step at the base's zero contour
     stages['uplands'] = surface
-    erodibility = hardness(domain, world, config['hardness'], structure, xs, ys, theta, alignment * foreland, mx, my, seed)
-    erodibility = erodibility * np.exp(fault_spec['soft'] * fault_zone)  # crushed rock along the fault traces
+    erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment * foreland, mx, my, seed)
     stages['hardness'] = erodibility
     if config['coast']['amplitude_m'] > 0:
-        surface = surface + coast_detail(domain, base, surface, x0, y0, amplitude, erodibility, config["coast"], seed)
+        surface = surface + coast_detail(domain, base, surface, x, y, amplitude, erodibility, config["coast"], seed)
     stages['coast'] = surface
     stages['precipitation'] = rain
     timings['noise'] = time.perf_counter() - started
@@ -388,7 +305,7 @@ def procedural(domain, world, config, seed):
     filtered = surface
     spec = config['filter']
     if spec['enabled'] and spec.get('when', 'before') == 'before':
-        filtered = surface + erosion_pass(domain, surface, x0, y0, amplitude, erodibility, spec, seed)
+        filtered = surface + erosion_pass(domain, surface, x, y, amplitude, erodibility, spec, seed)
     stages['filter'] = filtered
     timings['filter'] = time.perf_counter() - started
 
@@ -413,7 +330,7 @@ def procedural(domain, world, config, seed):
         sea |= ring
         filtered = np.where(ring, np.minimum(filtered, -1.0), filtered)
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
-            'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x0, y0), 'amplitude': amplitude,
+            'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude,
             'pinned': pinned}, timings
 
 
@@ -454,31 +371,6 @@ def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed)
         moved = ndimage.map_coordinates(surface + detail, [rows + dy, columns + dx], order=1, mode=mode)
         return moved - surface
     return detail
-
-
-def roughen_shore(domain, elevation, sea, fields, spec, seed):
-    """After the physics, the final shoreline itself is bent: the surface within reach_km of it (both sides,
-    by distance, not by height, so no inland valley floor near the sea level is touched) is resampled at
-    positions moved by an isotropic fractal displacement on the plain coordinates (warp_km at
-    wavelength_km), scaled as the coast term (hard rock and cold coasts stronger). This roughens what the
-    physics made, such as a flooded glacial trough's smooth walls. The sea is then flooded again from the
-    old sea; a cell left at or below the sea level but cut off from it stays land."""
-    x, y = fields['coords']
-    distance = np.where(sea, ndimage.distance_transform_edt(sea), ndimage.distance_transform_edt(~sea))
-    near = np.exp(-(distance * domain.fine_km / spec['reach_km']) ** 2)
-    latitude = np.abs(domain.north_deg - (np.arange(domain.rows) + 0.5) * domain.pixel_deg)[:, None]
-    strength = fields['erodibility'] ** spec['hardness_exponent'] * \
-        (1.0 + spec['cold_gain'] * smoothstep(latitude, *spec['cold_latitude']))
-    scale = spec['warp_km'] / domain.fine_km * near * np.clip(strength, 0.0, 2.5)
-    dx = scale * fbm(x, y, spec, seed + 90, domain)
-    dy = scale * fbm(x, y, spec, seed + 91, domain)
-    rows, columns = np.indices(elevation.shape, dtype=float)
-    mode = 'grid-wrap' if domain.whole else 'nearest'
-    moved = ndimage.map_coordinates(elevation, [rows + dy, columns + dx], order=1, mode=mode)
-    elevation = np.where(near > 1e-3, moved, elevation)
-    labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
-    touching = np.unique(labels[(labels > 0) & sea])
-    return elevation, np.isin(labels, touching[touching > 0])
 
 
 def hardness_domains(world, spec):
@@ -886,9 +778,17 @@ def main():
             touching = np.unique(labels[(labels > 0) & fields['sea']])
             sea = fields['sea'] | np.isin(labels, touching[touching > 0])
             fields['sea'] = sea
-            shore = config['shore']
-            if shore['enabled']:
-                elevation, sea = roughen_shore(domain, elevation, sea, fields, shore, config['seed'])
+            coast = config['coast']
+            if coast['amplitude_m'] > 0 and coast.get('after_physics', False):
+                # The coast term again on the final shoreline: troughs the physics cut below the sea and the sea
+                # flooded have the smooth walls of an ice-carved valley (F-troughs' inlet), which the term before
+                # the physics never saw. Then the sea is flooded again from the sea it had.
+                x, y = fields['coords']
+                elevation = elevation + coast_detail(domain, elevation, elevation, x, y, fields['amplitude'],
+                                                     fields['erodibility'], coast, config['seed'] + 1)
+                labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
+                touching = np.unique(labels[(labels > 0) & sea])
+                sea = np.isin(labels, touching[touching > 0])
                 fields['sea'] = sea
             spec = config['filter']
             extra = []
