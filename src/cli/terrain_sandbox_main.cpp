@@ -107,9 +107,43 @@ double limitslopes(const landscape::SphereMetric& metric, const std::vector<uint
             }
         }
     }
+    // The cones of successive channel cells leave a rib per cell down a steep wall (the bed drops in steps):
+    // the cut depth is averaged over 3 x 3 neighbourhoods twice, on the cells the limiter cut only, so the
+    // walls retreat without ribs and no channel bed is lowered.
+    std::vector<float> cut(elevation.size()), smoothed(elevation.size());
     for (std::size_t i = 0; i < elevation.size(); i++)
-        if (!sea[i])
-            elevation[i] = height[i];
+        cut[i] = sea[i] ? 0.0f : elevation[i] - height[i];
+    for (int pass = 0; pass < 2; pass++)
+    {
+        for (std::size_t i = 0; i < elevation.size(); i++)
+        {
+            if (cut[i] <= 0.0f)
+            {
+                smoothed[i] = 0.0f;
+                continue;
+            }
+            double sum = cut[i];
+            int count = 1;
+            for (int direction = 1; direction <= landscape::directioncount; direction++)
+            {
+                const std::size_t next = metric.neighbour(i, direction);
+                if (next != i)
+                {
+                    sum += cut[next];
+                    count++;
+                }
+            }
+            smoothed[i] = static_cast<float>(sum / count);
+        }
+        cut.swap(smoothed);
+    }
+    removed = 0.0;
+    for (std::size_t i = 0; i < elevation.size(); i++)
+        if (!sea[i] && cut[i] > 0.0f)
+        {
+            elevation[i] -= cut[i];
+            removed += cut[i] * metric.area_m2(i) * 1e-9;
+        }
     return removed;
 }
 

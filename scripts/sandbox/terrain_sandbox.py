@@ -441,6 +441,9 @@ def erosion_pass(domain, height_m, x, y, amplitude_m, erodibility, spec, seed):
     land = np.clip(height_m / spec['land_fade_m'], 0.0, 1.0)  # no gullies at sea, faded in above the coast
     strength = spec['strength'] * np.clip(amplitude_m / spec['relief_reference_m'], 0.0, spec['relief_cap']) * \
         erodibility ** spec['hardness_exponent'] * land
+    if 'slope_fade' in spec:  # gullies on slopes only: on flats they have no direction and crinkle the plain
+        real_slope = np.sqrt(slope_x * slope_x + slope_y * slope_y) / vs
+        strength = strength * smoothstep(real_slope, *spec['slope_fade'])
     weights, wavelength = [], spec['scale_km']
     for _ in range(spec['octaves']):
         weights.append(octave_fade(wavelength, domain, spec.get('min_cells', 2.5)))
