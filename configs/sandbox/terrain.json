@@ -59,6 +59,7 @@
              "uplift_factor": 1.0, "random_routing": true,
              "global": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.1},
              "window": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.35}},
+ "sea_level": {"enabled": false, "history": [[0, 0], [20, 0], [20, -120], [23, -120], [23, 0]], "keep_shelf": true},
  "glacial": {"enabled": true, "ela_equator_m": 5000, "ela_flat_latitude": 25, "ela_sea_latitude": 62, "ela_power": 1.0,
              "erodibility_ratio": 4.0, "full_ice_range_m": 500, "ice_accumulation": 1.0,
              "ela_per_doubling_m": 400, "ela_reference_m_yr": 1.0, "ela_min_m": 600, "present_shift_m": 1000},

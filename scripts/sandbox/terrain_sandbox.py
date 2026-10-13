@@ -12,6 +12,15 @@ filter (erosion_filter.py) on base + relief, a rock-hardness field (relative ero
 strike), then routing and stream power. Every noise is a function of absolute position, so a window is a
 zoom of the world preview; octaves finer than a domain's grid fade out instead of aliasing.
 
+Config groups: domains, seafloor, warp, structure, zones, relief, coast, micro, uplands, hardness, filter,
+physics, sea_level, glacial, precipitation, render. sea_level: a history of [Myr, m] points (piecewise
+linear, a repeated time a jump) the physics runs through (--sea-history), the default the main erosion at
+0 m, a lowstand at -120 m for 3 Myr, then the rise to 0; when enabled the physics' duration is the
+history's last time (global and windows alike). At the lowstand the shelf emerges and the rivers and
+glaciers cut down to the lowstand; the rise drowns their lower valleys (estuaries, rias, longer fjords).
+keep_shelf: the sea shallower than the lowest level keeps the physics' surface instead of its procedural
+depth, so the valleys cut across the exposed shelf stay drawn.
+
   uv run python scripts/sandbox/terrain_sandbox.py --label try1 [--config FILE] [--set group.key=value ...]
       [--domains global,A,B] [--no-physics]
 Writes out/scratch/sandbox/<label>/: index.html, the PNGs, config.json (the values used) and timings.
@@ -251,6 +260,9 @@ def procedural(domain, world, config, seed):
     sea_seed = sample(world['sea'].astype(float), domain, mx, my) > 0.5
     plain_base = base
     ocean_age, spreading = None, None
+    if config['seafloor'].get('shelf', {}).get('enabled', False):
+        base = shelf_profile(base, np.clip(sample(world['ocean']['oceanic'], domain, mx, my), 0.0, 1.0),
+                             config['seafloor']['shelf'])
     if config['seafloor']['enabled']:
         base, ocean_age, spreading = seafloor(domain, world, world['ocean'], base, mx, my, config['seafloor'], seed)
     timings['base'] = time.perf_counter() - started
@@ -529,10 +541,17 @@ def ocean_age_depth(age_myr):
     return np.where(t < 20.0, 2600.0 + 365.0 * np.sqrt(t), 5651.0 - 2473.0 * np.exp(-0.0278 * t))
 
 
-def ocean_world(world):
+def ocean_world(world, spec, seed, radius_km):
     """World-grid fields of the sea floor: the oceanic share (crust class 1), the spreading axis (the
     direction age increases in, as doubled-angle components weighted by the age gradient, smoothed) and the
-    trench indicator (convergent boundary cells beside oceanic crust, smoothed)."""
+    trench indicator (convergent boundary cells beside oceanic crust, smoothed). With half_rate_km_myr, also
+    the distance to the spreading axis on a grid ridge_grid_factor times finer than the world's (sea-v4):
+    the engine's crust ages about 200 Myr within 450 km of a ridge (plates at 0.7 cm/yr, a tenth of
+    Earth's), so its ridges are narrow; the sea floor reads the age as this distance over an Earth-like
+    half rate instead, wherever that is younger. The axis is where the age read through the segments
+    (segment_shift, so the crest steps at the transforms) is a minimum along the spreading direction (no
+    higher than axis_step_cells ahead and behind), on crust younger than young_myr; the distance is planar
+    (the sandbox's equirectangular km)."""
     oceanic = (world['crust_class'] == 1).astype(float)
     age = ndimage.gaussian_filter(world['crust_age'], 1.0, mode=('nearest', 'wrap'))
     gy, gx = np.gradient(age)
@@ -543,7 +562,57 @@ def ocean_world(world):
     near_ocean = ndimage.binary_dilation(oceanic > 0, structure=np.ones((3, 3)))
     trench = ((world['boundary_type'] == 1) & near_ocean).astype(float)
     trench = ndimage.gaussian_filter(trench, 1.0, mode=('nearest', 'wrap'))
-    return {'oceanic': oceanic, 'doubled': doubled, 'trench': trench}
+    ocean = {'oceanic': oceanic, 'doubled': doubled, 'trench': trench,
+             'strength': ndimage.gaussian_filter(strength, 1.5, mode=('nearest', 'wrap'))}
+    if spec.get('half_rate_km_myr', 0.0) > 0.0:
+        factor = spec['ridge_grid_factor']
+        H, W = oceanic.shape
+        grid = Domain('ridge-grid', W * factor, H * factor, 0.0, 0.0, factor, W, H, radius_km)
+        mx, my = bspline_matrix(grid.x, W, True), bspline_matrix(grid.y, H, False)
+        x, y = grid.mesh_km()
+        share = np.clip(sample(oceanic, grid, mx, my), 0.0, 1.0)
+        axis_doubled = sample(doubled.real, grid, mx, my) + 1j * sample(doubled.imag, grid, mx, my)
+        spreading = 0.5 * np.angle(axis_doubled)
+        xs, ys, _ = segment_shift(grid, x, y, spreading, share, spec, seed)
+        grid_age = np.maximum(sample_at(world['crust_age'], grid, xs, ys), 0.0)
+        # A minimum along the spreading direction: a minimum in every direction found only dots on the
+        # engine's young lines (sea-v4), whose distances drew round swells instead of ridges.
+        step = spec['axis_step_cells'] * grid.fine_km
+        dx, dy = step * np.cos(spreading), step * np.sin(spreading)
+        ahead = sample_at(world['crust_age'], grid, xs + dx, ys + dy)
+        behind = sample_at(world['crust_age'], grid, xs - dx, ys - dy)
+        axis = (share > 0.5) & (grid_age < spec['young_myr']) & (grid_age <= ahead) & (grid_age <= behind)
+        tiled = np.concatenate([~axis] * 3, axis=1)  # columns wrap
+        distance = ndimage.distance_transform_edt(tiled)[:, grid.columns:2 * grid.columns] * grid.fine_km
+        ocean['ridge_distance'] = distance if axis.any() else np.full_like(distance, np.inf)
+        ocean['ridge_factor'] = factor
+    return ocean
+
+
+def damp_abyss(world, spec):
+    """The deep sea off oceanic crust keeps the engine's depths, which the B-spline draws as smooth blotches
+    hundreds of km wide (sea-v3); Earth's abyssal plains are flat. Below start_m the depth's departure from
+    its sea-only mean over sigma_cells world cells is kept at the share `keep`."""
+    elevation, sea = world['elevation'], world['sea']
+    depth = -elevation
+    mode = ('nearest', 'wrap')
+    weight = ndimage.gaussian_filter(sea.astype(float), spec['sigma_cells'], mode=mode)
+    mean = ndimage.gaussian_filter(np.where(sea, depth, 0.0), spec['sigma_cells'], mode=mode) / np.maximum(weight, 1e-6)
+    deep = smoothstep(depth, spec['start_m'], spec['start_m'] + 1000.0) * sea * (world['crust_class'] != 1)
+    damped = mean + spec['keep'] * (depth - mean)
+    return elevation - deep * (damped - depth)
+
+
+def shelf_profile(base, oceanic, spec):
+    """A shelf break on the sea off oceanic crust (sea-v4): the base's depth d (m) maps to shelf_m x d /
+    break_m down to break_m, then steepens to the base's own depth over slope_m of it, so the shelf stays
+    near shelf_m deep and the slope beyond its edge is several times steeper than the base's broad ramp."""
+    depth = -base
+    shelf, edge, slope = spec['shelf_m'], spec['break_m'], spec['slope_m']
+    profile = np.where(depth <= edge, shelf * np.clip(depth / edge, 0.0, 1.0),
+                       shelf + (depth - shelf) * smoothstep(depth, edge, edge + slope))
+    weight = (base < 0.0) * (1.0 - oceanic)
+    return base + weight * (-profile - base)
 
 
 def sample_at(field, domain, x_km, y_km):
@@ -557,21 +626,32 @@ def sample_at(field, domain, x_km, y_km):
     return ndimage.map_coordinates(padded, [rows, columns], order=3, mode='nearest')
 
 
-def seafloor(domain, world, ocean, base, mx, my, spec, seed):
-    """The sea floor on oceanic crust (the user's 2026-10-13 request): depth from the crust age (GDH1),
-    with the age read through ridge-transform segments, an axial valley on the youngest crust, fracture-
-    zone troughs, abyssal hills elongated along the ridge (fading with age as sediment buries them) and
-    trenches on the ocean side of convergent boundaries. Segments: for a bank of spreading directions phi_b
-    (weighted by cos^sharpness 2(theta - phi_b)), the along-ridge coordinate is cut into segments
-    segment_km long, each shifted along the spreading direction by up to offset_km; the age is read at the
-    shifted position, so the ridge steps at each transform and the age step carries on across the plate:
-    a fracture zone. Blended into the base where the crust is oceanic and the base is deeper than
-    shallow_m. Returns (the new base, the age read, the spreading axis)."""
-    x, y = domain.mesh_km()
-    oceanic = np.clip(sample(ocean['oceanic'], domain, mx, my), 0.0, 1.0)
-    doubled = sample(ocean['doubled'].real, domain, mx, my) + 1j * sample(ocean['doubled'].imag, domain, mx, my)
-    theta = 0.5 * np.angle(doubled)  # the spreading axis
+def sample_fine(field, factor, domain, x_km, y_km):
+    """A field on a grid `factor` times finer than the world's, at planar positions (km): linear (a
+    distance's V keeps its crest), columns wrapped, rows clamped."""
+    pad = 2
+    padded = np.concatenate([field[:, -pad:], field, field[:, :pad]], axis=1)
+    cell = domain.cell_km / factor
+    columns = np.mod(x_km / cell - 0.5, field.shape[1]) + pad
+    rows = y_km / cell - 0.5
+    return ndimage.map_coordinates(padded, [rows, columns], order=1, mode='nearest')
+
+
+def segment_shift(domain, x, y, theta, oceanic, spec, seed):
+    """Ridge-transform segments: for a bank of spreading directions phi_b (weighted by cos^sharpness 2(theta -
+    phi_b)), the along-ridge coordinate is cut into segments segment_km long, each shifted along the
+    spreading direction by up to offset_km. Returns the shifted positions and the fracture-zone trough
+    (0 to 1, scaled by its transform's offset). fracture_warp (sea-v6): the segments are cut on positions
+    moved by a noise of amplitude_km, so the fracture zones curve and wander instead of running as straight,
+    evenly spaced lines (the user: window O's lines looked artificial); fracture_patch: the trough comes and
+    goes along its length, as Earth's fracture zones do."""
     shift_x, shift_y, trough, weights = (np.zeros_like(x) for _ in range(4))
+    warp = spec.get('fracture_warp')
+    if warp:
+        xw = x + warp['amplitude_km'] * fbm(x, y, warp, seed + 130, domain)
+        yw = y + warp['amplitude_km'] * fbm(x, y, warp, seed + 131, domain)
+    else:
+        xw, yw = x, y
     count, length = spec['orientations'], spec['segment_km']
     for b in range(count):
         phi = math.pi * b / count
@@ -579,7 +659,7 @@ def seafloor(domain, world, ocean, base, mx, my, spec, seed):
         active = (oceanic > 0.01) & (w > 1e-3)
         if not np.any(active):
             continue
-        xa, ya = x[active], y[active]
+        xa, ya = xw[active], yw[active]
         along_ridge = (-math.sin(phi) * xa + math.cos(phi) * ya) / length
         segment = np.floor(along_ridge).astype(np.int64)
         bank = np.full_like(segment, b)
@@ -595,27 +675,80 @@ def seafloor(domain, world, ocean, base, mx, my, spec, seed):
         trough[active] += w[active] * jump * np.exp(-(edge / spec['fracture_width_km']) ** 2)
         weights[active] += w[active]
     weights = np.maximum(weights, 1e-12)
-    xs, ys = x + shift_x / weights, y + shift_y / weights
+    trough = trough / weights
+    if spec.get('fracture_patch'):
+        trough = trough * np.clip(0.5 + 0.7 * fbm(x, y, spec['fracture_patch'], seed + 132, domain), 0.0, 1.5)
+    return x + shift_x / weights, y + shift_y / weights, trough
+
+
+def seamounts(x, y, spec, seed):
+    """Scattered volcanic cones (sea-v6): one candidate per spacing_km lattice cell at a hashed position,
+    kept with `probability`; size u in 0..1 sets the radius (radius_km range) and the height (height_m
+    range, by u^2: many small, few large); profile (1 - r / R)^profile. The tallest cone wins where two
+    overlap."""
+    spacing = spec['spacing_km']
+    ix, iy = np.floor(x / spacing).astype(np.int64), np.floor(y / spacing).astype(np.int64)
+    out = np.zeros_like(x)
+    (r0, r1), (h0, h1) = spec['radius_km'], spec['height_m']
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            cx, cy = ix + dx, iy + dy
+            u, v = erosion_filter.cell_hash(cx, cy, seed + 140)
+            keep, size = erosion_filter.cell_hash(cx, cy, seed + 141)
+            size = 0.5 + 0.5 * size
+            px, py = (cx + 0.5 + 0.45 * u) * spacing, (cy + 0.5 + 0.45 * v) * spacing
+            radius = r0 + (r1 - r0) * size
+            cone = (h0 + (h1 - h0) * size ** 2) * np.clip(1.0 - np.hypot(x - px, y - py) / radius, 0.0, 1.0) ** spec['profile']
+            out = np.maximum(out, np.where(0.5 + 0.5 * keep < spec['probability'], cone, 0.0))
+    return out
+
+
+def seafloor(domain, world, ocean, base, mx, my, spec, seed):
+    """The sea floor on oceanic crust (the user's 2026-10-13 request): depth from the crust age (GDH1),
+    with the age read through ridge-transform segments (segment_shift: the ridge steps at each transform and
+    the age step carries on across the plate as a fracture zone), an axial valley on the youngest crust,
+    fracture-zone troughs, abyssal hills elongated along the ridge (fading with age as sediment buries them)
+    and trenches on the ocean side of convergent boundaries. Blended into the base where the crust is
+    oceanic and the base is deeper than shallow_m. Returns (the new base, the age read, the spreading axis)."""
+    x, y = domain.mesh_km()
+    oceanic = np.clip(sample(ocean['oceanic'], domain, mx, my), 0.0, 1.0)
+    doubled = sample(ocean['doubled'].real, domain, mx, my) + 1j * sample(ocean['doubled'].imag, domain, mx, my)
+    theta = 0.5 * np.angle(doubled)  # the spreading axis
+    xs, ys, trough = segment_shift(domain, x, y, theta, oceanic, spec, seed)
     age = np.maximum(sample_at(world['crust_age'], domain, xs, ys), 0.0)
-    # The world's age is per 156 km cell, so near a ridge its minimum is a broad smooth trough that never
-    # reaches 0: no crest, no axial valley, the transform steps lost in it (sea-v1). Young crust is aged
-    # relative to the lowest age within ridge_radius_km, fully at the axis and not at all beyond young_myr.
-    size = max(3, int(round(2.0 * spec['ridge_radius_km'] / domain.fine_km)) | 1)
-    lowest = ndimage.minimum_filter(age, size=size, mode=('nearest', 'wrap') if domain.whole else 'nearest')
-    young = 1.0 - smoothstep(age, 0.5 * spec['young_myr'], spec['young_myr'])
-    age = np.maximum(age - lowest * young, 0.0)
+    if 'ridge_distance' in ocean:
+        # sea-v4: the age as the distance to the spreading axis over an Earth-like half rate, where younger.
+        distance = sample_fine(ocean['ridge_distance'], ocean['ridge_factor'], domain, x, y)
+        age = np.minimum(age, distance / spec['half_rate_km_myr'])
+    else:
+        # The world's age is per 156 km cell, so near a ridge its minimum is a broad smooth trough that never
+        # reaches 0: no crest, no axial valley, the transform steps lost in it (sea-v1). Young crust is aged
+        # relative to the lowest age within ridge_radius_km, fully at the axis and not at all beyond young_myr.
+        size = max(3, int(round(2.0 * spec['ridge_radius_km'] / domain.fine_km)) | 1)
+        lowest = ndimage.minimum_filter(age, size=size, mode=('nearest', 'wrap') if domain.whole else 'nearest')
+        young = 1.0 - smoothstep(age, 0.5 * spec['young_myr'], spec['young_myr'])
+        age = np.maximum(age - lowest * young, 0.0)
     depth = ocean_age_depth(age)
     depth = depth + spec['axial_valley_m'] * np.exp(-(age / spec['axial_age_myr']) ** 2)
-    depth = depth + spec['fracture_trough_m'] * (trough / weights) * np.exp(-age / spec['fracture_age_myr'])
-    hills = oriented_fbm(xs, ys, theta, np.ones_like(x), spec['hills'], seed + 121, domain)
+    depth = depth + spec['fracture_trough_m'] * trough * np.exp(-age / spec['fracture_age_myr'])
+    # The hills are stretched along the ridge only where the spreading direction is coherent (sea-v6: where
+    # the bank's orientation turned fast, the stretched noise drew swirls and fingerprints).
+    coherence = np.ones_like(x)
+    if spec.get('hills_coherence', False):
+        coherence = np.clip(np.abs(doubled) / np.maximum(sample(ocean['strength'], domain, mx, my), 1e-9), 0.0, 1.0)
+    hills = oriented_fbm(xs, ys, theta, coherence, spec['hills'], seed + 121, domain)
     amplitude = spec['hills']['amplitude_m'] * (spec['hills']['old_fraction'] + (1.0 - spec['hills']['old_fraction'])
                                                 * np.exp(-age / spec['hills']['age_scale_myr']))
+    if spec['hills'].get('patch'):
+        amplitude = amplitude * np.clip(0.7 + 0.5 * fbm(x, y, spec['hills']['patch'], seed + 122, domain), 0.15, 1.6)
     floor = -depth + amplitude * hills
+    if spec.get('seamounts', {}).get('enabled', False):
+        floor = floor + seamounts(x, y, spec['seamounts'], seed)
     weight = oceanic * smoothstep(-base, spec['shallow_m'], 2.0 * spec['shallow_m']) * spec['blend']
     out = base + weight * (floor - base)
-    # The trench: a narrow V along the crest of the smoothed indicator (its value over its local maximum
-    # within a world cell), so it is about trench_width_km wide and even along the boundary, not the whole
-    # smoothed band (sea-v1: beaded troughs hundreds of km wide).
+    # The trench: a V along the crest of the smoothed indicator (its value over its local maximum within a
+    # world cell), so it is even along the boundary, not the whole smoothed band (sea-v1: beaded troughs
+    # hundreds of km wide); trench_crest's lower end sets its width.
     trench = sample(ocean['trench'], domain, mx, my)
     size = max(3, int(round(domain.cell_km / domain.fine_km)) | 1)
     crest = trench / np.maximum(ndimage.maximum_filter(trench, size=size, mode=('nearest', 'wrap') if domain.whole
@@ -715,10 +848,12 @@ def run_physics(domain, fields, config, directory):
         np.asarray(values, dtype='<f4').tofile(files[key])
     out_elevation = stem.with_name(f'{domain.name}-out-elevation.f32')
     out_discharge = stem.with_name(f'{domain.name}-out-discharge.f32')
+    sea_level = config.get('sea_level', {'enabled': False})
+    duration = sea_level['history'][-1][0] if sea_level['enabled'] else spec['duration_myr']
     command = [str(PHYSICS), '--columns', str(domain.columns), '--rows', str(domain.rows),
                '--elevation', str(files['elevation']), '--sea', str(files['sea']),
                '--erodibility', str(files['erodibility']), '--uplift', str(files['uplift']),
-               '--runoff-file', str(files['runoff']), '--duration', str(spec['duration_myr']),
+               '--runoff-file', str(files['runoff']), '--duration', str(duration),
                '--step', str(spec['step_myr']), '--k', str(spec['k']), '--m', str(spec['m']),
                '--deposition', str(spec['deposition']), '--diffusivity', str(spec['diffusivity_km2_myr']),
                '--delta-top', str(spec['delta_top_m']), '--threshold-slope', str(spec['threshold_slope']),
@@ -727,6 +862,8 @@ def run_physics(domain, fields, config, directory):
                '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge)]
     if not domain.whole:
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
+    if sea_level['enabled']:
+        command += ['--sea-history', ','.join(f'{time}:{level}' for time, level in sea_level['history'])]
     glacial = config['glacial']
     out_ice = stem.with_name(f'{domain.name}-out-ice.f32')
     ela = None
@@ -991,7 +1128,9 @@ def main():
     world = world_fields(bundle)
     radius_m = float(bundle.manifest.get('parameters', {}).get('world.body.radius_km', 6371.0)) * 1000.0
     world['precipitation'] = precipitation(world, config['precipitation'], radius_m)
-    world['ocean'] = ocean_world(world)
+    if config['seafloor'].get('abyss', {}).get('enabled', False):
+        world['elevation'] = damp_abyss(world, config['seafloor']['abyss'])
+    world['ocean'] = ocean_world(world, config['seafloor'], config['seed'], radius_m / 1000.0)
     names = arguments.domains.split(',') if arguments.domains else config['default_domains']
     physics_on = config['physics']['enabled'] and not arguments.no_physics
     sections, timings = [], {}
@@ -1010,10 +1149,17 @@ def main():
             # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
             # Land cut below the sea and connected to it (a fjord, a drowned river mouth) becomes sea.
             procedural_sea = fields['sea'].copy()  # the open sea before the physics flooded its troughs
-            elevation = np.where(fields['sea'], fields['surface'], elevation)
+            sea_level = config.get('sea_level', {'enabled': False})
+            restored = fields['sea']
+            if sea_level['enabled'] and sea_level.get('keep_shelf', False):
+                # The shelf the lowstand exposed keeps the physics' surface (the valleys cut across it, drowned
+                # by the rise); only the sea deeper than the lowest level gets its procedural depth back. A shelf
+                # cell the physics left above the sea (a lowstand deposit) is land, as in the physics' routing.
+                restored = fields['sea'] & (fields['surface'] <= min(level for _, level in sea_level['history']))
+            elevation = np.where(restored, fields['surface'], elevation)
             labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
             touching = np.unique(labels[(labels > 0) & fields['sea']])
-            sea = fields['sea'] | np.isin(labels, touching[touching > 0])
+            sea = restored | np.isin(labels, touching[touching > 0])
             fields['sea'] = sea
             coast = config['coast']
             if coast['amplitude_m'] > 0 and coast.get('after_physics', False):
