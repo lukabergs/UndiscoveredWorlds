@@ -64,6 +64,15 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0095`: a kernel sum with per-splat phases as the fold fabric, whatever the kernel layout or weight: the crests break at 0.17 A on a uniform field
 - `erosion-0096`: a vergence sign on k from the strain gradient: a kink drawn as an 80 km fold at every flip
 - `erosion-0096`: chasing the along-strike steps with the axis smoothing above 3.5 cells: 2.5 to 3.5 moved p99 by 1 m
+- `erosion-0097`: the fine relief, coast terms and filter drawn on unwarped coordinates (v15, with transverse faults, plunging ridges and lower stretches): an isotropic orange peel that broke the directionality; rejected by the user
+- `erosion-0097`: the coast term applied again after the physics (after_physics): it put every lowland valley floor into its band and flooded G's coastal plain and F's southern valleys
+- `erosion-0097`: the coast term's band chosen by height alone: it drowned G's low inland valleys (it now acts within reach_km of the base's coastline)
+- `erosion-0097`: the shoreline micro-texture drawn against all of the sea: flooded glacial troughs became shores and G-coast's troughs turned into blotches (the shore is the open sea less parts narrower than 6 km)
+- `erosion-0097`: a vertical micro-texture before the physics: 80 m barely moves a shore, and 20 Myr of physics erases few-km shore detail drawn before it
+- `erosion-0097`: the coast term at 60 % of the warp (coast.warp_fraction, kept as a key at 1)
+- `erosion-0097`: an unsmoothed strain-driven warp: a 250 km drag folded the grid over itself along the belts
+- `erosion-0098`: equal fracture-zone troughs at every segment boundary: they read as a comb
+- `erosion-0098`: the smoothed convergent-boundary band drawn as the trench: beaded troughs hundreds of km wide
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
@@ -194,6 +203,8 @@ Lessons:
 | `erosion-0094` | 2026-10-11 | done | keep | multiscale plan, the kernel default (the user, 2026-10-11 evening: OpenSimplex2S everywhere but the fold fabric): landscape.noise.kernel 1 and rotate_octaves 1 by default; the shoreline warp normalised by its field's own deviation |
 | `erosion-0095` | 2026-10-11 | merged as the base of S5.3c; the steps acceptance open | keep | multiscale plan, S5.3b: the fold fabric's second round (Phacelle's jittered splat lattice and compact weight, direction and wavelength interpolated per splat, the relief fraction 0.15, no fabric under the ice or in lake blocks, the lakes flooded on the un-folded surface) |
 | `erosion-0096` | 2026-10-12 | merged; the judging round registered next | keep | multiscale plan, S5.3c: the coherent fold phase: the fabric as one phase field (the least-squares potential of the wavevector field on the global grid, oriented by a continuity flood, the axis smoothed on doubled angles, bicubic Hermite at the fine cells, dislocations faded into fold terminations, every fold drawn at the coarsest level with at least 4 cells per wavelength); the kernel sums retired |
+| `erosion-0097` | 2026-10-13 | approved by the user: v14 plus the shoreline micro-texture (fine-v16-micro5) is the look; v15 rejected ('much less realistic and aesthetically pleasing than compare-v14') and reverted | keep | terrain sandbox (roadmap T1), the look: sandbox versions v1 to v16 outside the pipeline, 0764d05..8f2a837 (2026-10-12 to 2026-10-13); v15 reverted by 269bba8 |
+| `erosion-0098` | 2026-10-13 | awaiting the user's look (roadmap T1.1) | keep | terrain sandbox (roadmap T1.0), the sea floor, first version (522dbdb): step 1 of the user's 2026-10-13 order (sea floor, then sea-level history and lakes, then the 100 m nested test against Copernicus GLO-30, then engine back-arc rollback and S6) |
 
 Lessons:
 
@@ -345,6 +356,15 @@ Lessons:
 - `erosion-0095`: The brief's acceptance figures must come from the same tree as the runs: the belt's 35 forced parents were a Perlin figure, the current tree's no-fold run has 93.
 - `erosion-0096`: A fabric at 15 wavelengths per global cell needs a direction field smoother than the engine's per-cell tensor: the field's resolution, not the kernel, sets the coherence.
 - `erosion-0096`: Keep the before/after figures on one tree: the no-fold baselines moved with the kernel default.
+- `erosion-0097`: A window's outer ring of sea at -1 m grades every river leaving the window to the sea level (canyons, the user's 'rivers jumping up'): the ring is pinned at the lowest terrain within half a world cell.
+- `erosion-0097`: A latitude equilibrium line reaching the sea at 62 degrees put an ice sheet on every polar lowland for 20 Myr and cut it below the sea in patches the sea re-flood drowned: the ELA needs a floor and a precipitation term.
+- `erosion-0097`: With the delta-top cap lifted, the marine fill-and-spill went quadratic (8 min on B, 21 min on the world against 35 to 40 s) and flooded troughs stacked marine loads on single cells (towers up to 12 km): sea cells are capped at the sea level after each step.
+- `erosion-0097`: A slope limiter's averaged cut must stop at the lowest capped height around a cell (it dug closed pits to -15 km beside glacier walls); a cone per channel cell ribs gorge walls (averaged over 3 x 3).
+- `erosion-0097`: Switches at the base's zero contour (the relief's sea fraction, the uplands) draw the old coastline as a crease: fade them over a height range.
+- `erosion-0097`: Where the warp stretches most, a noise drawn on its coordinates varies only every 150 km along the trend: map the stretch before adding texture.
+- `erosion-0097`: Runevision's filter adds only a faint texture at k 64; it belongs to the finer levels, after the physics or before the solve, never as the base.
+- `erosion-0098`: The world's crust age is per 156 km cell, so its minimum near a ridge is a broad trough that never reaches 0: the crest needs the age relative to the lowest age nearby.
+- `erosion-0098`: Most of this world's sea is flooded continental crust and most oceanic crust is 300 to 600 Myr old: an age-depth law shapes only a third of the sea.
 
 ## tectonics
 

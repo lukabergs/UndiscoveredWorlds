@@ -503,6 +503,7 @@ Open (**user**):
 - The authored river-mouth table of B5 (observed data as validation; the user may prefer another list or none).
 - The ocean's calibrated hypsometry (C4): the refinement maps the engine's ocean depths onto Earth's band shares, an explicit calibration under world-model rule 4; keep it, or ask for a physical law (which needs the engine to give oceanic crust a usable age).
 - The Nile is not in `configs/river-mouths.json`, so the runoff's main desert test reads the largest outlet near its mouth instead (C1, C2).
+- **Closed 2026-10-13 (the user, roadmap T0).** This plan's open items now live in `docs/architecture/terrain-roadmap.md`. The pending verdicts on regional runs 1 to 15 are superseded by the terrain sandbox's direction (none judged); the land's flatness and the open denudation band go into roadmap T2.2 (the per-stage hypsometry diagnosis first).
 
 ## 7. Prompts for the orchestrating sessions
 

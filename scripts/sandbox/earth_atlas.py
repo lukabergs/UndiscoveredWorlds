@@ -8,7 +8,8 @@ cos(latitude) clamped to at least 0.25, no outline):
      box-averaged from the 60 arc-second globe; vertical exaggeration 8;
   2. regional windows at the sandbox's window zoom (180 / 128 / 64 degrees per pixel, about 2.44 km),
      1280 x 1024 pixels, from the 60 arc-second globe; exaggeration 3;
-  3. two closer windows at k 256 (about 610 m), 1024 x 1024 pixels, from the 15 arc-second tiles
+  3. sea-floor windows (ridges, transforms, trenches) at the window zoom, from the 60 arc-second globe;
+  4. two closer windows at k 256 (about 610 m), 1024 x 1024 pixels, from the 15 arc-second tiles
      (scripts/refs/fetch_etopo_tiles.py); exaggeration 2.
 Elevations are read and box-averaged (area-weighted in degrees) with scripts/evaluation/earth_windows.py; a
 window's grid is anchored at its centre (a pixel corner). Sea is the world ocean (earth_windows.global_ocean,
@@ -16,7 +17,7 @@ its cache under refs/processed/earth-windows/ocean-60s/); below-0 m basins off i
 arc-second windows, whose pixels are finer than the mask's cells, the below-0 m pixels 4-connected to a pixel
 the mask calls ocean are sea too, so the fjords are sea.
 
-  uv run python scripts/sandbox/earth_atlas.py [--out refs/processed/earth-atlas]
+  uv run python scripts/sandbox/earth_atlas.py [--out refs/processed/earth-atlas] [--groups globe,window,ocean,close]
 Writes the PNGs, manifest.json and index.html (local-only under refs/).
 """
 import argparse
@@ -58,6 +59,13 @@ WINDOWS = [  # (name, title, longitude, latitude)
     ('alps', 'The Alps', 10.0, 46.0),
     ('basin-range', 'Basin and Range with the Colorado Plateau', -113.0, 38.0),
     ('east-africa', 'East African Rift', 36.0, -2.0),
+]
+
+OCEAN = [  # sea-floor windows at the window zoom (name, title, longitude, latitude)
+    ('reykjanes', 'Reykjanes Ridge and Iceland', -28.0, 60.0),
+    ('equatorial-atlantic', 'Equatorial Atlantic ridge and its fracture zones (St. Paul, Romanche)', -22.0, 0.0),
+    ('izu-mariana', 'Izu-Bonin and Mariana trenches, arcs and back-arc basins', 142.0, 24.0),
+    ('east-pacific-rise', 'East Pacific Rise with its transforms', -108.0, -10.0),
 ]
 
 CLOSE_DEG = 180.0 / 128 / 256  # k 256
@@ -214,6 +222,7 @@ pre{{background:#0d0f12;padding:8px;overflow:auto;font-size:12px}}</style></head
 
 SECTIONS = [('globe', 'The whole Earth (128 to 2048 columns; relief exaggeration 8)'),
             ('window', 'Regional windows at the sandbox window zoom (k 64 of a 256-column world, about 2.44 km; exaggeration 3)'),
+            ('ocean', 'Sea-floor windows at the sandbox window zoom (k 64, about 2.44 km; exaggeration 3)'),
             ('close', 'Closer windows (k 256, about 610 m; exaggeration 2)')]
 
 
@@ -238,21 +247,35 @@ def write_page(out, entries, skipped, created):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--out', default=str(ROOT / 'refs' / 'processed' / 'earth-atlas'))
+    parser.add_argument('--groups', default='globe,window,ocean,close',
+                        help='groups to render; the manifest keeps the entries of the others')
     args = parser.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    groups = set(args.groups.split(','))
     started = time.perf_counter()
     ocean = ew.global_ocean()
     entries, skipped = [], []
-    globe(out, ocean, entries)
-    for name, title, longitude, latitude in WINDOWS:
-        window(out, ocean, entries, 'window', name, title, longitude, latitude, WINDOW_DEG, WINDOW_PIXELS,
-               WINDOW_EXAGGERATION, 'etopo60')
-    for name, title, longitude, latitude in CLOSE:
-        message = window(out, ocean, entries, 'close', name, title, longitude, latitude, CLOSE_DEG, CLOSE_PIXELS,
-                         CLOSE_EXAGGERATION, 'etopo15')
-        if message:
-            skipped.append(message)
+    previous = out / 'manifest.json'
+    if previous.is_file():
+        old = json.loads(previous.read_text(encoding='utf-8'))
+        entries = [entry for entry in old['images'] if entry['group'] not in groups]
+        skipped = [line for line in old.get('skipped', []) if 'close' not in groups]
+    if 'globe' in groups:
+        globe(out, ocean, entries)
+    for group, items in (('window', WINDOWS), ('ocean', OCEAN)):
+        if group in groups:
+            for name, title, longitude, latitude in items:
+                window(out, ocean, entries, group, name, title, longitude, latitude, WINDOW_DEG, WINDOW_PIXELS,
+                       WINDOW_EXAGGERATION, 'etopo60')
+    if 'close' in groups:
+        for name, title, longitude, latitude in CLOSE:
+            message = window(out, ocean, entries, 'close', name, title, longitude, latitude, CLOSE_DEG, CLOSE_PIXELS,
+                             CLOSE_EXAGGERATION, 'etopo15')
+            if message:
+                skipped.append(message)
+    order = [group for group, _ in SECTIONS]
+    entries.sort(key=lambda entry: order.index(entry['group']))
     created = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
     seconds = time.perf_counter() - started
     manifest = {'schema': 'uw-earth-atlas/v1', 'created': created, 'seconds': round(seconds, 1),

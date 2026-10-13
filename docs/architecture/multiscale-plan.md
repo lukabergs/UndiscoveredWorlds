@@ -537,6 +537,8 @@ At most 400 words, in this order: **Done** (what changed, files); **Checks** (ea
 
 **2026-10-13: this plan is no longer the running plan.** Its open rows (S3.17, S3.18, S4.*, S5.4, S5.5, S6), questions and verdicts moved to `docs/architecture/terrain-roadmap.md` (phases T0 to T7), together with the terrain sandbox's work; this section stays as the record.
 
+**The user's answers of 2026-10-13 (roadmap T0).** Every pending verdict and question below is closed: the pending verdicts (runs 37/30, 39/32, 41/42 against 39/40, 51/52, 44/43, 53 to 57, S3.13's lake outline, the island question) are superseded by the sandbox's direction, none judged; question 1 (flatness) goes into roadmap T2.2 (the per-stage hypsometry diagnosis first); question 2 (river widths) waits for the tiles, option (a); question 3 keeps S3.15's land; question 5 is asked with the T3 judging run; questions 6 and 7 are superseded; whether the sandbox's look replaces the fold fabric (S5.2 to S5.3c) is decided at roadmap T2.0.
+
 Updated by the orchestrator after every step. The user's pointer is always the line in "The orchestrating session" above.
 
 - **State (2026-10-10 14:30, the orchestrator).** Done: Phases S0, S1, S2 (`erosion-0058` to `0073`); judging runs 26 to 32 registered (A, B, C at k 4: 26 to 28; at k 16: 29 to 31; A at k 64: 32; evaluations in `evaluation-2` with Earth windows and `--coarser`). Latest step-check label `s2-masks-2` (`out/scratch/later-float`). Worktrees `.claude/worktrees/agent-a7ef524edd68d9314`, `agent-a12607517804d44f0`, `s2.3-head` left for the user. Next id `erosion-0074`.

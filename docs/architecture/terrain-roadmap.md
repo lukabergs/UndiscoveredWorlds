@@ -10,7 +10,8 @@ Written 2026-10-13 (Opus 5.5; Fable 5.1 off, see `AGENTS.md`). It collects every
 
 ## 2. Rules for this roadmap
 
-- One phase per session (memory "Phase sessions"); every step records its duration (ledger field, the Duration column below) and gets a ledger entry: pipeline steps in `runs/ledger/erosion.jsonl` (tectonics engine steps in `tectonics.jsonl`), sandbox steps as one entry per sandbox phase in `erosion.jsonl` with `"module": "sandbox"` and the commit range.
+- One phase per session (memory "Phase sessions"); every step records its duration (ledger field, the Duration column below) and gets a ledger entry: pipeline steps in `runs/ledger/erosion.jsonl` (tectonics engine steps in `tectonics.jsonl`), sandbox steps as one entry per sandbox phase in `erosion.jsonl` with `"module": "erosion"` (the ledger tool accepts only the file's module), `"phase": "terrain sandbox ..."` and the commit range.
+- Python runs from Git Bash as from PowerShell: `uv.exe` is on Git Bash's `PATH` (the `~/bin/uv.cmd` wrapper only forwards to it), so `uv run python scripts/sandbox/...` works in either shell (checked 2026-10-13). PowerShell is needed only for the `.cmd` wrappers (`msvc-env.cmd`, `cmake-vs.cmd`, `ninja-vs.cmd`) of a C++ build. In Git Bash, write scripts with the Write tool rather than heredocs (apostrophes and backslashes break them), never `cat > file` without input (it waits on stdin), and never name a scratch script after a standard-library module (`inspect.py` broke numpy's import).
 - Sandbox steps are judged by the user's look (pages under `out/scratch/sandbox/<label>`, Earth atlas beside); no parity runs, no tests unless a bug persists. Pipeline steps keep the repository's checks (`step_check.py` at the minimal configuration for parity; one judging run where the change acts).
 - The reviewer runs on Opus 5.5 (`model: opus`) while Fable is off; a `design` agent likewise. Reviews follow each behaviour step of the pipeline (T2, T3, T4); sandbox steps are reviewed by the user's look.
 - **user** marks a decision only the user takes; the orchestrator continues with independent work meanwhile.
@@ -20,6 +21,8 @@ Written 2026-10-13 (Opus 5.5; Fable 5.1 off, see `AGENTS.md`). It collects every
 ### T0: verdict sweep and bookkeeping (orchestrator with the user; short)
 
 Many look questions of the old plans were overtaken by the sandbox. Ask once, with a recommendation each; record the answers in both old plans' §7/§6 and here.
+
+**Done 2026-10-13 (the user's answers):** T0.1 superseded, none judged; T0.2 into T2.2; T0.3 as recommended; T0.4 **decided at T2.0** (not now: T2.0's design weighs the phase-field fabric against the sandbox's texture and asks the user); T0.5 done (`erosion-0097`, `erosion-0098`, module `erosion`). The atlas gained a sea-floor group (`ocean-*`: Reykjanes Ridge, the equatorial Atlantic fracture zones, Izu-Bonin and Mariana, the East Pacific Rise; `earth_atlas.py --groups ocean` renders one group and keeps the others), and `compare_runs.py --earth-map` names the atlas map when the run's map differs (`procedural-relief` against `relief`).
 
 | Id | What | Recommendation |
 |---|---|---|
@@ -111,4 +114,5 @@ T0 (one short session with the user) → T1 (sandbox; the user's order: T1.1 loo
 
 | Id | Status | Commit | Duration |
 |---|---|---|---|
-| T1.0 (sea floor, first version) | done, awaiting the user's look (T1.1) | 522dbdb | |
+| T1.0 (sea floor, first version) | done, awaiting the user's look (T1.1; page `out/scratch/sandbox/compare-sea-v3` with the atlas's sea-floor windows) | 522dbdb | |
+| T0 | done | (this commit) | from c351008 |

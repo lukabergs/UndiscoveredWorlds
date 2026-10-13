@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--labels', required=True)
     parser.add_argument('--domains', required=True)
     parser.add_argument('--map', default='relief')
+    parser.add_argument('--earth-map', default=None, help='atlas map name when it differs from --map')
     parser.add_argument('--earth', default='', help='atlas image stems, e.g. close-everest,window-norway')
     arguments = parser.parse_args()
 
@@ -40,8 +41,9 @@ def main():
         figures = [figure(SANDBOX / label / f'{domain}-{arguments.map}.png', f'{label}: {domain} {arguments.map}')
                    for label in arguments.labels.split(',')]
         sections.append(f'<h2>{domain}</h2><div class="row">{"".join(figures)}</div>')
+    earth_map = arguments.earth_map or arguments.map
     if arguments.earth:
-        figures = [figure(ATLAS / f'{stem}-{arguments.map}.png', f'Earth: {stem} {arguments.map}')
+        figures = [figure(ATLAS / f'{stem}-{earth_map}.png', f'Earth: {stem} {earth_map}')
                    for stem in arguments.earth.split(',')]
         sections.append(f'<h2>Earth references (refs/processed/earth-atlas)</h2><div class="row">{"".join(figures)}</div>')
     directory = SANDBOX / f'compare-{arguments.name}'
