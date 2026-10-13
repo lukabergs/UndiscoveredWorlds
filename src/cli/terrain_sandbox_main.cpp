@@ -245,6 +245,7 @@ void usage()
                  "  [--ela FILE] (m per cell: glaciers) [--glacial-ratio 2] [--ice-full-range M 500] [--ice-accumulation 1]\n"
                  "  [--out-ice FILE] [--pinned FILE] (cells held at their starting height) [--sea-cap M 0]\n"
                  "  [--sea-history \"t:level,...\"] (Myr, m: the sea level in time, piecewise linear; default 0)\n"
+                 "  [--no-infill-after MYR] (from then on no deposition inside closed depressions of the bed)\n"
                  "  [--random-routing 0|1] [--seed N 1] [--radius-km 6371]\n";
 }
 }
@@ -383,6 +384,14 @@ int main(int argc, char** argv)
         const double thresholdslope = number("--threshold-slope", 0.0);
         const float seacap = static_cast<float>(number("--sea-cap", 0.0));
         double eroded = 0.0, deposited = 0.0, marine = 0.0, landslides = 0.0;
+        // A final glacial pulse (--no-infill-after, roadmap T1.3): from that time on, the land cells inside a closed
+        // depression of the bed (the Priority-Flood surface above the bed, in the step's frame and sea) get no
+        // deposition: the step's deposition there is taken off after it, so the ice and rivers keep cutting while
+        // the overdeepenings stay open (Earth's glacial lakes are about 15 kyr old, never filled). The removed
+        // volume leaves the system (carried out by the ice) and is reported apart.
+        const bool noinfill = options.count("--no-infill-after") != 0;
+        const double noinfillafter = number("--no-infill-after", 0.0);
+        double infillremoved = 0.0;
         // With a history, each step works in the frame of the level at its midpoint: the elevation and the ELA
         // less the level before the step, the level added back after it (the pinned cells are held in the
         // absolute frame, after that).
@@ -398,9 +407,23 @@ int main(int argc, char** argv)
                 cells += value;
             return count ? static_cast<double>(cells) / static_cast<double>(count) : 0.0;
         };
-        for (double time = 0.0; time < duration - 1e-9; time += step)
+        // Steps end at the history's breakpoints and at --no-infill-after, so a phase shorter than --step (a
+        // 0.25 Myr lowstand) is a step of its own instead of being sampled at a step's midpoint.
+        std::vector<double> breakpoints;
+        for (const SeaPoint& point : seahistory)
+            breakpoints.push_back(point.time_myr);
+        if (noinfill)
+            breakpoints.push_back(noinfillafter);
+        const auto nextstep = [&](double time) {
+            double length = std::min(step, duration - time);
+            for (double point : breakpoints)
+                if (point > time + 1e-9)
+                    length = std::min(length, point - time);
+            return length;
+        };
+        for (double time = 0.0; time < duration - 1e-9; time += parameters.step_myr)
         {
-            parameters.step_myr = std::min(step, duration - time);
+            parameters.step_myr = nextstep(time);
             const float level = history ? static_cast<float>(sealevel(seahistory, time + 0.5 * parameters.step_myr)) : 0.0f;
             if (history)
             {
@@ -425,12 +448,26 @@ int main(int argc, char** argv)
                 ice.erodibilityratio = glacialparameters.erodibilityratio;
                 ice.flotationratio = glacialparameters.flotationratio;
             }
+            std::vector<uint8_t> closed;  // land cells inside a closed depression of the bed, during the pulse
+            if (noinfill && time + 1e-9 >= noinfillafter)
+            {
+                const landscape::Depressions basins = landscape::filldepressions(metric, elevation, sea, 0.0f);
+                closed.assign(count, 0);
+                for (std::size_t i = 0; i < count; i++)
+                    closed[i] = !sea[i] && basins.filledelevation[i] > elevation[i] ? 1 : 0;
+            }
             const landscape::StreamPowerBudget budget = landscape::stepstreampower(
                 metric, graph, erodibility, uplift, parameters, elevation, erosion, deposition, nullptr,
                 glacial ? &ice : nullptr);
             eroded += budget.eroded_km3;
             deposited += budget.landdeposited_km3;
             marine += budget.marinedeposited_km3;
+            for (std::size_t i = 0; i < closed.size(); i++)
+                if (closed[i] && deposition[i] > 0.0f)
+                {
+                    elevation[i] -= deposition[i];
+                    infillremoved += static_cast<double>(deposition[i]) * metric.area_m2(i) * 1e-9;
+                }
             if (thresholdslope > 0.0)
                 landslides += limitslopes(metric, sea, thresholdslope, elevation);
             // No sea cell is filled above --sea-cap (m, default the sea level): with the delta top lifted (its
@@ -464,6 +501,8 @@ int main(int argc, char** argv)
         if (history)  // the schedule's lowest and final levels, the sea's least and final extent (cell fractions)
             std::printf(" sea_min_m %.1f sea_final_m %.1f sea_fraction_min %.4f sea_fraction_final %.4f", lowestlevel,
                         static_cast<double>(finallevel), seafractionmin, seafraction());
+        if (noinfill)  // the deposition taken off closed depressions during the final pulse
+            std::printf(" no_infill_after_myr %.2f infill_removed_km3 %.1f", noinfillafter, infillremoved);
         std::printf("\n");
     }
     catch (const std::exception& error)

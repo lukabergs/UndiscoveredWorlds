@@ -13,13 +13,19 @@ strike), then routing and stream power. Every noise is a function of absolute po
 zoom of the world preview; octaves finer than a domain's grid fade out instead of aliasing.
 
 Config groups: domains, seafloor, warp, structure, zones, relief, coast, micro, uplands, hardness, filter,
-physics, sea_level, glacial, precipitation, render. sea_level: a history of [Myr, m] points (piecewise
-linear, a repeated time a jump) the physics runs through (--sea-history), the default the main erosion at
-0 m, a lowstand at -120 m for 3 Myr, then the rise to 0; when enabled the physics' duration is the
-history's last time (global and windows alike). At the lowstand the shelf emerges and the rivers and
+physics, sea_level, glacial, precipitation, lakes, rivers, render. sea_level: a history of [Myr, m] points
+(piecewise linear, a repeated time a jump) the physics runs through (--sea-history), the default the main
+erosion at 0 m, a lowstand at -120 m for 3.5 Myr, then the rise to 0; when enabled the physics' duration is
+the history's last time (global and windows alike). At the lowstand the shelf emerges and the rivers and
 glaciers cut down to the lowstand; the rise drowns their lower valleys (estuaries, rias, longer fjords).
-keep_shelf: the sea shallower than the lowest level keeps the physics' surface instead of its procedural
-depth, so the valleys cut across the exposed shelf stay drawn.
+final_glacial_myr: the history's last stretch is a final glacial pulse (--no-infill-after) in which closed
+depressions get no deposition, so the ice re-digs the overdeepenings the lowstand's rivers filled (the
+linear lakes). keep_shelf: the sea shallower than the lowest level keeps the physics' surface instead of
+its procedural depth ("incision": the lower of the two), so the valleys cut across the exposed shelf stay
+drawn. lakes: after the physics and the micro texture, every closed depression not joined to the sea is a
+lake at its spill level (Priority-Flood); the filter after the physics spares them, and they are found again
+on the final surface and drawn flat. rivers: drawn on the elevation and relief maps with a width from the
+discharge (hydraulic geometry) times a stated exaggeration.
 
   uv run python scripts/sandbox/terrain_sandbox.py --label try1 [--config FILE] [--set group.key=value ...]
       [--domains global,A,B] [--no-physics]
@@ -27,12 +33,14 @@ Writes out/scratch/sandbox/<label>/: index.html, the PNGs, config.json (the valu
 """
 import argparse
 import copy
+import heapq
 import json
 import math
 import shutil
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -877,6 +885,8 @@ def run_physics(domain, fields, config, directory):
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
     if sea_level['enabled']:
         command += ['--sea-history', ','.join(f'{time}:{level}' for time, level in sea_level['history'])]
+        if sea_level.get('final_glacial_myr', 0) > 0:  # the history's last final_glacial_myr: no infill of closed basins
+            command += ['--no-infill-after', str(duration - sea_level['final_glacial_myr'])]
     glacial = config['glacial']
     out_ice = stem.with_name(f'{domain.name}-out-ice.f32')
     ela = None
@@ -899,6 +909,86 @@ def run_physics(domain, fields, config, directory):
     if ice is not None:  # the maps show today's glaciers: the ice where the surface is above today's line
         ice = np.where(elevation + ice > ela + glacial['present_shift_m'], ice, 0.0)
     return elevation, discharge, ice, result.stdout.strip()
+
+
+def priority_flood(elevation, sea, wrap):
+    """The filled surface of a terrain (Priority-Flood, Barnes et al. 2014, 8-connected): every land cell
+    raised to the lowest level at which water on it reaches a sea cell, the sea cells the outlets at their own
+    elevation. Cells raised (in a depression) go through a plain queue, the others through the heap. A whole
+    world wraps east-west through a padding of an eighth of its width on each side (a lake wider than that
+    across the date line would be cut there); its polar rows are no outlets."""
+    rows, columns = elevation.shape
+    pad = columns // 8 if wrap else 0
+    z = np.pad(np.asarray(elevation, dtype=float), ((1, 1), (pad + 1, pad + 1)),
+               mode='wrap' if wrap else 'edge')
+    water = np.pad(sea, ((1, 1), (pad + 1, pad + 1)), mode='wrap' if wrap else 'edge')
+    done = water.copy()
+    done[0, :] = done[-1, :] = done[:, 0] = done[:, -1] = True  # the frame: no cell, no outlet
+    width = z.shape[1]
+    offsets = (-width - 1, -width, -width + 1, -1, 1, width - 1, width, width + 1)
+    shore = water & ndimage.binary_dilation(~water, structure=np.ones((3, 3)))
+    shore[0, :] = shore[-1, :] = shore[:, 0] = shore[:, -1] = False
+    height = z.ravel().tolist()
+    filled = list(height)
+    closed = done.ravel().tolist()
+    heap = [(height[i], i) for i in np.flatnonzero(shore.ravel()).tolist()]
+    heapq.heapify(heap)
+    pit = deque()
+    while heap or pit:
+        if pit:
+            cell = pit.popleft()
+            level = filled[cell]
+        else:
+            level, cell = heapq.heappop(heap)
+        for offset in offsets:
+            j = cell + offset
+            if closed[j]:
+                continue
+            closed[j] = True
+            if height[j] <= level:
+                filled[j] = level
+                pit.append(j)
+            else:
+                heapq.heappush(heap, (height[j], j))
+    filled = np.asarray(filled).reshape(z.shape)[1:-1, pad + 1:pad + 1 + columns]
+    return np.where(sea, elevation, filled)
+
+
+def find_lakes(domain, elevation, sea, spec, physics_lakes=None):
+    """Lakes at their spill level (roadmap T1.3): the closed depressions the Priority-Flood fills (filled above
+    the terrain by more than a millimetre), 8-connected, kept when deeper than min_depth_m somewhere and at
+    least min_cells cells. Every lake is wet (no water balance in the sandbox). physics_lakes (a mask), when
+    given, keeps only the depressions that overlap it: on the surface after the filter, the lakes the physics
+    left, at the spill level the filter leaves them, without the filter's own small pits (thousands of them
+    in a k 256 window, t13-control). Returns the lake surface (m; NaN off lakes)."""
+    filled = priority_flood(elevation, sea, domain.whole)
+    depth = np.where(sea, 0.0, filled - elevation)
+    labels, count = ndimage.label(depth > 1e-3, structure=np.ones((3, 3)))
+    if count == 0:
+        return np.full(elevation.shape, np.nan)
+    index = np.arange(1, count + 1)
+    deepest = ndimage.maximum(depth, labels, index)
+    cells = ndimage.sum(np.ones_like(depth), labels, index)
+    keep = np.zeros(count + 1, bool)
+    keep[1:] = (deepest > spec['min_depth_m']) & (cells >= spec['min_cells'])
+    if physics_lakes is not None:
+        overlap = np.zeros(count + 1, bool)
+        overlap[np.unique(labels[physics_lakes & (labels > 0)])] = True
+        keep &= overlap
+    return np.where(keep[labels], filled, np.nan)
+
+
+def lake_statistics(domain, elevation, surface):
+    """Lake count, area (km^2) and the deepest lake (m) in the kept window."""
+    surface, elevation = crop(domain, surface), crop(domain, elevation)
+    lake = np.isfinite(surface)
+    coslat = crop(domain, domain.coslat[:, None] * np.ones((1, domain.columns)))
+    area = np.where(lake, domain.fine_km ** 2 * coslat, 0.0)
+    labels, count = ndimage.label(lake, structure=np.ones((3, 3)))
+    depth = np.where(lake, surface - elevation, 0.0)
+    return {'lakes': int(count), 'lake_area_km2': round(float(area.sum()), 1),
+            'deepest_lake_m': round(float(depth.max()) if count else 0.0, 1),
+            'largest_lake_km2': round(float(ndimage.sum(area, labels, np.arange(1, count + 1)).max()) if count else 0.0, 1)}
 
 
 def equilibrium_line(domain, precipitation, spec):
@@ -1074,18 +1164,95 @@ def with_ice(rgb, ice):
     return rgb * (1 - alpha) + np.array([236.0, 242.0, 248.0]) * alpha
 
 
-def render(domain, elevation, sea, discharge, directory, suffix='', ice=None):
+# Lakes and rivers (roadmap T1.3), one water family distinct from the sea's pale blues and greens: the lakes in
+# the lake-surface palette's colour at 0 m (configs/tectonics-palettes.json, lake_surface_m), the rivers a
+# little lighter (the river_flow palette's 100 stop), so a river is seen entering its lake.
+LAKE_RGB = np.array([30.0, 80.0, 160.0])
+RIVER_RGB = np.array([40.0, 90.0, 170.0])
+
+
+def river_threshold(domain, spec):
+    """The least discharge drawn as a river (m3/s): min_discharge_m3_s, one value or one per kind of domain
+    ({"global": ..., "window": ...}, as the physics group), so the world map's 20 km pixels are not a mesh."""
+    value = spec['min_discharge_m3_s']
+    return float(value['global' if domain.whole else 'window'] if isinstance(value, dict) else value)
+
+
+def water_note(domain, lakes, rivers):
+    """The caption's account of the water drawn on the elevation and relief maps."""
+    parts = []
+    if lakes.get('enabled', False):
+        parts.append(f'lakes (dark blue) at their spill level, flat and unshaded (the closed depressions the '
+                     f'physics left, deeper than {lakes["min_depth_m"]:g} m, at least {lakes["min_cells"]} cells)')
+    if rivers.get('enabled', False):
+        parts.append(f'rivers from {river_threshold(domain, rivers):g} m3/s, width {rivers["width_coefficient"]:g} '
+                     f'Q^{rivers["width_exponent"]:g} m (hydraulic geometry) exaggerated {rivers["exaggeration"]:g} '
+                     f'times, at least one pixel')
+    return '; ' + '; '.join(parts) if parts else ''
+
+
+def river_coverage(domain, discharge, water, spec):
+    """Coverage 0..1 of the rivers on the kept window: every land cell with a discharge of at least
+    min_discharge_m3_s joined to its downstream neighbour (the neighbour with the most discharge, when it has
+    more than the cell) by a segment w = width_coefficient x Q^width_exponent m wide (Leopold and Maddock's
+    hydraulic geometry; Q the cell's discharge, m3/s) times exaggeration, at least one pixel; the pixel's size
+    is its north-south one. Drawn at `supersample` times the resolution with round joins, then box-averaged
+    (antialiased). `water` (sea and lakes) takes no river."""
+    from PIL import Image, ImageDraw
+    rows, columns = discharge.shape
+    q = np.where(water, 0.0, discharge)
+    padded = np.pad(discharge, 1, constant_values=-np.inf)
+    neighbours = np.stack([padded[1 + dr:1 + dr + rows, 1 + dc:1 + dc + columns]
+                           for dr in (-1, 0, 1) for dc in (-1, 0, 1)])
+    neighbours[4] = -np.inf  # the cell itself
+    best = np.argmax(neighbours, axis=0)
+    downstream = np.take_along_axis(neighbours, best[None], 0)[0] > discharge
+    river = q >= river_threshold(domain, spec)
+    scale = int(spec.get('supersample', 4))
+    width_px = np.maximum(spec['width_coefficient'] * np.maximum(q, 0.0) ** spec['width_exponent'] *
+                          spec['exaggeration'] / (domain.fine_km * 1000.0), 1.0) * scale
+    image = Image.new('L', (columns * scale, rows * scale), 0)
+    draw = ImageDraw.Draw(image)
+    for r, c in zip(*np.nonzero(river)):
+        x0, y0 = (c + 0.5) * scale, (r + 0.5) * scale
+        width = float(width_px[r, c])
+        half = width / 2.0
+        ends = [(x0, y0)]
+        if downstream[r, c]:  # a river's last cell (into the sea or a lake) is only its round end
+            dr, dc = divmod(int(best[r, c]), 3)
+            x1, y1 = (c + dc - 1 + 0.5) * scale, (r + dr - 1 + 0.5) * scale
+            draw.line((x0, y0, x1, y1), fill=255, width=max(1, int(round(width))))
+            ends.append((x1, y1))
+        for x, y in ends:
+            draw.ellipse((x - half, y - half, x + half, y + half), fill=255)
+    coverage = np.asarray(image.resize((columns, rows), Image.BOX), dtype=float) / 255.0
+    return np.where(water, 0.0, coverage)
+
+
+def render(domain, elevation, sea, discharge, directory, suffix='', ice=None, lake_surface=None, rivers=None):
     elevation, sea = crop(domain, elevation), crop(domain, sea)
     ice = None if ice is None else crop(domain, ice)
+    lake = np.zeros_like(sea) if lake_surface is None else np.isfinite(crop(domain, lake_surface))
+    if lake.any():  # the relief of a lake is its flat surface
+        elevation = np.where(lake, crop(domain, lake_surface), elevation)
     base_rgb = with_ice(terrain_base(elevation, sea), ice)
+    coverage = None
+    if rivers is not None and discharge is not None:
+        coverage = river_coverage(domain, crop(domain, discharge), sea | lake, rivers)[..., None]
+
+    def water(rgb):  # rivers, then the lakes over them
+        if coverage is not None:
+            rgb = rgb * (1.0 - coverage) + RIVER_RGB * coverage
+        rgb[lake] = LAKE_RGB
+        return rgb
     names = {}
     names['elevation'] = f'{domain.name}{suffix}-elevation.png'
-    save_map(domain, directory / names['elevation'], base_rgb)
+    save_map(domain, directory / names['elevation'], water(base_rgb.copy()))
     names['relief'] = f'{domain.name}{suffix}-relief.png'
     coslat = np.maximum(crop(domain, domain.coslat[:, None] * np.ones((1, domain.columns)))[:, 0], 0.25)
     dy = domain.fine_km * 1000.0
     shade = shade_factor(hillshade(elevation, dy, dy * coslat[:elevation.shape[0]], domain.exaggeration))
-    save_map(domain, directory / names['relief'], np.clip(base_rgb * shade[..., None], 0, 255))  # the ice shaded too
+    save_map(domain, directory / names['relief'], np.clip(water(base_rgb * shade[..., None]), 0, 255))  # the ice shaded too
     if discharge is not None:
         discharge = crop(domain, discharge)
         logarithm = np.where(~sea & (discharge > 0), np.log10(np.maximum(discharge, 1e-9)), np.nan)
@@ -1212,12 +1379,17 @@ def main():
             spec = config['filter']
             extra = []
             np.save(directory / f'{domain.name}-elevation-physics.npy', crop(domain, elevation).astype(np.float32))
+            lakes = config.get('lakes', {'enabled': False})
+            lake = np.zeros_like(sea)
+            if lakes['enabled']:  # the closed depressions the physics left, before the filter (which spares them)
+                lake = np.isfinite(find_lakes(domain, elevation, sea, lakes))
+                timing['lakes_before_filter'] = int(ndimage.label(crop(domain, lake), structure=np.ones((3, 3)))[1])
             if spec['enabled'] and spec.get('when', 'before') == 'after':  # fine texture on the eroded surface
                 x, y = fields['coords']
                 field = filter_field(domain, fields, ice, spec, config['seed'])
                 detail = erosion_pass(domain, elevation, x, y, fields['amplitude'], fields['erodibility'], spec,
                                       config['seed'], field=field)
-                land = ~sea
+                land = ~sea & ~lake  # lakes are water to the filter, as the sea: no texture on their beds
                 if spec.get('mean_preserve', 'none') == 'smooth':
                     # Take out the filter's broad component (its mean over about a world cell, land only), so
                     # the averages over world cells stay close to the physics' (not exact: the pipeline's
@@ -1227,14 +1399,22 @@ def main():
                     broad = ndimage.gaussian_filter(np.where(land, detail, 0.0), sigma, mode='nearest') / \
                         np.maximum(weight, 1e-6)
                     detail = detail - broad
-                elevation = np.where(sea, elevation, np.maximum(elevation + detail, 1.0))
+                elevation = np.where(land, np.maximum(elevation + detail, 1.0), elevation)
                 if not domain.whole:
                     save_map(domain, directory / f'{domain.name}-filter-field.png',
                              colourize(crop(domain, field), FIELD_STOPS))
                     extra = [('filter strength field (black 0, white 1, orange 2 and more)', f'{domain.name}-filter-field.png')]
             np.save(directory / f'{domain.name}-elevation.npy', crop(domain, elevation).astype(np.float32))
-            after = render(domain, elevation, sea, discharge, directory, ice=ice)
-            images = [('elevation', after['elevation']), ('relief (hillshade, NW light)', after['relief']),
+            lake_surface = None
+            if lakes['enabled']:  # the physics' lakes at their spill level on the final surface
+                lake_surface = find_lakes(domain, elevation, sea, lakes, physics_lakes=lake)
+                np.save(directory / f'{domain.name}-lake-surface.npy', crop(domain, lake_surface).astype(np.float32))
+                timing.update(lake_statistics(domain, elevation, lake_surface))
+            rivers = config.get('rivers', {'enabled': False})
+            after = render(domain, elevation, sea, discharge, directory, ice=ice, lake_surface=lake_surface,
+                           rivers=rivers if rivers['enabled'] else None)
+            water = water_note(domain, lakes, rivers)
+            images = [(f'elevation{water}', after['elevation']), (f'relief (hillshade, NW light){water}', after['relief']),
                       ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + extra + images
         else:
             images = [('elevation (procedural, no physics)', before['elevation'])] + images
