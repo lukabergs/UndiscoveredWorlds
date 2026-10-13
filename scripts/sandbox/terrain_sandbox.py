@@ -611,6 +611,15 @@ def shelf_profile(base, oceanic, spec):
     shelf, edge, slope = spec['shelf_m'], spec['break_m'], spec['slope_m']
     profile = np.where(depth <= edge, shelf * np.clip(depth / edge, 0.0, 1.0),
                        shelf + (depth - shelf) * smoothstep(depth, edge, edge + slope))
+    if spec.get('foot_m'):
+        # sea-v7b (the hypsometric curve: twice Earth's area between -2500 and 0 m): the slope runs from the
+        # shelf to foot_m over the base's break_m to break_m + slope_m, linearly, and the depths beyond are
+        # compressed into foot_m to bottom_m, so the mid-depth sea goes to the abyss as on Earth's curve.
+        foot, bottom = spec['foot_m'], spec['bottom_m']
+        end = edge + slope
+        steep = shelf + (depth - edge) * (foot - shelf) / slope
+        deep = foot + (depth - end) * (bottom - foot) / max(bottom - end, 1.0)
+        profile = np.where(depth <= edge, profile, np.where(depth <= end, steep, np.maximum(deep, depth * 0 + foot)))
     weight = (base < 0.0) * (1.0 - oceanic)
     return base + weight * (-profile - base)
 
@@ -661,6 +670,10 @@ def segment_shift(domain, x, y, theta, oceanic, spec, seed):
             continue
         xa, ya = xw[active], yw[active]
         along_ridge = (-math.sin(phi) * xa + math.cos(phi) * ya) / length
+        jitter = spec.get('segment_jitter', 0.0)
+        if jitter > 0.0:  # irregular spacing: the along-ridge coordinate stretched by a 1-D noise of itself
+            along_ridge = along_ridge + jitter * gradient_noise(along_ridge * 0.6, np.full_like(along_ridge, 7.3 * b),
+                                                                seed + 133)
         segment = np.floor(along_ridge).astype(np.int64)
         bank = np.full_like(segment, b)
         offset = spec['offset_km'] * erosion_filter.cell_hash(segment, bank, seed + 120)[0]
@@ -1140,6 +1153,8 @@ def main():
         images = []
         if config['render'].get('before_physics', False) or not physics_on:
             before = render(domain, fields['surface'], fields['sea'], None, directory, '-procedural')
+            if not physics_on:  # for scripts/sandbox/hypsometry.py and other measurements
+                np.save(directory / f'{domain.name}-elevation.npy', crop(domain, fields['surface']).astype(np.float32))
             images += [('relief before physics', before['relief'])]
         if physics_on:
             physics_started = time.perf_counter()
@@ -1156,6 +1171,12 @@ def main():
                 # by the rise); only the sea deeper than the lowest level gets its procedural depth back. A shelf
                 # cell the physics left above the sea (a lowstand deposit) is land, as in the physics' routing.
                 restored = fields['sea'] & (fields['surface'] <= min(level for _, level in sea_level['history']))
+                if sea_level['keep_shelf'] == 'incision':
+                    # Only the cutting stays: the lowstand's rivers filled F-troughs' shallow bay with deposits
+                    # that kept it land after the rise (sl-v1, the user: "the bay emptied"). The exposed shelf
+                    # keeps the lower of the physics' surface and its procedural depth, so it is sea again.
+                    shelf = fields['sea'] & ~restored
+                    elevation = np.where(shelf, np.minimum(elevation, fields['surface']), elevation)
             elevation = np.where(restored, fields['surface'], elevation)
             labels, _ = ndimage.label(elevation <= 0.0, structure=np.ones((3, 3)))
             touching = np.unique(labels[(labels > 0) & fields['sea']])
