@@ -1,5 +1,7 @@
 # Erosion and hydrology plan
 
+**2026-10-13:** the open items of this plan (D2c, Phase F, §6's open and found-and-left items, the pending verdicts, the adversarial review) are scheduled in `docs/architecture/terrain-roadmap.md`; this plan stays as the record.
+
 Written 2026-10-06 by the lead session as the brief for the sessions that give the simulator an erosion and drainage model. It follows `world-model.md` (components, process kinds, recipes, evaluation) and `consolidation-plan.md` (structure, tooling, working agreement, naming); the roles and checks of the sessions are `docs/reference-guides/agent-workflow.md`. Section 2 records why each candidate algorithm was chosen or rejected, so that later agents do not re-run the comparison. Decisions marked **user** need the user's answer before the step that depends on them; everything else is decided here and undone by a commit.
 
 ## 1. Decisions taken on 2026-10-06

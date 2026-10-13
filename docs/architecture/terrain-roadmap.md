@@ -1,0 +1,114 @@
+# Terrain roadmap: what remains of the multiscale and erosion plans, and the sandbox's work
+
+Written 2026-10-13 (Opus 5.5; Fable 5.1 off, see `AGENTS.md`). It collects every task not yet done from `multiscale-plan.md` (§4 rows, §6 open items, §7 questions) and `erosion-hydrology-plan.md` (§4, §6), and the tasks that came out of the terrain sandbox sessions of 2026-10-12 and 2026-10-13, and orders them. The two plans stay as records of what was decided and learned; their open items now live here, each with its origin. Where the sandbox has overtaken an item, the item says so.
+
+## 1. Where things stand
+
+- **Pipeline.** Multiscale Phases S0 to S3 done (with S3.11 to S3.16), S5.1 to S5.3c done (the fold fabric as one coherent phase field, `erosion-0096`); S3.17, S3.18, S4.*, S5.4, S5.5, S6 open. Erosion plan Phases 0, A to E, G, H, R, R2, E5 done; D2c deferred, F parked (subsumed by S4.5).
+- **Terrain sandbox** (`multiscale-plan.md` §3 "The terrain sandbox" is the full record; commits `0764d05..522dbdb`). A fast loop outside the pipeline: the world stopped before the climate (`out/scratch/sandbox/base`), procedural layers, then the landscape kernels (`terrain_sandbox.exe`), rendered on the world and windows. It became the place where the look is decided. The user's verdicts: v14 plus the shoreline micro-texture (`fine-v16-micro5`) is the approved look; v15 (erosion layers unwarped, transverse faults, plunging ridges) was rejected and reverted (`269bba8`): **keep the warp's directionality, add only fine texture along it**. The sea floor (step 1 below) is a first, understated version awaiting the user's look (`out/scratch/sandbox/sea-v3`).
+- **References made in the sandbox sessions:** the Earth atlas (`scripts/sandbox/earth_atlas.py`, `refs/processed/earth-atlas/index.html`: ETOPO at 128 to 2048 columns, nine windows at k 64, two at k 256, scale bars and world-cell grids), GLiM erodibility (`scripts/refs/glim.py`, `refs/processed/lithology`), comparison pages (`scripts/sandbox/compare_runs.py`), block-mean check (`scripts/sandbox/block_means.py`).
+
+## 2. Rules for this roadmap
+
+- One phase per session (memory "Phase sessions"); every step records its duration (ledger field, the Duration column below) and gets a ledger entry: pipeline steps in `runs/ledger/erosion.jsonl` (tectonics engine steps in `tectonics.jsonl`), sandbox steps as one entry per sandbox phase in `erosion.jsonl` with `"module": "sandbox"` and the commit range.
+- Sandbox steps are judged by the user's look (pages under `out/scratch/sandbox/<label>`, Earth atlas beside); no parity runs, no tests unless a bug persists. Pipeline steps keep the repository's checks (`step_check.py` at the minimal configuration for parity; one judging run where the change acts).
+- The reviewer runs on Opus 5.5 (`model: opus`) while Fable is off; a `design` agent likewise. Reviews follow each behaviour step of the pipeline (T2, T3, T4); sandbox steps are reviewed by the user's look.
+- **user** marks a decision only the user takes; the orchestrator continues with independent work meanwhile.
+
+## 3. Phases
+
+### T0: verdict sweep and bookkeeping (orchestrator with the user; short)
+
+Many look questions of the old plans were overtaken by the sandbox. Ask once, with a recommendation each; record the answers in both old plans' §7/§6 and here.
+
+| Id | What | Recommendation |
+|---|---|---|
+| T0.1 | The old pending verdicts: regional runs 1 to 15 (erosion plan), runs 37/30, 39/32, 41/42 against 39/40, 51/52, 44/43, 53 to 57 (multiscale §7 questions 4 to 7, pending verdicts), S3.13's lake outline, the island question | mark superseded by the sandbox's direction, except where the user wants a specific one judged |
+| T0.2 | Multiscale Q1 (the world's flatness: 58.5 % of land below 50 m against Earth's 7.1 %) | take it into T2.2: the sandbox's uplands lift and erodibility address it; the global hypsometry diagnosis (land hypsometry after each stage of a world run) runs first in T2.2 |
+| T0.3 | Q2 river widths, Q3 sea pockets, Q5 which grid artefact | Q2 (a) wait for tiles; Q3 keep S3.15's land; Q5 ask with the T3 judging run |
+| T0.4 | **user**: does the sandbox's look (warp, strike-oriented relief bank, rock bands, physics) replace the fold fabric S5.2 to S5.3c as the belts' texture in the pipeline? | yes: the phase-field fabric stays as a switch, default off once T2.4 lands; S5.5's heterogeneity items are then served by the sandbox's zones and bands |
+| T0.5 | Ledger entries for the sandbox sessions (none exist after `erosion-0096`): one entry for `0764d05..8f2a837` (the look) and one for `522dbdb` (sea floor) | do |
+
+### T1: sandbox, finishing the look (the user's order of 2026-10-13)
+
+| Id | What | Acts | Depends | Duration |
+|---|---|---|---|---|
+| T1.1 | **Sea floor, follow-up** after the user's look at `sea-v3`: transform steps of the crest visible at k 64 (larger offsets or a sharper crest), the narrow ridges (the engine ages crust about 200 Myr over 450 km: an engine fact, T4.3), seamount chains when plumes exist | orchestrator | user's look | |
+| T1.2 | **Sea-level history** in the sandbox physics: after the main erosion, a lowstand (about -120 m for a few Myr) then the rise to 0, so rivers incise to the lowstand and the sea drowns their lower valleys: estuaries, rias, longer fjords. Judge on G-coast, F-troughs and window B against Norway and Patagonia (atlas) | worker | | |
+| T1.3 | **Lakes** in the sandbox: keep the depressions the physics leaves (glacial overdeepenings, enclosed basins) as lakes at their spill level (the pipeline's `lake_balance` decides wet or dry when the climate exists; the sandbox: wet), and draw them; the straight glacial troughs across filled lowland basins (seen in v15's F-troughs) are the same item, since the flats' routing draws them | worker | T1.2 | |
+| T1.4 | **Glacial isostasy** (optional, after T1.3's look): the ice load depresses the crust during the glacial phase and rebounds after: the St. Lawrence-style flooded lowlands, raised beaches | worker | T1.3 | |
+| T1.5 | **100 m nested test**: windows smaller than a world cell with margins in km; a window starts from the coarser window's eroded surface (upsampled) and runs a short physics (0.1 to 1 Myr), which prototypes the hierarchy's levels; Copernicus GLO-30 tiles (30 m, open) for Sognefjord and Patagonia into `refs/source/` (a few hundred MB), resampled to the same pixels in the atlas; window: G-coast's fjord coast | worker; download by a surveyor-like agent | T1.2 | |
+| T1.6 | Sandbox artefacts left: the fold-belt foreland's hard/soft bands erode into jagged, axis-aligned scarps (D8 on the bands); a few blotches in G-coast's upper troughs from the micro-texture; window B's rias at k 64 (seen in v15; check on the current defaults); the date-line seam and polar stretch of the planar noise (only if a window needs it) | orchestrator | | |
+| T1.7 | Close: the user's verdict on the full set (world, B, F, G, O, the four k 256 windows) as the target look for T2; the sandbox's config frozen as `configs/sandbox/terrain.json` at that commit | user | T1.1 to T1.6 | |
+
+### T2: port the approved look into the pipeline (the real goal)
+
+The sandbox draws on the B-spline of a 256-column world and runs its own physics per window; the pipeline must draw the same things inside its contract: the global grid authoritative, every level's block means exact (the projection), windows seamless. T2.0 maps each sandbox layer to its place.
+
+| Id | What | Acts | Depends | Duration |
+|---|---|---|---|---|
+| T2.0 | Design: each sandbox layer's home. Global stages: rock erodibility from the tectonic fields (soft sediment, interior and foreland basins, hard shields and orogen cores, 60 km mosaic; `geosphere.erodibility` exists), the uplands lift, the sea floor from crust age (replaces the legacy ocean-depth stages; also erosion plan §6's C4 ocean hypsometry), trenches. Regional levels: the warp and the strike-oriented relief bank and bands (with the zones), the coast term and the shoreline micro-texture, glaciers at the fine levels, the filter with its strength field after each level's solve (S4.5 merged here), all followed by the projection. What the pipeline already has instead of a sandbox proxy (climate for the precipitation proxy, the regional solve for the sandbox physics). Written into §3 of this file | orchestrator + `design` agent (opus) | T1.7 | |
+| T2.1 | Global erodibility from the tectonic fields (world-changing: every world's erosion changes) | worker, reviewer | T2.0 | |
+| T2.2 | Hypsometry: the diagnosis first (land hypsometry after each stage of a 256-column world run, multiscale Q1), then the uplands lift and/or the global erosion's levers (the erosion plan's open band criterion: kappa, area exponent, duration, uplift; erosion rate 5.7 m/Myr below the band, land 34.6 %) | worker, reviewer, **user** look | T2.1 | |
+| T2.3 | Sea floor and trenches as a global stage from crust age | worker, reviewer | T2.0, T1.1 | |
+| T2.4 | Regional: the warp, the oriented relief bank with the belt zones, the rock bands; the fold fabric behind a switch (T0.4) | worker, reviewer | T3.1 to T3.3 | |
+| T2.5 | Regional: the coast term and the shoreline micro-texture (after the level's solve, against the open sea) | worker, reviewer | T2.4 | |
+| T2.6 | Regional: the erosion filter after each level's solve with its strength field (noise, rock, precipitation, none under ice) and the projection (replaces S4.5 and the erosion plan's Phase F) | worker, reviewer | T2.5 | |
+| T2.7 | Regional glaciers at the fine levels (the sandbox's glacial physics: fjords, troughs) if the existing regional glacial forms (E5) do not give them | worker, reviewer | T2.6 | |
+| T2.8 | Judging runs: world (256), A, B, C at k 64 and the k 256 windows, against the sandbox's pages and the Earth atlas; **user** verdict | orchestrator, user | T2.1 to T2.7 | |
+
+### T3: multiscale infrastructure left (from multiscale §4)
+
+| Id | Was | What | Acts | Depends |
+|---|---|---|---|---|
+| T3.1 | S3.17 | Trace and fix the level ≥ 2 coast rule that prints the 9.8 km lattice under the coast warp (the `ShorelineWarp` normalisation part is likely done by `erosion-0094`) | worker | |
+| T3.2 | S3.18 | `landscape.refinement.prolong_basis` (0 Catmull-Rom, 1 cubic B-spline) for `prolong` and the level-1 start surface, with the `--sea` anisotropy variant | worker | T3.1 |
+| T3.3 | S4.0 | Connected seamless solve (descent labels plus minimax-Dijkstra fill); reach stays 0 until the user's verdict on reach 0 against 1 at A k 64 | worker, reviewer | |
+| T3.4 | S4.1 | Tiles (`world_pipeline region --tiles DIR`); the coast step's reads of about 6 global cells outside `levelhalo` are a recorded risk here | worker | T3.3 |
+| T3.5 | S4.2 | Kernel inventory test (per-cell functions only) | worker | T3.4 |
+| T3.6 | S4.3 | OpenGL 4.3 compute backend behind `--gpu` | worker | T3.5 |
+| T3.7 | S4.4 | Close: a 10 km window of A at 1 m/pixel as tiles, CPU and GPU timings | orchestrator | T3.6 |
+
+Open items of S3 to carry with T3: seamlessness by test (T3.3); A's N–S and C's E–W residual lattice peaks; B's worm-like trough texture; S2.7's parent-period ripple; S3.2's re-rasterising the beds on the de-lifted surface; S3.12's routing depressions to the pit bottom (option); the lakes-step items (multiscale §6 l.433, l.449, l.553 (3): uncapped wet pits, the straight sea–lake contact, the lake flood's gate over filled pockets, the square pond at (169, 59), the floored sill needing lake surfaces in `rasterisechannels` and a rising lake → sill link); the 51 m displacement step at global cell (181, 60); S1's relief legend cut at the right; DEMs finer than 450 m (served by T1.5's GLO-30).
+
+### T4: tectonics engine
+
+| Id | Was | What | Acts | Depends |
+|---|---|---|---|---|
+| T4.1 | new | Survey: is progressive rifting on in `configs/tectonics-baseline.json`; how plumes are anchored (fixed in the mantle frame gives hotspot chains); why seed 1 has no plumes; how ridges segment (the engine's transform boundaries) | surveyor | |
+| T4.2 | new | Back-arc rollback as a rule: behind old, fast ocean-ocean subduction, extension of the overriding plate (back-arc basins, remnant arcs, island-arc archipelagos) | worker, reviewer, **user** (world-changing) | T4.1 |
+| T4.3 | new | Spreading rate and ocean area: crust ages about 200 Myr within 450 km of a ridge (about 2 km/Myr); two thirds of the sea lies on continental crust (flooded shelves, against Earth's few percent); oceanic crust 19 % of the world | surveyor, then a design question | T4.1 |
+| T4.4 | S5.4 | Material coordinates and the full strain tensor exported; **user**: the contract change | worker, reviewer | |
+| T4.5 | S5.5 | Material-space drawing, seam bands, belt zonation (the zonation part may already be served by T2.4; decide at T2.0) | worker | T4.4, T2.4 |
+| T4.6 | S6.0 | Thin viscous sheet design (lateral flow, plateaus, curved belts, gradual continental rifting with rift flanks, back-arc extension with retreating trenches) | `design` agent (opus) + surveyor | T4.4 |
+| T4.7 | S6.1..n | Per T4.6; ends with the user's verdict on a 256-column run | worker, reviewer, user | T4.6 |
+| T4.8 | EHP §6 | H2's rift-edge under-measurement: "is to be fixed" (the user accepted its cost) | worker | |
+
+### T5: hydrology and erosion items left (erosion plan §6)
+
+- Sediment calibration: about 400 times too little sediment reaches the sea (EHP:492); the denudation band against the diffusion-dominated rate (EHP:491). Pair with T2.2.
+- Three enclosed below-sea cells without a lake surface (EHP:496); the ocean under the engine's uplift moves the C4 depth bands (EHP:497; T2.3 replaces C4's depths).
+- River mouths: replace the table with Dai and Trenberth ds551.0 (the user's decision, EHP:530; no commit found), add the Nile (EHP:503).
+- D2c (coarse-climate runoff at tectonic checkpoints): stays deferred (**user**, 2026-10-07/08).
+- Found and left: `random(a, b)` draws only 15 bits (biases `createfractal` low); the `normalisecoasts` one-ring pull (a km-based reach); an unidentified legacy stage lowering coastal land; dead `generateglobalclimate` (about 700 lines).
+- Regional items of R5, R10, E5.4 (coast ruggedness, shore-floor block edges, the block-mean drop now handled by the projection, the trough cap and wall, cirques against pits at k 16, a bed law following the trough floor): re-check against T2's port; most are superseded.
+- Climate module, not terrain (listed for completeness): the south-polar hot desert, PET 2 to 5 times Earth's and land rain 22 % high, residual ice flicker near the ELA.
+
+### T6: later phenomena (catalogue; each a design question when its turn comes)
+
+Water and coasts: deltas and alluvial fans at fine scale, endorheic basins and salt flats, karst, coral reefs and atolls, dune fields, raised beaches, meanders (D8 stream power cannot make them: a lateral-migration model, centreline after Howard and Knutson or the momentum particles of McDonald and Cordonnier 2026, for large lowland rivers). Glacial: moraines, drumlins, eskers, hanging valleys (at 100 m). Volcanic: stratovolcanoes and calderas on arcs, shield volcanoes, flood basalts, hotspot chains (with T4.1). Structural: great escarpments at passive margins, rift flanks and half-grabens (T4.7), salt domes, inselbergs on old shields, river capture, landslide scars.
+
+### T7: reviews and the adversarial review
+
+- Behaviour steps reviewed by `reviewer` (opus while Fable is off): every T2, T3, T4 worker step. Unverified earlier: S5.3b and S5.3c (no review recorded in `erosion-0095`, `0096`), H4b (not reviewed).
+- The adversarial review (GPT-6 Astra through Codex, run by the user) comes after the last phase, holistically over the repository. Ranges to hand over: the erosion plan `16ddfb3..HEAD` (its §7 prompt at EHP:509-519, widened to A–H), the multiscale plan `82fdef0..HEAD`, the sandbox `0764d05..HEAD`.
+
+## 4. Order
+
+T0 (one short session with the user) → T1 (sandbox; the user's order: T1.1 look, T1.2, T1.3, T1.5; T1.4 and T1.6 when they fit) → T3.1 to T3.3 (the pipeline's regional base must be clean before the port) → T2 → T3.4 to T3.7 → T4 (T4.1 survey can run any time; T4.2 and T4.4 need the user) → T5 alongside where it pairs (sediment with T2.2, river mouths any time) → T6 as the user picks → T7's adversarial review at the end.
+
+## 5. Status
+
+| Id | Status | Commit | Duration |
+|---|---|---|---|
+| T1.0 (sea floor, first version) | done, awaiting the user's look (T1.1) | 522dbdb | |
