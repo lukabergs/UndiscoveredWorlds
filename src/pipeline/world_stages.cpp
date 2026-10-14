@@ -696,7 +696,6 @@ void applyterraintexturing(planet& world, GenerationScratch& scratch)
     shift(fractal, world.width(), world.height(), random(1, world.width()));
 
     const int sealevel = world.sealevel();
-    const int midpoint = world.maxelevation() / 2;
 
     // The sea's texture is the fractal at zero mean and unit spread: the fractal's draws cover
     // only part of its range and its spread grows with the grid height in cells.
@@ -719,15 +718,19 @@ void applyterraintexturing(planet& world, GenerationScratch& scratch)
     const double spread = count > 0.0 ? sqrt(max(0.0, sumsquares / count - mean * mean)) : 0.0;
     const float seascale = spread > 0.0 ? tuning::terrain::ocean_floor::textureSdM / static_cast<float>(spread) : 0.0f;
 
+    // The land's texture is centred at the same measured mean: centred at half the maximum
+    // elevation it lowered almost all land, and the floor below held most of it at the coast.
+    const float landscale = tuning::terrain::texturing::landScale;
+
     for (int x = 0; x <= world.width(); x++)
     {
         for (int y = 0; y <= world.height(); y++)
         {
             const float oldvalue = world.nomfloat(x, y);
-            const int noise = fractal[x][y] - midpoint;
+            const float noise = static_cast<float>(static_cast<double>(fractal[x][y]) - mean);
             float newvalue = world.sea(x, y)
-                ? oldvalue + static_cast<float>(static_cast<double>(fractal[x][y]) - mean) * seascale
-                : oldvalue + static_cast<float>(noise) * 0.10f;
+                ? oldvalue + noise * seascale
+                : oldvalue + noise * landscale;
 
             if (world.sea(x, y))
                 newvalue = min(newvalue, static_cast<float>(sealevel - 10));

@@ -469,7 +469,7 @@ Decided for Phase E5 by the lead session (2026-10-09, Fable 5.1); each is undone
 
 Found and left (not this plan's work):
 
-- `random(a, b)` (`src/core/procedural_noise.cpp` around 118-125, 353-358) draws only 15 bits (0 to 32767), so every `createfractal(..., 1, maxelev)` with the engine's `maxelev` of 65536 starts from values in the lower half and is biased low: the land branch of `terrain.texturing` lowers land by up to 3.3 km; and `createfractal`'s amplitude grows with the grid height in cells in every caller (C4 survey; C4 corrected only the sea branch). A terrain-module step of its own; it changes every procedural world.
+- `random(a, b)` (`src/core/procedural_noise.cpp` around 118-125, 353-358) draws only 15 bits (0 to 32767), so every `createfractal(..., 1, maxelev)` with the engine's `maxelev` of 65536 starts from values in the lower half and is biased low: the land branch of `terrain.texturing` lowers land by up to 3.3 km (fixed 2026-10-14 by centring it at the fractal's measured mean, terrain roadmap T2.2a); and `createfractal`'s amplitude grows with the grid height in cells in every caller (C4 survey; C4 corrected only the sea branch). A terrain-module step of its own; it changes every procedural world.
 
 - In `procedural-world`, `hydrology.rivers_and_basins` and `hydrology.basin_policy` turn 4 to 7 percent of the planet from land into shallow sea (C4's measurement; §6 B1 names the river map's tidying passes and `addlandnoise`); `eroded-world` no longer runs them.
 

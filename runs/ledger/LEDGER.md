@@ -73,6 +73,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0097`: an unsmoothed strain-driven warp: a 250 km drag folded the grid over itself along the belts
 - `erosion-0098`: equal fracture-zone troughs at every segment boundary: they read as a comb
 - `erosion-0098`: the smoothed convergent-boundary band drawn as the trench: beaded troughs hundreds of km wide
+- `erosion-0099`: starting a procedural-world terrain chain from runs/tectonics/78/bundle: terrain.tectonic_trenches reads a table a bundle cannot load
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
@@ -205,6 +206,7 @@ Lessons:
 | `erosion-0096` | 2026-10-12 | merged; the judging round registered next | keep | multiscale plan, S5.3c: the coherent fold phase: the fabric as one phase field (the least-squares potential of the wavevector field on the global grid, oriented by a continuity flood, the axis smoothed on doubled angles, bicubic Hermite at the fine cells, dislocations faded into fold terminations, every fold drawn at the coarsest level with at least 4 cells per wavelength); the kernel sums retired |
 | `erosion-0097` | 2026-10-13 | approved by the user: v14 plus the shoreline micro-texture (fine-v16-micro5) is the look; v15 rejected ('much less realistic and aesthetically pleasing than compare-v14') and reverted | keep | terrain sandbox (roadmap T1), the look: sandbox versions v1 to v16 outside the pipeline, 0764d05..8f2a837 (2026-10-12 to 2026-10-13); v15 reverted by 269bba8 |
 | `erosion-0098` | 2026-10-13 | awaiting the user's look (roadmap T1.1) | keep | terrain sandbox (roadmap T1.0), the sea floor, first version (522dbdb): step 1 of the user's 2026-10-13 order (sea floor, then sea-level history and lakes, then the 100 m nested test against Copernicus GLO-30, then engine back-arc rollback and S6) |
+| `erosion-0099` | 2026-10-14 | reviewed (reviewer on Opus 5.5, Fable off): pass with notes; the user's look at compare-base-v2 pending | keep | terrain roadmap T2.2a: the land branch of terrain.texturing centred at the fractal's measured mean (the missing midlands) |
 
 Lessons:
 
@@ -365,6 +367,8 @@ Lessons:
 - `erosion-0097`: Runevision's filter adds only a faint texture at k 64; it belongs to the finer levels, after the physics or before the solve, never as the base.
 - `erosion-0098`: The world's crust age is per 156 km cell, so its minimum near a ridge is a broad trough that never reaches 0: the crest needs the age relative to the lowest age nearby.
 - `erosion-0098`: Most of this world's sea is flooded continental crust and most oceanic crust is 300 to 600 Myr old: an age-depth law shapes only a third of the sea.
+- `erosion-0099`: Measure the land after every stage before tuning physics: one uncentred noise term outweighed every erosion lever discussed for the flatness.
+- `erosion-0099`: The hillslope diffusion reaches about sqrt(kappa t) = 4.5 km over the sandbox's run: it cannot remove a band of the hypsometry.
 
 ## tectonics
 

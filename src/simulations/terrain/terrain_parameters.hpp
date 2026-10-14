@@ -52,6 +52,11 @@ inline int faultVariation = 3;
 inline int faultLookDistance = 4;
 }
 
+namespace texturing
+{
+inline float landScale = 0.1f;
+}
+
 namespace subgrid
 {
 inline float spacingCoefficient = 8.0f;
@@ -102,6 +107,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "terrain.oceanridges.fault_step", &oceanridges::faultStep },
         { "terrain.oceanridges.fault_variation", &oceanridges::faultVariation },
         { "terrain.oceanridges.fault_look_distance", &oceanridges::faultLookDistance },
+        { "terrain.texturing.land_scale", &texturing::landScale },
         { "terrain.subgrid.spacing_coefficient", &subgrid::spacingCoefficient },
         { "terrain.subgrid.reference_d_over_k", &subgrid::referenceDOverK },
         { "terrain.subgrid.reference_m", &subgrid::referenceM },
