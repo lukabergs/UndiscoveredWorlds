@@ -13,7 +13,7 @@ strike), then routing and stream power. Every noise is a function of absolute po
 zoom of the world preview; octaves finer than a domain's grid fade out instead of aliasing.
 
 Config groups: domains, seafloor, warp, structure, zones, relief, coast, micro, uplands, hardness, filter,
-physics, sea_level, glacial, precipitation, lakes, rivers, render. sea_level: a history of [Myr, m] points
+physics, sea_level, history, glacial, precipitation, lakes, rivers, render. sea_level: a history of [Myr, m] points
 (piecewise linear, a repeated time a jump) the physics runs through (--sea-history), the default the main
 erosion at 0 m, a lowstand at -120 m for 3.5 Myr, then the rise to 0; when enabled the physics' duration is
 the history's last time (global and windows alike). At the lowstand the shelf emerges and the rivers and
@@ -26,6 +26,13 @@ drawn. lakes: after the physics and the micro texture, every closed depression n
 lake at its spill level (Priority-Flood); the filter after the physics spares them, and they are found again
 on the final surface and drawn flat. rivers: drawn on the elevation and relief maps with a width from the
 discharge (hydraulic geometry) times a stated exaggeration.
+history (roadmap T1.2b; supersedes sea_level when enabled): phases, each from start_myr to the next one's
+start (the last to end.time_myr, the run's duration, where the sea jumps to end.sea_m): the sea level sea_m
+(--sea-history, constant within a phase), the ice (true: the glacial ELA, false: none, a number: metres added
+to the ELA) with glacial_ratio (--ice-history), the step step_myr (--step, then --step-after where it changes)
+and no_infill (from the first such phase to the end: --no-infill-after); keep_shelf as sea_level's.
+Every physics run also writes per-cell totals (--out-fields), saved cropped as <domain>-<name>.npy (eroded_m,
+deposited_m, glacial_eroded_m, ice_time_myr, ice_max_m, landslide_m, last_eroded_m) and drawn as three maps.
 
   uv run python scripts/sandbox/terrain_sandbox.py --label try1 [--config FILE] [--set group.key=value ...]
       [--domains global,A,B] [--no-physics]
@@ -856,6 +863,57 @@ def erosion_pass(domain, height_m, x, y, amplitude_m, erodibility, spec, seed, f
 
 # ---------------------------------------------------------------- physics
 
+NO_ICE_OFFSET_M = 100000.0  # an ELA offset that leaves no ice (a phase with "ice": false)
+TOTAL_FIELDS = ('eroded_m', 'deposited_m', 'glacial_eroded_m', 'ice_time_myr', 'ice_max_m', 'landslide_m',
+                'last_eroded_m')
+
+
+def schedule(config):
+    """The physics' time schedule, or None for the plain run at 0 m: from the history group when enabled
+    (roadmap T1.2b; it supersedes sea_level), else from sea_level when enabled. A dict with sea_history
+    ([Myr, m] points), duration, no_infill_after (Myr or None), keep_shelf and, from the history only,
+    ice_history ([Myr, ELA offset m, glacial ratio] per phase), step (the first phase's step, Myr) and
+    step_after ([Myr, step] where the step changes)."""
+    history = config.get('history', {'enabled': False})
+    if history.get('enabled', False):
+        phases, end = history['phases'], history['end']
+        starts = [phase['start_myr'] for phase in phases] + [end['time_myr']]
+        if any(b <= a for a, b in zip(starts, starts[1:])):
+            raise ValueError('history: phase starts and the end must increase')
+        sea, ice, step_after = [], [], []
+        step = phases[0].get('step_myr')
+        current = step
+        ratio = config['glacial']['erodibility_ratio']
+        for phase, until in zip(phases, starts[1:]):
+            sea += [[phase['start_myr'], phase['sea_m']], [until, phase['sea_m']]]
+            value = phase.get('ice', True)
+            offset = NO_ICE_OFFSET_M if value is False else 0.0 if value is True else float(value)
+            ratio = phase.get('glacial_ratio') or ratio
+            ice.append([phase['start_myr'], offset, ratio])
+            if phase.get('step_myr') and phase['step_myr'] != current:
+                current = phase['step_myr']
+                step_after.append([phase['start_myr'], current])
+        sea.append([end['time_myr'], end['sea_m']])
+        flags = [bool(phase.get('no_infill', False)) for phase in phases]
+        no_infill_after = None
+        if any(flags):
+            first = flags.index(True)
+            if not all(flags[first:]):
+                raise ValueError('history: no_infill must hold from its first phase to the end')
+            no_infill_after = phases[first]['start_myr']
+        return {'sea_history': sea, 'duration': end['time_myr'], 'no_infill_after': no_infill_after,
+                'keep_shelf': history.get('keep_shelf', 'incision'), 'ice_history': ice, 'step': step,
+                'step_after': step_after}
+    sea_level = config.get('sea_level', {'enabled': False})
+    if sea_level.get('enabled', False):
+        duration = sea_level['history'][-1][0]
+        final = sea_level.get('final_glacial_myr', 0)
+        return {'sea_history': sea_level['history'], 'duration': duration,
+                'no_infill_after': duration - final if final > 0 else None,
+                'keep_shelf': sea_level.get('keep_shelf', False)}
+    return None
+
+
 def run_physics(domain, fields, config, directory):
     spec = {**config['physics'], **domain.physics}
     stem = directory / f'{domain.name}'
@@ -869,24 +927,29 @@ def run_physics(domain, fields, config, directory):
         np.asarray(values, dtype='<f4').tofile(files[key])
     out_elevation = stem.with_name(f'{domain.name}-out-elevation.f32')
     out_discharge = stem.with_name(f'{domain.name}-out-discharge.f32')
-    sea_level = config.get('sea_level', {'enabled': False})
-    duration = sea_level['history'][-1][0] if sea_level['enabled'] else spec['duration_myr']
+    plan = schedule(config)
+    duration = plan['duration'] if plan else spec['duration_myr']
+    step = (plan or {}).get('step') or spec['step_myr']
+    totals_prefix = stem.with_name(f'{domain.name}-totals')
     command = [str(PHYSICS), '--columns', str(domain.columns), '--rows', str(domain.rows),
                '--elevation', str(files['elevation']), '--sea', str(files['sea']),
                '--erodibility', str(files['erodibility']), '--uplift', str(files['uplift']),
                '--runoff-file', str(files['runoff']), '--duration', str(duration),
-               '--step', str(spec['step_myr']), '--k', str(spec['k']), '--m', str(spec['m']),
+               '--step', str(step), '--k', str(spec['k']), '--m', str(spec['m']),
                '--deposition', str(spec['deposition']), '--diffusivity', str(spec['diffusivity_km2_myr']),
                '--delta-top', str(spec['delta_top_m']), '--threshold-slope', str(spec['threshold_slope']),
                '--pinned', str(files['pinned']), '--radius-km', str(domain.radius_km),
                '--random-routing', '1' if spec.get('random_routing', False) else '0', '--seed', str(config['seed']),
-               '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge)]
+               '--out-elevation', str(out_elevation), '--out-discharge', str(out_discharge),
+               '--out-fields', str(totals_prefix)]
     if not domain.whole:
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
-    if sea_level['enabled']:
-        command += ['--sea-history', ','.join(f'{time}:{level}' for time, level in sea_level['history'])]
-        if sea_level.get('final_glacial_myr', 0) > 0:  # the history's last final_glacial_myr: no infill of closed basins
-            command += ['--no-infill-after', str(duration - sea_level['final_glacial_myr'])]
+    if plan:
+        command += ['--sea-history', ','.join(f'{time}:{level}' for time, level in plan['sea_history'])]
+        if plan['no_infill_after'] is not None:  # the final glacial pulse: no infill of closed basins
+            command += ['--no-infill-after', str(plan['no_infill_after'])]
+        if plan.get('step_after'):
+            command += ['--step-after', ','.join(f'{time}:{length}' for time, length in plan['step_after'])]
     glacial = config['glacial']
     out_ice = stem.with_name(f'{domain.name}-out-ice.f32')
     ela = None
@@ -897,6 +960,8 @@ def run_physics(domain, fields, config, directory):
         command += ['--ela', str(files['ela']), '--glacial-ratio', str(glacial['erodibility_ratio']),
                     '--ice-full-range', str(glacial['full_ice_range_m']),
                     '--ice-accumulation', str(glacial['ice_accumulation']), '--out-ice', str(out_ice)]
+        if plan and plan.get('ice_history'):
+            command += ['--ice-history', ','.join(f'{time}:{offset}:{ratio}' for time, offset, ratio in plan['ice_history'])]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f'terrain_sandbox failed on {domain.name}: {result.stderr.strip()}')
@@ -904,11 +969,14 @@ def run_physics(domain, fields, config, directory):
     elevation = np.fromfile(out_elevation, dtype='<f4').reshape(shape).astype(np.float64)
     discharge = np.fromfile(out_discharge, dtype='<f4').reshape(shape).astype(np.float64)
     ice = np.fromfile(out_ice, dtype='<f4').reshape(shape).astype(np.float64) if glacial['enabled'] else None
-    for path in list(files.values()) + [out_elevation, out_discharge] + ([out_ice] if glacial['enabled'] else []):
+    total_files = [Path(f'{totals_prefix}-{name}.f32') for name in TOTAL_FIELDS]
+    totals = {name: np.fromfile(path, dtype='<f4').reshape(shape) for name, path in zip(TOTAL_FIELDS, total_files)}
+    for path in list(files.values()) + [out_elevation, out_discharge] + ([out_ice] if glacial['enabled'] else []) + \
+            total_files:
         path.unlink()
     if ice is not None:  # the maps show today's glaciers: the ice where the surface is above today's line
         ice = np.where(elevation + ice > ela + glacial['present_shift_m'], ice, 0.0)
-    return elevation, discharge, ice, result.stdout.strip()
+    return elevation, discharge, ice, totals, result.stdout.strip()
 
 
 def priority_flood(elevation, sea, wrap):
@@ -1266,6 +1334,51 @@ def render(domain, elevation, sea, discharge, directory, suffix='', ice=None, la
     return names
 
 
+DEPTH_STOPS = [(0.0, (12, 12, 18)), (0.25, (80, 30, 110)), (0.5, (190, 55, 80)), (0.75, (245, 150, 45)),
+               (1.0, (252, 248, 205))]  # sequential, black to pale yellow, on 0..1 of the map's range
+SHARE_STOPS = [(0.0, (12, 12, 18)), (0.5, (50, 110, 185)), (1.0, (235, 245, 255))]  # black to ice white
+
+
+def render_totals(domain, totals, sea, directory):
+    """The physics' per-cell totals on the kept window: the total eroded depth (stream-power erosion with its
+    hillslope term, plus the landslides), the deposit thickness (land and marine) and the glacial share of the
+    stream-power erosion. Each on a sequential ramp from 0 to the window's 99th percentile (the share 0 to 1);
+    the final sea darkened toward blue so the coast reads."""
+    sea = crop(domain, sea)
+    values = {name: crop(domain, field).astype(np.float64) for name, field in totals.items()}
+
+    def ramp(field, top, stops):
+        rgb = colourize(np.clip(field / max(top, 1e-9), 0.0, 1.0), stops).astype(float)
+        rgb[sea] = 0.5 * rgb[sea] + 0.5 * np.array([20.0, 40.0, 80.0])
+        return rgb
+
+    images = []
+    eroded = values['eroded_m'] + values['landslide_m']
+    deposited = values['deposited_m']
+    stream = values['eroded_m']
+    share = np.where(stream > 1.0, values['glacial_eroded_m'] / np.maximum(stream, 1e-9), np.nan)
+    ice_time, ice_max = values['ice_time_myr'], values['ice_max_m']
+    for key, field, top, stops, caption in (
+            ('eroded', eroded, float(np.percentile(eroded, 99)), DEPTH_STOPS,
+             'total eroded depth, m (stream power with its hillslope term, plus landslides)'),
+            ('deposited', deposited, float(np.percentile(deposited, 99)), DEPTH_STOPS,
+             'deposit thickness, m (land and marine; the final pulse\'s infill of closed basins taken off)'),
+            ('glacial-share', share, 1.0, SHARE_STOPS,
+             'glacial share of the stream-power erosion (erosion in steps under more than 10 m of ice over all '
+             'of it; cells eroded less than 1 m black)')):
+        rgb = ramp(np.nan_to_num(field), top, stops)
+        name = f'{domain.name}-total-{key}.png'
+        save_map(domain, directory / name, rgb)
+        if key == 'glacial-share':
+            text = (f'{caption}: black 0 to white 1; ice above 10 m for 0 to {ice_time.max():.2f} Myr, thickest '
+                    f'{ice_max.max():.0f} m; final sea darkened')
+        else:
+            text = (f'{caption}: black 0 to pale yellow {top:.0f} m (99th percentile); range {field.min():.0f} to '
+                    f'{field.max():.0f} m; final sea darkened')
+        images.append((text, name))
+    return images
+
+
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Terrain sandbox {label}</title>
 <style>body{{background:#15181d;color:#ddd;font:14px system-ui;margin:16px}}h2{{margin:24px 0 8px}}
 .row{{display:flex;gap:8px;flex-wrap:wrap}}figure{{margin:0;flex:1 1 30%;min-width:280px}}
@@ -1325,20 +1438,22 @@ def main():
             images += [('relief before physics', before['relief'])]
         if physics_on:
             physics_started = time.perf_counter()
-            elevation, discharge, ice, report = run_physics(domain, fields, config, directory)
+            elevation, discharge, ice, totals, report = run_physics(domain, fields, config, directory)
             timing['physics'] = time.perf_counter() - physics_started
             timing['physics_report'] = report
+            for name, values in totals.items():  # per-cell totals for later mineral work
+                np.save(directory / f'{domain.name}-{name}.npy', crop(domain, values).astype(np.float32))
             # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
             # Land cut below the sea and connected to it (a fjord, a drowned river mouth) becomes sea.
             procedural_sea = fields['sea'].copy()  # the open sea before the physics flooded its troughs
-            sea_level = config.get('sea_level', {'enabled': False})
+            plan = schedule(config)
             restored = fields['sea']
-            if sea_level['enabled'] and sea_level.get('keep_shelf', False):
+            if plan and plan.get('keep_shelf', False):
                 # The shelf the lowstand exposed keeps the physics' surface (the valleys cut across it, drowned
                 # by the rise); only the sea deeper than the lowest level gets its procedural depth back. A shelf
                 # cell the physics left above the sea (a lowstand deposit) is land, as in the physics' routing.
-                restored = fields['sea'] & (fields['surface'] <= min(level for _, level in sea_level['history']))
-                if sea_level['keep_shelf'] == 'incision':
+                restored = fields['sea'] & (fields['surface'] <= min(level for _, level in plan['sea_history']))
+                if plan['keep_shelf'] == 'incision':
                     # Only the cutting stays: the lowstand's rivers filled F-troughs' shallow bay with deposits
                     # that kept it land after the rise (sl-v1, the user: "the bay emptied"). The exposed shelf
                     # keeps the lower of the physics' surface and its procedural depth, so it is sea again.
@@ -1415,7 +1530,8 @@ def main():
                            rivers=rivers if rivers['enabled'] else None)
             water = water_note(domain, lakes, rivers)
             images = [(f'elevation{water}', after['elevation']), (f'relief (hillshade, NW light){water}', after['relief']),
-                      ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + extra + images
+                      ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + extra + \
+                render_totals(domain, totals, sea, directory) + images
         else:
             images = [('elevation (procedural, no physics)', before['elevation'])] + images
         timing['total'] = time.perf_counter() - started

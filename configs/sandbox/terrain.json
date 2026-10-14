@@ -60,6 +60,12 @@
              "window": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.35}},
  "sea_level": {"enabled": false, "history": [[0, 0], [20, 0], [20, -120], [23, -120], [23.5, -120], [23.5, 0]],
                "final_glacial_myr": 0.5, "keep_shelf": "incision"},
+ "history": {"enabled": false, "keep_shelf": "incision",
+             "phases": [
+              {"name": "Neogene: rivers only", "start_myr": 0, "sea_m": 0, "ice": false, "glacial_ratio": 4.0, "step_myr": 1.0, "no_infill": false},
+              {"name": "Quaternary: glacials' mean", "start_myr": 20, "sea_m": -70, "ice": true, "glacial_ratio": 35.0, "step_myr": 0.25, "no_infill": false},
+              {"name": "last glacial maximum", "start_myr": 22.5, "sea_m": -120, "ice": true, "glacial_ratio": 35.0, "step_myr": 0.25, "no_infill": true}],
+             "end": {"time_myr": 22.6, "sea_m": 0}},
  "lakes": {"enabled": true, "min_depth_m": 1.0, "min_cells": 4},
  "rivers": {"enabled": true, "min_discharge_m3_s": {"global": 1000, "window": 30}, "width_coefficient": 4.0,
             "width_exponent": 0.5, "exaggeration": 3.0, "supersample": 4},

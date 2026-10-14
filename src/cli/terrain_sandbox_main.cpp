@@ -73,9 +73,12 @@ landscape::SphereMetric windowmetric(int columns, int rows, double north_deg, do
 // counting at the sea level (0 m). A Dijkstra pass from the lowest cells up: each cell, once final, caps its
 // land neighbours at its height plus slope x distance, so valley walls retreat as the rivers cut instead of
 // leaving one-cell slots. Returns the volume removed (km^3); it leaves the system as landslide debris.
+// `cut_m`, when given, is assigned each cell's lowering (m, 0 where none); the result does not depend on it.
 double limitslopes(const landscape::SphereMetric& metric, const std::vector<uint8_t>& sea, double slope,
-                   std::vector<float>& elevation)
+                   std::vector<float>& elevation, std::vector<float>* cut_m = nullptr)
 {
+    if (cut_m)
+        cut_m->assign(elevation.size(), 0.0f);
     using entry = std::pair<float, std::size_t>;
     std::priority_queue<entry, std::vector<entry>, std::greater<entry>> queue;
     std::vector<float> height(elevation.size());
@@ -153,6 +156,8 @@ double limitslopes(const landscape::SphereMetric& metric, const std::vector<uint
             }
             const float lowered = std::max(elevation[i] - cut[i], floor);
             removed += (elevation[i] - lowered) * metric.area_m2(i) * 1e-9;
+            if (cut_m)
+                (*cut_m)[i] = elevation[i] - lowered;
             elevation[i] = lowered;
         }
     return removed;
@@ -225,6 +230,71 @@ double sealevel(const std::vector<SeaPoint>& points, double time_myr)
     return a.level_m + (b.level_m - a.level_m) * (time_myr - a.time_myr) / (b.time_myr - a.time_myr);
 }
 
+// An ice history (--ice-history, roadmap T1.2b): phases (Myr from the start, an offset added to the ELA file in
+// m, the glacial erodibility ratio), each holding from its time on (the first one before its time too); a
+// large offset (100000) means no ice. Times must not decrease.
+struct IcePhase
+{
+    double time_myr;
+    double elaoffset_m;
+    double ratio;
+};
+
+std::vector<IcePhase> parseicehistory(const std::string& text)
+{
+    std::vector<IcePhase> phases;
+    std::size_t start = 0;
+    while (start <= text.size())
+    {
+        std::size_t end = text.find(',', start);
+        if (end == std::string::npos)
+            end = text.size();
+        const std::string item = text.substr(start, end - start);
+        const std::size_t first = item.find(':');
+        const std::size_t second = first == std::string::npos ? std::string::npos : item.find(':', first + 1);
+        if (second == std::string::npos)
+            throw std::runtime_error("--ice-history: expected t:ela_offset_m:ratio, got '" + item + "'");
+        phases.push_back({std::stod(item.substr(0, first)), std::stod(item.substr(first + 1, second - first - 1)),
+                          std::stod(item.substr(second + 1))});
+        if (phases.size() > 1 && phases.back().time_myr < phases[phases.size() - 2].time_myr)
+            throw std::runtime_error("--ice-history: times must not decrease");
+        start = end + 1;
+    }
+    return phases;
+}
+
+const IcePhase& icephase(const std::vector<IcePhase>& phases, double time_myr)
+{
+    std::size_t last = 0;  // the last phase starting at or before the time (the first before every start)
+    while (last + 1 < phases.size() && phases[last + 1].time_myr <= time_myr)
+        last++;
+    return phases[last];
+}
+
+// Step lengths in time (--step-after "T:STEP,..."): from each T on the step is STEP Myr. Times must not decrease.
+std::vector<std::pair<double, double>> parsestepafter(const std::string& text)
+{
+    std::vector<std::pair<double, double>> changes;
+    std::size_t start = 0;
+    while (start <= text.size())
+    {
+        std::size_t end = text.find(',', start);
+        if (end == std::string::npos)
+            end = text.size();
+        const std::string item = text.substr(start, end - start);
+        const std::size_t colon = item.find(':');
+        if (colon == std::string::npos)
+            throw std::runtime_error("--step-after: expected T:STEP, got '" + item + "'");
+        changes.emplace_back(std::stod(item.substr(0, colon)), std::stod(item.substr(colon + 1)));
+        if (changes.back().second <= 0.0)
+            throw std::runtime_error("--step-after: a step must be positive");
+        if (changes.size() > 1 && changes.back().first < changes[changes.size() - 2].first)
+            throw std::runtime_error("--step-after: times must not decrease");
+        start = end + 1;
+    }
+    return changes;
+}
+
 // The sea under a moving level: the 8-connected flood from the seeds over the cells at or below the level
 // (0 m: elevations here are relative to the level). Rebuilt each routing, so the sea retreats as well as
 // advances.
@@ -246,6 +316,10 @@ void usage()
                  "  [--out-ice FILE] [--pinned FILE] (cells held at their starting height) [--sea-cap M 0]\n"
                  "  [--sea-history \"t:level,...\"] (Myr, m: the sea level in time, piecewise linear; default 0)\n"
                  "  [--no-infill-after MYR] (from then on no deposition inside closed depressions of the bed)\n"
+                 "  [--ice-history \"t:ela_offset_m:ratio,...\"] (Myr, m added to the ELA, glacial ratio: piecewise constant)\n"
+                 "  [--step-after \"T:STEP,...\"] (from T Myr on, steps of STEP Myr)\n"
+                 "  [--out-fields PREFIX] (per-cell totals: PREFIX-eroded_m.f32, -deposited_m, -glacial_eroded_m,\n"
+                 "   -ice_time_myr, -ice_max_m, -landslide_m, -last_eroded_m) [--ice-threshold M 10]\n"
                  "  [--random-routing 0|1] [--seed N 1] [--radius-km 6371]\n";
 }
 }
@@ -352,6 +426,11 @@ int main(int argc, char** argv)
         landscape::GlacialParameters glacialparameters;
         glacialparameters.erodibilityratio = number("--glacial-ratio", 2.0);
         glacialparameters.fullicerange_m = number("--ice-full-range", 500.0);
+        // An ice history (--ice-history): each step's ELA offset and glacial ratio are the phase's at its midpoint.
+        const bool icehistory = options.count("--ice-history") != 0;
+        if (icehistory && !glacial)
+            throw std::runtime_error("--ice-history needs --ela");
+        const std::vector<IcePhase> icephases = icehistory ? parseicehistory(text("--ice-history", "")) : std::vector<IcePhase>();
         // The ice's own water supply: the runoff times --ice-accumulation (the wet coasts glaciers grow on; the
         // sandbox has no precipitation field). The ice flux may then exceed the rivers' discharge.
         std::vector<float> snowfall(runoff);
@@ -395,11 +474,31 @@ int main(int argc, char** argv)
         // With a history, each step works in the frame of the level at its midpoint: the elevation and the ELA
         // less the level before the step, the level added back after it (the pinned cells are held in the
         // absolute frame, after that).
-        std::vector<float> elarelative(history ? ela : std::vector<float>());
+        std::vector<float> elarelative(history || icehistory ? ela : std::vector<float>());
         const auto shift = [&](float level) {
             for (float& value : elevation)
                 value -= level;
         };
+        // Per-cell totals for later mineral work (--out-fields PREFIX, raw float32 PREFIX-<name>.f32): the kernel's
+        // erosion (fluvial, glacial and hillslope lowering) and deposition (land and marine, less what the final
+        // pulse took off closed depressions), m, summed over the steps; the erosion of the steps in which the cell
+        // carried more than --ice-threshold m of ice, the time it did (Myr) and its thickest ice (m); the threshold
+        // slope limiter's lowering (m); and the lowering (erosion plus landslides) from the last sea-history
+        // breakpoint before the end on (the whole run without a history): the rock the final phase exposed.
+        const bool fields = options.count("--out-fields") != 0;
+        const double icethreshold = number("--ice-threshold", 10.0);
+        double laststart = 0.0;
+        for (const SeaPoint& point : seahistory)
+            if (point.time_myr < duration - 1e-9)
+                laststart = std::max(laststart, point.time_myr);
+        std::vector<double> erodedtotal, depositedtotal, glacialtotal, icetime, landslidetotal, lasteroded;
+        std::vector<float> icemax, cut;
+        if (fields)
+        {
+            for (std::vector<double>* total : {&erodedtotal, &depositedtotal, &glacialtotal, &icetime, &landslidetotal, &lasteroded})
+                total->assign(count, 0.0);
+            icemax.assign(count, 0.0f);
+        }
         double seafractionmin = 1.0;
         const auto seafraction = [&]() {
             std::size_t cells = 0;
@@ -414,8 +513,18 @@ int main(int argc, char** argv)
             breakpoints.push_back(point.time_myr);
         if (noinfill)
             breakpoints.push_back(noinfillafter);
+        for (const IcePhase& phase : icephases)
+            breakpoints.push_back(phase.time_myr);
+        const std::vector<std::pair<double, double>> stepafter =
+            options.count("--step-after") ? parsestepafter(text("--step-after", "")) : std::vector<std::pair<double, double>>();
+        for (const auto& change : stepafter)
+            breakpoints.push_back(change.first);
         const auto nextstep = [&](double time) {
-            double length = std::min(step, duration - time);
+            double base = step;
+            for (const auto& change : stepafter)
+                if (time + 1e-9 >= change.first)
+                    base = change.second;
+            double length = std::min(base, duration - time);
             for (double point : breakpoints)
                 if (point > time + 1e-9)
                     length = std::min(length, point - time);
@@ -426,12 +535,18 @@ int main(int argc, char** argv)
             parameters.step_myr = nextstep(time);
             const float level = history ? static_cast<float>(sealevel(seahistory, time + 0.5 * parameters.step_myr)) : 0.0f;
             if (history)
-            {
                 shift(level);
-                if (glacial)
-                    for (std::size_t i = 0; i < count; i++)
-                        elarelative[i] = ela[i] - level;
+            if (icehistory)
+            {
+                const IcePhase& phase = icephase(icephases, time + 0.5 * parameters.step_myr);
+                glacialparameters.erodibilityratio = phase.ratio;
+                const float offset = static_cast<float>(phase.elaoffset_m);
+                for (std::size_t i = 0; i < count; i++)
+                    elarelative[i] = ela[i] + offset - level;
             }
+            else if (history && glacial)
+                for (std::size_t i = 0; i < count; i++)
+                    elarelative[i] = ela[i] - level;
             for (std::size_t i = 0; i < count; i++)
                 surface[i] = elevation[i] + thickness[i];
             route(surface);
@@ -440,7 +555,7 @@ int main(int argc, char** argv)
             landscape::GlacialInput ice;
             if (glacial)
             {
-                landscape::accumulateice(metric, graph, surface, history ? elarelative : ela, snowfall,
+                landscape::accumulateice(metric, graph, surface, history || icehistory ? elarelative : ela, snowfall,
                                          glacialparameters.fullicerange_m, iceflux);
                 landscape::icethickness(iceflux, glacialparameters, thickness);
                 ice.iceflux_m3_yr = &iceflux;
@@ -469,14 +584,39 @@ int main(int argc, char** argv)
                     infillremoved += static_cast<double>(deposition[i]) * metric.area_m2(i) * 1e-9;
                 }
             if (thresholdslope > 0.0)
-                landslides += limitslopes(metric, sea, thresholdslope, elevation);
+                landslides += limitslopes(metric, sea, thresholdslope, elevation, fields ? &cut : nullptr);
             // No sea cell is filled above --sea-cap (m, default the sea level): with the delta top lifted (its
             // fill-and-spill search went quadratic), marine deposits otherwise stacked whole loads on one cell,
             // towers up to 12 km in glacially cut troughs the sea had flooded (F-troughs, G-coast at k 256).
             // With a history the cap is relative to the level (the frame here), seed cells above it included.
+            // The deposit the cap takes off is not counted in deposited_m.
             for (std::size_t i = 0; i < count; i++)
                 if (sea[i])
+                {
+                    if (fields && elevation[i] > seacap)
+                        depositedtotal[i] -= std::min(static_cast<double>(deposition[i]), static_cast<double>(elevation[i] - seacap));
                     elevation[i] = std::min(elevation[i], seacap);
+                }
+            if (fields)
+            {
+                const bool last = time + 1e-9 >= laststart;
+                for (std::size_t i = 0; i < count; i++)
+                {
+                    const bool removed = !closed.empty() && closed[i] && deposition[i] > 0.0f;
+                    const double slid = cut.empty() ? 0.0 : static_cast<double>(cut[i]);
+                    erodedtotal[i] += erosion[i];
+                    depositedtotal[i] += removed ? 0.0 : static_cast<double>(deposition[i]);
+                    landslidetotal[i] += slid;
+                    if (thickness[i] > icethreshold)
+                    {
+                        glacialtotal[i] += erosion[i];
+                        icetime[i] += parameters.step_myr;
+                    }
+                    icemax[i] = std::max(icemax[i], thickness[i]);
+                    if (last)
+                        lasteroded[i] += erosion[i] + slid;
+                }
+            }
             if (history)
                 shift(-level);
             holdpinned();
@@ -496,6 +636,23 @@ int main(int argc, char** argv)
         writeraster(text("--out-discharge", ""), discharge);
         if (options.count("--out-ice"))
             writeraster(text("--out-ice", ""), thickness);
+        if (fields)
+        {
+            const std::string prefix = text("--out-fields", "");
+            const auto save = [&](const char* name, const std::vector<double>& values) {
+                std::vector<float> stored(values.size());
+                for (std::size_t i = 0; i < values.size(); i++)
+                    stored[i] = static_cast<float>(values[i]);
+                writeraster(prefix + "-" + name + ".f32", stored);
+            };
+            save("eroded_m", erodedtotal);
+            save("deposited_m", depositedtotal);
+            save("glacial_eroded_m", glacialtotal);
+            save("ice_time_myr", icetime);
+            writeraster(prefix + "-ice_max_m.f32", icemax);
+            save("landslide_m", landslidetotal);
+            save("last_eroded_m", lasteroded);
+        }
         std::printf("steps %d eroded_km3 %.1f land_deposited_km3 %.1f marine_deposited_km3 %.1f landslides_km3 %.1f", steps,
                     eroded, deposited, marine, landslides);
         if (history)  // the schedule's lowest and final levels, the sea's least and final extent (cell fractions)
