@@ -354,15 +354,64 @@ void releaselakes(landscape::FlowGraph& graph, const LakeTrap& trap)
         graph.receiver[exit] = trap.spill[exit];
 }
 
-// After the fluvial step on the trapped graph (graph restored): takes the loads off the exits and fills the lakes.
+// A sloped lake fill (--lake-fill-gradient G, --lake-fill-noise FILE; roadmap T1 v18): a flat fill left flat lake
+// floors along whose routing lines the ice cut straight parallel grooves (comb-like lakes). The full fill of a lake is
+// its spill level plus an offset that rises from its exits: a Dijkstra pass within each lake from its exits, each move
+// adding max(0.1 G d, G d + n_next - n_cell) (d the centre distance, n the noise in m, as the sandbox's sloped_fill
+// of the procedural pits), so every filled cell has a lower neighbour towards an exit. Cells the pass does not reach
+// keep offset 0.
+std::vector<double> filloffsets(const landscape::SphereMetric& metric, const std::vector<int32_t>& id,
+                                const std::vector<std::size_t>& exits, double gradient, const std::vector<float>& noise)
+{
+    std::vector<double> offset(id.size(), std::numeric_limits<double>::infinity());
+    using Entry = std::pair<double, std::size_t>;
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue;
+    for (std::size_t exit : exits)
+    {
+        offset[exit] = 0.0;
+        queue.emplace(0.0, exit);
+    }
+    while (!queue.empty())
+    {
+        const auto [value, cell] = queue.top();
+        queue.pop();
+        if (value > offset[cell])
+            continue;
+        for (int direction = 1; direction <= 8; direction++)
+        {
+            const std::size_t next = metric.neighbour(cell, direction);
+            if (next == cell || id[next] != id[cell])
+                continue;
+            const double run = gradient * metric.distance_m(cell, direction);
+            const double rise = noise.empty() ? run
+                : run + static_cast<double>(noise[next]) - static_cast<double>(noise[cell]);
+            const double candidate = value + std::max(0.1 * run, rise);
+            if (candidate < offset[next])
+            {
+                offset[next] = candidate;
+                queue.emplace(candidate, next);
+            }
+        }
+    }
+    for (double& value : offset)
+        if (!std::isfinite(value))
+            value = 0.0;
+    return offset;
+}
+
+// After the fluvial step on the trapped graph (graph restored): takes the loads off the exits and fills the lakes
+// (level, or sloped by `gradient` > 0 with `noise`: filloffsets).
 void filllakes(const landscape::SphereMetric& metric, const landscape::FlowGraph& graph,
                const landscape::Depressions& depressions, const std::vector<float>& thickness, LakeTrap& trap,
-               std::vector<float>& elevation, std::vector<float>& deposition)
+               std::vector<float>& elevation, std::vector<float>& deposition, double gradient,
+               const std::vector<float>& noise)
 {
     const std::vector<int32_t>& id = depressions.depressionid;
     const std::size_t lakes = depressions.depressions.size();
     if (trap.exits.empty())
         return;
+    const std::vector<double> offset = gradient > 0.0 ? filloffsets(metric, id, trap.exits, gradient, noise)
+                                                       : std::vector<double>();
     // Per lake: its cells, its main spill (the spill of its exit with the most water) and its place in the order.
     std::vector<std::vector<std::size_t>> cells(lakes + 1);
     for (std::size_t i = 0; i < id.size(); i++)
@@ -391,7 +440,8 @@ void filllakes(const landscape::SphereMetric& metric, const landscape::FlowGraph
         }
         last[lake] = std::max(last[lake], position[exit]);
     }
-    // A level fill of `volume` (m^3) into lake `lake` up to its spill level; returns what did not fit.
+    // A level fill of `volume` (m^3) into lake `lake` up to its spill level; returns what did not fit. Sloped: the
+    // same fill on the surface less the offset (the fill's level `height` lies at height + offset on each cell).
     std::vector<std::pair<double, std::size_t>> floor;
     const auto fill = [&](std::size_t lake, double volume) {
         if (volume <= 0.0)
@@ -400,7 +450,9 @@ void filllakes(const landscape::SphereMetric& metric, const landscape::FlowGraph
         floor.clear();
         for (std::size_t i : cells[lake])
         {
-            const double surface = static_cast<double>(elevation[i]) + static_cast<double>(thickness[i]);
+            double surface = static_cast<double>(elevation[i]) + static_cast<double>(thickness[i]);
+            if (!offset.empty())
+                surface -= offset[i];
             if (surface < level)
                 floor.emplace_back(surface, i);
         }
@@ -424,7 +476,8 @@ void filllakes(const landscape::SphereMetric& metric, const landscape::FlowGraph
         {
             if (surface >= height)
                 break;
-            const float bed = static_cast<float>(height - static_cast<double>(thickness[i]));
+            const float bed = offset.empty() ? static_cast<float>(height - static_cast<double>(thickness[i]))
+                                             : static_cast<float>(height + offset[i] - static_cast<double>(thickness[i]));
             if (bed <= elevation[i])
                 continue;
             const float raise = bed - elevation[i];
@@ -491,6 +544,7 @@ void usage()
                  "  [--sea-history \"t:level,...\"] (Myr, m: the sea level in time, piecewise linear; default 0)\n"
                  "  [--no-infill-after MYR] (from then on no deposition inside closed depressions of the bed)\n"
                  "  [--lake-trap 0|1] (lakes keep the sediment reaching them, filled up to their spill; not in no-infill steps)\n"
+                 "  [--lake-fill-gradient G 0] [--lake-fill-noise FILE] (m per cell) (the trap's fill sloped up from the exits)\n"
                  "  [--ice-history \"t:ela_offset_m:ratio,...\"] (Myr, m added to the ELA, glacial ratio: piecewise constant)\n"
                  "  [--step-after \"T:STEP,...\"] (from T Myr on, steps of STEP Myr)\n"
                  "  [--out-fields PREFIX] (per-cell totals: PREFIX-eroded_m.f32, -deposited_m, -glacial_eroded_m,\n"
@@ -640,6 +694,10 @@ int main(int argc, char** argv)
         // Lakes trap sediment (--lake-trap 1; LakeTrap above), outside the final pulse's no-infill steps (those keep
         // their own rule: no deposition in closed depressions, so the young glacial lakes stay open).
         const bool laketrap = number("--lake-trap", 0.0) > 0.5;
+        // The trap's fill sloped up from the exits (--lake-fill-gradient, --lake-fill-noise; filloffsets above).
+        const double lakefillgradient = number("--lake-fill-gradient", 0.0);
+        const std::vector<float> lakefillnoise = options.count("--lake-fill-noise")
+            ? readraster(text("--lake-fill-noise", ""), count) : std::vector<float>();
         double laketrapped = 0.0, lakeoverflow = 0.0;
         const std::vector<float> noerosion(laketrap ? count : 0, 0.0f), nouplift(laketrap ? count : 0, 0.0f);
         std::vector<float> erosionafter(laketrap ? count : 0), depositionafter(laketrap ? count : 0);
@@ -765,7 +823,8 @@ int main(int argc, char** argv)
                     metric, graph, erodibility, uplift, fluvial, elevation, erosion, deposition, nullptr,
                     glacial ? &ice : nullptr);
                 releaselakes(graph, trap);
-                filllakes(metric, graph, routeddepressions, thickness, trap, elevation, deposition);
+                filllakes(metric, graph, routeddepressions, thickness, trap, elevation, deposition, lakefillgradient,
+                          lakefillnoise);
                 const landscape::StreamPowerBudget slopes = landscape::stepstreampower(
                     metric, graph, noerosion, nouplift, parameters, elevation, erosionafter, depositionafter);
                 for (std::size_t i = 0; i < count; i++)

@@ -33,6 +33,12 @@ to the ELA) with glacial_ratio (--ice-history), the step step_myr (--step, then 
 and no_infill (from the first such phase to the end: --no-infill-after); keep_shelf as sea_level's.
 physics.lake_trap (--lake-trap): every closed depression of the routing keeps the sediment reaching it, filled
 from its floor up to at most its spill level, and only the excess passes on (not in no_infill steps).
+physics.lake_fill_gradient (--lake-fill-gradient, with physics.lake_fill_noise: --lake-fill-noise, the relief's
+fill noise): the trap's fill slopes up from the lake's exits at that gradient, so a filled lake floor is no flat
+(the ice cut straight grooves along a flat's routing lines). relief.fill_depressions: before the physics, every
+closed depression not joined to the sea is filled from its spill, sloped at relief.fill_gradient with
+relief.fill_noise (amplitude_m on an fBm) on it (sloped_fill): the procedural pits as sediment-filled basins.
+The physics' input surface is saved as <domain>-elevation-procedural.npy.
 Every physics run also writes per-cell totals (--out-fields), saved cropped as <domain>-<name>.npy (eroded_m,
 deposited_m, glacial_eroded_m, ice_time_myr, ice_max_m, landslide_m, last_eroded_m) and drawn as three maps.
 
@@ -374,9 +380,27 @@ def procedural(domain, world, config, seed):
         filtered = np.where(pinned, np.maximum(floor, 1.0), filtered)
         sea |= ring
         filtered = np.where(ring, np.minimum(filtered, -1.0), filtered)
+    # The procedural pits as sediment-filled basins (relief.fill_depressions, roadmap T1 v18): 23-29 % of the land
+    # lay in closed depressions up to 5.8 km deep (the ridged relief noise), and rivers entering one incised toward
+    # its floor, below the sea. The fill slopes up from the spill at relief.fill_gradient with relief.fill_noise on
+    # it; the same noise goes to the physics' lake fill (physics.lake_fill_gradient).
+    relief_spec = config['relief']
+    noise_spec = relief_spec.get('fill_noise', {})
+    fill_noise = None
+    if noise_spec.get('amplitude_m', 0.0) > 0.0:
+        fill_noise = noise_spec['amplitude_m'] * fbm(x0, y0, noise_spec, seed + 90, domain)
+    fill_stats = {}
+    if relief_spec.get('fill_depressions', False):
+        started = time.perf_counter()
+        unfilled = filtered
+        filtered = sloped_fill(domain, filtered, sea, relief_spec['fill_gradient'], fill_noise)
+        fill_stats = fill_statistics(domain, unfilled, filtered, sea)
+        timings['fill'] = time.perf_counter() - started
+    stages['fill'] = filtered
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
             'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude,
-            'pinned': pinned, 'warped': (x, y), 'plain': (x0, y0), 'ratio': ratio}, timings
+            'pinned': pinned, 'warped': (x, y), 'plain': (x0, y0), 'ratio': ratio, 'fill_noise': fill_noise,
+            'fill_stats': fill_stats}, timings
 
 
 def warp_stretch(domain, x, y):
@@ -948,6 +972,12 @@ def run_physics(domain, fields, config, directory):
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
     if spec.get('lake_trap', False):  # lakes keep the sediment reaching them (filled up to their spill)
         command += ['--lake-trap', '1']
+        if spec.get('lake_fill_gradient', 0.0) > 0.0:  # the fill sloped up from the spill, with the fill noise
+            command += ['--lake-fill-gradient', str(spec['lake_fill_gradient'])]
+            if spec.get('lake_fill_noise', False) and fields.get('fill_noise') is not None:
+                files['fill_noise'] = stem.with_name(f'{domain.name}-fill-noise.f32')
+                np.asarray(fields['fill_noise'], dtype='<f4').tofile(files['fill_noise'])
+                command += ['--lake-fill-noise', str(files['fill_noise'])]
     if plan:
         command += ['--sea-history', ','.join(f'{time}:{level}' for time, level in plan['sea_history'])]
         if plan['no_infill_after'] is not None:  # the final glacial pulse: no infill of closed basins
@@ -1024,6 +1054,71 @@ def priority_flood(elevation, sea, wrap):
                 heapq.heappush(heap, (height[j], j))
     filled = np.asarray(filled).reshape(z.shape)[1:-1, pad + 1:pad + 1 + columns]
     return np.where(sea, elevation, filled)
+
+
+def sloped_fill(domain, elevation, sea, gradient, noise=None):
+    """The procedural surface with its closed depressions filled as sediment-filled basins (relief.fill_depressions,
+    roadmap T1 v18): a Priority-Flood from the sea (as priority_flood) in which a cell lower than the cell that
+    reaches it is raised to that cell's level plus max(0.1 g d, g d + n_j - n_i) (g the gradient, d the centre
+    distance on the sphere, n the noise, m), and goes back into the heap at that level. The fill rises away from
+    the spill at about g, with the noise's few metres on it so the routing on the floor follows the noise instead
+    of the flood's straight lines; every raised cell has a lower neighbour (its parent), so no closed depression
+    is left. The rising fill also buries low ground just above the flat spill level (the fill laps onto the
+    basin's margins). Returns the filled surface (the sea and every cell that was not raised unchanged)."""
+    rows, columns = elevation.shape
+    wrap = domain.whole
+    pad = columns // 8 if wrap else 0
+    padding = ((1, 1), (pad + 1, pad + 1))
+    mode = 'wrap' if wrap else 'edge'
+    z = np.pad(np.asarray(elevation, dtype=float), padding, mode=mode)
+    water = np.pad(sea, padding, mode=mode)
+    n = np.pad(np.zeros(elevation.shape) if noise is None else np.asarray(noise, dtype=float), padding, mode=mode)
+    done = water.copy()
+    done[0, :] = done[-1, :] = done[:, 0] = done[:, -1] = True
+    width = z.shape[1]
+    dy = domain.fine_km * 1000.0
+    dx = dy * np.pad(domain.coslat, (1, 1), mode='edge')  # per padded row
+    offsets = (-width - 1, -width, -width + 1, -1, 1, width - 1, width, width + 1)
+    rises = [[gradient * math.hypot(dx[row] if dc else 0.0, dy if dr else 0.0)
+              for dr, dc in ((1, 1), (1, 0), (1, 1), (0, 1), (0, 1), (1, 1), (1, 0), (1, 1))] for row in range(z.shape[0])]
+    shore = water & ndimage.binary_dilation(~water, structure=np.ones((3, 3)))
+    shore[0, :] = shore[-1, :] = shore[:, 0] = shore[:, -1] = False
+    height = z.ravel().tolist()
+    lift = n.ravel().tolist()
+    filled = list(height)
+    closed = done.ravel().tolist()
+    heap = [(height[i], i) for i in np.flatnonzero(shore.ravel()).tolist()]
+    heapq.heapify(heap)
+    while heap:
+        level, cell = heapq.heappop(heap)
+        run = rises[cell // width]
+        for k, offset in enumerate(offsets):
+            j = cell + offset
+            if closed[j]:
+                continue
+            closed[j] = True
+            if height[j] <= level:
+                step = run[k] + lift[j] - lift[cell]
+                filled[j] = level + max(0.1 * run[k], step)
+                heapq.heappush(heap, (filled[j], j))
+            else:
+                heapq.heappush(heap, (height[j], j))
+    filled = np.asarray(filled).reshape(z.shape)[1:-1, pad + 1:pad + 1 + columns]
+    return np.where(sea, elevation, filled)
+
+
+def fill_statistics(domain, before, after, sea):
+    """What relief.fill_depressions added on the kept domain: volume (km^3), the raised share of the land (cells
+    raised by more than 1 m), mean and largest raise (m), and the land's area-weighted mean before and after."""
+    raise_m, land = crop(domain, after - before), ~crop(domain, sea)
+    area = domain.fine_km ** 2 * crop(domain, domain.coslat[:, None] * np.ones((1, domain.columns)))
+    raised = land & (raise_m > 1.0)
+    return {'fill_km3': round(float((raise_m * area)[land].sum()) / 1e3, 1),
+            'fill_land_pct': round(100.0 * float(area[raised].sum() / max(area[land].sum(), 1e-9)), 2),
+            'fill_mean_m': round(float((raise_m * area)[raised].sum() / max(area[raised].sum(), 1e-9)), 1),
+            'fill_max_m': round(float(raise_m.max()), 1),
+            'land_mean_before_m': round(float((crop(domain, before) * area)[land].sum() / area[land].sum()), 1),
+            'land_mean_after_m': round(float((crop(domain, after) * area)[land].sum() / area[land].sum()), 1)}
 
 
 def find_lakes(domain, elevation, sea, spec, physics_lakes=None):
@@ -1111,7 +1206,9 @@ def render_stages(domain, fields, final_elevation, config, directory):
                                             ('hardness', 'rock hardness: ln erodibility over 0.7 (brown hard, blue soft)'),
                                             ('coast', 'coastal detail'),
                                             ('precipitation', 'precipitation proxy, m/yr (brown 0, green 1, blue 3 and more)'),
-                                            ('filter', 'erosion filter'), ('physics', 'drainage and erosion')), 1):
+                                            ('filter', 'erosion filter'),
+                                            ('fill', 'closed depressions filled (sloped from the spill)'),
+                                            ('physics', 'drainage and erosion')), 1):
         if key == 'warp':
             rgb = relief_rgb(domain, crop(domain, stages['base']), sea)
             spacing = config['render']['warp_grid_km']
@@ -1434,6 +1531,7 @@ def main():
     for domain in make_domains(config, bundle, names):
         started = time.perf_counter()
         fields, timing = procedural(domain, world, config, config['seed'])
+        timing.update(fields['fill_stats'])
         images = []
         if config['render'].get('before_physics', False) or not physics_on:
             before = render(domain, fields['surface'], fields['sea'], None, directory, '-procedural')
@@ -1445,6 +1543,8 @@ def main():
             elevation, discharge, ice, totals, report = run_physics(domain, fields, config, directory)
             timing['physics'] = time.perf_counter() - physics_started
             timing['physics_report'] = report
+            # The physics' input surface (after the depression fill), for measuring what the physics changed.
+            np.save(directory / f'{domain.name}-elevation-procedural.npy', crop(domain, fields['surface']).astype(np.float32))
             for name, values in totals.items():  # per-cell totals for later mineral work
                 np.save(directory / f'{domain.name}-{name}.npy', crop(domain, values).astype(np.float32))
             # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
