@@ -1,5 +1,5 @@
 {
- "base_bundle": "out/scratch/sandbox/base",
+ "base_bundle": "out/scratch/sandbox/base-v2",
  "seed": 1,
  "default_domains": ["global", "B", "F", "G"],
  "domains": {
@@ -60,7 +60,7 @@
              "window": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.35}},
  "sea_level": {"enabled": false, "history": [[0, 0], [20, 0], [20, -120], [23, -120], [23.5, -120], [23.5, 0]],
                "final_glacial_myr": 0.5, "keep_shelf": "incision"},
- "history": {"enabled": false, "keep_shelf": "incision",
+ "history": {"enabled": true, "keep_shelf": "incision",
              "phases": [
               {"name": "Neogene: rivers only", "start_myr": 0, "sea_m": 0, "ice": false, "glacial_ratio": 4.0, "step_myr": 1.0, "no_infill": false},
               {"name": "Quaternary: glacials' mean", "start_myr": 20, "sea_m": -70, "ice": true, "glacial_ratio": 35.0, "step_myr": 0.25, "no_infill": false},
