@@ -4,6 +4,7 @@
 // after real drainage and erosion without running the pipeline. Not a pipeline stage: no world, no
 // bundle, no tuning header. Files are raw little-endian float32, rows north first; elevations are metres
 // relative to today's sea level (--sea-history moves the sea during the run).
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -305,6 +306,179 @@ void floodfromseeds(const landscape::SphereMetric& metric, const std::vector<flo
     floodsea(metric, elevation, sea);
 }
 
+// Lakes trap sediment (--lake-trap; roadmap T1.3, the user's "too many lakes" of 2026-10-14). The kernel routes water
+// and sediment over the routing's filled surface, so a load reaching a closed depression passed through it to the
+// spill and only the Yuan share G a / (A + G a) of it settled on each lake cell: depressions survived 20 Myr of rivers.
+// Here every closed depression of the routing (a lake: the cells the Priority-Flood raised) keeps the load that
+// reaches it: its exits (lake cells whose receiver lies outside it) are made land roots for the fluvial step, so the
+// kernel lays that load on them; the load is then taken off the exits and spread over the lake from its floor up (a
+// level fill on the routing's surface, bed plus ice) to at most its spill level, and only the excess passes on down
+// the receivers from the spill: into the next lake downstream, or out of the land (an outlet: it leaves the system and
+// is reported, as the sea's own deposits are not judged). Upstream lakes are filled first (their exits lie later in
+// the flow order). The hillslope diffusion runs after the fill (a second kernel call without erosion or uplift), so it
+// never spreads a load that is then taken back.
+struct LakeTrap
+{
+    std::vector<int32_t> spill;        // an exit's former receiver (the spill side), -1 elsewhere
+    std::vector<std::size_t> exits;
+    double dumped_m3 = 0.0;            // the loads the kernel laid on the exits
+    double placed_m3 = 0.0;            // what the fills laid in the lakes
+    double overflow_m3 = 0.0;          // what passed out of the land
+};
+
+// Makes the exits of every closed, non-terminal depression of the routing land roots of `graph` (in place; restored by
+// releaselakes). The order stays valid: a root needs no receiver before it.
+void traplakes(landscape::FlowGraph& graph, const landscape::Depressions& depressions, LakeTrap& trap)
+{
+    const std::vector<int32_t>& id = depressions.depressionid;
+    trap.spill.assign(graph.receiver.size(), -1);
+    trap.exits.clear();
+    for (int32_t entry : graph.order)
+    {
+        const std::size_t i = static_cast<std::size_t>(entry);
+        const int32_t lake = id[i];
+        if (lake == 0 || depressions.depressions[static_cast<std::size_t>(lake - 1)].terminal)
+            continue;
+        const int32_t receiver = graph.receiver[i];
+        if (static_cast<std::size_t>(receiver) == i || id[static_cast<std::size_t>(receiver)] == lake)
+            continue;
+        trap.spill[i] = receiver;
+        trap.exits.push_back(i);
+        graph.receiver[i] = static_cast<int32_t>(i);
+    }
+}
+
+void releaselakes(landscape::FlowGraph& graph, const LakeTrap& trap)
+{
+    for (std::size_t exit : trap.exits)
+        graph.receiver[exit] = trap.spill[exit];
+}
+
+// After the fluvial step on the trapped graph (graph restored): takes the loads off the exits and fills the lakes.
+void filllakes(const landscape::SphereMetric& metric, const landscape::FlowGraph& graph,
+               const landscape::Depressions& depressions, const std::vector<float>& thickness, LakeTrap& trap,
+               std::vector<float>& elevation, std::vector<float>& deposition)
+{
+    const std::vector<int32_t>& id = depressions.depressionid;
+    const std::size_t lakes = depressions.depressions.size();
+    if (trap.exits.empty())
+        return;
+    // Per lake: its cells, its main spill (the spill of its exit with the most water) and its place in the order.
+    std::vector<std::vector<std::size_t>> cells(lakes + 1);
+    for (std::size_t i = 0; i < id.size(); i++)
+        if (id[i] != 0)
+            cells[static_cast<std::size_t>(id[i])].push_back(i);
+    std::vector<std::size_t> position(id.size(), 0);
+    for (std::size_t k = 0; k < graph.order.size(); k++)
+        position[static_cast<std::size_t>(graph.order[k])] = k;
+    std::vector<uint8_t> trapped(lakes + 1, 0), processed(lakes + 1, 0);
+    std::vector<int32_t> mainspill(lakes + 1, -1);
+    std::vector<double> mainwater(lakes + 1, -1.0), pending(lakes + 1, 0.0);
+    std::vector<std::size_t> last(lakes + 1, 0);
+    for (std::size_t exit : trap.exits)
+    {
+        const std::size_t lake = static_cast<std::size_t>(id[exit]);
+        trapped[lake] = 1;
+        const double load = static_cast<double>(deposition[exit]) * metric.area_m2(exit);
+        pending[lake] += load;
+        trap.dumped_m3 += load;
+        elevation[exit] -= deposition[exit];
+        deposition[exit] = 0.0f;
+        if (graph.discharge_m3_yr[exit] > mainwater[lake])
+        {
+            mainwater[lake] = graph.discharge_m3_yr[exit];
+            mainspill[lake] = trap.spill[exit];
+        }
+        last[lake] = std::max(last[lake], position[exit]);
+    }
+    // A level fill of `volume` (m^3) into lake `lake` up to its spill level; returns what did not fit.
+    std::vector<std::pair<double, std::size_t>> floor;
+    const auto fill = [&](std::size_t lake, double volume) {
+        if (volume <= 0.0)
+            return 0.0;
+        const double level = static_cast<double>(depressions.depressions[lake - 1].spillelevation_m);
+        floor.clear();
+        for (std::size_t i : cells[lake])
+        {
+            const double surface = static_cast<double>(elevation[i]) + static_cast<double>(thickness[i]);
+            if (surface < level)
+                floor.emplace_back(surface, i);
+        }
+        std::sort(floor.begin(), floor.end());
+        double area = 0.0, moment = 0.0, height = level;
+        bool full = true;
+        for (std::size_t k = 0; k < floor.size(); k++)
+        {
+            area += metric.area_m2(floor[k].second);
+            moment += metric.area_m2(floor[k].second) * floor[k].first;
+            const double next = k + 1 < floor.size() ? floor[k + 1].first : level;
+            if (area * next - moment >= volume)
+            {
+                height = (volume + moment) / area;
+                full = false;
+                break;
+            }
+        }
+        double placed = 0.0;
+        for (const auto& [surface, i] : floor)
+        {
+            if (surface >= height)
+                break;
+            const float bed = static_cast<float>(height - static_cast<double>(thickness[i]));
+            if (bed <= elevation[i])
+                continue;
+            const float raise = bed - elevation[i];
+            elevation[i] = bed;
+            deposition[i] += raise;
+            placed += static_cast<double>(raise) * metric.area_m2(i);
+        }
+        trap.placed_m3 += placed;
+        return full ? std::max(0.0, volume - placed) : 0.0;
+    };
+    // The excess of a lake down the receivers from `cell`: into the next trapped lake (pending, or filled at once if it
+    // was already processed) or out of the land.
+    const auto carry = [&](double volume, int32_t start) {
+        std::size_t cell = static_cast<std::size_t>(start);
+        for (std::size_t steps = 0; volume > 0.0 && steps <= graph.order.size(); steps++)
+        {
+            const std::size_t lake = static_cast<std::size_t>(id[cell]);
+            if (lake != 0 && trapped[lake])
+            {
+                if (!processed[lake])
+                {
+                    pending[lake] += volume;
+                    return;
+                }
+                volume = fill(lake, volume);
+                if (mainspill[lake] < 0)
+                    break;
+                cell = static_cast<std::size_t>(mainspill[lake]);
+                continue;
+            }
+            const std::size_t receiver = static_cast<std::size_t>(graph.receiver[cell]);
+            if (receiver == cell)
+                break;
+            cell = receiver;
+        }
+        trap.overflow_m3 += volume;
+    };
+    std::vector<std::size_t> sequence;
+    for (std::size_t lake = 1; lake <= lakes; lake++)
+        if (trapped[lake])
+            sequence.push_back(lake);
+    std::sort(sequence.begin(), sequence.end(), [&](std::size_t a, std::size_t b) {
+        return last[a] != last[b] ? last[a] > last[b] : a < b;
+    });
+    for (std::size_t lake : sequence)
+    {
+        processed[lake] = 1;
+        const double excess = fill(lake, pending[lake]);
+        pending[lake] = 0.0;
+        if (excess > 0.0)
+            carry(excess, mainspill[lake]);
+    }
+}
+
 void usage()
 {
     std::cout << "terrain_sandbox --columns W --rows H --elevation FILE --sea FILE --out-elevation FILE --out-discharge FILE\n"
@@ -316,6 +490,7 @@ void usage()
                  "  [--out-ice FILE] [--pinned FILE] (cells held at their starting height) [--sea-cap M 0]\n"
                  "  [--sea-history \"t:level,...\"] (Myr, m: the sea level in time, piecewise linear; default 0)\n"
                  "  [--no-infill-after MYR] (from then on no deposition inside closed depressions of the bed)\n"
+                 "  [--lake-trap 0|1] (lakes keep the sediment reaching them, filled up to their spill; not in no-infill steps)\n"
                  "  [--ice-history \"t:ela_offset_m:ratio,...\"] (Myr, m added to the ELA, glacial ratio: piecewise constant)\n"
                  "  [--step-after \"T:STEP,...\"] (from T Myr on, steps of STEP Myr)\n"
                  "  [--out-fields PREFIX] (per-cell totals: PREFIX-eroded_m.f32, -deposited_m, -glacial_eroded_m,\n"
@@ -444,12 +619,13 @@ int main(int argc, char** argv)
         const bool randomrouting = number("--random-routing", 0.0) > 0.5;
         const long long routingseed = static_cast<long long>(number("--seed", 1.0)) * 1000003LL;
         int steps = 0;
+        landscape::Depressions routeddepressions;  // the last routing's, for --lake-trap
         const auto route = [&](const std::vector<float>& terrain) {
             if (history)
                 floodfromseeds(metric, elevation, seaseeds, sea);
             else
                 floodsea(metric, elevation, sea);
-            const landscape::Depressions depressions = landscape::filldepressions(metric, terrain, sea, 0.0f);
+            landscape::Depressions depressions = landscape::filldepressions(metric, terrain, sea, 0.0f);
             landscape::RoutingOptions routing;
             routing.resolveflats = true;  // flats drain to their low edges, not in straight flood-order lines
             // Randomised receivers (flow_graph.hpp, Rho8 on the sphere's metric): the mean flow follows the gradient
@@ -459,7 +635,14 @@ int main(int argc, char** argv)
             routing.seed = static_cast<std::uint64_t>(routingseed + steps);
             graph = landscape::buildflowgraph(metric, terrain, sea, 0.0f, depressions, routing);
             landscape::accumulateflow(metric, runoff, graph);
+            routeddepressions = std::move(depressions);
         };
+        // Lakes trap sediment (--lake-trap 1; LakeTrap above), outside the final pulse's no-infill steps (those keep
+        // their own rule: no deposition in closed depressions, so the young glacial lakes stay open).
+        const bool laketrap = number("--lake-trap", 0.0) > 0.5;
+        double laketrapped = 0.0, lakeoverflow = 0.0;
+        const std::vector<float> noerosion(laketrap ? count : 0, 0.0f), nouplift(laketrap ? count : 0, 0.0f);
+        std::vector<float> erosionafter(laketrap ? count : 0), depositionafter(laketrap ? count : 0);
         const double thresholdslope = number("--threshold-slope", 0.0);
         const float seacap = static_cast<float>(number("--sea-cap", 0.0));
         double eroded = 0.0, deposited = 0.0, marine = 0.0, landslides = 0.0;
@@ -571,12 +754,41 @@ int main(int argc, char** argv)
                 for (std::size_t i = 0; i < count; i++)
                     closed[i] = !sea[i] && basins.filledelevation[i] > elevation[i] ? 1 : 0;
             }
-            const landscape::StreamPowerBudget budget = landscape::stepstreampower(
-                metric, graph, erodibility, uplift, parameters, elevation, erosion, deposition, nullptr,
-                glacial ? &ice : nullptr);
-            eroded += budget.eroded_km3;
-            deposited += budget.landdeposited_km3;
-            marine += budget.marinedeposited_km3;
+            if (laketrap && closed.empty())
+            {
+                // The fluvial step with the lakes' exits as roots and no diffusion, the fill, then the diffusion alone.
+                LakeTrap trap;
+                traplakes(graph, routeddepressions, trap);
+                landscape::StreamPowerParameters fluvial = parameters;
+                fluvial.hillslopediffusivity_km2_myr = 0.0;
+                const landscape::StreamPowerBudget budget = landscape::stepstreampower(
+                    metric, graph, erodibility, uplift, fluvial, elevation, erosion, deposition, nullptr,
+                    glacial ? &ice : nullptr);
+                releaselakes(graph, trap);
+                filllakes(metric, graph, routeddepressions, thickness, trap, elevation, deposition);
+                const landscape::StreamPowerBudget slopes = landscape::stepstreampower(
+                    metric, graph, noerosion, nouplift, parameters, elevation, erosionafter, depositionafter);
+                for (std::size_t i = 0; i < count; i++)
+                {
+                    erosion[i] += erosionafter[i];
+                    deposition[i] += depositionafter[i];
+                }
+                eroded += budget.eroded_km3 + slopes.eroded_km3;
+                deposited += budget.landdeposited_km3 + slopes.landdeposited_km3
+                    + (trap.placed_m3 - trap.dumped_m3) * 1e-9;
+                marine += budget.marinedeposited_km3 + slopes.marinedeposited_km3;
+                laketrapped += trap.placed_m3 * 1e-9;
+                lakeoverflow += trap.overflow_m3 * 1e-9;
+            }
+            else
+            {
+                const landscape::StreamPowerBudget budget = landscape::stepstreampower(
+                    metric, graph, erodibility, uplift, parameters, elevation, erosion, deposition, nullptr,
+                    glacial ? &ice : nullptr);
+                eroded += budget.eroded_km3;
+                deposited += budget.landdeposited_km3;
+                marine += budget.marinedeposited_km3;
+            }
             for (std::size_t i = 0; i < closed.size(); i++)
                 if (closed[i] && deposition[i] > 0.0f)
                 {
@@ -660,6 +872,8 @@ int main(int argc, char** argv)
                         static_cast<double>(finallevel), seafractionmin, seafraction());
         if (noinfill)  // the deposition taken off closed depressions during the final pulse
             std::printf(" no_infill_after_myr %.2f infill_removed_km3 %.1f", noinfillafter, infillremoved);
+        if (laketrap)  // the sediment the lakes kept, and what passed out of the land over full lakes
+            std::printf(" lake_trapped_km3 %.1f lake_overflow_km3 %.1f", laketrapped, lakeoverflow);
         std::printf("\n");
     }
     catch (const std::exception& error)

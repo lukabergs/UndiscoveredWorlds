@@ -31,6 +31,8 @@ start (the last to end.time_myr, the run's duration, where the sea jumps to end.
 (--sea-history, constant within a phase), the ice (true: the glacial ELA, false: none, a number: metres added
 to the ELA) with glacial_ratio (--ice-history), the step step_myr (--step, then --step-after where it changes)
 and no_infill (from the first such phase to the end: --no-infill-after); keep_shelf as sea_level's.
+physics.lake_trap (--lake-trap): every closed depression of the routing keeps the sediment reaching it, filled
+from its floor up to at most its spill level, and only the excess passes on (not in no_infill steps).
 Every physics run also writes per-cell totals (--out-fields), saved cropped as <domain>-<name>.npy (eroded_m,
 deposited_m, glacial_eroded_m, ice_time_myr, ice_max_m, landslide_m, last_eroded_m) and drawn as three maps.
 
@@ -944,6 +946,8 @@ def run_physics(domain, fields, config, directory):
                '--out-fields', str(totals_prefix)]
     if not domain.whole:
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
+    if spec.get('lake_trap', False):  # lakes keep the sediment reaching them (filled up to their spill)
+        command += ['--lake-trap', '1']
     if plan:
         command += ['--sea-history', ','.join(f'{time}:{level}' for time, level in plan['sea_history'])]
         if plan['no_infill_after'] is not None:  # the final glacial pulse: no infill of closed basins

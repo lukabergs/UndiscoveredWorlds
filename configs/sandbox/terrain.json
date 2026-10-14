@@ -55,7 +55,7 @@
                       "hardness_exponent": 0.6, "precipitation_reference_m_yr": 1.0, "precipitation_exponent": 0.5,
                       "precipitation_clip": [0.3, 2.0], "ice_full_m": 200}},
  "physics": {"enabled": true, "runoff_m_yr": 0.3, "k": 3000, "m": 0.5, "deposition": 0.1, "diffusivity_km2_myr": 1.0,
-             "uplift_factor": 1.0, "random_routing": true,
+             "uplift_factor": 1.0, "random_routing": true, "lake_trap": true,
              "global": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.1},
              "window": {"duration_myr": 20, "step_myr": 1.0, "delta_top_m": 1e9, "threshold_slope": 0.35}},
  "sea_level": {"enabled": false, "history": [[0, 0], [20, 0], [20, -120], [23, -120], [23.5, -120], [23.5, 0]],
