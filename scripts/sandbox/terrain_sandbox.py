@@ -12,8 +12,14 @@ filter (erosion_filter.py) on base + relief, a rock-hardness field (relative ero
 strike), then routing and stream power. Every noise is a function of absolute position, so a window is a
 zoom of the world preview; octaves finer than a domain's grid fade out instead of aliasing.
 
-Config groups: domains, seafloor, warp, structure, zones, relief, coast, micro, uplands, hardness, filter,
-physics, sea_level, history, glacial, precipitation, lakes, rivers, render. sea_level: a history of [Myr, m] points
+Config groups: domains, seafloor, warp, structure, zones, relief, coast, micro, uplands, hardness, platform, filter,
+physics, sea_level, history, glacial, precipitation, lakes, rivers, render.
+platform (roadmap T1 v19): a tectonic stability field (0 to 1) and provinces (oceanic, shield, platform, sedimentary
+basin, orogen, rift / active margin) from the world's fields (provinces_world), sampled smoothly per domain and saved
+as <domain>-stability.npy and <domain>-province.npy; the relief amplitude on land is damped by x 1 - relief_damp x
+stability (the filters read that amplitude) and the physics' erodibility by x 1 - (1 - erodibility_factor) x stability.
+physics.aggrade_subsidence (--aggrade-subsidence): land cells' negative uplift is filled by sediment instead of
+lowering them (the per-cell total basin_fill_m, the report's basin_fill_km3). sea_level: a history of [Myr, m] points
 (piecewise linear, a repeated time a jump) the physics runs through (--sea-history), the default the main
 erosion at 0 m, a lowstand at -120 m for 3.5 Myr, then the rise to 0; when enabled the physics' duration is
 the history's last time (global and windows alike). At the lowstand the shelf emerges and the rivers and
@@ -178,11 +184,15 @@ def world_fields(bundle):
     direction = bundle.load('geosphere.shortening_direction').astype(float)
     uplift = bundle.load('geosphere.rock_uplift_rate').astype(float) if bundle.has('geosphere.rock_uplift_rate') else \
         np.zeros_like(elevation)
+    optional = lambda name, dtype: bundle.load(f'geosphere.{name}').astype(dtype) if bundle.has(f'geosphere.{name}') \
+        else np.zeros(elevation.shape, dtype=dtype)  # noqa: E731
     return {'elevation': elevation, 'sea': sea, 'shortening': np.maximum(strain, 0.0), 'direction': direction,
             'uplift': uplift, 'sediment': bundle.load('geosphere.sediment').astype(float),
             'continental_crust': bundle.load('geosphere.continental_crust').astype(float),
             'crust_class': bundle.load('geosphere.crust_class'), 'crust_age': bundle.load('geosphere.crust_age').astype(float),
-            'boundary_type': bundle.load('geosphere.boundary_type')}
+            'boundary_type': bundle.load('geosphere.boundary_type'),
+            'accumulated_strain': optional('accumulated_strain', float),
+            'deforming_region_type': optional('deforming_region_type', np.uint8)}
 
 
 # ---------------------------------------------------------------- noise
@@ -326,6 +336,15 @@ def procedural(domain, world, config, seed):
     # contour jumped the noise along the smooth old coastline, a crease in the sea floor and the coast.
     wet = 1.0 - smoothstep(base, -500.0, 200.0)
     amplitude = amplitude * (1.0 - (1.0 - relief['sea_fraction']) * wet)
+    # Stable platforms keep low relief (platform group, roadmap T1 v19): the relief amplitude damped by the tectonic
+    # stability on land (x 1 - relief_damp x stability; the sea floor unchanged). The filters read this amplitude too
+    # (strength x amplitude / relief_reference_m), so their gullies are damped alike.
+    platform = config.get('platform', {'enabled': False})
+    stability, province = None, None
+    if platform['enabled']:
+        stability, province = provinces_domain(domain, world['provinces'], platform, x, y, mx, my, seed)
+        amplitude = amplitude * (1.0 - platform['relief_damp'] * stability * (1.0 - wet))
+        stages['provinces'] = (stability, province)
     surface = base + amplitude * noise
     stages['relief'] = surface
     uplands = config['uplands']
@@ -339,6 +358,11 @@ def procedural(domain, world, config, seed):
     stages['uplands'] = surface
     erodibility = hardness(domain, world, config['hardness'], structure, x, y, theta, alignment * foreland, mx, my, seed)
     stages['hardness'] = erodibility
+    # The physics' erodibility on stable ground (old basement and flat-lying cover): x erodibility_factor at full
+    # stability, so the rivers do not dissect the platforms into badlands. The drawn hardness and the coast and filter
+    # terms keep the rock's own value.
+    physics_erodibility = erodibility if stability is None else \
+        erodibility * (1.0 - (1.0 - platform['erodibility_factor']) * stability)
     if config['coast']['amplitude_m'] > 0:
         # coast.warp_fraction: the share of the warp the coast term's noise follows (1: all, v14; less: its
         # features keep the trend but vary more along a strike-parallel shore).
@@ -398,6 +422,7 @@ def procedural(domain, world, config, seed):
         timings['fill'] = time.perf_counter() - started
     stages['fill'] = filtered
     return {'base': base, 'surface': filtered, 'sea': sea, 'erodibility': erodibility, 'uplift': uplift,
+            'physics_erodibility': physics_erodibility, 'stability': stability, 'province': province,
             'strain': strain, 'stages': stages, 'precipitation': rain, 'coords': (x, y), 'amplitude': amplitude,
             'pinned': pinned, 'warped': (x, y), 'plain': (x0, y0), 'ratio': ratio, 'fill_noise': fill_noise,
             'fill_stats': fill_stats}, timings
@@ -531,6 +556,98 @@ def hardness(domain, world, spec, structure, x, y, theta, banded, mx, my, seed):
     variation = np.clip(0.5 + 0.7 * fbm(x, y, bands['variation'], seed + 33, domain), 0.0, 1.0)
     value += bands['amplitude'] * banded * variation * np.tanh(contrast * layered) / math.tanh(contrast)
     return np.exp(value)
+
+
+# ---------------------------------------------------------------- provinces (craton and platform field)
+
+PROVINCES = ('oceanic', 'shield', 'platform', 'sedimentary basin', 'orogen', 'rift / active margin')
+PROVINCE_COLOURS = ((40, 62, 110), (196, 84, 84), (226, 190, 120), (246, 238, 160), (128, 76, 150), (70, 170, 165))
+
+
+def boundary_distance_km(boundary_type, code, cell_km):
+    """Distance (km) from every world cell to the nearest boundary cell of `code`, wrapping east-west (the engine's
+    planar cells, cell_km each way); infinite when the world has none."""
+    mask = boundary_type == code
+    if not mask.any():
+        return np.full(mask.shape, np.inf)
+    columns = mask.shape[1]
+    distance = ndimage.distance_transform_edt(~np.tile(mask, (1, 3)))[:, columns:2 * columns]
+    return distance * cell_km
+
+
+def provinces_world(world, spec, cell_km):
+    """The tectonic stability (0 to 1) and the province memberships on the world grid (roadmap T1 v19). Stability is
+    a product of factors, each 1 on stable ground: continental crust of normal thickness (smoothstep up through
+    crust_m[0:2], down through crust_m[2:4]: oceanic, thinned and orogen-thickened crust are not stable), little
+    shortening (the strain, shortening over the cell width, below strain), little recent strain (the engine's
+    decaying accumulated_strain), far from active boundaries (convergent, divergent, transform: smoothstep of the
+    distance in km through boundary_km[type]), little uplift or subsidence (|rock_uplift_rate| through uplift_m_myr),
+    outside the engine's deforming regions (x 1 - deforming_weight) and older crust (1 - age_weight below age_myr[0],
+    1 above age_myr[1]); then smoothed over smoothing_cells. The provinces: oceanic (continental crust thinner than
+    provinces.ocean_crust_m); stable ground (stability at least provinces.stable) is a sedimentary basin where it
+    subsides (rock uplift at most provinces.basin_uplift_m_myr) or carries thick sediment (provinces.basin_sediment_m),
+    a platform with sediment cover (provinces.cover_m), else a shield (exposed basement); unstable ground an orogen
+    where the compressional factors (strain, recent strain, convergent boundary, thick crust, uplift, a collision
+    region) explain more of the instability than the extensional ones (divergent and transform boundaries, thin crust,
+    subsidence, a rift region), else a rift or active margin. Returns stability, memberships (one per PROVINCES,
+    smoothed like the stability) and the hard codes."""
+    smooth = lambda field, sigma: ndimage.gaussian_filter(field, sigma, mode=('nearest', 'wrap'))  # noqa: E731
+    crust = world['continental_crust']
+    c0, c1, c2, c3 = spec['crust_m']
+    thin = 1.0 - smoothstep(crust, c0, c1)
+    thick = smoothstep(crust, c2, c3)
+    strain = smoothstep(world['shortening'], *spec['strain'])
+    recent = smoothstep(world['accumulated_strain'], *spec['accumulated_strain'])
+    rate = world['uplift']
+    moving = smoothstep(np.abs(rate), *spec['uplift_m_myr'])
+    near = {}
+    for name, code in (('convergent', 1), ('divergent', 2), ('transform', 3)):
+        near[name] = 1.0 - smoothstep(boundary_distance_km(world['boundary_type'], code, cell_km), *spec['boundary_km'][name])
+    deforming = world['deforming_region_type']
+    a0, a1 = spec['age_myr']
+    age = 1.0 - spec['age_weight'] * (1.0 - smoothstep(world['crust_age'], a0, a1))
+    raw = (1 - thin) * (1 - thick) * (1 - strain) * (1 - recent) * (1 - moving) * age * \
+        (1 - near['convergent']) * (1 - near['divergent']) * (1 - near['transform']) * \
+        (1 - spec['deforming_weight'] * (deforming > 0))
+    stability = np.clip(smooth(raw, spec['smoothing_cells']), 0.0, 1.0)
+    rules = spec['provinces']
+    oceanic = crust < rules['ocean_crust_m']
+    stable = ~oceanic & (stability >= rules['stable'])
+    basin = stable & ((rate <= rules['basin_uplift_m_myr']) | (world['sediment'] >= rules['basin_sediment_m']))
+    platform = stable & ~basin & (world['sediment'] >= rules['cover_m'])
+    shield = stable & ~basin & ~platform
+    compression = np.maximum.reduce([strain, recent, near['convergent'], thick, moving * (rate > 0),
+                                     (deforming == 2).astype(float)])
+    extension = np.maximum.reduce([near['divergent'], near['transform'], thin, moving * (rate < 0),
+                                   (deforming == 1).astype(float)])
+    unstable = ~oceanic & ~stable
+    orogen = unstable & (compression >= extension)
+    rift = unstable & ~orogen
+    codes = np.zeros(crust.shape, dtype=np.uint8)
+    for code, mask in enumerate((oceanic, shield, platform, basin, orogen, rift)):
+        codes[mask] = code
+    memberships = [smooth((codes == code).astype(float), spec['smoothing_cells']) for code in range(len(PROVINCES))]
+    return {'stability': stability, 'memberships': memberships, 'codes': codes}
+
+
+def provinces_domain(domain, provinces, spec, x, y, mx, my, seed):
+    """The stability (cubic B-spline of the world's, smooth) and the province codes on a domain: each province's
+    smoothed membership B-spline sampled, plus provinces.edge_noise x an fBm per province on the (warped) noise
+    coordinates so the edges are not smooth contours, then the largest."""
+    stability = np.clip(sample(provinces['stability'], domain, mx, my), 0.0, 1.0)
+    noise_spec = spec['provinces']['noise']
+    amplitude = spec['provinces']['edge_noise']
+    scores = [sample(field, domain, mx, my) + (amplitude * fbm(x, y, noise_spec, seed + 95 + code, domain)
+                                               if amplitude > 0 else 0.0)
+              for code, field in enumerate(provinces['memberships'])]
+    return stability, np.argmax(np.stack(scores), axis=0).astype(np.uint8)
+
+
+def province_shares(codes, land, weights):
+    """Area shares (%) of the provinces on land (weights: the cells' areas)."""
+    total = float(weights[land].sum())
+    return {name: round(100.0 * float(weights[land & (codes == code)].sum()) / max(total, 1e-9), 1)
+            for code, name in enumerate(PROVINCES)}
 
 
 def precipitation(world, spec, radius_m):
@@ -947,7 +1064,8 @@ def run_physics(domain, fields, config, directory):
     runoff = np.maximum(fields['precipitation'] * config['precipitation']['runoff_fraction'],
                         config['precipitation']['runoff_min_m_yr'])
     for key, values in (('elevation', fields['surface']), ('sea', fields['sea'].astype(np.float32)),
-                        ('erodibility', fields['erodibility']), ('uplift', fields['uplift'] * spec['uplift_factor']),
+                        ('erodibility', fields.get('physics_erodibility', fields['erodibility'])),
+                        ('uplift', fields['uplift'] * spec['uplift_factor']),
                         ('runoff', runoff), ('pinned', fields['pinned'].astype(np.float32))):
         files[key] = stem.with_name(f'{domain.name}-{key}.f32')
         np.asarray(values, dtype='<f4').tofile(files[key])
@@ -978,6 +1096,10 @@ def run_physics(domain, fields, config, directory):
                 files['fill_noise'] = stem.with_name(f'{domain.name}-fill-noise.f32')
                 np.asarray(fields['fill_noise'], dtype='<f4').tofile(files['fill_noise'])
                 command += ['--lake-fill-noise', str(files['fill_noise'])]
+    names = TOTAL_FIELDS
+    if spec.get('aggrade_subsidence', False):  # land cells' subsidence filled by sediment (basin_fill_m)
+        command += ['--aggrade-subsidence', '1']
+        names = TOTAL_FIELDS + ('basin_fill_m',)
     if plan:
         command += ['--sea-history', ','.join(f'{time}:{level}' for time, level in plan['sea_history'])]
         if plan['no_infill_after'] is not None:  # the final glacial pulse: no infill of closed basins
@@ -1003,8 +1125,8 @@ def run_physics(domain, fields, config, directory):
     elevation = np.fromfile(out_elevation, dtype='<f4').reshape(shape).astype(np.float64)
     discharge = np.fromfile(out_discharge, dtype='<f4').reshape(shape).astype(np.float64)
     ice = np.fromfile(out_ice, dtype='<f4').reshape(shape).astype(np.float64) if glacial['enabled'] else None
-    total_files = [Path(f'{totals_prefix}-{name}.f32') for name in TOTAL_FIELDS]
-    totals = {name: np.fromfile(path, dtype='<f4').reshape(shape) for name, path in zip(TOTAL_FIELDS, total_files)}
+    total_files = [Path(f'{totals_prefix}-{name}.f32') for name in names]
+    totals = {name: np.fromfile(path, dtype='<f4').reshape(shape) for name, path in zip(names, total_files)}
     for path in list(files.values()) + [out_elevation, out_discharge] + ([out_ice] if glacial['enabled'] else []) + \
             total_files:
         path.unlink()
@@ -1459,6 +1581,10 @@ def render_totals(domain, totals, sea, directory):
     stream = values['eroded_m']
     share = np.where(stream > 1.0, values['glacial_eroded_m'] / np.maximum(stream, 1e-9), np.nan)
     ice_time, ice_max = values['ice_time_myr'], values['ice_max_m']
+    fill = values.get('basin_fill_m')
+    basin = () if fill is None else (
+        ('basin-fill', fill, float(max(np.percentile(fill, 99), 1.0)), DEPTH_STOPS,
+         'basin fill, m (the subsidence of land cells filled by sediment, physics.aggrade_subsidence)'),)
     for key, field, top, stops, caption in (
             ('eroded', eroded, float(np.percentile(eroded, 99)), DEPTH_STOPS,
              'total eroded depth, m (stream power with its hillslope term, plus landslides)'),
@@ -1466,7 +1592,7 @@ def render_totals(domain, totals, sea, directory):
              'deposit thickness, m (land and marine; the final pulse\'s infill of closed basins taken off)'),
             ('glacial-share', share, 1.0, SHARE_STOPS,
              'glacial share of the stream-power erosion (erosion in steps under more than 10 m of ice over all '
-             'of it; cells eroded less than 1 m black)')):
+             'of it; cells eroded less than 1 m black)')) + basin:
         rgb = ramp(np.nan_to_num(field), top, stops)
         name = f'{domain.name}-total-{key}.png'
         save_map(domain, directory / name, rgb)
@@ -1478,6 +1604,29 @@ def render_totals(domain, totals, sea, directory):
                     f'{field.max():.0f} m; final sea darkened')
         images.append((text, name))
     return images
+
+
+def render_provinces(domain, fields, directory):
+    """The province map (categorical, with its legend in the caption) and the stability (black 0 to white 1) on the
+    kept window, the procedural sea darkened; saves <domain>-stability.npy and <domain>-province.npy (cropped). Returns
+    the images and the provinces' shares of the procedural land (%, area-weighted)."""
+    stability, province = crop(domain, fields['stability']), crop(domain, fields['province'])
+    np.save(directory / f'{domain.name}-stability.npy', stability.astype(np.float32))
+    np.save(directory / f'{domain.name}-province.npy', province.astype(np.uint8))
+    sea = crop(domain, fields['sea'])
+    weights = crop(domain, np.repeat(domain.coslat[:, None], domain.columns, axis=1))
+    shares = province_shares(province, ~sea, weights)
+    rgb = np.asarray(PROVINCE_COLOURS, dtype=float)[province]
+    rgb[sea] = 0.45 * rgb[sea] + 0.55 * np.array([15.0, 20.0, 35.0])
+    save_map(domain, directory / f'{domain.name}-province.png', rgb)
+    legend = ' '.join(f'<span style="background:rgb{colour};display:inline-block;width:12px;height:12px"></span> '
+                      f'{name} {shares[name]:.1f} %' for name, colour in zip(PROVINCES, PROVINCE_COLOURS))
+    grey = colourize(stability, [(0.0, (10, 10, 14)), (0.5, (120, 120, 110)), (1.0, (250, 248, 235))]).astype(float)
+    grey[sea] = 0.45 * grey[sea] + 0.55 * np.array([15.0, 40.0, 80.0])
+    save_map(domain, directory / f'{domain.name}-stability.png', grey)
+    return [(f'tectonic provinces (sea darkened; shares of the procedural land): {legend}', f'{domain.name}-province.png'),
+            ('tectonic stability: black 0 (orogens, active margins) to white 1 (stable craton); it damps the relief '
+             'amplitude and the physics\' erodibility; sea darkened', f'{domain.name}-stability.png')], shares
 
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Terrain sandbox {label}</title>
@@ -1525,6 +1674,8 @@ def main():
     if config['seafloor'].get('abyss', {}).get('enabled', False):
         world['elevation'] = damp_abyss(world, config['seafloor']['abyss'])
     world['ocean'] = ocean_world(world, config['seafloor'], config['seed'], radius_m / 1000.0)
+    if config.get('platform', {}).get('enabled', False):
+        world['provinces'] = provinces_world(world, config['platform'], 2.0 * math.pi * radius_m / 1000.0 / bundle.columns)
     names = arguments.domains.split(',') if arguments.domains else config['default_domains']
     physics_on = config['physics']['enabled'] and not arguments.no_physics
     sections, timings = [], {}
@@ -1533,6 +1684,9 @@ def main():
         fields, timing = procedural(domain, world, config, config['seed'])
         timing.update(fields['fill_stats'])
         images = []
+        province_images = []
+        if fields['province'] is not None:
+            province_images, timing['province_land_pct'] = render_provinces(domain, fields, directory)
         if config['render'].get('before_physics', False) or not physics_on:
             before = render(domain, fields['surface'], fields['sea'], None, directory, '-procedural')
             if not physics_on:  # for scripts/sandbox/hypsometry.py and other measurements
@@ -1635,9 +1789,9 @@ def main():
             water = water_note(domain, lakes, rivers)
             images = [(f'elevation{water}', after['elevation']), (f'relief (hillshade, NW light){water}', after['relief']),
                       ('discharge (log, stretched from the median to the maximum)', after['discharge'])] + extra + \
-                render_totals(domain, totals, sea, directory) + images
+                render_totals(domain, totals, sea, directory) + province_images + images
         else:
-            images = [('elevation (procedural, no physics)', before['elevation'])] + images
+            images = [('elevation (procedural, no physics)', before['elevation'])] + province_images + images
         timing['total'] = time.perf_counter() - started
         timings[domain.name] = {key: (round(value, 2) if isinstance(value, float) else value) for key, value in timing.items()}
         title = 'Whole world' if domain.whole else f'Window {domain.name}'

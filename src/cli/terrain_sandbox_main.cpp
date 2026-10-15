@@ -547,8 +547,10 @@ void usage()
                  "  [--lake-fill-gradient G 0] [--lake-fill-noise FILE] (m per cell) (the trap's fill sloped up from the exits)\n"
                  "  [--ice-history \"t:ela_offset_m:ratio,...\"] (Myr, m added to the ELA, glacial ratio: piecewise constant)\n"
                  "  [--step-after \"T:STEP,...\"] (from T Myr on, steps of STEP Myr)\n"
+                 "  [--aggrade-subsidence 0|1] (land cells' negative uplift filled by sediment as they subside)\n"
                  "  [--out-fields PREFIX] (per-cell totals: PREFIX-eroded_m.f32, -deposited_m, -glacial_eroded_m,\n"
-                 "   -ice_time_myr, -ice_max_m, -landslide_m, -last_eroded_m) [--ice-threshold M 10]\n"
+                 "   -ice_time_myr, -ice_max_m, -landslide_m, -last_eroded_m; -basin_fill_m with --aggrade-subsidence 1)\n"
+                 "  [--ice-threshold M 10]\n"
                  "  [--random-routing 0|1] [--seed N 1] [--radius-km 6371]\n";
 }
 }
@@ -634,6 +636,15 @@ int main(int argc, char** argv)
             value = static_cast<float>(value * k);
         const std::vector<float> uplift = options.count("--uplift") ? readraster(text("--uplift", ""), count)
                                                                      : std::vector<float>(count, 0.0f);
+        // Aggrading basins (--aggrade-subsidence 1, roadmap T1 v19): the engine's negative uplift lowered land cells with
+        // no floor (20 % of the land subsided, p5 -146 m over the run) and drowned lowlands. With the option, a cell that
+        // is land at the step's routing keeps its height where it subsides: the step's uplift there is 0 and the
+        // subsidence U dt is counted as basin fill (sediment filling the basin as it sinks; per cell basin_fill_m, the
+        // volume basin_fill_km3). Sea cells are unchanged (the kernel reads no uplift on them unless upliftsea is set).
+        const bool aggrade = number("--aggrade-subsidence", 0.0) > 0.5;
+        std::vector<float> stepuplift(aggrade ? count : 0, 0.0f);
+        std::vector<double> basinfill(aggrade ? count : 0, 0.0);
+        double basinfilled = 0.0;
         // Runoff per cell (m/yr): a file from the sandbox's precipitation proxy, else uniform --runoff.
         const std::vector<float> runoff = options.count("--runoff-file")
             ? readraster(text("--runoff-file", ""), count)
@@ -793,6 +804,19 @@ int main(int argc, char** argv)
             route(surface);
             if (history)
                 seafractionmin = std::min(seafractionmin, seafraction());
+            if (aggrade)
+                for (std::size_t i = 0; i < count; i++)
+                {
+                    const bool filled = !sea[i] && uplift[i] < 0.0f;
+                    stepuplift[i] = filled ? 0.0f : uplift[i];
+                    if (filled)
+                    {
+                        const double depth = -static_cast<double>(uplift[i]) * parameters.step_myr;
+                        basinfill[i] += depth;
+                        basinfilled += depth * metric.area_m2(i) * 1e-9;
+                    }
+                }
+            const std::vector<float>& upliftnow = aggrade ? stepuplift : uplift;
             landscape::GlacialInput ice;
             if (glacial)
             {
@@ -820,7 +844,7 @@ int main(int argc, char** argv)
                 landscape::StreamPowerParameters fluvial = parameters;
                 fluvial.hillslopediffusivity_km2_myr = 0.0;
                 const landscape::StreamPowerBudget budget = landscape::stepstreampower(
-                    metric, graph, erodibility, uplift, fluvial, elevation, erosion, deposition, nullptr,
+                    metric, graph, erodibility, upliftnow, fluvial, elevation, erosion, deposition, nullptr,
                     glacial ? &ice : nullptr);
                 releaselakes(graph, trap);
                 filllakes(metric, graph, routeddepressions, thickness, trap, elevation, deposition, lakefillgradient,
@@ -842,7 +866,7 @@ int main(int argc, char** argv)
             else
             {
                 const landscape::StreamPowerBudget budget = landscape::stepstreampower(
-                    metric, graph, erodibility, uplift, parameters, elevation, erosion, deposition, nullptr,
+                    metric, graph, erodibility, upliftnow, parameters, elevation, erosion, deposition, nullptr,
                     glacial ? &ice : nullptr);
                 eroded += budget.eroded_km3;
                 deposited += budget.landdeposited_km3;
@@ -923,6 +947,8 @@ int main(int argc, char** argv)
             writeraster(prefix + "-ice_max_m.f32", icemax);
             save("landslide_m", landslidetotal);
             save("last_eroded_m", lasteroded);
+            if (aggrade)
+                save("basin_fill_m", basinfill);
         }
         std::printf("steps %d eroded_km3 %.1f land_deposited_km3 %.1f marine_deposited_km3 %.1f landslides_km3 %.1f", steps,
                     eroded, deposited, marine, landslides);
@@ -933,6 +959,8 @@ int main(int argc, char** argv)
             std::printf(" no_infill_after_myr %.2f infill_removed_km3 %.1f", noinfillafter, infillremoved);
         if (laketrap)  // the sediment the lakes kept, and what passed out of the land over full lakes
             std::printf(" lake_trapped_km3 %.1f lake_overflow_km3 %.1f", laketrapped, lakeoverflow);
+        if (aggrade)  // the subsidence of land cells filled by sediment instead of lowering them
+            std::printf(" basin_fill_km3 %.1f", basinfilled);
         std::printf("\n");
     }
     catch (const std::exception& error)
