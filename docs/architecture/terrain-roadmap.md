@@ -241,5 +241,6 @@ Quantile gaps: v3 454 m, v7 411, v7b 405, v7d 315 (run 62 522, the base world 42
 | T1.9 (new) | v17 diagnosis; provinces, damped platforms, aggrading basins (v19); uplands lift 200 (v20) | b9b655d, 8dd879a, 46d49c1 | about 1 day with the user's looks |
 | T2.2a | `terrain.texturing`'s land term centred: the midlands | 4d8f4ce (`erosion-0099`) | 23 min |
 | T4.1 | engine survey | 801a45c | 7 min (surveyor) |
-| T4.12 | survey done (cba7842); `world.ocean.land_fraction` added, default off (ba63d91); the growth model's design in progress | | |
+| T4.12 | survey (cba7842); `world.ocean.land_fraction` default off (ba63d91); design (46cdddb); first round: keys off by default, legacy-identical, Earth-like set fails area and thickness (b670db0, `tectonics-0012`); second round next | b670db0 | about 1 h from ba63d91 |
+| Tools | `scripts/sandbox/terrain_metrics.py` | 3d3afda | |
 | Ledger | `erosion-0100` covers the sandbox work 2f201aa..ba63d91 | 2994869 | |

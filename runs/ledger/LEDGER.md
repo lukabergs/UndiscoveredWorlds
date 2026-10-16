@@ -81,6 +81,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0100`: placing the sea at Earth's land fraction while the continents are thin: the interiors flood
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
+- `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
+- `tectonics-0012`: expecting the minimum-thickness cap and collisions alone to regulate thickness: nothing bounds it from above
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -393,6 +395,7 @@ Lessons:
 | `tectonics-0009` | 2026-10-07 | changed as intended | keep | erosion plan, step H1: implicit engine rivers become the tectonics baseline (the user's decision after reviewing run 78) |
 | `tectonics-0010` | 2026-10-07 | changed as intended; measurement only in the engine | keep | erosion plan, step H2: the engine's rock uplift rate in the plate's frame |
 | `tectonics-0011` | 2026-10-10 | fields exported | Route (a) as approved; cumulative (no decay); the tensor turns with the local spin; new ocean floor starts at zero strain. | multiscale plan, step S5.1: the engine accumulates a strain tensor per cell in the plate's frame and exports the cumulative shortening and its direction into the world fields geosphere.shortening and geosphere.shortening_direction (the user approved route (a) on 2026-10-10) |
+| `tectonics-0012` | 2026-10-16 | reviewed (reviewer on Opus 5.5, Fable off): pass with notes; the report script's mass check fixed at commit | keep | terrain roadmap T4.12, first round: continental growth as a world parameter (keys off by default) |
 
 Lessons:
 
@@ -413,6 +416,8 @@ Lessons:
 - `tectonics-0008`: A legacy stage whose writes no measured run ever saw can start writing when an upstream change creates the cells it acts on (here new land near the poles): the close's tracked run at the judging size finds it, a minimal run never would.
 - `tectonics-0010`: Sampling cell averages bilinearly is not the same transport as a conservative remap with limited parabolic reconstruction: a 'Lagrangian' measurement must move its fields with the very scheme that moves the material, or curvature turns into spurious uplift.
 - `tectonics-0011`: A carried quantity without decay keeps every error forever: test the source of new material (here new ocean floor) explicitly.
+- `tectonics-0012`: Name the measure in every table: the same run gave 0.28, 0.336 and 0.545 continental area by three measures.
+- `tectonics-0012`: A controller on mass does not hold area when thickness is free.
 
 ## world
 
