@@ -74,6 +74,11 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0098`: equal fracture-zone troughs at every segment boundary: they read as a comb
 - `erosion-0098`: the smoothed convergent-boundary band drawn as the trench: beaded troughs hundreds of km wide
 - `erosion-0099`: starting a procedural-world terrain chain from runs/tectonics/78/bundle: terrain.tectonic_trenches reads a table a bundle cannot load
+- `erosion-0100`: a long lowstand at -120 m (3 Myr) as the only sea-level history: it drains inland lakes; use the Earth-shaped history
+- `erosion-0100`: flat lake fills: the Quaternary ice cuts comb lakes along their D8 lines
+- `erosion-0100`: fill noise at a few km on the world's 19.5 km grid: it fades out and leaves straight radial drainage
+- `erosion-0100`: the tectonics sea_level key to change the final land fraction: it only sets the initial ocean coverage
+- `erosion-0100`: placing the sea at Earth's land fraction while the continents are thin: the interiors flood
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
@@ -207,6 +212,7 @@ Lessons:
 | `erosion-0097` | 2026-10-13 | approved by the user: v14 plus the shoreline micro-texture (fine-v16-micro5) is the look; v15 rejected ('much less realistic and aesthetically pleasing than compare-v14') and reverted | keep | terrain sandbox (roadmap T1), the look: sandbox versions v1 to v16 outside the pipeline, 0764d05..8f2a837 (2026-10-12 to 2026-10-13); v15 reverted by 269bba8 |
 | `erosion-0098` | 2026-10-13 | awaiting the user's look (roadmap T1.1) | keep | terrain sandbox (roadmap T1.0), the sea floor, first version (522dbdb): step 1 of the user's 2026-10-13 order (sea floor, then sea-level history and lakes, then the 100 m nested test against Copernicus GLO-30, then engine back-arc rollback and S6) |
 | `erosion-0099` | 2026-10-14 | reviewed (reviewer on Opus 5.5, Fable off): pass with notes; the user's look at compare-base-v2 pending | keep | terrain roadmap T2.2a: the land branch of terrain.texturing centred at the fractal's measured mean (the missing midlands) |
+| `erosion-0100` | 2026-10-16 | the user's look: base-v2, the Earth-shaped history, v18 and v19 approved; the sea floor paused | keep | terrain sandbox, roadmap T1 (T1.1 sea floor to v7d and paused, T1.2 sea level, T1.2b the Earth-shaped history, T1.3 lakes, the v17 diagnosis, lakes and pits, provinces and aggrading basins, the uplands lift) and the world sea-level parameter, 2026-10-13 to 2026-10-16 |
 
 Lessons:
 
@@ -369,6 +375,8 @@ Lessons:
 - `erosion-0098`: Most of this world's sea is flooded continental crust and most oceanic crust is 300 to 600 Myr old: an age-depth law shapes only a third of the sea.
 - `erosion-0099`: Measure the land after every stage before tuning physics: one uncentred noise term outweighed every erosion lever discussed for the flatness.
 - `erosion-0099`: The hillslope diffusion reaches about sqrt(kappa t) = 4.5 km over the sandbox's run: it cannot remove a band of the hypsometry.
+- `erosion-0100`: Measure before tuning: one uncentred noise term (the midlands), one missing sediment path (lakes) and one unfilled pit field (drowning) outweighed every tuning lever discussed.
+- `erosion-0100`: Record the per-cell totals: erosion, glacial share and fill fields answered the drowning question directly.
 
 ## tectonics
 
