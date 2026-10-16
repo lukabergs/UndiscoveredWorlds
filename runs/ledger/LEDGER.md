@@ -84,6 +84,9 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0101`: longer child physics (2 Myr) to grow valleys from noise
 - `erosion-0102`: damping platform relief to fix the foothills (platform.relief_damp 0.4 barely changes them)
 - `erosion-0102`: a steeper or no landslide threshold at k 64 (no effect)
+- `erosion-0103`: a higher fluvial K on an unnested window (it drains the land; only the nested projection can hold the mean)
+- `erosion-0103`: a uniform per-parent-cell shift as the exactness step after the physics (it draws the grid)
+- `erosion-0103`: the lake trap on every lake under ice (it fills the troughs that become fjords)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
@@ -228,6 +231,7 @@ Lessons:
 | `erosion-0100` | 2026-10-16 | the user's look: base-v2, the Earth-shaped history, v18 and v19 approved; the sea floor paused | keep | terrain sandbox, roadmap T1 (T1.1 sea floor to v7d and paused, T1.2 sea level, T1.2b the Earth-shaped history, T1.3 lakes, the v17 diagnosis, lakes and pits, provinces and aggrading basins, the uplands lift) and the world sea-level parameter, 2026-10-13 to 2026-10-16 |
 | `erosion-0101` | 2026-10-16 | not reviewed (reviews of evaluations paused since 2026-10-05); not yet seen by the user | keep | terrain roadmap T1.5: the 100 m nested test (sandbox) |
 | `erosion-0102` | 2026-10-16 | not reviewed (reviews of evaluations paused since 2026-10-05); awaiting the user's look (pages compare-t16-1 to -5) | keep | terrain roadmap T1.6: sandbox artefacts, diagnosis round |
+| `erosion-0103` | 2026-10-16 | not reviewed (reviews of evaluations paused since 2026-10-05); the user has not looked yet | keep | terrain roadmap T1.7 (G's fjords), the window smoothness (T1.6/T1.8b), one nesting mechanism for the window levels |
 
 Lessons:
 
@@ -396,6 +400,9 @@ Lessons:
 - `erosion-0101`: An fbm with ridging and per-cell mean removal realises about 0.3 of its nominal amplitude: normalise to the measured rms.
 - `erosion-0102`: Hillslope diffusivity is a grid parameter: the same km^2/Myr at 19.5 km and 2.44 km cells acts on different shares of a cell.
 - `erosion-0102`: A sloped fill with too coarse a noise turns filled basins into cones with straight fall lines.
+- `erosion-0103`: Check which lever actually binds: the exe's 5 % diffusion limiter, not kappa, set the window smoothness.
+- `erosion-0103`: A physical exception (no trap under ice) beats removing a process: the trap still protects lakes elsewhere.
+- `erosion-0103`: Exactness to a coarse parent must be smooth across parent cells, or the parent grid becomes terrain.
 
 ## tectonics
 

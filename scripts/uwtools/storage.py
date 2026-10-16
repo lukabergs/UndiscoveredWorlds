@@ -18,7 +18,8 @@ CONFIG = ROOT / 'runs/storage.json'
 # Only generated data may leave the workspace: one directory level under runs/, or a
 # direct child of the two parents that hold one directory per experiment or module.
 # runs/archive is sealed (already routed, never written), so it is not routable.
-ROUTABLE = re.compile(r'runs/(reports/[^/]+|work/[^/]+|[a-z][a-z0-9_-]*)')
+# Run data under runs/, and the bulk scratch and evaluation trees under out/ (routed 2026-10-16 when C filled up).
+ROUTABLE = re.compile(r'runs/(reports/[^/]+|work/[^/]+|[a-z][a-z0-9_-]*)|out/(scratch|evaluation)')
 RESERVED = {'archive', 'registry', 'ledger', 'reports', 'work'}
 
 
