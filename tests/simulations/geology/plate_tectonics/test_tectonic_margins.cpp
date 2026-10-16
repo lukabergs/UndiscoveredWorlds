@@ -7,6 +7,8 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace {
 struct MarginFixture {
@@ -231,7 +233,28 @@ TEST(TectonicMargins, ContinentalRiftsCreateOceanFloorWhenCrustBecomesThin) {
     f.cells.assign(f.w*f.h,tectonics::columns::seed(100,true,40));
     for (size_t i=0;i<f.velocity.size();++i) f.velocity[i].x=f.owners[i]==0?-.15:.15;
     tectonics::columns::Model model;model.initialize(f.w,f.h,150000,f.cells);
-    for (int step=0;step<100;++step) model.advance(f.velocity,1,0,1,0,nullptr,p);
+    const double cell_area=150000.0*150000;
+    const auto area_terms=[](const tectonics::columns::Budget& b) {
+        return b.stretched_continental_area_m2+b.arc_continental_area_m2+b.continentalized_oceanic_area_m2
+            -b.collided_continental_area_m2-b.oceanized_continental_area_m2;
+    };
+    const auto continental_area=[&] {
+        double sum=0;
+        for (const auto& c:model.cells()) sum+=c.continental_area;
+        return sum*cell_area;
+    };
+    for (int step=0;step<100;++step) {
+        // The continental area changes by the budget's area terms only (the remap moves it).
+        const double area=continental_area(),terms=area_terms(model.budget());
+        model.advance(f.velocity,1,0,1,0,nullptr,p);
+        EXPECT_NEAR(continental_area()-area,area_terms(model.budget())-terms,1e-9*cell_area);
+    }
+    // The rift stretches the continent, the periodic seam collides; no arcs, no caps.
+    EXPECT_GT(model.budget().stretched_continental_area_m2,0);
+    EXPECT_GT(model.budget().collided_continental_area_m2,0);
+    EXPECT_DOUBLE_EQ(model.budget().arc_continental_area_m2,0);
+    EXPECT_DOUBLE_EQ(model.budget().oceanized_continental_area_m2,0);
+    EXPECT_DOUBLE_EQ(model.budget().continentalized_oceanic_area_m2,0);
     EXPECT_GT(model.budget().generated_ocean_kg,0);
     EXPECT_GT(model.cells()[31].ocean,0);
     EXPECT_LT(model.cells()[31].continental_area,.5);
@@ -558,6 +581,36 @@ TEST(TectonicMargins, GrowthControllerHoldsTheReservoirTargetWithAShareInZeroToO
     EXPECT_LT(error,.25*deficit);
     EXPECT_DOUBLE_EQ(model.budget().continental_growth_shortfall_kg,0);
     EXPECT_LT(std::abs(model.budget().felsic_relative_residual),1e-11);
+    // Erosion turns continent into sediment: the felsic reservoir keeps its mass (above a
+    // slowly falling target, no sinks) while the continent falls short. Only the
+    // continent-only reservoir sees the deficit and makes arc melt continent.
+    const auto eroding=[](bool continent_only) {
+        ContinentalMarginFixture f;
+        auto p=growth_parameters();
+        p.continental_growth_control=true;p.continental_growth_per_gyr=-.01;
+        p.continental_growth_continent_only=continent_only;
+        tectonics::columns::Model model;model.initialize(f.w,f.h,50000,f.cells);
+        tectonics::margins::Polarity polarity;
+        std::vector<double> shares;
+        for (int step=0;step<150;++step) {
+            const auto forcing=tectonics::margins::forcing(f.w,f.h,50000,1,f.owners,model.cells(),f.velocity,p,&polarity);
+            model.advance(f.velocity,1,1,1,0,&forcing,p);
+            shares.push_back(model.budget().arc_continent_fraction);
+        }
+        EXPECT_LT(std::abs(model.budget().felsic_relative_residual),1e-11);
+        return std::pair{model.budget(),shares};
+    };
+    const auto [felsic,felsic_shares]=eroding(false);
+    const auto [continent,continent_shares]=eroding(true);
+    for (double share:felsic_shares) EXPECT_DOUBLE_EQ(share,0);
+    EXPECT_DOUBLE_EQ(felsic.generated_continent_kg,0);
+    EXPECT_GE(felsic.felsic_kg,felsic.initial_felsic_kg*(1-1e-12));
+    EXPECT_LT(felsic.continent_kg,felsic.initial_continent_kg);
+    EXPECT_GT(continent.generated_continent_kg,0);
+    // Measured: the share rises to 0.064 after 150 Myr as the continent's deficit grows.
+    EXPECT_GT(continent_shares.back(),continent_shares[10]);
+    EXPECT_NEAR(continent_shares.back(),.064,.01);
+    EXPECT_GT(continent.continent_kg,felsic.continent_kg);
 }
 
 namespace {

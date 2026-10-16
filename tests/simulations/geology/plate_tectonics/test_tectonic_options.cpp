@@ -29,6 +29,7 @@ TEST(TectonicOptions, BaselineAndExplicitValuesStart) {
     EXPECT_NO_THROW(start({"--delta-time-myr", ".5", "--evolution-duration-myr", "2", "--transport-subdivision", "2"}));
     EXPECT_NO_THROW(start({"--continental-max-thickness-m", "40000", "--orogenic-collapse-km2-myr", "3000"}));
     EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246"}));
+    EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246", "--initial-margin-width-m", "2800"}));
 }
 
 // A value the option parser or the engine refuses stops the run before it starts.
@@ -62,6 +63,10 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
         {"--continental-fraction", ".40", "--initial-ocean-depth-m", "3500"}, // slope foot at 3500 m
         {"--continental-root-kg-m3", "500"}, // no crust buoyancy left
         {"--continental-root-kg-m3", "-1"},
+        // At root 246 a continental column has no crust below 3916 m: the slope foot
+        // 2500 m + width / 2 needs a width under 2832 m.
+        {"--continental-root-kg-m3", "246", "--initial-margin-width-m", "3000"},
+        {"--continental-growth-continent-only", "maybe"},
     };
     for (const auto& options : cases) {
         EXPECT_ANY_THROW(start(options)) << options[0] << ' ' << options[1];

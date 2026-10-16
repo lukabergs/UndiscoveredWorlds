@@ -14,7 +14,13 @@ Every measure is named; all are unweighted shares of the engine's planar grid ce
 - cont_land_median: median height of land on continental columns (col_area, or c20 without the field)
 - interior_median: median height of land cells more than --interior-cells cells (chessboard distance; a coastal
   cell is at 1) from the sea
+- shelf_band, slope_band: cells from -200 to 0 m and from -1000 to -200 m; shelf_thick_km, slope_thick_km their
+  continental volume per continental area (their mean continent without the area field); shelf_sed_m, slope_sed_m
+  their mean sediment
 - f, residuals, shortfall: the snapshot's column budget
+- collided_area_rate, stretched_area_rate, arc_area_rate, capped_area_rate: the budget's cumulative continental
+  area terms (capped: oceanized minus continentalized) between this row and the previous one in time (the first
+  from t = 0), as shares of the surface per Myr; only when the snapshot has them
 
 Usage: uv run python scripts/benchmarks/continental_growth_metrics.py BUNDLE [BUNDLE ...] [--json OUT]
 """
@@ -29,6 +35,14 @@ import numpy as np
 from scipy import ndimage
 
 BANDS = [(0, 200), (200, 500), (500, 1000), (1000, 2000), (2000, None)]
+SEA_BANDS = {"shelf": (-200, 0), "slope": (-1000, -200)}
+# Cumulative budget area terms, m²: rate name -> (added keys, subtracted keys).
+AREA_TERMS = {
+    "collided_area_rate": (["collided_continental_area_m2"], []),
+    "stretched_area_rate": (["stretched_continental_area_m2"], []),
+    "arc_area_rate": (["arc_continental_area_m2"], []),
+    "capped_area_rate": (["oceanized_continental_area_m2"], ["continentalized_oceanic_area_m2"]),
+}
 
 
 def load(directory: Path, name: str):
@@ -65,6 +79,18 @@ def measure(directory: Path, interior_cells: int) -> dict:
     for low, high in BANDS:
         band = land & (elevation >= low) & ((elevation < high) if high is not None else True)
         row[f"land_{low}_{high or 'up'}"] = float(band.mean())
+    sediment_m = load(directory, "sediment")
+    for name, (low, high) in SEA_BANDS.items():
+        band = (elevation >= low) & (elevation < high)
+        row[f"{name}_band"] = float(band.mean())
+        if not band.any():
+            row[f"{name}_thick_km"] = row[f"{name}_sed_m"] = float("nan")
+            continue
+        if area is not None:
+            row[f"{name}_thick_km"] = float(continent[band].sum() / max(area[band].sum(), 1e-30) / 1000)
+        else:
+            row[f"{name}_thick_km"] = float(continent[band].mean() / 1000)
+        row[f"{name}_sed_m"] = float(sediment_m[band].mean()) if sediment_m is not None else float("nan")
     cont_land = land & continental
     row["cont_land_median"] = float(np.median(elevation[cont_land])) if cont_land.any() else float("nan")
     # Distance to the sea on the torus: tile 3 x 3, take the centre.
@@ -87,7 +113,33 @@ def measure(directory: Path, interior_cells: int) -> dict:
         row["felsic_kg"] = budget.get("felsic_kg")
         row["mean_speed_cm_yr"] = data.get("motion_diagnostics", {}).get("mean_speed_cm_yr")
         row["plates"] = len(data.get("plates", []))
+        # Cumulative area terms and what their rates need (removed again by series).
+        width_m = float(data.get("run_scenario", {}).get("world_width_km", 0)) * 1000
+        cells_wide, cells_high = data.get("width", 0), data.get("height", 0)
+        row["_surface_m2"] = width_m * width_m * cells_high / cells_wide if width_m > 0 and cells_wide else None
+        row["_engine_time_myr"] = data.get("time_myr")
+        for name, (added, subtracted) in AREA_TERMS.items():
+            if all(key in budget for key in added + subtracted):
+                row[f"_{name}"] = sum(budget[k] for k in added) - sum(budget[k] for k in subtracted)
     return row
+
+
+def add_area_rates(rows: list[dict]) -> None:
+    """Area terms as shares of the surface per Myr since the previous row in time (t = 0 for the first)."""
+    for index, row in enumerate(rows):
+        time, surface = row.get("_engine_time_myr"), row.get("_surface_m2")
+        for name in AREA_TERMS:
+            value = row.get(f"_{name}")
+            if value is None or time is None or not surface:
+                continue
+            earlier = [r for r in rows[:index] if r.get("_engine_time_myr") is not None
+                       and r["_engine_time_myr"] < time and r.get(f"_{name}") is not None]
+            start_time, start_value = (earlier[-1]["_engine_time_myr"], earlier[-1][f"_{name}"]) if earlier else (0.0, 0.0)
+            if time > start_time:
+                row[name] = (value - start_value) / surface / (time - start_time)
+    for row in rows:
+        for key in [k for k in row if k.startswith("_")]:
+            del row[key]
 
 
 def series(bundle: Path, interior_cells: int) -> list[dict]:
@@ -99,7 +151,9 @@ def series(bundle: Path, interior_cells: int) -> list[dict]:
             if match and (directory / "fields").is_dir():
                 rows.append({"time_myr": float(match.group(1)), **measure(directory, interior_cells)})
     final = {"time_myr": "final", **measure(bundle, interior_cells)}
-    return rows + [final]
+    rows.append(final)
+    add_area_rates(rows)
+    return rows
 
 
 def main() -> None:

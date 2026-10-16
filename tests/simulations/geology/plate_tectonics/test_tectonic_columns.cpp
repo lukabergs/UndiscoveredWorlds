@@ -92,12 +92,38 @@ TEST(TectonicColumns, StationaryCoolingIsIndependentOfTimestepAndDoesNotRemoveCr
     EXPECT_NEAR(a.budget().relative_mass_residual, 0, 1e-14);
 }
 
+namespace {
+// The budget's continental area terms: stretched + arc + continentalized - collided - oceanized, m².
+double continental_area_terms(const Budget& b) {
+    return b.stretched_continental_area_m2 + b.arc_continental_area_m2 + b.continentalized_oceanic_area_m2
+        - b.collided_continental_area_m2 - b.oceanized_continental_area_m2;
+}
+double continental_area_m2(const Model& model, double cell_area) {
+    double sum = 0;
+    for (const auto& c : model.cells()) sum += c.continental_area;
+    return sum * cell_area;
+}
+}
+
 TEST(TectonicColumns, ConvergenceThickensContinentsWithoutInventingOrDeletingMass) {
     Model world;
     world.initialize(32, 8, 100000, std::vector<Cell>(256, seed(0, true, 100)));
     std::vector<Displacement> v(256);
     for (size_t i = 0; i < v.size(); ++i) v[i].x = i % 32 < 16 ? .05 : -.05;
-    for (int i = 0; i < 80; ++i) world.advance(v, .25, 0, 1);
+    const double cell_area = 100000.0 * 100000;
+    for (int i = 0; i < 80; ++i) {
+        // The continental area changes by the budget's area terms only (the remap moves it).
+        const double area = continental_area_m2(world, cell_area), terms = continental_area_terms(world.budget());
+        world.advance(v, .25, 0, 1);
+        EXPECT_NEAR(continental_area_m2(world, cell_area) - area, continental_area_terms(world.budget()) - terms,
+                    1e-9 * cell_area);
+    }
+    // The middle collides, the periodic seam opens (stretched without margins); no arcs, no caps.
+    EXPECT_GT(world.budget().collided_continental_area_m2, 0);
+    EXPECT_GT(world.budget().stretched_continental_area_m2, 0);
+    EXPECT_DOUBLE_EQ(world.budget().arc_continental_area_m2, 0);
+    EXPECT_DOUBLE_EQ(world.budget().oceanized_continental_area_m2, 0);
+    EXPECT_DOUBLE_EQ(world.budget().continentalized_oceanic_area_m2, 0);
     double peak = 0;
     for (const auto& c : world.cells()) peak = std::max(peak, elevation_m(c));
     EXPECT_GT(peak, 5000); // A root can support high mountains; no 4 km ceiling.

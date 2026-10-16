@@ -52,6 +52,10 @@ struct Parameters {
     // (1 + continental_growth_per_gyr x time in Gyr). Requires continental_min_thickness_m.
     bool continental_growth_control = false;
     double continental_growth_per_gyr = 0;
+    // The controller's reservoir is the continental crust mass only (sediment out): its
+    // target starts from the initial continent mass and only subduction erosion is booked
+    // as a sink. False: the felsic reservoir.
+    bool continental_growth_continent_only = false;
     double process_variation = 0;
     double process_wavelength_km = 1800;
     double process_period_myr = 80;

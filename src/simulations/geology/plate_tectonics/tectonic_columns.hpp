@@ -51,9 +51,18 @@ struct Budget {
     double eroded_ocean_kg = 0; // Subset of eroded_kg taken from oceanic crust (becomes sediment).
     double oceanized_continental_area_m2 = 0; // Area freed by the minimum-thickness cap.
     double continentalized_oceanic_area_m2 = 0; // Area gained by the maximum-thickness cap.
+    // Continental area terms, measurement only: area lost where coverage stays above 1
+    // after the oceanic overlap sinks (collision), the continental share of an opening
+    // (stretched crust) and the oceanic area converted at island-arc outlets. With the
+    // caps: area change = stretched + arc + continentalized - collided - oceanized.
+    double collided_continental_area_m2 = 0;
+    double stretched_continental_area_m2 = 0;
+    double arc_continental_area_m2 = 0;
     double collapsed_continent_kg = 0; // Orogenic collapse; internal transfer, not a mass source.
     double initial_continental_area_m2 = 0; // Sum of continental_area x cell area at initialize.
     double initial_felsic_kg = 0, felsic_kg = 0;
+    // Continental crust mass: the reservoir of margins::Parameters::continental_growth_continent_only.
+    double initial_continent_kg = 0, continent_kg = 0;
     double felsic_relative_residual = 0;
     double continental_growth_shortfall_kg = 0; // Arc continent the controller asked for beyond the arc melt.
     double arc_continent_fraction = 0; // Share of arc melt made continent in the last update.

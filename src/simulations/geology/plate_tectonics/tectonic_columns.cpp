@@ -106,9 +106,12 @@ double mountain_force_n_m(const Cell& c, bool sediment_feedback, double root_kg_
         / (mantle_density - continental_density);
     const double reference = reference_continent_m * c.continental_area;
     if (sediment_feedback) {
-        // Exact two-layer Airy GPE for continental basement plus its sediment
-        // cover, relative to the same unthickened reference column. Units N/m.
-        // Mixed-cell sediment participation follows the continental area.
+        // Two-layer Airy GPE for continental basement plus its sediment cover,
+        // relative to the same unthickened reference column, N/m; exact for the
+        // crust-only column (root 0). With a root, the (500 - root) / 500 factor is a
+        // model choice: the crust-only estimate scaled with the elevation; a real dense
+        // root lowers the GPE further. Mixed-cell sediment participation follows the
+        // continental area.
         const double s=c.sediment*c.continental_area;
         const double z=((mantle_density-continental_density)*(c.continent-reference)
             +(mantle_density-sediment_density)*s)/mantle_density;
@@ -145,6 +148,8 @@ Cell seed(double z, bool continental, double age, double root_kg_m3) {
         c.continent = reference_continent_m
             + z * (z >= 0 ? mantle_density : mantle_density - water_density)
                 / (mantle_density - continental_density - root_kg_m3);
+        if (!(c.continent > 0))
+            throw std::runtime_error("Continental column has no crust: initial elevation below the root's crust-zero depth");
         c.continental_age_volume = c.continent * age;
     } else {
         // Ocean depth follows age/cooling; do not infer implausibly thick basalt
@@ -179,10 +184,12 @@ void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vect
         validate(c);
         budget_.initial_mass_kg += mass_per_area(c) * cell_m * cell_m;
         budget_.initial_felsic_kg += felsic_mass_per_area(c) * cell_m * cell_m;
+        budget_.initial_continent_kg += c.continent * continental_density * cell_m * cell_m;
         budget_.initial_continental_area_m2 += c.continental_area * cell_m * cell_m;
     }
     budget_.mass_kg = budget_.initial_mass_kg;
     budget_.felsic_kg = budget_.initial_felsic_kg;
+    budget_.continent_kg = budget_.initial_continent_kg;
     subdivision_ = subdivision;
     transport_cells_.resize(static_cast<size_t>(width)*height*subdivision*subdivision);
     for (uint32_t y=0; y<height*subdivision; ++y) for (uint32_t x=0; x<width*subdivision; ++x)
@@ -643,15 +650,19 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     const auto elevation_stay = coarse_mean(carried[0]), rate_stay = coarse_mean(carried[1]);
     const auto xx_stay = coarse_mean(carried[3]), yy_stay = coarse_mean(carried[4]), xy_stay = coarse_mean(carried[5]);
     const double area = cell_m_ * cell_m_;
-    // The felsic reservoir before this update, for the growth controller (serial sum).
+    // The reservoir before this update, for the growth controller (serial sum): felsic,
+    // or the continent alone.
+    const bool continent_only = margin_parameters.continental_growth_continent_only;
     double reservoir_start = 0;
     if (margin_parameters.continental_growth_control)
-        for (const auto& c : cells_) reservoir_start += felsic_mass_per_area(c) * area;
+        for (const auto& c : cells_)
+            reservoir_start += (continent_only ? c.continent * continental_density : felsic_mass_per_area(c)) * area;
     auto next = transportColumns(velocity, dt, carried);
     std::vector<double> arc_source(next.size());
     std::vector<double> created_area(next.size(), 0.0); // New ocean floor of this update, share of the cell.
     const double min_thickness = margin_parameters.continental_min_thickness_m;
     double reservoir_sinks = 0; // This update's subducted sediment and continent, kg.
+    double continent_sinks = 0; // This update's subducted continent, kg.
     for (size_t i=0; i<next.size(); ++i) {
         auto& c=next[i];
         double coverage = c.continental_area + c.oceanic_area;
@@ -671,6 +682,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
                 c.continent-=eroded;
                 budget_.subducted_continent_kg+=eroded*continental_density*area;
                 reservoir_sinks+=eroded*continental_density*area;
+                continent_sinks+=eroded*continental_density*area;
             }
             budget_.subducted_ocean_kg += c.ocean * fraction * oceanic_density * area;
             const double melt=forcing && !forcing->arc_multiplier.empty()?forcing->arc_multiplier[i]:1;
@@ -697,6 +709,8 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
             const double opening=1-coverage;
             const double generated_area = opening*ocean_share;
             created_area[i] = generated_area;
+            // Without margins the division by coverage below grows the continental area by the same share.
+            budget_.stretched_continental_area_m2 += (opening-generated_area)*area;
             const double generated = newborn_ocean_crust_[i] * generated_area;
             c.ocean += generated;
             budget_.generated_ocean_kg += generated * oceanic_density * area;
@@ -711,6 +725,11 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
             }
         }
         if (!(coverage > 0)) throw std::runtime_error("Unresolved empty column after remap");
+        if (coverage > 1) {
+            // Collision: the continental area the overlap squeezes out of the column.
+            const double before = c.continental_area;
+            budget_.collided_continental_area_m2 += (before - before / coverage) * area;
+        }
         c.continental_area /= coverage;
         c.oceanic_area /= coverage;
         c.flexure_m /= coverage;
@@ -742,7 +761,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         }
     }
     // Share of arc melt emplaced as continent: fixed, or set by the growth controller
-    // to hold the felsic reservoir at M0 (1 + g t): this update's sinks, the target's
+    // to hold the reservoir (felsic, or the continent alone) at M0 (1 + g t): this update's sinks, the target's
     // growth and the reservoir's error over growth_response_myr, over this update's melt.
     double arc_share=margin_parameters.arc_continent_fraction;
     if (margin_parameters.continental_growth_control) {
@@ -750,12 +769,14 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         if (forcing) for (size_t i=0;i<next.size();++i)
             if (arc_source[i]>0 && forcing->arc_receiver[i]!=std::numeric_limits<uint32_t>::max())
                 melt+=arc_source[i]*oceanic_density*area;
-        const double initial=budget_.initial_felsic_kg, growth=margin_parameters.continental_growth_per_gyr;
+        const double initial=continent_only?budget_.initial_continent_kg:budget_.initial_felsic_kg;
+        const double growth=margin_parameters.continental_growth_per_gyr;
+        const double sinks=continent_only?continent_sinks:reservoir_sinks;
         const double target=initial*(1+growth*time_myr_/1000);
-        const double need=reservoir_sinks+initial*growth*dt/1000+(target-reservoir_start)*dt/growth_response_myr;
+        const double need=sinks+initial*growth*dt/1000+(target-reservoir_start)*dt/growth_response_myr;
         arc_share=melt>0?std::clamp(need/melt,0.0,1.0):0;
         // Book only this update's unmet physical demand; the error term would recount a lasting deficit.
-        budget_.continental_growth_shortfall_kg+=std::max(0.0,reservoir_sinks+initial*growth*dt/1000-melt);
+        budget_.continental_growth_shortfall_kg+=std::max(0.0,sinks+initial*growth*dt/1000-melt);
     }
     budget_.arc_continent_fraction=arc_share;
     if (forcing && margin_parameters.enabled) for (size_t i=0;i<next.size();++i) {
@@ -785,6 +806,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
                     const double converted=std::min(next[j].oceanic_area,continent/min_thickness);
                     next[j].oceanic_area-=converted;
                     next[j].continental_area+=converted;
+                    budget_.arc_continental_area_m2+=converted*area;
                 }
             } else next[j].ocean+=melt;
         }
@@ -916,10 +938,12 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         budget_.noise_redistributed_kg+=noise_pass::apply(width_,height_,cell_m_,next,seed_,time_myr_,time_myr_+dt,noise,thermal_strength,root_kg_m3_);
     budget_.mass_kg = 0;
     budget_.felsic_kg = 0;
+    budget_.continent_kg = 0;
     for (size_t i=0;i<next.size();++i) {
         validate(next[i]);
         budget_.mass_kg += mass_per_area(next[i]) * area;
         budget_.felsic_kg += felsic_mass_per_area(next[i]) * area;
+        budget_.continent_kg += next[i].continent * continental_density * area;
     }
     budget_.relative_mass_residual = (budget_.mass_kg - budget_.initial_mass_kg
         - budget_.generated_ocean_kg - budget_.generated_continent_kg + budget_.subducted_ocean_kg

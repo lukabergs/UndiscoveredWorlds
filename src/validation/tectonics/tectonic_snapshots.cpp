@@ -402,6 +402,7 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"subduction_erosion_ratio\": " << scenario.margin_processes.subduction_erosion_ratio << ",\n";
     output << indent << "  \"continental_growth_control\": " << (scenario.margin_processes.continental_growth_control?"true":"false") << ",\n";
     output << indent << "  \"continental_growth_per_gyr\": " << scenario.margin_processes.continental_growth_per_gyr << ",\n";
+    output << indent << "  \"continental_growth_continent_only\": " << (scenario.margin_processes.continental_growth_continent_only?"true":"false") << ",\n";
     output << indent << "  \"world_width_km\": " << scenario.world_width_km << ",\n";
     output << indent << "  \"mantle_flow_speed_cm_yr\": " << scenario.mantle_flow_speed_cm_yr << ",\n";
     output << indent << "  \"thermal_subsidence_strength\": " << scenario.thermal_subsidence_strength << ",\n";
@@ -483,10 +484,15 @@ void write_snapshot_record(std::ostream& output, const tectonics::contract::Snap
     output << "    \"eroded_ocean_kg\": " << budget.eroded_ocean_kg << ",\n";
     output << "    \"oceanized_continental_area_m2\": " << budget.oceanized_continental_area_m2 << ",\n";
     output << "    \"continentalized_oceanic_area_m2\": " << budget.continentalized_oceanic_area_m2 << ",\n";
+    output << "    \"collided_continental_area_m2\": " << budget.collided_continental_area_m2 << ",\n";
+    output << "    \"stretched_continental_area_m2\": " << budget.stretched_continental_area_m2 << ",\n";
+    output << "    \"arc_continental_area_m2\": " << budget.arc_continental_area_m2 << ",\n";
     output << "    \"collapsed_continent_kg\": " << budget.collapsed_continent_kg << ",\n";
     output << "    \"initial_continental_area_m2\": " << budget.initial_continental_area_m2 << ",\n";
     output << "    \"initial_felsic_kg\": " << budget.initial_felsic_kg << ",\n";
     output << "    \"felsic_kg\": " << budget.felsic_kg << ",\n";
+    output << "    \"initial_continent_kg\": " << budget.initial_continent_kg << ",\n";
+    output << "    \"continent_kg\": " << budget.continent_kg << ",\n";
     output << "    \"felsic_relative_residual\": " << budget.felsic_relative_residual << ",\n";
     output << "    \"continental_growth_shortfall_kg\": " << budget.continental_growth_shortfall_kg << ",\n";
     output << "    \"arc_continent_fraction\": " << budget.arc_continent_fraction << ",\n";
@@ -943,10 +949,15 @@ LoadedSnapshotBundle load_snapshot_bundle(const fs::path& input_dir) {
                  {"eroded_ocean_kg", &tectonics::columns::Budget::eroded_ocean_kg},
                  {"oceanized_continental_area_m2", &tectonics::columns::Budget::oceanized_continental_area_m2},
                  {"continentalized_oceanic_area_m2", &tectonics::columns::Budget::continentalized_oceanic_area_m2},
+                 {"collided_continental_area_m2", &tectonics::columns::Budget::collided_continental_area_m2},
+                 {"stretched_continental_area_m2", &tectonics::columns::Budget::stretched_continental_area_m2},
+                 {"arc_continental_area_m2", &tectonics::columns::Budget::arc_continental_area_m2},
                  {"collapsed_continent_kg", &tectonics::columns::Budget::collapsed_continent_kg},
                  {"initial_continental_area_m2", &tectonics::columns::Budget::initial_continental_area_m2},
                  {"initial_felsic_kg", &tectonics::columns::Budget::initial_felsic_kg},
                  {"felsic_kg", &tectonics::columns::Budget::felsic_kg},
+                 {"initial_continent_kg", &tectonics::columns::Budget::initial_continent_kg},
+                 {"continent_kg", &tectonics::columns::Budget::continent_kg},
                  {"felsic_relative_residual", &tectonics::columns::Budget::felsic_relative_residual},
                  {"continental_growth_shortfall_kg", &tectonics::columns::Budget::continental_growth_shortfall_kg},
                  {"arc_continent_fraction", &tectonics::columns::Budget::arc_continent_fraction}})

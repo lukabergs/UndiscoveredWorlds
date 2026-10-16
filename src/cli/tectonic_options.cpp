@@ -253,6 +253,9 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.margin_processes.continental_growth_control=std::string(value)=="on";
     } else if (arg == "--continental-growth-per-gyr") {
         scenario.margin_processes.continental_growth_per_gyr=parse_double(arg.c_str(),value);
+    } else if (arg == "--continental-growth-continent-only") {
+        if (std::string(value)!="on" && std::string(value)!="off") fail("continental-growth-continent-only requires on/off");
+        scenario.margin_processes.continental_growth_continent_only=std::string(value)=="on";
     } else if (arg == "--delta-time-myr") {
         scenario.delta_time_myr = parse_double("--delta-time-myr", value);
     } else if (arg == "--uplift-rate-window-myr") {
@@ -356,6 +359,7 @@ void printtectonicoptionsusage(std::ostream& out)
         "--subduction-erosion-ratio",
         "--continental-growth-control",
         "--continental-growth-per-gyr",
+        "--continental-growth-continent-only",
         "--delta-time-myr",
         "--uplift-rate-window-myr",
     };

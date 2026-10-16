@@ -483,6 +483,17 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
     if (!std::isfinite(params.continental_root_kg_m3) || params.continental_root_kg_m3<0 ||
         params.continental_root_kg_m3>=tectonics::columns::mantle_density-tectonics::columns::continental_density)
         throw runtime_error("Continental root load must be in 0..500 kg/m^3 (500 excluded)");
+    {
+        // The slope foot (2500 m + width / 2 deep) must lie above the depth where a seeded
+        // continental column has no crust left: 35 km x (500 - root) / (rho_m - rho_w).
+        const double crust_zero_depth=tectonics::columns::reference_continent_m
+            *(tectonics::columns::mantle_density-tectonics::columns::continental_density-params.continental_root_kg_m3)
+            /(tectonics::columns::mantle_density-tectonics::columns::water_density);
+        if (2500+params.initial_margin_width_m/2>=crust_zero_depth)
+            throw runtime_error("Initial margin width must be below "+std::to_string(std::max(0.0,2*(crust_zero_depth-2500)))
+                +" m at this continental root load (slope foot 2500 m + width / 2 above the crust-zero depth "
+                +std::to_string(crust_zero_depth)+" m)");
+    }
     if ((params.transport_subdivision != 1 && params.transport_subdivision != 2 && params.transport_subdivision != 4) ||
         !std::isfinite(params.deformation_peak_km) || params.deformation_peak_km < 0 ||
         !std::isfinite(params.deformation_variation) || params.deformation_variation < 0 || params.deformation_variation > .5 ||
