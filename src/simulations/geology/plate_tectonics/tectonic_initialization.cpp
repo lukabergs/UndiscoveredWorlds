@@ -11,14 +11,15 @@ namespace tectonics::initialization {
 std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt,
         const std::vector<double>& elevations,const std::vector<double>& ages,
         const std::vector<uint32_t>& owners,const std::vector<transport::Displacement>& velocity,
-        double thermal_strength, double margin_width_m, double boundary_influence) {
+        double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3) {
     using namespace columns;
     const size_t count=static_cast<size_t>(w)*h;
     if (w<2 || h<2 || elevations.size()!=count || ages.size()!=count || owners.size()!=count ||
         velocity.size()!=count || !std::isfinite(cell_m) || cell_m<=0 || !std::isfinite(dt) || dt<=0 ||
         !std::isfinite(thermal_strength) || thermal_strength<0 ||
         !std::isfinite(margin_width_m) || margin_width_m<0 || margin_width_m>4000 ||
-        !std::isfinite(boundary_influence) || boundary_influence<0 || boundary_influence>1)
+        !std::isfinite(boundary_influence) || boundary_influence<0 || boundary_influence>1 ||
+        !std::isfinite(root_kg_m3) || root_kg_m3<0 || root_kg_m3>=mantle_density-continental_density)
         throw std::runtime_error("Invalid initial terrain grid");
     const auto index=[&](int x,int y) { return static_cast<uint32_t>((y%static_cast<int>(h)+h)%h)*w
         +static_cast<uint32_t>((x%static_cast<int>(w)+w)%w); };
@@ -77,15 +78,15 @@ std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt
         const double ocean_fraction=margin_width_m>0?transition*transition*(3-2*transition):(z>-2500?0:1);
         if (ocean_fraction==0) {
             // Submerged continental basement represents shelves and young rifts.
-            result[i]=seed(z,true,ages[i]);
+            result[i]=seed(z,true,ages[i],root_kg_m3);
         } else {
-            auto c=seed(z,false,0);
+            auto c=seed(z,false,0,root_kg_m3);
             // Carry high-frequency relief in physical basalt thickness, so it
             // does not disappear as thermal ages approach equilibrium.
             const double anomaly=3500*std::tanh(detail*(mantle_density-water_density)
                 /((mantle_density-oceanic_density)*3500));
             c.ocean+=anomaly;
-            const double target=std::max(0.0,(elevation_m(c,0)-z)/std::max(thermal_strength,1e-30));
+            const double target=std::max(0.0,(elevation_m(c,0,root_kg_m3)-z)/std::max(thermal_strength,1e-30));
             double lo=0,hi=1000;
             for (int iteration=0;iteration<60;++iteration) {
                 const double mid=(lo+hi)*.5;
@@ -95,7 +96,7 @@ std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt
             c.oceanic_age_volume=c.ocean*age;
             // Residual beyond the invertible cooling range belongs to crust
             // thickness. This does not clip or remap the requested terrain.
-            c.ocean+=(z-elevation_m(c,thermal_strength))*(mantle_density-water_density)
+            c.ocean+=(z-elevation_m(c,thermal_strength,root_kg_m3))*(mantle_density-water_density)
                 /(mantle_density-oceanic_density);
             if (c.ocean<=0) throw std::runtime_error("Initial bathymetry requires nonpositive ocean crust");
             c.oceanic_age_volume=c.ocean*age;
@@ -103,7 +104,7 @@ std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt
                 // Both end-member columns reproduce the same submerged height.
                 // Their mixture therefore preserves it exactly, while thermal
                 // subsidence tapers with oceanic area instead of jumping at -2500 m.
-                const auto continent=seed(z,true,ages[i]);
+                const auto continent=seed(z,true,ages[i],root_kg_m3);
                 c.ocean*=ocean_fraction;c.oceanic_age_volume*=ocean_fraction;
                 c.oceanic_area=ocean_fraction;c.continental_area=1-ocean_fraction;
                 c.continent=continent.continent*c.continental_area;

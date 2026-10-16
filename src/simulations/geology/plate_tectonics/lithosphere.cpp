@@ -480,6 +480,9 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
         throw runtime_error("Continental fraction must be 0, or in 1 - sea_level + 0.01..1 (a shelf of at least 1 % "
                             "of the surface) with boundary-conditioned terrain and an initial ocean depth over "
                             "2500 m + initial_margin_width_m / 2 (the slope foot)");
+    if (!std::isfinite(params.continental_root_kg_m3) || params.continental_root_kg_m3<0 ||
+        params.continental_root_kg_m3>=tectonics::columns::mantle_density-tectonics::columns::continental_density)
+        throw runtime_error("Continental root load must be in 0..500 kg/m^3 (500 excluded)");
     if ((params.transport_subdivision != 1 && params.transport_subdivision != 2 && params.transport_subdivision != 4) ||
         !std::isfinite(params.deformation_peak_km) || params.deformation_peak_km < 0 ||
         !std::isfinite(params.deformation_variation) || params.deformation_variation < 0 || params.deformation_variation > .5 ||
@@ -2297,7 +2300,8 @@ void lithosphere::solvePlateMotion() {
         pressure_owners.resize(static_cast<size_t>(width)*height);
         for (uint32_t i=0;i<width*height;++i) pressure_owners[i]=imap[i];
         pressure.reserve(pressure_owners.size());
-        for (const auto& c:column_model.cells()) pressure.push_back(tectonics::columns::mountain_force_n_m(c,scenario.sediment_load_feedback));
+        for (const auto& c:column_model.cells()) pressure.push_back(tectonics::columns::mountain_force_n_m(c,scenario.sediment_load_feedback,
+            scenario.continental_root_kg_m3));
     }
     for (uint32_t y = 0; y < height; ++y) for (uint32_t x = 0; x < width; ++x) {
         const uint32_t index = y * width + x, owner = imap[index];
@@ -2350,8 +2354,10 @@ void lithosphere::solvePlateMotion() {
                     contacts.back().age_b_myr=thermal_age(cells[neighbor]);
                     contacts.back().slab_pull_scale=scenario.thermal_subsidence_strength;
                 }
-                contacts.back().mountain_force_n_m = .5 * (tectonics::columns::mountain_force_n_m(cells[index],scenario.sediment_load_feedback)
-                    + tectonics::columns::mountain_force_n_m(cells[neighbor],scenario.sediment_load_feedback));
+                contacts.back().mountain_force_n_m = .5 * (tectonics::columns::mountain_force_n_m(cells[index],scenario.sediment_load_feedback,
+                        scenario.continental_root_kg_m3)
+                    + tectonics::columns::mountain_force_n_m(cells[neighbor],scenario.sediment_load_feedback,
+                        scenario.continental_root_kg_m3));
                 if (!pressure.empty())
                     contacts.back().mountain_force_n_m=.5*(inland_pressure(width,height,cell_m,pressure_owners,pressure,
                         index,static_cast<uint32_t>(axis),-1,scenario.mountain_force_range_km*1000)
@@ -2453,11 +2459,13 @@ void lithosphere::initializeColumns() {
     std::vector<tectonics::columns::Cell> cells(_worldDimension.getArea());
     for (uint32_t i = 0; i < _worldDimension.getArea(); ++i)
         cells[i] = tectonics::columns::seed(internalToPhysicalMeters(hmap[i]) - sea_level_m,
-            hmap[i] >= CONTINENTAL_BASE || is_continental_material(material_map[i]), crust_age_myr_map[i]);
+            hmap[i] >= CONTINENTAL_BASE || is_continental_material(material_map[i]), crust_age_myr_map[i],
+            scenario.continental_root_kg_m3);
     column_model.initialize(_worldDimension.getWidth(), _worldDimension.getHeight(),
         scenario.world_width_km * 1000 / _worldDimension.getWidth(), std::move(cells), scenario.transport_subdivision,
         scenario.seed, {scenario.ocean_crust_variation_m, scenario.ocean_noise_wavelength_km,
-        scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness});
+        scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness},
+        false, scenario.continental_root_kg_m3);
     std::vector<uint32_t> owners(_worldDimension.getArea());
     for (uint32_t i = 0; i < owners.size(); ++i) owners[i] = imap[i];
     topology_model.initialize(_worldDimension.getWidth(), _worldDimension.getHeight(), num_plates, owners);
@@ -2476,11 +2484,12 @@ void lithosphere::initializeColumns() {
         auto conditioned=tectonics::initialization::terrain(_worldDimension.getWidth(),_worldDimension.getHeight(),
             scenario.world_width_km*1000/_worldDimension.getWidth(),scenario.delta_time_myr,
             elevations,ages,owners,velocity,scenario.thermal_subsidence_strength,scenario.initial_margin_width_m,
-            scenario.initial_boundary_influence);
+            scenario.initial_boundary_influence,scenario.continental_root_kg_m3);
         column_model.initialize(_worldDimension.getWidth(),_worldDimension.getHeight(),
             scenario.world_width_km*1000/_worldDimension.getWidth(),std::move(conditioned),scenario.transport_subdivision,
             scenario.seed,{scenario.ocean_crust_variation_m,scenario.ocean_noise_wavelength_km,
-            scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness},true);
+            scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness},true,
+            scenario.continental_root_kg_m3);
     }
     publishColumns();
     // Conditioning changes buoyancy/GPE. Publish motion for that actual initial
@@ -2493,7 +2502,8 @@ void lithosphere::publishColumns() {
     const auto& cells = column_model.cells();
     for (uint32_t i = 0; i < _worldDimension.getArea(); ++i) {
         const auto& c = cells[i];
-        const double z = tectonics::columns::elevation_m(c, scenario.thermal_subsidence_strength);
+        const double z = tectonics::columns::elevation_m(c, scenario.thermal_subsidence_strength,
+            scenario.continental_root_kg_m3);
         if (!std::isfinite(z) || z <= -sea_level_m)
             throw runtime_error("Isostatic elevation cannot be represented by the native height datum");
         hmap[i] = elevation_to_internal(static_cast<float>(z), sea_level_m);

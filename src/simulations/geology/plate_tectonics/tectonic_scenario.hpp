@@ -42,6 +42,15 @@ struct Scenario {
     // edge and reaching -(2500 + initial_margin_width_m / 2) m; beyond it the deep floor.
     // At least 1 - sea_level + 0.01; requires boundary-conditioned terrain.
     double continental_fraction = 0;
+    // Continental freeboard: the load of a lithospheric mantle root per metre of crust
+    // away from reference_continent_m, kg/m^3 (the root's density contrast times its
+    // thickness per crust thickness; thick crust rides on thicker, colder, denser mantle
+    // lithosphere). Earth-like 246 (about 40 kg/m^3 x 6.1 km per km of crust) gives
+    // (500 - 246) / 3300 = 0.077 km of elevation per km of crust above sea level, CRUST1.0's
+    // fit, and 0.112 below; 0 (legacy) the crust-only Airy 0.152 and 0.220. The root is
+    // mantle lithosphere, a load outside the crust mass and felsic budgets (like the
+    // continental mantle load and thermal subsidence). 0 <= value < 500.
+    double continental_root_kg_m3 = 0;
     bool sediment_load_feedback = false; // Include continental sediment in GPE and weak-crust redistribution.
     bool thermal_force_feedback = false; // Slab buoyancy follows advected thermal age, not chronological age.
     double world_width_km = 40000.0;

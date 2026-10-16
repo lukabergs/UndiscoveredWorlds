@@ -93,11 +93,17 @@ double age_myr(const Cell& c) {
     return (c.continent + c.ocean) > 0
         ? (c.continental_age_volume + c.oceanic_age_volume) / (c.continent + c.ocean) : 0;
 }
-double mountain_force_n_m(const Cell& c, bool sediment_feedback) {
+double mountain_force_n_m(const Cell& c, bool sediment_feedback, double root_kg_m3) {
     // Airy-compensated continental column, relative to unthickened crust:
     // delta GPE = g*rho_c*(1-rho_c/rho_m)*(H²-H0²)/2, in N/m.
     // Effective mixed-cell column: no division by vanishing area fractions.
     // This reduced crust-only estimate omits thermal mantle GPE and flexure.
+    // A lithospheric root scales the elevation per metre of crust by
+    // (rho_m - rho_c - root) / (rho_m - rho_c); the GPE g rho_c z (H + H0) / 2 scales
+    // with the elevation, so both branches take that factor (the same crust-only
+    // estimate; the root's own GPE is not resolved).
+    const double root_scale = (mantle_density - continental_density - root_kg_m3)
+        / (mantle_density - continental_density);
     const double reference = reference_continent_m * c.continental_area;
     if (sediment_feedback) {
         // Exact two-layer Airy GPE for continental basement plus its sediment
@@ -109,32 +115,36 @@ double mountain_force_n_m(const Cell& c, bool sediment_feedback) {
         const double base=z-c.continent-s,interface_z=z-s;
         const double gpe=sediment_density*z*z+(continental_density-sediment_density)*interface_z*interface_z
             +(mantle_density-continental_density)*(base*base-reference*reference);
-        return .5*9.80665*std::max(0.0,gpe);
+        return .5*9.80665*std::max(0.0,gpe)*root_scale;
     }
     return .5 * 9.80665 * continental_density * (1 - continental_density / mantle_density)
-        * std::max(0.0, c.continent * c.continent - reference * reference);
+        * std::max(0.0, c.continent * c.continent - reference * reference) * root_scale;
 }
-double elevation_m(const Cell& c, double thermal_strength) {
+double elevation_m(const Cell& c, double thermal_strength, double root_kg_m3) {
     const double ocean_age = c.ocean > 0 ? std::max(0.0,
         (c.oceanic_age_volume-c.thermal_rejuvenation_volume)/c.ocean) : 0;
     const double load = ocean_reference + continental_mantle_load * c.continental_area
         + (mantle_density - water_density) * thermal_strength
             * thermal::subsidence_m(ocean_age) * c.oceanic_area;
-    const double buoyancy = (mantle_density - continental_density) * c.continent
+    double buoyancy = (mantle_density - continental_density) * c.continent
         + (mantle_density - oceanic_density) * c.ocean
         + (mantle_density - sediment_density) * c.sediment - load;
+    // Lithospheric root: crust thicker than the (area-weighted) reference rides on a
+    // denser mantle root, thinner crust on a lighter one. Exact zero when root is 0.
+    buoyancy -= root_kg_m3 * (c.continent - reference_continent_m * c.continental_area);
     // Hydrostatic compensation includes water loading below sea level.
     return buoyancy / (buoyancy >= 0 ? mantle_density : mantle_density - water_density) - c.flexure_m;
 }
-Cell seed(double z, bool continental, double age) {
-    if (!std::isfinite(z) || !std::isfinite(age) || age < 0)
-        throw std::runtime_error("Invalid initial column elevation or age");
+Cell seed(double z, bool continental, double age, double root_kg_m3) {
+    if (!std::isfinite(z) || !std::isfinite(age) || age < 0 || !std::isfinite(root_kg_m3) || root_kg_m3 < 0
+        || root_kg_m3 >= mantle_density - continental_density)
+        throw std::runtime_error("Invalid initial column elevation, age or root load");
     Cell c;
     if (continental) {
         c.continental_area = 1;
         c.continent = reference_continent_m
             + z * (z >= 0 ? mantle_density : mantle_density - water_density)
-                / (mantle_density - continental_density);
+                / (mantle_density - continental_density - root_kg_m3);
         c.continental_age_volume = c.continent * age;
     } else {
         // Ocean depth follows age/cooling; do not infer implausibly thick basalt
@@ -147,12 +157,15 @@ Cell seed(double z, bool continental, double age) {
     return c;
 }
 void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vector<Cell> cells,
-        uint32_t subdivision, long seed, const ocean_relief::Parameters& relief, bool preserve_initial) {
+        uint32_t subdivision, long seed, const ocean_relief::Parameters& relief, bool preserve_initial,
+        double root_kg_m3) {
     if (width < 2 || height < 2 || cells.size() != static_cast<size_t>(width) * height
         || !std::isfinite(cell_m) || cell_m <= 0 || (subdivision != 1 && subdivision != 2 && subdivision != 4))
         throw std::runtime_error("Invalid column grid");
+    if (!std::isfinite(root_kg_m3) || root_kg_m3 < 0 || root_kg_m3 >= mantle_density - continental_density)
+        throw std::runtime_error("Continental root load must be in 0..500 kg/m^3 (500 excluded)");
     width_ = width; height_ = height; cell_m_ = cell_m; cells_ = std::move(cells);
-    seed_=seed;time_myr_=0;
+    seed_=seed;root_kg_m3_=root_kg_m3;time_myr_=0;
     newborn_ocean_crust_ = ocean_relief::crust(width,height,cell_m,seed,relief);
     for (size_t i=0; i<cells_.size(); ++i) {
         auto& c=cells_[i];
@@ -278,7 +291,7 @@ void Model::spreadRoots(std::vector<Cell>& cells, double dt, double thermal_stre
         for (auto* buffer : {&rates, &outgoing, &incoming, &incoming_age}) std::fill(buffer->begin(), buffer->end(), 0);
         std::fill(out_sediment.begin(),out_sediment.end(),0);std::fill(in_sediment.begin(),in_sediment.end(),0);
         for (size_t i = 0; i < cells.size(); ++i) {
-            z[i] = elevation_m(cells[i], thermal_strength);
+            z[i] = elevation_m(cells[i], thermal_strength, root_kg_m3_);
             mobile[i]=cells[i].continent+(sediment_feedback?cells[i].sediment*cells[i].continental_area:0);
             channel[i] = std::pow(.5 * mobile[i], 5);
         }
@@ -385,7 +398,7 @@ void Model::routeRiversImplicit(std::vector<Cell>& cells, double dt, double ther
     std::vector<float> z(count),runoff(count),erodibility(count),uplift(count,0.0f),erosion(count),deposition(count);
     std::vector<uint8_t> sea(count);
     for (size_t i=0;i<count;++i) {
-        z[i]=static_cast<float>(elevation_m(cells[i],thermal_strength));
+        z[i]=static_cast<float>(elevation_m(cells[i],thermal_strength,root_kg_m3_));
         sea[i]=z[i]<=0?1:0;
         runoff[i]=sea[i]?0.0f:1.0f;
         const double factor=forcing && !forcing->erosion_multiplier.empty()?forcing->erosion_multiplier[i]:1;
@@ -464,7 +477,7 @@ void Model::routeSediment(std::vector<Cell>& cells, double dt, double thermal_st
     std::vector<double> upstream_drop(count,std::numeric_limits<double>::infinity());
     std::vector<size_t> order(count),downstream(count);
     std::iota(order.begin(),order.end(),0);
-    for (size_t i=0;i<count;++i) { z[i]=elevation_m(cells[i],thermal_strength); downstream[i]=i; }
+    for (size_t i=0;i<count;++i) { z[i]=elevation_m(cells[i],thermal_strength,root_kg_m3_); downstream[i]=i; }
     const auto index=[&](int x,int y) {
         return static_cast<size_t>((y+static_cast<int>(height_))%static_cast<int>(height_))*width_
             +(x+static_cast<int>(width_))%static_cast<int>(width_);
@@ -578,7 +591,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     // positivity and shape limiters can act, and moved / coverage is a bounded
     // approximation there.
     std::vector<double> elevation_before(cells_.size());
-    for (size_t i = 0; i < cells_.size(); ++i) elevation_before[i] = elevation_m(cells_[i], thermal_strength);
+    for (size_t i = 0; i < cells_.size(); ++i) elevation_before[i] = elevation_m(cells_[i], thermal_strength, root_kg_m3_);
     const uint32_t fine_width = width_ * subdivision_;
     const auto parent = [&](size_t f) {
         return static_cast<size_t>(f / fine_width / subdivision_) * width_ + (f % fine_width) / subdivision_;
@@ -610,7 +623,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     // Carried with the rock: 0 elevation, 1 uplift rate, 2 coverage, 3 to 5 strain xx, yy, xy.
     std::vector<std::vector<double>> carried(6, std::vector<double>(transport_cells_.size(), 1.0));
     for (size_t f = 0; f < transport_cells_.size(); ++f) {
-        carried[0][f] = elevation_m(transport_cells_[f], thermal_strength);
+        carried[0][f] = elevation_m(transport_cells_[f], thermal_strength, root_kg_m3_);
         carried[1][f] = uplift_rate_m_myr_[parent(f)];
         carried[3][f] = strain_[parent(f)].xx;
         carried[4][f] = strain_[parent(f)].yy;
@@ -821,7 +834,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     // continental/oceanic rock; deposit the same mass at the lower neighbour.
     // Density conversion includes sediment expansion; no sediment is deleted.
     std::vector<double> elevation(next.size()), deposits(next.size(), 0);
-    for (size_t i = 0; i < next.size(); ++i) elevation[i] = elevation_m(next[i], thermal_strength);
+    for (size_t i = 0; i < next.size(); ++i) elevation[i] = elevation_m(next[i], thermal_strength, root_kg_m3_);
     // Rock uplift rate: the tectonic elevation change of this step (before the
     // surface processes below), kept as an exponential mean. Measurement only.
     // In the plate's frame (semi-Lagrangian: the elevation before the step and the
@@ -900,7 +913,7 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     }
     routeSediment(next,dt,thermal_strength,margin_parameters,forcing);
     if (noise.amplitude_m>0)
-        budget_.noise_redistributed_kg+=noise_pass::apply(width_,height_,cell_m_,next,seed_,time_myr_,time_myr_+dt,noise,thermal_strength);
+        budget_.noise_redistributed_kg+=noise_pass::apply(width_,height_,cell_m_,next,seed_,time_myr_,time_myr_+dt,noise,thermal_strength,root_kg_m3_);
     budget_.mass_kg = 0;
     budget_.felsic_kg = 0;
     for (size_t i=0;i<next.size();++i) {

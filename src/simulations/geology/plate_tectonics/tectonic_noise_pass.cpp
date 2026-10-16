@@ -13,12 +13,13 @@ void validate(const Parameters& p) {
         throw std::runtime_error("Invalid experimental noise pass");
 }
 double apply(uint32_t w,uint32_t h,double cell_m,std::vector<columns::Cell>& cells,
-             long seed,double start,double end,const Parameters& p,double thermal_strength) {
+             long seed,double start,double end,const Parameters& p,double thermal_strength,double root_kg_m3) {
     using namespace columns;
     validate(p);
     if (w<2 || h<2 || cells.size()!=static_cast<size_t>(w)*h ||
         !std::isfinite(cell_m) || cell_m<=0 || !std::isfinite(start) || !std::isfinite(end) || start<0 || end<start ||
-        !std::isfinite(thermal_strength) || thermal_strength<0)
+        !std::isfinite(thermal_strength) || thermal_strength<0 ||
+        !std::isfinite(root_kg_m3) || root_kg_m3<0 || root_kg_m3>=mantle_density-continental_density)
         throw std::runtime_error("Invalid noise pass grid or time");
     if (p.amplitude_m==0 || start==end) return 0;
     constexpr double tau=6.28318530717958647692;
@@ -36,7 +37,7 @@ double apply(uint32_t w,uint32_t h,double cell_m,std::vector<columns::Cell>& cel
         potential[y*w+x]=p.amplitude_m*(steady*ocean_relief::noise(u,v,kx,ky,seed)
             +varying*ocean_relief::noise(u,v,kx,ky,static_cast<uint32_t>(seed)^0x9e3779b9U));
         if (p.coast_taper_m>0) {
-            const double z=elevation_m(cells[y*w+x],thermal_strength);
+            const double z=elevation_m(cells[y*w+x],thermal_strength,root_kg_m3);
             const double t=std::min(1.,std::abs(z)/p.coast_taper_m);
             coast_weight[y*w+x]=t*t*(3-2*t);land[y*w+x]=z>=0;
         }

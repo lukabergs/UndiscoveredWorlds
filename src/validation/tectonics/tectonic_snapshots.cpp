@@ -394,6 +394,7 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"sediment_travel_km\": " << scenario.margin_processes.sediment_travel_km << ",\n";
     output << indent << "  \"rift_breakup_thickness_m\": " << scenario.margin_processes.rift_breakup_thickness_m << ",\n";
     output << indent << "  \"continental_fraction\": " << scenario.continental_fraction << ",\n";
+    output << indent << "  \"continental_root_kg_m3\": " << scenario.continental_root_kg_m3 << ",\n";
     output << indent << "  \"continental_min_thickness_m\": " << scenario.margin_processes.continental_min_thickness_m << ",\n";
     output << indent << "  \"continental_max_thickness_m\": " << scenario.margin_processes.continental_max_thickness_m << ",\n";
     output << indent << "  \"orogenic_collapse_km2_myr\": " << scenario.margin_processes.orogenic_collapse_km2_myr << ",\n";

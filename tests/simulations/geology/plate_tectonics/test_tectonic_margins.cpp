@@ -286,6 +286,10 @@ TEST(TectonicInitialization, GradualMarginsPreserveHeightAndAvoidCoolingDisconti
         EXPECT_GE(cells[i].continent,0); EXPECT_GE(cells[i].ocean,0);
         if (i%f.w>0) EXPECT_GE(cells[i].oceanic_area,cells[i-1].oceanic_area);
     }
+    // A lithospheric root keeps the taper's heights: both end members carry it.
+    const auto rooted=initialization::terrain(f.w,f.h,150000,1,z,age,f.owners,stopped,1,2000,1,246);
+    for (size_t i=0;i<z.size();++i) EXPECT_NEAR(columns::elevation_m(rooted[i],1,246),z[i],1e-8);
+    EXPECT_THROW(initialization::terrain(f.w,f.h,150000,1,z,age,f.owners,stopped,1,2000,1,500),std::runtime_error);
     const auto cooling=[&](double height) {
         z.assign(z.size(),height);
         auto c=initialization::terrain(f.w,f.h,150000,1,z,age,f.owners,stopped,1,2000)[0];

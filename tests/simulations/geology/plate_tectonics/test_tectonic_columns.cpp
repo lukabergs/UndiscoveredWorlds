@@ -23,6 +23,62 @@ TEST(TectonicColumns, AiryRootsAndWaterLoadingHaveAnalyticalElevations) {
     EXPECT_NEAR(elevation_m(seed(-100, false, 80)), -2500 - tectonics::thermal::subsidence_m(80), 1e-10);
 }
 
+// The lithospheric root (continental_root_kg_m3): seed and elevation stay inverses,
+// the slope per km of crust is (500 - root) / 3300 above sea and / 2270 below, and a
+// root of 0 reproduces the crust-only expressions bit for bit.
+TEST(TectonicColumns, LithosphericRootLowersTheSlopeAndZeroKeepsTheCrustOnlyColumn) {
+    constexpr double root = 246;
+    // -3500 m, not -5000: at this root continental crust thins to zero at -3.9 km.
+    for (double z : {-3500., -500., 0., 1500., 8000., 12000.}) {
+        const auto c = seed(z, true, 100, root);
+        EXPECT_NEAR(elevation_m(c, 1, root), z, 1e-10);
+    }
+    Cell thick, thin;
+    thick.continental_area = thin.continental_area = 1;
+    thick.continent = 36000; thin.continent = 34000;
+    EXPECT_NEAR(elevation_m(thick, 1, root), 77.0, .05);
+    EXPECT_NEAR(elevation_m(thin, 1, root), -111.9, .05);
+    EXPECT_NEAR(elevation_m(thick, 1, root), 254000. / 3300, 1e-9);
+    EXPECT_NEAR(elevation_m(thin, 1, root), -254000. / 2270, 1e-9);
+    // The crust-only expressions as they stood before the root was added.
+    constexpr double ocean_reference = (mantle_density - oceanic_density) * ridge_crust_m
+        + (mantle_density - water_density) * ridge_depth_m;
+    constexpr double continental_mantle_load =
+        (mantle_density - continental_density) * reference_continent_m - ocean_reference;
+    const auto legacy_elevation = [&](const Cell& c, double thermal_strength) {
+        const double ocean_age = c.ocean > 0 ? std::max(0.0,
+            (c.oceanic_age_volume-c.thermal_rejuvenation_volume)/c.ocean) : 0;
+        const double load = ocean_reference + continental_mantle_load * c.continental_area
+            + (mantle_density - water_density) * thermal_strength
+                * tectonics::thermal::subsidence_m(ocean_age) * c.oceanic_area;
+        const double buoyancy = (mantle_density - continental_density) * c.continent
+            + (mantle_density - oceanic_density) * c.ocean
+            + (mantle_density - sediment_density) * c.sediment - load;
+        return buoyancy / (buoyancy >= 0 ? mantle_density : mantle_density - water_density) - c.flexure_m;
+    };
+    Cell mixed;
+    mixed.continent = 0.3 * 41234.5; mixed.ocean = 0.7 * 6800; mixed.sediment = 812.25;
+    mixed.continental_area = .3; mixed.oceanic_area = .7;
+    mixed.continental_age_volume = mixed.continent * 310; mixed.oceanic_age_volume = mixed.ocean * 47.5;
+    mixed.thermal_rejuvenation_volume = mixed.ocean * 3; mixed.flexure_m = 123.4;
+    Cell ghost; // Continental traces without continental area.
+    ghost.continent = 1e-3; ghost.ocean = 7100; ghost.sediment = 20;
+    ghost.oceanic_area = 1; ghost.oceanic_age_volume = ghost.ocean * 80;
+    for (const auto& c : {mixed, ghost}) for (double thermal : {0., .5, 1.}) {
+        EXPECT_EQ(elevation_m(c, thermal, 0), legacy_elevation(c, thermal));
+        EXPECT_EQ(elevation_m(c, thermal, 0), elevation_m(c, thermal));
+    }
+    for (double z : {-5000., -500., 0., 1500., 12000.})
+        EXPECT_EQ(seed(z, true, 100, 0).continent,
+                  reference_continent_m + z * (z >= 0 ? mantle_density : mantle_density - water_density)
+                      / (mantle_density - continental_density));
+    EXPECT_THROW(seed(0, true, 100, 500), std::runtime_error);
+    EXPECT_THROW(seed(0, true, 100, -1), std::runtime_error);
+    Model model;
+    EXPECT_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, 500),
+                 std::runtime_error);
+}
+
 TEST(TectonicColumns, StationaryCoolingIsIndependentOfTimestepAndDoesNotRemoveCrust) {
     Model a, b;
     const std::vector<Cell> initial(32, seed(-5000, false, 20));
@@ -165,6 +221,15 @@ TEST(TectonicColumns, InitializationKeepsLowContinentalLandAboveWater) {
         EXPECT_DOUBLE_EQ(c.continental_area, 1);
         EXPECT_NEAR(elevation_m(c), 200, .1);
     }
+    // With an Earth-like lithospheric root the same lowland stands on a 37.6 km column.
+    s.continental_root_kg_m3 = 246;
+    lithosphere rooted(s);
+    rooted.importMetricHeightMap(lowland.data(), datum);
+    for (const auto& c : rooted.getColumnModel().cells()) {
+        EXPECT_DOUBLE_EQ(c.continental_area, 1);
+        EXPECT_NEAR(elevation_m(c, 1, 246), 200, .1);
+        EXPECT_NEAR(c.continent, 35000 + 200 * 3300. / 254, 2);
+    }
 }
 
 TEST(TectonicColumns, ContinentalFractionSeedsShelvesToTheRequestedArea) {
@@ -264,6 +329,12 @@ TEST(TectonicColumns, ExcessMountainForceMatchesAiryColumnUnitsAndVanishesOnUnth
     const double expected=.5*9.80665*2800*(1-2800./3300)*(68000.*68000-35000.*35000);
     EXPECT_NEAR(mountain_force_n_m(mountain),expected,expected*1e-14);
     EXPECT_GT(mountain_force_n_m(seed(10000,true,100)),mountain_force_n_m(mountain));
+    // A lithospheric root scales the force with the elevation per metre of crust.
+    EXPECT_NEAR(mountain_force_n_m(mountain,false,246),expected*.508,expected*1e-14);
+    auto covered=mountain; covered.sediment=1500;
+    EXPECT_NEAR(mountain_force_n_m(covered,true,246),.508*mountain_force_n_m(covered,true),
+                mountain_force_n_m(covered,true)*1e-14);
+    EXPECT_EQ(mountain_force_n_m(covered,true,0),mountain_force_n_m(covered,true));
 }
 
 // Every field of two snapshots is equal.

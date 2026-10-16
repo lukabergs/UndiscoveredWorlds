@@ -72,16 +72,19 @@ double shortening_direction(const Strain& s);
 double mass_per_area(const Cell& c);
 // Continent and sediment mass per unit area, kg/m²: the felsic reservoir.
 double felsic_mass_per_area(const Cell& c);
-double elevation_m(const Cell& c, double thermal_strength = 1);
-double mountain_force_n_m(const Cell& c, bool sediment_feedback = false);
+// root_kg_m3: the lithospheric root load per metre of crust away from the reference
+// continent (scenario::Scenario::continental_root_kg_m3); 0 is the crust-only column.
+double elevation_m(const Cell& c, double thermal_strength = 1, double root_kg_m3 = 0);
+double mountain_force_n_m(const Cell& c, bool sediment_feedback = false, double root_kg_m3 = 0);
 double age_myr(const Cell& c);
-Cell seed(double elevation_m, bool continental, double age_myr);
+Cell seed(double elevation_m, bool continental, double age_myr, double root_kg_m3 = 0);
 
 class Model {
 public:
     void initialize(uint32_t width, uint32_t height, double cell_m, std::vector<Cell> cells,
                     uint32_t transport_subdivision = 1, long seed = 0,
-                    const ocean_relief::Parameters& relief = {}, bool preserve_initial = false);
+                    const ocean_relief::Parameters& relief = {}, bool preserve_initial = false,
+                    double root_kg_m3 = 0);
     void advance(const std::vector<Displacement>& velocity, double dt_myr,
                  double erosion_strength, double thermal_strength, double submarine_erosion_ratio = 1,
                  const margins::Forcing* forcing = nullptr, const margins::Parameters& margins = {},
@@ -139,6 +142,7 @@ private:
     uint32_t width_ = 0, height_ = 0;
     double cell_m_ = 0;
     long seed_ = 0;
+    double root_kg_m3_ = 0; // Lithospheric root load in every elevation of the model.
     double time_myr_ = 0;
     std::vector<Cell> cells_;
     uint32_t subdivision_ = 1;

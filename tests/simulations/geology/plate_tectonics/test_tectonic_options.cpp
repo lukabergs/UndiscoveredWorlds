@@ -28,6 +28,7 @@ TEST(TectonicOptions, BaselineAndExplicitValuesStart) {
     EXPECT_NO_THROW(start({}));
     EXPECT_NO_THROW(start({"--delta-time-myr", ".5", "--evolution-duration-myr", "2", "--transport-subdivision", "2"}));
     EXPECT_NO_THROW(start({"--continental-max-thickness-m", "40000", "--orogenic-collapse-km2-myr", "3000"}));
+    EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246"}));
 }
 
 // A value the option parser or the engine refuses stops the run before it starts.
@@ -59,6 +60,8 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
         {"--continental-max-thickness-m", "-1"},
         {"--orogenic-collapse-km2-myr", "3000"}, // needs a maximum thickness
         {"--continental-fraction", ".40", "--initial-ocean-depth-m", "3500"}, // slope foot at 3500 m
+        {"--continental-root-kg-m3", "500"}, // no crust buoyancy left
+        {"--continental-root-kg-m3", "-1"},
     };
     for (const auto& options : cases) {
         EXPECT_ANY_THROW(start(options)) << options[0] << ' ' << options[1];

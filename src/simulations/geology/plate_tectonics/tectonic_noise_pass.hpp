@@ -15,6 +15,7 @@ void validate(const Parameters& parameters);
 // Conservative face transfers driven by the change in a bounded, continuous
 // noise potential. No new material, per-step RNG draws, or initialization pass.
 double apply(uint32_t width,uint32_t height,double cell_m,std::vector<columns::Cell>& cells,
-             long seed,double start_myr,double end_myr,const Parameters& parameters,double thermal_strength = 1);
+             long seed,double start_myr,double end_myr,const Parameters& parameters,double thermal_strength = 1,
+             double root_kg_m3 = 0);
 }
 #endif

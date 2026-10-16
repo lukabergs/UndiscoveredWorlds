@@ -236,6 +236,8 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.margin_processes.rift_breakup_thickness_m=parse_double(arg.c_str(),value);
     } else if (arg == "--continental-fraction") {
         scenario.continental_fraction=parse_double(arg.c_str(),value);
+    } else if (arg == "--continental-root-kg-m3") {
+        scenario.continental_root_kg_m3=parse_double(arg.c_str(),value);
     } else if (arg == "--continental-min-thickness-m") {
         scenario.margin_processes.continental_min_thickness_m=parse_double(arg.c_str(),value);
     } else if (arg == "--continental-max-thickness-m") {
@@ -346,6 +348,7 @@ void printtectonicoptionsusage(std::ostream& out)
         "--sediment-travel-km",
         "--rift-breakup-thickness-m",
         "--continental-fraction",
+        "--continental-root-kg-m3",
         "--continental-min-thickness-m",
         "--continental-max-thickness-m",
         "--orogenic-collapse-km2-myr",
