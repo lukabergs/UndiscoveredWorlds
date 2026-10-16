@@ -167,6 +167,30 @@ TEST(TectonicColumns, InitializationKeepsLowContinentalLandAboveWater) {
     }
 }
 
+TEST(TectonicColumns, ContinentalFractionSeedsShelvesToTheRequestedArea) {
+    tectonics::scenario::Scenario s;
+    s.seed = 1; s.width = 128; s.height = 64; s.plate_count = 8; s.sea_level = .65f;
+    s.evolution_duration_myr = 1; s.boundary_conditioned_terrain = true;
+    const auto share = [](lithosphere& world) {
+        double continental = 0;
+        const auto& cells = world.getColumnModel().cells();
+        for (const auto& c : cells) continental += c.continental_area >= .5 ? 1 : 0;
+        return continental / cells.size();
+    };
+    lithosphere legacy(s);
+    s.continental_fraction = .40;
+    lithosphere shelved(s);
+    EXPECT_GT(share(legacy), .5);
+    EXPECT_NEAR(share(shelved), .40, .01);
+    // The land share is unchanged: the shelf lies below sea level.
+    double legacy_land = 0, shelved_land = 0;
+    for (const auto& c : legacy.getColumnModel().cells()) legacy_land += elevation_m(c) > 0;
+    for (const auto& c : shelved.getColumnModel().cells()) shelved_land += elevation_m(c) > 0;
+    EXPECT_NEAR(shelved_land, legacy_land, .01 * legacy.getColumnModel().cells().size());
+    s.continental_fraction = .30;
+    EXPECT_THROW(lithosphere{s}, std::runtime_error);
+}
+
 TEST(TectonicColumns, Integrated200MyrReplayClosesMassBudgetAndPreservesContinents) {
     tectonics::scenario::Scenario s;
     s.seed = 1; s.width = 64; s.height = 32; s.plate_count = 8;

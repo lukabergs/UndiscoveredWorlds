@@ -20,6 +20,20 @@ void validate(const Parameters& p) {
         if (!std::isfinite(value) || value<=0) throw std::runtime_error("Invalid margin process length");
     if (p.river_implicit && p.alluvial_transport>0)
         throw std::runtime_error("Implicit rivers have no alluvial transport capacity: set alluvial_transport to 0");
+    if (!std::isfinite(p.continental_min_thickness_m) || p.continental_min_thickness_m<0
+        || p.continental_min_thickness_m>=p.rift_breakup_thickness_m)
+        throw std::runtime_error("Continental minimum thickness must be 0 or below the rift breakup onset");
+    if (!std::isfinite(p.arc_continent_fraction) || p.arc_continent_fraction<0 || p.arc_continent_fraction>1)
+        throw std::runtime_error("Invalid arc continent fraction");
+    if (!std::isfinite(p.subduction_erosion_ratio) || p.subduction_erosion_ratio<0)
+        throw std::runtime_error("Invalid subduction erosion ratio");
+    if (!std::isfinite(p.continental_growth_per_gyr) || p.continental_growth_per_gyr<-1)
+        throw std::runtime_error("Continental growth per Gyr must be finite and at least -1");
+    if ((p.arc_continent_fraction>0 || p.continental_growth_control) && p.continental_min_thickness_m<=0)
+        throw std::runtime_error("Arc continent and continental growth require a continental minimum thickness");
+    if (!p.enabled && (p.continental_min_thickness_m>0 || p.arc_continent_fraction>0
+        || p.subduction_erosion_ratio>0 || p.continental_growth_control))
+        throw std::runtime_error("Continental growth processes require active margins");
 }
 Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
         const std::vector<uint32_t>& owners,const std::vector<columns::Cell>& cells,

@@ -369,12 +369,18 @@ def diagnostics(manifest, fields):
             valid = (initial > 0 and all(budget[k] >= 0 for k in required[:-1])
                      and abs(budget["relative_mass_residual"]) < 1e-9
                      and abs(budget["mass_kg"] - initial - budget["generated_ocean_kg"]
-                             + budget["subducted_ocean_kg"] + budget.get("subducted_sediment_kg", 0)) < initial * 1e-9
+                             - budget.get("generated_continent_kg", 0)
+                             + budget["subducted_ocean_kg"] + budget.get("subducted_sediment_kg", 0)
+                             + budget.get("subducted_continent_kg", 0)) < initial * 1e-9
                      and abs(budget["eroded_kg"] - budget["deposited_kg"]) < initial * 1e-9)
+            # T4.12: arc melt booked as continent leaves generated_ocean_kg, so the arc subset is checked against both.
+            if "generated_continent_kg" in budget and "generated_arc_kg" in budget:
+                valid = valid and 0 <= budget["generated_continent_kg"] <= budget["generated_arc_kg"] + initial*1e-12
             for subset, total in (("generated_arc_kg", "generated_ocean_kg"), ("generated_plume_kg", "generated_ocean_kg"),
                                   ("river_eroded_kg", "eroded_kg")):
                 if subset in budget:
-                    valid = valid and np.isfinite(budget[subset]) and 0 <= budget[subset] <= budget[total] + initial*1e-12
+                    limit = budget[total] + (budget.get("generated_continent_kg", 0) if subset == "generated_arc_kg" else 0)
+                    valid = valid and np.isfinite(budget[subset]) and 0 <= budget[subset] <= limit + initial*1e-12
             for transfer in ("redistributed_continent_kg", "redistributed_sediment_kg", "noise_redistributed_kg"):
                 if transfer in budget:
                     valid = valid and np.isfinite(budget[transfer]) and budget[transfer] >= 0

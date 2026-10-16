@@ -234,6 +234,19 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.margin_processes.sediment_travel_km=parse_double(arg.c_str(),value);
     } else if (arg == "--rift-breakup-thickness-m") {
         scenario.margin_processes.rift_breakup_thickness_m=parse_double(arg.c_str(),value);
+    } else if (arg == "--continental-fraction") {
+        scenario.continental_fraction=parse_double(arg.c_str(),value);
+    } else if (arg == "--continental-min-thickness-m") {
+        scenario.margin_processes.continental_min_thickness_m=parse_double(arg.c_str(),value);
+    } else if (arg == "--arc-continent-fraction") {
+        scenario.margin_processes.arc_continent_fraction=parse_double(arg.c_str(),value);
+    } else if (arg == "--subduction-erosion-ratio") {
+        scenario.margin_processes.subduction_erosion_ratio=parse_double(arg.c_str(),value);
+    } else if (arg == "--continental-growth-control") {
+        if (std::string(value)!="on" && std::string(value)!="off") fail("continental-growth-control requires on/off");
+        scenario.margin_processes.continental_growth_control=std::string(value)=="on";
+    } else if (arg == "--continental-growth-per-gyr") {
+        scenario.margin_processes.continental_growth_per_gyr=parse_double(arg.c_str(),value);
     } else if (arg == "--delta-time-myr") {
         scenario.delta_time_myr = parse_double("--delta-time-myr", value);
     } else if (arg == "--uplift-rate-window-myr") {
@@ -328,6 +341,12 @@ void printtectonicoptionsusage(std::ostream& out)
         "--river-outlet-sea-level",
         "--sediment-travel-km",
         "--rift-breakup-thickness-m",
+        "--continental-fraction",
+        "--continental-min-thickness-m",
+        "--arc-continent-fraction",
+        "--subduction-erosion-ratio",
+        "--continental-growth-control",
+        "--continental-growth-per-gyr",
         "--delta-time-myr",
         "--uplift-rate-window-myr",
     };

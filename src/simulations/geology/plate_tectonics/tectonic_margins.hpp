@@ -25,6 +25,23 @@ struct Parameters {
     double alluvial_transport = 0; // 0: sediment bypass; >0: capacity / stream-power erosion potential.
     bool river_outlet_sea_level = false; // Clip river outlet slope at sea level; submarine routing still follows seabed.
     double rift_breakup_thickness_m = 12000; // Onset of gradual oceanization during extension.
+    // Continental crust's least mean thickness, m (0: off, the legacy opening share).
+    // Above 0 the opening's oceanic share rises from the onset to it, and a column's
+    // continental area relaxes (5 Myr) to at most continent / this value: the freed
+    // area becomes oceanic area, no rock moves.
+    double continental_min_thickness_m = 0;
+    // Share of arc melt emplaced as continental crust at age 0 (mass kept, volume
+    // x 2900/2800); an outlet with mostly oceanic area also gains continental area
+    // (added thickness / continental_min_thickness_m). Above 0 it requires that minimum.
+    double arc_continent_fraction = 0;
+    // Continental volume removed at an overlap cell per subducted oceanic volume,
+    // capped by the continent there: subduction erosion, a sink of the reservoir.
+    double subduction_erosion_ratio = 0;
+    // A global feedback on the arc share in place of arc_continent_fraction: it holds
+    // the felsic reservoir (continent and sediment mass) at its initial mass times
+    // (1 + continental_growth_per_gyr x time in Gyr). Requires continental_min_thickness_m.
+    bool continental_growth_control = false;
+    double continental_growth_per_gyr = 0;
     double process_variation = 0;
     double process_wavelength_km = 1800;
     double process_period_myr = 80;

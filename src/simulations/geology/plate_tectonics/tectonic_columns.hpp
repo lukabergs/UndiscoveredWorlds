@@ -43,6 +43,18 @@ struct Budget {
     double noise_redistributed_kg = 0; // Synthetic experiment; internal transfer, not a mass source.
     uint64_t river_unsupplied_cells = 0; // Implicit rivers: cell updates whose column could not supply the erosion.
     double relative_mass_residual = 0;
+    // Continental growth (margins::Parameters). The felsic reservoir is the mass of
+    // continent and sediment; it grows by arc continent and oceanic crust eroded into
+    // sediment, and shrinks by subducted sediment and subduction erosion.
+    double generated_continent_kg = 0; // Subset of generated_arc_kg; not in generated_ocean_kg.
+    double subducted_continent_kg = 0; // Subduction erosion at overlap cells.
+    double eroded_ocean_kg = 0; // Subset of eroded_kg taken from oceanic crust (becomes sediment).
+    double oceanized_continental_area_m2 = 0; // Area freed by the minimum-thickness cap.
+    double initial_continental_area_m2 = 0; // Sum of continental_area x cell area at initialize.
+    double initial_felsic_kg = 0, felsic_kg = 0;
+    double felsic_relative_residual = 0;
+    double continental_growth_shortfall_kg = 0; // Arc continent the controller asked for beyond the arc melt.
+    double arc_continent_fraction = 0; // Share of arc melt made continent in the last update.
 };
 // Cumulative horizontal strain of the rock: a symmetric 2D tensor on the grid's axes
 // (x east, y the row direction), dimensionless, the sum of the per-update strains
@@ -56,6 +68,8 @@ double shortening_m(const Strain& s, double cell_m);
 // axis toward the y axis; 0 where the two principal components are equal.
 double shortening_direction(const Strain& s);
 double mass_per_area(const Cell& c);
+// Continent and sediment mass per unit area, kg/m²: the felsic reservoir.
+double felsic_mass_per_area(const Cell& c);
 double elevation_m(const Cell& c, double thermal_strength = 1);
 double mountain_force_n_m(const Cell& c, bool sediment_feedback = false);
 double age_myr(const Cell& c);

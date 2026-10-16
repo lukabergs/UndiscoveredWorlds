@@ -174,3 +174,20 @@ out/build/headless-modules/bin/tectonic_pipeline.exe inspect --final --seed 1 `
   kept it). At 256 x 128, 600 Myr (run 78 against 77): land above 2 km 18.0
   to 15.8 percent of land, above 3 km 12.2 to 10.1 (finding 5: Earth 10.7
   and 5.0), land fraction 33.6 to 37.1 percent.
+- Continental crust (2026-10-16, terrain roadmap T4.12): no engine process
+  creates continental crust (arc melt goes to the oceanic reservoir);
+  continental area changes only by rift stretching, collision (area divided
+  at constant volume) and the start-up seeding; its volume falls only by
+  erosion into sediment. Run 78 starts with a surface-mean continental volume
+  of 22.7 km, 1.65 times Earth's (CRUST1.0: continental crust 38.3 percent of
+  the surface, mean 36.1 km). `crust_class` is drawn from the plate rasters
+  (`updateFieldStackMaps`), not the columns: its 81 percent continental and
+  14.6 percent ghost cells are a raster artefact; the columns keep 0.62 to
+  0.65 of the surface continental. T4.12 added continental_fraction,
+  continental_min_thickness_m, arc_continent_fraction,
+  subduction_erosion_ratio and a growth controller (all off by default,
+  legacy-identical); with the Earth-like set the area shrinks 0.40 to 0.28
+  and the thickness grows to 52 km over 600 Myr: nothing bounds the
+  thickness from above (the next round: an orogenic-collapse regulator).
+  The force-balance solver moves plates as rigid translations (no rotation);
+  the mantle forcing is an analytic pattern with a 600 Myr wobble.

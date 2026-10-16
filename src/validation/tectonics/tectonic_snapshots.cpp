@@ -9,11 +9,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iomanip>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -391,6 +393,12 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"root_mobility\": " << scenario.margin_processes.root_mobility << ",\n";
     output << indent << "  \"sediment_travel_km\": " << scenario.margin_processes.sediment_travel_km << ",\n";
     output << indent << "  \"rift_breakup_thickness_m\": " << scenario.margin_processes.rift_breakup_thickness_m << ",\n";
+    output << indent << "  \"continental_fraction\": " << scenario.continental_fraction << ",\n";
+    output << indent << "  \"continental_min_thickness_m\": " << scenario.margin_processes.continental_min_thickness_m << ",\n";
+    output << indent << "  \"arc_continent_fraction\": " << scenario.margin_processes.arc_continent_fraction << ",\n";
+    output << indent << "  \"subduction_erosion_ratio\": " << scenario.margin_processes.subduction_erosion_ratio << ",\n";
+    output << indent << "  \"continental_growth_control\": " << (scenario.margin_processes.continental_growth_control?"true":"false") << ",\n";
+    output << indent << "  \"continental_growth_per_gyr\": " << scenario.margin_processes.continental_growth_per_gyr << ",\n";
     output << indent << "  \"world_width_km\": " << scenario.world_width_km << ",\n";
     output << indent << "  \"mantle_flow_speed_cm_yr\": " << scenario.mantle_flow_speed_cm_yr << ",\n";
     output << indent << "  \"thermal_subsidence_strength\": " << scenario.thermal_subsidence_strength << ",\n";
@@ -467,6 +475,16 @@ void write_snapshot_record(std::ostream& output, const tectonics::contract::Snap
     output << "    \"redistributed_continent_kg\": " << budget.redistributed_continent_kg << ",\n";
     output << "    \"redistributed_sediment_kg\": " << budget.redistributed_sediment_kg << ",\n";
     output << "    \"noise_redistributed_kg\": " << budget.noise_redistributed_kg << ",\n";
+    output << "    \"generated_continent_kg\": " << budget.generated_continent_kg << ",\n";
+    output << "    \"subducted_continent_kg\": " << budget.subducted_continent_kg << ",\n";
+    output << "    \"eroded_ocean_kg\": " << budget.eroded_ocean_kg << ",\n";
+    output << "    \"oceanized_continental_area_m2\": " << budget.oceanized_continental_area_m2 << ",\n";
+    output << "    \"initial_continental_area_m2\": " << budget.initial_continental_area_m2 << ",\n";
+    output << "    \"initial_felsic_kg\": " << budget.initial_felsic_kg << ",\n";
+    output << "    \"felsic_kg\": " << budget.felsic_kg << ",\n";
+    output << "    \"felsic_relative_residual\": " << budget.felsic_relative_residual << ",\n";
+    output << "    \"continental_growth_shortfall_kg\": " << budget.continental_growth_shortfall_kg << ",\n";
+    output << "    \"arc_continent_fraction\": " << budget.arc_continent_fraction << ",\n";
     output << "    \"relative_mass_residual\": " << budget.relative_mass_residual << "\n  }";
     const auto& topology = snapshot.topology_diagnostics;
     if (topology.enabled) {
@@ -908,6 +926,19 @@ LoadedSnapshotBundle load_snapshot_bundle(const fs::path& input_dir) {
             budget.redistributed_sediment_kg = value("redistributed_sediment_kg");
         if (find_optional_key_after(manifest, "noise_redistributed_kg", start) != std::string::npos)
             budget.noise_redistributed_kg = value("noise_redistributed_kg");
+        // Continental growth terms; bundles written before them read as 0.
+        for (const auto& [name, member] : std::initializer_list<std::pair<const char*, double tectonics::columns::Budget::*>>{
+                 {"generated_continent_kg", &tectonics::columns::Budget::generated_continent_kg},
+                 {"subducted_continent_kg", &tectonics::columns::Budget::subducted_continent_kg},
+                 {"eroded_ocean_kg", &tectonics::columns::Budget::eroded_ocean_kg},
+                 {"oceanized_continental_area_m2", &tectonics::columns::Budget::oceanized_continental_area_m2},
+                 {"initial_continental_area_m2", &tectonics::columns::Budget::initial_continental_area_m2},
+                 {"initial_felsic_kg", &tectonics::columns::Budget::initial_felsic_kg},
+                 {"felsic_kg", &tectonics::columns::Budget::felsic_kg},
+                 {"felsic_relative_residual", &tectonics::columns::Budget::felsic_relative_residual},
+                 {"continental_growth_shortfall_kg", &tectonics::columns::Budget::continental_growth_shortfall_kg},
+                 {"arc_continent_fraction", &tectonics::columns::Budget::arc_continent_fraction}})
+            if (find_optional_key_after(manifest, name, start) != std::string::npos) budget.*member = value(name);
     }
     bundle.snapshot.heightmap = read_binary_file<float>(input_dir / "heightmap.f32", cell_count);
     bundle.snapshot.plate_id = read_binary_file<uint32_t>(input_dir / "plate_id.u32", cell_count);

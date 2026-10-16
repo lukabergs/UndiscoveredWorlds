@@ -359,3 +359,169 @@ TEST(TectonicVariation, ChangesProcessRatesWithoutBreakingSedimentMassBudget) {
     EXPECT_NEAR(model.budget().eroded_kg,model.budget().deposited_kg,model.budget().eroded_kg*1e-12);
     EXPECT_LT(std::abs(model.budget().relative_mass_residual),1e-12);
 }
+
+namespace {
+// Earth-like continental growth keys (T4.12) on top of active margins without rivers.
+tectonics::margins::Parameters growth_parameters() {
+    tectonics::margins::Parameters p;p.enabled=true;p.river_erosion=0;
+    p.continental_min_thickness_m=20000;p.rift_breakup_thickness_m=30000;
+    return p;
+}
+// An oceanic plate (0, left) subducting at 4 cm/yr under a stationary continental
+// plate (1, right) with 500 m of sediment.
+struct ContinentalMarginFixture : MarginFixture {
+    ContinentalMarginFixture() {
+        for (uint32_t i=0;i<w*h;++i) {
+            if (owners[i]==1) { cells[i]=tectonics::columns::seed(500,true,100);cells[i].sediment=500; }
+            velocity[i]={owners[i]==0?.8:0,0};
+        }
+    }
+};
+}
+
+TEST(TectonicMargins, ContinentalMinimumThicknessCapsGhostAreaWithoutMovingRock) {
+    MarginFixture f;
+    for (auto& c:f.cells) {
+        c=tectonics::columns::Cell{};
+        c.continental_area=1;c.continent=1000;c.continental_age_volume=1000*50;
+    }
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    tectonics::columns::Model legacy,capped;
+    legacy.initialize(f.w,f.h,50000,f.cells);capped.initialize(f.w,f.h,50000,f.cells);
+    tectonics::margins::Parameters off;off.enabled=true;off.river_erosion=0;
+    const auto p=growth_parameters();
+    legacy.advance(stopped,1,0,1,0,nullptr,off);
+    capped.advance(stopped,1,0,1,0,nullptr,p);
+    const double freed=(1-.05)*-std::expm1(-1.0/5);
+    for (size_t i=0;i<f.cells.size();++i) {
+        EXPECT_DOUBLE_EQ(legacy.cells()[i].continental_area,1);
+        EXPECT_NEAR(capped.cells()[i].continental_area,1-freed,1e-12);
+        EXPECT_NEAR(capped.cells()[i].oceanic_area,freed,1e-12);
+        EXPECT_NEAR(capped.cells()[i].continent,1000,1e-9);
+        EXPECT_DOUBLE_EQ(capped.cells()[i].ocean,0);
+    }
+    EXPECT_NEAR(capped.budget().oceanized_continental_area_m2,freed*50000.0*50000*f.cells.size(),1e-3*50000.0*50000);
+    EXPECT_DOUBLE_EQ(legacy.budget().oceanized_continental_area_m2,0);
+    for (int step=1;step<100;++step) capped.advance(stopped,1,0,1,0,nullptr,p);
+    for (const auto& c:capped.cells()) {
+        EXPECT_NEAR(c.continental_area,.05,1e-6);
+        EXPECT_NEAR(c.continent/c.continental_area,20000,1);
+    }
+    EXPECT_LT(std::abs(capped.budget().relative_mass_residual),1e-12);
+    EXPECT_LT(std::abs(capped.budget().felsic_relative_residual),1e-12);
+}
+
+TEST(TectonicMargins, ContinentalMinimumThicknessMakesOceanOnceRiftedCrustReachesIt) {
+    MarginFixture f;
+    f.cells.assign(f.w*f.h,tectonics::columns::seed(100,true,40));
+    for (size_t i=0;i<f.velocity.size();++i) f.velocity[i].x=f.owners[i]==0?-.15:.15;
+    tectonics::margins::Parameters legacy_parameters;legacy_parameters.enabled=true;legacy_parameters.river_erosion=0;
+    // The legacy share is the minimum thickness 0 written out explicitly.
+    auto explicit_zero=legacy_parameters;explicit_zero.continental_min_thickness_m=0;
+    const auto p=growth_parameters();
+    tectonics::columns::Model legacy,zero,limited;
+    for (auto* model:{&legacy,&zero,&limited}) model->initialize(f.w,f.h,150000,f.cells);
+    const auto thinnest=[&](const tectonics::columns::Model& model) {
+        double least=std::numeric_limits<double>::infinity();
+        for (const auto& c:model.cells()) if (c.continental_area>.05) least=std::min(least,c.continent/c.continental_area);
+        return least;
+    };
+    double limited_least=std::numeric_limits<double>::infinity();
+    for (int step=0;step<100;++step) {
+        legacy.advance(f.velocity,1,0,1,0,nullptr,legacy_parameters);
+        zero.advance(f.velocity,1,0,1,0,nullptr,explicit_zero);
+        limited.advance(f.velocity,1,0,1,0,nullptr,p);
+        limited_least=std::min(limited_least,thinnest(limited));
+    }
+    for (size_t i=0;i<f.cells.size();++i) {
+        EXPECT_EQ(legacy.cells()[i].continent,zero.cells()[i].continent);
+        EXPECT_EQ(legacy.cells()[i].continental_area,zero.cells()[i].continental_area);
+    }
+    // Legacy rifts stretch the crust far below 20 km before it breaks up; with the
+    // minimum, the opening is ocean once the crust reaches it; the cap relaxes the
+    // overshoot of a fast opening (0.3 cells/Myr here) within its 5 Myr.
+    EXPECT_LT(thinnest(legacy),15000);
+    EXPECT_GT(limited_least,.7*p.continental_min_thickness_m);
+    EXPECT_GT(thinnest(limited),.95*p.continental_min_thickness_m);
+    EXPECT_GT(limited.budget().generated_ocean_kg,legacy.budget().generated_ocean_kg);
+    EXPECT_LT(std::abs(limited.budget().relative_mass_residual),1e-11);
+    EXPECT_LT(std::abs(limited.budget().felsic_relative_residual),1e-11);
+}
+
+TEST(TectonicMargins, ArcContinentShareKeepsMassAndBuildsIslandArcArea) {
+    MarginFixture f;
+    auto p=growth_parameters();p.arc_continent_fraction=.5;
+    for (size_t i=0;i<f.velocity.size();++i) f.velocity[i].x=f.owners[i]==0?.8:0;
+    tectonics::columns::Model model;model.initialize(f.w,f.h,50000,f.cells);
+    tectonics::margins::Polarity polarity;
+    for (int step=0;step<200;++step) {
+        const auto forcing=tectonics::margins::forcing(f.w,f.h,50000,1,f.owners,model.cells(),f.velocity,p,&polarity);
+        model.advance(f.velocity,1,0,1,0,&forcing,p);
+    }
+    const auto& b=model.budget();
+    EXPECT_GT(b.generated_continent_kg,0);
+    EXPECT_NEAR(b.generated_continent_kg,.5*b.generated_arc_kg,b.generated_arc_kg*1e-12);
+    EXPECT_DOUBLE_EQ(b.arc_continent_fraction,.5);
+    EXPECT_DOUBLE_EQ(b.initial_felsic_kg,0);
+    EXPECT_LT(std::abs(b.relative_mass_residual),1e-11);
+    EXPECT_NEAR(b.felsic_kg,b.generated_continent_kg,b.generated_continent_kg*1e-11);
+    bool island=false;
+    for (size_t i=0;i<f.cells.size();++i)
+        island=island || (f.owners[i]==1 && model.cells()[i].continental_area>0 && model.cells()[i].continent>0);
+    EXPECT_TRUE(island);
+    auto invalid=p;invalid.continental_min_thickness_m=0;
+    EXPECT_THROW(tectonics::margins::validate(invalid),std::runtime_error);
+}
+
+TEST(TectonicMargins, SubductionErosionAndSedimentSubductionAreReservoirSinks) {
+    ContinentalMarginFixture f;
+    auto p=growth_parameters();p.sediment_subduction_fraction=.75;p.subduction_erosion_ratio=.07;
+    tectonics::columns::Model model;model.initialize(f.w,f.h,50000,f.cells);
+    tectonics::margins::Polarity polarity;
+    for (int step=0;step<100;++step) {
+        const auto forcing=tectonics::margins::forcing(f.w,f.h,50000,1,f.owners,model.cells(),f.velocity,p,&polarity);
+        model.advance(f.velocity,1,0,1,0,&forcing,p);
+    }
+    const auto& b=model.budget();
+    EXPECT_GT(b.subducted_continent_kg,0);
+    EXPECT_GT(b.subducted_sediment_kg,0);
+    EXPECT_LE(b.subducted_continent_kg,.07*b.subducted_ocean_kg*2800/2900*(1+1e-12));
+    EXPECT_DOUBLE_EQ(b.generated_continent_kg,0);
+    EXPECT_LT(b.felsic_kg,b.initial_felsic_kg);
+    EXPECT_LT(std::abs(b.relative_mass_residual),1e-11);
+    EXPECT_LT(std::abs(b.felsic_relative_residual),1e-11);
+}
+
+TEST(TectonicMargins, GrowthControllerHoldsTheReservoirTargetWithAShareInZeroToOne) {
+    const auto run=[](double growth,int steps) {
+        ContinentalMarginFixture f;
+        auto p=growth_parameters();p.sediment_subduction_fraction=.75;p.subduction_erosion_ratio=.07;
+        p.continental_growth_control=true;p.continental_growth_per_gyr=growth;
+        tectonics::columns::Model model;model.initialize(f.w,f.h,50000,f.cells);
+        tectonics::margins::Polarity polarity;
+        for (int step=0;step<steps;++step) {
+            const auto forcing=tectonics::margins::forcing(f.w,f.h,50000,1,f.owners,model.cells(),f.velocity,p,&polarity);
+            model.advance(f.velocity,1,0,1,0,&forcing,p);
+            EXPECT_GE(model.budget().arc_continent_fraction,0);
+            EXPECT_LE(model.budget().arc_continent_fraction,1);
+        }
+        EXPECT_LT(std::abs(model.budget().relative_mass_residual),1e-11);
+        EXPECT_LT(std::abs(model.budget().felsic_relative_residual),1e-11);
+        return model.budget();
+    };
+    // Steady reservoir: the arcs replace exactly what the trench takes.
+    const auto steady=run(0,150);
+    EXPECT_GT(steady.subducted_continent_kg+steady.subducted_sediment_kg,0);
+    EXPECT_GT(steady.generated_continent_kg,0);
+    EXPECT_DOUBLE_EQ(steady.continental_growth_shortfall_kg,0);
+    EXPECT_NEAR(steady.felsic_kg,steady.initial_felsic_kg,steady.initial_felsic_kg*1e-9);
+    // Growth of 0.2 per Gyr over 150 Myr: 3 % more.
+    const auto growing=run(.2,150);
+    EXPECT_DOUBLE_EQ(growing.continental_growth_shortfall_kg,0);
+    EXPECT_NEAR(growing.felsic_kg,growing.initial_felsic_kg*1.03,growing.initial_felsic_kg*1e-9);
+    // A rate the arcs cannot supply: the share saturates at 1 and the deficit is booked.
+    const auto starved=run(50,150);
+    EXPECT_DOUBLE_EQ(starved.arc_continent_fraction,1);
+    EXPECT_GT(starved.continental_growth_shortfall_kg,0);
+    EXPECT_LT(starved.felsic_kg,starved.initial_felsic_kg*(1+50*.15));
+}

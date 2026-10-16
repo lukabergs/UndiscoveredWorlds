@@ -474,6 +474,11 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
         throw runtime_error("Initial margin width requires boundary-conditioned terrain and 0..4000 m");
     if (params.margin_processes.process_variation>0 && !params.margin_processes.enabled)
         throw runtime_error("Process variation requires isostatic columns and active margins");
+    if (!std::isfinite(params.continental_fraction) || params.continental_fraction<0 || params.continental_fraction>1 ||
+        (params.continental_fraction>0 && (params.continental_fraction<1-static_cast<double>(params.sea_level)-1e-6 ||
+            !params.boundary_conditioned_terrain || params.initial_ocean_depth_m<=2500)))
+        throw runtime_error("Continental fraction must be 0, or in 1 - sea_level..1 with boundary-conditioned terrain "
+                            "and an initial ocean depth over 2500 m");
     if ((params.transport_subdivision != 1 && params.transport_subdivision != 2 && params.transport_subdivision != 4) ||
         !std::isfinite(params.deformation_peak_km) || params.deformation_peak_km < 0 ||
         !std::isfinite(params.deformation_variation) || params.deformation_variation < 0 || params.deformation_variation > .5 ||
@@ -1712,6 +1717,20 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
     }
 
     const float continent_threshold = quantile_threshold(continentality, ocean_coverage);
+    // A continental fraction above the land share (scenario.continental_fraction):
+    // the ocean side between the land and the continental edge is shelf and slope,
+    // and the deep floor's profile starts at the continental edge.
+    const bool shelf_mode = scenario.continental_fraction > 0;
+    const float shelf_edge = shelf_mode
+        ? quantile_threshold(continentality, static_cast<float>(1 - scenario.continental_fraction))
+        : continent_threshold;
+    const auto is_shelf = [&](uint32_t index) {
+        return shelf_mode && continentality[index] < continent_threshold && continentality[index] >= shelf_edge;
+    };
+    // The deep floor's profile is measured from the continental edge.
+    const auto ocean_edge = [&](uint32_t index) {
+        return shelf_mode && continentality[index] < shelf_edge ? shelf_edge : continent_threshold;
+    };
     float raw_land_min = FLT_MAX;
     float raw_land_max = -FLT_MAX;
     float raw_ocean_min = FLT_MAX;
@@ -1743,7 +1762,7 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
                                                                       _worldDimension, ridge_noise));
             const float trench = 1.0f - std::abs(sample_toroidal_noise(sample_x * 2.35f, sample_y * 2.35f,
                                                                        _worldDimension, trench_noise));
-            const float distance_to_coast = continentality[index] - continent_threshold;
+            const float distance_to_coast = continentality[index] - ocean_edge(index);
             const float coastal_transition =
                 smoothstep(0.010f, 0.110f, std::abs(distance_to_coast));
             const float shoreline_profile =
@@ -1771,8 +1790,10 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
                     0.27f * trench + 0.04f * detail;
                 raw_height[index] =
                     interpolate(shoreline_profile, ocean_profile, coastal_transition);
-                raw_ocean_min = std::min(raw_ocean_min, raw_height[index]);
-                raw_ocean_max = std::max(raw_ocean_max, raw_height[index]);
+                if (!is_shelf(index)) {
+                    raw_ocean_min = std::min(raw_ocean_min, raw_height[index]);
+                    raw_ocean_max = std::max(raw_ocean_max, raw_height[index]);
+                }
             }
         }
     }
@@ -1784,8 +1805,9 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
     float land_peak = 0.0f;
     float ocean_peak = 0.0f;
     for (uint32_t i = 0; i < map_area; ++i) {
+        if (is_shelf(i)) continue;
         const float coast_weight = smoothstep(
-            0.0f, 0.110f, std::abs(continentality[i] - continent_threshold));
+            0.0f, 0.110f, std::abs(continentality[i] - ocean_edge(i)));
         const float amplitude = is_land[i]
             ? remap_to_range(raw_height[i], raw_land_min, raw_land_max, 0.0f, 1.0f)
             : remap_to_range(raw_height[i], raw_ocean_min, raw_ocean_max, 1.0f, 0.0f);
@@ -1793,13 +1815,32 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
         float& peak = is_land[i] ? land_peak : ocean_peak;
         peak = std::max(peak, profile[i]);
     }
+    // Shelf from the coast to -200 m, then a slope to -2500 m over the last
+    // continentality of about 0.01 before the continental edge; columns above
+    // -2500 m are seeded as continental crust (tectonic_initialization.cpp).
+    constexpr double shelf_depth_m = 200, slope_foot_m = 2500, slope_width = 0.010;
+    const double shelf_width = static_cast<double>(continent_threshold) - shelf_edge;
+    const double slope = std::min(slope_width, shelf_width / 2);
     std::vector<uint16_t> seeded_heightmap(map_area);
     for (uint32_t i = 0; i < map_area; ++i) {
         const float peak = is_land[i] ? land_peak : ocean_peak;
         const float fraction = peak > FLT_EPSILON ? profile[i] / peak : 0.0f;
-        const int offset_m = is_land[i]
+        int offset_m = is_land[i]
             ? static_cast<int>(std::lround(initial_land_relief_m * fraction))
             : -std::max(1, static_cast<int>(std::lround(initial_ocean_depth_m * fraction)));
+        if (shelf_mode && !is_land[i]) {
+            if (is_shelf(i)) {
+                const double d = static_cast<double>(continent_threshold) - continentality[i];
+                const double depth = d <= shelf_width - slope
+                    ? shelf_depth_m * d / (shelf_width - slope)
+                    : shelf_depth_m + (slope_foot_m - shelf_depth_m) * (d - (shelf_width - slope)) / slope;
+                offset_m = -std::max(1, static_cast<int>(std::lround(depth)));
+            } else {
+                // The deep floor below the slope's foot, never at it.
+                offset_m = -static_cast<int>(slope_foot_m) - std::max(1, static_cast<int>(std::lround(
+                    (initial_ocean_depth_m - slope_foot_m) * fraction)));
+            }
+        }
         seeded_heightmap[i] = static_cast<uint16_t>(sea_level_m + offset_m);
     }
     initializeHeightMapFromMetric(seeded_heightmap.data(), sea_level_m);
