@@ -36,7 +36,8 @@ from scipy import ndimage
 
 BANDS = [(0, 200), (200, 500), (500, 1000), (1000, 2000), (2000, None)]
 SEA_BANDS = {"shelf": (-200, 0), "slope": (-1000, -200)}
-# Cumulative budget area terms, m²: rate name -> (added keys, subtracted keys).
+# Cumulative budget area terms, m²: rate name -> (added keys, subtracted keys). Signs: collided and capped
+# positive = continental area lost, stretched and arc positive = continental area gained.
 AREA_TERMS = {
     "collided_area_rate": (["collided_continental_area_m2"], []),
     "stretched_area_rate": (["stretched_continental_area_m2"], []),

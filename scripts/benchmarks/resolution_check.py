@@ -148,6 +148,9 @@ def main() -> None:
             if metric in OPTIONAL and (rows_a[time].get(metric) is None or rows_b[time].get(metric) is None):
                 continue
             entry = judge(metric, rows_a[time].get(metric), rows_b[time].get(metric))
+            # A required metric missing on either side is a failure, never a silent "n/a" (reviewer of 5b3f384).
+            if metric not in OPTIONAL and (rows_a[time].get(metric) is None or rows_b[time].get(metric) is None):
+                entry["status"] = "fail"
             entry.update(time_myr=time, judged=judged)
             results.append(entry)
             if judged and entry["status"] == "fail":
