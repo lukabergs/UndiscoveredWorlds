@@ -13,7 +13,7 @@ strike), then routing and stream power. Every noise is a function of absolute po
 zoom of the world preview; octaves finer than a domain's grid fade out instead of aliasing.
 
 Config groups: domains, seafloor, warp, structure, zones, relief, coast, micro, uplands, hardness, platform, filter,
-physics, sea_level, history, glacial, precipitation, lakes, rivers, render.
+physics, sea_level, history, glacial, precipitation, lakes, rivers, render, nesting.
 platform (roadmap T1 v19): a tectonic stability field (0 to 1) and provinces (oceanic, shield, platform, sedimentary
 basin, orogen, rift / active margin) from the world's fields (provinces_world), sampled smoothly per domain and saved
 as <domain>-stability.npy and <domain>-province.npy; the relief amplitude on land is damped by x 1 - relief_damp x
@@ -55,8 +55,43 @@ m3/s) and <domain>-fill_m.npy (the depth relief.fill_depressions added).
 Every physics run also writes per-cell totals (--out-fields), saved cropped as <domain>-<name>.npy (eroded_m,
 deposited_m, glacial_eroded_m, ice_time_myr, ice_max_m, landslide_m, last_eroded_m) and drawn as three maps.
 
+Nesting (roadmap T1.8, default off: nesting.enabled false draws every domain as above, byte for byte). One zoom
+mechanism for every level below the global domain: a region of a region is a map zoomed in. Levels: L0 the
+256-column world bundle (156 km cells), L1 the global domain (2048 columns, 19.5 km), L2 the k 64 windows (2.44 km,
+factor 8 from L1), L3 the k 256 windows (0.61 km, factor 4 from L2); L4, 100 m, is nested_window.py. A window domain
+names its parent in domains.<name>.parent; with nesting on, the domains run parents first (run_order) and a child
+reads its parent's arrays from the same run's directory, or from --parent-run LABEL for a parent not in --domains
+(otherwise the parent is run too).
+- Rule A (L1, a domain without a parent): today's procedural chain (base, sea floor, warp, relief, uplands, coast,
+  fill) and the full history, unchanged.
+- Rule B (every nested level, nested_start): start = the Catmull-Rom prolongation of the parent's physics surface
+  (<parent>-elevation-physics.npy: before the post-physics filter, which is a render detail and digs pits;
+  clamped to the 2 x 2 bracketing parents) + the level's detail (the relief noise and the coast term restricted to
+  the level's band of octaves, fbm's band_parent_km: in `complement` mode the share of each octave the parent's
+  grid faded out, so the levels' shares sum to the finest grid's noise; `cut` keeps the octaves up to
+  band.cut_parent_cells parent cells; on the warped coordinates with the oriented bank, so the directionality is
+  the parent's; the ridged share split as mix(whole) - mix(whole - band); the sandbox's amplitude law with the
+  stability damp; hardness, uplift, runoff, ELA and provinces evaluated as functions of position by procedural();
+  no base, sea floor or uplands: they are in the parent) + the sloped fill of the new pits (the parent's lakes
+  kept) -> the exact projection of the whole start onto the parent's cell means (nesting.project_bounded: one shift
+  per parent cell on its movable children, land never below projection.land_floor_m, sea never above
+  projection.sea_ceiling_m; the outer sea ring and the pinned ring fixed) -> the physics for the tail of the one
+  history from physics.levels[k].from_myr with the level's diffusivity, K and landslide threshold
+  (physics.levels[k]; used only with nesting on), the pinned ring at the parent's prolonged heights, the parent's
+  rivers entering as runoff on the first movable cell inside the pinned ring (nesting.inflow_raster; the exe has
+  no inflow option, so the discharge goes through the runoff raster, and the ELA there is held at the cell's
+  start height so the inflow makes no glacier or ablation sink) -> the sea restored and the post-physics steps as
+  today (the micro texture with the level's band only, the filter, the lakes). Each nested domain writes
+  <domain>-nest.json (departures before and after the projection and after the physics, the inflow and its
+  continuity) and <domain>-start-relief.png; with nesting on every domain also saves <domain>-sea.npy and
+  <domain>-discharge.npy for its children.
+- Why two rules: the world bundle's elevation is the legacy terrain chain's output, which this sandbox exists to
+  replace (the uplands and the depression fill change the hypsometry on purpose), so L1 does not keep L0's cell
+  means; it is the first level the sandbox owns. After roadmap T2 the split becomes the multiscale plan's own:
+  rule A the global stages, rule B the regional levels.
+
   uv run python scripts/sandbox/terrain_sandbox.py --label try1 [--config FILE] [--set group.key=value ...]
-      [--domains global,A,B] [--no-physics]
+      [--domains global,A,B] [--no-physics] [--parent-run LABEL]
 Writes out/scratch/sandbox/<label>/: index.html, the PNGs, config.json (the values used) and timings.
 """
 import argparse
@@ -85,6 +120,7 @@ from validation import surface_elevation  # noqa: E402
 from maps import hillshade, shade_factor, terrain_base  # noqa: E402
 
 import erosion_filter  # noqa: E402
+import nesting  # noqa: E402
 import overlays  # noqa: E402
 
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'terrain.json'
@@ -150,6 +186,21 @@ def make_domains(config, bundle, names):
             k = spec['columns'] // W
             domains.append(Domain(name, W * k, H * k, 0.0, 0.0, k, W, H, radius_km,
                                   exaggeration=spec.get('exaggeration', 10.0), physics=config['physics']['global']))
+        elif nesting_on(config) and spec.get('parent'):
+            # A nested level (rule B): the margin in parent cells (nesting.margin_parent_cells by k), so the domain
+            # lies on the parent's cell edges; the physics values of its level (physics.levels by k) over the window's.
+            c0, r0, c1, r1 = spec['pixels']
+            k, parent_k = spec['scale'], domain_k(config, spec['parent'], W)
+            if k % parent_k:
+                raise ValueError(f'{name}: scale {k} is not a multiple of its parent\'s {parent_k}')
+            factor = k // parent_k
+            margin = int(config['nesting'].get('margin_parent_cells', {}).get(str(k), spec['margin'] * parent_k))
+            columns = ((c1 - c0 + 1) * parent_k + 2 * margin) * factor
+            rows = ((r1 - r0 + 1) * parent_k + 2 * margin) * factor
+            crop = (margin * factor, rows - margin * factor, margin * factor, columns - margin * factor)
+            domains.append(Domain(name, columns, rows, c0 - margin / parent_k, r0 - margin / parent_k, k, W, H,
+                                  radius_km, crop=crop, exaggeration=spec.get('exaggeration', 3.0),
+                                  physics={**config['physics']['window'], **level_physics(config, k)}))
         else:
             c0, r0, c1, r1 = spec['pixels']
             k, m = spec['scale'], spec['margin']
@@ -158,6 +209,281 @@ def make_domains(config, bundle, names):
             domains.append(Domain(name, columns, rows, c0 - m, r0 - m, k, W, H, radius_km, crop=crop,
                                   exaggeration=spec.get('exaggeration', 3.0), physics=config['physics']['window']))
     return domains
+
+
+# ---------------------------------------------------------------- nesting (rule B)
+
+def nesting_on(config):
+    return bool(config.get('nesting', {}).get('enabled', False))
+
+
+def domain_k(config, name, world_columns):
+    spec = config['domains'][name]
+    return spec['columns'] // world_columns if name == 'global' else spec['scale']
+
+
+def domain_depth(config, name):
+    """0 for a domain without a parent (rule A), else its parent's depth + 1."""
+    parent = config['domains'][name].get('parent')
+    return 0 if not parent else 1 + domain_depth(config, parent)
+
+
+def level_physics(config, k):
+    """The physics values of the level with k cells per world cell (physics.levels[str(k)]): diffusivity, k and the
+    landslide threshold go to the domain's physics group; step_myr and from_myr to its history (level_config)."""
+    level = config['physics'].get('levels', {}).get(str(k), {})
+    return {key: level[key] for key in ('diffusivity_km2_myr', 'k', 'threshold_slope') if key in level}
+
+
+def level_config(config, domain):
+    """The config a nested level's physics runs with: the tail of the one history from physics.levels[k].from_myr
+    (phases shifted to start at 0, the earlier ones dropped) and, with step_myr, no phase step longer than it."""
+    level = config['physics'].get('levels', {}).get(str(domain.k), {})
+    start, step = float(level.get('from_myr', 0.0)), level.get('step_myr')
+    if start <= 0.0 and step is None:
+        return config
+    run = copy.deepcopy(config)
+    history = run.get('history', {'enabled': False})
+    if history.get('enabled', False):
+        end = history['end']['time_myr']
+        if start >= end:
+            raise ValueError(f'{domain.name}: from_myr {start} is not before the history\'s end {end}')
+        starts = [phase['start_myr'] for phase in history['phases']] + [end]
+        phases = []
+        for phase, until in zip(history['phases'], starts[1:]):
+            if until <= start:
+                continue
+            phases.append({**phase, 'start_myr': max(phase['start_myr'] - start, 0.0)})
+        if step is not None:
+            phases = [{**phase, 'step_myr': min(phase.get('step_myr') or step, step)} for phase in phases]
+        history['phases'] = phases
+        history['end'] = {**history['end'], 'time_myr': end - start}
+    else:
+        window = run['physics']['window']
+        window['duration_myr'] = window['duration_myr'] - start
+        if step is not None:
+            window['step_myr'] = min(window['step_myr'], step)
+    return run
+
+
+def run_order(config, names, parent_run):
+    """The domains to run, parents first: a nested domain whose parent is neither requested nor read from
+    --parent-run brings its parent (and so on up) into the run."""
+    wanted = list(names)
+    if nesting_on(config):
+        queue = list(names)
+        while queue:
+            parent = config['domains'][queue.pop()].get('parent')
+            if parent and parent not in wanted and parent_run is None:
+                wanted.append(parent)
+                queue.append(parent)
+        wanted.sort(key=lambda name: domain_depth(config, name))  # stable: the requested order within a level
+    return wanted
+
+
+def load_parent(config, directory, name, world_columns):
+    """A parent domain's saved arrays (cropped to its kept window) and where they lie: its physics surface
+    (-elevation-physics.npy, before the post-physics filter), sea (-sea.npy, saved with nesting; else the cells at
+    or below 0 m joined to the crop's border), lakes (-lake-surface.npy, NaN off lakes; none when missing) and
+    discharge (-discharge.npy, m3/s; None when missing: no inflow)."""
+    elevation = np.load(directory / f'{name}-elevation-physics.npy').astype(np.float64)
+    path = directory / f'{name}-sea.npy'
+    if path.is_file():
+        sea = np.load(path)
+    else:
+        sea = nesting.flood(elevation <= 0.0, nesting.ring(elevation.shape, 1))
+    path = directory / f'{name}-lake-surface.npy'
+    lakes = np.load(path) if path.is_file() else np.full(elevation.shape, np.nan)
+    path = directory / f'{name}-discharge.npy'
+    discharge = np.load(path).astype(np.float64) if path.is_file() else None
+    spec = config['domains'][name]
+    origin = (0.0, 0.0) if name == 'global' else (float(spec['pixels'][0]), float(spec['pixels'][1]))
+    return {'name': name, 'directory': str(directory), 'elevation': elevation, 'sea': sea, 'lakes': lakes,
+            'discharge': discharge, 'k': domain_k(config, name, world_columns), 'origin': origin}
+
+
+def band_spec(config, parent_fine_km):
+    band = config['nesting'].get('band', {})
+    return {'band_parent_km': parent_fine_km, 'band_mode': band.get('mode', 'complement'),
+            'band_cut_cells': band.get('cut_parent_cells', 2.0)}
+
+
+def nested_start(domain, world, config, parent, seed):
+    """Rule B's start surface of a nested level (docstring, "Nesting"). Returns the fields (as procedural's, with
+    the start surface, its sea, the pinned ring, the inflow and the ELA at the inflow cells), the timings and the
+    nesting diagnostics."""
+    timings, info = {}, {}
+    pk = parent['k']
+    f = domain.k // pk
+    prow, pcol = domain.rows // f, domain.columns // f
+    x0 = domain.x[0] - 0.5 / domain.k
+    y0 = domain.y[0] - 0.5 / domain.k
+    pc = int(round((x0 - parent['origin'][0]) * pk))
+    pr = int(round((y0 - parent['origin'][1]) * pk))
+    P = parent['elevation']
+    if not (0 <= pr and pr + prow <= P.shape[0] and 0 <= pc and pc + pcol <= P.shape[1]):
+        raise ValueError(f'{domain.name}: parent cells [{pr}, {pr + prow}) x [{pc}, {pc + pcol}) outside '
+                         f'{parent["name"]}\'s saved {P.shape}')
+    margin = domain.crop[0] // f
+    inner = (slice(margin, prow - margin), slice(margin, pcol - margin))
+    info.update(parent=parent['name'], parent_directory=parent['directory'], factor=f,
+                parent_cells=[pr, pc, prow, pcol], margin_parent_cells=margin)
+
+    started = time.perf_counter()
+    prolonged = nesting.prolong(P, f, pr, pc, prow, pcol)
+    under_sea = nesting.nearest(parent['sea'], f, pr, pc, prow, pcol)
+    sea0 = nesting.flood(prolonged <= 0.0, under_sea & (prolonged <= 0.0))
+    timings['prolong'] = time.perf_counter() - started
+
+    # The fields that are functions of position (rock, uplift, rain, provinces, warp, the relief's amplitude and
+    # noise) as procedural() draws them; no base, sea floor, uplands, coast, filter or fill: the surface is the
+    # parent's.
+    level = copy.deepcopy(config)
+    level['seafloor']['enabled'] = False
+    level['seafloor'].setdefault('shelf', {})['enabled'] = False
+    level['uplands']['lift_m'] = 0
+    level['coast'] = {**level['coast'], 'amplitude_m': 0}
+    level['filter'] = {**level['filter'], 'enabled': False}
+    level['relief'] = {**level['relief'], 'fill_depressions': False}
+    level['micro'] = {**level.get('micro', {}), 'enabled': False}
+    fields, timing = procedural(domain, world, level, seed)
+    timings.update({key: value for key, value in timing.items() if isinstance(value, float)})
+
+    # The level's detail: the relief noise's band and the coast term's (band_spec), both on the warped coordinates
+    # and the oriented bank, so the directionality is the parent's.
+    started = time.perf_counter()
+    stages = fields['stages']
+    x, y = fields['coords']
+    theta, alignment = stages['strike']
+    _, core = stages['zones']
+    relief, structure = config['relief'], config['structure']
+    band = band_spec(config, domain.cell_km / pk)
+    relief_alignment = alignment * (1 - config['zones']['core_isotropy'] * core)
+    whole = stages['relief_noise']
+    part = oriented_fbm(x, y, theta, relief_alignment, {**relief, **structure, **band}, seed + 20, domain)
+    mix = lambda n: (1 - relief['ridged']) * n + relief['ridged'] * ridged(n) / 0.6  # noqa: E731
+    detail = fields['amplitude'] * (mix(whole) - mix(whole - part))
+    surface = prolonged + detail
+    coast = config['coast']
+    if coast['amplitude_m'] > 0:
+        fraction = coast.get('warp_fraction', 1.0)
+        (xp, yp) = fields['plain']
+        xc, yc = (x, y) if fraction == 1.0 else (xp + fraction * (x - xp), yp + fraction * (y - yp))
+        surface = surface + coast_detail(domain, fields['base'], surface, xc, yc, fields['amplitude'],
+                                         fields['erodibility'], {**coast, **band}, seed)
+    land0 = ~sea0
+    info['detail_rms_m'] = {'relief_land': float(np.sqrt((detail[land0] ** 2).mean())) if land0.any() else 0.0,
+                            'total_land': float(np.sqrt(((surface - prolonged)[land0] ** 2).mean())) if land0.any() else 0.0}
+    timings['detail'] = time.perf_counter() - started
+
+    # Sea, the outlet ring and the pinned ring (nested_window.py's step 5).
+    sea = nesting.flood(surface <= 0.0, sea0)
+    outer = nesting.ring(surface.shape, 1)
+    pinned = nesting.ring(surface.shape, 2) & ~outer & ~sea
+    surface = np.where(pinned, prolonged, surface)
+    surface = np.where(outer, np.minimum(prolonged, -1.0), surface)
+    sea |= outer
+
+    # The new pits filled (sloped, as relief.fill_depressions), the parent's lakes kept.
+    started = time.perf_counter()
+    filled = sloped_fill(domain, surface, sea, relief['fill_gradient'], fields['fill_noise'])
+    labels, count = ndimage.label(filled - surface > 1e-3, structure=np.ones((3, 3)))
+    under_lake = np.isfinite(nesting.nearest(parent['lakes'], f, pr, pc, prow, pcol))
+    kept = np.unique(labels[under_lake & (labels > 0)])
+    kept_mask = np.isin(labels, kept[kept > 0])
+    unfilled = surface
+    surface = np.where(kept_mask, surface, filled)
+    surface = np.where(pinned, prolonged, surface)
+    fields['fill_stats'] = {**fill_statistics(domain, unfilled, surface, sea), 'depressions': int(count),
+                            'kept_with_parent_lake': int(np.count_nonzero(kept))}
+    timings['fill'] = time.perf_counter() - started
+
+    # The exact projection onto the parent's cell means (land never below land_floor_m, sea never above
+    # sea_ceiling_m; nesting.project_bounded).
+    targets = P[pr:pr + prow, pc:pc + pcol]
+    movable = ~pinned & ~outer
+    spec = config['nesting'].get('projection', {})
+    before = nesting.departure(surface, targets, movable, f, inner)
+    surface, stats = nesting.project_bounded(surface, targets, movable, ~sea, f, spec.get('land_floor_m', 1.0),
+                                             spec.get('sea_ceiling_m', -1.0))
+    # A forced block (caps exhausted: e.g. a land parent cell whose children the prolongation drew as sea) flips
+    # children; the sea is flooded again from the sea that stayed at or below 0 m.
+    flipped = nesting.flood(surface <= 0.0, sea & (surface <= 0.0)) | outer
+    stats['flipped_to_land'] = int(np.count_nonzero(sea & ~flipped))
+    stats['flipped_to_sea'] = int(np.count_nonzero(~sea & flipped))
+    sea = flipped
+    everywhere = (slice(0, prow), slice(0, pcol))
+    info['start_departure_m'] = {'before_projection': before,
+                                 'after_projection_kept': nesting.departure(surface, targets, movable, f, inner),
+                                 'after_projection_all': nesting.departure(surface, targets, movable, f, everywhere),
+                                 'projection': stats,
+                                 'prolongation': nesting.departure(prolonged, targets, movable, f, inner)}
+
+    # The parent's rivers entering at the edge (nesting.inflow_raster), the ELA held at the inflow cells' start height.
+    inflow, cells, records = None, None, []
+    if parent['discharge'] is not None and config['nesting'].get('inflow', {}).get('enabled', True):
+        found = nesting.entries(parent['discharge'], pr, pc, prow, pcol,
+                                config['nesting'].get('inflow', {}).get('min_m3_s', 1.0))
+        areas = nesting.row_areas_m2(domain.north_deg, domain.pixel_deg, domain.rows, domain.radius_km)
+        inflow, cells, records = nesting.inflow_raster(found, pr, pc, f, surface.shape, surface, movable & ~sea, areas)
+    info['inflow'] = {'entries': len(records), 'placed': sum(1 for r in records if r['child_cell']),
+                      'parent_m3_s_total': float(sum(r['parent_m3_s'] for r in records)),
+                      'placed_m3_s_total': float(sum(r['parent_m3_s'] for r in records if r['child_cell'])),
+                      'records': records}
+    fields.update(surface=surface, sea=sea, pinned=pinned, inflow_m_yr=inflow,
+                  ela_fixed=None if cells is None or not cells.any() else (cells, surface))
+    stages['filter'] = unfilled  # save_extra's fill_m: what the fill added
+    stages['fill'] = surface
+    fields['nest'] = {'targets': targets, 'inner': inner, 'factor': f, 'prolonged': prolonged,
+                      'parent_discharge': None if parent['discharge'] is None else
+                      parent['discharge'][pr:pr + prow, pc:pc + pcol]}
+    return fields, timings, info
+
+
+def nested_after_physics(domain, fields, elevation, sea, discharge, info):
+    """Rule B's checks after the physics: the departure of the parent-cell means (the physics' surface with the
+    sea restored, kept window, blocks more than half land), the inflow's continuity (the child's discharge at each
+    entry cell and the most in the inside parent cell, against the parent's) and the discharge consistency in the
+    kept window (the most child discharge per parent cell against the parent's, where the parent has 100 m3/s)."""
+    nest = fields['nest']
+    f, inner, targets = nest['factor'], nest['inner'], nest['targets']
+    change = (nesting.block_mean(elevation, f) - targets)[inner]
+    land = (nesting.block_mean((~sea).astype(float), f) > 0.5)[inner]
+    out = {}
+    if land.any():
+        out['physics_departure_m_land_blocks'] = {
+            'mean': float(change[land].mean()), 'p5': float(np.percentile(change[land], 5)),
+            'p50': float(np.percentile(change[land], 50)), 'p95': float(np.percentile(change[land], 95)),
+            'max_abs': float(np.abs(change[land]).max())}
+    rows, columns = discharge.shape
+    block_max = discharge.reshape(rows // f, f, columns // f, f).max(axis=(1, 3))
+    checks = []
+    for record in info['inflow']['records']:
+        if not record['child_cell']:
+            continue
+        i, j = record['child_cell']
+        r, c = record['inside'][0] - info['parent_cells'][0], record['inside'][1] - info['parent_cells'][1]
+        parent_inside = None if nest['parent_discharge'] is None else float(nest['parent_discharge'][r, c])
+        checks.append({'parent_entering_m3_s': record['parent_m3_s'], 'child_at_entry_m3_s': float(discharge[i, j]),
+                       'parent_inside_m3_s': parent_inside, 'child_inside_max_m3_s': float(block_max[r, c])})
+    if checks:
+        entry = np.array([c['child_at_entry_m3_s'] / c['parent_entering_m3_s'] for c in checks])
+        big = [c for c in checks if c['parent_entering_m3_s'] >= 100.0]
+        out['inflow_continuity'] = {
+            'entries': len(checks), 'entry_ratio_p10_p50_p90': [float(np.percentile(entry, q)) for q in (10, 50, 90)],
+            'largest': sorted(checks, key=lambda c: -c['parent_entering_m3_s'])[:8],
+            'entries_100_m3_s': len(big)}
+    if nest['parent_discharge'] is not None:
+        parent_q = nest['parent_discharge'][inner]
+        child_q = block_max[inner]
+        rivers = parent_q >= 100.0
+        if rivers.any():
+            ratio = child_q[rivers] / parent_q[rivers]
+            out['discharge_kept_parent_cells_100_m3_s'] = {
+                'cells': int(rivers.sum()), 'child_max_over_parent_p10_p50_p90':
+                    [float(np.percentile(ratio, q)) for q in (10, 50, 90)],
+                'parent_max_m3_s': float(parent_q.max()), 'child_max_m3_s': float(child_q.max())}
+    return out
 
 
 # ---------------------------------------------------------------- sampling the world
@@ -226,14 +552,36 @@ def octave_fade(wavelength_km, domain, min_cells):
     return float(np.clip((cells - min_cells) / min_cells, 0.0, 1.0))
 
 
+def band_weight(wavelength_km, spec):
+    """A nested level's share of an octave (nesting, rule B): with spec['band_parent_km'] (the parent level's cell),
+    `complement` mode keeps 1 - the parent grid's octave fade (what the parent could not draw, so the levels' shares
+    of every octave sum to the finest grid's), `cut` mode keeps the octaves no longer than band_cut_cells parent
+    cells. 1 without the key."""
+    parent_km = spec.get('band_parent_km')
+    if parent_km is None:
+        return 1.0
+    if spec.get('band_mode', 'complement') == 'cut':
+        return 1.0 if wavelength_km <= spec.get('band_cut_cells', 2.0) * parent_km else 0.0
+    min_cells = spec.get('min_cells', 2.5)
+    return 1.0 - float(np.clip((wavelength_km / parent_km - min_cells) / min_cells, 0.0, 1.0))
+
+
 def fbm(x, y, spec, seed, domain, stretch=1.0):
     """Fractal sum with unit standard deviation (about); x across and y along a stretch of `stretch`.
-    Each octave is rotated by a fixed irrational angle so no lattice direction repeats."""
+    Each octave is rotated by a fixed irrational angle so no lattice direction repeats. With
+    spec['band_parent_km'] (a nested level, rule B) only the level's band of octaves is summed (band_weight), with
+    the normalisation of the whole sum on this grid, so the band is the part of this grid's noise the parent lacks."""
     total = np.zeros_like(x)
     norm = 0.0
     wavelength, amplitude = spec['wavelength_km'], 1.0
+    banded = spec.get('band_parent_km') is not None
     for octave in range(spec['octaves']):
         fade = octave_fade(wavelength, domain, spec.get('min_cells', 2.5))
+        if banded and fade > 0.0 and band_weight(wavelength, spec) <= 0.0:
+            norm += (amplitude * fade) ** 2
+            wavelength /= spec.get('lacunarity', 2.0)
+            amplitude *= spec.get('gain', 0.5)
+            continue
         if fade > 0.0:
             if stretch == 1.0:  # each octave rotated by the golden angle
                 angle = 2.399963 * octave
@@ -241,7 +589,10 @@ def fbm(x, y, spec, seed, domain, stretch=1.0):
                 u, v = (ca * x - sa * y) / wavelength, (sa * x + ca * y) / wavelength
             else:  # a stretched octave keeps the stretch's axes: shifted, not rotated
                 u, v = x / wavelength + 0.37 * octave, y / (wavelength * stretch) + 0.61 * octave
-            total += amplitude * fade * gradient_noise(u, v, seed * 131 + octave)
+            if banded:
+                total += amplitude * fade * band_weight(wavelength, spec) * gradient_noise(u, v, seed * 131 + octave)
+            else:
+                total += amplitude * fade * gradient_noise(u, v, seed * 131 + octave)
         norm += (amplitude * fade) ** 2
         wavelength /= spec.get('lacunarity', 2.0)
         amplitude *= spec.get('gain', 0.5)
@@ -336,6 +687,7 @@ def procedural(domain, world, config, seed):
     relief = config['relief']
     relief_alignment = alignment * (1 - zones['core_isotropy'] * core)
     noise = oriented_fbm(x, y, theta, relief_alignment, {**relief, **structure}, seed + 20, domain)
+    stages['relief_noise'] = noise  # before the ridged share: a nested level splits it by band (nested_start)
     noise = (1 - relief['ridged']) * noise + relief['ridged'] * ridged(noise) / 0.6
     amplitude = relief['base_m'] + relief['elevation_fraction'] * np.maximum(base, 0.0) + \
         relief['strain_m'] * alignment
@@ -487,9 +839,16 @@ def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed)
     hard rock (erodibility^hardness_exponent, negative: hard coasts are rocky, soft ones smooth), the local
     relief (1 + relief_gain x relief / relief_reference_m: mountains meeting the sea) and cold coasts (1 +
     cold_gain x smoothstep(|latitude|, cold_latitude): the skerry and fjord coasts of former ice). Pure
-    function of position, so every zoom draws the same coast down to its grid's resolution."""
+    function of position, so every zoom draws the same coast down to its grid's resolution. With
+    spec['band_parent_km'] (a nested level, rule B) the vertical term is the difference the level's band makes to the
+    ridged mix (of the whole noise on this grid less the band) and the displacement is the band's alone."""
     noise = fbm(x, y, spec, seed + 70, domain)
-    noise = (1 - spec['ridged']) * noise + spec['ridged'] * ridged(noise) / 0.6
+    if spec.get('band_parent_km') is not None:
+        whole = fbm(x, y, {key: value for key, value in spec.items() if key != 'band_parent_km'}, seed + 70, domain)
+        mix = lambda n: (1 - spec['ridged']) * n + spec['ridged'] * ridged(n) / 0.6  # noqa: E731
+        noise = mix(whole) - mix(whole - noise)
+    else:
+        noise = (1 - spec['ridged']) * noise + spec['ridged'] * ridged(noise) / 0.6
     latitude = np.abs(domain.north_deg - (np.arange(domain.rows) + 0.5) * domain.pixel_deg)[:, None]
     strength = spec['amplitude_m'] * erodibility ** spec['hardness_exponent'] * \
         (1.0 + spec['relief_gain'] * np.clip(relief_m / spec['relief_reference_m'], 0.0, 2.0)) * \
@@ -1070,6 +1429,8 @@ def run_physics(domain, fields, config, directory):
     files = {}
     runoff = np.maximum(fields['precipitation'] * config['precipitation']['runoff_fraction'],
                         config['precipitation']['runoff_min_m_yr'])
+    if fields.get('inflow_m_yr') is not None:  # a nested level's parent rivers entering at its edge (rule B)
+        runoff = runoff + fields['inflow_m_yr']
     for key, values in (('elevation', fields['surface']), ('sea', fields['sea'].astype(np.float32)),
                         ('erodibility', fields.get('physics_erodibility', fields['erodibility'])),
                         ('uplift', fields['uplift'] * spec['uplift_factor']),
@@ -1120,6 +1481,11 @@ def run_physics(domain, fields, config, directory):
     ela = None
     if glacial['enabled']:
         ela = equilibrium_line(domain, fields['precipitation'], glacial)
+        if fields.get('ela_fixed') is not None:
+            # The inflow cells' line at their start height: the exe's ice source is the runoff times (surface - ELA)
+            # / full_ice_range, so a river's whole discharge would otherwise become a glacier or an ablation sink.
+            mask, values = fields['ela_fixed']
+            ela = np.where(mask, values, ela)
         files['ela'] = stem.with_name(f'{domain.name}-ela.f32')
         np.asarray(ela, dtype='<f4').tofile(files['ela'])
         command += ['--ela', str(files['ela']), '--glacial-ratio', str(glacial['erodibility_ratio']),
@@ -1671,6 +2037,9 @@ def main():
     parser.add_argument('--set', action='append', default=[], metavar='GROUP.KEY=VALUE')
     parser.add_argument('--domains', default=None, help="comma-separated, default the config's default_domains")
     parser.add_argument('--no-physics', action='store_true')
+    parser.add_argument('--parent-run', default=None, metavar='LABEL',
+                        help='with nesting: read the parents not in --domains from out/scratch/sandbox/LABEL '
+                             '(default: run them here)')
     arguments = parser.parse_args()
 
     config = load_config(arguments.config, arguments.set)
@@ -1686,11 +2055,22 @@ def main():
     if config.get('platform', {}).get('enabled', False):
         world['provinces'] = provinces_world(world, config['platform'], 2.0 * math.pi * radius_m / 1000.0 / bundle.columns)
     names = arguments.domains.split(',') if arguments.domains else config['default_domains']
+    names = run_order(config, names, arguments.parent_run)
     physics_on = config['physics']['enabled'] and not arguments.no_physics
     sections, timings = [], {}
     for domain in make_domains(config, bundle, names):
         started = time.perf_counter()
-        fields, timing = procedural(domain, world, config, config['seed'])
+        parent_name = config['domains'][domain.name].get('parent') if nesting_on(config) else None
+        run_config, nest_info, band = config, None, {}
+        if parent_name:  # rule B (docstring, "Nesting")
+            source = directory if parent_name in names else ROOT / 'out' / 'scratch' / 'sandbox' / arguments.parent_run
+            parent = load_parent(config, source, parent_name, bundle.columns)
+            fields, timing, nest_info = nested_start(domain, world, config, parent, config['seed'])
+            del parent
+            run_config = level_config(config, domain)
+            band = band_spec(config, domain.fine_km * nest_info['factor'])
+        else:
+            fields, timing = procedural(domain, world, config, config['seed'])
         timing.update(fields['fill_stats'])
         images = []
         province_images = []
@@ -1703,22 +2083,23 @@ def main():
             images += [('relief before physics', before['relief'])]
         if physics_on:
             physics_started = time.perf_counter()
-            elevation, discharge, ice, totals, report = run_physics(domain, fields, config, directory)
+            elevation, discharge, ice, totals, report = run_physics(domain, fields, run_config, directory)
             timing['physics'] = time.perf_counter() - physics_started
             timing['physics_report'] = report
             # The physics' input surface (after the depression fill), for measuring what the physics changed.
             np.save(directory / f'{domain.name}-elevation-procedural.npy', crop(domain, fields['surface']).astype(np.float32))
             for name, values in totals.items():  # per-cell totals for later mineral work
                 np.save(directory / f'{domain.name}-{name}.npy', crop(domain, values).astype(np.float32))
-            if config['render'].get('save_extra', False):  # for measurements (roadmap T1.6): the final routing's
-                # discharge (m3/s, the rivers drawn) and the depth relief.fill_depressions added (m)
+            if config['render'].get('save_extra', False) or nesting_on(config):  # for measurements (roadmap
+                # T1.6) and a nested child's inflow: the final routing's discharge (m3/s, the rivers drawn)
                 np.save(directory / f'{domain.name}-discharge.npy', crop(domain, discharge).astype(np.float32))
+            if config['render'].get('save_extra', False):  # the depth relief.fill_depressions added (m)
                 np.save(directory / f'{domain.name}-fill_m.npy',
                         crop(domain, fields['surface'] - fields['stages']['filter']).astype(np.float32))
             # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
             # Land cut below the sea and connected to it (a fjord, a drowned river mouth) becomes sea.
             procedural_sea = fields['sea'].copy()  # the open sea before the physics flooded its troughs
-            plan = schedule(config)
+            plan = schedule(run_config)
             restored = fields['sea']
             if plan and plan.get('keep_shelf', False):
                 # The shelf the lowstand exposed keeps the physics' surface (the valleys cut across it, drowned
@@ -1736,7 +2117,9 @@ def main():
             touching = np.unique(labels[(labels > 0) & fields['sea']])
             sea = restored | np.isin(labels, touching[touching > 0])
             fields['sea'] = sea
-            coast = config['coast']
+            if nest_info is not None:  # rule B's checks after the physics (nested_after_physics)
+                nest_info['after_physics'] = nested_after_physics(domain, fields, elevation, sea, discharge, nest_info)
+            coast = {**config['coast'], **band}
             if coast['amplitude_m'] > 0 and coast.get('after_physics', False):
                 # The coast term again on the final shoreline: troughs the physics cut below the sea and the sea
                 # flooded have the smooth walls of an ice-carved valley (F-troughs' inlet), which the term before
@@ -1748,7 +2131,7 @@ def main():
                 touching = np.unique(labels[(labels > 0) & sea])
                 sea = np.isin(labels, touching[touching > 0])
                 fields['sea'] = sea
-            micro = config.get('micro', {'enabled': False})
+            micro = {**config.get('micro', {'enabled': False}), **band}  # a nested level: its band only
             if micro['enabled'] and micro.get('when', 'after') == 'after':
                 # The shoreline texture on the final coast: drawn before the physics, 20 Myr of erosion and
                 # marine filling took its few-km headlands and pockets back to a smooth arc (F-troughs, v16).
@@ -1766,6 +2149,8 @@ def main():
             spec = config['filter']
             extra = []
             np.save(directory / f'{domain.name}-elevation-physics.npy', crop(domain, elevation).astype(np.float32))
+            if nesting_on(config):  # a nested child's parent sea
+                np.save(directory / f'{domain.name}-sea.npy', crop(domain, sea))
             lakes = config.get('lakes', {'enabled': False})
             lake = np.zeros_like(sea)
             levels = None
@@ -1823,6 +2208,20 @@ def main():
                 render_totals(domain, totals, sea, directory) + province_images + images
         else:
             images = [('elevation (procedural, no physics)', before['elevation'])] + province_images + images
+        if nest_info is not None:
+            (directory / f'{domain.name}-nest.json').write_text(json.dumps(nest_info, indent=1) + '\n', encoding='utf-8')
+            start = nest_info['start_departure_m']
+            timing['nest'] = {'parent': nest_info['parent'], 'factor': nest_info['factor'],
+                              'start_departure_max_m': start['after_projection_all']['max_abs'],
+                              'before_projection_max_m': start['before_projection']['max_abs'],
+                              'projection': start['projection'],
+                              'inflow_entries': nest_info['inflow']['placed'],
+                              'inflow_m3_s': round(nest_info['inflow']['placed_m3_s_total'], 1),
+                              'after_physics': {key: value for key, value in nest_info.get('after_physics', {}).items()
+                                                if key != 'inflow_continuity'}}
+            start_images = render(domain, fields['surface'], fields['sea'], None, directory, '-start')
+            images.append(('start (rule B): the parent prolonged, the level\'s detail, the new pits filled, projected '
+                           'onto the parent\'s cell means', start_images['relief']))
         timing['total'] = time.perf_counter() - started
         timings[domain.name] = {key: (round(value, 2) if isinstance(value, float) else value) for key, value in timing.items()}
         title = 'Whole world' if domain.whole else f'Window {domain.name}'

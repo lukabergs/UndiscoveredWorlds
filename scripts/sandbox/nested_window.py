@@ -84,93 +84,9 @@ from uwtools.bundle import Bundle  # noqa: E402
 
 SANDBOX = ROOT / 'out' / 'scratch' / 'sandbox'
 DEFAULT_CONFIG = ROOT / 'configs' / 'sandbox' / 'nested.json'
-EIGHT = np.ones((3, 3), bool)
-
-
-# ---------------------------------------------------------------- grids
-
-def catmull_rom_matrix(count, factor, start, size):
-    """Rows of Catmull-Rom weights from `size` parent samples to count x factor children covering the parents
-    start .. start + count - 1 (indices clamped to the array), and the two bracketing parent indices per child."""
-    children = np.arange(count * factor)
-    p = start + (children + 0.5) / factor - 0.5
-    i0 = np.floor(p).astype(np.int64)
-    t = p - i0
-    weights = [(-t ** 3 + 2 * t ** 2 - t) / 2, (3 * t ** 3 - 5 * t ** 2 + 2) / 2, (-3 * t ** 3 + 4 * t ** 2 + t) / 2,
-               (t ** 3 - t ** 2) / 2]
-    matrix = np.zeros((children.size, size))
-    for offset, w in zip(range(-1, 3), weights):
-        np.add.at(matrix, (children, np.clip(i0 + offset, 0, size - 1)), w)
-    return matrix, np.clip(i0, 0, size - 1), np.clip(i0 + 1, 0, size - 1)
-
-
-def prolong(parent, factor, row0, col0, rows, columns, limit=True):
-    """The parent array's cells [row0, row0 + rows) x [col0, col0 + columns) prolonged by `factor` (Catmull-Rom,
-    clamped to the 2 x 2 bracketing parents with `limit`)."""
-    my, r0, r1 = catmull_rom_matrix(rows, factor, row0, parent.shape[0])
-    mx, c0, c1 = catmull_rom_matrix(columns, factor, col0, parent.shape[1])
-    values = my @ np.asarray(parent, dtype=np.float64) @ mx.T
-    if limit:
-        corners = [parent[np.ix_(r, c)] for r in (r0, r1) for c in (c0, c1)]
-        values = np.clip(values, np.minimum.reduce(corners), np.maximum.reduce(corners))
-    return values
-
-
-def nearest(parent, factor, row0, col0, rows, columns):
-    return np.repeat(np.repeat(parent[row0:row0 + rows, col0:col0 + columns], factor, axis=0), factor, axis=1)
-
-
-def block_mean(values, factor):
-    rows, columns = values.shape
-    return values.reshape(rows // factor, factor, columns // factor, factor).mean(axis=(1, 3))
-
-
-def flood(low, seeds):
-    """The cells of `low` 8-connected to a seed cell of `low`."""
-    labels, _ = ndimage.label(low, structure=EIGHT)
-    touching = np.unique(labels[seeds & (labels > 0)])
-    return np.isin(labels, touching[touching > 0])
-
-
-def ring(shape, depth):
-    mask = np.zeros(shape, bool)
-    mask[:depth, :] = mask[-depth:, :] = mask[:, :depth] = mask[:, -depth:] = True
-    return mask
-
-
-# ---------------------------------------------------------------- detail
-
-def project_means(values, targets, movable, factor, passes, relaxation):
-    """Values with their mean over every parent cell moved to `targets` exactly, moving the `movable` children only:
-    `passes` smooth passes (relaxation x the Catmull-Rom prolongation of the block departures over the movable share),
-    then the remainder spread evenly over each block's movable children. Blocks without one keep their departure."""
-    share = block_mean(movable.astype(float), factor)
-    rows, columns = share.shape
-    with np.errstate(invalid='ignore', divide='ignore'):
-        for _ in range(passes):
-            per_cell = np.where(share > 0, (block_mean(values, factor) - targets) / share, 0.0)
-            values = values - relaxation * movable * prolong(per_cell, factor, 0, 0, rows, columns, limit=False)
-        per_cell = np.where(share > 0, (block_mean(values, factor) - targets) / share, 0.0)
-    return values - movable * nearest(per_cell, factor, 0, 0, rows, columns)
-
-
-def remove_parent_means(detail, land, factor, passes, relaxation):
-    """Detail with its mean over every parent cell removed exactly, moving land children only (project_means to 0).
-    Blocks without land carry no detail."""
-    return project_means(np.where(land, detail, 0.0), 0.0, land, factor, passes, relaxation)
-
-
-def departure(values, parent, movable, factor, inner):
-    """max |.| and rms of the parent-cell means' departure from the parent, over the inner blocks with a movable child."""
-    gap = (block_mean(values, factor) - parent)[inner][block_mean(movable.astype(float), factor)[inner] > 0]
-    return {'max_abs': float(np.abs(gap).max()), 'rms': float(np.sqrt((gap ** 2).mean()))}
-
-
-def local_relief(parent, window):
-    """max - min of the parent surface (sea at 0 m) over window x window parent cells."""
-    surface = np.maximum(parent, 0.0)
-    return ndimage.maximum_filter(surface, size=window, mode='nearest') - \
-        ndimage.minimum_filter(surface, size=window, mode='nearest')
+# The grid operations and the projection live in nesting.py, shared with terrain_sandbox.py's nesting (rule B).
+from nesting import (EIGHT, block_mean, catmull_rom_matrix, departure, flood, local_relief,  # noqa: E402,F401
+                     nearest, project_means, prolong, remove_parent_means, ring)
 
 
 # ---------------------------------------------------------------- main
