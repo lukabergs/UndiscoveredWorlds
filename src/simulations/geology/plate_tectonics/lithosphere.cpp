@@ -483,6 +483,8 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
     if (!std::isfinite(params.continental_root_kg_m3) || params.continental_root_kg_m3<0 ||
         params.continental_root_kg_m3>=tectonics::columns::mantle_density-tectonics::columns::continental_density)
         throw runtime_error("Continental root load must be in 0..500 kg/m^3 (500 excluded)");
+    if (!tectonics::columns::valid_root_max_thickness(params.continental_root_max_thickness_m))
+        throw runtime_error("Continental root maximum thickness must be 0 (no cap) or above 35000 m");
     {
         // The slope foot (2500 m + width / 2 deep) must lie above the depth where a seeded
         // continental column has no crust left: 35 km x (500 - root) / (rho_m - rho_w).
@@ -2471,12 +2473,12 @@ void lithosphere::initializeColumns() {
     for (uint32_t i = 0; i < _worldDimension.getArea(); ++i)
         cells[i] = tectonics::columns::seed(internalToPhysicalMeters(hmap[i]) - sea_level_m,
             hmap[i] >= CONTINENTAL_BASE || is_continental_material(material_map[i]), crust_age_myr_map[i],
-            scenario.continental_root_kg_m3);
+            scenario.continental_root_kg_m3, scenario.continental_root_max_thickness_m);
     column_model.initialize(_worldDimension.getWidth(), _worldDimension.getHeight(),
         scenario.world_width_km * 1000 / _worldDimension.getWidth(), std::move(cells), scenario.transport_subdivision,
         scenario.seed, {scenario.ocean_crust_variation_m, scenario.ocean_noise_wavelength_km,
         scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness},
-        false, scenario.continental_root_kg_m3);
+        false, scenario.continental_root_kg_m3, scenario.continental_root_max_thickness_m);
     std::vector<uint32_t> owners(_worldDimension.getArea());
     for (uint32_t i = 0; i < owners.size(); ++i) owners[i] = imap[i];
     topology_model.initialize(_worldDimension.getWidth(), _worldDimension.getHeight(), num_plates, owners);
@@ -2495,12 +2497,13 @@ void lithosphere::initializeColumns() {
         auto conditioned=tectonics::initialization::terrain(_worldDimension.getWidth(),_worldDimension.getHeight(),
             scenario.world_width_km*1000/_worldDimension.getWidth(),scenario.delta_time_myr,
             elevations,ages,owners,velocity,scenario.thermal_subsidence_strength,scenario.initial_margin_width_m,
-            scenario.initial_boundary_influence,scenario.continental_root_kg_m3);
+            scenario.initial_boundary_influence,scenario.continental_root_kg_m3,
+            scenario.continental_root_max_thickness_m);
         column_model.initialize(_worldDimension.getWidth(),_worldDimension.getHeight(),
             scenario.world_width_km*1000/_worldDimension.getWidth(),std::move(conditioned),scenario.transport_subdivision,
             scenario.seed,{scenario.ocean_crust_variation_m,scenario.ocean_noise_wavelength_km,
             scenario.seamount_crust_m,scenario.seamount_radius_km,scenario.seamount_spacing_km,scenario.seamount_roughness},true,
-            scenario.continental_root_kg_m3);
+            scenario.continental_root_kg_m3,scenario.continental_root_max_thickness_m);
     }
     publishColumns();
     // Conditioning changes buoyancy/GPE. Publish motion for that actual initial
@@ -2514,7 +2517,7 @@ void lithosphere::publishColumns() {
     for (uint32_t i = 0; i < _worldDimension.getArea(); ++i) {
         const auto& c = cells[i];
         const double z = tectonics::columns::elevation_m(c, scenario.thermal_subsidence_strength,
-            scenario.continental_root_kg_m3);
+            scenario.continental_root_kg_m3, scenario.continental_root_max_thickness_m);
         if (!std::isfinite(z) || z <= -sea_level_m)
             throw runtime_error("Isostatic elevation cannot be represented by the native height datum");
         hmap[i] = elevation_to_internal(static_cast<float>(z), sea_level_m);

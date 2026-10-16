@@ -79,6 +79,77 @@ TEST(TectonicColumns, LithosphericRootLowersTheSlopeAndZeroKeepsTheCrustOnlyColu
                  std::runtime_error);
 }
 
+// The root's delamination cap (continental_root_max_thickness_m): above the cap the
+// root stops growing and the crust-only slope 500 / 3300 returns; seed inverts it
+// piecewise; cap 0 is the uncapped expression bit for bit.
+TEST(TectonicColumns, RootCapRestoresTheCrustOnlySlopeAboveIt) {
+    constexpr double root = 246, cap = 50000;
+    const double cap_z = (cap - reference_continent_m) * (500 - root) / mantle_density;
+    EXPECT_NEAR(cap_z, 1155, .5);
+    for (double z : {-3500., 0., 500., 1155., cap_z, 2000., 5000., 8000.}) {
+        const auto c = seed(z, true, 100, root, cap);
+        EXPECT_NEAR(elevation_m(c, 1, root, cap), z, 1e-9) << z;
+    }
+    EXPECT_NEAR(seed(cap_z, true, 100, root, cap).continent, cap, 1e-9);
+    EXPECT_NEAR(seed(8000, true, 100, root, cap).continent, cap + (8000 - cap_z) * 3300 / 500, 1e-9);
+    const auto at = [&](double continent) {
+        Cell c; c.continental_area = 1; c.continent = continent;
+        return elevation_m(c, 1, root, cap);
+    };
+    EXPECT_NEAR((at(41000) - at(40000)) / 1000, .077, .0005);
+    EXPECT_NEAR((at(61000) - at(60000)) / 1000, .1515, .0005);
+    EXPECT_NEAR((at(41000) - at(40000)) / 1000, 254. / 3300, 1e-12);
+    EXPECT_NEAR((at(61000) - at(60000)) / 1000, 500. / 3300, 1e-12);
+    // Mixed cells: the cap is area-weighted like the reference.
+    Cell half; half.continental_area = .5; half.oceanic_area = .5;
+    half.continent = 30000; half.ocean = 3500; half.oceanic_age_volume = half.ocean * 20;
+    // The root acts on `rooted` metres of crust (the whole continent when uncapped).
+    const auto expression = [](const Cell& c, double thermal, double r, double rooted) {
+        constexpr double ocean_reference = (mantle_density - oceanic_density) * ridge_crust_m
+            + (mantle_density - water_density) * ridge_depth_m;
+        constexpr double continental_mantle_load =
+            (mantle_density - continental_density) * reference_continent_m - ocean_reference;
+        const double ocean_age = c.ocean > 0 ? std::max(0.0,
+            (c.oceanic_age_volume-c.thermal_rejuvenation_volume)/c.ocean) : 0;
+        const double load = ocean_reference + continental_mantle_load * c.continental_area
+            + (mantle_density - water_density) * thermal
+                * tectonics::thermal::subsidence_m(ocean_age) * c.oceanic_area;
+        double buoyancy = (mantle_density - continental_density) * c.continent
+            + (mantle_density - oceanic_density) * c.ocean
+            + (mantle_density - sediment_density) * c.sediment - load;
+        buoyancy -= r * (rooted - reference_continent_m * c.continental_area);
+        return buoyancy / (buoyancy >= 0 ? mantle_density : mantle_density - water_density) - c.flexure_m;
+    };
+    const auto uncapped = [&](const Cell& c, double thermal, double r) { return expression(c, thermal, r, c.continent); };
+    EXPECT_EQ(elevation_m(half, 1, root, cap), expression(half, 1, root, cap * half.continental_area));
+    EXPECT_GT(elevation_m(half, 1, root, cap), elevation_m(half, 1, root));
+    // Cap 0: the uncapped expression, at root 246 and at root 0.
+    Cell mixed;
+    mixed.continent = 0.3 * 61234.5; mixed.ocean = 0.7 * 6800; mixed.sediment = 812.25;
+    mixed.continental_area = .3; mixed.oceanic_area = .7;
+    mixed.continental_age_volume = mixed.continent * 310; mixed.oceanic_age_volume = mixed.ocean * 47.5;
+    mixed.thermal_rejuvenation_volume = mixed.ocean * 3; mixed.flexure_m = 123.4;
+    Cell thick; thick.continental_area = 1; thick.continent = 70000;
+    for (const auto& c : {mixed, thick, half}) for (double r : {0., root}) for (double thermal : {0., 1.}) {
+        EXPECT_EQ(elevation_m(c, thermal, r, 0), uncapped(c, thermal, r));
+        EXPECT_EQ(elevation_m(c, thermal, r, 0), elevation_m(c, thermal, r));
+    }
+    for (double r : {0., root}) for (double z : {-3500., 0., 1500., 8000.})
+        EXPECT_EQ(seed(z, true, 100, r, 0).continent,
+                  reference_continent_m + z * (z >= 0 ? mantle_density : mantle_density - water_density)
+                      / (mantle_density - continental_density - r));
+    // Validation: 0 or above 35 km.
+    EXPECT_NO_THROW(seed(0, true, 100, root, 0));
+    EXPECT_THROW(seed(0, true, 100, root, 30000), std::runtime_error);
+    EXPECT_THROW(seed(0, true, 100, root, reference_continent_m), std::runtime_error);
+    EXPECT_THROW(seed(0, true, 100, root, std::numeric_limits<double>::quiet_NaN()), std::runtime_error);
+    Model model;
+    EXPECT_NO_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, 0));
+    EXPECT_NO_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, cap));
+    EXPECT_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, 30000),
+                 std::runtime_error);
+}
+
 TEST(TectonicColumns, StationaryCoolingIsIndependentOfTimestepAndDoesNotRemoveCrust) {
     Model a, b;
     const std::vector<Cell> initial(32, seed(-5000, false, 20));

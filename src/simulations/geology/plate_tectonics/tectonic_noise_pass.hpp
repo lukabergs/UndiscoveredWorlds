@@ -16,6 +16,6 @@ void validate(const Parameters& parameters);
 // noise potential. No new material, per-step RNG draws, or initialization pass.
 double apply(uint32_t width,uint32_t height,double cell_m,std::vector<columns::Cell>& cells,
              long seed,double start_myr,double end_myr,const Parameters& parameters,double thermal_strength = 1,
-             double root_kg_m3 = 0);
+             double root_kg_m3 = 0, double root_max_thickness_m = 0);
 }
 #endif

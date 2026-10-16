@@ -51,6 +51,13 @@ struct Scenario {
     // mantle lithosphere, a load outside the crust mass and felsic budgets (like the
     // continental mantle load and thermal subsidence). 0 <= value < 500.
     double continental_root_kg_m3 = 0;
+    // Delamination: the crust thickness, m, above which the root stops growing (thick
+    // orogens on Earth have thin, hot mantle lithosphere); above it the elevation per
+    // metre of crust is the crust-only 0.152 again (at root 246: 0.077 up to the cap's
+    // height (cap - 35 km) x 0.077, 1155 m at 50 km). Applied (area-weighted) to the
+    // elevation and the seeded columns; the mountain force keeps the uncapped root scale.
+    // Earth-like 50000; 0 (legacy) no cap; otherwise above reference_continent_m (35 km).
+    double continental_root_max_thickness_m = 0;
     bool sediment_load_feedback = false; // Include continental sediment in GPE and weak-crust redistribution.
     bool thermal_force_feedback = false; // Slab buoyancy follows advected thermal age, not chronological age.
     double world_width_km = 40000.0;

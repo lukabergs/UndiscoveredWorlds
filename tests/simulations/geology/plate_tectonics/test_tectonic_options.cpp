@@ -30,6 +30,8 @@ TEST(TectonicOptions, BaselineAndExplicitValuesStart) {
     EXPECT_NO_THROW(start({"--continental-max-thickness-m", "40000", "--orogenic-collapse-km2-myr", "3000"}));
     EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246"}));
     EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246", "--initial-margin-width-m", "2800"}));
+    EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246", "--continental-root-max-thickness-m", "50000"}));
+    EXPECT_NO_THROW(start({"--continental-root-max-thickness-m", "0"}));
 }
 
 // A value the option parser or the engine refuses stops the run before it starts.
@@ -67,6 +69,9 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
         // 2500 m + width / 2 needs a width under 2832 m.
         {"--continental-root-kg-m3", "246", "--initial-margin-width-m", "3000"},
         {"--continental-growth-continent-only", "maybe"},
+        {"--continental-root-max-thickness-m", "30000"}, // the cap must lie above 35 km
+        {"--continental-root-max-thickness-m", "35000"},
+        {"--continental-root-max-thickness-m", "-1"},
     };
     for (const auto& options : cases) {
         EXPECT_ANY_THROW(start(options)) << options[0] << ' ' << options[1];

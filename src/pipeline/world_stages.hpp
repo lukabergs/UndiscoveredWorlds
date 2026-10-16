@@ -72,7 +72,7 @@ struct WorldStageParameters
     std::vector<double> tectonicCheckpointsMyr;
     double erosionCheckpointEveryMyr = 0;       // checkpoints inside terrain.fluvial_erosion, see evolverCheckpoint
     std::vector<double> erosionCheckpointsMyr;
-    int seaLevel = 0;                           // terraforming target (world.ocean.land_fraction overrides the tectonics' level); tectonics and terraforming write the result back
+    int seaLevel = 0;                           // terraforming target (world.ocean.land_fraction overrides the tectonics' level, at terrain.sea_level by default); tectonics, terraforming and terrain.sea_level write the result back
     bool useHypsometricRemap = false;
     std::vector<WorldCurvePoint> hypsometricCurve;  // monotone target curve, sampled by the editor
 };

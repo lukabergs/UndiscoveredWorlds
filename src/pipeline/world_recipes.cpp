@@ -287,9 +287,12 @@ WorldRecipe importedworldrecipe()
                          "rivers from it (hydrology.rivers) and lakes from a water balance in its depressions "
                          "(hydrology.lake_levels), and layers; the imported terrain is not eroded";
     using S = GenerationStageId;
-    // terrain.depression_fill is left out: the lake balance owns the depressions of the imported terrain.
+    // terrain.depression_fill is left out: the lake balance owns the depressions of the imported terrain;
+    // terrain.sea_level too: the imported map sets the sea.
     std::vector<GenerationStageId> terrainandclimate = stagesbetween(S::mountain_bases, S::rainfall);
     terrainandclimate.erase(std::remove(terrainandclimate.begin(), terrainandclimate.end(), S::depression_fill),
+                            terrainandclimate.end());
+    terrainandclimate.erase(std::remove(terrainandclimate.begin(), terrainandclimate.end(), S::sea_level),
                             terrainandclimate.end());
     appendsteps(recipe.steps, terrainandclimate);
     // The routing on the final terrain, then the rivers and lakes that read it.

@@ -42,6 +42,9 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::depression_fill, "terrain.depression_fill", K::editor, false, {}, {}, {}, {},
           "Adds land noise between two depression fills." },
         { S::coastline_adjustment, "terrain.coastline_adjustment", K::editor, false, {}, {}, {}, {}, "" },
+        { S::sea_level, "terrain.sea_level", K::editor, false, {}, {}, {}, {},
+          "Places the sea level at world.ocean.land_fraction on the finished coast when "
+          "world.ocean.land_fraction_after_coast; does nothing at land_fraction 0." },
         { S::island_check, "terrain.island_check", K::editor, false, {}, {}, {}, {}, "" },
         { S::terrain_roughness, "terrain.roughness", K::detailer, false, {}, {}, {}, {},
           "Pure seeded noise; climate does not read it." },

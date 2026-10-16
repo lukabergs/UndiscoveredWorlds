@@ -31,6 +31,7 @@ enum class GenerationStageId
     canyon_uplift,
     depression_fill,
     coastline_adjustment,
+    sea_level,
     island_check,
     terrain_roughness,
     global_temperature,

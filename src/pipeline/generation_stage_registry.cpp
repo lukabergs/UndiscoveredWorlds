@@ -41,6 +41,7 @@ const vector<GenerationStageDefinition>& getgenerationstages()
         { GenerationStageId::canyon_uplift, "Canyon uplift", "Optionally raise land around incised drainage corridors and canyon systems.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::depression_fill, "Depression fill", "Optionally fill closed depressions and reduce unwanted sinks.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::coastline_adjustment, "Coastline adjustment", "Optionally normalize coastal elevations and shallow seas.", GenerationStageDomain::terrain, true, true },
+        { GenerationStageId::sea_level, "Sea level", "Place the sea level at the land fraction (world.ocean.land_fraction) on the finished coast.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::island_check, "Island check", "Optionally remove tiny isolated artifacts and stabilize island topology.", GenerationStageDomain::terrain, true, true },
         { GenerationStageId::terrain_roughness, "Terrain roughness", "Build the roughness field used by later terrain and climate layers.", GenerationStageDomain::terrain, true, false },
         { GenerationStageId::global_temperature, "Global temperature", "Generate the baseline temperature field from latitude, elevation, and orbital settings.", GenerationStageDomain::climate, true, false },

@@ -1,6 +1,7 @@
 #ifndef TECTONIC_COLUMNS_HPP
 #define TECTONIC_COLUMNS_HPP
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 #include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
@@ -16,6 +17,9 @@ inline constexpr double oceanic_density = 2900;
 inline constexpr double sediment_density = 2700;
 inline constexpr double water_density = 1030;
 inline constexpr double reference_continent_m = 35000;
+// The root's delamination cap (scenario::Scenario::continental_root_max_thickness_m):
+// 0 (no cap) or a crust thickness above reference_continent_m.
+inline bool valid_root_max_thickness(double m) { return m == 0 || (std::isfinite(m) && m > reference_continent_m); }
 inline constexpr double ridge_crust_m = 7000;
 inline constexpr double ridge_depth_m = 2500;
 // Coarse regional sediment transport, m²/Myr. Not a resolved river model.
@@ -83,17 +87,22 @@ double mass_per_area(const Cell& c);
 double felsic_mass_per_area(const Cell& c);
 // root_kg_m3: the lithospheric root load per metre of crust away from the reference
 // continent (scenario::Scenario::continental_root_kg_m3); 0 is the crust-only column.
-double elevation_m(const Cell& c, double thermal_strength = 1, double root_kg_m3 = 0);
+// root_max_thickness_m: the crust thickness above which the root stops growing
+// (delamination; 0 no cap); seed() inverts elevation_m() with it. mountain_force_n_m
+// keeps the uncapped (500 - root) / 500 scale: the cap does not enter the GPE estimate.
+double elevation_m(const Cell& c, double thermal_strength = 1, double root_kg_m3 = 0,
+                   double root_max_thickness_m = 0);
 double mountain_force_n_m(const Cell& c, bool sediment_feedback = false, double root_kg_m3 = 0);
 double age_myr(const Cell& c);
-Cell seed(double elevation_m, bool continental, double age_myr, double root_kg_m3 = 0);
+Cell seed(double elevation_m, bool continental, double age_myr, double root_kg_m3 = 0,
+          double root_max_thickness_m = 0);
 
 class Model {
 public:
     void initialize(uint32_t width, uint32_t height, double cell_m, std::vector<Cell> cells,
                     uint32_t transport_subdivision = 1, long seed = 0,
                     const ocean_relief::Parameters& relief = {}, bool preserve_initial = false,
-                    double root_kg_m3 = 0);
+                    double root_kg_m3 = 0, double root_max_thickness_m = 0);
     void advance(const std::vector<Displacement>& velocity, double dt_myr,
                  double erosion_strength, double thermal_strength, double submarine_erosion_ratio = 1,
                  const margins::Forcing* forcing = nullptr, const margins::Parameters& margins = {},
@@ -152,6 +161,7 @@ private:
     double cell_m_ = 0;
     long seed_ = 0;
     double root_kg_m3_ = 0; // Lithospheric root load in every elevation of the model.
+    double root_max_thickness_m_ = 0; // The root's delamination cap (0 none), with root_kg_m3_.
     double time_myr_ = 0;
     std::vector<Cell> cells_;
     uint32_t subdivision_ = 1;

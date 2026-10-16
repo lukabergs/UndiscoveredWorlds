@@ -44,6 +44,7 @@ inline float radiusKm = 6371.0f;
 namespace ocean
 {
 inline float landFraction = 0.0f;
+inline bool landFractionAfterCoast = true;
 }
 
 // Every value above, by its recipe name.
@@ -77,6 +78,7 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "world.defaults.crater_count", &defaults::craterCount },
         { "world.body.radius_km", &body::radiusKm },
         { "world.ocean.land_fraction", &ocean::landFraction },
+        { "world.ocean.land_fraction_after_coast", &ocean::landFractionAfterCoast },
     };
     return entries;
 }

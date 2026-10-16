@@ -239,10 +239,12 @@ void applyterraforming(planet& world, GenerationScratch& scratch, const WorldSta
     // world.ocean.land_fraction in (0, 1) places the sea level at that land share of the surface,
     // unless the stage was asked for another level than the one the tectonics left (the
     // workbench's sea-level slider); 0 keeps the requested level (before 2026-10-16 always the
-    // tectonic engine's).
+    // tectonic engine's). With world.ocean.land_fraction_after_coast the fraction is placed by
+    // terrain.sea_level instead, and this stage keeps the requested level.
     const float landfraction = tuning::world::ocean::landFraction;
     int sealevel = parameters.seaLevel;
-    if (landfraction > 0.0f && landfraction < 1.0f && parameters.seaLevel == world.sealevel())
+    if (landfraction > 0.0f && landfraction < 1.0f && !tuning::world::ocean::landFractionAfterCoast &&
+        parameters.seaLevel == world.sealevel())
         sealevel = sealevelforlandfraction(world, landfraction);
 
     world.setsealevel(clamp(sealevel, 1, world.maxelevation() - 2));
@@ -250,6 +252,20 @@ void applyterraforming(planet& world, GenerationScratch& scratch, const WorldSta
     if (parameters.useHypsometricRemap)
         applyhypsometricremap(world, scratch, parameters);
 
+    rebuildshelves(world, scratch);
+    rebuildheightdistribution(world, scratch);
+}
+
+// terrain.sea_level: world.ocean.land_fraction in (0, 1) on the finished coast (after the coast
+// passes, before the island check, which reads the level), when
+// world.ocean.land_fraction_after_coast; otherwise nothing.
+void applysealevel(planet& world, GenerationScratch& scratch)
+{
+    const float landfraction = tuning::world::ocean::landFraction;
+    if (!tuning::world::ocean::landFractionAfterCoast || !(landfraction > 0.0f && landfraction < 1.0f))
+        return;
+
+    world.setsealevel(clamp(sealevelforlandfraction(world, landfraction), 1, world.maxelevation() - 2));
     rebuildshelves(world, scratch);
     rebuildheightdistribution(world, scratch);
 }
@@ -1065,6 +1081,11 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
     case GenerationStageId::island_check:
         checkislands(world);
         extendnoshade(world);
+        return true;
+
+    case GenerationStageId::sea_level:
+        applysealevel(world, scratch);
+        parameters.seaLevel = world.sealevel();
         return true;
 
     case GenerationStageId::terrain_roughness:
