@@ -191,3 +191,40 @@ out/build/headless-modules/bin/tectonic_pipeline.exe inspect --final --seed 1 `
   thickness from above (the next round: an orogenic-collapse regulator).
   The force-balance solver moves plates as rigid translations (no rotation);
   the mantle forcing is an analytic pattern with a 600 Myr wobble.
+- Continental thickness regulation (2026-10-16, T4.12 second round; 128 x 64,
+  seed 1, 600 Myr, bundles `out/scratch/t412/R*`, measured with
+  `scripts/benchmarks/continental_growth_metrics.py`; area = cells with
+  column `continental_area` >= 0.5, the new field `geosphere.continental_area`;
+  thickness = sum continent / sum continental_area). The over-thickening sat in
+  mixed cells: remap noise against the one-sided lower cap, collisions at
+  constant volume, arc continent on outlets with oceanic_area <= 0.5 and root
+  flow all add continent without area. With the seeding fix alone (S4b) the
+  column area fell 0.400 to 0.20 and the thickness rose to 61 km while crust
+  over 20 km per cell held 0.31 (the two measures diverge: name the measure).
+  `continental_max_thickness_m` (an upper area cap, oceanic area relaxing into
+  continental over 10 Myr where continent > area x h_max, no rock moved) with
+  `orogenic_collapse_km2_myr` (linear diffusion of crust above h_max into any
+  neighbour) holds the area: h_max 40 km gives 0.33-0.36 and 39-42 km; 36 km
+  with D 20000 km^2/Myr (R14, the baseline since this date) 0.364-0.400 and
+  37.1-39.5 km, engine land 0.30-0.33, crust over 50 km 0-4.6 % of the
+  continental area; D 30000 erases the thick orogens (0-0.7 %). **The 128-column
+  calibration does not hold at 256 columns** (base-v5's tectonics and the
+  tectonics-recipe runs `out/scratch/t412/T1..T5`, 600 Myr, about 13 min each):
+  area 0.40 to 0.345, thickness 37 to 41 km, engine land median 1.2-1.4 km
+  (spherical weights; Earth 420 m), and the surface between -200 and 0 m 0.2-0.4 %
+  (Earth 5.0): margins are cliffs, so `world.ocean.land_fraction` 0.292 lowered
+  the sea by 2.9 km (`out/scratch/sandbox/base-v5-sea`: 21 % of the surface
+  above 3 km). An area cap of 32, 33 or 34 km with collapse only above 40 km
+  (a split threshold, tried and reverted) changed nothing: at 256 columns the
+  margins are sharp (area 0 or 1), so the cap finds few mixed cells, and a
+  plateau of uniform thickness has no gradient for the collapse. What sets the
+  high land is the Airy slope (below). A cap that
+  saturates must convert the last oceanic area fully (d5556a1): otherwise the
+  column's basalt sits under a vanishing area and a rounding overlap subducts it
+  in one pulse about 300 Myr later. The continental volume drains into sediment
+  (surface mean 15.0 to 14.5 km over 600 Myr; the controller counts sediment as
+  reservoir), so at a fixed thickness the area slowly falls. The interior land
+  stays high (median of land more than one cell from the sea 535-970 m at 128
+  columns): the engine's Airy slope is 0.1515 km of height per km of crust,
+  twice CRUST1.0's fitted 0.077, and the seeded land relief (2000 m) starts
+  the interiors at 660 m.
