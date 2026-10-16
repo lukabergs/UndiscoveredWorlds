@@ -91,8 +91,9 @@
                    "orographic_loss": 0.3, "altitude_scale_m": 9000, "runoff_fraction": 0.5, "runoff_min_m_yr": 0.15},
  "nesting": {"enabled": false, "margin_parent_cells": {"64": 8, "256": 32},
              "band": {"mode": "complement", "cut_parent_cells": 2.0},
-             "projection": {"land_floor_m": 1.0, "sea_ceiling_m": -1.0, "spike_clip_m": 300.0},
-             "project_after_physics": true,
+             "projection": {"land_floor_m": 1.0, "sea_ceiling_m": -1.0, "spike_clip_m": 300.0,
+                            "smooth_passes": 6, "relaxation": 1.4, "weight_floor_m": 10.0},
+             "project_after_physics": false,
              "inflow": {"enabled": true, "min_m3_s": 1.0}},
  "render": {"before_physics": false, "stages": true, "diagnostics": true, "warp_grid_km": 400,
             "earth_hardness": "refs/processed/lithology/glim_erodibility_2048.png"}

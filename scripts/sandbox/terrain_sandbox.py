@@ -75,21 +75,28 @@ reads its parent's arrays from the same run's directory, or from --parent-run LA
   no base, sea floor or uplands: they are in the parent; the relief band and the coast displacement fade to 0 within
   one parent cell of the parent's prolonged shore) + the sloped fill of the new pits (the parent's lakes kept); the
   start's sea only under the parent's sea and its coastal parent cells (children of other parent land cells stay
-  land; those below projection.land_floor_m are raised to it) -> the exact projection of the whole start onto the
-  parent's cell means (nesting.project_bounded: one shift per parent cell on its movable children, land never below
-  projection.land_floor_m, sea never above projection.sea_ceiling_m, no child rising above its bracketing parents'
-  maximum, the rest of a block's departure forced over its children (flips counted) but never more than
-  projection.spike_clip_m above that maximum (clipped blocks counted, not exact); the outer sea ring and the
-  pinned ring fixed) -> the physics for the tail of the one history from physics.levels[k].from_myr (k 64 from
+  land; those below projection.land_floor_m are raised to it; a parent sea cell that is a one-cell drowned valley
+  of the coarse D8, nesting.one_cell_inlets, counts as land at 1 m, its cell mean included) -> the projection of the
+  whole start onto the parent's cell means (project_and_refill: nesting.project_smooth's smooth pre-step of the
+  multiscale plan section 1, projection.smooth_passes passes at projection.relaxation, then the exact remainder in
+  proportion to each child's height above its block's lowest sea cell, uniform in a block without one; land never
+  below projection.land_floor_m, sea never above projection.sea_ceiling_m, no child rising above its bracketing
+  parents' maximum, the rest of a block's departure forced over its children (flips counted) but never more than
+  projection.spike_clip_m beyond the bracketing parents' range (clipped blocks counted, not exact); the outer sea
+  ring and the pinned ring fixed; then the new closed pits refilled, the parent's lakes and closed depressions
+  kept, the exact remainder again and a second refill, the block means checked per block class after each step)
+  -> the physics for the tail of the one history from physics.levels[k].from_myr (k 64 from
   20 Myr: the Quaternary only, the Neogene's valleys come from the parent; k 256 from 12.6; the level's sea and ice
   histories start at its own start) with the level's diffusivity, K and landslide threshold (physics.levels[k];
   on unnested windows too with physics.use_levels), the pinned ring at the parent's prolonged heights, the parent's
   rivers entering as runoff on the first movable cell inside the pinned ring (nesting.inflow_raster; the exe has
   no inflow option, so the discharge goes through the runoff raster, and the ELA there is held at the cell's
   start height so the inflow makes no glacier or ablation sink) -> the sea restored, the micro texture with the
-  level's band only -> with nesting.project_after_physics (default true) the physics surface projected again onto
-  the parent's cell means with the same bounds, moving only land that is no channel, lake or ring cell
-  (nested_project_after: the contract's "keep the parent's cell means" on the final map) -> saved as
+  level's band only -> with nesting.project_after_physics (default false since round three of T1.8: with it on,
+  t18-nest3 still drew the parent's cells as tiles, block-shaped lakes and terraces; t18-nest3-noafter did not) the
+  physics surface projected again onto the parent's cell means by the same sequence, a rise moving only land that
+  is no channel, lake or ring cell, a fall lowering the channels too (nested_project_after: the contract's "keep the
+  parent's cell means" on the final map) -> saved as
   -elevation-physics.npy (what a child reads), then the filter and the lakes as today. Each nested domain writes
   <domain>-nest.json (departures before and after the projection and after the physics, the inflow and its
   continuity) and <domain>-start-relief.png; with nesting on every domain also saves <domain>-sea.npy and
@@ -345,13 +352,26 @@ def nested_start(domain, world, config, parent, seed):
     inner = (slice(margin, prow - margin), slice(margin, pcol - margin))
     info.update(parent=parent['name'], parent_directory=parent['directory'], factor=f,
                 parent_cells=[pr, pc, prow, pcol], margin_parent_cells=margin)
+    spec = config['nesting'].get('projection', {})
+    land_floor = spec.get('land_floor_m', 1.0)
+    # A parent sea cell that is a one-cell drowned valley of the coarse D8 (nesting.one_cell_inlets: a one-cell-wide
+    # chain not touching the open sea) is land at the sea level + 1 m for this level: its classification, its
+    # prolongation and its cell mean (else the projection pulls its children back below the sea and the physics
+    # floods them again: the staircase inlets of round one).
+    stair = nesting.one_cell_inlets(parent['sea'])
+    box = (slice(pr, pr + prow), slice(pc, pc + pcol))
+    info['parent_one_cell_inlets'] = {'cells': int(stair[box].sum()),
+                                      'largest_lift_m': float((1.0 - P[box])[stair[box]].max()) if stair[box].any()
+                                      else 0.0}
+    P = np.where(stair, 1.0, P)
+    parent_sea = parent['sea'] & ~stair
 
     started = time.perf_counter()
     prolonged = nesting.prolong(P, f, pr, pc, prow, pcol)
-    under_sea = nesting.nearest(parent['sea'], f, pr, pc, prow, pcol)
+    under_sea = nesting.nearest(parent_sea, f, pr, pc, prow, pcol)
     # Children of a parent land cell stay land unless the parent's sea reaches them: sea only under the parent's
     # sea and its 8-neighbouring (coastal) parent cells, flooded from under the parent's sea.
-    reached = parent['sea'] | ndimage.binary_dilation(parent['sea'], structure=np.ones((3, 3)))
+    reached = parent_sea | ndimage.binary_dilation(parent_sea, structure=np.ones((3, 3)))
     allowed = nesting.nearest(reached, f, pr, pc, prow, pcol)
     sea0 = nesting.flood((prolonged <= 0.0) & allowed, under_sea & (prolonged <= 0.0))
     # The level's relief band and the coast displacement fade to 0 within one parent cell of the parent's shore
@@ -405,8 +425,6 @@ def nested_start(domain, world, config, parent, seed):
     timings['detail'] = time.perf_counter() - started
 
     # Sea, the outlet ring and the pinned ring (nested_window.py's step 5).
-    spec = config['nesting'].get('projection', {})
-    land_floor = spec.get('land_floor_m', 1.0)
     sea = nesting.flood((surface <= 0.0) & allowed, sea0)
     outer = nesting.ring(surface.shape, 1)
     pinned = nesting.ring(surface.shape, 2) & ~outer & ~sea
@@ -424,6 +442,14 @@ def nested_start(domain, world, config, parent, seed):
     filled = sloped_fill(domain, surface, sea, relief['fill_gradient'], fields['fill_noise'])
     labels, count = ndimage.label(filled - surface > 1e-3, structure=np.ones((3, 3)))
     under_lake = np.isfinite(nesting.nearest(parent['lakes'], f, pr, pc, prow, pcol))
+    # The parent's own closed depressions (its Priority-Flood raises them by more than 1 m; the box's edge drains)
+    # are kept as its lakes are: a refill would otherwise undo the projection of a parent pit (the global's one-cell
+    # pits to -644 m) every time.
+    parent_box = P[pr:pr + prow, pc:pc + pcol]
+    drains = parent_sea[pr:pr + prow, pc:pc + pcol] | nesting.ring(parent_box.shape, 1)
+    hollow = (priority_flood(parent_box, drains, False) - parent_box > 1.0) & ~drains
+    under_lake = under_lake | np.repeat(np.repeat(hollow, f, axis=0), f, axis=1)
+    info['parent_depression_cells'] = int(hollow.sum())
     kept = np.unique(labels[under_lake & (labels > 0)])
     kept_mask = np.isin(labels, kept[kept > 0])
     unfilled = surface
@@ -441,16 +467,18 @@ def nested_start(domain, world, config, parent, seed):
     # No child rises above its bracketing parents' maximum (the rest of a block's departure forced over all its
     # children, flipping sea children to land), and none more than spike_clip_m above it (the block's departure
     # clipped there: such a block is not exact; counted).
-    _, top = nesting.bracket_extremes(P, f, pr, pc, prow, pcol)
-    surface, stats, clipped = nesting.project_bounded(surface, targets, movable, ~sea, f, land_floor,
-                                                      spec.get('sea_ceiling_m', -1.0), cap=top,
-                                                      clip=top + spec.get('spike_clip_m', 300.0))
-    # A forced block (caps exhausted: e.g. a land parent cell whose children the prolongation drew as sea) flips
-    # children; the sea is flooded again from the sea that stayed at or below 0 m.
-    flipped = nesting.flood(surface <= 0.0, sea & (surface <= 0.0)) | outer
-    stats['flipped_to_land'] = int(np.count_nonzero(sea & ~flipped))
-    stats['flipped_to_sea'] = int(np.count_nonzero(~sea & flipped))
-    sea = flipped
+    bottom, top = nesting.bracket_extremes(P, f, pr, pc, prow, pcol)
+    original_sea = sea
+
+    def reflood(values, water):  # forced blocks flip children: the sea flooded again from what stayed at or below 0
+        return nesting.flood(values <= 0.0, water & (values <= 0.0)) | outer
+
+    surface, sea, clipped, stats, checks = project_and_refill(
+        domain, surface, targets, lambda water: (movable, movable, ~water, water), sea, reflood, (bottom, top), spec, f,
+        under_lake, pinned, prolonged, config, fields['fill_noise'], np.zeros_like(sea))
+    stats['flipped_to_land'] = int(np.count_nonzero(original_sea & ~sea))
+    stats['flipped_to_sea'] = int(np.count_nonzero(~original_sea & sea))
+    info['start_block_check_m'] = checks
     everywhere = (slice(0, prow), slice(0, pcol))
     info['start_departure_m'] = {'before_projection': before,
                                  'after_projection_kept': nesting.departure(surface, targets, movable, f, inner),
@@ -476,47 +504,88 @@ def nested_start(domain, world, config, parent, seed):
     stages['filter'] = unfilled  # save_extra's fill_m: what the fill added
     stages['fill'] = surface
     fields['nest'] = {'targets': targets, 'inner': inner, 'factor': f, 'prolonged': prolonged, 'top': top,
-                      'outer': outer,
+                      'bottom': bottom,
+                      'outer': outer, 'parent_lakes': under_lake,
                       'parent_discharge': None if parent['discharge'] is None else
                       parent['discharge'][pr:pr + prow, pc:pc + pcol]}
     return fields, timings, info
 
 
+def project_and_refill(domain, surface, targets, masks, sea, reflood, extremes, spec, f, keep, pinned, pinned_values,
+                       config, fill_noise, lake):
+    """Rule B's projection sequence (the start's and the one after the physics): nesting.project_smooth (the smooth
+    pre-step and the weighted exact remainder), the new closed pits refilled (refill_pits), the weighted exact
+    remainder again (nesting.project_weighted; the refill raised the pits' blocks), the pits refilled once more, so
+    the lake finder sees no pit the projection made. `masks(sea)` gives (movable_up, movable_down, land, reference);
+    `reflood(values, sea)` the sea after a projection. Returns the surface, the sea, the clipped mask, the counts
+    and the block-mean check per block class after each step."""
+    floor, ceiling = spec.get('land_floor_m', 1.0), spec.get('sea_ceiling_m', -1.0)
+    bottom, top = extremes  # the bracketing parents' least and greatest: no child forced 300 m beyond either
+    clip, clip_low = top + spec.get('spike_clip_m', 300.0), bottom - spec.get('spike_clip_m', 300.0)
+    rise, fall, land, reference = masks(sea)
+    projected, stats, clipped = nesting.project_smooth(
+        surface, targets, rise, fall, land, reference, f, floor, ceiling, top, clip, spec.get('smooth_passes', 6),
+        spec.get('relaxation', 1.4), spec.get('weight_floor_m', 10.0), clip_low=clip_low)
+    sea = reflood(projected, sea)
+    checks = {'after_projection': nesting.block_check(projected, targets, f, fall & ~sea, sea, lake, clipped)}
+    refilled, refill = refill_pits(domain, projected, sea, keep, pinned, pinned_values, config, fill_noise)
+    checks['after_refill'] = nesting.block_check(refilled, targets, f, fall & ~sea, sea, lake, clipped)
+    rise, fall, land, reference = masks(sea)
+    weights = nesting.reference_weights(refilled, reference, rise | fall, f)
+    again, stats2, clipped2 = nesting.project_weighted(refilled, targets, rise, fall, land, weights, f, floor, ceiling,
+                                                       cap=top, clip=clip, clip_low=clip_low)
+    sea = reflood(again, sea)
+    clipped = clipped | clipped2
+    checks['after_second_remainder'] = nesting.block_check(again, targets, f, fall & ~sea, sea, lake, clipped)
+    final, refill2 = refill_pits(domain, again, sea, keep, pinned, pinned_values, config, fill_noise)
+    checks['final_after_second_refill'] = nesting.block_check(final, targets, f, fall & ~sea, sea, lake, clipped)
+    moved = (final - surface)[rise | fall]
+    stats.update(refill=refill, second_remainder={key: stats2[key] for key in ('forced_blocks', 'clipped_blocks',
+                                                                               'largest_shift_m')},
+                 second_refill=refill2, total_correction_max_m=float(np.abs(moved).max()) if moved.size else 0.0,
+                 total_correction_rms_m=float(np.sqrt((moved ** 2).mean())) if moved.size else 0.0)
+    return final, sea, clipped, stats, checks
+
+
+def refill_pits(domain, surface, sea, keep, pinned, pinned_values, config, fill_noise):
+    """The closed pits a projection left, filled with the sloped fill (relief.fill_gradient and its noise) from the
+    sea, except the depressions overlapping `keep` (the parent's lakes, the physics' lakes); the pinned ring back at
+    its values. Returns the surface and counts."""
+    filled = sloped_fill(domain, surface, sea, config['relief']['fill_gradient'], fill_noise)
+    labels, count = ndimage.label(filled - surface > 1e-3, structure=np.ones((3, 3)))
+    kept = np.unique(labels[keep & (labels > 0)])
+    out = np.where(np.isin(labels, kept[kept > 0]), surface, filled)
+    out = np.where(pinned, pinned_values, out)
+    raised = out - surface
+    return out, {'pits': int(count), 'kept': int(np.count_nonzero(kept[kept > 0])),
+                 'raised_cells': int(np.count_nonzero(raised > 1e-3)), 'raised_max_m': float(raised.max())}
+
+
 def nested_project_after(domain, fields, elevation, sea, discharge, config):
     """The contract's "keep the parent's cell means" on the final map (nesting.project_after_physics): the child's
-    physics surface (sea restored, micro texture on) projected onto the parent's physics-surface cell means with the
-    start's bounds (land floor, the bracketing parents' maximum, the spike clip), moving only the land children that
-    are no channel (discharge below the window river threshold), no lake and not in the rings: the sea, the lakes
-    and the channels keep the physics' heights, the interfluves take the correction. Returns the surface and the
-    report (correction max and rms, the block-mean check on the projected surface)."""
+    physics surface (sea restored, micro texture on) projected onto the parent's cell means as the start is
+    (nesting.project_smooth: the smooth pre-step, then the exact remainder in proportion to the height above each
+    block's lowest channel, sea or lake cell; the land floor, the bracketing parents' maximum, the spike clip). A
+    rise moves the land that is no channel, lake or ring cell; a fall also lowers the channels (in proportion to
+    their height above the block's lowest), so a lowering leaves no river in a slot; the sea and the lakes stay
+    fixed. Then the new closed pits are filled (refill_pits; the physics' and the parent's lakes kept). Returns the
+    surface and the report (correction max and rms, the block-mean check per block class after the projection and
+    after the refill)."""
     nest = fields['nest']
     f, targets = nest['factor'], nest['targets']
     spec = config['nesting'].get('projection', {})
     lakes = config.get('lakes', {'enabled': False})
     lake = np.isfinite(find_lakes(domain, elevation, sea, lakes)) if lakes['enabled'] else np.zeros_like(sea)
     channel = discharge >= river_threshold(domain, config.get('rivers', {'min_discharge_m3_s': 30.0}))
-    movable = ~sea & ~lake & ~channel & ~fields['pinned'] & ~nest['outer']
-    projected, stats, clipped = nesting.project_bounded(
-        elevation, targets, movable, ~sea, f, spec.get('land_floor_m', 1.0), spec.get('sea_ceiling_m', -1.0),
-        cap=nest['top'], clip=nest['top'] + spec.get('spike_clip_m', 300.0))
-    correction = (projected - elevation)[movable]
-    everywhere = (slice(0, targets.shape[0]), slice(0, targets.shape[1]))
-    gap = np.abs(nesting.block_mean(projected, f) - targets)
-    has_movable = nesting.block_mean(movable.astype(float), f) > 0
-    exact = has_movable & ~(nesting.block_mean(clipped.astype(float), f) > 0)
-    report = {'correction_max_m': float(np.abs(correction).max()) if correction.size else 0.0,
-              'correction_rms_m': float(np.sqrt((correction ** 2).mean())) if correction.size else 0.0,
-              'correction_mean_m': float(correction.mean()) if correction.size else 0.0,
-              'movable_share': float(movable.mean()), 'channel_cells': int(channel.sum()), 'lake_cells': int(lake.sum()),
-              'block_mean_check_m': {'max_abs_exact_blocks': float(gap[exact].max()) if exact.any() else 0.0,
-                                     'kept_max_abs_exact_blocks': float(gap[nest['inner']][exact[nest['inner']]].max())
-                                     if exact[nest['inner']].any() else 0.0,
-                                     'blocks_without_movable_child': int(np.count_nonzero(~has_movable)),
-                                     'max_abs_all_blocks': float(gap.max()),
-                                     'rms_all_blocks': float(np.sqrt((gap ** 2).mean()))},
-              'projection': stats}
-    del everywhere
-    return projected, report
+    free = ~sea & ~lake & ~fields['pinned'] & ~nest['outer']
+    refilled, _, _, stats, checks = project_and_refill(
+        domain, elevation, targets, lambda water: (free & ~channel, free, ~water, channel | water | lake), sea,
+        lambda values, water: water, (nest['bottom'], nest['top']), spec, f, lake | nest['parent_lakes'], fields['pinned'], elevation,
+        config, fields['fill_noise'], lake)
+    report = {key: stats[key] for key in ('correction_max_m', 'correction_rms_m', 'correction_mean_m',
+                                          'total_correction_max_m', 'total_correction_rms_m')}
+    report.update(channel_cells=int(channel.sum()), lake_cells=int(lake.sum()), projection=stats, block_check_m=checks)
+    return refilled, report
 
 
 def nested_after_physics(domain, fields, elevation, sea, discharge, info):
@@ -2229,7 +2298,7 @@ def main():
                 fields['sea'] = sea
             spec = config['filter']
             extra = []
-            if nest_info is not None and config['nesting'].get('project_after_physics', True):
+            if nest_info is not None and config['nesting'].get('project_after_physics', False):
                 started_projection = time.perf_counter()
                 elevation, nest_info['after_physics_projection'] = nested_project_after(domain, fields, elevation, sea,
                                                                                         discharge, config)
@@ -2299,6 +2368,7 @@ def main():
             start = nest_info['start_departure_m']
             timing['nest'] = {'parent': nest_info['parent'], 'factor': nest_info['factor'],
                               'start_departure_max_m': start['after_projection_unclipped']['max_abs'],
+                              'start_block_check_after_refill': nest_info['start_block_check_m']['after_refill'],
                               'start_raised_to_floor': nest_info['start_land_raised_to_floor'],
                               'after_physics_projection': {
                                   key: value for key, value in nest_info.get('after_physics_projection', {}).items()

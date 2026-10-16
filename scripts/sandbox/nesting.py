@@ -170,6 +170,189 @@ def project_bounded(values, targets, movable, land, factor, land_floor_m, sea_ce
     return out, stats, from_blocks(np.repeat(clipped[:, None], n, axis=1), factor, shape)
 
 
+def class_bounds(values, land, land_floor_m, sea_ceiling_m, cap):
+    """Per child, the lowest and highest value a projection may move it to: land never below land_floor_m, sea never
+    above sea_ceiling_m, nothing above `cap` (None: no cap); a child already outside keeps its own value as the bound
+    (a projection never pushes it back)."""
+    big = 1e12
+    lower = np.where(land, land_floor_m, -big)
+    upper = np.where(land, big, sea_ceiling_m)
+    if cap is not None:
+        upper = np.minimum(upper, cap)
+    return np.minimum(values, lower), np.maximum(values, upper)
+
+
+def reference_weights(values, reference, movable, factor):
+    """The exact remainder's weights: each child's height above its block's lowest reference cell (channel, sea or
+    lake; never below 0), 1 in a block without a reference cell or whose movable children all sit at it."""
+    v = to_blocks(values, factor)
+    ref = to_blocks(reference, factor)
+    move = to_blocks(movable, factor)
+    lowest = np.where(ref, v, np.inf).min(axis=1)
+    w = np.where(np.isfinite(lowest)[:, None], np.maximum(v - np.where(np.isfinite(lowest), lowest, 0.0)[:, None], 0.0),
+                 1.0)
+    w = np.where(move, w, 0.0)
+    flat = w.sum(axis=1) <= 0.0
+    w = np.where(flat[:, None] & move, 1.0, w)
+    return from_blocks(w, factor, values.shape)
+
+
+def project_weighted(values, targets, movable_up, movable_down, land, weights, factor, land_floor_m, sea_ceiling_m,
+                     cap=None, clip=None, clip_low=None):
+    """Values with their mean over every parent cell set to `targets` exactly, the correction proportional to
+    `weights` (multiscale plan section 2: F = F* + lambda w / mean(w)): a block that must rise moves its movable_up
+    children, one that must fall its movable_down children; each child stops at its bound (class_bounds: the land
+    floor, the sea ceiling, `cap`), the others share the rest (weighted water-filling). When the bounds exhaust, the
+    rest is spread over the moving children in proportion to their weights ignoring the bounds (forced; uniform
+    when the weights are all 0), but an upward rest stops where a child would pass `clip` and a downward one where
+    it would pass below `clip_low` (the block keeps that departure: clipped). Blocks without a moving child keep their departure. Returns the values, counts and the
+    clipped blocks' mask."""
+    shape = values.shape
+    target = np.asarray(targets, dtype=np.float64).ravel()
+    values = np.asarray(values, dtype=np.float64)
+    lower, upper = class_bounds(values, land, land_floor_m, sea_ceiling_m, cap)
+    v = to_blocks(values, factor)
+    n = factor * factor
+    departure = target - v.mean(axis=1)
+    need = np.abs(departure) * n
+    up = departure > 0
+    move = np.where(up[:, None], to_blocks(movable_up, factor), to_blocks(movable_down, factor))
+    headroom = np.where(up[:, None], to_blocks(upper, factor) - v, v - to_blocks(lower, factor))
+    headroom = np.where(move, np.maximum(headroom, 0.0), 0.0)
+    w = np.where(move, to_blocks(np.asarray(weights, dtype=np.float64), factor), 0.0)
+    flat = (w.sum(axis=1) <= 0.0)[:, None] & move
+    w = np.where(flat, 1.0, w)
+    big_t = 1e30
+    t = np.where(w > 0, headroom / np.where(w > 0, w, 1.0), big_t)  # the multiplier at which a child stops
+    order = np.argsort(t, axis=1)
+    t_s = np.take_along_axis(t, order, axis=1)
+    h_s = np.take_along_axis(headroom, order, axis=1)
+    w_s = np.take_along_axis(w, order, axis=1)
+    below = np.zeros_like(h_s)
+    below[:, 1:] = np.cumsum(np.where(w_s[:, :-1] > 0, h_s[:, :-1], 0.0), axis=1)
+    above = np.cumsum(w_s[:, ::-1], axis=1)[:, ::-1]
+    reach = np.where(t_s < big_t, below + t_s * above, np.inf)
+    feasible = (reach >= need[:, None]) & (above > 0)
+    first = np.where(feasible.any(axis=1), feasible.argmax(axis=1), n)
+    rows_index = np.arange(v.shape[0])
+    safe = np.minimum(first, n - 1)
+    lam = np.where(first < n, (need - below[rows_index, safe]) / np.maximum(above[rows_index, safe], 1e-300), 0.0)
+    moved = np.where(first[:, None] < n, np.minimum(headroom, lam[:, None] * w), headroom * (w > 0))
+    count = move.sum(axis=1)
+    forced = (first >= n) & (count > 0) & (need > 0)
+    rest = np.where(forced, need - moved.sum(axis=1), 0.0)
+    total_w = w.sum(axis=1)
+    lam_f = rest / np.maximum(total_w, 1e-300)
+    clipped = np.zeros_like(forced)
+    if clip is not None:
+        room = np.where(move & (w > 0), (to_blocks(np.asarray(clip, dtype=np.float64), factor) - (v + moved)) /
+                        np.where(w > 0, w, 1.0), np.inf)
+        allowed = np.maximum(room.min(axis=1), 0.0)
+        clipped = forced & up & (lam_f > allowed)
+        lam_f = np.where(clipped, allowed, lam_f)
+    if clip_low is not None:  # a downward rest stops where a child would pass below clip_low (a hole)
+        room = np.where(move & (w > 0), ((v - moved) - to_blocks(np.asarray(clip_low, dtype=np.float64), factor)) /
+                        np.where(w > 0, w, 1.0), np.inf)
+        allowed = np.maximum(room.min(axis=1), 0.0)
+        low = forced & ~up & (lam_f > allowed)
+        lam_f = np.where(low, allowed, lam_f)
+        clipped = clipped | low
+    moved = moved + np.where(forced[:, None], lam_f[:, None] * w, 0.0)
+    signed = np.where(up[:, None], moved, -moved)
+    signed = np.where(move, signed, 0.0)
+    out = from_blocks(v + signed, factor, shape)
+    residual = np.abs(target - (v + signed).mean(axis=1))
+    stats = {'blocks': int(v.shape[0]), 'blocks_without_moving_child': int(np.count_nonzero(count == 0)),
+             'forced_blocks': int(np.count_nonzero(forced)), 'clipped_blocks': int(np.count_nonzero(clipped)),
+             'clipped_residual_max_m': float(residual[clipped].max()) if clipped.any() else 0.0,
+             'largest_shift_m': float(np.abs(signed).max()) if signed.size else 0.0}
+    return out, stats, from_blocks(np.repeat(clipped[:, None], n, axis=1), factor, shape)
+
+
+def smooth_prestep(values, targets, movable_up, movable_down, land, factor, land_floor_m, sea_ceiling_m, cap, passes,
+                   relaxation, weight_floor_m):
+    """The multiscale plan section 1 pre-step: `passes` passes adding relaxation x G / M x w, G the Catmull-Rom
+    prolongation of the block departures (each over its block's moving share), M the prolongation of the blocks'
+    mean weight over their moving children, w each child's weight: its height above the lowest value within one
+    parent cell around it plus weight_floor_m (continuous, no block edges). Both prolongations are clamped to their
+    bracketing parents, so the ratio stays bounded (dividing before prolonging made a flat block's large ratio land
+    on a steep neighbour's large weights: runaway shifts of 15 km). Where the field raises, the movable_up children
+    move; where it lowers, the movable_down ones; every child stays within its class bounds. The per-parent
+    multipliers so vary smoothly; the exact remainder follows (project_weighted)."""
+    values = np.asarray(values, dtype=np.float64)
+    lower, upper = class_bounds(values, land, land_floor_m, sea_ceiling_m, cap)
+    rows, columns = targets.shape
+    for _ in range(passes):
+        local = ndimage.minimum_filter(values, size=2 * factor + 1, mode='nearest')
+        w = values - local + weight_floor_m
+        gap = targets - block_mean(values, factor)
+        share = np.where(gap > 0, block_mean(movable_up.astype(float), factor),
+                         block_mean(movable_down.astype(float), factor))
+        mean_w = np.where(gap > 0, block_mean(w * movable_up, factor), block_mean(w * movable_down, factor))
+        has = (share > 0) & (mean_w > 0)
+        per_share = np.where(has, gap / np.where(has, share, 1.0), 0.0)
+        weight_mean = np.where(has, mean_w / np.where(has, share, 1.0), 0.0)  # mean weight of a moving child
+        G = prolong(per_share, factor, 0, 0, rows, columns, limit=True)
+        M = prolong(weight_mean, factor, 0, 0, rows, columns, limit=True)
+        field = np.where(M > 0, G / np.where(M > 0, M, 1.0), 0.0)
+        moving = np.where(field > 0, movable_up, movable_down)
+        values = np.clip(values + relaxation * field * w * moving, lower, upper)
+    return values
+
+
+def project_smooth(values, targets, movable_up, movable_down, land, reference, factor, land_floor_m, sea_ceiling_m,
+                   cap, clip, passes, relaxation, weight_floor_m, clip_low=None):
+    """smooth_prestep, then the exact remainder weighted by the height above each block's lowest reference cell
+    (reference_weights, project_weighted). Returns the values, counts and the clipped blocks' mask."""
+    smoothed = smooth_prestep(values, targets, movable_up, movable_down, land, factor, land_floor_m, sea_ceiling_m,
+                              cap, passes, relaxation, weight_floor_m)
+    pre_gap = np.abs(block_mean(smoothed, factor) - targets)
+    weights = reference_weights(smoothed, reference, movable_up | movable_down, factor)
+    out, stats, clipped = project_weighted(smoothed, targets, movable_up, movable_down, land, weights, factor,
+                                           land_floor_m, sea_ceiling_m, cap=cap, clip=clip, clip_low=clip_low)
+    moved = (out - values)[movable_up | movable_down]
+    stats.update(prestep_departure_rms_m=float(np.sqrt((pre_gap ** 2).mean())),
+                 prestep_departure_max_m=float(pre_gap.max()),
+                 correction_max_m=float(np.abs(moved).max()) if moved.size else 0.0,
+                 correction_rms_m=float(np.sqrt((moved ** 2).mean())) if moved.size else 0.0,
+                 correction_mean_m=float(moved.mean()) if moved.size else 0.0)
+    return out, stats, clipped
+
+
+def block_check(values, targets, factor, moving_land, sea, lake, clipped, inner=None):
+    """The parent-cell means' departure per block class: clipped, movable land (a moving land child), all sea, all
+    lake, other (no moving child: channels, rings, mixed water). Count, max |.| and rms per class."""
+    gap = np.abs(block_mean(values, factor) - targets)
+    is_clipped = block_mean(clipped.astype(float), factor) > 0
+    has_land = (block_mean(moving_land.astype(float), factor) > 0) & ~is_clipped
+    all_sea = (block_mean(sea.astype(float), factor) >= 1.0) & ~has_land & ~is_clipped
+    all_lake = (block_mean(lake.astype(float), factor) >= 1.0) & ~has_land & ~is_clipped & ~all_sea
+    other = ~(is_clipped | has_land | all_sea | all_lake)
+    region = np.ones(gap.shape, bool)
+    if inner is not None:
+        region = np.zeros(gap.shape, bool)
+        region[inner] = True
+    out = {}
+    for name, mask in (('movable_land', has_land), ('all_sea', all_sea), ('all_lake', all_lake), ('clipped', is_clipped),
+                       ('other', other)):
+        mask = mask & region
+        values_m = gap[mask]
+        out[name] = {'blocks': int(mask.sum()), 'max_abs_m': float(values_m.max()) if values_m.size else 0.0,
+                     'rms_m': float(np.sqrt((values_m ** 2).mean())) if values_m.size else 0.0}
+    return out
+
+
+def one_cell_inlets(sea):
+    """Parent sea cells that are one-cell drowned valleys of the coarse D8: at most 3 sea cells among their 8
+    neighbours (a one-cell-wide chain, staircase corners included) and not touching the open sea (the sea that
+    survives a 3 x 3 morphological opening, dilated by one cell)."""
+    sea = np.asarray(sea, bool)
+    count = ndimage.convolve(sea.astype(np.int32), np.ones((3, 3), np.int32), mode='constant') - sea
+    open_sea = ndimage.binary_opening(sea, structure=np.ones((3, 3)))
+    near_open = ndimage.binary_dilation(open_sea, structure=np.ones((3, 3)))
+    return sea & (count <= 3) & ~near_open
+
+
 def departure(values, parent, movable, factor, inner):
     """max |.| and rms of the parent-cell means' departure from the parent, over the inner blocks with a movable child."""
     gap = (block_mean(values, factor) - parent)[inner][block_mean(movable.astype(float), factor)[inner] > 0]
