@@ -327,8 +327,10 @@ struct LakeTrap
 };
 
 // Makes the exits of every closed, non-terminal depression of the routing land roots of `graph` (in place; restored by
-// releaselakes). The order stays valid: a root needs no receiver before it.
-void traplakes(landscape::FlowGraph& graph, const landscape::Depressions& depressions, LakeTrap& trap)
+// releaselakes). The order stays valid: a root needs no receiver before it. Depressions flagged in `skip` (per
+// depression, when given) are left open: their load passes on as without the trap.
+void traplakes(landscape::FlowGraph& graph, const landscape::Depressions& depressions, LakeTrap& trap,
+               const std::vector<uint8_t>* skip = nullptr)
 {
     const std::vector<int32_t>& id = depressions.depressionid;
     trap.spill.assign(graph.receiver.size(), -1);
@@ -337,7 +339,8 @@ void traplakes(landscape::FlowGraph& graph, const landscape::Depressions& depres
     {
         const std::size_t i = static_cast<std::size_t>(entry);
         const int32_t lake = id[i];
-        if (lake == 0 || depressions.depressions[static_cast<std::size_t>(lake - 1)].terminal)
+        if (lake == 0 || depressions.depressions[static_cast<std::size_t>(lake - 1)].terminal
+            || (skip && (*skip)[static_cast<std::size_t>(lake - 1)]))
             continue;
         const int32_t receiver = graph.receiver[i];
         if (static_cast<std::size_t>(receiver) == i || id[static_cast<std::size_t>(receiver)] == lake)
@@ -545,6 +548,7 @@ void usage()
                  "  [--no-infill-after MYR] (from then on no deposition inside closed depressions of the bed)\n"
                  "  [--lake-trap 0|1] (lakes keep the sediment reaching them, filled up to their spill; not in no-infill steps)\n"
                  "  [--lake-fill-gradient G 0] [--lake-fill-noise FILE] (m per cell) (the trap's fill sloped up from the exits)\n"
+                 "  [--lake-trap-ice-share S 2] (a lake with that share of its cells under ice does not trap; above 1: all trap)\n"
                  "  [--ice-history \"t:ela_offset_m:ratio,...\"] (Myr, m added to the ELA, glacial ratio: piecewise constant)\n"
                  "  [--step-after \"T:STEP,...\"] (from T Myr on, steps of STEP Myr)\n"
                  "  [--aggrade-subsidence 0|1] (land cells' negative uplift filled by sediment as they subside)\n"
@@ -705,6 +709,10 @@ int main(int argc, char** argv)
         // Lakes trap sediment (--lake-trap 1; LakeTrap above), outside the final pulse's no-infill steps (those keep
         // their own rule: no deposition in closed depressions, so the young glacial lakes stay open).
         const bool laketrap = number("--lake-trap", 0.0) > 0.5;
+        // Lakes under ice do not trap (--lake-trap-ice-share S, roadmap T1.7 fjords): a depression with at least the
+        // share S of its cells under more than --ice-threshold m of ice is left open, the ice carrying its sediment on
+        // (a subglacial trough stays a trough; it is drowned at the rise as a fjord). Above 1: every lake traps.
+        const double laketrapiceshare = number("--lake-trap-ice-share", 2.0);
         // The trap's fill sloped up from the exits (--lake-fill-gradient, --lake-fill-noise; filloffsets above).
         const double lakefillgradient = number("--lake-fill-gradient", 0.0);
         const std::vector<float> lakefillnoise = options.count("--lake-fill-noise")
@@ -840,7 +848,25 @@ int main(int argc, char** argv)
             {
                 // The fluvial step with the lakes' exits as roots and no diffusion, the fill, then the diffusion alone.
                 LakeTrap trap;
-                traplakes(graph, routeddepressions, trap);
+                std::vector<uint8_t> iced;  // depressions under ice (--lake-trap-ice-share): left open
+                if (glacial && laketrapiceshare <= 1.0)
+                {
+                    const std::size_t lakes = routeddepressions.depressions.size();
+                    std::vector<double> lakecells(lakes, 0.0), undericecells(lakes, 0.0);
+                    for (std::size_t i = 0; i < count; i++)
+                    {
+                        const int32_t lake = routeddepressions.depressionid[i];
+                        if (lake == 0)
+                            continue;
+                        lakecells[static_cast<std::size_t>(lake - 1)] += 1.0;
+                        if (thickness[i] > icethreshold)
+                            undericecells[static_cast<std::size_t>(lake - 1)] += 1.0;
+                    }
+                    iced.assign(lakes, 0);
+                    for (std::size_t k = 0; k < lakes; k++)
+                        iced[k] = lakecells[k] > 0.0 && undericecells[k] >= laketrapiceshare * lakecells[k] ? 1 : 0;
+                }
+                traplakes(graph, routeddepressions, trap, iced.empty() ? nullptr : &iced);
                 landscape::StreamPowerParameters fluvial = parameters;
                 fluvial.hillslopediffusivity_km2_myr = 0.0;
                 const landscape::StreamPowerBudget budget = landscape::stepstreampower(

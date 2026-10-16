@@ -39,6 +39,9 @@ to the ELA) with glacial_ratio (--ice-history), the step step_myr (--step, then 
 and no_infill (from the first such phase to the end: --no-infill-after); keep_shelf as sea_level's.
 physics.lake_trap (--lake-trap): every closed depression of the routing keeps the sediment reaching it, filled
 from its floor up to at most its spill level, and only the excess passes on (not in no_infill steps).
+physics.lake_trap_ice_share (--lake-trap-ice-share): a depression with at least that share of its cells under ice
+does not trap (the ice carries its sediment on, so glacial troughs stay deep and drown as fjords); absent: every
+lake traps (the trap alone filled G's troughs and removed its fjords, 2026-10-16).
 physics.lake_fill_gradient (--lake-fill-gradient, with physics.lake_fill_noise: --lake-fill-noise, the relief's
 fill noise): the trap's fill slopes up from the lake's exits at that gradient, so a filled lake floor is no flat
 (the ice cut straight grooves along a flat's routing lines). relief.fill_depressions: before the physics, every
@@ -1094,6 +1097,8 @@ def run_physics(domain, fields, config, directory):
         command += ['--north', str(domain.north_deg), '--pixel-deg', str(domain.pixel_deg)]
     if spec.get('lake_trap', False):  # lakes keep the sediment reaching them (filled up to their spill)
         command += ['--lake-trap', '1']
+        if spec.get('lake_trap_ice_share') is not None:  # lakes under ice stay open (fjords; T1.7)
+            command += ['--lake-trap-ice-share', str(spec['lake_trap_ice_share'])]
         if spec.get('lake_fill_gradient', 0.0) > 0.0:  # the fill sloped up from the spill, with the fill noise
             command += ['--lake-fill-gradient', str(spec['lake_fill_gradient'])]
             if spec.get('lake_fill_noise', False) and fields.get('fill_noise') is not None:
