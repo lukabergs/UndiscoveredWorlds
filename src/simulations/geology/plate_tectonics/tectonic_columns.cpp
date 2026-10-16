@@ -60,6 +60,8 @@ constexpr double area_cap_response_myr=5;
 // Relaxation time of the upper area cap (continental_max_thickness_m), Myr: gravitational
 // spreading of overthickened crust, slower than the lower cap's cleanup.
 constexpr double area_upper_cap_response_myr=10;
+// Oceanic area below which the upper cap converts the rest of a cell at once (share of the cell).
+constexpr double upper_cap_residual_area=1e-6;
 // Largest orogenic collapse coefficient per face and sub-step (D dt / cell²): at most
 // 0.4 of a cell's excess leaves through its four faces, so no source drops below the maximum.
 constexpr double collapse_step_limit=.1;
@@ -806,8 +808,11 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     const double max_thickness=margin_parameters.continental_max_thickness_m;
     if (margin_parameters.enabled && max_thickness>0) for (auto& c : next) {
         if (!(c.oceanic_area>0 && c.continent>c.continental_area*max_thickness)) continue;
-        const double gained=std::min(c.oceanic_area,c.continent/max_thickness-c.continental_area)
+        double gained=std::min(c.oceanic_area,c.continent/max_thickness-c.continental_area)
             *(-std::expm1(-dt/area_upper_cap_response_myr));
+        // A vanishing oceanic area converts fully: its basalt stays in the column as crust the
+        // continent overrode, never left under a near-zero area for a rounding overlap to subduct.
+        if (c.oceanic_area-gained<upper_cap_residual_area) gained=c.oceanic_area;
         c.continental_area+=gained;
         c.oceanic_area-=gained;
         budget_.continentalized_oceanic_area_m2+=gained*area;
