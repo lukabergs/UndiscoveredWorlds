@@ -79,10 +79,18 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0100`: fill noise at a few km on the world's 19.5 km grid: it fades out and leaves straight radial drainage
 - `erosion-0100`: the tectonics sea_level key to change the final land fraction: it only sets the initial ocean coverage
 - `erosion-0100`: placing the sea at Earth's land fraction while the continents are thin: the interiors flood
+- `erosion-0101`: raising the child's detail amplitude beyond the Earth-fitted law to fake steepness the parent lacks
+- `erosion-0101`: a steeper window landslide threshold as the fix for the parent's low slopes (it only moves p99)
+- `erosion-0101`: longer child physics (2 Myr) to grow valleys from noise
+- `erosion-0102`: damping platform relief to fix the foothills (platform.relief_damp 0.4 barely changes them)
+- `erosion-0102`: a steeper or no landslide threshold at k 64 (no effect)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
 - `tectonics-0012`: expecting the minimum-thickness cap and collisions alone to regulate thickness: nothing bounds it from above
+- `tectonics-0013`: calibrating continental growth at 128 columns and expecting 256 to follow
+- `tectonics-0013`: sweeping h_max (32-40 km) or D (10000-30000) to fix the land height at 256 columns: the Airy slope sets it
+- `tectonics-0013`: an area-cap threshold below the collapse threshold to make shelves (margins are sharp at 256 columns)
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -215,6 +223,8 @@ Lessons:
 | `erosion-0098` | 2026-10-13 | awaiting the user's look (roadmap T1.1) | keep | terrain sandbox (roadmap T1.0), the sea floor, first version (522dbdb): step 1 of the user's 2026-10-13 order (sea floor, then sea-level history and lakes, then the 100 m nested test against Copernicus GLO-30, then engine back-arc rollback and S6) |
 | `erosion-0099` | 2026-10-14 | reviewed (reviewer on Opus 5.5, Fable off): pass with notes; the user's look at compare-base-v2 pending | keep | terrain roadmap T2.2a: the land branch of terrain.texturing centred at the fractal's measured mean (the missing midlands) |
 | `erosion-0100` | 2026-10-16 | the user's look: base-v2, the Earth-shaped history, v18 and v19 approved; the sea floor paused | keep | terrain sandbox, roadmap T1 (T1.1 sea floor to v7d and paused, T1.2 sea level, T1.2b the Earth-shaped history, T1.3 lakes, the v17 diagnosis, lakes and pits, provinces and aggrading basins, the uplands lift) and the world sea-level parameter, 2026-10-13 to 2026-10-16 |
+| `erosion-0101` | 2026-10-16 | not reviewed (reviews of evaluations paused since 2026-10-05); not yet seen by the user | keep | terrain roadmap T1.5: the 100 m nested test (sandbox) |
+| `erosion-0102` | 2026-10-16 | not reviewed (reviews of evaluations paused since 2026-10-05); awaiting the user's look (pages compare-t16-1 to -5) | keep | terrain roadmap T1.6: sandbox artefacts, diagnosis round |
 
 Lessons:
 
@@ -379,6 +389,10 @@ Lessons:
 - `erosion-0099`: The hillslope diffusion reaches about sqrt(kappa t) = 4.5 km over the sandbox's run: it cannot remove a band of the hypsometry.
 - `erosion-0100`: Measure before tuning: one uncentred noise term (the midlands), one missing sediment path (lakes) and one unfilled pit field (drowning) outweighed every tuning lever discussed.
 - `erosion-0100`: Record the per-cell totals: erosion, glacial share and fill fields answered the drowning question directly.
+- `erosion-0101`: Measure a level against Earth at its own cell size before nesting below it: the parent at 611 m was already half Earth's slope.
+- `erosion-0101`: An fbm with ridging and per-cell mean removal realises about 0.3 of its nominal amplitude: normalise to the measured rms.
+- `erosion-0102`: Hillslope diffusivity is a grid parameter: the same km^2/Myr at 19.5 km and 2.44 km cells acts on different shares of a cell.
+- `erosion-0102`: A sloped fill with too coarse a noise turns filled basins into cones with straight fall lines.
 
 ## tectonics
 
@@ -396,6 +410,7 @@ Lessons:
 | `tectonics-0010` | 2026-10-07 | changed as intended; measurement only in the engine | keep | erosion plan, step H2: the engine's rock uplift rate in the plate's frame |
 | `tectonics-0011` | 2026-10-10 | fields exported | Route (a) as approved; cumulative (no decay); the tensor turns with the local spin; new ocean floor starts at zero strain. | multiscale plan, step S5.1: the engine accumulates a strain tensor per cell in the plate's frame and exports the cumulative shortening and its direction into the world fields geosphere.shortening and geosphere.shortening_direction (the user approved route (a) on 2026-10-10) |
 | `tectonics-0012` | 2026-10-16 | reviewed (reviewer on Opus 5.5, Fable off): pass with notes; the report script's mass check fixed at commit | keep | terrain roadmap T4.12, first round: continental growth as a world parameter (keys off by default) |
+| `tectonics-0013` | 2026-10-16 | reviewed (two reviewers on Opus 5.5, Fable off): db9f726 pass with notes, c7cd42a pass with notes (the saturation pulse fixed in d5556a1); the evaluation itself not reviewed (reviews of evaluations paused since 2026-10-05) | keep | terrain roadmap T4.12, second round: seeding fix, column continental_area field, upper thickness regulator (keys off by default) |
 
 Lessons:
 
@@ -418,6 +433,9 @@ Lessons:
 - `tectonics-0011`: A carried quantity without decay keeps every error forever: test the source of new material (here new ocean floor) explicitly.
 - `tectonics-0012`: Name the measure in every table: the same run gave 0.28, 0.336 and 0.545 continental area by three measures.
 - `tectonics-0012`: A controller on mass does not hold area when thickness is free.
+- `tectonics-0013`: Measure the engine at the resolution the pipeline uses: 128 passed, 256 failed.
+- `tectonics-0013`: Elevation per km of crust decides the land height: Earth-like thickness with the engine's Airy slope gives land twice too high.
+- `tectonics-0013`: Land fraction placement needs area between 0 and -1 km; cliff margins make it lower the sea by kilometres.
 
 ## world
 

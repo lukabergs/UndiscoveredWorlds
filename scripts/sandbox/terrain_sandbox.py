@@ -45,6 +45,10 @@ fill noise): the trap's fill slopes up from the lake's exits at that gradient, s
 closed depression not joined to the sea is filled from its spill, sloped at relief.fill_gradient with
 relief.fill_noise (amplitude_m on an fBm) on it (sloped_fill): the procedural pits as sediment-filled basins.
 The physics' input surface is saved as <domain>-elevation-procedural.npy.
+filter.fill_pits (roadmap T1.6, default off): the closed pits the post-physics filter digs (at the foot of slopes,
+where its strength falls with the slope: slope_fade) are filled as the relief's (sloped_fill) from the sea and the physics'
+lakes at their spill level. render.save_extra (default off): also saves <domain>-discharge.npy (the final routing's,
+m3/s) and <domain>-fill_m.npy (the depth relief.fill_depressions added).
 Every physics run also writes per-cell totals (--out-fields), saved cropped as <domain>-<name>.npy (eroded_m,
 deposited_m, glacial_eroded_m, ice_time_myr, ice_max_m, landslide_m, last_eroded_m) and drawn as three maps.
 
@@ -1701,6 +1705,11 @@ def main():
             np.save(directory / f'{domain.name}-elevation-procedural.npy', crop(domain, fields['surface']).astype(np.float32))
             for name, values in totals.items():  # per-cell totals for later mineral work
                 np.save(directory / f'{domain.name}-{name}.npy', crop(domain, values).astype(np.float32))
+            if config['render'].get('save_extra', False):  # for measurements (roadmap T1.6): the final routing's
+                # discharge (m3/s, the rivers drawn) and the depth relief.fill_depressions added (m)
+                np.save(directory / f'{domain.name}-discharge.npy', crop(domain, discharge).astype(np.float32))
+                np.save(directory / f'{domain.name}-fill_m.npy',
+                        crop(domain, fields['surface'] - fields['stages']['filter']).astype(np.float32))
             # The sea keeps its procedural depth: the marine deposition's straight walks are not what is judged.
             # Land cut below the sea and connected to it (a fjord, a drowned river mouth) becomes sea.
             procedural_sea = fields['sea'].copy()  # the open sea before the physics flooded its troughs
@@ -1754,8 +1763,10 @@ def main():
             np.save(directory / f'{domain.name}-elevation-physics.npy', crop(domain, elevation).astype(np.float32))
             lakes = config.get('lakes', {'enabled': False})
             lake = np.zeros_like(sea)
+            levels = None
             if lakes['enabled']:  # the closed depressions the physics left, before the filter (which spares them)
-                lake = np.isfinite(find_lakes(domain, elevation, sea, lakes))
+                levels = find_lakes(domain, elevation, sea, lakes)
+                lake = np.isfinite(levels)
                 timing['lakes_before_filter'] = int(ndimage.label(crop(domain, lake), structure=np.ones((3, 3)))[1])
             if spec['enabled'] and spec.get('when', 'before') == 'after':  # fine texture on the eroded surface
                 x, y = fields['coords']
@@ -1773,6 +1784,21 @@ def main():
                         np.maximum(weight, 1e-6)
                     detail = detail - broad
                 elevation = np.where(land, np.maximum(elevation + detail, 1.0), elevation)
+                if spec.get('fill_pits', False):
+                    # filter.fill_pits (roadmap T1.6): the filter's lowering (its gullies and height_offset, both
+                    # scaled by a strength that slope_fade raises with the slope) is deep on a slope and nil on the
+                    # flatter floor below it, so the foot of the slope becomes a closed pit (G-coast: 7 % of the land,
+                    # up to 1.2 km deep). They are filled as the relief's pits (sloped_fill: relief.fill_gradient with
+                    # the fill noise) from the sea and the physics' lakes, which stand at their spill level before
+                    # the filter.
+                    water = sea | lake
+                    outlets = elevation if levels is None else np.where(lake, levels, elevation)
+                    filled = sloped_fill(domain, outlets, water, config['relief']['fill_gradient'], fields['fill_noise'])
+                    raised = crop(domain, np.where(water, 0.0, filled - outlets))
+                    timing['filter_pits_land_pct'] = round(100.0 * float((raised > 1.0).sum()) /
+                                                           max(float((~crop(domain, water)).sum()), 1.0), 2)
+                    timing['filter_pits_max_m'] = round(float(raised.max()), 1)
+                    elevation = np.where(water, elevation, filled)
                 if not domain.whole:
                     save_map(domain, directory / f'{domain.name}-filter-field.png',
                              colourize(crop(domain, field), FIELD_STOPS))
