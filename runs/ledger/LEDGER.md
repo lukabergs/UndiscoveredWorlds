@@ -91,6 +91,9 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `tectonics-0013`: calibrating continental growth at 128 columns and expecting 256 to follow
 - `tectonics-0013`: sweeping h_max (32-40 km) or D (10000-30000) to fix the land height at 256 columns: the Airy slope sets it
 - `tectonics-0013`: an area-cap threshold below the collapse threshold to make shelves (margins are sharp at 256 columns)
+- `tectonics-0014`: a frozen root cap as the way to high mountains: it keeps the root under the orogen
+- `tectonics-0014`: placing the land fraction at terraforming: the engine surface has no shelves yet
+- `tectonics-0014`: tuning h_max or D to fix the land height: the Airy slope sets it
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -411,6 +414,7 @@ Lessons:
 | `tectonics-0011` | 2026-10-10 | fields exported | Route (a) as approved; cumulative (no decay); the tensor turns with the local spin; new ocean floor starts at zero strain. | multiscale plan, step S5.1: the engine accumulates a strain tensor per cell in the plate's frame and exports the cumulative shortening and its direction into the world fields geosphere.shortening and geosphere.shortening_direction (the user approved route (a) on 2026-10-10) |
 | `tectonics-0012` | 2026-10-16 | reviewed (reviewer on Opus 5.5, Fable off): pass with notes; the report script's mass check fixed at commit | keep | terrain roadmap T4.12, first round: continental growth as a world parameter (keys off by default) |
 | `tectonics-0013` | 2026-10-16 | reviewed (two reviewers on Opus 5.5, Fable off): db9f726 pass with notes, c7cd42a pass with notes (the saturation pulse fixed in d5556a1); the evaluation itself not reviewed (reviews of evaluations paused since 2026-10-05) | keep | terrain roadmap T4.12, second round: seeding fix, column continental_area field, upper thickness regulator (keys off by default) |
+| `tectonics-0014` | 2026-10-16 | reviewed (Fable 5.1): 0c64d84 pass with notes (fixed in 5b3f384), 5b3f384 pass with notes (fixed in ae2c114), 0e725bf pass with notes (fixed in 075383e); the evaluation itself not reviewed | keep | terrain roadmap T4.12, third round: continental freeboard (lithospheric root, its cap), area budgets, continent-only controller, resolution check, the sea placed after the coast cleanup |
 
 Lessons:
 
@@ -436,6 +440,9 @@ Lessons:
 - `tectonics-0013`: Measure the engine at the resolution the pipeline uses: 128 passed, 256 failed.
 - `tectonics-0013`: Elevation per km of crust decides the land height: Earth-like thickness with the engine's Airy slope gives land twice too high.
 - `tectonics-0013`: Land fraction placement needs area between 0 and -1 km; cliff margins make it lower the sea by kilometres.
+- `tectonics-0014`: Elevation per km of crust is the lever on land height; the root key moves it without touching the crust budget.
+- `tectonics-0014`: Measure at 256 and check 128 against it with a script: the core statistics agree, the shelf share does not.
+- `tectonics-0014`: The shelf band is transient: stretched margins are oceanised by the lower cap faster than arcs make area; a renewal mechanism is still missing.
 
 ## world
 
