@@ -20,6 +20,7 @@
 #include "simulations/terrain/fluvial_erosion.hpp"
 #include "simulations/terrain/subgrid_statistics.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
+#include "world/world_parameters.hpp"
 
 using namespace std;
 
@@ -174,9 +175,77 @@ void applyhypsometricremap(planet& world, GenerationScratch& scratch, const Worl
     rebuildheightdistribution(world, scratch);
 }
 
+// The whole-metre sea level that leaves the area share `landfraction` of the surface above it
+// (base elevation; a cell's area is proportional to the cosine of its latitude). No connectivity
+// rule: a closed basin below the level is below sea like any other cell.
+int sealevelforlandfraction(const planet& world, float landfraction)
+{
+    const int width = world.width();
+    const int height = world.height();
+    const float pi = 3.14159265358979f;
+
+    vector<pair<int, float>> cells;   // whole metres, as basebelowsea compares them; area weight
+    cells.reserve(static_cast<size_t>(width + 1) * static_cast<size_t>(height + 1));
+    double totalweight = 0.0;
+
+    for (int y = 0; y <= height; y++)
+    {
+        const float latitude = (0.5f - (static_cast<float>(y) + 0.5f) / static_cast<float>(height + 1)) * pi;
+        const float weight = max(0.0f, cosf(latitude));
+
+        for (int x = 0; x <= width; x++)
+        {
+            cells.push_back({ wholemetres(world.nomfloat(x, y)), weight });
+            totalweight += weight;
+        }
+    }
+
+    if (cells.empty() || totalweight <= 0.0)
+        return world.sealevel();
+
+    // Highest first; a level just below a group of equal heights makes that group land. The level
+    // whose land share is nearest the target wins (on a tie the higher one).
+    stable_sort(cells.begin(), cells.end(), [](const pair<int, float>& a, const pair<int, float>& b) { return a.first > b.first; });
+
+    const double target = static_cast<double>(landfraction) * totalweight;
+    double cumulative = 0.0;
+    int best = cells.front().first;
+    double besterror = target;
+    size_t first = 0;
+
+    while (first < cells.size())
+    {
+        size_t last = first;
+        while (last < cells.size() && cells[last].first == cells[first].first)
+        {
+            cumulative += cells[last].second;
+            last++;
+        }
+
+        const double error = abs(cumulative - target);
+        if (error < besterror)
+        {
+            best = cells[first].first - 1;
+            besterror = error;
+        }
+        first = last;
+    }
+
+    return best;
+}
+
 void applyterraforming(planet& world, GenerationScratch& scratch, const WorldStageParameters& parameters)
 {
-    world.setsealevel(clamp(parameters.seaLevel, 1, world.maxelevation() - 2));
+    // world.ocean.land_fraction in (0, 1) places the sea level at that land share of the surface,
+    // unless the stage was asked for another level than the one the tectonics left (the
+    // workbench's sea-level slider); 0 keeps the requested level (before 2026-10-16 always the
+    // tectonic engine's).
+    const float landfraction = tuning::world::ocean::landFraction;
+    int sealevel = parameters.seaLevel;
+    if (landfraction > 0.0f && landfraction < 1.0f && parameters.seaLevel == world.sealevel())
+        sealevel = sealevelforlandfraction(world, landfraction);
+
+    world.setsealevel(clamp(sealevel, 1, world.maxelevation() - 2));
 
     if (parameters.useHypsometricRemap)
         applyhypsometricremap(world, scratch, parameters);
@@ -926,6 +995,7 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 
     case GenerationStageId::terraforming:
         applyterraforming(world, scratch, parameters);
+        parameters.seaLevel = world.sealevel();
         return true;
 
     case GenerationStageId::inland_seas:

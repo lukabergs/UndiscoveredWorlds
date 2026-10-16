@@ -191,6 +191,8 @@ bool validaterecipeparameters(std::string* error)
         !(atmosphere::katabaticShallowDepthMetres > 20.0f &&
             atmosphere::katabaticShallowDepthMetres <= atmosphere::surfaceBoundaryLayerMomentumDepthMetres))
         problem = "climate.atmosphere.katabatic_shallow_depth_metres must contain 10 m and fit within surface_boundary_layer_momentum_depth_metres";
+    else if (!(tuning::world::ocean::landFraction >= 0.0f && tuning::world::ocean::landFraction < 1.0f))
+        problem = "world.ocean.land_fraction must be at least 0 (0 keeps the tectonics' sea level) and below 1";
     if (problem != nullptr && error != nullptr)
         *error = problem;
     return problem == nullptr;
