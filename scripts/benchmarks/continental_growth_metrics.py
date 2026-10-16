@@ -6,12 +6,14 @@ Every measure is named; all are unweighted shares of the engine's planar grid ce
 - col_area: cells whose column `continental_area` is at least 0.5 (needs the field, T4.12 round two)
 - col_area_sum: mean column `continental_area`
 - col_thick_km: sum `continental_crust` / sum `continental_area` (continental volume per continental area);
-  col_thick_sed_km adds the sediment on the continental area; surface_continent_km is the surface mean
+  col_thick_sed_km adds the sediment on the continental area (sediment taken as spread evenly over the cell);
+  surface_continent_km is the surface mean
 - c20_area: cells with `continental_crust` (continent per cell area) of at least 20 km; c20_thick_km their mean
 - ghost: cells with `continental_area` >= 0.5 and under 1 km of continent
 - land: cells above the engine's sea level; bands of land in m
 - cont_land_median: median height of land on continental columns (col_area, or c20 without the field)
-- interior_median: median height of land cells at least --interior-cells cells (8-neighbourhood) from the sea
+- interior_median: median height of land cells more than --interior-cells cells (chessboard distance; a coastal
+  cell is at 1) from the sea
 - f, residuals, shortfall: the snapshot's column budget
 
 Usage: uv run python scripts/benchmarks/continental_growth_metrics.py BUNDLE [BUNDLE ...] [--json OUT]

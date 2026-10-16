@@ -50,6 +50,8 @@ struct Budget {
     double subducted_continent_kg = 0; // Subduction erosion at overlap cells.
     double eroded_ocean_kg = 0; // Subset of eroded_kg taken from oceanic crust (becomes sediment).
     double oceanized_continental_area_m2 = 0; // Area freed by the minimum-thickness cap.
+    double continentalized_oceanic_area_m2 = 0; // Area gained by the maximum-thickness cap.
+    double collapsed_continent_kg = 0; // Orogenic collapse; internal transfer, not a mass source.
     double initial_continental_area_m2 = 0; // Sum of continental_area x cell area at initialize.
     double initial_felsic_kg = 0, felsic_kg = 0;
     double felsic_relative_residual = 0;
@@ -125,6 +127,7 @@ public:
     const Budget& budget() const { return budget_; }
 private:
     void spreadRoots(std::vector<Cell>& cells, double dt_myr, double thermal_strength, bool sediment_feedback);
+    void collapseOrogens(std::vector<Cell>& cells, double dt_myr, const margins::Parameters& margins);
     // carried: non-negative fields on the subcells, remapped in place with the material.
     std::vector<Cell> transportColumns(const std::vector<Displacement>& velocity, double dt_myr,
                                        std::vector<std::vector<double>>& carried);

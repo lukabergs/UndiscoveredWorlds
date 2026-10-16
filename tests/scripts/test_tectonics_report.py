@@ -163,7 +163,8 @@ class TectonicsReportTests(unittest.TestCase):
                 generated_ocean_kg=0, subducted_ocean_kg=0, eroded_kg=0, deposited_kg=0,
                 relative_mass_residual=0)
             self.assertEqual(diagnostics(manifest, fields)['checks']['column_mass_budget_invalid'], 0)
-            for transfer in ('redistributed_continent_kg', 'redistributed_sediment_kg', 'noise_redistributed_kg'):
+            for transfer in ('redistributed_continent_kg', 'redistributed_sediment_kg', 'noise_redistributed_kg',
+                             'collapsed_continent_kg'):
                 for invalid in (-1, float('nan'), float('inf')):
                     manifest['column_budget'][transfer] = invalid
                     self.assertEqual(diagnostics(manifest, fields)['checks']['column_mass_budget_invalid'], 1)

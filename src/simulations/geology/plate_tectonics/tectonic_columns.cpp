@@ -57,6 +57,12 @@ double removeRock(Cell& c, double mass, double* ocean_mass = nullptr) {
 }
 // Relaxation time of the continental area cap (continental_min_thickness_m), Myr.
 constexpr double area_cap_response_myr=5;
+// Relaxation time of the upper area cap (continental_max_thickness_m), Myr: gravitational
+// spreading of overthickened crust, slower than the lower cap's cleanup.
+constexpr double area_upper_cap_response_myr=10;
+// Largest orogenic collapse coefficient per face and sub-step (D dt / cell²): at most
+// 0.4 of a cell's excess leaves through its four faces, so no source drops below the maximum.
+constexpr double collapse_step_limit=.1;
 // Response time of the continental growth controller to the reservoir's error, Myr.
 constexpr double growth_response_myr=50;
 }
@@ -321,6 +327,42 @@ void Model::spreadRoots(std::vector<Cell>& cells, double dt, double thermal_stre
             if (sediment_feedback) cells[i].sediment=cells[i].sediment-out_sediment[i]+in_sediment[i];
         }
         remaining -= sub_dt;
+    }
+}
+void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::Parameters& p) {
+    // Linear diffusion of the cell-mean continent above the maximum thickness, toward the
+    // lower side of each face (east and south, torus wrap): v = kappa max(0, c_a - max(c_b,
+    // h_max)). Unlike root flow it reaches interior cells and pure ocean. Continental age
+    // moves with the rock; sediment stays. Simultaneous update per sub-step.
+    const double h_max=p.continental_max_thickness_m, diffusivity=p.orogenic_collapse_km2_myr*1e6;
+    if (diffusivity==0) return;
+    const double total=diffusivity*dt/(cell_m_*cell_m_);
+    const double steps=std::max(1.0,std::ceil(total/collapse_step_limit));
+    if (steps>10000) throw std::runtime_error("Orogenic collapse requires a smaller outer timestep");
+    const double kappa=total/steps;
+    const auto index=[&](uint32_t x,uint32_t y) { return static_cast<size_t>(y)*width_+x; };
+    std::vector<double> outgoing(cells.size()),incoming(cells.size()),incoming_age(cells.size());
+    for (int step=0;step<static_cast<int>(steps);++step) {
+        for (auto* buffer : {&outgoing,&incoming,&incoming_age}) std::fill(buffer->begin(),buffer->end(),0);
+        for (uint32_t y=0;y<height_;++y) for (uint32_t x=0;x<width_;++x) {
+            const auto a=index(x,y);
+            for (auto b : {index((x+1)%width_,y),index(x,(y+1)%height_)}) {
+                const double ca=cells[a].continent,cb=cells[b].continent;
+                const size_t from=ca>std::max(cb,h_max)?a:cb>std::max(ca,h_max)?b:cells.size();
+                if (from==cells.size()) continue;
+                const size_t to=from==a?b:a;
+                const double volume=kappa*(cells[from].continent-std::max(cells[to].continent,h_max));
+                outgoing[from]+=volume;incoming[to]+=volume;
+                incoming_age[to]+=volume*cells[from].continental_age_volume/cells[from].continent;
+                budget_.collapsed_continent_kg+=volume*continental_density*cell_m_*cell_m_;
+            }
+        }
+        for (size_t i=0;i<cells.size();++i) {
+            if (outgoing[i]==0 && incoming[i]==0) continue;
+            const double retained=cells[i].continent>0?1-outgoing[i]/cells[i].continent:0;
+            cells[i].continent=cells[i].continent*retained+incoming[i];
+            cells[i].continental_age_volume=cells[i].continental_age_volume*retained+incoming_age[i];
+        }
     }
 }
 
@@ -756,6 +798,20 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         }
     }
     spreadRoots(next, dt*margin_parameters.root_mobility, thermal_strength,sediment_feedback);
+    collapseOrogens(next,dt,margin_parameters);
+    // Upper area cap: oceanic area under continent beyond continental area x the maximum
+    // thickness (collisions, arc continent, root inflow, collapse) relaxes into continental
+    // area; no rock moves. Before the uplift rate is read, so the rate records it as
+    // tectonic: collapse and spreading lower an overthickened margin.
+    const double max_thickness=margin_parameters.continental_max_thickness_m;
+    if (margin_parameters.enabled && max_thickness>0) for (auto& c : next) {
+        if (!(c.oceanic_area>0 && c.continent>c.continental_area*max_thickness)) continue;
+        const double gained=std::min(c.oceanic_area,c.continent/max_thickness-c.continental_area)
+            *(-std::expm1(-dt/area_upper_cap_response_myr));
+        c.continental_area+=gained;
+        c.oceanic_area-=gained;
+        budget_.continentalized_oceanic_area_m2+=gained*area;
+    }
     // Conservative downhill transport. Erode the top sediment first, then
     // continental/oceanic rock; deposit the same mass at the lower neighbour.
     // Density conversion includes sediment expansion; no sediment is deleted.

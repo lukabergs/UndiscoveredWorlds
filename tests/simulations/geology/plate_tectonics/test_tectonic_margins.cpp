@@ -555,3 +555,164 @@ TEST(TectonicMargins, GrowthControllerHoldsTheReservoirTargetWithAShareInZeroToO
     EXPECT_DOUBLE_EQ(model.budget().continental_growth_shortfall_kg,0);
     EXPECT_LT(std::abs(model.budget().felsic_relative_residual),1e-11);
 }
+
+namespace {
+// Uniform mixed columns: no motion, no erosion and no root flow between equal cells.
+std::vector<tectonics::columns::Cell> mixed_cells(size_t count,double area,double continent,double ocean) {
+    tectonics::columns::Cell c;
+    c.continental_area=area;c.oceanic_area=1-area;c.continent=continent;c.ocean=ocean;
+    c.continental_age_volume=continent*100;c.oceanic_age_volume=ocean*20;
+    return std::vector<tectonics::columns::Cell>(count,c);
+}
+}
+
+TEST(TectonicMargins, ContinentalMaximumThicknessGainsAreaWithoutMovingRock) {
+    MarginFixture f;
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    const auto cells=mixed_cells(f.cells.size(),.5,30000,3500);
+    tectonics::columns::Model reference,capped;
+    reference.initialize(f.w,f.h,50000,cells);capped.initialize(f.w,f.h,50000,cells);
+    auto p=growth_parameters();p.continental_max_thickness_m=40000;
+    reference.advance(stopped,1,0,1,0,nullptr,growth_parameters());
+    capped.advance(stopped,1,0,1,0,nullptr,p);
+    const double gained=.25*-std::expm1(-1.0/10);
+    double sum=0;
+    for (size_t i=0;i<f.cells.size();++i) {
+        const auto& c=capped.cells()[i];
+        EXPECT_DOUBLE_EQ(reference.cells()[i].continental_area,.5);
+        EXPECT_NEAR(c.continental_area,.5+gained,1e-12);
+        EXPECT_NEAR(c.oceanic_area,.5-gained,1e-12);
+        EXPECT_EQ(c.continent,reference.cells()[i].continent);
+        EXPECT_EQ(c.ocean,reference.cells()[i].ocean);
+        EXPECT_EQ(c.continental_age_volume,reference.cells()[i].continental_age_volume);
+        EXPECT_EQ(c.oceanic_age_volume,reference.cells()[i].oceanic_age_volume);
+        sum+=c.continental_area-.5;
+    }
+    const double cell_area=50000.0*50000;
+    EXPECT_NEAR(capped.budget().continentalized_oceanic_area_m2,sum*cell_area,1e-12*sum*cell_area);
+    EXPECT_DOUBLE_EQ(reference.budget().continentalized_oceanic_area_m2,0);
+    for (int step=1;step<200;++step) capped.advance(stopped,1,0,1,0,nullptr,p);
+    for (const auto& c:capped.cells()) {
+        EXPECT_NEAR(c.continental_area,.75,1e-6);
+        EXPECT_NEAR(c.continent/c.continental_area,40000,1);
+    }
+    EXPECT_LT(std::abs(capped.budget().relative_mass_residual),1e-12);
+    EXPECT_LT(std::abs(capped.budget().felsic_relative_residual),1e-12);
+    // Room for more area than the oceanic area: the column saturates at area 1.
+    tectonics::columns::Model saturated;
+    saturated.initialize(f.w,f.h,50000,mixed_cells(f.cells.size(),.9,50000,350));
+    for (int step=0;step<200;++step) saturated.advance(stopped,1,0,1,0,nullptr,p);
+    // The cap moves no ocean; as the oceanic area vanishes, the remap's rounding-sized
+    // overlap is a large share of it and subducts (budgeted) a little of the ocean volume.
+    double lost=0;
+    for (const auto& c:saturated.cells()) {
+        EXPECT_NEAR(c.continental_area,1,1e-6);
+        EXPECT_GE(c.oceanic_area,0);
+        EXPECT_LE(c.ocean,350);
+        EXPECT_GT(c.ocean,349);
+        lost+=350-c.ocean;
+    }
+    EXPECT_NEAR(saturated.budget().subducted_ocean_kg-saturated.budget().generated_ocean_kg,lost*2900*cell_area,1e-6*350*2900*cell_area);
+    EXPECT_LT(std::abs(saturated.budget().relative_mass_residual),1e-12);
+    EXPECT_LT(std::abs(saturated.budget().felsic_relative_residual),1e-12);
+}
+
+TEST(TectonicMargins, ContinentalThicknessBetweenTheCapsKeepsItsArea) {
+    MarginFixture f;
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    tectonics::columns::Model model;
+    model.initialize(f.w,f.h,50000,mixed_cells(f.cells.size(),.5,15000,3500));
+    auto p=growth_parameters();p.continental_max_thickness_m=40000;p.orogenic_collapse_km2_myr=3000;
+    for (int step=0;step<50;++step) model.advance(stopped,1,0,1,0,nullptr,p);
+    for (const auto& c:model.cells()) EXPECT_DOUBLE_EQ(c.continental_area,.5);
+    EXPECT_DOUBLE_EQ(model.budget().oceanized_continental_area_m2,0);
+    EXPECT_DOUBLE_EQ(model.budget().continentalized_oceanic_area_m2,0);
+    EXPECT_DOUBLE_EQ(model.budget().collapsed_continent_kg,0);
+}
+
+TEST(TectonicMargins, OrogenicCollapseSpreadsThickCrustIntoMixedAndOceanCells) {
+    MarginFixture f;
+    // A 60 km strip (columns 20 to 23, area 1), a mixed column (area 0.3, 10 km of
+    // cell-mean continent, 33 km thick) east of it, ocean elsewhere.
+    for (uint32_t i=0;i<f.w*f.h;++i) {
+        const auto x=i%f.w;
+        if (x>=20 && x<24) f.cells[i]=mixed_cells(1,1,60000,0)[0];
+        else if (x==24) f.cells[i]=mixed_cells(1,.3,10000,4900)[0];
+    }
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    auto p=growth_parameters();p.continental_max_thickness_m=40000;p.orogenic_collapse_km2_myr=3000;
+    p.root_mobility=0; // Collapse alone; root flow never moves volume into pure ocean.
+    tectonics::columns::Model model;model.initialize(f.w,f.h,50000,f.cells);
+    const auto sums=[&] {
+        double area=0,continent=0;
+        for (const auto& c:model.cells()) { area+=c.continental_area;continent+=c.continent; }
+        return std::pair<double,double>{area,continent};
+    };
+    const auto [area0,continent0]=sums();
+    for (int step=0;step<50;++step) {
+        model.advance(stopped,1,0,1,0,nullptr,p);
+        for (size_t i=0;i<f.cells.size();++i) if (i%f.w>=20 && i%f.w<24)
+            EXPECT_GE(model.cells()[i].continent,p.continental_max_thickness_m*(1-1e-12));
+    }
+    const auto [area1,continent1]=sums();
+    EXPECT_GT(area1,area0);
+    EXPECT_NEAR(continent1,continent0,1e-12*continent0);
+    EXPECT_LT(model.cells()[20].continent,60000);
+    EXPECT_LT(model.cells()[23].continent,60000);
+    // The ocean west of the strip gained continent of the strip's age.
+    const auto& west=model.cells()[19],&source=model.cells()[21];
+    ASSERT_GT(west.continent,0);
+    EXPECT_GT(west.continental_area,0);
+    EXPECT_NEAR(west.continental_age_volume/west.continent,source.continental_age_volume/source.continent,1e-9);
+    for (const auto& c:model.cells()) EXPECT_FALSE(c.continental_area>=.5 && c.continent<1000);
+    EXPECT_GT(model.budget().collapsed_continent_kg,0);
+    EXPECT_GT(model.budget().continentalized_oceanic_area_m2,0);
+    EXPECT_LT(std::abs(model.budget().relative_mass_residual),1e-12);
+    EXPECT_LT(std::abs(model.budget().felsic_relative_residual),1e-12);
+}
+
+TEST(TectonicMargins, ZeroMaximumThicknessAndCollapseAreTheLegacyEngine) {
+    ContinentalMarginFixture f;
+    auto p=growth_parameters();p.sediment_subduction_fraction=.75;p.subduction_erosion_ratio=.07;
+    p.continental_growth_control=true;
+    auto explicit_zero=p;explicit_zero.continental_max_thickness_m=0;explicit_zero.orogenic_collapse_km2_myr=0;
+    tectonics::columns::Model legacy,zero;
+    legacy.initialize(f.w,f.h,50000,f.cells);zero.initialize(f.w,f.h,50000,f.cells);
+    tectonics::margins::Polarity legacy_polarity,zero_polarity;
+    for (int step=0;step<100;++step) {
+        const auto a=tectonics::margins::forcing(f.w,f.h,50000,1,f.owners,legacy.cells(),f.velocity,p,&legacy_polarity);
+        const auto b=tectonics::margins::forcing(f.w,f.h,50000,1,f.owners,zero.cells(),f.velocity,explicit_zero,&zero_polarity);
+        legacy.advance(f.velocity,1,0,1,0,&a,p);
+        zero.advance(f.velocity,1,0,1,0,&b,explicit_zero);
+    }
+    for (size_t i=0;i<f.cells.size();++i) {
+        const auto& a=legacy.cells()[i];const auto& b=zero.cells()[i];
+        EXPECT_EQ(a.continent,b.continent);EXPECT_EQ(a.ocean,b.ocean);EXPECT_EQ(a.sediment,b.sediment);
+        EXPECT_EQ(a.continental_area,b.continental_area);EXPECT_EQ(a.oceanic_area,b.oceanic_area);
+        EXPECT_EQ(a.continental_age_volume,b.continental_age_volume);EXPECT_EQ(a.oceanic_age_volume,b.oceanic_age_volume);
+        EXPECT_EQ(a.thermal_rejuvenation_volume,b.thermal_rejuvenation_volume);EXPECT_EQ(a.flexure_m,b.flexure_m);
+    }
+    EXPECT_EQ(legacy.budget().mass_kg,zero.budget().mass_kg);
+    EXPECT_EQ(legacy.budget().felsic_kg,zero.budget().felsic_kg);
+    EXPECT_DOUBLE_EQ(zero.budget().continentalized_oceanic_area_m2,0);
+    EXPECT_DOUBLE_EQ(zero.budget().collapsed_continent_kg,0);
+}
+
+TEST(TectonicMargins, MaximumThicknessAndCollapseAreValidated) {
+    auto p=growth_parameters();p.continental_max_thickness_m=40000;p.orogenic_collapse_km2_myr=3000;
+    EXPECT_NO_THROW(tectonics::margins::validate(p));
+    for (double h_max : {30000.0,25000.0,-1.0,std::numeric_limits<double>::quiet_NaN()}) {
+        auto invalid=p;invalid.continental_max_thickness_m=h_max;
+        EXPECT_THROW(tectonics::margins::validate(invalid),std::runtime_error) << h_max;
+    }
+    for (double collapse : {-1.0,std::numeric_limits<double>::quiet_NaN()}) {
+        auto invalid=p;invalid.orogenic_collapse_km2_myr=collapse;
+        EXPECT_THROW(tectonics::margins::validate(invalid),std::runtime_error) << collapse;
+    }
+    auto no_maximum=p;no_maximum.continental_max_thickness_m=0;
+    EXPECT_THROW(tectonics::margins::validate(no_maximum),std::runtime_error);
+    tectonics::margins::Parameters margins_off;margins_off.continental_max_thickness_m=40000;
+    EXPECT_THROW(tectonics::margins::validate(margins_off),std::runtime_error);
+    margins_off.enabled=true;
+    EXPECT_NO_THROW(tectonics::margins::validate(margins_off));
+}

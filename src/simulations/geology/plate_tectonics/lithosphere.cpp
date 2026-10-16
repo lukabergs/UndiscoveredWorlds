@@ -476,9 +476,10 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
         throw runtime_error("Process variation requires isostatic columns and active margins");
     if (!std::isfinite(params.continental_fraction) || params.continental_fraction<0 || params.continental_fraction>1 ||
         (params.continental_fraction>0 && (params.continental_fraction<1-static_cast<double>(params.sea_level)+.01-1e-6 ||
-            !params.boundary_conditioned_terrain || params.initial_ocean_depth_m<=2500)))
+            !params.boundary_conditioned_terrain || params.initial_ocean_depth_m<=2500+params.initial_margin_width_m/2)))
         throw runtime_error("Continental fraction must be 0, or in 1 - sea_level + 0.01..1 (a shelf of at least 1 % "
-                            "of the surface) with boundary-conditioned terrain and an initial ocean depth over 2500 m");
+                            "of the surface) with boundary-conditioned terrain and an initial ocean depth over "
+                            "2500 m + initial_margin_width_m / 2 (the slope foot)");
     if ((params.transport_subdivision != 1 && params.transport_subdivision != 2 && params.transport_subdivision != 4) ||
         !std::isfinite(params.deformation_peak_km) || params.deformation_peak_km < 0 ||
         !std::isfinite(params.deformation_variation) || params.deformation_variation < 0 || params.deformation_variation > .5 ||

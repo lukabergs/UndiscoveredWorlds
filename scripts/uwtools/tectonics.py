@@ -28,7 +28,7 @@ BUNDLE_FIELDS = {
     "shear_score": "geosphere.tectonic_shear", "geologic_regime": "geosphere.geologic_regime",
     "rift_damage": "geosphere.rift_damage", "plume_influence": "geosphere.plume_influence",
     "continental_crust_m": "geosphere.continental_crust", "oceanic_crust_m": "geosphere.oceanic_crust",
-    "sediment_m": "geosphere.sediment",
+    "sediment_m": "geosphere.sediment", "continental_area": "geosphere.continental_area",
 }
 SNAPSHOT_TABLE = "geosphere.tectonic_snapshot"
 

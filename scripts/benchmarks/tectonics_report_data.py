@@ -29,7 +29,7 @@ DTYPES = {
 # rock_uplift_rate (m/Myr, erosion plan D1) and shortening, shortening_direction (m, rad; multiscale
 # plan S5.1) are in run bundles only, never in the former snapshot files.
 OPTIONAL_DTYPES = {"rift_damage": "<f4", "plume_influence": "<f4", "continental_crust_m": "<f4", "oceanic_crust_m": "<f4", "sediment_m": "<f4",
-                   "rock_uplift_rate": "<f4", "shortening": "<f4", "shortening_direction": "<f4"}
+                   "continental_area": "<f4", "rock_uplift_rate": "<f4", "shortening": "<f4", "shortening_direction": "<f4"}
 
 
 def elevation_m(height, sea_level):
@@ -381,7 +381,8 @@ def diagnostics(manifest, fields):
                 if subset in budget:
                     limit = budget[total] + (budget.get("generated_continent_kg", 0) if subset == "generated_arc_kg" else 0)
                     valid = valid and np.isfinite(budget[subset]) and 0 <= budget[subset] <= limit + initial*1e-12
-            for transfer in ("redistributed_continent_kg", "redistributed_sediment_kg", "noise_redistributed_kg"):
+            for transfer in ("redistributed_continent_kg", "redistributed_sediment_kg", "noise_redistributed_kg",
+                             "collapsed_continent_kg"):
                 if transfer in budget:
                     valid = valid and np.isfinite(budget[transfer]) and budget[transfer] >= 0
             for field in ("continental_crust_m", "oceanic_crust_m", "sediment_m"):

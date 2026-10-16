@@ -30,6 +30,16 @@ struct Parameters {
     // continental area relaxes (5 Myr) to at most continent / this value: the freed
     // area becomes oceanic area, no rock moves.
     double continental_min_thickness_m = 0;
+    // Continental crust's greatest mean thickness, m (0: off). Above 0 a column with
+    // oceanic area whose continent exceeds continental area x this value gains
+    // continental area (10 Myr) toward continent / this value from its oceanic area;
+    // no rock moves. Requires margins and a value above the rift onset and the minimum.
+    double continental_max_thickness_m = 0;
+    // Orogenic collapse, km²/Myr (0: off): linear diffusion of the cell-mean continent
+    // above continental_max_thickness_m into lower neighbours, interior and pure-ocean
+    // cells included; continental age moves with the rock, sediment stays. Requires
+    // that maximum.
+    double orogenic_collapse_km2_myr = 0;
     // Share of arc melt emplaced as continental crust at age 0 (mass kept, volume
     // x 2900/2800); an outlet with mostly oceanic area also gains continental area
     // (added thickness / continental_min_thickness_m). Above 0 it requires that minimum.

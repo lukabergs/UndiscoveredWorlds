@@ -23,6 +23,14 @@ void validate(const Parameters& p) {
     if (!std::isfinite(p.continental_min_thickness_m) || p.continental_min_thickness_m<0
         || p.continental_min_thickness_m>=p.rift_breakup_thickness_m)
         throw std::runtime_error("Continental minimum thickness must be 0 or below the rift breakup onset");
+    if (!std::isfinite(p.continental_max_thickness_m) || p.continental_max_thickness_m<0
+        || (p.continental_max_thickness_m>0 && (p.continental_max_thickness_m<=p.rift_breakup_thickness_m
+            || p.continental_max_thickness_m<=p.continental_min_thickness_m)))
+        throw std::runtime_error("Continental maximum thickness must be 0 or above the rift breakup onset and the minimum thickness");
+    if (!std::isfinite(p.orogenic_collapse_km2_myr) || p.orogenic_collapse_km2_myr<0)
+        throw std::runtime_error("Invalid orogenic collapse diffusivity");
+    if (p.orogenic_collapse_km2_myr>0 && p.continental_max_thickness_m<=0)
+        throw std::runtime_error("Orogenic collapse requires a continental maximum thickness");
     if (!std::isfinite(p.arc_continent_fraction) || p.arc_continent_fraction<0 || p.arc_continent_fraction>1)
         throw std::runtime_error("Invalid arc continent fraction");
     if (!std::isfinite(p.subduction_erosion_ratio) || p.subduction_erosion_ratio<0)
@@ -31,7 +39,7 @@ void validate(const Parameters& p) {
         throw std::runtime_error("Continental growth per Gyr must be finite and at least -1");
     if ((p.arc_continent_fraction>0 || p.continental_growth_control) && p.continental_min_thickness_m<=0)
         throw std::runtime_error("Arc continent and continental growth require a continental minimum thickness");
-    if (!p.enabled && (p.continental_min_thickness_m>0 || p.arc_continent_fraction>0
+    if (!p.enabled && (p.continental_min_thickness_m>0 || p.continental_max_thickness_m>0 || p.arc_continent_fraction>0
         || p.subduction_erosion_ratio>0 || p.continental_growth_control))
         throw std::runtime_error("Continental growth processes require active margins");
 }
