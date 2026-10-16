@@ -72,16 +72,25 @@ reads its parent's arrays from the same run's directory, or from --parent-run LA
   band.cut_parent_cells parent cells; on the warped coordinates with the oriented bank, so the directionality is
   the parent's; the ridged share split as mix(whole) - mix(whole - band); the sandbox's amplitude law with the
   stability damp; hardness, uplift, runoff, ELA and provinces evaluated as functions of position by procedural();
-  no base, sea floor or uplands: they are in the parent) + the sloped fill of the new pits (the parent's lakes
-  kept) -> the exact projection of the whole start onto the parent's cell means (nesting.project_bounded: one shift
-  per parent cell on its movable children, land never below projection.land_floor_m, sea never above
-  projection.sea_ceiling_m; the outer sea ring and the pinned ring fixed) -> the physics for the tail of the one
-  history from physics.levels[k].from_myr with the level's diffusivity, K and landslide threshold
-  (physics.levels[k]; used only with nesting on), the pinned ring at the parent's prolonged heights, the parent's
+  no base, sea floor or uplands: they are in the parent; the relief band and the coast displacement fade to 0 within
+  one parent cell of the parent's prolonged shore) + the sloped fill of the new pits (the parent's lakes kept); the
+  start's sea only under the parent's sea and its coastal parent cells (children of other parent land cells stay
+  land; those below projection.land_floor_m are raised to it) -> the exact projection of the whole start onto the
+  parent's cell means (nesting.project_bounded: one shift per parent cell on its movable children, land never below
+  projection.land_floor_m, sea never above projection.sea_ceiling_m, no child rising above its bracketing parents'
+  maximum, the rest of a block's departure forced over its children (flips counted) but never more than
+  projection.spike_clip_m above that maximum (clipped blocks counted, not exact); the outer sea ring and the
+  pinned ring fixed) -> the physics for the tail of the one history from physics.levels[k].from_myr (k 64 from
+  20 Myr: the Quaternary only, the Neogene's valleys come from the parent; k 256 from 12.6; the level's sea and ice
+  histories start at its own start) with the level's diffusivity, K and landslide threshold (physics.levels[k];
+  on unnested windows too with physics.use_levels), the pinned ring at the parent's prolonged heights, the parent's
   rivers entering as runoff on the first movable cell inside the pinned ring (nesting.inflow_raster; the exe has
   no inflow option, so the discharge goes through the runoff raster, and the ELA there is held at the cell's
-  start height so the inflow makes no glacier or ablation sink) -> the sea restored and the post-physics steps as
-  today (the micro texture with the level's band only, the filter, the lakes). Each nested domain writes
+  start height so the inflow makes no glacier or ablation sink) -> the sea restored, the micro texture with the
+  level's band only -> with nesting.project_after_physics (default true) the physics surface projected again onto
+  the parent's cell means with the same bounds, moving only land that is no channel, lake or ring cell
+  (nested_project_after: the contract's "keep the parent's cell means" on the final map) -> saved as
+  -elevation-physics.npy (what a child reads), then the filter and the lakes as today. Each nested domain writes
   <domain>-nest.json (departures before and after the projection and after the physics, the inflow and its
   continuity) and <domain>-start-relief.png; with nesting on every domain also saves <domain>-sea.npy and
   <domain>-discharge.npy for its children.
@@ -89,6 +98,8 @@ reads its parent's arrays from the same run's directory, or from --parent-run LA
   replace (the uplands and the depression fill change the hypsometry on purpose), so L1 does not keep L0's cell
   means; it is the first level the sandbox owns. After roadmap T2 the split becomes the multiscale plan's own:
   rule A the global stages, rule B the regional levels.
+- Open (for the user, 2026-10-16): the global domain's physics (K 3000 on 19.5 km cells, 22.6 Myr) lowers G-coast's
+  box from a 2562 m procedural mean to 850 m, and every nested window inherits that denudation.
 
   uv run python scripts/sandbox/terrain_sandbox.py --label try1 [--config FILE] [--set group.key=value ...]
       [--domains global,A,B] [--no-physics] [--parent-run LABEL]
@@ -206,8 +217,11 @@ def make_domains(config, bundle, names):
             k, m = spec['scale'], spec['margin']
             columns, rows = (c1 - c0 + 1 + 2 * m) * k, (r1 - r0 + 1 + 2 * m) * k
             crop = (m * k, rows - m * k, m * k, columns - m * k)
+            physics = config['physics']['window']
+            if config['physics'].get('use_levels', False):  # the level's kappa, K and threshold on an unnested window
+                physics = {**physics, **level_physics(config, k)}
             domains.append(Domain(name, columns, rows, c0 - m, r0 - m, k, W, H, radius_km, crop=crop,
-                                  exaggeration=spec.get('exaggeration', 3.0), physics=config['physics']['window']))
+                                  exaggeration=spec.get('exaggeration', 3.0), physics=physics))
     return domains
 
 
@@ -230,14 +244,17 @@ def domain_depth(config, name):
 
 def level_physics(config, k):
     """The physics values of the level with k cells per world cell (physics.levels[str(k)]): diffusivity, k and the
-    landslide threshold go to the domain's physics group; step_myr and from_myr to its history (level_config)."""
+    landslide threshold go to the domain's physics group (a nested domain's always, an unnested window's with
+    physics.use_levels); step_myr and from_myr to a nested domain's history only (level_config)."""
     level = config['physics'].get('levels', {}).get(str(k), {})
     return {key: level[key] for key in ('diffusivity_km2_myr', 'k', 'threshold_slope') if key in level}
 
 
 def level_config(config, domain):
     """The config a nested level's physics runs with: the tail of the one history from physics.levels[k].from_myr
-    (phases shifted to start at 0, the earlier ones dropped) and, with step_myr, no phase step longer than it."""
+    (phases shifted to start at 0, the earlier ones dropped) and, with step_myr, no phase step longer than it. The
+    sea and ice histories are built from these phases, so the level's ice history starts at its own start (a phase
+    cut by from_myr keeps its ice and sea level from the level's time 0)."""
     level = config['physics'].get('levels', {}).get(str(domain.k), {})
     start, step = float(level.get('from_myr', 0.0)), level.get('step_myr')
     if start <= 0.0 and step is None:
@@ -332,7 +349,18 @@ def nested_start(domain, world, config, parent, seed):
     started = time.perf_counter()
     prolonged = nesting.prolong(P, f, pr, pc, prow, pcol)
     under_sea = nesting.nearest(parent['sea'], f, pr, pc, prow, pcol)
-    sea0 = nesting.flood(prolonged <= 0.0, under_sea & (prolonged <= 0.0))
+    # Children of a parent land cell stay land unless the parent's sea reaches them: sea only under the parent's
+    # sea and its 8-neighbouring (coastal) parent cells, flooded from under the parent's sea.
+    reached = parent['sea'] | ndimage.binary_dilation(parent['sea'], structure=np.ones((3, 3)))
+    allowed = nesting.nearest(reached, f, pr, pc, prow, pcol)
+    sea0 = nesting.flood((prolonged <= 0.0) & allowed, under_sea & (prolonged <= 0.0))
+    # The level's relief band and the coast displacement fade to 0 within one parent cell of the parent's shore
+    # (the prolonged shore), so the detail does not move the coast across parent cells.
+    if sea0.any() and not sea0.all():
+        shore = np.where(sea0, ndimage.distance_transform_edt(sea0), ndimage.distance_transform_edt(~sea0))
+        fade = smoothstep(shore / f, 0.0, 1.0)
+    else:
+        fade = np.ones(prolonged.shape)
     timings['prolong'] = time.perf_counter() - started
 
     # The fields that are functions of position (rock, uplift, rain, provinces, warp, the relief's amplitude and
@@ -362,7 +390,7 @@ def nested_start(domain, world, config, parent, seed):
     whole = stages['relief_noise']
     part = oriented_fbm(x, y, theta, relief_alignment, {**relief, **structure, **band}, seed + 20, domain)
     mix = lambda n: (1 - relief['ridged']) * n + relief['ridged'] * ridged(n) / 0.6  # noqa: E731
-    detail = fields['amplitude'] * (mix(whole) - mix(whole - part))
+    detail = fields['amplitude'] * (mix(whole) - mix(whole - part)) * fade
     surface = prolonged + detail
     coast = config['coast']
     if coast['amplitude_m'] > 0:
@@ -370,19 +398,26 @@ def nested_start(domain, world, config, parent, seed):
         (xp, yp) = fields['plain']
         xc, yc = (x, y) if fraction == 1.0 else (xp + fraction * (x - xp), yp + fraction * (y - yp))
         surface = surface + coast_detail(domain, fields['base'], surface, xc, yc, fields['amplitude'],
-                                         fields['erodibility'], {**coast, **band}, seed)
+                                         fields['erodibility'], {**coast, **band}, seed, displacement_fade=fade)
     land0 = ~sea0
     info['detail_rms_m'] = {'relief_land': float(np.sqrt((detail[land0] ** 2).mean())) if land0.any() else 0.0,
                             'total_land': float(np.sqrt(((surface - prolonged)[land0] ** 2).mean())) if land0.any() else 0.0}
     timings['detail'] = time.perf_counter() - started
 
     # Sea, the outlet ring and the pinned ring (nested_window.py's step 5).
-    sea = nesting.flood(surface <= 0.0, sea0)
+    spec = config['nesting'].get('projection', {})
+    land_floor = spec.get('land_floor_m', 1.0)
+    sea = nesting.flood((surface <= 0.0) & allowed, sea0)
     outer = nesting.ring(surface.shape, 1)
     pinned = nesting.ring(surface.shape, 2) & ~outer & ~sea
     surface = np.where(pinned, prolonged, surface)
     surface = np.where(outer, np.minimum(prolonged, -1.0), surface)
     sea |= outer
+    # Land children of a parent land cell below the land floor (the detail's troughs) are raised to it, so the
+    # physics' sea flood does not take them; a parent cell below 0 m (an inland basin) keeps its children.
+    low = ~sea & ~pinned & (surface < land_floor) & nesting.nearest(P > 0.0, f, pr, pc, prow, pcol)
+    surface = np.where(low, land_floor, surface)
+    info['start_land_raised_to_floor'] = int(np.count_nonzero(low))
 
     # The new pits filled (sloped, as relief.fill_depressions), the parent's lakes kept.
     started = time.perf_counter()
@@ -402,10 +437,14 @@ def nested_start(domain, world, config, parent, seed):
     # sea_ceiling_m; nesting.project_bounded).
     targets = P[pr:pr + prow, pc:pc + pcol]
     movable = ~pinned & ~outer
-    spec = config['nesting'].get('projection', {})
     before = nesting.departure(surface, targets, movable, f, inner)
-    surface, stats = nesting.project_bounded(surface, targets, movable, ~sea, f, spec.get('land_floor_m', 1.0),
-                                             spec.get('sea_ceiling_m', -1.0))
+    # No child rises above its bracketing parents' maximum (the rest of a block's departure forced over all its
+    # children, flipping sea children to land), and none more than spike_clip_m above it (the block's departure
+    # clipped there: such a block is not exact; counted).
+    _, top = nesting.bracket_extremes(P, f, pr, pc, prow, pcol)
+    surface, stats, clipped = nesting.project_bounded(surface, targets, movable, ~sea, f, land_floor,
+                                                      spec.get('sea_ceiling_m', -1.0), cap=top,
+                                                      clip=top + spec.get('spike_clip_m', 300.0))
     # A forced block (caps exhausted: e.g. a land parent cell whose children the prolongation drew as sea) flips
     # children; the sea is flooded again from the sea that stayed at or below 0 m.
     flipped = nesting.flood(surface <= 0.0, sea & (surface <= 0.0)) | outer
@@ -416,6 +455,8 @@ def nested_start(domain, world, config, parent, seed):
     info['start_departure_m'] = {'before_projection': before,
                                  'after_projection_kept': nesting.departure(surface, targets, movable, f, inner),
                                  'after_projection_all': nesting.departure(surface, targets, movable, f, everywhere),
+                                 'after_projection_unclipped': nesting.departure(surface, targets, movable & ~clipped, f,
+                                                                                 everywhere),
                                  'projection': stats,
                                  'prolongation': nesting.departure(prolonged, targets, movable, f, inner)}
 
@@ -434,10 +475,48 @@ def nested_start(domain, world, config, parent, seed):
                   ela_fixed=None if cells is None or not cells.any() else (cells, surface))
     stages['filter'] = unfilled  # save_extra's fill_m: what the fill added
     stages['fill'] = surface
-    fields['nest'] = {'targets': targets, 'inner': inner, 'factor': f, 'prolonged': prolonged,
+    fields['nest'] = {'targets': targets, 'inner': inner, 'factor': f, 'prolonged': prolonged, 'top': top,
+                      'outer': outer,
                       'parent_discharge': None if parent['discharge'] is None else
                       parent['discharge'][pr:pr + prow, pc:pc + pcol]}
     return fields, timings, info
+
+
+def nested_project_after(domain, fields, elevation, sea, discharge, config):
+    """The contract's "keep the parent's cell means" on the final map (nesting.project_after_physics): the child's
+    physics surface (sea restored, micro texture on) projected onto the parent's physics-surface cell means with the
+    start's bounds (land floor, the bracketing parents' maximum, the spike clip), moving only the land children that
+    are no channel (discharge below the window river threshold), no lake and not in the rings: the sea, the lakes
+    and the channels keep the physics' heights, the interfluves take the correction. Returns the surface and the
+    report (correction max and rms, the block-mean check on the projected surface)."""
+    nest = fields['nest']
+    f, targets = nest['factor'], nest['targets']
+    spec = config['nesting'].get('projection', {})
+    lakes = config.get('lakes', {'enabled': False})
+    lake = np.isfinite(find_lakes(domain, elevation, sea, lakes)) if lakes['enabled'] else np.zeros_like(sea)
+    channel = discharge >= river_threshold(domain, config.get('rivers', {'min_discharge_m3_s': 30.0}))
+    movable = ~sea & ~lake & ~channel & ~fields['pinned'] & ~nest['outer']
+    projected, stats, clipped = nesting.project_bounded(
+        elevation, targets, movable, ~sea, f, spec.get('land_floor_m', 1.0), spec.get('sea_ceiling_m', -1.0),
+        cap=nest['top'], clip=nest['top'] + spec.get('spike_clip_m', 300.0))
+    correction = (projected - elevation)[movable]
+    everywhere = (slice(0, targets.shape[0]), slice(0, targets.shape[1]))
+    gap = np.abs(nesting.block_mean(projected, f) - targets)
+    has_movable = nesting.block_mean(movable.astype(float), f) > 0
+    exact = has_movable & ~(nesting.block_mean(clipped.astype(float), f) > 0)
+    report = {'correction_max_m': float(np.abs(correction).max()) if correction.size else 0.0,
+              'correction_rms_m': float(np.sqrt((correction ** 2).mean())) if correction.size else 0.0,
+              'correction_mean_m': float(correction.mean()) if correction.size else 0.0,
+              'movable_share': float(movable.mean()), 'channel_cells': int(channel.sum()), 'lake_cells': int(lake.sum()),
+              'block_mean_check_m': {'max_abs_exact_blocks': float(gap[exact].max()) if exact.any() else 0.0,
+                                     'kept_max_abs_exact_blocks': float(gap[nest['inner']][exact[nest['inner']]].max())
+                                     if exact[nest['inner']].any() else 0.0,
+                                     'blocks_without_movable_child': int(np.count_nonzero(~has_movable)),
+                                     'max_abs_all_blocks': float(gap.max()),
+                                     'rms_all_blocks': float(np.sqrt((gap ** 2).mean()))},
+              'projection': stats}
+    del everywhere
+    return projected, report
 
 
 def nested_after_physics(domain, fields, elevation, sea, discharge, info):
@@ -832,7 +911,7 @@ def micro_texture(domain, surface, sea_seed, x, y, x0, y0, ratio, spec, seed, op
     return moved + vertical - surface
 
 
-def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed):
+def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed, displacement_fade=None):
     """Relief concentrated around the sea level, so the shoreline is a fractal line rather than a contour of
     smooth fields: a rough fBm (gain near 0.6 keeps the fine octaves strong, a ridged share makes headlands
     and skerries) times exp(-(surface / band_m)^2) on the surface so far. Its amplitude follows the terrain:
@@ -869,6 +948,8 @@ def coast_detail(domain, base, surface, x, y, relief_m, erodibility, spec, seed)
         warp_spec = {**spec, 'wavelength_km': spec['warp_wavelength_km'], 'octaves': spec['warp_octaves']}
         wide = np.exp(-(surface / (2.0 * spec['band_m'])) ** 2)
         scale = spec['warp_km'] / domain.fine_km * wide * strength / spec['amplitude_m']
+        if displacement_fade is not None:  # a nested level: none near the parent's shore (nested_start)
+            scale = scale * displacement_fade
         dx = scale * fbm(x, y, warp_spec, seed + 71, domain)
         dy = scale * fbm(x, y, warp_spec, seed + 72, domain)
         rows, columns = np.indices(surface.shape, dtype=float)
@@ -2148,6 +2229,11 @@ def main():
                 fields['sea'] = sea
             spec = config['filter']
             extra = []
+            if nest_info is not None and config['nesting'].get('project_after_physics', True):
+                started_projection = time.perf_counter()
+                elevation, nest_info['after_physics_projection'] = nested_project_after(domain, fields, elevation, sea,
+                                                                                        discharge, config)
+                timing['projection_after_physics'] = time.perf_counter() - started_projection
             np.save(directory / f'{domain.name}-elevation-physics.npy', crop(domain, elevation).astype(np.float32))
             if nesting_on(config):  # a nested child's parent sea
                 np.save(directory / f'{domain.name}-sea.npy', crop(domain, sea))
@@ -2212,7 +2298,11 @@ def main():
             (directory / f'{domain.name}-nest.json').write_text(json.dumps(nest_info, indent=1) + '\n', encoding='utf-8')
             start = nest_info['start_departure_m']
             timing['nest'] = {'parent': nest_info['parent'], 'factor': nest_info['factor'],
-                              'start_departure_max_m': start['after_projection_all']['max_abs'],
+                              'start_departure_max_m': start['after_projection_unclipped']['max_abs'],
+                              'start_raised_to_floor': nest_info['start_land_raised_to_floor'],
+                              'after_physics_projection': {
+                                  key: value for key, value in nest_info.get('after_physics_projection', {}).items()
+                                  if key != 'projection'},
                               'before_projection_max_m': start['before_projection']['max_abs'],
                               'projection': start['projection'],
                               'inflow_entries': nest_info['inflow']['placed'],

@@ -101,15 +101,25 @@ def from_blocks(blocks, factor, shape):
     return blocks.reshape(rows // factor, columns // factor, factor, factor).transpose(0, 2, 1, 3).reshape(shape)
 
 
-def project_bounded(values, targets, movable, land, factor, land_floor_m, sea_ceiling_m):
+def bracket_extremes(parent, factor, row0, col0, rows, columns):
+    """The least and the greatest of the 2 x 2 bracketing parents of every child (the range prolong clamps to)."""
+    _, r0, r1 = catmull_rom_matrix(rows, factor, row0, parent.shape[0])
+    _, c0, c1 = catmull_rom_matrix(columns, factor, col0, parent.shape[1])
+    corners = [parent[np.ix_(r, c)] for r in (r0, r1) for c in (c0, c1)]
+    return np.minimum.reduce(corners), np.maximum.reduce(corners)
+
+
+def project_bounded(values, targets, movable, land, factor, land_floor_m, sea_ceiling_m, cap=None, clip=None):
     """Values with their mean over every parent cell set to `targets` exactly (multiscale plan section 3, S2.3's
     "bounds, not weights"): the same shift on every movable child of a parent cell (land and sea alike), each child
     capped by its headroom in the shift's direction: a land child never goes below land_floor_m, a sea child never
-    above sea_ceiling_m (upward on land and downward at sea are unbounded), so no child changes class. The shift is
-    found by water-filling inside the block (children with less headroom stop at it, the rest share the remainder).
-    When the caps exhaust (rare: a block whose land would have to go below the sea), the remainder is spread evenly
-    over the movable children ignoring the caps (counted as forced). Blocks without a movable child keep their
-    departure. Returns the values and a dict of counts."""
+    above sea_ceiling_m, and with `cap` (per child, e.g. the bracketing parents' maximum) no child rises above it
+    (without: upward on land and downward at sea are unbounded). The shift is found by water-filling inside the
+    block (children with less headroom stop at it, the rest share the remainder). When the caps exhaust, the
+    remainder is spread evenly over the movable children ignoring the caps (counted as forced; it may flip a child's
+    class); with `clip` (per child) an upward remainder stops where a child would rise above its clip, and the block
+    keeps the rest of its departure (counted as clipped: those blocks are not exact). Blocks without a movable child
+    keep their departure. Returns the values and a dict of counts."""
     shape = values.shape
     target = np.asarray(targets, dtype=np.float64).ravel()
     v = to_blocks(np.asarray(values, dtype=np.float64), factor)
@@ -120,7 +130,10 @@ def project_bounded(values, targets, movable, land, factor, land_floor_m, sea_ce
     need = np.abs(departure) * n  # the sum of the shifts' magnitudes
     up = departure > 0
     big = 1e12
-    headroom_up = np.where(is_land, big, np.maximum(sea_ceiling_m - v, 0.0))
+    ceiling = np.where(is_land, big, sea_ceiling_m)
+    if cap is not None:
+        ceiling = np.minimum(ceiling, to_blocks(np.asarray(cap, dtype=np.float64), factor))
+    headroom_up = np.maximum(ceiling - v, 0.0)
     headroom_down = np.where(is_land, np.maximum(v - land_floor_m, 0.0), big)
     headroom = np.where(up[:, None], headroom_up, headroom_down)
     headroom = np.where(move, headroom, 0.0)
@@ -137,16 +150,24 @@ def project_bounded(values, targets, movable, land, factor, land_floor_m, sea_ce
     count = move.sum(axis=1)
     forced = (first >= n) & (count > 0) & (need > 0)
     remainder = np.where(forced, need - headroom.sum(axis=1), 0.0) / np.maximum(count, 1)
+    clipped = np.zeros_like(forced)
+    if clip is not None:
+        room = np.where(move, to_blocks(np.asarray(clip, dtype=np.float64), factor) - (v + moved), big)
+        allowed = np.maximum(room.min(axis=1), 0.0)
+        clipped = forced & up & (remainder > allowed)
+        remainder = np.where(clipped, allowed, remainder)
     moved = moved + np.where(move, remainder[:, None], 0.0)
     signed = np.where(up[:, None], moved, -moved)
     signed = np.where(move & (count > 0)[:, None], signed, 0.0)
     out = from_blocks(v + signed, factor, shape)
+    residual = np.abs(target - (v + signed).mean(axis=1))
     stats = {'blocks': int(v.shape[0]), 'blocks_without_movable_child': int(np.count_nonzero(count == 0)),
-             'forced_blocks': int(np.count_nonzero(forced)),
+             'forced_blocks': int(np.count_nonzero(forced)), 'clipped_blocks': int(np.count_nonzero(clipped)),
+             'clipped_residual_max_m': float(residual[clipped].max()) if clipped.any() else 0.0,
              'sea_children_moved': int(np.count_nonzero(move & ~is_land & (np.abs(signed) > 1e-9))),
              'largest_shift_m': float(np.abs(signed).max()) if signed.size else 0.0,
              'shift_p99_m': float(np.percentile(np.abs(signed[move]), 99)) if move.any() else 0.0}
-    return out, stats
+    return out, stats, from_blocks(np.repeat(clipped[:, None], n, axis=1), factor, shape)
 
 
 def departure(values, parent, movable, factor, inner):
