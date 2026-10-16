@@ -1,0 +1,38 @@
+{
+ "nest": {
+  "detail": {
+   "longest_parent_cells": 2.0,
+   "octaves": 3,
+   "lacunarity": 2.0,
+   "gain": 0.52,
+   "min_cells": 2.0,
+   "ridged": 0.6,
+   "relief_fraction": 0.052,
+   "relief_window_parent_cells": 3,
+   "floor_m": 11.8,
+   "normalise": true,
+   "smooth_passes": 6,
+   "relaxation": 1.4,
+   "seed_offset": 300,
+   "source": "Earth calibration, not forcing: scripts/sandbox/glo30_residual.py (refs/processed/earth-atlas/glo30-residual.json) on GLO-30 glo30-sognefjord-98km and glo30-patagonia-98km (101.8 x 63.6 m pixels, 6 x 6 boxes = the parent's 611 x 382 m cells). The 100 m surface minus its prolonged box means, less its land mean per box, on land: rms 29.3 m (Sognefjord), 35.6 m (Patagonia); against the prolonged 3 x 3 local relief of the box means, rms = 0.052 relief + 11.8 m pooled (R^2 0.93; 0.048 + 10.8 m R^2 0.98 and 0.054 + 12.9 m R^2 0.87 per window; the slope x cell law fits worse, R^2 0.89). Spectrum slope of that detail (log power vs log wavelength, 1.2 to 0.25 km, land tiles): 3.66 and 3.74 (the surface's: 4.70 and 4.80); this fBm with ridged 0.6, 3 octaves from 1.22 km, parent means removed, has 3.76 at gain 0.5 and 3.57 at 0.56, so gain 0.52. With normalise the amplitude is the detail's rms. ridged 0.6 is not calibrated."
+  },
+  "project_means": true,
+  "physics": {
+   "step_myr": 0.025,
+   "diffusivity_km2_myr": 0.005,
+   "threshold_slope": 0.84
+  },
+  "pulse": {
+   "lgm_myr": 0.1,
+   "sea_m": -120,
+   "glacial_ratio": 20.0,
+   "lgm_step_myr": 0.01
+  },
+  "lakes": {
+   "min_depth_m": 1.0,
+   "min_cells": 16
+  },
+  "fill_depressions": true,
+  "exaggeration": 2.0
+ }
+}
