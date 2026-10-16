@@ -81,7 +81,8 @@ TEST(TectonicColumns, LithosphericRootLowersTheSlopeAndZeroKeepsTheCrustOnlyColu
 
 // The root's delamination cap (continental_root_max_thickness_m): above the cap the
 // root stops growing and the crust-only slope 500 / 3300 returns; seed inverts it
-// piecewise; cap 0 is the uncapped expression bit for bit.
+// piecewise; cap 0 is the uncapped expression bit for bit. With a delamination width
+// the root's load falls to zero over the width instead; width 0 is the frozen cap.
 TEST(TectonicColumns, RootCapRestoresTheCrustOnlySlopeAboveIt) {
     constexpr double root = 246, cap = 50000;
     const double cap_z = (cap - reference_continent_m) * (500 - root) / mantle_density;
@@ -147,6 +148,73 @@ TEST(TectonicColumns, RootCapRestoresTheCrustOnlySlopeAboveIt) {
     EXPECT_NO_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, 0));
     EXPECT_NO_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, cap));
     EXPECT_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, 30000),
+                 std::runtime_error);
+
+    // Delamination ramp (continental_root_delamination_width_m): the root's load is full
+    // up to the cap, falls linearly to zero at cap + width, and the crust-only Airy height
+    // holds above; continuous, strictly increasing, inverted by seed().
+    constexpr double width = 10000;
+    const auto ramped = [&](double continent, double w, double r) {
+        Cell c; c.continental_area = 1; c.continent = continent;
+        return elevation_m(c, 1, r, cap, w);
+    };
+    const auto crust_only = [&](double continent) {
+        Cell c; c.continental_area = 1; c.continent = continent;
+        return elevation_m(c, 1, 0);
+    };
+    // Continuity at both ends: the frozen cap's height at the cap, no root at cap + width.
+    EXPECT_NEAR(ramped(cap, width, root), at(cap), 1e-9);
+    EXPECT_NEAR(ramped(cap, width, root), cap_z, 1e-9);
+    EXPECT_NEAR(ramped(cap + width, width, root), crust_only(cap + width), 1e-9);
+    EXPECT_EQ(ramped(cap + width + 1, width, root), crust_only(cap + width + 1));
+    EXPECT_NEAR(ramped(60000, width, root), 25000. * 500 / 3300, 1e-9); // 3788 m
+    EXPECT_NEAR(ramped(70000, width, root), 35000. * 500 / 3300, 1e-9); // 5303 m
+    EXPECT_NEAR(ramped(cap + width / 2, width, root), (500. * 20000 - root * .5 * 20000) / 3300, 1e-9);
+    const double mid_z = ramped(cap + width / 2, width, root), top_z = ramped(cap + width, width, root);
+    for (double z : {0., 500., cap_z, mid_z, top_z, 3000., 5000., 8000.}) {
+        const auto c = seed(z, true, 100, root, cap, width);
+        EXPECT_NEAR(elevation_m(c, 1, root, cap, width), z, 1e-9) << z;
+    }
+    EXPECT_NEAR(seed(cap_z, true, 100, root, cap, width).continent, cap, 1e-6);
+    EXPECT_NEAR(seed(mid_z, true, 100, root, cap, width).continent, cap + width / 2, 1e-6);
+    EXPECT_NEAR(seed(top_z, true, 100, root, cap, width).continent, cap + width, 1e-6);
+    EXPECT_NEAR(seed(-3500, true, 100, root, cap, width).continent, seed(-3500, true, 100, root, cap).continent, 1e-9);
+    // Strictly increasing through the ramp for every width and root: d(buoyancy)/dH =
+    // 500 - root (1 - (2H - cap - 35 km) / width) > 500 - root > 0 on (cap, cap + width).
+    for (double w : {1., 1000., width, 1e6}) for (double r : {root, 499.}) {
+        const double step = (w + 2000) / 2000;
+        double previous = ramped(cap - 1000, w, r);
+        for (double h = cap - 1000 + step; h <= cap + w + 1000; h += step) {
+            const double z = ramped(h, w, r);
+            ASSERT_GT(z, previous) << "width " << w << " root " << r << " h " << h;
+            previous = z;
+        }
+        for (double z : {0., 2000., 5000., 8000.})
+            EXPECT_NEAR(elevation_m(seed(z, true, 100, r, cap, w), 1, r, cap, w), z, 1e-8) << w << ' ' << r << ' ' << z;
+    }
+    // Mixed cells by area: the per-area thickness picks the factor.
+    Cell ramp_half = half; ramp_half.continent = .5 * (cap + width / 2); // factor 1/2
+    EXPECT_NEAR(elevation_m(ramp_half, 1, root, cap, width), expression(ramp_half, 1, root * .5, ramp_half.continent), 1e-9);
+    EXPECT_NEAR(elevation_m(half, 1, root, cap, width), uncapped(half, 1, 0), 1e-9); // 60 km per area: no root
+    EXPECT_NEAR(elevation_m(mixed, 1, root, cap, width), uncapped(mixed, 1, 0), 1e-9); // 61.2 km per area
+    Cell ghost; ghost.continent = 1e-3; ghost.ocean = 7100; ghost.oceanic_area = 1; ghost.oceanic_age_volume = ghost.ocean * 80;
+    for (double thermal : {0., 1.})
+        EXPECT_EQ(elevation_m(ghost, thermal, root, cap, width), elevation_m(ghost, thermal, root, cap));
+    // Width 0: the frozen cap's expression bit for bit (mixed, 70 km and half cells).
+    for (const auto& c : {mixed, thick, half}) for (double thermal : {0., 1.}) {
+        EXPECT_EQ(elevation_m(c, thermal, root, cap, 0),
+                  expression(c, thermal, root, std::min(c.continent, cap * c.continental_area)));
+        EXPECT_EQ(elevation_m(c, thermal, root, cap, 0), elevation_m(c, thermal, root, cap));
+    }
+    for (double z : {-3500., 0., 1500., 8000.})
+        EXPECT_EQ(seed(z, true, 100, root, cap, 0).continent, seed(z, true, 100, root, cap).continent);
+    // Validation: 0, or finite and positive with a cap.
+    EXPECT_THROW(seed(0, true, 100, root, cap, -1), std::runtime_error);
+    EXPECT_THROW(seed(0, true, 100, root, 0, width), std::runtime_error);
+    EXPECT_THROW(seed(0, true, 100, root, cap, std::numeric_limits<double>::quiet_NaN()), std::runtime_error);
+    EXPECT_THROW(seed(0, true, 100, root, cap, std::numeric_limits<double>::infinity()), std::runtime_error);
+    EXPECT_NO_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, cap, width));
+    EXPECT_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, 0, width),
                  std::runtime_error);
 }
 

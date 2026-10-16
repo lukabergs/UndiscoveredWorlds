@@ -240,6 +240,8 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.continental_root_kg_m3=parse_double(arg.c_str(),value);
     } else if (arg == "--continental-root-max-thickness-m") {
         scenario.continental_root_max_thickness_m=parse_double(arg.c_str(),value);
+    } else if (arg == "--continental-root-delamination-width-m") {
+        scenario.continental_root_delamination_width_m=parse_double(arg.c_str(),value);
     } else if (arg == "--continental-min-thickness-m") {
         scenario.margin_processes.continental_min_thickness_m=parse_double(arg.c_str(),value);
     } else if (arg == "--continental-max-thickness-m") {
@@ -355,6 +357,7 @@ void printtectonicoptionsusage(std::ostream& out)
         "--continental-fraction",
         "--continental-root-kg-m3",
         "--continental-root-max-thickness-m",
+        "--continental-root-delamination-width-m",
         "--continental-min-thickness-m",
         "--continental-max-thickness-m",
         "--orogenic-collapse-km2-myr",

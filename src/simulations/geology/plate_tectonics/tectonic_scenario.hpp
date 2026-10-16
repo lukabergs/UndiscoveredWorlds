@@ -57,7 +57,20 @@ struct Scenario {
     // height (cap - 35 km) x 0.077, 1155 m at 50 km). Applied (area-weighted) to the
     // elevation and the seeded columns; the mountain force keeps the uncapped root scale.
     // Earth-like 50000; 0 (legacy) no cap; otherwise above reference_continent_m (35 km).
+    // With continental_root_delamination_width_m > 0 the root load is full up to this
+    // thickness and is then lost over the width (below).
     double continental_root_max_thickness_m = 0;
+    // Delamination of overthickened orogens, m: the mantle lithosphere under crust thicker
+    // than continental_root_max_thickness_m founders (Tibet, the Altiplano: 60-70 km of
+    // crust at 4-5 km), so the whole root's load falls linearly from full at the cap to
+    // zero at cap + width (per-area crust thickness, mixed cells by area), and above it
+    // the crust rebounds to the crust-only Airy height 0.1515 x (H - 35 km): 3.8 km at
+    // 60 km, 5.3 km at 70 km. The elevation stays continuous and rises with the crust for
+    // every width (the ramp is steeper than either slope); seed() inverts it. The mountain
+    // force keeps the uncapped root scale. Earth-like 10000 (no root at 60 km with the
+    // 50 km cap); 0 (legacy) keeps the frozen cap, the root stopped at the cap's
+    // thickness; a positive width requires a cap.
+    double continental_root_delamination_width_m = 0;
     bool sediment_load_feedback = false; // Include continental sediment in GPE and weak-crust redistribution.
     bool thermal_force_feedback = false; // Slab buoyancy follows advected thermal age, not chronological age.
     double world_width_km = 40000.0;

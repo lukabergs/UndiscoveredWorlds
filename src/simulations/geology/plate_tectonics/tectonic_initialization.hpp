@@ -9,6 +9,6 @@ std::vector<columns::Cell> terrain(uint32_t w, uint32_t h, double cell_m, double
     const std::vector<double>& elevations, const std::vector<double>& ages,
     const std::vector<uint32_t>& owners, const std::vector<transport::Displacement>& velocity,
     double thermal_strength, double margin_width_m = 0, double boundary_influence = 1, double root_kg_m3 = 0,
-    double root_max_thickness_m = 0);
+    double root_max_thickness_m = 0, double root_delamination_width_m = 0);
 }
 #endif

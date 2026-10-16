@@ -20,6 +20,13 @@ inline constexpr double reference_continent_m = 35000;
 // The root's delamination cap (scenario::Scenario::continental_root_max_thickness_m):
 // 0 (no cap) or a crust thickness above reference_continent_m.
 inline bool valid_root_max_thickness(double m) { return m == 0 || (std::isfinite(m) && m > reference_continent_m); }
+// The width of the root's delamination ramp
+// (scenario::Scenario::continental_root_delamination_width_m): 0 (the frozen cap), or
+// finite and positive with a cap. The ramp never makes the elevation decrease with the
+// crust (elevation_m), so no width needs a further bound.
+inline bool valid_root_delamination_width(double max_thickness_m, double width_m) {
+    return width_m == 0 || (std::isfinite(width_m) && width_m > 0 && max_thickness_m > 0);
+}
 inline constexpr double ridge_crust_m = 7000;
 inline constexpr double ridge_depth_m = 2500;
 // Coarse regional sediment transport, m²/Myr. Not a resolved river model.
@@ -87,22 +94,30 @@ double mass_per_area(const Cell& c);
 double felsic_mass_per_area(const Cell& c);
 // root_kg_m3: the lithospheric root load per metre of crust away from the reference
 // continent (scenario::Scenario::continental_root_kg_m3); 0 is the crust-only column.
-// root_max_thickness_m: the crust thickness above which the root stops growing
-// (delamination; 0 no cap); seed() inverts elevation_m() with it. mountain_force_n_m
-// keeps the uncapped (500 - root) / 500 scale: the cap does not enter the GPE estimate.
+// root_max_thickness_m: the crust thickness up to which the root load is full (0 no
+// cap). root_delamination_width_m: 0, the root stops growing above the cap (frozen);
+// positive, the root delaminates: its load (the whole root, root x (h - 35 km) per unit
+// continental area) falls linearly to zero between the cap and cap + width, h the
+// per-area crust thickness continent / continental_area (cells without continental
+// area carry no root load, as with the frozen cap). Over the ramp d(buoyancy)/dh =
+// (500 - root x (1 - (2h - cap - 35 km) / width)), at least 500 - root > 0: the
+// elevation rises with the crust for every width. seed() inverts elevation_m() with
+// both. mountain_force_n_m keeps the uncapped (500 - root) / 500 scale: neither the cap
+// nor the ramp enters the GPE estimate.
 double elevation_m(const Cell& c, double thermal_strength = 1, double root_kg_m3 = 0,
-                   double root_max_thickness_m = 0);
+                   double root_max_thickness_m = 0, double root_delamination_width_m = 0);
 double mountain_force_n_m(const Cell& c, bool sediment_feedback = false, double root_kg_m3 = 0);
 double age_myr(const Cell& c);
 Cell seed(double elevation_m, bool continental, double age_myr, double root_kg_m3 = 0,
-          double root_max_thickness_m = 0);
+          double root_max_thickness_m = 0, double root_delamination_width_m = 0);
 
 class Model {
 public:
     void initialize(uint32_t width, uint32_t height, double cell_m, std::vector<Cell> cells,
                     uint32_t transport_subdivision = 1, long seed = 0,
                     const ocean_relief::Parameters& relief = {}, bool preserve_initial = false,
-                    double root_kg_m3 = 0, double root_max_thickness_m = 0);
+                    double root_kg_m3 = 0, double root_max_thickness_m = 0,
+                    double root_delamination_width_m = 0);
     void advance(const std::vector<Displacement>& velocity, double dt_myr,
                  double erosion_strength, double thermal_strength, double submarine_erosion_ratio = 1,
                  const margins::Forcing* forcing = nullptr, const margins::Parameters& margins = {},
@@ -162,6 +177,7 @@ private:
     long seed_ = 0;
     double root_kg_m3_ = 0; // Lithospheric root load in every elevation of the model.
     double root_max_thickness_m_ = 0; // The root's delamination cap (0 none), with root_kg_m3_.
+    double root_delamination_width_m_ = 0; // The delamination ramp above the cap (0 frozen root).
     double time_myr_ = 0;
     std::vector<Cell> cells_;
     uint32_t subdivision_ = 1;
