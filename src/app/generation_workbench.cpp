@@ -943,7 +943,7 @@ bool runproceduralworldrecipe(planet& world, GenerationScratch& scratch, Generat
     RecipeRunOptions options;
     options.afterstep = [&](const RecipeRunResult&, const RecipeStepRecord& step, string&)
     {
-        if (step.stage == GenerationStageId::terraforming)
+        if (step.stage == GenerationStageId::terraforming || step.stage == GenerationStageId::sea_level)
         {
             ui.seaLevel = parameters.seaLevel;
             if (ui.terrainRenderPreset != WorkbenchTerrainRenderPreset::custom)
