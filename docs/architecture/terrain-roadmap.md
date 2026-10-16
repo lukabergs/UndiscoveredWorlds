@@ -192,4 +192,16 @@ Quantile gaps: v3 454 m, v7 411, v7b 405, v7d 315 (run 62 522, the base world 42
 | Id | Status | Commit | Duration |
 |---|---|---|---|
 | T1.0 (sea floor, first version) | done, awaiting the user's look (T1.1; page `out/scratch/sandbox/compare-sea-v3` with the atlas's sea-floor windows) | 522dbdb | |
-| T0 | done | (this commit) | from c351008 |
+| T0 | done | 2f201aa | 20 min (from c351008) |
+| T1.1 | sea floor v4 to v7d, the default; **paused** for the user's research | 276f137, 15d5550 | about 4 h with the user's looks |
+| T1.2 | sea-level history in the exe (`--sea-history`, `keep_shelf` incision) | 8d2f7f8, 276f137 | 1 h 35 min (worker and renders) |
+| T1.2b | the Earth-shaped history, on by default; per-cell totals | fe81f87, 41f3f54 | about 20 min of worker time |
+| T1.3 | lakes at the spill level, river widths, the final glacial pulse; then the lake trap and filled procedural pits (v18) | f1a849b, fe6b236, 0d77edf | about 3 h over two rounds |
+| T1.5a | GLO-30 data for the 100 m test | 7abbda0 | 5 min |
+| T1.5 | the 100 m nested test | open: next session | |
+| T1.6 | artefacts | open: next session (with the high-latitude striping noted for the sphere decision) | |
+| T1.9 (new) | v17 diagnosis; provinces, damped platforms, aggrading basins (v19); uplands lift 200 (v20) | b9b655d, 8dd879a, 46d49c1 | about 1 day with the user's looks |
+| T2.2a | `terrain.texturing`'s land term centred: the midlands | 4d8f4ce (`erosion-0099`) | 23 min |
+| T4.1 | engine survey | 801a45c | 7 min (surveyor) |
+| T4.12 | survey done (cba7842); `world.ocean.land_fraction` added, default off (ba63d91); the growth model's design in progress | | |
+| Ledger | `erosion-0100` covers the sandbox work 2f201aa..ba63d91 | 2994869 | |
