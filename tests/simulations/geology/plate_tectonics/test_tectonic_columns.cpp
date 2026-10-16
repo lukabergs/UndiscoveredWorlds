@@ -187,6 +187,16 @@ TEST(TectonicColumns, ContinentalFractionSeedsShelvesToTheRequestedArea) {
     for (const auto& c : legacy.getColumnModel().cells()) legacy_land += elevation_m(c) > 0;
     for (const auto& c : shelved.getColumnModel().cells()) shelved_land += elevation_m(c) > 0;
     EXPECT_NEAR(shelved_land, legacy_land, .01 * legacy.getColumnModel().cells().size());
+    // With the baseline's 2000 m margin taper the slope continues to -3500 m, so the
+    // continental area summed over the columns, not only the cells over one half, is f.
+    s.initial_margin_width_m = 2000;
+    lithosphere tapered(s);
+    double area = 0;
+    for (const auto& c : tapered.getColumnModel().cells()) area += c.continental_area;
+    EXPECT_NEAR(area / tapered.getColumnModel().cells().size(), .40, .01);
+    s.initial_margin_width_m = 0;
+    s.continental_fraction = .35; // 1 - sea_level: no shelf, a 2.5 km cliff at the coast
+    EXPECT_THROW(lithosphere{s}, std::runtime_error);
     s.continental_fraction = .30;
     EXPECT_THROW(lithosphere{s}, std::runtime_error);
 }

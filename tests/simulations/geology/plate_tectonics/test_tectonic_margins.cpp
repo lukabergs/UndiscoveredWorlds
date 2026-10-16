@@ -524,4 +524,34 @@ TEST(TectonicMargins, GrowthControllerHoldsTheReservoirTargetWithAShareInZeroToO
     EXPECT_DOUBLE_EQ(starved.arc_continent_fraction,1);
     EXPECT_GT(starved.continental_growth_shortfall_kg,0);
     EXPECT_LT(starved.felsic_kg,starved.initial_felsic_kg*(1+50*.15));
+    // Only the physical demand is booked (the sinks and the target's growth), never a lasting deficit again.
+    EXPECT_LE(starved.continental_growth_shortfall_kg,(starved.subducted_continent_kg+starved.subducted_sediment_kg
+        +starved.initial_felsic_kg*50*.15)*(1+1e-12));
+    // Feedback: 100 Myr of sinks without arcs leave the reservoir below its target; the
+    // controller then closes the gap over its 50 Myr response, booking no shortfall.
+    ContinentalMarginFixture f;
+    auto p=growth_parameters();p.sediment_subduction_fraction=.75;p.subduction_erosion_ratio=.07;
+    tectonics::columns::Model model;model.initialize(f.w,f.h,50000,f.cells);
+    tectonics::margins::Polarity polarity;
+    const auto step=[&] {
+        const auto forcing=tectonics::margins::forcing(f.w,f.h,50000,1,f.owners,model.cells(),f.velocity,p,&polarity);
+        model.advance(f.velocity,1,0,1,0,&forcing,p);
+    };
+    for (int i=0;i<100;++i) step();
+    const double initial=model.budget().initial_felsic_kg;
+    const double deficit=initial-model.budget().felsic_kg;
+    ASSERT_GT(deficit,1e-3*initial);
+    p.continental_growth_control=true;
+    double error=deficit;
+    for (int i=0;i<150;++i) {
+        step();
+        EXPECT_GE(model.budget().arc_continent_fraction,0);
+        EXPECT_LE(model.budget().arc_continent_fraction,1);
+        const double next=initial-model.budget().felsic_kg;
+        EXPECT_LE(std::abs(next),error*(1+1e-9));
+        error=std::abs(next);
+    }
+    EXPECT_LT(error,.25*deficit);
+    EXPECT_DOUBLE_EQ(model.budget().continental_growth_shortfall_kg,0);
+    EXPECT_LT(std::abs(model.budget().felsic_relative_residual),1e-11);
 }

@@ -150,6 +150,7 @@ void planet::resizegrids()
     geosphere_.tectonicplateidmap.resize(columns, rows);
     geosphere_.tectoniccrustagestepsmap.resize(columns, rows);
     geosphere_.tectoniccontinentalcrustmap.resize(columns, rows);
+    geosphere_.tectoniccontinentalareamap.resize(columns, rows);
     geosphere_.tectonicoceaniccrustmap.resize(columns, rows);
     geosphere_.tectonicsedimentmap.resize(columns, rows);
     geosphere_.tectonicriftdamagemap.resize(columns, rows);
@@ -226,6 +227,7 @@ void planet::cleartectonicprovenanceinternal()
     geosphere_.tectonicplateidmap.fill(0);
     geosphere_.tectoniccrustagestepsmap.fill(0);
     geosphere_.tectoniccontinentalcrustmap.fill(0);
+    geosphere_.tectoniccontinentalareamap.fill(0);
     geosphere_.tectonicoceaniccrustmap.fill(0);
     geosphere_.tectonicsedimentmap.fill(0);
     geosphere_.tectonicriftdamagemap.fill(0);
@@ -590,6 +592,7 @@ void planet::clear()
     geosphere_.tectonicplateidmap.fill(0);
     geosphere_.tectoniccrustagestepsmap.fill(0);
     geosphere_.tectoniccontinentalcrustmap.fill(0);
+    geosphere_.tectoniccontinentalareamap.fill(0);
     geosphere_.tectonicoceaniccrustmap.fill(0);
     geosphere_.tectonicsedimentmap.fill(0);
     geosphere_.tectonicriftdamagemap.fill(0);
@@ -755,6 +758,7 @@ void planet::shiftterrain(int offset)
     shift(geosphere_.tectonicplateidmap, offset);
     shift(geosphere_.tectoniccrustagestepsmap, offset);
     shift(geosphere_.tectoniccontinentalcrustmap, offset);
+    shift(geosphere_.tectoniccontinentalareamap, offset);
     shift(geosphere_.tectonicoceaniccrustmap, offset);
     shift(geosphere_.tectonicsedimentmap, offset);
     shift(geosphere_.tectonicriftdamagemap, offset);

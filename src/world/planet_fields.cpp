@@ -131,6 +131,7 @@ struct planetfieldaccess
         case FieldId::plate_id: return op.grid(id, world.geosphere_.tectonicplateidmap);
         case FieldId::crust_age_steps: return op.grid(id, world.geosphere_.tectoniccrustagestepsmap);
         case FieldId::continental_crust: return op.grid(id, world.geosphere_.tectoniccontinentalcrustmap);
+        case FieldId::continental_area: return op.grid(id, world.geosphere_.tectoniccontinentalareamap);
         case FieldId::oceanic_crust: return op.grid(id, world.geosphere_.tectonicoceaniccrustmap);
         case FieldId::sediment: return op.grid(id, world.geosphere_.tectonicsedimentmap);
         case FieldId::rift_damage: return op.grid(id, world.geosphere_.tectonicriftdamagemap);

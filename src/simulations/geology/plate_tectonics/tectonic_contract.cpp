@@ -24,6 +24,7 @@ Snapshot capture_snapshot(const lithosphere& litho) {
     snapshot.plume_influence = litho.getPlumeInfluenceMap();
     for (const auto& c : litho.getColumnModel().cells()) {
         snapshot.continental_crust_m.push_back(static_cast<float>(c.continent));
+        snapshot.continental_area.push_back(static_cast<float>(c.continental_area));
         snapshot.oceanic_crust_m.push_back(static_cast<float>(c.ocean));
         snapshot.sediment_m.push_back(static_cast<float>(c.sediment));
     }

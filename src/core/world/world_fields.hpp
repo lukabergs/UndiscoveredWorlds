@@ -117,6 +117,7 @@ enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile
     X(plate_id, geosphere, i32, grid, "id", "Plate index of the last tectonic update") \
     X(crust_age_steps, geosphere, i32, grid, "updates", "Crust age in tectonic updates") \
     X(continental_crust, geosphere, f32, grid, "m", "Continental crust of the isostatic column") \
+    X(continental_area, geosphere, f32, grid, "0..1", "Continental share of the isostatic column's area") \
     X(oceanic_crust, geosphere, f32, grid, "m", "Oceanic crust of the isostatic column") \
     X(sediment, geosphere, f32, grid, "m", "Sediment of the isostatic column") \
     X(rift_damage, geosphere, f32, grid, "0..1", "Advected rift damage") \

@@ -154,6 +154,7 @@ struct Snapshot {
     tectonics::columns::Budget column_budget;
     tectonics::topology::Diagnostics topology_diagnostics;
     std::vector<float> continental_crust_m, oceanic_crust_m, sediment_m;
+    std::vector<float> continental_area; // The column's continental share of its area, 0..1; optional in historical bundles.
     std::vector<float> rift_damage; // Advected incipient fracture damage, 0..1; optional in historical bundles.
     std::vector<float> plume_influence; // 0..1 proximity to an active mantle plume; empty when plumes are off.
 

@@ -515,6 +515,7 @@ void write_snapshot_record(std::ostream& output, const tectonics::contract::Snap
         output << "  \"files\": {\n";
         if (budget.enabled) {
             output << "    \"continental_crust_m\": \"continental_crust_m.f32\",\n";
+            output << "    \"continental_area\": \"continental_area.f32\",\n";
             output << "    \"oceanic_crust_m\": \"oceanic_crust_m.f32\",\n";
             output << "    \"sediment_m\": \"sediment_m.f32\",\n";
             output << "    \"rift_damage\": \"rift_damage.f32\",\n";
@@ -550,6 +551,7 @@ void write_snapshot_record(std::ostream& output, const tectonics::contract::Snap
         output << "  \"hashes\": {\n";
         if (budget.enabled) {
             output << "    \"continental_crust_m\": \"" << fnv1a_hash(snapshot.continental_crust_m) << "\",\n";
+            output << "    \"continental_area\": \"" << fnv1a_hash(snapshot.continental_area) << "\",\n";
             output << "    \"oceanic_crust_m\": \"" << fnv1a_hash(snapshot.oceanic_crust_m) << "\",\n";
             output << "    \"sediment_m\": \"" << fnv1a_hash(snapshot.sediment_m) << "\",\n";
             output << "    \"rift_damage\": \"" << fnv1a_hash(snapshot.rift_damage) << "\",\n";
@@ -787,6 +789,7 @@ void write_snapshot_bundle(const fs::path& output_dir, const tectonics::contract
     write_binary_file(output_dir / "crust_thickness.f32", snapshot.crust_thickness);
     if (snapshot.column_budget.enabled) {
         write_binary_file(output_dir / "continental_crust_m.f32", snapshot.continental_crust_m);
+        write_binary_file(output_dir / "continental_area.f32", snapshot.continental_area);
         write_binary_file(output_dir / "oceanic_crust_m.f32", snapshot.oceanic_crust_m);
         write_binary_file(output_dir / "sediment_m.f32", snapshot.sediment_m);
         write_binary_file(output_dir / "rift_damage.f32", snapshot.rift_damage);
@@ -899,6 +902,8 @@ LoadedSnapshotBundle load_snapshot_bundle(const fs::path& input_dir) {
         bundle.snapshot.continental_crust_m = read_binary_file<float>(input_dir / "continental_crust_m.f32", cell_count);
         bundle.snapshot.oceanic_crust_m = read_binary_file<float>(input_dir / "oceanic_crust_m.f32", cell_count);
         bundle.snapshot.sediment_m = read_binary_file<float>(input_dir / "sediment_m.f32", cell_count);
+        if (find_optional_key_after(manifest, "continental_area", 0) != std::string::npos)
+            bundle.snapshot.continental_area = read_binary_file<float>(input_dir / "continental_area.f32", cell_count);
         if (find_optional_key_after(manifest, "rift_damage", 0) != std::string::npos)
             bundle.snapshot.rift_damage = read_binary_file<float>(input_dir / "rift_damage.f32", cell_count);
         auto& budget = bundle.snapshot.column_budget;

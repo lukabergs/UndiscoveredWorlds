@@ -405,7 +405,7 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
             const std::size_t index = grid.nativeIndex(x, y);
             world.settectonicsnapshotcell(x, y, snapshot.heightmap[index], static_cast<int>(snapshot.plate_id[index]),
                 static_cast<int>(snapshot.crust_age_steps[index]), cellvalue(snapshot.continental_crust_m, index),
-                cellvalue(snapshot.oceanic_crust_m, index), cellvalue(snapshot.sediment_m, index),
+                cellvalue(snapshot.continental_area, index), cellvalue(snapshot.oceanic_crust_m, index), cellvalue(snapshot.sediment_m, index),
                 cellvalue(snapshot.rift_damage, index), cellvalue(snapshot.plume_influence, index));
         }
     }

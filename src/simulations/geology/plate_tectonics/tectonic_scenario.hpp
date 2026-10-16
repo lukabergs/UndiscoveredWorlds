@@ -38,8 +38,9 @@ struct Scenario {
     double initial_margin_width_m = 0; // Smooth continental/oceanic mixture around -2500 m; preserves seeded elevation.
     // Share of the surface seeded as continental crust (0: the legacy seeding, where
     // every column above -2500 m is continental). Above 0 the ocean side between the
-    // land and this share is a shelf (0 to -200 m) and a slope to -2500 m; beyond it the
-    // deep floor. At least 1 - sea_level; requires boundary-conditioned terrain.
+    // land and this share is a shelf (0 to -200 m) and a slope crossing -2500 m at its
+    // edge and reaching -(2500 + initial_margin_width_m / 2) m; beyond it the deep floor.
+    // At least 1 - sea_level + 0.01; requires boundary-conditioned terrain.
     double continental_fraction = 0;
     bool sediment_load_feedback = false; // Include continental sediment in GPE and weak-crust redistribution.
     bool thermal_force_feedback = false; // Slab buoyancy follows advected thermal age, not chronological age.

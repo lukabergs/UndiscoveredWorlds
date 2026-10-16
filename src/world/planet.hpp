@@ -925,7 +925,7 @@ public:
     int tectonicboundarysegmentcount() const;
     // The engine's own fields of one cell and the record of its last update (geosphere.tectonic_snapshot).
     void settectonicsnapshotcell(int x, int y, float height, int plate, int crustagesteps, float continentalcrust,
-        float oceaniccrust, float sediment, float riftdamage, float plumeinfluence);
+        float continentalarea, float oceaniccrust, float sediment, float riftdamage, float plumeinfluence);
     void settectonicsnapshotrecord(std::string record);
     void settectonicboundarysegments(std::vector<TectonicBoundarySegment> segments);
     template<typename SegmentT> void settectonicboundarysegments(const std::vector<SegmentT>& segments);
@@ -3151,7 +3151,7 @@ inline const std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegme
 inline std::vector<TectonicBoundarySegment>& planet::tectonicboundarysegments() { UW_TABLE_READ(tectonic_boundary_segments); return geosphere_.tectonicboundarysegmentlist; }
 inline int planet::tectonicboundarysegmentcount() const { UW_TABLE_READ(tectonic_boundary_segments); return static_cast<int>(geosphere_.tectonicboundarysegmentlist.size()); }
 inline void planet::settectonicsnapshotcell(int x, int y, float height, int plate, int crustagesteps,
-    float continentalcrust, float oceaniccrust, float sediment, float riftdamage, float plumeinfluence)
+    float continentalcrust, float continentalarea, float oceaniccrust, float sediment, float riftdamage, float plumeinfluence)
 {
     if (y<0 || y>body_.itsheight || x<0 || x>body_.itswidth)
         return;
@@ -3160,6 +3160,7 @@ inline void planet::settectonicsnapshotcell(int x, int y, float height, int plat
     geosphere_.tectonicplateidmap[x][y] = plate;
     geosphere_.tectoniccrustagestepsmap[x][y] = crustagesteps;
     geosphere_.tectoniccontinentalcrustmap[x][y] = continentalcrust;
+    geosphere_.tectoniccontinentalareamap[x][y] = continentalarea;
     geosphere_.tectonicoceaniccrustmap[x][y] = oceaniccrust;
     geosphere_.tectonicsedimentmap[x][y] = sediment;
     geosphere_.tectonicriftdamagemap[x][y] = riftdamage;

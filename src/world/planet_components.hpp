@@ -217,6 +217,7 @@ struct geospherestate
     worldgrid<int> tectonicplateidmap;
     worldgrid<int> tectoniccrustagestepsmap;
     worldgrid<float> tectoniccontinentalcrustmap;
+    worldgrid<float> tectoniccontinentalareamap;
     worldgrid<float> tectonicoceaniccrustmap;
     worldgrid<float> tectonicsedimentmap;
     worldgrid<float> tectonicriftdamagemap;

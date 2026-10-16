@@ -32,6 +32,7 @@ elapsed time and `crust_age_myr` for consumers.
 - `continental_crust_m`, `oceanic_crust_m`, `sediment_m`: physical column material
   volume divided by native cell area. The diagnostic `crust_thickness` field is
   a proxy; do not substitute it for these physical columns.
+- `continental_area` (bundle `geosphere.continental_area`): the column's continental share of its area, 0..1; measure continental area with it, not with the plate-raster `crust_class`.
 - `crust_class`, `geologic_regime`, boundary and deforming-region type maps:
   categorical classifications defined by the contract enums.
 - Convergence, divergence and shear scores, uplift/subsidence tendencies,

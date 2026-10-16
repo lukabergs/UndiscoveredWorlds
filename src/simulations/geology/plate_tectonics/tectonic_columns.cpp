@@ -697,7 +697,8 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
         const double target=initial*(1+growth*time_myr_/1000);
         const double need=reservoir_sinks+initial*growth*dt/1000+(target-reservoir_start)*dt/growth_response_myr;
         arc_share=melt>0?std::clamp(need/melt,0.0,1.0):0;
-        if (need>melt) budget_.continental_growth_shortfall_kg+=need-melt;
+        // Book only this update's unmet physical demand; the error term would recount a lasting deficit.
+        budget_.continental_growth_shortfall_kg+=std::max(0.0,reservoir_sinks+initial*growth*dt/1000-melt);
     }
     budget_.arc_continent_fraction=arc_share;
     if (forcing && margin_parameters.enabled) for (size_t i=0;i<next.size();++i) {
