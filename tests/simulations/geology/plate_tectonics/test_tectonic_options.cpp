@@ -92,6 +92,8 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "-1"},
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "nan"},
         {"--orogenic-collapse-margin-cap", "maybe"},
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-km2-myr", "3000",
+         "--orogenic-collapse-onset-thickness-m", "65000", "--orogenic-collapse-below-onset-km2-myr", "3001"}, // creep > D
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "65000"}, // no collapse
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "65000",
          "--orogenic-collapse-margin-cap", "on"},

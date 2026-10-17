@@ -415,10 +415,11 @@ void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::
     // orogenic_collapse_onset_thickness_m replaces h_max here (not in the area cap): crust
     // is held by its strength below about 60-70 km and spreads only above it.
     // With the onset, two options (both off: the single threshold above):
-    // orogenic_collapse_margin_cap: a face whose receiver has oceanic area (continental_area
-    // < 1) keeps the legacy threshold, the maximum thickness: thick crust spreads into its
-    // weak margins and forelands; between two cells without oceanic area it waits for the
-    // onset. orogenic_collapse_below_onset_km2_myr: weak creep D_low (min(c_a, onset) -
+    // orogenic_collapse_margin_cap: a face whose receiver has oceanic area (more than
+    // upper_cap_residual_area) keeps the legacy threshold, the maximum thickness: thick crust
+    // spreads into its weak margins and forelands. The receiver alone decides: a face into a
+    // cell without oceanic area waits for the onset, whatever the source (a margin feeding
+    // an interior cell too). orogenic_collapse_below_onset_km2_myr: weak creep D_low (min(c_a, onset) -
     // max(c_b, cap))+ plus the full D (c_a - max(c_b, onset))+. With both, a margin receiver
     // takes the full collapse above the cap (the creep is subsumed) and interior faces the
     // two regimes. The sub-step count follows the larger coefficient.
@@ -452,7 +453,7 @@ void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::
                     if (ca==cb) continue;
                     from=ca>cb?a:b;
                     const double c_from=cells[from].continent,c_to=cells[from==a?b:a].continent;
-                    if (margin_cap && cells[from==a?b:a].continental_area<1)
+                    if (margin_cap && cells[from==a?b:a].oceanic_area>upper_cap_residual_area)
                         volume=kappa*std::max(0.0,c_from-std::max(c_to,cap));
                     else
                         volume=kappa_low*std::max(0.0,std::min(c_from,onset)-std::max(c_to,cap))

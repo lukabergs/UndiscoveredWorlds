@@ -884,6 +884,60 @@ TEST(TectonicMargins, OrogenicCollapseMarginCapAndCreepBelowTheOnset) {
         auto invalid=creep;invalid.orogenic_collapse_below_onset_km2_myr=value;
         EXPECT_THROW(tectonics::margins::validate(invalid),std::runtime_error) << value;
     }
+    // The creep is weak: at most the collapse diffusivity.
+    auto equal=creep;equal.orogenic_collapse_below_onset_km2_myr=equal.orogenic_collapse_km2_myr;
+    EXPECT_NO_THROW(tectonics::margins::validate(equal));
+    auto stronger=creep;stronger.orogenic_collapse_below_onset_km2_myr=stronger.orogenic_collapse_km2_myr*1.01;
+    EXPECT_THROW(tectonics::margins::validate(stronger),std::runtime_error);
+}
+
+// The margin cap's receiver alone decides: a margin cell (oceanic area 0.1) above the cap
+// feeds its ocean neighbour from the cap but its interior neighbour only above the onset.
+// Two sub-steps with both coefficients (D 400 km²/Myr: 0.08 per sub-step, D_low 160: 0.032)
+// follow the hand-computed sequence and close the mass budget.
+TEST(TectonicMargins, OrogenicCollapseReceiverDecidesAndTwoRegimesSubStep) {
+    MarginFixture f;
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    auto legacy=growth_parameters();legacy.continental_max_thickness_m=40000;legacy.orogenic_collapse_km2_myr=25;
+    legacy.root_mobility=0;
+    auto margin=legacy;margin.orogenic_collapse_onset_thickness_m=65000;margin.orogenic_collapse_margin_cap=true;
+    // Column 20: a margin cell (area 0.9, 50 km of cell-mean continent); 21: an interior cell
+    // (area 1, 30 km); ocean elsewhere (19 and 22 included).
+    auto cells=f.cells;
+    for (uint32_t i=0;i<f.w*f.h;++i) {
+        if (i%f.w==20) cells[i]=mixed_cells(1,.9,50000,700)[0];
+        else if (i%f.w==21) cells[i]=mixed_cells(1,1,30000,0)[0];
+    }
+    tectonics::columns::Model a,b;
+    a.initialize(f.w,f.h,50000,cells);b.initialize(f.w,f.h,50000,cells);
+    a.advance(stopped,1,0,1,0,nullptr,margin);b.advance(stopped,1,0,1,0,nullptr,legacy);
+    ASSERT_GT(b.budget().collapsed_continent_kg,0);
+    EXPECT_NEAR(a.budget().collapsed_continent_kg/b.budget().collapsed_continent_kg,.5,1e-12);
+    for (uint32_t y=0;y<f.h;++y) {
+        EXPECT_EQ(a.cells()[y*f.w+21].continent,30000);
+        EXPECT_GT(a.cells()[y*f.w+19].continent,0);
+        EXPECT_GT(b.cells()[y*f.w+21].continent,30000);
+    }
+    // Two regimes over two sub-steps, a 70 km strip (columns 20 to 23) beside ocean:
+    // step 1, edge to ocean 0.032 x 25 km + 0.08 x 5 km = 1200 m; step 2, edge (68.8 km) to
+    // ocean (1.2 km) 800 + 304 m, inner (70 km) to edge 0 + 0.08 x 1.2 km = 96 m.
+    auto creep=legacy;creep.orogenic_collapse_onset_thickness_m=65000;
+    creep.orogenic_collapse_km2_myr=400;creep.orogenic_collapse_below_onset_km2_myr=160;
+    auto strip=f.cells;
+    for (uint32_t i=0;i<f.w*f.h;++i) if (i%f.w>=20 && i%f.w<24) strip[i]=mixed_cells(1,1,70000,0)[0];
+    tectonics::columns::Model two;two.initialize(f.w,f.h,50000,strip);
+    two.advance(stopped,1,0,1,0,nullptr,creep);
+    const double cell_area=50000.0*50000;
+    EXPECT_NEAR(two.budget().collapsed_continent_kg,2*f.h*2400*tectonics::columns::continental_density*cell_area,
+                1e-9*2*f.h*2400*tectonics::columns::continental_density*cell_area);
+    for (uint32_t y=0;y<f.h;++y) {
+        EXPECT_NEAR(two.cells()[y*f.w+20].continent,67792,1e-9);
+        EXPECT_NEAR(two.cells()[y*f.w+21].continent,69904,1e-9);
+        EXPECT_NEAR(two.cells()[y*f.w+19].continent,2304,1e-9);
+        EXPECT_NEAR(two.cells()[y*f.w+23].continent,67792,1e-9);
+    }
+    EXPECT_LT(std::abs(two.budget().relative_mass_residual),1e-12);
+    EXPECT_LT(std::abs(two.budget().felsic_relative_residual),1e-12);
 }
 
 TEST(TectonicMargins, ZeroMaximumThicknessAndCollapseAreTheLegacyEngine) {
