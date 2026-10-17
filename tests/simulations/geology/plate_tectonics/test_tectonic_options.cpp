@@ -37,7 +37,8 @@ TEST(TectonicOptions, BaselineAndExplicitValuesStart) {
     EXPECT_NO_THROW(start({"--continental-root-delamination-width-m", "0"}));
     EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
                            "--orogenic-collapse-onset-thickness-m", "60000"}));
-    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-onset-thickness-m", "34000"}));
+    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
+                           "--orogenic-collapse-onset-thickness-m", "34000"}));
     EXPECT_NO_THROW(start({"--orogenic-collapse-onset-thickness-m", "0"}));
     EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
                            "--orogenic-collapse-onset-thickness-m", "65000", "--orogenic-collapse-margin-cap", "on",
@@ -91,6 +92,9 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "-1"},
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "nan"},
         {"--orogenic-collapse-margin-cap", "maybe"},
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "65000"}, // no collapse
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "65000",
+         "--orogenic-collapse-margin-cap", "on"},
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-margin-cap", "on"}, // needs an onset
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-below-onset-km2-myr", "10000"},
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "65000",

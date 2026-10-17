@@ -860,12 +860,9 @@ TEST(TectonicMargins, OrogenicCollapseMarginCapAndCreepBelowTheOnset) {
     const double onset_kg=collapsed(cells(70000,false),onset,m2),creep_kg=collapsed(cells(70000,false),creep,m3);
     ASSERT_GT(onset_kg,0);
     EXPECT_NEAR(creep_kg/onset_kg,3,1e-12);
-    // Creep alone (D 0) at 50 km is the legacy collapse at D_low, bit for bit.
-    auto creep_only=creep;creep_only.orogenic_collapse_km2_myr=0;
-    auto legacy_low=legacy;legacy_low.orogenic_collapse_km2_myr=10;
+    // At 50 km (below the onset) only the creep acts: 0.004 x 10 km against legacy 0.01 x 10 km.
     tectonics::columns::Model c_a,c_b;
-    EXPECT_EQ(collapsed(cells(50000,false),creep_only,c_a),collapsed(cells(50000,false),legacy_low,c_b));
-    for (size_t i=0;i<f.cells.size();++i) EXPECT_EQ(c_a.cells()[i].continent,c_b.cells()[i].continent) << i;
+    EXPECT_NEAR(collapsed(cells(50000,false),creep,c_a)/collapsed(cells(50000,false),legacy,c_b),.4,1e-12);
     // A and B: the margin receiver takes the full collapse above the cap (0.01 x 10 km), the
     // interior receiver the creep (0.004 x (50 - 40) km): 140 against legacy 200 per row.
     auto both=margin;both.orogenic_collapse_below_onset_km2_myr=10;
@@ -878,6 +875,11 @@ TEST(TectonicMargins, OrogenicCollapseMarginCapAndCreepBelowTheOnset) {
     EXPECT_THROW(tectonics::margins::validate(no_onset),std::runtime_error);
     no_onset=legacy;no_onset.orogenic_collapse_below_onset_km2_myr=10;
     EXPECT_THROW(tectonics::margins::validate(no_onset),std::runtime_error);
+    // The onset and both options require the collapse itself.
+    for (auto invalid : {onset,margin,creep,both}) {
+        invalid.orogenic_collapse_km2_myr=0;
+        EXPECT_THROW(tectonics::margins::validate(invalid),std::runtime_error);
+    }
     for (double value : {-1.0,std::numeric_limits<double>::quiet_NaN()}) {
         auto invalid=creep;invalid.orogenic_collapse_below_onset_km2_myr=value;
         EXPECT_THROW(tectonics::margins::validate(invalid),std::runtime_error) << value;

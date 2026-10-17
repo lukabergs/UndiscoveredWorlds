@@ -36,9 +36,9 @@ struct Parameters {
     // no rock moves. Requires margins and a value above the rift onset and the minimum.
     double continental_max_thickness_m = 0;
     // Orogenic collapse, km²/Myr (0: off): linear diffusion of the cell-mean continent
-    // above continental_max_thickness_m into lower neighbours, interior and pure-ocean
-    // cells included; continental age moves with the rock, sediment stays. Requires
-    // that maximum.
+    // above continental_max_thickness_m, or the onset when set (below), into lower
+    // neighbours, interior and pure-ocean cells included; continental age moves with the
+    // rock, sediment stays. Requires that maximum.
     double orogenic_collapse_km2_myr = 0;
     // Onset of orogenic collapse, m of cell-mean continent (0, legacy: the collapse acts
     // above continental_max_thickness_m). Above 0 it replaces that threshold in the

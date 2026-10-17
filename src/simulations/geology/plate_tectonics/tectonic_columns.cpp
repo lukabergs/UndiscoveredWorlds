@@ -63,7 +63,9 @@ constexpr double area_upper_cap_response_myr=10;
 // Oceanic area below which the upper cap converts the rest of a cell at once (share of the cell).
 constexpr double upper_cap_residual_area=1e-6;
 // Largest orogenic collapse coefficient per face and sub-step (D dt / cell²): at most
-// 0.4 of a cell's excess leaves through its four faces, so no source drops below the maximum.
+// 0.4 of a cell's excess leaves through its four faces, so no source drops below the collapse
+// threshold (the maximum thickness, or the onset when set; with the creep below the onset or
+// the margin cap the lowest threshold is the maximum, and both regimes share the limit).
 constexpr double collapse_step_limit=.1;
 // Response time of the continental growth controller to the reservoir's error, Myr.
 constexpr double growth_response_myr=50;

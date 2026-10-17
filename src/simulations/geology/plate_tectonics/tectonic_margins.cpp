@@ -39,6 +39,9 @@ void validate(const Parameters& p) {
         throw std::runtime_error("Invalid orogenic collapse diffusivity below the onset");
     if ((p.orogenic_collapse_margin_cap || p.orogenic_collapse_below_onset_km2_myr>0) && p.orogenic_collapse_onset_thickness_m<=0)
         throw std::runtime_error("Orogenic collapse margin cap and creep below the onset require an onset thickness");
+    if ((p.orogenic_collapse_onset_thickness_m>0 || p.orogenic_collapse_margin_cap || p.orogenic_collapse_below_onset_km2_myr>0)
+        && p.orogenic_collapse_km2_myr<=0)
+        throw std::runtime_error("Orogenic collapse onset, margin cap and creep below the onset require orogenic collapse");
     if (!std::isfinite(p.arc_continent_fraction) || p.arc_continent_fraction<0 || p.arc_continent_fraction>1)
         throw std::runtime_error("Invalid arc continent fraction");
     if (!std::isfinite(p.subduction_erosion_ratio) || p.subduction_erosion_ratio<0)
