@@ -728,6 +728,82 @@ TEST(TectonicMargins, OrogenicCollapseSpreadsThickCrustIntoMixedAndOceanCells) {
     EXPECT_LT(std::abs(model.budget().felsic_relative_residual),1e-12);
 }
 
+// The collapse onset (orogenic_collapse_onset_thickness_m): crust between the maximum
+// thickness and the onset is held by its strength; above the onset only the excess over
+// it spreads; an onset of 0 or equal to the maximum is the legacy collapse bit for bit.
+TEST(TectonicMargins, OrogenicCollapseStartsAtItsOnsetThickness) {
+    MarginFixture f;
+    const auto strip=[&](double continent) {
+        auto cells=f.cells;
+        for (uint32_t i=0;i<f.w*f.h;++i) if (i%f.w>=20 && i%f.w<24) cells[i]=mixed_cells(1,1,continent,0)[0];
+        return cells;
+    };
+    const std::vector<tectonics::transport::Displacement> stopped(f.cells.size());
+    auto p=growth_parameters();p.continental_max_thickness_m=40000;p.orogenic_collapse_km2_myr=3000;
+    p.root_mobility=0; // Collapse alone.
+    const auto run=[&](tectonics::columns::Model& model,const std::vector<tectonics::columns::Cell>& cells,
+                       const tectonics::margins::Parameters& q,int steps) {
+        model.initialize(f.w,f.h,50000,cells);
+        for (int step=0;step<steps;++step) model.advance(stopped,1,0,1,0,nullptr,q);
+    };
+    const auto same_cells=[&](const tectonics::columns::Model& a,const tectonics::columns::Model& b) {
+        for (size_t i=0;i<f.cells.size();++i) {
+            const auto& x=a.cells()[i];const auto& y=b.cells()[i];
+            EXPECT_EQ(x.continent,y.continent) << i;EXPECT_EQ(x.continental_area,y.continental_area) << i;
+            EXPECT_EQ(x.continental_age_volume,y.continental_age_volume) << i;EXPECT_EQ(x.ocean,y.ocean) << i;
+        }
+    };
+    auto onset=p;onset.orogenic_collapse_onset_thickness_m=60000;
+    auto no_collapse=p;no_collapse.orogenic_collapse_km2_myr=0;
+    // 55 km: above the maximum, below the onset: held, the run without collapse bit for bit.
+    {
+        tectonics::columns::Model held,still,legacy;
+        run(held,strip(55000),onset,50);run(still,strip(55000),no_collapse,50);run(legacy,strip(55000),p,50);
+        same_cells(held,still);
+        EXPECT_DOUBLE_EQ(held.budget().collapsed_continent_kg,0);
+        EXPECT_GT(legacy.budget().collapsed_continent_kg,0);
+        EXPECT_LT(legacy.cells()[20].continent,55000);
+    }
+    // 70 km: only the excess over the onset spreads. One sub-step (kappa 0.01): each of
+    // the strip's two edges per row passes kappa (70 - 60) km against kappa (70 - 40) km.
+    {
+        auto slow=p;slow.orogenic_collapse_km2_myr=25;
+        auto slow_onset=onset;slow_onset.orogenic_collapse_km2_myr=25;
+        tectonics::columns::Model a,b;
+        run(a,strip(70000),slow_onset,1);run(b,strip(70000),slow,1);
+        ASSERT_GT(b.budget().collapsed_continent_kg,0);
+        EXPECT_NEAR(a.budget().collapsed_continent_kg/b.budget().collapsed_continent_kg,1./3,1e-12);
+        tectonics::columns::Model spread;
+        for (int step=0;step<50;++step) {
+            if (step==0) run(spread,strip(70000),onset,1);
+            else spread.advance(stopped,1,0,1,0,nullptr,onset);
+            for (size_t i=0;i<f.cells.size();++i) if (i%f.w>=20 && i%f.w<24)
+                EXPECT_GE(spread.cells()[i].continent,60000*(1-1e-12));
+        }
+        EXPECT_LT(spread.cells()[20].continent,70000);
+        EXPECT_GT(spread.cells()[19].continent,0);
+        EXPECT_LT(std::abs(spread.budget().relative_mass_residual),1e-12);
+        EXPECT_LT(std::abs(spread.budget().felsic_relative_residual),1e-12);
+    }
+    // Onset 0 and onset at the maximum are the legacy collapse.
+    {
+        auto at_maximum=p;at_maximum.orogenic_collapse_onset_thickness_m=40000;
+        auto zero=p;zero.orogenic_collapse_onset_thickness_m=0;
+        tectonics::columns::Model legacy,a,b;
+        run(legacy,strip(70000),p,20);run(a,strip(70000),zero,20);run(b,strip(70000),at_maximum,20);
+        same_cells(legacy,a);same_cells(legacy,b);
+        EXPECT_EQ(legacy.budget().collapsed_continent_kg,b.budget().collapsed_continent_kg);
+    }
+    // Validation: 0, or at least the maximum thickness (which must be set).
+    EXPECT_NO_THROW(tectonics::margins::validate(onset));
+    for (double value : {30000.0,39999.0,-1.0,std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()}) {
+        auto invalid=p;invalid.orogenic_collapse_onset_thickness_m=value;
+        EXPECT_THROW(tectonics::margins::validate(invalid),std::runtime_error) << value;
+    }
+    auto no_maximum=growth_parameters();no_maximum.orogenic_collapse_onset_thickness_m=60000;
+    EXPECT_THROW(tectonics::margins::validate(no_maximum),std::runtime_error);
+}
+
 TEST(TectonicMargins, ZeroMaximumThicknessAndCollapseAreTheLegacyEngine) {
     ContinentalMarginFixture f;
     auto p=growth_parameters();p.sediment_subduction_fraction=.75;p.subduction_erosion_ratio=.07;

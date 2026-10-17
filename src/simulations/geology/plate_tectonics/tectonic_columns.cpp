@@ -409,8 +409,12 @@ void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::
     // Linear diffusion of the cell-mean continent above the maximum thickness, toward the
     // lower side of each face (east and south, torus wrap): v = kappa max(0, c_a - max(c_b,
     // h_max)). Unlike root flow it reaches interior cells and pure ocean. Continental age
-    // moves with the rock; sediment stays. Simultaneous update per sub-step.
-    const double h_max=p.continental_max_thickness_m, diffusivity=p.orogenic_collapse_km2_myr*1e6;
+    // moves with the rock; sediment stays. Simultaneous update per sub-step. A positive
+    // orogenic_collapse_onset_thickness_m replaces h_max here (not in the area cap): crust
+    // is held by its strength below about 60-70 km and spreads only above it.
+    const double h_max=p.orogenic_collapse_onset_thickness_m>0
+        ? p.orogenic_collapse_onset_thickness_m : p.continental_max_thickness_m;
+    const double diffusivity=p.orogenic_collapse_km2_myr*1e6;
     if (diffusivity==0) return;
     const double total=diffusivity*dt/(cell_m_*cell_m_);
     const double steps=std::max(1.0,std::ceil(total/collapse_step_limit));

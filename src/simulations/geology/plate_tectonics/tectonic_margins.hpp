@@ -40,6 +40,12 @@ struct Parameters {
     // cells included; continental age moves with the rock, sediment stays. Requires
     // that maximum.
     double orogenic_collapse_km2_myr = 0;
+    // Onset of orogenic collapse, m of cell-mean continent (0, legacy: the collapse acts
+    // above continental_max_thickness_m). Above 0 it replaces that threshold in the
+    // collapse only, so margins keep the area cap while interiors thicken to the onset:
+    // orogens spread gravitationally only above about 60-70 km of crust (Tibet ~70 km);
+    // below it the crust is held by its strength. 0 or at least the maximum thickness.
+    double orogenic_collapse_onset_thickness_m = 0;
     // Share of arc melt emplaced as continental crust at age 0 (mass kept, volume
     // x 2900/2800); an outlet with mostly oceanic area also gains continental area
     // (added thickness / continental_min_thickness_m). Above 0 it requires that minimum.

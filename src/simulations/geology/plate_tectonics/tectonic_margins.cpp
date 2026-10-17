@@ -31,6 +31,10 @@ void validate(const Parameters& p) {
         throw std::runtime_error("Invalid orogenic collapse diffusivity");
     if (p.orogenic_collapse_km2_myr>0 && p.continental_max_thickness_m<=0)
         throw std::runtime_error("Orogenic collapse requires a continental maximum thickness");
+    if (!std::isfinite(p.orogenic_collapse_onset_thickness_m) || p.orogenic_collapse_onset_thickness_m<0
+        || (p.orogenic_collapse_onset_thickness_m>0 && (p.continental_max_thickness_m<=0
+            || p.orogenic_collapse_onset_thickness_m<p.continental_max_thickness_m)))
+        throw std::runtime_error("Orogenic collapse onset must be 0 or at least the continental maximum thickness");
     if (!std::isfinite(p.arc_continent_fraction) || p.arc_continent_fraction<0 || p.arc_continent_fraction>1)
         throw std::runtime_error("Invalid arc continent fraction");
     if (!std::isfinite(p.subduction_erosion_ratio) || p.subduction_erosion_ratio<0)

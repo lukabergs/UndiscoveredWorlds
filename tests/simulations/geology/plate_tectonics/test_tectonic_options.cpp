@@ -35,6 +35,10 @@ TEST(TectonicOptions, BaselineAndExplicitValuesStart) {
     EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246", "--continental-root-max-thickness-m", "50000",
                            "--continental-root-delamination-width-m", "10000"}));
     EXPECT_NO_THROW(start({"--continental-root-delamination-width-m", "0"}));
+    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
+                           "--orogenic-collapse-onset-thickness-m", "60000"}));
+    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-onset-thickness-m", "34000"}));
+    EXPECT_NO_THROW(start({"--orogenic-collapse-onset-thickness-m", "0"}));
 }
 
 // A value the option parser or the engine refuses stops the run before it starts.
@@ -78,6 +82,10 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
         {"--continental-root-delamination-width-m", "10000"}, // a ramp needs a cap
         {"--continental-root-max-thickness-m", "50000", "--continental-root-delamination-width-m", "-1"},
         {"--continental-root-max-thickness-m", "50000", "--continental-root-delamination-width-m", "inf"},
+        {"--orogenic-collapse-onset-thickness-m", "60000"}, // an onset needs a maximum thickness
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "30000"}, // below it
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "-1"},
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "nan"},
     };
     for (const auto& options : cases) {
         EXPECT_ANY_THROW(start(options)) << options[0] << ' ' << options[1];

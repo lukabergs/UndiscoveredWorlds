@@ -248,6 +248,8 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.margin_processes.continental_max_thickness_m=parse_double(arg.c_str(),value);
     } else if (arg == "--orogenic-collapse-km2-myr") {
         scenario.margin_processes.orogenic_collapse_km2_myr=parse_double(arg.c_str(),value);
+    } else if (arg == "--orogenic-collapse-onset-thickness-m") {
+        scenario.margin_processes.orogenic_collapse_onset_thickness_m=parse_double(arg.c_str(),value);
     } else if (arg == "--arc-continent-fraction") {
         scenario.margin_processes.arc_continent_fraction=parse_double(arg.c_str(),value);
     } else if (arg == "--subduction-erosion-ratio") {
@@ -361,6 +363,7 @@ void printtectonicoptionsusage(std::ostream& out)
         "--continental-min-thickness-m",
         "--continental-max-thickness-m",
         "--orogenic-collapse-km2-myr",
+        "--orogenic-collapse-onset-thickness-m",
         "--arc-continent-fraction",
         "--subduction-erosion-ratio",
         "--continental-growth-control",
