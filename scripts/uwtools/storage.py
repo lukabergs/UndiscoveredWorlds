@@ -100,6 +100,23 @@ def route(path):
     receipt_path = root / 'receipts' / (relative.replace('/', '__') + '.json')
     if destination.exists() and any(destination.iterdir()) and not receipt_path.is_file():
         raise FileExistsError(f'Destination already exists without a receipt: {destination}')
+    if receipt_path.is_file() and path.is_dir():
+        # A verified copy whose swap was refused (an open handle, 2026-10-17): finish it without copying
+        # again, unless something on the source side is newer than the receipt.
+        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+        if receipt.get('status') == 'verified':
+            stamp = receipt_path.stat().st_mtime
+            newer = [item for item in path.rglob('*') if item.is_file() and item.stat().st_mtime > stamp]
+            if newer:
+                raise OSError(f'{len(newer)} files newer than the verified copy, e.g. {newer[0]}: route again after removing them or re-copy')
+            backup = path.with_name(path.name + '.storage-migration-backup')
+            path.rename(backup)
+            make_junction(path, destination)
+            shutil.rmtree(backup)
+            receipt['status'] = 'complete'
+            receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+            receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
+            return path
     destination.mkdir(parents=True, exist_ok=True)
     receipt = {'source': str(path), 'destination': str(destination), 'status': 'copying', 'sha256': {}}
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
