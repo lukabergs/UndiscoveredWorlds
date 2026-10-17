@@ -13,7 +13,8 @@ Written 2026-10-13 (Opus 5.5; Fable 5.1 off, see `AGENTS.md`). It collects every
 - One phase per session (memory "Phase sessions"); every step records its duration (ledger field, the Duration column below) and gets a ledger entry: pipeline steps in `runs/ledger/erosion.jsonl` (tectonics engine steps in `tectonics.jsonl`), sandbox steps as one entry per sandbox phase in `erosion.jsonl` with `"module": "erosion"` (the ledger tool accepts only the file's module), `"phase": "terrain sandbox ..."` and the commit range.
 - Python runs from Git Bash as from PowerShell: `uv.exe` is on Git Bash's `PATH` (the `~/bin/uv.cmd` wrapper only forwards to it), so `uv run python scripts/sandbox/...` works in either shell (checked 2026-10-13). PowerShell is needed only for the `.cmd` wrappers (`msvc-env.cmd`, `cmake-vs.cmd`, `ninja-vs.cmd`) of a C++ build. In Git Bash, write scripts with the Write tool rather than heredocs (apostrophes and backslashes break them), never `cat > file` without input (it waits on stdin), and never name a scratch script after a standard-library module (`inspect.py` broke numpy's import).
 - Sandbox steps are judged by the user's look (pages under `out/scratch/sandbox/<label>`, Earth atlas beside); no parity runs, no tests unless a bug persists. Pipeline steps keep the repository's checks (`step_check.py` at the minimal configuration for parity; one judging run where the change acts).
-- The reviewer runs on Opus 5.5 (`model: opus`) while Fable is off; a `design` agent likewise. Reviews follow each behaviour step of the pipeline (T2, T3, T4); sandbox steps are reviewed by the user's look.
+- The reviewer and any `design` agent run on Opus 5.5 (Fable 5.1 set aside by the user on 2026-10-17 for its token usage). Reviews follow each behaviour step of the pipeline (T2, T3, T4); sandbox steps are reviewed by the user's look.
+- Storage (2026-10-17): `out/scratch` and `out/evaluation` are junctions to `D:/dev/undiscovered-worlds/out/` (so every page and run under them is on D); `out/build` stays on C. The session-start hook prints `scripts/uwtools/storage.py status`; agent worktrees are retired only through `scripts/uwtools/worktrees.py` (AGENTS.md).
 - **user** marks a decision only the user takes; the orchestrator continues with independent work meanwhile.
 
 ## 3. Phases
@@ -167,7 +168,7 @@ Water and coasts: deltas and alluvial fans at fine scale, endorheic basins and s
 
 ### T7: reviews and the adversarial review
 
-- Behaviour steps reviewed by `reviewer` (opus while Fable is off): every T2, T3, T4 worker step. Unverified earlier: S5.3b and S5.3c (no review recorded in `erosion-0095`, `0096`), H4b (not reviewed).
+- Behaviour steps reviewed by `reviewer` (Opus 5.5): every T2, T3, T4 worker step. Unverified earlier: S5.3b and S5.3c (no review recorded in `erosion-0095`, `0096`), H4b (not reviewed).
 - The adversarial review (GPT-6 Astra through Codex, run by the user) comes after the last phase, holistically over the repository. Ranges to hand over: the erosion plan `16ddfb3..HEAD` (its §7 prompt at EHP:509-519, widened to A–H), the multiscale plan `82fdef0..HEAD`, the sandbox `0764d05..HEAD`.
 
 ## 4. Order

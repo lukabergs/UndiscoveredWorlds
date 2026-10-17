@@ -1,7 +1,7 @@
 ---
 name: reviewer
-description: Fresh-context review of one completed step on Fable 5.1 at high effort - does the change satisfy its plan step, do the recorded checks support the ledger entry's claims, what is unverified or at risk. Read-only. Use after a step's checks pass and before its ledger entry is final; give it the commit range or the diff, the plan step and the draft entry, not the author's reasoning.
-model: fable
+description: Fresh-context review of one completed step on Opus 5.5 at high effort - does the change satisfy its plan step, do the recorded checks support the ledger entry's claims, what is unverified or at risk. Read-only. Use after a step's checks pass and before its ledger entry is final; give it the commit range or the diff, the plan step and the draft entry, not the author's reasoning.
+model: opus
 effort: high
 tools: Read, Glob, Grep, Bash, PowerShell
 disallowedTools: Write, Edit, NotebookEdit

@@ -11,8 +11,14 @@ import re
 import shutil
 from pathlib import Path
 
-from .hashing import sha256
-from .paths import ROOT
+if __package__:
+    from .hashing import sha256
+    from .paths import ROOT
+else:  # run as a script: uv run python scripts/uwtools/storage.py status
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from uwtools.hashing import sha256
+    from uwtools.paths import ROOT
 
 CONFIG = ROOT / 'runs/storage.json'
 # Only generated data may leave the workspace: one directory level under runs/, or a
@@ -48,6 +54,63 @@ def junction_target(path):
         return None
     # readlink returns the extended-length form (\\?\D:\...).
     return Path(os.readlink(path).removeprefix('\\\\?\\')).resolve()
+
+
+def is_link(entry):
+    """A symbolic link, a junction or any other reparse point (os.DirEntry or Path)."""
+    if isinstance(entry, Path):
+        if entry.is_symlink() or os.path.isjunction(entry):
+            return True
+        return bool(os.lstat(entry).st_file_attributes & 0x400)
+    return entry.is_symlink() or entry.is_junction() or bool(entry.stat(follow_symlinks=False).st_file_attributes & 0x400)
+
+
+def find_links(root):
+    """Every link below root, never followed (an unreadable directory counts as one: it cannot be checked)."""
+    found, stack = [], [str(root)]
+    while stack:
+        directory = stack.pop()
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            found.append(directory)
+            continue
+        for entry in entries:
+            if is_link(entry):
+                found.append(entry.path)
+            elif entry.is_dir(follow_symlinks=False):
+                stack.append(entry.path)
+    return found
+
+
+def remove_tree(root):
+    """Delete a directory tree that holds no link (2026-10-07: a recursive delete followed a junction into refs/).
+
+    Scans the whole tree first and deletes nothing if it finds a link; while deleting it never descends
+    into a link and stops at one that appeared since the scan.
+    """
+    root = Path(root)
+    if is_link(root):
+        raise OSError(f'Refusing to delete through a link: {root}')
+    links = find_links(root)
+    if links:
+        raise OSError(f'Refusing to delete {root}: {len(links)} links or unreadable directories inside, e.g. {links[0]}')
+
+    def remove(directory):
+        for entry in os.scandir(directory):
+            if is_link(entry):
+                raise OSError(f'A link appeared during the delete: {entry.path}')
+            if entry.is_dir(follow_symlinks=False):
+                remove(entry.path)
+            else:
+                try:
+                    os.unlink(entry.path)
+                except PermissionError:
+                    os.chmod(entry.path, 0o666)
+                    os.unlink(entry.path)
+        os.rmdir(directory)
+
+    remove(root)
 
 
 def make_junction(path, target):
@@ -112,7 +175,7 @@ def route(path):
             backup = path.with_name(path.name + '.storage-migration-backup')
             path.rename(backup)
             make_junction(path, destination)
-            shutil.rmtree(backup)
+            remove_tree(backup)
             receipt['status'] = 'complete'
             receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
             receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
@@ -138,7 +201,7 @@ def route(path):
             backup.rename(path)
         raise
     if backup.exists():
-        shutil.rmtree(backup)
+        remove_tree(backup)
     receipt['status'] = 'complete'
     receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
     write()
@@ -150,3 +213,105 @@ def run_directory(module, identifier):
     directory = route(ROOT / 'runs' / module) / str(identifier)
     directory.mkdir(parents=True, exist_ok=False)
     return directory
+
+
+def check_backup(path):
+    """Compare a leftover <path>.storage-migration-backup with its receipt and the storage copy.
+
+    Returns counts: ok (the file is unchanged since the copy and the storage copy has the same digest),
+    newer_on_storage (the storage copy was rewritten since, by a later run), and the blocking kinds
+    not_in_receipt, changed_since_copy, missing_on_storage, links.
+    """
+    path = Path(os.path.abspath(path))
+    relative = relative_path(path)
+    backup = path.with_name(path.name + '.storage-migration-backup')
+    receipt = json.loads((storage_root() / 'receipts' / (relative.replace('/', '__') + '.json')).read_text(encoding='utf-8'))
+    destination, digests = Path(receipt['destination']), receipt['sha256']
+    counts = dict.fromkeys(('files', 'ok', 'newer_on_storage', 'not_in_receipt', 'changed_since_copy',
+                            'missing_on_storage', 'links'), 0)
+    examples = {}
+    counts['links'] = len(find_links(backup))
+    for file in (item for item in backup.rglob('*') if item.is_file() and not is_link(item)):
+        key = file.relative_to(backup).as_posix()
+        counts['files'] += 1
+        target = destination / key
+        kind = ('not_in_receipt' if key not in digests else 'changed_since_copy' if sha256(file) != digests[key]
+                else 'missing_on_storage' if not target.is_file() else 'ok' if sha256(target) == digests[key]
+                else 'newer_on_storage')
+        counts[kind] += 1
+        examples.setdefault(kind, key)
+    return backup, receipt, counts, examples
+
+
+def finish(path, accept_newer=False):
+    """Delete the leftover backup of a routed directory once every file in it is verified on storage.
+
+    A swap whose clean-up stopped (an open handle, 2026-10-17) leaves the junction in place and the
+    old tree beside it. Refuses unless every file is unchanged since the receipt's copy and the storage
+    copy matches its digest; a storage copy rewritten since by a later run passes only with accept_newer.
+    """
+    backup, receipt, counts, examples = check_backup(path)
+    blocking = [kind for kind in ('not_in_receipt', 'changed_since_copy', 'missing_on_storage', 'links') if counts[kind]]
+    if not accept_newer and counts['newer_on_storage']:
+        blocking.append('newer_on_storage')
+    if junction_target(path) != Path(receipt['destination']).resolve():
+        raise OSError(f'{path} is not the junction to {receipt["destination"]}')
+    if blocking:
+        raise OSError(f'Backup not removed: {counts}; first of each: {examples}')
+    remove_tree(backup)
+    receipt['status'] = 'complete'
+    receipt['completed_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+    receipt['backup_check'] = counts
+    receipt_path = storage_root() / 'receipts' / (relative_path(path).replace('/', '__') + '.json')
+    receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
+    return counts
+
+
+# A session starts with a warning below this much free space on the workspace drive.
+LOW_SPACE_GB = 60
+
+
+def status():
+    """Lines describing the workspace drive: free space, leftover backups, unrouted bulk directories, worktrees."""
+    free = shutil.disk_usage(ROOT).free / 1e9
+    lines = [f'C free {free:.0f} GB' + (f' (below {LOW_SPACE_GB} GB)' if free < LOW_SPACE_GB else '')]
+    for parent in (ROOT / 'out', ROOT / 'runs', ROOT / 'runs' / 'reports'):
+        for item in parent.glob('*.storage-migration-backup'):
+            lines.append(f'leftover backup {item.relative_to(ROOT).as_posix()}: '
+                         f'storage.py finish {item.relative_to(ROOT).as_posix().removesuffix(".storage-migration-backup")}')
+    for name in ('scratch', 'evaluation'):
+        if junction_target(ROOT / 'out' / name) is None and (ROOT / 'out' / name).exists():
+            lines.append(f'out/{name} is a directory on C, not the junction: storage.py route out/{name}')
+    worktrees = ROOT / '.claude' / 'worktrees'
+    count = sum(1 for item in worktrees.iterdir() if item.is_dir()) if worktrees.is_dir() else 0
+    if count:
+        lines.append(f'{count} agent worktrees in .claude/worktrees (about 1.5-3 GB each): scripts/uwtools/worktrees.py audit')
+    return lines
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Bulk data on the storage drive (runs/storage.json).')
+    commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('status', help='free space and pending storage work')
+    for name, text in (('route', 'make a directory a junction into storage, moving its contents'),
+                       ('check', 'compare a leftover backup with its receipt and the storage copy (read-only)'),
+                       ('finish', 'delete a leftover backup once every file in it is verified on storage')):
+        command = commands.add_parser(name, help=text)
+        command.add_argument('path')
+        if name == 'finish':
+            command.add_argument('--accept-newer', action='store_true',
+                                 help='also when a later run rewrote the storage copy of some files')
+    args = parser.parse_args()
+    if args.command == 'status':
+        print('\n'.join(status()))
+    elif args.command == 'route':
+        print(route(ROOT / args.path))
+    elif args.command == 'check':
+        print(check_backup(ROOT / args.path)[2:])
+    else:
+        print(finish(ROOT / args.path, args.accept_newer))
+
+
+if __name__ == '__main__':
+    main()

@@ -8,16 +8,16 @@ Claude models only (Sonnet and Haiku are not used for now). The adversarial revi
 
 | Role | Who | Model, effort | Does | Does not |
 |---|---|---|---|---|
-| Planner / lead | the interactive session | Fable 5.1, `high` (`xhigh` for a design question the plan cannot settle; never routinely) | understands the request, writes or revises the plan (goal, decisions, step table, acceptance checks, risks), answers the user, reviews phase results | implement steps itself when a worker can |
+| Planner / lead | the interactive session | Opus 5.5, `high` (`xhigh` for a design question the plan cannot settle; never routinely) | understands the request, writes or revises the plan (goal, decisions, step table, acceptance checks, risks), answers the user, reviews phase results | implement steps itself when a worker can |
 | Orchestrator | the session that runs a phase | Opus 5.5, `high` | holds the step list, briefs workers, runs disjoint steps in parallel, integrates, runs the step check, writes ledger entries and commits, decides retry or stop | take design decisions the plan does not settle: it records the question in the plan and continues with independent work; if the whole phase is blocked, it stops with a handoff note |
 | Worker (`.claude/agents/worker.md`) | subagent | Opus 5.5, `high` | one bounded step: code, configs, tests, the step's named checks | surveys, architecture, unasked checks, large runs |
 | Mechanic (`.claude/agents/mechanic.md`) | subagent | Opus 5.5, `medium` | edits by recipe: renames, rewrites by pattern, moves, generated files, list and reference updates | judgement calls (left and reported) |
 | Surveyor (`.claude/agents/surveyor.md`) | subagent, read-only | Opus 5.5, `medium` | fan-out reading of code, data and sources; evidence with locations | recommendations, decisions |
-| Reviewer (`.claude/agents/reviewer.md`) | subagent, read-only, fresh context | Fable 5.1, `high` | checks a finished step against its plan step and the evidence behind its ledger entry | editing, running |
+| Reviewer (`.claude/agents/reviewer.md`) | subagent, read-only, fresh context | Opus 5.5, `high` | checks a finished step against its plan step and the evidence behind its ledger entry | editing, running |
 | Verifier (`.claude/agents/verifier.md`) | subagent, read-only | Opus 5.5, `high` | visual checklist of an evaluated run | paused since 2026-10-05; the user says when it resumes |
 | Adversarial reviewer | Codex, by the user | GPT-6 Astra, `xhigh` | assumes the step is wrong and looks for the most consequential failure, on the commit range and the plan alone | receives no reasoning from the Claude sessions |
 
-When Fable 5.1's usage limit is reached, the `reviewer` agent runs with the Agent tool's `model` set to `opus` (Opus 5.5, same definition and effort); the ledger entry says so and the lead may re-review on Fable (erosion Phase B, 2026-10-06). Effort escalation: `xhigh` or `max` only after a failed attempt at `high` on the same step, and the failure is recorded in the ledger entry (`lessons`). An agent's model and effort are fixed in its definition; the Agent tool's `model` parameter overrides the model only. When a step is harder than its definition's effort, the orchestrator does it in-session rather than inventing a new agent.
+Fable 5.1 is set aside (the user, 2026-10-17: its token usage is too high): the planner, the reviewer and any `design` agent run on Opus 5.5 at the efforts above; the `learned` notes below that name Fable are records. Effort escalation: `xhigh` or `max` only after a failed attempt at `high` on the same step, and the failure is recorded in the ledger entry (`lessons`). An agent's model and effort are fixed in its definition; the Agent tool's `model` parameter overrides the model only. When a step is harder than its definition's effort, the orchestrator does it in-session rather than inventing a new agent.
 
 A human-facing decision (what a world should look like, a data deletion under `refs/` or `runs/`, a public contract) is the user's; the planner writes the recommendation into the plan and the orchestrator continues with what does not depend on it (`self-sufficiency`, AGENTS.md).
 
@@ -73,5 +73,5 @@ Learned in erosion Phase E5 (2026-10-09, the lead session on Fable 5.1): when th
 ## Configuration
 
 - Agents: `.claude/agents/*.md` (frontmatter `model`, `effort`, `tools`, `disallowedTools`); documented fields at https://code.claude.com/docs/en/sub-agents.md. No `CLAUDE.md` in the repository: `AGENTS.md` is the project file (consolidation plan §8).
-- Session model and effort: the user's `~/.claude/settings.json` (`model: fable`, `modelSettings` with `effortLevel: high` for Fable 5.1 and Opus 5.5). An orchestrating session is started with `--model opus` (or the `/model` command); the agents' models are fixed in their definitions regardless of the session's.
+- Session model and effort: the user's `~/.claude/settings.json` (`model: opus`, `modelSettings` with `effortLevel: high`); the agents' models are fixed in their definitions regardless of the session's.
 - Codex (adversarial review): `~/.codex/config.toml` (`gpt-6-astra`, `xhigh`); it reads `~/.codex/AGENTS.md` and the repository's `AGENTS.md`.
