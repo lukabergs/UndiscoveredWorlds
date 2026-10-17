@@ -46,6 +46,18 @@ struct Parameters {
     // orogens spread gravitationally only above about 60-70 km of crust (Tibet ~70 km);
     // below it the crust is held by its strength. 0 or at least the maximum thickness.
     double orogenic_collapse_onset_thickness_m = 0;
+    // With an onset: a face whose receiving cell has oceanic area (continental_area < 1:
+    // a margin or ocean cell) collapses above continental_max_thickness_m as in legacy;
+    // a face between two cells without oceanic area waits for the onset. Thick crust
+    // spreads into its weak margins and forelands (the upper cap turns them into
+    // continent); within a continent interior it is held until the onset. Requires an onset.
+    bool orogenic_collapse_margin_cap = false;
+    // With an onset, km²/Myr (0: off): weak creep between continental_max_thickness_m and
+    // the onset, D_low (min(c_a, onset) - max(c_b, h_max))+, added to the full collapse
+    // D (c_a - max(c_b, onset))+. With orogenic_collapse_margin_cap the creep applies to
+    // interior faces only (a margin receiver takes the full collapse above h_max).
+    // Requires an onset.
+    double orogenic_collapse_below_onset_km2_myr = 0;
     // Share of arc melt emplaced as continental crust at age 0 (mass kept, volume
     // x 2900/2800); an outlet with mostly oceanic area also gains continental area
     // (added thickness / continental_min_thickness_m). Above 0 it requires that minimum.

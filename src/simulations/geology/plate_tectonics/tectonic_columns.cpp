@@ -412,14 +412,26 @@ void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::
     // moves with the rock; sediment stays. Simultaneous update per sub-step. A positive
     // orogenic_collapse_onset_thickness_m replaces h_max here (not in the area cap): crust
     // is held by its strength below about 60-70 km and spreads only above it.
-    const double h_max=p.orogenic_collapse_onset_thickness_m>0
-        ? p.orogenic_collapse_onset_thickness_m : p.continental_max_thickness_m;
+    // With the onset, two options (both off: the single threshold above):
+    // orogenic_collapse_margin_cap: a face whose receiver has oceanic area (continental_area
+    // < 1) keeps the legacy threshold, the maximum thickness: thick crust spreads into its
+    // weak margins and forelands; between two cells without oceanic area it waits for the
+    // onset. orogenic_collapse_below_onset_km2_myr: weak creep D_low (min(c_a, onset) -
+    // max(c_b, cap))+ plus the full D (c_a - max(c_b, onset))+. With both, a margin receiver
+    // takes the full collapse above the cap (the creep is subsumed) and interior faces the
+    // two regimes. The sub-step count follows the larger coefficient.
+    const double cap=p.continental_max_thickness_m, onset=p.orogenic_collapse_onset_thickness_m;
+    const double h_max=onset>0 ? onset : cap;
     const double diffusivity=p.orogenic_collapse_km2_myr*1e6;
-    if (diffusivity==0) return;
-    const double total=diffusivity*dt/(cell_m_*cell_m_);
+    const double low_diffusivity=onset>0 ? p.orogenic_collapse_below_onset_km2_myr*1e6 : 0;
+    const bool margin_cap=onset>0 && p.orogenic_collapse_margin_cap;
+    const bool two_regimes=margin_cap || low_diffusivity>0;
+    if (diffusivity==0 && low_diffusivity==0) return;
+    const double total=std::max(diffusivity,low_diffusivity)*dt/(cell_m_*cell_m_);
     const double steps=std::max(1.0,std::ceil(total/collapse_step_limit));
     if (steps>10000) throw std::runtime_error("Orogenic collapse requires a smaller outer timestep");
-    const double kappa=total/steps;
+    const double kappa=diffusivity*dt/(cell_m_*cell_m_)/steps;
+    const double kappa_low=low_diffusivity*dt/(cell_m_*cell_m_)/steps;
     const auto index=[&](uint32_t x,uint32_t y) { return static_cast<size_t>(y)*width_+x; };
     std::vector<double> outgoing(cells.size()),incoming(cells.size()),incoming_age(cells.size());
     for (int step=0;step<static_cast<int>(steps);++step) {
@@ -428,10 +440,24 @@ void Model::collapseOrogens(std::vector<Cell>& cells, double dt, const margins::
             const auto a=index(x,y);
             for (auto b : {index((x+1)%width_,y),index(x,(y+1)%height_)}) {
                 const double ca=cells[a].continent,cb=cells[b].continent;
-                const size_t from=ca>std::max(cb,h_max)?a:cb>std::max(ca,h_max)?b:cells.size();
-                if (from==cells.size()) continue;
+                size_t from=cells.size();
+                double volume=0;
+                if (!two_regimes) {
+                    from=ca>std::max(cb,h_max)?a:cb>std::max(ca,h_max)?b:cells.size();
+                    if (from==cells.size()) continue;
+                    volume=kappa*(cells[from].continent-std::max(cells[(from==a?b:a)].continent,h_max));
+                } else {
+                    if (ca==cb) continue;
+                    from=ca>cb?a:b;
+                    const double c_from=cells[from].continent,c_to=cells[from==a?b:a].continent;
+                    if (margin_cap && cells[from==a?b:a].continental_area<1)
+                        volume=kappa*std::max(0.0,c_from-std::max(c_to,cap));
+                    else
+                        volume=kappa_low*std::max(0.0,std::min(c_from,onset)-std::max(c_to,cap))
+                            +kappa*std::max(0.0,c_from-std::max(c_to,onset));
+                    if (!(volume>0)) continue;
+                }
                 const size_t to=from==a?b:a;
-                const double volume=kappa*(cells[from].continent-std::max(cells[to].continent,h_max));
                 outgoing[from]+=volume;incoming[to]+=volume;
                 incoming_age[to]+=volume*cells[from].continental_age_volume/cells[from].continent;
                 budget_.collapsed_continent_kg+=volume*continental_density*cell_m_*cell_m_;

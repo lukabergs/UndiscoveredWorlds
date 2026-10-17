@@ -39,6 +39,10 @@ TEST(TectonicOptions, BaselineAndExplicitValuesStart) {
                            "--orogenic-collapse-onset-thickness-m", "60000"}));
     EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-onset-thickness-m", "34000"}));
     EXPECT_NO_THROW(start({"--orogenic-collapse-onset-thickness-m", "0"}));
+    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
+                           "--orogenic-collapse-onset-thickness-m", "65000", "--orogenic-collapse-margin-cap", "on",
+                           "--orogenic-collapse-below-onset-km2-myr", "10000"}));
+    EXPECT_NO_THROW(start({"--orogenic-collapse-margin-cap", "off", "--orogenic-collapse-below-onset-km2-myr", "0"}));
 }
 
 // A value the option parser or the engine refuses stops the run before it starts.
@@ -86,6 +90,11 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "30000"}, // below it
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "-1"},
         {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "nan"},
+        {"--orogenic-collapse-margin-cap", "maybe"},
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-margin-cap", "on"}, // needs an onset
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-below-onset-km2-myr", "10000"},
+        {"--continental-max-thickness-m", "40000", "--orogenic-collapse-onset-thickness-m", "65000",
+         "--orogenic-collapse-below-onset-km2-myr", "-1"},
     };
     for (const auto& options : cases) {
         EXPECT_ANY_THROW(start(options)) << options[0] << ' ' << options[1];

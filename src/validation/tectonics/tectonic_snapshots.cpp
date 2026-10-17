@@ -401,6 +401,8 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"continental_max_thickness_m\": " << scenario.margin_processes.continental_max_thickness_m << ",\n";
     output << indent << "  \"orogenic_collapse_km2_myr\": " << scenario.margin_processes.orogenic_collapse_km2_myr << ",\n";
     output << indent << "  \"orogenic_collapse_onset_thickness_m\": " << scenario.margin_processes.orogenic_collapse_onset_thickness_m << ",\n";
+    output << indent << "  \"orogenic_collapse_margin_cap\": " << (scenario.margin_processes.orogenic_collapse_margin_cap?"true":"false") << ",\n";
+    output << indent << "  \"orogenic_collapse_below_onset_km2_myr\": " << scenario.margin_processes.orogenic_collapse_below_onset_km2_myr << ",\n";
     output << indent << "  \"arc_continent_fraction\": " << scenario.margin_processes.arc_continent_fraction << ",\n";
     output << indent << "  \"subduction_erosion_ratio\": " << scenario.margin_processes.subduction_erosion_ratio << ",\n";
     output << indent << "  \"continental_growth_control\": " << (scenario.margin_processes.continental_growth_control?"true":"false") << ",\n";
