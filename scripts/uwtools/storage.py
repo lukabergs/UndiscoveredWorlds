@@ -56,6 +56,16 @@ def junction_target(path):
     return Path(os.readlink(path).removeprefix('\\\\?\\')).resolve()
 
 
+def long_path(path):
+    """The extended-length form (\\\\?\\C:\\...): files below it stay reachable past 260 characters.
+
+    Without it a deep file is invisible to exists(), open() and rglob's is_file() (2026-10-17: the clean-up
+    of out/scratch stopped on one, and a scan without it would skip such files silently).
+    """
+    text = os.path.abspath(path)
+    return Path(text if text.startswith('\\\\?\\') else '\\\\?\\' + text)
+
+
 def is_link(entry):
     """A symbolic link, a junction or any other reparse point (os.DirEntry or Path)."""
     if isinstance(entry, Path):
@@ -67,7 +77,7 @@ def is_link(entry):
 
 def find_links(root):
     """Every link below root, never followed (an unreadable directory counts as one: it cannot be checked)."""
-    found, stack = [], [str(root)]
+    found, stack = [], [str(long_path(root))]
     while stack:
         directory = stack.pop()
         try:
@@ -89,7 +99,7 @@ def remove_tree(root):
     Scans the whole tree first and deletes nothing if it finds a link; while deleting it never descends
     into a link and stops at one that appeared since the scan.
     """
-    root = Path(root)
+    root = long_path(root)
     if is_link(root):
         raise OSError(f'Refusing to delete through a link: {root}')
     links = find_links(root)
@@ -123,6 +133,7 @@ def make_junction(path, target):
 def copy_verified(source, destination):
     """Copy a directory tree, checking every file's SHA-256; returns {relative path: digest}."""
     digests = {}
+    source, destination = long_path(source), long_path(destination)
     items = list(source.rglob('*'))
     links = [item for item in items if os.path.isjunction(item) or item.is_symlink()]
     if links:
@@ -224,9 +235,9 @@ def check_backup(path):
     """
     path = Path(os.path.abspath(path))
     relative = relative_path(path)
-    backup = path.with_name(path.name + '.storage-migration-backup')
+    backup = long_path(path.with_name(path.name + '.storage-migration-backup'))
     receipt = json.loads((storage_root() / 'receipts' / (relative.replace('/', '__') + '.json')).read_text(encoding='utf-8'))
-    destination, digests = Path(receipt['destination']), receipt['sha256']
+    destination, digests = long_path(receipt['destination']), receipt['sha256']
     counts = dict.fromkeys(('files', 'ok', 'newer_on_storage', 'not_in_receipt', 'changed_since_copy',
                             'missing_on_storage', 'links'), 0)
     examples = {}

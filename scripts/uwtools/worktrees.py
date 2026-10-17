@@ -85,7 +85,8 @@ def landed(worktree, head):
 def sizes(worktree):
     """Bytes per top-level entry (per out/<child> under out), links not followed."""
     totals = {}
-    stack = [str(worktree)]
+    root = storage.long_path(worktree)
+    stack = [str(root)]
     while stack:
         try:
             entries = list(os.scandir(stack.pop()))
@@ -97,7 +98,7 @@ def sizes(worktree):
             if entry.is_dir(follow_symlinks=False):
                 stack.append(entry.path)
                 continue
-            parts = Path(entry.path).relative_to(worktree).parts
+            parts = Path(entry.path).relative_to(root).parts
             key = '/'.join(parts[:2]) if parts[0] == 'out' and len(parts) > 2 else parts[0]
             totals[key] = totals.get(key, 0) + entry.stat(follow_symlinks=False).st_size
     return totals
@@ -129,29 +130,41 @@ def preserve(worktree):
     destination = archive_root() / worktree.name
     receipt_path = destination / 'receipt.json'
     if receipt_path.is_file():
-        raise FileExistsError(f'{worktree.name}: already preserved ({receipt_path})')
-    destination.mkdir(parents=True, exist_ok=True)
-    state = audit_one(worktree)
-    (destination / 'state.json').write_text(json.dumps(state, indent=1) + '\n', encoding='utf-8')
-    patch = git('diff', '--binary', 'HEAD', cwd=worktree, binary=True)[1]
-    (destination / 'uncommitted.patch').write_bytes(patch)
+        # Run again on an archive: add the files it lacks (2026-10-17: the first archives were written
+        # without extended-length paths, so a file past 260 characters could have been skipped).
+        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+        if receipt['status'] != 'preserved':
+            raise OSError(f'{worktree.name}: archive status {receipt["status"]}')
+        digests = receipt['sha256']
+    else:
+        destination.mkdir(parents=True, exist_ok=True)
+        state = audit_one(worktree)
+        (destination / 'state.json').write_text(json.dumps(state, indent=1) + '\n', encoding='utf-8')
+        patch = git('diff', '--binary', 'HEAD', cwd=worktree, binary=True)[1]
+        (destination / 'uncommitted.patch').write_bytes(patch)
+        receipt = {'worktree': str(worktree), 'head': state['head'], 'branch': state['branch'], 'status': 'preserved',
+                   'patch_sha256': sha256(destination / 'uncommitted.patch')}
+        digests = {}
     listed = git('ls-files', '--others', '-z', cwd=worktree, binary=True)[1].decode('utf-8', 'replace').split('\0')
-    digests = {}
-    for relative in sorted(item for item in listed if item and not skipped(item)):
-        source = worktree / relative
+    source_root, target_root = storage.long_path(worktree), storage.long_path(destination / 'files')
+    added = 0
+    for relative in sorted(item for item in listed if item and not skipped(item) and item not in digests):
+        source = source_root / relative
         if not source.is_file() or storage.is_link(source):
+            if not source.exists():
+                raise OSError(f'{worktree.name}: listed by git but unreachable: {relative}')
             continue
-        target = destination / 'files' / relative
+        added += 1
+        target = target_root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         digests[relative] = sha256(source)
         if sha256(target) != digests[relative]:
             raise OSError(f'Copy verification failed: {source}')
-    receipt = {'worktree': str(worktree), 'head': state['head'], 'branch': state['branch'], 'status': 'preserved',
-               'preserved_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
-               'patch_sha256': sha256(destination / 'uncommitted.patch'), 'sha256': digests}
+    receipt['sha256'] = digests
+    receipt['preserved_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
     receipt_path.write_text(json.dumps(receipt, indent=1) + '\n', encoding='utf-8')
-    return len(digests), sum((worktree / item).stat().st_size for item in digests) / 1e9
+    return len(digests), added, sum((source_root / item).stat().st_size for item in digests) / 1e9
 
 
 def retire(worktree):
@@ -166,8 +179,9 @@ def retire(worktree):
         raise OSError(f'{worktree.name}: HEAD moved since the archive')
     if sha256_bytes(git('diff', '--binary', 'HEAD', cwd=worktree, binary=True)[1]) != receipt['patch_sha256']:
         raise OSError(f'{worktree.name}: the uncommitted diff changed since the archive')
-    newer = [item for item in worktree.rglob('*') if item.is_file() and item.stat().st_mtime > stamp
-             and not skipped(item.relative_to(worktree).as_posix()) and item.name != '.git']
+    root = storage.long_path(worktree)
+    newer = [item for item in root.rglob('*') if item.is_file() and item.stat().st_mtime > stamp
+             and not skipped(item.relative_to(root).as_posix()) and item.name != '.git']
     if newer:
         raise OSError(f'{worktree.name}: {len(newer)} files newer than the archive, e.g. {newer[0]}')
     storage.remove_tree(worktree)
@@ -210,8 +224,8 @@ def main():
     chosen = every if args.all else [WORKTREES / name for name in args.names]
     for worktree in chosen:
         if args.command == 'preserve':
-            files, gb = preserve(worktree)
-            print(f'{worktree.name}: preserved {files} files ({gb:.2f} GB) and the uncommitted patch')
+            files, added, gb = preserve(worktree)
+            print(f'{worktree.name}: {files} files in the archive ({gb:.2f} GB), {added} added now, and the uncommitted patch')
         else:
             retire(worktree)
             print(f'{worktree.name}: retired (branch kept)')
