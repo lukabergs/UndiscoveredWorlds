@@ -89,6 +89,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0103`: the lake trap on every lake under ice (it fills the troughs that become fjords)
 - `erosion-0104`: showing nested windows to the user before the parent's D8 bias and the block terraces are gone
 - `erosion-0104`: a global-scale page for one-pixel features (crop at 1:1)
+- `erosion-0105`: comparing a sandbox label's config.json before its render has finished (written at the end)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
@@ -99,6 +100,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `tectonics-0014`: a frozen root cap as the way to high mountains: it keeps the root under the orogen
 - `tectonics-0014`: placing the land fraction at terraforming: the engine surface has no shelves yet
 - `tectonics-0014`: tuning h_max or D to fix the land height: the Airy slope sets it
+- `tectonics-0015`: an onset with no collapse at all between the cap and the onset (loses 0.03-0.07 of continental area)
+- `tectonics-0015`: judging the Earth-like set at 600 Myr without the 400 Myr checkpoint
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -235,6 +238,7 @@ Lessons:
 | `erosion-0102` | 2026-10-16 | not reviewed (reviews of evaluations paused since 2026-10-05); awaiting the user's look (pages compare-t16-1 to -5) | keep | terrain roadmap T1.6: sandbox artefacts, diagnosis round |
 | `erosion-0103` | 2026-10-16 | not reviewed (reviews of evaluations paused since 2026-10-05); the user has not looked yet | keep | terrain roadmap T1.7 (G's fjords), the window smoothness (T1.6/T1.8b), one nesting mechanism for the window levels |
 | `erosion-0104` | 2026-10-17 | the user's visual verdict (the recorded one above); no agent review | keep | terrain roadmap T1.7, T1.8b: the user's verdicts of 2026-10-17 and the decisions taken from them |
+| `erosion-0105` | 2026-10-17 | pending the user's look at the pages (asked 2026-10-17) | park | terrain roadmap T1 (step 1 of the 2026-10-17 session): confirming renders of the new defaults, the glacial-ratio pair, the global K question, straight rivers, fill_pits |
 
 Lessons:
 
@@ -408,6 +412,7 @@ Lessons:
 - `erosion-0103`: Exactness to a coarse parent must be smooth across parent cells, or the parent grid becomes terrain.
 - `erosion-0104`: The user judges mechanisms by their artefacts: a grid that shows anywhere fails the whole page.
 - `erosion-0104`: Bold physical changes (open troughs, less diffusion) were accepted; numerical exactness that costs a visible grid was not.
+- `erosion-0105`: Measure a ratio's cost on the domain it hurt (B above 4 km), not on the land mean: the mean hides an 11 % local loss.
 
 ## tectonics
 
@@ -427,6 +432,7 @@ Lessons:
 | `tectonics-0012` | 2026-10-16 | reviewed (reviewer on Opus 5.5, Fable off): pass with notes; the report script's mass check fixed at commit | keep | terrain roadmap T4.12, first round: continental growth as a world parameter (keys off by default) |
 | `tectonics-0013` | 2026-10-16 | reviewed (two reviewers on Opus 5.5, Fable off): db9f726 pass with notes, c7cd42a pass with notes (the saturation pulse fixed in d5556a1); the evaluation itself not reviewed (reviews of evaluations paused since 2026-10-05) | keep | terrain roadmap T4.12, second round: seeding fix, column continental_area field, upper thickness regulator (keys off by default) |
 | `tectonics-0014` | 2026-10-16 | reviewed (Fable 5.1): 0c64d84 pass with notes (fixed in 5b3f384), 5b3f384 pass with notes (fixed in ae2c114), 0e725bf pass with notes (fixed in 075383e); the evaluation itself not reviewed | keep | terrain roadmap T4.12, third round: continental freeboard (lithospheric root, its cap), area budgets, continent-only controller, resolution check, the sea placed after the coast cleanup |
+| `tectonics-0015` | 2026-10-17 | agent measurement against the round's criteria (fails area, median and the 3000+ band); no user look (no candidate) | keep | terrain roadmap T4.12, fourth round: orogenic collapse above an onset thickness (the missing high mountains) |
 
 Lessons:
 
@@ -455,6 +461,7 @@ Lessons:
 - `tectonics-0014`: Elevation per km of crust is the lever on land height; the root key moves it without touching the crust budget.
 - `tectonics-0014`: Measure at 256 and check 128 against it with a script: the core statistics agree, the shelf share does not.
 - `tectonics-0014`: The shelf band is transient: stretched margins are oceanised by the lower cap faster than arcs make area; a renewal mechanism is still missing.
+- `tectonics-0015`: Before switching off a process, find which budget it feeds: the collapse was the area source, not only a thickness limit.
 
 ## world
 
