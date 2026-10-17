@@ -102,6 +102,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `tectonics-0014`: tuning h_max or D to fix the land height: the Airy slope sets it
 - `tectonics-0015`: an onset with no collapse at all between the cap and the onset (loses 0.03-0.07 of continental area)
 - `tectonics-0015`: judging the Earth-like set at 600 Myr without the 400 Myr checkpoint
+- `tectonics-0016`: the margin rule alone (W1, W2: interiors grow past 60 km without bound, 3000+ 3.5-7 %)
+- `tectonics-0016`: creep 20000 below a 65 km onset (W4: no mountains)
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -433,6 +435,7 @@ Lessons:
 | `tectonics-0013` | 2026-10-16 | reviewed (two reviewers on Opus 5.5, Fable off): db9f726 pass with notes, c7cd42a pass with notes (the saturation pulse fixed in d5556a1); the evaluation itself not reviewed (reviews of evaluations paused since 2026-10-05) | keep | terrain roadmap T4.12, second round: seeding fix, column continental_area field, upper thickness regulator (keys off by default) |
 | `tectonics-0014` | 2026-10-16 | reviewed (Fable 5.1): 0c64d84 pass with notes (fixed in 5b3f384), 5b3f384 pass with notes (fixed in ae2c114), 0e725bf pass with notes (fixed in 075383e); the evaluation itself not reviewed | keep | terrain roadmap T4.12, third round: continental freeboard (lithospheric root, its cap), area budgets, continent-only controller, resolution check, the sea placed after the coast cleanup |
 | `tectonics-0015` | 2026-10-17 | agent measurement against the round's criteria (fails area, median and the 3000+ band); no user look (no candidate) | keep | terrain roadmap T4.12, fourth round: orogenic collapse above an onset thickness (the missing high mountains) |
+| `tectonics-0016` | 2026-10-17 | agent measurement against the round's gate (passed by W3 at 400 Myr); the user's look pending | keep | terrain roadmap T4.12, fifth round: collapse into margins and creep below the onset (the area source kept, the interiors thickening) |
 
 Lessons:
 
@@ -462,6 +465,7 @@ Lessons:
 - `tectonics-0014`: Measure at 256 and check 128 against it with a script: the core statistics agree, the shelf share does not.
 - `tectonics-0014`: The shelf band is transient: stretched margins are oceanised by the lower cap faster than arcs make area; a renewal mechanism is still missing.
 - `tectonics-0015`: Before switching off a process, find which budget it feeds: the collapse was the area source, not only a thickness limit.
+- `tectonics-0016`: A matched control run with the new exe (W0) turns a guessed cause into a measured one: compare budget terms, not end states.
 
 ## world
 
