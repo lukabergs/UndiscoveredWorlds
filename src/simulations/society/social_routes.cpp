@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "core/mesh/mesh_geometry.hpp"
 #include "world/planet.hpp"
 #include "simulations/society/social_generation_internal.hpp"
 
@@ -124,76 +125,41 @@ vector<CellId> findpathastar(const planet& world, CellId start, CellId end, int 
     return reversed;
 }
 
-// The straight line between two cells, when no passable path exists (lat-lon only).
+// The cells along the great circle between two cells, when no passable path exists.
 vector<CellId> buildstraightpath(const mesh::CellGrid& grid, CellId start, CellId end)
 {
-    const int startx = grid.column(start);
-    const int starty = grid.row(start);
-    const int endx = grid.column(end);
-    const int endy = grid.row(end);
-    const int worldspan = grid.columns();
-    int adjustedendx = endx;
-    const int directdx = endx - startx;
+    // Antipodal centres have no single arc: no straight path.
+    if (mesh::greatcircle_rad(grid.centre(start), grid.centre(end)) > 3.14159265358979323846 - 1e-9)
+        return {};
 
-    if (std::abs(directdx) > worldspan / 2)
-    {
-        if (directdx > 0)
-            adjustedendx -= worldspan;
-        else
-            adjustedendx += worldspan;
-    }
-
-    vector<CellId> path;
-    int x0 = startx;
-    int y0 = starty;
-    const int x1 = adjustedendx;
-    const int y1 = endy;
-    const int dx = std::abs(x1 - x0);
-    const int sx = x0 < x1 ? 1 : -1;
-    const int dy = -std::abs(y1 - y0);
-    const int sy = y0 < y1 ? 1 : -1;
-    int error = dx + dy;
-
-    while (true)
-    {
-        int wrappedx = x0;
-        while (wrappedx < 0)
-            wrappedx += worldspan;
-        while (wrappedx >= worldspan)
-            wrappedx -= worldspan;
-        const int clampedy = std::clamp(y0, 0, grid.rows() - 1);
-        path.push_back(grid.cellof(wrappedx, clampedy));
-
-        if (x0 == x1 && y0 == y1)
-            break;
-
-        const int e2 = 2 * error;
-
-        if (e2 >= dy)
-        {
-            error += dy;
-            x0 += sx;
-        }
-
-        if (e2 <= dx)
-        {
-            error += dx;
-            y0 += sy;
-        }
-    }
-
-    return path;
+    return mesh::cellsalongarc(grid, grid.centre(start), grid.centre(end));
 }
 
-// The unit direction of a step for the sea-current assist (lat-lon only: the
-// column and row offsets, y growing south, as the former loops computed them).
-void stepdirection(const mesh::CellGrid& grid, CellId from, CellId to, float& ux, float& uy)
+// The compass direction of a step for the sea-current assist: east and, as the
+// former row offsets counted it, south.
+void stepdirection(const mesh::CellGrid& grid, CellId from, int slot, float& ux, float& uy)
 {
-    const float dirx = static_cast<float>(grid.column(to) - grid.column(from));
-    const float diry = static_cast<float>(grid.row(to) - grid.row(from));
-    const float length = std::max(1.0f, std::sqrt(dirx * dirx + diry * diry));
-    ux = dirx / length;
-    uy = diry / length;
+    const double bearing = grid.bearing_rad(from, slot);
+    ux = static_cast<float>(std::sin(bearing));
+    uy = static_cast<float>(-std::cos(bearing));
+}
+
+// A step's length in cell widths.
+float steplength(const mesh::CellGrid& grid, CellId from, int slot)
+{
+    return static_cast<float>(grid.distance_m(from, slot) / socialgen::cellwidth_m(grid));
+}
+
+// A path's extent in cell widths: centre to centre along the path plus half a
+// cell at each end (the former count of its cells on a straight row).
+float pathlength(const mesh::CellGrid& grid, const vector<CellId>& path)
+{
+    double length_m = 0.0;
+
+    for (size_t k = 1; k < path.size(); k++)
+        length_m += mesh::greatcircle_m(grid.centre(path[k - 1]), grid.centre(path[k]), grid.radius_m());
+
+    return 1.0f + static_cast<float>(length_m / socialgen::cellwidth_m(grid));
 }
 
 float settlementpopulation(const Settlement& settlement)
@@ -254,7 +220,7 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
 
         edgekeys.emplace(edgekey);
 
-        const float distance = static_cast<float>(path.size());
+        const float distance = pathlength(grid, path);
         const float populationfactor = std::sqrt(std::max(1.0f, settlementpopulation(from) * settlementpopulation(to)));
         const float modemultiplier = mode == RouteMode::land ? 1.0f : (mode == RouteMode::river ? 1.22f : 1.35f);
         const float costmultiplier = mode == RouteMode::land ? 1.0f : (mode == RouteMode::river ? 0.76f : 0.64f);
@@ -312,7 +278,7 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
 
             const auto landmovecost = [&](CellId current, CellId next, int slot) -> float
             {
-                float cost = orthogonalslot(slot) ? 10.0f : 14.0f;
+                float cost = 10.0f * steplength(grid, current, slot);
                 const float elevationdelta = std::fabs(world.mapfloat(current) - world.mapfloat(next));
                 cost += std::min(12.0f, elevationdelta / 180.0f);
                 const int special = world.special(next);
@@ -346,9 +312,9 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
                     return !world.sea(next) && world.riveraccess(next) >= 18;
                 };
 
-                const auto rivermovecost = [&](CellId, CellId next, int slot) -> float
+                const auto rivermovecost = [&](CellId current, CellId next, int slot) -> float
                 {
-                    float cost = orthogonalslot(slot) ? 8.0f : 11.0f;
+                    float cost = 8.0f * steplength(grid, current, slot);
                     cost -= static_cast<float>(std::min(world.riveraccess(next), 90)) * 0.04f;
                     cost = std::max(2.0f, cost);
                     return cost;
@@ -387,14 +353,12 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
                     if (world.sea(next) || iscoast(next))
                         return true;
 
-                    const int startdist = cellmanhattan(grid, next, source.cell);
-                    const int enddist = cellmanhattan(grid, next, target.cell);
-                    return startdist <= 3 || enddist <= 3;
+                    return celldistance(grid, next, source.cell) <= 3.0f || celldistance(grid, next, target.cell) <= 3.0f;
                 };
 
                 const auto seamovecost = [&](CellId current, CellId next, int slot) -> float
                 {
-                    float cost = orthogonalslot(slot) ? 7.0f : 9.5f;
+                    float cost = 7.0f * steplength(grid, current, slot);
 
                     if (!world.sea(next))
                         cost += 6.0f;
@@ -404,7 +368,7 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
 
                     float ux = 0.0f;
                     float uy = 0.0f;
-                    stepdirection(grid, current, next, ux, uy);
+                    stepdirection(grid, current, slot, ux, uy);
                     const float currentu = static_cast<float>(world.seasonalcurrentu(seasonjuly, current));
                     const float currentv = static_cast<float>(world.seasonalcurrentv(seasonjuly, current));
                     const float assist = (currentu * ux + currentv * uy) / 120.0f;

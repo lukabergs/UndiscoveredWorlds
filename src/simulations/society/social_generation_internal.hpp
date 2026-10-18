@@ -69,13 +69,18 @@ inline bool orthogonalslot(int slot) { return (slot & 1) == 1; }
 
 // The lat-lon export's columns W of the world's grid (columns on lat-lon, 4 N on the cube).
 int exportcolumns(const mesh::CellGrid& grid);
-// The distance between two cell centres in grid steps of the lat-lon grid
-// (wrapped column offset and row offset, Euclidean).
+// The unit of society's distances: the equatorial cell width of the export,
+// 2 pi R / W (the grid step the former distances counted at the equator).
+double cellwidth_m(const mesh::CellGrid& grid);
+// The great-circle distance between two cell centres in cell widths.
 float celldistance(const mesh::CellGrid& grid, mesh::CellId a, mesh::CellId b);
-// The same distance as the sum of the two offsets (the sea routes' landing test).
-int cellmanhattan(const mesh::CellGrid& grid, mesh::CellId a, mesh::CellId b);
-// The squared Euclidean offset in grid steps (the capital spacing test).
-int celldistancesquared(const mesh::CellGrid& grid, mesh::CellId a, mesh::CellId b);
+// The mean cell area of the export grid, 4 pi R^2 / (W x W/2): land areas in
+// these units are the former land cell counts.
+double exportcellarea_m2(const mesh::CellGrid& grid);
+// Per cell, the key by which equal-scored candidate sites are taken (largest
+// first): a draw without replacement weighted by cell area (Efraimidis-Spirakis,
+// log(u) / (area / mean area)) from a stream of the seed alone.
+std::vector<double> sitedrawkeys(const mesh::CellGrid& grid, long seed);
 // Places a settlement on a cell: its cell id, and x, y on the lat-lon export
 // grid (the cell's column and row on lat-lon; on the cube the export cell of its centre).
 void placesettlement(Settlement& settlement, const mesh::CellGrid& grid, mesh::CellId cell);

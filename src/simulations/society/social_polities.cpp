@@ -157,7 +157,9 @@ void buildpolities(planet& world, const SocialGenerationOptions&, std::mt19937_6
         for (int selected : selectedcapitals)
         {
             const Settlement& existing = settlements[selected];
-            if (celldistancesquared(grid, existing.cell, candidate.cell) < spacingsquared && component[existing.id] == component[candidate.id])
+            const float distance = celldistance(grid, existing.cell, candidate.cell);
+
+            if (distance * distance < static_cast<float>(spacingsquared) && component[existing.id] == component[candidate.id])
             {
                 blocked = true;
                 break;

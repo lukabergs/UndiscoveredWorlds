@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "core/mesh/mesh_geometry.hpp"
 #include "world/planet.hpp"
 #include "simulations/society/social_generation_internal.hpp"
 
@@ -22,31 +23,8 @@ struct SettlementCandidate
     int choke = 0;
     int harbor = 0;
     int river = 0;
+    double drawkey = 0.0;
 };
-
-// The cells in the order the former x-major loops visited them (columns outer
-// on lat-lon; id order on the cube): the candidate sort keeps it for ties.
-vector<CellId> scanorder(const mesh::CellGrid& grid)
-{
-    vector<CellId> order;
-    order.reserve(grid.cellcount());
-
-    if (grid.kind() == mesh::GridKind::latlon)
-    {
-        for (int x = 0; x < grid.columns(); x++)
-        {
-            for (int y = 0; y < grid.rows(); y++)
-                order.push_back(grid.cellof(x, y));
-        }
-    }
-    else
-    {
-        for (CellId c = 0; c < grid.cellcount(); c++)
-            order.push_back(c);
-    }
-
-    return order;
-}
 
 // Steps to the nearest sea cell over the four edge neighbours (the former
 // diamond rings), maxradius + 1 beyond maxradius.
@@ -165,20 +143,6 @@ bool hasphysicalreserveinputs(const planet& world)
 {
     const mesh::CellGrid& grid = world.grid();
 
-    if (grid.kind() == mesh::GridKind::latlon)
-    {
-        for (int x = 0; x < grid.columns(); x += 16)
-        {
-            for (int y = 0; y < grid.rows(); y += 16)
-            {
-                if (hasphysicalreserve(world, grid.cellof(x, y)))
-                    return true;
-            }
-        }
-
-        return false;
-    }
-
     for (CellId c = 0; c < grid.cellcount(); c++)
     {
         if (hasphysicalreserve(world, c))
@@ -209,33 +173,10 @@ int computeresourceopportunity(const planet& world, CellId c, bool usephysicalre
     return std::clamp(proxy, 0, 100);
 }
 
-// The lat-lon cells of the former square or disc loops around a cell (lat-lon only).
-template <typename Visit>
-void visitlatlonbox(const mesh::CellGrid& grid, CellId centre, int radius, bool disc, Visit&& visit)
+// The cells whose centres lie within a radius in cell widths of a cell's centre.
+vector<CellId> cellsaround(const mesh::CellGrid& grid, CellId centre, double radiuscells)
 {
-    const int cx = grid.column(centre);
-    const int cy = grid.row(centre);
-
-    for (int dx = -radius; dx <= radius; dx++)
-    {
-        for (int dy = -radius; dy <= radius; dy++)
-        {
-            if (disc && dx * dx + dy * dy > radius * radius)
-                continue;
-
-            int nx = cx + dx;
-            while (nx < 0)
-                nx += grid.columns();
-            while (nx >= grid.columns())
-                nx -= grid.columns();
-            const int ny = cy + dy;
-
-            if (ny < 0 || ny >= grid.rows())
-                continue;
-
-            visit(grid.cellof(nx, ny));
-        }
-    }
+    return mesh::cellswithin(grid, grid.centre(centre), radiuscells * socialgen::cellwidth_m(grid));
 }
 
 string makesettlementname(int id, std::mt19937_64& rng)
@@ -260,11 +201,12 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
     world.clearsocialstate();
 
     const vector<int> seadistance = seadistances(world, maxcoastradius);
-    int landcells = 0;
+    const vector<double> drawkeys = sitedrawkeys(grid, world.seed());
+    double landarea_m2 = 0.0;
     vector<SettlementCandidate> candidates;
     candidates.reserve(static_cast<size_t>(cellcount) / 8);
 
-    for (const CellId c : scanorder(grid))
+    for (CellId c = 0; c < grid.cellcount(); c++)
     {
         world.setownersettlementid(c, -1);
         world.setownerpolityid(c, -1);
@@ -280,7 +222,7 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
             continue;
         }
 
-        landcells++;
+        landarea_m2 += grid.area_m2(c);
 
         const int coastdistance = seadistance[c];
         const int coastscore = std::clamp(100 - coastdistance * 8, 0, 100);
@@ -392,6 +334,7 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
             candidate.suitability = suitability;
             candidate.harbor = harborscore;
             candidate.river = riveraccess;
+            candidate.drawkey = drawkeys[c];
             candidate.choke = std::clamp((harborscore + riveraccess + confluencescore + routeaccessproxy) / 4, 0, 100);
             candidates.push_back(candidate);
         }
@@ -408,10 +351,18 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
         if (left.harbor != right.harbor)
             return left.harbor > right.harbor;
 
-        return left.river > right.river;
+        if (left.river != right.river)
+            return left.river > right.river;
+
+        if (left.drawkey != right.drawkey)
+            return left.drawkey > right.drawkey;
+
+        return left.cell < right.cell;
     });
 
     vector<Settlement>& settlements = world.settlements();
+    // The land area in export cells (the former count of land cells).
+    const int landcells = static_cast<int>(landarea_m2 / exportcellarea_m2(grid));
     const int targetsettlements = std::clamp(landcells / 12000, 8, 180);
     const float worldscalefactor = static_cast<float>(exportcolumns(grid)) / 1024.0f;
     const int spacingradius = std::max(6, static_cast<int>(std::round(static_cast<float>(profile.spacingRadius) * worldscalefactor)));
@@ -475,15 +426,15 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
         int routeaccesstotal = 0;
         int samples = 0;
 
-        visitlatlonbox(grid, settlement.cell, radius, true, [&](CellId n)
+        for (const CellId n : cellsaround(grid, settlement.cell, static_cast<double>(radius)))
         {
             if (world.sea(n))
-                return;
+                continue;
 
             agriculturetotal += world.agriculturalcapacity(n);
             routeaccesstotal += std::max({ world.riveraccess(n), world.harborscore(n), world.settlementsuitability(n) });
             samples++;
-        });
+        }
 
         const int suitability = world.settlementsuitability(settlement.cell);
         const float averageagriculture = samples > 0 ? static_cast<float>(agriculturetotal) / static_cast<float>(samples) : static_cast<float>(world.agriculturalcapacity(settlement.cell));
@@ -622,14 +573,18 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
         int total = 0;
         int samples = 0;
 
-        visitlatlonbox(grid, settlement.cell, 4, false, [&](CellId n)
+        // The disc of the former 9 x 9 square's area.
+        const double squarehalfwidth = 4.5;
+        const double pi = 3.14159265358979323846;
+
+        for (const CellId n : cellsaround(grid, settlement.cell, squarehalfwidth * 2.0 / std::sqrt(pi)))
         {
             if (world.sea(n))
-                return;
+                continue;
 
             total += world.infrastructure(n);
             samples++;
-        });
+        }
 
         if (samples > 0)
             settlement.infrastructure = static_cast<float>(total) / static_cast<float>(samples);

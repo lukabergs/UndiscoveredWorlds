@@ -1,22 +1,16 @@
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
-#include <stdexcept>
+#include <cstdint>
 
+#include "core/deterministic_random.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include "simulations/society/social_generation_internal.hpp"
 
 namespace socialgen
 {
 namespace
 {
-void latlonoffsets(const mesh::CellGrid& grid, mesh::CellId a, mesh::CellId b, int& dx, int& dy)
-{
-    if (grid.kind() != mesh::GridKind::latlon)
-        throw std::logic_error("society: grid-step distances exist on lat-lon only");
-    const int direct = std::abs(grid.column(a) - grid.column(b));
-    dx = std::min(direct, grid.columns() - direct);
-    dy = std::abs(grid.row(a) - grid.row(b));
-}
+constexpr double pi = 3.14159265358979323846;
 }
 
 int exportcolumns(const mesh::CellGrid& grid)
@@ -24,28 +18,36 @@ int exportcolumns(const mesh::CellGrid& grid)
     return grid.kind() == mesh::GridKind::latlon ? grid.columns() : 4 * grid.facecells();
 }
 
+double cellwidth_m(const mesh::CellGrid& grid)
+{
+    return 2.0 * pi * grid.radius_m() / static_cast<double>(exportcolumns(grid));
+}
+
 float celldistance(const mesh::CellGrid& grid, mesh::CellId a, mesh::CellId b)
 {
-    int dx = 0;
-    int dy = 0;
-    latlonoffsets(grid, a, b, dx, dy);
-    return std::sqrt(static_cast<float>(dx * dx + dy * dy));
+    return static_cast<float>(mesh::greatcircle_m(grid.centre(a), grid.centre(b), grid.radius_m()) / cellwidth_m(grid));
 }
 
-int cellmanhattan(const mesh::CellGrid& grid, mesh::CellId a, mesh::CellId b)
+double exportcellarea_m2(const mesh::CellGrid& grid)
 {
-    int dx = 0;
-    int dy = 0;
-    latlonoffsets(grid, a, b, dx, dy);
-    return dx + dy;
+    const double columns = static_cast<double>(exportcolumns(grid));
+    return grid.totalarea_m2() / (columns * (columns / 2.0));
 }
 
-int celldistancesquared(const mesh::CellGrid& grid, mesh::CellId a, mesh::CellId b)
+std::vector<double> sitedrawkeys(const mesh::CellGrid& grid, long seed)
 {
-    int dx = 0;
-    int dy = 0;
-    latlonoffsets(grid, a, b, dx, dy);
-    return dx * dx + dy * dy;
+    const std::uint64_t base = deterministiccontextseed(seed, 0x53495445);
+    const double meanarea = grid.totalarea_m2() / static_cast<double>(grid.cellcount());
+    std::vector<double> keys(grid.cellcount());
+
+    for (mesh::CellId c = 0; c < grid.cellcount(); c++)
+    {
+        // Efraimidis-Spirakis: u^(1 / w) for weight w, compared as log(u) / w; u in (0, 1).
+        const double u = (static_cast<double>(deterministiccombine(base, static_cast<std::int64_t>(c)) >> 11) + 0.5) * (1.0 / 9007199254740992.0);
+        keys[c] = std::log(u) / (grid.area_m2(c) / meanarea);
+    }
+
+    return keys;
 }
 
 void placesettlement(Settlement& settlement, const mesh::CellGrid& grid, mesh::CellId cell)
@@ -59,7 +61,6 @@ void placesettlement(Settlement& settlement, const mesh::CellGrid& grid, mesh::C
         return;
     }
 
-    const double pi = 3.14159265358979323846;
     const int columns = exportcolumns(grid);
     const int rows = columns / 2;
     const double longitude = grid.longitude_rad(cell);

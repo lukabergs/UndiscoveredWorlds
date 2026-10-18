@@ -102,4 +102,12 @@ if(TARGET world_pipeline)
     target_link_libraries(terrain_cube_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
     target_include_directories(terrain_cube_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(terrain_cube_tests)
+
+    # Society on a cube planet (sphere-mesh.md section 12, W2-S).
+    add_executable(society_cube_tests
+        simulations/society/society_cube_tests.cpp
+    )
+    target_link_libraries(society_cube_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(society_cube_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(society_cube_tests)
 endif()
