@@ -27,8 +27,9 @@ namespace
 using S = GenerationStageId;
 using worldmodel::FieldId;
 
-const std::vector<GenerationStageId> kCoarseClimate = { S::global_temperature, S::pressure, S::winds, S::ocean_currents,
-    S::sea_surface_temperatures, S::sea_ice_and_tides, S::rainfall };
+// The coarse climate of the procedural recipe, then the two climate diagnosers.
+const std::vector<GenerationStageId> kClimateProcesses = { S::global_temperature, S::pressure, S::winds, S::ocean_currents,
+    S::sea_surface_temperatures, S::sea_ice_and_tides, S::rainfall, S::mountain_temperature_lapse, S::climates_and_biomes };
 
 // Two continents and an ocean on a world of the given grid, seed 1, at the coarse
 // climate's settings (32 columns, 2 coupling iterations).
@@ -78,21 +79,25 @@ TEST(ClimateAdapter, CoarseClimateOnCubeWorld)
     initializegenerationscratch(scratch);
 
     std::vector<FieldId> imported;
-    for (std::size_t index = 0; index < kCoarseClimate.size(); index++)
+    for (std::size_t index = 0; index < kClimateProcesses.size(); index++)
     {
-        const GenerationStageId stage = kCoarseClimate[index];
+        const GenerationStageId stage = kClimateProcesses[index];
         ASSERT_TRUE(runstage(stage, *world, scratch));
         const ClimateShadowSync& sync = scratch.climateShadow.lastsync();
         const WorldProcessDefinition& process = getworldprocess(stage);
         std::cout << "ClimateAdapter " << std::left << std::setw(34) << process.id << std::fixed << std::setprecision(4)
                   << " export " << sync.exportseconds << " s (" << sync.exported << (sync.created ? ", created" : "")
-                  << ")  import " << sync.importseconds << " s (" << sync.imported << " fields)\n";
+                  << ")  import " << sync.importseconds << " s (" << sync.imported << " fields, " << sync.keptcells
+                  << " cells kept)\n";
         // The shadow is built once, by the first process; afterwards nothing changed on the
         // cube but climate's own imports, so nothing is sent back.
         EXPECT_EQ(sync.created, index == 0) << process.id;
         EXPECT_EQ(sync.exported, 0u) << process.id;
-        EXPECT_EQ(sync.importcalls, 1u) << process.id;
-        EXPECT_GT(sync.imported, 0u) << process.id;
+        // At most one import per process, of the declared writes it changed; every
+        // process here but the lapse (no mountains) changes some.
+        EXPECT_EQ(sync.importcalls, sync.imported > 0 ? 1u : 0u) << process.id;
+        if (stage != S::mountain_temperature_lapse)
+            EXPECT_GT(sync.imported, 0u) << process.id;
         EXPECT_LE(sync.imported, process.writes.size()) << process.id;
         imported.insert(imported.end(), process.writes.begin(), process.writes.end());
     }

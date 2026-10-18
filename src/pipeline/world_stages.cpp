@@ -937,6 +937,7 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
     case GenerationStageId::geosphere_initialization:
     {
         world.clear();
+        scratch.climateShadow.reset();   // a new world: climate's shadow starts again
         scratch.geologySolver.set(initializegeosphere(world, world.continentalshelves(), tectonicoptions(parameters)));
         parameters.seaLevel = world.sealevel();
         rebuildheightdistribution(world, scratch);
@@ -949,7 +950,10 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
         // copy without that step), the world starts over and the engine is created here.
         std::shared_ptr<GeologySolverState> solver = scratch.geologySolver.take();
         if (solver == nullptr)
+        {
             world.clear();
+            scratch.climateShadow.reset();
+        }
         const WorldTectonicsOptions options = tectonicoptions(parameters);
         // Checkpoints are not part of what the solver state was made for.
         WorldTectonicsOptions evolveroptions = options;
