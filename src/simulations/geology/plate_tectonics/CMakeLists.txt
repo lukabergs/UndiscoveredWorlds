@@ -50,9 +50,6 @@ endfunction()
 
 include(tectonic_recipe.cmake)
 add_library(uw_tectonics STATIC
-    bounds.cpp
-    geometry.cpp
-    heightmap.cpp
     lithosphere.cpp
     tectonic_columns.cpp
     tectonic_initialization.cpp
@@ -63,16 +60,11 @@ add_library(uw_tectonics STATIC
     tectonic_margins.cpp
     tectonic_transport.cpp
     tectonic_topology.cpp
-    mass.cpp
-    movement.cpp
-    noise.cpp
-    plate.cpp
+    tectonic_grid.cpp
     tectonic_api.cpp
     tectonic_recipe.cpp
-    rectangle.cpp
     simplerandom.cpp
     simplexnoise.cpp
-    sqrdmd.cpp
     tectonic_contract.cpp
     tectonic_dynamics.cpp
     tectonic_boundary_graph.cpp
@@ -82,9 +74,8 @@ add_library(uw_tectonics STATIC
     tectonic_provenance.cpp
     topography_codec.cpp
     utils.cpp
-    world_point.cpp
 )
-target_link_libraries(uw_tectonics PUBLIC uw_includes PRIVATE uw_landscape)
+target_link_libraries(uw_tectonics PUBLIC uw_includes uw_core PRIVATE uw_landscape)
 target_include_directories(uw_tectonics PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(uw_tectonics PRIVATE NOMINMAX)
 uw_tectonics_target_defaults(uw_tectonics)

@@ -10,6 +10,7 @@
 #include "simulations/geology/plate_tectonics/tectonic_noise_pass.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_plumes.hpp"
 
+namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::columns {
 inline constexpr double mantle_density = 3300;
 inline constexpr double continental_density = 2800;
@@ -117,7 +118,7 @@ public:
                     uint32_t transport_subdivision = 1, long seed = 0,
                     const ocean_relief::Parameters& relief = {}, bool preserve_initial = false,
                     double root_kg_m3 = 0, double root_max_thickness_m = 0,
-                    double root_delamination_width_m = 0);
+                    double root_delamination_width_m = 0, const grid::TectonicGrid* grid = nullptr);
     void advance(const std::vector<Displacement>& velocity, double dt_myr,
                  double erosion_strength, double thermal_strength, double submarine_erosion_ratio = 1,
                  const margins::Forcing* forcing = nullptr, const margins::Parameters& margins = {},
@@ -173,6 +174,7 @@ private:
     void routeRiversImplicit(std::vector<Cell>& cells, double dt_myr, double thermal_strength,
                              const margins::Parameters& parameters, const margins::Forcing* forcing);
     uint32_t width_ = 0, height_ = 0;
+    const grid::TectonicGrid* grid_ = nullptr; // the engine's cell table (W2-E), null in unit tests
     double cell_m_ = 0;
     long seed_ = 0;
     double root_kg_m3_ = 0; // Lithospheric root load in every elevation of the model.

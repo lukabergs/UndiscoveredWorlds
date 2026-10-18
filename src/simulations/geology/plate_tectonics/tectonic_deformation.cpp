@@ -17,7 +17,8 @@ double taper(double distance, double peak) {
 
 std::vector<transport::Displacement> distribute(uint32_t w, uint32_t h, double cell_m,
         const std::vector<uint32_t>& owners, const std::vector<double>& continent,
-        const std::vector<transport::Displacement>& rigid, long seed, const Parameters& p) {
+        const std::vector<transport::Displacement>& rigid, long seed, const Parameters& p,
+        const grid::TectonicGrid* /*grid*/) {
     variation::validate(p.process_variation,p.process_wavelength_km,p.process_period_myr);
     const size_t size=static_cast<size_t>(w)*h;
     if (w<2 || h<2 || owners.size()!=size || continent.size()!=size || rigid.size()!=size ||

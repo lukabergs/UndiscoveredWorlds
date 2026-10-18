@@ -2,6 +2,8 @@
 #define TECTONIC_TOPOLOGY_HPP
 #include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
+#include <memory>
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -43,6 +45,11 @@ struct Diagnostics {
 // material columns: resolving a boundary must never erase or flatten terrain.
 class Model {
 public:
+    // Neighbourhoods, connectivity and contacts on the engine's cell table (W2-E); the rift
+    // geometry and the coverage transport are still planar (E2).
+    void initialize(std::shared_ptr<const grid::TectonicGrid> grid, uint32_t plates,
+                    const std::vector<uint32_t>& owners);
+    // The same on a planar scaffold of width x height (unit tests).
     void initialize(uint32_t width, uint32_t height, uint32_t plates, const std::vector<uint32_t>& owners);
     std::vector<uint32_t> advance(const std::vector<transport::Displacement>& plate_displacement);
     // Changes ownership only. No height, rock, sediment or age input can be modified.
@@ -63,6 +70,7 @@ private:
     std::vector<uint32_t> partition(uint32_t plate, const std::vector<uint32_t>& owners,
         const std::vector<dynamics::Vector>& mantle, const std::vector<double>& strength = {}) const;
     struct Rift { std::vector<double> side, cracks; double damage = 0, duration = 0, cooldown = 0; };
+    std::shared_ptr<const grid::TectonicGrid> grid_;
     uint32_t width_ = 0, height_ = 0;
     std::vector<std::vector<double>> coverage_;
     std::vector<Rift> rifts_;

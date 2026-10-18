@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::boundary_graph {
 
 struct Inputs {
@@ -23,6 +24,8 @@ struct Inputs {
     uint32_t previous_segment_count = 0;
     uint32_t next_boundary_id = contract::kNoBoundaryId + 1U;
     double delta_time_myr = 0.0;
+    // The engine's cell table (W2-E); null for synthetic inputs, which use width x height.
+    const grid::TectonicGrid* grid = nullptr;
 };
 
 struct Outputs {

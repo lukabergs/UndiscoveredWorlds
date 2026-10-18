@@ -5,6 +5,7 @@
 
 #include <cstdint>
 
+namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::provenance {
 
 struct Inputs {
@@ -19,6 +20,8 @@ struct Inputs {
     // Zero preserves dimensionless cells/update thresholds. Positive converts native
     // velocities to cm/year, so physical boundary classes survive dt/grid changes.
     double velocity_to_cm_yr = 0.0;
+    // The engine's cell table (W2-E); null for synthetic inputs, which use width x height.
+    const grid::TectonicGrid* grid = nullptr;
 };
 
 void compute_maps(const Inputs& inputs, uint8_t* convergence_score,

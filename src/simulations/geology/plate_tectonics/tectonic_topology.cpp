@@ -12,9 +12,16 @@
 namespace tectonics::topology {
 namespace { constexpr uint32_t missing = std::numeric_limits<uint32_t>::max(); }
 void Model::initialize(uint32_t width, uint32_t height, uint32_t plates, const std::vector<uint32_t>& owners) {
-    if (width < 2 || height < 2 || plates == 0 || owners.size() != static_cast<size_t>(width) * height)
+    if (width < 2 || height < 2) throw std::runtime_error("Invalid plate topology grid");
+    initialize(grid::TectonicGrid::planar(width, height, static_cast<double>(width)), plates, owners);
+}
+void Model::initialize(std::shared_ptr<const grid::TectonicGrid> grid, uint32_t plates,
+        const std::vector<uint32_t>& owners) {
+    if (!grid || grid->kind() != grid::TectonicGrid::Kind::planar || grid->width() < 2 || grid->height() < 2 ||
+        plates == 0 || owners.size() != grid->cellcount())
         throw std::runtime_error("Invalid plate topology grid");
-    width_ = width; height_ = height;
+    grid_ = std::move(grid);
+    width_ = grid_->width(); height_ = grid_->height();
     diagnostics_ = {}; diagnostics_.enabled = true;
     coverage_.assign(plates, std::vector<double>(owners.size(), 0));
     rifts_.assign(plates, {}); welding_.clear(); next_id_ = plates;
@@ -105,9 +112,7 @@ std::vector<uint32_t> Model::partition(uint32_t plate, const std::vector<uint32_
             const auto [distance,i,label]=queue.top();queue.pop();
             if (side[i]!=missing) continue;
             side[i]=label;
-            const auto x=i%width_,y=i/width_;
-            for (auto n:{y*width_+(x+width_-1)%width_,y*width_+(x+1)%width_,
-                    ((y+height_-1)%height_)*width_+x,((y+1)%height_)*width_+x})
+            for (auto n:grid_->neighbours(i))
                 if (owners[n]==plate && side[n]==missing)
                     queue.emplace(distance+2/(strength[i]+strength[n]),n,label);
         }
@@ -116,9 +121,7 @@ std::vector<uint32_t> Model::partition(uint32_t plate, const std::vector<uint32_
     std::deque<uint32_t> queue{low, high}; side[low] = 0; side[high] = 1;
     while (!queue.empty()) {
         const uint32_t i = queue.front(); queue.pop_front();
-        const uint32_t x = i % width_, y = i / width_;
-        for (auto n : {y*width_+(x+width_-1)%width_, y*width_+(x+1)%width_,
-                ((y+height_-1)%height_)*width_+x, ((y+1)%height_)*width_+x})
+        for (auto n : grid_->neighbours(i))
             if (owners[n] == plate && side[n] == missing) { side[n] = side[i]; queue.push_back(n); }
     }
     return side;
@@ -144,11 +147,7 @@ std::vector<Change> Model::evolve(std::vector<uint32_t>& owners,
             throw std::runtime_error("Invalid topology forcing cell");
     for (auto v : velocity) if (!std::isfinite(v.x) || !std::isfinite(v.y))
         throw std::runtime_error("Invalid topology velocity");
-    const auto neighbors = [&](uint32_t i) {
-        const uint32_t x = i % width_, y = i / width_;
-        return std::array<uint32_t,4>{y*width_+(x+width_-1)%width_, y*width_+(x+1)%width_,
-            ((y+height_-1)%height_)*width_+x, ((y+1)%height_)*width_+x};
-    };
+    const auto neighbors = [&](uint32_t i) { return grid_->neighbours(i); };
     for (size_t p=0;p<rifts_.size();++p) {
         auto& r=rifts_[p];r.cooldown=std::max(0.0,r.cooldown-dt);
         // Material damage survives a rejected geometric candidate. Heal even
@@ -172,17 +171,14 @@ std::vector<Change> Model::evolve(std::vector<uint32_t>& owners,
     };
     struct Contact { uint32_t faces=0, continental=0; double compression=0, normal_motion=0; };
     std::map<std::pair<uint32_t,uint32_t>,Contact> contacts;
-    for (uint32_t i = 0; i < size; ++i) {
-        const auto ns = neighbors(i);
-        for (size_t axis = 0; axis < 2; ++axis) {
-            const auto j = ns[axis == 0 ? 1 : 3], a = owners[i], b = owners[j];
-            if (a == b) continue;
-            auto& c = contacts[std::minmax(a,b)]; ++c.faces;
-            c.continental += continent[i] >= .5 && continent[j] >= .5;
-            const double closing = axis == 0 ? velocity[a].x-velocity[b].x : velocity[a].y-velocity[b].y;
-            c.compression += std::max(0.0, closing);
-            c.normal_motion += std::abs(closing);
-        }
+    for (const grid::Edge& edge : grid_->edges()) {
+        const auto i = edge.a, j = edge.b, a = owners[i], b = owners[j];
+        if (a == b) continue;
+        auto& c = contacts[std::minmax(a,b)]; ++c.faces;
+        c.continental += continent[i] >= .5 && continent[j] >= .5;
+        const double closing = (velocity[a].x-velocity[b].x)*edge.normal.x + (velocity[a].y-velocity[b].y)*edge.normal.y;
+        c.compression += std::max(0.0, closing);
+        c.normal_motion += std::abs(closing);
     }
     std::map<std::pair<uint32_t,uint32_t>,double> next_welding;
     for (const auto& entry : contacts) {
@@ -349,13 +345,15 @@ std::vector<transport::Displacement> Model::riftDisplacement(const std::vector<u
     // Opening motion points away from an incipient fault. Conservative column
     // transport converts this distributed extension to thinning and subsidence;
     // no rift depth is painted onto the terrain and no rock is deleted.
+    // Unit steps of west, east, north, south (planar: x and y).
+    constexpr int step_x[grid::directioncount]={-1,1,0,0}, step_y[grid::directioncount]={0,0,-1,1};
     for (uint32_t i=0;i<owners.size();++i) {
-        const auto p=owners[i],x=i%width_,y=i/width_;
+        const auto p=owners[i];
         if (rifts_[p].side.empty() || damage[i]==0) continue;
         const bool side=rifts_[p].side[i]>.5*coverage_[p][i];
-        for (const auto [j,dx,dy]:{std::tuple<uint32_t,int,int>{y*width_+(x+width_-1)%width_,-1,0},
-                {y*width_+(x+1)%width_,1,0},{((y+height_-1)%height_)*width_+x,0,-1},
-                {((y+1)%height_)*width_+x,0,1}}) {
+        for (std::uint8_t k=0;k<grid::directioncount;++k) {
+            const uint32_t j=grid_->neighbour(i,k);
+            const int dx=step_x[k],dy=step_y[k];
             if (owners[j]!=p || (rifts_[p].side[j]>.5*coverage_[p][j])==side) continue;
             const double opening=.5*parameters.strain_rate_myr*dt*std::min(damage[i],damage[j]);
             result[i].x-=dx*opening;result[i].y-=dy*opening;
@@ -365,12 +363,7 @@ std::vector<transport::Displacement> Model::riftDisplacement(const std::vector<u
 }
 
 void Model::connect(std::vector<uint32_t>& owners) {
-    const auto neighbors = [&](uint32_t i) {
-        const uint32_t x = i % width_, y = i / width_;
-        return std::array<uint32_t, 4>{y * width_ + (x + width_ - 1) % width_,
-            y * width_ + (x + 1) % width_, ((y + height_ - 1) % height_) * width_ + x,
-            ((y + 1) % height_) * width_ + x};
-    };
+    const auto neighbors = [&](uint32_t i) { return grid_->neighbours(i); };
     std::vector<uint32_t> component(owners.size(), missing), largest(coverage_.size(), missing);
     std::vector<uint32_t> sizes, plate_ids;
     std::deque<uint32_t> queue;

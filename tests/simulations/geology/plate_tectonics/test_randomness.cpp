@@ -21,8 +21,31 @@
 #include "gtest/gtest.h"
 #include <cstdlib>
 #include "simulations/geology/plate_tectonics/simplerandom.hpp"
+#include "simulations/geology/plate_tectonics/simplexnoise.hpp"
 
 using namespace std;
+
+TEST(SimpleRandom, NextRepeatability)
+{
+    SimpleRandom sr1(1);
+    EXPECT_EQ(81414, sr1.next());
+    EXPECT_EQ(1328228615, sr1.next());
+    EXPECT_EQ(3215746516, sr1.next());
+
+    SimpleRandom sr999(999);
+    EXPECT_EQ(69012276, sr999.next());
+    EXPECT_EQ(3490172125, sr999.next());
+    EXPECT_EQ(3364058674, sr999.next());
+}
+
+TEST(Noise, SimplexRawNoiseRepeatability)
+{
+    EXPECT_FLOAT_EQ(-0.12851511f, raw_noise_4d(0.3f, 0.78f, 1.677f, 0.99f));
+    EXPECT_FLOAT_EQ(-0.83697641f, raw_noise_4d(-0.3f, 0.78f, 1.677f, 0.99f));
+    EXPECT_FLOAT_EQ(-0.5346418f, raw_noise_4d(7339.3f, 0.78f, 1.677f, 0.99f));
+    EXPECT_FLOAT_EQ(0.089452535f, raw_noise_4d(0.3f, 70.78f, 1.677f, 0.0009f));
+    EXPECT_FLOAT_EQ(-0.063593753f, raw_noise_4d(0.3f, 500.78f, 1.677f, 500.99f));
+}
 
 TEST(Randomness, SequenceDoubles)
 {

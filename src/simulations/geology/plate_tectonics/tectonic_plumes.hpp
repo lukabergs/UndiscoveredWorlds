@@ -2,6 +2,7 @@
 #define TECTONIC_PLUMES_HPP
 #include <cstdint>
 #include <vector>
+namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::plumes {
 // Mantle plumes fixed in the native (mantle) frame. A prescribed source, not a
 // convection solution: each plume adds basalt at a steady tail flux, optionally
@@ -31,6 +32,6 @@ void validate(const Parameters& parameters);
 std::vector<Plume> place(double width_km, double height_km, long seed, const Parameters& parameters);
 // Source over [start_myr, end_myr]; volumes integrate exactly over any time step.
 Source source(uint32_t width, uint32_t height, double cell_m, long seed, double start_myr, double end_myr,
-              const Parameters& parameters);
+              const Parameters& parameters, const grid::TectonicGrid* grid = nullptr);
 }
 #endif

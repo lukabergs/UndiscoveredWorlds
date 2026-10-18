@@ -5,6 +5,7 @@
 #include <vector>
 #include <map>
 
+namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::columns { struct Cell; }
 namespace tectonics::margins {
 struct Parameters {
@@ -98,6 +99,6 @@ using Polarity = std::map<std::pair<uint32_t,uint32_t>,uint32_t>; // Stable plat
 Forcing forcing(uint32_t w, uint32_t h, double cell_m, double dt_myr,
     const std::vector<uint32_t>& owners, const std::vector<columns::Cell>& cells,
     const std::vector<transport::Displacement>& rigid, const Parameters& p, Polarity* polarity = nullptr,
-    long seed = 0, double time_myr = 0);
+    long seed = 0, double time_myr = 0, const grid::TectonicGrid* grid = nullptr);
 }
 #endif

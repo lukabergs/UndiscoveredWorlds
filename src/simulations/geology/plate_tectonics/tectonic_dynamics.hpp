@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::dynamics {
 
 struct Vector { double x = 0.0, y = 0.0; };
@@ -70,7 +71,7 @@ double slab_pull_per_length(double age_myr);
 // Samples only the same connected plate along its inward grid-face normal.
 double inland_pressure(uint32_t width,uint32_t height,double cell_m,
     const std::vector<uint32_t>& owners,const std::vector<double>& pressure,
-    uint32_t cell,uint32_t axis,int direction,double range_m);
+    uint32_t cell,uint32_t axis,int direction,double range_m,const grid::TectonicGrid* grid = nullptr);
 Solution solve(const std::vector<Plate>& plates, const std::vector<Contact>& contacts);
 Solution solve_consistent(const std::vector<Plate>& plates, std::vector<Contact> contacts,
                           std::vector<Vector> velocity);

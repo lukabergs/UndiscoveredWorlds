@@ -3,7 +3,6 @@
 
 #include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 #include "simulations/geology/plate_tectonics/lithosphere.hpp"
-#include "simulations/geology/plate_tectonics/plate.hpp"
 
 #include <algorithm>
 #include <cmath>

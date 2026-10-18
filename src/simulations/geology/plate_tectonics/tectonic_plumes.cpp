@@ -75,7 +75,8 @@ std::vector<Plume> place(double width_km, double height_km, long seed, const Par
     return plumes;
 }
 
-Source source(uint32_t w, uint32_t h, double cell_m, long seed, double t0, double t1, const Parameters& p) {
+Source source(uint32_t w, uint32_t h, double cell_m, long seed, double t0, double t1, const Parameters& p,
+              const grid::TectonicGrid* /*grid*/) {
     validate(p);
     if (w == 0 || h == 0 || !(cell_m > 0) || !std::isfinite(t0) || !(t1 > t0))
         throw std::runtime_error("Invalid mantle plume source grid or interval");

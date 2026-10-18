@@ -12,7 +12,7 @@ std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt
         const std::vector<double>& elevations,const std::vector<double>& ages,
         const std::vector<uint32_t>& owners,const std::vector<transport::Displacement>& velocity,
         double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3,
-        double root_max_thickness_m, double root_delamination_width_m) {
+        double root_max_thickness_m, double root_delamination_width_m, const grid::TectonicGrid* /*grid*/) {
     using namespace columns;
     const size_t count=static_cast<size_t>(w)*h;
     if (w<2 || h<2 || elevations.size()!=count || ages.size()!=count || owners.size()!=count ||

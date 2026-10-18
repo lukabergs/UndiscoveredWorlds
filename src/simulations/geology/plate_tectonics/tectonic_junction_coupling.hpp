@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::tectonic_junction_coupling {
 
 struct Inputs {
@@ -13,6 +14,8 @@ struct Inputs {
     uint32_t height = 0;
     const contract::TectonicJunction* junctions = nullptr;
     uint32_t junction_count = 0;
+    // The engine's cell table (W2-E); null for synthetic inputs, which use width x height.
+    const grid::TectonicGrid* grid = nullptr;
 };
 
 struct Outputs {

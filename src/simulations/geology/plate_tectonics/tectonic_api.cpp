@@ -19,7 +19,6 @@
 
 #include "simulations/geology/plate_tectonics/tectonic_api.hpp"
 #include "simulations/geology/plate_tectonics/lithosphere.hpp"
-#include "simulations/geology/plate_tectonics/plate.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -271,7 +270,7 @@ uint32_t tectonics_get_plate_count(void* pointer) {
 
 uint8_t tectonics_is_oceanic_plate(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlate(plate_index)->isOceanicPlate() ? 1U : 0U;
+    return litho->getPlate(plate_index).isOceanic() ? 1U : 0U;
 }
 
 uint32_t tectonics_get_map_width(void* pointer) {
@@ -293,37 +292,38 @@ tectonics::contract::Snapshot tectonics_capture_snapshot(void* pointer) {
 
 float tectonics_velocity_unity_vector_x(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlate(plate_index)->velocityUnitVector().x();
+    return litho->getPlate(plate_index).direction_x;
 }
 
 float tectonics_velocity_unity_vector_y(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlate(plate_index)->velocityUnitVector().y();
+    return litho->getPlate(plate_index).direction_y;
 }
 
 float tectonics_velocity_vector_x(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlate(plate_index)->linearVelocityVector().x();
+    return litho->getPlate(plate_index).velocityX();
 }
 
 float tectonics_velocity_vector_y(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlate(plate_index)->linearVelocityVector().y();
+    return litho->getPlate(plate_index).velocityY();
 }
 
 float tectonics_angular_velocity(void* pointer, uint32_t plate_index) {
-    lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlate(plate_index)->getAngularVelocity();
+    // Planar translations only (the spherical rotation arrives with E2C).
+    (void)static_cast<lithosphere*>(pointer)->getPlate(plate_index);
+    return 0.0f;
 }
 
 float tectonics_mass_center_x(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlate(plate_index)->worldMassCenter().getX();
+    return static_cast<float>(litho->getPlate(plate_index).centroid.x);
 }
 
 float tectonics_mass_center_y(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
-    return litho->getPlate(plate_index)->worldMassCenter().getY();
+    return static_cast<float>(litho->getPlate(plate_index).centroid.y);
 }
 
 uint64_t tectonics_get_plate_uid(void* pointer, uint32_t index) {

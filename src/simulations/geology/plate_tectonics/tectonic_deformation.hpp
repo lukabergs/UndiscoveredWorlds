@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::deformation {
 struct Parameters {
     double peak_distance_km = 300; // Maximum distributed shortening, inland from contact.
@@ -16,6 +17,7 @@ struct Parameters {
 double taper(double distance_m, double peak_distance_m);
 std::vector<transport::Displacement> distribute(uint32_t width, uint32_t height, double cell_m,
     const std::vector<uint32_t>& owners, const std::vector<double>& continental_fraction,
-    const std::vector<transport::Displacement>& rigid, long seed, const Parameters& parameters);
+    const std::vector<transport::Displacement>& rigid, long seed, const Parameters& parameters,
+    const grid::TectonicGrid* grid = nullptr);
 }
 #endif

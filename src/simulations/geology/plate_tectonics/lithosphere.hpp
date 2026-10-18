@@ -20,21 +20,19 @@
 #ifndef LITHOSPHERE_HPP
 #define LITHOSPHERE_HPP
 
+#include <array>
+#include <cstdint>
 #include <cstring> // For size_t.
+#include <memory>
 #include <stdexcept>
 #include <vector>
-#ifdef __MINGW32__ // this is to avoid a problem with the hypot function which is messed up by
-                   // Python...
-    #undef __STRICT_ANSI__
-#endif
-#include "simulations/geology/plate_tectonics/heightmap.hpp"
 #include "simulations/geology/plate_tectonics/material.hpp"
-#include "simulations/geology/plate_tectonics/rectangle.hpp"
 #include "simulations/geology/plate_tectonics/simplerandom.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_scenario.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_topology.hpp"
 #include "simulations/geology/plate_tectonics/topography_codec.hpp"
 #include <cmath>
@@ -44,23 +42,41 @@ using namespace std;
 #define CONTINENTAL_BASE 1.0f
 #define OCEANIC_BASE 0.1f
 
-class plate;
+namespace tectonics {
 
-/**
- * Wrapper for growing plate from a seed. Contains plate's dimensions.
- *
- * Used exclusively in plate creation phase.
- */
-class plateArea {
-  public:
-    vector<uint32_t> border; ///< Plate's unprocessed border pixels.
-    uint32_t btm;            ///< Most bottom pixel of plate.
-    uint32_t lft;            ///< Most left pixel of plate.
-    uint32_t rgt;            ///< Most right pixel of plate.
-    uint32_t top;            ///< Most top pixel of plate.
-    uint32_t wdt;            ///< Width of area in pixels.
-    uint32_t hgt;            ///< Height of area in pixels.
+// One plate (W2-E, E1): its identity, rotation, centroid, area and continental share. On the
+// planar scaffold the motion is the torus engine's: a translation in cells per update kept as a
+// unit direction and a speed (so the published velocities are unchanged); the rotation vector
+// stays zero until the spherical kinematics (E2C).
+struct PlateState {
+    uint32_t stable_id = 0;
+    mesh::Vec3 rotation_rad_s;   // omega
+    mesh::Vec3 centroid;         // grid::TectonicGrid::centroids
+    double area_m2 = 0;
+    // Owned cells with crust whose owner material is continental, over owned cells with crust
+    // (the torus engine's continentalAreaRatio).
+    float continental_share = 0;
+    float direction_x = 1, direction_y = 0;  // planar unit direction
+    float speed = 0;                         // planar speed, cells per update
+
+    // A new plate's motion drawn from its seed: speed 1 in a uniform direction (as the torus).
+    static PlateState fromSeed(uint32_t seed);
+    float velocityX() const { return direction_x * speed; }
+    float velocityY() const { return direction_y * speed; }
+    // Speed and unit direction of (x, y); below 1e-6 the plate stops facing +x.
+    void setVelocity(float x, float y);
+    bool isOceanic() const { return continental_share <= 0.10f; }
 };
+
+// Wall-clock seconds per engine phase, summed over the run.
+struct PhaseTimings {
+    static constexpr int count = 16;
+    static const char* name(int phase);
+    std::array<double, count> seconds{};
+    uint64_t updates = 0;
+};
+
+} // namespace tectonics
 
 /**
  * Lithosphere is the rigid outermost shell of a rocky planet.
@@ -103,8 +119,11 @@ class lithosphere {
     const tectonics::dynamics::Diagnostics& getMotionDiagnostics() const noexcept {
         return motion_diagnostics;
     }
-    const WorldDimension& getWorldDimension() const noexcept {
-        return _worldDimension;
+    const tectonics::grid::TectonicGrid& getGrid() const noexcept {
+        return *grid_;
+    }
+    const tectonics::PhaseTimings& getPhaseTimings() const noexcept {
+        return phase_timings;
     }
     uint32_t getPlateCount() const noexcept;    ///< Return number of plates.
     uint32_t getProvenancePlateCount() const noexcept;
@@ -161,19 +180,16 @@ class lithosphere {
     const std::vector<tectonics::columns::Displacement>& getMaterialDisplacement() const { return material_displacement; }
     const tectonics::topology::Diagnostics& getTopologyDiagnostics() const { return topology_model.diagnostics(); }
     std::vector<double> getRiftDamage() const {
-        std::vector<uint32_t> owners(_worldDimension.getArea());
-        for (uint32_t i=0;i<owners.size();++i) owners[i]=imap[i];
-        return topology_model.damageField(owners);
+        return topology_model.damageField(imap);
     }
     uint32_t getWidth() const;
     uint32_t getHeight() const;
     bool isFinished() const;
-    const plate* getPlate(uint32_t index) const;
+    const tectonics::PlateState& getPlate(uint32_t index) const;
 
   protected:
   private:
-    void createNoise(float* tmp, const WorldDimension& tmpDim, bool useSimplex = false);
-    void createSlowNoise(float* tmp, const WorldDimension& tmpDim);
+    uint32_t cellCount() const noexcept { return static_cast<uint32_t>(grid_->cellcount()); }
     bool isOceanic(float value) const noexcept;
     void resetSimulationState();
     void initializeHeightMapFromFloat(const float* heightmap);
@@ -192,23 +208,19 @@ class lithosphere {
     void fillEnclosedInitialOceans();
     void seedMaterialMap();
     void seedInitialCrustAges();
-    void jaggedizePlateBoundaries();
-    void rebuildPlateAreasFromOwnership();
     void solvePlateMotion();
     void initializeColumns();
     void publishColumns();
     void updateColumns();
     void updateTensionMagnitudeMap() noexcept;
-    void clearPlates();
-    void growPlates();
+    void growPlates(std::vector<std::vector<uint32_t>>& borders);
     void removeEmptyPlates();
-    void ensurePlateCapacity(uint32_t required_capacity);
     float internalToPhysicalMeters(float internal_height) const noexcept;
     float metersToInternalDelta(float delta_m) const noexcept;
 
-    WorldPoint randomPosition();
-
     tectonics::scenario::Scenario scenario;
+    std::shared_ptr<const tectonics::grid::TectonicGrid> grid_;
+    tectonics::PhaseTimings phase_timings;
     tectonics::dynamics::Diagnostics motion_diagnostics;
     struct MotionSample { uint32_t a=UINT32_MAX,b=UINT32_MAX; double closing=0,ridge=0,slab=0; };
     std::vector<MotionSample> motion_history;
@@ -217,22 +229,25 @@ class lithosphere {
     std::vector<tectonics::columns::Displacement> material_displacement;
     tectonics::topology::Model topology_model;
     tectonics::margins::Polarity subduction_polarity;
-    HeightMap hmap;              ///< Physical topography used by the simulation.
-    HeightMap prev_hmap;         ///< Previous step's physical topography.
-    HeightMap display_hmap;      ///< Visual/export topography exposed via the public API.
-    HeightMap prev_display_hmap; ///< Previous frame's visual/export topography.
-    HeightMap initial_hmap;      ///< Initial topography before plates begin moving.
-    IndexMap imap;          ///< Plate index map of the "owner" of each map point.
-    IndexMap prev_imap;     ///< Plate index map from the last update
-    AgeMap amap;            ///< Age map of the system's surface (topography).
-    plate** plates;     ///< Array of plates that constitute the system.
-    vector<plateArea> plate_areas;
+    std::vector<float> hmap;              ///< Physical topography used by the simulation.
+    std::vector<float> prev_hmap;         ///< Previous step's physical topography.
+    std::vector<float> display_hmap;      ///< Visual/export topography exposed via the public API.
+    std::vector<float> prev_display_hmap; ///< Previous frame's visual/export topography.
+    std::vector<float> initial_hmap;      ///< Initial topography before plates begin moving.
+    std::vector<uint32_t> imap;           ///< Plate index of the owner of each cell.
+    std::vector<uint32_t> prev_imap;      ///< Plate index map from the last update
+    std::vector<uint32_t> amap;           ///< Age map of the system's surface (topography).
+    // The crust and material the owning plate last recorded at each cell (the torus engine's
+    // per-plate rasters, which kept continental material until the cell changed owner): they
+    // give the crust thickness split and each plate's continental share.
+    std::vector<float> owner_crust_map;
+    std::vector<uint8_t> owner_material_map;
+    std::vector<tectonics::PlateState> plates; ///< The plates, by live index.
     vector<uint32_t> plate_indices_found; ///< Used in update loop to remove plates
 
     uint32_t iter_count;       ///< Whole-run iteration count. Used to timestamp new crust.
     uint32_t time_origin_step; ///< Whole-run timestamp corresponding to elapsed time 0.
     uint32_t max_plates;       ///< Number of plates in the initial setting.
-    uint32_t plate_capacity;   ///< Allocated storage for current and future plates.
     uint32_t num_plates;       ///< Number of plates in the current setting.
     float erosion_strength;    ///< Scales terrain erosion.
     uint16_t sea_level_m;      ///< Coastline threshold in metric export space.
@@ -276,9 +291,6 @@ class lithosphere {
     std::vector<tectonics::contract::TectonicJunction> tectonic_junctions;
     uint32_t next_boundary_segment_id = tectonics::contract::kNoBoundaryId + 1U;
 
-
-
-    const WorldDimension _worldDimension;
     SimpleRandom _randsource;
     int _steps;
     bool finished = false;
