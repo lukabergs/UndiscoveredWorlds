@@ -10,6 +10,13 @@ theta)| and A4 = mean cos(4 theta). ratio_median and ratio_mean are edge over in
 10 % of 1), a4_difference edge minus interior. SPEC is a field id or a sum of ids joined by '+', as stored;
 --above V keeps the cells whose summed value is above V (e.g. sea level for land only).
 
+Noise floor of the 10 % gate (measured 2026-10-19, out/scratch/sphere/W2-EV/seams-spread.json): on a seamless
+isotropic random field (tests/scripts/test_cube_evaluation.py, wavenumber 20) ratio_median ranged 0.94 to 1.10
+over seeds 1-5 at N 64 and 0.94 to 1.11 at N 128 (ratio_mean 0.98 to 1.07): the band samples about an eighth
+of the sphere, so a field's own variability moves the ratio by up to 11 %, independent of N. A field with the
+same |grad| everywhere gives 1.000. A ratio outside 0.9-1.1 on one realisation is therefore not yet a seam;
+compare seeds, or the same field's ratio against a seamless reference of matching spectrum.
+
   uv run python scripts/evaluation/cube_seams.py BUNDLE --field SPEC[,SPEC] [--band 2] [--min-slope 0]
       [--above V] [--json OUT]
 """

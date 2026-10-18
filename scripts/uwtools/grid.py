@@ -13,13 +13,19 @@ import numpy as np
 EARTH_RADIUS_KM = 6371.0
 
 
-def cell_km(scenario, columns, radius_km=None):
+TORUS_WIDTH_KM = 40000.0
+
+
+def cell_km(scenario, columns, radius_km=None, kind='latlon'):
     """East-west size in km of one of `columns` cells at the equator. The torus engine's own metric,
-    run_scenario.world_width_km / columns, while its scenario records it (so the lat-lon numbers are
-    unchanged); without it the sphere's 2 pi R / columns, R the grid's radius (6371 km when absent)."""
+    run_scenario.world_width_km / columns, while its scenario records it; without it, on a lat-lon (torus
+    engine) bundle the torus default of 40,000 km (the readers' former fallback, so old numbers are
+    unchanged), on a cube bundle the sphere's 2 pi R / columns, R the grid's radius (6371 km when absent)."""
     width_km = (scenario or {}).get('world_width_km')
     if width_km is not None:
         return float(width_km) / columns
+    if kind == 'latlon':
+        return TORUS_WIDTH_KM / columns
     return 2.0 * math.pi * float(radius_km or EARTH_RADIUS_KM) / columns
 
 

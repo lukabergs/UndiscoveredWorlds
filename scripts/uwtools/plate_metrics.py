@@ -77,7 +77,7 @@ def measure(directory, threshold):
     if snapshot_path.is_file():
         snapshot = json.loads(snapshot_path.read_text())
         scenario = snapshot['run_scenario']
-        km_per_cell = grid.cell_km(scenario, snapshot['width'], radius_km)
+        km_per_cell = grid.cell_km(scenario, snapshot['width'], radius_km, bundle.grid_kind)
         mm_yr = km_per_cell / snapshot['delta_time_myr']  # one cell per update, in km/Myr = mm/yr
         if cube:
             columns, rows = snapshot['width'], snapshot['height']  # the engine's cells

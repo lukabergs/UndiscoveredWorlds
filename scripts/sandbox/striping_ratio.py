@@ -123,7 +123,6 @@ def measure_native(bundle, z):
     """Aspect harmonics in face coordinates of a native cube field z (6, N, N) on land (> 0 m), by latitude band."""
     cells = bundle.cells()
     g_u, g_v, valid = cell_grid.face_gradients(cells, z, bundle.radius_km or tm.RADIUS_KM)
-    g_u, g_v = g_u * 1000.0, g_v * 1000.0  # metres per km
     lat = np.abs(np.asarray(cells['latitude_deg'], dtype=np.float64))
     land = valid & (z.reshape(-1) > 0)
     slope = np.where(valid, np.hypot(g_u, g_v), 0.0)

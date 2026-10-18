@@ -244,6 +244,40 @@ class CubeMeasureTests(unittest.TestCase):
         # Below 1 because the frame is orthonormal: near face corners the v grid lines are not perpendicular to u.
         self.assertGreater(record["native"]["bands"]["all-0-80"]["a4"], 0.6, record["native"])
 
+    def test_striping_native_slopes_are_metres_per_km(self):
+        sys.path.insert(0, str(SCRIPTS / "sandbox"))
+        import striping_ratio
+        bundle = Bundle.open(self.geodesic)   # |grad| 1000 m per radian = 0.157 m/km
+        z = bundle.load_native("geosphere.base_elevation").astype(np.float64)
+        saved = striping_ratio.MIN_SLOPE_M_KM
+        try:
+            for threshold, kept in ((0.1, True), (0.2, False)):
+                striping_ratio.MIN_SLOPE_M_KM = threshold
+                bands = striping_ratio.measure_native(bundle, z)
+                cells = sum(v["cells"] for k, v in bands.items() if k != "all-0-80")
+                aspect = sum(v["aspect_cells"] for k, v in bands.items() if k != "all-0-80")
+                if kept:
+                    self.assertGreater(aspect, 0.99 * cells, bands)   # all but the cone tip at the antipode
+                else:
+                    self.assertEqual(aspect, 0, bands)
+        finally:
+            striping_ratio.MIN_SLOPE_M_KM = saved
+
+    def test_face_frame_treats_both_axes_alike(self):
+        n = self.N
+        _, a, b = face_coordinates(n)
+        distance = cube_seams.cell_grid.face_edge_distance(n).reshape(-1)
+        index = np.arange(n)
+        axis = np.minimum(index, n - 1 - index)
+        corner = ((axis[None, :] < n // 4) & (axis[:, None] < n // 4)).ravel()
+        corner = np.tile(corner, 6) & (distance >= 1)   # face-local differences only, near the four corners
+        a4 = []
+        for values in (1000.0 * a, 1000.0 * b):
+            g_u, g_v, valid = cube_seams.cell_grid.face_gradients(self.cells, values, RADIUS_KM)
+            a4.append(cube_seams.cell_grid.aspect_harmonics(np.arctan2(g_v, g_u)[corner & valid])[1])
+        self.assertAlmostEqual(a4[0], a4[1], places=9)
+        self.assertGreater(a4[0], 0.5)
+
     def test_striping_native_refuses_latlon(self):
         directory = self.root / "latlon-v1"
         if not directory.exists():
@@ -296,8 +330,9 @@ class PlateMetricsTests(unittest.TestCase):
 
     def test_cell_km(self):
         self.assertEqual(grid.cell_km({"world_width_km": 40000}, 256), 156.25)
-        self.assertAlmostEqual(grid.cell_km({}, 256), 2 * math.pi * 6371.0 / 256)
-        self.assertAlmostEqual(grid.cell_km(None, 256, 3000.0), 2 * math.pi * 3000.0 / 256)
+        self.assertEqual(grid.cell_km({}, 256), 156.25)   # lat-lon without the key: the torus default
+        self.assertAlmostEqual(grid.cell_km({}, 256, kind="cube"), 2 * math.pi * 6371.0 / 256)
+        self.assertAlmostEqual(grid.cell_km(None, 256, 3000.0, "cube"), 2 * math.pi * 3000.0 / 256)
 
 
 class SchemaTests(unittest.TestCase):

@@ -37,8 +37,10 @@ def face_gradients(cells: dict, values: np.ndarray, radius_km: float):
     along the face's two grid lines through each cell are central differences over the edge-slot neighbours
     of the cell table (E minus W over the two great-circle distances between centres, N minus S likewise;
     slot directions are the cell's own face frame, also across face edges); the gradient they determine is
-    returned in the orthonormal frame of the cell's u line (W to E) and the perpendicular towards v (S to N),
-    so hypot(g_u, g_v) is the true |grad| where the grid lines meet at an angle (near face corners).
+    returned in an orthonormal frame placed symmetrically about the bisector of the cell's u line (W to E) and
+    v line (S to N): the two axes at 45 degrees either side of the bisector, so they are the grid lines where
+    those are perpendicular and both lines are treated alike where they meet at an angle (near face corners;
+    a field varying with a alone or with b alone gives the same A4). hypot(g_u, g_v) is the true |grad|.
     valid is False where an edge neighbour is missing (-1)."""
     z = np.asarray(values, dtype=np.float64).reshape(-1)
     neighbours = np.asarray(cells['neighbours'])
@@ -54,8 +56,12 @@ def face_gradients(cells: dict, values: np.ndarray, radius_km: float):
     d_u = (z[e] - z[w]) / (_arc_km(centre, c, e, radius_km) + _arc_km(centre, c, w, radius_km))
     d_v = (z[n] - z[s]) / (_arc_km(centre, c, n, radius_km) + _arc_km(centre, c, s, radius_km))
     k = np.einsum('ij,ij->i', _tangent(centre, c, w, e), _tangent(centre, c, s, n))  # cosine between the lines
-    g_u[valid] = d_u
-    g_v[valid] = (d_v - k * d_u) / np.sqrt(1.0 - k * k)
+    # The gradient along the bisector p = (t_u + t_v)/|.| and q = (t_u - t_v)/|.| (orthonormal for unit t_u, t_v),
+    # then the frame e_u = (p + q)/sqrt 2, e_v = (p - q)/sqrt 2 (t_u and t_v themselves when k = 0).
+    along_p = (d_u + d_v) / np.sqrt(2.0 + 2.0 * k)
+    along_q = (d_u - d_v) / np.sqrt(2.0 - 2.0 * k)
+    g_u[valid] = (along_p + along_q) / np.sqrt(2.0)
+    g_v[valid] = (along_p - along_q) / np.sqrt(2.0)
     return g_u, g_v, valid
 
 
