@@ -4,10 +4,14 @@
 #include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
 #include "simulations/geology/plate_tectonics/lithosphere.hpp"
 
+#include "core/mesh/cube_geometry.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 #include <limits>
+#include <random>
 
 namespace {
 using tectonics::dynamics::Contact;
@@ -270,4 +274,306 @@ TEST(TectonicDynamics, BoundaryHistoryBalancesItsReturnedVelocity) {
     // A reversed surface velocity does not instantaneously detach an old slab.
     contact.closing_m_s=-1e-9;
     EXPECT_GT(solve(plates,{contact}).diagnostics.subduction_length_km,0);
+}
+
+// ---- The sphere (W2-E, step E2C) ----
+namespace {
+using tectonics::dynamics::MantleSample;
+using tectonics::dynamics::SphereContact;
+using tectonics::dynamics::SpherePlate;
+using tectonics::grid::TectonicGrid;
+using Vec3 = mesh::Vec3;
+constexpr double kEarthRadiusKm = 6371.0;
+constexpr double kCmYr = 3.15576e9;  // cm/yr per m/s
+
+// A random partition: count distinct source cells from mt19937(seed), each cell to its
+// nearest source over the edge graph.
+std::vector<uint32_t> random_partition(const TectonicGrid& grid, uint32_t count, uint32_t seed) {
+    std::mt19937 engine(seed);
+    std::vector<tectonics::grid::CellId> sources;
+    while (sources.size() < count) {
+        const auto c = static_cast<tectonics::grid::CellId>(engine() % grid.cellcount());
+        if (std::find(sources.begin(), sources.end(), c) == sources.end()) sources.push_back(c);
+    }
+    return grid.dijkstra(sources).source;
+}
+
+std::vector<SphereContact> plate_contacts(const TectonicGrid& grid, const std::vector<uint32_t>& owners) {
+    std::vector<SphereContact> contacts;
+    for (const auto& edge : grid.edges())
+        if (owners[edge.a] != owners[edge.b])
+            contacts.push_back(tectonics::dynamics::sphere_contact(grid, edge, owners[edge.a], owners[edge.b]));
+    return contacts;
+}
+
+// Cyclic Jacobi eigenvalues of a symmetric n x n matrix (scaled to its largest diagonal).
+std::vector<double> eigenvalues(std::vector<double> a, size_t n) {
+    double scale = 0;
+    for (size_t i = 0; i < n; ++i) scale = std::max(scale, std::abs(a[i * n + i]));
+    for (auto& value : a) value /= scale;
+    for (int sweep = 0; sweep < 100; ++sweep) {
+        double off = 0;
+        for (size_t p = 0; p < n; ++p) for (size_t q = p + 1; q < n; ++q) off += a[p * n + q] * a[p * n + q];
+        if (off < 1e-40) break;
+        for (size_t p = 0; p < n; ++p) for (size_t q = p + 1; q < n; ++q) {
+            const double apq = a[p * n + q];
+            if (std::abs(apq) < 1e-300) continue;
+            const double theta = (a[q * n + q] - a[p * n + p]) / (2 * apq);
+            const double t = (theta >= 0 ? 1.0 : -1.0) / (std::abs(theta) + std::sqrt(theta * theta + 1));
+            const double c = 1 / std::sqrt(t * t + 1), s = t * c;
+            for (size_t k = 0; k < n; ++k) {
+                const double akp = a[k * n + p], akq = a[k * n + q];
+                a[k * n + p] = c * akp - s * akq;
+                a[k * n + q] = s * akp + c * akq;
+            }
+            for (size_t k = 0; k < n; ++k) {
+                const double apk = a[p * n + k], aqk = a[q * n + k];
+                a[p * n + k] = c * apk - s * aqk;
+                a[q * n + k] = s * apk + c * aqk;
+            }
+        }
+    }
+    std::vector<double> result(n);
+    for (size_t i = 0; i < n; ++i) result[i] = a[i * n + i] * scale;
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+double relative_difference(const Vec3& a, const Vec3& b) {
+    return mesh::length(a - b) / std::max(mesh::length(a), mesh::length(b));
+}
+} // namespace
+
+TEST(TectonicDynamics, SphereSolidBodyMantleRotationGivesThatRotationForEveryPlate) {
+    using namespace tectonics::dynamics;
+    const auto grid = TectonicGrid::cube(8, kEarthRadiusKm);
+    const double radius = grid->mesh()->radius_m();
+    const auto owners = random_partition(*grid, 5, 1);
+    const Vec3 rotation{1e-15, -2e-15, 3e-15};  // about 7.5 cm/yr at the equator of the axis
+    std::vector<MantleSample> mantle(grid->cellcount());
+    for (tectonics::grid::CellId c = 0; c < grid->cellcount(); ++c) {
+        const Vec3 p = grid->position(c);
+        mantle[c] = {mesh::cross(rotation, radius * p), mesh::dot(rotation, p)};
+    }
+    const auto plates = sphere_plates(*grid, owners, 5, mantle);
+    auto contacts = plate_contacts(*grid, owners);
+    ASSERT_FALSE(contacts.empty());
+    for (auto& contact : contacts) {
+        contact.closing_m_s = sphere_closing_m_s(contact, rotation, rotation, radius);
+        EXPECT_EQ(contact.closing_m_s, 0.0);
+    }
+    const auto solution = solve_sphere(plates, contacts, radius);
+    for (const auto& w : solution.rotation_rad_s) EXPECT_LT(relative_difference(w, rotation), 1e-10);
+    EXPECT_LT(solution.diagnostics.relative_force_residual, 1e-12);
+    EXPECT_NEAR(solution.diagnostics.driving_power_w, solution.diagnostics.dissipation_w,
+                solution.diagnostics.dissipation_w * 1e-10);
+}
+
+TEST(TectonicDynamics, SphereSymmetricPlatePairGetsEqualAndOppositeTorques) {
+    using namespace tectonics::dynamics;
+    // Plate b is plate a turned by pi about the contact's midpoint x = +X, which maps the
+    // contact normal +Y to -Y: the same contact seen from b.
+    const double radius = kEarthRadiusKm * 1000;
+    const auto turned = [](const Vec3& v) { return Vec3{v.x, -v.y, -v.z}; };
+    std::vector<SpherePlate> plates(2);
+    for (int i = 0; i < 4; ++i) for (int j = 0; j < 3; ++j) {
+        const Vec3 c = mesh::normalise({1.0, -0.05 - 0.1 * i, 0.08 * (j - 1) + 0.03 * i});
+        add_sphere_cell(plates[0], c, 4e11 + 1e10 * j, radius, {});
+        add_sphere_cell(plates[1], turned(c), 4e11 + 1e10 * j, radius, {});
+    }
+    SphereContact contact;
+    contact.a = 0; contact.b = 1;
+    contact.position = {1, 0, 0};
+    contact.normal = {0, 1, 0};
+    contact.length_m = 1e6;
+    contact.closing_m_s = -1e-9;           // spreading: ridge push on both flanks
+    contact.mountain_force_n_m = 3e12;
+    const auto system = sphere_system(plates, {contact}, radius);
+    for (int k = 0; k < 3; ++k) EXPECT_EQ(system.rhs[k], -system.rhs[3 + k]);
+    EXPECT_GT(std::abs(system.rhs[2]), 0);
+    for (size_t i = 0; i < 6; ++i) for (size_t j = 0; j < 6; ++j)
+        EXPECT_NEAR(system.matrix[i * 6 + j], system.matrix[j * 6 + i], std::abs(system.matrix[i * 6 + i]) * 1e-15);
+    const auto solution = solve_sphere(plates, {contact}, radius);
+    EXPECT_LT(relative_difference(solution.rotation_rad_s[1], turned(solution.rotation_rad_s[0])), 1e-10);
+    // Spreading: the flanks separate along the normal.
+    EXPECT_LT(sphere_closing_m_s(contact, solution.rotation_rad_s[0], solution.rotation_rad_s[1], radius), 0);
+    EXPECT_DOUBLE_EQ(solution.diagnostics.ridge_length_km, 1000);
+    EXPECT_DOUBLE_EQ(solution.diagnostics.mountain_boundary_force_n, 3e18);
+    EXPECT_NEAR(solution.diagnostics.driving_power_w, solution.diagnostics.dissipation_w,
+                solution.diagnostics.dissipation_w * 1e-12);
+    // Slab pull acts on the sinking plate alone.
+    contact.closing_m_s = 1e-9;
+    contact.mountain_force_n_m = 0;
+    contact.age_a_myr = 80; contact.age_b_myr = 20;
+    const auto trench = sphere_system(plates, {contact}, radius);
+    EXPECT_GT(std::abs(trench.rhs[2]), 0);
+    for (int k = 3; k < 6; ++k) EXPECT_EQ(trench.rhs[k], 0);
+    EXPECT_DOUBLE_EQ(trench.diagnostics.subduction_length_km, 1000);
+}
+
+TEST(TectonicDynamics, SphereOneCellPlateKeepsTheTorqueBalancePositiveDefinite) {
+    using namespace tectonics::dynamics;
+    const auto grid = TectonicGrid::cube(16, kEarthRadiusKm);
+    const double radius = grid->mesh()->radius_m();
+    auto owners = random_partition(*grid, 12, 1);
+    owners[700] = 12;  // a plate of one cell inside another
+    const SphereMantleFlow flow(1, 4);
+    std::vector<MantleSample> mantle(grid->cellcount());
+    for (tectonics::grid::CellId c = 0; c < grid->cellcount(); ++c) mantle[c] = flow.at(grid->position(c), 0, radius);
+    const auto plates = sphere_plates(*grid, owners, 13, mantle);
+    // Its drag alone: lever arm in two directions, the disc's spin moment in the third.
+    const auto lone = eigenvalues({plates[12].drag_m4.begin(), plates[12].drag_m4.end()}, 3);
+    const double area = grid->area_m2(700);
+    EXPECT_NEAR(lone[0], area * area / (2 * 3.14159265358979323846), lone[0] * 1e-9);
+    EXPECT_NEAR(lone[2], area * radius * radius, lone[2] * 1e-9);
+    const auto contacts = plate_contacts(*grid, owners);
+    const auto system = sphere_system(plates, contacts, radius);
+    const auto values = eigenvalues(system.matrix, 39);
+    EXPECT_GT(values.front(), 0);
+    std::cout << "one-cell plate: condition " << values.back() / values.front() << "\n";
+    const auto solution = solve_sphere(plates, contacts, radius);
+    EXPECT_LT(solution.diagnostics.relative_force_residual, 1e-12);
+    // Without contacts it moves with the mantle sample of its cell.
+    const auto alone = solve_sphere({plates[12]}, {}, radius);
+    const Vec3 c = grid->position(700), w = alone.rotation_rad_s[0];
+    EXPECT_LT(relative_difference(mesh::cross(w, radius * c), mantle[700].velocity_m_s), 1e-9);
+    EXPECT_NEAR(mesh::dot(w, c), mantle[700].spin_rad_s, std::abs(mantle[700].spin_rad_s) * 1e-9);
+}
+
+TEST(TectonicDynamics, SphereMantleFlowIsTangentContinuousSeededPeriodicAndSmoothInPhysicalTime) {
+    using tectonics::dynamics::SphereMantleFlow;
+    const double radius = kEarthRadiusKm * 1000, speed = 4 / kCmYr;
+    const SphereMantleFlow flow(1, 4), again(1, 4), other(2, 4);
+    const Vec3 p = mesh::normalise({.3, -.5, .8});
+    const auto a = flow.at(p, 50, radius);
+    EXPECT_EQ(a.velocity_m_s.x, again.at(p, 50, radius).velocity_m_s.x);
+    EXPECT_EQ(a.spin_rad_s, again.at(p, 50, radius).spin_rad_s);
+    EXPECT_LT(mesh::length(a.velocity_m_s - flow.at(p, 650, radius).velocity_m_s), speed * 1e-9);
+    EXPECT_LT(mesh::length(a.velocity_m_s - flow.at(p, 50.001, radius).velocity_m_s), speed * 1e-3);
+    EXPECT_GT(mesh::length(a.velocity_m_s - other.at(p, 50, radius).velocity_m_s), speed * 1e-2);
+    EXPECT_GT(mesh::length(a.velocity_m_s - flow.at(p, 350, radius).velocity_m_s), speed * 1e-2);
+    // Tangent, and the torus field's RMS speed, over the cube's cells and the 600 Myr cycle.
+    const auto grid = TectonicGrid::cube(16, kEarthRadiusKm);
+    double square = 0, area = 0;
+    for (int t = 0; t < 6; ++t) for (tectonics::grid::CellId c = 0; c < grid->cellcount(); ++c) {
+        const Vec3 q = grid->position(c);
+        const auto v = flow.at(q, 100.0 * t + 25, radius).velocity_m_s;
+        EXPECT_LT(std::abs(mesh::dot(v, q)), speed * 1e-12);
+        square += grid->area_m2(c) * mesh::dot(v, v);
+        area += grid->area_m2(c);
+    }
+    const double rms = std::sqrt(square / area) / (std::sqrt(.6225) * speed);
+    std::cout << "mantle flow RMS / torus RMS on the N 16 cube: " << rms << "\n";
+    EXPECT_NEAR(rms, 1, .05);
+    // Continuous across face edges and corners: points a hair apart on different faces.
+    const double hair = 1e-7;
+    for (const Vec3 corner : {Vec3{1, 1, 1}, Vec3{-1, 1, -1}, Vec3{1, 0, 1}, Vec3{0, -1, -1}}) {
+        const Vec3 x = mesh::normalise(corner);
+        const auto centre = flow.at(x, 50, radius).velocity_m_s;
+        std::vector<int> faces;
+        for (const Vec3 axis : {Vec3{corner.x, 0, 0}, Vec3{0, corner.y, 0}, Vec3{0, 0, corner.z}}) {
+            if (mesh::length(axis) == 0) continue;
+            const Vec3 q = mesh::normalise(x + hair * axis);
+            faces.push_back(mesh::cubeposition(q).face);
+            EXPECT_LT(mesh::length(flow.at(q, 50, radius).velocity_m_s - centre), 100 * hair * speed);
+        }
+        std::sort(faces.begin(), faces.end());
+        EXPECT_TRUE(std::adjacent_find(faces.begin(), faces.end()) == faces.end());  // one point on each face
+    }
+    // Spin is half the radial vorticity: the circulation around a small circle.
+    for (const Vec3 centre : {p, mesh::normalise({1, 1, 1}), mesh::normalise({-.2, .9, -.1})}) {
+        const Vec3 e1 = mesh::normalise(mesh::cross(centre, {0.3, 0.1, 1})), e2 = mesh::cross(centre, e1);
+        const double angle = 1e-3;
+        const int steps = 128;
+        double circulation = 0;
+        for (int k = 0; k < steps; ++k) {
+            const double theta = 2 * 3.14159265358979323846 * (k + .5) / steps;
+            const Vec3 q = std::cos(angle) * centre + std::sin(angle) * (std::cos(theta) * e1 + std::sin(theta) * e2);
+            const Vec3 tangent = -std::sin(theta) * e1 + std::cos(theta) * e2;
+            circulation += mesh::dot(flow.at(q, 50, radius).velocity_m_s, tangent);
+        }
+        circulation *= 2 * 3.14159265358979323846 * radius * std::sin(angle) / steps;
+        const double cap = 2 * 3.14159265358979323846 * radius * radius * (1 - std::cos(angle));
+        EXPECT_NEAR(flow.at(centre, 50, radius).spin_rad_s, circulation / (2 * cap), 1e-3 * speed / radius);
+    }
+}
+
+TEST(TectonicDynamics, SphereTwelvePlatePartitionRecordsConditionAndSpinShare) {
+    using namespace tectonics::dynamics;
+    const auto grid = TectonicGrid::cube(16, kEarthRadiusKm);
+    const double radius = grid->mesh()->radius_m();
+    const auto owners = random_partition(*grid, 12, 1);
+    const SphereMantleFlow flow(1, 4);
+    std::vector<MantleSample> mantle(grid->cellcount());
+    for (tectonics::grid::CellId c = 0; c < grid->cellcount(); ++c) mantle[c] = flow.at(grid->position(c), 0, radius);
+    const auto plates = sphere_plates(*grid, owners, 12, mantle);
+    // Each plate's motion under its basal drag alone, for the boundaries' initial activity
+    // (the engine's rule: activity follows the mantle forcing, memory 30 Myr at 1 Myr steps).
+    std::vector<Vec3> free(12);
+    for (uint32_t p = 0; p < 12; ++p) free[p] = solve_sphere({plates[p]}, {}, radius).rotation_rad_s[0];
+    auto contacts = plate_contacts(*grid, owners);
+    for (auto& contact : contacts) {
+        contact.continental_a = contact.a < 3;
+        contact.continental_b = contact.b < 3;
+        contact.age_a_myr = 10 + 15.0 * contact.a;
+        contact.age_b_myr = 10 + 15.0 * contact.b;
+        contact.activation_speed_m_s = .1 / kCmYr;
+        const double closing = sphere_closing_m_s(contact, free[contact.a], free[contact.b], radius);
+        const double strength = std::abs(closing) / std::hypot(closing, contact.activation_speed_m_s);
+        contact.ridge_activity = closing < 0 ? strength : 0;
+        contact.slab_activity = closing > 0 ? strength : 0;
+        contact.activity_response = 1.0 / 31;
+    }
+    const auto solution = solve_sphere_consistent(plates, contacts, std::vector<Vec3>(12), radius);
+    EXPECT_LT(solution.diagnostics.velocity_consistency_cm_yr, 1e-4);
+    EXPECT_LT(solution.diagnostics.relative_force_residual, 1e-12);
+    EXPECT_GT(solution.diagnostics.mean_speed_cm_yr, .1);
+    EXPECT_GT(solution.diagnostics.ridge_length_km, 0);
+    EXPECT_GT(solution.diagnostics.subduction_length_km, 0);
+    const auto values = eigenvalues(sphere_system(plates, contacts, radius).matrix, 36);
+    ASSERT_GT(values.front(), 0);
+    const double condition = values.back() / values.front();
+    double mean_share = 0, max_share = 0;
+    for (uint32_t p = 0; p < 12; ++p) {
+        const Vec3 w = solution.rotation_rad_s[p];
+        const double share = std::abs(mesh::dot(w, sphere_centroid(plates[p]))) / mesh::length(w);
+        mean_share += share / 12;
+        max_share = std::max(max_share, share);
+    }
+    std::cout << "12 plates, N 16, seed 1: condition " << condition << ", spin share mean " << mean_share
+              << " max " << max_share << ", mean speed " << solution.diagnostics.mean_speed_cm_yr
+              << " cm/yr, iterations " << solution.diagnostics.nonlinear_iterations << "\n";
+    RecordProperty("condition", std::to_string(condition));
+    RecordProperty("spin_share_mean", std::to_string(mean_share));
+    RecordProperty("spin_share_max", std::to_string(max_share));
+    EXPECT_LT(condition, 1e12);
+}
+
+TEST(TectonicDynamics, SphereInlandPressureWalksAcrossFaceEdgesAndStopsAtOtherPlates) {
+    using tectonics::dynamics::inland_pressure;
+    using tectonics::grid::east;
+    const auto grid = TectonicGrid::cube(8, kEarthRadiusKm);
+    std::vector<uint32_t> owners(grid->cellcount(), 0);
+    std::vector<double> pressure(grid->cellcount(), 2e12);
+    EXPECT_NEAR(inland_pressure(*grid, owners, pressure, 0, east, 3e6), 2e12, 1e-3);
+    EXPECT_NEAR(inland_pressure(*grid, owners, pressure, 0, east, 1e9), 2e12, 1e-3);  // once around
+    // A cell at a face's east edge: the root lies beyond it, on the next face.
+    tectonics::grid::CellId cell = 0;
+    while (mesh::cubeposition(grid->position(grid->ahead(cell, east).cell)).face ==
+           mesh::cubeposition(grid->position(cell)).face) ++cell;
+    const auto beyond = grid->ahead(cell, east);
+    pressure.assign(grid->cellcount(), 0);
+    pressure[beyond.cell] = 1e13;
+    const double one = inland_pressure(*grid, owners, pressure, cell, east, 3e6);
+    EXPECT_GT(one, 0);
+    // The walk goes on straight in the next face's frame.
+    pressure[grid->ahead(beyond.cell, beyond.direction).cell] = 1e13;
+    EXPECT_GT(inland_pressure(*grid, owners, pressure, cell, east, 3e6), one);
+    EXPECT_DOUBLE_EQ(inland_pressure(*grid, owners, pressure, cell, east, 0), 0);
+    owners[beyond.cell] = 1;
+    EXPECT_DOUBLE_EQ(inland_pressure(*grid, owners, pressure, cell, east, 3e6), 0);
+    EXPECT_THROW(inland_pressure(*grid, owners, pressure, cell, 4, 3e6), std::runtime_error);
+    const auto torus = TectonicGrid::planar(8, 4, 800);
+    EXPECT_THROW(inland_pressure(*torus, std::vector<uint32_t>(32), std::vector<double>(32), 0, east, 3e6),
+                 std::runtime_error);
 }
