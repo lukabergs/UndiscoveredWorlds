@@ -8,8 +8,9 @@
 
 namespace {
 
-// The baseline recipe without its Earth-like set: those members at the engine's
-// struct defaults, so that each case below sets only the inputs of the rule it probes.
+// The baseline recipe without its Earth-like set: its margin, column and root keys at
+// the engine's struct defaults (initial_land_relief_m and the duration stay the
+// recipe's), so that each case below sets only the inputs of the rule it probes.
 tectonics::scenario::Scenario without_earth_set() {
     tectonics::scenario::Scenario scenario = tectonics::scenario::baseline();
     const tectonics::scenario::Scenario defaults{};
@@ -74,6 +75,19 @@ TEST(TectonicOptions, BaselineAndExplicitValuesStart) {
                            "--orogenic-collapse-onset-thickness-m", "65000", "--orogenic-collapse-margin-cap", "on",
                            "--orogenic-collapse-below-onset-km2-myr", "10000"}));
     EXPECT_NO_THROW(probe({"--orogenic-collapse-margin-cap", "off", "--orogenic-collapse-below-onset-km2-myr", "0"}));
+}
+
+// On the production baseline (the Earth-like set) some keys are switched off only in
+// pairs: the collapse onset with the creep below it, the root cap with its
+// delamination ramp, and a rift breakup onset under the 15 km minimum thickness with a
+// lower minimum (not 0: continental growth needs one).
+TEST(TectonicOptions, BaselineOverridesComeInPairs) {
+    EXPECT_NO_THROW(start({"--orogenic-collapse-onset-thickness-m", "0", "--orogenic-collapse-below-onset-km2-myr", "0"}));
+    EXPECT_ANY_THROW(start({"--orogenic-collapse-onset-thickness-m", "0"}));
+    EXPECT_NO_THROW(start({"--continental-root-max-thickness-m", "0", "--continental-root-delamination-width-m", "0"}));
+    EXPECT_ANY_THROW(start({"--continental-root-max-thickness-m", "0"}));
+    EXPECT_NO_THROW(start({"--rift-breakup-thickness-m", "12000", "--continental-min-thickness-m", "10000"}));
+    EXPECT_ANY_THROW(start({"--rift-breakup-thickness-m", "12000"}));
 }
 
 // A value the option parser or the engine refuses stops the run before it starts.

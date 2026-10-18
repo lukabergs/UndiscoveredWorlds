@@ -78,7 +78,7 @@ the uplift rate's mean continues the stayed rock's, the strain of new ocean floo
   turns the tensor and adds none. The ocean floor created in an opening starts at
   0, so a divergent cell keeps the stayed rock's tensor on the rest of its area
   only. Cumulative over the run, no decay; a sum of small strains (the strain
-  reaches about 1.4 at 256 columns, seed 1, 600 Myr), so a small-strain measure.
+  reaches about 1.4 at 256 columns, seed 1, 600 Myr of the legacy recipe v3), so a small-strain measure.
   `shortening` is minus the least principal component times the native cell width
   (`world_width_km / width`), 0 where no axis shortens: strain x the native cell
   width, metres that depend on the engine's resolution, so a consumer that needs

@@ -11,6 +11,7 @@ world_pipeline.exe run --recipe tectonics [--seed N] [--resolution W] [--<scenar
 - Steps: `geology.geosphere_initialization` (writes the starting Geosphere) and `geology.plate_tectonics`. `--from-bundle`, `--steps` and `--only` work as for other recipes (`docs/reference-guides/benchmark-commands.md`).
 - The engine runs on the world grid W x W/2 (default W = 256, the width in `configs/tectonics-baseline.json`) and uses the default planet body, not one drawn from the seed. Seed 1 is the project default.
 - Scenario options: every key of `scenario` in `configs/tectonics-baseline.json` and the engine's other scenario members (plumes, noise pass, rifting, ...) as `--key value`; `world_pipeline --help` lists them. A value the engine rejects fails the run with the engine's message and a non-zero exit code; an unknown option is rejected at parsing.
+- On the baseline (recipe v4, the Earth-like W3 set) some keys are switched off only in pairs: `--orogenic-collapse-onset-thickness-m 0` with `--orogenic-collapse-below-onset-km2-myr 0`, `--continental-root-max-thickness-m 0` with `--continental-root-delamination-width-m 0`, and a `--rift-breakup-thickness-m` under the 15 km minimum with `--continental-min-thickness-m 0` (or a lower minimum); test `TectonicOptions.BaselineOverridesComeInPairs`.
 - Mineral history runs by default; its tables are written at the end of the run only.
 
 ## Checkpoints

@@ -18,7 +18,8 @@ def review(run):
     draw = ImageDraw.Draw(canvas)
     draw.text((15, 10), f'Run {run}: fixed location x=150..190, y=50..90; yellow box is x=160..180, y=60..80. Native cells = 156.25 km.', fill='white')
     results = []
-    for panel, time in enumerate([0, 100, 300, 600]):
+    final = max(s['time_myr'] for s in record['snapshots'])   # the last snapshot: 600 Myr before recipe v4, 400 since
+    for panel, time in enumerate([0, 100, 300, final]):
         snap = next(s for s in record['snapshots'] if s['time_myr'] == time)
         m, f, _ = load_bundle(snap['path'])
         z = f['elevation']

@@ -125,8 +125,9 @@ Existing uncommitted work on `main` is part of that implementation.
 `configs/tectonics-baseline.json` is the shared production recipe. CMake compiles
 it into `tectonics::scenario::baseline()`; changing it triggers reconfiguration.
 The current recipe uses seed 1, a 256×128 native grid, 10 initial plates, the
-Earth-like set of terrain roadmap T4.12 (W3) and 400 Myr at 1 Myr per update. Application generation uses the world's seed;
-new benchmark runs use seed 1. The app's duration, initial plate count and
+Earth-like set of terrain roadmap T4.12 (W3) and 400 Myr at 1 Myr per update.
+Application generation uses the world's seed; new benchmark runs use seed 1.
+The app's duration, initial plate count and
 timestep overrides use 0 to select the recipe value. `--tectonic-duration-myr`
 is the application's duration override; the `tectonics`
 recipe uses `--duration`.

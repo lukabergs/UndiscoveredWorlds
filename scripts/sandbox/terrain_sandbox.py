@@ -2,8 +2,8 @@
 (terrain_sandbox.exe, src/cli/terrain_sandbox_main.cpp), rendered on the whole world and on windows.
 It is for iterating on the look in seconds, not a pipeline stage: nothing is registered and the multiscale
 contract (exact block means, pinned rivers, seamless windows) is not enforced. The base is a world bundle
-stopped before the climate (out/scratch/sandbox/base: procedural-world, seed 1, 256 columns, 600 Myr,
---steps ..terrain.roughness).
+stopped before the climate (config base_bundle, out/scratch/sandbox/base-v9: procedural-world, seed 1,
+256 columns, the W3 tectonics baseline at 400 Myr, --steps ..terrain.roughness).
 
 Order per domain (the whole world at a preview resolution, each window at a scale k with a margin):
 the base surface (cubic B-spline of the world's surface elevation), a slow position warp, the relief noise
@@ -2186,8 +2186,8 @@ def write_page(directory, label, sections, config, timings):
         figures = ''.join(f'<figure><a href="{path}"><img src="{path}"></a><figcaption>{caption}</figcaption></figure>'
                           for caption, path in images)
         html.append(f'<h2>{title}</h2><div class="row">{figures}</div>')
-    note = ('Seed 1; base: procedural-world at 256 columns after 600 Myr of tectonics and the terrain stages, '
-            'before the climate and the global erosion. Uniform runoff, no climate. Windows are zooms of the same '
+    note = (f'Seed 1; base: {config.get("base_bundle")}, procedural-world at 256 columns after the tectonics (base-v9: '
+            'the W3 baseline, 400 Myr) and the terrain stages, before the climate and the global erosion. Uniform runoff, no climate. Windows are zooms of the same '
             'noise functions; their physics runs alone (no rivers pinned from the world), on the window plus a '
             'margin with a sea ring, cropped.')
     (directory / 'index.html').write_text(PAGE.format(label=label, note=note, sections=''.join(html),

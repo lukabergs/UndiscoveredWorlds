@@ -106,7 +106,7 @@ passes.
   (`tectonics_get_plume_influence_map`, null when off), palette entry, budget
   field in pipeline JSON and the report data checks.
 
-Seed 1, baseline recipe (256 x 128, 600 Myr):
+Seed 1, baseline recipe v3 (256 x 128, 600 Myr):
 
 | Configuration | Plume basalt (kg) | Residual | Land fraction | Deep ocean (< -6 km) |
 |---|---|---|---|---|
