@@ -12,6 +12,7 @@ add_executable(tectonics_tests
     test_tectonic_dynamics.cpp
     test_tectonic_columns.cpp
     test_tectonic_transport.cpp
+    test_tectonic_sphere_transport.cpp
     test_tectonic_events.cpp
     test_tectonic_deformation.cpp
     test_tectonic_ocean_relief.cpp

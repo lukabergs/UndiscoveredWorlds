@@ -59,6 +59,7 @@ add_library(uw_tectonics STATIC
     tectonic_plumes.cpp
     tectonic_margins.cpp
     tectonic_transport.cpp
+    tectonic_sphere_transport.cpp
     tectonic_topology.cpp
     tectonic_grid.cpp
     tectonic_api.cpp
