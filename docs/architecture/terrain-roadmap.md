@@ -232,7 +232,9 @@ About 22 h of agent time over four sessions (T8.0-T8.2; T8.3-T8.4; T8.5-T8.6 wit
 - **W2, a parallel wave by module**: the engine (T8.0 to T8.7 above, on the core mesh; T8.6 becomes the engine writing mesh fields directly); the landscape kernels; terrain stages and noise; hydrology; society; a climate adapter; the sandbox; evaluation and Earth references; io, the desktop export and a legacy-regional adapter; the refinement hierarchy and windows.
 - **W3**: integration, recalibration, the new base world and the user's looks.
 
-Questions 2 and 3 are answered by (c): the interfaces change, and no torus is kept. Question 4 (one W3 re-tuning round) is still open.
+Questions 2 and 3 are answered by (c): the interfaces change, and no torus is kept. **The user, 2026-10-18 (later): T8 runs fully autonomously** (`AGENTS.md`, "Autonomy"). The W0 foundation design (bundle grid layout, windows, `.uww`, resolution mapping) and the W3 re-tuning round (question 4) are decided by the orchestrator with the recommended option, and recorded here with their reasons; the user reviews afterwards.
+
+**For the user** (what an agent could not do alone; the delete guard's refusals land here with path and reason): nothing yet.
 
 **Unrelated findings (reported, not fixed).** `planet::wrapx` adds or subtracts `itswidth` (W - 1, the last index), so x = W maps to 1 (`src/world/planet.cpp:2197-2210`; society's `wrapxlocal` wraps by W; reach in practice unchecked). `planet::latitude` is node-centred (row 0 at 90 degrees), half a cell off the cell-centred grid (`planet.cpp:474-515`; called only from `src/app`). The sandbox's `make_domains` would give a negative width to a box across the date line (inferred, no current box crosses).
 
