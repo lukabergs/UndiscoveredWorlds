@@ -1,18 +1,18 @@
 {
- "base_bundle": "out/scratch/sandbox/base-v2",
+ "base_bundle": "out/scratch/sandbox/base-v9",
  "seed": 1,
  "default_domains": ["global", "B", "F", "G"],
  "domains": {
   "global": {"columns": 2048, "exaggeration": 8.0},
-  "A": {"pixels": [164, 48, 183, 63], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
-  "B": {"pixels": [180, 48, 199, 63], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
-  "F": {"pixels": [176, 94, 195, 109], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
-  "G": {"pixels": [36, 20, 55, 35], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
-  "O": {"pixels": [160, 12, 179, 27], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
-  "B-core": {"pixels": [188, 57, 191, 60], "scale": 256, "margin": 1, "exaggeration": 2.0, "parent": "B"},
-  "B-foreland": {"pixels": [192, 58, 195, 61], "scale": 256, "margin": 1, "exaggeration": 2.0, "parent": "B"},
-  "F-troughs": {"pixels": [189, 96, 192, 99], "scale": 256, "margin": 1, "exaggeration": 2.0, "parent": "F"},
-  "G-coast": {"pixels": [45, 25, 48, 28], "scale": 256, "margin": 1, "exaggeration": 2.0, "parent": "G"}
+  "A": {"pixels": [153, 61, 172, 76], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
+  "B": {"pixels": [169, 61, 188, 76], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
+  "F": {"pixels": [162, 101, 181, 116], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
+  "G": {"pixels": [57, 12, 76, 27], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
+  "O": {"pixels": [89, 7, 108, 22], "scale": 64, "margin": 1, "exaggeration": 3.0, "parent": "global"},
+  "B-core": {"pixels": [174, 67, 177, 70], "scale": 256, "margin": 1, "exaggeration": 2.0, "parent": "B"},
+  "B-foreland": {"pixels": [175, 72, 178, 75], "scale": 256, "margin": 1, "exaggeration": 2.0, "parent": "B"},
+  "F-troughs": {"pixels": [171, 108, 174, 111], "scale": 256, "margin": 1, "exaggeration": 2.0, "parent": "F"},
+  "G-coast": {"pixels": [62, 13, 65, 16], "scale": 256, "margin": 1, "exaggeration": 2.0, "parent": "G"}
  },
  "seafloor": {"enabled": true, "blend": 1.0, "shallow_m": 400, "orientations": 12, "sharpness": 40.0, "segment_km": 300, "offset_km": 150, "fracture_width_km": 5, "fracture_trough_m": 700, "fracture_age_myr": 400, "axial_valley_m": 1200, "axial_age_myr": 0.8, "trench_m": 2000, "trench_band": [0.08, 0.2], "trench_crest": [0.85, 1.0], "ridge_radius_km": 250, "young_myr": 80,
               "hills": {"wavelength_km": 20, "octaves": 5, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5, "orientations": 6, "sharpness": 4.0, "stretch": 8.0, "amplitude_m": 500, "old_fraction": 0.35, "age_scale_myr": 25, "patch": {"wavelength_km": 250, "octaves": 3, "lacunarity": 2.0, "gain": 0.5, "min_cells": 2.5}}, "half_rate_km_myr": 25.0, "ridge_grid_factor": 8, "axis_step_cells": 1.5,
