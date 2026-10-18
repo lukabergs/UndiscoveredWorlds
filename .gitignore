@@ -96,3 +96,6 @@ temp/extra/
 
 # Git worktrees of background agents (Claude Code isolation)
 .claude/worktrees/
+
+# editor settings (local-only)
+.vscode/
