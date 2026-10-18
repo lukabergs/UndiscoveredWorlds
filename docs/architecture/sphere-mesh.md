@@ -154,6 +154,8 @@ Timings to record in W3: the full procedural pipeline at the 256 and 512 equival
 
 See `terrain-roadmap.md` §3 T8, "W0" and the T8 status table (the single place for state).
 
+**Frozen at 4bdf592 (W1 done, 2026-10-19 00:45).** W1c's departures, part of the frozen text: `exportlatlon` returns `std::unique_ptr<planet>`; export entries carry `dtype` and `shape`; `reverse(c, k)` and `grid/reverse.npy` give slot 0 where there is no neighbour; records in tables are copied as x, y until their module's port relocates them; `cube-window` is implemented by W2-W. `writeplanetbundle` gains the direction callback in W2-IO, and accumulated fluxes (discharge, drainage area, river flows) are recomputed on export by that callback rather than remapped as totals.
+
 ### W1b: (x, y)-only accessors
 
 Every other per-cell accessor of `planet` (274 forms) and `climateworld` (164) has its `CellId` overload. These keep only their `(x, y)` form, because their bodies read neighbouring or wrapped x and y, or their y is not a row:
