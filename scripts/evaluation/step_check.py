@@ -10,6 +10,11 @@ reference label, then runs parameters.py --check, check_layout.py and process_ac
 report sets. --social adds a procedural world with society (<LABEL>-social).
 Build and run output goes to <directory>/<LABEL>-*.log. Exit status: 0 when every build,
 run and check passed and every comparison was identical.
+
+From a git worktree (.claude/worktrees/<name>, no refs/ or runs/) the worktree is built and
+checked as above, but the recipes run with the main tree as working directory (so refs/
+resolve), using the worktree's world_pipeline.exe, and process_access.py --check reads the
+main tree's runs/reports. Pass --directory as an absolute path in the main tree's out/scratch.
 """
 import argparse
 import subprocess
@@ -21,6 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import paths
 
 ROOT = paths.ROOT
+# The main tree: ROOT itself, or the main checkout when ROOT is a worktree; refs/ and runs/ live there.
+DATA_ROOT = paths.main_root()
 COMMON = ['--seed', '1', '--resolution', '128', '--audit-access']
 CLIMATE = ['--climate-resolution', '32', '--climate-coupling-iterations', '2']
 RECIPES = {
@@ -34,9 +41,9 @@ ACCESS_SETS = ('phase4-access', 'phase4b-access', 'phase4c-access', 'erosion-a-a
                'multiscale-s3-access', 'multiscale-s5-access', 't412-access', 't412-sea-access')
 
 
-def logged(command, log):
+def logged(command, log, cwd=ROOT):
     with open(log, 'w', encoding='utf-8', errors='replace') as stream:
-        return subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT).returncode
+        return subprocess.run(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT).returncode
 
 
 def build(preset, log):
@@ -73,7 +80,8 @@ def main():
     for name, options in runs.items():
         bundle = directory / f'{label}-{name}'
         start = time.time()
-        status = logged([str(executable), 'run'] + options + COMMON + ['--bundle', str(bundle)], directory / f'{label}-{name}.log')
+        status = logged([str(executable), 'run'] + options + COMMON + ['--bundle', str(bundle)], directory / f'{label}-{name}.log',
+                        cwd=DATA_ROOT)
         print(f'{name} run exit {status} in {time.time() - start:.0f} s')
         passed = passed and status == 0
         if arguments.reference:
@@ -89,7 +97,7 @@ def main():
     status = subprocess.run([sys.executable, 'scripts/check_layout.py'], cwd=ROOT).returncode
     print(f'check_layout exit {status}')
     passed = passed and status == 0
-    reports = [str(path) for name in ACCESS_SETS for path in sorted((ROOT / 'runs/reports' / name).glob('*.json'))]
+    reports = [str(path) for name in ACCESS_SETS for path in sorted((DATA_ROOT / 'runs/reports' / name).glob('*.json'))]
     status = subprocess.run([sys.executable, 'scripts/evaluation/process_access.py', '--check'] + reports, cwd=ROOT).returncode
     print(f'process_access exit {status}')
     return 0 if passed and status == 0 else 1

@@ -23,8 +23,9 @@ SOURCE_SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cu"}
 GENERATED_HEADERS = {"tectonic_baseline.inc"}
 DESKTOP_HEADERS = ("SFML/", "imgui", "ImGui")
 RUNS_RESERVED ={"archive", "ledger", "registry", "reports", "work"}
+# .git is a file in a git worktree (agent worktrees under .claude/worktrees/).
 ROOT_FILES = {
-    ".gitignore", ".gitattributes", "AGENTS.md", "AGENTS.override.md",
+    ".git", ".gitignore", ".gitattributes", "AGENTS.md", "AGENTS.override.md",
     "README.md", "CMakeLists.txt", "CMakePresets.json", "vcpkg.json",
     "LICENSE", "version.txt", "pyproject.toml", "uv.lock",
 }
@@ -71,12 +72,17 @@ def include_issues(root=ROOT):
     return issues
 
 
-def main():
+def root_item_issues(root=ROOT):
     issues = []
-    for path in ROOT.iterdir():
+    for path in root.iterdir():
         allowed = ROOT_DIRECTORIES if path.is_dir() else ROOT_FILES
         if path.name not in allowed:
             issues.append(f"Unclassified root item: {path.name}; move it to its scope folder")
+    return issues
+
+
+def main():
+    issues = root_item_issues()
 
     for path in ((ROOT / "refs").iterdir() if (ROOT / "refs").exists() else ()):
         if path.name not in {"source", "processed", "README.md"}:
