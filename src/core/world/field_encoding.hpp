@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/world/world_fields.hpp"
+#include "core/world/world_grid.hpp"
 
 namespace worldmodel
 {
@@ -47,7 +48,26 @@ void checkelement(FieldId id)
         throw std::logic_error("World field element type mismatch: " + qualifiedname(id));
 }
 
-// x-major storage indexed grid[x][y] over 0..columns-1, 0..rows-1.
+// A world grid is stored in its cell grid's id order (row-major on lat-lon): its
+// bytes are the field's. Shape [row, column] on lat-lon, [cell] otherwise (bundle
+// v2 gives the cube its own shape, docs/architecture/sphere-mesh.md section 7).
+template<typename T>
+FieldData grid(FieldId id, std::size_t columns, std::size_t rows, const worldgrid<T>& source)
+{
+    checkelement<T>(id);
+    FieldData data;
+    data.id = id;
+    const bool latlon = source.columns() > 0;
+    if (latlon && (static_cast<std::size_t>(source.columns()) != columns || static_cast<std::size_t>(source.rows()) != rows))
+        throw std::logic_error("World field does not match the world grid: " + qualifiedname(id));
+    data.shape = latlon ? std::vector<std::size_t>{ rows, columns } : std::vector<std::size_t>{ source.size() };
+    data.bytes.resize(source.size() * sizeof(T));
+    if (source.size())
+        std::memcpy(data.bytes.data(), source.data(), source.size() * sizeof(T));
+    return data;
+}
+
+// Other storage indexed grid[x][y] over 0..columns-1, 0..rows-1.
 template<typename Grid>
 FieldData grid(FieldId id, std::size_t columns, std::size_t rows, const Grid& source)
 {
@@ -186,6 +206,20 @@ inline void checkloadsize(const FieldData& data, std::size_t elements, std::size
 {
     if (data.bytes.size() != elements * elementbytes)
         throw std::runtime_error("Field data does not match its storage: " + qualifiedname(data.id));
+}
+
+template<typename T>
+void loadgrid(const FieldData& data, std::size_t columns, std::size_t rows, worldgrid<T>& target)
+{
+    checkelement<T>(data.id);
+    const bool latlon = target.columns() > 0;
+    if (latlon && (static_cast<std::size_t>(target.columns()) != columns || static_cast<std::size_t>(target.rows()) != rows))
+        throw std::runtime_error("Field shape does not match the world grid: " + qualifiedname(data.id));
+    if (data.shape != (latlon ? std::vector<std::size_t>{ rows, columns } : std::vector<std::size_t>{ target.size() }))
+        throw std::runtime_error("Field shape does not match the world grid: " + qualifiedname(data.id));
+    checkloadsize(data, target.size(), sizeof(T));
+    if (target.size())
+        std::memcpy(target.data(), data.bytes.data(), target.size() * sizeof(T));
 }
 
 template<typename Grid>

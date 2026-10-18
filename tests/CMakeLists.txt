@@ -77,3 +77,13 @@ if(TARGET uw_climate_world)
 else()
     message(STATUS "world_tests is not built: it needs UW_BUILD_WORLD or UW_BUILD_APP")
 endif()
+
+if(TARGET world_pipeline)
+    # The world class on its cell grid (docs/architecture/sphere-mesh.md section 4): needs planet and the pipeline.
+    add_executable(planet_grid_tests
+        world/planet_grid_tests.cpp
+    )
+    target_link_libraries(planet_grid_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(planet_grid_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(planet_grid_tests)
+endif()

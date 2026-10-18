@@ -16,7 +16,8 @@ using S = GenerationStageId;
 // Kinds and notes describe the current stages. Access lists and the stochastic
 // flag come from world_process_access.inc (measured, see world_processes.hpp);
 // the flags set here cover generators the analysis cannot see (the tectonics
-// engine's own stream, society and mineral streams).
+// engine's own stream, society and mineral streams). No process is cube-ready
+// yet (cubeready false): each W2 port of docs/architecture/sphere-mesh.md sets it.
 std::vector<WorldProcessDefinition> buildprocesses()
 {
     std::vector<WorldProcessDefinition> processes =

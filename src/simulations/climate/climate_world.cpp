@@ -10,6 +10,21 @@
 
 void climateworld::resize(int width, int height)
 {
+    resizecells(width, height, nullptr);
+}
+
+void climateworld::resize(const mesh::CellGrid& grid)
+{
+    if (grid.kind() == mesh::GridKind::latlon && !grid.issubgrid())
+        resizecells(grid.columns() - 1, grid.rows() - 1, nullptr);
+    else
+        resizecells(-1, -1, &grid);
+}
+
+// A lat-lon grid of largest indices width, height when grid is null; otherwise
+// one value per cell of grid, with no (x, y) cells (width and height -1).
+void climateworld::resizecells(int width, int height, const mesh::CellGrid* grid)
+{
     inputs_.width = width;
     inputs_.height = height;
     levels_.clear();
@@ -35,19 +50,27 @@ void climateworld::resize(int width, int height)
     options.atmosphereCaptureDirectory = climatecontext_.atmosphereCaptureDirectory;
     options.couplingIterationLimit = climatecontext_.couplingIterationLimit;
     climatecontext_ = std::move(options);
-    const int cellcount = (inputs_.width + 1) * (inputs_.height + 1);
-    jantempmap.resize(inputs_.width + 1, inputs_.height + 1);
-    jultempmap.resize(inputs_.width + 1, inputs_.height + 1);
-    climatemap.resize(inputs_.width + 1, inputs_.height + 1);
-    biomemap.resize(inputs_.width + 1, inputs_.height + 1);
-    janrainmap.resize(inputs_.width + 1, inputs_.height + 1);
-    julrainmap.resize(inputs_.width + 1, inputs_.height + 1);
-    janmountainrainmap.resize(inputs_.width + 1, inputs_.height + 1);
-    julmountainrainmap.resize(inputs_.width + 1, inputs_.height + 1);
-    janmountainraindirmap.resize(inputs_.width + 1, inputs_.height + 1);
-    julmountainraindirmap.resize(inputs_.width + 1, inputs_.height + 1);
-    seaicemap.resize(inputs_.width + 1, inputs_.height + 1);
-    windmap.resize(inputs_.width + 1, inputs_.height + 1);
+    const std::size_t cellcount = grid != nullptr ? grid->cellcount()
+        : static_cast<std::size_t>(inputs_.width + 1) * static_cast<std::size_t>(inputs_.height + 1);
+    const auto resizegrid = [&](auto& field)
+    {
+        if (grid != nullptr)
+            field.resize(*grid);
+        else
+            field.resize(inputs_.width + 1, inputs_.height + 1);
+    };
+    resizegrid(jantempmap);
+    resizegrid(jultempmap);
+    resizegrid(climatemap);
+    resizegrid(biomemap);
+    resizegrid(janrainmap);
+    resizegrid(julrainmap);
+    resizegrid(janmountainrainmap);
+    resizegrid(julmountainrainmap);
+    resizegrid(janmountainraindirmap);
+    resizegrid(julmountainraindirmap);
+    resizegrid(seaicemap);
+    resizegrid(windmap);
     // The save format stores subtropical-high rows for the full 2048-column capacity.
     horselats.resize(ARRAYWIDTH, 6);
 

@@ -81,7 +81,9 @@ void printcommandlineusage()
     printclimateoptionsusage(cout);
     printtectonicoptionsusage(cout);
     cout << "  --resolution <width>    Set an even global width and derive height as width/2.\n";
-    cout << "  --import-land <tiff>    Import a land height map instead of generating terrain.\n";
+    cout << "  --grid latlon|cube      The world's cell grid (default latlon). cube: the cubed sphere of N = width/4\n";
+    cout << "                           cells per face edge (width a multiple of 4); only cube-ready processes run on it.\n";
+    cout << "  --import-land <tiff>   Import a land height map instead of generating terrain.\n";
     cout << "  --import-sea <tiff>     Import a sea depth map instead of generating terrain.\n";
     cout << "  --import-lakes <png>    run with earth-hydrology or imported-world: a 2:1 lake mask (255 lake, 0 not; north row first, from 180 W)\n";
     cout << "                           into hydrosphere.imported_lake: a land cell is lake where at least half its\n";
@@ -169,7 +171,7 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
         }
 
         if (isclimateoption(argument) ||
-            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--set" || argument == "--parameters" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--duration" || argument == "--mineral-history" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--import-lakes" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
+            argument == "--map-resolution" || argument == "--wind-map-resolution" || argument == "--seed" || argument == "--save" || argument == "--bundle" || argument == "--recipe" || argument == "--from-bundle" || argument == "--steps" || argument == "--only" || argument == "--set" || argument == "--parameters" || argument == "--checkpoint-at" || argument == "--checkpoint-every" || argument == "--checkpoint-dir" || argument == "--duration" || argument == "--mineral-history" || argument == "--access-report" || argument == "--tectonic-duration-myr" || argument == "--plates" || argument == "--world-width" || argument == "--world-height" || argument == "--resolution" || argument == "--grid" || argument == "--map" || argument == "--maps" || argument == "--reference-precip" || argument == "--import-land" || argument == "--import-sea" || argument == "--import-lakes" || argument == "--benchmark-info" || argument == "--social-mode" || argument == "--history-years")
         {
             if (index + 1 >= argc)
             {
@@ -305,6 +307,15 @@ bool parsecommandlineoptions(const vector<string>& arguments, CommandLineGenerat
                     if (options.resolution < 2 || options.resolution % 2 != 0)
                         throw invalid_argument("resolution");
                     options.hasResolution = true;
+                }
+                else if (argument == "--grid")
+                {
+                    if (value == "latlon")
+                        options.grid = mesh::GridKind::latlon;
+                    else if (value == "cube")
+                        options.grid = mesh::GridKind::cube;
+                    else
+                        throw invalid_argument("grid");
                 }
                 else if (argument == "--map-resolution" || argument == "--wind-map-resolution")
                 {
@@ -696,6 +707,23 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
         fast_srand(world->seed());
     }
 
+    if (options.grid == mesh::GridKind::cube)
+    {
+        // Bundles are lat-lon until bundle v2 (sphere-mesh.md section 7).
+        if (frombundle)
+        {
+            cerr << "--grid cube cannot start from a bundle: bundles hold lat-lon worlds.\n";
+            return 1;
+        }
+        const int columns = world->width() + 1;
+        if (columns % 4 != 0)
+        {
+            cerr << "--grid cube needs a resolution that is a multiple of 4 (N = W / 4), not " << columns << ".\n";
+            return 1;
+        }
+        world->setgrid(mesh::GridKind::cube, columns);
+    }
+
     applyclimateoptions(options.climate, world->climatesimulation());
     const SocialGenerationOptions socialoptions = makesocialoptions(options.socialEnabled, options.socialMode, options.usePrehistory, options.historyYears);
 
@@ -1038,7 +1066,9 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     if (!runresult.completed)
     {
         cerr << "Recipe " << recipe.name << " failed: " << runresult.error << '\n';
-        if (recipe.name == "earth-climate" || recipe.name == "earth-hydrology" || options.runCommand)
+        // A cube world writes no bundle until bundle v2 (sphere-mesh.md section 7).
+        if (recipe.name == "earth-climate" || recipe.name == "earth-hydrology" || options.runCommand ||
+            world->grid().kind() == mesh::GridKind::cube)
             return 1;
     }
     if (!reportrecipe(recipe, runresult, options.accessReportPath))

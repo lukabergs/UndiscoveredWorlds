@@ -1,4 +1,5 @@
-// Bounds failures of worldgrid in analysis builds (-DUW_CHECK_GRID_BOUNDS).
+// Bounds failures of worldgrid in analysis builds (-DUW_CHECK_GRID_BOUNDS):
+// an (x, y) outside the lat-lon grid, (x, y) on a cube grid, or a cell id beyond the grid.
 #ifdef UW_CHECK_GRID_BOUNDS
 #include "core/world/world_grid.hpp"
 
@@ -14,7 +15,11 @@
 
 void worldgridboundsfailure(int x, int y, int columns, int rows)
 {
-    std::fprintf(stderr, "worldgrid index (%d, %d) outside %d x %d\n", x, y, columns, rows);
+    // y is -1 for a cell id (x) beyond the cell count; columns 0 is a cube grid read by [x][y].
+    if (y == -1)
+        std::fprintf(stderr, "worldgrid cell %d outside the grid (%d x %d)\n", x, columns, rows);
+    else
+        std::fprintf(stderr, "worldgrid index (%d, %d) outside %d x %d\n", x, y, columns, rows);
     void* frames[48];
     const USHORT count = CaptureStackBackTrace(1, 48, frames, nullptr);
     HANDLE process = GetCurrentProcess();

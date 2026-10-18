@@ -962,6 +962,22 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 {
     const GenerationStageDefinition& stagedefinition = getgenerationstage(stageId);
 
+    // A cube world runs only the processes ported to the cell grid (sphere-mesh.md section 4).
+    if (world.grid().kind() == mesh::GridKind::cube)
+    {
+        const WorldProcessDefinition* process = nullptr;
+        for (const WorldProcessDefinition& candidate : getworldprocesses())
+            if (candidate.stage == stageId)
+                process = &candidate;
+        if (process == nullptr || !process->cubeready)
+        {
+            if (errormessage != nullptr)
+                *errormessage = "Process " + string(process != nullptr ? process->id : stagedefinition.label) +
+                    " is not ready for a cube world (--grid cube); it runs on --grid latlon.";
+            return false;
+        }
+    }
+
     if (beginworldgenstep(stagedefinition.label) == false)
         return true;
 

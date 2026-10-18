@@ -153,3 +153,11 @@ Timings to record in W3: the full procedural pipeline at the 256 and 512 equival
 ## 14. Status, waves and file ownership
 
 See `terrain-roadmap.md` §3 T8, "W0" and the T8 status table (the single place for state).
+
+### W1b: (x, y)-only accessors
+
+Every other per-cell accessor of `planet` (274 forms) and `climateworld` (164) has its `CellId` overload. These keep only their `(x, y)` form, because their bodies read neighbouring or wrapped x and y, or their y is not a row:
+- `planet::outline`, `coast`, `seawrap`, `outlinewrap`, `mountainheightwrap` (`planet.cpp`: the four neighbours, `wrapx`/`clipy`);
+- `climateworld::outline`, `seawrap` (the same);
+- `planet::horse`/`sethorse`, `climateworld::horse`/`sethorse`: subtropical-high rows, x and one of six bands (`horselats` is 2048 x 6, not a world field on the cell grid);
+- not per cell: `planet::longitude(x)`, `latitude(y)`, `reverselatitude`, and the private index helpers `seasonalclimateindex` (both classes).

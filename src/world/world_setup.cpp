@@ -533,6 +533,18 @@ void getlandandseatotals(planet& world)
     int seatotal = 0;
     int landtotal = 0;
 
+    if (world.grid().kind() == mesh::GridKind::cube)
+    {
+        // A cube world has no margins: every cell counts.
+        for (mesh::CellId c = 0; c < world.cellcount(); c++)
+        {
+            if (!world.basebelowsea(c))
+                landtotal++;
+            else
+                seatotal++;
+        }
+    }
+
     for (int i = 1; i < width; i++) // Avoid the margins, to avoid false positives.
     {
         for (int j = 1; j < height; j++)

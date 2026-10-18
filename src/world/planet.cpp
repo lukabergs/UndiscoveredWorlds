@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cmath>
 #include <fstream>
+#include <stdexcept>
 #include <stdio.h>
 #include <utility>
 
@@ -93,6 +94,7 @@ planet::planet() //constructor
     geosphere_.itstectonicplatecount = 0;
     geosphere_.itstectonicsealevelm = 0;
     body_.itsradius_m = tuning::world::body::radiusKm * 1000.0f;
+    grid_ = mesh::makelatlongrid(body_.itswidth + 1, body_.itsradius_m);
     resizegrids();
 }
 
@@ -100,113 +102,150 @@ planet::~planet()
 {
 }
 
+void planet::setwidth(int amount)
+{
+    const int columns = std::clamp(amount + 1, 2, ARRAYWIDTH) & ~1;
+    body_.itswidth = columns - 1;
+    body_.itsheight = columns / 2 - 1;
+    if (grid_->kind() != mesh::GridKind::latlon || grid_->columns() != columns)
+        grid_ = mesh::makelatlongrid(columns, grid_->radius_m());
+    resizegrids();
+}
+
+// A cube world has no (x, y) cells: width() and height() are -1, so every
+// (x, y) accessor is out of range and every (x, y) loop is empty.
+void planet::setgrid(mesh::GridKind kind, int columns)
+{
+    if (kind == mesh::GridKind::latlon)
+    {
+        setwidth(columns - 1);
+        return;
+    }
+    if (columns < 4 || columns % 4 != 0)
+        throw std::invalid_argument("A cube world needs a multiple of 4 export columns (N = W / 4)");
+    if (grid_->kind() != mesh::GridKind::cube || grid_->facecells() != columns / 4)
+        grid_ = mesh::makecubegrid(columns / 4, grid_->radius_m());
+    body_.itswidth = -1;
+    body_.itsheight = -1;
+    resizegrids();
+}
+
+void planet::setradius(float amount)
+{
+    body_.itsradius_m = amount;
+    if (!(amount > 0.0f) || static_cast<double>(amount) == grid_->radius_m())
+        return;
+    grid_ = grid_->kind() == mesh::GridKind::cube ? mesh::makecubegrid(grid_->facecells(), amount)
+                                                  : mesh::makelatlongrid(grid_->columns(), amount);
+}
+
 void planet::resizegrids()
 {
-    climate_.resize(body_.itswidth, body_.itsheight);
-    const int columns = body_.itswidth + 1;
-    const int rows = body_.itsheight + 1;
-    const bool resized = geosphere_.mapnom.columns() != columns || geosphere_.mapnom.rows() != rows;
-    hydrosphere_.rivermapdir.resize(columns, rows);
-    hydrosphere_.rivermapjan.resize(columns, rows);
-    hydrosphere_.rivermapjul.resize(columns, rows);
-    hydrosphere_.lakemap.resize(columns, rows);
-    hydrosphere_.flowdirectionmap.resize(columns, rows);
-    hydrosphere_.drainageareamap.resize(columns, rows);
-    hydrosphere_.dischargemap.resize(columns, rows);
-    hydrosphere_.filledelevationmap.resize(columns, rows);
-    hydrosphere_.depressionidmap.resize(columns, rows);
-    hydrosphere_.runoffmap.resize(columns, rows);
-    hydrosphere_.sedimentfluxmap.resize(columns, rows);
-    hydrosphere_.importedlakemap.resize(columns, rows);
-    geosphere_.erodibilitymap.resize(columns, rows);
-    geosphere_.erosionratemap.resize(columns, rows);
-    geosphere_.depositionratemap.resize(columns, rows);
-    geosphere_.denudationmap.resize(columns, rows);
-    geosphere_.aggradationmap.resize(columns, rows);
-    geosphere_.progradedmap.resize(columns, rows);
-    geosphere_.glacialdenudationmap.resize(columns, rows);
-    geosphere_.reliefamplitudemap.resize(columns, rows);
-    geosphere_.valleyspacingmap.resize(columns, rows);
-    cryosphere_.equilibriumlinemap.resize(columns, rows);
-    cryosphere_.glaciationmap.resize(columns, rows);
-    cryosphere_.icethicknessmap.resize(columns, rows);
-    geosphere_.roughnessmap.resize(columns, rows);
-    geosphere_.mountainridges.resize(columns, rows);
-    geosphere_.mountainheights.resize(columns, rows);
-    geosphere_.craterrims.resize(columns, rows);
-    geosphere_.cratercentres.resize(columns, rows);
-    geosphere_.mapnom.resize(columns, rows);
-    hydrosphere_.tidalmap.resize(columns, rows);
-    hydrosphere_.riftlakemapsurface.resize(columns, rows);
-    hydrosphere_.riftlakemapbed.resize(columns, rows);
-    hydrosphere_.lakestartmap.resize(columns, rows);
-    hydrosphere_.specials.resize(columns, rows);
-    geosphere_.geologicregimemap.resize(columns, rows);
-    geosphere_.tectonicconvergencemap.resize(columns, rows);
-    geosphere_.tectonicdivergencemap.resize(columns, rows);
-    geosphere_.tectonicshearmap.resize(columns, rows);
-    geosphere_.tectoniccrustagemyrmap.resize(columns, rows);
-    geosphere_.tectonicheightmap.resize(columns, rows);
-    geosphere_.tectonicplateidmap.resize(columns, rows);
-    geosphere_.tectoniccrustagestepsmap.resize(columns, rows);
-    geosphere_.tectoniccontinentalcrustmap.resize(columns, rows);
-    geosphere_.tectoniccontinentalareamap.resize(columns, rows);
-    geosphere_.tectonicoceaniccrustmap.resize(columns, rows);
-    geosphere_.tectonicsedimentmap.resize(columns, rows);
-    geosphere_.tectonicriftdamagemap.resize(columns, rows);
-    geosphere_.tectonicplumeinfluencemap.resize(columns, rows);
-    geosphere_.tectoniccrustthicknessmap.resize(columns, rows);
-    geosphere_.tectoniccrustclassmap.resize(columns, rows);
-    geosphere_.tectonicuplifttendencymap.resize(columns, rows);
-    geosphere_.tectonicrockupliftratemap.resize(columns, rows);
-    geosphere_.tectonicshorteningmap.resize(columns, rows);
-    geosphere_.tectonicshorteningdirectionmap.resize(columns, rows);
-    geosphere_.tectonicsubsidencetendencymap.resize(columns, rows);
-    geosphere_.tectonicaccumulatedstrainmap.resize(columns, rows);
-    geosphere_.tectonicboundarytypemap.resize(columns, rows);
-    geosphere_.tectonicboundarydistancemap.resize(columns, rows);
-    geosphere_.tectonicboundarysegmentidmap.resize(columns, rows);
-    geosphere_.tectonicnearestboundaryidmap.resize(columns, rows);
-    geosphere_.tectonicboundaryhistorymap.resize(columns, rows);
-    geosphere_.tectonicdeformingregionidmap.resize(columns, rows);
-    geosphere_.tectonicdeformingregiontypemap.resize(columns, rows);
-    geosphere_.tectonicdeformationratemap.resize(columns, rows);
-    geosphere_.tectonicdeformationvelocityxmap.resize(columns, rows);
-    geosphere_.tectonicdeformationvelocityymap.resize(columns, rows);
-    hydrosphere_.basinclassmap.resize(columns, rows);
-    geosphere_.erosionpotentialmap.resize(columns, rows);
-    geosphere_.depositionpotentialmap.resize(columns, rows);
-    geosphere_.floodplainfertilitymap.resize(columns, rows);
-    geosphere_.metalorereservemap.resize(columns, rows);
-    geosphere_.placerreservemap.resize(columns, rows);
-    geosphere_.evaporitereservemap.resize(columns, rows);
-    geosphere_.volcanicreservemap.resize(columns, rows);
-    biosphere_.fisheryreservemap.resize(columns, rows);
-    anthroposphere_.settlement_suitability.resize(columns, rows);
-    anthroposphere_.social_infrastructure.resize(columns, rows);
-    anthroposphere_.agricultural_capacity.resize(columns, rows);
-    anthroposphere_.route_traffic.resize(columns, rows);
-    anthroposphere_.river_access.resize(columns, rows);
-    anthroposphere_.harbor_score.resize(columns, rows);
-    anthroposphere_.owner_settlement_id.resize(columns, rows);
-    anthroposphere_.owner_polity_id.resize(columns, rows);
-    geosphere_.extraelevmap.resize(columns, rows);
-    hydrosphere_.deltamapdir.resize(columns, rows);
-    hydrosphere_.deltamapjan.resize(columns, rows);
-    hydrosphere_.deltamapjul.resize(columns, rows);
-    geosphere_.islandmap.resize(columns, rows);
-    geosphere_.mountainislandmap.resize(columns, rows);
-    geosphere_.noisemap.resize(columns, rows);
-    geosphere_.oceanridgemap.resize(columns, rows);
-    geosphere_.oceanridgeheightmap.resize(columns, rows);
-    geosphere_.oceanriftmap.resize(columns, rows);
-    geosphere_.oceanridgeoffsetmap.resize(columns, rows);
-    geosphere_.oceanridgeanglemap.resize(columns, rows);
-    geosphere_.volcanomap.resize(columns, rows);
-    geosphere_.stratomap.resize(columns, rows);
-    presentation_.noshademap.resize(columns, rows);
-    presentation_.testmap.resize(columns, rows);
-    geosphere_.shelfmap.resize(columns, rows);
+    climate_.resize(*grid_);
+    const mesh::CellGrid& grid = *grid_;
+    const bool resized = geosphere_.mapnom.columns() != grid.columns() || geosphere_.mapnom.rows() != grid.rows() ||
+        geosphere_.mapnom.size() != grid.cellcount();
+    hydrosphere_.rivermapdir.resize(grid);
+    hydrosphere_.rivermapjan.resize(grid);
+    hydrosphere_.rivermapjul.resize(grid);
+    hydrosphere_.lakemap.resize(grid);
+    hydrosphere_.flowdirectionmap.resize(grid);
+    hydrosphere_.drainageareamap.resize(grid);
+    hydrosphere_.dischargemap.resize(grid);
+    hydrosphere_.filledelevationmap.resize(grid);
+    hydrosphere_.depressionidmap.resize(grid);
+    hydrosphere_.runoffmap.resize(grid);
+    hydrosphere_.sedimentfluxmap.resize(grid);
+    hydrosphere_.importedlakemap.resize(grid);
+    geosphere_.erodibilitymap.resize(grid);
+    geosphere_.erosionratemap.resize(grid);
+    geosphere_.depositionratemap.resize(grid);
+    geosphere_.denudationmap.resize(grid);
+    geosphere_.aggradationmap.resize(grid);
+    geosphere_.progradedmap.resize(grid);
+    geosphere_.glacialdenudationmap.resize(grid);
+    geosphere_.reliefamplitudemap.resize(grid);
+    geosphere_.valleyspacingmap.resize(grid);
+    cryosphere_.equilibriumlinemap.resize(grid);
+    cryosphere_.glaciationmap.resize(grid);
+    cryosphere_.icethicknessmap.resize(grid);
+    geosphere_.roughnessmap.resize(grid);
+    geosphere_.mountainridges.resize(grid);
+    geosphere_.mountainheights.resize(grid);
+    geosphere_.craterrims.resize(grid);
+    geosphere_.cratercentres.resize(grid);
+    geosphere_.mapnom.resize(grid);
+    hydrosphere_.tidalmap.resize(grid);
+    hydrosphere_.riftlakemapsurface.resize(grid);
+    hydrosphere_.riftlakemapbed.resize(grid);
+    hydrosphere_.lakestartmap.resize(grid);
+    hydrosphere_.specials.resize(grid);
+    geosphere_.geologicregimemap.resize(grid);
+    geosphere_.tectonicconvergencemap.resize(grid);
+    geosphere_.tectonicdivergencemap.resize(grid);
+    geosphere_.tectonicshearmap.resize(grid);
+    geosphere_.tectoniccrustagemyrmap.resize(grid);
+    geosphere_.tectonicheightmap.resize(grid);
+    geosphere_.tectonicplateidmap.resize(grid);
+    geosphere_.tectoniccrustagestepsmap.resize(grid);
+    geosphere_.tectoniccontinentalcrustmap.resize(grid);
+    geosphere_.tectoniccontinentalareamap.resize(grid);
+    geosphere_.tectonicoceaniccrustmap.resize(grid);
+    geosphere_.tectonicsedimentmap.resize(grid);
+    geosphere_.tectonicriftdamagemap.resize(grid);
+    geosphere_.tectonicplumeinfluencemap.resize(grid);
+    geosphere_.tectoniccrustthicknessmap.resize(grid);
+    geosphere_.tectoniccrustclassmap.resize(grid);
+    geosphere_.tectonicuplifttendencymap.resize(grid);
+    geosphere_.tectonicrockupliftratemap.resize(grid);
+    geosphere_.tectonicshorteningmap.resize(grid);
+    geosphere_.tectonicshorteningdirectionmap.resize(grid);
+    geosphere_.tectonicsubsidencetendencymap.resize(grid);
+    geosphere_.tectonicaccumulatedstrainmap.resize(grid);
+    geosphere_.tectonicboundarytypemap.resize(grid);
+    geosphere_.tectonicboundarydistancemap.resize(grid);
+    geosphere_.tectonicboundarysegmentidmap.resize(grid);
+    geosphere_.tectonicnearestboundaryidmap.resize(grid);
+    geosphere_.tectonicboundaryhistorymap.resize(grid);
+    geosphere_.tectonicdeformingregionidmap.resize(grid);
+    geosphere_.tectonicdeformingregiontypemap.resize(grid);
+    geosphere_.tectonicdeformationratemap.resize(grid);
+    geosphere_.tectonicdeformationvelocityxmap.resize(grid);
+    geosphere_.tectonicdeformationvelocityymap.resize(grid);
+    hydrosphere_.basinclassmap.resize(grid);
+    geosphere_.erosionpotentialmap.resize(grid);
+    geosphere_.depositionpotentialmap.resize(grid);
+    geosphere_.floodplainfertilitymap.resize(grid);
+    geosphere_.metalorereservemap.resize(grid);
+    geosphere_.placerreservemap.resize(grid);
+    geosphere_.evaporitereservemap.resize(grid);
+    geosphere_.volcanicreservemap.resize(grid);
+    biosphere_.fisheryreservemap.resize(grid);
+    anthroposphere_.settlement_suitability.resize(grid);
+    anthroposphere_.social_infrastructure.resize(grid);
+    anthroposphere_.agricultural_capacity.resize(grid);
+    anthroposphere_.route_traffic.resize(grid);
+    anthroposphere_.river_access.resize(grid);
+    anthroposphere_.harbor_score.resize(grid);
+    anthroposphere_.owner_settlement_id.resize(grid);
+    anthroposphere_.owner_polity_id.resize(grid);
+    geosphere_.extraelevmap.resize(grid);
+    hydrosphere_.deltamapdir.resize(grid);
+    hydrosphere_.deltamapjan.resize(grid);
+    hydrosphere_.deltamapjul.resize(grid);
+    geosphere_.islandmap.resize(grid);
+    geosphere_.mountainislandmap.resize(grid);
+    geosphere_.noisemap.resize(grid);
+    geosphere_.oceanridgemap.resize(grid);
+    geosphere_.oceanridgeheightmap.resize(grid);
+    geosphere_.oceanriftmap.resize(grid);
+    geosphere_.oceanridgeoffsetmap.resize(grid);
+    geosphere_.oceanridgeanglemap.resize(grid);
+    geosphere_.volcanomap.resize(grid);
+    geosphere_.stratomap.resize(grid);
+    presentation_.noshademap.resize(grid);
+    presentation_.testmap.resize(grid);
+    geosphere_.shelfmap.resize(grid);
     // Resized grids are zero; give them the values clear() sets, as the former
     // fixed arrays kept them across size changes (imports size the world after clear()).
     if (resized)
@@ -246,35 +285,26 @@ void planet::cleartectonicprovenanceinternal()
     geosphere_.mineraldepositlist.clear();
     geosphere_.mineralbudgetstate = {};
 
-    parallelforrows(0, body_.itswidth, [&](int startx, int endx)
-    {
-        for (int i = startx; i <= endx; i++)
-        {
-            for (int j = 0; j <= body_.itsheight; j++)
-            {
-                geosphere_.geologicregimemap[i][j] = static_cast<std::uint8_t>(GeologicRegime::stable);
-                geosphere_.tectonicconvergencemap[i][j] = 0;
-                geosphere_.tectonicdivergencemap[i][j] = 0;
-                geosphere_.tectonicshearmap[i][j] = 0;
-                geosphere_.tectoniccrustagemyrmap[i][j] = 0.0f;
-                geosphere_.tectoniccrustthicknessmap[i][j] = 0.0f;
-                geosphere_.tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
-                geosphere_.tectonicuplifttendencymap[i][j] = 0.0f;
-                geosphere_.tectonicsubsidencetendencymap[i][j] = 0.0f;
-                geosphere_.tectonicaccumulatedstrainmap[i][j] = 0.0f;
-                geosphere_.tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
-                geosphere_.tectonicboundarydistancemap[i][j] = 0;
-                geosphere_.tectonicboundarysegmentidmap[i][j] = 0;
-                geosphere_.tectonicnearestboundaryidmap[i][j] = 0;
-                geosphere_.tectonicboundaryhistorymap[i][j] = 0.0f;
-                geosphere_.tectonicdeformingregionidmap[i][j] = 0;
-                geosphere_.tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
-                geosphere_.tectonicdeformationratemap[i][j] = 0.0f;
-                geosphere_.tectonicdeformationvelocityxmap[i][j] = 0.0f;
-                geosphere_.tectonicdeformationvelocityymap[i][j] = 0.0f;
-            }
-        }
-    }, 64);
+    geosphere_.geologicregimemap.fill(static_cast<std::uint8_t>(GeologicRegime::stable));
+    geosphere_.tectonicconvergencemap.fill(0);
+    geosphere_.tectonicdivergencemap.fill(0);
+    geosphere_.tectonicshearmap.fill(0);
+    geosphere_.tectoniccrustagemyrmap.fill(0.0f);
+    geosphere_.tectoniccrustthicknessmap.fill(0.0f);
+    geosphere_.tectoniccrustclassmap.fill(static_cast<std::uint8_t>(CrustClass::none));
+    geosphere_.tectonicuplifttendencymap.fill(0.0f);
+    geosphere_.tectonicsubsidencetendencymap.fill(0.0f);
+    geosphere_.tectonicaccumulatedstrainmap.fill(0.0f);
+    geosphere_.tectonicboundarytypemap.fill(static_cast<std::uint8_t>(BoundaryType::none));
+    geosphere_.tectonicboundarydistancemap.fill(0);
+    geosphere_.tectonicboundarysegmentidmap.fill(0);
+    geosphere_.tectonicnearestboundaryidmap.fill(0);
+    geosphere_.tectonicboundaryhistorymap.fill(0.0f);
+    geosphere_.tectonicdeformingregionidmap.fill(0);
+    geosphere_.tectonicdeformingregiontypemap.fill(static_cast<std::uint8_t>(DeformingRegionType::none));
+    geosphere_.tectonicdeformationratemap.fill(0.0f);
+    geosphere_.tectonicdeformationvelocityxmap.fill(0.0f);
+    geosphere_.tectonicdeformationvelocityymap.fill(0.0f);
 }
 
 void planet::cleartectonicprovenance()
@@ -343,8 +373,10 @@ void planet::readwholedata(ifstream& infile, worldgrid<float>& arr)
 std::vector<int> planet::wholemapnom() const
 {
     UW_FIELD_READ(base_elevation);
-    const worldgrid<int> whole = wholegrid(geosphere_.mapnom);
-    return std::vector<int>(whole.data(), whole.data() + whole.size());
+    std::vector<int> whole(geosphere_.mapnom.size());
+    for (std::size_t index = 0; index < whole.size(); index++)
+        whole[index] = wholemetres(geosphere_.mapnom.data()[index]);
+    return whole;
 }
 
 // The save format keeps the climate fields in their former int16 encodings.
@@ -606,93 +638,84 @@ void planet::clear()
     geosphere_.mineraldepositlist.clear();
     geosphere_.mineralbudgetstate = {};
 
-    parallelforrows(0, body_.itswidth, [&](int startx, int endx)
-    {
-        for (int i = startx; i <= endx; i++) // Set all the maps to 0.
-        {
-            for (int j = 0; j <= body_.itsheight; j++)
-            {
-                climate_.jantempmap[i][j] = 0;
-                climate_.jultempmap[i][j] = 0;
-                climate_.climatemap[i][j] = 0;
-                climate_.biomemap[i][j] = 0;
-                climate_.janrainmap[i][j] = 0;
-                climate_.julrainmap[i][j] = 0;
-                climate_.janmountainrainmap[i][j] = 0;
-                climate_.julmountainrainmap[i][j] = 0;
-                climate_.janmountainraindirmap[i][j] = 0;
-                climate_.julmountainraindirmap[i][j] = 0;
-                climate_.seaicemap[i][j] = 0;
-                hydrosphere_.rivermapdir[i][j] = 0;
-                hydrosphere_.rivermapjan[i][j] = 0;
-                hydrosphere_.rivermapjul[i][j] = 0;
-                climate_.windmap[i][j] = 0;
-                hydrosphere_.lakemap[i][j] = 0;
-                geosphere_.roughnessmap[i][j] = 0;
-                geosphere_.mountainridges[i][j] = 0;
-                geosphere_.mountainheights[i][j] = 0;
-                geosphere_.craterrims[i][j] = 0;
-                geosphere_.cratercentres[i][j] = 0;
-                geosphere_.mapnom[i][j] = 0;
-                hydrosphere_.tidalmap[i][j] = 0;
-                hydrosphere_.riftlakemapsurface[i][j] = 0;
-                hydrosphere_.riftlakemapbed[i][j] = 0;
-                hydrosphere_.specials[i][j] = 0;
-                geosphere_.geologicregimemap[i][j] = static_cast<std::uint8_t>(GeologicRegime::stable);
-                geosphere_.tectonicconvergencemap[i][j] = 0;
-                geosphere_.tectonicdivergencemap[i][j] = 0;
-                geosphere_.tectonicshearmap[i][j] = 0;
-                geosphere_.tectoniccrustagemyrmap[i][j] = 0.0f;
-                geosphere_.tectoniccrustthicknessmap[i][j] = 0.0f;
-                geosphere_.tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
-                geosphere_.tectonicuplifttendencymap[i][j] = 0.0f;
-                geosphere_.tectonicsubsidencetendencymap[i][j] = 0.0f;
-                geosphere_.tectonicaccumulatedstrainmap[i][j] = 0.0f;
-                geosphere_.tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
-                geosphere_.tectonicboundarydistancemap[i][j] = 0;
-                geosphere_.tectonicboundarysegmentidmap[i][j] = 0;
-                geosphere_.tectonicnearestboundaryidmap[i][j] = 0;
-                geosphere_.tectonicboundaryhistorymap[i][j] = 0.0f;
-                geosphere_.tectonicdeformingregionidmap[i][j] = 0;
-                geosphere_.tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
-                geosphere_.tectonicdeformationratemap[i][j] = 0.0f;
-                geosphere_.tectonicdeformationvelocityxmap[i][j] = 0.0f;
-                geosphere_.tectonicdeformationvelocityymap[i][j] = 0.0f;
-                hydrosphere_.basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
-                geosphere_.erosionpotentialmap[i][j] = 0;
-                geosphere_.depositionpotentialmap[i][j] = 0;
-                geosphere_.floodplainfertilitymap[i][j] = 0;
-                geosphere_.metalorereservemap[i][j] = 0;
-                geosphere_.placerreservemap[i][j] = 0;
-                geosphere_.evaporitereservemap[i][j] = 0;
-                geosphere_.volcanicreservemap[i][j] = 0;
-                biosphere_.fisheryreservemap[i][j] = 0;
-                anthroposphere_.settlement_suitability[i][j] = 0;
-                anthroposphere_.social_infrastructure[i][j] = 0;
-                anthroposphere_.agricultural_capacity[i][j] = 0;
-                anthroposphere_.route_traffic[i][j] = 0;
-                anthroposphere_.river_access[i][j] = 0;
-                anthroposphere_.harbor_score[i][j] = 0;
-                anthroposphere_.owner_settlement_id[i][j] = -1;
-                anthroposphere_.owner_polity_id[i][j] = -1;
-                geosphere_.extraelevmap[i][j] = 0;
-                hydrosphere_.deltamapdir[i][j] = 0;
-                hydrosphere_.deltamapjan[i][j] = 0;
-                hydrosphere_.deltamapjul[i][j] = 0;
-                geosphere_.oceanridgemap[i][j] = 0;
-                geosphere_.oceanridgeheightmap[i][j] = 0;
-                geosphere_.oceanriftmap[i][j] = 0;
-                geosphere_.oceanridgeoffsetmap[i][j] = 0;
-                geosphere_.islandmap[i][j] = 0;
-                presentation_.noshademap[i][j] = 0;
-                geosphere_.mountainislandmap[i][j] = 0;
-                geosphere_.volcanomap[i][j] = 0;
-                geosphere_.stratomap[i][j] = 0;
-                geosphere_.noisemap[i][j] = 0;
-                presentation_.testmap[i][j] = 0;
-            }
-        }
-    }, 64);
+    climate_.jantempmap.fill(0);
+    climate_.jultempmap.fill(0);
+    climate_.climatemap.fill(0);
+    climate_.biomemap.fill(0);
+    climate_.janrainmap.fill(0);
+    climate_.julrainmap.fill(0);
+    climate_.janmountainrainmap.fill(0);
+    climate_.julmountainrainmap.fill(0);
+    climate_.janmountainraindirmap.fill(0);
+    climate_.julmountainraindirmap.fill(0);
+    climate_.seaicemap.fill(0);
+    hydrosphere_.rivermapdir.fill(0);
+    hydrosphere_.rivermapjan.fill(0);
+    hydrosphere_.rivermapjul.fill(0);
+    climate_.windmap.fill(0);
+    hydrosphere_.lakemap.fill(0);
+    geosphere_.roughnessmap.fill(0);
+    geosphere_.mountainridges.fill(0);
+    geosphere_.mountainheights.fill(0);
+    geosphere_.craterrims.fill(0);
+    geosphere_.cratercentres.fill(0);
+    geosphere_.mapnom.fill(0);
+    hydrosphere_.tidalmap.fill(0);
+    hydrosphere_.riftlakemapsurface.fill(0);
+    hydrosphere_.riftlakemapbed.fill(0);
+    hydrosphere_.specials.fill(0);
+    geosphere_.geologicregimemap.fill(static_cast<std::uint8_t>(GeologicRegime::stable));
+    geosphere_.tectonicconvergencemap.fill(0);
+    geosphere_.tectonicdivergencemap.fill(0);
+    geosphere_.tectonicshearmap.fill(0);
+    geosphere_.tectoniccrustagemyrmap.fill(0.0f);
+    geosphere_.tectoniccrustthicknessmap.fill(0.0f);
+    geosphere_.tectoniccrustclassmap.fill(static_cast<std::uint8_t>(CrustClass::none));
+    geosphere_.tectonicuplifttendencymap.fill(0.0f);
+    geosphere_.tectonicsubsidencetendencymap.fill(0.0f);
+    geosphere_.tectonicaccumulatedstrainmap.fill(0.0f);
+    geosphere_.tectonicboundarytypemap.fill(static_cast<std::uint8_t>(BoundaryType::none));
+    geosphere_.tectonicboundarydistancemap.fill(0);
+    geosphere_.tectonicboundarysegmentidmap.fill(0);
+    geosphere_.tectonicnearestboundaryidmap.fill(0);
+    geosphere_.tectonicboundaryhistorymap.fill(0.0f);
+    geosphere_.tectonicdeformingregionidmap.fill(0);
+    geosphere_.tectonicdeformingregiontypemap.fill(static_cast<std::uint8_t>(DeformingRegionType::none));
+    geosphere_.tectonicdeformationratemap.fill(0.0f);
+    geosphere_.tectonicdeformationvelocityxmap.fill(0.0f);
+    geosphere_.tectonicdeformationvelocityymap.fill(0.0f);
+    hydrosphere_.basinclassmap.fill(static_cast<std::uint8_t>(BasinClass::none));
+    geosphere_.erosionpotentialmap.fill(0);
+    geosphere_.depositionpotentialmap.fill(0);
+    geosphere_.floodplainfertilitymap.fill(0);
+    geosphere_.metalorereservemap.fill(0);
+    geosphere_.placerreservemap.fill(0);
+    geosphere_.evaporitereservemap.fill(0);
+    geosphere_.volcanicreservemap.fill(0);
+    biosphere_.fisheryreservemap.fill(0);
+    anthroposphere_.settlement_suitability.fill(0);
+    anthroposphere_.social_infrastructure.fill(0);
+    anthroposphere_.agricultural_capacity.fill(0);
+    anthroposphere_.route_traffic.fill(0);
+    anthroposphere_.river_access.fill(0);
+    anthroposphere_.harbor_score.fill(0);
+    anthroposphere_.owner_settlement_id.fill(-1);
+    anthroposphere_.owner_polity_id.fill(-1);
+    geosphere_.extraelevmap.fill(0);
+    hydrosphere_.deltamapdir.fill(0);
+    hydrosphere_.deltamapjan.fill(0);
+    hydrosphere_.deltamapjul.fill(0);
+    geosphere_.oceanridgemap.fill(0);
+    geosphere_.oceanridgeheightmap.fill(0);
+    geosphere_.oceanriftmap.fill(0);
+    geosphere_.oceanridgeoffsetmap.fill(0);
+    geosphere_.islandmap.fill(0);
+    presentation_.noshademap.fill(0);
+    geosphere_.mountainislandmap.fill(0);
+    geosphere_.volcanomap.fill(0);
+    geosphere_.stratomap.fill(0);
+    geosphere_.noisemap.fill(0);
+    presentation_.testmap.fill(0);
     geosphere_.shelfmap.fill(false);
     hydrosphere_.flowdirectionmap.fill(0);
     hydrosphere_.drainageareamap.fill(0.0f);
@@ -1505,6 +1528,9 @@ bool planet::loadworld(string filename)
         return false;
     }
     readvariable(infile, body_.itsseed);
+    // A .uww holds a lat-lon world.
+    if (grid_->kind() != mesh::GridKind::latlon || grid_->columns() != columns)
+        grid_ = mesh::makelatlongrid(columns, grid_->radius_m());
     resizegrids();
     geosphere_.tectonicrockupliftratemap.fill(0); // Not in the .uww: a loaded world has no rate.
     geosphere_.tectonicshorteningmap.fill(0); // Not in the .uww either.
@@ -1808,24 +1834,15 @@ bool planet::loadworld(string filename)
     {
         cleartectonicprovenanceinternal();
 
-        parallelforrows(0, body_.itswidth, [&](int startx, int endx)
-        {
-            for (int i = startx; i <= endx; i++)
-            {
-                for (int j = 0; j <= body_.itsheight; j++)
-                {
-                    hydrosphere_.basinclassmap[i][j] = static_cast<std::uint8_t>(BasinClass::none);
-                    geosphere_.erosionpotentialmap[i][j] = 0;
-                    geosphere_.depositionpotentialmap[i][j] = 0;
-                    geosphere_.floodplainfertilitymap[i][j] = 0;
-                    geosphere_.metalorereservemap[i][j] = 0;
-                    geosphere_.placerreservemap[i][j] = 0;
-                    geosphere_.evaporitereservemap[i][j] = 0;
-                    geosphere_.volcanicreservemap[i][j] = 0;
-                    biosphere_.fisheryreservemap[i][j] = 0;
-                }
-            }
-        }, 64);
+        hydrosphere_.basinclassmap.fill(static_cast<std::uint8_t>(BasinClass::none));
+        geosphere_.erosionpotentialmap.fill(0);
+        geosphere_.depositionpotentialmap.fill(0);
+        geosphere_.floodplainfertilitymap.fill(0);
+        geosphere_.metalorereservemap.fill(0);
+        geosphere_.placerreservemap.fill(0);
+        geosphere_.evaporitereservemap.fill(0);
+        geosphere_.volcanicreservemap.fill(0);
+        biosphere_.fisheryreservemap.fill(0);
     }
     readwholeshortdata(infile, geosphere_.extraelevmap);
     readdata(infile, hydrosphere_.deltamapdir);
@@ -1947,23 +1964,14 @@ bool planet::loadworld(string filename)
     }
     else
     {
-        parallelforrows(0, body_.itswidth, [&](int startx, int endx)
-        {
-            for (int i = startx; i <= endx; i++)
-            {
-                for (int j = 0; j <= body_.itsheight; j++)
-                {
-                    anthroposphere_.settlement_suitability[i][j] = 0;
-                    anthroposphere_.social_infrastructure[i][j] = 0;
-                    anthroposphere_.agricultural_capacity[i][j] = 0;
-                    anthroposphere_.route_traffic[i][j] = 0;
-                    anthroposphere_.river_access[i][j] = 0;
-                    anthroposphere_.harbor_score[i][j] = 0;
-                    anthroposphere_.owner_settlement_id[i][j] = -1;
-                    anthroposphere_.owner_polity_id[i][j] = -1;
-                }
-            }
-        }, 64);
+        anthroposphere_.settlement_suitability.fill(0);
+        anthroposphere_.social_infrastructure.fill(0);
+        anthroposphere_.agricultural_capacity.fill(0);
+        anthroposphere_.route_traffic.fill(0);
+        anthroposphere_.river_access.fill(0);
+        anthroposphere_.harbor_score.fill(0);
+        anthroposphere_.owner_settlement_id.fill(-1);
+        anthroposphere_.owner_polity_id.fill(-1);
 
         clearsocialstate();
     }
@@ -2135,31 +2143,22 @@ bool planet::loadworld(string filename)
         geosphere_.tectonicboundarysegmentlist.clear();
         geosphere_.tectonicdeformingregionlist.clear();
 
-        parallelforrows(0, body_.itswidth, [&](int startx, int endx)
-        {
-            for (int i = startx; i <= endx; i++)
-            {
-                for (int j = 0; j <= body_.itsheight; j++)
-                {
-                    geosphere_.tectoniccrustagemyrmap[i][j] = 0.0f;
-                    geosphere_.tectoniccrustthicknessmap[i][j] = 0.0f;
-                    geosphere_.tectoniccrustclassmap[i][j] = static_cast<std::uint8_t>(CrustClass::none);
-                    geosphere_.tectonicuplifttendencymap[i][j] = 0.0f;
-                    geosphere_.tectonicsubsidencetendencymap[i][j] = 0.0f;
-                    geosphere_.tectonicaccumulatedstrainmap[i][j] = 0.0f;
-                    geosphere_.tectonicboundarytypemap[i][j] = static_cast<std::uint8_t>(BoundaryType::none);
-                    geosphere_.tectonicboundarydistancemap[i][j] = 0;
-                    geosphere_.tectonicboundarysegmentidmap[i][j] = 0;
-                    geosphere_.tectonicnearestboundaryidmap[i][j] = 0;
-                    geosphere_.tectonicboundaryhistorymap[i][j] = 0.0f;
-                    geosphere_.tectonicdeformingregionidmap[i][j] = 0;
-                    geosphere_.tectonicdeformingregiontypemap[i][j] = static_cast<std::uint8_t>(DeformingRegionType::none);
-                    geosphere_.tectonicdeformationratemap[i][j] = 0.0f;
-                    geosphere_.tectonicdeformationvelocityxmap[i][j] = 0.0f;
-                    geosphere_.tectonicdeformationvelocityymap[i][j] = 0.0f;
-                }
-            }
-        }, 64);
+        geosphere_.tectoniccrustagemyrmap.fill(0.0f);
+        geosphere_.tectoniccrustthicknessmap.fill(0.0f);
+        geosphere_.tectoniccrustclassmap.fill(static_cast<std::uint8_t>(CrustClass::none));
+        geosphere_.tectonicuplifttendencymap.fill(0.0f);
+        geosphere_.tectonicsubsidencetendencymap.fill(0.0f);
+        geosphere_.tectonicaccumulatedstrainmap.fill(0.0f);
+        geosphere_.tectonicboundarytypemap.fill(static_cast<std::uint8_t>(BoundaryType::none));
+        geosphere_.tectonicboundarydistancemap.fill(0);
+        geosphere_.tectonicboundarysegmentidmap.fill(0);
+        geosphere_.tectonicnearestboundaryidmap.fill(0);
+        geosphere_.tectonicboundaryhistorymap.fill(0.0f);
+        geosphere_.tectonicdeformingregionidmap.fill(0);
+        geosphere_.tectonicdeformingregiontypemap.fill(static_cast<std::uint8_t>(DeformingRegionType::none));
+        geosphere_.tectonicdeformationratemap.fill(0.0f);
+        geosphere_.tectonicdeformationvelocityxmap.fill(0.0f);
+        geosphere_.tectonicdeformationvelocityymap.fill(0.0f);
     }
 
     int weatherstatesize = 0;
@@ -2512,17 +2511,16 @@ climateinputs planet::climateinputsview() const
     inputs.sealevel = geosphere_.itssealevel;
     inputs.landtotal = geosphere_.itslandtotal;
     inputs.seatotal = geosphere_.itsseatotal;
-    inputs.rows = body_.itsheight + 1;
-    inputs.nom = &geosphere_.mapnom[0][0];
-    inputs.mountainheights = &geosphere_.mountainheights[0][0];
-    inputs.extraelev = &geosphere_.extraelevmap[0][0];
-    inputs.craterrims = &geosphere_.craterrims[0][0];
-    inputs.cratercentres = &geosphere_.cratercentres[0][0];
-    inputs.volcano = &geosphere_.volcanomap[0][0];
-    inputs.oceanridgeheight = &geosphere_.oceanridgeheightmap[0][0];
-    inputs.lakesurface = &hydrosphere_.lakemap[0][0];
-    inputs.riftlakesurface = &hydrosphere_.riftlakemapsurface[0][0];
-    inputs.special = &hydrosphere_.specials[0][0];
+    inputs.nom = geosphere_.mapnom.data();
+    inputs.mountainheights = geosphere_.mountainheights.data();
+    inputs.extraelev = geosphere_.extraelevmap.data();
+    inputs.craterrims = geosphere_.craterrims.data();
+    inputs.cratercentres = geosphere_.cratercentres.data();
+    inputs.volcano = geosphere_.volcanomap.data();
+    inputs.oceanridgeheight = geosphere_.oceanridgeheightmap.data();
+    inputs.lakesurface = hydrosphere_.lakemap.data();
+    inputs.riftlakesurface = hydrosphere_.riftlakemapsurface.data();
+    inputs.special = hydrosphere_.specials.data();
     return inputs;
 }
 

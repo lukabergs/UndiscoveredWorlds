@@ -46,6 +46,9 @@ struct WorldProcessDefinition
     std::vector<worldmodel::TableId> tablewrites;
     const char* note;                // known responsibilities outside the label
     EvolverTime time;                // evolvers of the time model only
+    // Runs on a cube world (docs/architecture/sphere-mesh.md section 4): set by
+    // the W2 port of the process; executegenerationstage refuses the others there.
+    bool cubeready = false;
 };
 
 const char* processkindname(ProcessKind kind);
