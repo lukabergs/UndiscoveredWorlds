@@ -90,6 +90,7 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `erosion-0104`: showing nested windows to the user before the parent's D8 bias and the block terraces are gone
 - `erosion-0104`: a global-scale page for one-pixel features (crop at 1:1)
 - `erosion-0105`: comparing a sandbox label's config.json before its render has finished (written at the end)
+- `erosion-0106`: running sandbox look experiments on one base while the next base is being built (the user, 2026-10-18)
 - `tectonics-0010`: Bilinear semi-Lagrangian sampling of the elevation for the uplift rate (spurious uplift at moving summits).
 - `tectonics-0011`: carrying the strain into new crust at divergent boundaries: young ocean floor showed 8 km of shortening
 - `tectonics-0012`: measuring continental area with crust_class (plate rasters): use the columns or continental_crust thickness
@@ -241,6 +242,7 @@ Lessons:
 | `erosion-0103` | 2026-10-16 | not reviewed (reviews of evaluations paused since 2026-10-05); the user has not looked yet | keep | terrain roadmap T1.7 (G's fjords), the window smoothness (T1.6/T1.8b), one nesting mechanism for the window levels |
 | `erosion-0104` | 2026-10-17 | the user's visual verdict (the recorded one above); no agent review | keep | terrain roadmap T1.7, T1.8b: the user's verdicts of 2026-10-17 and the decisions taken from them |
 | `erosion-0105` | 2026-10-17 | pending the user's look at the pages (asked 2026-10-17) | park | terrain roadmap T1 (step 1 of the 2026-10-17 session): confirming renders of the new defaults, the glacial-ratio pair, the global K question, straight rivers, fill_pits |
+| `erosion-0106` | 2026-10-18 | the user's look (recorded above) with the numbers deciding where the user deferred | keep | terrain roadmap T1: the user's verdicts of 2026-10-18 on the step-1 pages and the decisions taken from them by the numbers |
 
 Lessons:
 
@@ -415,6 +417,8 @@ Lessons:
 - `erosion-0104`: The user judges mechanisms by their artefacts: a grid that shows anywhere fails the whole page.
 - `erosion-0104`: Bold physical changes (open troughs, less diffusion) were accepted; numerical exactness that costs a visible grid was not.
 - `erosion-0105`: Measure a ratio's cost on the domain it hurt (B above 4 km), not on the land mean: the mean hides an 11 % local loss.
+- `erosion-0106`: Show the render exaggeration with a relief map: the user read 3x-exaggerated relief as too rugged while the slopes are below Earth's.
+- `erosion-0106`: When the user defers to the numbers, name the measure that decides and the ones against it.
 
 ## tectonics
 

@@ -1,0 +1,26 @@
+{
+  "note": "Named looks for the terrain sandbox: `terrain_sandbox.py --preset NAME[,NAME]` applies each preset's overrides to configs/sandbox/terrain.json before any --set. Each records how an earlier look was made so it can be brought back (the user, 2026-10-18); the evidence is in the ledger entries named. The workbench port (roadmap T2) should expose the same keys as controls.",
+  "presets": {
+    "gentle-t16": {
+      "description": "The gentler valleys of t16-control (2026-10-16, erosion-0102): no per-level kappa on windows, every lake traps sediment (fewer, shallower inlets; speckled lakes), the earlier fill gradient and no pit fill. Lowers the fjords (G-coast narrow sea 1.9 % against 6.9 %).",
+      "set": ["physics.use_levels=false", "physics.lake_trap_ice_share=null", "relief.fill_gradient=1e-4",
+              "physics.lake_fill_gradient=1e-4", "filter.fill_pits=false"]
+    },
+    "glacial-35": {
+      "description": "Quaternary glacial erodibility ratio 35 (default 20): deeper troughs and more inlets, the t17-v17cfg look on G-coast (median 1616 m, slope p50 0.255, narrow sea 9.0 %); costs B's highest iced cells up to 1.5 km (erosion-0105).",
+      "set": ["history.phases.1.glacial_ratio=35", "history.phases.2.glacial_ratio=35"]
+    },
+    "global-k1500": {
+      "description": "Stream-power erodibility 1500 (default 3000): the global's physics lowers G-coast's box by 1.0 km instead of 1.8 (erosion-0105).",
+      "set": ["physics.k=1500"]
+    },
+    "global-k1000": {
+      "description": "Stream-power erodibility 1000: the global lowers G-coast's box by 0.67 km, the standalone windows' range; the world's median rises to 688 m and the relief falls (erosion-0105).",
+      "set": ["physics.k=1000"]
+    },
+    "fill-legacy": {
+      "description": "The fill before 2026-10-18: steeper fill gradient (1e-4, more straight D8 runs on filled basins) and the filter's pits left as hidden dry holes.",
+      "set": ["relief.fill_gradient=1e-4", "physics.lake_fill_gradient=1e-4", "filter.fill_pits=false"]
+    }
+  }
+}

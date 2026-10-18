@@ -149,11 +149,12 @@ NOISE_STD = 0.22  # standard deviation of one octave of the gradient noise below
 # ---------------------------------------------------------------- configuration
 
 def load_config(path, overrides):
+    """The config with GROUP.KEY=VALUE overrides; a numeric part indexes a list (history.phases.1.glacial_ratio=35)."""
     config = json.loads(Path(path).read_text(encoding='utf-8'))
     for item in overrides:
         key, _, value = item.partition('=')
         node = config
-        parts = key.split('.')
+        parts = [int(part) if part.isdigit() else part for part in key.split('.')]
         for part in parts[:-1]:
             node = node[part]
         try:
@@ -161,6 +162,22 @@ def load_config(path, overrides):
         except json.JSONDecodeError:
             node[parts[-1]] = value
     return config
+
+
+PRESETS = ROOT / 'configs' / 'sandbox' / 'presets.json'
+
+
+def preset_overrides(names):
+    """The --set list of each named preset in configs/sandbox/presets.json, in order."""
+    if not names:
+        return []
+    presets = json.loads(PRESETS.read_text(encoding='utf-8'))['presets']
+    overrides = []
+    for name in names.split(','):
+        if name not in presets:
+            raise SystemExit(f'Unknown preset {name}; known: {", ".join(sorted(presets))}')
+        overrides += presets[name]['set']
+    return overrides
 
 
 # ---------------------------------------------------------------- domains
@@ -2185,6 +2202,8 @@ def main():
     parser.add_argument('--label', required=True)
     parser.add_argument('--config', default=str(DEFAULT_CONFIG))
     parser.add_argument('--set', action='append', default=[], metavar='GROUP.KEY=VALUE')
+    parser.add_argument('--preset', default=None, metavar='NAME[,NAME]',
+                        help='named looks from configs/sandbox/presets.json, applied before --set')
     parser.add_argument('--domains', default=None, help="comma-separated, default the config's default_domains")
     parser.add_argument('--no-physics', action='store_true')
     parser.add_argument('--parent-run', default=None, metavar='LABEL',
@@ -2192,7 +2211,7 @@ def main():
                              '(default: run them here)')
     arguments = parser.parse_args()
 
-    config = load_config(arguments.config, arguments.set)
+    config = load_config(arguments.config, preset_overrides(arguments.preset) + arguments.set)
     directory = ROOT / 'out' / 'scratch' / 'sandbox' / arguments.label
     directory.mkdir(parents=True, exist_ok=True)
     bundle = Bundle.open(ROOT / config['base_bundle'])
