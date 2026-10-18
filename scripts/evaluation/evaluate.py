@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools.bundle import SCHEMA as BUNDLE_SCHEMA, Bundle, read_manifest
+from uwtools.bundle import SCHEMAS as BUNDLE_SCHEMAS, Bundle, read_manifest
 from uwtools.hashing import sha256_bytes
 from uwtools import runs
 from checks import hierarchy_levels, run_checks
@@ -100,7 +100,7 @@ def checkpoint_bundles(directory):
     if directory is None or not Path(directory).is_dir():
         return []
     return [Bundle.open(path) for path in sorted(Path(directory).iterdir())
-            if (path / 'manifest.json').is_file() and read_manifest(path).get('schema') == BUNDLE_SCHEMA]
+            if (path / 'manifest.json').is_file() and read_manifest(path).get('schema') in BUNDLE_SCHEMAS]
 
 
 def evaluate(profile, profile_path, bundle, output, baseline=None, repeat=None, input_bundle=None, maps=True,

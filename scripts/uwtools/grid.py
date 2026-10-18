@@ -6,7 +6,21 @@ sin(north) - sin(south) and the cosine of the centre latitude. The band edges ar
 in radians or in degrees by different callers; the two differ in the last bits.
 remap_area_mean is the validation summary's conservative reduction (also used for region masks).
 """
+import math
+
 import numpy as np
+
+EARTH_RADIUS_KM = 6371.0
+
+
+def cell_km(scenario, columns, radius_km=None):
+    """East-west size in km of one of `columns` cells at the equator. The torus engine's own metric,
+    run_scenario.world_width_km / columns, while its scenario records it (so the lat-lon numbers are
+    unchanged); without it the sphere's 2 pi R / columns, R the grid's radius (6371 km when absent)."""
+    width_km = (scenario or {}).get('world_width_km')
+    if width_km is not None:
+        return float(width_km) / columns
+    return 2.0 * math.pi * float(radius_km or EARTH_RADIUS_KM) / columns
 
 
 def latitudes(rows):

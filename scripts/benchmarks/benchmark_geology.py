@@ -11,7 +11,8 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import grid
 from uwtools.hashing import sha256
-from uwtools.tectonics import bundle_files, is_run_bundle, snapshot_manifest
+from uwtools.bundle import Bundle
+from uwtools.tectonics import BUNDLE_FIELDS, bundle_files, is_run_bundle, snapshot_manifest
 from tectonics_report_data import read_field
 
 REPO = Path(__file__).resolve().parents[2]
@@ -83,11 +84,19 @@ def read_bundle(path):
     # Contract 6 carried an always-zero cycle counter that 7 removed; the fields are the same.
     if manifest.get("schema") != "tectonic-snapshot-bundle/v1" or manifest.get("contract_schema_version") not in (6, 7):
         raise ValueError(f"Unsupported native bundle contract: {path}")
-    width, height = int(manifest["width"]), int(manifest["height"])
-    if width != height * 2 or height < 1:
-        raise ValueError("Reference comparison requires a 2:1 planetary interpretation")
     files = bundle_files(path)
     native = is_run_bundle(path)
+    if native:
+        # The bundle's lat-lon grid (v1 and v2; a cube bundle's lat-lon export), not the engine's width.
+        bundle = Bundle.open(path)
+        width, height = bundle.columns, bundle.rows
+        if bundle.grid_kind != "latlon":
+            files = {name: bundle.exports[BUNDLE_FIELDS[name]]["file"] for name in files
+                     if BUNDLE_FIELDS.get(name) in bundle.exports}
+    else:
+        width, height = int(manifest["width"]), int(manifest["height"])
+    if width != height * 2 or height < 1:
+        raise ValueError("Reference comparison requires a 2:1 planetary interpretation")
     fields = {}
     hashes = {}
     for name in ("heightmap", "crust_age_myr", "crust_class", "geologic_regime", "convergence_score",

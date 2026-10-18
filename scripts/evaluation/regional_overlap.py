@@ -2,7 +2,7 @@
 
     uv run --offline scripts/evaluation/regional_overlap.py A B [--json]
 
-A regional bundle is a run bundle (uw-run-bundle/v1) written by `world_pipeline region`
+A regional bundle is a run bundle (uw-run-bundle/v1 or v2, grid kind latlon) written by `world_pipeline region`
 whose manifest has a `window` block: the scale k, the world grid W x H and the absolute
 fine indices (fine_column0, fine_row0) of the bundle's first cell on the planet-wide
 kW x kH grid (docs/architecture/erosion-hydrology-plan.md, Phase E). The two bundles are
@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools.bundle import SCHEMA, read_manifest
+from uwtools.bundle import SCHEMAS, grid_kind, read_manifest
 
 
 class Refused(Exception):
@@ -32,8 +32,10 @@ class Refused(Exception):
 
 def window_of(path):
     manifest = read_manifest(path)
-    if manifest.get('schema') != SCHEMA:
+    if manifest.get('schema') not in SCHEMAS:
         raise Refused(f'{path}: unsupported schema {manifest.get("schema")!r}')
+    if grid_kind(manifest) != 'latlon':
+        raise Refused(f'{path}: grid kind {grid_kind(manifest)!r}; only lat-lon windows are aligned by pixels')
     window = manifest.get('window')
     if not isinstance(window, dict):
         raise Refused(f'{path}: no window block; not a regional bundle')

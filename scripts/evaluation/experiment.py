@@ -262,7 +262,10 @@ def main():
                 if not seeded:
                     manifest = json.loads((directory / 'bundle/manifest.json').read_text(encoding='utf-8'))
                     record['seed'] = manifest['seed']
-                    record['grid'] = [manifest['grid']['columns'], manifest['grid']['rows']]
+                    opened = Bundle.open(directory / 'bundle')
+                    record['grid'] = [opened.columns, opened.rows]  # the lat-lon (export) grid in every kind
+                    if opened.grid_kind != 'latlon':
+                        record['grid_kind'] = opened.grid_kind
                     record['window'] = manifest.get('window')
                 repeat = Bundle.open(directory / 'bundle-repeat') if args.repeat else None
                 explicit_bundle = Bundle.open(directory / 'bundle-explicit') if args.explicit_recipe else None

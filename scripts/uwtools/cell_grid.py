@@ -1,10 +1,70 @@
-"""Shared spherical remapping for processed global reference grids."""
+"""Shared spherical remapping for processed global reference grids, and measures on the native fields of
+a cube bundle through its cell table (docs/architecture/sphere-mesh.md sections 2, 3 and 7)."""
 
 from __future__ import annotations
 
 import numpy as np
 
 from . import grid
+
+# Columns of the cell table's neighbours array for the edge slots 1 N, 3 E, 5 S, 7 W (slot k in column k - 1).
+SLOT_NORTH, SLOT_EAST, SLOT_SOUTH, SLOT_WEST = 0, 2, 4, 6
+
+
+def face_edge_distance(face_cells: int) -> np.ndarray:
+    """(6, N, N): each cell's distance in cells to the nearest edge of its face (0 on the edge row)."""
+    index = np.arange(face_cells)
+    edge = np.minimum(index, face_cells - 1 - index)
+    one = np.minimum(edge[:, None], edge[None, :])
+    return np.broadcast_to(one, (6, face_cells, face_cells)).copy()
+
+
+def _arc_km(centre: np.ndarray, first: np.ndarray, second: np.ndarray, radius_km: float) -> np.ndarray:
+    a, b = centre[first], centre[second]
+    return radius_km * np.arctan2(np.linalg.norm(np.cross(a, b), axis=-1), np.einsum('ij,ij->i', a, b))
+
+
+def _tangent(centre: np.ndarray, at: np.ndarray, start: np.ndarray, end: np.ndarray) -> np.ndarray:
+    """Unit tangent at the centres `at` of the chord from `start` to `end`."""
+    c = centre[at]
+    t = centre[end] - centre[start]
+    t -= np.einsum('ij,ij->i', t, c)[:, None] * c
+    return t / np.linalg.norm(t, axis=1, keepdims=True)
+
+
+def face_gradients(cells: dict, values: np.ndarray, radius_km: float):
+    """(g_u, g_v, valid) of a native field in face coordinates, per km, in id order (flat, n). The derivatives
+    along the face's two grid lines through each cell are central differences over the edge-slot neighbours
+    of the cell table (E minus W over the two great-circle distances between centres, N minus S likewise;
+    slot directions are the cell's own face frame, also across face edges); the gradient they determine is
+    returned in the orthonormal frame of the cell's u line (W to E) and the perpendicular towards v (S to N),
+    so hypot(g_u, g_v) is the true |grad| where the grid lines meet at an angle (near face corners).
+    valid is False where an edge neighbour is missing (-1)."""
+    z = np.asarray(values, dtype=np.float64).reshape(-1)
+    neighbours = np.asarray(cells['neighbours'])
+    centre = np.asarray(cells['centre'], dtype=np.float64)
+    if neighbours.shape != (z.size, 8) or centre.shape != (z.size, 3):
+        raise ValueError(f'cell table of {neighbours.shape[0]} cells does not match a field of {z.size}')
+    north, east, south, west = (neighbours[:, slot] for slot in (SLOT_NORTH, SLOT_EAST, SLOT_SOUTH, SLOT_WEST))
+    valid = (north >= 0) & (east >= 0) & (south >= 0) & (west >= 0)
+    ids = np.arange(z.size)
+    g_u = np.full(z.size, np.nan)
+    g_v = np.full(z.size, np.nan)
+    c, n, e, s, w = ids[valid], north[valid], east[valid], south[valid], west[valid]
+    d_u = (z[e] - z[w]) / (_arc_km(centre, c, e, radius_km) + _arc_km(centre, c, w, radius_km))
+    d_v = (z[n] - z[s]) / (_arc_km(centre, c, n, radius_km) + _arc_km(centre, c, s, radius_km))
+    k = np.einsum('ij,ij->i', _tangent(centre, c, w, e), _tangent(centre, c, s, n))  # cosine between the lines
+    g_u[valid] = d_u
+    g_v[valid] = (d_v - k * d_u) / np.sqrt(1.0 - k * k)
+    return g_u, g_v, valid
+
+
+def aspect_harmonics(theta: np.ndarray) -> tuple:
+    """(A8, A4) of aspect angles: |mean e^(8 i theta)| and mean cos(4 theta) (None for no angles)."""
+    theta = np.asarray(theta)
+    if not theta.size:
+        return None, None
+    return float(np.abs(np.mean(np.exp(8j * theta)))), float(np.mean(np.cos(4.0 * theta)))
 
 
 def grid_dimensions(width: int, height: int | None = None) -> tuple[int, int]:

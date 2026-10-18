@@ -8,6 +8,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools.tectonics_earth_reference import hypsography_shape  # noqa: F401 (used by the reports and their tests)
+from uwtools import grid
 from uwtools.hashing import sha256
 from uwtools.tectonics import bundle_files, is_run_bundle, snapshot_manifest
 
@@ -96,7 +97,7 @@ def load_bundle(path, expected_hashes=None):
         raise ValueError("Incomplete physical crust fields")
     fields["elevation"] = elevation_m(fields["heightmap"], manifest["sea_level_m"])
     fields["local_relief"] = local_relief(fields["elevation"])
-    cell_km = manifest.get("run_scenario", {}).get("world_width_km", 40000) / shape[1]
+    cell_km = grid.cell_km(manifest.get("run_scenario"), shape[1])
     fields["coast_distance_km"] = coast_distance(fields["elevation"] >= 0, cell_km)
     identities = manifest.get("topology_diagnostics", {}).get("stable_ids")
     if identities is not None:
@@ -151,7 +152,7 @@ def coast_distance(land, cell_km):
 
 def coastal_terrain(manifest, fields):
     z = fields['elevation']
-    cell_km = manifest.get('run_scenario', {}).get('world_width_km', 40000) / z.shape[1]
+    cell_km = grid.cell_km(manifest.get("run_scenario"), z.shape[1])
     distance = fields.get('coast_distance_km')
     if distance is None:
         distance = coast_distance(z >= 0, cell_km)
@@ -388,7 +389,7 @@ def diagnostics(manifest, fields):
             for field in ("continental_crust_m", "oceanic_crust_m", "sediment_m"):
                 valid = valid and field in fields and bool((fields[field] >= 0).all())
             if valid:
-                cell_m = manifest["run_scenario"]["world_width_km"] * 1000 / manifest["width"]
+                cell_m = grid.cell_km(manifest["run_scenario"], manifest["width"]) * 1000
                 raster_mass = sum(float(fields[k].astype(float).sum()) * rho for k, rho in
                     (("continental_crust_m", 2800), ("oceanic_crust_m", 2900), ("sediment_m", 2700))) * cell_m**2
                 valid = abs(raster_mass - budget["mass_kg"]) < initial * 1e-7

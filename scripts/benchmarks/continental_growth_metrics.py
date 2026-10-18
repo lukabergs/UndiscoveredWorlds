@@ -51,6 +51,16 @@ def load(directory: Path, name: str):
     return np.load(path) if path.exists() else None
 
 
+def radius_km(directory: Path) -> float:
+    """The planet's radius: planetbody.radius, else the v2 grid block's radius_km, else 6371 km."""
+    path = directory / "fields" / "planetbody" / "radius.npy"
+    if path.exists():
+        return float(np.load(path)) / 1000.0
+    manifest = directory / "manifest.json"
+    grid_block = json.loads(manifest.read_text(encoding="utf-8")).get("grid", {}) if manifest.exists() else {}
+    return float(grid_block.get("radius_km", 6371.0))
+
+
 def measure(directory: Path, interior_cells: int) -> dict:
     continent = load(directory, "continental_crust").astype(np.float64)
     area = load(directory, "continental_area")
@@ -115,9 +125,13 @@ def measure(directory: Path, interior_cells: int) -> dict:
         row["mean_speed_cm_yr"] = data.get("motion_diagnostics", {}).get("mean_speed_cm_yr")
         row["plates"] = len(data.get("plates", []))
         # Cumulative area terms and what their rates need (removed again by series).
+        # The torus engine's surface while its scenario records world_width_km; else the sphere's 4 pi R^2.
         width_m = float(data.get("run_scenario", {}).get("world_width_km", 0)) * 1000
         cells_wide, cells_high = data.get("width", 0), data.get("height", 0)
-        row["_surface_m2"] = width_m * width_m * cells_high / cells_wide if width_m > 0 and cells_wide else None
+        if width_m > 0 and cells_wide:
+            row["_surface_m2"] = width_m * width_m * cells_high / cells_wide
+        else:
+            row["_surface_m2"] = 4.0 * np.pi * (1000.0 * radius_km(directory)) ** 2
         row["_engine_time_myr"] = data.get("time_myr")
         for name, (added, subtracted) in AREA_TERMS.items():
             if all(key in budget for key in added + subtracted):

@@ -1,16 +1,20 @@
 """Plate measures of a world bundle (terrain roadmap T8.0): plate count, the true spherical area of each plate,
 the share of the largest, the count above a share (5 %), and area-weighted RMS speeds.
 
-Areas: each cell of the cell-centred W x W/2 grid has its exact spherical area R^2 (2 pi / W)(sin north - sin south)
-(uwtools.grid.area_weights), R the bundle's planetbody.radius. Plates are the geosphere.plate_id grid.
+Bundles v1 and v2 (uwtools.bundle). Areas: on a lat-lon bundle each cell of the cell-centred W x W/2 grid has its
+exact spherical area R^2 (2 pi / W)(sin north - sin south) (uwtools.grid.area_weights), R the bundle's
+planetbody.radius; on a cube bundle the cell table's area_m2 and latitude_deg (true areas, written by C++).
+Plates are the native geosphere.plate_id field ((rows, columns) or (6, N, N)).
 
 Speeds: the bundle has no plate-velocity grid; the per-plate record is the tectonic snapshot's plates list
-(tables/geosphere/tectonic_snapshot.json: linear_velocity in world cells per update, x east, y south;
-angular_velocity). A cell is run_scenario.world_width_km / width km and an update delta_time_myr, so the
+(tables/geosphere/tectonic_snapshot.json: linear_velocity in engine cells per update, x east, y south;
+angular_velocity). An engine cell is uwtools.grid.cell_km: run_scenario.world_width_km / width km while the
+scenario records it (the torus engine), else 2 pi R / width; an update is delta_time_myr, so the
 engine's speed is |v| * that / dt in km/Myr (= mm/yr; motion_diagnostics.max_speed_cm_yr is the largest).
 Two RMS speeds, weighted by true cell area: 'engine' in the engine's flat metric (a column and a row the same
 length), 'sphere' the same cell displacement on the sphere the map is drawn on (east component times
-cos(latitude): a column is 2 pi R cos(lat) / W, a row pi R / H); rms_cm_yr_sphere is the baseline the sphere
+cos(latitude): a column is 2 pi R cos(lat) / W, a row pi R / H; W and H the plate grid's on lat-lon, the
+snapshot's engine width and height on a cube, lat each cell's); rms_cm_yr_sphere is the baseline the sphere
 engine's area-weighted RMS speed is compared with. per_plate_mean_cm_yr_engine is the snapshot's
 motion_diagnostics.mean_speed_cm_yr: the unweighted mean over plates. Rotation is not added: angular_velocity is
 reported, and a bundle with any non-zero value is flagged. geosphere.deformation_velocity_x/_y (the deforming
@@ -29,10 +33,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from uwtools import grid  # noqa: E402
-
-
-def field(directory, entries, field_id):
-    return np.load(directory / entries[field_id]['file'])
+from uwtools.bundle import Bundle  # noqa: E402
 
 
 def area_weighted_rms(speed, area):
@@ -40,12 +41,21 @@ def area_weighted_rms(speed, area):
 
 
 def measure(directory, threshold):
-    manifest = json.loads((directory / 'manifest.json').read_text())
-    entries = {f['id']: f for f in manifest['fields']}
-    plate = field(directory, entries, 'geosphere.plate_id')
-    rows, columns = plate.shape
-    radius_km = float(field(directory, entries, 'planetbody.radius')) / 1000.0
-    area = np.asarray(grid.area_weights(rows, columns)) * (2.0 * math.pi / columns) * radius_km ** 2
+    bundle = Bundle.open(directory)
+    entries = bundle.fields
+    plate = bundle.load_native('geosphere.plate_id')
+    radius_km = float(bundle.load_native('planetbody.radius')) / 1000.0
+    cube = bundle.grid_kind == 'cube'
+    if cube:
+        cells = bundle.cells()
+        area = np.asarray(cells['area_m2'], dtype=np.float64).reshape(plate.shape) / 1.0e6
+        lat = np.radians(np.asarray(cells['latitude_deg'], dtype=np.float64)).reshape(plate.shape)
+        grid_record = {'kind': 'cube', 'face_cells': bundle.face_cells, 'export': [bundle.columns, bundle.rows]}
+    else:
+        rows, columns = plate.shape
+        area = np.asarray(grid.area_weights(rows, columns)) * (2.0 * math.pi / columns) * radius_km ** 2
+        lat = np.radians(grid.latitudes(rows))[:, None]
+        grid_record = [columns, rows]
     total = float(area.sum())
     ids = np.unique(plate)
     plates = []
@@ -55,11 +65,10 @@ def measure(directory, threshold):
                        'share': round(float(area[mask].sum()) / total, 4),
                        'cell_share': round(float(mask.mean()), 4)})
     shares = sorted((p['share'] for p in plates), reverse=True)
-    record = {'bundle': directory.as_posix(), 'grid': [columns, rows], 'radius_km': radius_km,
+    record = {'bundle': directory.as_posix(), 'grid': grid_record, 'radius_km': radius_km,
               'surface_km2': round(total, 0), 'plate_count': len(plates), 'largest_share': shares[0],
               'threshold': threshold, 'plates_above_threshold': sum(s > threshold for s in shares),
               'shares_descending': shares}
-    lat = np.radians(grid.latitudes(rows))[:, None]
     record['fields'] = {
         'plate': sorted(k for k in entries if 'plate' in k),
         'velocity': sorted(k for k in entries if 'velocity' in k and k.startswith('geosphere.')),
@@ -68,8 +77,10 @@ def measure(directory, threshold):
     if snapshot_path.is_file():
         snapshot = json.loads(snapshot_path.read_text())
         scenario = snapshot['run_scenario']
-        km_per_cell = scenario['world_width_km'] / snapshot['width']
+        km_per_cell = grid.cell_km(scenario, snapshot['width'], radius_km)
         mm_yr = km_per_cell / snapshot['delta_time_myr']  # one cell per update, in km/Myr = mm/yr
+        if cube:
+            columns, rows = snapshot['width'], snapshot['height']  # the engine's cells
         velocity = {p['plate_id']: p for p in snapshot['plates']}
         missing = [int(i) for i in ids if int(i) not in velocity]
         vx = np.zeros(plate.shape)
@@ -101,8 +112,8 @@ def measure(directory, threshold):
             'rotation_flag': 'non-zero angular velocity: the RMS lacks the rotational part' if angular else None,
             'plates_without_velocity': missing}
         if 'geosphere.deformation_velocity_x' in entries:
-            dx = field(directory, entries, 'geosphere.deformation_velocity_x').astype(np.float64)
-            dy = field(directory, entries, 'geosphere.deformation_velocity_y').astype(np.float64)
+            dx = bundle.load_native('geosphere.deformation_velocity_x').astype(np.float64)
+            dy = bundle.load_native('geosphere.deformation_velocity_y').astype(np.float64)
             record['speed']['deformation_rms_cm_yr_engine'] = round(
                 area_weighted_rms(np.hypot(dx, dy) * mm_yr / 10.0, area), 3)
     record['plates'] = plates

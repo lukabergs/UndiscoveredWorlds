@@ -6,10 +6,10 @@ catalogue ids). A run's snapshots are its checkpoint bundles and its final bundl
 import json
 from pathlib import Path
 
-from .bundle import SCHEMA as RUN_BUNDLE_SCHEMA, read_manifest
+from .bundle import SCHEMAS as RUN_BUNDLE_SCHEMAS, read_manifest
 from .hashing import sha256
 
-# Catalogue fields of a run bundle (uw-run-bundle/v1) under the names the former
+# Catalogue fields of a run bundle (uw-run-bundle/v1 or v2) under the names the former
 # snapshot files had; the reports keep using those names.
 BUNDLE_FIELDS = {
     "heightmap": "geosphere.tectonic_height", "plate_id": "geosphere.plate_id",
@@ -34,13 +34,13 @@ SNAPSHOT_TABLE = "geosphere.tectonic_snapshot"
 
 
 def is_run_bundle(bundle):
-    return read_manifest(bundle).get("schema") == RUN_BUNDLE_SCHEMA
+    return read_manifest(bundle).get("schema") in RUN_BUNDLE_SCHEMAS
 
 
 def bundle_files(bundle):
     """Field name -> file of a snapshot, for a run bundle or a former snapshot bundle."""
     manifest = read_manifest(bundle)
-    if manifest.get("schema") != RUN_BUNDLE_SCHEMA:
+    if manifest.get("schema") not in RUN_BUNDLE_SCHEMAS:
         return dict(manifest["files"])
     entries = {entry["id"]: entry["file"] for entry in manifest["fields"]}
     return {name: entries[identifier] for name, identifier in BUNDLE_FIELDS.items() if identifier in entries}
@@ -50,7 +50,7 @@ def snapshot_manifest(bundle):
     """The engine's snapshot record: label, time, scenario, diagnostics, plates."""
     bundle = Path(bundle)
     manifest = read_manifest(bundle)
-    if manifest.get("schema") != RUN_BUNDLE_SCHEMA:
+    if manifest.get("schema") not in RUN_BUNDLE_SCHEMAS:
         return manifest
     table = next(entry for entry in manifest["tables"] if entry["id"] == SNAPSHOT_TABLE)
     return json.loads((bundle / table["file"]).read_text())
