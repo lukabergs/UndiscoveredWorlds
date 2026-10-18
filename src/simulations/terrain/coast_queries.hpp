@@ -31,8 +31,8 @@ int landdistance(const planet& world, mesh::CellId c);
 std::int32_t nearestsea(const planet& world, mesh::CellId c, bool land, double limit_km);
 // A sea cell next to land or a land cell next to sea (the eight neighbours).
 bool vaguelycoastal(const planet& world, mesh::CellId c);
-// Land, bordered by sea to the east, south and southeast, with land (or the lat-lon column edge)
-// to the northwest; the other three are the same turned. -1 (no cell) is false.
+// Land, bordered by sea to the east, south and southeast, with land to the northwest; the other
+// three are the same turned. -1 (no cell) is false.
 bool northwestlandonly(const planet& world, std::int32_t c);
 bool northeastlandonly(const planet& world, std::int32_t c);
 bool southwestlandonly(const planet& world, std::int32_t c);

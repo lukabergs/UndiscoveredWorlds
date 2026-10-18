@@ -1,7 +1,7 @@
 // Sea connectivity, coastal elevation, and island cleanup.
 // Algorithms by Jonathan Hill, extracted from globalterrain.cpp; on the cell grid since T8 W2-T2
-// (docs/architecture/sphere-mesh.md sections 3 and 4): loops over cell ids in the legacy order,
-// neighbours from the table, boxes as walks (terrain_coasts.hpp).
+// (docs/architecture/sphere-mesh.md sections 3, 4 and 11): loops over cell ids in the legacy
+// order, neighbours from the table; neighbour tests in cells, distances in legacy pixels of km.
 
 #include "simulations/terrain/terrain_coasts.hpp"
 
@@ -74,19 +74,6 @@ std::int32_t terrain::coastgrid::offset(const mesh::CellGrid& grid, CellId c, in
     return at;
 }
 
-std::int32_t terrain::coastgrid::rawneighbour(const mesh::CellGrid& grid, CellId c, int slot)
-{
-    if (grid.kind() == mesh::GridKind::latlon)
-    {
-        const int x = grid.column(c);
-        if (x == 0 && (slot == 6 || slot == 7 || slot == 8))
-            return -1;
-        if (x == grid.columns() - 1 && (slot == 2 || slot == 3 || slot == 4))
-            return -1;
-    }
-    return grid.neighbour(c, slot);
-}
-
 namespace
 {
 // planet::seawrap on a cell: base elevation in whole metres at or below sea level, no lake.
@@ -115,17 +102,11 @@ bool borders(const planet& world, CellId c, bool seaneighbour)
 
 bool terrain::coastgrid::outline(const planet& world, CellId c)
 {
-    const mesh::CellGrid& grid = world.grid();
-    if (grid.kind() == mesh::GridKind::latlon)
-        return world.outline(grid.column(c), grid.row(c));
     return world.sea(c) == 0 && borders(world, c, true);
 }
 
 bool terrain::coastgrid::coast(const planet& world, CellId c)
 {
-    const mesh::CellGrid& grid = world.grid();
-    if (grid.kind() == mesh::GridKind::latlon)
-        return world.coast(grid.column(c), grid.row(c));
     return world.sea(c) == 1 && borders(world, c, false);
 }
 
@@ -369,17 +350,6 @@ vector<int> terrain::coastgrid::spherefractal(const planet& world, int salt, con
 
 namespace
 {
-// The legacy loops' range in rows and columns: on lat-lon the cell lies at least margin cells
-// from the first and last column and row; on the cube every cell does.
-bool interior(const mesh::CellGrid& grid, CellId c, int margin)
-{
-    if (grid.kind() != mesh::GridKind::latlon)
-        return true;
-    const int x = grid.column(c);
-    const int y = grid.row(c);
-    return x >= margin && x < grid.columns() - margin && y >= margin && y < grid.rows() - margin;
-}
-
 // Rows 1 to height - 1 of the legacy loops: the cell has its north and south neighbours.
 bool hasnorthandsouth(const mesh::CellGrid& grid, CellId c)
 {
@@ -398,14 +368,6 @@ bool surfacebelowseaat(const planet& world, std::int32_t n)
     return n < 0 || world.surfacebelowsea(static_cast<CellId>(n));
 }
 
-// One step of a legacy walk that did not wrap x: on lat-lon rawneighbour, on the cube a straight step.
-std::int32_t rawstep(const mesh::CellGrid& grid, CellId c, int slot, int& turn)
-{
-    if (grid.kind() == mesh::GridKind::latlon)
-        return rawneighbour(grid, c, slot);
-    return step(grid, c, slot, turn);
-}
-
 // The legacy cell-size in km: the planet's radius x pi / rows (rows: the lat-lon export's on the cube).
 float cellsizekm(const planet& world)
 {
@@ -414,9 +376,7 @@ float cellsizekm(const planet& world)
     return world.radius() / 1000.0f * 3.14159265358979f / static_cast<float>(rows);
 }
 
-// The sizes of the 4-connected components of sea (sea: base at or below sea level) on cells
-// with a south neighbour (the legacy flood's "y < height"), started from interior cells
-// (legacy: x and y from 1 to the last but one) in descending legacy order; 0 elsewhere.
+// The sizes (cell counts) of the 4-connected components of sea (base at or below sea level); 0 on land.
 vector<int> seaareas(planet& world)
 {
     const mesh::CellGrid& grid = world.grid();
@@ -428,7 +388,7 @@ vector<int> seaareas(planet& world)
     for (auto it = order.rbegin(); it != order.rend(); ++it)
     {
         const CellId start = *it;
-        if (!interior(grid, start, 1) || !world.basebelowsea(start) || checked[start] || area[start] != 0)
+        if (!world.basebelowsea(start) || checked[start] || area[start] != 0)
             continue;
 
         component.clear();
@@ -445,7 +405,7 @@ vector<int> seaareas(planet& world)
             for (int slot = 1; slot <= mesh::slotcount; slot += 2)
             {
                 const std::int32_t n = grid.neighbour(c, slot);
-                if (n < 0 || grid.neighbour(static_cast<CellId>(n), 5) < 0)
+                if (n < 0)
                     continue;
                 if (world.basebelowsea(static_cast<CellId>(n)) && !checked[n])
                 {
@@ -467,17 +427,6 @@ void removesmallseas(planet& world, int minseasize, int level)
 {
     const mesh::CellGrid& grid = world.grid();
 
-    // The legacy last column (from when the grid had a column more) is the mean of its neighbours.
-    if (grid.kind() == mesh::GridKind::latlon)
-    {
-        for (int j = 0; j < grid.rows(); j++)
-        {
-            const CellId c = grid.cellof(grid.columns() - 1, j);
-            const float amount = (world.nomfloat(static_cast<CellId>(grid.neighbour(c, 7))) + world.nomfloat(static_cast<CellId>(grid.neighbour(c, 3)))) / 2.0f;
-            world.setnomfloat(c, amount);
-        }
-    }
-
     const vector<int> area = seaareas(world);
 
     // Now turn all the points whose area is too small into land.
@@ -498,7 +447,7 @@ namespace
 // grid). Their count is the legacy do-while loops' advance (they stepped once more after the
 // failing cell).
 template <typename Keep, typename Stop>
-vector<std::int32_t> straightrun(const mesh::CellGrid& grid, CellId c, int slot, bool raw, Keep&& keep, Stop&& stopafter)
+vector<std::int32_t> straightrun(const mesh::CellGrid& grid, CellId c, int slot, Keep&& keep, Stop&& stopafter)
 {
     vector<std::int32_t> cells;
     int turn = 0;
@@ -509,8 +458,9 @@ vector<std::int32_t> straightrun(const mesh::CellGrid& grid, CellId c, int slot,
         const bool ok = at >= 0 && keep(static_cast<CellId>(at), turn);
         if (!ok)
             break;
-        at = raw ? rawstep(grid, static_cast<CellId>(at), slot, turn) : step(grid, static_cast<CellId>(at), slot, turn);
-        if (stopafter(at, turn))
+        at = step(grid, static_cast<CellId>(at), slot, turn);
+        // A run that comes back round to its start (a whole parallel of coast) ends there.
+        if (stopafter(at, turn) || at == static_cast<std::int32_t>(c) || cells.size() >= grid.cellcount())
             break;
     }
     return cells;
@@ -527,8 +477,6 @@ void removestraights(planet& world)
     int maxsize = 4; // Range of sizes for the chunks to be cut out of the coasts.
 
     auto never = [](std::int32_t, int) { return false; };
-    // The legacy "y > height - 1": the next cell is the last row (no south neighbour) or beyond.
-    auto lastrow = [&](std::int32_t at, int turn) { return at < 0 || grid.neighbour(static_cast<CellId>(at), turned(5, turn)) < 0; };
 
     auto disruptrun = [&](const vector<std::int32_t>& run, CellId c)
     {
@@ -549,7 +497,7 @@ void removestraights(planet& world)
 
         if (grid.neighbour(c, 1) >= 0 && !world.surfacebelowsea(static_cast<CellId>(grid.neighbour(c, 1)))) // Sea to the south, land to the north
         {
-            const vector<std::int32_t> run = straightrun(grid, c, 3, true, [&](CellId at, int turn)
+            const vector<std::int32_t> run = straightrun(grid, c, 3, [&](CellId at, int turn)
             {
                 return world.surfacebelowsea(at) && !surfacebelowseaat(world, grid.neighbour(at, turned(1, turn)));
             }, never);
@@ -558,28 +506,28 @@ void removestraights(planet& world)
 
         if (grid.neighbour(c, 5) >= 0 && !world.surfacebelowsea(static_cast<CellId>(grid.neighbour(c, 5)))) // Sea to the north, land to the south
         {
-            const vector<std::int32_t> run = straightrun(grid, c, 3, true, [&](CellId at, int turn)
+            const vector<std::int32_t> run = straightrun(grid, c, 3, [&](CellId at, int turn)
             {
                 return world.surfacebelowsea(at) && !surfacebelowseaat(world, grid.neighbour(at, turned(5, turn)));
             }, never);
             disruptrun(run, c);
         }
 
-        if (!surfacebelowseaat(world, rawneighbour(grid, c, 3))) // Sea to the west, land to the east
+        if (!surfacebelowseaat(world, grid.neighbour(c, 3))) // Sea to the west, land to the east
         {
-            const vector<std::int32_t> run = straightrun(grid, c, 5, false, [&](CellId at, int turn)
+            const vector<std::int32_t> run = straightrun(grid, c, 5, [&](CellId at, int turn)
             {
                 return world.surfacebelowsea(at) && !surfacebelowseaat(world, grid.neighbour(at, turned(3, turn)));
-            }, lastrow);
+            }, never);
             disruptrun(run, c);
         }
 
-        if (!surfacebelowseaat(world, rawneighbour(grid, c, 7))) // Sea to the east, land to the west
+        if (!surfacebelowseaat(world, grid.neighbour(c, 7))) // Sea to the east, land to the west
         {
-            const vector<std::int32_t> run = straightrun(grid, c, 5, false, [&](CellId at, int turn)
+            const vector<std::int32_t> run = straightrun(grid, c, 5, [&](CellId at, int turn)
             {
-                return world.surfacebelowsea(at) && !surfacebelowseaat(world, rawneighbour(grid, at, turned(7, turn)));
-            }, lastrow);
+                return world.surfacebelowsea(at) && !surfacebelowseaat(world, grid.neighbour(at, turned(7, turn)));
+            }, never);
             disruptrun(run, c);
         }
     }
@@ -705,33 +653,35 @@ void widenchannels(planet& world)
     };
     const vector<CellId> order = columnorder(grid);
 
+    auto land = [&](std::int32_t n) { return n >= 0 && !world.sea(static_cast<CellId>(n)); }; // a cell, and not sea
+
     for (const CellId c : order) // First remove any one-pixel channels.
     {
-        if (!interior(grid, c, 1) || !world.sea(c))
+        if (!world.sea(c))
             continue;
 
-        if (sea(grid.neighbour(c, 1)) == 0 && sea(grid.neighbour(c, 5)) == 0)
+        if (land(grid.neighbour(c, 1)) && land(grid.neighbour(c, 5)))
             lower(grid.neighbour(c, 1));
 
-        if (sea(grid.neighbour(c, 7)) == 0 && sea(grid.neighbour(c, 3)) == 0)
+        if (land(grid.neighbour(c, 7)) && land(grid.neighbour(c, 3)))
             lower(grid.neighbour(c, 7));
 
-        if (sea(grid.neighbour(c, 8)) == 0 && sea(grid.neighbour(c, 4)) == 0)
+        if (land(grid.neighbour(c, 8)) && land(grid.neighbour(c, 4)))
             lower(grid.neighbour(c, 8));
 
-        if (sea(grid.neighbour(c, 6)) == 0 && sea(grid.neighbour(c, 2)) == 0)
+        if (land(grid.neighbour(c, 6)) && land(grid.neighbour(c, 2)))
             lower(grid.neighbour(c, 6));
     }
 
     for (const CellId c : order) // Now remove any two-pixel channels.
     {
-        if (!interior(grid, c, 2) || !world.sea(c))
+        if (!world.sea(c))
             continue;
 
-        if (sea(grid.neighbour(c, 1)) == 0 && sea(grid.neighbour(c, 5)) == 1 && sea(offset(grid, c, 0, 2)) == 0)
+        if (land(grid.neighbour(c, 1)) && sea(grid.neighbour(c, 5)) == 1 && land(offset(grid, c, 0, 2)))
             lower(static_cast<std::int32_t>(c));
 
-        if (sea(grid.neighbour(c, 7)) == 0 && sea(grid.neighbour(c, 3)) == 1 && sea(offset(grid, c, 2, 0)) == 0)
+        if (land(grid.neighbour(c, 7)) && sea(grid.neighbour(c, 3)) == 1 && land(offset(grid, c, 2, 0)))
             lower(grid.neighbour(c, 3));
     }
 }
@@ -747,12 +697,14 @@ void loweroceans(planet& world)
         {
             bool nearland = 0;
 
-            box(grid, c, 2, [&](CellId n, int, int)
+            for (const CellId n : cellswithinkm(world, grid.centre(c), 2.5 * legacypixelkm(world)))
             {
                 if (world.sea(n) == 0)
+                {
                     nearland = 1;
-                return nearland == 0;
-            });
+                    break;
+                }
+            }
 
             if (nearland == 0)
                 world.setnomfloat(c, static_cast<float>(sealevel - 170 + randomsign(random(0, 10))));

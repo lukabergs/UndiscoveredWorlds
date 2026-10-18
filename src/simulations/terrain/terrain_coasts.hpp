@@ -48,11 +48,6 @@ inline std::int32_t step(const mesh::CellGrid& grid, CellId c, int slot, int& tu
 // pole). clamped: a walk north or south stops at the last cell instead (the legacy clip of y).
 std::int32_t offset(const mesh::CellGrid& grid, CellId c, int dx, int dy, bool clamped = false);
 
-// The neighbour of c in slot, except that on the lat-lon grid a step across the column edge
-// (west of column 0, east of the last column) is -1: the legacy loops that read x - 1 or x + 1
-// without wrapping it (the planet's (x, y) getters return their out-of-grid value there).
-std::int32_t rawneighbour(const mesh::CellGrid& grid, CellId c, int slot);
-
 // The square box of half-width r around c in the legacy order (dx from -r to r outer, dy from
 // -r to r inner): f(cell, dx, dy) for every offset that stays on the grid. A callback that
 // returns bool stops the walk when it returns false.
@@ -61,7 +56,7 @@ void box(const mesh::CellGrid& grid, CellId c, int r, F&& f);
 
 // planet::outline and planet::coast on any grid: a land (sea) cell with a sea (land) cell among
 // its four cardinal neighbours, false where one is missing; sea as planet::seawrap (base
-// elevation in whole metres at or below sea level, no lake). On lat-lon the legacy (x, y) forms.
+// elevation in whole metres at or below sea level, no lake).
 bool outline(const planet& world, CellId c);
 bool coast(const planet& world, CellId c);
 

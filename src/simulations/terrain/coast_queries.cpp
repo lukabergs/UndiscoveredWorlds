@@ -188,8 +188,7 @@ bool vaguelycoastal(planet& world, int x, int y)
 }
 
 // These check whether a tile is land bordered by sea on three sides of one corner, with land
-// at the opposite corner. On lat-lon the legacy forms read the opposite corner of the
-// northwest and southwest cases without wrapping x (land beyond the column edge).
+// at the opposite corner.
 
 bool terrain::coastgrid::northwestlandonly(const planet& world, std::int32_t c)
 {
@@ -207,7 +206,7 @@ bool terrain::coastgrid::northwestlandonly(const planet& world, std::int32_t c)
     if (!seaat(world, grid.neighbour(cell, 3)) || !seaat(world, grid.neighbour(cell, 5)) || !seaat(world, grid.neighbour(cell, 4)))
         return 0;
 
-    if (seaat(world, rawneighbour(grid, cell, 8)))
+    if (seaat(world, grid.neighbour(cell, 8)))
         return 0;
 
     return 1;
@@ -251,7 +250,7 @@ bool terrain::coastgrid::southwestlandonly(const planet& world, std::int32_t c)
     if (!seaat(world, grid.neighbour(cell, 3)) || !seaat(world, grid.neighbour(cell, 1)) || !seaat(world, grid.neighbour(cell, 2)))
         return 0;
 
-    if (seaat(world, rawneighbour(grid, cell, 4)))
+    if (seaat(world, grid.neighbour(cell, 4)))
         return 0;
 
     return 1;
@@ -301,101 +300,6 @@ bool southeastlandonly(planet& world, int x, int y)
 
 namespace
 {
-// The legacy lattice Voronoi (lat-lon): points every pointdist pixels, moved by up to three
-// quarters of that, and each cell's nearest point within growing square searches.
-void latlonshelvesvoronoi(planet& world, vector<int>& voronoi, int pointdist)
-{
-    int width = world.width();
-    int height = world.height();
-    int maxelev = world.maxelevation();
-
-    int grain = 16; // Level of detail on this fractal map.
-    float valuemod = 0.4f;
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
-
-    vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0); // Its warp is not applied; the call keeps the draws.
-
-    vector<vector<int>> pointsmap(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    int pointnumber = 1;
-    int movedist = (pointdist / 4) * 3;
-
-    for (int i = 0; i <= width; i = i + pointdist)
-    {
-        for (int j = 0; j <= height; j = j + pointdist)
-        {
-            int ii = i + randomsign(random(1, movedist));
-            int jj = j + randomsign(random(1, movedist));
-
-            if (ii<0 || ii>width)
-                ii = wrap(ii, width);
-
-            if (jj < 0)
-                jj = 0;
-
-            if (jj > height)
-                jj = height;
-
-            pointsmap[ii][jj] = pointnumber;
-            pointnumber++;
-        }
-    }
-
-    const mesh::CellGrid& grid = world.grid();
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            int closest = 0;
-            int dist = 10000000;
-
-            int checkx = i;
-            int checky = j;
-
-            int distcheck = 10;
-
-            do
-            {
-                for (int x = checkx - distcheck; x <= checkx + distcheck; x++)
-                {
-                    int xx = x;
-
-                    if (xx<0 || xx>width)
-                        xx = wrap(xx, width);
-
-                    for (int y = checky - distcheck; y <= checky + distcheck; y++)
-                    {
-                        if (y >= 0 && y <= height)
-                        {
-                            if (pointsmap[xx][y] != 0)
-                            {
-                                int xdist = checkx - xx;
-                                int ydist = checky - y;
-                                int pointdistance = xdist * xdist + ydist * ydist;
-
-                                if (pointdistance < dist)
-                                {
-                                    closest = pointsmap[xx][y];
-                                    dist = pointdistance;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                distcheck = distcheck + 10;
-
-            } while (closest == 0);
-
-            voronoi[grid.cellof(i, j)] = static_cast<short>(closest); // the legacy short panels
-        }
-    }
-}
-
 // The Voronoi panels on the sphere: seeds drawn by area, one per (pointdist legacy pixels)^2,
 // and each cell the seed nearest its centre (a Dijkstra-ordered propagation over the neighbour
 // table with the great-circle distance to the candidate seed; ties to the earlier seed).
@@ -462,8 +366,5 @@ void sphereshelvesvoronoi(planet& world, vector<int>& voronoi, int pointdist)
 void makeshelvesvoronoi(planet& world, vector<int>& voronoi, int pointdist)
 {
     voronoi.assign(world.cellcount(), 0);
-    if (world.grid().kind() == mesh::GridKind::latlon)
-        latlonshelvesvoronoi(world, voronoi, pointdist);
-    else
-        sphereshelvesvoronoi(world, voronoi, pointdist);
+    sphereshelvesvoronoi(world, voronoi, pointdist);
 }
