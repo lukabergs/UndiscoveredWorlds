@@ -3,6 +3,7 @@
 #include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 #include "core/mesh/mesh_remap.hpp"
+#include "core/parallel_rows.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
 
 #include <algorithm>
@@ -75,9 +76,19 @@ TEST(Mesh, NeighboursAreSymmetricAndCornersHaveSeven)
     {
         const auto grid = mesh::makecubegrid(n, radius);
         int seven = 0, eight = 0, other = 0;
+        // Every distance against the cell's smallest cardinal spacing.
+        double worstcardinal = 0.0, worstdiagonal = 0.0;
         for (mesh::CellId c = 0; c < grid->cellcount(); c++)
         {
             int count = 0;
+            double cardinal = grid->distance_m(c, 1);
+            for (int k = 3; k <= mesh::slotcount; k += 2)
+                cardinal = std::min(cardinal, grid->distance_m(c, k));
+            for (int k = 1; k <= mesh::slotcount; k++)
+            {
+                double& worst = k % 2 == 1 ? worstcardinal : worstdiagonal;
+                worst = std::max(worst, grid->distance_m(c, k) / cardinal);
+            }
             for (int k = 1; k <= mesh::slotcount; k++)
             {
                 const std::int32_t m = grid->neighbour(c, k);
@@ -103,6 +114,12 @@ TEST(Mesh, NeighboursAreSymmetricAndCornersHaveSeven)
             if (n == 1)
                 EXPECT_EQ(count, 4);
         }
+        std::cout << "[Mesh] cube N " << n << " largest distance / smallest cardinal: cardinal " << worstcardinal
+                  << ", diagonal " << worstdiagonal << "\n";
+        EXPECT_LE(worstcardinal, 1.6) << "N " << n;
+        // Near a cube corner the cells are rhombi with a 120-degree angle at the corner: the long diagonal is
+        // about sqrt(3) times the shorter side, and more where the sides differ.
+        EXPECT_LE(worstdiagonal, 2.0) << "N " << n;
         if (n >= 2)
         {
             EXPECT_EQ(seven, 24) << "N " << n;
@@ -123,12 +140,35 @@ TEST(Mesh, NeighboursAreSymmetricAndCornersHaveSeven)
 
 TEST(Mesh, EdgeAndDiagonalNeighboursAcrossFaces)
 {
-    // Face 0's top row meets face 4's bottom row with the same u; face 0's east column meets face 1's west column.
+    // The uw-cube-1 table of sphere-mesh.md section 2: centre c, right u, up v per face.
+    const mesh::Vec3 table[mesh::cubefacecount][3] = {
+        { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } },
+        { { 0, 1, 0 }, { -1, 0, 0 }, { 0, 0, 1 } },
+        { { -1, 0, 0 }, { 0, -1, 0 }, { 0, 0, 1 } },
+        { { 0, -1, 0 }, { 1, 0, 0 }, { 0, 0, 1 } },
+        { { 0, 0, 1 }, { 0, 1, 0 }, { -1, 0, 0 } },
+        { { 0, 0, -1 }, { 0, 1, 0 }, { 1, 0, 0 } },
+    };
+    for (int f = 0; f < mesh::cubefacecount; f++)
+    {
+        const mesh::CubeFace& face = mesh::cubeface(f);
+        const mesh::Vec3 actual[3] = { face.centre, face.right, face.up };
+        for (int axis = 0; axis < 3; axis++)
+        {
+            EXPECT_EQ(actual[axis].x, table[f][axis].x) << "face " << f << " axis " << axis;
+            EXPECT_EQ(actual[axis].y, table[f][axis].y) << "face " << f << " axis " << axis;
+            EXPECT_EQ(actual[axis].z, table[f][axis].z) << "face " << f << " axis " << axis;
+        }
+    }
+    // Face 0's top row meets face 4's bottom row and face 0's bottom row face 5's top row, with the same u (same i);
+    // face 0's east column meets face 1's west column.
     const int n = 8;
     const auto grid = mesh::makecubegrid(n, radius);
     for (int i = 0; i < n; i++)
     {
         EXPECT_EQ(grid->neighbour(mesh::cubeid(n, 0, i, 0), 1), static_cast<std::int32_t>(mesh::cubeid(n, 4, i, n - 1)));
+        EXPECT_EQ(grid->neighbour(mesh::cubeid(n, 0, i, n - 1), 5), static_cast<std::int32_t>(mesh::cubeid(n, 5, i, 0)));
+        EXPECT_EQ(grid->neighbour(mesh::cubeid(n, 5, i, 0), 1), static_cast<std::int32_t>(mesh::cubeid(n, 0, i, n - 1)));
         EXPECT_EQ(grid->neighbour(mesh::cubeid(n, 0, n - 1, i), 3), static_cast<std::int32_t>(mesh::cubeid(n, 1, 0, i)));
     }
     for (int j = 1; j < n; j++)
@@ -279,6 +319,59 @@ TEST(Mesh, RemapKeepsConstantsTotalsAndSmoothFields)
         EXPECT_LT(meanerror, 1.0e-2) << test.name;
         EXPECT_LT(worst, 5.0e-2) << test.name;
     }
+}
+
+namespace
+{
+std::uint64_t weightshash(const mesh::RemapWeights& weights)
+{
+    std::uint64_t hash = 1469598103934665603ull;  // FNV-1a over the bytes of the three arrays
+    const auto bytes = [&hash](const void* data, std::size_t size) {
+        const unsigned char* p = static_cast<const unsigned char*>(data);
+        for (std::size_t n = 0; n < size; n++)
+            hash = (hash ^ p[n]) * 1099511628211ull;
+    };
+    bytes(weights.rowstart.data(), weights.rowstart.size() * sizeof(std::size_t));
+    bytes(weights.source.data(), weights.source.size() * sizeof(mesh::CellId));
+    bytes(weights.area_m2.data(), weights.area_m2.size() * sizeof(double));
+    return hash;
+}
+}
+
+TEST(Mesh, RemapWeightsDoNotDependOnTheThreadCount)
+{
+    // parallelforrows runs a call on the calling thread alone while
+    // rowworkers::executing is set (its nested-call path): the one-thread build.
+    const auto cube = mesh::makecubegrid(64, radius);
+    const auto latlon = mesh::makelatlongrid(256, radius);
+    for (const auto& pair : { std::make_pair(cube.get(), latlon.get()), std::make_pair(latlon.get(), cube.get()) })
+    {
+        rowworkers::executing = true;
+        const mesh::RemapWeights single = mesh::makeremap(*pair.first, *pair.second);
+        rowworkers::executing = false;
+        const mesh::RemapWeights parallel = mesh::makeremap(*pair.first, *pair.second);
+        std::cout << "[Mesh] weights hash, 1 thread " << std::hex << weightshash(single) << std::dec << ", "
+                  << rowworkers::concurrency() << " threads " << std::hex << weightshash(parallel) << std::dec << "\n";
+        EXPECT_EQ(weightshash(single), weightshash(parallel));
+        EXPECT_EQ(single.rowstart, parallel.rowstart);
+        EXPECT_EQ(single.source, parallel.source);
+        EXPECT_EQ(single.area_m2, parallel.area_m2);
+    }
+}
+
+TEST(Mesh, RemapCubeToFineLatLonTiming)
+{
+    const auto cube = mesh::makecubegrid(64, radius);
+    const auto latlon = mesh::makelatlongrid(2048, radius);
+    const auto start = std::chrono::steady_clock::now();
+    const mesh::RemapWeights weights = mesh::makeremap(*cube, *latlon);
+    const double elapsed = seconds(start);
+    std::cout << "[Mesh] cube64->latlon2048 weights in " << elapsed << " s, " << weights.source.size() << " entries, "
+              << weights.emptyrows << " empty rows\n";
+    ::testing::Test::RecordProperty("cube64->latlon2048_weights_s", std::to_string(elapsed));
+    const auto mean = mesh::remapmean(weights, *cube, *latlon, std::vector<double>(cube->cellcount(), 3.7));
+    for (double value : mean)
+        ASSERT_EQ(value, 3.7);
 }
 
 TEST(Mesh, MajorityAndNearestCodes)

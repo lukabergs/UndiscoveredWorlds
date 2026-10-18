@@ -165,15 +165,21 @@ struct Subdivider
 
     CellId at(double x, double y) const { return destination.locate(nativepoint(cell, x, y)); }
 
-    void add(CellId d, double area)
+    void add(CellId d, double area) { leaves.emplace_back(d, area); }
+
+    // Leaves by destination, equal destinations summed in their traversal order (deterministic).
+    void merge()
     {
-        for (auto& leaf : leaves)
-            if (leaf.first == d)
-            {
-                leaf.second += area;
-                return;
-            }
-        leaves.emplace_back(d, area);
+        std::stable_sort(leaves.begin(), leaves.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        std::size_t kept = 0;
+        for (std::size_t n = 0; n < leaves.size(); n++)
+        {
+            if (kept > 0 && leaves[kept - 1].first == leaves[n].first)
+                leaves[kept - 1].second += leaves[n].second;
+            else
+                leaves[kept++] = leaves[n];
+        }
+        leaves.resize(kept);
     }
 
     // c00 at (x0, y0), c10 at (x1, y0), c01 at (x0, y1), c11 at (x1, y1).
@@ -219,13 +225,13 @@ RemapWeights subdividedremap(const CellGrid& source, const CellGrid& destination
                 subdivider.leaves.clear();
                 subdivider.piece(cell.x0, cell.x1, cell.y0, cell.y1, subdivider.at(cell.x0, cell.y0),
                     subdivider.at(cell.x1, cell.y0), subdivider.at(cell.x0, cell.y1), subdivider.at(cell.x1, cell.y1), 0);
+                subdivider.merge();
                 double leafarea = 0.0;
                 for (const auto& leaf : subdivider.leaves)
                     leafarea += leaf.second;
                 // Scale the leaves to the cell's exact area: the column sums are exact.
                 const double scale = source.area_m2(s) / leafarea;
                 double distributed = 0.0;
-                std::sort(subdivider.leaves.begin(), subdivider.leaves.end());
                 for (const auto& leaf : subdivider.leaves)
                 {
                     const double area = leaf.second * scale;
