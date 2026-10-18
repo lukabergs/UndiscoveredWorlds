@@ -217,7 +217,7 @@ About 22 h of agent time over four sessions (T8.0-T8.2; T8.3-T8.4; T8.5-T8.6 wit
 **Acceptance.**
 - Striping (`striping_ratio.py`, sandbox global of base-v10 against ETOPO at the same columns): the east-west over north-south ratio between 0.8 and 1.4 in every band on the engine's surface and the procedural input (base-v9: 1.52/2.12/3.08 at 50-80 degrees), at most 1.5 on the final; A4 at most 0.08 in every band on the engine's surface and the procedural input (base-v9 procedural 0.136/0.305 at 60-80; ETOPO's largest 0.062); A8 recorded (item 3's measure).
 - Cells: every engine cell's area in its budgets is its true area; largest over smallest at most 1.41; the share of engine cells poleward of 60 degrees within 2 points of that latitude band's area share (13.4 %; the torus has 33 %).
-- Plates (`plate_metrics.py`): count, the area share of the largest plate and the number of plates above 5 % of the surface against the current engine at 400 Myr and Earth; area-weighted RMS speed within 30 % of the current engine's and inside Earth's range; no update above the displacement limit at the default step.
+- Plates (`plate_metrics.py`): count, the area share of the largest plate and the number of plates above 5 % of the surface against the current engine at 400 Myr and Earth; area-weighted RMS speed on the sphere (`plate_metrics.py` `rms_cm_yr_sphere`) within 30 % of the current engine's (0.937 cm/yr at 400 Myr, T8.0); Earth's figure (`configs/evaluation/plate-earth-reference.json`) is recorded beside it, not gated (decision 2026-10-18 night, review of T8.0: the torus engine moves plates about four times slower than Earth, so no result could meet both; matching Earth's speeds is a calibration question for the W3 re-tuning round, not part of the port); no update above the displacement limit at the default step.
 - Conservation: mass and continental area under a pure rotation within 1e-6 (test); T4.12's gates with true areas (area, thickness, median, the 2000+ bands within W3's tolerances).
 - Cube imprint: on the engine's surface, slope-aspect A4 measured in face coordinates at most ETOPO's all-latitude A4 (0.028), and gradient statistics within two cells of a face edge within 10 % of the face interiors.
 - Time: 400 Myr at N 64 at most 1.5 times 477 s.
@@ -245,8 +245,10 @@ Questions 2 and 3 are answered by (c): the interfaces change, and no torus is ke
 
 | Step | Agent | Branch | Commit | Checks | Duration |
 |---|---|---|---|---|---|
-| W0 design | orchestrator, surveyors W0-S1..S5 | main | the commit after 255db4e | none (design) | from 255db4e (23:06) |
-| T8.0 measures | worker | worktree | | | running |
+| W0 design | orchestrator, surveyors W0-S1..S5 | main | 5edc651 | none (design) | 38 min (255db4e 23:06 to 23:44) |
+| T8.0 measures | worker, reviewer (pass with notes), surveyor (Earth reference verified) | worktree-agent-a79a2148fa6ec7cb8, merged | bd8a1f8, 6974e33 | scripts run on base-v9 and ETOPO; 400 Myr at 256 in 467.1 s (`out/scratch/sphere/logs/T8.0.txt`) | about 18 min, in parallel with W0 (23:39:44 to 23:58:16) |
+
+**T8.0 results** (`out/scratch/sphere/T8.0/`): east-west over north-south ratio by band 0-30/30-50/50-60/60-70/70-80 on the engine's own surface 0.68/0.89/0.92/1.53/3.29 (A4 0.144/0.364 at 60-80), the base world 0.73/1.19/2.67/1.89/2.50, the sandbox procedural input 0.83/1.24/1.61/2.13/3.27, the final 0.90/1.20/1.52/2.12/3.09; ETOPO 2048 1.04/1.04/1.30/1.26/1.07, ETOPO 256 (area mean of 2048) 1.05/1.18/1.17/1.25/1.18. The engine's surface carries the 60-80 striping; the base world's 50-60 excess comes from the `terrain.*` stages. Plates at 400 Myr: 9, the largest 25.0 % of the surface, 8 above 5 %, area-weighted RMS 0.937 cm/yr on the sphere (0.987 in engine cells); Earth (PB2002, NNR-MORVEL56, verified): 52 or 56 plates, Pacific 20.5 %, 7 above 5 %, RMS 4.39 cm/yr. The bundle has no plate-velocity grid; per-plate velocities are in `tables/geosphere/tectonic_snapshot.json`.
 
 **For the user** (what an agent could not do alone; the delete guard's refusals land here with path and reason): nothing yet.
 
