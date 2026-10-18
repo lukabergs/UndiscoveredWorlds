@@ -19,7 +19,11 @@
 #include "simulations/hydrology/flow_routing.hpp"
 #include "simulations/hydrology/lake_levels.hpp"
 #include "simulations/hydrology/rivers.hpp"
+#include "core/deterministic_random.hpp"
 #include "simulations/terrain/fluvial_erosion.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
+#include "simulations/terrain/terrain_shapes.hpp"
+#include "simulations/terrain/terrain_volcanoes.hpp"
 #include "simulations/terrain/subgrid_statistics.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
 #include "world/world_parameters.hpp"
@@ -51,11 +55,6 @@ void reseedterrainpass(planet& world, int salt)
 float clamp01(float value)
 {
     return clamp(value, 0.0f, 1.0f);
-}
-
-int wrapx(const planet& world, int x)
-{
-    return wrap(x, world.width());
 }
 
 float normalizeterrainvalue(float current, int minimum, int maximum)
@@ -195,28 +194,21 @@ void applyhypsometricremap(planet& world, GenerationScratch& scratch, const Worl
 }
 
 // The whole-metre sea level that leaves the area share `landfraction` of the surface above it
-// (base elevation; a cell's area is proportional to the cosine of its latitude). No connectivity
-// rule: a closed basin below the level is below sea like any other cell.
+// (base elevation; a cell weighs its area, mesh::CellGrid::area_m2). No connectivity rule: a
+// closed basin below the level is below sea like any other cell.
 int sealevelforlandfraction(const planet& world, float landfraction)
 {
-    const int width = world.width();
-    const int height = world.height();
-    const float pi = 3.14159265358979f;
+    const mesh::CellGrid& grid = world.grid();
 
-    vector<pair<int, float>> cells;   // whole metres, as basebelowsea compares them; area weight
-    cells.reserve(static_cast<size_t>(width + 1) * static_cast<size_t>(height + 1));
+    vector<pair<int, double>> cells;   // whole metres, as basebelowsea compares them; area weight
+    cells.reserve(world.cellcount());
     double totalweight = 0.0;
 
-    for (int y = 0; y <= height; y++)
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
-        const float latitude = (0.5f - (static_cast<float>(y) + 0.5f) / static_cast<float>(height + 1)) * pi;
-        const float weight = max(0.0f, cosf(latitude));
-
-        for (int x = 0; x <= width; x++)
-        {
-            cells.push_back({ wholemetres(world.nomfloat(x, y)), weight });
-            totalweight += weight;
-        }
+        const double weight = grid.area_m2(c) / grid.totalarea_m2();
+        cells.push_back({ wholemetres(world.nomfloat(c)), weight });
+        totalweight += weight;
     }
 
     if (cells.empty() || totalweight <= 0.0)
@@ -224,7 +216,7 @@ int sealevelforlandfraction(const planet& world, float landfraction)
 
     // Highest first; a level just below a group of equal heights makes that group land. The level
     // whose land share is nearest the target wins (on a tie the higher one).
-    stable_sort(cells.begin(), cells.end(), [](const pair<int, float>& a, const pair<int, float>& b) { return a.first > b.first; });
+    stable_sort(cells.begin(), cells.end(), [](const pair<int, double>& a, const pair<int, double>& b) { return a.first > b.first; });
 
     const double target = static_cast<double>(landfraction) * totalweight;
     double cumulative = 0.0;
@@ -289,13 +281,15 @@ void applysealevel(planet& world, GenerationScratch& scratch)
     rebuildheightdistribution(world, scratch);
 }
 
-vector<vector<int>> buildterrainfractal(planet& world, int salt, int maximum)
+// The terrain stages' fractal on the sphere (terrain.sphere_noise.terrain_fractal_*, warped as
+// the legacy grain-8 fractal was): one value per cell in [1, maximum]. The pass's stream is
+// reseeded with the salt first, as before, and the warp's reach is drawn from it.
+vector<float> buildterrainfractal(planet& world, int salt, int maximum)
 {
-    vector<vector<int>> fractal = makeintgrid();
     reseedterrainpass(world, salt);
-    createfractal(fractal, world.width(), world.height(), 8, 0.2f, static_cast<float>(random(3, 6)), 1, maximum, 0, 0);
-    warp(fractal, world.width(), world.height(), world.maxelevation(), random(20, 80), 1);
-    return fractal;
+    const int warpfactor = random(20, 80);
+    return terrain::spherefractalwarped(world, deterministiccontextseed(world.seed(), salt), terrain::terrainfractal(),
+                                        static_cast<float>(maximum), warpfactor);
 }
 
 // The ocean's depth curve (tuning::terrain::ocean_floor): depth in metres at an area share
@@ -331,36 +325,28 @@ float oceandepthatshare(float share)
 // depth distribution no longer depends on the grid width or on the shelf mask.
 void metadataoceanrefinement(planet& world, GenerationScratch&)
 {
-    const int width = world.width();
-    const int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
     const float sealevel = static_cast<float>(world.sealevel());
-    const float pi = 3.14159265358979f;
 
     struct SeaCell
     {
         float elevation;
-        float weight;
-        int x;
-        int y;
+        double weight;
+        mesh::CellId cell;
     };
 
     vector<SeaCell> cells;
     double totalweight = 0.0;
 
-    for (int y = 0; y <= height; y++)
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
-        // Cell-centred rows: the area of a cell is proportional to the cosine of its latitude.
-        const float latitude = (0.5f - (static_cast<float>(y) + 0.5f) / static_cast<float>(height + 1)) * pi;
-        const float weight = max(0.0f, cosf(latitude));
+        if (world.sea(c) == 0)
+            continue;
 
-        for (int x = 0; x <= width; x++)
-        {
-            if (world.sea(x, y) == 0)
-                continue;
-
-            cells.push_back({ world.nomfloat(x, y), weight, x, y });
-            totalweight += weight;
-        }
+        // A cell weighs its area.
+        const double weight = grid.area_m2(c) / grid.totalarea_m2();
+        cells.push_back({ world.nomfloat(c), weight, c });
+        totalweight += weight;
     }
 
     if (cells.empty() || totalweight <= 0.0)
@@ -376,7 +362,7 @@ void metadataoceanrefinement(planet& world, GenerationScratch&)
     while (first < cells.size())
     {
         // Cells of equal engine height form one group and all take the share at the group's
-        // middle, so a tie is not broken by the order of the rows.
+        // middle, so a tie is not broken by the order of the cells.
         size_t last = first;
         double groupweight = 0.0;
         while (last < cells.size() && cells[last].elevation == cells[first].elevation)
@@ -389,26 +375,20 @@ void metadataoceanrefinement(planet& world, GenerationScratch&)
         const float depth = max(oceandepthatshare(share), minimumdepth);
 
         for (size_t index = first; index < last; index++)
-            world.setnomfloat(cells[index].x, cells[index].y, max(1.0f, sealevel - depth));
+            world.setnomfloat(cells[index].cell, max(1.0f, sealevel - depth));
 
         cumulative += groupweight;
         first = last;
     }
 }
 
-int wrapdistx(const planet& world, int left, int right)
-{
-    const int width = world.width() + 1;
-    int delta = abs(left - right);
-    delta = min(delta, width - delta);
-    return delta;
-}
-
+// Trenches along convergent oceanic boundary segments: a branch reaches up to 18 to 38 legacy
+// pixels (terrain.sphere_noise.legacy_columns, in km) along its segment from a random anchor,
+// each segment cell cutting the sea within 2 to 4 pixels (plus half a pixel) of it.
 void metadataactivetrenches(planet& world, GenerationScratch& scratch)
 {
-    const int width = world.width();
-    const int height = world.height();
     const int sealevel = world.sealevel();
+    const double pixel_km = terrain::legacycellkm(world);
     clearfeaturemask(scratch);
     reseedterrainpass(world, 0x4114);
 
@@ -468,112 +448,105 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
 
         for (int branch = 0; branch < branchcount; branch++)
         {
-            const mesh::CellId anchorcell = cells[random(0, static_cast<int>(cells.size()) - 1)];
-            const pair<int, int> anchor = { world.grid().column(anchorcell), world.grid().row(anchorcell) };
+            const mesh::CellId anchor = cells[random(0, static_cast<int>(cells.size()) - 1)];
             const float maxsegmentdistance = static_cast<float>(random(18, 38));
             const int radius = random(2, 4);
+            const float reach = static_cast<float>(radius) + 0.5f;
 
             for (const mesh::CellId c : cells)
             {
-                const pair<int, int> cell = { world.grid().column(c), world.grid().row(c) };
-                const int dx = wrapdistx(world, cell.first, anchor.first);
-                const int dy = abs(cell.second - anchor.second);
-                const float segmentdistance = sqrtf(static_cast<float>(dx * dx + dy * dy));
+                // Distances in legacy pixels.
+                const float segmentdistance = static_cast<float>(terrain::distancekm(world, c, anchor) / pixel_km);
 
                 if (segmentdistance > maxsegmentdistance)
                     continue;
 
                 const float branchstrength = 1.0f - clamp01(segmentdistance / maxsegmentdistance);
 
-                for (int ox = -radius; ox <= radius; ox++)
+                for (const mesh::CellId n : terrain::cellswithinkm(world, c, reach * pixel_km))
                 {
-                    for (int oy = -radius; oy <= radius; oy++)
-                    {
-                        const int nx = wrapx(world, cell.first + ox);
-                        const int ny = cell.second + oy;
+                    if (world.sea(n) == 0)
+                        continue;
 
-                        if (ny < 0 || ny > height || world.sea(nx, ny) == 0)
-                            continue;
+                    const float kerneldistance = static_cast<float>(terrain::distancekm(world, c, n) / pixel_km);
+                    if (kerneldistance > reach)
+                        continue;
 
-                        const float kerneldistance = sqrtf(static_cast<float>(ox * ox + oy * oy));
-                        if (kerneldistance > static_cast<float>(radius) + 0.5f)
-                            continue;
+                    const float kernelfalloff = 1.0f - clamp01(kerneldistance / reach);
+                    const float proximity = 1.0f - clamp01(static_cast<float>(world.tectonicboundarydistance(n)) / 16.0f);
+                    (void)proximity;  // read as before (the stage's declared access), unused
+                    const float subsidence = clamp01(world.tectonicsubsidencetendency(n));
+                    const float convergence = clamp01(static_cast<float>(world.tectonicconvergence(n)) / 255.0f);
+                    const float randomness = 0.82f + static_cast<float>(random(0, 35)) / 100.0f;
+                    const int trenchdepth = static_cast<int>(roundf((1200.0f + 2200.0f * branchstrength) * kernelfalloff * randomness * (0.45f + subsidence * 0.30f + convergence * 0.25f)));
 
-                        const float kernelfalloff = 1.0f - clamp01(kerneldistance / (static_cast<float>(radius) + 0.5f));
-                        const float proximity = 1.0f - clamp01(static_cast<float>(world.tectonicboundarydistance(nx, ny)) / 16.0f);
-                        const float subsidence = clamp01(world.tectonicsubsidencetendency(nx, ny));
-                        const float convergence = clamp01(static_cast<float>(world.tectonicconvergence(nx, ny)) / 255.0f);
-                        const float randomness = 0.82f + static_cast<float>(random(0, 35)) / 100.0f;
-                        const int trenchdepth = static_cast<int>(roundf((1200.0f + 2200.0f * branchstrength) * kernelfalloff * randomness * (0.45f + subsidence * 0.30f + convergence * 0.25f)));
+                    if (trenchdepth <= 0)
+                        continue;
 
-                        if (trenchdepth <= 0)
-                            continue;
+                    const float target = max(1.0f, min(world.nomfloat(n), trenchfloor[n] - static_cast<float>(trenchdepth)));
+                    if (target >= world.nomfloat(n))
+                        continue;
 
-                        const float target = max(1.0f, min(world.nomfloat(nx, ny), trenchfloor[world.grid().cellof(nx, ny)] - static_cast<float>(trenchdepth)));
-                        if (target >= world.nomfloat(nx, ny))
-                            continue;
-
-                        world.setnomfloat(nx, ny, target);
-                        world.setgeologicregime(nx, ny, GeologicRegime::trench_adjacent);
-                        markfeaturecell(scratch, nx, ny);
-                    }
+                    world.setnomfloat(n, target);
+                    world.setgeologicregime(n, GeologicRegime::trench_adjacent);
+                    markfeaturecell(scratch, world, n);
                 }
             }
         }
     }
 }
 
-void applyvolcanicupliftkernel(planet& world, GenerationScratch& scratch, int centrex, int centrey, int radius, int maximumuplift, GeologicRegime regime)
+// Raises the cells within radius legacy pixels (plus half a pixel) of a centre cell.
+void applyvolcanicupliftkernel(planet& world, GenerationScratch& scratch, mesh::CellId centre, int radius, int maximumuplift, GeologicRegime regime)
 {
-    for (int dx = -radius; dx <= radius; dx++)
+    const double pixel_km = terrain::legacycellkm(world);
+    const float reach = static_cast<float>(radius) + 0.5f;
+
+    for (const mesh::CellId n : terrain::cellswithinkm(world, centre, reach * pixel_km))
     {
-        for (int dy = -radius; dy <= radius; dy++)
-        {
-            const int nx = wrapx(world, centrex + dx);
-            const int ny = centrey + dy;
+        const float distance = static_cast<float>(terrain::distancekm(world, centre, n) / pixel_km);
+        if (distance > reach)
+            continue;
 
-            if (ny < 0 || ny > world.height())
-                continue;
+        const float falloff = 1.0f - clamp01(distance / reach);
+        const int uplift = static_cast<int>(roundf(static_cast<float>(maximumuplift) * falloff * falloff));
+        if (uplift <= 0)
+            continue;
 
-            const float distance = sqrtf(static_cast<float>(dx * dx + dy * dy));
-            if (distance > static_cast<float>(radius) + 0.5f)
-                continue;
+        const float target = min(static_cast<float>(world.maxelevation() - 1), world.nomfloat(n) + static_cast<float>(uplift));
+        if (target <= world.nomfloat(n))
+            continue;
 
-            const float falloff = 1.0f - clamp01(distance / (static_cast<float>(radius) + 0.5f));
-            const int uplift = static_cast<int>(roundf(static_cast<float>(maximumuplift) * falloff * falloff));
-            if (uplift <= 0)
-                continue;
-
-            const float target = min(static_cast<float>(world.maxelevation() - 1), world.nomfloat(nx, ny) + static_cast<float>(uplift));
-            if (target <= world.nomfloat(nx, ny))
-                continue;
-
-            world.setnomfloat(nx, ny, target);
-            if (regime != GeologicRegime::stable)
-                world.setgeologicregime(nx, ny, regime);
-            markfeaturecell(scratch, nx, ny);
-        }
+        world.setnomfloat(n, target);
+        if (regime != GeologicRegime::stable)
+            world.setgeologicregime(n, regime);
+        markfeaturecell(scratch, world, n);
     }
 }
 
+// Arc cones on convergent boundaries and hotspots: seeds at least 24 (cones) or 34 (hotspots)
+// legacy pixels apart in km, hotspots drawn by area; the counts are those of the 2048-column
+// world (per legacy cell, terrain.sphere_noise.legacy_columns), so every resolution has them.
 void metadatavolcanoes(planet& world, GenerationScratch& scratch)
 {
-    const int width = world.width();
-    const int height = world.height();
     clearfeaturemask(scratch);
     rebuildshelves(world, scratch);
     reseedterrainpass(world, 0x4115);
 
-    vector<vector<int>> volcanodirection = buildterrainfractal(world, 0x4116, world.maxelevation());
-    vector<pair<int, int>> selectedseeds;
+    // The two direction fields (east and north shifts): the legacy fractal and its value half a
+    // turn of longitude away, which acted as a second, independent one.
+    const vector<float> eastdirection = buildterrainfractal(world, 0x4116, world.maxelevation());
+    const vector<float> northdirection = terrain::spherefractalwarped(
+        world, deterministiccombine(deterministiccontextseed(world.seed(), 0x4116), 7), terrain::terrainfractal(),
+        static_cast<float>(world.maxelevation()), random(20, 80));
+    const double pixel_km = terrain::legacycellkm(world);
+    vector<mesh::CellId> selectedseeds;
 
-    auto farenough = [&](int x, int y, int minimumdistance)
+    auto farenough = [&](mesh::CellId c, int minimumdistance)
     {
-        for (const pair<int, int>& seed : selectedseeds)
+        for (const mesh::CellId seed : selectedseeds)
         {
-            const int dx = wrapdistx(world, x, seed.first);
-            const int dy = abs(y - seed.second);
-            if (dx * dx + dy * dy < minimumdistance * minimumdistance)
+            if (terrain::distancekm(world, c, seed) < static_cast<double>(minimumdistance) * pixel_km)
                 return false;
         }
 
@@ -582,8 +555,7 @@ void metadatavolcanoes(planet& world, GenerationScratch& scratch)
 
     struct VolcanoCandidate
     {
-        int x = 0;
-        int y = 0;
+        mesh::CellId cell = 0;
         float score = 0.0f;
     };
 
@@ -603,60 +575,59 @@ void metadatavolcanoes(planet& world, GenerationScratch& scratch)
         if (score < 0.34f)
             continue;
 
-        conecandidates.push_back({ world.grid().column(c), world.grid().row(c), score });
+        conecandidates.push_back({ c, score });
     }
 
     for (int index = static_cast<int>(conecandidates.size()) - 1; index > 0; index--)
         swap(conecandidates[index], conecandidates[random(0, index)]);
 
-    const int area = (width + 1) * (height + 1);
-    const int desiredcones = clamp(area / 200000, 2, 10);
+    const double area = terrain::legacycellcount();
+    const int desiredcones = clamp(static_cast<int>(area / 200000.0), 2, 10);
 
     for (const VolcanoCandidate& candidate : conecandidates)
     {
         if (static_cast<int>(selectedseeds.size()) >= desiredcones)
             break;
 
-        if (!farenough(candidate.x, candidate.y, 24))
+        if (!farenough(candidate.cell, 24))
             continue;
 
         const int peakheight = static_cast<int>(roundf(1800.0f + candidate.score * 3800.0f));
-        applyvolcanicupliftkernel(world, scratch, candidate.x, candidate.y, world.sea(candidate.x, candidate.y) ? 2 : 1, static_cast<int>(roundf(240.0f + candidate.score * 520.0f)), GeologicRegime::convergent_arc);
-        createisolatedvolcano(world, candidate.x, candidate.y, world.continentalshelves(), volcanodirection, peakheight, true);
-        selectedseeds.emplace_back(candidate.x, candidate.y);
+        applyvolcanicupliftkernel(world, scratch, candidate.cell, world.sea(candidate.cell) ? 2 : 1, static_cast<int>(roundf(240.0f + candidate.score * 520.0f)), GeologicRegime::convergent_arc);
+        terrain::createisolatedvolcano(world, candidate.cell, world.continentalshelves(), eastdirection, northdirection, peakheight, true);
+        selectedseeds.push_back(candidate.cell);
     }
 
     auto placenexthotspot = [&](bool oceanpreferred, int targetcount)
     {
         for (int placed = 0, attempts = 0; placed < targetcount && attempts < 512; attempts++)
         {
-            const int x = random(0, width);
-            const int y = random(0, height);
+            const mesh::CellId c = terrain::randomcellbyarea(world);
 
-            if (!farenough(x, y, 34))
+            if (!farenough(c, 34))
                 continue;
 
-            if (world.tectonicboundarydistance(x, y) < 18)
+            if (world.tectonicboundarydistance(c) < 18)
                 continue;
 
-            if (oceanpreferred != (world.sea(x, y) == 1))
+            if (oceanpreferred != (world.sea(c) == 1))
                 continue;
 
-            if (world.sea(x, y) == 1 && world.continentalshelves()[x][y])
+            if (world.sea(c) == 1 && world.continentalshelves()[c])
                 continue;
 
             const int radius = oceanpreferred ? random(4, 6) : random(3, 5);
             const int uplift = oceanpreferred ? random(260, 700) : random(180, 460);
             const int peakheight = oceanpreferred ? random(900, 2400) : random(700, 1600);
-            applyvolcanicupliftkernel(world, scratch, x, y, radius, uplift, GeologicRegime::stable);
-            createisolatedvolcano(world, x, y, world.continentalshelves(), volcanodirection, peakheight, false);
-            selectedseeds.emplace_back(x, y);
+            applyvolcanicupliftkernel(world, scratch, c, radius, uplift, GeologicRegime::stable);
+            terrain::createisolatedvolcano(world, c, world.continentalshelves(), eastdirection, northdirection, peakheight, false);
+            selectedseeds.push_back(c);
             placed++;
         }
     };
 
-    placenexthotspot(true, clamp(area / 280000 + 1, 1, 6));
-    placenexthotspot(false, clamp(area / 520000, 0, 3));
+    placenexthotspot(true, clamp(static_cast<int>(area / 280000.0) + 1, 1, 6));
+    placenexthotspot(false, clamp(static_cast<int>(area / 520000.0), 0, 3));
 
     for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
@@ -765,27 +736,26 @@ void applyinlandseapolicies(planet& world, GenerationScratch& scratch)
 void applyterraintexturing(planet& world, GenerationScratch& scratch)
 {
     clearfeaturemask(scratch);
-    vector<vector<int>> fractal = buildterrainfractal(world, 0x4111, world.maxelevation());
-    flip(fractal, world.width(), world.height(), 1, 1);
-    shift(fractal, world.width(), world.height(), random(1, world.width()));
+    // The legacy flip and shift only made the field another, independent sample: a sphere field
+    // of its own salt is one already.
+    const vector<float> fractal = buildterrainfractal(world, 0x4111, world.maxelevation());
+    const mesh::CellGrid& grid = world.grid();
 
     const int sealevel = world.sealevel();
 
-    // The sea's texture is the fractal at zero mean and unit spread: the fractal's draws cover
-    // only part of its range and its spread grows with the grid height in cells.
+    // The sea's texture is the fractal at zero mean and unit spread, both by area: the fractal's
+    // values cover only part of its range.
     double sum = 0.0;
     double sumsquares = 0.0;
     double count = 0.0;
 
-    for (int x = 0; x <= world.width(); x++)
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
-        for (int y = 0; y <= world.height(); y++)
-        {
-            const double value = static_cast<double>(fractal[x][y]);
-            sum += value;
-            sumsquares += value * value;
-            count += 1.0;
-        }
+        const double weight = grid.area_m2(c) / grid.totalarea_m2();
+        const double value = static_cast<double>(fractal[c]);
+        sum += weight * value;
+        sumsquares += weight * value * value;
+        count += weight;
     }
 
     const double mean = count > 0.0 ? sum / count : 0.0;
@@ -796,41 +766,35 @@ void applyterraintexturing(planet& world, GenerationScratch& scratch)
     // elevation it lowered almost all land, and the floor below held most of it at the coast.
     const float landscale = tuning::terrain::texturing::landScale;
 
-    for (int x = 0; x <= world.width(); x++)
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
-        for (int y = 0; y <= world.height(); y++)
-        {
-            const float oldvalue = world.nomfloat(x, y);
-            const float noise = static_cast<float>(static_cast<double>(fractal[x][y]) - mean);
-            float newvalue = world.sea(x, y)
-                ? oldvalue + noise * seascale
-                : oldvalue + noise * landscale;
+        const float oldvalue = world.nomfloat(c);
+        const float noise = static_cast<float>(static_cast<double>(fractal[c]) - mean);
+        float newvalue = world.sea(c)
+            ? oldvalue + noise * seascale
+            : oldvalue + noise * landscale;
 
-            if (world.sea(x, y))
-                newvalue = min(newvalue, static_cast<float>(sealevel - 10));
-            else
-                newvalue = max(newvalue, static_cast<float>(sealevel + 5));
+        if (world.sea(c))
+            newvalue = min(newvalue, static_cast<float>(sealevel - 10));
+        else
+            newvalue = max(newvalue, static_cast<float>(sealevel + 5));
 
-            newvalue = clamp(newvalue, 1.0f, static_cast<float>(world.maxelevation() - 1));
+        newvalue = clamp(newvalue, 1.0f, static_cast<float>(world.maxelevation() - 1));
 
-            if (newvalue == oldvalue)
-                continue;
+        if (newvalue == oldvalue)
+            continue;
 
-            world.setnomfloat(x, y, newvalue);
-            markfeaturecell(scratch, x, y);
-        }
+        world.setnomfloat(c, newvalue);
+        markfeaturecell(scratch, world, c);
     }
 }
 
 void rebuildterrainroughness(planet& world)
 {
-    vector<vector<int>> roughness = buildterrainfractal(world, 0x4113, world.maxelevation());
+    const vector<float> roughness = buildterrainfractal(world, 0x4113, world.maxelevation());
 
-    for (int x = 0; x <= world.width(); x++)
-    {
-        for (int y = 0; y <= world.height(); y++)
-            world.setroughness(x, y, static_cast<float>(roughness[x][y]));
-    }
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
+        world.setroughness(c, roughness[c]);
 }
 
 void applyaridfeatures(planet& world, const GenerationExecutionContext& context)
@@ -1012,8 +976,8 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 
     case GenerationStageId::archipelagos:
     {
-        vector<vector<bool>> removedland = makeboolgrid(false);
-        makearchipelagos(world, removedland, context.landshape);
+        const vector<std::uint8_t> removedland(world.cellcount(), 0);
+        terrain::makearchipelagos(world, removedland, context.landshape);
         return true;
     }
 

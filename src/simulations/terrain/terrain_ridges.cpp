@@ -11,6 +11,7 @@
 #include "core/classes.hpp"
 #include "core/grid_shapes.hpp"
 #include "core/mesh/cell_grid.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 #include "simulations/terrain/terrain_ridges.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
@@ -316,8 +317,6 @@ int getdestinationland(const planet& world, mesh::CellId c, int dir)
 
 void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, vector<vector<bool>>& OKmountains)
 {
-    int width = world.width();
-    int height = world.height();
     int sealevel = world.sealevel();
     int maxelev = world.maxelevation();
     float gravity = world.gravity();
@@ -381,18 +380,24 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
             mountainheightfactor = 0.2f;
     }
 
-    for (int i = 0; i <= width; i++)
+    // The scratch arrays hold a cell at its legacy slot (core/grid_shapes.hpp).
+    const mesh::CellGrid& grid = world.grid();
+    const vector<mesh::CellId> cells = columnmajorcells(grid);
+    auto slot = [&](mesh::CellId c, int& x, int& y) { legacyslot(grid, c, x, y); };
+
+    for (const mesh::CellId c : cells)
     {
-        for (int j = 0; j <= height; j++)
+        int x = 0;
+        int y = 0;
+        slot(c, x, y);
+
+        if (OKmountains[x][y] == 0) // Don't change the heights of any mountains that the user has imported.
         {
-            if (OKmountains[i][j] == 0) // Don't change the heights of any mountains that the user has imported.
-            {
-                float thismountain = world.mountainheightfloat(i, j);
+            float thismountain = world.mountainheightfloat(c);
 
-                thismountain = thismountain * mountainheightfactor;
+            thismountain = thismountain * mountainheightfactor;
 
-                world.setmountainheight(i, j, thismountain);
-            }
+            world.setmountainheight(c, thismountain);
         }
     }
 
@@ -407,7 +412,10 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
 
     world.setmaxelevation(sealevel + (int)abovesea);
 
-    // Now do the mountain bases themselves.
+    // Now do the mountain bases themselves: rings of one legacy pixel (terrain.sphere_noise.legacy_columns)
+    // in km, ring r holding the cells at d pixels with d^2 < r^2 + r, as the legacy circles did.
+
+    const double pixel_km = terrain::legacycellkm(world);
 
     bool volcano = 0;
 
@@ -424,78 +432,77 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
         highrandom = lowrandom * 2.0f;
     }
 
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : cells)
     {
-        for (int j = 0; j <= height; j++)
+        volcano = 0;
+
+        float mheights = world.mountainheightfloat(c);
+
+        if (mheights == 0 && world.strato(c) == 0)
         {
-            volcano = 0;
+            mheights = world.volcanofloat(c);
+            volcano = 1;
+        }
 
-            float mheights = world.mountainheightfloat(i, j);
+        if (mheights < 0.0f)
+            mheights = 0.0f - mheights;
 
-            if (mheights == 0 && world.strato(i, j) == 0)
+        if (mheights != 0.0f)
+        {
+            heightreduce = 0.7f; //0.5f;
+
+            float baseheightfraction = (float)random((int)lowrandom, (int)highrandom);
+
+            if (volcano == 1)
+                baseheightfraction = (float)random((int)lowrandom * 5, (int)highrandom * 4);
+
+            baseheightfraction = baseheightfraction / 100.0f;
+            float baseheight = mheights * baseheightfraction;
+
+            int thismaxradius = maxradius;
+
+            if (volcano == 1)
+                thismaxradius = volcanomaxradius;
+
+            if (thismaxradius < 1)
+                continue;
+
+            for (const mesh::CellId n : terrain::cellswithinkm(world, c, (thismaxradius + 0.5) * pixel_km))
             {
-                mheights = world.volcanofloat(i, j);
-                volcano = 1;
-            }
+                if (world.sea(n) != 0)
+                    continue;
 
-            if (mheights < 0.0f)
-                mheights = 0.0f - mheights;
+                const double d = terrain::distancekm(world, c, n) / pixel_km;
+                int ring = 1;
+                while (ring <= thismaxradius && !(d * d < static_cast<double>(ring * ring + ring)))
+                    ring++;
 
-            if (mheights != 0.0f)
-            {
-                heightreduce = 0.7f; //0.5f;
+                if (ring > thismaxradius)
+                    continue;
 
-                float baseheightfraction = (float)random((int)lowrandom, (int)highrandom);
+                float height = baseheight;
+                for (int r = 1; r < ring; r++)
+                    height = height * heightreduce;
 
-                if (volcano == 1)
-                    baseheightfraction = (float)random((int)lowrandom * 5, (int)highrandom * 4);
+                int x = 0;
+                int y = 0;
+                slot(n, x, y);
 
-                baseheightfraction = baseheightfraction / 100.0f;
-                float baseheight = mheights * baseheightfraction;
-
-                int thismaxradius = maxradius;
-
-                if (volcano == 1)
-                    thismaxradius = volcanomaxradius;
-
-                for (int radius = 1; radius <= thismaxradius; radius++) // Go through ever-increasing circles
-                {
-                    for (int k = -radius; k <= radius; k++)
-                    {
-                        for (int l = -radius; l <= radius; l++)
-                        {
-                            if (k * k + l * l < radius * radius + radius) // If we're within the current circle
-                            {
-                                int ll = j + l;
-
-                                if (ll >= 0 && ll <= height)
-                                {
-                                    int kk = i + k;
-
-                                    if (kk<0 || kk>width)
-                                        kk = wrap(kk, width);
-
-                                    if (world.sea(kk, ll) == 0 && mountaindrainage[kk][ll] < baseheight)
-                                        mountaindrainage[kk][ll] = (int)baseheight;
-                                }
-                            }
-                        }
-                    }
-
-                    baseheight = baseheight * heightreduce;
-                }
+                if (mountaindrainage[x][y] < height)
+                    mountaindrainage[x][y] = (int)height;
             }
         }
     }
 
     // Now add the extra heights onto the actual map.
 
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : cells)
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.sea(i, j) == 0)
-                world.setnomfloat(i, j, world.nomfloat(i, j) + mountaindrainage[i][j]);
-        }
+        int x = 0;
+        int y = 0;
+        slot(c, x, y);
+
+        if (world.sea(c) == 0)
+            world.setnomfloat(c, world.nomfloat(c) + mountaindrainage[x][y]);
     }
 }

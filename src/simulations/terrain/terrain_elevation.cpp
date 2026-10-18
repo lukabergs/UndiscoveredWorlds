@@ -1,7 +1,9 @@
 // Elevation smoothing, relief noise, and depression filling.
-// Algorithms by Jonathan Hill, extracted from globalterrain.cpp.
+// Algorithms by Jonathan Hill, extracted from globalterrain.cpp; on the cell grid
+// (docs/architecture/sphere-mesh.md sections 3, 11 and 12) since T8 W2-T1.
 
 #include "simulations/terrain/terrain_internal.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,8 +11,12 @@
 #include <queue>
 
 #include "core/classes.hpp"
+#include "core/deterministic_random.hpp"
 #include "core/grid_shapes.hpp"
 #include "core/mesh/cell_grid.hpp"
+#include "core/mesh/mesh_geometry.hpp"
+#include "core/parallel_rows.hpp"
+#include "simulations/landscape/spherical_noise.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
@@ -20,115 +26,239 @@ using namespace std;
 namespace
 {
 bool checkdepressiontile(planet& world, std::vector<float>& filledmap, mesh::CellId c, int e, bool somethingdone, const std::vector<int>& noise);
+
+namespace sn = tuning::terrain::sphere_noise;
+
+// Salts of the sphere fields that replace fractals drawn from a stage's stream.
+constexpr int smoothingsalt = 0x5301;
+constexpr int canyonbasesalt = 0x5302;
+constexpr int canyonmasksalt = 0x5303;
+
+landscape::FractalNoiseField makefield(const planet& world, std::uint64_t seed, double wavelength_km, double persistence)
+{
+    landscape::FractalNoise noise;
+    noise.seed = seed;
+    noise.radius_km = world.grid().radius_m() / 1000.0;
+    noise.wavelength_km = wavelength_km;
+    noise.persistence = persistence;
+    // Octaves from the first wavelength down to terrain.sphere_noise.shortest_km.
+    const double shortest = max(1.0, static_cast<double>(sn::shortestKm));
+    int octaves = 1;
+    while (wavelength_km / pow(2.0, octaves) >= shortest && octaves < 24)
+        octaves++;
+    noise.octaves = octaves;
+    return landscape::FractalNoiseField(noise);
 }
 
-// This function smoothes, but without turning any land to sea or vice versa.
+// The legacy share of the maximum at a point: clamp(mean + deviation x z, 0, 1).
+double legacyshare(const landscape::FractalNoiseField& field, const terrain::SphereFractal& fractal, const mesh::Vec3& p)
+{
+    const double z = field.sum(p.x, p.y, p.z) / field.normalisation();
+    return clamp(fractal.mean + fractal.deviation * z, 0.0, 1.0);
+}
+
+float legacyvalue(const landscape::FractalNoiseField& field, const terrain::SphereFractal& fractal, const mesh::Vec3& p,
+                  float maximum)
+{
+    return max(1.0f, static_cast<float>(static_cast<double>(maximum) * legacyshare(field, fractal, p)));
+}
+
+terrain::SphereFractal warpfractal()
+{
+    return { sn::warpWavelengthKm, sn::warpPersistence, sn::warpMean, sn::warpDeviation };
+}
+
+terrain::SphereFractal warpvaryfractal()
+{
+    return { sn::warpVaryWavelengthKm, sn::warpVaryPersistence, sn::warpVaryMean, sn::warpVaryDeviation };
+}
+
+template <typename Fn>
+void forcells(const planet& world, Fn&& fn)
+{
+    parallelforrows(0, static_cast<int>(world.cellcount()) - 1, [&](int first, int last)
+    {
+        for (mesh::CellId c = static_cast<mesh::CellId>(first); c <= static_cast<mesh::CellId>(last); c++)
+            fn(c);
+    }, 256);
+}
+
+// Averages a float field over each land cell's disc of radius legacy pixels (in km), in the
+// legacy column-major order and in place, as planet::smoothoverland did over its square box.
+void smoothoverland(planet& world, int amount, float (planet::*get)(mesh::CellId) const,
+                    void (planet::*set)(mesh::CellId, float))
+{
+    const double radius_km = (static_cast<double>(amount) + 0.5) * terrain::legacycellkm(world);
+    const float maximum = static_cast<float>(world.maxelevation());
+    for (const mesh::CellId c : columnmajorcells(world.grid()))
+    {
+        if (world.sea(c) != 0)
+            continue;
+
+        const vector<mesh::CellId> cells = terrain::cellswithinkm(world, c, radius_km);
+        float ave = 0.0f;
+        for (const mesh::CellId n : cells)
+            ave += (world.*get)(n);
+        ave /= static_cast<float>(cells.size());
+
+        if (ave > 0.0f && ave < maximum)
+            (world.*set)(c, ave);
+    }
+}
+}
+
+terrain::SphereFractal terrain::terrainfractal()
+{
+    return { sn::terrainFractalWavelengthKm, sn::terrainFractalPersistence, sn::terrainFractalMean, sn::terrainFractalDeviation };
+}
+
+terrain::SphereFractal terrain::smoothingfractal()
+{
+    return { sn::smoothingWavelengthKm, sn::smoothingPersistence, 0.5, 0.2 };
+}
+
+terrain::SphereFractal terrain::canyonbasefractal()
+{
+    return { sn::canyonBaseWavelengthKm, sn::canyonBasePersistence, sn::canyonBaseMean, sn::canyonBaseDeviation };
+}
+
+terrain::SphereFractal terrain::canyonmaskfractal()
+{
+    return { sn::canyonMaskWavelengthKm, sn::canyonMaskPersistence, sn::canyonMaskMean, sn::canyonMaskDeviation };
+}
+
+terrain::SphereFractal terrain::archipelagofractal()
+{
+    return { sn::archipelagoWavelengthKm, sn::archipelagoPersistence, sn::archipelagoMean, sn::archipelagoDeviation };
+}
+
+double terrain::legacycellkm(const planet& world)
+{
+    const double pi = 3.14159265358979323846;
+    return 2.0 * pi * world.grid().radius_m() / 1000.0 / static_cast<double>(max(1, sn::legacyColumns));
+}
+
+double terrain::legacycellcount()
+{
+    const double columns = static_cast<double>(max(1, sn::legacyColumns));
+    return columns * columns / 2.0;
+}
+
+vector<float> terrain::spherefractal(const planet& world, std::uint64_t seed, const SphereFractal& fractal, float maximum)
+{
+    const landscape::FractalNoiseField field = makefield(world, seed, fractal.wavelength_km, fractal.persistence);
+    const mesh::CellGrid& grid = world.grid();
+    vector<float> values(world.cellcount(), 0.0f);
+    forcells(world, [&](mesh::CellId c) { values[c] = legacyvalue(field, fractal, grid.centre(c), maximum); });
+    return values;
+}
+
+vector<float> terrain::spherefractalwarped(const planet& world, std::uint64_t seed, const SphereFractal& fractal,
+                                           float maximum, int warpfactor)
+{
+    const landscape::FractalNoiseField field = makefield(world, seed, fractal.wavelength_km, fractal.persistence);
+    const SphereFractal warp = warpfractal();
+    const SphereFractal vary = warpvaryfractal();
+    const landscape::FractalNoiseField east = makefield(world, deterministiccombine(seed, 1), warp.wavelength_km, warp.persistence);
+    const landscape::FractalNoiseField north = makefield(world, deterministiccombine(seed, 2), warp.wavelength_km, warp.persistence);
+    const landscape::FractalNoiseField varying = makefield(world, deterministiccombine(seed, 3), vary.wavelength_km, vary.persistence);
+    const mesh::CellGrid& grid = world.grid();
+    const double pixel_km = legacycellkm(world);
+    vector<float> values(world.cellcount(), 0.0f);
+    forcells(world, [&](mesh::CellId c)
+    {
+        const mesh::Vec3 p = grid.centre(c);
+        const double reach = static_cast<double>(warpfactor) * legacyshare(varying, vary, p) * pixel_km;
+        const double east_km = (legacyshare(east, warp, p) - warp.mean) * reach;
+        const double north_km = (legacyshare(north, warp, p) - warp.mean) * reach;
+        const mesh::Vec3 q = mesh::fromtangent(mesh::tangentframe(p, grid.radius_m()), east_km, north_km);
+        values[c] = legacyvalue(field, fractal, q, maximum);
+    });
+    return values;
+}
+
+vector<mesh::CellId> terrain::cellswithinkm(const planet& world, mesh::CellId c, double radius_km)
+{
+    const mesh::CellGrid& grid = world.grid();
+    vector<mesh::CellId> cells = mesh::cellswithin(grid, grid.centre(c), max(0.0, radius_km) * 1000.0);
+    if (cells.empty())
+        cells.push_back(c);
+    return cells;
+}
+
+double terrain::distancekm(const planet& world, mesh::CellId a, mesh::CellId b)
+{
+    const mesh::CellGrid& grid = world.grid();
+    return mesh::greatcircle_m(grid.centre(a), grid.centre(b), grid.radius_m()) / 1000.0;
+}
+
+mesh::CellId terrain::movedcell(const planet& world, mesh::CellId c, double east_km, double north_km)
+{
+    if (east_km == 0.0 && north_km == 0.0)
+        return c;
+    const mesh::CellGrid& grid = world.grid();
+    const mesh::CellId moved = grid.locate(mesh::fromtangent(mesh::tangentframe(grid.centre(c), grid.radius_m()), east_km, north_km));
+    return moved == mesh::nocell ? c : moved;
+}
+
+mesh::CellId terrain::randomcellbyarea(const planet& world)
+{
+    return mesh::randomcellbyarea(world.grid(), []
+    {
+        const double high = static_cast<double>(random(0, 32767));
+        const double low = static_cast<double>(random(0, 32767));
+        return (high * 32768.0 + low) / 1073741824.0;
+    });
+}
+
+// This function smoothes, but without turning any land to sea or vice versa: each sea cell is
+// averaged over the cells within a radius (km, tuning::terrain::ocean_floor) chosen between the
+// two radii by a sphere noise across its own range; a radius that reaches no other cell centre
+// leaves the cell. Land is never written.
 
 void smoothland(planet& world, int amount)
 {
-    int width = world.width();
-    int height = world.height();
+    (void)amount;
     int sealevel = world.sealevel();
     float maxelev = (float)world.maxelevation();
 
-    int grain = 8; // Level of detail on this fractal map.
-    float valuemod = 0.2f;
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
+    const vector<float> fractal = terrain::spherefractal(world, deterministiccontextseed(world.seed(), smoothingsalt),
+                                                         terrain::smoothingfractal(), maxelev);
 
-    vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    float fractalmin = fractal.empty() ? 0.0f : fractal[0];
+    float fractalmax = fractalmin;
 
-    for (int i = 0; i <= width; i++)
+    for (const float value : fractal)
     {
-        for (int j = 0; j <= height; j++)
-            fractal[i][j] = 0;
+        fractalmin = min(fractalmin, value);
+        fractalmax = max(fractalmax, value);
     }
 
-    createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, (int)maxelev, 0, 0);
-
-    // A sea cell's radius is set in km (tuning::terrain::ocean_floor) and chosen between the two
-    // radii by the fractal across its own range; in cells it is the km over the cell size.
-    int fractalmin = fractal[0][0];
-    int fractalmax = fractal[0][0];
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            fractalmin = min(fractalmin, fractal[i][j]);
-            fractalmax = max(fractalmax, fractal[i][j]);
-        }
-    }
-
-    const float cellkm = world.radius() / 1000.0f * 3.14159265358979f / static_cast<float>(height + 1);
     const float minimumradiuskm = tuning::terrain::ocean_floor::smoothingMinimumRadiusKm;
     const float maximumradiuskm = tuning::terrain::ocean_floor::smoothingMaximumRadiusKm;
-    const float fractalrange = static_cast<float>(max(1, fractalmax - fractalmin));
+    const float fractalrange = max(1.0f, fractalmax - fractalmin);
 
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : columnmajorcells(world.grid()))
     {
-        for (int j = 0; j <= height; j++)
-        {
-            float crount = 0.0f;
-            float ave = 0.0f;
-            int origland = 0;
-            int thisamount = amount;
+        if (world.sea(c) == 0) // Land is never written.
+            continue;
 
-            if (world.sea(i, j) == 0) // Check to see whether this point is originally land or sea
-                origland = 1;
-            else
-            {
-                const float position = static_cast<float>(fractal[i][j] - fractalmin) / fractalrange;
-                const float radiuskm = minimumradiuskm + position * (maximumradiuskm - minimumradiuskm);
-                thisamount = cellkm > 0.0f ? static_cast<int>(lroundf(radiuskm / cellkm)) : 0;
-            }
+        const float position = (fractal[c] - fractalmin) / fractalrange;
+        const float radiuskm = minimumradiuskm + position * (maximumradiuskm - minimumradiuskm);
+        const vector<mesh::CellId> cells = terrain::cellswithinkm(world, c, radiuskm);
 
-            // Land is never written; a sea cell whose radius is under half a cell keeps its value.
-            if (origland == 0 && thisamount < 1)
-                continue;
+        if (cells.size() < 2) // The radius reaches no other cell: the cell keeps its value.
+            continue;
 
-            if (thisamount < 1)
-                thisamount = 1;
+        float ave = 0.0f;
 
-            bool goahead = 1;
-            int seacheck = 5;
+        for (const mesh::CellId n : cells)
+            ave = ave + world.nomfloat(n);
 
-            if (goahead == 1)
-            {
-                for (int k = i - thisamount; k <= i + thisamount; k++)
-                {
-                    int kk = k;
+        ave = ave / static_cast<float>(cells.size());
 
-                    if (kk<0 || kk>width)
-                        kk = wrap(kk, width);
-
-                    for (int l = j - thisamount; l <= j + thisamount; l++)
-                    {
-                        if (l > 0 && l < height)
-                        {
-                            ave = ave + world.nomfloat(kk, l);
-                            crount++;
-                        }
-                    }
-                }
-
-                if (crount > 0.0f)
-                {
-                    ave = ave / crount;
-
-                    if (ave > 0 && ave < maxelev)
-                    {
-                        int newland = 0;
-
-                        if (wholemetres(ave) > sealevel) // Now check to see whether the new value is land or sea
-                            newland = 1;
-
-                        if (origland == 0 && newland == 0)
-                            world.setnomfloat(i, j, ave);
-                    }
-                }
-            }
-        }
+        if (ave > 0 && ave < maxelev && wholemetres(ave) <= sealevel) // The new value must stay sea.
+            world.setnomfloat(c, ave);
     }
 }
 
@@ -185,11 +315,7 @@ void smoothonlysea(planet& world, int amount)
 
 void createextraelev(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
     float gravity = world.gravity();
-
-    vector<vector<int>> tempelev(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
     float maxextra = 1000.0f; // Maximum amount that the extraelev array can have.
 
@@ -197,64 +323,39 @@ void createextraelev(planet& world)
 
     float div = maxelev / (maxextra * 2.0f);
 
-    // First create a fractal for this map.
-
-    int grain = 16; // Level of detail on this fractal map.
-    float valuemod = 0.2f;
-    float valuemod2 = 0.2f;
-
-    createfractal(tempelev, width, height, grain, valuemod, valuemod2, 1, (int)maxelev, 0, 0);
+    // First create a fractal for this map (the sphere noise of the legacy grain-16 fractal, warped).
 
     int warpfactor = random(20, 80);
-    warp(tempelev, width, height, (int)maxelev, warpfactor, 1);
+    const vector<float> base = terrain::spherefractalwarped(world, deterministiccontextseed(world.seed(), canyonbasesalt),
+                                                            terrain::canyonbasefractal(), maxelev, warpfactor);
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
-    {
-        for (int j = startrow; j <= endrow; j++)
-        {
-            for (int i = 0; i <= width; i++)
-            {
-                world.setextraelev(i, j, tempelev[i][j]);
-                tempelev[i][j] = 0;
-            }
-        }
-    });
-
-    int v = random(3, 6);
-    valuemod2 = (float)v;
-
-    createfractal(tempelev, width, height, grain, valuemod, valuemod2, 1, (int)maxelev, 0, 0);
+    forcells(world, [&](mesh::CellId c) { world.setextraelev(c, base[c]); });
 
     warpfactor = random(20, 80);
-    warp(tempelev, width, height, (int)maxelev, warpfactor, 1);
+    const vector<float> mask = terrain::spherefractalwarped(world, deterministiccontextseed(world.seed(), canyonmasksalt),
+                                                            terrain::canyonmaskfractal(), maxelev, warpfactor);
 
     // Now alter it a bit.
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    forcells(world, [&](mesh::CellId c)
     {
-        for (int j = startrow; j <= endrow; j++)
+        if (world.sea(c) == 1)
+            world.setextraelev(c, 0);
+        else
         {
-            for (int i = 0; i <= width; i++)
-            {
-                if (world.sea(i, j) == 1)
-                    world.setextraelev(i, j, 0);
-                else
-                {
-                    float e = world.extraelevfloat(i, j);
-                    e = e / div;
-                    e = e - maxextra;
+            float e = world.extraelevfloat(c);
+            e = e / div;
+            e = e - maxextra;
 
-                    if (e < 0.0f)
-                        e = 0.0f;
+            if (e < 0.0f)
+                e = 0.0f;
 
-                    if (e > maxextra)
-                        e = maxextra;
+            if (e > maxextra)
+                e = maxextra;
 
-                    e = e * gravity;
+            e = e * gravity;
 
-                    world.setextraelev(i, j, e);
-                }
-            }
+            world.setextraelev(c, e);
         }
     });
 
@@ -264,34 +365,28 @@ void createextraelev(planet& world)
     float multfactor = (float)random(1, 10);
     multfactor = multfactor / 10.0f + 1.0f; // Different worlds will have different amounts of extra elevation.
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    forcells(world, [&](mesh::CellId c)
     {
-        for (int j = startrow; j <= endrow; j++)
+        if (world.sea(c) == 0)
         {
-            for (int i = 0; i <= width; i++)
-            {
-                if (world.sea(i, j) == 0)
-                {
-                    float e = (float)tempelev[i][j];
-                    e = e / div;
-                    e = e - maxextra;
+            float e = mask[c];
+            e = e / div;
+            e = e - maxextra;
 
-                    e = e * multfactor; // The higher this is, the more widespread the extra elevation will be.
+            e = e * multfactor; // The higher this is, the more widespread the extra elevation will be.
 
-                    if (e < 0.0f)
-                        e = 0.0f;
+            if (e < 0.0f)
+                e = 0.0f;
 
-                    if (e < world.extraelevfloat(i, j))
-                        world.setextraelev(i, j, e);
-                }
-            }
+            if (e < world.extraelevfloat(c))
+                world.setextraelev(c, e);
         }
     });
 
-    // Now smooth it
+    // Now smooth it over discs of 2 and 5 legacy pixels.
 
-    world.smoothextraelev(2);
-    world.smoothextraelev(5);
+    smoothoverland(world, 2, &planet::extraelevfloat, &planet::setextraelev);
+    smoothoverland(world, 5, &planet::extraelevfloat, &planet::setextraelev);
 }
 
 namespace

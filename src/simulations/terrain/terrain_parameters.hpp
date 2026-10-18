@@ -57,6 +57,38 @@ namespace texturing
 inline float landScale = 0.1f;
 }
 
+namespace sphere_noise
+{
+inline int legacyColumns = 2048;
+inline float shortestKm = 39.0f;
+inline float terrainFractalWavelengthKm = 5000.0f;
+inline float terrainFractalPersistence = 0.5f;
+inline float terrainFractalMean = 0.358f;
+inline float terrainFractalDeviation = 0.173f;
+inline float smoothingWavelengthKm = 5000.0f;
+inline float smoothingPersistence = 0.5f;
+inline float canyonBaseWavelengthKm = 1250.0f;
+inline float canyonBasePersistence = 0.6f;
+inline float canyonBaseMean = 0.423f;
+inline float canyonBaseDeviation = 0.252f;
+inline float canyonMaskWavelengthKm = 2500.0f;
+inline float canyonMaskPersistence = 0.5f;
+inline float canyonMaskMean = 0.344f;
+inline float canyonMaskDeviation = 0.138f;
+inline float archipelagoWavelengthKm = 3500.0f;
+inline float archipelagoPersistence = 0.5f;
+inline float archipelagoMean = 0.408f;
+inline float archipelagoDeviation = 0.224f;
+inline float warpWavelengthKm = 5000.0f;
+inline float warpPersistence = 0.5f;
+inline float warpMean = 0.358f;
+inline float warpDeviation = 0.173f;
+inline float warpVaryWavelengthKm = 10000.0f;
+inline float warpVaryPersistence = 0.5f;
+inline float warpVaryMean = 0.335f;
+inline float warpVaryDeviation = 0.109f;
+}
+
 namespace subgrid
 {
 inline float spacingCoefficient = 8.0f;
@@ -108,6 +140,34 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "terrain.oceanridges.fault_variation", &oceanridges::faultVariation },
         { "terrain.oceanridges.fault_look_distance", &oceanridges::faultLookDistance },
         { "terrain.texturing.land_scale", &texturing::landScale },
+        { "terrain.sphere_noise.legacy_columns", &sphere_noise::legacyColumns },
+        { "terrain.sphere_noise.shortest_km", &sphere_noise::shortestKm },
+        { "terrain.sphere_noise.terrain_fractal_wavelength_km", &sphere_noise::terrainFractalWavelengthKm },
+        { "terrain.sphere_noise.terrain_fractal_persistence", &sphere_noise::terrainFractalPersistence },
+        { "terrain.sphere_noise.terrain_fractal_mean", &sphere_noise::terrainFractalMean },
+        { "terrain.sphere_noise.terrain_fractal_deviation", &sphere_noise::terrainFractalDeviation },
+        { "terrain.sphere_noise.smoothing_wavelength_km", &sphere_noise::smoothingWavelengthKm },
+        { "terrain.sphere_noise.smoothing_persistence", &sphere_noise::smoothingPersistence },
+        { "terrain.sphere_noise.canyon_base_wavelength_km", &sphere_noise::canyonBaseWavelengthKm },
+        { "terrain.sphere_noise.canyon_base_persistence", &sphere_noise::canyonBasePersistence },
+        { "terrain.sphere_noise.canyon_base_mean", &sphere_noise::canyonBaseMean },
+        { "terrain.sphere_noise.canyon_base_deviation", &sphere_noise::canyonBaseDeviation },
+        { "terrain.sphere_noise.canyon_mask_wavelength_km", &sphere_noise::canyonMaskWavelengthKm },
+        { "terrain.sphere_noise.canyon_mask_persistence", &sphere_noise::canyonMaskPersistence },
+        { "terrain.sphere_noise.canyon_mask_mean", &sphere_noise::canyonMaskMean },
+        { "terrain.sphere_noise.canyon_mask_deviation", &sphere_noise::canyonMaskDeviation },
+        { "terrain.sphere_noise.archipelago_wavelength_km", &sphere_noise::archipelagoWavelengthKm },
+        { "terrain.sphere_noise.archipelago_persistence", &sphere_noise::archipelagoPersistence },
+        { "terrain.sphere_noise.archipelago_mean", &sphere_noise::archipelagoMean },
+        { "terrain.sphere_noise.archipelago_deviation", &sphere_noise::archipelagoDeviation },
+        { "terrain.sphere_noise.warp_wavelength_km", &sphere_noise::warpWavelengthKm },
+        { "terrain.sphere_noise.warp_persistence", &sphere_noise::warpPersistence },
+        { "terrain.sphere_noise.warp_mean", &sphere_noise::warpMean },
+        { "terrain.sphere_noise.warp_deviation", &sphere_noise::warpDeviation },
+        { "terrain.sphere_noise.warp_vary_wavelength_km", &sphere_noise::warpVaryWavelengthKm },
+        { "terrain.sphere_noise.warp_vary_persistence", &sphere_noise::warpVaryPersistence },
+        { "terrain.sphere_noise.warp_vary_mean", &sphere_noise::warpVaryMean },
+        { "terrain.sphere_noise.warp_vary_deviation", &sphere_noise::warpVaryDeviation },
         { "terrain.subgrid.spacing_coefficient", &subgrid::spacingCoefficient },
         { "terrain.subgrid.reference_d_over_k", &subgrid::referenceDOverK },
         { "terrain.subgrid.reference_m", &subgrid::referenceM },

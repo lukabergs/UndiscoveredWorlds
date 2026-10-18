@@ -1,7 +1,9 @@
 // Isolated volcanoes and mountainous islands.
-// Algorithms by Jonathan Hill, extracted from globalterrain.cpp.
+// Algorithms by Jonathan Hill, extracted from globalterrain.cpp; on the cell grid
+// (docs/architecture/sphere-mesh.md sections 3 and 12) since T8 W2-T1.
 
 #include "simulations/terrain/terrain_internal.hpp"
+#include "simulations/terrain/terrain_volcanoes.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,17 +11,63 @@
 #include <queue>
 
 #include "core/classes.hpp"
+#include "core/grid_shapes.hpp"
+#include "core/mesh/cell_grid.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
+#include "simulations/terrain/terrain_ridges.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
 using namespace std;
 
+namespace
+{
+// The neighbour slot of a step of dx columns east and dy rows south (each -1, 0 or 1; not both 0).
+int stepslot(int dx, int dy)
+{
+    if (dy < 0)
+        return dx < 0 ? 8 : (dx == 0 ? 1 : 2);
+    if (dy > 0)
+        return dx < 0 ? 6 : (dx == 0 ? 5 : 4);
+    return dx < 0 ? 7 : 3;
+}
+
+// Marks a cell and its eight neighbours.
+template <typename Fn>
+void forbox(const planet& world, mesh::CellId c, Fn&& fn)
+{
+    for (const int slot : boxslots)
+    {
+        const std::int32_t n = slot == 0 ? static_cast<std::int32_t>(c) : world.grid().neighbour(c, slot);
+        if (n >= 0)
+            fn(static_cast<mesh::CellId>(n));
+    }
+}
+
+// Whether a continental-shelf cell lies within the shelf check of five legacy pixels.
+bool nearshelf(const planet& world, mesh::CellId c, const worldgrid<bool>& shelves)
+{
+    const int shelfcheck = 5;
+    for (const mesh::CellId n : terrain::cellswithinkm(world, c, (shelfcheck + 0.5) * terrain::legacycellkm(world)))
+    {
+        if (shelves[n] == 1)
+            return true;
+    }
+    return false;
+}
+}
+
 // This makes a small, mountainous island.
 
 void terrain::detail::makemountainisland(planet& world, int x, int y, float peakheight)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellId c = world.grid().cellof(x, y);
+    if (c != mesh::nocell)
+        terrain::makemountainisland(world, c, peakheight);
+}
+
+void terrain::makemountainisland(planet& world, mesh::CellId c, float peakheight)
+{
     int sealevel = world.sealevel();
 
     int iterations = random(1, 3);
@@ -28,88 +76,54 @@ void terrain::detail::makemountainisland(planet& world, int x, int y, float peak
     {
         int landheight = sealevel + random(5, 50);
 
-        int xx = x;
-        int yy = y;
+        int dx = 0;
+        int dy = 0;
 
         do
         {
-            xx = x - 2 + random(1, 3);
-            yy = y - 2 + random(1, 3);
+            dx = -2 + random(1, 3);
+            dy = -2 + random(1, 3);
 
-        } while (x == xx && y == yy);
+        } while (dx == 0 && dy == 0);
 
-        if (yy<0 || yy>height)
+        const int dir = stepslot(dx, dy);
+        const std::int32_t neighbour = world.grid().neighbour(c, dir);
+
+        if (neighbour < 0)
             return;
 
-        if (xx<0 || xx>width)
-            xx = wrap(xx, width);
+        const mesh::CellId next = static_cast<mesh::CellId>(neighbour);
 
-        if (world.mountainheightfloat(x, y) < peakheight)
-            world.setmountainheight(x, y, peakheight);
+        if (world.mountainheightfloat(c) < peakheight)
+            world.setmountainheight(c, peakheight);
 
-        if (world.mountainheightfloat(xx, yy) < peakheight)
-            world.setmountainheight(xx, yy, peakheight);
+        if (world.mountainheightfloat(next) < peakheight)
+            world.setmountainheight(next, peakheight);
 
-        for (int i = x - 1; i <= x + 1; i++) // Mark it all out as mountain islands!
+        // Mark it all out as mountain islands!
+        forbox(world, c, [&](mesh::CellId m) { world.setmountainisland(m, 1); });
+        forbox(world, next, [&](mesh::CellId m) { world.setmountainisland(m, 1); });
+
+        if (world.nomfloat(c) < landheight)
+            world.setnomfloat(c, static_cast<float>(landheight));
+
+        if (world.nomfloat(next) < landheight)
+            world.setnomfloat(next, static_cast<float>(landheight));
+
+        // If there isn't a ridge between them, make one. The legacy code gives the neighbour the
+        // same direction code (dir + 8, less 8), not the reverse; kept as it was.
+
+        if (getridge(world, c, dir) == 0)
         {
-            int ii = i;
+            const int code = terrain::detail::getcode(dir);
 
-            if (ii<0 || ii>width)
-                ii = wrap(ii, width);
-
-            for (int j = y - 1; j <= y + 1; j++)
-            {
-                if (j >= 0 && j <= height)
-                    world.setmountainisland(i, j, 1);
-            }
+            world.setmountainridge(c, world.mountainridge(c) + code);
+            world.setmountainridge(next, world.mountainridge(next) + code);
         }
 
-        for (int i = xx - 1; i <= xx + 1; i++)
-        {
-            int ii = i;
+        c = next;
 
-            if (ii<0 || ii>width)
-                ii = wrap(ii, width);
-
-            for (int j = yy - 1; j <= yy + 1; j++)
-            {
-                if (j >= 0 && j <= height)
-                    world.setmountainisland(i, j, 1);
-            }
-        }
-
-        if (world.nomfloat(x, y) < landheight)
-            world.setnomfloat(x, y, landheight);
-
-        if (world.nomfloat(xx, yy) < landheight)
-            world.setnomfloat(xx, yy, landheight);
-
-        // If there isn't a ridge between them, make one.
-
-        int dir = getdir(x, y, xx, yy);
-
-        if (getridge(world, x, y, dir) == 0)
-        {
-            int code = terrain::detail::getcode(dir);
-
-            world.setmountainridge(x, y, world.mountainridge(x, y) + code);
-
-            dir = dir + 8;
-
-            if (dir > 8)
-                dir = dir - 8;
-
-            code = terrain::detail::getcode(dir);
-
-            world.setmountainridge(xx, yy, world.mountainridge(xx, yy) + code);
-        }
-
-        //world.settest(x,y,1);
-
-        x = xx;
-        y = yy;
-
-        peakheight = peakheight + randomsign(random(peakheight / 4, peakheight / 2));
+        peakheight = peakheight + randomsign(random((int)peakheight / 4, (int)peakheight / 2));
     }
 }
 
@@ -117,35 +131,39 @@ void terrain::detail::makemountainisland(planet& world, int x, int y, float peak
 
 void createisolatedvolcano(planet& world, int x, int y, worldgrid<bool>& shelves, vector<vector<int>>& volcanodirection, int peakheight, bool strato)
 {
-    int width = world.width();
-    int height = world.height();
-    int sealevel = world.sealevel();
+    // The legacy direction grid: column x for the east shift, column x + width / 2 for the north shift.
+    const mesh::CellGrid& grid = world.grid();
+    const mesh::CellId c = grid.cellof(x, y);
+    if (c == mesh::nocell)
+        return;
+    const int width = world.width();
+    vector<float> eastdirection(world.cellcount()), northdirection(world.cellcount());
+    for (mesh::CellId cell = 0; cell < world.cellcount(); cell++)
+    {
+        const int column = grid.column(cell);
+        const int row = grid.row(cell);
+        int other = column + width / 2;
+        if (other > width)
+            other = other - width;
+        eastdirection[cell] = static_cast<float>(volcanodirection[column][row]);
+        northdirection[cell] = static_cast<float>(volcanodirection[other][row]);
+    }
+    terrain::createisolatedvolcano(world, c, shelves, eastdirection, northdirection, peakheight, strato);
+}
+
+void terrain::createisolatedvolcano(planet& world, mesh::CellId c, const worldgrid<bool>& shelves,
+                                    const vector<float>& eastdirection, const vector<float>& northdirection,
+                                    int peakheight, bool strato)
+{
     int maxelev = world.maxelevation();
 
     float maxshift = 6;
     float shiftdiv = maxshift / (maxelev / 2);
 
-    int shelfcheck = 5;
+    const double pixel_km = terrain::legacycellkm(world);
 
-    if (world.sea(x, y) == 1) // Don't do any submarine volcanoes near continental shelves.
-    {
-        for (int i = x - shelfcheck; i <= x + shelfcheck; i++)
-        {
-            int ii = i;
-
-            if (ii<0 || ii>width)
-                ii = wrap(ii, width);
-
-            for (int j = y - shelfcheck; j <= y + shelfcheck; j++)
-            {
-                if (j >= 0 && j <= height)
-                {
-                    if (shelves[ii][j] == 1)
-                        return;
-                }
-            }
-        }
-    }
+    if (world.sea(c) == 1 && nearshelf(world, c, shelves)) // Don't do any submarine volcanoes near continental shelves.
+        return;
 
     bool active = 1;
 
@@ -153,22 +171,8 @@ void createisolatedvolcano(planet& world, int x, int y, worldgrid<bool>& shelves
 
     for (int n = 1; n != total; n++)
     {
-        if (world.sea(x, y) == 1)
-        {
-            for (int i = x - 1; i <= x + 1; i++) // No shading around undersea volcanoes.
-            {
-                int ii = i;
-
-                if (ii<0 || ii>width)
-                    ii = wrap(ii, width);
-
-                for (int j = y - 1; j <= y + 1; j++)
-                {
-                    if (j >= 0 && j <= height)
-                        world.setnoshade(i, j, 1);
-                }
-            }
-        }
+        if (world.sea(c) == 1) // No shading around undersea volcanoes.
+            forbox(world, c, [&](mesh::CellId m) { world.setnoshade(m, 1); });
 
         float thispeakheight = (float)peakheight;
 
@@ -179,67 +183,24 @@ void createisolatedvolcano(planet& world, int x, int y, worldgrid<bool>& shelves
         if (active == 0)
             thispeakheight = (float)(0 - peakheight);
 
-        for (int i = x - 1; i <= x + 1; i++) // Remove any volcanoes immediately around
-        {
-            int ii = i;
+        // Remove any volcanoes immediately around.
+        forbox(world, c, [&](mesh::CellId m) { world.setvolcano(m, 0); });
 
-            if (ii<0 || ii>width)
-                ii = wrap(ii, width);
-
-            for (int j = y - 1; j <= y + 1; j++)
-            {
-                if (j >= 0 && j <= height)
-                {
-                    world.setvolcano(ii, j, 0);
-                    //world.settest(ii,j,0);
-                }
-            }
-        }
-
-        world.setvolcano(x, y, thispeakheight);
-        world.setstrato(x, y, strato);
+        world.setvolcano(c, thispeakheight);
+        world.setstrato(c, strato);
 
         active = 0;
 
-        int xx = x + width / 2;
-
-        if (xx > width)
-            xx = xx - width;
-
-        float xshift = (float)(volcanodirection[x][y] - maxelev / 2);
-        float yshift = (float)(volcanodirection[xx][y] - maxelev / 2);
+        float xshift = eastdirection[c] - (float)(maxelev / 2);
+        float yshift = northdirection[c] - (float)(maxelev / 2);
 
         xshift = xshift * shiftdiv + (float)randomsign(random(0, 2));
         yshift = yshift * shiftdiv + (float)randomsign(random(0, 2));
 
-        x = x + (int)xshift;
+        // Whole legacy pixels east and south, as the legacy (x, y) step.
+        c = terrain::movedcell(world, c, static_cast<double>((int)xshift) * pixel_km, -static_cast<double>((int)yshift) * pixel_km);
 
-        if (x<0 || x>width)
-            x = wrap(x, width);
-
-        y = y + (int)yshift;
-
-        if (y<0 || y>height)
+        if (world.sea(c) == 1 && nearshelf(world, c, shelves)) // Don't do any submarine volcanoes near continental shelves.
             return;
-
-        if (world.sea(x, y) == 1) // Don't do any submarine volcanoes near continental shelves.
-        {
-            for (int i = x - shelfcheck; i <= x + shelfcheck; i++)
-            {
-                int ii = i;
-
-                if (ii<0 || ii>width)
-                    ii = wrap(ii, width);
-
-                for (int j = y - shelfcheck; j <= y + shelfcheck; j++)
-                {
-                    if (j >= 0 && j <= height)
-                    {
-                        if (shelves[ii][j] == 1)
-                            return;
-                    }
-                }
-            }
-        }
     }
 }

@@ -9,6 +9,12 @@
 #include <queue>
 
 #include "core/classes.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/grid_shapes.hpp"
+#include "core/mesh/cell_grid.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
+#include "simulations/terrain/terrain_shapes.hpp"
+#include "simulations/terrain/terrain_volcanoes.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
@@ -16,6 +22,9 @@ using namespace std;
 
 namespace
 {
+// Salt of the archipelagos' sphere noise (it replaces a fractal drawn from the stage's stream).
+constexpr int archipelagosalt = 0x5304;
+
 void drawshape(planet& world, int shapenumber, int centrex, int centrey, bool land, int baseheight, int conheight, boolshapetemplate shape[]);
 void drawplateaushape(planet& world, int shapenumber, int centrex, int centrey, int baseheight, int platheight, std::vector<std::vector<int>>& plateaumap, boolshapetemplate chainland[]);
 }
@@ -904,88 +913,72 @@ void fractaladdland(planet& world, vector<vector<int>>& fractal)
 
 void makearchipelagos(planet& world, vector<vector<bool>>& removedland, boolshapetemplate landshape[])
 {
-    int width = world.width();
-    int height = world.height();
-    int sealevel = world.sealevel();
-    int maxelev = world.maxelevation();
-    int conheight = sealevel + 50;
-
-    int baseheight = sealevel - 4500;
-    if (baseheight < 1)
-        baseheight = 1;
-
-    int grain = 8; // This is a fractal, for the islands
-    float valuemod = 0.05f;
-    float valuemod2 = valuemod;
-
-    vector<vector<int>> islandfractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    createfractal(islandfractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    for (int i = 0; i <= width; i++)
+    const mesh::CellGrid& grid = world.grid();
+    vector<std::uint8_t> removed(world.cellcount(), 0);
+    if (grid.kind() == mesh::GridKind::latlon)
     {
-        for (int j = 0; j <= height; j++)
+        for (mesh::CellId c = 0; c < world.cellcount(); c++)
+            removed[c] = removedland[grid.column(c)][grid.row(c)] ? 1 : 0;
+    }
+    terrain::makearchipelagos(world, removed, landshape);
+}
+
+void terrain::makearchipelagos(planet& world, const vector<std::uint8_t>& removedland, boolshapetemplate landshape[])
+{
+    int maxelev = world.maxelevation();
+
+    // Two sphere noises for the islands (the legacy grain-8 fractal, and its value half a turn
+    // of longitude away, which acted as a second, independent one).
+    const std::uint64_t seed = deterministiccontextseed(world.seed(), archipelagosalt);
+    const vector<float> islandfractal = terrain::spherefractal(world, seed, terrain::archipelagofractal(), static_cast<float>(maxelev));
+    const vector<float> otherfractal =
+        terrain::spherefractal(world, deterministiccombine(seed, 1), terrain::archipelagofractal(), static_cast<float>(maxelev));
+
+    const vector<mesh::CellId> cells = columnmajorcells(world.grid());
+
+    for (const mesh::CellId c : cells)
+    {
+        int thisrandom = random(1, maxelev * 100);
+        (void)thisrandom;
+
+        int islandchance = 0;
+
+        if (islandfractal[c] < maxelev / 5)
+            islandchance = 70;
+
+        if (islandfractal[c] < maxelev / 6)
+            islandchance = 40;
+
+        if (islandfractal[c] < maxelev / 7)
+            islandchance = 30;
+
+        if (islandchance != 0 && otherfractal[c] > maxelev / 3 && removedland[c] == 1 && world.sea(c) == 1 && random(1, islandchance) == 1) // Put an island here.
         {
-            int thisrandom = random(1, maxelev * 100);
-
-            int islandchance = 0;
-
-            if (islandfractal[i][j] < maxelev / 5)
-                islandchance = 70;
-
-            if (islandfractal[i][j] < maxelev / 6)
-                islandchance = 40;
-
-            if (islandfractal[i][j] < maxelev / 7)
-                islandchance = 30;
-
-            int ii = i + width / 2;
-
-            if (ii > width)
-                ii = ii - width;
-
-            if (islandchance != 0 && islandfractal[ii][j] > maxelev / 3 && removedland[i][j] == 1 && world.sea(i, j) == 1 && random(1, islandchance) == 1) // Put an island here.
-            {
-                int peakheight = random(500, 3000);
-                terrain::detail::makemountainisland(world, i, j, peakheight);
-            }
+            int peakheight = random(500, 3000);
+            terrain::makemountainisland(world, c, static_cast<float>(peakheight));
         }
     }
 
-    int amount = 2; // No mountain islands this close to existing land (at least not marked as such).
+    // No mountain islands within two legacy pixels of existing land (at least not marked as such).
+    const double radius_km = 2.5 * terrain::legacycellkm(world);
 
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : cells)
     {
-        for (int j = 0; j <= height; j++)
+        if (world.mountainisland(c) == 1)
         {
-            if (world.mountainisland(i, j) == 1)
+            bool nearland = 0;
+
+            for (const mesh::CellId n : terrain::cellswithinkm(world, c, radius_km))
             {
-                bool nearland = 0;
-
-                for (int k = i - amount; k <= i + amount; k++)
+                if (world.sea(n) == 0 && world.mountainisland(n) == 0)
                 {
-                    int kk = k;
-
-                    if (kk<0 || kk>width)
-                        kk = wrap(kk, width);
-
-                    for (int l = j - amount; l <= j + amount; l++)
-                    {
-                        if (l >= 0 && l <= height)
-                        {
-                            if (world.sea(kk, l) == 0 && world.mountainisland(kk, l) == 0)
-                            {
-                                nearland = 1;
-                                k = i + amount;
-                                l = j + amount;
-                            }
-                        }
-                    }
+                    nearland = 1;
+                    break;
                 }
-
-                if (nearland == 1)
-                    world.setmountainisland(i, j, 0);
             }
+
+            if (nearland == 1)
+                world.setmountainisland(c, 0);
         }
     }
 }
