@@ -226,6 +226,14 @@ About 22 h of agent time over four sessions (T8.0-T8.2; T8.3-T8.4; T8.5-T8.6 wit
 
 **Questions for the user (they block the code, not the design).** (1) Approve (b) with the cubed sphere? (2) The engine's public header and scenario keys change (`WorldGrid` replaced by the sampler; `world_width_km` gone, `sphere_face_cells` new), and `tectonic-output-contract.md`'s "native cells" become cube cells published on the lat-lon grid; the bundle format, `.uww` and windows stay as they are. (3) Replace the torus in place without a switch back. (4) Allow one W3 re-tuning round in T8.7 if the gates with true areas fail.
 
+**The user's decision (2026-10-18, after reading the design): option (c)**, "to avoid accumulating technical debt", with subagents working in parallel. Estimate in agent units (not measured): 80 to 150 h of agent work, one to two weeks of sessions with eight to ten parallel workers. What stays serial: the foundation (mesh storage replacing `planet`'s `[x][y]` arrays, the table-driven neighbour and metric interface, the bundle's grid layout and cell table, the mesh-to-lat-lon remap, windows on the mesh), the engine, integration and per-module recalibration against Earth data (every module's results change, so parity cannot confirm the port), and the user's looks. The cubed sphere stays the mesh unless the foundation design finds a blocker. Order:
+- **W0, foundation design** (orchestrator with surveyors). It needs the user's yes, because it changes the public contract and save format: the bundle grid layout, windows, `.uww`, the resolution mapping (today's `--resolution` W to N cells per face) and the fate of the legacy regional map and the desktop (a lat-lon export is the default proposal).
+- **W1, foundation code**: the core mesh, the remap, field storage, bundle v2 in C++ and `uwtools`, and a frozen interface document.
+- **W2, a parallel wave by module**: the engine (T8.0 to T8.7 above, on the core mesh; T8.6 becomes the engine writing mesh fields directly); the landscape kernels; terrain stages and noise; hydrology; society; a climate adapter; the sandbox; evaluation and Earth references; io, the desktop export and a legacy-regional adapter; the refinement hierarchy and windows.
+- **W3**: integration, recalibration, the new base world and the user's looks.
+
+Questions 2 and 3 are answered by (c): the interfaces change, and no torus is kept. Question 4 (one W3 re-tuning round) is still open.
+
 **Unrelated findings (reported, not fixed).** `planet::wrapx` adds or subtracts `itswidth` (W - 1, the last index), so x = W maps to 1 (`src/world/planet.cpp:2197-2210`; society's `wrapxlocal` wraps by W; reach in practice unchecked). `planet::latitude` is node-centred (row 0 at 90 degrees), half a cell off the cell-centred grid (`planet.cpp:474-515`; called only from `src/app`). The sandbox's `make_domains` would give a negative width to a box across the date line (inferred, no current box crosses).
 
 ## 4. Order
