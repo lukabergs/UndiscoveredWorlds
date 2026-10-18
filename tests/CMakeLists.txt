@@ -88,6 +88,15 @@ if(TARGET world_pipeline)
     target_include_directories(planet_grid_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(planet_grid_tests)
 
+    # The coast, shelf, ocean-feature, arid-landform and import terrain functions on a cube
+    # planet (sphere-mesh.md section 12, T8 W2-T2).
+    add_executable(terrain_cube_coast_tests
+        simulations/terrain/terrain_cube_coast_tests.cpp
+    )
+    target_link_libraries(terrain_cube_coast_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(terrain_cube_coast_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(terrain_cube_coast_tests)
+
     # Bundle v2 and the lat-lon export of a world (sphere-mesh.md sections 6 and 7).
     add_executable(bundle_v2_tests
         io/bundle_v2_tests.cpp

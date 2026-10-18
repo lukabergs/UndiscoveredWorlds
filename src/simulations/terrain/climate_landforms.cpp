@@ -1,3 +1,9 @@
+// Climate-driven dunes, salt pans and surface roughness.
+// On the cell grid since T8 W2-T2 (docs/architecture/sphere-mesh.md sections 3, 4 and 11): the
+// lat-lon grid keeps the legacy pixel forms of the ergs and salt pans; every other grid draws
+// them on the sphere (positions by area, templates through the tangent frame, distances in
+// legacy pixels of km, chances per pixel area).
+
 #include <algorithm>
 #include <cmath>
 #include <mutex>
@@ -8,127 +14,82 @@
 #include "world/planet.hpp"
 #include "world/functions.hpp"
 #include "simulations/terrain/climate_landforms.hpp"
+#include "simulations/terrain/terrain_coasts.hpp"
 #include "simulations/hydrology/lakes.hpp"
 
 using namespace std;
+using mesh::CellId;
+namespace cg = terrain::coastgrid;
 
 namespace
 {
-void checkergelevation(planet& world);
-float lowestergelevation(planet& world, int startx, int starty, vector<vector<bool>>& thiserg);
-void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, int lakeno, vector<vector<int>>& thislake, boolshapetemplate laketemplate[], bool canoverlap, int special);
-
-// This ensures that the elevation of each erg remains constant.
+// This ensures that the elevation of each erg remains constant: each 4-connected group of erg
+// cells (special 120) takes its lowest base elevation (at least 2 and above sea level) as its
+// surface. The legacy flood never entered the last row; neither does it here on lat-lon.
 
 void checkergelevation(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
+    const size_t count = grid.cellcount();
     int sealevel = world.sealevel();
 
-    vector<vector<bool>> checked(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
+    vector<char> checked(count, 0);
+    vector<char> thiserg(count, 0);
+    vector<CellId> erg;
 
-    for (int i = 0; i <= width; i++)
+    for (const CellId start : cg::columnorder(grid))
     {
-        for (int j = 0; j <= height; j++)
+        if (world.special(start) != 120 || checked[start] != 0)
+            continue;
+
+        // First, find the lowest elevation within this erg.
+
+        float lowestelev = 1000000.0f;
+        erg.clear();
+        queue<CellId> q;
+        q.push(start);
+        thiserg[start] = 1;
+
+        while (!q.empty())
         {
-            if (world.special(i, j) == 120 && checked[i][j] == 0)
+            const CellId c = q.front();
+            q.pop();
+            erg.push_back(c);
+            lowestelev = min(lowestelev, world.nomfloat(c));
+
+            for (int slot = 1; slot <= mesh::slotcount; slot += 2)
             {
-                vector<vector<bool>> thiserg(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0));
-                
-                // First, find the lowest elevation within this erg.
-
-                float lowestelev = lowestergelevation(world, i, j, thiserg);
-
-                if (lowestelev < 2)
-                    lowestelev = 2;
-
-                if (lowestelev <= sealevel)
-                    lowestelev = sealevel + 1;
-
-                // Now apply that to the whole erg.
-
-                for (int k = 0; k <= width; k++)
+                const std::int32_t n = grid.neighbour(c, slot);
+                if (n < 0 || grid.neighbour(static_cast<CellId>(n), 5) < 0)
+                    continue;
+                if (world.special(static_cast<CellId>(n)) == 120 && thiserg[n] == 0) // If this node is erg
                 {
-                    for (int l = 0; l <= height; l++)
-                    {
-                        if (thiserg[k][l] == 1)
-                        {
-                            checked[k][l] = 1;
-                            world.setlakesurface(k, l, wholemetres(lowestelev));
-                        }
-                    }
+                    thiserg[n] = 1;
+                    q.push(static_cast<CellId>(n));
                 }
             }
         }
-    }
-}
 
-// This finds the lowest elevation in an erg.
+        if (lowestelev < 2)
+            lowestelev = 2;
 
-float lowestergelevation(planet& world, int startx, int starty, vector<vector<bool>>& thiserg)
-{
-    int width = world.width();
-    int height = world.height();
+        if (lowestelev <= sealevel)
+            lowestelev = sealevel + 1;
 
-    float lowest = 1000000.0f;
+        // Now apply that to the whole erg.
 
-    int row[] = { -1,0,0,1 };
-    int col[] = { 0,-1,1,0 };
-
-    twointegers node;
-
-    node.x = startx;
-    node.y = starty;
-
-    queue<twointegers> q; // Create a queue
-    q.push(node); // Put our starting node into the queue
-
-    while (q.empty() != 1) // Keep going while there's anything left in the queue
-    {
-        node = q.front(); // Take the node at the front of the queue
-        q.pop(); // And then pop it out of the queue
-
-        if (node.x >= 0 && node.x <= width && node.y >= 0 && node.y <= height && world.special(node.x, node.y) == 120)
+        for (const CellId c : erg)
         {
-            float thiselev = world.nomfloat(node.x, node.y);
-
-            if (thiselev < lowest)
-                lowest = thiselev;
-
-            thiserg[node.x][node.y] = 1;
-
-            for (int k = 0; k < 4; k++) // Look at the four neighbouring nodes in turn
-            {
-                twointegers nextnode;
-
-                nextnode.x = node.x + row[k];
-                nextnode.y = node.y + col[k];
-
-                if (nextnode.x > width)
-                    nextnode.x = 0;
-
-                if (nextnode.x < 0)
-                    nextnode.x = width;
-
-                if (nextnode.y >= 0 && nextnode.y < height)
-                {
-                    if (world.special(nextnode.x, nextnode.y) == 120 && thiserg[nextnode.x][nextnode.y] == 0) // If this node is erg
-                    {
-                        thiserg[nextnode.x][nextnode.y] = 1;
-                        q.push(nextnode); // Put that node onto the queue
-                    }
-                }
-            }
+            thiserg[c] = 0;
+            checked[c] = 1;
+            world.setlakesurface(c, static_cast<float>(wholemetres(lowestelev)));
         }
     }
-
-    return lowest;
 }
 
 // Puts a lake template onto the lakemap, but as a "special", e.g. salt pans etc.
 
-void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, int lakeno, vector<vector<int>>& thislake, boolshapetemplate laketemplate[], bool canoverlap, int special)
+void latlondrawspeciallake(planet& world, int shapenumber, int centrex, int centrey, int lakeno, vector<vector<int>>& thislake, boolshapetemplate laketemplate[], bool canoverlap, int special)
 {
     int width = world.width();
     int height = world.height();
@@ -351,11 +312,10 @@ void drawspeciallake(planet& world, int shapenumber, int centrex, int centrey, i
 
     makelakestartpoint(world, thislake, lakeno, leftx, lefty, rightx, righty);
 }
-}
 
 // This function puts ergs in deserts.
 
-void createergs(planet& world, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate shape[])
+void latloncreateergs(planet& world, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate shape[])
 {
     int width = world.width();
     int height = world.height();
@@ -536,7 +496,7 @@ void createergs(planet& world, boolshapetemplate smalllake[], boolshapetemplate 
                         if (random(1, 4) == 1)
                         {
                             shapenumber = random(0, 11);
-                            drawspeciallake(world, shapenumber, i, j, lakeno, thislake, smalllake, canoverlap, 120); // 120 is the code for ergs.
+                            latlondrawspeciallake(world, shapenumber, i, j, lakeno, thislake, smalllake, canoverlap, 120); // 120 is the code for ergs.
 
                         }
                         else
@@ -545,7 +505,7 @@ void createergs(planet& world, boolshapetemplate smalllake[], boolshapetemplate 
                                 shapenumber = random(0, 2);
                             else
                                 shapenumber = random(0, 9);
-                            drawspeciallake(world, shapenumber, i, j, lakeno, thislake, largelake, canoverlap, 120); // 120 is the code for ergs.
+                            latlondrawspeciallake(world, shapenumber, i, j, lakeno, thislake, largelake, canoverlap, 120); // 120 is the code for ergs.
                         }
 
                         lakeno++;
@@ -555,14 +515,11 @@ void createergs(planet& world, boolshapetemplate smalllake[], boolshapetemplate 
         }
     }
 
-    // Some ergs may have overlapped, so now we need to make sure their elevation remains constant.
-
-    checkergelevation(world);
 }
 
 // This function puts salt pans in deserts.
 
-void createsaltpans(planet& world, boolshapetemplate smalllake[], boolshapetemplate largelake[])
+void latloncreatesaltpans(planet& world, boolshapetemplate smalllake[], boolshapetemplate largelake[])
 {
     int width = world.width();
     int height = world.height();
@@ -608,12 +565,12 @@ void createsaltpans(planet& world, boolshapetemplate smalllake[], boolshapetempl
                         if (random(1, 4) != 1)
                         {
                             shapenumber = random(0, 3);
-                            drawspeciallake(world, shapenumber, i, j, lakeno, thislake, smalllake, 0, 110); // 110 is the code for salt pans.
+                            latlondrawspeciallake(world, shapenumber, i, j, lakeno, thislake, smalllake, 0, 110); // 110 is the code for salt pans.
                         }
                         else
                         {
                             shapenumber = random(3, 11);
-                            drawspeciallake(world, shapenumber, i, j, lakeno, thislake, smalllake, 0, 110); // 110 is the code for salt pans.
+                            latlondrawspeciallake(world, shapenumber, i, j, lakeno, thislake, smalllake, 0, 110); // 110 is the code for salt pans.
                         }
 
                         lakeno++;
@@ -624,235 +581,326 @@ void createsaltpans(planet& world, boolshapetemplate smalllake[], boolshapetempl
     }
 }
 
-// This refines the roughness map so that it takes into account more factors, producing a roughness factor that will be used for the fractal terrain in the regional map.
-
-void refineroughnessmap(planet& world)
+// The start point of a special lake on the regional map (makelakestartpoint on cells): one of
+// its edge cells (a neighbour of another lake number, or none), drawn as the legacy loop drew it.
+void makelakestartcell(planet& world, const vector<int>& thislake, int lakeno, const vector<CellId>& cells)
 {
-    int width = world.width();
-    int height = world.height();
-    int sealevel = world.sealevel();
-    int maxelev = world.maxelevation();
-    float maxvaluemod = 1.0f; // Maximum that a valuemod can be.
-    float maxcoastalvaluemod = 0.1f; //0.08; // Maximum that it can at the coasts.
-
-    // This array will hold the valuemod for every tile on the map. The valuemod is used in the regional map to determine how rough the diamond-square routine makes the terrain.
-
-    vector<vector<float>> valuemod(ARRAYWIDTH, vector<float>(ARRAYHEIGHT, 0));
-
-    for (int i = 0; i <= width; i++)
+    const mesh::CellGrid& grid = world.grid();
+    vector<CellId> edge;
+    for (const CellId c : cells)
     {
-        for (int j = 0; j <= height; j++)
+        bool onedge = false;
+        for (int slot = 1; slot <= mesh::slotcount && !onedge; slot++)
         {
-            if (world.sea(i, j) == 0)
-            {
-                int eax = i + 1;
-                int eay = j;
-                if (eax > width)
-                    eax = 0;
+            const std::int32_t n = grid.neighbour(c, slot);
+            if (n >= 0 && thislake[n] != lakeno)
+                onedge = true;
+        }
+        if (onedge)
+            edge.push_back(c);
+    }
+    if (edge.empty())
+        return;
 
-                int wex = i - 1;
-                int wey = j;
-                if (wex < 0)
-                    wex = width;
+    std::int32_t startpoint = -1;
+    for (int crount = 0; crount <= 1000 && startpoint < 0; crount++)
+        for (const CellId c : edge)
+            if (random(1, 3) == 1)
+                startpoint = static_cast<std::int32_t>(c);
 
-                int nox = i;
-                int noy = j - 1;
-                if (noy < 0)
-                    noy = 0;
+    if (startpoint >= 0)
+        world.setlakestart(static_cast<CellId>(startpoint), 1);
+}
 
-                int sox = i;
-                int soy = j + 1;
-                if (soy > height)
-                    soy = height;
+// drawspeciallake on the sphere: the template stamped at the cell's centre one legacy pixel per
+// template pixel; the climate, outline and spacing tests within 1 and 4 pixels (in km).
+void spheredrawspeciallake(planet& world, int shapenumber, CellId centre, int lakeno, vector<int>& thislake, boolshapetemplate laketemplate[], bool canoverlap, int special)
+{
+    const mesh::CellGrid& grid = world.grid();
 
-                int sex = eax;
-                int sey = soy;
-                /*
-                int aveheight = (world.nomfloat(i, j) + world.nomfloat(eax, eay) + world.nomfloat(sox, soy) + world.nomfloat(sex, sey)) / 4;
-                */
-                if (world.basebelowsea(i, j) && world.basebelowsea(nox, noy) && world.basebelowsea(sox, soy) && world.basebelowsea(eax, eay) && world.basebelowsea(wex, wey)) // Sea beds will be very smooth.
-                {
-                    float m = 0.08f / (float)maxelev;
-                    float n = world.roughness(i, j);
-                    float extrabit = 0.01f * (float)random(1, 7);
+    if (grid.neighbour(centre, 1) < 0 || grid.neighbour(centre, 5) < 0)
+    {
+        world.setlakesurface(centre, 0.0f);
+        return;
+    }
 
-                    valuemod[i][j] = (m * n) + extrabit;
-                }
-                else // On land, the higher it is, the rougher it is.
-                {
-                    valuemod[i][j] = world.roughness(i, j) / (float)maxelev;
-                    /*
-                    float mult = 3.0f / (float)(maxelev - (sealevel - 50)); // 6.0f
-                    float rough = world.roughness(i, j);
-                    rough = rough / (float)maxelev;
+    const double pixelkm = cg::legacypixelkm(world);
+    const double minlakedistance = 4.0; // Minimum distance between lakes (pixels).
+    int maxmountainlakeheight = 1000; // Ignore mountains smaller than this.
 
-                    valuemod[i][j] = ((float)aveheight - ((float)sealevel - 50.0f)) * mult * rough;
+    const bool leftr = random(0, 1) == 1; // If it's 1 then we reverse it left-right
+    const bool downr = random(0, 1) == 1; // If it's 1 then we reverse it top-bottom
 
-                    // Alter it according to how flat this whole area is
+    const vector<CellId> cells = cg::stamptemplate(world, grid.centre(centre), laketemplate[shapenumber], leftr, downr);
 
-                    float diff = 0.0f;
+    // First, check that the location is clear. Also, get the height of the lowest point in it, and make that the surface height.
 
-                    diff = diff + (float)abs(world.mapfloat(i, j) - world.mapfloat(eax, eay));
-                    diff = diff + (float)abs(world.mapfloat(sox, soy) - world.mapfloat(sex, sey));
-                    diff = diff + (float)abs(world.mapfloat(i, j) - world.mapfloat(sox, soy));
-                    diff = diff + (float)abs(world.mapfloat(eax, eay) - world.mapfloat(sex, sey));
+    float surfaceheight = 1000000000.0f;
 
-                    diff = diff / 20.0f;
+    for (const CellId c : cells)
+    {
+        surfaceheight = min(surfaceheight, world.nomfloat(c));
 
-                    // Alter it according to how mountainous the area is.
+        if (world.sea(c) != 0 || world.mountainheightfloat(c) >= maxmountainlakeheight) // Don't try to put them on top of sea or mountains...
+            return;
 
-                    float mountain = (float)world.mountainheightfloat(i, j);
+        if (special == 110 || special == 120)
+        {
+            for (const CellId n : cg::cellswithinkm(world, grid.centre(c), 1.5 * pixelkm))
+                if (world.climate(n) != 5 || world.riverjan(n) > 0 || world.riverjul(n) > 0)
+                    return; // Don't put lakes onto inappropriate climates.
+        }
 
-                    if (mountain == 0.0f)
-                    {
-                        for (int k = i - 1; k <= i + 1; k++)
-                        {
-                            int kk = k;
+        if (cg::outline(world, c))
+            return;
 
-                            if (kk<0 || kk>width)
-                                kk = wrap(kk, width);
+        for (const CellId n : cg::cellswithinkm(world, grid.centre(c), (minlakedistance + 0.5) * pixelkm))
+        {
+            if (thislake[n] != 0 && thislake[n] != lakeno && canoverlap == 0) // There's another lake here already!
+                return;
 
-                            for (int l = j - 1; l <= j + 1; l++)
-                            {
-                                if (l >= 0 && l <= height)
-                                {
-                                    if (world.mountainheightfloat(kk, l) > 0)
-                                        mountain = (float)world.mountainheightfloat(kk, l) * 0.7f;
-                                }
-                            }
-                        }
+            if (world.lakesurfacefloat(n) != 0 && thislake[n] != lakeno && (canoverlap == 0 || (special != 120 || world.special(n) != 120))) // There's another kind of lake here already! (Doesn't apply when both are ergs.)
+                return;
 
-                        if (mountain == 0.0f)
-                        {
-                            for (int k = i - 3; k <= i + 3; k++)
-                            {
-                                int kk = k;
-
-                                if (kk<0 || kk>width)
-                                    kk = wrap(kk, width);
-
-                                for (int l = j - 3; l <= j + 3; l++)
-                                {
-                                    if (l >= 0 && l <= height)
-                                    {
-                                        if (world.mountainheightfloat(kk, l) > 0)
-                                            mountain = (float)world.mountainheightfloat(kk, l) * 0.3f;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    mountain = mountain / 100.0f; // 50.0f;
-
-                    diff = diff + mountain;
-
-                    if (diff > 8.0f)
-                        diff = 8.0f;
-
-                    valuemod[i][j] = valuemod[i][j] * diff;
-                    */
-                }
-            }
-            else // Sea beds - very smooth.
-            {
-
-                float m = 0.08f / (float)maxelev;
-                float n = world.roughness(i, j);
-                float extrabit = 0.01f * (float)random(1, 7);
-
-                valuemod[i][j] = (m * n) + extrabit;
-            }
+            if (world.sea(n) == 1) // Sea here.
+                return;
         }
     }
 
-    // Now we blur that, so that there aren't sharp transitions in roughness on the regional map.
+    if (cells.empty())
+        return;
 
-    /*
-    int amount = 2; // Amount to blur by.
+    // Now, do the actual thing.
 
-    vector<vector<float>> valuemod2(ARRAYWIDTH, vector<float>(ARRAYHEIGHT, 0));
-
-    for (int i = 0; i <= width; i++)
+    for (const CellId c : cells)
     {
-        for (int j = 0; j <= height; j++)
+        world.setlakesurface(c, static_cast<float>(wholemetres(surfaceheight))); // Put the lake on this bit of the lake map.
+        world.setnomfloat(c, surfaceheight);
+        world.setspecial(c, special);
+
+        thislake[c] = lakeno; // Mark it on the keeping-track array too.
+
+        if (world.mountainheightfloat(c) != 0) // Remove any mountains that might be here.
         {
-            if (!world.basebelowsea(i, j) && world.truelake(i, j) == 0)
+            for (int dir = 1; dir <= 8; dir++)
+                cg::deleteridge(world, c, dir);
+        }
+    }
+
+    // Now mark a "start point" somewhere on the edge of the "lake", which we will use when it comes to the regional map.
+
+    makelakestartcell(world, thislake, lakeno, cells);
+}
+
+// createergs on the sphere: cluster templates at positions drawn by area, an erg's chance per
+// legacy pixel area, the spacing to lakes within 2 pixels.
+void spherecreateergs(planet& world, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate shape[])
+{
+    const mesh::CellGrid& grid = world.grid();
+    const size_t count = grid.cellcount();
+    const double pixelkm = cg::legacypixelkm(world);
+    int worldsize = world.size();
+
+    vector<short> ergprobability(count, 0); // This is the probability of making an erg here.
+    vector<short> overlapprobability(count, 0); // This is the probability of this erg being able to overlap its neighbours.
+
+    int clusternumber = random(2, 50); // 50; Number of possible clusters of erg on the map.
+
+    if (worldsize == 1)
+        clusternumber = clusternumber * 4;
+
+    if (worldsize == 2)
+        clusternumber = clusternumber * 16;
+
+    for (int n = 0; n < clusternumber; n++) // Draw some shapes on this array, to allow for erg clusters.
+    {
+        int shapenumber = random(1, 11);
+
+        int probability = random(20, 200);
+
+        int overlap = random(1, 100);
+
+        const mesh::Vec3 centre = cg::randompoint();
+
+        const bool leftr = random(0, 1) == 1; // If it's 1 then we reverse it left-right
+        const bool downr = random(0, 1) == 1; // If it's 1 then we reverse it top-bottom
+
+        for (const CellId c : cg::stamptemplate(world, centre, shape[shapenumber], leftr, downr))
+        {
+            ergprobability[c] = static_cast<short>(probability);
+            overlapprobability[c] = static_cast<short>(overlap);
+        }
+    }
+
+    const double mindist = 2.0; // Minimum distance to existing lakes etc. (pixels)
+
+    int lakeno = 0;
+
+    vector<int> thislake(count, 0);
+
+    for (const CellId c : cg::columnorder(grid))
+    {
+        if (world.climate(c) == 5 && ergprobability[c] != 0) // If this is a hot desert
+        {
+            if (cg::uniformdraw() < cg::cellchance(world, c, 1.0 / static_cast<double>(ergprobability[c])))
             {
                 bool goahead = 1;
 
-                for (int k = i - 1; k <= i + 1; k++)
+                for (const CellId n : cg::cellswithinkm(world, grid.centre(c), (mindist + 0.5) * pixelkm)) // Check that there aren't any lakes too close.
                 {
-                    int kk = k;
-
-                    if (kk<0 || kk>width)
-                        kk = wrap(kk, width);
-
-                    for (int l = j - 1; l <= j + 1; l++)
-                    {
-                        if (l >= 0 && l <= height)
-                        {
-                            if (world.sea(kk, l) == 1)
-                            {
-                                goahead = 0;
-                                k = i + 1;
-                                l = j + 1;
-                            }
-                        }
-                    }
+                    if (world.truelake(n) != 0)
+                        goahead = 0;
                 }
 
                 if (goahead == 1)
                 {
-                    float total = 0.0f;
-                    float crount = 0.0f;
+                    bool canoverlap = 0;
 
-                    for (int k = i - amount; k <= i + amount; k++)
+                    if (random(1, 100) < overlapprobability[c])
+                        canoverlap = 1;
+
+                    int shapenumber;
+
+                    if (random(1, 4) == 1)
                     {
-                        int kk = k;
-
-                        if (kk<0 || kk>width)
-                            kk = wrap(kk, width);
-
-                        for (int l = j - amount; l <= j + amount; l++)
-                        {
-                            if (l >= 0 && l <= height)
-                            {
-                                if (!world.basebelowsea(kk, l) && world.truelake(kk, l) == 0)
-                                {
-                                    total = total + valuemod[kk][l];
-                                    crount++;
-                                }
-                            }
-                        }
+                        shapenumber = random(0, 11);
+                        spheredrawspeciallake(world, shapenumber, c, lakeno, thislake, smalllake, canoverlap, 120); // 120 is the code for ergs.
                     }
-                    valuemod2[i][j] = total / crount;
+                    else
+                    {
+                        if (random(1, 2) == 1)
+                            shapenumber = random(0, 2);
+                        else
+                            shapenumber = random(0, 9);
+                        spheredrawspeciallake(world, shapenumber, c, lakeno, thislake, largelake, canoverlap, 120); // 120 is the code for ergs.
+                    }
 
-                    if (valuemod2[i][j] > maxvaluemod)
-                        valuemod2[i][j] = maxvaluemod;
-                }
-                else
-                {
-                    valuemod2[i][j] = valuemod[i][j];
-
-                    if (valuemod2[i][j] > maxcoastalvaluemod)
-                        valuemod2[i][j] = maxcoastalvaluemod;
+                    lakeno++;
                 }
             }
-            else
-                valuemod2[i][j] = 0.0f;
         }
     }
-    */
+}
 
-    for (int i = 0; i <= width; i++)
+// createsaltpans on the sphere: a pan's chance per legacy pixel area, the spacing within 2 pixels.
+void spherecreatesaltpans(planet& world, boolshapetemplate smalllake[], boolshapetemplate largelake[])
+{
+    (void)largelake;
+    const mesh::CellGrid& grid = world.grid();
+    const double pixelkm = cg::legacypixelkm(world);
+
+    const double saltchance = 1.0 / 1000.0; // Probability of salt pans in any given desert pixel.
+    const double mindist = 2.0; // Minimum distance to existing lakes etc. (pixels)
+
+    int lakeno = 0;
+
+    vector<int> thislake(grid.cellcount(), 0);
+
+    for (const CellId c : cg::columnorder(grid))
     {
-        for (int j = 0; j <= height; j++)
+        if (world.climate(c) == 5) // If this is a hot desert
         {
-            if (valuemod[i][j] < 0.0f)
-                world.setroughness(i, j, 0.0f);
-            else
-                world.setroughness(i, j, valuemod[i][j]);
+            if (cg::uniformdraw() < cg::cellchance(world, c, saltchance))
+            {
+                bool goahead = 1;
+
+                for (const CellId n : cg::cellswithinkm(world, grid.centre(c), (mindist + 0.5) * pixelkm)) // Check that there aren't any other lakes too close.
+                {
+                    if (world.lakesurfacefloat(n) != 0)
+                        goahead = 0;
+                }
+
+                if (goahead == 1)
+                {
+                    int shapenumber;
+
+                    if (random(1, 4) != 1)
+                        shapenumber = random(0, 3);
+                    else
+                        shapenumber = random(3, 11);
+
+                    spheredrawspeciallake(world, shapenumber, c, lakeno, thislake, smalllake, 0, 110); // 110 is the code for salt pans.
+
+                    lakeno++;
+                }
+            }
         }
+    }
+}
+}
+
+// This function puts ergs in deserts.
+
+void createergs(planet& world, boolshapetemplate smalllake[], boolshapetemplate largelake[], boolshapetemplate shape[])
+{
+    if (world.grid().kind() == mesh::GridKind::latlon)
+        latloncreateergs(world, smalllake, largelake, shape);
+    else
+        spherecreateergs(world, smalllake, largelake, shape);
+
+    // Some ergs may have overlapped, so now we need to make sure their elevation remains constant.
+
+    checkergelevation(world);
+}
+
+// This function puts salt pans in deserts.
+
+void createsaltpans(planet& world, boolshapetemplate smalllake[], boolshapetemplate largelake[])
+{
+    if (world.grid().kind() == mesh::GridKind::latlon)
+        latloncreatesaltpans(world, smalllake, largelake);
+    else
+        spherecreatesaltpans(world, smalllake, largelake);
+}
+
+// This refines the roughness map so that it takes into account more factors, producing a roughness factor that will be used for the fractal terrain in the regional map.
+
+void refineroughnessmap(planet& world)
+{
+    const mesh::CellGrid& grid = world.grid();
+    int maxelev = world.maxelevation();
+
+    // This array will hold the valuemod for every tile on the map. The valuemod is used in the regional map to determine how rough the diamond-square routine makes the terrain.
+
+    vector<float> valuemod(grid.cellcount(), 0.0f);
+
+    // A neighbour, or the cell itself where there is none (the legacy clip of y at the poles).
+    auto orself = [&](CellId c, int slot)
+    {
+        const std::int32_t n = grid.neighbour(c, slot);
+        return n < 0 ? c : static_cast<CellId>(n);
+    };
+
+    for (const CellId c : cg::columnorder(grid))
+    {
+        if (world.sea(c) == 0)
+        {
+            if (world.basebelowsea(c) && world.basebelowsea(orself(c, 1)) && world.basebelowsea(orself(c, 5)) && world.basebelowsea(orself(c, 3)) && world.basebelowsea(orself(c, 7))) // Sea beds will be very smooth.
+            {
+                float m = 0.08f / (float)maxelev;
+                float n = world.roughness(c);
+                float extrabit = 0.01f * (float)random(1, 7);
+
+                valuemod[c] = (m * n) + extrabit;
+            }
+            else // On land, the higher it is, the rougher it is.
+                valuemod[c] = world.roughness(c) / (float)maxelev;
+        }
+        else // Sea beds - very smooth.
+        {
+            float m = 0.08f / (float)maxelev;
+            float n = world.roughness(c);
+            float extrabit = 0.01f * (float)random(1, 7);
+
+            valuemod[c] = (m * n) + extrabit;
+        }
+    }
+
+    for (CellId c = 0; c < grid.cellcount(); c++)
+    {
+        if (valuemod[c] < 0.0f)
+            world.setroughness(c, 0.0f);
+        else
+            world.setroughness(c, valuemod[c]);
     }
 }

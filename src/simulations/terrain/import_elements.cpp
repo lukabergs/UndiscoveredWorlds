@@ -1,6 +1,36 @@
 #include "simulations/terrain/import_elements.hpp"
 
+// On the cell grid since T8 W2-T2: the lat-lon grid keeps the legacy fractals; every other grid
+// takes sphere noise (terrain::coastgrid::spherefractal) and hands the functions that still take
+// legacy arrays their values in the legacy slots (terrain::coastgrid::legacyslot).
+
+#include "simulations/terrain/terrain_coasts.hpp"
 #include "world/functions.hpp"
+
+using mesh::CellId;
+namespace cg = terrain::coastgrid;
+
+namespace
+{
+bool latlon(const planet& world)
+{
+    return world.grid().kind() == mesh::GridKind::latlon;
+}
+
+// Per-cell values in a legacy ARRAYWIDTH x ARRAYHEIGHT array, at the cells' legacy slots.
+vector<vector<int>> legacyarray(const planet& world, const vector<int>& values)
+{
+    vector<vector<int>> array(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    const mesh::CellGrid& grid = world.grid();
+    for (CellId c = 0; c < grid.cellcount(); c++)
+    {
+        int x = 0, y = 0;
+        cg::legacyslot(grid, c, x, y);
+        array[static_cast<size_t>(x)][static_cast<size_t>(y)] = values[c];
+    }
+    return array;
+}
+}
 
 void generateimportedshelves(planet& world)
 {
@@ -15,45 +45,36 @@ void generateimportedshelves(planet& world)
     makecontinentalshelves(world, shelves, 4);
     createoceantrenches(world, shelves);
 
-    int grain = 8; // Level of detail on this fractal map.
-    float valuemod = 0.2f;
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
-
-    vector<vector<int>> seafractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    createfractal(seafractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    float coastalvarreduce = (float)maxelev / 3000.0f;
-    float oceanvarreduce = (float)maxelev / 100.0f;
-
-    for (int i = 0; i <= width; i++)
+    if (latlon(world))
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.sea(i, j) == 1 && shelves[i][j] == 1)
-                world.setnom(i, j, sealevel - 100);
-        }
+        int grain = 8; // Level of detail on this fractal map.
+        float valuemod = 0.2f;
+        int v = random(3, 6);
+        float valuemod2 = (float)v;
+
+        vector<vector<int>> seafractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+
+        createfractal(seafractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0); // Not used; the call keeps the draws.
+    }
+
+    for (CellId c = 0; c < world.cellcount(); c++)
+    {
+        if (world.sea(c) == 1 && shelves[c] == 1)
+            world.setnom(c, sealevel - 100);
     }
 }
 
 void generateimportedoceanridges(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
-    int maxelev = world.maxelevation();
     int sealevel = world.sealevel();
 
     worldgrid<bool>& shelves = world.continentalshelves();
     shelves.fill(false);
 
-    for (int i = 0; i <= width; i++)
+    for (CellId c = 0; c < world.cellcount(); c++)
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.nom(i, j) > sealevel - 400)
-                shelves[i][j] = 1;
-        }
+        if (world.nom(c) > sealevel - 400)
+            shelves[c] = 1;
     }
 
     createoceanridges(world, shelves);
@@ -66,40 +87,47 @@ void generateimportedseabed(planet& world)
     int maxelev = world.maxelevation();
     int sealevel = world.sealevel();
 
-    int grain = 8; // Level of detail on this fractal map.
-    float valuemod = 0.2f;
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
+    vector<int> seafractal;
 
-    vector<vector<int>> seafractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    if (latlon(world))
+    {
+        int grain = 8; // Level of detail on this fractal map.
+        float valuemod = 0.2f;
+        int v = random(3, 6);
+        float valuemod2 = (float)v;
 
-    createfractal(seafractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
+        vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
-    int warpfactor = random(20, 80);
-    warp(seafractal, width, height, maxelev, warpfactor, 1);
+        createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
+
+        int warpfactor = random(20, 80);
+        warp(fractal, width, height, maxelev, warpfactor, 1);
+
+        seafractal.assign(world.cellcount(), 0);
+        for (CellId c = 0; c < world.cellcount(); c++)
+            seafractal[c] = fractal[static_cast<size_t>(world.grid().column(c))][static_cast<size_t>(world.grid().row(c))];
+    }
+    else
+        seafractal = cg::spherefractal(world, 0x5eab0001, cg::grain8noise(), maxelev);
 
     float coastalvarreduce = (float)maxelev / 3000.0f;
-    float oceanvarreduce = (float)maxelev / 1000.0f;
 
-    for (int i = 0; i <= width; i++)
+    for (const CellId c : cg::columnorder(world.grid()))
     {
-        for (int j = 0; j <= height; j++)
+        if (world.sea(c) == 1)
         {
-            if (world.sea(i, j) == 1)
-            {
-                float var = (float)(seafractal[i][j] - maxelev / 2);
-                var = var / coastalvarreduce;
+            float var = (float)(seafractal[c] - maxelev / 2);
+            var = var / coastalvarreduce;
 
-                int newval = world.nom(i, j) + (int)var;
+            int newval = world.nom(c) + (int)var;
 
-                if (newval > sealevel - 10)
-                    newval = sealevel - 10;
+            if (newval > sealevel - 10)
+                newval = sealevel - 10;
 
-                if (newval < 1)
-                    newval = 1;
+            if (newval < 1)
+                newval = 1;
 
-                world.setnom(i, j, newval);
-            }
+            world.setnom(c, newval);
         }
     }
 
@@ -115,35 +143,43 @@ void generateimportedlandelevation(planet& world)
     int maxelev = world.maxelevation();
     int sealevel = world.sealevel();
 
-    // First, make a fractal map.
-
-    int grain = 8; // Level of detail on this fractal map.
-    float valuemod = 0.2f;
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
-
-    vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, 12750, 0, 0);
-
-    int warpfactor = random(20, 80);
-    warp(fractal, width, height, maxelev, warpfactor, 1);
-
     int fractaladd = sealevel - 2500;
 
-    for (int i = 0; i <= width; i++)
+    vector<vector<int>> fractal;
+
+    // First, make a fractal map.
+
+    if (latlon(world))
     {
-        for (int j = 0; j <= height; j++)
-            fractal[i][j] = fractal[i][j] + fractaladd;
+        int grain = 8; // Level of detail on this fractal map.
+        float valuemod = 0.2f;
+        int v = random(3, 6);
+        float valuemod2 = (float)v;
+
+        fractal.assign(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+
+        createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, 12750, 0, 0);
+
+        int warpfactor = random(20, 80);
+        warp(fractal, width, height, maxelev, warpfactor, 1);
+
+        for (int i = 0; i <= width; i++)
+        {
+            for (int j = 0; j <= height; j++)
+                fractal[i][j] = fractal[i][j] + fractaladd;
+        }
+    }
+    else
+    {
+        vector<int> values = cg::spherefractal(world, 0x1a4d0001, cg::grain8noise(), 12750);
+        for (int& value : values)
+            value += fractaladd;
+        fractal = legacyarray(world, values);
     }
 
     // Now use it to change the land heights.
 
     fractaladdland(world, fractal);
-
-    // Smooth the land.
-
-    //smoothonlyland(world, 2);
 
     // Also, create extra elevation.
 
@@ -154,7 +190,6 @@ void generateimportedmountainchains(planet& world, boolshapetemplate landshape[]
 {
     int width = world.width();
     int height = world.height();
-    int maxelev = world.maxelevation();
     int sealevel = world.sealevel();
 
     int baseheight = sealevel - 4500;
@@ -164,23 +199,35 @@ void generateimportedmountainchains(planet& world, boolshapetemplate landshape[]
 
     vector<vector<int>> plateaumap(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
-    // First, make a fractal map.
-
-    int grain = 8; // Level of detail on this fractal map.
-    float valuemod = 0.2f;
-    int v = random(3, 6);
-    float valuemod2 = (float)v;
-
-    vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, 12750, 0, 0);
-
     int fractaladd = sealevel - 2500;
 
-    for (int i = 0; i <= width; i++)
+    vector<vector<int>> fractal;
+
+    // First, make a fractal map.
+
+    if (latlon(world))
     {
-        for (int j = 0; j <= height; j++)
-            fractal[i][j] = fractal[i][j] + fractaladd;
+        int grain = 8; // Level of detail on this fractal map.
+        float valuemod = 0.2f;
+        int v = random(3, 6);
+        float valuemod2 = (float)v;
+
+        fractal.assign(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+
+        createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, 12750, 0, 0);
+
+        for (int i = 0; i <= width; i++)
+        {
+            for (int j = 0; j <= height; j++)
+                fractal[i][j] = fractal[i][j] + fractaladd;
+        }
+    }
+    else
+    {
+        vector<int> values = cg::spherefractal(world, 0xc4a10001, cg::grain8noise(), 12750);
+        for (int& value : values)
+            value += fractaladd;
+        fractal = legacyarray(world, values);
     }
 
     twointegers dummy[1];
@@ -190,18 +237,14 @@ void generateimportedmountainchains(planet& world, boolshapetemplate landshape[]
 
 void generateimportedcraters(planet& world, std::vector<int>& squareroot)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
     int maxelev = world.maxelevation();
     int sealevel = world.sealevel();
 
-    vector<vector<int>> oldterrain(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0)); // Copy the terrain as it is before adding craters. This is so that we can add some variation to the craters afterwards, if there's sea on this world, so the depression filling doesn't fill them completely.
+    vector<int> oldterrain(world.cellcount(), 0); // Copy the terrain as it is before adding craters. This is so that we can add some variation to the craters afterwards, if there's sea on this world, so the depression filling doesn't fill them completely.
 
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-            oldterrain[i][j] = world.nom(i, j);
-    }
+    for (CellId c = 0; c < world.cellcount(); c++)
+        oldterrain[c] = world.nom(c);
 
     int cratertotal = random(500, 10000);
 
@@ -210,46 +253,47 @@ void generateimportedcraters(planet& world, std::vector<int>& squareroot)
     float minseaproportion = (float)random(1, 500);
     minseaproportion = minseaproportion / 1000.0f;
 
-    int minseasize = (int)(((float)width * (float)height) * minseaproportion);
+    // The legacy count of cells (width x height, the largest indices) on lat-lon; the cells on the cube.
+    const float cells = latlon(world) ? (float)world.width() * (float)world.height() : (float)world.cellcount();
+    int minseasize = (int)(cells * minseaproportion);
 
     if (random(1, 4) != 1) // That may have produced seas inside craters, so probably remove those now.
         removesmallseas(world, minseasize, sealevel + 1);
     else // Definitely remove any really little bits of sea.
         removesmallseas(world, 20, sealevel + 1);
 
+    // The legacy count of sea cells ran over no column (its loop ended at -width), so the
+    // variation below never ran; kept as it was (T8 W2-T2 reports it).
     int totalsea = 0;
-
-    for (int i = 0; i <= -width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.sea(i, j))
-                totalsea++;
-        }
-    }
 
     if (totalsea > 40) // If there's sea, add some variation to how prominent the craters are. This will create some gaps in the craters so they don't get entirely filled up by the depression filling.
     {
-        vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+        vector<int> fractal;
 
-        int grain = 8; // Level of detail on this fractal map.
-        float valuemod = 0.2f;
-        int v = random(3, 6);
-        float valuemod2 = (float)v;
-
-        createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 1, 0);
-
-        for (int i = 0; i <= width; i++)
+        if (latlon(world))
         {
-            for (int j = 0; j <= height; j++)
-            {
-                float oldmult = (float)fractal[i][j] / (float)maxelev;
-                float newmult = 1.0f - oldmult;
+            int grain = 8; // Level of detail on this fractal map.
+            float valuemod = 0.2f;
+            int v = random(3, 6);
+            float valuemod2 = (float)v;
 
-                float thiselev = (float)oldterrain[i][j] * oldmult + (float)world.nom(i, j) * newmult;
+            vector<vector<int>> legacy(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+            createfractal(legacy, world.width(), world.height(), grain, valuemod, valuemod2, 1, maxelev, 1, 0);
+            fractal.assign(world.cellcount(), 0);
+            for (CellId c = 0; c < world.cellcount(); c++)
+                fractal[c] = legacy[static_cast<size_t>(grid.column(c))][static_cast<size_t>(grid.row(c))];
+        }
+        else
+            fractal = cg::spherefractal(world, 0xc4a70001, cg::grain8noise(), maxelev);
 
-                world.setnom(i, j, (int)thiselev);
-            }
+        for (CellId c = 0; c < world.cellcount(); c++)
+        {
+            float oldmult = (float)fractal[c] / (float)maxelev;
+            float newmult = 1.0f - oldmult;
+
+            float thiselev = (float)oldterrain[c] * oldmult + (float)world.nom(c) * newmult;
+
+            world.setnom(c, (int)thiselev);
         }
     }
 }

@@ -1,388 +1,313 @@
 // Questions about coasts on the world grid: distance to land and sea, coastal cells, land in one quadrant.
-// Moved unchanged from misc.cpp (Jonathan Hill, 2022).
+// Moved unchanged from misc.cpp (Jonathan Hill, 2022); on the cell grid since T8 W2-T2.
 
 #include "simulations/terrain/coast_queries.hpp"
 
-#include <iostream>
+#include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <stdio.h>
+#include <limits>
 #include <queue>
+#include <utility>
 
 #include "core/classes.hpp"
+#include "core/mesh/mesh_geometry.hpp"
+#include "simulations/terrain/terrain_coasts.hpp"
 #include "world/planet.hpp"
 #include "world/functions.hpp"
 
 using namespace std;
+using namespace terrain::coastgrid;
+using mesh::CellId;
+
+namespace
+{
+// planet::sea at a neighbour: out of the grid (-1) reads as land, as sea(x, y) does.
+bool seaat(const planet& world, std::int32_t n)
+{
+    return n >= 0 && world.sea(static_cast<CellId>(n));
+}
+
+// The lat-lon cell of (x, y) with x wrapped, -1 outside the rows (or on another grid kind).
+std::int32_t latloncell(const planet& world, int x, int y)
+{
+    const mesh::CellGrid& grid = world.grid();
+    if (grid.kind() != mesh::GridKind::latlon || y < 0 || y >= grid.rows())
+        return -1;
+    x = wrap(x, grid.columns() - 1);
+    const CellId c = grid.cellof(x, y);
+    return c == mesh::nocell ? -1 : static_cast<std::int32_t>(c);
+}
+
+// The cardinal slot whose bearing is nearest the target bearing (0 north, pi south).
+int slottoward(const mesh::CellGrid& grid, CellId c, double target)
+{
+    int best = 0;
+    double bestdifference = 10.0;
+    for (int slot = 1; slot <= mesh::slotcount; slot += 2)
+    {
+        if (grid.neighbour(c, slot) < 0)
+            continue;
+        double difference = fabs(grid.bearing_rad(c, slot) - target);
+        difference = min(difference, 2.0 * 3.14159265358979323846 - difference);
+        if (difference < bestdifference)
+        {
+            bestdifference = difference;
+            best = slot;
+        }
+    }
+    return best;
+}
+}
 
 // This finds the distance to the nearest land in the direction of the equator.
 
-int landdistance(planet& world, int x, int y)
+int terrain::coastgrid::landdistance(const planet& world, CellId c)
 {
-    int width = world.width();
-    int height = world.height();
-    int equator = height / 2;
-
-    if (x<0 || x>width || y<0 || y>height)
-        return (-1);
-
-    int dist = 0;
-    int pets = -1;
-
-    int target = equator;
-
-    if (y < equator)
-        pets = 1;
+    const mesh::CellGrid& grid = world.grid();
+    const bool north = grid.latitude_rad(c) > 0.0;
 
     // Reverse the direction of search if the equator is colder than the poles!
+    bool towardequator = true;
+    if (north && world.northpolartemp() > world.eqtemp())
+        towardequator = false;
+    if (!north && world.southpolartemp() > world.eqtemp())
+        towardequator = false;
+    const double target = (north == towardequator) ? 3.14159265358979323846 : 0.0;
 
-    if (y < equator) // Northern hemisphere
-    {
-        if (world.northpolartemp()>world.eqtemp())
-        {
-            pets = -1;
-            target = 0;
-        }
-    }
-    else // Southern hemisphere
-    {
-        if (world.southpolartemp() > world.eqtemp())
-        {
-            pets = 1;
-            target = height;
-        }
-    }
+    const int limit = static_cast<int>(3.14159265358979323846 * grid.radius_m() / max(1.0, grid.minimumspacing_m())) + 2;
+    std::int32_t at = static_cast<std::int32_t>(c);
 
-    for (int j = y; j != target; j = j + pets)
+    for (int dist = 0; dist < limit; dist++)
     {
-        if (world.sea(x, j) == 0)
+        const CellId here = static_cast<CellId>(at);
+        if (towardequator && (grid.latitude_rad(here) > 0.0) != north)
+            return -1;
+
+        const int slot = slottoward(grid, here, target);
+        if (slot == 0)
+            return -1;
+        int turn = 0;
+        const std::int32_t next = step(grid, here, slot, turn);
+
+        if (world.sea(here) == 0)
         {
-            if (world.sea(x, j + pets) == 0 && world.sea(x, j + pets * 2) == 0) // To avoid little islands showing up
+            int turn2 = turn;
+            const std::int32_t after = next >= 0 ? step(grid, static_cast<CellId>(next), slot, turn2) : -1;
+            if (!seaat(world, next) && !seaat(world, after)) // To avoid little islands showing up
             {
-                int xleft = x - 1;
-
-                if (xleft == -1)
-                    xleft = width;
-
-                int xright = x + 1;
-                if (xright == width + 1)
-                    xright = 0;
-
-                if (world.sea(xleft, j + pets) == 0 && world.sea(xright, j + pets) == 0)
-                {
-                    return (dist);
-                }
+                const std::int32_t left = next >= 0 ? grid.neighbour(static_cast<CellId>(next), turned(slot, turn - 2)) : -1;
+                const std::int32_t right = next >= 0 ? grid.neighbour(static_cast<CellId>(next), turned(slot, turn + 2)) : -1;
+                if (!seaat(world, left) && !seaat(world, right))
+                    return dist;
             }
         }
 
-        dist++;
+        if (next < 0)
+            return -1;
+        at = next;
     }
 
-    dist = -1; // No land found at all.
-
-    return(dist);
+    return -1; // No land found at all.
 }
 
-// This finds the coordinates of the nearest sea (or land, if land=1) to the point specified. Note that it does not wrap the x coordinate, i.e. it could return one lower than 0 or higher than width.
+int landdistance(planet& world, int x, int y)
+{
+    const std::int32_t c = latloncell(world, x, y);
+    if (c < 0 || x < 0 || x > world.width())
+        return -1;
+    return terrain::coastgrid::landdistance(world, static_cast<CellId>(c));
+}
+
+// This finds the nearest sea (or land, if land=1) to the cell specified.
+
+std::int32_t terrain::coastgrid::nearestsea(const planet& world, CellId c, bool land, double limit_km)
+{
+    const mesh::CellGrid& grid = world.grid();
+    const mesh::Vec3 p = grid.centre(c);
+    std::int32_t best = -1;
+    double bestdistance = numeric_limits<double>::max();
+    for (const CellId n : cellswithinkm(world, p, limit_km))
+    {
+        if (n == c || (world.sea(n) == 1) == land)
+            continue;
+        const double distance = mesh::greatcircle_rad(p, grid.centre(n));
+        if (distance < bestdistance)
+        {
+            bestdistance = distance;
+            best = static_cast<std::int32_t>(n);
+        }
+    }
+    return best;
+}
 
 twointegers nearestsea(planet& world, int i, int j, bool land, int limit, int grain)
 {
-    int width = world.width();
-    int height = world.height();
-
+    (void)grain;
     twointegers seapoint;
-
     seapoint.x = -1;
     seapoint.y = -1;
 
-    int distance = -1; // Distance to nearest sea.
-    int seax = -1; // x coordinate of nearest sea.
-    int seay = -1; // y coordinate of nearest sea.
-    int checkdist = 1; // Distance that we're checking to see if it contains sea.
-
-    while (distance == -1)
+    const std::int32_t c = latloncell(world, i, j);
+    if (c < 0)
+        return seapoint;
+    const mesh::CellGrid& grid = world.grid();
+    const double rowkm = 3.14159265358979323846 * grid.radius_m() / 1000.0 / static_cast<double>(grid.rows());
+    const std::int32_t found = terrain::coastgrid::nearestsea(world, static_cast<CellId>(c), land, static_cast<double>(limit) * rowkm);
+    if (found >= 0)
     {
-        checkdist = checkdist + grain; // Increase the size of circle that we're checking
-
-        int rr = checkdist * checkdist;
-
-        for (int x = i - checkdist; x <= i + checkdist; x++)
-        {
-            int xx = x;
-
-            if (xx<0 || xx>width)
-                xx = wrap(xx, width);
-
-            for (int y = j - checkdist; y <= j + checkdist; y++)
-            {
-                if (y >= 0 && y <= height)
-                {
-                    if ((x-i)*(x-i)+(y-j)*(y-j)==rr) // if this point is on the circle we're looking at
-                    {
-                        if (world.sea(xx, y) == 1 && land == 0) // And if this point is sea
-                        {
-                            distance = checkdist;
-                            seax = x;
-                            seay = y;
-                        }
-
-                        if (world.sea(xx, y) == 0 && land == 1) // And if this point is land
-                        {
-                            distance = checkdist;
-                            seax = x;
-                            seay = y;
-                        }
-                    }
-                }
-            }
-        }
-        if (checkdist > limit) // We are surely not going to find any now...
-        {
-            distance = width * 2;
-            seax = -1;
-            seay = -1;
-        }
+        seapoint.x = grid.column(static_cast<CellId>(found));
+        seapoint.y = grid.row(static_cast<CellId>(found));
     }
-
-    seapoint.x = seax;
-    seapoint.y = seay;
-
-    return (seapoint);
+    return seapoint;
 }
 
 // This function checks whether a global tile is either sea next to land or land next to sea.
 
-bool vaguelycoastal(planet& world, int x, int y)
+bool terrain::coastgrid::vaguelycoastal(const planet& world, CellId c)
 {
-    int width = world.width();
-    int height = world.height();
-
-    bool sea = 0;
-
-    if (world.sea(x, y) == 1)
-        sea = 1;
+    const bool sea = world.sea(c) == 1;
 
     bool found = 0;
 
-    for (int i = x - 1; i <= x + 1; i++)
+    box(world.grid(), c, 1, [&](CellId n, int, int)
     {
-        int ii = i;
-
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = y - 1; j <= y + 1; j++)
-        {
-            if (j >= 0 && j <= height)
-            {
-                if (sea == 0 && world.sea(ii, j) == 1)
-                {
-                    found = 1;
-                    i = x + 1;
-                    j = y + 1;
-                }
-
-                if (sea == 1 && world.sea(ii, j) == 0)
-                {
-                    found = 1;
-                    i = x + 1;
-                    j = y + 1;
-                }
-            }
-        }
-    }
+        if ((world.sea(n) == 1) != sea)
+            found = 1;
+        return found == 0;
+    });
 
     return found;
 }
 
-// This function checks to see if a global tile is land, bordered by sea to the east, south, and southeast.
+bool vaguelycoastal(planet& world, int x, int y)
+{
+    const std::int32_t c = latloncell(world, x, y);
+    if (c < 0 || x < 0 || x > world.width())
+        return false;
+    return terrain::coastgrid::vaguelycoastal(world, static_cast<CellId>(c));
+}
+
+// These check whether a tile is land bordered by sea on three sides of one corner, with land
+// at the opposite corner. On lat-lon the legacy forms read the opposite corner of the
+// northwest and southwest cases without wrapping x (land beyond the column edge).
+
+bool terrain::coastgrid::northwestlandonly(const planet& world, std::int32_t c)
+{
+    if (c < 0)
+        return 0;
+    const mesh::CellGrid& grid = world.grid();
+    const CellId cell = static_cast<CellId>(c);
+
+    if (world.sea(cell) == 1)
+        return 0;
+
+    if (grid.neighbour(cell, 5) < 0 || grid.neighbour(cell, 1) < 0)
+        return 0;
+
+    if (!seaat(world, grid.neighbour(cell, 3)) || !seaat(world, grid.neighbour(cell, 5)) || !seaat(world, grid.neighbour(cell, 4)))
+        return 0;
+
+    if (seaat(world, rawneighbour(grid, cell, 8)))
+        return 0;
+
+    return 1;
+}
+
+bool terrain::coastgrid::northeastlandonly(const planet& world, std::int32_t c)
+{
+    if (c < 0)
+        return 0;
+    const mesh::CellGrid& grid = world.grid();
+    const CellId cell = static_cast<CellId>(c);
+
+    if (world.sea(cell) == 1)
+        return 0;
+
+    if (grid.neighbour(cell, 5) < 0 || grid.neighbour(cell, 1) < 0)
+        return 0;
+
+    if (!seaat(world, grid.neighbour(cell, 7)) || !seaat(world, grid.neighbour(cell, 5)) || !seaat(world, grid.neighbour(cell, 6)))
+        return 0;
+
+    if (seaat(world, grid.neighbour(cell, 2)))
+        return 0;
+
+    return 1;
+}
+
+bool terrain::coastgrid::southwestlandonly(const planet& world, std::int32_t c)
+{
+    if (c < 0)
+        return 0;
+    const mesh::CellGrid& grid = world.grid();
+    const CellId cell = static_cast<CellId>(c);
+
+    if (world.sea(cell) == 1)
+        return 0;
+
+    if (grid.neighbour(cell, 1) < 0 || grid.neighbour(cell, 5) < 0)
+        return 0;
+
+    if (!seaat(world, grid.neighbour(cell, 3)) || !seaat(world, grid.neighbour(cell, 1)) || !seaat(world, grid.neighbour(cell, 2)))
+        return 0;
+
+    if (seaat(world, rawneighbour(grid, cell, 4)))
+        return 0;
+
+    return 1;
+}
+
+bool terrain::coastgrid::southeastlandonly(const planet& world, std::int32_t c)
+{
+    if (c < 0)
+        return 0;
+    const mesh::CellGrid& grid = world.grid();
+    const CellId cell = static_cast<CellId>(c);
+
+    if (world.sea(cell) == 1)
+        return 0;
+
+    if (grid.neighbour(cell, 1) < 0 || grid.neighbour(cell, 5) < 0)
+        return 0;
+
+    if (!seaat(world, grid.neighbour(cell, 7)) || !seaat(world, grid.neighbour(cell, 1)) || !seaat(world, grid.neighbour(cell, 8)))
+        return 0;
+
+    if (seaat(world, grid.neighbour(cell, 4)))
+        return 0;
+
+    return 1;
+}
 
 bool northwestlandonly(planet& world, int x, int y)
 {
-    int width = world.width();
-    int height = world.height();
-
-    if (world.sea(x, y) == 1)
-        return 0;
-
-    int xx = x + 1;
-
-    if (xx > width)
-        xx = 0;
-
-    int yy = y + 1;
-
-    if (yy > height)
-        return 0;
-
-    if (world.sea(xx, y) == 0)
-        return 0;
-
-    if (world.sea(x, yy) == 0)
-        return 0;
-
-    if (world.sea(xx, yy) == 0)
-        return 0;
-
-    xx = x - 1;
-
-    if (xx < 0)
-        x = width;
-
-    yy = y - 1;
-
-    if (yy < 0)
-        return 0;
-
-    if (world.sea(xx, yy) == 1)
-        return 0;
-
-    return 1;
+    return terrain::coastgrid::northwestlandonly(world, latloncell(world, x, y));
 }
-
-// This function checks to see if a global tile is land, bordered by sea to the west, south, and southwest.
 
 bool northeastlandonly(planet& world, int x, int y)
 {
-    int width = world.width();
-    int height = world.height();
-
-    if (world.sea(x, y) == 1)
-        return 0;
-
-    int xx = x - 1;
-
-    if (xx < 0)
-        xx = width;
-
-    int yy = y + 1;
-
-    if (yy > height)
-        return 0;
-
-    if (world.sea(xx, y) == 0)
-        return 0;
-
-    if (world.sea(x, yy) == 0)
-        return 0;
-
-    if (world.sea(xx, yy) == 0)
-        return 0;
-
-    xx = x + 1;
-
-    if (xx > width)
-        xx = 0;
-
-    yy = y - 1;
-
-    if (yy < 0)
-        return 0;
-
-    if (world.sea(xx, yy) == 1)
-        return 0;
-
-    return 1;
+    return terrain::coastgrid::northeastlandonly(world, latloncell(world, x, y));
 }
-
-// This function checks to see if a global tile is land, bordered by sea to the east, north, and northeast.
 
 bool southwestlandonly(planet& world, int x, int y)
 {
-    int width = world.width();
-    int height = world.height();
-
-    if (world.sea(x, y) == 1)
-        return 0;
-
-    int xx = x + 1;
-
-    if (xx > width)
-        xx = 0;
-
-    int yy = y - 1;
-
-    if (yy < 0)
-        return 0;
-
-    if (world.sea(xx, y) == 0)
-        return 0;
-
-    if (world.sea(x, yy) == 0)
-        return 0;
-
-    if (world.sea(xx, yy) == 0)
-        return 0;
-
-    xx = x + 1;
-
-    if (xx > width)
-        x = 0;
-
-    yy = y + 1;
-
-    if (yy > height)
-        return 0;
-
-    if (world.sea(xx, yy) == 1)
-        return 0;
-
-    return 1;
+    return terrain::coastgrid::southwestlandonly(world, latloncell(world, x, y));
 }
-
-// This function checks to see if a global tile is land, bordered by sea to the west, north, and northwest.
 
 bool southeastlandonly(planet& world, int x, int y)
 {
-    int width = world.width();
-    int height = world.height();
-
-    if (world.sea(x, y) == 1)
-        return 0;
-
-    int xx = x - 1;
-
-    if (xx < 0)
-        xx = width;
-
-    int yy = y - 1;
-
-    if (yy < 0)
-        return 0;
-
-    if (world.sea(xx, y) == 0)
-        return 0;
-
-    if (world.sea(x, yy) == 0)
-        return 0;
-
-    if (world.sea(xx, yy) == 0)
-        return 0;
-
-    xx = x + 1;
-
-    if (xx > width)
-        xx = 0;
-
-    yy = y + 1;
-
-    if (yy > height)
-        return 0;
-
-    if (world.sea(xx, yy) == 1)
-        return 0;
-
-    return 1;
+    return terrain::coastgrid::southeastlandonly(world, latloncell(world, x, y));
 }
 
-// This does the same thing, for the continental shelves.
-
-void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<vector<bool>>& outline, int pointdist)
+namespace
+{
+// The legacy lattice Voronoi (lat-lon): points every pointdist pixels, moved by up to three
+// quarters of that, and each cell's nearest point within growing square searches.
+void latlonshelvesvoronoi(planet& world, vector<int>& voronoi, int pointdist)
 {
     int width = world.width();
     int height = world.height();
     int maxelev = world.maxelevation();
-    int midelev = maxelev / 2;
 
     int grain = 16; // Level of detail on this fractal map.
     float valuemod = 0.4f;
@@ -391,10 +316,7 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
 
     vector<vector<int>> fractal(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
-    createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0);
-
-    int warpdist = 1;
-    int warpdiv = midelev / warpdist;
+    createfractal(fractal, width, height, grain, valuemod, valuemod2, 1, maxelev, 0, 0); // Its warp is not applied; the call keeps the draws.
 
     vector<vector<int>> pointsmap(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
 
@@ -422,6 +344,8 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
         }
     }
 
+    const mesh::CellGrid& grid = world.grid();
+
     for (int i = 0; i <= width; i++)
     {
         for (int j = 0; j <= height; j++)
@@ -429,42 +353,8 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
             int closest = 0;
             int dist = 10000000;
 
-            int warpdistx = 0;
-            int warpdisty = 0;
-
-            int warpx = i;
-            int warpy = j;
-
-            if (fractal[warpx][warpy] > maxelev / 2)
-                warpdistx = (fractal[warpx][warpy] - midelev) / warpdiv;
-            else
-                warpdistx = 0 - (midelev - fractal[warpx][warpy]) / warpdiv;
-
-            int checkx = i + warpdistx;
-
-            if (checkx<0 || checkx>width)
-                wrap(checkx, width);
-
-            warpx = warpx + width / 2;
-
-            if (warpx > width)
-                warpx = warpx - width;
-
-            if (fractal[warpx][warpy] > maxelev / 2)
-                warpdisty = (fractal[warpx][warpy] - midelev) / warpdiv;
-            else
-                warpdisty = 0 - (midelev - fractal[warpx][warpy]) / warpdiv;
-
-            int checky = j + warpdisty;
-
-            if (checky < 0)
-                checky = 0;
-
-            if (checky > height)
-                checky = height;
-
-            checkx = i;
-            checky = j;
+            int checkx = i;
+            int checky = j;
 
             int distcheck = 10;
 
@@ -485,12 +375,12 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
                             {
                                 int xdist = checkx - xx;
                                 int ydist = checky - y;
-                                int pointdist = xdist * xdist + ydist * ydist;
+                                int pointdistance = xdist * xdist + ydist * ydist;
 
-                                if (pointdist < dist)
+                                if (pointdistance < dist)
                                 {
                                     closest = pointsmap[xx][y];
-                                    dist = pointdist;
+                                    dist = pointdistance;
                                 }
                             }
                         }
@@ -501,7 +391,79 @@ void makeshelvesvoronoi(planet& world, vector<vector<short>>& voronoi, vector<ve
 
             } while (closest == 0);
 
-            voronoi[i][j] = closest;
+            voronoi[grid.cellof(i, j)] = static_cast<short>(closest); // the legacy short panels
         }
     }
+}
+
+// The Voronoi panels on the sphere: seeds drawn by area, one per (pointdist legacy pixels)^2,
+// and each cell the seed nearest its centre (a Dijkstra-ordered propagation over the neighbour
+// table with the great-circle distance to the candidate seed; ties to the earlier seed).
+void sphereshelvesvoronoi(planet& world, vector<int>& voronoi, int pointdist)
+{
+    const mesh::CellGrid& grid = world.grid();
+    const size_t count = grid.cellcount();
+    const double spacing_m = static_cast<double>(max(1, pointdist)) * legacypixelkm(world) * 1000.0;
+    const int seeds = max(1, static_cast<int>(lround(grid.totalarea_m2() / (spacing_m * spacing_m))));
+
+    vector<mesh::Vec3> points;
+    points.reserve(static_cast<size_t>(seeds) + 1);
+    points.push_back(mesh::Vec3{});
+    for (int k = 1; k <= seeds; k++)
+        points.push_back(randompoint());
+
+    vector<double> best(count, numeric_limits<double>::max());
+    fill(voronoi.begin(), voronoi.end(), 0);
+    for (int k = 1; k <= seeds; k++)
+    {
+        const CellId c = grid.locate(points[static_cast<size_t>(k)]);
+        if (c == mesh::nocell)
+            continue;
+        const double d = mesh::greatcircle_rad(grid.centre(c), points[static_cast<size_t>(k)]);
+        if (d < best[c])
+        {
+            best[c] = d;
+            voronoi[c] = k;
+        }
+    }
+
+    using Entry = pair<double, CellId>;
+    priority_queue<Entry, vector<Entry>, greater<Entry>> q;
+    for (CellId c = 0; c < count; c++)
+        if (voronoi[c] != 0)
+            q.push({ best[c], c });
+
+    while (!q.empty())
+    {
+        const Entry top = q.top();
+        q.pop();
+        if (top.first > best[top.second])
+            continue;
+        const int seed = voronoi[top.second];
+        for (int slot = 1; slot <= mesh::slotcount; slot++)
+        {
+            const std::int32_t n = grid.neighbour(top.second, slot);
+            if (n < 0)
+                continue;
+            const double d = mesh::greatcircle_rad(grid.centre(static_cast<CellId>(n)), points[static_cast<size_t>(seed)]);
+            if (d < best[n] || (d == best[n] && seed < voronoi[n]))
+            {
+                best[n] = d;
+                voronoi[n] = seed;
+                q.push({ d, static_cast<CellId>(n) });
+            }
+        }
+    }
+}
+}
+
+// This does the same thing, for the continental shelves.
+
+void makeshelvesvoronoi(planet& world, vector<int>& voronoi, int pointdist)
+{
+    voronoi.assign(world.cellcount(), 0);
+    if (world.grid().kind() == mesh::GridKind::latlon)
+        latlonshelvesvoronoi(world, voronoi, pointdist);
+    else
+        sphereshelvesvoronoi(world, voronoi, pointdist);
 }

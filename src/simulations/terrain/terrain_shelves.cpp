@@ -1,5 +1,6 @@
 // Continental shelf masks and their connected gaps.
-// Algorithms by Jonathan Hill, extracted from globalterrain.cpp.
+// Algorithms by Jonathan Hill, extracted from globalterrain.cpp; on the cell grid since T8 W2-T2
+// (docs/architecture/sphere-mesh.md sections 3 and 11).
 
 #include "simulations/terrain/terrain_internal.hpp"
 
@@ -9,25 +10,29 @@
 #include <queue>
 
 #include "core/classes.hpp"
+#include "core/mesh/mesh_geometry.hpp"
+#include "simulations/terrain/coast_queries.hpp"
+#include "simulations/terrain/terrain_coasts.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
 using namespace std;
+using namespace terrain::coastgrid;
+using mesh::CellId;
 
 namespace
 {
 void removeshelfgaps(planet& world, worldgrid<bool>& shelves);
-int nonshelfareacheck(planet& world, worldgrid<bool>& shelves, std::vector<std::vector<bool>>& checked, int startx, int starty);
-}
 
-// This function makes continental shelves.
-
-void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdist)
+// The legacy shelves (lat-lon): outline circles at fractal-warped centres joined to the coast
+// by a curve, the Voronoi panels that hold outline, random circles, all in pixels.
+void latloncontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdist)
 {
     int width = world.width();
     int height = world.height();
     int maxelev = world.maxelevation();
     int midelev = maxelev / 2;
+    const mesh::CellGrid& grid = world.grid();
 
     // First, sort out the outline.
 
@@ -73,9 +78,6 @@ void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdi
                     warpdistx = 0 - (midelev - fractal[warpx][warpy]) / warpdiv;
 
                 int ii = i + warpdistx;
-
-                if (ii<0 || ii>width)
-                    wrap(ii, width);
 
                 warpx = warpx + width / 2;
 
@@ -127,9 +129,6 @@ void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdi
 
                 // Now we can draw a circle.
 
-                if (ii<0 || ii>width)
-                    wrap(ii, width);
-
                 if (jj < 0)
                     jj = 0;
 
@@ -162,9 +161,9 @@ void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdi
 
     // Now, we need a voronoi map.
 
-    vector<vector<short>> voronoi(width + 1, vector<short>(height + 1, 0));
+    vector<int> voronoi;
 
-    makeshelvesvoronoi(world, voronoi, outline, pointdist);
+    makeshelvesvoronoi(world, voronoi, pointdist);
 
     // Now, every panel of the voronoi map that has any outline in it is continental shelf.
 
@@ -174,7 +173,7 @@ void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdi
         {
             if (outline[i][j] == 1 && shelves[i][j] == 0)
             {
-                int thiscell = voronoi[i][j];
+                int thiscell = voronoi[grid.cellof(i, j)];
 
                 for (int k = i - 50; k <= i + 50; k++)
                 {
@@ -187,7 +186,7 @@ void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdi
                     {
                         if (l >= 0 && l < height)
                         {
-                            if (voronoi[kk][l] == thiscell)
+                            if (voronoi[grid.cellof(kk, l)] == thiscell)
                                 shelves[kk][l] = 1;
                         }
                     }
@@ -279,6 +278,145 @@ void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdi
                 shelves[i][j] = 1;
         }
     }
+}
+
+// The shelves on the sphere: the same construction in legacy pixels of km
+// (tuning::terrain::sphere_noise_coast): the warp and the circle radii from sphere noise, the
+// joining curve (a straight line in the legacy, its control point the midpoint) as a great-circle
+// arc, the panel test within 50 pixels as a disc, the circles' chance per pixel area.
+void spherecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdist)
+{
+    const mesh::CellGrid& grid = world.grid();
+    const size_t count = grid.cellcount();
+    const double pixelkm = legacypixelkm(world);
+    int maxelev = world.maxelevation();
+    int midelev = maxelev / 2;
+
+    vector<char> outline(count, 0);
+
+    const vector<int> fractal = spherefractal(world, 0x5e1f0001, grain8noise(), maxelev);
+    const vector<int> fractalx = spherefractal(world, 0x5e1f0002, grain8noise(), maxelev);
+    const vector<int> fractaly = spherefractal(world, 0x5e1f0003, grain8noise(), maxelev);
+
+    int maxwarp = 60;
+    int warpdiv = max(1, maxelev / maxwarp);
+    int maxradius = 20;
+    int raddiv = max(1, maxelev / maxradius);
+
+    const vector<CellId> order = columnorder(grid);
+
+    for (const CellId c : order)
+    {
+        if (!terrain::coastgrid::outline(world, c))
+            continue;
+
+        // The centre of this circle, offset to make the shelves more interesting (east and south in pixels).
+        const int warpdistx = (fractalx[c] - midelev) / warpdiv;
+        const int warpdisty = (fractaly[c] - midelev) / warpdiv;
+        const mesh::Vec3 target = movedpoint(world, c, warpdistx * pixelkm, -warpdisty * pixelkm);
+
+        // A line from the outline to that centre, so that there is no gap in the shelf.
+        for (const CellId n : mesh::cellsalongarc(grid, grid.centre(c), target))
+            outline[n] = 1;
+
+        // Now we can draw a circle.
+        const int radius = fractal[c] / raddiv;
+        if (radius > 0)
+            for (const CellId n : cellswithinkm(world, target, (radius + 0.5) * pixelkm))
+                outline[n] = 1;
+    }
+
+    // Now, every panel of the voronoi map that has any outline within 50 pixels is continental shelf.
+
+    vector<int> voronoi;
+
+    makeshelvesvoronoi(world, voronoi, pointdist);
+
+    int panels = 0;
+    for (const int id : voronoi)
+        panels = max(panels, id);
+    vector<int> start(static_cast<size_t>(panels) + 2, 0);
+    for (const int id : voronoi)
+        start[static_cast<size_t>(id) + 1]++;
+    for (size_t k = 1; k < start.size(); k++)
+        start[k] += start[k - 1];
+    vector<CellId> members(count);
+    {
+        vector<int> fillat(start.begin(), start.end() - 1);
+        for (CellId c = 0; c < count; c++)
+            members[static_cast<size_t>(fillat[static_cast<size_t>(voronoi[c])]++)] = c;
+    }
+
+    const double panelreach_m = 50.5 * pixelkm * 1000.0;
+
+    for (const CellId c : order)
+    {
+        if (outline[c] == 1 && shelves[c] == 0)
+        {
+            const int id = voronoi[c];
+            const mesh::Vec3 p = grid.centre(c);
+            for (int k = start[static_cast<size_t>(id)]; k < start[static_cast<size_t>(id) + 1]; k++)
+            {
+                const CellId n = members[static_cast<size_t>(k)];
+                if (mesh::greatcircle_m(p, grid.centre(n), grid.radius_m()) <= panelreach_m)
+                    shelves[n] = 1;
+            }
+        }
+    }
+
+    // And anywhere that's land is continental shelf too, technically.
+
+    for (CellId c = 0; c < count; c++)
+    {
+        if (world.sea(c) == 0)
+            shelves[c] = 1;
+    }
+
+    // Now add a circles of shelf to the shelves, to make the edges a bit more varied.
+
+    vector<char> circles(count, 0);
+
+    const double circlechance = 1.0 / 40.0; // per legacy pixel
+    const double mindist = 5.0; // Minimum distance to non-shelf sea (pixels).
+    const double radius = 8.0;
+
+    for (const CellId c : order)
+    {
+        if (shelves[c] == 1 && uniformdraw() < cellchance(world, c, circlechance))
+        {
+            bool nearsea = 0;
+
+            for (const CellId n : cellswithinkm(world, grid.centre(c), (mindist + 0.5) * pixelkm))
+            {
+                if (shelves[n] == 0)
+                {
+                    nearsea = 1;
+                    break;
+                }
+            }
+
+            if (nearsea == 0)
+                for (const CellId n : cellswithinkm(world, grid.centre(c), (radius + 0.5) * pixelkm))
+                    circles[n] = 1;
+        }
+    }
+
+    for (CellId c = 0; c < count; c++)
+    {
+        if (circles[c] == 1)
+            shelves[c] = 1;
+    }
+}
+}
+
+// This function makes continental shelves.
+
+void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdist)
+{
+    if (world.grid().kind() == mesh::GridKind::latlon)
+        latloncontinentalshelves(world, shelves, pointdist);
+    else
+        spherecontinentalshelves(world, shelves, pointdist);
 
     // Now we need to remove any holes in the continental shelves!
 
@@ -287,133 +425,80 @@ void makecontinentalshelves(planet& world, worldgrid<bool>& shelves, int pointdi
 
 namespace
 {
-// This function removes any gaps in the continental shelves
+// This function removes any gaps in the continental shelves: every non-shelf cell outside the
+// largest 4-connected area of non-shelf becomes shelf. On lat-lon the legacy flood: started from
+// interior cells, never entering the last row, the largest by cell count.
 
 void removeshelfgaps(planet& world, worldgrid<bool>& shelves)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
+    const size_t count = grid.cellcount();
+    const bool legacy = grid.kind() == mesh::GridKind::latlon;
 
-    int minseasize = (width * height) / 4;
+    vector<double> area(count, 0.0);
+    vector<char> checked(count, 0);
+    vector<CellId> component;
+    const vector<CellId> order = columnorder(grid);
 
-    vector<vector<bool>> checked(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, 0)); // This array marks which sea areas have already been scanned.
-
-    vector<vector<int>> area(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0)); // This array marks the area of each bit of sea.
-
-    int seax = -1;
-    int seay = -1;
-
-    // First, we find the area of each section of non-shelf and mark them on the area array.
-
-    for (int i = width - 1; i > 0; i--)
+    auto enterable = [&](CellId c)
     {
-        for (int j = height - 1; j > 0; j--)
-        {
-            if (shelves[i][j] == 0 && checked[i][j] == 0 && area[i][j] == 0)
-            {
-                int size = nonshelfareacheck(world, shelves, checked, i, j);
+        return shelves[c] == 0 && (!legacy || grid.neighbour(c, 5) >= 0);
+    };
 
-                for (int k = 0; k <= width; k++) // Clear the checked array and mark all adjoining points with this area.
+    for (auto it = order.rbegin(); it != order.rend(); ++it)
+    {
+        const CellId first = *it;
+        if (shelves[first] != 0 || checked[first] || area[first] != 0.0)
+            continue;
+        if (legacy)
+        {
+            const int x = grid.column(first);
+            const int y = grid.row(first);
+            if (x < 1 || x > grid.columns() - 2 || y < 1 || y > grid.rows() - 2)
+                continue;
+        }
+
+        component.clear();
+        queue<CellId> q;
+        q.push(first);
+        checked[first] = 1;
+        double size = 0.0;
+        while (!q.empty())
+        {
+            const CellId c = q.front();
+            q.pop();
+            component.push_back(c);
+            size += legacy ? 1.0 : grid.area_m2(c);
+            for (int slot = 1; slot <= mesh::slotcount; slot += 2)
+            {
+                const std::int32_t n = grid.neighbour(c, slot);
+                if (n >= 0 && !checked[n] && enterable(static_cast<CellId>(n)))
                 {
-                    for (int l = 0; l <= height; l++)
-                    {
-                        if (checked[k][l] == 1)
-                        {
-                            area[k][l] = size;
-                            checked[k][l] = 0;
-                        }
-                    }
+                    checked[n] = 1;
+                    q.push(static_cast<CellId>(n));
                 }
             }
         }
+        for (const CellId c : component)
+            area[c] = size;
     }
 
-    // Now we just find a point that's in the largest area of non-shelf.
+    // Now we just find the largest area of non-shelf.
 
-    int largest = 0;
+    double largest = 0.0;
 
-    for (int i = 0; i <= width; i++)
+    for (const CellId c : order)
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (area[i][j] > largest)
-            {
-                largest = area[i][j];
-                seax = i;
-                seay = j;
-            }
-        }
+        if (area[c] > largest)
+            largest = area[c];
     }
 
     // Now we simply remove any sea tiles that aren't part of the largest area of sea.
 
-    for (int i = 0; i <= width; i++)
+    for (CellId c = 0; c < count; c++)
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (area[i][j] != largest)
-                shelves[i][j] = 1;
-        }
+        if (area[c] != largest)
+            shelves[c] = 1;
     }
-}
-}
-
-namespace
-{
-// This tells how large a given area of non-shelf sea is.
-
-int nonshelfareacheck(planet& world, worldgrid<bool>& shelves, vector<vector<bool>>& checked, int startx, int starty)
-{
-    int width = world.width();
-    int height = world.height();
-
-    int total = 0;
-
-    int row[] = { -1,0,0,1 };
-    int col[] = { 0,-1,1,0 };
-
-    twointegers node;
-
-    node.x = startx;
-    node.y = starty;
-
-    queue<twointegers> q; // Create a queue
-    q.push(node); // Put our starting node into the queue
-
-    while (q.empty() != 1) // Keep going while there's anything left in the queue
-    {
-        node = q.front(); // Take the node at the front of the queue
-        q.pop(); // And then pop it out of the queue
-
-        if (node.x >= 0 && node.x <= width && node.y >= 0 && node.y <= height && shelves[node.x][node.y] == 0)
-        {
-            total++;
-            checked[node.x][node.y] = 1;
-
-            for (int k = 0; k < 4; k++) // Look at the four neighbouring nodes in turn
-            {
-                twointegers nextnode;
-
-                nextnode.x = node.x + row[k];
-                nextnode.y = node.y + col[k];
-
-                if (nextnode.x > width)
-                    nextnode.x = 0;
-
-                if (nextnode.x < 0)
-                    nextnode.x = width;
-
-                if (nextnode.y >= 0 && nextnode.y < height)
-                {
-                    if (shelves[nextnode.x][nextnode.y] == 0 && checked[nextnode.x][nextnode.y] == 0) // If this node is sea
-                    {
-                        checked[nextnode.x][nextnode.y] = 1;
-                        q.push(nextnode); // Put that node onto the queue
-                    }
-                }
-            }
-        }
-    }
-    return total;
 }
 }
