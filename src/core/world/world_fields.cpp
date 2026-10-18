@@ -7,10 +7,46 @@ namespace worldmodel
 {
 namespace
 {
+// The remap rule of each field (sphere-mesh.md sections 5 and 6): floats are
+// intensive (mean) and integers codes, ids, masks or scores (nearest), except:
+constexpr RemapRule remaprule(FieldId id, ElementType element)
+{
+    switch (id)
+    {
+    // D8 codes and D8 direction bits, in the cell's own frame: recomputed, never remapped.
+    case FieldId::mountain_ridges:
+    case FieldId::river_direction:
+    case FieldId::flow_direction:
+    case FieldId::delta_direction:
+    case FieldId::mountain_precipitation_direction_january:
+    case FieldId::mountain_precipitation_direction_july:
+        return RemapRule::direction;
+    // Fluxes through a cell's area (sphere-mesh.md section 5): extensive.
+    case FieldId::river_flow_january:
+    case FieldId::river_flow_july:
+    case FieldId::drainage_area:
+    case FieldId::discharge:
+    case FieldId::sediment_flux:
+    case FieldId::delta_flow_january:
+    case FieldId::delta_flow_july:
+        return RemapRule::total;
+    // Floats that are not averaged: an axis (pi equals 0), surfaces where 0 means none, isolated peaks.
+    case FieldId::shortening_direction:
+    case FieldId::lake_surface:
+    case FieldId::rift_lake_surface:
+    case FieldId::rift_lake_bed:
+    case FieldId::volcano:
+        return RemapRule::nearest;
+    default:
+        return element == ElementType::f32 ? RemapRule::mean : RemapRule::nearest;
+    }
+}
+
 const std::array<FieldSpec, kFieldCount> kFields =
 { {
 #define UW_WORLD_FIELD_SPEC(id, component, element, layout, units, description) \
-    { FieldId::id, Component::component, ElementType::element, Layout::layout, #id, units, description },
+    { FieldId::id, Component::component, ElementType::element, Layout::layout, #id, units, description, \
+      remaprule(FieldId::id, ElementType::element) },
     UW_WORLD_FIELD_LIST(UW_WORLD_FIELD_SPEC)
 #undef UW_WORLD_FIELD_SPEC
 } };
@@ -94,6 +130,18 @@ const char* layoutname(Layout layout)
     case Layout::monthly: return "monthly";
     case Layout::zonalprofile: return "zonalprofile";
     case Layout::levelseasonal: return "levelseasonal";
+    }
+    return "";
+}
+
+const char* remaprulename(RemapRule rule)
+{
+    switch (rule)
+    {
+    case RemapRule::mean: return "mean";
+    case RemapRule::total: return "total";
+    case RemapRule::nearest: return "nearest";
+    case RemapRule::direction: return "direction";
     }
     return "";
 }

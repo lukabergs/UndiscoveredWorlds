@@ -29,30 +29,52 @@ def select(bundle, patterns):
 
 
 def check_grid(bundle, spec, context):
-    """Cell-centred W x W/2 grid; every spatial field ends in (rows, columns) of the
-    surface grid or of a native model grid with the same 2:1 aspect."""
+    """Bundle v2 grid kinds (docs/architecture/sphere-mesh.md section 7). latlon (and v1): a
+    cell-centred W x W/2 grid; every spatial field ends in (rows, columns) of the surface grid
+    or of a native model grid with the same 2:1 aspect. cube: N cells per face edge with the
+    lat-lon export at W = 4 N; every spatial field ends in (6, N, N) or a 2:1 model grid, and
+    every export in (rows, columns) of the export."""
     grid = bundle.manifest['grid']
+    kind = bundle.grid_kind
     problems = []
-    if grid.get('registration') != 'cell-centred':
-        problems.append(f"registration is {grid.get('registration')!r}")
+    if kind == 'latlon':
+        if grid.get('registration') != 'cell-centred':
+            problems.append(f"registration is {grid.get('registration')!r}")
+    elif kind == 'cube':
+        if grid.get('orientation') != 'uw-cube-1':
+            problems.append(f"orientation is {grid.get('orientation')!r}")
+        if bundle.columns != 4 * bundle.face_cells:
+            problems.append(f'export columns {bundle.columns} are not 4 N (N = {bundle.face_cells})')
+    else:
+        problems.append(f'grid kind {kind!r} is not latlon or cube')
     if bundle.columns != 2 * bundle.rows:
         problems.append(f'grid is {bundle.columns} x {bundle.rows}, not W x W/2')
     native = {}
     for identifier, info in bundle.fields.items():
         if info.layout not in SPATIAL_LAYOUTS:
             continue
+        if kind == 'cube' and tuple(info.shape[-3:]) == (6, bundle.face_cells, bundle.face_cells):
+            continue
         if len(info.shape) < 2:
             problems.append(f'{identifier}: shape {list(info.shape)} has no grid')
             continue
         rows, columns = info.shape[-2:]
-        if (rows, columns) == (bundle.rows, bundle.columns):
+        if kind == 'latlon' and (rows, columns) == (bundle.rows, bundle.columns):
             continue
         if columns == 2 * rows:
             native[identifier] = f'{columns} x {rows}'
         else:
             problems.append(f'{identifier}: {columns} x {rows} is not W x W/2')
+    for identifier, entry in bundle.exports.items():
+        if tuple(entry['shape'][-2:]) != (bundle.rows, bundle.columns):
+            problems.append(f'{identifier}: export shape {entry["shape"]} is not {bundle.rows} x {bundle.columns}')
     details = problems + [f'{identifier}: native grid {size}' for identifier, size in native.items()]
-    summary = f'{bundle.columns} x {bundle.rows} cell-centred' if not problems else f'{len(problems)} problem(s)'
+    if problems:
+        summary = f'{len(problems)} problem(s)'
+    elif kind == 'cube':
+        summary = f'cube N {bundle.face_cells}, export {bundle.columns} x {bundle.rows}'
+    else:
+        summary = f'{bundle.columns} x {bundle.rows} cell-centred'
     return result('grid', 'fail' if problems else 'pass', summary, details)
 
 

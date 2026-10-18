@@ -86,4 +86,12 @@ if(TARGET world_pipeline)
     target_link_libraries(planet_grid_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
     target_include_directories(planet_grid_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(planet_grid_tests)
+
+    # Bundle v2 and the lat-lon export of a world (sphere-mesh.md sections 6 and 7).
+    add_executable(bundle_v2_tests
+        io/bundle_v2_tests.cpp
+    )
+    target_link_libraries(bundle_v2_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(bundle_v2_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(bundle_v2_tests)
 endif()

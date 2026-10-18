@@ -134,6 +134,26 @@ void Writer::addfield(const FieldEntry& field)
     fields_.push_back(std::move(written));
 }
 
+void Writer::addexport(const FieldEntry& field, const std::string& rule, bool recomputed)
+{
+    const std::string relative = "latlon/" + field.component + "/" + field.id.substr(field.id.find('.') + 1) + ".npy";
+    std::filesystem::create_directories((directory_ / relative).parent_path());
+    writenpy(directory_ / relative, field.dtype, field.shape, field.data, field.bytes);
+    WrittenExport written{ field, relative, hashbytes(field.data, field.bytes), rule, recomputed };
+    written.entry.data = nullptr;
+    exports_.push_back(std::move(written));
+}
+
+void Writer::addcells(const ArrayEntry& cells)
+{
+    const std::string relative = "grid/" + cells.id + ".npy";
+    std::filesystem::create_directories((directory_ / relative).parent_path());
+    writenpy(directory_ / relative, cells.dtype, cells.shape, cells.data, cells.bytes);
+    WrittenArray written{ cells, relative, hashbytes(cells.data, cells.bytes) };
+    written.entry.data = nullptr;
+    cells_.push_back(std::move(written));
+}
+
 void Writer::addtable(const TableEntry& table)
 {
     const std::string relative = "tables/" + table.component + "/" + table.id.substr(table.id.find('.') + 1) + table.extension;
@@ -152,8 +172,28 @@ void Writer::finish(const Metadata& metadata)
     out << "  \"schema\": " << jsonstring(kSchema) << ",\n";
     out << "  \"created\": " << jsonstring(utcnow()) << ",\n";
     out << "  \"seed\": " << metadata.seed << ",\n";
-    out << "  \"grid\": {\"columns\": " << metadata.columns << ", \"rows\": " << metadata.rows
-        << ", \"registration\": \"cell-centred\", \"layout\": \"row-major, north row first\"},\n";
+    const GridSpec& grid = metadata.grid;
+    if (grid.kind == "latlon")
+    {
+        if (!cells_.empty())
+            throw std::logic_error("A lat-lon bundle has no cell table");
+        out << "  \"grid\": {\"kind\": \"latlon\", \"columns\": " << metadata.columns << ", \"rows\": " << metadata.rows
+            << ", \"registration\": \"cell-centred\", \"layout\": \"row-major, north row first\"";
+    }
+    else if (grid.kind == "cube")
+    {
+        if (grid.facecells < 1 || metadata.columns != 4 * grid.facecells || metadata.rows * 2 != metadata.columns)
+            throw std::logic_error("A cube bundle needs N >= 1 and its lat-lon export of 4 N x 2 N");
+        out << "  \"grid\": {\"kind\": \"cube\", \"face_cells\": " << grid.facecells
+            << ", \"orientation\": \"uw-cube-1\", \"layout\": \"face, row (top first), column\"";
+    }
+    else
+        throw std::logic_error("Unsupported bundle grid kind: " + grid.kind);
+    if (grid.radiuskm > 0.0)
+        out << ", \"radius_km\": " << grid.radiuskm;
+    if (grid.kind == "cube")
+        out << ", \"export_columns\": " << metadata.columns;
+    out << "},\n";
     out << "  \"recipe\": " << jsonstring(metadata.recipe) << ",\n";
     out << "  \"command\": [";
     for (std::size_t index = 0; index < metadata.command.size(); index++)
@@ -197,6 +237,33 @@ void Writer::finish(const Metadata& metadata)
             << ", \"written_by\": " << jsonstring(field.writtenby) << ", \"description\": " << jsonstring(field.description) << "}";
     }
     out << (fields_.empty() ? "],\n" : "\n  ],\n");
+    if (!exports_.empty())
+    {
+        out << "  \"exports\": [";
+        for (std::size_t index = 0; index < exports_.size(); index++)
+        {
+            const WrittenExport& written = exports_[index];
+            out << (index ? ",\n" : "\n") << "    {\"id\": " << jsonstring(written.entry.id) << ", \"dtype\": " << jsonstring(written.entry.dtype)
+                << ", \"shape\": " << shapetext(written.entry.shape, true) << ", \"file\": " << jsonstring(written.file)
+                << ", \"hash\": " << jsonstring(hexhash(written.hash)) << ", \"rule\": " << jsonstring(written.rule);
+            if (written.rule == "direction")
+                out << ", \"recomputed\": " << (written.recomputed ? "true" : "false");
+            out << "}";
+        }
+        out << "\n  ],\n";
+    }
+    if (!cells_.empty())
+    {
+        out << "  \"cells\": [";
+        for (std::size_t index = 0; index < cells_.size(); index++)
+        {
+            const WrittenArray& written = cells_[index];
+            out << (index ? ",\n" : "\n") << "    {\"id\": " << jsonstring(written.entry.id) << ", \"dtype\": " << jsonstring(written.entry.dtype)
+                << ", \"shape\": " << shapetext(written.entry.shape, true) << ", \"file\": " << jsonstring(written.file)
+                << ", \"hash\": " << jsonstring(hexhash(written.hash)) << "}";
+        }
+        out << "\n  ],\n";
+    }
     out << "  \"tables\": [";
     for (std::size_t index = 0; index < tables_.size(); index++)
     {
@@ -216,6 +283,7 @@ namespace
 struct JsonValue
 {
     double number = 0.0;
+    bool boolean = false;
     std::string text;
     std::vector<JsonValue> items;
     std::map<std::string, JsonValue> members;
@@ -334,7 +402,12 @@ private:
         }
         else if (first == '"')
             value.text = parsestring();
-        else if (text_.compare(position_, 4, "true") == 0 || text_.compare(position_, 4, "null") == 0)
+        else if (text_.compare(position_, 4, "true") == 0)
+        {
+            value.boolean = true;
+            position_ += 4;
+        }
+        else if (text_.compare(position_, 4, "null") == 0)
             position_ += 4;
         else if (text_.compare(position_, 5, "false") == 0)
             position_ += 5;
@@ -374,6 +447,8 @@ ManifestEntry manifestentry(const JsonValue& value)
     entry.description = value.at("description").text;
     entry.file = value.at("file").text;
     entry.writtenby = value.at("written_by").text;
+    entry.rule = value.at("rule").text;
+    entry.recomputed = value.at("recomputed").boolean;
     return entry;
 }
 }
@@ -391,14 +466,36 @@ Reader::Reader(std::filesystem::path directory) : directory_(std::move(directory
     {
         throw std::runtime_error(manifestpath.string() + ": " + error.what());
     }
-    if (manifest.at("schema").text != kSchema)
-        throw std::runtime_error(manifestpath.string() + ": not a " + kSchema + " manifest");
+    schema_ = manifest.at("schema").text;
+    if (schema_ != kSchema && schema_ != kSchemaV1)
+        throw std::runtime_error(manifestpath.string() + ": not a " + kSchema + " or " + kSchemaV1 + " manifest");
     seed_ = static_cast<long>(manifest.at("seed").number);
-    columns_ = static_cast<int>(manifest.at("grid").at("columns").number);
-    rows_ = static_cast<int>(manifest.at("grid").at("rows").number);
+    const JsonValue& grid = manifest.at("grid");
+    // v1 has no kind: lat-lon.
+    grid_.kind = schema_ == kSchemaV1 || grid.at("kind").text.empty() ? "latlon" : grid.at("kind").text;
+    grid_.radiuskm = grid.at("radius_km").number;
+    if (grid_.kind == "latlon")
+    {
+        columns_ = static_cast<int>(grid.at("columns").number);
+        rows_ = static_cast<int>(grid.at("rows").number);
+    }
+    else if (grid_.kind == "cube")
+    {
+        if (grid.at("orientation").text != "uw-cube-1")
+            throw std::runtime_error(manifestpath.string() + ": unknown cube orientation " + grid.at("orientation").text);
+        grid_.facecells = static_cast<int>(grid.at("face_cells").number);
+        columns_ = static_cast<int>(grid.at("export_columns").number);
+        rows_ = columns_ / 2;
+    }
+    else
+        throw std::runtime_error(manifestpath.string() + ": unsupported grid kind " + grid_.kind);
     recipe_ = manifest.at("recipe").text;
     for (const JsonValue& field : manifest.at("fields").items)
         fields_.push_back(manifestentry(field));
+    for (const JsonValue& field : manifest.at("exports").items)
+        exports_.push_back(manifestentry(field));
+    for (const JsonValue& cells : manifest.at("cells").items)
+        cells_.push_back(manifestentry(cells));
     for (const JsonValue& table : manifest.at("tables").items)
         tables_.push_back(manifestentry(table));
 }

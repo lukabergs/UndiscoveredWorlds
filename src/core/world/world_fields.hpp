@@ -33,6 +33,13 @@ enum class ElementType : std::uint8_t { b8, u8, i16, u16, i32, f32 };
 // surface grid; their shape is taken from the stored data.
 enum class Layout : std::uint8_t { scalar, grid, seasonal, monthly, zonalprofile, levelseasonal };
 
+// How a field of a spatial layout moves between cell grids (docs/architecture/
+// sphere-mesh.md sections 5 and 6): mean (intensive: remapmean), total (extensive:
+// remaptotal), nearest (codes, ids, masks, scores: remapnearest), direction (D8
+// codes, never remapped: recomputed on the destination grid). Scalars and zonal
+// profiles are copied; their rule is not used.
+enum class RemapRule : std::uint8_t { mean, total, nearest, direction };
+
 // X(id, component, element, layout, units, description)
 #define UW_WORLD_FIELD_LIST(X) \
     X(seed, planetbody, i32, scalar, "", "World seed") \
@@ -277,6 +284,7 @@ struct FieldSpec
     const char* name;        // e.g. "base_elevation"
     const char* units;
     const char* description;
+    RemapRule rule;          // world_fields.cpp, remaprule
 };
 
 struct TableSpec
@@ -293,6 +301,7 @@ const char* componentname(Component component);
 const char* elementname(ElementType element);   // NumPy dtype string, e.g. "<i2"
 std::size_t elementsize(ElementType element);
 const char* layoutname(Layout layout);
+const char* remaprulename(RemapRule rule);      // "mean", "total", "nearest", "direction"
 std::string qualifiedname(FieldId id);          // "geosphere.base_elevation"
 std::string qualifiedname(TableId id);
 bool findfield(std::string_view qualified, FieldId& id);

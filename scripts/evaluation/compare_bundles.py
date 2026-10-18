@@ -2,10 +2,13 @@
 
     uv run --offline scripts/evaluation/compare_bundles.py BUNDLE_A BUNDLE_B [--fields PREFIX ...] [--json OUT]
 
-A bundle is a directory written by `world_pipeline --bundle` (schema uw-run-bundle/v1).
-Fields are compared exactly; for differing fields the report gives the number of
-differing values and the largest absolute difference. Tables are compared as text.
-Exit status: 0 when every compared field and table is identical, 1 otherwise.
+A bundle is a directory written by `world_pipeline --bundle` (schema uw-run-bundle/v2, or v1
+read as grid kind latlon; docs/architecture/sphere-mesh.md section 7). The native fields are
+compared exactly; for differing fields the report gives the number of differing values and the
+largest absolute difference. Tables are compared as text. The lat-lon exports and the cell table
+of cube bundles are compared too when both bundles have them. The manifest's schema and grid
+block are not compared, so a v1 and a v2 lat-lon bundle with equal fields are identical.
+Exit status: 0 when every compared field, export, cell array and table is identical, 1 otherwise.
 
 --legacy-encoding compares a bundle from before the float migration of the climate
 fields and base elevation (integers, some scaled) with a later one: a float field is put
@@ -20,12 +23,15 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uwtools.bundle import SCHEMA, read_manifest
+from uwtools.bundle import SCHEMAS, read_manifest
+
+# Manifest lists compared entry by entry: native fields, lat-lon exports, the cell table, tables.
+KINDS = ('fields', 'exports', 'cells', 'tables')
 
 
 def load_manifest(bundle):
     manifest = read_manifest(bundle)
-    if manifest.get('schema') != SCHEMA:
+    if manifest.get('schema') not in SCHEMAS:
         raise SystemExit(f'{bundle}: unsupported schema {manifest.get("schema")!r}')
     return manifest
 
@@ -92,31 +98,38 @@ def main():
 
     left, right = load_manifest(args.left), load_manifest(args.right)
     result = {'left': str(args.left), 'right': str(args.right), 'fields': {}, 'tables': {}}
-    for kind in ('fields', 'tables'):
+    for kind in KINDS:
+        if kind in ('exports', 'cells'):
+            # Only cube bundles have them: compared when both bundles do.
+            if kind not in left or kind not in right:
+                continue
+            result[kind] = {}
         lefts = {entry['id']: entry for entry in left[kind]}
         rights = {entry['id']: entry for entry in right[kind]}
         for identifier in sorted(set(lefts) | set(rights)):
-            if not selected(identifier, args.fields):
+            if kind != 'cells' and not selected(identifier, args.fields):
                 continue
             if identifier not in lefts or identifier not in rights:
                 result[kind][identifier] = {'status': 'missing', 'side': 'left' if identifier not in lefts else 'right'}
-            elif kind == 'fields':
+            elif kind in ('fields', 'exports', 'cells'):
                 result[kind][identifier] = compare_field(args.left, args.right, lefts[identifier], rights[identifier],
-                                                         args.legacy_encoding)
+                                                         args.legacy_encoding and kind == 'fields')
             else:
                 same = (args.left / lefts[identifier]['file']).read_bytes() == (args.right / rights[identifier]['file']).read_bytes()
                 result[kind][identifier] = {'status': 'identical' if same else 'different'}
 
     problems = 0
-    for kind in ('fields', 'tables'):
-        for identifier, outcome in result[kind].items():
+    for kind in KINDS:
+        prefix = {'exports': 'latlon:', 'cells': 'grid:'}.get(kind, '')
+        for identifier, outcome in result.get(kind, {}).items():
             if outcome['status'] == 'identical':
                 continue
             problems += 1
             details = ', '.join(f'{key}={value}' for key, value in outcome.items() if key != 'status')
-            print(f'{outcome["status"]:>9}  {identifier}  {details}')
-    compared = len(result['fields']) + len(result['tables'])
-    print(f'{compared - problems} of {compared} fields and tables identical')
+            print(f'{outcome["status"]:>9}  {prefix}{identifier}  {details}')
+    compared = sum(len(result.get(kind, {})) for kind in KINDS)
+    extra = ', exports and cell arrays' if 'exports' in result or 'cells' in result else ''
+    print(f'{compared - problems} of {compared} fields{extra} and tables identical')
     legacy = {identifier: outcome for identifier, outcome in result['fields'].items() if outcome.get('legacy')}
     if legacy:
         refined = sum(1 for identifier, outcome in legacy.items()

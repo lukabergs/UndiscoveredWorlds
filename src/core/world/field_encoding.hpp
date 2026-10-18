@@ -50,7 +50,8 @@ void checkelement(FieldId id)
 
 // A world grid is stored in its cell grid's id order (row-major on lat-lon): its
 // bytes are the field's. Shape [row, column] on lat-lon, [cell] otherwise (bundle
-// v2 gives the cube its own shape, docs/architecture/sphere-mesh.md section 7).
+// v2 gives the cube its own shape, docs/architecture/sphere-mesh.md section 7:
+// cubebundleshape below).
 template<typename T>
 FieldData grid(FieldId id, std::size_t columns, std::size_t rows, const worldgrid<T>& source)
 {
@@ -65,6 +66,31 @@ FieldData grid(FieldId id, std::size_t columns, std::size_t rows, const worldgri
     if (source.size())
         std::memcpy(data.bytes.data(), source.data(), source.size() * sizeof(T));
     return data;
+}
+
+// Bundle v2 stores a cube field as [layer,] 6, N, N (id order: face, row, column);
+// the encoding above gives [layer,] cells. cubebundleshape turns a shape ending in
+// the 6 N^2 cells into the bundle's, cubeworldshape the reverse; both return false
+// and leave the shape unchanged when it does not end in the cube's cells (scalars,
+// zonal profiles, the climate solver's own grids).
+inline bool cubebundleshape(std::vector<std::size_t>& shape, std::size_t facecells)
+{
+    if (shape.empty() || facecells == 0 || shape.back() != 6 * facecells * facecells)
+        return false;
+    shape.back() = 6;
+    shape.push_back(facecells);
+    shape.push_back(facecells);
+    return true;
+}
+
+inline bool cubeworldshape(std::vector<std::size_t>& shape, std::size_t facecells)
+{
+    const std::size_t count = shape.size();
+    if (count < 3 || facecells == 0 || shape[count - 3] != 6 || shape[count - 2] != facecells || shape[count - 1] != facecells)
+        return false;
+    shape.resize(count - 2);
+    shape.back() = 6 * facecells * facecells;
+    return true;
 }
 
 // Other storage indexed grid[x][y] over 0..columns-1, 0..rows-1.

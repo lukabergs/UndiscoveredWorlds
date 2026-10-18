@@ -697,9 +697,11 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             cerr << "Failed to load run bundle: " << error.what() << '\n';
             return 1;
         }
-        if (options.hasWorldWidth || (options.hasResolution && options.resolution != world->width() + 1))
+        // The bundle's grid applies: a cube bundle gives a cube world of export columns 4 N.
+        const int bundlecolumns = world->grid().kind() == mesh::GridKind::cube ? 4 * world->grid().facecells() : world->width() + 1;
+        if (options.hasWorldWidth || (options.hasResolution && options.resolution != bundlecolumns))
         {
-            cerr << "--from-bundle fixes the grid at " << world->width() + 1 << " columns.\n";
+            cerr << "--from-bundle fixes the grid at " << bundlecolumns << " columns.\n";
             return 1;
         }
         if (options.hasSeed)
@@ -709,19 +711,25 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     if (options.grid == mesh::GridKind::cube)
     {
-        // Bundles are lat-lon until bundle v2 (sphere-mesh.md section 7).
+        // A bundle fixes the grid kind (sphere-mesh.md section 7): a cube world comes from a cube bundle.
         if (frombundle)
         {
-            cerr << "--grid cube cannot start from a bundle: bundles hold lat-lon worlds.\n";
-            return 1;
+            if (world->grid().kind() != mesh::GridKind::cube)
+            {
+                cerr << "--grid cube cannot start from a lat-lon bundle: the bundle's grid applies.\n";
+                return 1;
+            }
         }
-        const int columns = world->width() + 1;
-        if (columns % 4 != 0)
+        else
         {
-            cerr << "--grid cube needs a resolution that is a multiple of 4 (N = W / 4), not " << columns << ".\n";
-            return 1;
+            const int columns = world->width() + 1;
+            if (columns % 4 != 0)
+            {
+                cerr << "--grid cube needs a resolution that is a multiple of 4 (N = W / 4), not " << columns << ".\n";
+                return 1;
+            }
+            world->setgrid(mesh::GridKind::cube, columns);
         }
-        world->setgrid(mesh::GridKind::cube, columns);
     }
 
     applyclimateoptions(options.climate, world->climatesimulation());

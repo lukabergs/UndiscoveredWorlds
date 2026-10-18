@@ -1,9 +1,13 @@
 #include "world/planet_bundle.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <memory>
 #include <stdexcept>
 
+#include "core/mesh/cell_grid.hpp"
 #include "world/planet.hpp"
+#include "world/planet_export.hpp"
 #include "world/planet_fields.hpp"
 
 namespace
@@ -21,6 +25,50 @@ const runbundle::ManifestEntry* findentry(const std::vector<runbundle::ManifestE
             return &entry;
     return nullptr;
 }
+
+template<typename T>
+void addcells(runbundle::Writer& writer, const char* id, const char* dtype, std::vector<std::size_t> shape, const std::vector<T>& values)
+{
+    runbundle::ArrayEntry entry;
+    entry.id = id;
+    entry.dtype = dtype;
+    entry.shape = std::move(shape);
+    entry.data = values.data();
+    entry.bytes = values.size() * sizeof(T);
+    writer.addcells(entry);
+}
+
+// The cell table of a cube grid (sphere-mesh.md section 7), in id order.
+void writecelltable(runbundle::Writer& writer, const mesh::CellGrid& grid)
+{
+    const std::size_t count = grid.cellcount();
+    constexpr double degrees = 180.0 / 3.14159265358979323846;
+    std::vector<double> centre(3 * count), latitude(count), longitude(count), area(count);
+    std::vector<std::int32_t> neighbours(mesh::slotcount * count);
+    std::vector<std::int8_t> reverse(mesh::slotcount * count);
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const mesh::Vec3 p = grid.centre(c);
+        centre[3 * c] = p.x;
+        centre[3 * c + 1] = p.y;
+        centre[3 * c + 2] = p.z;
+        latitude[c] = grid.latitude_rad(c) * degrees;
+        longitude[c] = grid.longitude_rad(c) * degrees;
+        area[c] = grid.area_m2(c);
+        for (int k = 1; k <= mesh::slotcount; k++)
+        {
+            neighbours[mesh::slotcount * c + (k - 1)] = grid.neighbour(c, k);
+            reverse[mesh::slotcount * c + (k - 1)] = static_cast<std::int8_t>(grid.reverse(c, k));   // 0 where no neighbour
+        }
+    }
+    const std::size_t slots = static_cast<std::size_t>(mesh::slotcount);
+    addcells(writer, "centre", "<f8", { count, 3 }, centre);
+    addcells(writer, "latitude_deg", "<f8", { count }, latitude);
+    addcells(writer, "longitude_deg", "<f8", { count }, longitude);
+    addcells(writer, "area_m2", "<f8", { count }, area);
+    addcells(writer, "neighbours", "<i4", { count, slots }, neighbours);
+    addcells(writer, "reverse", "|i1", { count, slots }, reverse);
+}
 }
 
 PlanetBundleSource loadplanetbundle(planet& world, const std::filesystem::path& directory)
@@ -29,11 +77,25 @@ PlanetBundleSource loadplanetbundle(planet& world, const std::filesystem::path& 
     PlanetBundleSource source;
     source.reader = std::make_shared<runbundle::Reader>(directory);
     const runbundle::Reader& reader = *source.reader;
-    if (reader.columns() < 2 || reader.columns() != reader.rows() * 2)
-        throw std::runtime_error("Run bundle grid is not W x W/2: " + directory.string());
-    world.setwidth(reader.columns() - 1);
-    if (world.width() + 1 != reader.columns())
-        throw std::runtime_error("Run bundle grid exceeds the world's capacity: " + directory.string());
+    const bool cube = reader.grid().kind == "cube";
+    const std::size_t facecells = cube ? static_cast<std::size_t>(reader.grid().facecells) : 0;
+    if (cube)
+    {
+        // A cube bundle gives a cube world (sphere-mesh.md section 7).
+        if (reader.grid().facecells < 1 || reader.columns() != 4 * reader.grid().facecells)
+            throw std::runtime_error("Run bundle cube grid has no N >= 1 with export columns 4 N: " + directory.string());
+        world.setgrid(mesh::GridKind::cube, reader.columns());
+    }
+    else if (reader.grid().kind == "latlon")
+    {
+        if (reader.columns() < 2 || reader.columns() != reader.rows() * 2)
+            throw std::runtime_error("Run bundle grid is not W x W/2: " + directory.string());
+        world.setwidth(reader.columns() - 1);
+        if (world.width() + 1 != reader.columns())
+            throw std::runtime_error("Run bundle grid exceeds the world's capacity: " + directory.string());
+    }
+    else
+        throw std::runtime_error("Run bundle grid kind " + reader.grid().kind + " does not load as a world: " + directory.string());
 
     // Tables are compared before fields load: the crater table follows a scalar field.
     for (const runbundle::ManifestEntry& entry : reader.tables())
@@ -57,9 +119,20 @@ PlanetBundleSource loadplanetbundle(planet& world, const std::filesystem::path& 
         if (entry.dtype != elementname(fieldspec(data.id).element))
             throw std::runtime_error("Run bundle field has another element type than the catalogue: " + entry.id);
         data.shape = entry.shape;
+        if (cube)
+            encoding::cubeworldshape(data.shape, facecells);   // [layer,] 6, N, N -> [layer,] cells
         data.bytes = reader.fielddata(entry);
         if (loadplanetfield(world, data))
+        {
             source.loadedfields.push_back(data.id);
+            // The radius is the grid's too: its areas and distances follow it.
+            if (data.id == FieldId::radius)
+            {
+                float radius = 0.0f;
+                encoding::loadscalar(data, radius);
+                world.setradius(radius);
+            }
+        }
         else
             source.carriedfields.push_back(data.id);
         if (!entry.writtenby.empty())
@@ -76,6 +149,27 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
     using namespace worldmodel;
     runbundle::Writer writer(directory);
 
+    // The grid block is the world's (sphere-mesh.md section 7).
+    const mesh::CellGrid& grid = world.grid();
+    const bool cube = grid.kind() == mesh::GridKind::cube;
+    const std::size_t facecells = cube ? static_cast<std::size_t>(grid.facecells()) : 0;
+    runbundle::Metadata manifest = metadata;
+    manifest.grid.kind = cube ? "cube" : "latlon";
+    manifest.grid.facecells = cube ? grid.facecells() : 0;
+    manifest.grid.radiuskm = grid.radius_m() / 1000.0;
+    manifest.columns = cube ? 4 * grid.facecells() : grid.columns();
+    manifest.rows = manifest.columns / 2;
+
+    // A cube bundle carries the lat-lon export of every field on the world grid (section 6).
+    std::shared_ptr<const mesh::CellGrid> exportgrid;
+    std::unique_ptr<FieldRemap> exporter;
+    if (cube)
+    {
+        exportgrid = mesh::makelatlongrid(manifest.columns, grid.radius_m());
+        exporter = std::make_unique<FieldRemap>(grid, *exportgrid);
+        writecelltable(writer, grid);
+    }
+
     for (std::size_t index = 0; index < kFieldCount; index++)
     {
         const FieldId id = static_cast<FieldId>(index);
@@ -90,19 +184,46 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
         if (const auto found = provenance.fields.find(id); found != provenance.fields.end())
             entry.writtenby = found->second;
 
+        // data.shape is the bundle's, nativeshape the planet's encoding ([layer,] cells on the cube).
         PlanetFieldData data;
+        std::vector<std::size_t> nativeshape;
         if (source != nullptr && contains(source->carriedfields, id) && !contains(writtenfields, id))
         {
             const runbundle::ManifestEntry& carried = *findentry(source->reader->fields(), entry.id);
+            data.id = id;
             data.shape = carried.shape;
             data.bytes = source->reader->fielddata(carried);
+            nativeshape = data.shape;
+            if (cube)
+                encoding::cubeworldshape(nativeshape, facecells);
         }
         else
         {
             data = readplanetfield(world, id);
             if (data.shape.empty() && data.bytes.empty())
                 continue;   // absent (a diagnostic the world has not recorded)
+            nativeshape = data.shape;
+            if (cube)
+                encoding::cubebundleshape(data.shape, facecells);
         }
+
+        if (exporter)
+        {
+            std::vector<std::size_t> bundleshape = data.shape;
+            data.shape = nativeshape;
+            if (exporter->ongrid(data))
+            {
+                const PlanetFieldData exported = spec.rule == RemapRule::direction ? exporter->zeros(data) : exporter->remap(data);
+                runbundle::FieldEntry exportentry = entry;
+                exportentry.shape = exported.shape;
+                exportentry.data = exported.bytes.data();
+                exportentry.bytes = exported.bytes.size();
+                // Without the routing's callback (W2-IO) a direction field is exported as 0.
+                writer.addexport(exportentry, remaprulename(spec.rule), false);
+            }
+            data.shape = std::move(bundleshape);
+        }
+
         entry.shape = data.shape;
         entry.data = data.bytes.data();
         entry.bytes = data.bytes.size();
@@ -125,5 +246,5 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
         writer.addtable(entry);
     }
 
-    writer.finish(metadata);
+    writer.finish(manifest);
 }
