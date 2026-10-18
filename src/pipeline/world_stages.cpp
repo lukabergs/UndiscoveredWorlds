@@ -1059,19 +1059,25 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
     case GenerationStageId::sea_surface_temperatures:
     case GenerationStageId::pressure:
     case GenerationStageId::winds:
-        executeclimatestage(stageId, world.climate(), climatecontext);
+        // Through the climate adapter (climate_adapter.hpp): the world itself on lat-lon, its shadow on a cube.
+        runclimateprocess(stageId, world, scratch.climateShadow,
+            [&](planet& target) { executeclimatestage(stageId, target.climate(), climatecontext); });
         return true;
 
     case GenerationStageId::sea_ice_and_tides:
-        executeclimatestage(stageId, world.climate(), climatecontext);
-        if (world.seatotal() > 0)
-            createtidalmap(world);
+        runclimateprocess(stageId, world, scratch.climateShadow, [&](planet& target)
+        {
+            executeclimatestage(stageId, target.climate(), climatecontext);
+            if (target.seatotal() > 0)
+                createtidalmap(target);
+        });
         return true;
 
     case GenerationStageId::rainfall:
         // The planet keeps its own land/sea counts for the stages after climate.
         getlandandseatotals(world);
-        executeclimatestage(stageId, world.climate(), climatecontext);
+        runclimateprocess(stageId, world, scratch.climateShadow,
+            [&](planet& target) { executeclimatestage(stageId, target.climate(), climatecontext); });
         return true;
 
     case GenerationStageId::flow_routing:
@@ -1106,7 +1112,8 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 
     case GenerationStageId::mountain_temperature_lapse:
     case GenerationStageId::climates_and_biomes:
-        executeclimatestage(stageId, world.climate(), climatecontext);
+        runclimateprocess(stageId, world, scratch.climateShadow,
+            [&](planet& target) { executeclimatestage(stageId, target.climate(), climatecontext); });
         return true;
 
     case GenerationStageId::arid_features:
@@ -1179,6 +1186,7 @@ void initializegenerationscratch(GenerationScratch& scratch)
     scratch.heightCdf.assign(kHeightHistogramBins, 0.0f);
     scratch.inlandSeaComponents.clear();
     clearfeaturemask(scratch);
+    scratch.climateShadow.reset();
 }
 
 void finalizegeneratedworld(planet& world, GenerationScratch& scratch, const GenerationExecutionContext& context)

@@ -110,4 +110,12 @@ if(TARGET world_pipeline)
     target_link_libraries(society_cube_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
     target_include_directories(society_cube_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(society_cube_tests)
+
+    # The climate adapter on a cube world (sphere-mesh.md section 10).
+    add_executable(climate_adapter_tests
+        pipeline/climate_adapter_tests.cpp
+    )
+    target_link_libraries(climate_adapter_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(climate_adapter_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(climate_adapter_tests)
 endif()

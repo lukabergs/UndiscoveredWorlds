@@ -1,5 +1,6 @@
 # Process registry, recipes, stages and checkpoints.
 add_library(uw_pipeline STATIC
+    climate_adapter.cpp
     climate_stages.cpp
     generation_progress.cpp
     generation_stage_registry.cpp

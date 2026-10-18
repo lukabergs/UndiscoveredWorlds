@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "pipeline/climate_adapter.hpp"
 #include "pipeline/generation_stage_registry.hpp"
 #include "world/planet.hpp"
 #include "simulations/society/social_generation.hpp"
@@ -51,6 +52,7 @@ struct GenerationScratch
     std::vector<std::vector<std::uint8_t>> stageFeatureMask;   // overlay of cells changed by the last stage
     int stageFeatureCellCount = 0;
     transientstate<GeologySolverState> geologySolver;           // initializer -> tectonics, this run only
+    ClimateShadow climateShadow;                                // climate's lat-lon world on a cube world (climate_adapter.hpp)
 };
 
 struct WorldCurvePoint
