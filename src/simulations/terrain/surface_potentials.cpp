@@ -1,4 +1,6 @@
 #include "simulations/terrain/surface_potentials.hpp"
+#include "core/grid_shapes.hpp"
+#include "core/mesh/cell_grid.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
 #include "simulations/resources/physical_layers_internal.hpp"
 
@@ -8,68 +10,115 @@ using namespace detail;
 
 namespace
 {
-bool iswetlandcell(const planet& world, int x, int y)
+// The per-cell queries of physical_layers::detail on the cell grid.
+bool iswetlandcell(const planet& world, mesh::CellId c)
 {
-    const int special = world.special(x, y);
+    const int special = world.special(c);
     return special >= 130 && special < 140;
 }
 
-float averagetemperature(const planet& world, int x, int y)
+bool islakecell(const planet& world, mesh::CellId c)
 {
-    return (world.mintempfloat(x, y) + world.maxtempfloat(x, y)) / 2.0f;
+    return world.truelake(c) != 0 || world.riftlakesurfacefloat(c) != 0;
 }
 
-float localrelief(const planet& world, int x, int y)
+bool issaltfeature(const planet& world, mesh::CellId c)
 {
-    const int width = world.width();
-    const int height = world.height();
-    const float centre = world.mapfloat(x, y);
+    const int special = world.special(c);
+    return special == 100 || special == 110;
+}
+
+bool isdeltacell(const planet& world, mesh::CellId c)
+{
+    return world.deltadir(c) != 0 || world.deltajan(c) != 0 || world.deltajul(c) != 0;
+}
+
+float annualrainfall(const planet& world, mesh::CellId c)
+{
+    return (world.summerrainfloat(c) + world.winterrainfloat(c)) / 2.0f;
+}
+
+int averageriverflow(const planet& world, mesh::CellId c)
+{
+    const int riverflow = world.riveraveflow(c);
+    const int deltaflow = (std::abs(world.deltajan(c)) + std::abs(world.deltajul(c))) / 2;
+    return std::max(riverflow, deltaflow);
+}
+
+// Whether a cell within one (radius 1) or two (radius 2) neighbour steps satisfies the
+// predicate: the 3 x 3 and 5 x 5 boxes of the legacy grid.
+template <typename Predicate>
+bool hasfeatureinradius(const planet& world, mesh::CellId c, int radius, Predicate predicate)
+{
+    const mesh::CellGrid& grid = world.grid();
+    for (const int first : boxslots)
+    {
+        const std::int32_t inner = first == 0 ? static_cast<std::int32_t>(c) : grid.neighbour(c, first);
+        if (inner < 0)
+            continue;
+        if (radius < 2)
+        {
+            if (predicate(static_cast<mesh::CellId>(inner)))
+                return true;
+            continue;
+        }
+        for (const int second : boxslots)
+        {
+            const std::int32_t outer = second == 0 ? inner : grid.neighbour(static_cast<mesh::CellId>(inner), second);
+            if (outer >= 0 && predicate(static_cast<mesh::CellId>(outer)))
+                return true;
+        }
+    }
+    return false;
+}
+
+float averagetemperature(const planet& world, mesh::CellId c)
+{
+    return (world.mintempfloat(c) + world.maxtempfloat(c)) / 2.0f;
+}
+
+float localrelief(const planet& world, mesh::CellId c)
+{
+    const mesh::CellGrid& grid = world.grid();
+    const float centre = world.mapfloat(c);
     float maxdifference = 0.0f;
 
-    for (const auto& offset : drainageoffsets)
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
     {
-        const int ny = y + offset[1];
+        const std::int32_t neighbour = grid.neighbour(c, slot);
 
-        if (ny < 0 || ny > height)
+        if (neighbour < 0)
             continue;
 
-        const int nx = wrap(x + offset[0], width);
-        maxdifference = std::max(maxdifference, std::abs(world.mapfloat(nx, ny) - centre));
+        maxdifference = std::max(maxdifference, std::abs(world.mapfloat(static_cast<mesh::CellId>(neighbour)) - centre));
     }
 
     return maxdifference;
 }
 
-int inflowcount(const planet& world, int x, int y)
+// The neighbours whose river or distributary direction leads into the cell.
+int inflowcount(const planet& world, mesh::CellId c)
 {
-    const int width = world.width();
-    const int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
     int inflow = 0;
 
-    for (const auto& offset : drainageoffsets)
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
     {
-        const int ny = y + offset[1];
+        const std::int32_t neighbour = grid.neighbour(c, slot);
 
-        if (ny < 0 || ny > height)
+        if (neighbour < 0)
             continue;
 
-        const int nx = wrap(x + offset[0], width);
+        const mesh::CellId n = static_cast<mesh::CellId>(neighbour);
+        const int riverdir = world.riverdir(n);
 
-        if (world.riverdir(nx, ny) != 0)
-        {
-            const twointegers dest = wrappeddestination(world, nx, ny, world.riverdir(nx, ny));
+        if (riverdir != 0 && grid.neighbour(n, riverdir) == static_cast<std::int32_t>(c))
+            inflow++;
 
-            if (dest.x == x && dest.y == y)
-                inflow++;
-        }
+        const int deltadir = world.deltadir(n);
 
-        if (world.deltadir(nx, ny) > 0)
-        {
-            const twointegers dest = wrappeddestination(world, nx, ny, world.deltadir(nx, ny));
-
-            if (dest.x == x && dest.y == y)
-                inflow++;
-        }
+        if (deltadir > 0 && grid.neighbour(n, deltadir) == static_cast<std::int32_t>(c))
+            inflow++;
     }
 
     return inflow;
@@ -112,8 +161,6 @@ float ratepotential(float rate, float reference)
 
 void generate_surface_potentials(planet& world)
 {
-    const int width = world.width();
-    const int height = world.height();
     const int maximumflow = std::max(1, world.maxriverflow());
     const int majorriverthreshold = std::max(250, maximumflow / 20);
     // An eroded world (erosion_duration > 0) takes the erosion and deposition
@@ -131,83 +178,80 @@ void generate_surface_potentials(planet& world)
     const float erosionreference = tuning::landscape::potentials::erosionReferenceRateMMyr;
     const float depositionreference = tuning::landscape::potentials::depositionReferenceRateMMyr;
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforrows(0, static_cast<int>(world.cellcount()) - 1, [&](int first, int last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (mesh::CellId c = static_cast<mesh::CellId>(first); c <= static_cast<mesh::CellId>(last); c++)
         {
-            for (int x = 0; x <= width; x++)
+            if (world.sea(c) != 0)
             {
-                if (world.sea(x, y) != 0)
-                {
-                    world.seterosionpotential(x, y, 0);
-                    world.setdepositionpotential(x, y, 0);
-                    world.setfloodplainfertility(x, y, 0);
-                    continue;
-                }
-
-                const float relief = localrelief(world, x, y);
-                const float reliefnorm = clampunit(relief / 2200.0f);
-                const float lownorm = 1.0f - clampunit(relief / 1400.0f);
-                const float rainfallnorm = clampunit(static_cast<float>(annualrainfall(world, x, y)) / 1000.0f);
-                const float flownorm = std::log1p(static_cast<float>(averageriverflow(world, x, y))) / std::log1p(static_cast<float>(maximumflow));
-                const float inflownorm = clampunit(static_cast<float>(inflowcount(world, x, y)) / 4.0f);
-                const bool majorrivernear = hasfeatureinradius(world, x, y, 2, [&](int nx, int ny)
-                {
-                    return averageriverflow(world, nx, ny) >= majorriverthreshold || isdeltacell(world, nx, ny);
-                });
-                const bool wetlandnear = hasfeatureinradius(world, x, y, 1, [&](int nx, int ny)
-                {
-                    return iswetlandcell(world, nx, ny);
-                });
-                const bool lakemargin = islakecell(world, x, y) || hasfeatureinradius(world, x, y, 1, [&](int nx, int ny)
-                {
-                    return islakecell(world, nx, ny) || issaltfeature(world, nx, ny);
-                });
-                const bool terminalbasin = world.basinclass(x, y) == BasinClass::endorheic && (issaltfeature(world, x, y) || lakemargin);
-                const float rivercorridor = std::max(flownorm, majorrivernear ? 0.65f : 0.0f);
-
-                float erosionscore = 100.0f * (0.34f * reliefnorm + 0.30f * flownorm + 0.24f * rainfallnorm + 0.12f * inflownorm);
-
-                if (world.mountainheightfloat(x, y) > 0)
-                    erosionscore += 8.0f;
-
-                float depositionscore = 100.0f * (0.32f * lownorm + 0.27f * rivercorridor + 0.15f * rainfallnorm
-                    + 0.12f * (wetlandnear ? 1.0f : 0.0f)
-                    + 0.09f * (lakemargin ? 1.0f : 0.0f)
-                    + 0.05f * (terminalbasin ? 1.0f : 0.0f));
-
-                if (isdeltacell(world, x, y))
-                    depositionscore += 20.0f;
-
-                if (reliefnorm > 0.7f)
-                    depositionscore *= 0.6f;
-
-                if (eroded)
-                {
-                    const float net = ((*denudation)[x][y] - (*aggradation)[x][y]) / duration;
-                    erosionscore = ratepotential(std::max(0.0f, net), erosionreference);
-                    depositionscore = ratepotential(std::max(0.0f, -net), depositionreference);
-                }
-
-                const float fertilitytemperature = temperaturerangefactor(averagetemperature(world, x, y));
-                const float fertilityrain = rainfertilityfactor(annualrainfall(world, x, y));
-                const float riverproximity = std::max(rivercorridor, majorrivernear ? 1.0f : 0.0f);
-                const float wetlandfactor = wetlandnear ? 1.0f : (lakemargin ? 0.5f : 0.0f);
-                const float gentleterrain = 1.0f - clampunit(relief / 1800.0f);
-                const float coldpenalty = clampunit(static_cast<float>(world.glacialtemp() - world.maxtempfloat(x, y) + 2) / 14.0f);
-                const float aridpenalty = clampunit(static_cast<float>(200 - annualrainfall(world, x, y)) / 200.0f);
-                const float glacialpenalty = (world.biome(x, y) == biomeice || world.maxtempfloat(x, y) <= world.glacialtemp()) ? 1.0f : 0.0f;
-
-                float fertilityscore = 0.42f * static_cast<float>(clampscore(depositionscore)) + 22.0f * riverproximity + 14.0f * fertilityrain
-                    + 12.0f * fertilitytemperature + 10.0f * wetlandfactor;
-                fertilityscore *= 0.55f + 0.45f * gentleterrain;
-                fertilityscore -= 24.0f * coldpenalty + 20.0f * aridpenalty + 26.0f * glacialpenalty;
-
-                world.seterosionpotential(x, y, clampscore(erosionscore));
-                world.setdepositionpotential(x, y, clampscore(depositionscore));
-                world.setfloodplainfertility(x, y, clampscore(fertilityscore));
+                world.seterosionpotential(c, 0);
+                world.setdepositionpotential(c, 0);
+                world.setfloodplainfertility(c, 0);
+                continue;
             }
+
+            const float relief = localrelief(world, c);
+            const float reliefnorm = clampunit(relief / 2200.0f);
+            const float lownorm = 1.0f - clampunit(relief / 1400.0f);
+            const float rainfallnorm = clampunit(static_cast<float>(annualrainfall(world, c)) / 1000.0f);
+            const float flownorm = std::log1p(static_cast<float>(averageriverflow(world, c))) / std::log1p(static_cast<float>(maximumflow));
+            const float inflownorm = clampunit(static_cast<float>(inflowcount(world, c)) / 4.0f);
+            const bool majorrivernear = hasfeatureinradius(world, c, 2, [&](mesh::CellId n)
+            {
+                return averageriverflow(world, n) >= majorriverthreshold || isdeltacell(world, n);
+            });
+            const bool wetlandnear = hasfeatureinradius(world, c, 1, [&](mesh::CellId n)
+            {
+                return iswetlandcell(world, n);
+            });
+            const bool lakemargin = islakecell(world, c) || hasfeatureinradius(world, c, 1, [&](mesh::CellId n)
+            {
+                return islakecell(world, n) || issaltfeature(world, n);
+            });
+            const bool terminalbasin = world.basinclass(c) == BasinClass::endorheic && (issaltfeature(world, c) || lakemargin);
+            const float rivercorridor = std::max(flownorm, majorrivernear ? 0.65f : 0.0f);
+
+            float erosionscore = 100.0f * (0.34f * reliefnorm + 0.30f * flownorm + 0.24f * rainfallnorm + 0.12f * inflownorm);
+
+            if (world.mountainheightfloat(c) > 0)
+                erosionscore += 8.0f;
+
+            float depositionscore = 100.0f * (0.32f * lownorm + 0.27f * rivercorridor + 0.15f * rainfallnorm
+                + 0.12f * (wetlandnear ? 1.0f : 0.0f)
+                + 0.09f * (lakemargin ? 1.0f : 0.0f)
+                + 0.05f * (terminalbasin ? 1.0f : 0.0f));
+
+            if (isdeltacell(world, c))
+                depositionscore += 20.0f;
+
+            if (reliefnorm > 0.7f)
+                depositionscore *= 0.6f;
+
+            if (eroded)
+            {
+                const float net = ((*denudation)[c] - (*aggradation)[c]) / duration;
+                erosionscore = ratepotential(std::max(0.0f, net), erosionreference);
+                depositionscore = ratepotential(std::max(0.0f, -net), depositionreference);
+            }
+
+            const float fertilitytemperature = temperaturerangefactor(averagetemperature(world, c));
+            const float fertilityrain = rainfertilityfactor(annualrainfall(world, c));
+            const float riverproximity = std::max(rivercorridor, majorrivernear ? 1.0f : 0.0f);
+            const float wetlandfactor = wetlandnear ? 1.0f : (lakemargin ? 0.5f : 0.0f);
+            const float gentleterrain = 1.0f - clampunit(relief / 1800.0f);
+            const float coldpenalty = clampunit(static_cast<float>(world.glacialtemp() - world.maxtempfloat(c) + 2) / 14.0f);
+            const float aridpenalty = clampunit(static_cast<float>(200 - annualrainfall(world, c)) / 200.0f);
+            const float glacialpenalty = (world.biome(c) == biomeice || world.maxtempfloat(c) <= world.glacialtemp()) ? 1.0f : 0.0f;
+
+            float fertilityscore = 0.42f * static_cast<float>(clampscore(depositionscore)) + 22.0f * riverproximity + 14.0f * fertilityrain
+                + 12.0f * fertilitytemperature + 10.0f * wetlandfactor;
+            fertilityscore *= 0.55f + 0.45f * gentleterrain;
+            fertilityscore -= 24.0f * coldpenalty + 20.0f * aridpenalty + 26.0f * glacialpenalty;
+
+            world.seterosionpotential(c, clampscore(erosionscore));
+            world.setdepositionpotential(c, clampscore(depositionscore));
+            world.setfloodplainfertility(c, clampscore(fertilityscore));
         }
-    }, 16);
+    }, 1024);
 }
 }

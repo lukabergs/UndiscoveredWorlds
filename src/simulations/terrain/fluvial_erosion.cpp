@@ -24,17 +24,17 @@ constexpr int roughnessseedsalt = 0x5266;
 // K per cell: the crust-class multiplier times the age factor; the field
 // geosphere.erodibility stores this relative value, the kernel gets it times
 // landscape.stream_power.erodibility.
-float relativeerodibility(const planet& world, int x, int y)
+float relativeerodibility(const planet& world, mesh::CellId c)
 {
     namespace sp = tuning::landscape::stream_power;
     float multiplier = sp::crustClassMultiplierContinental;
-    switch (world.tectoniccrustclass(x, y))
+    switch (world.tectoniccrustclass(c))
     {
     case CrustClass::oceanic: multiplier = sp::crustClassMultiplierOceanic; break;
     case CrustClass::transitional: multiplier = sp::crustClassMultiplierTransitional; break;
     default: break;
     }
-    const float age = std::max(0.0f, world.tectoniccrustagemyr(x, y));
+    const float age = std::max(0.0f, world.tectoniccrustagemyr(c));
     return multiplier * (1.0f + sp::crustAgeFactor * age / 1000.0f);
 }
 
@@ -104,21 +104,19 @@ void startglacialrun(const planet& world, const flowrouting::Inputs& inputs, Gla
     glacial.enabled = true;
     glacial.parameters = glacialparameters();
     std::vector<float> warmest(size), precipitation(size);
-    for (int y = 0; y < metric.height; y++)
+    // The metric's cell index is the world's cell id (both in the grid's id order).
+    for (std::size_t cell = 0; cell < size; cell++)
     {
-        for (int x = 0; x < metric.width; x++)
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        float warm = world.seasonaltempfloat(0, c);
+        double annual_mm = 0.0;
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
         {
-            const std::size_t cell = metric.index(x, y);
-            float warm = world.seasonaltempfloat(0, x, y);
-            double annual_mm = 0.0;
-            for (int season = 0; season < CLIMATESEASONCOUNT; season++)
-            {
-                warm = std::max(warm, world.seasonaltempfloat(season, x, y));
-                annual_mm += 3.0 * std::max(0.0f, world.seasonalrainfloat(season, x, y));
-            }
-            warmest[cell] = warm;
-            precipitation[cell] = static_cast<float>(annual_mm);
+            warm = std::max(warm, world.seasonaltempfloat(season, c));
+            annual_mm += 3.0 * std::max(0.0f, world.seasonalrainfloat(season, c));
         }
+        warmest[cell] = warm;
+        precipitation[cell] = static_cast<float>(annual_mm);
     }
     // z of the ELA is the height the climate's temperature belongs to: the climate lapses
     // only above the sea (max(0, mapfloat - sealevel), climate_energy.cpp), so a cell below
@@ -190,32 +188,29 @@ void writeerosionstate(planet& world, const flowrouting::Inputs& inputs, const s
     worldgrid<std::uint8_t>& prograded = world.prograded();
     const double megayears = std::max(elapsed, 1.0e-9);
     constexpr double yearspermegayear = 1.0e6;
-    for (int y = 0; y < metric.height; y++)
+    for (std::size_t cell = 0; cell < metric.size(); cell++)
     {
-        for (int x = 0; x < metric.width; x++)
-        {
-            const std::size_t cell = metric.index(x, y);
-            world.setnomfloat(x, y, elevation[cell]);
-            erodibilityfield[x][y] = routing.sea[cell] ? 0.0f : erodibility[cell] / t::stream_power::erodibility;
-            erosionrate[x][y] = static_cast<float>(denudation[cell] / megayears);
-            depositionrate[x][y] = static_cast<float>(aggradation[cell] / megayears);
-            denudationfield[x][y] = static_cast<float>(denudation[cell]);
-            aggradationfield[x][y] = static_cast<float>(aggradation[cell]);
-            // hydrosphere.sediment_flux: the mean over the elapsed time in m^3/yr; 0 on the current sea.
-            sedimentflux[x][y] = routing.sea[cell] ? 0.0f
-                : static_cast<float>(sediment[cell] / (megayears * yearspermegayear));
-            // geosphere.prograded (erosion plan C5b): sea when the run started and now above the sea
-            // level (raised by deposition); an arm of the sea merely cut off from the ocean (H3) is not.
-            prograded[x][y] = inputs.sea[cell] != 0 && !flowrouting::belowsea(elevation[cell], inputs.sealevel) ? 1 : 0;
-            // The glacial fields (erosion plan Phase G): the run's ELA, the share of the elapsed
-            // time with ice, the glacial part of the denudation; the present-day ice at the end.
-            equilibriumline[x][y] = glacial.enabled ? glacial.ela[cell] : 0.0f;
-            glaciation[x][y] = glacial.enabled
-                ? static_cast<float>(std::min(1.0, glacial.icetime[cell] / megayears)) : 0.0f;
-            glacialdenudation[x][y] = glacial.enabled ? static_cast<float>(glacial.denudation[cell]) : 0.0f;
-            if (end)
-                icethickness[x][y] = glacial.enabled ? presentice[cell] : 0.0f;
-        }
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        world.setnomfloat(c, elevation[cell]);
+        erodibilityfield[c] = routing.sea[cell] ? 0.0f : erodibility[cell] / t::stream_power::erodibility;
+        erosionrate[c] = static_cast<float>(denudation[cell] / megayears);
+        depositionrate[c] = static_cast<float>(aggradation[cell] / megayears);
+        denudationfield[c] = static_cast<float>(denudation[cell]);
+        aggradationfield[c] = static_cast<float>(aggradation[cell]);
+        // hydrosphere.sediment_flux: the mean over the elapsed time in m^3/yr; 0 on the current sea.
+        sedimentflux[c] = routing.sea[cell] ? 0.0f
+            : static_cast<float>(sediment[cell] / (megayears * yearspermegayear));
+        // geosphere.prograded (erosion plan C5b): sea when the run started and now above the sea
+        // level (raised by deposition); an arm of the sea merely cut off from the ocean (H3) is not.
+        prograded[c] = inputs.sea[cell] != 0 && !flowrouting::belowsea(elevation[cell], inputs.sealevel) ? 1 : 0;
+        // The glacial fields (erosion plan Phase G): the run's ELA, the share of the elapsed
+        // time with ice, the glacial part of the denudation; the present-day ice at the end.
+        equilibriumline[c] = glacial.enabled ? glacial.ela[cell] : 0.0f;
+        glaciation[c] = glacial.enabled
+            ? static_cast<float>(std::min(1.0, glacial.icetime[cell] / megayears)) : 0.0f;
+        glacialdenudation[c] = glacial.enabled ? static_cast<float>(glacial.denudation[cell]) : 0.0f;
+        if (end)
+            icethickness[c] = glacial.enabled ? presentice[cell] : 0.0f;
     }
     world.seterosionduration(static_cast<float>(elapsed));
     world.seterodedvolume(static_cast<float>(total.eroded_km3));
@@ -232,25 +227,21 @@ void applyfluvialerosionstage(planet& world, const FluvialErosionCheckpoints& ch
     // H3), as at every routing of the run, whatever erosion_duration says before the run writes it.
     inputs.sea = flowrouting::seamask(inputs.metric, inputs.elevation, inputs.sealevel);
     const landscape::SphereMetric& metric = inputs.metric;
-    const int columns = metric.width;
-    const int rows = metric.height;
     const std::size_t size = metric.size();
 
     std::vector<float> erodibility(size), uplift(size), elevation = inputs.elevation;
     std::vector<float> steperosion(size), stepdeposition(size);
     std::vector<double> denudation(size, 0.0), aggradation(size, 0.0);
     std::vector<double> stepflux, sediment(size, 0.0);  // m^3/Myr of a step; m^3 summed over the run
-    for (int y = 0; y < rows; y++)
+    // The metric's cell index is the world's cell id (both in the grid's id order).
+    for (std::size_t cell = 0; cell < size; cell++)
     {
-        for (int x = 0; x < columns; x++)
-        {
-            const std::size_t cell = metric.index(x, y);
-            erodibility[cell] = relativeerodibility(world, x, y) * t::stream_power::erodibility;
-            // U (erosion plan D1): the uniform uplift plus the engine's rock uplift rate, m/Myr,
-            // signed; the kernel applies it to land and sea cells (upliftsea).
-            uplift[cell] = static_cast<float>(t::erosion::upliftMMyr
-                + t::erosion::engineUpliftScale * world.tectonicrockupliftrate(x, y));
-        }
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        erodibility[cell] = relativeerodibility(world, c) * t::stream_power::erodibility;
+        // U (erosion plan D1): the uniform uplift plus the engine's rock uplift rate, m/Myr,
+        // signed; the kernel applies it to land and sea cells (upliftsea).
+        uplift[cell] = static_cast<float>(t::erosion::upliftMMyr
+            + t::erosion::engineUpliftScale * world.tectonicrockupliftrate(c));
     }
 
     // Relief roughness (erosion plan C3): the land's sub-cell relief, added once to

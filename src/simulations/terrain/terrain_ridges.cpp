@@ -9,6 +9,9 @@
 #include <queue>
 
 #include "core/classes.hpp"
+#include "core/grid_shapes.hpp"
+#include "core/mesh/cell_grid.hpp"
+#include "simulations/terrain/terrain_ridges.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
@@ -16,30 +19,24 @@ using namespace std;
 
 namespace
 {
-int getdestinationland(planet& world, int x, int y, int dir);
+int getdestinationland(const planet& world, mesh::CellId c, int dir);
 }
 
 // This function removes any mountains that aren't over land.
 
 void terrain::detail::removefloatingmountains(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
-
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : columnmajorcells(world.grid()))
     {
-        for (int j = 0; j <= height; j++)
+        if (world.sea(c) == 1)
         {
-            if (world.sea(i, j) == 1)
+            if (world.mountainridge(c) != 0)
             {
-                if (world.mountainridge(i, j) != 0)
-                {
-                    for (int dir = 1; dir <= 8; dir++)
-                        deleteridge(world, i, j, dir);
-                }
-
-                world.setcraterrim(i, j, 0);
+                for (int dir = 1; dir <= 8; dir++)
+                    terrain::deleteridge(world, c, dir);
             }
+
+            world.setcraterrim(c, 0);
         }
     }
 }
@@ -48,20 +45,14 @@ void terrain::detail::removefloatingmountains(planet& world)
 
 void cleanmountainridges(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
-
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : columnmajorcells(world.grid()))
     {
-        for (int j = 0; j <= height; j++)
+        if (world.mountainheightfloat(c) != 0 && world.sea(c) == 0)
         {
-            if (world.mountainheightfloat(i, j) != 0 && world.sea(i, j) == 0)
+            for (int dir = 1; dir <= 8; dir++)
             {
-                for (int dir = 1; dir <= 8; dir++)
-                {
-                    if (getridge(world, i, j, dir) == 1 && getdestinationland(world, i, j, dir) == 0) // If there is a ridge going in this direction from this point
-                        deleteridge(world, i, j, dir);
-                }
+                if (terrain::getridge(world, c, dir) == 1 && getdestinationland(world, c, dir) == 0) // If there is a ridge going in this direction from this point
+                    terrain::deleteridge(world, c, dir);
             }
         }
     }
@@ -134,6 +125,18 @@ int getoceanridge(planet& world, int x, int y, int dir)
     return(0);
 }
 
+// The same on the cell grid.
+
+int terrain::getridge(const planet& world, mesh::CellId c, int slot)
+{
+    return (world.mountainridge(c) & (1 << (slot - 1))) != 0 ? 1 : 0;
+}
+
+int terrain::getoceanridge(const planet& world, mesh::CellId c, int slot)
+{
+    return (world.oceanridges(c) & (1 << (slot - 1))) != 0 ? 1 : 0;
+}
+
 // This function deletes a ridge going from the specified tile in the specified direction.
 
 void deleteridge(planet& world, int x, int y, int dir)
@@ -147,58 +150,40 @@ void deleteridge(planet& world, int x, int y, int dir)
     if (y<0 || y>height)
         return;
 
-    if (getridge(world, x, y, dir) != 1) // If there isn't a ridge going this way
+    terrain::deleteridge(world, world.grid().cellof(x, y), dir);
+}
+
+void terrain::deleteridge(planet& world, mesh::CellId c, int slot)
+{
+    if (getridge(world, c, slot) != 1) // If there isn't a ridge going this way
         return;
 
-    int code = terrain::detail::getcode(dir);
+    int currentridge = world.mountainridge(c) - terrain::detail::getcode(slot);
 
-    int currentridge = world.mountainridge(x, y);
-
-    currentridge = currentridge - code;
-
-    world.setmountainridge(x, y, currentridge);
+    world.setmountainridge(c, currentridge);
 
     if (currentridge == 0)
-        world.setmountainheight(x, y, 0);
+        world.setmountainheight(c, 0.0f);
 
-    // Now remove one going the other way.
+    // Now remove the other end, at the neighbour in its own frame.
 
-    if (dir == 8 || dir == 1 || dir == 2)
-        y--;
+    const std::int32_t neighbour = world.grid().neighbour(c, slot);
 
-    if (dir == 4 || dir == 5 || dir == 6)
-        y++;
-
-    if (dir == 2 || dir == 3 || dir == 4)
-        x++;
-
-    if (dir == 6 || dir == 7 || dir == 8)
-        x--;
-
-    if (x<0 || x>width)
-        x = wrap(x, width);
-
-    if (y<0 || y>height)
+    if (neighbour < 0)
         return;
 
-    dir = dir + 4;
+    const mesh::CellId n = static_cast<mesh::CellId>(neighbour);
+    const int back = world.grid().reverse(c, slot);
 
-    if (dir > 8)
-        dir = dir - 8;
-
-    if (getridge(world, x, y, dir) != 1) // If there isn't a ridge going in this direction
+    if (getridge(world, n, back) != 1) // If there isn't a ridge going in this direction
         return;
 
-    code = terrain::detail::getcode(dir);
+    currentridge = world.mountainridge(n) - terrain::detail::getcode(back);
 
-    currentridge = world.mountainridge(x, y);
-
-    currentridge = currentridge - code;
-
-    world.setmountainridge(x, y, currentridge);
+    world.setmountainridge(n, currentridge);
 
     if (currentridge == 0)
-        world.setmountainheight(x, y, 0);
+        world.setmountainheight(n, 0.0f);
 }
 
 // Same thing, but on a specified vector.
@@ -281,84 +266,46 @@ void terrain::detail::deleteoceanridge(planet& world, int x, int y, int dir)
     if (y<0 || y>height)
         return;
 
-    if (getoceanridge(world, x, y, dir) != 1) // If there isn't a ridge going this way
+    terrain::deleteoceanridge(world, world.grid().cellof(x, y), dir);
+}
+
+void terrain::deleteoceanridge(planet& world, mesh::CellId c, int slot)
+{
+    if (getoceanridge(world, c, slot) != 1) // If there isn't a ridge going this way
         return;
 
-    int code = terrain::detail::getcode(dir);
+    world.setoceanridges(c, world.oceanridges(c) - terrain::detail::getcode(slot));
 
-    int currentridge = world.oceanridges(x, y);
+    // Now remove the other end, at the neighbour in its own frame.
 
-    currentridge = currentridge - code;
+    const std::int32_t neighbour = world.grid().neighbour(c, slot);
 
-    world.setoceanridges(x, y, currentridge);
-
-    // Now remove one going the other way.
-
-    if (dir == 8 || dir == 1 || dir == 2)
-        y--;
-
-    if (dir == 4 || dir == 5 || dir == 6)
-        y++;
-
-    if (dir == 2 || dir == 3 || dir == 4)
-        x++;
-
-    if (dir == 6 || dir == 7 || dir == 8)
-        x--;
-
-    if (x<0 || x>width)
-        x = wrap(x, width);
-
-    if (y<0 || y>height)
+    if (neighbour < 0)
         return;
 
-    dir = dir + 4;
+    const mesh::CellId n = static_cast<mesh::CellId>(neighbour);
+    const int back = world.grid().reverse(c, slot);
 
-    if (dir > 8)
-        dir = dir - 8;
-
-    if (getoceanridge(world, x, y, dir) != 1) // If there isn't a ridge going in this direction
+    if (getoceanridge(world, n, back) != 1) // If there isn't a ridge going in this direction
         return;
 
-    code = terrain::detail::getcode(dir);
-
-    currentridge = world.oceanridges(x, y);
-
-    currentridge = currentridge - code;
-
-    world.setoceanridges(x, y, currentridge);
+    world.setoceanridges(n, world.oceanridges(n) - terrain::detail::getcode(back));
 }
 
 namespace
 {
 // This function tells whether there is land in the specified direction from this point.
 
-int getdestinationland(planet& world, int x, int y, int dir)
+int getdestinationland(const planet& world, mesh::CellId c, int dir)
 {
-    int newx = x;
-    int newy = y;
+    const std::int32_t neighbour = world.grid().neighbour(c, dir);
 
-    if (dir == 8 || dir == 1 || dir == 2)
-        newy--;
-
-    if (dir == 4 || dir == 5 || dir == 6)
-        newy++;
-
-    if (dir == 2 || dir == 3 || dir == 4)
-        newx++;
-
-    if (dir == 6 || dir == 7 || dir == 8)
-        newx--;
-
-    if (newy<0 || newy>world.height())
+    if (neighbour < 0)
         return(0);
 
-    if (newx<0 || newx>world.width())
-        newx = wrap(newx, world.width());
+    // The neighbour is where this ridge is pointing to.
 
-    // newx and newy are the coordinates of where this ridge is pointing to.
-
-    if (world.sea(newx, newy) == 1)
+    if (world.sea(static_cast<mesh::CellId>(neighbour)) == 1)
         return(0);
 
     return(1);

@@ -35,17 +35,15 @@ void applysubgridstatisticsstage(planet& world)
     const worldgrid<float>& erodibilityfield = reader.erodibility();
     const worldgrid<float>& runofffield = reader.runoff();
     const worldgrid<float>& erosionratefield = reader.erosionrate();
-    for (int y = 0; y < rows; y++)
+    // The metric's cell index is the world's cell id (both in the grid's id order).
+    for (std::size_t cell = 0; cell < size; cell++)
     {
-        for (int x = 0; x < columns; x++)
-        {
-            const std::size_t cell = metric.index(x, y);
-            elevation[cell] = world.nomfloat(x, y);
-            sea[cell] = world.basebelowsea(x, y) ? 1 : 0;
-            erodibility[cell] = erodibilityfield[x][y];
-            runoff[cell] = runofffield[x][y];
-            erosionrate[cell] = erosionratefield[x][y];
-        }
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        elevation[cell] = world.nomfloat(c);
+        sea[cell] = world.basebelowsea(c) ? 1 : 0;
+        erodibility[cell] = erodibilityfield[c];
+        runoff[cell] = runofffield[c];
+        erosionrate[cell] = erosionratefield[c];
     }
 
     std::vector<float> relief, spacing;
@@ -59,13 +57,10 @@ void applysubgridstatisticsstage(planet& world)
 
     worldgrid<float>& relieffield = world.reliefamplitude();
     worldgrid<float>& spacingfield = world.valleyspacing();
-    for (int y = 0; y < rows; y++)
+    for (std::size_t cell = 0; cell < size; cell++)
     {
-        for (int x = 0; x < columns; x++)
-        {
-            const std::size_t cell = metric.index(x, y);
-            relieffield[x][y] = relief[cell];
-            spacingfield[x][y] = spacing[cell];
-        }
+        const mesh::CellId c = static_cast<mesh::CellId>(cell);
+        relieffield[c] = relief[cell];
+        spacingfield[c] = spacing[cell];
     }
 }

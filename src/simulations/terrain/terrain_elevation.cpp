@@ -9,6 +9,8 @@
 #include <queue>
 
 #include "core/classes.hpp"
+#include "core/grid_shapes.hpp"
+#include "core/mesh/cell_grid.hpp"
 #include "simulations/terrain/terrain_parameters.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
@@ -17,7 +19,7 @@ using namespace std;
 
 namespace
 {
-bool checkdepressiontile(planet& world, std::vector<std::vector<float>>& filledmap, int i, int j, int e, int neighbours[8][2], bool somethingdone, std::vector<std::vector<int>>& noise);
+bool checkdepressiontile(planet& world, std::vector<float>& filledmap, mesh::CellId c, int e, bool somethingdone, const std::vector<int>& noise);
 }
 
 // This function smoothes, but without turning any land to sea or vice versa.
@@ -292,215 +294,159 @@ void createextraelev(planet& world)
     world.smoothextraelev(5);
 }
 
+namespace
+{
+// The cells of a grid as panels of columns x rows, id = panel x columns x rows + row x columns
+// + column: one panel on lat-lon (W x W/2), the six faces on the cube (N x N).
+struct ScanPanels
+{
+    int panels = 0;
+    int columns = 0;
+    int rows = 0;
+};
+
+ScanPanels scanpanels(const mesh::CellGrid& grid)
+{
+    if (grid.kind() == mesh::GridKind::cube)
+        return { 6, grid.facecells(), grid.facecells() };
+    return { 1, grid.columns(), grid.rows() };
+}
+
+// One of the eight directional scans of the fill: column by column (columnmajor) or row by row,
+// columns and rows ascending or descending; the panels in turn, descending when both are.
+// On lat-lon these are the legacy (x, y) scans; skipfirstcolumn keeps the seventh scan's
+// "x > 0" (column 0 is left to the other seven).
+vector<mesh::CellId> scanorder(const ScanPanels& panels, bool columnmajor, bool columnsdescending, bool rowsdescending,
+                               bool skipfirstcolumn = false)
+{
+    vector<mesh::CellId> cells;
+    cells.reserve(static_cast<size_t>(panels.panels) * panels.columns * panels.rows);
+    const int firstcolumn = skipfirstcolumn ? 1 : 0;
+    for (int p = 0; p < panels.panels; p++)
+    {
+        const int panel = columnsdescending && rowsdescending ? panels.panels - 1 - p : p;
+        const mesh::CellId base = static_cast<mesh::CellId>(panel) * panels.columns * panels.rows;
+        const int outercount = columnmajor ? panels.columns : panels.rows;
+        const int innercount = columnmajor ? panels.rows : panels.columns;
+        const bool outerdescending = columnmajor ? columnsdescending : rowsdescending;
+        const bool innerdescending = columnmajor ? rowsdescending : columnsdescending;
+        for (int o = 0; o < outercount; o++)
+        {
+            const int outer = outerdescending ? outercount - 1 - o : o;
+            for (int n = 0; n < innercount; n++)
+            {
+                const int inner = innerdescending ? innercount - 1 - n : n;
+                const int column = columnmajor ? outer : inner;
+                const int row = columnmajor ? inner : outer;
+                if (column < firstcolumn)
+                    continue;
+                cells.push_back(base + static_cast<mesh::CellId>(row * panels.columns + column));
+            }
+        }
+    }
+    return cells;
+}
+
+// A land cell with a sea cell among its four cardinal neighbours (planet::outline on lat-lon:
+// a cell missing a cardinal neighbour, a polar row there, is not).
+bool coastalcell(const planet& world, mesh::CellId c)
+{
+    if (world.sea(c) != 0)
+        return false;
+    const mesh::CellGrid& grid = world.grid();
+    bool coastal = false;
+    for (int slot = 1; slot <= mesh::slotcount; slot += 2)
+    {
+        const std::int32_t neighbour = grid.neighbour(c, slot);
+        if (neighbour < 0)
+            return false;
+        if (world.sea(static_cast<mesh::CellId>(neighbour)) == 1)
+            coastal = true;
+    }
+    return coastal;
+}
+}
+
 // Fill land depressions using Planchon-Darboux directional scans. The noisy
 // minimum gradient prevents flat areas from blocking later river routing.
 
 void depressionfill(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
-    int sealevel = world.sealevel();
+    const mesh::CellGrid& grid = world.grid();
+    const size_t count = world.cellcount();
     int maxelev = world.maxelevation();
 
     int e = 2; // This is the extra amount added to ensure that everywhere slopes.
 
-    int neighbours[8][2];
+    vector<int> noise(count, 0); // This will contain noise that allows us to vary the value of e from tile to tile.
 
-    neighbours[0][0] = 0;
-    neighbours[0][1] = -1;
+    for (const mesh::CellId c : columnmajorcells(grid))
+        noise[c] = random(0, 5);
 
-    neighbours[1][0] = 1;
-    neighbours[1][1] = -1;
+    vector<float> filledmap(count, 0.0f); // This will be the new version of the map.
 
-    neighbours[2][0] = 1;
-    neighbours[2][1] = 0;
-
-    neighbours[3][0] = 1;
-    neighbours[3][1] = 1;
-
-    neighbours[4][0] = 0;
-    neighbours[4][1] = 1;
-
-    neighbours[5][0] = -1;
-    neighbours[5][1] = 1;
-
-    neighbours[6][0] = -1;
-    neighbours[6][1] = -0;
-
-    neighbours[7][0] = -1;
-    neighbours[7][1] = -1;
-
-    vector<vector<int>> noise(ARRAYWIDTH, vector<int>(ARRAYWIDTH, 0)); // This will contain noise that allows us to vary the value of e from tile to tile.
-
-    for (int i = 0; i <= width; i++)
+    for (mesh::CellId c = 0; c < count; c++) // First, fill the new map to a huge height.
     {
-        for (int j = 0; j <= height; j++)
-            noise[i][j] = random(0, 5);
-    }
-
-    vector<vector<float>> filledmap(ARRAYWIDTH, vector<float>(ARRAYWIDTH, 0.0f)); // This will be the new version of the map.
-
-    for (int i = 0; i <= width; i++) // First, fill the new map to a huge height.
-    {
-        for (int j = 0; j <= height; j++)
+        if (world.basebelowsea(c))
+            filledmap[c] = world.nomfloat(c); // Sea tiles start with the normal heights.
+        else
         {
-            if (world.basebelowsea(i, j))
-                filledmap[i][j] = world.nomfloat(i, j); // Sea tiles start with the normal heights.
+            if (coastalcell(world, c)) // If this is a coastal tile
+                filledmap[c] = world.nomfloat(c); // Coastal tiles start with the normal heights.
             else
-            {
-                if (world.outline(i, j) == 1) // If this is a coastal tile
-                    filledmap[i][j] = world.nomfloat(i, j); // Coastal tiles start with the normal heights.
-                else
-                    filledmap[i][j] = static_cast<float>(maxelev * 2); // Other tiles start very high
-
-            }
+                filledmap[c] = static_cast<float>(maxelev * 2); // Other tiles start very high
         }
     }
 
-    
+    // Eight scans, because there are eight possible ways to scan the map and we must rotate between them.
+    const ScanPanels panels = scanpanels(grid);
+    const vector<mesh::CellId> scans[8] =
+    {
+        scanorder(panels, true, false, false),
+        scanorder(panels, false, true, true),
+        scanorder(panels, true, true, false),
+        scanorder(panels, false, true, false),
+        scanorder(panels, true, false, true),
+        scanorder(panels, false, false, true),
+        scanorder(panels, true, true, true, true),
+        scanorder(panels, false, false, false),
+    };
 
     // Now we're ready to start!
-
-    twointegers lowest;
-
-    lowest.x = 0;
-    lowest.y = 0;
 
     bool somethingdone = 0;
 
     do
     {
-        for (int i = 0; i <= width; i++) // Eight mini-loops, because there are eight possible ways to scan the map and we must rotate between them.
+        for (int scan = 0; scan < 8; scan++)
         {
-            for (int j = 0; j <= height; j++)
+            if (scan > 0)
             {
-                if (filledmap[i][j] > world.nomfloat(i, j))
-                    somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
+                if (somethingdone == 0)
+                    break;
+                somethingdone = 0;
             }
-        }
 
-        if (somethingdone == 1)
-        {
-            somethingdone = 0;
-
-            for (int j = height; j >= 0; j--)
+            for (const mesh::CellId c : scans[scan])
             {
-                for (int i = width; i >= 0; i--)
-                {
-                    if (filledmap[i][j] > world.nomfloat(i, j))
-                        somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
-
-                }
-            }
-        }
-
-        if (somethingdone == 1)
-        {
-            somethingdone = 0;
-
-            for (int i = width; i >= 0; i--)
-            {
-                for (int j = 0; j <= height; j++)
-                {
-                    if (filledmap[i][j] > world.nomfloat(i, j))
-                        somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
-
-                }
-            }
-        }
-
-        if (somethingdone == 1)
-        {
-            somethingdone = 0;
-
-            for (int j = 0; j <= height; j++)
-            {
-                for (int i = width; i >= 0; i--)
-                {
-                    if (filledmap[i][j] > world.nomfloat(i, j))
-                        somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
-
-                }
-            }
-        }
-
-        if (somethingdone == 1)
-        {
-            somethingdone = 0;
-
-            for (int i = 0; i <= width; i++)
-            {
-                for (int j = height; j >= 0; j--)
-                {
-                    if (filledmap[i][j] > world.nomfloat(i, j))
-                        somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
-
-                }
-            }
-        }
-
-        if (somethingdone == 1)
-        {
-            somethingdone = 0;
-
-            for (int j = height; j >= 0; j--)
-            {
-                for (int i = 0; i <= width; i++)
-                {
-                    if (filledmap[i][j] > world.nomfloat(i, j))
-                        somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
-
-                }
-            }
-        }
-
-        if (somethingdone == 1)
-        {
-            somethingdone = 0;
-
-            for (int i = width; i > 0; i--)
-            {
-                for (int j = height; j >= 0; j--)
-                {
-                    if (filledmap[i][j] > world.nomfloat(i, j))
-                        somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
-
-                }
-            }
-        }
-
-        if (somethingdone == 1)
-        {
-            somethingdone = 0;
-
-            for (int j = 0; j <= height; j++)
-            {
-                for (int i = 0; i <= width; i++)
-                {
-                    if (filledmap[i][j] > world.nomfloat(i, j))
-                        somethingdone = checkdepressiontile(world, filledmap, i, j, e, neighbours, somethingdone, noise);
-
-                }
+                if (filledmap[c] > world.nomfloat(c))
+                    somethingdone = checkdepressiontile(world, filledmap, c, e, somethingdone, noise);
             }
         }
     } while (somethingdone == 1);
 
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-            world.setnomfloat(i, j, filledmap[i][j]);
-
-    }
+    for (mesh::CellId c = 0; c < count; c++)
+        world.setnomfloat(c, filledmap[c]);
 }
 
 namespace
 {
-// This does the actual checking/filling of each tile.
+// This does the actual checking/filling of each tile: its eight neighbours from a random
+// one, a cardinal step one metre steeper than a diagonal.
 
-bool checkdepressiontile(planet& world, vector<vector<float>>& filledmap, int i, int j, int e, int neighbours[8][2], bool somethingdone, vector<vector<int>>& noise)
+bool checkdepressiontile(planet& world, vector<float>& filledmap, mesh::CellId c, int e, bool somethingdone, const vector<int>& noise)
 {
-    int width = world.width();
-    int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
 
     int start = random(0, 7);
 
@@ -508,34 +454,30 @@ bool checkdepressiontile(planet& world, vector<vector<float>>& filledmap, int i,
     {
         int nn = wrap(n, 7);
 
-        int k = i + neighbours[nn][0];
+        const std::int32_t neighbour = grid.neighbour(c, nn + 1);
 
-        if (k<0 || k>width)
-            k = wrap(k, width);
-
-        int l = j + neighbours[nn][1];
-
-        if (l >= 0 && l <= height)
+        if (neighbour >= 0)
         {
+            const mesh::CellId k = static_cast<mesh::CellId>(neighbour);
             int ee = 0;
 
-            if (k == i || l == j)
-                ee = e + 1 + noise[i][j];
+            if ((nn + 1) % 2 == 1)
+                ee = e + 1 + noise[c];
 
             else
-                ee = e + noise[i][j];
+                ee = e + noise[c];
 
-            if (world.nomfloat(i, j) >= filledmap[k][l] + ee)
+            if (world.nomfloat(c) >= filledmap[k] + ee)
             {
-                filledmap[i][j] = world.nomfloat(i, j);
+                filledmap[c] = world.nomfloat(c);
                 somethingdone = 1;
 
             }
             else
             {
-                if (filledmap[i][j] > filledmap[k][l] + ee)
+                if (filledmap[c] > filledmap[k] + ee)
                 {
-                    filledmap[i][j] = filledmap[k][l] + ee;
+                    filledmap[c] = filledmap[k] + ee;
                     somethingdone = 1;
                 }
             }
@@ -550,32 +492,27 @@ bool checkdepressiontile(planet& world, vector<vector<float>>& filledmap, int i,
 
 void addlandnoise(planet& world)
 {
-    int width = world.width();
-    int height = world.height();
     int sealevel = world.sealevel();
     int maxelev = world.maxelevation();
 
     int maxadjust = 10;
     int adjustchance = 5; // The lower this is, the more there will be.
 
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : columnmajorcells(world.grid()))
     {
-        for (int j = 0; j <= height; j++)
+        if (!world.basebelowsea(c) && random(1, adjustchance) == 1)
         {
-            if (!world.basebelowsea(i, j) && random(1, adjustchance) == 1)
-            {
-                int adjust = randomsign(random(1, maxadjust));
+            int adjust = randomsign(random(1, maxadjust));
 
-                float newamount = world.nomfloat(i, j) + static_cast<float>(adjust);
+            float newamount = world.nomfloat(c) + static_cast<float>(adjust);
 
-                if (newamount <= static_cast<float>(sealevel))
-                    newamount = static_cast<float>(sealevel);
+            if (newamount <= static_cast<float>(sealevel))
+                newamount = static_cast<float>(sealevel);
 
-                if (newamount > static_cast<float>(maxelev))
-                    newamount = static_cast<float>(maxelev);
+            if (newamount > static_cast<float>(maxelev))
+                newamount = static_cast<float>(maxelev);
 
-                world.setnomfloat(i, j, newamount);
-            }
+            world.setnomfloat(c, newamount);
         }
     }
 }

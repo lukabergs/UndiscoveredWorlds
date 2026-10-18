@@ -546,3 +546,43 @@ void makevoronoi(vector<vector<short>>& voronoi, int width, int height, int poin
         }
     }
 }
+
+std::vector<mesh::CellId> columnmajorcells(const mesh::CellGrid& grid)
+{
+    std::vector<mesh::CellId> cells;
+    cells.reserve(grid.cellcount());
+    if (grid.kind() == mesh::GridKind::latlon && !grid.issubgrid())
+    {
+        const int columns = grid.columns();
+        const int rows = grid.rows();
+        for (int x = 0; x < columns; x++)
+            for (int y = 0; y < rows; y++)
+                cells.push_back(static_cast<mesh::CellId>(y) * static_cast<mesh::CellId>(columns) + static_cast<mesh::CellId>(x));
+    }
+    else if (grid.kind() == mesh::GridKind::cube && !grid.issubgrid())
+    {
+        const mesh::CellId n = static_cast<mesh::CellId>(grid.facecells());
+        for (mesh::CellId face = 0; face < 6; face++)
+            for (mesh::CellId i = 0; i < n; i++)
+                for (mesh::CellId j = 0; j < n; j++)
+                    cells.push_back(face * n * n + j * n + i);
+    }
+    else
+    {
+        for (mesh::CellId c = 0; c < grid.cellcount(); c++)
+            cells.push_back(c);
+    }
+    return cells;
+}
+
+void legacyslot(const mesh::CellGrid& grid, mesh::CellId c, int& x, int& y)
+{
+    if (grid.kind() == mesh::GridKind::latlon)
+    {
+        x = grid.column(c);
+        y = grid.row(c);
+        return;
+    }
+    x = static_cast<int>(c % ARRAYWIDTH);
+    y = static_cast<int>(c / ARRAYWIDTH);
+}

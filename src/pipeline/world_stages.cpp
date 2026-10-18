@@ -10,6 +10,8 @@
 #include "pipeline/climate_stages.hpp"
 
 #include "core/classes.hpp"
+#include "core/grid_shapes.hpp"
+#include "core/mesh/cell_grid.hpp"
 #include "world/functions.hpp"
 #include "pipeline/physical_layers.hpp"
 #include "pipeline/world_generation_debug.hpp"
@@ -119,6 +121,38 @@ void markfeaturecell(GenerationScratch& scratch, int x, int y)
     scratch.stageFeatureCellCount++;
 }
 
+// The scratch's [x][y] arrays hold a cell at its legacy slot (core/grid_shapes.hpp).
+void markfeaturecell(GenerationScratch& scratch, const planet& world, mesh::CellId c)
+{
+    int x = 0;
+    int y = 0;
+    legacyslot(world.grid(), c, x, y);
+    markfeaturecell(scratch, x, y);
+}
+
+template <typename T>
+T& scratchcell(std::vector<std::vector<T>>& grid, const planet& world, mesh::CellId c)
+{
+    int x = 0;
+    int y = 0;
+    legacyslot(world.grid(), c, x, y);
+    return grid[x][y];
+}
+
+template <typename T>
+T scratchcell(const std::vector<std::vector<T>>& grid, const planet& world, mesh::CellId c)
+{
+    int x = 0;
+    int y = 0;
+    legacyslot(world.grid(), c, x, y);
+    return grid[x][y];
+}
+
+mesh::CellId cellcount(const planet& world)
+{
+    return static_cast<mesh::CellId>(world.cellcount());
+}
+
 WorldTectonicsOptions tectonicoptions(const WorldStageParameters& parameters)
 {
     WorldTectonicsOptions options;
@@ -133,44 +167,29 @@ WorldTectonicsOptions tectonicoptions(const WorldStageParameters& parameters)
 
 void rebuildshelves(planet& world, GenerationScratch& scratch)
 {
-    const int width = world.width();
-    const int height = world.height();
-
-    parallelforrows(0, height, [&](int startrow, int endrow)
-    {
-        for (int y = startrow; y <= endrow; y++)
-        {
-            for (int x = 0; x <= width; x++)
-                world.continentalshelves()[x][y] = false;
-        }
-    });
+    world.continentalshelves().fill(false);
 
     makecontinentalshelves(world, world.continentalshelves(), 4);
 }
 
 void applyhypsometricremap(planet& world, GenerationScratch& scratch, const WorldStageParameters& parameters)
 {
-    const int width = world.width();
-    const int height = world.height();
     const int minimum = 1;
     const int maximum = world.maxelevation() - 1;
     const vector<float> sourcecdf = scratch.heightCdf;
     const vector<WorldCurvePoint>& targetcurve = parameters.hypsometricCurve;
 
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    parallelforrows(0, static_cast<int>(cellcount(world)) - 1, [&](int first, int last)
     {
-        for (int y = startrow; y <= endrow; y++)
+        for (mesh::CellId c = static_cast<mesh::CellId>(first); c <= static_cast<mesh::CellId>(last); c++)
         {
-            for (int x = 0; x <= width; x++)
-            {
-                const float normalized = normalizeterrainvalue(world.nomfloat(x, y), minimum, maximum);
-                const float quantile = sampleheightcdf(sourcecdf, normalized);
-                const float remapped = samplecurveaxis(targetcurve, quantile, false);
-                const float newvalue = static_cast<float>(minimum) + remapped * static_cast<float>(maximum - minimum);
-                world.setnomfloat(x, y, clamp(newvalue, static_cast<float>(minimum), static_cast<float>(maximum)));
-            }
+            const float normalized = normalizeterrainvalue(world.nomfloat(c), minimum, maximum);
+            const float quantile = sampleheightcdf(sourcecdf, normalized);
+            const float remapped = samplecurveaxis(targetcurve, quantile, false);
+            const float newvalue = static_cast<float>(minimum) + remapped * static_cast<float>(maximum - minimum);
+            world.setnomfloat(c, clamp(newvalue, static_cast<float>(minimum), static_cast<float>(maximum)));
         }
-    });
+    }, 1024);
 
     rebuildheightdistribution(world, scratch);
 }
@@ -399,41 +418,35 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
 
     vector<int> segmentlookup(static_cast<size_t>(maxsegmentid + 1), -1);
     vector<int> segmentids;
-    vector<vector<pair<int, int>>> segmentcells;
+    vector<vector<mesh::CellId>> segmentcells;
 
     // A trench is cut below the floor as it was before this stage (at least 450 m deep), so it
     // shows on the ocean curve's deep floor and overlapping kernels do not add up.
-    vector<vector<float>> trenchfloor(static_cast<size_t>(width + 1), vector<float>(static_cast<size_t>(height + 1), 0.0f));
-    for (int x = 0; x <= width; x++)
-    {
-        for (int y = 0; y <= height; y++)
-            trenchfloor[x][y] = min(world.nomfloat(x, y), static_cast<float>(sealevel - 450));
-    }
+    vector<float> trenchfloor(world.cellcount(), 0.0f);
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
+        trenchfloor[c] = min(world.nomfloat(c), static_cast<float>(sealevel - 450));
 
-    for (int y = 0; y <= height; y++)
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
-        for (int x = 0; x <= width; x++)
+        if (world.sea(c) == 0 || world.tectonicboundarytype(c) != BoundaryType::convergent)
+            continue;
+
+        const CrustClass crustclass = world.tectoniccrustclass(c);
+        if (crustclass != CrustClass::oceanic && crustclass != CrustClass::transitional)
+            continue;
+
+        const int segmentid = world.tectonicboundarysegmentid(c);
+        if (segmentid <= 0)
+            continue;
+
+        if (segmentlookup[segmentid] < 0)
         {
-            if (world.sea(x, y) == 0 || world.tectonicboundarytype(x, y) != BoundaryType::convergent)
-                continue;
-
-            const CrustClass crustclass = world.tectoniccrustclass(x, y);
-            if (crustclass != CrustClass::oceanic && crustclass != CrustClass::transitional)
-                continue;
-
-            const int segmentid = world.tectonicboundarysegmentid(x, y);
-            if (segmentid <= 0)
-                continue;
-
-            if (segmentlookup[segmentid] < 0)
-            {
-                segmentlookup[segmentid] = static_cast<int>(segmentcells.size());
-                segmentids.push_back(segmentid);
-                segmentcells.emplace_back();
-            }
-
-            segmentcells[segmentlookup[segmentid]].emplace_back(x, y);
+            segmentlookup[segmentid] = static_cast<int>(segmentcells.size());
+            segmentids.push_back(segmentid);
+            segmentcells.emplace_back();
         }
+
+        segmentcells[segmentlookup[segmentid]].push_back(c);
     }
 
     vector<int> order(segmentids.size(), 0);
@@ -447,7 +460,7 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
 
     for (int trenchindex = 0; trenchindex < trenchcount; trenchindex++)
     {
-        const vector<pair<int, int>>& cells = segmentcells[order[trenchindex]];
+        const vector<mesh::CellId>& cells = segmentcells[order[trenchindex]];
         if (cells.empty())
             continue;
 
@@ -455,12 +468,14 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
 
         for (int branch = 0; branch < branchcount; branch++)
         {
-            const pair<int, int>& anchor = cells[random(0, static_cast<int>(cells.size()) - 1)];
+            const mesh::CellId anchorcell = cells[random(0, static_cast<int>(cells.size()) - 1)];
+            const pair<int, int> anchor = { world.grid().column(anchorcell), world.grid().row(anchorcell) };
             const float maxsegmentdistance = static_cast<float>(random(18, 38));
             const int radius = random(2, 4);
 
-            for (const pair<int, int>& cell : cells)
+            for (const mesh::CellId c : cells)
             {
+                const pair<int, int> cell = { world.grid().column(c), world.grid().row(c) };
                 const int dx = wrapdistx(world, cell.first, anchor.first);
                 const int dy = abs(cell.second - anchor.second);
                 const float segmentdistance = sqrtf(static_cast<float>(dx * dx + dy * dy));
@@ -494,7 +509,7 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
                         if (trenchdepth <= 0)
                             continue;
 
-                        const float target = max(1.0f, min(world.nomfloat(nx, ny), trenchfloor[nx][ny] - static_cast<float>(trenchdepth)));
+                        const float target = max(1.0f, min(world.nomfloat(nx, ny), trenchfloor[world.grid().cellof(nx, ny)] - static_cast<float>(trenchdepth)));
                         if (target >= world.nomfloat(nx, ny))
                             continue;
 
@@ -574,24 +589,21 @@ void metadatavolcanoes(planet& world, GenerationScratch& scratch)
 
     vector<VolcanoCandidate> conecandidates;
 
-    for (int y = 0; y <= height; y++)
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
-        for (int x = 0; x <= width; x++)
-        {
-            if (world.tectonicboundarytype(x, y) != BoundaryType::convergent)
-                continue;
+        if (world.tectonicboundarytype(c) != BoundaryType::convergent)
+            continue;
 
-            const float proximity = 1.0f - clamp01(static_cast<float>(world.tectonicboundarydistance(x, y)) / 12.0f);
-            const float uplift = clamp01(world.tectonicuplifttendency(x, y));
-            const float convergence = clamp01(static_cast<float>(world.tectonicconvergence(x, y)) / 255.0f);
-            const float history = clamp01(world.tectonicboundaryhistory(x, y));
-            const float score = proximity * (0.35f + uplift * 0.35f + convergence * 0.20f + history * 0.10f);
+        const float proximity = 1.0f - clamp01(static_cast<float>(world.tectonicboundarydistance(c)) / 12.0f);
+        const float uplift = clamp01(world.tectonicuplifttendency(c));
+        const float convergence = clamp01(static_cast<float>(world.tectonicconvergence(c)) / 255.0f);
+        const float history = clamp01(world.tectonicboundaryhistory(c));
+        const float score = proximity * (0.35f + uplift * 0.35f + convergence * 0.20f + history * 0.10f);
 
-            if (score < 0.34f)
-                continue;
+        if (score < 0.34f)
+            continue;
 
-            conecandidates.push_back({ x, y, score });
-        }
+        conecandidates.push_back({ world.grid().column(c), world.grid().row(c), score });
     }
 
     for (int index = static_cast<int>(conecandidates.size()) - 1; index > 0; index--)
@@ -646,95 +658,75 @@ void metadatavolcanoes(planet& world, GenerationScratch& scratch)
     placenexthotspot(true, clamp(area / 280000 + 1, 1, 6));
     placenexthotspot(false, clamp(area / 520000, 0, 3));
 
-    for (int y = 0; y <= height; y++)
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
-        for (int x = 0; x <= width; x++)
-        {
-            if (world.volcanofloat(x, y) == 0)
-                continue;
+        if (world.volcanofloat(c) == 0)
+            continue;
 
-            markfeaturecell(scratch, x, y);
-            if (world.strato(x, y))
-                world.setgeologicregime(x, y, GeologicRegime::convergent_arc);
-        }
+        markfeaturecell(scratch, world, c);
+        if (world.strato(c))
+            world.setgeologicregime(c, GeologicRegime::convergent_arc);
     }
 }
 
-vector<pair<int, int>> findcomponentdrainpath(planet& world, const vector<vector<int>>& componentids, int componentid)
+vector<mesh::CellId> findcomponentdrainpath(planet& world, const vector<vector<int>>& componentids, int componentid)
 {
-    const int width = world.width();
-    const int height = world.height();
-    vector<vector<bool>> visited = makeboolgrid(false);
-    vector<vector<int>> parentx = makeintgrid(-1);
-    vector<vector<int>> parenty = makeintgrid(-1);
-    queue<pair<int, int>> frontier;
-    pair<int, int> endpoint = { -1, -1 };
+    const mesh::CellGrid& grid = world.grid();
+    const mesh::CellId count = cellcount(world);
+    vector<std::uint8_t> visited(count, 0);
+    vector<mesh::CellId> parent(count, mesh::nocell);
+    queue<mesh::CellId> frontier;
+    mesh::CellId endpoint = mesh::nocell;
 
-    for (int y = 0; y <= height; y++)
+    for (mesh::CellId c = 0; c < count; c++)
     {
-        for (int x = 0; x <= width; x++)
+        if (scratchcell(componentids, world, c) == componentid)
         {
-            if (componentids[x][y] == componentid)
-            {
-                frontier.emplace(x, y);
-                visited[x][y] = true;
-                parentx[x][y] = x;
-                parenty[x][y] = y;
-            }
+            frontier.push(c);
+            visited[c] = 1;
+            parent[c] = c;
         }
     }
 
-    const int directions[8][2] =
+    while (frontier.empty() == false && endpoint == mesh::nocell)
     {
-        { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
-        { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }
-    };
-
-    while (frontier.empty() == false && endpoint.first < 0)
-    {
-        const pair<int, int> current = frontier.front();
+        const mesh::CellId current = frontier.front();
         frontier.pop();
 
-        for (const auto& direction : directions)
+        for (int slot = 1; slot <= mesh::slotcount; slot++)
         {
-            const int nx = wrapx(world, current.first + direction[0]);
-            const int ny = current.second + direction[1];
-
-            if (ny < 0 || ny > height || visited[nx][ny])
+            const std::int32_t neighbour = grid.neighbour(current, slot);
+            if (neighbour < 0 || visited[neighbour])
                 continue;
 
-            visited[nx][ny] = true;
-            parentx[nx][ny] = current.first;
-            parenty[nx][ny] = current.second;
+            const mesh::CellId next = static_cast<mesh::CellId>(neighbour);
+            visited[next] = 1;
+            parent[next] = current;
 
-            if (world.sea(nx, ny) == 1 && componentids[nx][ny] == 0)
+            if (world.sea(next) == 1 && scratchcell(componentids, world, next) == 0)
             {
-                endpoint = { nx, ny };
+                endpoint = next;
                 break;
             }
 
-            frontier.emplace(nx, ny);
+            frontier.push(next);
         }
     }
 
-    vector<pair<int, int>> path;
+    vector<mesh::CellId> path;
 
-    if (endpoint.first < 0)
+    if (endpoint == mesh::nocell)
         return path;
 
-    int x = endpoint.first;
-    int y = endpoint.second;
+    mesh::CellId c = endpoint;
 
-    while (parentx[x][y] != x || parenty[x][y] != y)
+    while (parent[c] != c)
     {
-        path.emplace_back(x, y);
-        const int px = parentx[x][y];
-        const int py = parenty[x][y];
-        x = px;
-        y = py;
+        path.push_back(c);
+        c = parent[c];
     }
 
-    path.emplace_back(x, y);
+    path.push_back(c);
     reverse(path.begin(), path.end());
     return path;
 }
@@ -751,21 +743,18 @@ void applyinlandseapolicies(planet& world, GenerationScratch& scratch)
 
         if (component.policy == GenerationComponentPolicy::fill)
         {
-            for (int x = 0; x <= world.width(); x++)
+            for (mesh::CellId c = 0; c < cellcount(world); c++)
             {
-                for (int y = 0; y <= world.height(); y++)
-                {
-                    if (scratch.inlandSeaComponentIds[x][y] == component.id)
-                        world.setnomfloat(x, y, max(static_cast<float>(world.sealevel() + 1), world.nomfloat(x, y)));
-                }
+                if (scratchcell(scratch.inlandSeaComponentIds, world, c) == component.id)
+                    world.setnomfloat(c, max(static_cast<float>(world.sealevel() + 1), world.nomfloat(c)));
             }
         }
         else
         {
-            const vector<pair<int, int>> path = findcomponentdrainpath(world, scratch.inlandSeaComponentIds, component.id);
+            const vector<mesh::CellId> path = findcomponentdrainpath(world, scratch.inlandSeaComponentIds, component.id);
 
-            for (const pair<int, int>& cell : path)
-                world.setnom(cell.first, cell.second, max(1, world.sealevel() - 10));
+            for (const mesh::CellId c : path)
+                world.setnom(c, max(1, world.sealevel() - 10));
         }
     }
 
@@ -860,13 +849,12 @@ void applydeltawetlandstage(planet& world, const GenerationExecutionContext& con
     const bool eroded = view.erosionduration() > 0.0f;
     if (!context.dodeltas && eroded)
     {
-        for (int x = 0; x <= world.width(); x++)
-            for (int y = 0; y <= world.height(); y++)
-            {
-                world.setdeltadir(x, y, 0);
-                world.setdeltajan(x, y, 0);
-                world.setdeltajul(x, y, 0);
-            }
+        for (mesh::CellId c = 0; c < cellcount(world); c++)
+        {
+            world.setdeltadir(c, 0);
+            world.setdeltajan(c, 0);
+            world.setdeltajul(c, 0);
+        }
     }
 
     createwetlands(world, context.smalllake);
@@ -884,60 +872,49 @@ void applydeltawetlandstage(planet& world, const GenerationExecutionContext& con
 
 void detectinlandseas(planet& world, GenerationScratch& scratch)
 {
-    const int width = world.width();
-    const int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
+    const mesh::CellId count = cellcount(world);
     scratch.inlandSeaComponentIds = makeintgrid(0);
     scratch.inlandSeaComponents.clear();
 
-    vector<vector<bool>> visited = makeboolgrid(false);
-    vector<vector<pair<int, int>>> components(1);
+    vector<std::uint8_t> visited(count, 0);
+    vector<vector<mesh::CellId>> components(1);
     int largestcomponentid = 0;
     int largestcomponentarea = 0;
 
-    for (int y = 0; y <= height; y++)
+    for (mesh::CellId c = 0; c < count; c++)
     {
-        for (int x = 0; x <= width; x++)
+        if (visited[c] || world.sea(c) == 0)
+            continue;
+
+        queue<mesh::CellId> frontier;
+        vector<mesh::CellId> cells;
+        frontier.push(c);
+        visited[c] = 1;
+
+        while (frontier.empty() == false)
         {
-            if (visited[x][y] || world.sea(x, y) == 0)
-                continue;
+            const mesh::CellId current = frontier.front();
+            frontier.pop();
+            cells.push_back(current);
 
-            queue<pair<int, int>> frontier;
-            vector<pair<int, int>> cells;
-            frontier.emplace(x, y);
-            visited[x][y] = true;
-
-            while (frontier.empty() == false)
+            for (int slot = 1; slot <= mesh::slotcount; slot++)
             {
-                const pair<int, int> current = frontier.front();
-                frontier.pop();
-                cells.push_back(current);
+                const std::int32_t neighbour = grid.neighbour(current, slot);
+                if (neighbour < 0 || visited[neighbour] || world.sea(static_cast<mesh::CellId>(neighbour)) == 0)
+                    continue;
 
-                const int directions[8][2] =
-                {
-                    { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
-                    { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }
-                };
-
-                for (const auto& direction : directions)
-                {
-                    const int nx = wrapx(world, current.first + direction[0]);
-                    const int ny = current.second + direction[1];
-
-                    if (ny < 0 || ny > height || visited[nx][ny] || world.sea(nx, ny) == 0)
-                        continue;
-
-                    visited[nx][ny] = true;
-                    frontier.emplace(nx, ny);
-                }
+                visited[neighbour] = 1;
+                frontier.push(static_cast<mesh::CellId>(neighbour));
             }
+        }
 
-            components.push_back(std::move(cells));
+        components.push_back(std::move(cells));
 
-            if (static_cast<int>(components.back().size()) > largestcomponentarea)
-            {
-                largestcomponentarea = static_cast<int>(components.back().size());
-                largestcomponentid = static_cast<int>(components.size() - 1);
-            }
+        if (static_cast<int>(components.back().size()) > largestcomponentarea)
+        {
+            largestcomponentarea = static_cast<int>(components.back().size());
+            largestcomponentid = static_cast<int>(components.size() - 1);
         }
     }
 
@@ -948,13 +925,12 @@ void detectinlandseas(planet& world, GenerationScratch& scratch)
 
         GenerationWaterComponent component;
         component.id = static_cast<int>(scratch.inlandSeaComponents.size() + 1);
-        component.seedX = components[componentindex].front().first;
-        component.seedY = components[componentindex].front().second;
+        legacyslot(grid, components[componentindex].front(), component.seedX, component.seedY);
         component.cellCount = static_cast<int>(components[componentindex].size());
         scratch.inlandSeaComponents.push_back(component);
 
-        for (const pair<int, int>& cell : components[componentindex])
-            scratch.inlandSeaComponentIds[cell.first][cell.second] = component.id;
+        for (const mesh::CellId cell : components[componentindex])
+            scratchcell(scratch.inlandSeaComponentIds, world, cell) = component.id;
     }
 }
 
@@ -1192,8 +1168,6 @@ bool stageusesmanualpreview(GenerationStageId stageid)
 
 void rebuildheightdistribution(const planet& world, GenerationScratch& scratch)
 {
-    const int width = world.width();
-    const int height = world.height();
     const int minimum = 1;
     const int maximum = world.maxelevation() - 1;
 
@@ -1202,16 +1176,13 @@ void rebuildheightdistribution(const planet& world, GenerationScratch& scratch)
 
     int total = 0;
 
-    for (int x = 0; x <= width; x++)
+    for (mesh::CellId c = 0; c < cellcount(world); c++)
     {
-        for (int y = 0; y <= height; y++)
-        {
-            const float normalized = normalizeterrainvalue(world.nomfloat(x, y), minimum, maximum);
-            int bin = static_cast<int>(floorf(normalized * static_cast<float>(kHeightHistogramBins)));
-            bin = clamp(bin, 0, kHeightHistogramBins - 1);
-            scratch.heightHistogram[bin]++;
-            total++;
-        }
+        const float normalized = normalizeterrainvalue(world.nomfloat(c), minimum, maximum);
+        int bin = static_cast<int>(floorf(normalized * static_cast<float>(kHeightHistogramBins)));
+        bin = clamp(bin, 0, kHeightHistogramBins - 1);
+        scratch.heightHistogram[bin]++;
+        total++;
     }
 
     if (total <= 0)
