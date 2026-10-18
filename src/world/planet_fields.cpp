@@ -282,12 +282,22 @@ struct planetfieldaccess
             }
             break;
         case TableId::settlements:
-            out << "id,x,y,name,urban_population,rural_population,carrying_capacity,infrastructure,market_strength,harbor,river_access,polity\n";
+        {
+            // x, y: the lat-lon (export) position; a cube bundle adds the cell id.
+            const bool cube = world.grid().kind() == mesh::GridKind::cube;
+            out << "id,x,y,name,urban_population,rural_population,carrying_capacity,infrastructure,market_strength,harbor,river_access,polity"
+                << (cube ? ",cell\n" : "\n");
             for (const Settlement& s : world.anthroposphere_.settlementlist)
+            {
                 out << s.id << ',' << s.x << ',' << s.y << ',' << csvtext(s.name) << ',' << s.urbanPopulation << ',' << s.ruralPopulation << ','
                     << s.carryingCapacity << ',' << s.infrastructure << ',' << s.marketStrength << ',' << s.harbor << ','
-                    << s.riverAccess << ',' << s.polityId << '\n';
+                    << s.riverAccess << ',' << s.polityId;
+                if (cube)
+                    out << ',' << s.cell;
+                out << '\n';
+            }
             break;
+        }
         case TableId::polities:
             out << "id,name,capital,cohesion,population,infrastructure,wealth,military_pressure\n";
             for (const Polity& p : world.anthroposphere_.politylist)

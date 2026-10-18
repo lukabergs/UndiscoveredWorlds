@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 
+#include "core/mesh/cell_grid.hpp"
+
 class planet;
 
 struct SocialGenerationOptions
@@ -27,9 +29,13 @@ enum class RouteMode : std::uint8_t
     sea = 2
 };
 
+// A settlement sits on a cell of the world's grid; x, y are its position on the
+// lat-lon export grid (the cell's column and row on a lat-lon world), kept for
+// the bundle tables, .uww, the desktop and the legacy regional map.
 struct Settlement
 {
     int id = -1;
+    mesh::CellId cell = mesh::nocell;
     int x = 0;
     int y = 0;
     std::string name;

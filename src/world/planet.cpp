@@ -853,6 +853,8 @@ void planet::shiftterrain(int offset)
 
         while (settlement.x > body_.itswidth)
             settlement.x -= body_.itswidth;
+
+        settlement.cell = grid_->cellof(settlement.x, settlement.y);
     }
 
     const float worldspan = static_cast<float>(body_.itswidth + 1);
@@ -1908,6 +1910,7 @@ bool planet::loadworld(string filename)
             readvariable(infile, settlement.harbor);
             readvariable(infile, settlement.riverAccess);
             readvariable(infile, settlement.polityId);
+            settlement.cell = grid_->cellof(settlement.x, settlement.y);
         }
 
         int politycount = 0;

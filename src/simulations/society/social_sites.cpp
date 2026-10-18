@@ -1,10 +1,10 @@
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <queue>
 #include <string>
 #include <vector>
 
-#include "core/grid_coordinates.hpp"
 #include "world/planet.hpp"
 #include "simulations/society/social_generation_internal.hpp"
 
@@ -12,122 +12,122 @@ using namespace std;
 
 namespace
 {
+using mesh::CellId;
+using socialgen::scanslots;
+
 struct SettlementCandidate
 {
-    int x = 0;
-    int y = 0;
+    CellId cell = 0;
     int suitability = 0;
     int choke = 0;
     int harbor = 0;
     int river = 0;
 };
 
-int wrapxlocal(int x, int width)
+// The cells in the order the former x-major loops visited them (columns outer
+// on lat-lon; id order on the cube): the candidate sort keeps it for ties.
+vector<CellId> scanorder(const mesh::CellGrid& grid)
 {
-    while (x < 0)
-        x += width + 1;
+    vector<CellId> order;
+    order.reserve(grid.cellcount());
 
-    while (x > width)
-        x -= width + 1;
-
-    return x;
-}
-
-int wrappedxdistance(int x1, int x2, int width)
-{
-    const int worldspan = width + 1;
-    const int direct = std::abs(x1 - x2);
-    return std::min(direct, worldspan - direct);
-}
-
-float wrappeddistance(int x1, int y1, int x2, int y2, int width)
-{
-    const int dx = wrappedxdistance(x1, x2, width);
-    const int dy = std::abs(y1 - y2);
-    return std::sqrt(static_cast<float>(dx * dx + dy * dy));
-}
-
-int distancetosea(planet& world, int x, int y, int maxradius)
-{
-    if (world.sea(x, y))
-        return 0;
-
-    for (int radius = 1; radius <= maxradius; radius++)
+    if (grid.kind() == mesh::GridKind::latlon)
     {
-        for (int dx = -radius; dx <= radius; dx++)
+        for (int x = 0; x < grid.columns(); x++)
         {
-            const int dy = radius - std::abs(dx);
-            const int nx1 = wrapxlocal(x + dx, world.width());
-            const int ny1 = y - dy;
-            const int ny2 = y + dy;
+            for (int y = 0; y < grid.rows(); y++)
+                order.push_back(grid.cellof(x, y));
+        }
+    }
+    else
+    {
+        for (CellId c = 0; c < grid.cellcount(); c++)
+            order.push_back(c);
+    }
 
-            if (ny1 >= 0 && ny1 <= world.height() && world.sea(nx1, ny1))
-                return radius;
+    return order;
+}
 
-            if (dy != 0 && ny2 >= 0 && ny2 <= world.height() && world.sea(nx1, ny2))
-                return radius;
+// Steps to the nearest sea cell over the four edge neighbours (the former
+// diamond rings), maxradius + 1 beyond maxradius.
+vector<int> seadistances(const planet& world, int maxradius)
+{
+    const mesh::CellGrid& grid = world.grid();
+    vector<int> distance(grid.cellcount(), maxradius + 1);
+    deque<CellId> frontier;
+
+    for (CellId c = 0; c < grid.cellcount(); c++)
+    {
+        if (world.sea(c))
+        {
+            distance[c] = 0;
+            frontier.push_back(c);
         }
     }
 
-    return maxradius + 1;
+    while (!frontier.empty())
+    {
+        const CellId c = frontier.front();
+        frontier.pop_front();
+
+        if (distance[c] >= maxradius)
+            continue;
+
+        for (int slot = 1; slot <= 7; slot += 2)
+        {
+            const int n = grid.neighbour(c, slot);
+
+            if (n < 0 || distance[n] <= distance[c] + 1)
+                continue;
+
+            distance[n] = distance[c] + 1;
+            frontier.push_back(static_cast<CellId>(n));
+        }
+    }
+
+    return distance;
 }
 
-int countinflows(planet& world, int x, int y)
+int countinflows(const planet& world, CellId c)
 {
+    const mesh::CellGrid& grid = world.grid();
     int inflows = 0;
 
-    for (int dx = -1; dx <= 1; dx++)
+    for (int slot : scanslots)
     {
-        for (int dy = -1; dy <= 1; dy++)
-        {
-            if (dx == 0 && dy == 0)
-                continue;
+        const int n = grid.neighbour(c, slot);
 
-            const int nx = wrapxlocal(x + dx, world.width());
-            const int ny = y + dy;
+        if (n < 0)
+            continue;
 
-            if (ny < 0 || ny > world.height())
-                continue;
+        const int dir = world.riverdir(static_cast<CellId>(n));
 
-            const int dir = world.riverdir(nx, ny);
+        if (dir <= 0)
+            continue;
 
-            if (dir <= 0)
-                continue;
-
-            const twointegers destination = getdestination(nx, ny, dir);
-            const int destx = wrapxlocal(destination.x, world.width());
-            const int desty = std::clamp(destination.y, 0, world.height());
-
-            if (destx == x && desty == y)
-                inflows++;
-        }
+        if (grid.neighbour(static_cast<CellId>(n), dir) == static_cast<int>(c))
+            inflows++;
     }
 
     return inflows;
 }
 
-int computeslopepenalty(planet& world, int x, int y)
+int computeslopepenalty(const planet& world, CellId c)
 {
+    const mesh::CellGrid& grid = world.grid();
     float totaldelta = 0.0f;
     int samples = 0;
-    const float baseelevation = world.mapfloat(x, y);
+    const float baseelevation = world.mapfloat(c);
 
-    for (int dx = -1; dx <= 1; dx++)
+    for (int slot : scanslots)
     {
-        for (int dy = -1; dy <= 1; dy++)
-        {
-            if (dx == 0 && dy == 0)
-                continue;
+        const int n = grid.neighbour(c, slot);
 
-            const int nx = wrapxlocal(x + dx, world.width());
-            const int ny = y + dy;
+        if (n < 0)
+            continue;
 
-            if (ny < 0 || ny > world.height())
-                continue;
-
-            totaldelta += std::fabs(baseelevation - world.mapfloat(nx, ny));
-            samples++;
-        }
+        totaldelta += std::fabs(baseelevation - world.mapfloat(static_cast<CellId>(n)));
+        samples++;
     }
 
     if (samples == 0)
@@ -156,28 +156,46 @@ int computebiomesuitability(int biome)
     return 56;
 }
 
-bool hasphysicalreserveinputs(planet& world)
+bool hasphysicalreserve(const planet& world, CellId c)
 {
-    for (int x = 0; x <= world.width(); x += 16)
+    return world.floodplainfertility(c) > 0 || world.fisheryreserve(c) > 0 || world.metalorereserve(c) > 0 || world.placerreserve(c) > 0 || world.volcanicreserve(c) > 0;
+}
+
+bool hasphysicalreserveinputs(const planet& world)
+{
+    const mesh::CellGrid& grid = world.grid();
+
+    if (grid.kind() == mesh::GridKind::latlon)
     {
-        for (int y = 0; y <= world.height(); y += 16)
+        for (int x = 0; x < grid.columns(); x += 16)
         {
-            if (world.floodplainfertility(x, y) > 0 || world.fisheryreserve(x, y) > 0 || world.metalorereserve(x, y) > 0 || world.placerreserve(x, y) > 0 || world.volcanicreserve(x, y) > 0)
-                return true;
+            for (int y = 0; y < grid.rows(); y += 16)
+            {
+                if (hasphysicalreserve(world, grid.cellof(x, y)))
+                    return true;
+            }
         }
+
+        return false;
+    }
+
+    for (CellId c = 0; c < grid.cellcount(); c++)
+    {
+        if (hasphysicalreserve(world, c))
+            return true;
     }
 
     return false;
 }
 
-int computeresourceopportunity(planet& world, int x, int y, bool usephysicalreserves, int coastscore, int riverscore, int slopescore)
+int computeresourceopportunity(const planet& world, CellId c, bool usephysicalreserves, int coastscore, int riverscore, int slopescore)
 {
     if (usephysicalreserves)
     {
         const int reserve =
-            std::max(world.metalorereserve(x, y), world.placerreserve(x, y)) +
-            std::max(world.volcanicreserve(x, y), world.fisheryreserve(x, y)) +
-            world.floodplainfertility(x, y);
+            std::max(world.metalorereserve(c), world.placerreserve(c)) +
+            std::max(world.volcanicreserve(c), world.fisheryreserve(c)) +
+            world.floodplainfertility(c);
 
         return std::clamp(reserve / 2, 0, 100);
     }
@@ -186,9 +204,38 @@ int computeresourceopportunity(planet& world, int x, int y, bool usephysicalrese
     proxy += coastscore / 4;
     proxy += riverscore / 3;
     proxy += slopescore / 6;
-    proxy += world.mountainheightfloat(x, y) > 0 ? 24 : 0;
-    proxy += std::abs(world.volcanofloat(x, y)) > 0 ? 30 : 0;
+    proxy += world.mountainheightfloat(c) > 0 ? 24 : 0;
+    proxy += std::abs(world.volcanofloat(c)) > 0 ? 30 : 0;
     return std::clamp(proxy, 0, 100);
+}
+
+// The lat-lon cells of the former square or disc loops around a cell (lat-lon only).
+template <typename Visit>
+void visitlatlonbox(const mesh::CellGrid& grid, CellId centre, int radius, bool disc, Visit&& visit)
+{
+    const int cx = grid.column(centre);
+    const int cy = grid.row(centre);
+
+    for (int dx = -radius; dx <= radius; dx++)
+    {
+        for (int dy = -radius; dy <= radius; dy++)
+        {
+            if (disc && dx * dx + dy * dy > radius * radius)
+                continue;
+
+            int nx = cx + dx;
+            while (nx < 0)
+                nx += grid.columns();
+            while (nx >= grid.columns())
+                nx -= grid.columns();
+            const int ny = cy + dy;
+
+            if (ny < 0 || ny >= grid.rows())
+                continue;
+
+            visit(grid.cellof(nx, ny));
+        }
+    }
 }
 
 string makesettlementname(int id, std::mt19937_64& rng)
@@ -205,163 +252,148 @@ namespace socialgen
 {
 void computesitesandinfrastructure(planet& world, const SocialProfile& profile, std::mt19937_64& rng)
 {
-    const int width = world.width();
-    const int height = world.height();
+    const mesh::CellGrid& grid = world.grid();
+    const int cellcount = static_cast<int>(grid.cellcount());
     const int maxcoastradius = 12;
     const bool usephysicalreserves = hasphysicalreserveinputs(world);
 
     world.clearsocialstate();
 
+    const vector<int> seadistance = seadistances(world, maxcoastradius);
     int landcells = 0;
     vector<SettlementCandidate> candidates;
-    candidates.reserve(((width + 1) * (height + 1)) / 8);
+    candidates.reserve(static_cast<size_t>(cellcount) / 8);
 
-    for (int x = 0; x <= width; x++)
+    for (const CellId c : scanorder(grid))
     {
-        for (int y = 0; y <= height; y++)
+        world.setownersettlementid(c, -1);
+        world.setownerpolityid(c, -1);
+        world.setinfrastructure(c, 0);
+        world.setroutetraffic(c, 0);
+
+        if (world.sea(c))
         {
-            world.setownersettlementid(x, y, -1);
-            world.setownerpolityid(x, y, -1);
-            world.setinfrastructure(x, y, 0);
-            world.setroutetraffic(x, y, 0);
+            world.setsettlementsuitability(c, 0);
+            world.setagriculturalcapacity(c, 0);
+            world.setharborscore(c, 0);
+            world.setriveraccess(c, 0);
+            continue;
+        }
 
-            if (world.sea(x, y))
-            {
-                world.setsettlementsuitability(x, y, 0);
-                world.setagriculturalcapacity(x, y, 0);
-                world.setharborscore(x, y, 0);
-                world.setriveraccess(x, y, 0);
+        landcells++;
+
+        const int coastdistance = seadistance[c];
+        const int coastscore = std::clamp(100 - coastdistance * 8, 0, 100);
+
+        int adjacentsea = 0;
+        int adjacentland = 0;
+
+        for (int slot : scanslots)
+        {
+            const int n = grid.neighbour(c, slot);
+
+            if (n < 0)
                 continue;
-            }
 
-            landcells++;
-
-            const int coastdistance = distancetosea(world, x, y, maxcoastradius);
-            const int coastscore = std::clamp(100 - coastdistance * 8, 0, 100);
-
-            int adjacentsea = 0;
-            int adjacentland = 0;
-
-            for (int dx = -1; dx <= 1; dx++)
-            {
-                for (int dy = -1; dy <= 1; dy++)
-                {
-                    if (dx == 0 && dy == 0)
-                        continue;
-
-                    const int nx = wrapxlocal(x + dx, width);
-                    const int ny = y + dy;
-
-                    if (ny < 0 || ny > height)
-                        continue;
-
-                    if (world.sea(nx, ny))
-                        adjacentsea++;
-                    else
-                        adjacentland++;
-                }
-            }
-
-            int harborscore = 0;
-
-            if (coastdistance <= 2)
-            {
-                const int shelter = std::max(0, adjacentland - adjacentsea);
-                harborscore = 42 + shelter * 7 + adjacentsea * 3;
-
-                if (adjacentsea >= 2 && adjacentsea <= 5)
-                    harborscore += 12;
-            }
-
-            harborscore = std::clamp(harborscore, 0, 100);
-            world.setharborscore(x, y, harborscore);
-
-            const int riverflow = world.riveraveflow(x, y);
-            const int riverscore = std::clamp(static_cast<int>(std::log1p(static_cast<float>(riverflow)) * 14.0f), 0, 100);
-            const int inflows = countinflows(world, x, y);
-            const int confluencescore = inflows >= 2 ? std::clamp(18 + inflows * 18, 0, 100) : 0;
-            const int slopepenalty = computeslopepenalty(world, x, y);
-            const int slopescore = std::clamp(100 - slopepenalty, 0, 100);
-
-            const float averageclimate = (world.jantempfloat(x, y) + world.jultempfloat(x, y)) / 2.0f;
-            const float averagerain = (world.janrainfloat(x, y) + world.julrainfloat(x, y)) / 2.0f;
-            const int temperaturescore = std::clamp(100 - static_cast<int>(std::abs(averageclimate - 14.0f) * 4.0f), 0, 100);
-            const int rainscore = std::clamp(100 - static_cast<int>(std::abs(averagerain - 80.0f) * 0.8f), 0, 100);
-            const int biomescore = computebiomesuitability(world.biome(x, y));
-            const int climatescore = std::clamp((temperaturescore * 2 + rainscore + biomescore) / 4, 0, 100);
-
-            const int riverdir = world.riverdir(x, y);
-            int gradientpenalty = 0;
-
-            if (riverdir > 0)
-            {
-                const twointegers downstream = getdestination(x, y, riverdir);
-                const int downstreamx = wrapxlocal(downstream.x, width);
-                const int downstreamy = std::clamp(downstream.y, 0, height);
-                gradientpenalty = static_cast<int>(std::max(0.0f, world.mapfloat(x, y) - world.mapfloat(downstreamx, downstreamy)) / 24.0f);
-            }
-
-            const int riveraccess = std::clamp(riverscore - gradientpenalty + (riverflow > 300 ? 12 : 0), 0, 100);
-            world.setriveraccess(x, y, riveraccess);
-
-            int fertility = 0;
-
-            if (usephysicalreserves)
-            {
-                fertility = world.floodplainfertility(x, y);
-            }
+            if (world.sea(static_cast<CellId>(n)))
+                adjacentsea++;
             else
-            {
-                fertility = std::clamp((riverscore * 4 + rainscore * 3 + slopescore * 2 + coastscore) / 10, 0, 100);
-            }
+                adjacentland++;
+        }
 
-            const int agriculture = std::clamp((fertility * 45 + climatescore * 25 + riveraccess * 20 + slopescore * 10) / 100, 0, 100);
-            world.setagriculturalcapacity(x, y, agriculture);
+        int harborscore = 0;
 
-            const int routeaccessproxy = std::clamp((riverscore + coastscore + harborscore) / 3, 0, 100);
-            const int resourceopportunity = computeresourceopportunity(world, x, y, usephysicalreserves, coastscore, riverscore, slopescore);
+        if (coastdistance <= 2)
+        {
+            const int shelter = std::max(0, adjacentland - adjacentsea);
+            harborscore = 42 + shelter * 7 + adjacentsea * 3;
 
-            const float weightedsum =
-                static_cast<float>(coastscore) * profile.coastWeight +
-                static_cast<float>(harborscore) * profile.harborWeight +
-                static_cast<float>(riverscore) * profile.riverWeight +
-                static_cast<float>(confluencescore) * profile.confluenceWeight +
-                static_cast<float>(climatescore) * profile.climateWeight +
-                static_cast<float>(agriculture) * profile.agricultureWeight +
-                static_cast<float>(routeaccessproxy) * profile.routeWeight +
-                static_cast<float>(resourceopportunity) * profile.resourceWeight;
+            if (adjacentsea >= 2 && adjacentsea <= 5)
+                harborscore += 12;
+        }
 
-            const float weighttotal =
-                profile.coastWeight +
-                profile.harborWeight +
-                profile.riverWeight +
-                profile.confluenceWeight +
-                profile.climateWeight +
-                profile.agricultureWeight +
-                profile.routeWeight +
-                profile.resourceWeight;
+        harborscore = std::clamp(harborscore, 0, 100);
+        world.setharborscore(c, harborscore);
 
-            int suitability = 0;
+        const int riverflow = world.riveraveflow(c);
+        const int riverscore = std::clamp(static_cast<int>(std::log1p(static_cast<float>(riverflow)) * 14.0f), 0, 100);
+        const int inflows = countinflows(world, c);
+        const int confluencescore = inflows >= 2 ? std::clamp(18 + inflows * 18, 0, 100) : 0;
+        const int slopepenalty = computeslopepenalty(world, c);
+        const int slopescore = std::clamp(100 - slopepenalty, 0, 100);
 
-            if (weighttotal > 0.0f)
-                suitability = static_cast<int>(std::round(weightedsum / weighttotal));
+        const float averageclimate = (world.jantempfloat(c) + world.jultempfloat(c)) / 2.0f;
+        const float averagerain = (world.janrainfloat(c) + world.julrainfloat(c)) / 2.0f;
+        const int temperaturescore = std::clamp(100 - static_cast<int>(std::abs(averageclimate - 14.0f) * 4.0f), 0, 100);
+        const int rainscore = std::clamp(100 - static_cast<int>(std::abs(averagerain - 80.0f) * 0.8f), 0, 100);
+        const int biomescore = computebiomesuitability(world.biome(c));
+        const int climatescore = std::clamp((temperaturescore * 2 + rainscore + biomescore) / 4, 0, 100);
 
-            suitability -= static_cast<int>(std::round(profile.terrainPenalty * static_cast<float>(slopepenalty) * 0.30f));
-            suitability = std::clamp(suitability, 0, 100);
+        int gradientpenalty = 0;
+        const int downstream = grid.neighbour(c, world.riverdir(c));
 
-            world.setsettlementsuitability(x, y, suitability);
+        if (downstream >= 0)
+            gradientpenalty = static_cast<int>(std::max(0.0f, world.mapfloat(c) - world.mapfloat(static_cast<CellId>(downstream))) / 24.0f);
 
-            if (suitability >= 35)
-            {
-                SettlementCandidate candidate;
-                candidate.x = x;
-                candidate.y = y;
-                candidate.suitability = suitability;
-                candidate.harbor = harborscore;
-                candidate.river = riveraccess;
-                candidate.choke = std::clamp((harborscore + riveraccess + confluencescore + routeaccessproxy) / 4, 0, 100);
-                candidates.push_back(candidate);
-            }
+        const int riveraccess = std::clamp(riverscore - gradientpenalty + (riverflow > 300 ? 12 : 0), 0, 100);
+        world.setriveraccess(c, riveraccess);
+
+        int fertility = 0;
+
+        if (usephysicalreserves)
+        {
+            fertility = world.floodplainfertility(c);
+        }
+        else
+        {
+            fertility = std::clamp((riverscore * 4 + rainscore * 3 + slopescore * 2 + coastscore) / 10, 0, 100);
+        }
+
+        const int agriculture = std::clamp((fertility * 45 + climatescore * 25 + riveraccess * 20 + slopescore * 10) / 100, 0, 100);
+        world.setagriculturalcapacity(c, agriculture);
+
+        const int routeaccessproxy = std::clamp((riverscore + coastscore + harborscore) / 3, 0, 100);
+        const int resourceopportunity = computeresourceopportunity(world, c, usephysicalreserves, coastscore, riverscore, slopescore);
+
+        const float weightedsum =
+            static_cast<float>(coastscore) * profile.coastWeight +
+            static_cast<float>(harborscore) * profile.harborWeight +
+            static_cast<float>(riverscore) * profile.riverWeight +
+            static_cast<float>(confluencescore) * profile.confluenceWeight +
+            static_cast<float>(climatescore) * profile.climateWeight +
+            static_cast<float>(agriculture) * profile.agricultureWeight +
+            static_cast<float>(routeaccessproxy) * profile.routeWeight +
+            static_cast<float>(resourceopportunity) * profile.resourceWeight;
+
+        const float weighttotal =
+            profile.coastWeight +
+            profile.harborWeight +
+            profile.riverWeight +
+            profile.confluenceWeight +
+            profile.climateWeight +
+            profile.agricultureWeight +
+            profile.routeWeight +
+            profile.resourceWeight;
+
+        int suitability = 0;
+
+        if (weighttotal > 0.0f)
+            suitability = static_cast<int>(std::round(weightedsum / weighttotal));
+
+        suitability -= static_cast<int>(std::round(profile.terrainPenalty * static_cast<float>(slopepenalty) * 0.30f));
+        suitability = std::clamp(suitability, 0, 100);
+
+        world.setsettlementsuitability(c, suitability);
+
+        if (suitability >= 35)
+        {
+            SettlementCandidate candidate;
+            candidate.cell = c;
+            candidate.suitability = suitability;
+            candidate.harbor = harborscore;
+            candidate.river = riveraccess;
+            candidate.choke = std::clamp((harborscore + riveraccess + confluencescore + routeaccessproxy) / 4, 0, 100);
+            candidates.push_back(candidate);
         }
     }
 
@@ -381,7 +413,7 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
 
     vector<Settlement>& settlements = world.settlements();
     const int targetsettlements = std::clamp(landcells / 12000, 8, 180);
-    const float worldscalefactor = static_cast<float>(width + 1) / 1024.0f;
+    const float worldscalefactor = static_cast<float>(exportcolumns(grid)) / 1024.0f;
     const int spacingradius = std::max(6, static_cast<int>(std::round(static_cast<float>(profile.spacingRadius) * worldscalefactor)));
 
     for (const SettlementCandidate& candidate : candidates)
@@ -393,12 +425,12 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
 
         for (const Settlement& existing : settlements)
         {
-            const float distance = wrappeddistance(candidate.x, candidate.y, existing.x, existing.y, width);
+            const float distance = celldistance(grid, candidate.cell, existing.cell);
 
             if (distance >= static_cast<float>(spacingradius))
                 continue;
 
-            const int existingscore = world.settlementsuitability(existing.x, existing.y);
+            const int existingscore = world.settlementsuitability(existing.cell);
             const bool privilegedchokepoint = candidate.harbor >= 85 || candidate.river >= 85;
 
             if (!privilegedchokepoint || distance < static_cast<float>(spacingradius) * 0.5f)
@@ -416,8 +448,7 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
 
         Settlement settlement;
         settlement.id = static_cast<int>(settlements.size());
-        settlement.x = candidate.x;
-        settlement.y = candidate.y;
+        placesettlement(settlement, grid, candidate.cell);
         settlement.name = makesettlementname(settlement.id, rng);
         settlement.harbor = static_cast<float>(candidate.harbor);
         settlement.riverAccess = static_cast<float>(candidate.river);
@@ -429,8 +460,7 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
     {
         Settlement settlement;
         settlement.id = 0;
-        settlement.x = candidates[0].x;
-        settlement.y = candidates[0].y;
+        placesettlement(settlement, grid, candidates[0].cell);
         settlement.name = makesettlementname(0, rng);
         settlement.harbor = static_cast<float>(candidates[0].harbor);
         settlement.riverAccess = static_cast<float>(candidates[0].river);
@@ -445,28 +475,19 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
         int routeaccesstotal = 0;
         int samples = 0;
 
-        for (int dx = -radius; dx <= radius; dx++)
+        visitlatlonbox(grid, settlement.cell, radius, true, [&](CellId n)
         {
-            for (int dy = -radius; dy <= radius; dy++)
-            {
-                if (dx * dx + dy * dy > radius * radius)
-                    continue;
+            if (world.sea(n))
+                return;
 
-                const int nx = wrapxlocal(settlement.x + dx, width);
-                const int ny = settlement.y + dy;
+            agriculturetotal += world.agriculturalcapacity(n);
+            routeaccesstotal += std::max({ world.riveraccess(n), world.harborscore(n), world.settlementsuitability(n) });
+            samples++;
+        });
 
-                if (ny < 0 || ny > height || world.sea(nx, ny))
-                    continue;
-
-                agriculturetotal += world.agriculturalcapacity(nx, ny);
-                routeaccesstotal += std::max({ world.riveraccess(nx, ny), world.harborscore(nx, ny), world.settlementsuitability(nx, ny) });
-                samples++;
-            }
-        }
-
-        const int suitability = world.settlementsuitability(settlement.x, settlement.y);
-        const float averageagriculture = samples > 0 ? static_cast<float>(agriculturetotal) / static_cast<float>(samples) : static_cast<float>(world.agriculturalcapacity(settlement.x, settlement.y));
-        const float averagerouteaccess = samples > 0 ? static_cast<float>(routeaccesstotal) / static_cast<float>(samples) : static_cast<float>(std::max(world.riveraccess(settlement.x, settlement.y), world.harborscore(settlement.x, settlement.y)));
+        const int suitability = world.settlementsuitability(settlement.cell);
+        const float averageagriculture = samples > 0 ? static_cast<float>(agriculturetotal) / static_cast<float>(samples) : static_cast<float>(world.agriculturalcapacity(settlement.cell));
+        const float averagerouteaccess = samples > 0 ? static_cast<float>(routeaccesstotal) / static_cast<float>(samples) : static_cast<float>(std::max(world.riveraccess(settlement.cell), world.harborscore(settlement.cell)));
         float carryingcapacity = 800.0f + averageagriculture * 120.0f + averagerouteaccess * 65.0f + static_cast<float>(suitability) * 70.0f;
 
         float crowdingpenalty = 0.0f;
@@ -476,12 +497,12 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
             if (other.id == settlement.id)
                 continue;
 
-            const float distance = wrappeddistance(settlement.x, settlement.y, other.x, other.y, width);
+            const float distance = celldistance(grid, settlement.cell, other.cell);
 
             if (distance >= static_cast<float>(spacingradius * 2))
                 continue;
 
-            const int otherscore = world.settlementsuitability(other.x, other.y);
+            const int otherscore = world.settlementsuitability(other.cell);
 
             if (otherscore <= suitability)
                 continue;
@@ -509,8 +530,7 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
     struct Node
     {
         int strength = 0;
-        int x = 0;
-        int y = 0;
+        CellId cell = 0;
         int settlementId = -1;
 
         bool operator<(const Node& other) const
@@ -519,23 +539,16 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
         }
     };
 
-    const int cellcount = (width + 1) * (height + 1);
     vector<int> beststrength(static_cast<size_t>(cellcount), -1);
     vector<int> bestowner(static_cast<size_t>(cellcount), -1);
     priority_queue<Node> frontier;
 
-    const auto indexof = [height](int x, int y) -> int
-    {
-        return x * (height + 1) + y;
-    };
-
     for (const Settlement& settlement : settlements)
     {
         const int startstrength = std::clamp(static_cast<int>(55.0f + settlement.infrastructure * 0.65f), 35, 100);
-        const int index = indexof(settlement.x, settlement.y);
-        beststrength[index] = startstrength;
-        bestowner[index] = settlement.id;
-        frontier.push({ startstrength, settlement.x, settlement.y, settlement.id });
+        beststrength[settlement.cell] = startstrength;
+        bestowner[settlement.cell] = settlement.id;
+        frontier.push({ startstrength, settlement.cell, settlement.id });
     }
 
     while (!frontier.empty())
@@ -543,79 +556,65 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
         const Node node = frontier.top();
         frontier.pop();
 
-        const int currentindex = indexof(node.x, node.y);
-
-        if (node.strength < beststrength[currentindex] || node.settlementId != bestowner[currentindex])
+        if (node.strength < beststrength[node.cell] || node.settlementId != bestowner[node.cell])
             continue;
 
-        for (int dx = -1; dx <= 1; dx++)
+        for (int slot : scanslots)
         {
-            for (int dy = -1; dy <= 1; dy++)
+            const int neighbour = grid.neighbour(node.cell, slot);
+
+            if (neighbour < 0 || world.sea(static_cast<CellId>(neighbour)))
+                continue;
+
+            const CellId n = static_cast<CellId>(neighbour);
+            int movecost = 4;
+
+            if (!orthogonalslot(slot))
+                movecost++;
+
+            const float elevationdelta = std::fabs(world.mapfloat(n) - world.mapfloat(node.cell));
+            movecost += std::min(8, static_cast<int>(elevationdelta / 180.0f));
+
+            const int special = world.special(n);
+            if (special >= 130 && special <= 132)
+                movecost += 3;
+
+            const bool currentriver = world.riveraveflow(node.cell) > 220;
+            const bool nextriver = world.riveraveflow(n) > 220;
+            if (currentriver != nextriver)
+                movecost += 2;
+
+            if (world.riveraccess(n) > 40)
+                movecost = std::max(1, movecost - 1);
+
+            if (world.harborscore(n) > 60)
+                movecost = std::max(1, movecost - 1);
+
+            const int newstrength = node.strength - movecost;
+
+            if (newstrength <= 0)
+                continue;
+
+            if (newstrength > beststrength[n] || (newstrength == beststrength[n] && node.settlementId < bestowner[n]))
             {
-                if (dx == 0 && dy == 0)
-                    continue;
-
-                const int nx = wrapxlocal(node.x + dx, width);
-                const int ny = node.y + dy;
-
-                if (ny < 0 || ny > height || world.sea(nx, ny))
-                    continue;
-
-                int movecost = 4;
-
-                if (dx != 0 && dy != 0)
-                    movecost++;
-
-                const float elevationdelta = std::fabs(world.mapfloat(nx, ny) - world.mapfloat(node.x, node.y));
-                movecost += std::min(8, static_cast<int>(elevationdelta / 180.0f));
-
-                const int special = world.special(nx, ny);
-                if (special >= 130 && special <= 132)
-                    movecost += 3;
-
-                const bool currentriver = world.riveraveflow(node.x, node.y) > 220;
-                const bool nextriver = world.riveraveflow(nx, ny) > 220;
-                if (currentriver != nextriver)
-                    movecost += 2;
-
-                if (world.riveraccess(nx, ny) > 40)
-                    movecost = std::max(1, movecost - 1);
-
-                if (world.harborscore(nx, ny) > 60)
-                    movecost = std::max(1, movecost - 1);
-
-                const int newstrength = node.strength - movecost;
-
-                if (newstrength <= 0)
-                    continue;
-
-                const int neighbourindex = indexof(nx, ny);
-
-                if (newstrength > beststrength[neighbourindex] || (newstrength == beststrength[neighbourindex] && node.settlementId < bestowner[neighbourindex]))
-                {
-                    beststrength[neighbourindex] = newstrength;
-                    bestowner[neighbourindex] = node.settlementId;
-                    frontier.push({ newstrength, nx, ny, node.settlementId });
-                }
+                beststrength[n] = newstrength;
+                bestowner[n] = node.settlementId;
+                frontier.push({ newstrength, n, node.settlementId });
             }
         }
     }
 
-    for (int x = 0; x <= width; x++)
+    for (CellId c = 0; c < grid.cellcount(); c++)
     {
-        for (int y = 0; y <= height; y++)
+        if (world.sea(c))
         {
-            if (world.sea(x, y))
-            {
-                world.setinfrastructure(x, y, 0);
-                world.setownersettlementid(x, y, -1);
-                continue;
-            }
-
-            const int index = indexof(x, y);
-            world.setinfrastructure(x, y, std::max(0, beststrength[index]));
-            world.setownersettlementid(x, y, bestowner[index]);
+            world.setinfrastructure(c, 0);
+            world.setownersettlementid(c, -1);
+            continue;
         }
+
+        world.setinfrastructure(c, std::max(0, beststrength[c]));
+        world.setownersettlementid(c, bestowner[c]);
     }
 
     for (Settlement& settlement : settlements)
@@ -623,20 +622,14 @@ void computesitesandinfrastructure(planet& world, const SocialProfile& profile, 
         int total = 0;
         int samples = 0;
 
-        for (int dx = -4; dx <= 4; dx++)
+        visitlatlonbox(grid, settlement.cell, 4, false, [&](CellId n)
         {
-            for (int dy = -4; dy <= 4; dy++)
-            {
-                const int nx = wrapxlocal(settlement.x + dx, width);
-                const int ny = settlement.y + dy;
+            if (world.sea(n))
+                return;
 
-                if (ny < 0 || ny > height || world.sea(nx, ny))
-                    continue;
-
-                total += world.infrastructure(nx, ny);
-                samples++;
-            }
-        }
+            total += world.infrastructure(n);
+            samples++;
+        });
 
         if (samples > 0)
             settlement.infrastructure = static_cast<float>(total) / static_cast<float>(samples);

@@ -13,10 +13,12 @@ using namespace std;
 
 namespace
 {
+using mesh::CellId;
+using socialgen::scanslots;
+
 struct OpenNode
 {
-    int x = 0;
-    int y = 0;
+    CellId cell = 0;
     float g = 0.0f;
     float f = 0.0f;
 };
@@ -29,54 +31,26 @@ struct OpenNodeCompare
     }
 };
 
-int wrapxlocal(int x, int width)
+float heuristiccost(const mesh::CellGrid& grid, CellId cell, CellId end)
 {
-    while (x < 0)
-        x += width + 1;
-
-    while (x > width)
-        x -= width + 1;
-
-    return x;
+    return socialgen::celldistance(grid, cell, end) * 10.0f;
 }
 
-int wrappedxdistance(int x1, int x2, int width)
-{
-    const int worldspan = width + 1;
-    const int direct = std::abs(x1 - x2);
-    return std::min(direct, worldspan - direct);
-}
-
-float heuristiccost(int x, int y, int endx, int endy, int width)
-{
-    const int dx = wrappedxdistance(x, endx, width);
-    const int dy = std::abs(y - endy);
-    return std::sqrt(static_cast<float>(dx * dx + dy * dy)) * 10.0f;
-}
-
+// A* over the neighbour table; passable and movecost take (from, to, slot).
 template <typename PassableFn, typename CostFn>
-vector<pair<int, int>> findpathastar(planet& world, int startx, int starty, int endx, int endy, int maxexpanded, PassableFn&& passable, CostFn&& movecost)
+vector<CellId> findpathastar(const planet& world, CellId start, CellId end, int maxexpanded, PassableFn&& passable, CostFn&& movecost)
 {
-    const int width = world.width();
-    const int height = world.height();
-    const int cellheight = height + 1;
-    const auto indexof = [cellheight](int x, int y) -> int
-    {
-        return x * cellheight + y;
-    };
-
-    const int startindex = indexof(startx, starty);
-    const int endindex = indexof(endx, endy);
+    const mesh::CellGrid& grid = world.grid();
     priority_queue<OpenNode, vector<OpenNode>, OpenNodeCompare> open;
-    unordered_map<int, float> bestg;
-    unordered_map<int, int> camefrom;
-    unordered_set<int> closed;
+    unordered_map<CellId, float> bestg;
+    unordered_map<CellId, CellId> camefrom;
+    unordered_set<CellId> closed;
     bestg.reserve(8192);
     camefrom.reserve(8192);
     closed.reserve(8192);
 
-    open.push({ startx, starty, 0.0f, heuristiccost(startx, starty, endx, endy, width) });
-    bestg.emplace(startindex, 0.0f);
+    open.push({ start, 0.0f, heuristiccost(grid, start, end) });
+    bestg.emplace(start, 0.0f);
 
     int expanded = 0;
 
@@ -85,65 +59,57 @@ vector<pair<int, int>> findpathastar(planet& world, int startx, int starty, int 
         const OpenNode node = open.top();
         open.pop();
 
-        const int nodeindex = indexof(node.x, node.y);
-        const auto bestfornode = bestg.find(nodeindex);
+        const auto bestfornode = bestg.find(node.cell);
 
         if (bestfornode != bestg.end() && node.g > bestfornode->second)
             continue;
 
-        if (closed.find(nodeindex) != closed.end())
+        if (closed.find(node.cell) != closed.end())
             continue;
 
-        closed.emplace(nodeindex);
+        closed.emplace(node.cell);
         expanded++;
 
-        if (nodeindex == endindex)
+        if (node.cell == end)
             break;
 
-        for (int dx = -1; dx <= 1; dx++)
+        for (int slot : scanslots)
         {
-            for (int dy = -1; dy <= 1; dy++)
+            const int neighbour = grid.neighbour(node.cell, slot);
+
+            if (neighbour < 0)
+                continue;
+
+            const CellId n = static_cast<CellId>(neighbour);
+
+            if (!passable(node.cell, n, slot))
+                continue;
+
+            if (closed.find(n) != closed.end())
+                continue;
+
+            const float movement = movecost(node.cell, n, slot);
+            const float tentativeg = node.g + movement;
+            const auto existing = bestg.find(n);
+
+            if (existing == bestg.end() || tentativeg < existing->second)
             {
-                if (dx == 0 && dy == 0)
-                    continue;
-
-                const int nx = wrapxlocal(node.x + dx, width);
-                const int ny = node.y + dy;
-
-                if (ny < 0 || ny > height)
-                    continue;
-
-                if (!passable(node.x, node.y, nx, ny))
-                    continue;
-
-                const int neighbourindex = indexof(nx, ny);
-
-                if (closed.find(neighbourindex) != closed.end())
-                    continue;
-
-                const float movement = movecost(node.x, node.y, nx, ny);
-                const float tentativeg = node.g + movement;
-                const auto existing = bestg.find(neighbourindex);
-
-                if (existing == bestg.end() || tentativeg < existing->second)
-                {
-                    bestg[neighbourindex] = tentativeg;
-                    camefrom[neighbourindex] = nodeindex;
-                    const float f = tentativeg + heuristiccost(nx, ny, endx, endy, width);
-                    open.push({ nx, ny, tentativeg, f });
-                }
+                bestg[n] = tentativeg;
+                camefrom[n] = node.cell;
+                const float f = tentativeg + heuristiccost(grid, n, end);
+                open.push({ n, tentativeg, f });
             }
         }
     }
 
-    if (camefrom.find(endindex) == camefrom.end() && startindex != endindex)
+    if (camefrom.find(end) == camefrom.end() && start != end)
         return {};
 
-    vector<pair<int, int>> reversed;
-    reversed.push_back({ endx, endy });
-    int current = endindex;
+    vector<CellId> reversed;
+    reversed.push_back(end);
+    CellId current = end;
 
-    while (current != startindex)
+    while (current != start)
     {
         const auto found = camefrom.find(current);
 
@@ -151,20 +117,22 @@ vector<pair<int, int>> findpathastar(planet& world, int startx, int starty, int 
             return {};
 
         current = found->second;
-        const int x = current / cellheight;
-        const int y = current % cellheight;
-        reversed.push_back({ x, y });
+        reversed.push_back(current);
     }
 
     std::reverse(reversed.begin(), reversed.end());
     return reversed;
 }
 
-vector<pair<int, int>> buildstraightpath(planet& world, int startx, int starty, int endx, int endy)
+// The straight line between two cells, when no passable path exists (lat-lon only).
+vector<CellId> buildstraightpath(const mesh::CellGrid& grid, CellId start, CellId end)
 {
-    const int width = world.width();
+    const int startx = grid.column(start);
+    const int starty = grid.row(start);
+    const int endx = grid.column(end);
+    const int endy = grid.row(end);
+    const int worldspan = grid.columns();
     int adjustedendx = endx;
-    const int worldspan = width + 1;
     const int directdx = endx - startx;
 
     if (std::abs(directdx) > worldspan / 2)
@@ -175,7 +143,7 @@ vector<pair<int, int>> buildstraightpath(planet& world, int startx, int starty, 
             adjustedendx += worldspan;
     }
 
-    vector<pair<int, int>> path;
+    vector<CellId> path;
     int x0 = startx;
     int y0 = starty;
     const int x1 = adjustedendx;
@@ -188,9 +156,13 @@ vector<pair<int, int>> buildstraightpath(planet& world, int startx, int starty, 
 
     while (true)
     {
-        const int wrappedx = wrapxlocal(x0, width);
-        const int clampedy = std::clamp(y0, 0, world.height());
-        path.push_back({ wrappedx, clampedy });
+        int wrappedx = x0;
+        while (wrappedx < 0)
+            wrappedx += worldspan;
+        while (wrappedx >= worldspan)
+            wrappedx -= worldspan;
+        const int clampedy = std::clamp(y0, 0, grid.rows() - 1);
+        path.push_back(grid.cellof(wrappedx, clampedy));
 
         if (x0 == x1 && y0 == y1)
             break;
@@ -213,6 +185,17 @@ vector<pair<int, int>> buildstraightpath(planet& world, int startx, int starty, 
     return path;
 }
 
+// The unit direction of a step for the sea-current assist (lat-lon only: the
+// column and row offsets, y growing south, as the former loops computed them).
+void stepdirection(const mesh::CellGrid& grid, CellId from, CellId to, float& ux, float& uy)
+{
+    const float dirx = static_cast<float>(grid.column(to) - grid.column(from));
+    const float diry = static_cast<float>(grid.row(to) - grid.row(from));
+    const float length = std::max(1.0f, std::sqrt(dirx * dirx + diry * diry));
+    ux = dirx / length;
+    uy = diry / length;
+}
+
 float settlementpopulation(const Settlement& settlement)
 {
     return static_cast<float>(settlement.urbanPopulation + settlement.ruralPopulation);
@@ -232,6 +215,7 @@ namespace socialgen
 {
 void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
 {
+    const mesh::CellGrid& grid = world.grid();
     vector<Settlement>& settlements = world.settlements();
     vector<RouteEdge>& routes = world.routeedges();
     routes.clear();
@@ -239,31 +223,26 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
     if (settlements.size() < 2)
         return;
 
-    for (int x = 0; x <= world.width(); x++)
-    {
-        for (int y = 0; y <= world.height(); y++)
-            world.setroutetraffic(x, y, 0);
-    }
+    for (CellId c = 0; c < grid.cellcount(); c++)
+        world.setroutetraffic(c, 0);
 
     unordered_set<uint64_t> edgekeys;
     edgekeys.reserve(settlements.size() * 8);
 
-    auto applypathtraffic = [&](const vector<pair<int, int>>& path, RouteMode mode, float traffic)
+    auto applypathtraffic = [&](const vector<CellId>& path, RouteMode mode, float traffic)
     {
         const int trafficadd = std::clamp(static_cast<int>(std::round(traffic * 0.18f)), 1, 22);
 
-        for (const pair<int, int>& point : path)
+        for (const CellId c : path)
         {
-            const int x = point.first;
-            const int y = point.second;
-            world.setroutetraffic(x, y, std::min(100, world.routetraffic(x, y) + trafficadd));
+            world.setroutetraffic(c, std::min(100, world.routetraffic(c) + trafficadd));
 
-            if (mode != RouteMode::sea && !world.sea(x, y))
-                world.setinfrastructure(x, y, std::min(100, world.infrastructure(x, y) + trafficadd / 4));
+            if (mode != RouteMode::sea && !world.sea(c))
+                world.setinfrastructure(c, std::min(100, world.infrastructure(c) + trafficadd / 4));
         }
     };
 
-    auto addroute = [&](Settlement& from, Settlement& to, RouteMode mode, const vector<pair<int, int>>& path)
+    auto addroute = [&](Settlement& from, Settlement& to, RouteMode mode, const vector<CellId>& path)
     {
         if (path.size() < 2)
             return;
@@ -307,7 +286,7 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
                 continue;
 
             const Settlement& target = settlements[j];
-            const float distance = std::sqrt(static_cast<float>(wrappedxdistance(source.x, target.x, world.width()) * wrappedxdistance(source.x, target.x, world.width()) + (source.y - target.y) * (source.y - target.y)));
+            const float distance = celldistance(grid, source.cell, target.cell);
             neighbours.push_back({ distance, static_cast<int>(j) });
         }
 
@@ -326,56 +305,56 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
             if (directdistance > 460.0f)
                 continue;
 
-            const auto landpassable = [&](int, int, int nx, int ny) -> bool
+            const auto landpassable = [&](CellId, CellId next, int) -> bool
             {
-                return !world.sea(nx, ny);
+                return !world.sea(next);
             };
 
-            const auto landmovecost = [&](int cx, int cy, int nx, int ny) -> float
+            const auto landmovecost = [&](CellId current, CellId next, int slot) -> float
             {
-                float cost = (cx == nx || cy == ny) ? 10.0f : 14.0f;
-                const float elevationdelta = std::fabs(world.mapfloat(cx, cy) - world.mapfloat(nx, ny));
+                float cost = orthogonalslot(slot) ? 10.0f : 14.0f;
+                const float elevationdelta = std::fabs(world.mapfloat(current) - world.mapfloat(next));
                 cost += std::min(12.0f, elevationdelta / 180.0f);
-                const int special = world.special(nx, ny);
+                const int special = world.special(next);
 
                 if (special >= 130 && special <= 132)
                     cost += 6.0f;
 
-                const bool currentriver = world.riveraveflow(cx, cy) > 250;
-                const bool nextriver = world.riveraveflow(nx, ny) > 250;
+                const bool currentriver = world.riveraveflow(current) > 250;
+                const bool nextriver = world.riveraveflow(next) > 250;
 
                 if (currentriver != nextriver)
                     cost += 5.0f;
 
-                if (world.infrastructure(nx, ny) > 30)
+                if (world.infrastructure(next) > 30)
                     cost = std::max(2.0f, cost - 1.8f);
 
                 return cost;
             };
 
-            vector<pair<int, int>> landpath = findpathastar(world, source.x, source.y, target.x, target.y, 85000, landpassable, landmovecost);
+            vector<CellId> landpath = findpathastar(world, source.cell, target.cell, 85000, landpassable, landmovecost);
 
             if (landpath.empty())
-                landpath = buildstraightpath(world, source.x, source.y, target.x, target.y);
+                landpath = buildstraightpath(grid, source.cell, target.cell);
 
             addroute(source, target, RouteMode::land, landpath);
 
             if (source.riverAccess >= 45.0f && target.riverAccess >= 45.0f && directdistance <= 500.0f)
             {
-                const auto riverpassable = [&](int, int, int nx, int ny) -> bool
+                const auto riverpassable = [&](CellId, CellId next, int) -> bool
                 {
-                    return !world.sea(nx, ny) && world.riveraccess(nx, ny) >= 18;
+                    return !world.sea(next) && world.riveraccess(next) >= 18;
                 };
 
-                const auto rivermovecost = [&](int cx, int cy, int nx, int ny) -> float
+                const auto rivermovecost = [&](CellId, CellId next, int slot) -> float
                 {
-                    float cost = (cx == nx || cy == ny) ? 8.0f : 11.0f;
-                    cost -= static_cast<float>(std::min(world.riveraccess(nx, ny), 90)) * 0.04f;
+                    float cost = orthogonalslot(slot) ? 8.0f : 11.0f;
+                    cost -= static_cast<float>(std::min(world.riveraccess(next), 90)) * 0.04f;
                     cost = std::max(2.0f, cost);
                     return cost;
                 };
 
-                vector<pair<int, int>> riverpath = findpathastar(world, source.x, source.y, target.x, target.y, 70000, riverpassable, rivermovecost);
+                vector<CellId> riverpath = findpathastar(world, source.cell, target.cell, 70000, riverpassable, rivermovecost);
 
                 if (!riverpath.empty())
                     addroute(source, target, RouteMode::river, riverpath);
@@ -383,39 +362,57 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
 
             if (source.harbor >= 55.0f && target.harbor >= 55.0f && directdistance <= 760.0f)
             {
-                const auto seapassable = [&](int, int, int nx, int ny) -> bool
+                const auto iscoast = [&](CellId c) -> bool
                 {
-                    if (world.sea(nx, ny) || world.coast(nx, ny))
+                    // planet::coast: a sea cell with land across an edge, polar rows excluded on lat-lon.
+                    if (!world.sea(c))
+                        return false;
+
+                    if (grid.kind() == mesh::GridKind::latlon && (grid.row(c) == 0 || grid.row(c) == grid.rows() - 1))
+                        return false;
+
+                    for (int slot = 1; slot <= 7; slot += 2)
+                    {
+                        const int n = grid.neighbour(c, slot);
+
+                        if (n >= 0 && !world.sea(static_cast<CellId>(n)))
+                            return true;
+                    }
+
+                    return false;
+                };
+
+                const auto seapassable = [&](CellId, CellId next, int) -> bool
+                {
+                    if (world.sea(next) || iscoast(next))
                         return true;
 
-                    const int startdist = wrappedxdistance(nx, source.x, world.width()) + std::abs(ny - source.y);
-                    const int enddist = wrappedxdistance(nx, target.x, world.width()) + std::abs(ny - target.y);
+                    const int startdist = cellmanhattan(grid, next, source.cell);
+                    const int enddist = cellmanhattan(grid, next, target.cell);
                     return startdist <= 3 || enddist <= 3;
                 };
 
-                const auto seamovecost = [&](int cx, int cy, int nx, int ny) -> float
+                const auto seamovecost = [&](CellId current, CellId next, int slot) -> float
                 {
-                    float cost = (cx == nx || cy == ny) ? 7.0f : 9.5f;
+                    float cost = orthogonalslot(slot) ? 7.0f : 9.5f;
 
-                    if (!world.sea(nx, ny))
+                    if (!world.sea(next))
                         cost += 6.0f;
 
-                    if (world.coast(nx, ny))
+                    if (iscoast(next))
                         cost = std::max(2.0f, cost - 0.8f);
 
-                    const float dirx = static_cast<float>(nx - cx);
-                    const float diry = static_cast<float>(ny - cy);
-                    const float length = std::max(1.0f, std::sqrt(dirx * dirx + diry * diry));
-                    const float ux = dirx / length;
-                    const float uy = diry / length;
-                    const float currentu = static_cast<float>(world.seasonalcurrentu(seasonjuly, cx, cy));
-                    const float currentv = static_cast<float>(world.seasonalcurrentv(seasonjuly, cx, cy));
+                    float ux = 0.0f;
+                    float uy = 0.0f;
+                    stepdirection(grid, current, next, ux, uy);
+                    const float currentu = static_cast<float>(world.seasonalcurrentu(seasonjuly, current));
+                    const float currentv = static_cast<float>(world.seasonalcurrentv(seasonjuly, current));
                     const float assist = (currentu * ux + currentv * uy) / 120.0f;
                     cost *= std::clamp(1.0f - assist * 0.08f, 0.72f, 1.40f);
                     return std::max(2.0f, cost);
                 };
 
-                vector<pair<int, int>> seapath = findpathastar(world, source.x, source.y, target.x, target.y, 95000, seapassable, seamovecost);
+                vector<CellId> seapath = findpathastar(world, source.cell, target.cell, 95000, seapassable, seamovecost);
 
                 if (!seapath.empty())
                     addroute(source, target, RouteMode::sea, seapath);
@@ -439,27 +436,24 @@ void buildroutes(planet& world, const SocialProfile& profile, std::mt19937_64&)
         settlement.ruralPopulation = std::max(0, settlement.ruralPopulation - urbanboost);
     }
 
-    for (int x = 0; x <= world.width(); x++)
+    for (CellId c = 0; c < grid.cellcount(); c++)
     {
-        for (int y = 0; y <= world.height(); y++)
-        {
-            if (world.sea(x, y))
-                continue;
+        if (world.sea(c))
+            continue;
 
-            const int traffic = world.routetraffic(x, y);
-            int adjustment = static_cast<int>(std::round(profile.routeWeight * (static_cast<float>(traffic) / 6.0f)));
+        const int traffic = world.routetraffic(c);
+        int adjustment = static_cast<int>(std::round(profile.routeWeight * (static_cast<float>(traffic) / 6.0f)));
 
-            if (traffic > 60)
-                adjustment += 4;
+        if (traffic > 60)
+            adjustment += 4;
 
-            if (traffic > 52 && world.riveraccess(x, y) > 35)
-                adjustment += 3;
+        if (traffic > 52 && world.riveraccess(c) > 35)
+            adjustment += 3;
 
-            if (traffic > 52 && world.harborscore(x, y) > 35)
-                adjustment += 3;
+        if (traffic > 52 && world.harborscore(c) > 35)
+            adjustment += 3;
 
-            world.setsettlementsuitability(x, y, std::clamp(world.settlementsuitability(x, y) + adjustment, 0, 100));
-        }
+        world.setsettlementsuitability(c, std::clamp(world.settlementsuitability(c) + adjustment, 0, 100));
     }
 }
 }

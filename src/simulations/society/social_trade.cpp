@@ -94,8 +94,8 @@ void runtradeandknowledge(planet& world, const SocialTables& tables, std::mt1993
         for (const pair<int, float>& edge : adjacency[settlement.id])
             routeconnectivity += edge.second;
 
-        const int localresources = std::max(world.agriculturalcapacity(settlement.x, settlement.y), world.riveraccess(settlement.x, settlement.y));
-        const int reservebonus = std::max(world.fisheryreserve(settlement.x, settlement.y), std::max(world.metalorereserve(settlement.x, settlement.y), world.placerreserve(settlement.x, settlement.y)));
+        const int localresources = std::max(world.agriculturalcapacity(settlement.cell), world.riveraccess(settlement.cell));
+        const int reservebonus = std::max(world.fisheryreserve(settlement.cell), std::max(world.metalorereserve(settlement.cell), world.placerreserve(settlement.cell)));
         const int componentid = component[settlement.id];
         const float componenttraffic = componentid >= 0 && componentid < static_cast<int>(componentconnectivity.size()) ? componentconnectivity[componentid] : routeconnectivity;
         const float scarcitypenalty = adjacency[settlement.id].empty() ? 14.0f : 0.0f;

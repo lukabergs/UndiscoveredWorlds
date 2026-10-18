@@ -12,28 +12,22 @@ using namespace std;
 
 namespace
 {
-int wrapxlocal(int x, int width)
+using mesh::CellId;
+
+float settlementdistance(const mesh::CellGrid& grid, const Settlement& left, const Settlement& right)
 {
-    while (x < 0)
-        x += width + 1;
-
-    while (x > width)
-        x -= width + 1;
-
-    return x;
+    return socialgen::celldistance(grid, left.cell, right.cell);
 }
 
-float settlementdistance(const Settlement& left, const Settlement& right, int width)
+// The largest column index of the lat-lon export (the former world.width()).
+int lastcolumn(const mesh::CellGrid& grid)
 {
-    const int worldspan = width + 1;
-    const int directdx = std::abs(left.x - right.x);
-    const int dx = std::min(directdx, worldspan - directdx);
-    const int dy = std::abs(left.y - right.y);
-    return std::sqrt(static_cast<float>(dx * dx + dy * dy));
+    return socialgen::exportcolumns(grid) - 1;
 }
 
-void recalcpolitystats(vector<Settlement>& settlements, vector<Polity>& polities, int worldwidth)
+void recalcpolitystats(const mesh::CellGrid& grid, vector<Settlement>& settlements, vector<Polity>& polities)
 {
+    const int worldwidth = lastcolumn(grid);
     vector<int> settlementcounts(polities.size(), 0);
     vector<float> distanceaccum(polities.size(), 0.0f);
 
@@ -59,7 +53,7 @@ void recalcpolitystats(vector<Settlement>& settlements, vector<Polity>& polities
         const int capitalsettlementid = polity.capitalSettlementId;
 
         if (capitalsettlementid >= 0 && capitalsettlementid < static_cast<int>(settlements.size()))
-            distanceaccum[settlement.polityId] += settlementdistance(settlement, settlements[capitalsettlementid], worldwidth);
+            distanceaccum[settlement.polityId] += settlementdistance(grid, settlement, settlements[capitalsettlementid]);
     }
 
     for (Polity& polity : polities)
@@ -83,6 +77,7 @@ namespace socialgen
 {
 void buildpolities(planet& world, const SocialGenerationOptions&, std::mt19937_64& rng)
 {
+    const mesh::CellGrid& grid = world.grid();
     vector<Settlement>& settlements = world.settlements();
     vector<Polity>& polities = world.polities();
     vector<HistoryEvent>& history = world.historyevents();
@@ -148,7 +143,7 @@ void buildpolities(planet& world, const SocialGenerationOptions&, std::mt19937_6
     });
 
     const int desiredpolities = std::clamp(static_cast<int>(settlements.size()) / 6, 1, 24);
-    const int spacingsquared = std::max(64, (world.width() / 18) * (world.width() / 18));
+    const int spacingsquared = std::max(64, (lastcolumn(grid) / 18) * (lastcolumn(grid) / 18));
     vector<int> selectedcapitals;
 
     for (const pair<float, int>& scoredcapital : capitalscores)
@@ -162,10 +157,7 @@ void buildpolities(planet& world, const SocialGenerationOptions&, std::mt19937_6
         for (int selected : selectedcapitals)
         {
             const Settlement& existing = settlements[selected];
-            const int dx = std::min(std::abs(existing.x - candidate.x), world.width() + 1 - std::abs(existing.x - candidate.x));
-            const int dy = std::abs(existing.y - candidate.y);
-
-            if (dx * dx + dy * dy < spacingsquared && component[existing.id] == component[candidate.id])
+            if (celldistancesquared(grid, existing.cell, candidate.cell) < spacingsquared && component[existing.id] == component[candidate.id])
             {
                 blocked = true;
                 break;
@@ -210,7 +202,7 @@ void buildpolities(planet& world, const SocialGenerationOptions&, std::mt19937_6
         for (const Polity& polity : polities)
         {
             const Settlement& capital = settlements[polity.capitalSettlementId];
-            const float distance = settlementdistance(settlement, capital, world.width());
+            const float distance = settlementdistance(grid, settlement, capital);
             float score = distance;
 
             if (component[settlement.id] == component[capital.id])
@@ -229,56 +221,51 @@ void buildpolities(planet& world, const SocialGenerationOptions&, std::mt19937_6
         settlement.polityId = bestpolity;
     }
 
-    recalcpolitystats(settlements, polities, world.width());
+    recalcpolitystats(grid, settlements, polities);
 
-    for (int x = 0; x <= world.width(); x++)
+    for (CellId c = 0; c < grid.cellcount(); c++)
     {
-        for (int y = 0; y <= world.height(); y++)
-        {
-            const int owner = world.ownersettlementid(x, y);
+        const int owner = world.ownersettlementid(c);
 
-            if (owner >= 0 && owner < static_cast<int>(settlements.size()))
-                world.setownerpolityid(x, y, settlements[owner].polityId);
-            else
-                world.setownerpolityid(x, y, -1);
+        if (owner >= 0 && owner < static_cast<int>(settlements.size()))
+            world.setownerpolityid(c, settlements[owner].polityId);
+        else
+            world.setownerpolityid(c, -1);
 
-            world.settest(x, y, 0);
-        }
+        world.settest(c, 0);
     }
 
     vector<float> borderpressure(polities.size(), 0.0f);
 
-    for (int x = 0; x <= world.width(); x++)
+    for (CellId c = 0; c < grid.cellcount(); c++)
     {
-        for (int y = 1; y < world.height(); y++)
+        // The polar rows of a lat-lon grid keep no border friction.
+        if (grid.kind() == mesh::GridKind::latlon && (grid.row(c) == 0 || grid.row(c) == grid.rows() - 1))
+            continue;
+
+        if (world.sea(c))
+            continue;
+
+        const int owner = world.ownerpolityid(c);
+        int friction = 0;
+
+        for (int slot : scanslots)
         {
-            if (world.sea(x, y))
+            const int n = grid.neighbour(c, slot);
+
+            if (n < 0)
                 continue;
 
-            const int owner = world.ownerpolityid(x, y);
-            int friction = 0;
+            const int neighbourowner = world.ownerpolityid(static_cast<CellId>(n));
 
-            for (int dx = -1; dx <= 1; dx++)
+            if (owner >= 0 && neighbourowner >= 0 && owner != neighbourowner)
             {
-                for (int dy = -1; dy <= 1; dy++)
-                {
-                    if (dx == 0 && dy == 0)
-                        continue;
-
-                    const int nx = wrapxlocal(x + dx, world.width());
-                    const int ny = std::clamp(y + dy, 0, world.height());
-                    const int neighbourowner = world.ownerpolityid(nx, ny);
-
-                    if (owner >= 0 && neighbourowner >= 0 && owner != neighbourowner)
-                    {
-                        friction++;
-                        borderpressure[owner] += 0.25f;
-                    }
-                }
+                friction++;
+                borderpressure[owner] += 0.25f;
             }
-
-            world.settest(x, y, std::clamp(friction * 18, 0, 100));
         }
+
+        world.settest(c, std::clamp(friction * 18, 0, 100));
     }
 
     for (Polity& polity : polities)
@@ -307,6 +294,7 @@ void runhistoricalmode(planet& world, const SocialGenerationOptions& options, st
     if (options.mode != SocialGenerationOptions::Mode::historical)
         return;
 
+    const mesh::CellGrid& grid = world.grid();
     vector<Settlement>& settlements = world.settlements();
     vector<Polity>& polities = world.polities();
     vector<HistoryEvent>& history = world.historyevents();
@@ -333,7 +321,7 @@ void runhistoricalmode(planet& world, const SocialGenerationOptions& options, st
 
     for (int tick = 0; tick < ticks; tick++, currentyear += tickyears)
     {
-        recalcpolitystats(settlements, polities, world.width());
+        recalcpolitystats(grid, settlements, polities);
 
         const size_t initialpolitycount = polities.size();
 
@@ -355,7 +343,7 @@ void runhistoricalmode(planet& world, const SocialGenerationOptions& options, st
                 if (settlement.polityId != polities[polityindex].id || settlement.id == polities[polityindex].capitalSettlementId)
                     continue;
 
-                const float distance = settlementdistance(settlement, settlements[polities[polityindex].capitalSettlementId], world.width());
+                const float distance = settlementdistance(grid, settlement, settlements[polities[polityindex].capitalSettlementId]);
 
                 if (distance > bestdistance)
                 {
@@ -389,19 +377,16 @@ void runhistoricalmode(planet& world, const SocialGenerationOptions& options, st
         }
     }
 
-    recalcpolitystats(settlements, polities, world.width());
+    recalcpolitystats(grid, settlements, polities);
 
-    for (int x = 0; x <= world.width(); x++)
+    for (CellId c = 0; c < grid.cellcount(); c++)
     {
-        for (int y = 0; y <= world.height(); y++)
-        {
-            const int owner = world.ownersettlementid(x, y);
+        const int owner = world.ownersettlementid(c);
 
-            if (owner >= 0 && owner < static_cast<int>(settlements.size()))
-                world.setownerpolityid(x, y, settlements[owner].polityId);
-            else
-                world.setownerpolityid(x, y, -1);
-        }
+        if (owner >= 0 && owner < static_cast<int>(settlements.size()))
+            world.setownerpolityid(c, settlements[owner].polityId);
+        else
+            world.setownerpolityid(c, -1);
     }
 }
 }
