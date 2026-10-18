@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_plumes.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -76,7 +77,8 @@ std::vector<Plume> place(double width_km, double height_km, long seed, const Par
 }
 
 Source source(uint32_t w, uint32_t h, double cell_m, long seed, double t0, double t1, const Parameters& p,
-              const grid::TectonicGrid* /*grid*/) {
+              const grid::TectonicGrid* grid) {
+    grid::requireplanar(grid, "plumes");
     validate(p);
     if (w == 0 || h == 0 || !(cell_m > 0) || !std::isfinite(t0) || !(t1 > t0))
         throw std::runtime_error("Invalid mantle plume source grid or interval");

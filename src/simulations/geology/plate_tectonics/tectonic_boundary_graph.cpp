@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_boundary_graph.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 
 #include <algorithm>
 #include <array>
@@ -320,6 +321,7 @@ uint32_t choose_persistent_id(
 } // namespace
 
 Outputs build(const Inputs& inputs) {
+    grid::requireplanar(inputs.grid, "boundary_graph");
     Outputs outputs;
     outputs.next_boundary_id = inputs.next_boundary_id;
 

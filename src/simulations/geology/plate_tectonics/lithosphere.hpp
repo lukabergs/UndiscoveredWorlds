@@ -56,6 +56,8 @@ struct PlateState {
     // Owned cells with crust whose owner material is continental, over owned cells with crust
     // (the torus engine's continentalAreaRatio).
     float continental_share = 0;
+    // The share at the plate's creation (crust above 0), kept for a plate without crust cells.
+    float creation_continental_share = 0;
     float direction_x = 1, direction_y = 0;  // planar unit direction
     float speed = 0;                         // planar speed, cells per update
 

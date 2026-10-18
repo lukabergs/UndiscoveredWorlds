@@ -14,6 +14,8 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace tectonics::grid {
@@ -128,6 +130,13 @@ private:
     std::vector<double> area_;                  // cube only
     std::vector<Edge> edges_;
 };
+
+// The guard of a module not yet ported to the cube (E2 removes each module's call):
+// a null table (unit tests) or the planar scaffold passes, the cube throws std::logic_error.
+inline void requireplanar(const TectonicGrid* grid, const char* module) {
+    if (grid && grid->kind() != TectonicGrid::Kind::planar)
+        throw std::logic_error(std::string(module) + ": not on the cube yet");
+}
 
 } // namespace tectonics::grid
 #endif

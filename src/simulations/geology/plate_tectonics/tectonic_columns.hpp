@@ -151,7 +151,7 @@ public:
     // forcing), the one-sided difference toward it; when both are, the smaller of the two
     // differences in magnitude (their mean when equal); when neither is, 0. So a velocity
     // jump to another plate (subduction, ridge, transform) is never strain; a jump inside
-    // a plate (the rotation seam of plate::surfaceVelocityAt) is skipped only where the
+    // a plate (a rotation seam, where the offset from the plate centre wraps) is skipped only where the
     // other difference on that axis is the smaller one. Distributed deformation and
     // rift opening inside a plate count. Exact for a velocity linear on both sides of a
     // cell; a rigid rotation gives E = 0 and W = its angle. The tensor is then carried

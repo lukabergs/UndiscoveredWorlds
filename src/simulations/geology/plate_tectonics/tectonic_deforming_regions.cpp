@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_deforming_regions.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -147,6 +148,7 @@ void interpolate_velocity(const BoundarySegment& segment, const PlateKinematics*
 } // namespace
 
 Outputs build(const Inputs& inputs) {
+    grid::requireplanar(inputs.grid, "deforming_regions");
     Outputs outputs;
     const size_t cell_count =
         static_cast<size_t>(inputs.width) * static_cast<size_t>(inputs.height);

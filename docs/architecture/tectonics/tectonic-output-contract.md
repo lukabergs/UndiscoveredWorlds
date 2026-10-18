@@ -71,8 +71,7 @@ the uplift rate's mean continues the stayed rock's, the strain of new ocean floo
   toward that neighbour; when both are, the smaller of the two differences in
   magnitude (their mean when equal); when neither is, 0. A velocity jump to another
   plate (subduction, ridges, transforms) is therefore never strain. A jump inside a
-  plate (the rotation seam of `plate::surfaceVelocityAt`, where the offset from the
-  mass centre wraps) is skipped only where the other difference on that axis is the
+  plate (a rotation seam, where the offset from the plate's centroid wraps) is skipped only where the other difference on that axis is the
   smaller one, which holds where the plate's velocity is smooth on that side.
   Distributed deformation and rift opening inside a plate count; a rigid rotation
   turns the tensor and adds none. The ocean floor created in an opening starts at

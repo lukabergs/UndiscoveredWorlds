@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 
 #include "simulations/geology/plate_tectonics/topography_codec.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_kinematics.hpp"
@@ -192,6 +193,7 @@ void record_boundary_motion(const Inputs& inputs, int x, int y, int nx, int ny,
 void compute_maps(const Inputs& inputs, uint8_t* convergence_score,
                   uint8_t* divergence_score, uint8_t* shear_score,
                   uint8_t* geologic_regime) {
+    grid::requireplanar(inputs.grid, "provenance");
     if (inputs.width == 0 || inputs.height == 0 || inputs.heightmap == nullptr ||
         inputs.plate_id == nullptr || convergence_score == nullptr ||
         divergence_score == nullptr || shear_score == nullptr ||

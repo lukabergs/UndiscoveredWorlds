@@ -74,6 +74,8 @@ struct PlateKinematics {
     float linear_velocity_x = 0.0f;
     float linear_velocity_y = 0.0f;
     float angular_velocity = 0.0f;
+    // The plate's area centroid in native cell coordinates (column, row; circular means on the
+    // torus), not a mass centre since W2-E step E1.
     float mass_center_x = 0.0f;
     float mass_center_y = 0.0f;
 };

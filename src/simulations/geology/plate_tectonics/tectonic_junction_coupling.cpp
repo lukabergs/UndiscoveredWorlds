@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_junction_coupling.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -121,6 +122,7 @@ void clamp_tension_vectors(Outputs& outputs) {
 } // namespace
 
 Outputs build(const Inputs& inputs) {
+    grid::requireplanar(inputs.grid, "tectonic_junction_coupling");
     Outputs outputs;
     const size_t cell_count =
         static_cast<size_t>(inputs.width) * static_cast<size_t>(inputs.height);

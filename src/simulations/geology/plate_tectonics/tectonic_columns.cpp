@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
 #include "simulations/landscape/depressions.hpp"
 #include "simulations/landscape/flow_graph.hpp"
@@ -215,6 +216,7 @@ void Model::initialize(uint32_t width, uint32_t height, double cell_m, std::vect
         uint32_t subdivision, long seed, const ocean_relief::Parameters& relief, bool preserve_initial,
         double root_kg_m3, double root_max_thickness_m, double root_delamination_width_m,
         const grid::TectonicGrid* grid) {
+    grid::requireplanar(grid, "columns");
     grid_ = grid;
     if (width < 2 || height < 2 || cells.size() != static_cast<size_t>(width) * height
         || !std::isfinite(cell_m) || cell_m <= 0 || (subdivision != 1 && subdivision != 2 && subdivision != 4))

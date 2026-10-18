@@ -385,6 +385,7 @@ lithosphere::lithosphere(const tectonics::scenario::Scenario& params) noexcept(f
     if (params.width < 5 || params.height < 5) {
         throw runtime_error("Width and height should be >=5");
     }
+    tectonics::grid::requireplanar(grid_.get(), "lithosphere");
     if (!std::isfinite(params.delta_time_myr) || params.delta_time_myr <= 0.0) {
         throw runtime_error("delta_time_myr must be finite and > 0");
     }
@@ -548,9 +549,19 @@ void lithosphere::createPlates() {
         // crust and material of its cells.
         plates.assign(num_plates, {});
         for (uint32_t i = 0; i < num_plates; ++i) plates[i] = tectonics::PlateState::fromSeed(_randsource.next());
+        std::vector<uint32_t> occupied(num_plates, 0U), continental(num_plates, 0U);
         for (uint32_t k = 0; k < map_area; ++k) {
             owner_crust_map[k] = hmap[k];
             owner_material_map[k] = material_map[k];
+            if (hmap[k] > 0.0f) {
+                ++occupied[imap[k]];
+                continental[imap[k]] += is_continental_material(material_map[k]) ? 1U : 0U;
+            }
+        }
+        for (uint32_t i = 0; i < num_plates; ++i) {
+            plates[i].creation_continental_share = occupied[i] > 0U
+                ? static_cast<float>(continental[i]) / static_cast<float>(occupied[i]) : 0.0f;
+            plates[i].continental_share = plates[i].creation_continental_share;
         }
         plate_indices_found.assign(num_plates, 0U);
 
@@ -1115,9 +1126,9 @@ void lithosphere::updateFieldStackMaps() {
         }
     }
     for (uint32_t plate_index = 0; plate_index < num_plates; ++plate_index)
-        if (occupied[plate_index] > 0U)
-            plates[plate_index].continental_share = static_cast<float>(continental_cells[plate_index]) /
-                                                    static_cast<float>(occupied[plate_index]);
+        plates[plate_index].continental_share = occupied[plate_index] > 0U
+            ? static_cast<float>(continental_cells[plate_index]) / static_cast<float>(occupied[plate_index])
+            : plates[plate_index].creation_continental_share;
 
     for (uint32_t index = 0; index < map_area; ++index) {
         crust_thickness_map[index] =
@@ -2292,24 +2303,30 @@ void lithosphere::updateColumns() {
     }
     {
     PhaseTimer ownership_timer(phase_timings, Phase::ownership_publish);
-    uint32_t newborn = UINT32_MAX;
+    std::vector<uint8_t> newborn(num_plates, 0U);
     for (const auto& change : changes) if (change.kind == tectonics::topology::EventKind::Split) {
         if (change.b != plates.size()) throw runtime_error("A split plate's index is not the next plate");
         // The newborn inherits motion until the next force solve, with no kick.
         tectonics::PlateState daughter = tectonics::PlateState::fromSeed(static_cast<uint32_t>(scenario.seed));
         daughter.setVelocity(plates[change.a].velocityX(), plates[change.a].velocityY());
         plates.push_back(daughter);
-        newborn = change.b;
+        newborn.push_back(1U);
         ++num_plates;
     }
+    // A newborn's creation share counts its cells with crust (above 0), as at creation.
+    std::vector<uint32_t> born_occupied(num_plates, 0U), born_continental(num_plates, 0U);
     plate_indices_found.assign(num_plates, 0U);
     for (uint32_t i = 0; i < cellCount(); ++i) {
         // A new owner records no crust at the cell, except a newborn plate, which starts with
         // the crust and material of its cells. Material columns are untouched.
         if (imap[i] != owners[i]) {
-            if (owners[i] == newborn) {
+            if (newborn[owners[i]]) {
                 owner_crust_map[i] = hmap[i];
                 owner_material_map[i] = material_map[i];
+                if (hmap[i] > 0.0f) {
+                    ++born_occupied[owners[i]];
+                    born_continental[owners[i]] += is_continental_material(material_map[i]) ? 1U : 0U;
+                }
             } else {
                 owner_crust_map[i] = 0.0f;
             }
@@ -2317,6 +2334,10 @@ void lithosphere::updateColumns() {
         imap[i] = owners[i];
         ++plate_indices_found[imap[i]];
     }
+    for (uint32_t p = 0; p < num_plates; ++p)
+        if (newborn[p])
+            plates[p].creation_continental_share = born_occupied[p] > 0U
+                ? static_cast<float>(born_continental[p]) / static_cast<float>(born_occupied[p]) : 0.0f;
     ++iter_count;
     publishColumns();
     removeEmptyPlates();

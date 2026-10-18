@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
 
 #include <algorithm>
@@ -52,7 +53,8 @@ Vector mantle_flow(double x, double y, double time_myr, long seed, double speed_
 
 double inland_pressure(uint32_t w,uint32_t h,double cell_m,const std::vector<uint32_t>& owners,
         const std::vector<double>& pressure,uint32_t cell,uint32_t axis,int direction,double range_m,
-        const grid::TectonicGrid* /*grid*/) {
+        const grid::TectonicGrid* grid) {
+    grid::requireplanar(grid, "dynamics::inland_pressure");
     if (w<2 || h<2 || owners.size()!=static_cast<size_t>(w)*h || pressure.size()!=owners.size() ||
         cell>=owners.size() || axis>1 || (direction!=1 && direction!=-1) ||
         !std::isfinite(cell_m) || cell_m<=0 || !std::isfinite(range_m) || range_m<0)

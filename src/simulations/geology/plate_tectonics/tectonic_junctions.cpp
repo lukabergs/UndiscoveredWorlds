@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_junctions.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_kinematics.hpp"
 
 #include <algorithm>
@@ -612,6 +613,7 @@ void populate_stability_diagnostics(const Inputs& inputs, TectonicJunction& junc
 } // namespace
 
 Outputs build(const Inputs& inputs) {
+    grid::requireplanar(inputs.grid, "tectonic_junctions");
     Outputs outputs;
     if (inputs.width == 0U || inputs.height == 0U || inputs.plate_id == nullptr ||
         inputs.boundary_segment_id == nullptr || inputs.boundary_segments == nullptr ||

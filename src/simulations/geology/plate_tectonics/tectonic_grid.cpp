@@ -227,7 +227,9 @@ float TectonicGrid::quantile(const std::vector<float>& values, float q) const {
     std::vector<CellId> order(values.size());
     std::iota(order.begin(), order.end(), 0U);
     std::stable_sort(order.begin(), order.end(), [&](CellId l, CellId r) { return values[l] < values[r]; });
-    const double target = static_cast<double>(clamped) * (totalarea_m2_ - area_[order.back()]);
+    double total = 0;
+    for (const CellId c : order) total += area_[c];
+    const double target = static_cast<double>(clamped) * (total - area_[order.back()]);
     double below = 0;
     CellId chosen = order.front();
     for (const CellId c : order) {

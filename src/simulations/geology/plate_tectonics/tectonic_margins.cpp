@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_margins.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_variation.hpp"
 #include <algorithm>
@@ -59,7 +60,8 @@ void validate(const Parameters& p) {
 Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
         const std::vector<uint32_t>& owners,const std::vector<columns::Cell>& cells,
         const std::vector<transport::Displacement>& rigid,const Parameters& p,Polarity* polarity,long seed,double time_myr,
-        const grid::TectonicGrid* /*grid*/) {
+        const grid::TectonicGrid* grid) {
+    grid::requireplanar(grid, "margins");
     validate(p);
     const size_t count=static_cast<size_t>(w)*h;
     if (w<2 || h<2 || owners.size()!=count || cells.size()!=count || rigid.size()!=count ||
