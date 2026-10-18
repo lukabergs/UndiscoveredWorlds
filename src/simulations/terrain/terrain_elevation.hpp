@@ -53,6 +53,7 @@ std::vector<mesh::CellId> cellswithinkm(const planet& world, mesh::CellId c, dou
 double distancekm(const planet& world, mesh::CellId a, mesh::CellId b);
 // The cell reached from c by moving east_km and north_km in its tangent frame.
 mesh::CellId movedcell(const planet& world, mesh::CellId c, double east_km, double north_km);
-// A cell drawn by area from the shared legacy stream (two 30-bit draws of random()).
+// A cell drawn by area from the shared legacy stream: two uniform numbers, each of 30 bits
+// from two 15-bit draws of random(0, 32767).
 mesh::CellId randomcellbyarea(const planet& world);
 }

@@ -444,7 +444,12 @@ void metadataactivetrenches(planet& world, GenerationScratch& scratch)
         if (cells.empty())
             continue;
 
-        const int branchcount = clamp(static_cast<int>(cells.size()) / 48, 1, 3);
+        // One branch per 48 legacy pixels of segment: its cells' widths (the square roots of
+        // their areas) summed, in legacy pixels.
+        double lengthpixels = 0.0;
+        for (const mesh::CellId c : cells)
+            lengthpixels += sqrt(world.grid().area_m2(c)) / 1000.0 / pixel_km;
+        const int branchcount = clamp(static_cast<int>(lengthpixels / 48.0), 1, 3);
 
         for (int branch = 0; branch < branchcount; branch++)
         {

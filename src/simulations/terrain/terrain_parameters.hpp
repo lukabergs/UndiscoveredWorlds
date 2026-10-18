@@ -67,6 +67,8 @@ inline float terrainFractalMean = 0.358f;
 inline float terrainFractalDeviation = 0.173f;
 inline float smoothingWavelengthKm = 5000.0f;
 inline float smoothingPersistence = 0.5f;
+inline float smoothingMean = 0.5f;
+inline float smoothingDeviation = 0.2f;
 inline float canyonBaseWavelengthKm = 1250.0f;
 inline float canyonBasePersistence = 0.6f;
 inline float canyonBaseMean = 0.423f;
@@ -148,6 +150,8 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "terrain.sphere_noise.terrain_fractal_deviation", &sphere_noise::terrainFractalDeviation },
         { "terrain.sphere_noise.smoothing_wavelength_km", &sphere_noise::smoothingWavelengthKm },
         { "terrain.sphere_noise.smoothing_persistence", &sphere_noise::smoothingPersistence },
+        { "terrain.sphere_noise.smoothing_mean", &sphere_noise::smoothingMean },
+        { "terrain.sphere_noise.smoothing_deviation", &sphere_noise::smoothingDeviation },
         { "terrain.sphere_noise.canyon_base_wavelength_km", &sphere_noise::canyonBaseWavelengthKm },
         { "terrain.sphere_noise.canyon_base_persistence", &sphere_noise::canyonBasePersistence },
         { "terrain.sphere_noise.canyon_base_mean", &sphere_noise::canyonBaseMean },

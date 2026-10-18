@@ -13,8 +13,8 @@ class planet;
 namespace terrain
 {
 // A small mountainous island from cell c: one to three steps to a random neighbour, each step
-// raising both cells, marking their 3 x 3 neighbourhoods as mountain islands and joining them
-// by a ridge.
+// raising both cells, marking the cells within 1.5 legacy pixels of each (the legacy 3 x 3 box)
+// as mountain islands and joining them by a ridge.
 void makemountainisland(planet& world, mesh::CellId c, float peakheight);
 
 // An isolated volcano at c with a line of extinct neighbours: each next one moves by the two

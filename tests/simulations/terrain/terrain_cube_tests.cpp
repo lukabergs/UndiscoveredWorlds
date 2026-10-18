@@ -148,7 +148,7 @@ TEST(TerrainCube, IsolatedVolcanoOnTheCube)
         islands += world->mountainisland(c) ? 1 : 0;
     }
     EXPECT_GT(volcanoes, 0);
-    EXPECT_GE(islands, 12);  // the 3 x 3 boxes of two neighbouring cells at a face centre
+    EXPECT_GE(islands, 2);  // at least the two neighbouring cells of the first step at a face centre
     expectfinite(*world, "createisolatedvolcano");
 }
 

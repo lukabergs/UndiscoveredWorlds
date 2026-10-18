@@ -114,7 +114,7 @@ terrain::SphereFractal terrain::terrainfractal()
 
 terrain::SphereFractal terrain::smoothingfractal()
 {
-    return { sn::smoothingWavelengthKm, sn::smoothingPersistence, 0.5, 0.2 };
+    return { sn::smoothingWavelengthKm, sn::smoothingPersistence, sn::smoothingMean, sn::smoothingDeviation };
 }
 
 terrain::SphereFractal terrain::canyonbasefractal()

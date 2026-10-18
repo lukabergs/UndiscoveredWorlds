@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iostream>
 #include <queue>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -583,6 +584,9 @@ void legacyslot(const mesh::CellGrid& grid, mesh::CellId c, int& x, int& y)
         y = grid.row(c);
         return;
     }
+    if (c / ARRAYWIDTH >= ARRAYHEIGHT)
+        throw std::out_of_range("legacyslot: cell " + std::to_string(c) + " of a " + std::to_string(grid.cellcount()) +
+                                "-cell grid does not fit a 2048 x 1024 legacy array (a cube world above about 2364 export columns)");
     x = static_cast<int>(c % ARRAYWIDTH);
     y = static_cast<int>(c / ARRAYWIDTH);
 }

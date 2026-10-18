@@ -32,16 +32,13 @@ int stepslot(int dx, int dy)
     return dx < 0 ? 7 : 3;
 }
 
-// Marks a cell and its eight neighbours.
+// The legacy 3 x 3 box around a cell as a disc of 1.5 legacy pixels in km (the cell itself at
+// least): the box's reach at the 2048-column world, whatever the grid.
 template <typename Fn>
 void forbox(const planet& world, mesh::CellId c, Fn&& fn)
 {
-    for (const int slot : boxslots)
-    {
-        const std::int32_t n = slot == 0 ? static_cast<std::int32_t>(c) : world.grid().neighbour(c, slot);
-        if (n >= 0)
-            fn(static_cast<mesh::CellId>(n));
-    }
+    for (const mesh::CellId n : terrain::cellswithinkm(world, c, 1.5 * terrain::legacycellkm(world)))
+        fn(n);
 }
 
 // Whether a continental-shelf cell lies within the shelf check of five legacy pixels.
@@ -197,8 +194,15 @@ void terrain::createisolatedvolcano(planet& world, mesh::CellId c, const worldgr
         xshift = xshift * shiftdiv + (float)randomsign(random(0, 2));
         yshift = yshift * shiftdiv + (float)randomsign(random(0, 2));
 
-        // Whole legacy pixels east and south, as the legacy (x, y) step.
-        c = terrain::movedcell(world, c, static_cast<double>((int)xshift) * pixel_km, -static_cast<double>((int)yshift) * pixel_km);
+        // Whole legacy pixels east and south, as the legacy (x, y) step. A step that stays in the
+        // cell ends the chain, so an extinct cone never overwrites the active one on its own cell.
+        const mesh::CellId moved = terrain::movedcell(world, c, static_cast<double>((int)xshift) * pixel_km,
+                                                      -static_cast<double>((int)yshift) * pixel_km);
+
+        if (moved == c)
+            return;
+
+        c = moved;
 
         if (world.sea(c) == 1 && nearshelf(world, c, shelves)) // Don't do any submarine volcanoes near continental shelves.
             return;
