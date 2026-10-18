@@ -55,9 +55,9 @@ std::size_t subgridstatistics(const SphereMetric& metric, const SubgridParameter
         float local = 0.0f;
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t other = metric.neighbour(cell, direction);
-            if (other != cell)
-                local = std::max(local, std::fabs(elevation_m[other] - elevation_m[cell]));
+            const std::int32_t other = metric.neighbourid(cell, direction);
+            if (other >= 0)
+                local = std::max(local, std::fabs(elevation_m[static_cast<std::size_t>(other)] - elevation_m[cell]));
         }
         const double relief = hillsloperelief_m(parameters, erosionrate_m_myr[cell], 0.5 * cellsize_km);
         relief_m[cell] = static_cast<float>(std::min(relief, static_cast<double>(local)));

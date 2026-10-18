@@ -17,37 +17,11 @@ int directionto(const SphereMetric& metric, std::size_t cell, std::size_t target
 {
     for (int direction = 1; direction <= directioncount; direction++)
     {
-        const std::size_t next = metric.neighbour(cell, direction);
-        if (next != cell && next == target)
+        const std::int32_t next = metric.neighbourid(cell, direction);
+        if (next >= 0 && static_cast<std::size_t>(next) == target)
             return direction;
     }
     return 0;
-}
-
-// The offset from a cell centre to its neighbour's in a direction, in metres east
-// and north on the tangent plane: the row's dx for east and west, dy for north and
-// south, and for a diagonal (mean dx of the two rows, dy), whose length is the
-// metric's diagonal distance.
-struct Offset
-{
-    double east = 0.0;
-    double north = 0.0;
-};
-
-Offset neighbouroffset(const SphereMetric& metric, std::size_t cell, int direction)
-{
-    const int y = metric.row(cell);
-    const int ox = directionoffsetx(direction), oy = directionoffsety(direction);
-    const double dx = metric.rowdx_m[static_cast<std::size_t>(y)];
-    if (oy == 0)
-        return { ox * dx, 0.0 };
-    if (ox == 0)
-        return { 0.0, -oy * metric.dy_m };
-    // The neighbour's row: y + oy on a sphere (a caller never asks beyond a pole),
-    // wrapped on a torus.
-    const int other = metric.row(metric.neighbour(cell, direction));
-    const double meandx = 0.5 * (dx + metric.rowdx_m[static_cast<std::size_t>(other)]);
-    return { ox * meandx, -oy * metric.dy_m };
 }
 
 // A uniform number in [0, 1) from a hash.
@@ -77,11 +51,12 @@ int randomiseddirection(const SphereMetric& metric, std::size_t cell, const std:
     for (int direction = 1; direction <= directioncount; direction++)
     {
         const int other = direction % directioncount + 1;
-        const std::size_t one = metric.neighbour(cell, direction), two = metric.neighbour(cell, other);
-        if (one == cell || two == cell)
+        const std::int32_t one = metric.neighbourid(cell, direction), two = metric.neighbourid(cell, other);
+        if (one < 0 || two < 0)
             continue;
-        const double drop1 = centre - height(one), drop2 = centre - height(two);
-        const Offset p1 = neighbouroffset(metric, cell, direction), p2 = neighbouroffset(metric, cell, other);
+        const double drop1 = centre - height(static_cast<std::size_t>(one));
+        const double drop2 = centre - height(static_cast<std::size_t>(two));
+        const TangentOffset p1 = metric.tangentoffset(cell, direction), p2 = metric.tangentoffset(cell, other);
         // The descent vector v of the plane: v . p1 = drop1, v . p2 = drop2.
         const double det = p1.east * p2.north - p1.north * p2.east;
         const double ve = (drop1 * p2.north - drop2 * p1.north) / det;
@@ -116,7 +91,7 @@ int randomiseddirection(const SphereMetric& metric, std::size_t cell, const std:
 
     const bool drawsecond = unitdraw(deterministiccombine(seed, static_cast<std::int64_t>(cell))) < fraction;
     const auto accepted = [&](int direction) {
-        const std::size_t next = metric.neighbour(cell, direction);
+        const std::size_t next = static_cast<std::size_t>(metric.neighbourid(cell, direction));  // both exist
         return sea[next] != 0 || filled[next] < filled[cell];
     };
     const int drawn = drawsecond ? second : first, other = drawsecond ? first : second;
@@ -132,7 +107,7 @@ int randomiseddirection(const SphereMetric& metric, std::size_t cell, const std:
 void setreceiver(const SphereMetric& metric, const std::vector<uint8_t>& sea, std::size_t cell, int direction,
                  FlowGraph& graph)
 {
-    const std::size_t target = metric.neighbour(cell, direction);
+    const std::size_t target = static_cast<std::size_t>(metric.neighbourid(cell, direction));  // an existing neighbour
     graph.direction[cell] = static_cast<uint8_t>(direction);
     graph.distance_m[cell] = static_cast<float>(metric.distance_m(cell, direction));
     graph.receiver[cell] = static_cast<int32_t>(cell);
@@ -248,9 +223,10 @@ void resolveflatcells(const SphereMetric& metric, const std::vector<float>& elev
             stack.pop_back();
             for (int direction = 1; direction <= directioncount; direction++)
             {
-                const std::size_t neighbour = metric.neighbour(current, direction);
-                if (neighbour == current)
+                const std::int32_t next = metric.neighbourid(current, direction);
+                if (next < 0)
                     continue;
+                const std::size_t neighbour = static_cast<std::size_t>(next);
                 drains = drains || lowedge(current, neighbour);
                 if (kind[neighbour] != 1 || flatid[neighbour] != -1 || filled[neighbour] != filled[current])
                     continue;
@@ -284,8 +260,11 @@ void resolveflatcells(const SphereMetric& metric, const std::vector<float>& elev
                 const std::size_t cell = static_cast<std::size_t>(member);
                 for (int direction = 1; direction <= directioncount; direction++)
                 {
-                    const std::size_t neighbour = metric.neighbour(cell, direction);
-                    if (neighbour == cell || flatid[neighbour] != flatid[cell] || distance[neighbour] != 0)
+                    const std::int32_t next = metric.neighbourid(cell, direction);
+                    if (next < 0)
+                        continue;
+                    const std::size_t neighbour = static_cast<std::size_t>(next);
+                    if (flatid[neighbour] != flatid[cell] || distance[neighbour] != 0)
                         continue;
                     distance[neighbour] = loop;
                     nextlayer.push_back(static_cast<int32_t>(neighbour));
@@ -303,8 +282,9 @@ void resolveflatcells(const SphereMetric& metric, const std::vector<float>& elev
             continue;
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t neighbour = metric.neighbour(cell, direction);
-            if (neighbour != cell && sea[neighbour] == 0 && filled[neighbour] > filled[cell])
+            const std::int32_t neighbour = metric.neighbourid(cell, direction);
+            if (neighbour >= 0 && sea[static_cast<std::size_t>(neighbour)] == 0
+                && filled[static_cast<std::size_t>(neighbour)] > filled[cell])
             {
                 away[cell] = 1;
                 layer.push_back(static_cast<int32_t>(cell));
@@ -327,8 +307,8 @@ void resolveflatcells(const SphereMetric& metric, const std::vector<float>& elev
             continue;
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t neighbour = metric.neighbour(cell, direction);
-            if (neighbour != cell && exit(cell, neighbour))
+            const std::int32_t neighbour = metric.neighbourid(cell, direction);
+            if (neighbour >= 0 && exit(cell, static_cast<std::size_t>(neighbour)))
             {
                 towards[cell] = 2;
                 layer.push_back(static_cast<int32_t>(cell));
@@ -353,9 +333,10 @@ void resolveflatcells(const SphereMetric& metric, const std::vector<float>& elev
         double steepest = 0.0;
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t neighbour = metric.neighbour(cell, direction);
-            if (neighbour == cell)
+            const std::int32_t next = metric.neighbourid(cell, direction);
+            if (next < 0)
                 continue;
+            const std::size_t neighbour = static_cast<std::size_t>(next);
             int32_t value;
             if (exit(cell, neighbour))
                 value = 2;
@@ -411,15 +392,18 @@ FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& e
             float lowest = elevation[cell];
             for (int direction = 1; direction <= directioncount; direction++)
             {
-                const std::size_t next = metric.neighbour(cell, direction);
-                if (next == cell || sea[next] == 0 || !(elevation[next] < lowest))
+                const std::int32_t neighbour = metric.neighbourid(cell, direction);
+                if (neighbour < 0)
+                    continue;
+                const std::size_t next = static_cast<std::size_t>(neighbour);
+                if (sea[next] == 0 || !(elevation[next] < lowest))
                     continue;
                 lowest = elevation[next];
                 best = direction;
             }
             if (best != 0)
             {
-                graph.receiver[cell] = static_cast<int32_t>(metric.neighbour(cell, best));
+                graph.receiver[cell] = metric.neighbourid(cell, best);
                 graph.distance_m[cell] = static_cast<float>(metric.distance_m(cell, best));
             }
             continue;
@@ -433,9 +417,10 @@ FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& e
         double steepest = 0.0;
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t next = metric.neighbour(cell, direction);
-            if (next == cell)
+            const std::int32_t neighbour = metric.neighbourid(cell, direction);
+            if (neighbour < 0)
                 continue;
+            const std::size_t next = static_cast<std::size_t>(neighbour);
             const double height = sea[next] != 0 ? static_cast<double>(sealevel) : static_cast<double>(filled[next]);
             const double gradient = (static_cast<double>(filled[cell]) - height) / metric.distance_m(cell, direction);
             if (gradient > steepest)
@@ -446,11 +431,12 @@ FlowGraph buildflowgraph(const SphereMetric& metric, const std::vector<float>& e
         }
 
         std::size_t target = cell;
-        if (best != 0 && (sea[metric.neighbour(cell, best)] != 0 || depressions.depressionid[cell] == 0))
+        if (best != 0
+            && (sea[static_cast<std::size_t>(metric.neighbourid(cell, best))] != 0 || depressions.depressionid[cell] == 0))
         {
             if (options.randomised)
                 best = randomiseddirection(metric, cell, filled, sea, sealevel, options.seed, best);
-            target = metric.neighbour(cell, best);
+            target = static_cast<std::size_t>(metric.neighbourid(cell, best));
             if (options.resolveflats)
                 routed[cell] = routedsteepest;
         }

@@ -46,7 +46,7 @@ struct Distributaries
     double strandedjuly = 0.0;
 };
 
-// Every vector has metric.size() elements (row-major, north row first): `sea` and
+// Every vector has metric.size() elements in the grid's cell order: `sea` and
 // `prograded` 0/1, `surface` in m on the datum of `sealevel`, `flowdirection` the
 // routing's codes (0 none), the flows in legacy units. Throws std::invalid_argument
 // on a size mismatch.

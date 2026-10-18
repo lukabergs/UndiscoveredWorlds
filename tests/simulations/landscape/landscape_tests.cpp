@@ -155,6 +155,44 @@ TEST_F(Landscape, SphereMetricOppositeDirectionRoundTrips)
     }
 }
 
+// The whole-sphere metric is a view of the latitude-longitude CellGrid: the same
+// tables from either constructor, -1 beyond a pole, the reverse slot the opposite
+// code; a metric of other rows (a window) has no grid.
+TEST_F(Landscape, SphereMetricViewsALatLonGrid)
+{
+    const landscape::SphereMetric metric(width, height, radius);
+    ASSERT_TRUE(metric.grid);
+    EXPECT_EQ(metric.grid->kind(), mesh::GridKind::latlon);
+    const landscape::SphereMetric view(mesh::makelatlongrid(width, radius));
+    ASSERT_EQ(view.size(), metric.size());
+    EXPECT_EQ(view.width, width);
+    EXPECT_EQ(view.height, height);
+    EXPECT_EQ(view.dy_m, metric.dy_m);
+    EXPECT_EQ(view.rowdx_m, metric.rowdx_m);
+    EXPECT_EQ(view.totalarea_m2(), metric.totalarea_m2());
+    const landscape::SphereMetric window(width, height - 3, radius);
+    EXPECT_FALSE(window.grid);
+    for (std::size_t cell = 0; cell < metric.size(); cell++)
+    {
+        EXPECT_EQ(view.area_m2(cell), metric.area_m2(cell));
+        for (int direction = 1; direction <= landscape::directioncount; direction++)
+        {
+            const std::size_t next = metric.neighbour(cell, direction);
+            const std::int32_t id = metric.neighbourid(cell, direction);
+            EXPECT_EQ(id, next == cell ? -1 : static_cast<std::int32_t>(next));
+            EXPECT_EQ(metric.reverse(cell, direction), id < 0 ? 0 : landscape::oppositedirection(direction));
+            EXPECT_EQ(view.distance_m(cell, direction), metric.distance_m(cell, direction));
+            EXPECT_EQ(view.facelength_m(cell, direction), metric.facelength_m(cell, direction));
+            if (cell < window.size())
+            {
+                const std::int32_t inwindow = window.neighbourid(cell, direction);
+                EXPECT_EQ(inwindow < 0, window.neighbour(cell, direction) == cell);
+                EXPECT_EQ(window.reverse(cell, direction), inwindow < 0 ? 0 : landscape::oppositedirection(direction));
+            }
+        }
+    }
+}
+
 TEST_F(Landscape, SphereMetricDiagonalDistance)
 {
     const landscape::SphereMetric metric(width, height, radius);

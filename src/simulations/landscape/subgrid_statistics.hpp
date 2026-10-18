@@ -53,7 +53,7 @@ double characteristiclength_km(const SubgridParameters& parameters, double relat
 // E l^2 / (2 D); 0 with D not positive.
 double hillsloperelief_m(const SubgridParameters& parameters, double erosionrate_m_myr, double halflength_km);
 
-// Both statistics on every cell of the metric's grid (row-major, as metric.index). `sea` 1
+// Both statistics on every cell of the metric's grid (in its cell order). `sea` 1
 // marks the sea, where both are 0. `erodibility` is relative (geosphere.erodibility),
 // `runoff_mm_yr` hydrosphere.runoff, `erosionrate_m_myr` geosphere.erosion_rate (negative
 // counts as 0), `elevation_m` the base elevation. A spacing beyond the cell size is stored as

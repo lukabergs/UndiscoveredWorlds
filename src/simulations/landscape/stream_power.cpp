@@ -60,8 +60,22 @@ constexpr double metresperkilometre = 1000.0;
 // climate_erosion.cpp (plan section 3): a face moves at most this fraction of its
 // drop times the smaller of the two cell areas. Numerical, not a tuned value.
 constexpr double hillslopefacelimit = 0.05;
+constexpr int northdirection = 1;
 constexpr int eastdirection = 3;
 constexpr int southdirection = 5;
+constexpr int westdirection = 7;
+
+// The hillslope step visits every face shared by two cells once, from the side
+// whose cardinal slot ranks first: east and south before north and west, then the
+// lower cell id (a cube's frames rotate across face edges, so a face may be east or
+// north on both sides). On latitude-longitude every face is a cell's east or south
+// face, as before.
+bool ownsface(int direction, int reversedirection, std::size_t cell, std::size_t neighbour)
+{
+    const auto rank = [](int slot) { return slot == eastdirection || slot == southdirection ? 0 : 1; };
+    const int own = rank(direction), other = rank(reversedirection);
+    return own != other ? own < other : cell < neighbour;
+}
 
 void checksize(std::size_t actual, std::size_t expected, const char* name)
 {
@@ -333,8 +347,8 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
         landdepositedvolume += volume;
     }
 
-    // Hillslope diffusion between land cells across the east and south faces of
-    // every land cell. All transfers use the elevations after the fluvial step and
+    // Hillslope diffusion between land cells across every cardinal face, each once
+    // (ownsface). All transfers use the elevations after the fluvial step and
     // are applied together, so the result does not depend on the face order.
     std::vector<double> lowered(cells, 0.0);  // m
     std::vector<double> raised(cells, 0.0);   // m
@@ -352,10 +366,13 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
         {
             if (graph.land[i] == 0)
                 continue;
-            for (int direction : { eastdirection, southdirection })
+            for (int direction : { eastdirection, southdirection, northdirection, westdirection })
             {
-                const std::size_t j = metric.neighbour(i, direction);
-                if (j == i || graph.land[j] == 0)
+                const std::int32_t neighbour = metric.neighbourid(i, direction);
+                if (neighbour < 0)
+                    continue;
+                const std::size_t j = static_cast<std::size_t>(neighbour);
+                if (graph.land[j] == 0 || !ownsface(direction, metric.reverse(i, direction), i, j))
                     continue;
                 if (z[i] == z[j])
                     continue;
@@ -427,8 +444,11 @@ StreamPowerBudget stepstreampower(const SphereMetric& metric, const FlowGraph& g
         auto reach = [&](std::size_t from) {
             for (int direction = 1; direction <= directioncount; direction++)
             {
-                const std::size_t next = metric.neighbour(from, direction);
-                if (next == from || graph.land[next] != 0 || reached[next] == stamp)
+                const std::int32_t neighbour = metric.neighbourid(from, direction);
+                if (neighbour < 0)
+                    continue;
+                const std::size_t next = static_cast<std::size_t>(neighbour);
+                if (graph.land[next] != 0 || reached[next] == stamp)
                     continue;
                 reached[next] = stamp;
                 queue.push({ z[next] + marine[next] / metric.area_m2(next), next });

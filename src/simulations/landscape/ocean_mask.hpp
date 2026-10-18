@@ -3,8 +3,8 @@
 // The sea of a below-sea mask (docs/architecture/erosion-hydrology-plan.md, Phase H,
 // step H3): every 8-connected region of cells at or below the sea level whose area
 // is at least a given fraction of the planet's, and always the largest region by
-// area (the world ocean). Neighbours are those of the metric (longitude wraps, no
-// neighbour beyond a pole; a torus wraps rows too); areas are the metric's cell
+// area (the world ocean). Neighbours are those of the metric's grid (on lat-lon
+// longitude wraps, no neighbour beyond a pole; a torus wraps rows too); areas are the metric's cell
 // areas, so a polar region of many small cells does not outweigh a larger one at
 // low latitude. A smaller enclosed below-sea region is not sea: the routing fills it
 // from its rim and the lake balance decides whether it holds a lake, a salt lake or

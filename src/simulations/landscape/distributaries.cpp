@@ -50,8 +50,8 @@ Distributaries splitdistributaries(const SphereMetric& metric, const std::vector
         const int code = flowdirection[cell];
         if (code < 1 || code > directioncount)
             return none;
-        const std::size_t next = metric.neighbour(cell, code);
-        return next == cell ? none : next;
+        const std::int32_t next = metric.neighbourid(cell, code);
+        return next < 0 ? none : static_cast<std::size_t>(next);
     };
 
     std::vector<double> january(size, 0.0), july(size, 0.0), largest(size, 0.0);
@@ -98,8 +98,11 @@ Distributaries splitdistributaries(const SphereMetric& metric, const std::vector
         std::vector<Link>& out = links[cell];
         for (int code = 1; code <= directioncount; code++)
         {
-            const std::size_t next = metric.neighbour(cell, code);
-            if (next == cell || (sea[next] == 0 && !isdelta(next)))
+            const std::int32_t neighbour = metric.neighbourid(cell, code);
+            if (neighbour < 0)
+                continue;
+            const std::size_t next = static_cast<std::size_t>(neighbour);
+            if (sea[next] == 0 && !isdelta(next))
                 continue;
             const double below = sea[next] != 0 ? sealevel : static_cast<double>(surface[next]);
             const double drop = height - below;
@@ -165,8 +168,11 @@ Distributaries splitdistributaries(const SphereMetric& metric, const std::vector
             continue;
         int towards = 0;
         for (int code = 1; code <= directioncount && towards == 0; code++)
-            if (metric.neighbour(cell, code) == supplier[cell])
+        {
+            const std::int32_t next = metric.neighbourid(cell, code);
+            if (next >= 0 && static_cast<std::size_t>(next) == supplier[cell])
                 towards = code;
+        }
         result.direction[cell] = static_cast<int16_t>(towards);
         result.january[cell] = static_cast<int32_t>(jan);
         result.july[cell] = static_cast<int32_t>(jul);

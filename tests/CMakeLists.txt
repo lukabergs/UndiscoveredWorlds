@@ -35,6 +35,7 @@ if(TARGET uw_climate_world)
         simulations/climate/climate_weather_tests.cpp
         simulations/landscape/analytical_relief_tests.cpp
         simulations/landscape/channel_network_tests.cpp
+        simulations/landscape/cube_kernels_tests.cpp
         simulations/landscape/distributaries_tests.cpp
         simulations/landscape/glacial_tests.cpp
         simulations/landscape/isostasy_tests.cpp

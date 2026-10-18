@@ -32,8 +32,11 @@ std::vector<uint8_t> oceanmask(const SphereMetric& metric, const std::vector<uin
             area += metric.area_m2(cell);
             for (int direction = 1; direction <= directioncount; direction++)
             {
-                const std::size_t neighbour = metric.neighbour(cell, direction);
-                if (neighbour == cell || belowsea[neighbour] == 0 || region[neighbour] >= 0)
+                const std::int32_t next = metric.neighbourid(cell, direction);
+                if (next < 0)
+                    continue;
+                const std::size_t neighbour = static_cast<std::size_t>(next);
+                if (belowsea[neighbour] == 0 || region[neighbour] >= 0)
                     continue;
                 region[neighbour] = id;
                 members.push_back(neighbour);

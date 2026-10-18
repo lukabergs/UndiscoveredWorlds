@@ -1,8 +1,8 @@
 #pragma once
 
 // Priority-Flood (Barnes et al. 2014) over a terrain on a SphereMetric, seeded
-// from the sea cells and nothing else (polar rows are closed; a torus metric wraps
-// them), or, on a grid without a sea cell, from its terminal sink (terminalsink):
+// from the sea cells and nothing else (a missing neighbour, beyond a pole or at a
+// cube corner, is skipped; a torus metric wraps rows), or, on a grid without a sea cell, from its terminal sink (terminalsink):
 // the filled surface, one id per depression, its spill, and the flood
 // receiver of every land cell
 // (docs/architecture/erosion-hydrology-plan.md, section 3, Kernels). Phase A: a

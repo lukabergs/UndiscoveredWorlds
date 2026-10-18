@@ -77,8 +77,11 @@ Depressions filldepressions(const SphereMetric& metric, const std::vector<float>
         }
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t next = metric.neighbour(cell, direction);
-            if (next == cell || closed[next] != 0)
+            const std::int32_t neighbour = metric.neighbourid(cell, direction);
+            if (neighbour < 0)
+                continue;
+            const std::size_t next = static_cast<std::size_t>(neighbour);
+            if (closed[next] != 0)
                 continue;
             closed[next] = 1;
             closeorder.push_back(static_cast<int32_t>(next));
@@ -132,8 +135,11 @@ Depressions filldepressions(const SphereMetric& metric, const std::vector<float>
                 result.filledelevation[cell] = level;
                 for (int direction = 1; direction <= directioncount; direction++)
                 {
-                    const std::size_t next = metric.neighbour(cell, direction);
-                    if (next == cell || result.depressionid[next] != 0 || !(elevation[next] < level))
+                    const std::int32_t neighbour = metric.neighbourid(cell, direction);
+                    if (neighbour < 0)
+                        continue;
+                    const std::size_t next = static_cast<std::size_t>(neighbour);
+                    if (result.depressionid[next] != 0 || !(elevation[next] < level))
                         continue;
                     result.depressionid[next] = depression.id;
                     stack.push_back(static_cast<int32_t>(next));
@@ -165,8 +171,11 @@ Depressions filldepressions(const SphereMetric& metric, const std::vector<float>
             stack.pop_back();
             for (int direction = 1; direction <= directioncount; direction++)
             {
-                const std::size_t next = metric.neighbour(cell, direction);
-                if (next == cell || sea[next] != 0 || result.depressionid[next] != 0 || !deep(next))
+                const std::int32_t neighbour = metric.neighbourid(cell, direction);
+                if (neighbour < 0)
+                    continue;
+                const std::size_t next = static_cast<std::size_t>(neighbour);
+                if (sea[next] != 0 || result.depressionid[next] != 0 || !deep(next))
                     continue;
                 result.depressionid[next] = depression.id;
                 stack.push_back(static_cast<int32_t>(next));

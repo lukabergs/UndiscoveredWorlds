@@ -59,30 +59,42 @@ void addreliefroughness(const SphereMetric& metric, const ReliefRoughness& rough
 
     const double pi = 3.14159265358979323846;
     const double floor = static_cast<double>(sealevel) + 1.0;
-    for (int y = 0; y < metric.height; y++)
+    // The noise position of a cell: its centre on a cube or a subgrid; on a full
+    // latitude-longitude grid (or a gridless metric of rows) the row-centre latitude
+    // and the longitude 2 pi (x + 0.5) / W, which runs from 0 at the west edge of
+    // column 0 (the grid's own longitudes run from -pi: the roughness of a lat-lon
+    // world is kept as it was).
+    const bool rows = !metric.grid || (metric.grid->kind() == mesh::GridKind::latlon && !metric.grid->issubgrid());
+    for (std::size_t cell = 0; cell < count; cell++)
     {
-        const double latitude = metric.rowlatitude_rad[static_cast<std::size_t>(y)];
-        for (int x = 0; x < metric.width; x++)
+        if (sea[cell] != 0)
+            continue;
+        double px = 0.0, py = 0.0, pz = 0.0;
+        if (rows)
         {
-            const std::size_t cell = metric.index(x, y);
-            if (sea[cell] != 0)
-                continue;
-            const double longitude = 2.0 * pi * (static_cast<double>(x) + 0.5) / metric.width;
-            double px = 0.0, py = 0.0, pz = 0.0;
+            const double latitude = metric.rowlatitude_rad[static_cast<std::size_t>(metric.row(cell))];
+            const double longitude = 2.0 * pi * (static_cast<double>(metric.column(cell)) + 0.5) / metric.width;
             unitvector(latitude, longitude, px, py, pz);
-            const double sum = field.sum(px, py, pz);
-            // A lowering tapers towards the coast: it is scaled by
-            // min(1, (old - floor) / amplitude), so low land is not flattened onto
-            // floor = sealevel + 1 m. The floor stays as a backstop for the rare
-            // perturbation beyond the amplitude: a land cell is not lowered to it or
-            // below (one already there is not lowered at all), so it stays land.
-            const double old = static_cast<double>(elevation[cell]);
-            double delta = factor * sum;
-            if (delta < 0.0)
-                delta *= std::clamp((old - floor) / std::fabs(roughness.amplitude_m), 0.0, 1.0);
-            const double lowest = std::min(old, floor);
-            elevation[cell] = static_cast<float>(std::max(old + delta, lowest));
         }
+        else
+        {
+            const mesh::Vec3 centre = metric.grid->centre(static_cast<mesh::CellId>(cell));
+            px = centre.x;
+            py = centre.y;
+            pz = centre.z;
+        }
+        const double sum = field.sum(px, py, pz);
+        // A lowering tapers towards the coast: it is scaled by
+        // min(1, (old - floor) / amplitude), so low land is not flattened onto
+        // floor = sealevel + 1 m. The floor stays as a backstop for the rare
+        // perturbation beyond the amplitude: a land cell is not lowered to it or
+        // below (one already there is not lowered at all), so it stays land.
+        const double old = static_cast<double>(elevation[cell]);
+        double delta = factor * sum;
+        if (delta < 0.0)
+            delta *= std::clamp((old - floor) / std::fabs(roughness.amplitude_m), 0.0, 1.0);
+        const double lowest = std::min(old, floor);
+        elevation[cell] = static_cast<float>(std::max(old + delta, lowest));
     }
 }
 }
