@@ -219,61 +219,127 @@ TEST(TectonicSphereTransport, CapCrossesAPole) {
     crossing(mesh::unitvector(72 * pi / 180, 10 * pi / 180), mesh::unitvector(72 * pi / 180, -170 * pi / 180), "pole");
 }
 
-// A uniform field on one rigid plate: max |coverage - 1| in face interiors, on face-edge
-// subcells (corners excluded) and on the 24 corner subcells, after one update and after 20.
-TEST(TectonicSphereTransport, RigidPlateCoverage) {
+// The maxima of |value - expected| by subcell class: face interiors, face-edge subcells (corners
+// excluded) and the 24 corner subcells.
+namespace {
+struct Classes {
+    double interior = 0, edge = 0, corner = 0;
+    double all() const { return std::max({interior, edge, corner}); }
+};
+Classes classify(const st::Lattice& l, const std::vector<double>& values, double expected) {
+    Classes result;
+    const int m = l.subfacecells();
+    int corners = 0;
+    for (st::CellId c = 0; c < l.subcellcount(); ++c) {
+        int f = 0, i = 0, j = 0;
+        mesh::cubeindices(m, c, f, i, j);
+        const bool bi = i == 0 || i == m - 1, bj = j == 0 || j == m - 1;
+        const double error = std::abs(values[c] - expected);
+        if (bi && bj) { result.corner = std::max(result.corner, error); ++corners; }
+        else if (bi || bj) result.edge = std::max(result.edge, error);
+        else result.interior = std::max(result.interior, error);
+    }
+    EXPECT_EQ(corners, 24);
+    return result;
+}
+} // namespace
+
+// One plate over the whole sphere, rotating about two axes for 100 updates: the transported
+// uniform field stays uniform and the plate's coverage 1 (interiors, face edges, corners), and
+// the plate's amounts of a uniform and a varying field are conserved. The raw kernel's coverage
+// after one update is recorded for comparison.
+TEST(TectonicSphereTransport, RigidPlateKeepsAUniformFieldAndItsCoverage) {
     for (const auto [n, s] : {std::pair{8, 2}, std::pair{32, 4}}) {
         const auto lattice = st::Lattice::make(n, s, radius_m);
         const st::Lattice& l = *lattice;
-        const int m = l.subfacecells();
-        const Vec3 rotation = (0.6 * mesh::cubestep(m)) * mesh::normalise({0.3, -0.5, 0.8});
-        const st::Stencil stencil(lattice, rigid(l, rotation));
-        std::vector<double> field(l.subcellcount(), 1);
-        // A subcell's upstream path stays farther than 4 subcells from every cube corner.
-        std::vector<std::uint8_t> clear(l.subcellcount(), 1);
-        const auto nearcorner = [&](const Vec3& p) {
-            const double nearest = (std::abs(p.x) + std::abs(p.y) + std::abs(p.z)) / std::sqrt(3.0);
-            return std::acos(std::min(1.0, nearest)) <= 4 * mesh::cubestep(m);
-        };
-        for (st::CellId c = 0; c < l.subcellcount(); ++c) clear[c] = !nearcorner(l.centre(c));
-        for (int t = 1; t <= 100; ++t) {
-            field = stencil.remap(field);
-            for (st::CellId c = 0; c < l.subcellcount(); ++c)
-                if (clear[c] && nearcorner(rotate(-static_cast<double>(t) * rotation, l.centre(c)))) clear[c] = 0;
-            if (t != 1 && t != 20 && t != 100) continue;
-            double interior = 0, edge = 0, corner = 0, away = 0;
-            int corners = 0;
-            for (st::CellId c = 0; c < l.subcellcount(); ++c) {
-                int f = 0, i = 0, j = 0;
-                mesh::cubeindices(m, c, f, i, j);
-                const bool bi = i == 0 || i == m - 1, bj = j == 0 || j == m - 1;
-                const double error = std::abs(field[c] - 1);
-                if (bi && bj) { corner = std::max(corner, error); ++corners; }
-                else if (bi || bj) edge = std::max(edge, error);
-                else interior = std::max(interior, error);
-                if (clear[c]) away = std::max(away, error);
+        for (const Vec3 axis : {mesh::normalise({0.3, -0.5, 0.8}), mesh::normalise({-0.7, 0.2, 0.1})}) {
+            const Vec3 rotation = (0.6 * mesh::cubestep(l.subfacecells())) * axis;
+            const st::Stencil stencil(lattice, rigid(l, rotation));
+            const Classes raw = classify(l, stencil.remap(std::vector<double>(l.subcellcount(), 1)), 1);
+            std::vector<double> uniform(l.subcellcount(), 2500), varying(l.subcellcount());
+            Random random;
+            for (auto& v : varying) v = random.uniform() < 0.1 ? 0 : 100 + 27000 * random.uniform();
+            const double uniformmass = total(l, uniform), varyingmass = total(l, varying);
+            for (int t = 1; t <= 100; ++t) {
+                const auto layers = stencil.transport({&uniform, &varying});
+                ASSERT_EQ(layers.size(), 1U);
+                const st::PlateLayer& layer = layers[0];
+                ASSERT_EQ(layer.cells.size(), l.subcellcount());
+                std::vector<double> coverage(l.subcellcount(), 0);
+                double um = 0, vm = 0;
+                for (std::size_t k = 0; k < layer.cells.size(); ++k) {
+                    const st::CellId c = layer.cells[k];
+                    coverage[c] = layer.coverage[k];
+                    uniform[c] = layer.values[0][k];
+                    varying[c] = layer.values[1][k];
+                    um += uniform[c] * coverage[c] * l.area_m2(c);
+                    vm += varying[c] * coverage[c] * l.area_m2(c);
+                }
+                ASSERT_GE(*std::min_element(varying.begin(), varying.end()), 0);
+                if (t != 1 && t != 20 && t != 100) continue;
+                const Classes value = classify(l, uniform, 2500), cover = classify(l, coverage, 1);
+                std::printf("N %d s %d axis (%.2f, %.2f, %.2f) after %3d: max |value / 2500 - 1| interior %.1e, edge "
+                            "%.1e, corner %.1e; max |coverage - 1| interior %.1e, edge %.1e, corner %.1e; mass error "
+                            "uniform %.1e, varying %.1e (raw kernel, one update: interior %.1e, edge %.1e, corner %.1e)\n",
+                            n, s, axis.x, axis.y, axis.z, t, value.interior / 2500, value.edge / 2500,
+                            value.corner / 2500, cover.interior, cover.edge, cover.corner,
+                            std::abs(um / uniformmass - 1), std::abs(vm / varyingmass - 1), raw.interior, raw.edge,
+                            raw.corner);
+                const std::string key = "N" + std::to_string(n) + "_s" + std::to_string(s) + "_t" + std::to_string(t);
+                RecordProperty(key + "_value_error", std::to_string(value.all() / 2500));
+                RecordProperty(key + "_coverage_error", std::to_string(cover.all()));
+                EXPECT_LT(value.all() / 2500, 1e-9) << t;
+                EXPECT_LT(cover.all(), 1e-9) << t;
+                EXPECT_NEAR(um, uniformmass, uniformmass * 1e-9) << t;
+                EXPECT_NEAR(vm, varyingmass, varyingmass * 1e-9) << t;
             }
-            ASSERT_EQ(corners, 24);
-            const std::string key = "N" + std::to_string(n) + "_s" + std::to_string(s) + "_t" + std::to_string(t);
-            RecordProperty(key + "_interior", std::to_string(interior));
-            RecordProperty(key + "_edge", std::to_string(edge));
-            RecordProperty(key + "_corner", std::to_string(corner));
-            RecordProperty(key + "_away_from_corners", std::to_string(away));
-            std::printf("coverage N %d s %d after %d update(s): max |coverage - 1| interior %.3e, edge %.3e, "
-                        "corner %.3e, away from the corners' wakes %.3e\n", n, s, t, interior, edge, corner, away);
-            // Regression bounds over the measured values (E2D, 2026-10-19), not quality claims.
-            // The corner subcells keep about a third: three face frames meet at 120 degrees there
-            // and the splat assumes 90; the defect is carried downstream as a wake (the later
-            // interior and edge maxima). Elsewhere the index displacement of a rigid rotation
-            // varies in space and the bilinear splat ripples by about its gradient per update
-            // (first order: smaller at finer s N), and the ripples grow over updates ("away").
-            if (t == 1) {
-                EXPECT_LT(interior, n == 8 ? 0.025 : 0.006);
-                EXPECT_LT(edge, n == 8 ? 0.05 : 0.008);
-            }
-            EXPECT_LT(corner, 0.5);
-            EXPECT_LT(away, 0.1);
         }
+    }
+}
+
+// Two plates split by the plane y = 0 turning in opposite senses about Z: they converge along
+// longitude 0 and diverge along 180. The summed coverage exceeds 1 only along the converging
+// contact, falls short only along the diverging one and is 1 within 1e-9 everywhere else.
+TEST(TectonicSphereTransport, ConvergingPlatesOverlapOnlyAlongTheirContact) {
+    for (const auto [n, s] : {std::pair{8, 2}, std::pair{32, 4}}) {
+        const auto lattice = st::Lattice::make(n, s, radius_m);
+        const st::Lattice& l = *lattice;
+        const auto parents = mesh::makecubegrid(n, radius_m);
+        const double step = mesh::cubestep(l.subfacecells());
+        st::Motion motion;
+        motion.rotation = {Vec3{0, 0, 0.6 * step}, Vec3{0, 0, -0.6 * step}};
+        motion.plate.resize(l.cellcount());
+        for (st::CellId c = 0; c < l.cellcount(); ++c) motion.plate[c] = parents->centre(c).y < 0 ? 0U : 1U;
+        const st::Stencil stencil(lattice, motion);
+        std::vector<double> rock(l.subcellcount(), 30000);
+        const auto layers = stencil.transport({&rock});
+        ASSERT_EQ(layers.size(), 2U);
+        std::vector<double> sum(l.subcellcount(), 0);
+        for (const auto& layer : layers)
+            for (std::size_t k = 0; k < layer.cells.size(); ++k) {
+                sum[layer.cells[k]] += layer.coverage[k];
+                EXPECT_NEAR(layer.values[0][k], 30000, 30000 * 1e-9);
+            }
+        // The angle to the half meridian at longitude 0 (x >= 0) or 180 (x <= 0).
+        const auto distance = [](const Vec3& p, bool east) {
+            return (east ? p.x >= 0 : p.x <= 0) ? std::asin(std::min(1.0, std::abs(p.y))) : std::acos(std::min(1.0, std::abs(p.z)));
+        };
+        const double band = 6 * step;
+        int overlap = 0, gap = 0, stray = 0;
+        double elsewhere = 0;
+        for (st::CellId c = 0; c < l.subcellcount(); ++c) {
+            const Vec3& p = l.centre(c);
+            const bool converging = distance(p, true) <= band, diverging = distance(p, false) <= band;
+            if (sum[c] > 1 + 1e-6) { ++overlap; stray += !converging; }
+            else if (sum[c] < 1 - 1e-6) { ++gap; stray += !diverging; }
+            if (!converging && !diverging) elsewhere = std::max(elsewhere, std::abs(sum[c] - 1));
+        }
+        std::printf("N %d s %d: %d overlapping and %d gap subcells, %d outside their contact band; max |coverage - 1| "
+                    "elsewhere %.1e\n", n, s, overlap, gap, stray, elsewhere);
+        EXPECT_GT(overlap, 0);
+        EXPECT_GT(gap, 0);
+        EXPECT_EQ(stray, 0);
+        EXPECT_LT(elsewhere, 1e-9);
     }
 }
 
@@ -301,7 +367,8 @@ TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
     }
     std::vector<double> field(l.subcellcount());
     for (auto& v : field) v = 1000 + 30000 * random.uniform();
-    double build = 1e30, sphere = 1e30;
+    std::vector<double> second(field), third(field), fourth(field);
+    double build = 1e30, sphere = 1e30, one = 1e30, four = 1e30;
     std::uint32_t substeps = 0;
     for (int repeat = 0; repeat < 3; ++repeat) {
         auto t0 = clock::now();
@@ -309,10 +376,18 @@ TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
         auto t1 = clock::now();
         const auto moved = stencil.remap(field);
         auto t2 = clock::now();
+        const auto layers = stencil.transport({&field});
+        auto t3 = clock::now();
+        const auto layers4 = stencil.transport({&field, &second, &third, &fourth});
+        auto t4 = clock::now();
         substeps = stencil.substeps();
         build = std::min(build, seconds(t1 - t0));
         sphere = std::min(sphere, seconds(t2 - t1) / substeps);
+        one = std::min(one, seconds(t3 - t2) / substeps);
+        four = std::min(four, seconds(t4 - t3) / substeps / 4);
         ASSERT_EQ(moved.size(), field.size());
+        ASSERT_EQ(layers.size(), 12U);
+        ASSERT_EQ(layers4.size(), 12U);
     }
     // The torus kernel at 256 x 128 with subdivision 4 (the baseline's): 1024 x 512 subcells.
     const std::uint32_t w = 1024, h = 512;
@@ -331,10 +406,14 @@ TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
     }
     const double nsphere = 1e9 * sphere / l.subcellcount(), nbuild = 1e9 * build / l.subcellcount();
     const double ntorus = 1e9 * kernel / torus.size();
-    std::printf("cube N 64 s 4 (%zu subcells, %u substeps): stencil %.1f ns per subcell, remap %.1f ns per subcell and "
-                "substep; torus 1024 x 512: remap %.1f ns per subcell and substep\n",
-                l.subcellcount(), substeps, nbuild, nsphere, ntorus);
+    const double none = 1e9 * one / l.subcellcount(), nfour = 1e9 * four / l.subcellcount();
+    std::printf("cube N 64 s 4 (%zu subcells, 12 plates, %u substeps): stencil with the rigid references %.1f ns per "
+                "subcell; raw remap %.1f ns per subcell and substep; per-plate transport, one field (and the coverage) "
+                "%.1f, four fields %.1f per field, ns per subcell and substep; torus 1024 x 512: remap %.1f ns per "
+                "subcell and substep\n", l.subcellcount(), substeps, nbuild, nsphere, none, nfour, ntorus);
     RecordProperty("sphere_stencil_ns", std::to_string(nbuild));
     RecordProperty("sphere_remap_ns", std::to_string(nsphere));
+    RecordProperty("sphere_transport_one_field_ns", std::to_string(none));
+    RecordProperty("sphere_transport_per_field_of_four_ns", std::to_string(nfour));
     RecordProperty("torus_remap_ns", std::to_string(ntorus));
 }

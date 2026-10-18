@@ -18,6 +18,16 @@
 // three targets in proportion to their weights. Amounts are value x source subcell area and the
 // result is the amount divided by the destination's area, so the integral of value x area is
 // conserved. The stencil serves every field and substep; the scatter is serial in id order.
+//
+// The splat alone does not keep a rigid plate uniform: the index displacement of a rotation
+// varies over a face (a ripple of about its gradient per update) and three face frames meet at
+// 120 degrees at a cube corner (about a third there). So the engine moves each plate
+// separately (transport): the plate's coverage (1 on its cells) and its fields go through the
+// same stencil, each field is divided by the transported coverage (a value per covered area),
+// and the coverage by the plate's rigid reference, the transport of 1 everywhere under the
+// plate's rotation alone (the E2D decision, 2026-10-19): a rigid interior keeps coverage 1 and
+// a uniform field uniform exactly, overlap of two plates means convergence and a deficit
+// divergence (or deformation, which the reference leaves out).
 
 #include "core/mesh/cell_grid.hpp"
 
@@ -79,6 +89,26 @@ struct Motion {
     std::vector<Vec3> offset_m;             // per parent cell, or empty
 };
 
+// One plate's rock after an update, on the subcells its coverage reaches.
+struct PlateLayer {
+    std::uint32_t plate = 0;          // an index into Motion::rotation, or noplate
+    std::vector<CellId> cells;        // ascending: transported coverage > 0
+    // Transported coverage over the plate's rigid reference: 1 in a rigid interior, the covered
+    // share at a margin; the plates' coverages summed above 1 are overlap, below 1 a gap.
+    std::vector<double> coverage;
+    // Per field, aligned with cells: the transported value over the transported coverage (a
+    // value per covered area), scaled per plate and field (moments: their rock field's scale)
+    // so that sum value x coverage x area equals the plate's transported amount.
+    std::vector<std::vector<double>> values;
+};
+
+namespace detail {
+struct Entry {
+    std::array<CellId, 4> target;  // (0, 0), (1, 0), (0, 1), (1, 1); nocell: a corner's gap
+    std::array<double, 2> wx, cx, qx, wy, cy, qy;  // weight, linear and quadratic terms per axis
+};
+} // namespace detail
+
 class Stencil {
 public:
     // Throws std::invalid_argument on a size mismatch, a non-finite input, a plate index out
@@ -87,34 +117,47 @@ public:
 
     const Lattice& lattice() const { return *lattice_; }
     std::uint32_t substeps() const { return substeps_; }
-    double maximumdisplacement() const { return maximum_; }  // lattice cells per update
+    // Lattice cells per update, over the subcells and the plates' rigid references.
+    double maximumdisplacement() const { return maximum_; }
     // The index displacement of a subcell over the whole update (columns east, rows south in
     // the source face's frame).
     std::array<double, 2> displacement(CellId subcell) const;
 
-    // A density (amount per area) on the subcells through every substep. Values must be
-    // finite and non-negative (std::invalid_argument otherwise).
+    // The engine's transport: every plate's rock moved separately (the header comment). fields:
+    // densities on the subcells, each subcell's rock belonging to its parent's plate. momentof:
+    // empty, or per field the index of the rock field whose transfer fractions it uses (a
+    // material moment such as thickness x age; its specific value stays within its donors'
+    // range) or -1 for a field of its own. Layers in ascending plate order, noplate last; a
+    // plate without cells has none. Values finite and non-negative, a moment zero where its rock
+    // is (std::invalid_argument otherwise).
+    std::vector<PlateLayer> transport(const std::vector<const std::vector<double>*>& fields,
+                                      const std::vector<int>& momentof = {}) const;
+
+    // The raw kernel over the whole lattice, without the per-plate normalisation (the crossing
+    // and conservation checks): a density through every substep; the integral of value x area
+    // is conserved.
     std::vector<double> remap(const std::vector<double>& values) const;
-    // The same, with material moments (e.g. thickness x age) moved by the rock's transfer
-    // fractions and replaced in place: both integrals are conserved and each moment's specific
-    // value stays within its donors' range. A moment must be finite, non-negative and zero
-    // where the rock is zero.
+    // The same, with material moments moved by the rock's transfer fractions and replaced in
+    // place: both integrals are conserved and each moment's specific value stays within its
+    // donors' range.
     std::vector<double> remap(const std::vector<double>& values,
                               const std::vector<std::vector<double>*>& moments) const;
 
 private:
-    struct Entry {
-        std::array<CellId, 4> target;  // (0, 0), (1, 0), (0, 1), (1, 1); nocell: a corner's gap
-        std::array<double, 2> wx, cx, qx, wy, cy, qy;  // weight, linear and quadratic terms per axis
+    // A plate's cells, its reach (the subcells its rock can arrive at: the cells dilated by one
+    // ring per substep) and its rigid reference on the reach.
+    struct Group {
+        std::uint32_t plate = 0;
+        std::vector<CellId> cells, reach;
+        std::vector<double> reference;
     };
-    void substep(const std::vector<double>& values, const std::vector<std::vector<double>>& moments,
-                 std::vector<double>& next, std::vector<std::vector<double>>& nextmoments) const;
 
     std::shared_ptr<const Lattice> lattice_;
     std::uint32_t substeps_ = 1;
     double maximum_ = 0;
     std::vector<std::array<double, 2>> displacement_;
-    std::vector<Entry> entries_;
+    std::vector<detail::Entry> entries_;
+    std::vector<Group> groups_;
 };
 
 } // namespace tectonics::sphere_transport
