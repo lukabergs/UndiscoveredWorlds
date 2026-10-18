@@ -1,10 +1,10 @@
 {
   "schema": "plate-earth-reference/v1",
-  "description": "Earth's plate count, plate areas and speeds for the plate measures of terrain roadmap T8 (scripts/uwtools/plate_metrics.py --earth). Areas from PB2002, speeds in the no-net-rotation frame of NNR-MORVEL56.",
-  "status": "unverified: written by the T8.0 worker from the literature without web access (2026-10-18); the 52 areas sum to 12.496 sr against 4 pi = 12.566 sr (99.4 %), so a few digits are wrong; the summary's count, largest share and count above 5 % do not depend on them. Check every number against the two sources before using one as a gate; the RMS speed is an estimate, not a computation from the Euler vectors over the PB2002 polygons.",
+  "description": "Earth's plate count, plate areas and speeds for the plate measures of terrain roadmap T8 (scripts/uwtools/plate_metrics.py --earth, which asserts that the areas sum to 4 pi sr within 1e-4). Areas from PB2002, speeds in the no-net-rotation frame of NNR-MORVEL56.",
+  "status": "verified 2026-10-18 against both sources (Bird 2003 Table 1; the NNR-MORVEL56 angular-velocity table); the 52 areas sum to 12.56638 sr (4 pi = 12.56637).",
   "sources": [
-    {"id": "PB2002", "citation": "Bird, P. (2003), An updated digital model of plate boundaries, Geochemistry, Geophysics, Geosystems 4(3), 1027, doi:10.1029/2001GC000252", "url": "http://peterbird.name/publications/2003_PB2002/2003_PB2002.htm", "used_for": "plate count (52) and plate areas (Table 1, steradians)"},
-    {"id": "NNR-MORVEL56", "citation": "Argus, D. F., Gordon, R. G., and DeMets, C. (2011), Geologically current motion of 56 plates relative to the no-net-rotation reference frame, Geochemistry, Geophysics, Geosystems 12, Q11001, doi:10.1029/2011GC003751", "url": "https://doi.org/10.1029/2011GC003751", "used_for": "plate count (56) and speeds in the no-net-rotation frame"}
+    {"id": "PB2002", "citation": "Bird, P. (2003), An updated digital model of plate boundaries, Geochemistry, Geophysics, Geosystems 4(3), 1027, doi:10.1029/2001GC000252", "url": "http://peterbird.name/publications/2003_PB2002/2001GC000252.pdf", "used_for": "plate count (52) and plate areas (Table 1, steradians)"},
+    {"id": "NNR-MORVEL56", "citation": "Argus, D. F., Gordon, R. G., and DeMets, C. (2011), Geologically current motion of 56 plates relative to the no-net-rotation reference frame, Geochemistry, Geophysics, Geosystems 12, Q11001, doi:10.1029/2011GC003751", "url": "https://web.archive.org/web/2020/http://www.geology.wisc.edu/~chuck/MORVEL/NNRMRVL56_AVs.html", "used_for": "plate count (56) and per-plate RMS speeds in the no-net-rotation frame (the table's Rms column)"}
   ],
   "summary": {
     "plate_count_pb2002": 52,
@@ -15,29 +15,21 @@
     "plates_above_5_percent": 7,
     "plates_above_5_percent_names": ["Pacific", "Africa", "Antarctica", "North America", "Eurasia", "Australia", "South America"],
     "speed_frame": "no-net-rotation (NNR-MORVEL56)",
-    "plate_speed_range_cm_yr": [1.0, 10.0],
-    "area_weighted_rms_speed_cm_yr_estimate": 4.0,
-    "area_weighted_rms_speed_cm_yr_range": [3.0, 5.0]
+    "area_weighted_rms_speed_cm_yr": 4.39,
+    "area_weighted_mean_of_plate_rms_cm_yr": 3.80,
+    "plate_rms_speed_range_cm_yr": [0.96, 12.18],
+    "plate_rms_speed_range_plates": ["ND (North Andes)", "TO (Tonga)"],
+    "plate_rms_speed_cm_yr": {"Pacific": 6.55, "India": 5.76, "Philippine Sea": 5.26},
+    "speed_method": "sqrt(sum A_i rms_i^2 / sum A_i) over the 56 NNR-MORVEL56 plates, rms_i the table's per-plate Rms column, A_i the plate areas; the table does not state that its per-plate Rms is area-averaged"
   },
   "areas_sr_pb2002": {
     "PA": 2.57685, "AF": 1.44065, "AN": 1.43268, "NA": 1.36559, "EU": 1.19630, "AU": 1.13294, "SA": 1.03045,
     "SO": 0.47192, "NZ": 0.39669, "IN": 0.30637, "SU": 0.21967, "PS": 0.13409, "AM": 0.13066, "AR": 0.12082,
-    "CA": 0.07804, "OK": 0.07482, "CO": 0.07482, "YA": 0.05425, "SC": 0.04189, "CL": 0.03765, "ND": 0.02545,
-    "BS": 0.02394, "SB": 0.02090, "BU": 0.01545, "AT": 0.01338, "ON": 0.01313, "NB": 0.01023, "WL": 0.00768,
-    "JF": 0.00599, "AP": 0.00523, "PM": 0.00474, "KE": 0.00366, "SS": 0.00330, "AS": 0.00309, "MO": 0.00306,
-    "NH": 0.00255, "TO": 0.00253, "MS": 0.00194, "RI": 0.00194, "BR": 0.00170, "SW": 0.00141, "BH": 0.00122,
-    "GP": 0.00118, "NI": 0.00095, "TI": 0.00092, "CR": 0.00085, "SL": 0.00084, "FT": 0.00079, "EA": 0.00041,
-    "JZ": 0.00020, "MA": 0.00013, "MN": 0.00012
-  },
-  "angular_speed_deg_myr_nnr_morvel56": {
-    "note": "magnitudes of the NNR Euler vectors of the large plates, unverified; a plate's speed is omega R sin(distance from its pole), up to 111 km/Myr per deg/Myr",
-    "Pacific": 0.651, "Africa": 0.292, "Antarctica": 0.250, "North America": 0.209, "Eurasia": 0.223, "Australia": 0.632,
-    "South America": 0.109, "Somalia": 0.339, "Nazca": 0.696, "India": 0.544, "Sunda": 0.337, "Philippine Sea": 0.910,
-    "Arabia": 0.559, "Cocos": 1.198, "Caribbean": 0.286
-  },
-  "typical_speed_cm_yr_nnr": {
-    "note": "order of the speeds over each plate in the NNR frame, unverified",
-    "fast_oceanic": {"Pacific": "6 to 9", "Cocos": "7 to 9", "Nazca": "5 to 7", "Australia": "6 to 7", "Philippine Sea": "6 to 9", "India": "4 to 5"},
-    "slow_continental": {"Eurasia": "1 to 3", "Africa": "2 to 3", "North America": "1 to 2", "South America": "1 to 1.5", "Antarctica": "1 to 1.5"}
+    "OK": 0.07482, "CA": 0.07304, "CO": 0.07223, "YA": 0.05425, "SC": 0.04190, "CL": 0.03765, "ND": 0.02394,
+    "AP": 0.02050, "BS": 0.01715, "NH": 0.01585, "AT": 0.01418, "BH": 0.01295, "BU": 0.01270, "KE": 0.01245,
+    "WL": 0.01116, "MA": 0.01037, "MS": 0.01030, "NB": 0.00956, "TI": 0.00870, "ON": 0.00802, "AS": 0.00793,
+    "SB": 0.00762, "PM": 0.00674, "JF": 0.00632, "TO": 0.00625, "BR": 0.00481, "SW": 0.00454, "EA": 0.00411,
+    "CR": 0.00356, "SS": 0.00317, "NI": 0.00306, "MO": 0.00284, "RI": 0.00249, "JZ": 0.00241, "SL": 0.00178,
+    "FT": 0.00079, "GP": 0.00036, "MN": 0.00020
   }
 }

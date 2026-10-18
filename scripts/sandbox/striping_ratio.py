@@ -145,6 +145,7 @@ def main():
         for spec in (fields or 'geosphere.tectonic_height').split(','):
             record = bundle_field(directory, spec)
             result['bundle']['fields'][spec] = record
+            columns = record['shape'][1]  # --earth at the bundle's width unless a sandbox label follows
             print(spec, '; '.join(f'{band}: ' + (f'ratio {v["ratio"]:.2f} ' if 'ratio' in v else '')
                                   + f'A8 {v["a8"]} A4 {v["a4"]}' for band, v in record['bands'].items()))
     for label in (args[0].split(',') if args else []):

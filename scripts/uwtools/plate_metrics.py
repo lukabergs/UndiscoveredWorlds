@@ -10,7 +10,9 @@ angular_velocity). A cell is run_scenario.world_width_km / width km and an updat
 engine's speed is |v| * that / dt in km/Myr (= mm/yr; motion_diagnostics.max_speed_cm_yr is the largest).
 Two RMS speeds, weighted by true cell area: 'engine' in the engine's flat metric (a column and a row the same
 length), 'sphere' the same cell displacement on the sphere the map is drawn on (east component times
-cos(latitude): a column is 2 pi R cos(lat) / W, a row pi R / H). Rotation is not added: angular_velocity is
+cos(latitude): a column is 2 pi R cos(lat) / W, a row pi R / H); rms_cm_yr_sphere is the baseline the sphere
+engine's area-weighted RMS speed is compared with. per_plate_mean_cm_yr_engine is the snapshot's
+motion_diagnostics.mean_speed_cm_yr: the unweighted mean over plates. Rotation is not added: angular_velocity is
 reported, and a bundle with any non-zero value is flagged. geosphere.deformation_velocity_x/_y (the deforming
 part, same units) is reported separately when present.
 
@@ -93,7 +95,7 @@ def measure(directory, threshold):
             'mean_cm_yr_engine': round(float(np.sum(area * engine) / total), 3),
             'max_cm_yr_engine': round(float(engine.max()), 3),
             'diagnostics_max_speed_cm_yr': snapshot.get('motion_diagnostics', {}).get('max_speed_cm_yr'),
-            'diagnostics_mean_speed_cm_yr': snapshot.get('motion_diagnostics', {}).get('mean_speed_cm_yr'),
+            'per_plate_mean_cm_yr_engine': snapshot.get('motion_diagnostics', {}).get('mean_speed_cm_yr'),
             'max_abs_angular_velocity': angular,
             'rotation_included': False,
             'rotation_flag': 'non-zero angular velocity: the RMS lacks the rotational part' if angular else None,
@@ -109,6 +111,8 @@ def measure(directory, threshold):
 
 def earth_summary(path):
     reference = json.loads(Path(path).read_text())
+    areas = sum(reference['areas_sr_pb2002'].values())
+    assert abs(areas - 4.0 * math.pi) < 1e-4, f'{path}: plate areas sum to {areas:.5f} sr, not 4 pi'
     return {'file': Path(path).as_posix(), 'status': reference.get('status'), **reference.get('summary', {})}
 
 
