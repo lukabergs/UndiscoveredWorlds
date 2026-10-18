@@ -5,6 +5,10 @@ add_library(uw_core STATIC
     climate_grid.cpp
     grid_coordinates.cpp
     grid_shapes.cpp
+    mesh/cell_grid.cpp
+    mesh/cube_geometry.cpp
+    mesh/mesh_geometry.cpp
+    mesh/mesh_remap.cpp
     parameters.cpp
     procedural_noise.cpp
     profiler.cpp
