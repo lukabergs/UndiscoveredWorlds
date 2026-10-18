@@ -67,6 +67,7 @@ landscape::SphereMetric windowmetric(int columns, int rows, double north_deg, do
         metric.rowdx_m[row] = radius_m * pixel * std::cos(metric.rowlatitude_rad[row]);
         metric.rowarea_m2[row] = radius_m * radius_m * pixel * (std::sin(north) - std::sin(south));
     }
+    metric.grid.reset();  // the window's own rows, not the whole-sphere grid's tables (columns = 2 x rows)
     return metric;
 }
 
