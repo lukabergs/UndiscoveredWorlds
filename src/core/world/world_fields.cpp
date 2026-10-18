@@ -21,7 +21,9 @@ constexpr RemapRule remaprule(FieldId id, ElementType element)
     case FieldId::mountain_precipitation_direction_january:
     case FieldId::mountain_precipitation_direction_july:
         return RemapRule::direction;
-    // Fluxes through a cell's area (sphere-mesh.md section 5): extensive.
+    // Accumulated fluxes are point values of the drainage network, not area totals: nearest
+    // until the routing callback of the export (W2-IO) recomputes them with the directions.
+    // No catalogue field is extensive (rule total) today.
     case FieldId::river_flow_january:
     case FieldId::river_flow_july:
     case FieldId::drainage_area:
@@ -29,7 +31,6 @@ constexpr RemapRule remaprule(FieldId id, ElementType element)
     case FieldId::sediment_flux:
     case FieldId::delta_flow_january:
     case FieldId::delta_flow_july:
-        return RemapRule::total;
     // Floats that are not averaged: an axis (pi equals 0), surfaces where 0 means none, isolated peaks.
     case FieldId::shortening_direction:
     case FieldId::lake_surface:

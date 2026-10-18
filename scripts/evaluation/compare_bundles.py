@@ -6,9 +6,11 @@ A bundle is a directory written by `world_pipeline --bundle` (schema uw-run-bund
 read as grid kind latlon; docs/architecture/sphere-mesh.md section 7). The native fields are
 compared exactly; for differing fields the report gives the number of differing values and the
 largest absolute difference. Tables are compared as text. The lat-lon exports and the cell table
-of cube bundles are compared too when both bundles have them. The manifest's schema and grid
-block are not compared, so a v1 and a v2 lat-lon bundle with equal fields are identical.
-Exit status: 0 when every compared field, export, cell array and table is identical, 1 otherwise.
+of cube bundles are compared too (an entry on one side only is missing). Of the grid block the
+kind (v1 is latlon), face_cells and export_columns must agree; the schema, the radius and the
+layout strings are not compared, so a v1 and a v2 lat-lon bundle with equal fields are identical.
+Exit status: 0 when the grid agrees and every compared field, export, cell array and table is
+identical, 1 otherwise.
 
 --legacy-encoding compares a bundle from before the float migration of the climate
 fields and base elevation (integers, some scaled) with a later one: a float field is put
@@ -27,6 +29,13 @@ from uwtools.bundle import SCHEMAS, read_manifest
 
 # Manifest lists compared entry by entry: native fields, lat-lon exports, the cell table, tables.
 KINDS = ('fields', 'exports', 'cells', 'tables')
+# Grid block members that must agree (the radius and the v1/v2 layout strings are not compared).
+GRID_KEYS = ('kind', 'face_cells', 'export_columns')
+
+
+def grid_value(manifest, key):
+    grid = manifest.get('grid', {})
+    return grid.get(key, 'latlon') if key == 'kind' else grid.get(key)
 
 
 def load_manifest(bundle):
@@ -98,14 +107,20 @@ def main():
 
     left, right = load_manifest(args.left), load_manifest(args.right)
     result = {'left': str(args.left), 'right': str(args.right), 'fields': {}, 'tables': {}}
+    # The grid: kind (v1 is latlon), face cells and export columns must agree.
+    result['grid'] = {}
+    for key in GRID_KEYS:
+        values = [grid_value(manifest, key) for manifest in (left, right)]
+        if values[0] != values[1]:
+            result['grid'][key] = {'status': 'different', 'left': values[0], 'right': values[1]}
     for kind in KINDS:
         if kind in ('exports', 'cells'):
-            # Only cube bundles have them: compared when both bundles do.
-            if kind not in left or kind not in right:
+            # Only cube bundles have them; an entry on one side only is missing on the other.
+            if kind not in left and kind not in right:
                 continue
             result[kind] = {}
-        lefts = {entry['id']: entry for entry in left[kind]}
-        rights = {entry['id']: entry for entry in right[kind]}
+        lefts = {entry['id']: entry for entry in left.get(kind, [])}
+        rights = {entry['id']: entry for entry in right.get(kind, [])}
         for identifier in sorted(set(lefts) | set(rights)):
             if kind != 'cells' and not selected(identifier, args.fields):
                 continue
@@ -129,7 +144,10 @@ def main():
             print(f'{outcome["status"]:>9}  {prefix}{identifier}  {details}')
     compared = sum(len(result.get(kind, {})) for kind in KINDS)
     extra = ', exports and cell arrays' if 'exports' in result or 'cells' in result else ''
-    print(f'{compared - problems} of {compared} fields{extra} and tables identical')
+    for key, outcome in result['grid'].items():
+        problems += 1
+        print(f'different  grid.{key}  left={outcome["left"]}, right={outcome["right"]}')
+    print(f'{compared - problems + len(result["grid"])} of {compared} fields{extra} and tables identical')
     legacy = {identifier: outcome for identifier, outcome in result['fields'].items() if outcome.get('legacy')}
     if legacy:
         refined = sum(1 for identifier, outcome in legacy.items()

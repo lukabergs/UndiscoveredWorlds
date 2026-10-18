@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <set>
 #include <vector>
@@ -393,6 +394,33 @@ TEST(Mesh, MajorityAndNearestCodes)
             EXPECT_EQ(nearest[c], z > 0.0 ? 2 : 1);
         }
     }
+}
+
+TEST(Mesh, IntegerTotalsRoundToNearest)
+{
+    const auto cube = mesh::makecubegrid(16, radius);
+    const auto latlon = mesh::makelatlongrid(32, radius);
+    const auto weights = mesh::makeremap(*cube, *latlon);
+    std::vector<int> counts(cube->cellcount());
+    std::vector<double> exact(cube->cellcount());
+    long long sourcetotal = 0;
+    for (mesh::CellId c = 0; c < cube->cellcount(); c++)
+    {
+        counts[c] = 1000 + static_cast<int>(c % 7);
+        exact[c] = counts[c];
+        sourcetotal += counts[c];
+    }
+    const std::vector<int> moved = mesh::remaptotal(weights, counts);
+    const std::vector<double> reference = mesh::remaptotal(weights, exact);
+    long long movedtotal = 0;
+    for (mesh::CellId d = 0; d < latlon->cellcount(); d++)
+    {
+        // Rounded, not truncated: a share of 999.7 is 1000.
+        EXPECT_EQ(moved[d], static_cast<int>(std::llround(reference[d]))) << d;
+        movedtotal += moved[d];
+    }
+    // The integer total is kept up to half a unit per destination cell.
+    EXPECT_LE(std::llabs(movedtotal - sourcetotal), static_cast<long long>(latlon->cellcount() / 2));
 }
 
 TEST(Mesh, SampleBilinearIsContinuousAcrossAFaceEdgeAndACorner)

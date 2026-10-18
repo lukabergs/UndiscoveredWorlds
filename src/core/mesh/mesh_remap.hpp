@@ -19,8 +19,10 @@
 #include "core/mesh/cell_grid.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -104,6 +106,8 @@ std::vector<T> remapmean(const RemapWeights& weights, const CellGrid& source, co
 }
 
 // Extensive fields: each source total split by its overlap shares; the global total is kept.
+// The shares are summed in double; an integer type takes the sum rounded to nearest, so an
+// integer total is exact only up to that rounding of each destination cell.
 template <typename T>
 std::vector<T> remaptotal(const RemapWeights& weights, const std::vector<T>& values)
 {
@@ -118,7 +122,10 @@ std::vector<T> remaptotal(const RemapWeights& weights, const std::vector<T>& val
             const CellId s = weights.source[e];
             total += static_cast<double>(values[s]) * (weights.area_m2[e] / weights.sourcearea_m2[s]);
         }
-        result[d] = static_cast<T>(total);
+        if constexpr (std::is_integral_v<T>)
+            result[d] = static_cast<T>(std::llround(total));
+        else
+            result[d] = static_cast<T>(total);
     }
     return result;
 }

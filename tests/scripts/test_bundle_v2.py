@@ -162,6 +162,22 @@ class BundleV2Tests(unittest.TestCase):
         self.assertEqual(different.returncode, 1)
         self.assertIn("latlon:geosphere.base_elevation", different.stdout)
 
+    def test_compare_reports_grid_and_one_sided_exports(self):
+        cube = write_cube(self.root / "cube")
+        latlon = compare(write_latlon(self.root / "latlon", latlon_fields(), SCHEMA), cube)
+        self.assertEqual(latlon.returncode, 1)
+        self.assertIn("grid.kind  left=latlon, right=cube", latlon.stdout)
+        self.assertIn("grid.face_cells", latlon.stdout)
+        # A cube bundle without its exports and cells: each entry is missing on that side.
+        stripped = write_cube(self.root / "stripped")
+        manifest = json.loads((stripped / "manifest.json").read_text(encoding="utf-8"))
+        del manifest["exports"], manifest["cells"]
+        (stripped / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        missing = compare(cube, stripped)
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("missing  latlon:geosphere.base_elevation  side=right", missing.stdout)
+        self.assertIn("missing  grid:centre  side=right", missing.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
