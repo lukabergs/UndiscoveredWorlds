@@ -442,6 +442,7 @@ Lessons:
 | `tectonics-0015` | 2026-10-17 | agent measurement against the round's criteria (fails area, median and the 3000+ band); no user look (no candidate) | keep | terrain roadmap T4.12, fourth round: orogenic collapse above an onset thickness (the missing high mountains) |
 | `tectonics-0016` | 2026-10-17 | agent measurement against the round's gate (passed by W3 at 400 Myr); the user's look pending | keep | terrain roadmap T4.12, fifth round: collapse into margins and creep below the onset (the area source kept, the interiors thickening) |
 | `tectonics-0017` | 2026-10-18 | the user's approval (2026-10-18) and the identity check; review pass with notes | keep | terrain roadmap T4.12: the baseline switch to the Earth-like W3 set at 400 Myr (approved by the user, 2026-10-18) |
+| `tectonics-0018` | 2026-10-18 | design only; the user decides | keep | terrain roadmap T8 steps 1-2: the spherical world model, survey and design (no code; awaiting the user's yes) |
 
 Lessons:
 
@@ -473,6 +474,7 @@ Lessons:
 - `tectonics-0015`: Before switching off a process, find which budget it feeds: the collapse was the area source, not only a thickness limit.
 - `tectonics-0016`: A matched control run with the new exe (W0) turns a guessed cause into a measured one: compare budget terms, not end states.
 - `tectonics-0017`: Refresh a stale step-check reference on the unchanged tree before the step, so the step's own changes are attributable.
+- `tectonics-0018`: The torus is confined to the engine: a spherical engine needs only one sampler at the hand-off, so the bundle format and the windows need not change.
 
 ## world
 
