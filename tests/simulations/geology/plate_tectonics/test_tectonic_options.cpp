@@ -8,10 +8,35 @@
 
 namespace {
 
-// The engine as world_pipeline starts it: the baseline recipe, then the scenario
-// options of the command line (--key value), on a small grid.
-void start(const std::vector<std::string>& options) {
+// The baseline recipe without its Earth-like set: those members at the engine's
+// struct defaults, so that each case below sets only the inputs of the rule it probes.
+tectonics::scenario::Scenario without_earth_set() {
     tectonics::scenario::Scenario scenario = tectonics::scenario::baseline();
+    const tectonics::scenario::Scenario defaults{};
+    scenario.continental_fraction = defaults.continental_fraction;
+    scenario.continental_root_kg_m3 = defaults.continental_root_kg_m3;
+    scenario.continental_root_max_thickness_m = defaults.continental_root_max_thickness_m;
+    scenario.continental_root_delamination_width_m = defaults.continental_root_delamination_width_m;
+    auto& margins = scenario.margin_processes;
+    const auto& legacy = defaults.margin_processes;
+    margins.rift_breakup_thickness_m = legacy.rift_breakup_thickness_m;
+    margins.continental_min_thickness_m = legacy.continental_min_thickness_m;
+    margins.sediment_subduction_fraction = legacy.sediment_subduction_fraction;
+    margins.subduction_erosion_ratio = legacy.subduction_erosion_ratio;
+    margins.continental_growth_control = legacy.continental_growth_control;
+    margins.continental_growth_per_gyr = legacy.continental_growth_per_gyr;
+    margins.continental_growth_continent_only = legacy.continental_growth_continent_only;
+    margins.continental_max_thickness_m = legacy.continental_max_thickness_m;
+    margins.orogenic_collapse_km2_myr = legacy.orogenic_collapse_km2_myr;
+    margins.orogenic_collapse_onset_thickness_m = legacy.orogenic_collapse_onset_thickness_m;
+    margins.orogenic_collapse_below_onset_km2_myr = legacy.orogenic_collapse_below_onset_km2_myr;
+    return scenario;
+}
+
+// The engine as world_pipeline starts it: the baseline recipe (or the given start),
+// then the scenario options of the command line (--key value), on a small grid.
+void start(const std::vector<std::string>& options,
+           tectonics::scenario::Scenario scenario = tectonics::scenario::baseline()) {
     scenario.width = 32;
     scenario.height = 16;
     for (size_t i = 0; i + 1 < options.size(); i += 2) {
@@ -22,28 +47,33 @@ void start(const std::vector<std::string>& options) {
     lithosphere engine(scenario);
 }
 
+// A case of a single rule: the options on the baseline without its Earth-like set.
+void probe(const std::vector<std::string>& options) {
+    start(options, without_earth_set());
+}
+
 } // namespace
 
 TEST(TectonicOptions, BaselineAndExplicitValuesStart) {
     EXPECT_NO_THROW(start({}));
-    EXPECT_NO_THROW(start({"--delta-time-myr", ".5", "--evolution-duration-myr", "2", "--transport-subdivision", "2"}));
-    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "40000", "--orogenic-collapse-km2-myr", "3000"}));
-    EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246"}));
-    EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246", "--initial-margin-width-m", "2800"}));
-    EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246", "--continental-root-max-thickness-m", "50000"}));
-    EXPECT_NO_THROW(start({"--continental-root-max-thickness-m", "0"}));
-    EXPECT_NO_THROW(start({"--continental-root-kg-m3", "246", "--continental-root-max-thickness-m", "50000",
+    EXPECT_NO_THROW(probe({"--delta-time-myr", ".5", "--evolution-duration-myr", "2", "--transport-subdivision", "2"}));
+    EXPECT_NO_THROW(probe({"--continental-max-thickness-m", "40000", "--orogenic-collapse-km2-myr", "3000"}));
+    EXPECT_NO_THROW(probe({"--continental-root-kg-m3", "246"}));
+    EXPECT_NO_THROW(probe({"--continental-root-kg-m3", "246", "--initial-margin-width-m", "2800"}));
+    EXPECT_NO_THROW(probe({"--continental-root-kg-m3", "246", "--continental-root-max-thickness-m", "50000"}));
+    EXPECT_NO_THROW(probe({"--continental-root-max-thickness-m", "0"}));
+    EXPECT_NO_THROW(probe({"--continental-root-kg-m3", "246", "--continental-root-max-thickness-m", "50000",
                            "--continental-root-delamination-width-m", "10000"}));
-    EXPECT_NO_THROW(start({"--continental-root-delamination-width-m", "0"}));
-    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
+    EXPECT_NO_THROW(probe({"--continental-root-delamination-width-m", "0"}));
+    EXPECT_NO_THROW(probe({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
                            "--orogenic-collapse-onset-thickness-m", "60000"}));
-    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
+    EXPECT_NO_THROW(probe({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
                            "--orogenic-collapse-onset-thickness-m", "34000"}));
-    EXPECT_NO_THROW(start({"--orogenic-collapse-onset-thickness-m", "0"}));
-    EXPECT_NO_THROW(start({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
+    EXPECT_NO_THROW(probe({"--orogenic-collapse-onset-thickness-m", "0"}));
+    EXPECT_NO_THROW(probe({"--continental-max-thickness-m", "34000", "--orogenic-collapse-km2-myr", "30000",
                            "--orogenic-collapse-onset-thickness-m", "65000", "--orogenic-collapse-margin-cap", "on",
                            "--orogenic-collapse-below-onset-km2-myr", "10000"}));
-    EXPECT_NO_THROW(start({"--orogenic-collapse-margin-cap", "off", "--orogenic-collapse-below-onset-km2-myr", "0"}));
+    EXPECT_NO_THROW(probe({"--orogenic-collapse-margin-cap", "off", "--orogenic-collapse-below-onset-km2-myr", "0"}));
 }
 
 // A value the option parser or the engine refuses stops the run before it starts.
@@ -103,6 +133,6 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
          "--orogenic-collapse-below-onset-km2-myr", "-1"},
     };
     for (const auto& options : cases) {
-        EXPECT_ANY_THROW(start(options)) << options[0] << ' ' << options[1];
+        EXPECT_ANY_THROW(probe(options)) << options[0] << ' ' << options[1];
     }
 }
