@@ -1,5 +1,8 @@
 #include "simulations/geology/plate_tectonics/tectonic_boundary_graph.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
+
+#include "core/mesh/mesh_geometry.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -19,20 +23,9 @@ using tectonics::contract::BoundarySegment;
 using tectonics::contract::BoundaryType;
 using tectonics::contract::CrustClass;
 using tectonics::contract::GeologicRegime;
+using tectonics::grid::TectonicGrid;
 
 constexpr double kTwoPi = 6.28318530717958647692;
-
-size_t map_index(uint32_t x, uint32_t y, uint32_t width) {
-    return static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x);
-}
-
-uint32_t wrap_prev(uint32_t value, uint32_t limit) {
-    return value > 0U ? value - 1U : limit - 1U;
-}
-
-uint32_t wrap_next(uint32_t value, uint32_t limit) {
-    return value + 1U < limit ? value + 1U : 0U;
-}
 
 uint8_t average_score(uint8_t a, uint8_t b) {
     return static_cast<uint8_t>((static_cast<uint32_t>(a) + static_cast<uint32_t>(b) + 1U) / 2U);
@@ -49,10 +42,16 @@ float wrapped_distance(float a, float b, float period) {
     return delta;
 }
 
-float centroid_distance(float x0, float y0, float x1, float y1, uint32_t width,
-                        uint32_t height) {
-    const float dx = wrapped_distance(x0, x1, static_cast<float>(width));
-    const float dy = wrapped_distance(y0, y1, static_cast<float>(height));
+// Between two segment centroids in cells: the wrapped offset on the scaffold, the great circle
+// over the cube's cell spacing on the cube (centroids as longitude and latitude).
+float centroid_distance(const TectonicGrid& grid, float x0, float y0, float x1, float y1) {
+    if (grid.kind() == TectonicGrid::Kind::cube) {
+        const double arc = mesh::greatcircle_rad(boundary_cube::decodecentroid(x0, y0),
+                                                 boundary_cube::decodecentroid(x1, y1));
+        return static_cast<float>(arc * grid.mesh()->radius_m() / boundary_cube::cellspacing_m(grid));
+    }
+    const float dx = wrapped_distance(x0, x1, static_cast<float>(grid.width()));
+    const float dy = wrapped_distance(y0, y1, static_cast<float>(grid.height()));
     return std::sqrt(dx * dx + dy * dy);
 }
 
@@ -185,26 +184,14 @@ struct CellSeed {
     float shear_motion = 0.0f;
 };
 
-CellSeed build_seed_for_cell(const Inputs& inputs, uint32_t x, uint32_t y) {
+CellSeed build_seed_for_cell(const Inputs& inputs, const TectonicGrid& grid, size_t index) {
     CellSeed best;
-    const size_t index = map_index(x, y, inputs.width);
     const uint32_t plate = inputs.plate_id[index];
-    const uint32_t neighbor_x[] = {
-        wrap_prev(x, inputs.width),
-        wrap_next(x, inputs.width),
-        x,
-        x,
-    };
-    const uint32_t neighbor_y[] = {
-        y,
-        y,
-        wrap_prev(y, inputs.height),
-        wrap_next(y, inputs.height),
-    };
+    // West, east, north, south: the torus stencil's x - 1, x + 1, y - 1, y + 1.
+    const auto neighbours = grid.neighbours(static_cast<grid::CellId>(index));
 
     for (size_t i = 0; i < 4; ++i) {
-        const size_t neighbor_index =
-            map_index(neighbor_x[i], neighbor_y[i], inputs.width);
+        const size_t neighbor_index = neighbours[i];
         const uint32_t neighbor_plate = inputs.plate_id[neighbor_index];
         if (plate == neighbor_plate) {
             continue;
@@ -265,7 +252,8 @@ const BoundarySegment* find_previous_segment(
 }
 
 uint32_t choose_persistent_id(
-    const Inputs& inputs, const std::unordered_map<uint32_t, const BoundarySegment*>& previous_by_id,
+    const Inputs& inputs, const TectonicGrid& grid,
+    const std::unordered_map<uint32_t, const BoundarySegment*>& previous_by_id,
     const std::vector<uint32_t>& component_cells, BoundaryType boundary_type, float centroid_x,
     float centroid_y, const std::unordered_set<uint32_t>& claimed_ids) {
     std::unordered_map<uint32_t, uint32_t> overlap_votes;
@@ -295,9 +283,8 @@ uint32_t choose_persistent_id(
             if (previous == nullptr || previous->boundary_type != boundary_type) {
                 continue;
             }
-            if (centroid_distance(centroid_x, centroid_y, previous->centroid_x,
-                                  previous->centroid_y, inputs.width, inputs.height) >
-                max_distance) {
+            if (centroid_distance(grid, centroid_x, centroid_y, previous->centroid_x,
+                                  previous->centroid_y) > max_distance) {
                 continue;
             }
             if (entry.second > best_votes) {
@@ -321,17 +308,26 @@ uint32_t choose_persistent_id(
 } // namespace
 
 Outputs build(const Inputs& inputs) {
-    grid::requireplanar(inputs.grid, "boundary_graph");
     Outputs outputs;
     outputs.next_boundary_id = inputs.next_boundary_id;
 
-    const size_t cell_count =
-        static_cast<size_t>(inputs.width) * static_cast<size_t>(inputs.height);
+    std::shared_ptr<const TectonicGrid> owned;
+    const TectonicGrid* grid = inputs.grid;
+    if (grid == nullptr && inputs.width != 0U && inputs.height != 0U) {
+        owned = TectonicGrid::planar(inputs.width, inputs.height, static_cast<double>(inputs.width));
+        grid = owned.get();
+    }
+    if (grid == nullptr) {
+        return outputs;
+    }
+    const bool cube = grid->kind() == TectonicGrid::Kind::cube;
+
+    const size_t cell_count = grid->cellcount();
     outputs.boundary_segment_id.assign(cell_count, contract::kNoBoundaryId);
     outputs.boundary_type.assign(cell_count, static_cast<uint8_t>(BoundaryType::None));
     outputs.boundary_regime.assign(cell_count, static_cast<uint8_t>(GeologicRegime::Stable));
 
-    if (inputs.width == 0U || inputs.height == 0U || inputs.plate_id == nullptr ||
+    if (inputs.plate_id == nullptr ||
         inputs.convergence_score == nullptr || inputs.divergence_score == nullptr ||
         inputs.shear_score == nullptr || inputs.raw_geologic_regime == nullptr ||
         inputs.crust_class == nullptr || inputs.previous_boundary_segment_id == nullptr ||
@@ -346,159 +342,158 @@ Outputs build(const Inputs& inputs) {
     }
 
     std::vector<CellSeed> seeds(cell_count);
-    for (uint32_t y = 0; y < inputs.height; ++y) {
-        for (uint32_t x = 0; x < inputs.width; ++x) {
-            seeds[map_index(x, y, inputs.width)] = build_seed_for_cell(inputs, x, y);
-        }
+    for (size_t index = 0; index < cell_count; ++index) {
+        seeds[index] = build_seed_for_cell(inputs, *grid, index);
     }
 
     std::vector<uint8_t> visited(cell_count, 0U);
     std::unordered_set<uint32_t> claimed_previous_ids;
 
-    for (uint32_t y = 0; y < inputs.height; ++y) {
-        for (uint32_t x = 0; x < inputs.width; ++x) {
-            const size_t start_index = map_index(x, y, inputs.width);
-            const CellSeed& start_seed = seeds[start_index];
-            if (!start_seed.active || visited[start_index]) {
+    for (size_t start_index = 0; start_index < cell_count; ++start_index) {
+        const CellSeed& start_seed = seeds[start_index];
+        if (!start_seed.active || visited[start_index]) {
+            continue;
+        }
+
+        std::vector<uint32_t> frontier{static_cast<uint32_t>(start_index)};
+        std::vector<uint32_t> component_cells;
+        component_cells.reserve(32);
+        std::array<uint32_t, 8> regime_counts{};
+        uint32_t continental_votes = 0U;
+        uint32_t oceanic_votes = 0U;
+        uint64_t convergence_total = 0U;
+        uint64_t divergence_total = 0U;
+        uint64_t shear_total = 0U;
+        double normal_total = 0.0;
+        double shear_total_f = 0.0;
+        // The scaffold's circular means of columns and rows; the cube's area-weighted sum of
+        // centre unit vectors.
+        double x_sin_sum = 0.0;
+        double x_cos_sum = 0.0;
+        double y_sin_sum = 0.0;
+        double y_cos_sum = 0.0;
+        mesh::Vec3 unit_sum;
+
+        while (!frontier.empty()) {
+            const uint32_t current = frontier.back();
+            frontier.pop_back();
+            if (visited[current]) {
                 continue;
             }
 
-            std::vector<uint32_t> frontier{static_cast<uint32_t>(start_index)};
-            std::vector<uint32_t> component_cells;
-            component_cells.reserve(32);
-            std::array<uint32_t, 8> regime_counts{};
-            uint32_t continental_votes = 0U;
-            uint32_t oceanic_votes = 0U;
-            uint64_t convergence_total = 0U;
-            uint64_t divergence_total = 0U;
-            uint64_t shear_total = 0U;
-            double normal_total = 0.0;
-            double shear_total_f = 0.0;
-            double x_sin_sum = 0.0;
-            double x_cos_sum = 0.0;
-            double y_sin_sum = 0.0;
-            double y_cos_sum = 0.0;
+            const CellSeed& current_seed = seeds[current];
+            if (!current_seed.active || current_seed.left_plate != start_seed.left_plate ||
+                current_seed.right_plate != start_seed.right_plate ||
+                current_seed.boundary_type != start_seed.boundary_type) {
+                continue;
+            }
 
-            while (!frontier.empty()) {
-                const uint32_t current = frontier.back();
-                frontier.pop_back();
-                if (visited[current]) {
-                    continue;
-                }
+            visited[current] = 1U;
+            component_cells.push_back(current);
+            convergence_total += current_seed.convergence_score;
+            divergence_total += current_seed.divergence_score;
+            shear_total += current_seed.shear_score;
+            normal_total += static_cast<double>(current_seed.normal_motion);
+            shear_total_f += static_cast<double>(current_seed.shear_motion);
 
-                const CellSeed& current_seed = seeds[current];
-                if (!current_seed.active || current_seed.left_plate != start_seed.left_plate ||
-                    current_seed.right_plate != start_seed.right_plate ||
-                    current_seed.boundary_type != start_seed.boundary_type) {
-                    continue;
-                }
-
-                visited[current] = 1U;
-                component_cells.push_back(current);
-                convergence_total += current_seed.convergence_score;
-                divergence_total += current_seed.divergence_score;
-                shear_total += current_seed.shear_score;
-                normal_total += static_cast<double>(current_seed.normal_motion);
-                shear_total_f += static_cast<double>(current_seed.shear_motion);
-
-                const uint32_t cx =
-                    static_cast<uint32_t>(current % inputs.width);
-                const uint32_t cy =
-                    static_cast<uint32_t>(current / inputs.width);
+            if (cube) {
+                unit_sum = unit_sum + grid->area_m2(current) * grid->mesh()->centre(current);
+            } else {
+                const uint32_t cx = static_cast<uint32_t>(current % grid->width());
+                const uint32_t cy = static_cast<uint32_t>(current / grid->width());
                 const double x_angle =
-                    kTwoPi * (static_cast<double>(cx) / static_cast<double>(inputs.width));
+                    kTwoPi * (static_cast<double>(cx) / static_cast<double>(grid->width()));
                 const double y_angle =
-                    kTwoPi * (static_cast<double>(cy) / static_cast<double>(inputs.height));
+                    kTwoPi * (static_cast<double>(cy) / static_cast<double>(grid->height()));
                 x_sin_sum += std::sin(x_angle);
                 x_cos_sum += std::cos(x_angle);
                 y_sin_sum += std::sin(y_angle);
                 y_cos_sum += std::cos(y_angle);
-
-                const GeologicRegime hint = current_seed.regime_hint;
-                const size_t regime_index = static_cast<size_t>(hint);
-                if (regime_index < regime_counts.size()) {
-                    regime_counts[regime_index] += 1U;
-                }
-
-                const CrustClass crust = crust_class_from_byte(inputs.crust_class[current]);
-                if (crust == CrustClass::Oceanic) {
-                    oceanic_votes += 1U;
-                } else if (crust == CrustClass::Continental ||
-                           crust == CrustClass::Transitional) {
-                    continental_votes += 1U;
-                }
-
-                const uint32_t neighbors[] = {
-                    static_cast<uint32_t>(
-                        map_index(wrap_prev(cx, inputs.width), cy, inputs.width)),
-                    static_cast<uint32_t>(
-                        map_index(wrap_next(cx, inputs.width), cy, inputs.width)),
-                    static_cast<uint32_t>(
-                        map_index(cx, wrap_prev(cy, inputs.height), inputs.width)),
-                    static_cast<uint32_t>(
-                        map_index(cx, wrap_next(cy, inputs.height), inputs.width)),
-                };
-                frontier.insert(frontier.end(), std::begin(neighbors), std::end(neighbors));
             }
 
-            if (component_cells.empty()) {
-                continue;
+            const GeologicRegime hint = current_seed.regime_hint;
+            const size_t regime_index = static_cast<size_t>(hint);
+            if (regime_index < regime_counts.size()) {
+                regime_counts[regime_index] += 1U;
             }
 
+            const CrustClass crust = crust_class_from_byte(inputs.crust_class[current]);
+            if (crust == CrustClass::Oceanic) {
+                oceanic_votes += 1U;
+            } else if (crust == CrustClass::Continental ||
+                       crust == CrustClass::Transitional) {
+                continental_votes += 1U;
+            }
+
+            const auto neighbors = grid->neighbours(current);
+            frontier.insert(frontier.end(), neighbors.begin(), neighbors.end());
+        }
+
+        if (component_cells.empty()) {
+            continue;
+        }
+
+        float centroid_x = 0.0f;
+        float centroid_y = 0.0f;
+        if (cube) {
+            const auto centroid = boundary_cube::encodecentroid(mesh::normalise(unit_sum));
+            centroid_x = centroid[0];
+            centroid_y = centroid[1];
+        } else {
             const double x_angle = std::atan2(x_sin_sum, x_cos_sum);
             const double y_angle = std::atan2(y_sin_sum, y_cos_sum);
-            const float centroid_x = static_cast<float>(
+            centroid_x = static_cast<float>(
                 (x_angle < 0.0 ? x_angle + kTwoPi : x_angle) / kTwoPi *
-                static_cast<double>(inputs.width));
-            const float centroid_y = static_cast<float>(
+                static_cast<double>(grid->width()));
+            centroid_y = static_cast<float>(
                 (y_angle < 0.0 ? y_angle + kTwoPi : y_angle) / kTwoPi *
-                static_cast<double>(inputs.height));
-            const uint32_t matched_id = choose_persistent_id(
-                inputs, previous_by_id, component_cells, start_seed.boundary_type, centroid_x,
-                centroid_y, claimed_previous_ids);
+                static_cast<double>(grid->height()));
+        }
+        const uint32_t matched_id = choose_persistent_id(
+            inputs, *grid, previous_by_id, component_cells, start_seed.boundary_type, centroid_x,
+            centroid_y, claimed_previous_ids);
 
-            BoundarySegment segment;
-            segment.id = matched_id != contract::kNoBoundaryId ? matched_id : outputs.next_boundary_id++;
-            segment.left_plate_id = start_seed.left_plate;
-            segment.right_plate_id = start_seed.right_plate;
-            segment.cell_count = static_cast<uint32_t>(component_cells.size());
-            segment.centroid_x = centroid_x;
-            segment.centroid_y = centroid_y;
-            segment.length_cells = static_cast<float>(component_cells.size());
-            segment.average_convergence_score = static_cast<uint8_t>(
-                convergence_total / static_cast<uint64_t>(component_cells.size()));
-            segment.average_divergence_score = static_cast<uint8_t>(
-                divergence_total / static_cast<uint64_t>(component_cells.size()));
-            segment.average_shear_score = static_cast<uint8_t>(
-                shear_total / static_cast<uint64_t>(component_cells.size()));
-            segment.average_normal_motion = static_cast<float>(
-                normal_total / static_cast<double>(component_cells.size()));
-            segment.average_shear_motion = static_cast<float>(
-                shear_total_f / static_cast<double>(component_cells.size()));
-            segment.boundary_type = start_seed.boundary_type;
-            segment.geologic_regime = finalize_segment_regime(
-                start_seed.boundary_type, regime_counts, continental_votes, oceanic_votes);
+        BoundarySegment segment;
+        segment.id = matched_id != contract::kNoBoundaryId ? matched_id : outputs.next_boundary_id++;
+        segment.left_plate_id = start_seed.left_plate;
+        segment.right_plate_id = start_seed.right_plate;
+        segment.cell_count = static_cast<uint32_t>(component_cells.size());
+        segment.centroid_x = centroid_x;
+        segment.centroid_y = centroid_y;
+        segment.length_cells = static_cast<float>(component_cells.size());
+        segment.average_convergence_score = static_cast<uint8_t>(
+            convergence_total / static_cast<uint64_t>(component_cells.size()));
+        segment.average_divergence_score = static_cast<uint8_t>(
+            divergence_total / static_cast<uint64_t>(component_cells.size()));
+        segment.average_shear_score = static_cast<uint8_t>(
+            shear_total / static_cast<uint64_t>(component_cells.size()));
+        segment.average_normal_motion = static_cast<float>(
+            normal_total / static_cast<double>(component_cells.size()));
+        segment.average_shear_motion = static_cast<float>(
+            shear_total_f / static_cast<double>(component_cells.size()));
+        segment.boundary_type = start_seed.boundary_type;
+        segment.geologic_regime = finalize_segment_regime(
+            start_seed.boundary_type, regime_counts, continental_votes, oceanic_votes);
 
-            const BoundarySegment* previous = matched_id != contract::kNoBoundaryId
-                                                  ? find_previous_segment(previous_by_id, matched_id)
-                                                  : nullptr;
-            if (previous != nullptr) {
-                segment.persistence_steps = previous->persistence_steps + 1U;
-                segment.age_myr = previous->age_myr + inputs.delta_time_myr;
-                claimed_previous_ids.insert(previous->id);
-            } else {
-                segment.persistence_steps = 1U;
-                segment.age_myr = inputs.delta_time_myr;
-            }
+        const BoundarySegment* previous = matched_id != contract::kNoBoundaryId
+                                              ? find_previous_segment(previous_by_id, matched_id)
+                                              : nullptr;
+        if (previous != nullptr) {
+            segment.persistence_steps = previous->persistence_steps + 1U;
+            segment.age_myr = previous->age_myr + inputs.delta_time_myr;
+            claimed_previous_ids.insert(previous->id);
+        } else {
+            segment.persistence_steps = 1U;
+            segment.age_myr = inputs.delta_time_myr;
+        }
 
-            outputs.segments.push_back(segment);
-            for (uint32_t cell_index : component_cells) {
-                outputs.boundary_segment_id[cell_index] = segment.id;
-                outputs.boundary_type[cell_index] =
-                    static_cast<uint8_t>(segment.boundary_type);
-                outputs.boundary_regime[cell_index] =
-                    static_cast<uint8_t>(seeds[cell_index].regime_hint);
-            }
+        outputs.segments.push_back(segment);
+        for (uint32_t cell_index : component_cells) {
+            outputs.boundary_segment_id[cell_index] = segment.id;
+            outputs.boundary_type[cell_index] =
+                static_cast<uint8_t>(segment.boundary_type);
+            outputs.boundary_regime[cell_index] =
+                static_cast<uint8_t>(seeds[cell_index].regime_hint);
         }
     }
 

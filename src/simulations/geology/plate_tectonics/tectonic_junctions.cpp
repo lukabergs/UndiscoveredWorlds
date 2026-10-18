@@ -1,6 +1,9 @@
 #include "simulations/geology/plate_tectonics/tectonic_junctions.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_kinematics.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
+
+#include "core/mesh/mesh_geometry.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -20,20 +24,25 @@ using tectonics::contract::JunctionArmType;
 using tectonics::contract::JunctionStability;
 using tectonics::contract::PlateKinematics;
 using tectonics::contract::TectonicJunction;
+using tectonics::grid::TectonicGrid;
 
 constexpr double kTwoPi = 6.28318530717958647692;
 constexpr double kPi = 3.14159265358979323846;
 constexpr int kProbePadding = 2;
 constexpr int kOrientationRadius = 6;
+// The cube's windows: discs of the scaffold windows' areas, (2 kProbePadding + 2)^2 cells
+// around a candidate vertex and (2 kOrientationRadius + 1)^2 around a junction, radii in cells.
+const double kCubeProbeRadius = (2.0 * kProbePadding + 2.0) / std::sqrt(kPi);
+const double kCubeOrientationRadius = (2.0 * kOrientationRadius + 1.0) / std::sqrt(kPi);
+
+bool on_cube(const Inputs& inputs) {
+    return inputs.grid != nullptr && inputs.grid->kind() == TectonicGrid::Kind::cube;
+}
 constexpr float kMinStabilityOrientationQuality = 0.25f;
 constexpr float kStableConstraintError = 0.25f;
 
 size_t map_index(uint32_t x, uint32_t y, uint32_t width) {
     return static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x);
-}
-
-uint32_t wrap_next(uint32_t value, uint32_t limit) {
-    return value + 1U < limit ? value + 1U : 0U;
 }
 
 uint32_t wrapped_add(uint32_t value, int offset, uint32_t limit) {
@@ -138,6 +147,7 @@ struct JunctionAccumulator {
     double x_cos_sum = 0.0;
     double y_sin_sum = 0.0;
     double y_cos_sum = 0.0;
+    mesh::Vec3 unit_sum;  // the cube: the candidate vertices' unit vectors
 };
 
 struct OrientationEstimate {
@@ -236,35 +246,53 @@ OrientationEstimate estimate_orientation(const Inputs& inputs, uint32_t segment_
         return estimate;
     }
 
-    const auto center_x = static_cast<int>(std::floor(centroid_x));
-    const auto center_y = static_cast<int>(std::floor(centroid_y));
     double x_sum = 0.0;
     double y_sum = 0.0;
     double xx_sum = 0.0;
     double xy_sum = 0.0;
     double yy_sum = 0.0;
     uint32_t sample_count = 0U;
+    const auto add_sample = [&](double dx, double dy) {
+        x_sum += dx;
+        y_sum += dy;
+        xx_sum += dx * dx;
+        xy_sum += dx * dy;
+        yy_sum += dy * dy;
+        ++sample_count;
+    };
 
-    for (int oy = -kOrientationRadius; oy <= kOrientationRadius; ++oy) {
-        for (int ox = -kOrientationRadius; ox <= kOrientationRadius; ++ox) {
-            const uint32_t x = wrapped_add(static_cast<uint32_t>(center_x), ox, inputs.width);
-            const uint32_t y = wrapped_add(static_cast<uint32_t>(center_y), oy, inputs.height);
-            if (inputs.boundary_segment_id[map_index(x, y, inputs.width)] != segment_id) {
+    if (on_cube(inputs)) {
+        // The segment's cells within the disc, as (east, north) offsets in cells in the tangent
+        // plane at the junction.
+        const TectonicGrid& grid = *inputs.grid;
+        const double spacing = boundary_cube::cellspacing_m(grid);
+        const mesh::Vec3 origin = boundary_cube::decodecentroid(centroid_x, centroid_y);
+        for (const grid::CellId c :
+             mesh::cellswithin(*grid.mesh(), origin, kCubeOrientationRadius * spacing)) {
+            if (inputs.boundary_segment_id[c] != segment_id) {
                 continue;
             }
+            const auto offset = grid.tangentoffset_m(origin, c);
+            if (std::isfinite(offset[0]) && std::isfinite(offset[1])) {
+                add_sample(offset[0] / spacing, offset[1] / spacing);
+            }
+        }
+    } else {
+        const auto center_x = static_cast<int>(std::floor(centroid_x));
+        const auto center_y = static_cast<int>(std::floor(centroid_y));
+        for (int oy = -kOrientationRadius; oy <= kOrientationRadius; ++oy) {
+            for (int ox = -kOrientationRadius; ox <= kOrientationRadius; ++ox) {
+                const uint32_t x = wrapped_add(static_cast<uint32_t>(center_x), ox, inputs.width);
+                const uint32_t y = wrapped_add(static_cast<uint32_t>(center_y), oy, inputs.height);
+                if (inputs.boundary_segment_id[map_index(x, y, inputs.width)] != segment_id) {
+                    continue;
+                }
 
-            const double dx =
-                static_cast<double>(wrapped_delta(static_cast<float>(x) + 0.5f, centroid_x,
-                                                  inputs.width));
-            const double dy =
-                static_cast<double>(wrapped_delta(static_cast<float>(y) + 0.5f, centroid_y,
-                                                  inputs.height));
-            x_sum += dx;
-            y_sum += dy;
-            xx_sum += dx * dx;
-            xy_sum += dx * dy;
-            yy_sum += dy * dy;
-            ++sample_count;
+                add_sample(static_cast<double>(wrapped_delta(static_cast<float>(x) + 0.5f,
+                                                             centroid_x, inputs.width)),
+                           static_cast<double>(wrapped_delta(static_cast<float>(y) + 0.5f,
+                                                             centroid_y, inputs.height)));
+            }
         }
     }
 
@@ -321,6 +349,12 @@ bool gather_plate_kinematics(const Inputs& inputs, const TectonicJunction& junct
             !std::isfinite(plates[i]->mass_center_y)) {
             return false;
         }
+        if (on_cube(inputs) && inputs.plate_rotation != nullptr) {
+            const mesh::Vec3& rotation = inputs.plate_rotation[junction.plate_ids[i]];
+            if (!std::isfinite(rotation.x) || !std::isfinite(rotation.y) || !std::isfinite(rotation.z)) {
+                return false;
+            }
+        }
     }
     return true;
 }
@@ -329,6 +363,16 @@ std::array<Vec2, 3> local_plate_velocities(
     const Inputs& inputs, const TectonicJunction& junction,
     const std::array<const PlateKinematics*, 3>& plates) {
     std::array<Vec2, 3> velocities{};
+    if (on_cube(inputs)) {
+        // omega x p at the junction, (east, north) in cells per update.
+        const mesh::Vec3 p = boundary_cube::decodecentroid(junction.centroid_x, junction.centroid_y);
+        for (size_t i = 0; i < velocities.size(); ++i) {
+            const auto v = boundary_cube::velocity(*inputs.grid, inputs.plate_rotation,
+                                                   junction.plate_ids[i], inputs.plate_count, p);
+            velocities[i] = Vec2{v[0], v[1]};
+        }
+        return velocities;
+    }
     for (size_t i = 0; i < velocities.size(); ++i) {
         velocities[i] =
             local_plate_velocity(*plates[i], junction.centroid_x, junction.centroid_y,
@@ -610,16 +654,55 @@ void populate_stability_diagnostics(const Inputs& inputs, TectonicJunction& junc
     }
 }
 
+// The cells around one mesh vertex: four, or three at a cube corner (nocell last).
+struct Vertex {
+    std::array<grid::CellId, 4> cells{grid::nocell, grid::nocell, grid::nocell, grid::nocell};
+    uint32_t count = 0U;
+};
+
+// The cube's vertices, each once: cell c's corner k (NE, SE, SW, NW in c's frame) is taken
+// from the smallest id among the cells that share it.
+std::vector<Vertex> cube_vertices(const TectonicGrid& grid) {
+    static constexpr std::array<std::array<uint8_t, 2>, 4> kCornerSides{{
+        {grid::north, grid::east}, {grid::east, grid::south},
+        {grid::south, grid::west}, {grid::west, grid::north}}};
+    static constexpr std::array<int, 4> kCornerSlot{2, 4, 6, 8};
+    std::vector<Vertex> vertices;
+    vertices.reserve(grid.cellcount() + 2U);
+    for (grid::CellId c = 0; c < grid.cellcount(); ++c) {
+        for (size_t k = 0; k < kCornerSlot.size(); ++k) {
+            Vertex vertex;
+            vertex.cells[0] = c;
+            vertex.cells[1] = grid.neighbour(c, kCornerSides[k][0]);
+            vertex.cells[2] = grid.neighbour(c, kCornerSides[k][1]);
+            vertex.count = 3U;
+            const std::int32_t diagonal = grid.mesh()->neighbour(c, kCornerSlot[k]);
+            if (diagonal >= 0) vertex.cells[vertex.count++] = static_cast<grid::CellId>(diagonal);
+            if (*std::min_element(vertex.cells.begin(), vertex.cells.begin() + vertex.count) == c) {
+                vertices.push_back(vertex);
+            }
+        }
+    }
+    return vertices;
+}
+
 } // namespace
 
-Outputs build(const Inputs& inputs) {
-    grid::requireplanar(inputs.grid, "tectonic_junctions");
+Outputs build(const Inputs& given) {
     Outputs outputs;
-    if (inputs.width == 0U || inputs.height == 0U || inputs.plate_id == nullptr ||
+    std::shared_ptr<const TectonicGrid> owned;
+    Inputs inputs = given;
+    if (inputs.grid == nullptr && inputs.width != 0U && inputs.height != 0U) {
+        owned = TectonicGrid::planar(inputs.width, inputs.height, static_cast<double>(inputs.width));
+        inputs.grid = owned.get();
+    }
+    if (inputs.grid == nullptr || inputs.plate_id == nullptr ||
         inputs.boundary_segment_id == nullptr || inputs.boundary_segments == nullptr ||
         inputs.boundary_segment_count == 0U) {
         return outputs;
     }
+    const TectonicGrid& grid = *inputs.grid;
+    const bool cube = on_cube(inputs);
 
     std::unordered_map<uint32_t, const BoundarySegment*> segments_by_id;
     std::map<std::pair<uint32_t, uint32_t>, uint32_t> unique_pair_segments;
@@ -637,94 +720,121 @@ Outputs build(const Inputs& inputs) {
     }
 
     std::unordered_set<uint32_t> represented_segments;
-    const size_t cell_count = static_cast<size_t>(inputs.width) * inputs.height;
+    const size_t cell_count = grid.cellcount();
     for (size_t i = 0; i < cell_count; ++i) {
         if (inputs.boundary_segment_id[i] != contract::kNoBoundaryId) {
             represented_segments.insert(inputs.boundary_segment_id[i]);
         }
     }
 
+    // The candidate vertices: the scaffold's south-east corner of every cell (x, y), (x + 1, y),
+    // (x, y + 1), (x + 1, y + 1); the cube's vertices, three cells at a cube corner.
+    std::vector<Vertex> vertices;
+    if (cube) {
+        vertices = cube_vertices(grid);
+    } else {
+        vertices.resize(cell_count);
+        for (grid::CellId c = 0; c < cell_count; ++c) {
+            const grid::CellId south = grid.neighbour(c, grid::south);
+            vertices[c].cells = {c, grid.neighbour(c, grid::east), south, grid.neighbour(south, grid::east)};
+            vertices[c].count = 4U;
+        }
+    }
+    const double spacing = cube ? boundary_cube::cellspacing_m(grid) : 0.0;
+
     std::map<JunctionKey, JunctionAccumulator> candidates;
-    for (uint32_t y = 0; y < inputs.height; ++y) {
-        for (uint32_t x = 0; x < inputs.width; ++x) {
-            std::array<uint32_t, 4> neighborhood_plates{};
-            uint32_t neighborhood_plate_count = 0U;
-            const uint32_t x1 = wrap_next(x, inputs.width);
-            const uint32_t y1 = wrap_next(y, inputs.height);
-            const uint32_t indices[] = {
-                static_cast<uint32_t>(map_index(x, y, inputs.width)),
-                static_cast<uint32_t>(map_index(x1, y, inputs.width)),
-                static_cast<uint32_t>(map_index(x, y1, inputs.width)),
-                static_cast<uint32_t>(map_index(x1, y1, inputs.width)),
-            };
-            for (uint32_t index : indices) {
-                if (!add_unique_plate(neighborhood_plates, neighborhood_plate_count,
-                                      inputs.plate_id[index])) {
-                    break;
-                }
+    for (const Vertex& vertex : vertices) {
+        std::array<uint32_t, 4> neighborhood_plates{};
+        uint32_t neighborhood_plate_count = 0U;
+        for (uint32_t i = 0; i < vertex.count; ++i) {
+            if (!add_unique_plate(neighborhood_plates, neighborhood_plate_count,
+                                  inputs.plate_id[vertex.cells[i]])) {
+                break;
             }
-            if (neighborhood_plate_count != 3U) {
-                continue;
+        }
+        if (neighborhood_plate_count != 3U) {
+            continue;
+        }
+
+        std::array<uint32_t, 3> plate_ids{
+            neighborhood_plates[0],
+            neighborhood_plates[1],
+            neighborhood_plates[2],
+        };
+        std::sort(plate_ids.begin(), plate_ids.end());
+
+        std::array<std::map<uint32_t, uint32_t>, 3> segment_votes;
+        const auto vote = [&](size_t index) {
+            const uint32_t segment_id = inputs.boundary_segment_id[index];
+            if (segment_id == contract::kNoBoundaryId) {
+                return;
             }
-
-            std::array<uint32_t, 3> plate_ids{
-                neighborhood_plates[0],
-                neighborhood_plates[1],
-                neighborhood_plates[2],
-            };
-            std::sort(plate_ids.begin(), plate_ids.end());
-
-            std::array<std::map<uint32_t, uint32_t>, 3> segment_votes;
+            const auto found = segments_by_id.find(segment_id);
+            if (found == segments_by_id.end()) {
+                return;
+            }
+            const int slot = pair_slot(*found->second, plate_ids);
+            if (slot >= 0) {
+                segment_votes[static_cast<size_t>(slot)][segment_id] += 1U;
+            }
+        };
+        mesh::Vec3 point;
+        if (cube) {
+            for (uint32_t i = 0; i < vertex.count; ++i) {
+                point = point + grid.mesh()->centre(vertex.cells[i]);
+            }
+            point = mesh::normalise(point);
+            for (const grid::CellId c : mesh::cellswithin(*grid.mesh(), point, kCubeProbeRadius * spacing)) {
+                vote(c);
+            }
+        } else {
+            const uint32_t x = vertex.cells[0] % grid.width();
+            const uint32_t y = vertex.cells[0] / grid.width();
             for (int oy = -kProbePadding; oy <= kProbePadding + 1; ++oy) {
                 for (int ox = -kProbePadding; ox <= kProbePadding + 1; ++ox) {
                     const uint32_t sx = wrapped_add(x, ox, inputs.width);
                     const uint32_t sy = wrapped_add(y, oy, inputs.height);
-                    const uint32_t segment_id =
-                        inputs.boundary_segment_id[map_index(sx, sy, inputs.width)];
-                    if (segment_id == contract::kNoBoundaryId) {
-                        continue;
-                    }
-                    const auto found = segments_by_id.find(segment_id);
-                    if (found == segments_by_id.end()) {
-                        continue;
-                    }
-                    const int slot = pair_slot(*found->second, plate_ids);
-                    if (slot >= 0) {
-                        segment_votes[static_cast<size_t>(slot)][segment_id] += 1U;
-                    }
+                    vote(map_index(sx, sy, inputs.width));
                 }
             }
+        }
 
-            JunctionKey key;
-            key.plate_ids = plate_ids;
+        JunctionKey key;
+        key.plate_ids = plate_ids;
+        for (size_t i = 0; i < key.boundary_segment_ids.size(); ++i) {
+            key.boundary_segment_ids[i] = choose_segment_id(segment_votes[i]);
+        }
+        // A raster cell stores one segment, so a triple contact can lose
+        // one arm. Recover only a unique graph edge absent from the entire
+        // raster; never borrow a represented remote edge or guess between IDs.
+        if (std::count(key.boundary_segment_ids.begin(), key.boundary_segment_ids.end(),
+                       contract::kNoBoundaryId) == 1) {
             for (size_t i = 0; i < key.boundary_segment_ids.size(); ++i) {
-                key.boundary_segment_ids[i] = choose_segment_id(segment_votes[i]);
-            }
-            // A raster cell stores one segment, so a triple contact can lose
-            // one arm. Recover only a unique graph edge absent from the entire
-            // raster; never borrow a represented remote edge or guess between IDs.
-            if (std::count(key.boundary_segment_ids.begin(), key.boundary_segment_ids.end(),
-                           contract::kNoBoundaryId) == 1) {
-                for (size_t i = 0; i < key.boundary_segment_ids.size(); ++i) {
-                    if (key.boundary_segment_ids[i] != contract::kNoBoundaryId) {
-                        continue;
-                    }
-                    const auto pair = kArmPlatePairs[i];
-                    const auto found = unique_pair_segments.find(
-                        {plate_ids[pair[0]], plate_ids[pair[1]]});
-                    if (found != unique_pair_segments.end() &&
-                        represented_segments.count(found->second) == 0U) {
-                        key.boundary_segment_ids[i] = found->second;
-                    }
+                if (key.boundary_segment_ids[i] != contract::kNoBoundaryId) {
+                    continue;
+                }
+                const auto pair = kArmPlatePairs[i];
+                const auto found = unique_pair_segments.find(
+                    {plate_ids[pair[0]], plate_ids[pair[1]]});
+                if (found != unique_pair_segments.end() &&
+                    represented_segments.count(found->second) == 0U) {
+                    key.boundary_segment_ids[i] = found->second;
                 }
             }
-            if (key.boundary_segment_ids[0] == contract::kNoBoundaryId ||
-                key.boundary_segment_ids[1] == contract::kNoBoundaryId ||
-                key.boundary_segment_ids[2] == contract::kNoBoundaryId) {
-                continue;
-            }
+        }
+        if (key.boundary_segment_ids[0] == contract::kNoBoundaryId ||
+            key.boundary_segment_ids[1] == contract::kNoBoundaryId ||
+            key.boundary_segment_ids[2] == contract::kNoBoundaryId) {
+            continue;
+        }
 
-            add_candidate_position(candidates[key], x, y, inputs.width, inputs.height);
+        JunctionAccumulator& accumulator = candidates[key];
+        if (cube) {
+            accumulator.unit_sum = accumulator.unit_sum + point;
+            ++accumulator.candidate_count;
+        } else {
+            add_candidate_position(accumulator, vertex.cells[0] % grid.width(),
+                                   vertex.cells[0] / grid.width(), inputs.width, inputs.height);
         }
     }
 
@@ -734,10 +844,16 @@ Outputs build(const Inputs& inputs) {
         TectonicJunction junction;
         junction.id = next_id++;
         junction.candidate_cell_count = candidate.second.candidate_count;
-        junction.centroid_x =
-            circular_centroid(candidate.second.x_sin_sum, candidate.second.x_cos_sum, inputs.width);
-        junction.centroid_y =
-            circular_centroid(candidate.second.y_sin_sum, candidate.second.y_cos_sum, inputs.height);
+        if (cube) {
+            const auto centroid = boundary_cube::encodecentroid(mesh::normalise(candidate.second.unit_sum));
+            junction.centroid_x = centroid[0];
+            junction.centroid_y = centroid[1];
+        } else {
+            junction.centroid_x =
+                circular_centroid(candidate.second.x_sin_sum, candidate.second.x_cos_sum, inputs.width);
+            junction.centroid_y =
+                circular_centroid(candidate.second.y_sin_sum, candidate.second.y_cos_sum, inputs.height);
+        }
         junction.quality_score =
             std::min(1.0f, static_cast<float>(candidate.second.candidate_count) / 4.0f);
 

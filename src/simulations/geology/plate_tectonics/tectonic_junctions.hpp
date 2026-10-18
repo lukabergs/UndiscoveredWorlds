@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+namespace mesh { struct Vec3; }
 namespace tectonics::grid { class TectonicGrid; }
 namespace tectonics::tectonic_junctions {
 
@@ -20,6 +21,10 @@ struct Inputs {
     uint32_t plate_count = 0;
     // The engine's cell table (W2-E); null for synthetic inputs, which use width x height.
     const grid::TectonicGrid* grid = nullptr;
+    // Cube only: per plate the rotation vector in radians per update (null: every plate at
+    // rest). On the cube centroids are longitude and latitude in degrees and the strikes and
+    // velocities (east, north) at the junction, velocities in cells per update.
+    const mesh::Vec3* plate_rotation = nullptr;
 };
 
 struct Outputs {

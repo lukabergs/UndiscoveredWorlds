@@ -1,5 +1,8 @@
 #include "simulations/geology/plate_tectonics/tectonic_junction_coupling.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
+
+#include "core/mesh/mesh_geometry.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -119,21 +122,71 @@ void clamp_tension_vectors(Outputs& outputs) {
     }
 }
 
+// One junction's influence at one cell, at distance (cells) and with the direction away from the
+// junction (zero length: the fallback).
+struct Strengths {
+    float radius = 0.0f, rift = 0.0f, transform = 0.0f, subduction = 0.0f;
+    Vec2 fallback_direction;
+};
+
+void apply(const Strengths& strengths, size_t index, float distance, Vec2 away, Outputs& outputs) {
+    const float falloff = clamp_unit(1.0f - distance / (strengths.radius + 0.5f));
+    const float local_weight = falloff * falloff;
+    outputs.rift_influence[index] =
+        std::max(outputs.rift_influence[index], local_weight * strengths.rift);
+    outputs.transform_influence[index] =
+        std::max(outputs.transform_influence[index],
+                 local_weight * strengths.transform);
+    outputs.subduction_influence[index] =
+        std::max(outputs.subduction_influence[index],
+                 local_weight * strengths.subduction);
+
+    if (strengths.rift <= 0.0f) {
+        return;
+    }
+    Vec2 direction = normalized(away);
+    if (length(direction) <= 0.0f) {
+        direction = strengths.fallback_direction;
+    }
+    const float tension = local_weight * strengths.rift;
+    outputs.rift_tension_x[index] += direction.x * tension;
+    outputs.rift_tension_y[index] += direction.y * tension;
+}
+
+// The cube: the cells within the radius (great circle over the cell spacing) of the junction
+// (longitude, latitude), the tension (east, north) at each cell pointing away from it.
+void apply_cube(const grid::TectonicGrid& grid, const TectonicJunction& junction,
+                const Strengths& strengths, Outputs& outputs) {
+    const double spacing = boundary_cube::cellspacing_m(grid);
+    const double cells_per_radian = grid.mesh()->radius_m() / spacing;
+    const mesh::Vec3 p = boundary_cube::decodecentroid(junction.centroid_x, junction.centroid_y);
+    for (const grid::CellId c :
+         mesh::cellswithin(*grid.mesh(), p, static_cast<double>(strengths.radius) * spacing)) {
+        const mesh::Vec3 q = grid.mesh()->centre(c);
+        const float distance = static_cast<float>(mesh::greatcircle_rad(p, q) * cells_per_radian);
+        if (distance > strengths.radius) {
+            continue;
+        }
+        const auto away = boundary_cube::eastnorth(q, cells_per_radian * (mesh::dot(p, q) * q - p));
+        apply(strengths, c, distance, Vec2{static_cast<float>(away[0]), static_cast<float>(away[1])},
+              outputs);
+    }
+}
+
 } // namespace
 
 Outputs build(const Inputs& inputs) {
-    grid::requireplanar(inputs.grid, "tectonic_junction_coupling");
     Outputs outputs;
-    const size_t cell_count =
-        static_cast<size_t>(inputs.width) * static_cast<size_t>(inputs.height);
+    const bool cube = inputs.grid != nullptr && inputs.grid->kind() == grid::TectonicGrid::Kind::cube;
+    const size_t cell_count = cube ? inputs.grid->cellcount()
+        : static_cast<size_t>(inputs.width) * static_cast<size_t>(inputs.height);
     outputs.rift_influence.assign(cell_count, 0.0f);
     outputs.transform_influence.assign(cell_count, 0.0f);
     outputs.subduction_influence.assign(cell_count, 0.0f);
     outputs.rift_tension_x.assign(cell_count, 0.0f);
     outputs.rift_tension_y.assign(cell_count, 0.0f);
 
-    if (inputs.width == 0U || inputs.height == 0U || inputs.junctions == nullptr ||
-        inputs.junction_count == 0U) {
+    if (cell_count == 0U || inputs.junctions == nullptr || inputs.junction_count == 0U) {
         return outputs;
     }
 
@@ -156,15 +209,25 @@ Outputs build(const Inputs& inputs) {
             continue;
         }
 
-        const float radius =
+        Strengths strengths;
+        strengths.radius =
             2.5f + 4.5f * clamp_unit(std::max(junction.quality_score,
                                               junction.geometry_quality_score));
+        strengths.rift = rift_strength;
+        strengths.transform = transform_strength;
+        strengths.subduction = subduction_strength;
+        strengths.fallback_direction = fallback_rift_direction(junction);
+        if (cube) {
+            apply_cube(*inputs.grid, junction, strengths, outputs);
+            continue;
+        }
+
+        const float radius = strengths.radius;
         const int cell_radius = static_cast<int>(std::ceil(radius));
         const uint32_t center_x =
             wrapped_add(0U, static_cast<int>(std::floor(junction.centroid_x)), inputs.width);
         const uint32_t center_y =
             wrapped_add(0U, static_cast<int>(std::floor(junction.centroid_y)), inputs.height);
-        const Vec2 fallback_direction = fallback_rift_direction(junction);
 
         for (int oy = -cell_radius; oy <= cell_radius; ++oy) {
             for (int ox = -cell_radius; ox <= cell_radius; ++ox) {
@@ -180,29 +243,7 @@ Outputs build(const Inputs& inputs) {
                 if (distance > radius) {
                     continue;
                 }
-
-                const float falloff = clamp_unit(1.0f - distance / (radius + 0.5f));
-                const float local_weight = falloff * falloff;
-                const size_t index = map_index(x, y, inputs.width);
-                outputs.rift_influence[index] =
-                    std::max(outputs.rift_influence[index], local_weight * rift_strength);
-                outputs.transform_influence[index] =
-                    std::max(outputs.transform_influence[index],
-                             local_weight * transform_strength);
-                outputs.subduction_influence[index] =
-                    std::max(outputs.subduction_influence[index],
-                             local_weight * subduction_strength);
-
-                if (rift_strength <= 0.0f) {
-                    continue;
-                }
-                Vec2 direction = normalized(Vec2{dx, dy});
-                if (length(direction) <= 0.0f) {
-                    direction = fallback_direction;
-                }
-                const float tension = local_weight * rift_strength;
-                outputs.rift_tension_x[index] += direction.x * tension;
-                outputs.rift_tension_y[index] += direction.y * tension;
+                apply(strengths, map_index(x, y, inputs.width), distance, Vec2{dx, dy}, outputs);
             }
         }
     }

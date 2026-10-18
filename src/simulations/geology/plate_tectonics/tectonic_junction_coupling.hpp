@@ -15,6 +15,8 @@ struct Inputs {
     const contract::TectonicJunction* junctions = nullptr;
     uint32_t junction_count = 0;
     // The engine's cell table (W2-E); null for synthetic inputs, which use width x height.
+    // On the cube junction centroids are longitude and latitude in degrees and the rift
+    // tension (east, north) at each cell.
     const grid::TectonicGrid* grid = nullptr;
 };
 

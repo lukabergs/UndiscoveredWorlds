@@ -3,6 +3,7 @@
 #endif
 
 #include "gtest/gtest.h"
+#include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_junction_coupling.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_junctions.hpp"
 
@@ -478,16 +479,81 @@ TEST(TectonicJunctions, RequiresAllThreeIncidentBoundarySegments) {
     EXPECT_TRUE(output.junctions.empty());
 }
 
-TEST(TectonicJunctions, MergesWrappedWorldCandidateCellsAtSeam) {
-    const SyntheticJunctionInput input = make_wrapped_candidate_input();
+TEST(TectonicJunctions, MergesCubeCandidateCellsAcrossAFaceEdge) {
+    // The wrapped pattern of make_wrapped_candidate_input on an N 12 cube: its columns 6..11
+    // are face 0's, columns 0..5 face 1's (the same rows), so the seam is the face 0 / face 1
+    // edge at 45 E.
+    constexpr int N = 12;
+    const auto table = tectonics::grid::TectonicGrid::cube(N, 6371.0);
+    const SyntheticJunctionInput planar = make_wrapped_candidate_input();
+    const auto cell = [&](uint32_t x, uint32_t y) {
+        return static_cast<size_t>(x >= 6U ? 0 : N * N) + static_cast<size_t>(y) * N + x;
+    };
+    std::vector<uint32_t> plate_id(table->cellcount(), 0U);
+    std::vector<uint32_t> segment_id(table->cellcount(), tectonics::contract::kNoBoundaryId);
+    for (uint32_t y = 0; y < planar.height; ++y)
+        for (uint32_t x = 0; x < planar.width; ++x) {
+            plate_id[cell(x, y)] = planar.plate_id[index_of(x, y, planar.width)];
+            segment_id[cell(x, y)] = planar.boundary_segment_id[index_of(x, y, planar.width)];
+        }
+    std::vector<PlateKinematics> plates(3);
+    // Every plate turns eastward about +Z at one cell per update on the equator.
+    const double spacing = std::sqrt(table->totalarea_m2() / static_cast<double>(table->cellcount()));
+    const std::vector<mesh::Vec3> rotation(3, mesh::Vec3{0.0, 0.0, spacing / 6371000.0});
+    const tectonics::tectonic_junctions::Inputs inputs{
+        0, 0, plate_id.data(), segment_id.data(), planar.segments.data(),
+        static_cast<uint32_t>(planar.segments.size()), plates.data(), 3U, table.get(),
+        rotation.data()};
 
-    const tectonics::tectonic_junctions::Outputs output = build(input);
+    const tectonics::tectonic_junctions::Outputs output = tectonics::tectonic_junctions::build(inputs);
 
     ASSERT_EQ(output.junctions.size(), 1U);
     const auto& junction = output.junctions.front();
-    EXPECT_GE(junction.candidate_cell_count, 2U);
-    EXPECT_TRUE(junction.centroid_x < 1.0f ||
-                junction.centroid_x > static_cast<float>(input.width) - 1.0f);
+    // The torus's four candidate vertices: one on the face edge (cells of both faces), three
+    // on face 1, merged into one junction between 45 E and the third column (60 E).
+    EXPECT_EQ(junction.candidate_cell_count, 4U);
+    EXPECT_EQ(junction.plate_ids[0], 0U);
+    EXPECT_EQ(junction.plate_ids[1], 1U);
+    EXPECT_EQ(junction.plate_ids[2], 2U);
+    EXPECT_EQ(junction.boundary_segment_ids[0], 10U);
+    EXPECT_EQ(junction.boundary_segment_ids[1], 20U);
+    EXPECT_EQ(junction.boundary_segment_ids[2], 30U);
+    EXPECT_GT(junction.centroid_x, 45.0f);
+    EXPECT_LT(junction.centroid_x, 60.0f);
+    EXPECT_GT(junction.centroid_y, 0.0f);
+    EXPECT_LT(junction.centroid_y, 7.5f);
+    // The common rotation's velocity at the junction: east at cos(latitude) cells per update.
+    const float latitude = junction.centroid_y * 3.14159265f / 180.0f;
+    EXPECT_NEAR(junction.junction_velocity_x, std::cos(latitude), 1e-4f);
+    EXPECT_NEAR(junction.junction_velocity_y, 0.0f, 1e-4f);
+}
+
+TEST(TectonicJunctionCoupling, CubeRiftTensionPointsAwayAcrossAFaceEdge) {
+    constexpr int N = 12;
+    const auto table = tectonics::grid::TectonicGrid::cube(N, 6371.0);
+    TectonicJunction junction =
+        synthetic_junction(JunctionStability::Stable, JunctionArmType::Ridge,
+                           JunctionArmType::Ridge, JunctionArmType::Ridge);
+    // The vertex of face 0's column 11 and face 1's column 0 at rows 5 / 6 (the equator).
+    junction.centroid_x = 45.0f;
+    junction.centroid_y = 0.0f;
+    const tectonics::tectonic_junction_coupling::Inputs input{0U, 0U, &junction, 1U, table.get()};
+
+    const tectonics::tectonic_junction_coupling::Outputs output =
+        tectonics::tectonic_junction_coupling::build(input);
+
+    ASSERT_EQ(output.rift_influence.size(), table->cellcount());
+    const size_t face0 = 5U * N + 11U;              // north-west of the vertex
+    const size_t face1 = static_cast<size_t>(N * N) + 5U * N;  // north-east of the vertex
+    ASSERT_EQ(table->neighbour(static_cast<tectonics::grid::CellId>(face0), tectonics::grid::east), face1);
+    EXPECT_GT(output.rift_influence[face0], 0.0f);
+    EXPECT_GT(output.rift_influence[face1], 0.0f);
+    EXPECT_NEAR(output.rift_influence[face0], output.rift_influence[face1], 1e-5f);
+    EXPECT_LT(output.rift_tension_x[face0], 0.0f);
+    EXPECT_GT(output.rift_tension_x[face1], 0.0f);
+    EXPECT_GT(output.rift_tension_y[face0], 0.0f);
+    EXPECT_GT(output.rift_tension_y[face1], 0.0f);
+    EXPECT_EQ(output.rift_influence[3U * N * N], 0.0f);  // face 3, far away
 }
 
 TEST(TectonicJunctions, UsesWrappedCentroidForAngularLocalVelocity) {
