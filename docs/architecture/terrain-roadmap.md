@@ -275,6 +275,18 @@ Quantile gaps: v3 454 m, v7 411, v7b 405, v7d 315 (run 62 522, the base world 42
 
 **Blocked until the research returns:** T1.1 (sea-floor follow-up), T1.8 (submarine canyons and fans: the same morphology), T2.3 (sea floor and trenches as a global stage; with it T5's C4 depth bands), the sea-floor part of T2.0's design, and the drawing side of T4.3 (the engine side, ocean area and spreading rate, can be surveyed). Not blocked: T1.2 to T1.7 (land and coasts), T2.1, T2.2 (its sea-floor share follows the research), T2.4 to T2.8, T3, T4.2 (the engine rule; its sea-floor drawing waits), T4.4 to T4.8, T5.
 
+### Repository hygiene and storage automation (the user, 2026-10-18; next session's first task)
+
+The user's requirements, in their words where it matters: keep only the ESSENTIAL files on C, everything else straight to D; "this should be SCRIPTED, that is, AUTOMATED. No decision up to the agent if it can be avoidable."
+
+- **A repository structure enforcer**: a script (beside `scripts/check_layout.py` and `scripts/repository_scope.py`, run by a hook) that refuses arbitrarily named folders, per-run HTML outside `scripts/evaluation/` rendering, and files in places the layout does not name; agents drift over time.
+- **One naming scheme for experiments**: today's labels grew ad hoc (`v19`, `v20` = sandbox config versions; `t12`..`t23` = roadmap T1 rounds; `base-vN` = base worlds; `UV`, `W` = engine rounds) and live in three places (`runs/<module>/<id>` registered runs, `out/evaluation` rendered evaluations, `out/scratch` unregistered experiments). A design should give one place and one id scheme (the registry's numeric ids) with a readable tag.
+- **Archive without regenerable files**: keep the `.npy` fields, manifests and metrics JSON of an old run; delete the PNGs and pages that scripts can re-render from them (a `scripts/uwtools` command with a dry run and a receipt).
+- **Automatic moves**: when a new run of a topic is made, the previous one goes to D (or the archive) by script; image outputs that no numerical check reads are written to D directly. Note: `out/scratch` and `out/evaluation` are already junctions to D (so every sandbox and evaluation file already lands on D); what stays on C is the code, `out/build`, the `.venv` and `refs/` (44 GB, kept on C so far for the 2026-10-07 loss: a decision for the user).
+- `out/scratch.storage-migration-backup` (26 GB on C): every one of its 187,691 files was verified identical to `D:/dev/undiscovered-worlds/out/scratch` by `storage.py check out/scratch` (the user's run, 2026-10-18); no file is unique to it. The user may delete it by hand (`storage.py finish` did not complete for them); `storage.py` should mark the receipt complete when the folder is gone.
+
+**Left unfinished on 2026-10-18 (the session ended):** the worker's review fixes of `850170a` are in the working tree, uncommitted, unbuilt and untested (README.md, pipeline-tooling.md, tectonic-output-contract.md, ENGINE_FINDINGS.md, tectonics_coastal_review.py, terrain_sandbox.py, test_tectonic_options.cpp): build, run the TectonicOptions ctest (log to a file), save the parameter/access/layout check output to `out/scratch/later-float/w3-baseline-checks.txt`, commit. The confirming render `t23-v9-defaults` stopped before G-coast (global, B, F, G done; no page): re-run G-coast only (`--domains G-coast`, label t23-v9-defaults) and build the page. Open for the user: register a new tectonics baseline run (runs/registry/tectonics.json still names run 78, recipe v3, 600 Myr).
+
 ## 5. Status
 
 | Id | Status | Commit | Duration |
