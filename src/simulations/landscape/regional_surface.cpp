@@ -319,21 +319,24 @@ public:
     CellSample samplecube(const mesh::Vec3& centre, double warpx, double warpy, int n0) const
     {
         const mesh::CellGrid& grid = *inputs_.grid;
-        const auto gather = [&](const std::vector<float>& field, const mesh::Vec3& p) {
-            return mesh::applystencil(mesh::cubicstencil(n0, p),
-                                      [&](mesh::LevelKey key) { return field[grid.localofkey(key)]; });
+        // G at the centre and at the warped point, each stencil built once and applied to every field.
+        const mesh::KeyStencil atcentre = mesh::cubicstencil(n0, centre);
+        mesh::KeyStencil atwarped;
+        const auto apply = [&](const std::vector<float>& field, const mesh::KeyStencil& stencil) {
+            return mesh::applystencil(stencil, [&](mesh::LevelKey key) { return field[grid.localofkey(key)]; });
         };
         const double sealevel = static_cast<double>(inputs_.sealevel);
         CellSample cell;
-        cell.lapsebase = static_cast<float>(gather(inputs_.elevation_m, centre));
+        cell.lapsebase = static_cast<float>(apply(inputs_.elevation_m, atcentre));
         double fade = 1.0;
         if (parameters_.warp.fade_m > 0.0)
             fade = std::clamp(1.0 - std::fabs(static_cast<double>(cell.lapsebase) - sealevel) / parameters_.warp.fade_m,
                               0.0, 1.0);
         const mesh::Vec3 warped = warpedpoint(centre, fade * warpx, fade * warpy, inputs_.radius_m, n0);
-        cell.base = warpx == 0.0 && warpy == 0.0 ? cell.lapsebase : static_cast<float>(gather(inputs_.elevation_m, warped));
-        const float relief = static_cast<float>(gather(relief_, centre));
-        const float noiserelief = noiserelief_.empty() ? relief : static_cast<float>(gather(noiserelief_, centre));
+        atwarped = fade * warpx == 0.0 && fade * warpy == 0.0 ? atcentre : mesh::cubicstencil(n0, warped);
+        cell.base = warpx == 0.0 && warpy == 0.0 ? cell.lapsebase : static_cast<float>(apply(inputs_.elevation_m, atwarped));
+        const float relief = static_cast<float>(apply(relief_, atcentre));
+        const float noiserelief = noiserelief_.empty() ? relief : static_cast<float>(apply(noiserelief_, atcentre));
         float banded = cell.base;
         if (band_->resolved() > 0)
         {
@@ -348,13 +351,13 @@ public:
         cell.surface = banded;
         if (coastnoise_)
         {
-            const double weight = std::clamp(gather(coastal_, warped), 0.0, 1.0);
+            const double weight = std::clamp(apply(coastal_, atwarped), 0.0, 1.0);
             double amplitude = parameters_.coast.noiseamplitude_m +
                                parameters_.coast.noiserelieffraction * std::max(0.0, static_cast<double>(relief));
             if (factors_.active)
             {
-                amplitude += std::max(0.0, gather(factors_.amplitude_m, warped));
-                cell.dropfactor = static_cast<float>(std::clamp(gather(factors_.dropfactor, warped), 0.0, 1.0));
+                amplitude += std::max(0.0, apply(factors_.amplitude_m, atwarped));
+                cell.dropfactor = static_cast<float>(std::clamp(apply(factors_.dropfactor, atwarped), 0.0, 1.0));
             }
             if (weight > 0.0 && amplitude > 0.0)
             {
@@ -373,7 +376,7 @@ public:
             }
         }
         if (parameters_.coast.landshare > 0.0)
-            cell.inland = static_cast<float>(std::clamp(gather(inland_, warped), 0.0, 1.0));
+            cell.inland = static_cast<float>(std::clamp(apply(inland_, atwarped), 0.0, 1.0));
         return cell;
     }
 
@@ -1139,7 +1142,23 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const Regi
     return result;
 }
 
-void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, std::vector<float>& fine)
+namespace
+{
+// One signed block-mean pass on a cube window with its blocks and their gather plan.
+void signedpass(const RegionalGlobalInputs& inputs, const WindowBlocks& blocks, const GatherPlan& plan, std::vector<float>& fine)
+{
+    const mesh::CellGrid& levelzero = *inputs.grid;
+    std::vector<double> residual(blocks.count());
+    for (std::size_t b = 0; b < blocks.count(); b++)
+        residual[b] = static_cast<double>(static_cast<float>(
+            static_cast<double>(inputs.elevation_m[levelzero.localofkey(blocks.parents[b])]) - blockmean(blocks, b, fine)));
+    const std::vector<double> correction = gatherblocks(plan, residual);
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    for (std::size_t cell = 0; cell < fine.size(); cell++)
+        fine[cell] = signedmove(fine[cell], correction[cell], sealevel);
+}
+
+void checksigned(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const std::vector<float>& fine)
 {
     if (inputs.grid == nullptr)
         throw std::invalid_argument("correctsignedblockmeans: the inputs need their level-0 grid");
@@ -1148,15 +1167,14 @@ void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const mesh::Cel
         window.facecells() % levelzero.facecells() != 0 || fine.size() != window.cellcount() ||
         inputs.elevation_m.size() != levelzero.cellcount())
         throw std::invalid_argument("correctsignedblockmeans: a cube level 0 and a cube window refining it");
-    const WindowBlocks blocks = windowblocks(window, window.facecells() / levelzero.facecells());
-    std::vector<double> residual(blocks.count());
-    for (std::size_t b = 0; b < blocks.count(); b++)
-        residual[b] = static_cast<double>(static_cast<float>(
-            static_cast<double>(inputs.elevation_m[levelzero.localofkey(blocks.parents[b])]) - blockmean(blocks, b, fine)));
-    const std::vector<double> correction = gatherblocks(blocks, residual, window);
-    const double sealevel = static_cast<double>(inputs.sealevel);
-    for (std::size_t cell = 0; cell < fine.size(); cell++)
-        fine[cell] = signedmove(fine[cell], correction[cell], sealevel);
+}
+}
+
+void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, std::vector<float>& fine)
+{
+    checksigned(inputs, window, fine);
+    const WindowBlocks blocks = windowblocks(window, window.facecells() / inputs.grid->facecells());
+    signedpass(inputs, blocks, gatherplan(blocks, window), fine);
 }
 
 // --- The cube forms of the start surface, the sea and the refined coast (T8 W2-W2c, sphere-mesh.md
@@ -1532,10 +1550,15 @@ void cubelandsharesurface(const RegionalGlobalInputs& inputs, const mesh::CellGr
         else if (h > 0.0)
             shoreheight[cell] = std::max(shoreheight[cell], static_cast<float>(keep));
     }
-    for (int pass = 0; pass < signedcount; pass++)
+    if (signedcount > 0)
     {
-        correctsignedblockmeans(inputs, box, surface);
-        keepshore();
+        checksigned(inputs, box, surface);
+        const GatherPlan plan = gatherplan(blocks, box);
+        for (int pass = 0; pass < signedcount; pass++)
+        {
+            signedpass(inputs, blocks, plan, surface);
+            keepshore();
+        }
     }
     start.start_m.resize(window.cellcount());
     for (mesh::CellId c = 0; c < window.cellcount(); c++)
@@ -1927,6 +1950,60 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
         }
     }
     return sea;
+}
+
+void addlevelnoise(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, int parentscale,
+                   const RegionalParameters& parameters, std::vector<float>& surface_m)
+{
+    const int k = cubescale(inputs, window, "addlevelnoise");
+    if (parentscale < 1 || k <= parentscale || k % parentscale != 0)
+        throw std::invalid_argument("addlevelnoise: the level's scale must be a larger multiple of its parent's");
+    if (surface_m.size() != window.cellcount())
+        throw std::invalid_argument("addlevelnoise: the surface must hold one value per window cell");
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    // The lat-lon form's noise for a world of H = 2 N rows (the level-0 arc pi R / (2 N)), at the cell's centre.
+    FractalNoise noise;
+    noise.seed = deterministiccombine(inputs.seed, noisesalt);
+    noise.radius_km = inputs.radius_m / 1000.0;
+    const double longest = 2.0 * pi * inputs.radius_m / (2.0 * inputs.grid->facecells()) / 1000.0;
+    noise.wavelength_km = longest;
+    noise.longest_km = longest / parentscale;
+    noise.shortest_km = longest / k;
+    noise.octaves = 1;
+    while ((1 << noise.octaves) <= k)
+        noise.octaves++;
+    noise.persistence = parameters.noisepersistence;
+    const FractalNoiseField field(noise);
+    if (field.resolved() == 0)
+        return;
+    const std::vector<float> relief = upsample(noiserelief(inputs, parameters), *inputs.grid, window);
+    for (mesh::CellId c = 0; c < window.cellcount(); c++)
+    {
+        const mesh::Vec3 p = window.centre(c);
+        const double amplitude =
+            parameters.noiseamplitude_m + parameters.noiserelieffraction * std::max(0.0, static_cast<double>(relief[c]));
+        const double base = static_cast<double>(surface_m[c]);
+        const double band = parameters.coastband_m + amplitude;
+        const double taper = band > 0.0 ? std::clamp(std::fabs(base - sealevel) / band, 0.0, 1.0) : 1.0;
+        surface_m[c] = static_cast<float>(base + taper * amplitude * field.sum(p.x, p.y, p.z) / field.normalisation());
+    }
+}
+
+std::vector<float> levelnoiseband(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, int parentscale,
+                                  const RegionalParameters& parameters)
+{
+    const int k = cubescale(inputs, window, "levelnoiseband");
+    const double share = levelnoiseshare(k, parentscale, parameters.noisepersistence);
+    std::vector<float> band = upsample(noiserelief(inputs, parameters), *inputs.grid, window);
+    for (float& value : band)
+        value = static_cast<float>(share * (parameters.noiseamplitude_m +
+                                            parameters.noiserelieffraction * std::max(0.0, static_cast<double>(value))));
+    return band;
+}
+
+std::vector<float> regionalnoiserelief(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters)
+{
+    return noiserelief(inputs, parameters);
 }
 
 void noiselevel(const LevelContext& context, LevelState& state)

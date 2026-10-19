@@ -143,11 +143,13 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
     // Multiscale plan S5.2: the fold fabric's fields. The strain is the shortening over the native
     // cell width 2 pi R / W (the engine runs at the world's column count); a world without the
     // tectonic exports (erosion run 9, another recipe) carries zeros: each field is passed only when
-    // some cell is not zero, and the fold fabric is inert without the strain.
+    // some cell is not zero, and the fold fabric is inert without the strain. On the cube the native cell
+    // width is that of the lat-lon export's 4 N columns, 2 pi R / (4 N) (the level-0 arc pi R / (2 N); T8 W2-W2f).
     inputs.foldstrain.resize(size);
     inputs.folddirection_rad.resize(size);
     inputs.sediment_m.resize(size);
-    const double cellwidth_m = 2.0 * 3.14159265358979323846 * inputs.radius_m / static_cast<double>(columns);
+    const int nativecolumns = grid->kind() == mesh::GridKind::cube ? 4 * grid->facecells() : columns;
+    const double cellwidth_m = 2.0 * 3.14159265358979323846 * inputs.radius_m / static_cast<double>(nativecolumns);
     bool anystrain = false;
     bool anydirection = false;
     bool anysediment = false;

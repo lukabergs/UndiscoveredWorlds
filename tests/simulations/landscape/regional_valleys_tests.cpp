@@ -294,7 +294,7 @@ TEST_F(Landscape, RegionalValleysFloorAndSides)
     std::vector<float> elevation(count, 1000.0f);
     addchannelrow(channels, elevation, width, 20, 100.0f, 4000.0f);
     const std::vector<uint8_t> sea(count, 0);
-    const double dy = landscape::finepatchmetric(window, inputs.radius_m).dy_m;
+    const double dy = landscape::northsouthspacing_m(*landscape::regionalwindowgrid(window, inputs.radius_m));
     RegionalParameters parameters;
     parameters.valleys.floor_km = 1.0001 * dy / 1000.0;
     parameters.valleys.reference_m3s = 1000.0;
@@ -376,7 +376,7 @@ TEST_F(Landscape, RegionalValleysLowestTargetSeaAndChannelsKept)
     sea[at(x, 21, width)] = 1;
     elevation[at(x, 21, width)] = -50.0f;
     RegionalParameters parameters;
-    const double dy = landscape::finepatchmetric(window, inputs.radius_m).dy_m;
+    const double dy = landscape::northsouthspacing_m(*landscape::regionalwindowgrid(window, inputs.radius_m));
     parameters.valleys.floor_km = 1.0001 * dy / 1000.0;
     parameters.valleys.floormax_km = 4.0001 * dy / 1000.0;
     landscape::carvevalleys(inputs, window, parameters, channels, sea, elevation);
@@ -428,7 +428,7 @@ PointChannel pointchannel(const RegionalGlobalInputs& inputs, int scale, int row
     point.channels.bed_m[cell] = 100.0f;
     point.channels.discharge_m3s[cell] = 1000.0f;
     point.elevation[cell] = 100.0f;
-    point.dy = landscape::finepatchmetric(point.window, inputs.radius_m).dy_m;
+    point.dy = landscape::northsouthspacing_m(*landscape::regionalwindowgrid(point.window, inputs.radius_m));
     return point;
 }
 }
@@ -507,8 +507,8 @@ TEST_F(Landscape, RegionalValleysReachInKmAgainstTheBand)
         std::vector<float> elevation(count, 1000.0f);
         middle = window.domainfineheight() / 2;
         addchannelrow(channels, elevation, width, middle, 100.0f, 1000.0f);
-        const double cell_m = landscape::finepatchmetric(windowa(4), inputs.radius_m).dy_m;
-        dy = landscape::finepatchmetric(window, inputs.radius_m).dy_m;
+        const double cell_m = landscape::northsouthspacing_m(*landscape::regionalwindowgrid(windowa(4), inputs.radius_m));
+        dy = landscape::northsouthspacing_m(*landscape::regionalwindowgrid(window, inputs.radius_m));
         RegionalParameters parameters;
         parameters.valleys.floor_km = 0.2 * cell_m / 1000.0;
         parameters.valleys.reference_m3s = 1000.0;
@@ -601,7 +601,7 @@ TEST_F(Landscape, RegionalValleysChannelCellKeepsItsMean)
         elevation[at(x, middle, width)] = 400.0f;
     elevation[at(3, middle, width)] = 150.0f;  // below its mean: never raised
     const std::vector<uint8_t> sea(count, 0);
-    const double dy = landscape::finepatchmetric(window, inputs.radius_m).dy_m;
+    const double dy = landscape::northsouthspacing_m(*landscape::regionalwindowgrid(window, inputs.radius_m));
     RegionalParameters parameters;
     parameters.valleys.floor_km = 0.2 * dy / 1000.0;
     parameters.valleys.reference_m3s = 1000.0;

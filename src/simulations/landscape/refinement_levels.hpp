@@ -191,8 +191,8 @@ inline const char* levelstepname(LevelStep step)
 }
 
 // A level's cell size on the ground in km: the north-south spacing pi R / (H factor^level)
-// with H = worldwidth / 2, which is also the east-west spacing at the equator (PatchMetric's
-// dy_m / 1000 at k = factor^level). Throws std::invalid_argument when radius_m is not
+// with H = worldwidth / 2, which is also the east-west spacing at the equator (the window grid's
+// northsouthspacing_m / 1000 at k = factor^level). Throws std::invalid_argument when radius_m is not
 // positive and finite, worldwidth < 4 or odd, factor < 2 or level < 0.
 double levelcellsize_km(double radius_m, int worldwidth, int factor, int level);
 

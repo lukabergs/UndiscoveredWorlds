@@ -270,6 +270,19 @@ std::vector<uint8_t> refinedcoast(const RegionalGlobalInputs& inputs, const mesh
                                   std::vector<float>& surface, const std::vector<uint8_t>* kept = nullptr,
                                   PocketCount* filled = nullptr, PocketCount* left = nullptr);
 
+// The cube forms of addlevelnoise and of noiselevel's band (T8 W2-W2f): the lat-lon form's noise for a
+// world of H = 2 N rows (first wavelength 2 pi R / (2 N)), the octaves of the band (parentscale, k],
+// at the cell's centre, the relief gathered by G; one value per cell of a cube window refining
+// inputs.grid at k = its face cells / N. levelnoiseband: levelnoiseshare(k, parentscale, persistence)
+// times noiseamplitude_m + noiserelieffraction x the relief gathered by G (noiselevel's noiseband_m).
+// regionalnoiserelief: the relief the noise amplitude and the channels' roughness read (the world's
+// relief amplitude with noise_relief_field 1 when present, else the local relief on the world's table).
+void addlevelnoise(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, int parentscale,
+                   const RegionalParameters& parameters, std::vector<float>& surface_m);
+std::vector<float> levelnoiseband(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, int parentscale,
+                                  const RegionalParameters& parameters);
+std::vector<float> regionalnoiserelief(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters);
+
 // The land-share rule's signed block-mean correction on a cube window (T8 W2-W2b, sphere-mesh.md
 // section 8), one pass: the residual of every block over level 0 (the global base elevation minus
 // the block's mean, level_blocks.hpp) gathered at every window cell by gatherblocks (G, a node

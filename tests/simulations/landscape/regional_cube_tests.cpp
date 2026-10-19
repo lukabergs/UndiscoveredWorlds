@@ -11,10 +11,13 @@
 #include "core/mesh/window_grid.hpp"
 #include "simulations/landscape/channel_network.hpp"
 #include "simulations/landscape/level_blocks.hpp"
+#include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_coast.hpp"
+#include "simulations/landscape/regional_cube.hpp"
 #include "simulations/landscape/regional_edges.hpp"
 #include "simulations/landscape/regional_surface.hpp"
 #include "simulations/landscape/regional_cirques.hpp"
+#include "simulations/landscape/regional_folds.hpp"
 #include "simulations/landscape/regional_glacial.hpp"
 #include "simulations/landscape/regional_ice.hpp"
 #include "simulations/landscape/regional_troughs.hpp"
@@ -501,4 +504,208 @@ TEST_F(Landscape, RegionalCubeRefinedCoastKeepsTheParentShares)
     std::printf("[cube coast] level 2: %d sea of %zu cells, pockets %d filled, %d left\n", seacells, sea.size(),
                 filled.pockets, left.pockets);
     EXPECT_GT(seacells, 0);
+}
+
+namespace
+{
+// The cube world with every global field the pass reads: lakeworld's relief, lakes and ice, cubenetwork's
+// drainage, runoff, two seasons of temperature and precipitation, a climate class, and a fold belt (strain
+// 0.3 within 0.2 rad of a cell beside the face edge 0|1, the axis 0.5 rad from east toward south, 2 km of
+// sediment).
+RegionalGlobalInputs fullworld()
+{
+    RegionalGlobalInputs inputs = lakeworld();
+    inputs.network = cubenetwork(inputs);
+    const std::size_t size = inputs.grid->cellcount();
+    inputs.runoff_mm_yr.assign(size, 400.0f);
+    inputs.januarytemperature_c.resize(size);
+    inputs.julytemperature_c.resize(size);
+    inputs.januaryprecipitation_mm.assign(size, 60.0f);
+    inputs.julyprecipitation_mm.assign(size, 40.0f);
+    inputs.climate.assign(size, 3);
+    inputs.foldstrain.assign(size, 0.0f);
+    inputs.folddirection_rad.assign(size, 0.5f);
+    inputs.sediment_m.assign(size, 2000.0f);
+    inputs.glaciation.assign(size, 0.0f);  // no ice cover over the fold belt
+    const mesh::Vec3 belt = inputs.grid->centre(static_cast<mesh::CellId>(mesh::cubekey(cuben, 0, cuben - 2, 21)));
+    for (mesh::CellId c = 0; c < size; c++)
+    {
+        const mesh::Vec3 p = inputs.grid->centre(c);
+        inputs.januarytemperature_c[c] = static_cast<float>(-5.0 + 20.0 * (1.0 - std::fabs(p.z)));
+        inputs.julytemperature_c[c] = inputs.januarytemperature_c[c] + 10.0f;
+        if (mesh::dot(p, belt) > std::cos(0.2))
+            inputs.foldstrain[c] = 0.3f;
+    }
+    return inputs;
+}
+
+// coastparameters with long folds (150 km, so a level of 16 cells per level-0 cell draws them) and a
+// pass of one mean pass and one smoothing pass (a halo of 11 rings).
+RegionalParameters foldparameters()
+{
+    RegionalParameters parameters = coastparameters();
+    parameters.meanpasses = 1;
+    parameters.folds.amplitudemax_m = 400.0;
+    parameters.folds.wavelengthmin_km = 100.0;
+    parameters.folds.wavelengthmax_km = 200.0;
+    parameters.folds.wavelengthbase_km = 150.0;
+    parameters.folds.wavelengthpercover_km = 0.0;
+    parameters.folds.reliefelevationfraction = 2.0;
+    return parameters;
+}
+
+// The kept cells two cube window results share: keys in both, counted, and the differing ones per field.
+struct SharedCells
+{
+    int shared = 0, differ = 0;
+};
+
+SharedCells comparefields(const landscape::CubeRegionResult& a, const landscape::CubeRegionResult& b)
+{
+    SharedCells result;
+    const landscape::RegionalFields& fa = a.fields;
+    const landscape::RegionalFields& fb = b.fields;
+    for (mesh::CellId c = 0; c < a.kept->cellcount(); c++)
+    {
+        const mesh::CellId o = b.kept->localofkey(a.kept->globalkey(c));
+        if (o == mesh::nocell)
+            continue;
+        result.shared++;
+        const bool same = floatbits(fa.elevation_m[c]) == floatbits(fb.elevation_m[o]) && fa.sea[c] == fb.sea[o] &&
+                          fa.riverdirection[c] == fb.riverdirection[o] &&
+                          floatbits(fa.discharge_m3s[c]) == floatbits(fb.discharge_m3s[o]) &&
+                          fa.januaryflow[c] == fb.januaryflow[o] && fa.julyflow[c] == fb.julyflow[o] &&
+                          floatbits(fa.lakesurface_m[c]) == floatbits(fb.lakesurface_m[o]) &&
+                          floatbits(fa.januarytemperature_c[c]) == floatbits(fb.januarytemperature_c[o]) &&
+                          floatbits(fa.julytemperature_c[c]) == floatbits(fb.julytemperature_c[o]) &&
+                          floatbits(fa.januaryprecipitation_mm[c]) == floatbits(fb.januaryprecipitation_mm[o]) &&
+                          floatbits(fa.julyprecipitation_mm[c]) == floatbits(fb.julyprecipitation_mm[o]) &&
+                          floatbits(fa.icethickness_m[c]) == floatbits(fb.icethickness_m[o]) && fa.climate[c] == fb.climate[o];
+        result.differ += same ? 0 : 1;
+    }
+    return result;
+}
+}
+
+TEST_F(Landscape, RegionalCubeFoldsOverlap)
+{
+    // addfoldfabric's cube form on two windows of 5 rings around cells 2 apart across the face edge 0|1 at
+    // k 16 (19.5 km cells, folds of 150 km), with channels on every 29th key (the water gaps): on the cells of
+    // the level-0 cells within 2 rings of both centres the folded elevation is bit-identical, and the fabric
+    // changed cells of both.
+    constexpr int k = 16;
+    const RegionalGlobalInputs inputs = fullworld();
+    const RegionalParameters parameters = foldparameters();
+    const landscape::FoldPhaseField field = landscape::cubefoldphasefield(inputs, parameters.folds);
+    ASSERT_GT(field.maskcells, 0);
+    const mesh::LevelKey left = mesh::cubekey(cuben, 0, cuben - 2, 21), right = mesh::cubekey(cuben, 1, 0, 22);
+    struct Result
+    {
+        std::shared_ptr<const mesh::CellGrid> window;
+        std::vector<float> elevation;
+        int folded = 0;
+    };
+    const auto run = [&](mesh::LevelKey centre) {
+        Result result;
+        result.window = windowof(disc(centre, 5), k);
+        CubeFine fine = cubefine(inputs, *result.window, k);
+        for (float& z : fine.elevation)
+            z = std::max(z, 200.0f);  // land everywhere, above the shore floor
+        std::fill(fine.sea.begin(), fine.sea.end(), 0);
+        const std::vector<float> before = fine.elevation;
+        landscape::addfoldfabric(inputs, *result.window, parameters, fine.channels, fine.sea, fine.elevation);
+        for (std::size_t cell = 0; cell < before.size(); cell++)
+            result.folded += before[cell] != fine.elevation[cell] ? 1 : 0;
+        result.elevation = fine.elevation;
+        return result;
+    };
+    const Result a = run(left), b = run(right);
+    const std::vector<mesh::LevelKey> innera = disc(left, 2), innerb = disc(right, 2);
+    int shared = 0, differ = 0;
+    for (mesh::CellId c = 0; c < a.window->cellcount(); c++)
+    {
+        const mesh::LevelKey key = a.window->globalkey(c);
+        const mesh::LevelKey parent = mesh::cubeparentkey(cuben * k, k, key);
+        if (!std::binary_search(innera.begin(), innera.end(), parent) || !std::binary_search(innerb.begin(), innerb.end(), parent))
+            continue;
+        const mesh::CellId other = b.window->localofkey(key);
+        ASSERT_NE(other, mesh::nocell);
+        shared++;
+        differ += floatbits(a.elevation[c]) != floatbits(b.elevation[other]) ? 1 : 0;
+    }
+    std::printf("[cube folds] mask %d cells, %d components, %d sweeps, misfit %.3g; %d shared cells, %d differ; folded %d and %d "
+                "cells\n",
+                field.maskcells, field.components, field.sweeps, field.misfit, shared, differ, a.folded, b.folded);
+    EXPECT_GT(shared, 0);
+    EXPECT_EQ(differ, 0);
+    EXPECT_GT(a.folded, 0);
+    EXPECT_GT(b.folded, 0);
+}
+
+TEST_F(Landscape, RegionalCubeRefinementOverlap)
+{
+    // runcuberefinement to level 2 (factor 4, k 16) on two kept boxes of 3 x 3 level-0 cells around cells 2
+    // apart across the face edge 0|1, one mean pass and one smoothing pass (halo 11 rings), the coast, the
+    // channels, the valleys, the folds and the lakes on: every field of the shared kept cells is bit-identical, and every
+    // level's mean errors stay at float rounding.
+    const RegionalGlobalInputs inputs = fullworld();
+    RegionalParameters parameters = foldparameters();
+    parameters.valleys.floor_km = 60.0;
+    parameters.valleys.reference_m3s = 1000.0;
+    parameters.valleys.floormax_km = 100.0;
+    parameters.channels.pinarea_km2 = 20000.0;
+    parameters.channels.seed = 77;
+    parameters.channels.meanderamplitude = 0.2;
+    parameters.channels.junctionjitter = 0.25;
+    parameters.channels.edgemargin = 0.1875;
+    landscape::RefinementParameters refinement;
+    refinement.factor = 4;
+    refinement.smoothpasses = 1;
+    refinement.prolongationlimit = 1;
+    refinement.channelcellslope = 0.3;
+    refinement.parentlift = 2;
+    const int halo = landscape::refinementhalo(parameters.meanpasses, refinement.smoothpasses);
+    const mesh::LevelKey left = mesh::cubekey(cuben, 0, cuben - 2, 21), right = mesh::cubekey(cuben, 1, 0, 22);
+    const landscape::CubeRegionResult a = landscape::runcuberefinement(inputs, disc(left, 1), halo, 2, parameters, refinement);
+    const landscape::CubeRegionResult b = landscape::runcuberefinement(inputs, disc(right, 1), halo, 2, parameters, refinement);
+    const SharedCells cells = comparefields(a, b);
+    for (const landscape::LevelDiagnostics& level : a.levels)
+        std::printf("[cube refinement] level %d: kept %zu, domain %zu cells; parent-mean error %.3g m (bound %.3g), global-mean "
+                    "error %.3g m; forced %d; channel cells %d, fold cells %d, valley cells %d, lake edges %d; %.2f s\n",
+                    level.level, a.keptcells[static_cast<std::size_t>(level.level - 1)],
+                    a.domaincells[static_cast<std::size_t>(level.level - 1)], level.projection.maxparentmeanerror_m,
+                    level.meanbound_m, level.globalmeanerror_m, level.projection.forcedparents, level.channelcells,
+                    level.foldcells, level.valleycells, level.lakeedges, level.seconds);
+    std::printf("[cube refinement] %d shared kept cells, %d differ\n", cells.shared, cells.differ);
+    ASSERT_EQ(a.levels.size(), 2u);
+    EXPECT_GT(cells.shared, 0);
+    EXPECT_EQ(cells.differ, 0);
+    EXPECT_GT(a.levels[0].channelcells, 0);
+    EXPECT_GT(a.levels[0].valleycells, 0);
+    EXPECT_GT(a.levels[1].foldcells, 0);
+    for (const landscape::LevelDiagnostics& level : a.levels)
+    {
+        EXPECT_LE(level.projection.maxparentmeanerror_m, 4.0 * level.meanbound_m + 1.0e-6) << "level " << level.level;
+        EXPECT_LT(level.globalmeanerror_m, 0.05) << "level " << level.level;
+    }
+}
+
+TEST_F(Landscape, RegionalCubeSinglePassOverlap)
+{
+    // runcuberegionalpass at k 5 (not a power of the factor) on the same two kept boxes, halo 5 rings: every
+    // field of the shared kept cells is bit-identical.
+    const RegionalGlobalInputs inputs = fullworld();
+    const RegionalParameters parameters = foldparameters();
+    const int halo = landscape::regionalhalo(parameters.meanpasses, false);
+    const mesh::LevelKey left = mesh::cubekey(cuben, 0, cuben - 2, 21), right = mesh::cubekey(cuben, 1, 0, 22);
+    const landscape::CubeRegionResult a = landscape::runcuberegionalpass(inputs, disc(left, 1), 5, halo, parameters);
+    const landscape::CubeRegionResult b = landscape::runcuberegionalpass(inputs, disc(right, 1), 5, halo, parameters);
+    const SharedCells cells = comparefields(a, b);
+    std::printf("[cube single pass] kept %zu, domain %zu cells; %d shared kept cells, %d differ\n", a.keptcells[0], a.domaincells[0],
+                cells.shared, cells.differ);
+    EXPECT_GT(cells.shared, 0);
+    EXPECT_EQ(cells.differ, 0);
+    RegionalParameters tributaries = parameters;
+    tributaries.tributaries.enabled = 1;
+    EXPECT_THROW(landscape::runcuberegionalpass(inputs, disc(left, 1), 5, halo, tributaries), std::invalid_argument);
 }

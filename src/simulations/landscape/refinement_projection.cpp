@@ -211,6 +211,82 @@ void lambdastatistics(const LevelWindow& level, const std::vector<float>& field,
                 largeststep = std::max(largeststep, std::fabs(lambdaat(i, j) - lambdaat(i, j + 1)));
         }
 }
+
+// projectlevel's shifts of one parent's children (`cells`, in ascending key order) for lambda_c: the
+// common shift capped at the headrooms, then the rest on the beds or on every child. Fills `shift`
+// (one value per child); returns 0 when the rated children took it all, 1 when the rest went to the
+// beds, 2 when it was forced on every child, with `remainder` the rest before it was spread.
+int parentshifts(const std::vector<std::size_t>& cells, double lambdac, double children, const ProjectionBounds& bounds,
+                 std::vector<double>& shift, std::vector<int>& active, std::vector<int>& next, double& remainder)
+{
+    const int count = static_cast<int>(cells.size());
+    std::fill(shift.begin(), shift.end(), 0.0);
+    remainder = 0.0;
+    if (lambdac == 0.0)
+        return 0;
+    const bool up = lambdac > 0.0;
+    auto room = [&](int i) {
+        const std::size_t cell = cells[static_cast<std::size_t>(i)];
+        return static_cast<double>(up ? bounds.up_m[cell] : bounds.down_m[cell]);
+    };
+    auto rate = [&](int i) { return static_cast<double>(bounds.rate[cells[static_cast<std::size_t>(i)]]); };
+    // The beds of the fallback: the unrated children, or those bounds.bed marks.
+    auto isbed = [&](int i) {
+        return bounds.bed.empty() ? !(rate(i) > 0.0) : bounds.bed[cells[static_cast<std::size_t>(i)]] != 0;
+    };
+    remainder = lambdac * children;
+    active.clear();
+    for (int i = 0; i < count; i++)
+        if (rate(i) > 0.0 && room(i) > 0.0)
+            active.push_back(i);
+    // The common shift, capped: each round the children whose headroom is below
+    // their share take it and leave; a round that caps none ends it.
+    while (!active.empty())
+    {
+        double rates = 0.0;
+        for (const int i : active)
+            rates += rate(i);
+        const double delta = remainder / rates;
+        next.clear();
+        for (const int i : active)
+        {
+            const double want = rate(i) * delta;
+            if (std::fabs(want) >= room(i))
+            {
+                shift[static_cast<std::size_t>(i)] = up ? room(i) : -room(i);
+                remainder -= shift[static_cast<std::size_t>(i)];
+            }
+            else
+                next.push_back(i);
+        }
+        if (next.size() == active.size())
+        {
+            for (const int i : active)
+                shift[static_cast<std::size_t>(i)] = rate(i) * delta;
+            remainder = 0.0;
+            active.clear();
+        }
+        else
+            active.swap(next);
+    }
+    // The headrooms exhausted: the rest on the beds (the unrated children), or
+    // with none on every child, so the mean is exact.
+    if (remainder == 0.0)
+        return 0;
+    int beds = 0;
+    for (int i = 0; i < count; i++)
+        beds += isbed(i) ? 1 : 0;
+    if (beds > 0)
+    {
+        for (int i = 0; i < count; i++)
+            if (isbed(i))
+                shift[static_cast<std::size_t>(i)] += remainder / beds;
+        return 1;
+    }
+    for (int i = 0; i < count; i++)
+        shift[static_cast<std::size_t>(i)] += remainder / children;
+    return 2;
+}
 }
 
 ProjectionBounds projectionbounds(const LevelWindow& window, const std::vector<std::uint8_t>& channel,
@@ -319,83 +395,21 @@ ProjectionReport projectlevel(const LevelWindow& level, std::vector<float>& fiel
             for (int n = 0; n < count; n++)
                 cells[static_cast<std::size_t>(n)] = members[n];
             const double lambdac = parentvalue(parents, p, q) - childmean(parents, field, p, q);
-            std::fill(shift.begin(), shift.end(), 0.0);
-            if (lambdac != 0.0)
+            double remainder = 0.0;
+            const int fallback = parentshifts(cells, lambdac, children, bounds, shift, active, next, remainder);
+            if (fallback != 0)
             {
-                const bool up = lambdac > 0.0;
-                auto room = [&](int i) {
-                    const std::size_t cell = cells[static_cast<std::size_t>(i)];
-                    return static_cast<double>(up ? bounds.up_m[cell] : bounds.down_m[cell]);
-                };
-                auto rate = [&](int i) { return static_cast<double>(bounds.rate[cells[static_cast<std::size_t>(i)]]); };
-                // The beds of the fallback: the unrated children, or those bounds.bed marks.
-                auto isbed = [&](int i) {
-                    return bounds.bed.empty() ? !(rate(i) > 0.0) : bounds.bed[cells[static_cast<std::size_t>(i)]] != 0;
-                };
-                double remainder = lambdac * children;
-                active.clear();
-                for (int i = 0; i < count; i++)
-                    if (rate(i) > 0.0 && room(i) > 0.0)
-                        active.push_back(i);
-                // The common shift, capped: each round the children whose headroom is below
-                // their share take it and leave; a round that caps none ends it.
-                while (!active.empty())
+                const bool counted = inkept(p, q) && std::fabs(remainder) > 1.0e-6 * children;
+                if (fallback == 1)
+                    report.bedsmovedparents += counted ? 1 : 0;
+                else if (counted)
                 {
-                    double rates = 0.0;
-                    for (const int i : active)
-                        rates += rate(i);
-                    const double delta = remainder / rates;
-                    next.clear();
-                    for (const int i : active)
+                    report.forcedparents++;
+                    if (std::fabs(remainder / children) > report.maxforcedmove_m)
                     {
-                        const double want = rate(i) * delta;
-                        if (std::fabs(want) >= room(i))
-                        {
-                            shift[static_cast<std::size_t>(i)] = up ? room(i) : -room(i);
-                            remainder -= shift[static_cast<std::size_t>(i)];
-                        }
-                        else
-                            next.push_back(i);
-                    }
-                    if (next.size() == active.size())
-                    {
-                        for (const int i : active)
-                            shift[static_cast<std::size_t>(i)] = rate(i) * delta;
-                        remainder = 0.0;
-                        active.clear();
-                    }
-                    else
-                        active.swap(next);
-                }
-                // The headrooms exhausted: the rest on the beds (the unrated children), or
-                // with none on every child, so the mean is exact.
-                if (remainder != 0.0)
-                {
-                    const bool counted = inkept(p, q) && std::fabs(remainder) > 1.0e-6 * children;
-                    int beds = 0;
-                    for (int i = 0; i < count; i++)
-                        beds += isbed(i) ? 1 : 0;
-                    if (beds > 0)
-                    {
-                        for (int i = 0; i < count; i++)
-                            if (isbed(i))
-                                shift[static_cast<std::size_t>(i)] += remainder / beds;
-                        report.bedsmovedparents += counted ? 1 : 0;
-                    }
-                    else
-                    {
-                        for (int i = 0; i < count; i++)
-                            shift[static_cast<std::size_t>(i)] += remainder / children;
-                        if (counted)
-                        {
-                            report.forcedparents++;
-                            if (std::fabs(remainder / children) > report.maxforcedmove_m)
-                            {
-                                report.maxforcedmove_m = std::fabs(remainder / children);
-                                report.maxforcedcolumn = wraplevel(level.domaincolumn0 / f + p, level.levelwidth() / f);
-                                report.maxforcedrow = level.domainrow0 / f + q;
-                            }
-                        }
+                        report.maxforcedmove_m = std::fabs(remainder / children);
+                        report.maxforcedcolumn = wraplevel(level.domaincolumn0 / f + p, level.levelwidth() / f);
+                        report.maxforcedrow = level.domainrow0 / f + q;
                     }
                 }
             }
@@ -644,6 +658,7 @@ SmoothingReport smoothparentmeans(const mesh::CellGrid& level, std::vector<float
     std::vector<double> origin(size), total(size, 0.0), mu(count);
     for (std::size_t cell = 0; cell < size; cell++)
         origin[cell] = static_cast<double>(field[cell]);
+    const GatherPlan plan = gatherplan(blocks, level);
     for (int pass = 0; pass < passes; pass++)
     {
         for (std::size_t b = 0; b < count; b++)
@@ -661,7 +676,7 @@ SmoothingReport smoothparentmeans(const mesh::CellGrid& level, std::vector<float
                 }
             mu[b] = rates > 0.0 ? lambdac * children / rates : 0.0;
         }
-        const std::vector<double> lambdafield = gatherblocks(blocks, mu, level);
+        const std::vector<double> lambdafield = gatherblocks(plan, mu);
         for (std::size_t cell = 0; cell < size; cell++)
         {
             const double rate = static_cast<double>(bounds.rate[cell]);
@@ -687,6 +702,223 @@ double levelparentmeanerror(const LevelWindow& level, const std::vector<float>& 
 {
     checkpair(level, field.size(), parent, parentfield.size(), "levelparentmeanerror");
     return largestmeanerror(level, field, parentblocks(level, parent, parentfield));
+}
+
+// --- The cube forms (T8 W2-W2f, sphere-mesh.md section 8: blocks over the per-face quadtree, the
+// neighbourhoods on the window's table). ---
+
+namespace
+{
+// A cube level and its parent's kept cells: the level's blocks with v_c of each and whether it is kept.
+struct CubeParents
+{
+    WindowBlocks blocks;
+    std::vector<double> parentvalue;
+    std::vector<std::uint8_t> kept;
+};
+
+CubeParents cubeparents(const mesh::CellGrid& level, std::size_t fieldsize, const mesh::CellGrid& parent,
+                        const std::vector<float>& parentfield, int factor, const std::vector<std::uint8_t>& kept,
+                        const char* name)
+{
+    if (level.kind() != mesh::GridKind::cube || parent.kind() != mesh::GridKind::cube || factor < 2 ||
+        parent.facecells() * factor != level.facecells() || fieldsize != level.cellcount() ||
+        parentfield.size() != parent.cellcount() || kept.size() != level.cellcount())
+        throw std::invalid_argument(std::string(name) + ": cube windows of a level and its parent with their fields and kept flags");
+    CubeParents result;
+    result.blocks = windowblocks(level, factor);
+    result.parentvalue.resize(result.blocks.count());
+    result.kept.resize(result.blocks.count());
+    for (std::size_t b = 0; b < result.blocks.count(); b++)
+    {
+        const mesh::CellId cell = parent.localofkey(result.blocks.parents[b]);
+        if (cell == mesh::nocell)
+            throw std::invalid_argument(std::string(name) + ": a domain parent lies outside the parent's kept cells");
+        result.parentvalue[b] = static_cast<double>(parentfield[cell]);
+        result.kept[b] = kept[result.blocks.childrenof(b)[0]];
+    }
+    return result;
+}
+
+// The block of a parent key among the level's blocks, or count when absent (on the cube the blocks,
+// ordered by their first child's key, are in ascending parent key order).
+std::size_t blockofparent(const WindowBlocks& blocks, mesh::LevelKey key)
+{
+    if (key == mesh::nokey)
+        return blocks.count();
+    const auto found = std::lower_bound(blocks.parents.begin(), blocks.parents.end(), key);
+    return found == blocks.parents.end() || *found != key ? blocks.count()
+                                                          : static_cast<std::size_t>(found - blocks.parents.begin());
+}
+}
+
+ProjectionBounds projectionbounds(const mesh::CellGrid& level, const std::vector<std::uint8_t>& channel,
+                                  const std::vector<std::uint8_t>& sea, const std::vector<float>& lakesurface_m,
+                                  const std::vector<float>& elevation_m, float sealevel, double channelrate,
+                                  const std::vector<float>& ownlake_m, const std::vector<float>& bed_m)
+{
+    const std::size_t size = level.cellcount();
+    if ((!channel.empty() && channel.size() != size) || (!sea.empty() && sea.size() != size) ||
+        (!lakesurface_m.empty() && lakesurface_m.size() != size) || elevation_m.size() != size ||
+        (!ownlake_m.empty() && ownlake_m.size() != size) || (!bed_m.empty() && bed_m.size() != size))
+        throw std::invalid_argument("projectionbounds: every field must hold one value per window cell");
+    if (!std::isfinite(channelrate) || channelrate < 0.0)
+        throw std::invalid_argument("projectionbounds: the channel rate must be finite and not negative");
+    const float infinity = std::numeric_limits<float>::infinity();
+    const float seabelow = std::nextafter(sealevel, -infinity);
+    const float seaabove = std::nextafter(sealevel, infinity);
+    auto wet = [&](std::size_t cell) {
+        return !lakesurface_m.empty() && lakesurface_m[cell] > 0.0f && (sea.empty() || sea[cell] == 0);
+    };
+    ProjectionBounds bounds;
+    bounds.rate.assign(size, 1.0f);
+    bounds.up_m.assign(size, infinity);
+    bounds.down_m.assign(size, infinity);
+    if (!bed_m.empty())
+        bounds.bed.assign(size, 0);
+    for (mesh::CellId c = 0; c < size; c++)
+    {
+        const std::size_t cell = c;
+        const double value = static_cast<double>(elevation_m[cell]);
+        const bool channelcell = !channel.empty() && channel[cell] != 0;
+        const bool ownlake = !ownlake_m.empty() && ownlake_m[cell] > 0.0f;
+        const bool wetchannel = channelcell && !bed_m.empty() && wet(cell) && !ownlake;
+        if (!sea.empty() && sea[cell] != 0)
+            bounds.up_m[cell] = roomup(value, seabelow);
+        else if (wet(cell) && !wetchannel)
+            bounds.up_m[cell] = roomup(value, std::nextafter(lakesurface_m[cell], -infinity));
+        else
+        {
+            if (channelcell && bed_m.empty())
+                bounds.rate[cell] = static_cast<float>(channelrate);
+            if (channelcell && !bed_m.empty())
+                bounds.bed[cell] = 1;
+            float lake = -infinity;
+            if (!wetchannel && ownlake)
+                lake = ownlake_m[cell];
+            for (int slot = 1; slot <= mesh::slotcount && !wetchannel; slot++)
+            {
+                const std::int32_t other = level.neighbour(c, slot);
+                if (other >= 0 && wet(static_cast<std::size_t>(other)))
+                    lake = std::max(lake, lakesurface_m[static_cast<std::size_t>(other)]);
+            }
+            float floor = lake > -infinity ? std::max(seaabove, std::nextafter(lake, infinity)) : seaabove;
+            if (channelcell && !bed_m.empty())
+                floor = std::max(floor, bed_m[cell]);
+            bounds.down_m[cell] = roomdown(value, floor);
+        }
+    }
+    return bounds;
+}
+
+ProjectionReport projectlevel(const mesh::CellGrid& level, std::vector<float>& field, const ProjectionBounds& bounds,
+                              const mesh::CellGrid& parent, const std::vector<float>& parentfield, int factor,
+                              const std::vector<std::uint8_t>& kept)
+{
+    const CubeParents parents = cubeparents(level, field.size(), parent, parentfield, factor, kept, "projectlevel");
+    const std::size_t size = level.cellcount();
+    checkbounds(size, bounds, "projectlevel");
+    const WindowBlocks& blocks = parents.blocks;
+    const std::size_t blockcount = blocks.count();
+    const int count = factor * factor;
+    const double children = static_cast<double>(factor) * factor;
+    ProjectionReport report;
+    std::vector<double> lambda(blockcount, 0.0), correction(size, 0.0);
+    std::vector<std::uint8_t> moved(size, 0);
+    std::vector<std::size_t> cells(static_cast<std::size_t>(count));
+    std::vector<double> shift(static_cast<std::size_t>(count));
+    std::vector<int> active, next;
+    active.reserve(static_cast<std::size_t>(count));
+    next.reserve(static_cast<std::size_t>(count));
+    for (std::size_t b = 0; b < blockcount; b++)
+    {
+        const mesh::CellId* members = blocks.childrenof(b);
+        for (int n = 0; n < count; n++)
+            cells[static_cast<std::size_t>(n)] = members[n];
+        const double lambdac = parents.parentvalue[b] - blockmean(blocks, b, field);
+        double remainder = 0.0;
+        const int fallback = parentshifts(cells, lambdac, children, bounds, shift, active, next, remainder);
+        if (fallback != 0)
+        {
+            const bool counted = parents.kept[b] != 0 && std::fabs(remainder) > 1.0e-6 * children;
+            if (fallback == 1)
+                report.bedsmovedparents += counted ? 1 : 0;
+            else if (counted)
+            {
+                report.forcedparents++;
+                report.maxforcedmove_m = std::max(report.maxforcedmove_m, std::fabs(remainder / children));
+            }
+        }
+        for (int i = 0; i < count; i++)
+        {
+            const std::size_t cell = cells[static_cast<std::size_t>(i)];
+            const double d = shift[static_cast<std::size_t>(i)];
+            field[cell] = static_cast<float>(static_cast<double>(field[cell]) + d);
+            correction[cell] = d;
+            moved[cell] = bounds.rate[cell] > 0.0f || d != 0.0 ? 1 : 0;
+        }
+        lambda[b] = lambdac;
+    }
+
+    // The statistics over the kept parents: lambda, its steps to the kept parents in slots 3 and 5 at the
+    // parent level, the parent-mean error, and the border steps of kept cells in slots 3 and 5 (east and
+    // south in the cell's frame) whose blocks differ, both moved.
+    const std::int64_t parentcells = parent.facecells();
+    for (std::size_t b = 0; b < blockcount; b++)
+    {
+        if (parents.kept[b] == 0)
+            continue;
+        report.parents++;
+        report.maxlambda_m = std::max(report.maxlambda_m, std::fabs(lambda[b]));
+        report.maxparentmeanerror_m =
+            std::max(report.maxparentmeanerror_m, std::fabs(blockmean(blocks, b, field) - parents.parentvalue[b]));
+        for (const int slot : { 3, 5 })
+        {
+            const std::size_t other = blockofparent(blocks, mesh::cubekeyneighbour(parentcells, blocks.parents[b], slot));
+            if (other < blockcount && parents.kept[other] != 0)
+                report.maxlambdastep_m = std::max(report.maxlambdastep_m, std::fabs(lambda[b] - lambda[other]));
+        }
+    }
+    std::vector<std::size_t> blockof(size, blockcount);
+    for (std::size_t b = 0; b < blockcount; b++)
+        for (std::size_t n = 0; n < blocks.perparent(); n++)
+            blockof[blocks.childrenof(b)[n]] = b;
+    std::vector<double> steps;
+    for (mesh::CellId c = 0; c < size; c++)
+    {
+        if (kept[c] == 0 || moved[c] == 0)
+            continue;
+        for (const int slot : { 3, 5 })
+        {
+            const std::int32_t other = level.neighbour(c, slot);
+            if (other < 0)
+                continue;
+            const std::size_t o = static_cast<std::size_t>(other);
+            if (kept[o] == 0 || moved[o] == 0 || blockof[o] == blockof[c])
+                continue;
+            steps.push_back(std::fabs(correction[c] - correction[o]));
+        }
+    }
+    if (!steps.empty())
+    {
+        const std::size_t n = steps.size();
+        const std::size_t rank = (99 * n + 99) / 100 - 1;  // ceil(0.99 n) - 1
+        std::nth_element(steps.begin(), steps.begin() + static_cast<std::ptrdiff_t>(rank), steps.end());
+        report.borderstep99_m = steps[rank];
+        report.maxborderstep_m = *std::max_element(steps.begin() + static_cast<std::ptrdiff_t>(rank), steps.end());
+    }
+    return report;
+}
+
+double levelparentmeanerror(const mesh::CellGrid& level, const std::vector<float>& field, const mesh::CellGrid& parent,
+                            const std::vector<float>& parentfield, int factor, const std::vector<std::uint8_t>& kept)
+{
+    const CubeParents parents = cubeparents(level, field.size(), parent, parentfield, factor, kept, "levelparentmeanerror");
+    double largest = 0.0;
+    for (std::size_t b = 0; b < parents.blocks.count(); b++)
+        if (parents.kept[b] != 0)
+            largest = std::max(largest, std::fabs(blockmean(parents.blocks, b, field) - parents.parentvalue[b]));
+    return largest;
 }
 
 ResampledField resampleto(const std::vector<LevelWindow>& windows, const std::vector<std::vector<float>>& fields,

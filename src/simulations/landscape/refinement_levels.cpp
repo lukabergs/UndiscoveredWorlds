@@ -361,11 +361,12 @@ void correctparentmeans(const mesh::CellGrid& parent, const std::vector<float>& 
             throw std::invalid_argument("correctparentmeans: a domain parent lies outside the parent's kept cells");
         parentvalue[b] = static_cast<double>(parentfield[cell]);
     }
+    const GatherPlan plan = passes > 0 ? gatherplan(blocks, level) : GatherPlan{};
     for (int pass = 0; pass < passes; pass++)
     {
         for (std::size_t b = 0; b < blocks.count(); b++)
             residual[b] = static_cast<double>(static_cast<float>(blockmean(blocks, b, fine) - parentvalue[b]));
-        const std::vector<double> correction = gatherblocks(blocks, residual, level);
+        const std::vector<double> correction = gatherblocks(plan, residual);
         for (std::size_t cell = 0; cell < fine.size(); cell++)
             fine[cell] = static_cast<float>(static_cast<double>(fine[cell]) - correction[cell]);
     }

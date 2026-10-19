@@ -1,5 +1,5 @@
 // Tests of landscape/regional_grid.hpp (erosion plan Phase E, step E2a), suite Landscape:
-// Landscape.RegionalGrid* (the window) and Landscape.PatchMetric* (E0's patch metric).
+// Landscape.RegionalGrid* (the window) and Landscape.RegionalWindowGrid* (the window's grid).
 
 #include <gtest/gtest.h>
 
@@ -171,51 +171,53 @@ TEST_F(Landscape, RegionalGridThrowsOnBadInput)
     EXPECT_NO_THROW(landscape::regionalwindow(16, 2, 3, 1.0, 0.0, -136.0, 20.0));  // 16 columns: the whole turn
 }
 
-TEST_F(Landscape, PatchMetricOfTheWholeSphereSumsToItsArea)
+TEST_F(Landscape, RegionalWindowGridOfTheWholeSphereSumsToItsArea)
 {
     const landscape::RegionalWindow window = landscape::regionalwindow(16, 2, 0, -180.0, -90.0, 180.0, 90.0);
     ASSERT_EQ(window.domaincolumns, 16);
     ASSERT_EQ(window.domainrows, 8);
-    const landscape::PatchMetric metric = landscape::finepatchmetric(window, radius);
-    ASSERT_EQ(metric.width, 32);
-    ASSERT_EQ(metric.height, 16);
+    const auto grid = landscape::regionalwindowgrid(window, radius);
+    ASSERT_EQ(grid->cellcount(), 32u * 16u);
     double total = 0.0;
-    for (double area : metric.rowarea_m2)
-        total += area * metric.width;
+    for (mesh::CellId c = 0; c < grid->cellcount(); c++)
+        total += grid->area_m2(c);
     const double sphere = 4.0 * pi * radius * radius;
     EXPECT_NEAR(total / sphere, 1.0, 1e-9);
 }
 
-TEST_F(Landscape, PatchMetricNeighbourBeyondTheEdgeIsTheCell)
+TEST_F(Landscape, RegionalWindowGridHasNoNeighbourBeyondTheEdge)
 {
     const landscape::RegionalWindow window = landscape::regionalwindow(16, 2, 1, 10.0, 5.0, 30.0, 20.0);
-    const landscape::PatchMetric metric = landscape::finepatchmetric(window, radius);
-    const std::size_t northwest = metric.index(0, 0);
+    const auto grid = landscape::regionalwindowgrid(window, radius);
+    const int width = window.domainfinewidth(), height = window.domainfineheight();
+    const auto index = [width](int x, int y) { return static_cast<std::int32_t>(y * width + x); };
+    const mesh::CellId northwest = 0;
     for (int direction : { 1, 2, 6, 7, 8 })
-        EXPECT_EQ(metric.neighbour(northwest, direction), northwest) << "direction " << direction;
-    EXPECT_EQ(metric.neighbour(northwest, 3), metric.index(1, 0));
-    EXPECT_EQ(metric.neighbour(northwest, 5), metric.index(0, 1));
-    const std::size_t southeast = metric.index(metric.width - 1, metric.height - 1);
+        EXPECT_EQ(grid->neighbour(northwest, direction), -1) << "direction " << direction;
+    EXPECT_EQ(grid->neighbour(northwest, 3), index(1, 0));
+    EXPECT_EQ(grid->neighbour(northwest, 5), index(0, 1));
+    const mesh::CellId southeast = static_cast<mesh::CellId>(index(width - 1, height - 1));
     for (int direction : { 2, 3, 4, 5, 6 })
-        EXPECT_EQ(metric.neighbour(southeast, direction), southeast) << "direction " << direction;
-    EXPECT_EQ(metric.neighbour(southeast, 7), metric.index(metric.width - 2, metric.height - 1));
+        EXPECT_EQ(grid->neighbour(southeast, direction), -1) << "direction " << direction;
+    EXPECT_EQ(grid->neighbour(southeast, 7), index(width - 2, height - 1));
 }
 
-TEST_F(Landscape, PatchMetricRowsEqualThoseOfThePlanetWideFineGrid)
+TEST_F(Landscape, RegionalWindowGridRowsEqualThoseOfThePlanetWideFineGrid)
 {
     constexpr int k = 3;
     const landscape::RegionalWindow window = landscape::regionalwindow(16, k, 1, 10.0, -30.0, 30.0, 20.0);
     ASSERT_GT(window.domainrow0, 0);
-    const landscape::PatchMetric metric = landscape::finepatchmetric(window, radius);
+    const auto grid = landscape::regionalwindowgrid(window, radius);
     const landscape::SphereMetric planet(16 * k, 8 * k, radius);
-    EXPECT_EQ(metric.dy_m, planet.dy_m);
-    for (int y = 0; y < metric.height; y++)
+    EXPECT_EQ(landscape::northsouthspacing_m(*grid), planet.dy_m);
+    const int width = window.domainfinewidth();
+    for (int y = 0; y < window.domainfineheight(); y++)
     {
-        const std::size_t row = static_cast<std::size_t>(y);
+        const mesh::CellId cell = static_cast<mesh::CellId>(y * width);
         const std::size_t absolute = static_cast<std::size_t>(window.absolutefinerow(y));
-        EXPECT_EQ(metric.rowdx_m[row], planet.rowdx_m[absolute]) << "row " << y;
-        EXPECT_EQ(metric.rowarea_m2[row], planet.rowarea_m2[absolute]) << "row " << y;
-        EXPECT_EQ(metric.rowlatitude_rad[row], planet.rowlatitude_rad[absolute]) << "row " << y;
+        EXPECT_EQ(grid->distance_m(cell, 3), planet.rowdx_m[absolute]) << "row " << y;
+        EXPECT_EQ(grid->area_m2(cell), planet.rowarea_m2[absolute]) << "row " << y;
+        EXPECT_EQ(grid->latitude_rad(cell), planet.rowlatitude_rad[absolute]) << "row " << y;
         EXPECT_EQ(window.finelatitude_rad(y), planet.rowlatitude_rad[absolute]) << "row " << y;
     }
 }

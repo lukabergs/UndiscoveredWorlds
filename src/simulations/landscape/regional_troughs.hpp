@@ -12,7 +12,7 @@
 // catchment A_i (glacialcatchment_km2 at channels.globalcell, the upstream global cell of
 // the link; 0 or absent: no trough) is positive is the axis of a trough of half-width
 // W = min(troughs.widthmax_km, troughs.width_km x (A_i / troughs.reference_km2)^widthexponent)
-// km on the ground, in fine cells W / the fine cell's size (finepatchmetric's dy_m, the
+// km on the ground, in fine cells W / the fine cell's size (northsouthspacing_m, the
 // same in every window) and at most k (one global cell, the halo rule as carvevalleys):
 // every land cell that is not a channel within Euclidean distance d <= W (fine cells:
 // ground kilometres north-south, east-west shrunk by the cosine of the latitude, R9's

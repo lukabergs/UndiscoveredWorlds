@@ -12,8 +12,12 @@
 #include <tuple>
 
 #include "core/deterministic_random.hpp"
+#include "core/mesh/mesh_geometry.hpp"
+#include "core/mesh/window_grid.hpp"
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_grid.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_helpers.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/regional_valleys.hpp"
 #include "simulations/landscape/upsampling.hpp"
@@ -137,6 +141,13 @@ int orientationflood(const FoldPhaseField& field, const std::vector<uint8_t>& ma
     return oriented;
 }
 
+// An edge of the least-squares potential: the neighbour, the weight and the asked difference Phi_n - Phi_c.
+struct FoldLink
+{
+    std::size_t cell = 0;
+    double weight = 0.0, target = 0.0;
+};
+
 // One corner's Hermite data: the value, the slopes along the two cell parameters and the cross term.
 struct Corner
 {
@@ -172,6 +183,102 @@ void hermitederivative(double s, double& h00, double& h01, double& h10, double& 
     h01 = -6.0 * s2 + 6.0 * s;
     h10 = 3.0 * s2 - 4.0 * s + 1.0;
     h11 = 3.0 * s2 - 2.0 * s;
+}
+}
+
+namespace
+{
+template<typename Reversed>
+void solvepotential(FoldPhaseField& field, std::size_t size, const std::vector<std::size_t>& cells,
+                    const std::vector<std::size_t>& first, const std::vector<FoldLink>& links, Reversed reversed)
+{
+    using Link = FoldLink;
+    // The start: the wavenumber integrated along a breadth-first tree from each component's first cell; the
+    // components numbered in that order.
+    std::vector<int> component(size, -1);
+    std::vector<std::size_t> slot(size, 0);
+    for (std::size_t index = 0; index < cells.size(); index++)
+        slot[cells[index]] = index;
+    for (const std::size_t root : cells)
+    {
+        if (component[root] >= 0)
+            continue;
+        const int number = field.components++;
+        component[root] = number;
+        field.phase_rad[root] = 0.0;
+        std::deque<std::size_t> queue{root};
+        while (!queue.empty())
+        {
+            const std::size_t cell = queue.front();
+            queue.pop_front();
+            const std::size_t index = slot[cell];
+            for (std::size_t l = first[index]; l < first[index + 1]; l++)
+            {
+                const Link& link = links[l];
+                if (component[link.cell] >= 0)
+                    continue;
+                component[link.cell] = number;
+                field.phase_rad[link.cell] = field.phase_rad[cell] + link.target;
+                queue.push_back(link.cell);
+            }
+        }
+    }
+
+    // Over-relaxed Gauss-Seidel in double, the cells in row-major order.
+    for (field.sweeps = 0; field.sweeps < solvemaxsweeps;)
+    {
+        double largest = 0.0;
+        for (std::size_t index = 0; index < cells.size(); index++)
+        {
+            double numerator = 0.0, denominator = 0.0;
+            for (std::size_t l = first[index]; l < first[index + 1]; l++)
+            {
+                numerator += links[l].weight * (field.phase_rad[links[l].cell] - links[l].target);
+                denominator += links[l].weight;
+            }
+            if (!(denominator > 0.0))
+                continue;
+            double& value = field.phase_rad[cells[index]];
+            const double change = solverelaxation * (numerator / denominator - value);
+            largest = std::max(largest, std::fabs(change));
+            value += change;
+        }
+        field.sweeps++;
+        field.lastchange_rad = largest;
+        if (largest < solvetolerance_rad)
+            break;
+    }
+
+    // The gauge: each component's mean phase 0.
+    {
+        std::vector<double> sums(static_cast<std::size_t>(field.components), 0.0);
+        std::vector<double> counts(static_cast<std::size_t>(field.components), 0.0);
+        for (const std::size_t cell : cells)
+        {
+            sums[static_cast<std::size_t>(component[cell])] += field.phase_rad[cell];
+            counts[static_cast<std::size_t>(component[cell])] += 1.0;
+        }
+        for (const std::size_t cell : cells)
+            field.phase_rad[cell] -= sums[static_cast<std::size_t>(component[cell])] / counts[static_cast<std::size_t>(component[cell])];
+    }
+
+    // The misfit: the weighted rms of the edges' Phi_n - Phi_c - target relative to their targets' (each edge once).
+    {
+        double misfit = 0.0, scale = 0.0;
+        for (std::size_t index = 0; index < cells.size(); index++)
+            for (std::size_t l = first[index]; l < first[index + 1]; l++)
+            {
+                const Link& link = links[l];
+                if (link.cell < cells[index])
+                    continue;
+                if (reversed(link.cell, cells[index]))
+                    field.reversaledges++;
+                const double error = field.phase_rad[link.cell] - field.phase_rad[cells[index]] - link.target;
+                misfit += link.weight * error * error;
+                scale += link.weight * link.target * link.target;
+            }
+        field.misfit = scale > 0.0 ? std::sqrt(misfit / scale) : 0.0;
+    }
 }
 }
 
@@ -327,11 +434,7 @@ FoldPhaseField foldphasefield(const RegionalGlobalInputs& inputs, const FoldPara
     // across the poles), each asking Phi_n - Phi_c = the mean wavenumber of its two cells times the step on the
     // ground, weighted by the finite-volume Laplacian's metric (dy / dx across a row, dx at the edge / dy between
     // rows); natural (Neumann) conditions at the mask's edge.
-    struct Link
-    {
-        std::size_t cell = 0;
-        double weight = 0.0, target = 0.0;
-    };
+    using Link = FoldLink;
     std::vector<std::size_t> cells;
     std::vector<std::size_t> first;
     std::vector<Link> links;
@@ -362,95 +465,9 @@ FoldPhaseField foldphasefield(const RegionalGlobalInputs& inputs, const FoldPara
                 link(i, j + 1, edgedx_km[static_cast<std::size_t>(j)] / field.dy_km, field.dy_km, false);
         }
     first.push_back(links.size());
-
-    // The start: the wavenumber integrated along a breadth-first tree from each component's first cell; the
-    // components numbered in that order.
-    std::vector<int> component(size, -1);
-    std::vector<std::size_t> slot(size, 0);
-    for (std::size_t index = 0; index < cells.size(); index++)
-        slot[cells[index]] = index;
-    for (const std::size_t root : cells)
-    {
-        if (component[root] >= 0)
-            continue;
-        const int number = field.components++;
-        component[root] = number;
-        field.phase_rad[root] = 0.0;
-        std::deque<std::size_t> queue{root};
-        while (!queue.empty())
-        {
-            const std::size_t cell = queue.front();
-            queue.pop_front();
-            const std::size_t index = slot[cell];
-            for (std::size_t l = first[index]; l < first[index + 1]; l++)
-            {
-                const Link& link = links[l];
-                if (component[link.cell] >= 0)
-                    continue;
-                component[link.cell] = number;
-                field.phase_rad[link.cell] = field.phase_rad[cell] + link.target;
-                queue.push_back(link.cell);
-            }
-        }
-    }
-
-    // Over-relaxed Gauss-Seidel in double, the cells in row-major order.
-    for (field.sweeps = 0; field.sweeps < solvemaxsweeps;)
-    {
-        double largest = 0.0;
-        for (std::size_t index = 0; index < cells.size(); index++)
-        {
-            double numerator = 0.0, denominator = 0.0;
-            for (std::size_t l = first[index]; l < first[index + 1]; l++)
-            {
-                numerator += links[l].weight * (field.phase_rad[links[l].cell] - links[l].target);
-                denominator += links[l].weight;
-            }
-            if (!(denominator > 0.0))
-                continue;
-            double& value = field.phase_rad[cells[index]];
-            const double change = solverelaxation * (numerator / denominator - value);
-            largest = std::max(largest, std::fabs(change));
-            value += change;
-        }
-        field.sweeps++;
-        field.lastchange_rad = largest;
-        if (largest < solvetolerance_rad)
-            break;
-    }
-
-    // The gauge: each component's mean phase 0.
-    {
-        std::vector<double> sums(static_cast<std::size_t>(field.components), 0.0);
-        std::vector<double> counts(static_cast<std::size_t>(field.components), 0.0);
-        for (const std::size_t cell : cells)
-        {
-            sums[static_cast<std::size_t>(component[cell])] += field.phase_rad[cell];
-            counts[static_cast<std::size_t>(component[cell])] += 1.0;
-        }
-        for (const std::size_t cell : cells)
-            field.phase_rad[cell] -= sums[static_cast<std::size_t>(component[cell])] / counts[static_cast<std::size_t>(component[cell])];
-    }
-
-    // The misfit: the weighted rms of the edges' Phi_n - Phi_c - target relative to their targets' (each edge once).
-    {
-        double misfit = 0.0, scale = 0.0;
-        for (std::size_t index = 0; index < cells.size(); index++)
-            for (std::size_t l = first[index]; l < first[index + 1]; l++)
-            {
-                const Link& link = links[l];
-                if (link.cell < cells[index])
-                    continue;
-                if (field.wavenumbereast[link.cell] * field.wavenumbereast[cells[index]] +
-                        field.wavenumbersouth[link.cell] * field.wavenumbersouth[cells[index]] <
-                    0.0)
-                    field.reversaledges++;
-                const double error = field.phase_rad[link.cell] - field.phase_rad[cells[index]] - link.target;
-                misfit += link.weight * error * error;
-                scale += link.weight * link.target * link.target;
-            }
-        field.misfit = scale > 0.0 ? std::sqrt(misfit / scale) : 0.0;
-    }
+    solvepotential(field, size, cells, first, links, [&field](std::size_t a, std::size_t b) {
+        return field.wavenumbereast[a] * field.wavenumbereast[b] + field.wavenumbersouth[a] * field.wavenumbersouth[b] < 0.0;
+    });
 
     // The extension rings: a cell next to the defined ones (8-neighbours) takes the mean of their phases carried
     // over by their wavenumbers, and the mean of their wavenumbers; ring by ring, each from the cells defined before.
@@ -523,6 +540,7 @@ FoldPhaseField foldphasefield(const RegionalGlobalInputs& inputs, const FoldPara
     field.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     return field;
 }
+
 
 bool foldphase_rad(const FoldPhaseField& field, double u, double v, double& phase, double* misfit)
 {
@@ -832,6 +850,483 @@ void refoldafterlakes(const LevelContext& context, LevelState& state)
                 elevation[cell] =
                     level > 0.0f && !(folded > level) ? std::nextafter(level, std::numeric_limits<float>::infinity()) : folded;
             }
+    }
+    state.folded_m.clear();
+    state.folded_m.shrink_to_fit();
+    state.unfolded_m.clear();
+    state.unfolded_m.shrink_to_fit();
+}
+
+// --- The cube forms (T8 W2-W2f; sphere-mesh.md section 8: folds on the level-0 table with axes relative
+// to east/north, the potential's weights facelength / distance). ---
+
+namespace
+{
+// The tangent vector of (east, south) components in a cell's frame.
+mesh::Vec3 tangentvector(const mesh::Vec3& east, const mesh::Vec3& north, double eastward, double southward)
+{
+    return (eastward * east) - (southward * north);
+}
+
+bool cubefoldson(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters)
+{
+    return parameters.folds.amplitudemax_m > 0.0 && inputs.grid != nullptr && inputs.grid->kind() == mesh::GridKind::cube &&
+           inputs.foldstrain.size() == inputs.grid->cellcount() && inputs.grid->cellcount() > 0;
+}
+
+// The phase at a point from the bilinear stencil's level-0 cells: each node's phase carried to the
+// point along its wavenumber (Phi_n + R k_n . p, k_n tangent at the node), weighted; false where a
+// node is undefined. wavenumber (optional): the stencil's weighted wavenumber (3-D, rad per km).
+bool cubephaseat(const FoldPhaseField& field, const mesh::Vec3& p, double& phase, mesh::Vec3* wavenumber)
+{
+    const mesh::CellGrid& grid = *field.grid;
+    const mesh::KeyStencil stencil = mesh::cubebilinearstencil(grid.facecells(), p);
+    const double radius_km = grid.radius_m() / 1000.0;
+    double sum = 0.0;
+    mesh::Vec3 k{ 0.0, 0.0, 0.0 };
+    for (std::size_t n = 0; n < stencil.key.size(); n++)
+    {
+        const std::size_t cell = static_cast<std::size_t>(stencil.key[n]);
+        if (field.state[cell] == 0)
+            return false;
+        const mesh::Vec3& kn = field.wavenumber3[cell];
+        sum += stencil.weight[n] * (field.phase_rad[cell] + radius_km * mesh::dot(kn, p));
+        k = k + stencil.weight[n] * kn;
+    }
+    phase = sum;
+    if (wavenumber != nullptr)
+        *wavenumber = k;
+    return !stencil.key.empty();
+}
+}
+
+FoldPhaseField cubefoldphasefield(const RegionalGlobalInputs& inputs, const FoldParameters& folds)
+{
+    const auto start = std::chrono::steady_clock::now();
+    FoldPhaseField field;
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || inputs.grid->issubgrid())
+        return field;
+    const mesh::CellGrid& grid = *inputs.grid;
+    const std::size_t size = grid.cellcount();
+    if (size == 0 || inputs.foldstrain.size() != size || !(inputs.radius_m > 0.0))
+        return field;
+    field.grid = &grid;
+    field.phase_rad.assign(size, 0.0);
+    field.wavenumbereast.assign(size, 0.0);
+    field.wavenumbersouth.assign(size, 0.0);
+    field.wavenumber3.assign(size, mesh::Vec3{ 0.0, 0.0, 0.0 });
+    field.cross_rad.assign(size, 0.0);
+    field.state.assign(size, 0);
+    field.orientation.assign(size, 0);
+    const double cell_m = cubecellarc_m(grid.radius_m(), grid.facecells());
+    field.dy_km = cell_m / 1000.0;
+    field.column_km = field.dy_km;
+    std::vector<mesh::Vec3> east(size), north(size), centre(size);
+    for (mesh::CellId c = 0; c < size; c++)
+    {
+        east[c] = grid.east(c);
+        north[c] = grid.north(c);
+        centre[c] = grid.centre(c);
+    }
+
+    // The mask, the axis (east, south in the cell's frame) and the wavenumber's size, as on lat-lon.
+    const bool withsediment = inputs.sediment_m.size() == size;
+    const bool withdirection = inputs.folddirection_rad.size() == size;
+    std::vector<uint8_t> mask(size, 0);
+    std::vector<double> axiseast(size, 1.0), axissouth(size, 0.0), wavenumber(size, 0.0);
+    for (std::size_t cell = 0; cell < size; cell++)
+    {
+        const double strain = std::max(0.0, static_cast<double>(inputs.foldstrain[cell]));
+        mask[cell] = strainweight(folds, strain) > 0.0 ? 1 : 0;
+        field.maskcells += mask[cell];
+        const double theta = withdirection && std::isfinite(inputs.folddirection_rad[cell]) ? static_cast<double>(inputs.folddirection_rad[cell]) : 0.0;
+        axiseast[cell] = std::cos(theta);
+        axissouth[cell] = std::sin(theta);
+        const double wavelength = foldwavelength_km(folds, withsediment ? static_cast<double>(inputs.sediment_m[cell]) : 0.0, withsediment);
+        wavenumber[cell] = wavelength > 0.0 ? 2.0 * pi / wavelength : 0.0;
+    }
+    if (field.maskcells == 0)
+        return field;
+    const auto axisof = [&](std::size_t cell) { return tangentvector(east[cell], north[cell], axiseast[cell], axissouth[cell]); };
+
+    // The axis smoothed: the doubled-angle vectors of the mask cells within ceil(sigma) rings on the table, each
+    // axis expressed in the cell's own frame (its projection normalised), weighted by w(eps) and the Gaussian
+    // of the ground distance in level-0 arcs.
+    if (folds.axissmoothing_cells > 0.0)
+    {
+        const double sigma = folds.axissmoothing_cells;
+        const int reach = static_cast<int>(std::ceil(sigma));
+        std::vector<double> smoothedeast = axiseast, smoothedsouth = axissouth;
+        std::vector<std::uint32_t> stamp;
+        std::vector<std::pair<mesh::CellId, int>> around;
+        std::uint32_t id = 0;
+        for (mesh::CellId cell = 0; cell < size; cell++)
+        {
+            if (mask[cell] == 0)
+                continue;
+            regionaldetail::cellswithin(grid, cell, reach, stamp, ++id, around);
+            double c = 0.0, s = 0.0;
+            for (const auto& [next, ring] : around)
+            {
+                (void)ring;
+                if (mask[next] == 0)
+                    continue;
+                const mesh::Vec3 axis = axisof(next);
+                const double ae = mesh::dot(axis, east[cell]), as = -mesh::dot(axis, north[cell]);
+                const double length2 = ae * ae + as * as;
+                if (!(length2 > 0.0))
+                    continue;
+                const double d = regionaldetail::centredistance(grid, cell, next, cell_m);
+                const double gauss = std::exp(-(d * d) / (2.0 * sigma * sigma));
+                const double weight = gauss * strainweight(folds, std::max(0.0, static_cast<double>(inputs.foldstrain[next])));
+                c += weight * (ae * ae - as * as) / length2;
+                s += weight * 2.0 * ae * as / length2;
+            }
+            if (!(std::hypot(c, s) > 0.0))
+                continue;
+            const double theta = 0.5 * std::atan2(s, c);
+            smoothedeast[cell] = std::cos(theta);
+            smoothedsouth[cell] = std::sin(theta);
+        }
+        axiseast = std::move(smoothedeast);
+        axissouth = std::move(smoothedsouth);
+    }
+
+    // The orientation by continuity: each component's first cell (ascending id) points north (east for an
+    // east-west axis); a Dijkstra flood over the mask's table neighbours by the ground distance orients the rest
+    // (the sign keeping the 3-D axis within 90 degrees of the predecessor's, ties to the smaller hash).
+    {
+        using Entry = std::tuple<double, std::uint64_t, std::size_t>;
+        std::vector<uint8_t> done(size, 0);
+        std::vector<double> distance(size, std::numeric_limits<double>::infinity());
+        std::vector<std::int64_t> from(size, -1);
+        const auto hash = [&inputs](std::size_t cell) { return deterministiccombine(inputs.seed, foldsalt, static_cast<std::int64_t>(cell)); };
+        for (std::size_t root = 0; root < size; root++)
+        {
+            if (mask[root] == 0 || done[root] != 0)
+                continue;
+            field.orientation[root] =
+                static_cast<int8_t>(axissouth[root] < 0.0 || (axissouth[root] == 0.0 && axiseast[root] >= 0.0) ? 1 : -1);
+            field.orientedbynorth++;
+            std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue;
+            distance[root] = 0.0;
+            queue.emplace(0.0, hash(root), root);
+            while (!queue.empty())
+            {
+                const auto [d, unused, cell] = queue.top();
+                (void)unused;
+                queue.pop();
+                if (done[cell] != 0 || d > distance[cell])
+                    continue;
+                done[cell] = 1;
+                if (field.orientation[cell] == 0)
+                {
+                    const std::size_t previous = static_cast<std::size_t>(from[cell]);
+                    const double dot = mesh::dot(axisof(cell), axisof(previous));
+                    field.orientation[cell] = static_cast<int8_t>(dot * static_cast<double>(field.orientation[previous]) >= 0.0 ? 1 : -1);
+                    field.orientedbyflood++;
+                }
+                for (int slot = 1; slot <= mesh::slotcount; slot++)
+                {
+                    const std::int32_t other = grid.neighbour(static_cast<mesh::CellId>(cell), slot);
+                    if (other < 0)
+                        continue;
+                    const std::size_t next = static_cast<std::size_t>(other);
+                    if (mask[next] == 0 || done[next] != 0)
+                        continue;
+                    const double candidate = d + grid.distance_m(static_cast<mesh::CellId>(cell), slot) / 1000.0;
+                    if (candidate < distance[next] ||
+                        (candidate == distance[next] && from[next] >= 0 && hash(cell) < hash(static_cast<std::size_t>(from[next]))))
+                    {
+                        const bool improved = candidate < distance[next];
+                        distance[next] = candidate;
+                        from[next] = static_cast<std::int64_t>(cell);
+                        if (improved)
+                            queue.emplace(candidate, hash(next), next);
+                    }
+                }
+            }
+        }
+    }
+    for (std::size_t cell = 0; cell < size; cell++)
+        if (mask[cell] != 0)
+        {
+            const double sign = static_cast<double>(field.orientation[cell]);
+            field.wavenumbereast[cell] = sign * wavenumber[cell] * axiseast[cell];
+            field.wavenumbersouth[cell] = sign * wavenumber[cell] * axissouth[cell];
+            field.wavenumber3[cell] = tangentvector(east[cell], north[cell], field.wavenumbereast[cell], field.wavenumbersouth[cell]);
+            field.state[cell] = 1;
+        }
+
+    // The least-squares potential: the edges to the mask's cardinal table neighbours (slots N, W, E, S), each asking
+    // Phi_n - Phi_c = the two cells' mean 3-D wavenumber along the chord times the centres' distance, weighted by
+    // the finite-volume Laplacian's facelength / distance.
+    std::vector<std::size_t> cells;
+    std::vector<std::size_t> first;
+    std::vector<FoldLink> links;
+    for (mesh::CellId c = 0; c < size; c++)
+    {
+        if (mask[c] == 0)
+            continue;
+        cells.push_back(c);
+        first.push_back(links.size());
+        for (const int slot : { 1, 7, 3, 5 })
+        {
+            const std::int32_t other = grid.neighbour(c, slot);
+            if (other < 0 || mask[static_cast<std::size_t>(other)] == 0)
+                continue;
+            const std::size_t next = static_cast<std::size_t>(other);
+            const double length_m = grid.distance_m(c, slot);
+            if (!(length_m > 0.0))
+                continue;
+            const mesh::Vec3 chord = centre[next] - centre[c];
+            const double chordlength = mesh::length(chord);
+            const mesh::Vec3 mean = 0.5 * (field.wavenumber3[c] + field.wavenumber3[next]);
+            const double target = chordlength > 0.0 ? mesh::dot(mean, chord) / chordlength * length_m / 1000.0 : 0.0;
+            links.push_back({ next, grid.facelength_m(c, slot) / length_m, target });
+        }
+    }
+    first.push_back(links.size());
+    solvepotential(field, size, cells, first, links,
+                   [&field](std::size_t a, std::size_t b) { return mesh::dot(field.wavenumber3[a], field.wavenumber3[b]) < 0.0; });
+
+    // The extension rings: an undefined cell beside defined ones (its table neighbours) takes the mean of their
+    // phases carried along their wavenumbers to it and the mean of their 3-D wavenumbers, ring by ring.
+    for (int ring = 0; ring < extensionrings; ring++)
+    {
+        const std::vector<uint8_t> defined = field.state;
+        for (mesh::CellId c = 0; c < size; c++)
+        {
+            if (defined[c] != 0)
+                continue;
+            double phase = 0.0;
+            mesh::Vec3 k{ 0.0, 0.0, 0.0 };
+            int count = 0;
+            for (int slot = 1; slot <= mesh::slotcount; slot++)
+            {
+                const std::int32_t other = grid.neighbour(c, slot);
+                if (other < 0 || defined[static_cast<std::size_t>(other)] == 0)
+                    continue;
+                const std::size_t next = static_cast<std::size_t>(other);
+                const mesh::Vec3 chord = centre[c] - centre[next];
+                const double chordlength = mesh::length(chord);
+                const double step_km = grid.distance_m(c, slot) / 1000.0;
+                phase += field.phase_rad[next] +
+                         (chordlength > 0.0 ? mesh::dot(field.wavenumber3[next], chord) / chordlength * step_km : 0.0);
+                k = k + field.wavenumber3[next];
+                count++;
+            }
+            if (count == 0)
+                continue;
+            const mesh::Vec3 mean = (1.0 / count) * k;
+            field.phase_rad[c] = phase / count;
+            field.wavenumbereast[c] = mesh::dot(mean, east[c]);
+            field.wavenumbersouth[c] = -mesh::dot(mean, north[c]);
+            field.wavenumber3[c] = tangentvector(east[c], north[c], field.wavenumbereast[c], field.wavenumbersouth[c]);
+            field.state[c] = 2;
+        }
+    }
+    field.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    return field;
+}
+
+bool foldphase_rad(const FoldPhaseField& field, const mesh::Vec3& p, double& phase, double* misfit)
+{
+    if (field.grid == nullptr || field.state.empty())
+        return false;
+    mesh::Vec3 k{ 0.0, 0.0, 0.0 };
+    if (!cubephaseat(field, p, phase, &k))
+        return false;
+    if (misfit == nullptr)
+        return true;
+    // The gradient on the ground by central differences of 0.01 level-0 arcs in p's tangent plane; a probe
+    // on an undefined node leaves the point undefined.
+    const mesh::TangentFrame frame = mesh::tangentframe(p, field.grid->radius_m());
+    const double h = 0.01 * field.dy_km;
+    double east0 = 0.0, east1 = 0.0, north0 = 0.0, north1 = 0.0;
+    if (!cubephaseat(field, mesh::fromtangent(frame, -h, 0.0), east0, nullptr) ||
+        !cubephaseat(field, mesh::fromtangent(frame, h, 0.0), east1, nullptr) ||
+        !cubephaseat(field, mesh::fromtangent(frame, 0.0, -h), north0, nullptr) ||
+        !cubephaseat(field, mesh::fromtangent(frame, 0.0, h), north1, nullptr))
+        return false;
+    const double gradeast = (east1 - east0) / (2.0 * h), gradnorth = (north1 - north0) / (2.0 * h);
+    const double keast = mesh::dot(k, frame.east), knorth = mesh::dot(k, frame.north);
+    const double size = std::hypot(keast, knorth);
+    *misfit = size > 0.0 ? std::hypot(gradeast - keast, gradnorth - knorth) / size : 0.0;
+    return true;
+}
+
+void addfoldfabric(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                   const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m,
+                   int parentscale, std::vector<uint8_t>* floorclamped)
+{
+    if (!cubefoldson(inputs, parameters))
+        return;
+    const mesh::CellGrid& levelzero = *inputs.grid;
+    if (window.kind() != mesh::GridKind::cube || window.facecells() % levelzero.facecells() != 0)
+        throw std::invalid_argument("addfoldfabric: a cube window refining the inputs' cube level 0");
+    const FoldParameters& folds = parameters.folds;
+    const std::size_t count = window.cellcount();
+    if (count == 0 || channels.channel.size() != count || sea.size() != count || elevation_m.size() != count)
+        return;
+    if (floorclamped != nullptr)
+        floorclamped->assign(count, 0);
+    const std::size_t globalsize = levelzero.cellcount();
+    const int k = window.facecells() / levelzero.facecells();
+    const double cell_m = northsouthspacing_m(window);
+    const double cell_km = cell_m / 1000.0;
+    const double globalcell_km = cubecellarc_m(inputs.radius_m, levelzero.facecells()) / 1000.0;
+    if (!(cell_km > 0.0) || !(globalcell_km > 0.0))
+        return;
+    const double parentcell_km = parentscale > 0 ? globalcell_km / static_cast<double>(parentscale) : 0.0;
+    const FoldPhaseField phasefield = cubefoldphasefield(inputs, folds);
+    if (phasefield.maskcells == 0)
+        return;
+
+    const bool withsediment = inputs.sediment_m.size() == globalsize;
+    std::vector<float> wavelengthfield(globalsize), heightfield(globalsize);
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    for (std::size_t cell = 0; cell < globalsize; cell++)
+    {
+        wavelengthfield[cell] = static_cast<float>(
+            foldwavelength_km(folds, withsediment ? static_cast<double>(inputs.sediment_m[cell]) : 0.0, withsediment));
+        heightfield[cell] = static_cast<float>(std::max(0.0, static_cast<double>(inputs.elevation_m[cell]) - sealevel));
+    }
+    const std::vector<float> strain = upsample(inputs.foldstrain, levelzero, window);
+    const std::vector<float> cellwavelength = upsample(wavelengthfield, levelzero, window);
+    const std::vector<float> above = upsample(heightfield, levelzero, window);
+    const bool withice = inputs.glaciation.size() == globalsize;
+    const std::vector<float> glaciation = withice ? upsample(inputs.glaciation, levelzero, window) : std::vector<float>{};
+    const bool withlakes = inputs.lakesurface_m.size() == globalsize && inputs.network.sea.size() == globalsize;
+    const double wavelengthlower = std::min(folds.wavelengthmin_km, folds.wavelengthmax_km);
+    const double wavelengthupper = std::max(folds.wavelengthmin_km, folds.wavelengthmax_km);
+    const float floorlevel = std::max(std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity()),
+                                      static_cast<float>(sealevel + std::max(0.0, parameters.coast.shorefloor_m)));
+    // The rings that hold a disc of `gapcells` level arcs: the table's smallest spacing is about 0.7 arcs.
+    const double spacing = window.minimumspacing_m() / cell_m;
+    std::vector<std::uint32_t> stamp;
+    std::vector<std::pair<mesh::CellId, int>> around;
+    std::uint32_t id = 0;
+
+    // Every cell reads the elevation before the fabric only at itself, so the order does not matter.
+    for (mesh::CellId cell = 0; cell < count; cell++)
+    {
+        if (sea[cell] != 0 || channels.channel[cell] != 0 || !(elevation_m[cell] > floorlevel))
+            continue;
+        if (withice && std::clamp(static_cast<double>(glaciation[cell]), 0.0, 1.0) > folds.icemax)
+            continue;
+        if (withlakes)
+        {
+            const std::size_t global = levelzero.localofkey(parentkey(window, window.globalkey(cell), k));
+            if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
+                continue;
+        }
+        const double epsilon = std::max(0.0, static_cast<double>(strain[cell]));
+        if (!(strainweight(folds, epsilon) > 0.0))
+            continue;
+        const double wavelengthcell = std::clamp(static_cast<double>(cellwavelength[cell]), wavelengthlower, wavelengthupper);
+        if (!(cell_km <= 0.25 * wavelengthcell) || (parentscale > 0 && !(parentcell_km > 0.25 * wavelengthcell)))
+            continue;
+        const double amplitude = foldamplitude_m(folds, epsilon, wavelengthcell, static_cast<double>(above[cell]));
+        if (!(amplitude > 0.0))
+            continue;
+
+        // The water gap: the largest falloff over the channel cells within gapfraction x L on the ground (at most k rings).
+        double gap = 1.0;
+        const double gapcells = folds.gapfraction * wavelengthcell / cell_km;
+        if (gapcells > 0.0)
+        {
+            const int rings = std::min(k, static_cast<int>(std::ceil(gapcells / spacing)));
+            regionaldetail::cellswithin(window, cell, rings, stamp, ++id, around);
+            double strongest = 0.0;
+            for (const auto& [next, ring] : around)
+            {
+                (void)ring;
+                if (channels.channel[next] == 0)
+                    continue;
+                const double distance = regionaldetail::centredistance(window, cell, next, cell_m);
+                if (distance >= gapcells)
+                    continue;
+                strongest = std::max(strongest, 1.0 - smoothstep(distance / gapcells, 0.0, 1.0));
+            }
+            gap = 1.0 - strongest;
+        }
+        if (!(gap > 0.0))
+            continue;
+        double phase = 0.0, misfit = 0.0;
+        if (!foldphase_rad(phasefield, window.centre(cell), phase, &misfit))
+            continue;
+        const double fade = 1.0 - smoothstep(misfit, folds.misfitfadestart, folds.misfitfadeend);
+        const double fabric = amplitude * gap * fade * std::sin(phase);
+        if (fabric == 0.0 || !std::isfinite(fabric))
+            continue;
+        const float before = elevation_m[cell];
+        const float value = static_cast<float>(static_cast<double>(before) + fabric);
+        if (value < floorlevel && floorclamped != nullptr)
+            (*floorclamped)[cell] = 1;
+        elevation_m[cell] = std::max(value, floorlevel);
+    }
+}
+
+void unfoldforlakes(LevelState& state)
+{
+    std::vector<float>& elevation = state.elevation_m;
+    const std::size_t count = elevation.size();
+    if (state.folded_m.size() != count || state.unfolded_m.size() != count || state.sea.size() != count ||
+        state.channels.channel.size() != count)
+    {
+        state.folded_m.clear();
+        state.unfolded_m.clear();
+        return;
+    }
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        const float folded = state.folded_m[cell], prior = state.unfolded_m[cell];
+        if (folded == prior)
+            continue;
+        if (state.sea[cell] != 0 || state.channels.channel[cell] != 0)
+        {
+            state.unfolded_m[cell] = folded;
+            continue;
+        }
+        const float present = elevation[cell];
+        const float unfolded = present == folded ? prior : std::min(present, prior);
+        state.folded_m[cell] = present;
+        state.unfolded_m[cell] = unfolded;
+        elevation[cell] = unfolded;
+    }
+}
+
+void refoldafterlakes(const mesh::CellGrid& window, LevelState& state)
+{
+    std::vector<float>& elevation = state.elevation_m;
+    const std::size_t count = elevation.size();
+    if (state.folded_m.size() == count && state.unfolded_m.size() == count && count == window.cellcount())
+    {
+        const std::vector<float>& surface = state.water.lakesurface_m;
+        const bool withwater = surface.size() == count;
+        for (mesh::CellId cell = 0; cell < count; cell++)
+        {
+            const float folded = state.folded_m[cell], unfolded = state.unfolded_m[cell];
+            if (folded == unfolded || elevation[cell] != unfolded)
+                continue;
+            float level = 0.0f;
+            if (withwater)
+            {
+                if (surface[cell] > 0.0f)
+                    continue;
+                for (int slot = 1; slot <= mesh::slotcount; slot++)
+                {
+                    const std::int32_t other = window.neighbour(cell, slot);
+                    if (other >= 0)
+                        level = std::max(level, surface[static_cast<std::size_t>(other)]);
+                }
+            }
+            if (level > 0.0f && !(unfolded > level))
+                continue;
+            elevation[cell] =
+                level > 0.0f && !(folded > level) ? std::nextafter(level, std::numeric_limits<float>::infinity()) : folded;
+        }
     }
     state.folded_m.clear();
     state.folded_m.shrink_to_fit();

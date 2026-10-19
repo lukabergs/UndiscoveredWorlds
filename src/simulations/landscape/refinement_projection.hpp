@@ -190,6 +190,26 @@ SmoothingReport smoothparentmeans(const mesh::CellGrid& level, std::vector<float
 double levelparentmeanerror(const LevelWindow& level, const std::vector<float>& field, const LevelWindow& parent,
                             const std::vector<float>& parentfield);
 
+// The cube forms of projectionbounds, projectlevel and levelparentmeanerror (T8 W2-W2f, sphere-mesh.md
+// section 8; lat-lon windows take the forms above): `level` the level's cube window grid, whole parents
+// (level_blocks.hpp), every field one value per cell in its local order; `parent` the parent's kept cells
+// as a cube window grid (level.facecells() / factor cells per face edge) with parentfield one value per
+// cell; `kept` one flag per level cell (a block is kept with its first child). The bounds take the 8
+// neighbours on the window's table; the projection's shifts per block are the lat-lon rule's (children in
+// ascending key order). The report's statistics are over the kept blocks: lambda steps to the kept parents
+// in the parent level's slots 3 and 5, border steps between kept moved cells in slots 3 and 5 of different
+// blocks; the forced and border-step positions stay -1. Throws std::invalid_argument as the forms above
+// and when a block's parent lies outside `parent`.
+ProjectionBounds projectionbounds(const mesh::CellGrid& level, const std::vector<std::uint8_t>& channel,
+                                  const std::vector<std::uint8_t>& sea, const std::vector<float>& lakesurface_m,
+                                  const std::vector<float>& elevation_m, float sealevel, double channelrate,
+                                  const std::vector<float>& ownlake_m, const std::vector<float>& bed_m);
+ProjectionReport projectlevel(const mesh::CellGrid& level, std::vector<float>& field, const ProjectionBounds& bounds,
+                              const mesh::CellGrid& parent, const std::vector<float>& parentfield, int factor,
+                              const std::vector<std::uint8_t>& kept);
+double levelparentmeanerror(const mesh::CellGrid& level, const std::vector<float>& field, const mesh::CellGrid& parent,
+                            const std::vector<float>& parentfield, int factor, const std::vector<std::uint8_t>& kept);
+
 // --- Output at a requested resolution (section 1, "Output at any resolution"). ---
 
 // How a resampled output was made.

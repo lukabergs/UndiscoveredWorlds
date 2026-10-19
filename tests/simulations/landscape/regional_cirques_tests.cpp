@@ -30,7 +30,7 @@ struct CirqueCase
 
     std::size_t count() const { return elevation.size(); }
     int width() const { return window.domainfinewidth(); }
-    double cell_m() const { return landscape::finepatchmetric(window, inputs.radius_m).dy_m; }
+    double cell_m() const { return landscape::northsouthspacing_m(*landscape::regionalwindowgrid(window, inputs.radius_m)); }
     // The radius in kilometres that is `cells` fine cells on the ground.
     void radiuscells(double cells) { parameters.cirques.radius_km = cells * cell_m() / 1000.0; }
     // A flat surface: the fine elevation and the global base elevation (the candidate's

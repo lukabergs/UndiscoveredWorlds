@@ -73,7 +73,7 @@ struct TroughBench
                 area_km2 = catchment[cell];
                 global = static_cast<int32_t>(cell);
             }
-        cell_km = landscape::finepatchmetric(window, inputs.radius_m).dy_m / 1000.0;
+        cell_km = landscape::northsouthspacing_m(*landscape::regionalwindowgrid(window, inputs.radius_m)) / 1000.0;
         // The reference at the axis's own catchment (ratio 1): the half-width is width_km.
         parameters.troughs.reference_km2 = area_km2;
         parameters.troughs.widthmax_km = 1.0e6;

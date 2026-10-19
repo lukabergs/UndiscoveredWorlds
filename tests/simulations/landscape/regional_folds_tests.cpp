@@ -125,7 +125,7 @@ struct FoldBench
         channels.channel.assign(count, 0);
         sea.assign(count, 0);
         elevation.assign(count, 1000.0f);
-        cell_km = landscape::finepatchmetric(window, inputs.radius_m).dy_m / 1000.0;
+        cell_km = landscape::northsouthspacing_m(*landscape::regionalwindowgrid(window, inputs.radius_m)) / 1000.0;
         parameters.folds.amplitudemax_m = 100.0;
         parameters.folds.wavelengthmin_km = wavelength_cells * cell_km;
         parameters.folds.wavelengthmax_km = wavelength_cells * cell_km;

@@ -86,7 +86,7 @@ std::int32_t CellGrid::neighbour(CellId c, int k) const
         return neighbour_[slotindex(c, k)];
     if (latlonwindow_)
     {
-        // A box: nothing wraps (finepatchmetric's patch).
+        // A box: nothing wraps (a regional window's domain).
         const int y = static_cast<int>(c / static_cast<CellId>(windowcolumns_)) + latlonrowoffsets[k];
         const int x = static_cast<int>(c % static_cast<CellId>(windowcolumns_)) + latloncolumnoffsets[k];
         if (y < 0 || y >= windowrows_ || x < 0 || x >= windowcolumns_)
@@ -554,7 +554,7 @@ std::shared_ptr<const CellGrid> latlonwindowgrid(int levelcolumns, double radius
     g.windowrow0_ = box.row0;
     g.windowcolumns_ = box.columns;
     g.windowrows_ = box.rows;
-    // makelatlongrid's (and finepatchmetric's) expressions for the level grid's rows.
+    // makelatlongrid's (and SphereMetric's) expressions for the level grid's rows.
     g.dy_m_ = pi * radius / height;
     const double dlambda = 2.0 * pi / width;
     g.rowarea_.resize(static_cast<std::size_t>(box.rows));

@@ -83,40 +83,12 @@ RegionalWindow regionalwindow(int worldwidth, int scale, int halo, double west_d
 // grids"): on lat-lon mesh::latlonwindowgrid of the kW x kH planet-wide fine grid over the
 // domain box, local id y domainfinewidth() + x (the domain's row-major order), nothing
 // wrapping inside it (no neighbour beyond its edge: -1), latitudes, spacings, areas and
-// distances those of finepatchmetric bit for bit (MeshWindow.LatLonWindowEqualsPatchMetric),
+// distances those of the planet-wide kW x kH grid's rows (SphereMetric) bit for bit
+// (MeshWindow.LatLonWindowEqualsThePlanetWideGrid),
 // globalkey(c) the absolute fine index I + J kW. Throws as latlonwindowgrid.
 std::shared_ptr<const mesh::CellGrid> regionalwindowgrid(const RegionalWindow& window, double radius_m);
 
 // The north-south spacing of a window grid's cells, which the units take as the level's
-// cell size (on lat-lon pi R / (k H), finepatchmetric's dy_m: the north slot's distance).
+// cell size (on lat-lon pi R / (k H), the north slot's distance).
 double northsouthspacing_m(const mesh::CellGrid& grid);
-
-// The metric of a domain's fine grid on a sphere of radius R, the reference that
-// regionalwindowgrid reproduces (the pass reads the window grid; T8 W2-W2a): a patch, not the whole
-// sphere, so nothing wraps (its edges are the domain's boundary). Row y's centre
-// latitude, east-west spacing R dlambda cos(phi) with dlambda = 2 pi / (k W), the
-// north-south spacing pi R / (k H) and the cell area as SphereMetric computes them
-// for the planet-wide fine grid, so a cell's metric is the same in every window.
-struct PatchMetric
-{
-    int width = 0;
-    int height = 0;
-    double radius_m = 0.0;
-    double dy_m = 0.0;
-    std::vector<double> rowdx_m;
-    std::vector<double> rowarea_m2;
-    std::vector<double> rowlatitude_rad;
-
-    std::size_t size() const { return static_cast<std::size_t>(width) * static_cast<std::size_t>(height); }
-    std::size_t index(int x, int y) const
-    {
-        return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
-    }
-    // The neighbour in a direction 1..8 (sphere_metric.hpp's codes) or the cell
-    // itself beyond the patch's edge (callers skip it); distance as SphereMetric.
-    std::size_t neighbour(std::size_t cell, int direction) const;
-    double distance_m(std::size_t cell, int direction) const;
-};
-
-PatchMetric finepatchmetric(const RegionalWindow& window, double radius_m);
 }

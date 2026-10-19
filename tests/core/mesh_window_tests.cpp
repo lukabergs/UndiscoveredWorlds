@@ -1,12 +1,13 @@
 // Window grids on level keys (docs/architecture/sphere-mesh.md section 8, T8 W2-W1a):
 // 64-bit cube geometry, cubewindowgrid (stored and compact), latlonwindowgrid
-// against landscape::finepatchmetric, parents and children, and the helpers C,
+// against the planet-wide grid's rows (landscape::SphereMetric), parents and children, and the helpers C,
 // G, S and R of window_grid.hpp.
 
 #include "core/mesh/cell_grid.hpp"
 #include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/window_grid.hpp"
 #include "simulations/landscape/regional_grid.hpp"
+#include "simulations/landscape/sphere_metric.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -327,7 +328,7 @@ TEST(MeshWindow, RingsWalksAndChart)
     EXPECT_EQ(mesh::cubechartkey(n, 0, n, n), mesh::nokey);
 }
 
-TEST(MeshWindow, LatLonWindowEqualsPatchMetric)
+TEST(MeshWindow, LatLonWindowEqualsThePlanetWideGrid)
 {
     struct Box
     {
@@ -341,23 +342,25 @@ TEST(MeshWindow, LatLonWindowEqualsPatchMetric)
     for (const Box& b : boxes)
     {
         const landscape::RegionalWindow window = landscape::regionalwindow(worldwidth, scale, halo, b.west, b.south, b.east, b.north);
-        const landscape::PatchMetric patch = landscape::finepatchmetric(window, radius);
+        // The rows of the planet-wide kW x kH grid (SphereMetric) and the domain's size.
+        const landscape::SphereMetric planet(levelcolumns, levelcolumns / 2, radius);
+        const int width = window.domainfinewidth(), height = window.domainfineheight();
         mesh::LatLonWindowBox box;
         box.column0 = static_cast<std::int64_t>(window.domaincolumn0) * scale;
         box.columns = window.domaincolumns * scale;
         box.row0 = window.domainrow0 * scale;
         box.rows = window.domainrows * scale;
         const auto grid = mesh::latlonwindowgrid(levelcolumns, radius, box);
-        ASSERT_EQ(grid->cellcount(), patch.size()) << b.name;
+        ASSERT_EQ(grid->cellcount(), static_cast<std::size_t>(width) * static_cast<std::size_t>(height)) << b.name;
         EXPECT_EQ(bits(grid->minimumspacing_m()), bits(full->minimumspacing_m())) << b.name;
         EXPECT_EQ(grid->kind(), mesh::GridKind::latlon);
         for (mesh::CellId c = 0; c < grid->cellcount(); c++)
         {
-            const int x = static_cast<int>(c % static_cast<mesh::CellId>(patch.width));
-            const int y = static_cast<int>(c / static_cast<mesh::CellId>(patch.width));
-            ASSERT_EQ(patch.index(x, y), c);
-            EXPECT_EQ(bits(grid->latitude_rad(c)), bits(patch.rowlatitude_rad[static_cast<std::size_t>(y)])) << b.name;
-            EXPECT_EQ(bits(grid->area_m2(c)), bits(patch.rowarea_m2[static_cast<std::size_t>(y)])) << b.name;
+            const int x = static_cast<int>(c % static_cast<mesh::CellId>(width));
+            const int y = static_cast<int>(c / static_cast<mesh::CellId>(width));
+            const std::size_t planetrow = static_cast<std::size_t>(window.absolutefinerow(y));
+            EXPECT_EQ(bits(grid->latitude_rad(c)), bits(planet.rowlatitude_rad[planetrow])) << b.name;
+            EXPECT_EQ(bits(grid->area_m2(c)), bits(planet.rowarea_m2[planetrow])) << b.name;
             EXPECT_NEAR(grid->longitude_rad(c), window.finelongitude_rad(x) - pi, 1e-12) << b.name;
             const std::int64_t column = window.absolutefinecolumn(x), row = window.absolutefinerow(y);
             const mesh::LevelKey key = static_cast<mesh::LevelKey>(row) * static_cast<mesh::LevelKey>(levelcolumns) + static_cast<mesh::LevelKey>(column);
@@ -372,7 +375,11 @@ TEST(MeshWindow, LatLonWindowEqualsPatchMetric)
             EXPECT_EQ(bits(grid->area_m2(c)), bits(full->area_m2(whole)));
             for (int k = 1; k <= mesh::slotcount; k++)
             {
-                const std::size_t expected = patch.neighbour(c, k);
+                // The D8 offsets of slot k (1 N, 2 NE, 3 E, ... 8 NW), the neighbour inside the box or none.
+                const int dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 }, dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+                const int nx = x + dx[k - 1], ny = y + dy[k - 1];
+                const bool inside = nx >= 0 && nx < width && ny >= 0 && ny < height;
+                const std::size_t expected = inside ? static_cast<std::size_t>(ny) * static_cast<std::size_t>(width) + static_cast<std::size_t>(nx) : c;
                 const std::int32_t other = grid->neighbour(c, k);
                 if (expected == c)
                     EXPECT_EQ(other, -1) << b.name << " cell " << c << " slot " << k;
@@ -385,7 +392,13 @@ TEST(MeshWindow, LatLonWindowEqualsPatchMetric)
                     EXPECT_EQ(bits(grid->bearing_rad(c, k)), bits(full->bearing_rad(whole, k)));
                     EXPECT_EQ(grid->reverse(c, k), full->reverse(whole, k));
                 }
-                EXPECT_EQ(bits(grid->distance_m(c, k)), bits(patch.distance_m(c, k))) << b.name << " cell " << c << " slot " << k;
+                // The distance (also beyond the box's edge): dy north-south, the row's spacing east-west, the
+                // diagonal over the two rows' mean spacing, the cell's own row beyond the edge.
+                const std::size_t otherrow = static_cast<std::size_t>(window.absolutefinerow(inside ? ny : y));
+                const double distance = dx[k - 1] == 0 ? planet.dy_m
+                                        : dy[k - 1] == 0 ? planet.rowdx_m[planetrow]
+                                                         : std::hypot(0.5 * (planet.rowdx_m[planetrow] + planet.rowdx_m[otherrow]), planet.dy_m);
+                EXPECT_EQ(bits(grid->distance_m(c, k)), bits(distance)) << b.name << " cell " << c << " slot " << k;
             }
         }
         // A cell of the level grid outside the box.

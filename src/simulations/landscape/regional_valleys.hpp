@@ -80,7 +80,7 @@ GlobalIncision globalincision(const RegionalGlobalInputs& inputs, const Regional
 // valleys.reachcells, to at most b + (d - w) x valleys.sideslope x the fine cell's size
 // (sideslope 0: no sides); a cell shaped by several channels takes the lowest target; no
 // cell is lowered to or below the sea level (the next float above it at least). The fine
-// cell's size is the north-south spacing pi R / (k H) (finepatchmetric's dy_m), the same in
+// cell's size is the north-south spacing pi R / (k H) (northsouthspacing_m), the same in
 // every window; b is the elevation at the channel cell (its pinned bed). reachcells and the
 // floor's extent are clamped to k (one global cell), which the halo rule (halo >= 2 x meanpasses + 2) covers:
 // the channels agree between windows from 2 x meanpasses + 1 global cells inside the

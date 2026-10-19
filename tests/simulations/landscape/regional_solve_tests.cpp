@@ -117,7 +117,7 @@ TEST_F(Landscape, RegionalSolveChannelCellMeans)
         EXPECT_EQ(means.maxlowering_m, plain.maxlowering_m);
 
         const int width = window.domainfinewidth(), height = window.domainfineheight();
-        const double cap = on.channelcellslope * landscape::finepatchmetric(window, inputs.radius_m).dy_m;
+        const double cap = on.channelcellslope * landscape::northsouthspacing_m(*landscape::regionalwindowgrid(window, inputs.radius_m));
         int channelcells = 0, raised = 0, capped = 0, mismatched = 0;
         for (int y = 0; y < height; y++)
             for (int x = 0; x < width; x++)

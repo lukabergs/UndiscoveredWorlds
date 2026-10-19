@@ -22,7 +22,7 @@
 // guaranteed to agree between windows (only the start surface, the sea and the channel
 // beds agree there; the review of E5.0). Its floor is f = max(runela at the centre,
 // z - cirques.depth_m), at least the next float above the sea level. The bowl: R =
-// cirques.radius_km x 1000 / the fine cell's size (finepatchmetric's dy_m) in fine cells,
+// cirques.radius_km x 1000 / the fine cell's size (northsouthspacing_m) in fine cells,
 // at most k (the halo rule as carvevalleys; a radius under one cell carves the centre
 // cell alone); every land cell that is not a channel within Euclidean distance d <= R
 // (in fine cells: ground kilometres north-south, east-west shrunk by the cosine of the

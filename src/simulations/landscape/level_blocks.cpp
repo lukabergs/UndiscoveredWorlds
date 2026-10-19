@@ -159,23 +159,59 @@ std::size_t NearestDomainKey::operator()(mesh::LevelKey key) const
 
 std::vector<double> gatherblocks(const WindowBlocks& blocks, const std::vector<double>& values, const mesh::CellGrid& window)
 {
-    if (window.kind() != mesh::GridKind::cube || values.size() != blocks.count() || blocks.factor < 1 ||
-        window.facecells() % blocks.factor != 0)
+    if (values.size() != blocks.count())
+        throw std::invalid_argument("gatherblocks: a cube window, one value per block and a whole factor");
+    return gatherblocks(gatherplan(blocks, window), values);
+}
+
+GatherPlan gatherplan(const WindowBlocks& blocks, const mesh::CellGrid& window)
+{
+    if (window.kind() != mesh::GridKind::cube || blocks.factor < 1 || window.facecells() % blocks.factor != 0)
         throw std::invalid_argument("gatherblocks: a cube window, one value per block and a whole factor");
     const std::int64_t parentcells = window.facecells() / blocks.factor;
     const NearestDomainKey nearest(parentcells, blocks.parents);
-    // values by the parents' ascending order (NearestDomainKey's indices).
-    std::vector<std::size_t> order(blocks.count());
+    // The blocks by the parents' ascending order (NearestDomainKey's indices).
+    std::vector<std::uint32_t> order(blocks.count());
     for (std::size_t b = 0; b < blocks.count(); b++)
-        order[b] = b;
-    std::sort(order.begin(), order.end(), [&](std::size_t x, std::size_t y) { return blocks.parents[x] < blocks.parents[y]; });
-    std::vector<double> sorted(blocks.count());
-    for (std::size_t m = 0; m < order.size(); m++)
-        sorted[m] = values[order[m]];
-    std::vector<double> gathered(window.cellcount());
+        order[b] = static_cast<std::uint32_t>(b);
+    std::sort(order.begin(), order.end(), [&](std::uint32_t x, std::uint32_t y) { return blocks.parents[x] < blocks.parents[y]; });
+    GatherPlan plan;
+    plan.blocks = blocks.count();
+    plan.start.assign(window.cellcount() + 1, 0);
     for (mesh::CellId c = 0; c < window.cellcount(); c++)
-        gathered[c] = mesh::applystencil(mesh::cubicstencil(parentcells, window.centre(c)),
-                                         [&](mesh::LevelKey key) { return sorted[nearest(key)]; });
+    {
+        const mesh::KeyStencil stencil = mesh::cubicstencil(parentcells, window.centre(c));
+        for (std::size_t n = 0; n < stencil.key.size(); n++)
+        {
+            plan.block.push_back(order[nearest(stencil.key[n])]);
+            plan.weight.push_back(stencil.weight[n]);
+        }
+        plan.start[c + 1] = static_cast<std::uint32_t>(plan.block.size());
+    }
+    return plan;
+}
+
+std::vector<double> gatherblocks(const GatherPlan& plan, const std::vector<double>& values)
+{
+    if (values.size() != plan.blocks)
+        throw std::invalid_argument("gatherblocks: one value per block of the plan");
+    // mesh::applystencil's arithmetic: relative to the first node.
+    const std::size_t count = plan.start.size() - 1;
+    std::vector<double> gathered(count);
+    for (std::size_t c = 0; c < count; c++)
+    {
+        const std::uint32_t first = plan.start[c], last = plan.start[c + 1];
+        if (first == last)
+        {
+            gathered[c] = 0.0;
+            continue;
+        }
+        const double origin = values[plan.block[first]];
+        double sum = 0.0;
+        for (std::uint32_t t = first + 1; t < last; t++)
+            sum += plan.weight[t] * (values[plan.block[t]] - origin);
+        gathered[c] = origin + sum;
+    }
     return gathered;
 }
 

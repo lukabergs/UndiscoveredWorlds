@@ -204,6 +204,24 @@ KeyStencil cubicstencil(std::int64_t facecells, int face, double a, double b, Gh
     catmullrom(u - u0, wx);
     catmullrom(v - v0, wy);
     const std::int64_t i0 = static_cast<std::int64_t>(u0) - 1, j0 = static_cast<std::int64_t>(v0) - 1;
+    if (i0 >= 0 && j0 >= 0 && i0 + 3 < n && j0 + 3 < n)
+    {
+        // Every node on the face: the keys f N^2 + j N + i ascend in the loop's row-major order and are
+        // unique, so this is merged's result without the sort (T8 W2-W2f, the same stencil bit for bit).
+        KeyStencil stencil;
+        stencil.key.reserve(16);
+        stencil.weight.reserve(16);
+        for (int m = 0; m < 4; m++)
+            for (int l = 0; l < 4; l++)
+            {
+                const double w = wx[l] * wy[m];
+                if (w == 0.0)
+                    continue;
+                stencil.key.push_back(cubekey(n, face, i0 + l, j0 + m));
+                stencil.weight.push_back(w);
+            }
+        return stencil;
+    }
     Terms terms;
     for (int m = 0; m < 4; m++)
         for (int l = 0; l < 4; l++)

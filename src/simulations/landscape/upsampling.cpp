@@ -223,12 +223,13 @@ void correctblockmeans(const std::vector<float>& field, const mesh::CellGrid& le
         throw std::invalid_argument("correctblockmeans: passes must not be negative and fine must cover the window");
     const WindowBlocks blocks = windowblocks(window, window.facecells() / levelzero.facecells());
     std::vector<double> residual(blocks.count());
+    const GatherPlan plan = passes > 0 ? gatherplan(blocks, window) : GatherPlan{};
     for (int pass = 0; pass < passes; pass++)
     {
         for (std::size_t b = 0; b < blocks.count(); b++)
             residual[b] = static_cast<double>(static_cast<float>(
                 blockmean(blocks, b, fine) - static_cast<double>(field[levelzero.localofkey(blocks.parents[b])])));
-        const std::vector<double> correction = gatherblocks(blocks, residual, window);
+        const std::vector<double> correction = gatherblocks(plan, residual);
         for (std::size_t cell = 0; cell < fine.size(); cell++)
             fine[cell] = static_cast<float>(static_cast<double>(fine[cell]) - correction[cell]);
     }

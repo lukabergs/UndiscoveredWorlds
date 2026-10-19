@@ -14,10 +14,13 @@
 #include <utility>
 #include <vector>
 
+#include "core/mesh/cell_grid.hpp"
 #include "io/regional_bundle.hpp"
 #include "pipeline/recipe_parameters.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
+#include "simulations/landscape/refinement_grid.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
+#include "simulations/landscape/regional_cube.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/regional/regional_inputs.hpp"
 #include "world/planet.hpp"
@@ -319,6 +322,160 @@ landscape::RegionalWindow regionalwindowfromcells(int worldwidth, int scale, int
     return window;
 }
 
+namespace
+{
+// The manifest's run record and source block of a regional bundle.
+regionalbundle::Metadata regionmetadata(const RegionOptions& options, const planet& world, const vector<string>& fromworld,
+                                        const string& manifesthash, double seconds)
+{
+    regionalbundle::Metadata metadata;
+    metadata.run.seed = world.seed();
+    metadata.run.recipe = "region";
+    metadata.run.command = options.commandArguments;
+    runbundle::StepRecord step;
+    step.index = 0;
+    step.process = "landscape.regional_pass";
+    step.label = "region";
+    step.seconds = seconds;
+    metadata.run.steps.push_back(step);
+    metadata.run.parameters = recipeparametersjson();
+    metadata.run.properties.push_back({ "executable_built", string(__DATE__) + " " + __TIME__ });
+    metadata.run.properties.push_back({ "command", "region" });
+    metadata.run.properties.push_back({ "from_bundle", options.fromBundlePath });
+    // The values set from the world bundle before --set and --parameters ("parameters" holds
+    // the values used).
+    string fromworldnames;
+    for (const string& name : fromworld)
+        fromworldnames += (fromworldnames.empty() ? "" : ",") + name;
+    metadata.run.properties.push_back({ "parameters_from_world", fromworldnames });
+    metadata.sourcebundle = options.fromBundlePath;
+    metadata.sourcemanifestsha256 = manifesthash;
+    metadata.sourceseed = world.seed();
+    metadata.sealevel = world.sealevel();
+    return metadata;
+}
+
+// A cube world's window (T8 W2-W2f; sphere-mesh.md section 8): the box in the lat-lon export's pixels
+// (4 N columns) selects the level-0 cells whose centres lie in it, the halo counts rings of level-0
+// cells, the fields are the kept level cells, written as a cube-window bundle with the export of the box.
+int runcuberegion(const RegionOptions& options, const planet& world, const landscape::RegionalGlobalInputs& inputs,
+                  const landscape::RefinementParameters& refinement, const vector<string>& fromworld,
+                  const string& manifesthash)
+{
+    const mesh::CellGrid& base = *inputs.grid;
+    const int exportcolumns = 4 * base.facecells();
+    if (options.metresPerPixel > 0.0)
+    {
+        cerr << "region: --metres-per-pixel is not ported to cube worlds; give --scale.\n";
+        return 1;
+    }
+    if (tuning::landscape::regional::tributaryEnabled != 0)
+    {
+        cerr << "region: the tributaries (landscape.regional.tributary_enabled 1) are not ported to cube worlds.\n";
+        return 1;
+    }
+    const int levels = landscape::levelofscale(options.scale, refinement.factor);
+    const bool hierarchy = levels >= 1;
+    const int halo = hierarchy ? std::max(tuning::landscape::regional::haloCells,
+                                          landscape::refinementhalo(tuning::landscape::regional::meanPasses,
+                                                                    refinement.smoothpasses, false))
+                               : tuning::landscape::regional::haloCells;
+    if (hierarchy && options.scale > refinement.storedscalemax)
+    {
+        cerr << "region: --scale " << options.scale << " is above landscape.refinement.stored_scale_max ("
+             << refinement.storedscalemax << "), the finest scale written as a bundle.\n";
+        return 1;
+    }
+    landscape::RegionalWindow window;
+    vector<mesh::LevelKey> kept0;
+    try
+    {
+        // The export box (no halo: on the cube the halo is rings of level-0 cells, not columns).
+        window = options.hasPixels
+            ? regionalwindowfromcells(exportcolumns, options.scale, 0, options.pixels[0], options.pixels[1], options.pixels[2],
+                                      options.pixels[3])
+            : landscape::regionalwindow(exportcolumns, options.scale, 0, options.window[0], options.window[1],
+                                        options.window[2], options.window[3]);
+        kept0 = landscape::cellsinpixelbox(base, exportcolumns, window.column0,
+                                           window.row0, (window.column0 + window.columns - 1) % exportcolumns,
+                                           window.row0 + window.rows - 1);
+    }
+    catch (const exception& error)
+    {
+        cerr << "region: " << (options.hasPixels ? "--pixels" : "--window") << ": " << error.what() << '\n';
+        return 1;
+    }
+    if (kept0.empty())
+    {
+        cerr << "region: the box holds no cube cell centre; widen it.\n";
+        return 1;
+    }
+    window.halo = halo;
+
+    const landscape::RegionalParameters parameters = regionalparameters(inputs.seed);
+    landscape::CubeRegionResult result;
+    const auto started = chrono::steady_clock::now();
+    try
+    {
+        result = hierarchy ? landscape::runcuberefinement(inputs, kept0, halo, levels, parameters, refinement)
+                           : landscape::runcuberegionalpass(inputs, kept0, options.scale, halo, parameters);
+    }
+    catch (const exception& error)
+    {
+        cerr << "Regional pass failed: " << error.what() << '\n';
+        return 1;
+    }
+    const double seconds = chrono::duration<double>(chrono::steady_clock::now() - started).count();
+    result.fields.window = window;
+    regionalbundle::Metadata metadata = regionmetadata(options, world, fromworld, manifesthash, seconds);
+    if (hierarchy)
+    {
+        metadata.level = levels;
+        metadata.factor = refinement.factor;
+        metadata.levels = result.levels;
+    }
+    try
+    {
+        regionalbundle::writecubewindowbundle(options.bundlePath, result.fields, *result.kept, base.facecells(),
+                                              hierarchy ? levels : 0, metadata);
+    }
+    catch (const exception& error)
+    {
+        cerr << "Failed to write regional bundle: " << error.what() << '\n';
+        return 1;
+    }
+    const landscape::RegionalFields& fields = result.fields;
+    cout << "Regional window (cube N " << base.facecells() << "): export columns " << window.column0 << " + " << window.columns
+         << ", rows " << window.row0 << " + " << window.rows << " of " << exportcolumns << " x " << exportcolumns / 2
+         << "; scale " << options.scale << ", halo " << halo << " rings; " << kept0.size() << " level-0 cells, "
+         << result.kept->cellcount() << " kept cells, domain " << result.domaincells.back() << " cells\n";
+    cout << "Regional pass: " << seconds << " s; block-mean error " << fields.blockmeanerror_m << " m, relief "
+         << (fields.reliefconverged ? "converged" : "not converged") << ", " << fields.changedreceivers
+         << " receivers changed, lowering mean " << fields.meanlowering_m << " m, largest " << fields.maxlowering_m << " m";
+    if (fields.sharepasses >= 0)
+        cout << "; land share met after " << fields.sharepasses << " passes";
+    else if (fields.sharemisses > 0)
+        cout << "; land share not met: " << fields.sharemisses << " blocks missing after every pass";
+    cout << '\n';
+    for (std::size_t index = 0; index < result.levels.size(); index++)
+    {
+        const landscape::LevelDiagnostics& level = result.levels[index];
+        const landscape::ProjectionReport& projection = level.projection;
+        cout << "Level " << level.level << " (" << level.cellsize_km << " km cells, kept " << result.keptcells[index]
+             << ", domain " << result.domaincells[index] << " cells): " << level.seconds << " s; block-mean error "
+             << level.blockmeanerror_m << " m after the presmoothing; parent-mean error " << projection.maxparentmeanerror_m
+             << " m (bound " << level.meanbound_m << " m), global-mean error " << level.globalmeanerror_m
+             << " m after the projection; lambda max " << level.smoothing.maxlambdabefore_m << " m before the "
+             << level.smoothing.passes << " smoothing passes, " << projection.maxlambda_m << " m after; border step max "
+             << projection.maxborderstep_m << " m, p99 " << projection.borderstep99_m << " m; forced " << projection.forcedparents
+             << "; dried cells " << level.driedcells << ", dry land below the sea level " << level.landbelowsea
+             << ", fold cells " << level.foldcells << ", kept cells draining to the domain ring " << level.ringbasincells << '\n';
+    }
+    cout << "Regional bundle: " << options.bundlePath << '\n';
+    return 0;
+}
+}
+
 int runregioncommand(const vector<string>& arguments)
 {
     RegionOptions options;
@@ -367,6 +524,8 @@ int runregioncommand(const vector<string>& arguments)
     const int worldwidth = world->width() + 1;
     const landscape::RefinementParameters refinement = refinementparameters();
     const landscape::RegionalGlobalInputs inputs = gatherregionalinputs(*world);
+    if (inputs.grid != nullptr && inputs.grid->kind() == mesh::GridKind::cube)
+        return runcuberegion(options, *world, inputs, refinement, fromworld, manifesthash);
     const bool resample = options.metresPerPixel > 0.0;
     if (resample)
     {
@@ -472,30 +631,7 @@ int runregioncommand(const vector<string>& arguments)
     }
     const double seconds = chrono::duration<double>(chrono::steady_clock::now() - started).count();
 
-    regionalbundle::Metadata metadata;
-    metadata.run.seed = world->seed();
-    metadata.run.recipe = "region";
-    metadata.run.command = options.commandArguments;
-    runbundle::StepRecord step;
-    step.index = 0;
-    step.process = "landscape.regional_pass";
-    step.label = "region";
-    step.seconds = seconds;
-    metadata.run.steps.push_back(step);
-    metadata.run.parameters = recipeparametersjson();
-    metadata.run.properties.push_back({ "executable_built", string(__DATE__) + " " + __TIME__ });
-    metadata.run.properties.push_back({ "command", "region" });
-    metadata.run.properties.push_back({ "from_bundle", options.fromBundlePath });
-    // The values set from the world bundle before --set and --parameters ("parameters" holds
-    // the values used).
-    string fromworldnames;
-    for (const string& name : fromworld)
-        fromworldnames += (fromworldnames.empty() ? "" : ",") + name;
-    metadata.run.properties.push_back({ "parameters_from_world", fromworldnames });
-    metadata.sourcebundle = options.fromBundlePath;
-    metadata.sourcemanifestsha256 = manifesthash;
-    metadata.sourceseed = world->seed();
-    metadata.sealevel = world->sealevel();
+    regionalbundle::Metadata metadata = regionmetadata(options, *world, fromworld, manifesthash, seconds);
     if (hierarchy)
     {
         metadata.level = levels;

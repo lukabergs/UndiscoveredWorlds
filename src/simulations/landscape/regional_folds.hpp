@@ -121,6 +121,10 @@ struct FoldPhaseField
     double misfit = 0.0;                   // sqrt(sum w (dPhi - target)^2 / sum w target^2) over the edges
     int reversaledges = 0;                 // edges whose two cells' k point more than 90 degrees apart
     double seconds = 0.0;                  // wall time of the computation
+    // The cube form (cubefoldphasefield): the world's level-0 cube grid (width and height stay 0, cell ids
+    // index the vectors) and each defined cell's wavenumber as a 3-D tangent vector (rad per km).
+    const mesh::CellGrid* grid = nullptr;
+    std::vector<mesh::Vec3> wavenumber3;
 };
 
 // The phase field of `inputs` (empty, maskcells 0, without foldstrain or without a mask cell).
@@ -156,6 +160,35 @@ void foldfabriclevel(const LevelContext& context, LevelState& state);
 // value and the one before the fabric (a form cut below the folded surface); state.folded_m keeps the
 // present (folded) value and state.unfolded_m u. Other cells are left.
 void unfoldforlakes(const LevelContext& context, LevelState& state);
+
+// --- The cube forms (T8 W2-W2f; sphere-mesh.md section 8: folds on the level-0 table with axes relative
+// to east/north, the potential's weights facelength / distance; lat-lon windows take the forms above). ---
+// cubefoldphasefield: the contract's phase field on inputs.grid, a cube level 0 (empty without it or the
+// strain): the axis (cos theta, sin theta) in each cell's (east, south) frame; its smoothing sums the doubled
+// angles of the mask cells within ceil(sigma) rings on the table, each neighbour's axis projected into the
+// cell's frame and normalised, the Gaussian of the great-circle distance in level-0 arcs pi R / (2 N); the
+// orientation flood steps over the table's 8 neighbours by distance_m, the predecessor's axis compared as a
+// 3-D tangent vector; the potential's edges are the cardinal neighbours (slots 1, 7, 3, 5 in that order),
+// weight facelength_m / distance_m, target the two cells' mean 3-D wavenumber along the chord times
+// distance_m; the cells in ascending id; the extension rings over the table's 8 neighbours, a phase carried
+// along the neighbour's wavenumber over distance_m. No Hermite cross term.
+// foldphase_rad at a unit vector p: over mesh::cubebilinearstencil(N, p) the weighted sum of each node's
+// phase carried to p along its wavenumber, Phi_n + R k_n . p (k_n tangent at the node); undefined where a
+// node is; the misfit compares the gradient by central differences of 0.01 level-0 arcs in p's tangent
+// plane (a probe on an undefined node leaves p undefined) with the stencil's weighted wavenumber.
+// addfoldfabric: the contract per cell of a cube window refining inputs.grid (one value per cell, local
+// order), the fields gathered by G, the lake gate the level-0 ancestor's, the level band as on lat-lon
+// with the level-0 arc as the global cell, the water gap over the channel cells within gapfraction x L on
+// the ground (great-circle distance between centres), at most k rings on the window's table.
+// unfoldforlakes and refoldafterlakes: as above (no grid read by the first; the second's wet neighbours on
+// the window's table).
+FoldPhaseField cubefoldphasefield(const RegionalGlobalInputs& inputs, const FoldParameters& folds);
+bool foldphase_rad(const FoldPhaseField& field, const mesh::Vec3& p, double& phase, double* misfit = nullptr);
+void addfoldfabric(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                   const FineChannels& channels, const std::vector<uint8_t>& sea, std::vector<float>& elevation_m,
+                   int parentscale = 0, std::vector<uint8_t>* floorclamped = nullptr);
+void unfoldforlakes(LevelState& state);
+void refoldafterlakes(const mesh::CellGrid& window, LevelState& state);
 
 // S5.3b, after lakeslevel: the fabric back on the dry land the lakes left as it was. A cell that
 // unfoldforlakes changed and that is dry with the elevation u takes its folded value back, never at

@@ -205,7 +205,7 @@ std::shared_ptr<const CellGrid> cubewindowgrid(int facecells, double radius_m, c
                                                bool compact = false);
 // A box of the cell-centred levelcolumns x levelcolumns/2 lat-lon grid, in
 // row-major box order (local id y columns + x), nothing wrapping inside the box:
-// the tables of landscape::finepatchmetric (latitude, row spacing, area, the
+// the rows of the level's planet-wide grid (latitude, row spacing, area, the
 // diagonal with the cell's own row beyond the box edge), longitudes as
 // makelatlongrid's. Throws std::invalid_argument for an empty or oversized box.
 std::shared_ptr<const CellGrid> latlonwindowgrid(int levelcolumns, double radius_m, const LatLonWindowBox& box);

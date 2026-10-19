@@ -77,6 +77,19 @@ private:
 // window or a size mismatch.
 std::vector<double> gatherblocks(const WindowBlocks& blocks, const std::vector<double>& values, const mesh::CellGrid& window);
 
+// gatherblocks' stencils precomputed for repeated passes over one window (T8 W2-W2f): per cell its
+// terms (the block whose value a node takes, the node's weight) in the stencil's key order, applied
+// with gatherblocks' arithmetic, so a planned gather is bit-identical to gatherblocks.
+struct GatherPlan
+{
+    std::size_t blocks = 0;
+    std::vector<std::uint32_t> start;  // cellcount + 1 offsets into block and weight
+    std::vector<std::uint32_t> block;
+    std::vector<double> weight;
+};
+GatherPlan gatherplan(const WindowBlocks& blocks, const mesh::CellGrid& window);
+std::vector<double> gatherblocks(const GatherPlan& plan, const std::vector<double>& values);
+
 // The lat-lon key grid of a level window's domain (mesh::latlonwindowgrid of the level's
 // levelwidth() columns over the domain box, local id the domain's row-major index): the blocks and
 // the parents' local ids read its keys only, so its radius is nominal (1 m).
