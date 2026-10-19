@@ -128,3 +128,15 @@ TEST(PlanetGrid, CubeWorldRefusesANonReadyProcess)
     EXPECT_NE(error.find(process.id), std::string::npos) << error;
     EXPECT_NE(error.find("cube"), std::string::npos) << error;
 }
+
+TEST(PlanetGrid, MaxRiverFlowReadsEveryCubeCell)
+{
+    // setmaxriverflow loops over cells, not over the lat-lon width x height.
+    const std::unique_ptr<planet> world = cubeplanet(8);
+    const mesh::CellId last = static_cast<mesh::CellId>(world->cellcount() - 1);
+    world->setriverjan(last, 300);
+    world->setriverjul(last, 500);
+    world->setmaxriverflow();
+    EXPECT_EQ(world->maxriverflow(), 400);
+    EXPECT_EQ(world->sharedgrid().get(), &world->grid());
+}

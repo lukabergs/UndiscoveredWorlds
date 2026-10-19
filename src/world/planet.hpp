@@ -82,6 +82,8 @@ public:
     // a kind at W export columns (lat-lon W x W/2; the cube N = W / 4, W a
     // multiple of 4) and sizes every field; setwidth(W - 1) builds a lat-lon grid.
     const mesh::CellGrid& grid() const { return *grid_; }
+    // The grid as shared by the world and its copies (for holders that outlive a reference).
+    std::shared_ptr<const mesh::CellGrid> sharedgrid() const { return grid_; }
     std::size_t cellcount() const { return grid_->cellcount(); }
     void setgrid(mesh::GridKind kind, int columns);
 

@@ -877,18 +877,10 @@ void planet::shiftterrain(int offset)
 void planet::setmaxriverflow()
 {
     int largest = 0;
-    int current = 0;
 
-    for (int i = 0; i <= body_.itswidth; i++)
-    {
-        for (int j = 0; j <= body_.itsheight; j++)
-        {
-            current = riveraveflow(i, j);
+    for (mesh::CellId c = 0; c < cellcount(); c++)
+        largest = std::max(largest, riveraveflow(c));
 
-            if (current > largest)
-                largest = current;
-        }
-    }
     hydrosphere_.itsmaxriverflow = largest;
 }
 
