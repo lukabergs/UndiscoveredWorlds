@@ -122,6 +122,23 @@ TEST(ClimateAdapter, CoarseClimateOnCubeWorld)
         EXPECT_EQ(bad, 0u) << worldmodel::qualifiedname(id);
     }
 
+    // Codes are imported by class (planet_export.hpp, landawarefield): no land cell is
+    // water (climate class 0) and no sea cell has a land biome (biome 0 is water).
+    std::size_t landwater = 0, sealand = 0, landcells = 0;
+    for (mesh::CellId c = 0; c < grid.cellcount(); c++)
+    {
+        if (world->surfacebelowsea(c))
+            sealand += world->biome(c) != 0 ? 1 : 0;
+        else
+        {
+            landcells++;
+            landwater += world->climate(c) == 0 ? 1 : 0;
+        }
+    }
+    ASSERT_GT(landcells, 0u);
+    EXPECT_EQ(landwater, 0u) << "land cells with climate class 0 of " << landcells;
+    EXPECT_EQ(sealand, 0u) << "sea cells with a land biome";
+
     // The annual temperature falls from the tropics to the mid-latitudes to the poles.
     double sums[3] = {}, counts[3] = {};
     for (mesh::CellId c = 0; c < grid.cellcount(); c++)

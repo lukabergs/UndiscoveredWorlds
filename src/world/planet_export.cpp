@@ -1,7 +1,9 @@
 #include "world/planet_export.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 #include <stdexcept>
 #include <string>
 
@@ -21,6 +23,130 @@ std::size_t gridaxes(const mesh::CellGrid& grid)
 {
     return grid.kind() == mesh::GridKind::latlon ? 2 : 1;
 }
+
+// Calls apply with a value of the element's C++ type.
+template <typename Apply>
+void byelement(ElementType element, const Apply& apply)
+{
+    switch (element)
+    {
+    case ElementType::b8:   // one byte, 0 or 1: nearest and majority keep it so
+    case ElementType::u8: apply(std::uint8_t{}); break;
+    case ElementType::i16: apply(std::int16_t{}); break;
+    case ElementType::u16: apply(std::uint16_t{}); break;
+    case ElementType::i32: apply(std::int32_t{}); break;
+    case ElementType::f32: apply(float{}); break;
+    }
+}
+
+// The source cell at p; if it is of the other class, the closest cell of p's class
+// among it and its neighbours two rings out (by the neighbour table); the cell at p
+// when none is.
+mesh::CellId nearestofclass(const mesh::CellGrid& source, const mesh::Vec3& p, const std::vector<std::uint8_t>& sourcesea,
+    std::uint8_t sea)
+{
+    const mesh::CellId located = source.locate(p);
+    if (located == mesh::nocell || sourcesea[located] == sea)
+        return located;
+    std::vector<mesh::CellId> ring = { located }, cells = { located };
+    for (int step = 0; step < 2; step++)
+    {
+        std::vector<mesh::CellId> next;
+        for (const mesh::CellId c : ring)
+            for (int k = 1; k <= 8; k++)
+            {
+                const std::int32_t n = source.neighbour(c, k);
+                if (n < 0 || std::find(cells.begin(), cells.end(), static_cast<mesh::CellId>(n)) != cells.end())
+                    continue;
+                cells.push_back(static_cast<mesh::CellId>(n));
+                next.push_back(static_cast<mesh::CellId>(n));
+            }
+        ring = std::move(next);
+    }
+    mesh::CellId best = located;
+    double bestdistance = 0.0;
+    for (const mesh::CellId c : cells)
+    {
+        if (sourcesea[c] != sea)
+            continue;
+        const mesh::Vec3 q = source.centre(c);
+        const double distance = (q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) + (q.z - p.z) * (q.z - p.z);
+        if (best == located || distance < bestdistance || (distance == bestdistance && c < best))
+        {
+            best = c;
+            bestdistance = distance;
+        }
+    }
+    return best;
+}
+
+// remapmajority restricted to the sources of the destination cell's own class;
+// where none of its class overlaps, the nearest source of its class (nearestofclass).
+template <typename T>
+std::vector<T> remapclass(const mesh::RemapWeights& weights, const mesh::CellGrid& source, const mesh::CellGrid& destination,
+    const std::vector<T>& values, const std::vector<std::uint8_t>& sourcesea, const std::vector<std::uint8_t>& destinationsea)
+{
+    std::vector<T> result(weights.destinationcount);
+    std::vector<std::pair<T, double>> tally;
+    for (std::size_t d = 0; d < weights.destinationcount; d++)
+    {
+        tally.clear();
+        for (std::size_t e = weights.rowstart[d]; e < weights.rowstart[d + 1]; e++)
+        {
+            const mesh::CellId s = weights.source[e];
+            if (sourcesea[s] != destinationsea[d])
+                continue;
+            const T code = values[s];
+            auto found = std::find_if(tally.begin(), tally.end(), [&](const auto& entry) { return entry.first == code; });
+            if (found == tally.end())
+                tally.emplace_back(code, weights.area_m2[e]);
+            else
+                found->second += weights.area_m2[e];
+        }
+        if (tally.empty())
+        {
+            const mesh::CellId s = nearestofclass(source, destination.centre(static_cast<mesh::CellId>(d)), sourcesea, destinationsea[d]);
+            result[d] = s == mesh::nocell ? T{} : values[s];
+            continue;
+        }
+        std::size_t best = 0;
+        for (std::size_t n = 1; n < tally.size(); n++)
+            if (tally[n].second > tally[best].second ||
+                (tally[n].second == tally[best].second && tally[n].first < tally[best].first))
+                best = n;
+        result[d] = tally[best].first;
+    }
+    return result;
+}
+}
+
+bool landawarefield(FieldId id)
+{
+    switch (id)
+    {
+    case FieldId::climate_class:
+    case FieldId::biome:
+    case FieldId::special_features:
+    case FieldId::island:
+    case FieldId::mountain_island:
+    case FieldId::basin_class:
+    case FieldId::prograded:
+    case FieldId::owner_settlement:
+    case FieldId::owner_polity:
+    case FieldId::sea_ice:
+    case FieldId::continental_shelf:
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::vector<std::uint8_t> seamask(const planet& world)
+{
+    std::vector<std::uint8_t> sea(world.cellcount());
+    for (mesh::CellId c = 0; c < world.cellcount(); c++)
+        sea[c] = world.surfacebelowsea(c) ? 1 : 0;
+    return sea;
 }
 
 FieldRemap::FieldRemap(const mesh::CellGrid& source, const mesh::CellGrid& destination, mesh::RemapOptions options)
@@ -128,15 +254,45 @@ FieldData FieldRemap::remap(const FieldData& data) const
             std::memcpy(out.bytes.data() + layer * destinationcells * sizeof(T), result.data(), destinationcells * sizeof(T));
         }
     };
-    switch (spec.element)
+    byelement(spec.element, apply);
+    return out;
+}
+
+FieldData FieldRemap::remapbyclass(const FieldData& data, const std::vector<std::uint8_t>& sourcesea,
+    const std::vector<std::uint8_t>& destinationsea) const
+{
+    if (!ongrid(data))
+        throw std::logic_error("Field is not on the remap's source grid: " + worldmodel::qualifiedname(data.id));
+    const worldmodel::FieldSpec& spec = worldmodel::fieldspec(data.id);
+    FieldData out;
+    out.id = data.id;
+    out.shape = destinationshape(data);
+    if (identity_)
     {
-    case ElementType::b8:   // one byte, 0 or 1: nearest keeps it so
-    case ElementType::u8: apply(std::uint8_t{}); break;
-    case ElementType::i16: apply(std::int16_t{}); break;
-    case ElementType::u16: apply(std::uint16_t{}); break;
-    case ElementType::i32: apply(std::int32_t{}); break;
-    case ElementType::f32: apply(float{}); break;
+        out.bytes = data.bytes;
+        return out;
     }
+    if (spec.rule == RemapRule::direction)
+        throw std::logic_error("A direction field is recomputed on the destination grid, never remapped: " +
+            worldmodel::qualifiedname(data.id));
+    const std::size_t sourcecells = source_.cellcount(), destinationcells = destination_.cellcount();
+    if (sourcesea.size() != sourcecells || destinationsea.size() != destinationcells)
+        throw std::invalid_argument("remapbyclass: a sea mask does not match its grid");
+
+    const std::size_t layercount = layers(data);
+    const auto apply = [&](auto tag)
+    {
+        using T = decltype(tag);
+        out.bytes.resize(layercount * destinationcells * sizeof(T));
+        std::vector<T> values(sourcecells);
+        for (std::size_t layer = 0; layer < layercount; layer++)
+        {
+            std::memcpy(values.data(), data.bytes.data() + layer * sourcecells * sizeof(T), sourcecells * sizeof(T));
+            const std::vector<T> result = remapclass(weights(), source_, destination_, values, sourcesea, destinationsea);
+            std::memcpy(out.bytes.data() + layer * destinationcells * sizeof(T), result.data(), destinationcells * sizeof(T));
+        }
+    };
+    byelement(spec.element, apply);
     return out;
 }
 
@@ -154,11 +310,24 @@ std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const Lat
     for (std::size_t index = 0; index < worldmodel::kFieldCount; index++)
     {
         const FieldId id = static_cast<FieldId>(index);
+        if (landawarefield(id))
+            continue;
         const FieldData data = readplanetfield(world, id);
         if (!remap.ongrid(data))
             continue;
         // False for what a planet does not load (the climate solver's levels and diagnostics).
         loadplanetfield(*latlon, worldmodel::fieldspec(id).rule == RemapRule::direction ? remap.zeros(data) : remap.remap(data));
+    }
+    // The land-aware codes against the export's own sea mask, from its exported terrain.
+    const std::vector<std::uint8_t> sourcesea = seamask(world), destinationsea = seamask(*latlon);
+    for (std::size_t index = 0; index < worldmodel::kFieldCount; index++)
+    {
+        const FieldId id = static_cast<FieldId>(index);
+        if (!landawarefield(id))
+            continue;
+        const FieldData data = readplanetfield(world, id);
+        if (remap.ongrid(data))
+            loadplanetfield(*latlon, remap.remapbyclass(data, sourcesea, destinationsea));
     }
     // Records on cells (settlements, deposits) move to the export's cell of their cell's centre;
     // their x, y are its column and row. Polities and routes have no positions.
@@ -183,6 +352,7 @@ std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const Lat
 void importfields(planet& world, const planet& latlon, const std::vector<FieldId>& fields)
 {
     const FieldRemap remap(latlon.grid(), world.grid());
+    std::vector<std::uint8_t> sourcesea, destinationsea;   // for land-aware codes, built on first use
     for (const FieldId id : fields)
     {
         const FieldData data = readplanetfield(latlon, id);
@@ -194,7 +364,12 @@ void importfields(planet& world, const planet& latlon, const std::vector<FieldId
         }
         if (!remap.ongrid(data))
             throw std::runtime_error("importfields: field is not on the lat-lon world's grid: " + worldmodel::qualifiedname(id));
-        if (!loadplanetfield(world, remap.remap(data)))
+        if (landawarefield(id) && !remap.identity() && sourcesea.empty())
+        {
+            sourcesea = seamask(latlon);
+            destinationsea = seamask(world);
+        }
+        if (!loadplanetfield(world, landawarefield(id) ? remap.remapbyclass(data, sourcesea, destinationsea) : remap.remap(data)))
             throw std::runtime_error("importfields: the world does not load " + worldmodel::qualifiedname(id));
     }
 }

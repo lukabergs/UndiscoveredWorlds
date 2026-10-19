@@ -301,7 +301,8 @@ void runclimateprocess(GenerationStageId stage, planet& world, ClimateShadow& st
         {
             const FieldId id = fields[field];
             const worldmodel::FieldSpec& spec = worldmodel::fieldspec(id);
-            if (spec.layout == Layout::scalar)
+            // A land-aware code depends on both sea masks as well: its import stands whole.
+            if (spec.layout == Layout::scalar || landawarefield(id))
                 continue;
             const FieldData& old = cubebefore[field];
             FieldData updated = readplanetfield(world, id);
