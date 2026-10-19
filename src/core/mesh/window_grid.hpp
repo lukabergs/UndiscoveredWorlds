@@ -7,7 +7,9 @@
 //   the net rotation of the cross net;
 // - G, a 4 x 4 Catmull-Rom stencil in face coordinates whose nodes beyond one
 //   face edge are ghosts at their true positions (1-D Catmull-Rom values along
-//   the next face's line of centres) and beyond two edges bilinear samples;
+//   the next face's line of centres), beyond two edges (a corner quadrant) the
+//   same along the third face that holds the node, the 1-D nodes beyond that
+//   face's edge ghosts again, and only a ghost of a ghost's ghost bilinear;
 // - S, straight walks: the next slot is the opposite of the reverse slot;
 // - R, rings: dilation of a key set by 8-connected hops, and ring distances on
 //   a grid's table.

@@ -41,8 +41,12 @@ Vec3 extendedcentre(std::int64_t n, int face, std::int64_t column, std::int64_t 
     return cubepoint(face, cubecentrea(n, column), cubecentreb(n, row));
 }
 
-// A node of a 4 x 4 stencil on face `face` at extended indices (i, j).
-void addnode(Terms& terms, std::int64_t n, int face, std::int64_t i, std::int64_t j, double w, GhostRule rule)
+// Ghosts of ghosts: a node of a ghost's 1-D stencil beyond the next face's edge
+// is itself a ghost (level 1); a node beyond that (level 2) is a bilinear sample.
+constexpr int ghostlevels = 2;
+
+// A node of a stencil on face `face` at extended indices (i, j).
+void addnode(Terms& terms, std::int64_t n, int face, std::int64_t i, std::int64_t j, double w, GhostRule rule, int level)
 {
     const bool outi = i < 0 || i >= n, outj = j < 0 || j >= n;
     if (!outi && !outj)
@@ -50,27 +54,62 @@ void addnode(Terms& terms, std::int64_t n, int face, std::int64_t i, std::int64_
         terms.emplace_back(cubekey(n, face, i, j), w);
         return;
     }
-    const std::int64_t depth = outi ? (i < 0 ? -1 - i : i - n) : (j < 0 ? -1 - j : j - n);
-    if ((outi && outj) || depth >= n)
-    {
-        addbilinear(terms, n, extendedcentre(n, face, i, j), w);
-        return;
-    }
-    const int edge = outi ? (i < 0 ? 3 : 1) : (j < 0 ? 0 : 2);
-    const std::int64_t along = outi ? j : i;
-    const LevelKey chart = cubeacrossedge(n, face, edge, along, depth);
+    const Vec3 q = extendedcentre(n, face, i, j);
+    const int edgei = i < 0 ? 3 : 1, edgej = j < 0 ? 0 : 2;
+    const std::int64_t depthi = i < 0 ? -1 - i : i - n, depthj = j < 0 ? -1 - j : j - n;
     if (rule == GhostRule::indexunfolded)
     {
-        terms.emplace_back(chart, w);
+        // The measurement's alternative: the chart cell; beyond two edges bilinear.
+        if (outi && outj)
+            addbilinear(terms, n, q, w);
+        else if (outi)
+            terms.emplace_back(depthi < n ? cubeacrossedge(n, face, edgei, j, depthi) : nokey, w);
+        else
+            terms.emplace_back(depthj < n ? cubeacrossedge(n, face, edgej, i, depthj) : nokey, w);
+        if (terms.back().first == nokey)
+        {
+            terms.pop_back();
+            addbilinear(terms, n, q, w);
+        }
         return;
     }
-    // The ghost at its true position: on the face across, the line of centres
-    // through the chart cell parallel to the edge (the edge-normal coordinate of
-    // a great circle continues across the edge), the position along it from the
-    // ghost's own face coordinates there.
+    if (level >= ghostlevels)
+    {
+        addbilinear(terms, n, q, w);
+        return;
+    }
+    // The face that holds the ghost: across the crossed edge; beyond two edges
+    // (a corner quadrant) the one of the two faces across that q lies on (the
+    // third face at the corner).
+    bool acrosscolumns = outi;
+    if (outi && outj)
+    {
+        const int holder = cubeposition(q).face;
+        if (cubeedgelink(face, edgei).face == holder)
+            acrosscolumns = true;
+        else if (cubeedgelink(face, edgej).face == holder)
+            acrosscolumns = false;
+        else
+        {
+            addbilinear(terms, n, q, w);
+            return;
+        }
+    }
+    const int edge = acrosscolumns ? edgei : edgej;
+    const std::int64_t depth = acrosscolumns ? depthi : depthj;
+    if (depth >= n)
+    {
+        addbilinear(terms, n, q, w);
+        return;
+    }
+    // The ghost at its true position: a great circle of constant edge-normal
+    // coordinate continues as a line of centres of the face across, parallel to
+    // the edge at the same depth; the position along it is q's own coordinate
+    // there, and the line's nodes are nodes of that face (ghosts again beyond it).
+    const std::int64_t along = std::clamp(acrosscolumns ? j : i, std::int64_t{ 0 }, n - 1);  // only the line matters
     const CubeEdgeLink& link = cubeedgelink(face, edge);
-    const CubeCell cell = cubecell(n, chart);
-    const FacePosition position = cubepositiononface(link.face, extendedcentre(n, face, i, j));
+    const CubeCell cell = cubecell(n, cubeacrossedge(n, face, edge, along, depth));
+    const FacePosition position = cubepositiononface(link.face, q);
     const bool alongcolumns = link.edge == 0 || link.edge == 2;
     const double s = alongcolumns ? columnindex(n, position.a) : rowindex(n, position.b);
     const double s0 = std::floor(s);
@@ -82,13 +121,10 @@ void addnode(Terms& terms, std::int64_t n, int face, std::int64_t i, std::int64_
         if (ws[m] == 0.0)
             continue;
         const std::int64_t t = first + m;
-        const std::int64_t column = alongcolumns ? t : cell.column, row = alongcolumns ? cell.row : t;
-        if (t >= 0 && t < n)
-            terms.emplace_back(cubekey(n, link.face, column, row), w * ws[m]);
-        else
-            addbilinear(terms, n, extendedcentre(n, link.face, column, row), w * ws[m]);
+        addnode(terms, n, link.face, alongcolumns ? t : cell.column, alongcolumns ? cell.row : t, w * ws[m], rule, level + 1);
     }
 }
+
 
 KeyStencil merged(Terms& terms)
 {
@@ -174,7 +210,7 @@ KeyStencil cubicstencil(std::int64_t facecells, int face, double a, double b, Gh
         {
             const double w = wx[l] * wy[m];
             if (w != 0.0)
-                addnode(terms, n, face, i0 + l, j0 + m, w, rule);
+                addnode(terms, n, face, i0 + l, j0 + m, w, rule, 0);
         }
     return merged(terms);
 }

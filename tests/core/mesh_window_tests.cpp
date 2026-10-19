@@ -485,12 +485,16 @@ TEST(MeshWindow, CubicStencilGhostsAtTruePositions)
         EXPECT_LT(truth.edgeband, 2.0 * truth.interior);
         EXPECT_LT(truth.edgejump, truth.interior);
         EXPECT_LT(truth.edgeband, 0.1 * unfolded.edgeband);
-        // At a corner (the bilinear rule beyond two edges) both converge, at first order.
+        // At a corner (beyond two edges: 1-D Catmull-Rom along the third face) the same,
+        // converging at third order or better.
+        EXPECT_LT(truth.cornerband, 2.0 * truth.interior);
+        EXPECT_LT(truth.nearjump, truth.interior);
+        EXPECT_LT(truth.cornerjump, truth.interior);
+        EXPECT_LT(truth.cornerband, 0.1 * unfolded.cornerband);
         if (previous.cornerjump > 0.0)
         {
-            EXPECT_LT(truth.cornerjump, 0.6 * previous.cornerjump);
-            EXPECT_LT(truth.nearjump, 0.6 * previous.nearjump);
-            EXPECT_LT(truth.cornerband, 0.6 * previous.cornerband);
+            EXPECT_LT(truth.cornerjump, 0.2 * previous.cornerjump);
+            EXPECT_LT(truth.cornerband, 0.2 * previous.cornerband);
         }
         previous = truth;
     }
