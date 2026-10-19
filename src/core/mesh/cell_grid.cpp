@@ -304,7 +304,7 @@ std::shared_ptr<const CellGrid> makecubegrid(int facecells, double radius_m)
         g.centre_[c] = p;
         g.latitude_[c] = latitudeof(p);
         g.longitude_[c] = longitudeof(p);
-        g.area_[c] = r2 * cubeunitarea(cubeedgea(n, i), cubeedgea(n, i + 1), cubeedgeb(n, j + 1), cubeedgeb(n, j));
+        g.area_[c] = r2 * cubekeyunitarea(n, c);  // the one area rule of every cube level
         total += g.area_[c];
         for (int k = 1; k <= slotcount; k++)
             g.neighbour_[slotindex(c, k)] = cubeneighbour(n, c, k);

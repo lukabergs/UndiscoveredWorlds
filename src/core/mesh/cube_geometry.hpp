@@ -68,7 +68,7 @@ Vec3 cubeslotprobe(int facecells, CellId c, int slot);
 // ---- 64-bit level keys (sphere-mesh.md section 8): the same geometry for N_L up
 // to 2^30, every function in closed form from the key. At N_L <= 16384 the
 // centres, neighbours, reverses, distances, face lengths and bearings equal
-// makecubegrid's bit for bit (the same expressions); areas see cubekeyunitarea.
+// makecubegrid's bit for bit (the same expressions; makecubegrid's areas are cubekeyunitarea's).
 
 constexpr std::int64_t maxlevelfacecells = std::int64_t{ 1 } << 30;
 
