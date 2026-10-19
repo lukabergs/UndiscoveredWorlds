@@ -187,33 +187,34 @@ struct GlobalLakes
 GlobalLakes globallakes(const RegionalGlobalInputs& inputs)
 {
     GlobalLakes lakes;
-    const int width = inputs.width, height = inputs.height;
-    const std::size_t size = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
     if (inputs.lakesurface_m.size() != size)
         return lakes;
+    // The 8 neighbours on the world's table (sphere-mesh.md section 8; T8 W2-W2c).
+    if (inputs.grid == nullptr || inputs.grid->cellcount() != size)
+        throw std::invalid_argument("globallakes: the inputs need the world's grid, one cell per global value");
+    const mesh::CellGrid& grid = *inputs.grid;
     auto lake = [&](std::size_t cell) { return inputs.lakesurface_m[cell] > 0.0f && inputs.network.sea[cell] == 0; };
     bool any = false;
     lakes.own.assign(size, 0);
     lakes.surface.assign(size, 0.0f);
-    for (int j = 0; j < height; j++)
-        for (int i = 0; i < width; i++)
+    for (std::size_t cell = 0; cell < size; cell++)
+    {
+        if (lake(cell))
         {
-            const std::size_t cell = at(i, j, width);
-            if (lake(cell))
-            {
-                lakes.own[cell] = 1;
-                lakes.surface[cell] = inputs.lakesurface_m[cell];
-                any = true;
-                continue;
-            }
-            float highest = 0.0f;
-            regionaldetail::aroundcell(width, height, i, j, [&](std::size_t other) {
-                if (lake(other))
-                    highest = std::max(highest, inputs.lakesurface_m[other]);
-                return false;
-            });
-            lakes.surface[cell] = highest;
+            lakes.own[cell] = 1;
+            lakes.surface[cell] = inputs.lakesurface_m[cell];
+            any = true;
+            continue;
         }
+        float highest = 0.0f;
+        regionaldetail::aroundcell(grid, cell, [&](std::size_t other) {
+            if (lake(other))
+                highest = std::max(highest, inputs.lakesurface_m[other]);
+            return false;
+        });
+        lakes.surface[cell] = highest;
+    }
     if (!any)
         lakes = GlobalLakes{};
     return lakes;
@@ -466,6 +467,8 @@ void sinksmallislands(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     const int margin = std::max(1, static_cast<int>(std::lround(parameters.coast.islandmargin * k)));
     const std::size_t size = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
     const bool islands = inputs.island.size() == size, mountainislands = inputs.mountainisland.size() == size;
+    if (inputs.grid == nullptr || inputs.grid->cellcount() != size)
+        throw std::invalid_argument("sinksmallislands: the inputs need the world's grid, one cell per global value");
 
     // A ring cell is land when the mask says so or when it lies beyond the box (rows end at
     // the box's edge or a pole; columns wrap only around a whole turn).
@@ -494,19 +497,11 @@ void sinksmallislands(const RegionalGlobalInputs& inputs, const RegionalWindow& 
                     land = mask[at(x, y, finewidth)] == 0 && gate[at(x, y, finewidth)] != 0;
             if (!land)
                 continue;
-            // A one-cell island or a mountain island of the world in the 3 x 3 keeps the block.
-            bool island = false;
-            for (int dj = -1; dj <= 1 && !island; dj++)
-            {
-                const int j = row + dj;
-                if (j < 0 || j >= height)
-                    continue;
-                for (int di = -1; di <= 1 && !island; di++)
-                {
-                    const std::size_t cell = at(wrapcolumn(column + di, width), j, width);
-                    island = (islands && inputs.island[cell] != 0) || (mountainislands && inputs.mountainisland[cell] != 0);
-                }
-            }
+            // A one-cell island or a mountain island of the world in the 3 x 3 (on the world's table)
+            // keeps the block.
+            const bool island = regionaldetail::aroundcell(*inputs.grid, at(column, row, width), [&](std::size_t cell) {
+                return (islands && inputs.island[cell] != 0) || (mountainislands && inputs.mountainisland[cell] != 0);
+            });
             if (island)
                 continue;
             // The ring at `margin` fine cells around the block.

@@ -77,6 +77,19 @@ std::vector<float> lakecellweight(const RegionalGlobalInputs& inputs, const Regi
 std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const FineWarp& warp,
                              const RegionalParameters& parameters, const std::vector<float>* lakeweight = nullptr);
 
+// The cube forms of the two above (T8 W2-W2c, sphere-mesh.md section 8: gates by table neighbours
+// and G footprints; lat-lon windows take the forms above), one value per cell of a cube window
+// refining inputs.grid (a cube level 0), in its local order; `warp` the window's (regionalwarp's
+// cube form, or empty). lakecellweight: the lake mask gathered by G (upsampling.hpp) at each cell's
+// fully warped point (warpedpoint, regional_surface.hpp). seagate: the rules above with the cell's
+// level-0 ancestor as its global cell (nearseacells and the 3 x 3 on the world's table), and for
+// edges.smoothgate n >= 1 a sea cell of the world among the n-footprint (mesh::cubefootprint: the
+// C-chart 2n x 2n cells around the point on its face) of the faded warped point (the fade from G of
+// the base elevation at the cell's centre and warp.fade_m, as the Surfacer's).
+std::vector<float> lakecellweight(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp);
+std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp,
+                             const RegionalParameters& parameters, const std::vector<float>* lakeweight = nullptr);
+
 // The straight-run breaker (R8, after the legacy removestraights): no-op while
 // edges.straightmax <= 0. `mask` is the box's mask (1 = sea; domainfinewidth() x
 // domainfineheight()), `gate` seagate's on the same box. A straight shore run is a row or

@@ -6,8 +6,29 @@
 
 #include <cstddef>
 
+#include "core/mesh/cell_grid.hpp"
+
 namespace landscape::regionaldetail
 {
+// Whether `test` holds for a cell of the 3 x 3 neighbourhood of a level-0 cell on the world's grid,
+// the cell included (T8 W2-W2c, sphere-mesh.md section 8: gates by table neighbours): the cell, then
+// its slot neighbours 1..8 (none skipped). On the lat-lon grid these are the cells of the raster
+// aroundcell below (columns wrap, rows beyond the poles do not exist), so an `any` or a maximum over
+// them is the same.
+template<typename Test>
+bool aroundcell(const mesh::CellGrid& grid, std::size_t cell, Test test)
+{
+    if (test(cell))
+        return true;
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
+    {
+        const std::int32_t other = grid.neighbour(static_cast<mesh::CellId>(cell), slot);
+        if (other >= 0 && test(static_cast<std::size_t>(other)))
+            return true;
+    }
+    return false;
+}
+
 inline std::size_t at(int x, int y, int width)
 {
     return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);

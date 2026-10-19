@@ -8,10 +8,12 @@
 #include <stdexcept>
 
 #include "core/deterministic_random.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 #include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_coast.hpp"
 #include "simulations/landscape/regional_edges.hpp"
+#include "simulations/landscape/regional_helpers.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 
 // Erosion plan steps E3, R0, R2 and R6 (docs/architecture/erosion-hydrology-plan.md, Phase E,
@@ -44,39 +46,30 @@ int wrapcolumn(int column, int width) { return ((column % width) + width) % widt
 
 std::int64_t wrapfine(std::int64_t column, std::int64_t width) { return ((column % width) + width) % width; }
 
-// True when global cell (i, j) or one of its 8 neighbours satisfies `test` (columns
-// wrap, rows beyond the poles do not exist).
-template<typename Test>
-bool aroundcell(int width, int height, int i, int j, Test test)
+// The world's level-0 grid (the neighbourhoods below read its table; T8 W2-W2c).
+const mesh::CellGrid& levelzero(const RegionalGlobalInputs& inputs)
 {
-    for (int dj = -1; dj <= 1; dj++)
-    {
-        const int row = j + dj;
-        if (row < 0 || row >= height)
-            continue;
-        for (int di = -1; di <= 1; di++)
-            if (test(at(wrapcolumn(i + di, width), row, width)))
-                return true;
-    }
-    return false;
+    if (inputs.grid == nullptr || inputs.grid->cellcount() != inputs.elevation_m.size())
+        throw std::invalid_argument("regional surface: the inputs need the world's grid, one cell per global value");
+    return *inputs.grid;
 }
 
 // The local global relief: the largest absolute difference between a cell and its 8
-// neighbours (columns wrap, rows beyond the poles do not exist).
-std::vector<float> localrelief(const std::vector<float>& elevation, int width, int height)
+// neighbours on the world's table (sphere-mesh.md section 8; on lat-lon columns wrap, rows
+// beyond the poles do not exist).
+std::vector<float> localrelief(const std::vector<float>& elevation, const mesh::CellGrid& grid)
 {
     std::vector<float> relief(elevation.size(), 0.0f);
-    for (int j = 0; j < height; j++)
-        for (int i = 0; i < width; i++)
-        {
-            const float own = elevation[at(i, j, width)];
-            float largest = 0.0f;
-            aroundcell(width, height, i, j, [&](std::size_t other) {
-                largest = std::max(largest, std::fabs(elevation[other] - own));
-                return false;
-            });
-            relief[at(i, j, width)] = largest;
-        }
+    for (std::size_t cell = 0; cell < relief.size(); cell++)
+    {
+        const float own = elevation[cell];
+        float largest = 0.0f;
+        regionaldetail::aroundcell(grid, cell, [&](std::size_t other) {
+            largest = std::max(largest, std::fabs(elevation[other] - own));
+            return false;
+        });
+        relief[cell] = largest;
+    }
     return relief;
 }
 
@@ -93,23 +86,22 @@ std::vector<float> noiserelief(const RegionalGlobalInputs& inputs, const Regiona
 {
     if (relieffield(inputs, parameters))
         return inputs.reliefamplitude_m;
-    return localrelief(inputs.elevation_m, inputs.width, inputs.height);
+    return localrelief(inputs.elevation_m, levelzero(inputs));
 }
 
-// The coastal indicator: 1 where the global cell's 3 x 3 neighbourhood holds a cell of
-// the other kind (sea or land), else 0.
-std::vector<float> coastalcells(const std::vector<uint8_t>& sea, int width, int height)
+// The coastal indicator: 1 where the global cell's 3 x 3 neighbourhood on the world's table
+// holds a cell of the other kind (sea or land), else 0.
+std::vector<float> coastalcells(const std::vector<uint8_t>& sea, const mesh::CellGrid& grid)
 {
     std::vector<float> coastal(sea.size(), 0.0f);
-    for (int j = 0; j < height; j++)
-        for (int i = 0; i < width; i++)
-        {
-            const uint8_t own = sea[at(i, j, width)] != 0 ? 1 : 0;
-            coastal[at(i, j, width)] =
-                aroundcell(width, height, i, j, [&](std::size_t other) { return (sea[other] != 0 ? 1 : 0) != own; })
-                    ? 1.0f
-                    : 0.0f;
-        }
+    for (std::size_t cell = 0; cell < coastal.size(); cell++)
+    {
+        const uint8_t own = sea[cell] != 0 ? 1 : 0;
+        coastal[cell] =
+            regionaldetail::aroundcell(grid, cell, [&](std::size_t other) { return (sea[other] != 0 ? 1 : 0) != own; })
+                ? 1.0f
+                : 0.0f;
+    }
     return coastal;
 }
 
@@ -164,6 +156,15 @@ public:
             return;
         double px = 0.0, py = 0.0, pz = 0.0;
         unitvector(finelatitude(finerow, fineheight_), finelongitude(finecolumn, finewidth_), px, py, pz);
+        atpoint(px, py, pz, dx, dy);
+    }
+
+    // The same at a unit vector (a cube window cell's centre; at() is this at the lat-lon centre).
+    void atpoint(double px, double py, double pz, double& dx, double& dy) const
+    {
+        dx = dy = 0.0;
+        if (!active())
+            return;
         const double u = x_->sum(px, py, pz) / x_->normalisation();
         const double v = y_->sum(px, py, pz) / y_->normalisation();
         const double length = std::sqrt(u * u + v * v);
@@ -200,9 +201,9 @@ class Surfacer
 public:
     Surfacer(const RegionalGlobalInputs& inputs, int scale, const RegionalParameters& parameters)
         : inputs_(inputs), parameters_(parameters), scale_(scale),
-          relief_(localrelief(inputs.elevation_m, inputs.width, inputs.height)),
+          relief_(localrelief(inputs.elevation_m, levelzero(inputs))),
           noiserelief_(relieffield(inputs, parameters) ? inputs.reliefamplitude_m : std::vector<float>{}),
-          coastal_(coastalcells(inputs.network.sea, inputs.width, inputs.height)),
+          coastal_(coastalcells(inputs.network.sea, levelzero(inputs))),
           inland_(inlandcells(inputs, parameters)),
           factors_(coastfactors(inputs, parameters)),
           coast_(inputs.width, inputs.height, scale, inputs.seed, coastsalt, parameters.coast.noisepersistence)
@@ -901,6 +902,43 @@ FineWarp regionalwarp(const RegionalWindow& window, std::uint64_t seed, const Re
             field.at(window.absolutefinecolumn(x), window.absolutefinerow(y), warp.dx[cell], warp.dy[cell]);
         }
     return warp;
+}
+
+double cubecellarc_m(double radius_m, int facecells)
+{
+    if (!(radius_m > 0.0) || facecells < 1)
+        throw std::invalid_argument("cubecellarc_m: a positive radius and face size");
+    return pi * radius_m / (2.0 * static_cast<double>(facecells));
+}
+
+FineWarp regionalwarp(const mesh::CellGrid& window, int levelzerofacecells, std::uint64_t seed,
+                      const RegionalParameters& parameters)
+{
+    if (window.kind() != mesh::GridKind::cube || levelzerofacecells < 1 || window.facecells() % levelzerofacecells != 0)
+        throw std::invalid_argument("regionalwarp: a cube window refining a cube level 0");
+    // The lat-lon field of a world of H = 2 N rows (wavelengths in cells of pi / (2 N) radians: the
+    // level-0 cell arc), evaluated at each cell's centre.
+    const WarpField field(4 * levelzerofacecells, 2 * levelzerofacecells, window.facecells() / levelzerofacecells, seed,
+                          parameters.warp);
+    FineWarp warp;
+    if (!field.active())
+        return warp;
+    warp.dx.resize(window.cellcount());
+    warp.dy.resize(window.cellcount());
+    for (mesh::CellId c = 0; c < window.cellcount(); c++)
+    {
+        const mesh::Vec3 p = window.centre(c);
+        field.atpoint(p.x, p.y, p.z, warp.dx[c], warp.dy[c]);
+    }
+    return warp;
+}
+
+mesh::Vec3 warpedpoint(const mesh::Vec3& centre, double dx, double dy, double radius_m, int levelzerofacecells)
+{
+    if (dx == 0.0 && dy == 0.0)
+        return centre;
+    const double arc_km = cubecellarc_m(radius_m, levelzerofacecells) / 1000.0;
+    return mesh::fromtangent(mesh::tangentframe(centre, radius_m), dx * arc_km, -dy * arc_km);
 }
 
 StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const RegionalWindow& window,

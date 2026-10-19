@@ -10,6 +10,7 @@
 #include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/refinement_projection.hpp"
+#include "simulations/landscape/regional_edges.hpp"
 #include "simulations/landscape/regional_surface.hpp"
 #include "simulations/landscape/regional_grid.hpp"
 #include "simulations/landscape/upsampling.hpp"
@@ -321,6 +322,87 @@ TEST_F(Landscape, LevelBlocksCubeProlongAndParentMeans)
     EXPECT_LT(after, 0.5 * before);
     EXPECT_THROW(landscape::prolong(*level, std::vector<float>(level->cellcount()), *level, factor, false),
                  std::invalid_argument);
+}
+
+TEST_F(Landscape, RegionalCubeWarpAndGates)
+{
+    // T8 W2-W2c on cube windows (level 0 N 8, k 4) around a cube corner and across a face edge,
+    // overlapping in the corner's disc: the warp is a pure function of the cell's centre (equal on the
+    // overlap) and at most amplitude_cells level-0 arcs long, warpedpoint moves a centre by that arc on
+    // the ground; the gate with smoothgate 0 is nearseacells of the ancestor, with smoothgate 3 it holds
+    // the 3 x 3 rule and is equal on the overlap; the lake weight is 0 without lakes.
+    constexpr int n = 8, k = 4;
+    RegionalGlobalInputs inputs;
+    inputs.grid = mesh::makecubegrid(n, radius_m);
+    inputs.radius_m = radius_m;
+    inputs.sealevel = 0.0f;
+    const std::size_t size = inputs.grid->cellcount();
+    // A coast through the corner cell's centre, running north there (land east of it).
+    const mesh::LevelKey corner = mesh::cubekey(n, 1, 7, 0), edge = mesh::cubekey(n, 1, 7, 3);
+    const mesh::Vec3 coast = inputs.grid->centre(static_cast<mesh::CellId>(corner));
+    const mesh::Vec3 coasteast = inputs.grid->east(static_cast<mesh::CellId>(corner));
+    inputs.elevation_m.resize(size);
+    inputs.network.sea.assign(size, 0);
+    inputs.lakesurface_m.assign(size, 0.0f);
+    for (mesh::CellId c = 0; c < size; c++)
+    {
+        const mesh::Vec3 p = inputs.grid->centre(c);
+        inputs.elevation_m[c] = static_cast<float>(20000.0 * mesh::dot(p - coast, coasteast) / mesh::length(coasteast));
+        inputs.network.sea[c] = inputs.elevation_m[c] < 0.0f ? 1 : 0;
+    }
+    RegionalParameters parameters;
+    parameters.warp.amplitude_cells = 0.5;
+    parameters.warp.wavelength_cells = 2.0;
+    parameters.warp.fade_m = 300.0;
+    const auto a = mesh::cubewindowgrid(n * k, radius_m, cubechildren(n, k, cubedisc(n, corner, 3)));
+    const auto b = mesh::cubewindowgrid(n * k, radius_m, cubechildren(n, k, cubedisc(n, edge, 3)));
+    const landscape::FineWarp warpa = landscape::regionalwarp(*a, n, inputs.seed, parameters);
+    const landscape::FineWarp warpb = landscape::regionalwarp(*b, n, inputs.seed, parameters);
+    ASSERT_EQ(warpa.dx.size(), a->cellcount());
+    const double arc = landscape::cubecellarc_m(radius_m, n);
+    double largest = 0.0;
+    for (mesh::CellId c = 0; c < a->cellcount(); c++)
+    {
+        const double length = std::hypot(warpa.dx[c], warpa.dy[c]);
+        largest = std::max(largest, length);
+        const mesh::Vec3 moved = landscape::warpedpoint(a->centre(c), warpa.dx[c], warpa.dy[c], radius_m, n);
+        const double ground = radius_m * std::acos(std::clamp(mesh::dot(moved, a->centre(c)), -1.0, 1.0));
+        // fromtangent is gnomonic: the arc on the ground is R atan(tangent length / R).
+        EXPECT_NEAR(ground, radius_m * std::atan(length * arc / radius_m), 1e-6 * arc) << "cell " << c;
+    }
+    EXPECT_GT(largest, 0.05);
+    EXPECT_LE(largest, parameters.warp.amplitude_cells);
+
+    const std::vector<uint8_t> nearsea = landscape::nearseacells(inputs);
+    RegionalParameters hard = parameters;
+    hard.edges.smoothgate = 0;
+    const std::vector<uint8_t> step = landscape::seagate(inputs, *a, warpa, hard);
+    RegionalParameters smooth = parameters;
+    smooth.edges.smoothgate = 3;
+    const std::vector<uint8_t> gatea = landscape::seagate(inputs, *a, warpa, smooth);
+    const std::vector<uint8_t> gateb = landscape::seagate(inputs, *b, warpb, smooth);
+    const std::vector<float> lakes = landscape::lakecellweight(inputs, *a, warpa);
+    int opened = 0, shared = 0;
+    for (mesh::CellId c = 0; c < a->cellcount(); c++)
+    {
+        const mesh::LevelKey key = a->globalkey(c);
+        const std::size_t global = inputs.grid->localofkey(mesh::cubeparentkey(n * k, k, key));
+        EXPECT_EQ(step[c], nearsea[global]);
+        EXPECT_GE(gatea[c], nearsea[global]);
+        opened += gatea[c] > nearsea[global] ? 1 : 0;
+        EXPECT_EQ(lakes[c], 0.0f);
+        const mesh::CellId other = b->localofkey(key);
+        if (other == mesh::nocell)
+            continue;
+        shared++;
+        EXPECT_EQ(warpa.dx[c], warpb.dx[other]);
+        EXPECT_EQ(warpa.dy[c], warpb.dy[other]);
+        EXPECT_EQ(gatea[c], gateb[other]);
+    }
+    std::printf("[gates] cube: largest warp %.3g arcs, smooth gate opens %d cells beyond the 3 x 3 rule, %d shared cells\n",
+                largest, opened, shared);
+    EXPECT_GT(opened, 0);
+    EXPECT_GT(shared, 0);
 }
 
 TEST_F(Landscape, LevelBlocksCubeSmoothingAndSignedMeans)

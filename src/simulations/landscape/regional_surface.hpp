@@ -53,6 +53,19 @@ private:
 // A pure function of the fine cell's absolute position and the seed.
 FineWarp regionalwarp(const RegionalWindow& window, std::uint64_t seed, const RegionalParameters& parameters);
 
+// The warp on the cube (T8 W2-W2c, sphere-mesh.md section 8: an (east, north) displacement placed by
+// tangentframe and fromtangent). The level-0 cell arc of a cube level 0 of N cells per face edge is
+// pi R / (2 N), the equiangular cells' arc along the face centre lines (lat-lon's pi R / H with
+// H = 2 N). regionalwarp on a cube window: the same field as above for a world of H = 2 N rows,
+// evaluated at each cell's centre, dx east and dy south in level-0 cell arcs (one value per window
+// cell, local order). warpedpoint: the unit vector a cell samples at, its centre moved dx arcs east
+// and dy arcs south in its tangent plane (fromtangent; the centre itself without a displacement).
+// Both throw std::invalid_argument for a window that is not a cube level refining level 0.
+double cubecellarc_m(double radius_m, int facecells);
+FineWarp regionalwarp(const mesh::CellGrid& window, int levelzerofacecells, std::uint64_t seed,
+                      const RegionalParameters& parameters);
+mesh::Vec3 warpedpoint(const mesh::Vec3& centre, double dx, double dy, double radius_m, int levelzerofacecells);
+
 struct StartSurface
 {
     std::vector<float> base_m;    // the global base elevation upsampled at the faded warped positions

@@ -74,6 +74,14 @@ KeyStencil cubicstencil(std::int64_t facecells, const Vec3& p, GhostRule rule = 
 KeyStencil cubicstencilnode(std::int64_t facecells, const Vec3& p, int column, int row,
                             GhostRule rule = GhostRule::trueposition);
 
+// The 2 r x 2 r footprint of a point (the regional pass's smooth sea gate, sphere-mesh.md section
+// 8, T8 W2-W2c): the C-chart cells (cubechartkey) of columns i0 - r + 1 .. i0 + r and rows
+// j0 - r + 1 .. j0 + r of p's face index space, i0 and j0 the cell centres at or before p (at r = 2
+// the 4 x 4 nodes of G on the face and its charts); chart positions beyond two face edges (a corner
+// quadrant, where no cell lies) or deeper than a face are left out. Ascending and unique; empty for
+// reach < 1.
+std::vector<LevelKey> cubefootprint(std::int64_t facecells, const Vec3& p, int reach);
+
 // S: one straight step from a key in a slot: the neighbour and the slot that
 // continues straight from it (the opposite of its reverse slot); nokey and 0
 // where the slot has no neighbour (a corner diagonal).

@@ -4,9 +4,13 @@
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
+#include <string>
 
 #include "core/deterministic_random.hpp"
+#include "core/mesh/window_grid.hpp"
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/regional_helpers.hpp"
+#include "simulations/landscape/regional_surface.hpp"
 
 // Erosion plan Phase R2: the contract of R6 (nearseacells and inlandcells moved here from
 // regional_surface.cpp unchanged; seagate reproduces the 3 x 3 gate at edges.smoothgate 0)
@@ -56,19 +60,30 @@ bool lakecell(const RegionalGlobalInputs& inputs, std::size_t global)
 }
 }
 
+namespace
+{
+// The world's level-0 grid (the gates read its table; T8 W2-W2c).
+const mesh::CellGrid& levelzero(const RegionalGlobalInputs& inputs, const char* name)
+{
+    if (inputs.grid == nullptr || inputs.grid->cellcount() != inputs.network.sea.size())
+        throw std::invalid_argument(std::string(name) + ": the inputs need the world's grid, one cell per global value");
+    return *inputs.grid;
+}
+}
+
 std::vector<uint8_t> nearseacells(const RegionalGlobalInputs& inputs)
 {
-    const int width = inputs.width, height = inputs.height;
-    std::vector<uint8_t> nearsea(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
-    for (int j = 0; j < height; j++)
-        for (int i = 0; i < width; i++)
-        {
-            const std::size_t global = at(i, j, width);
-            const bool lake = inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0;
-            nearsea[global] = !lake && aroundcell(width, height, i, j, [&](std::size_t other) {
-                return inputs.network.sea[other] != 0;
-            }) ? 1 : 0;
-        }
+    // The 3 x 3 of every global cell on the world's table (sphere-mesh.md section 8: gates by table
+    // neighbours; on lat-lon the raster 3 x 3, columns wrapping, rows stopping at the poles).
+    const mesh::CellGrid& grid = levelzero(inputs, "nearseacells");
+    std::vector<uint8_t> nearsea(grid.cellcount(), 0);
+    for (std::size_t global = 0; global < nearsea.size(); global++)
+    {
+        const bool lake = inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0;
+        nearsea[global] = !lake && aroundcell(grid, global, [&](std::size_t other) {
+            return inputs.network.sea[other] != 0;
+        }) ? 1 : 0;
+    }
     return nearsea;
 }
 
@@ -83,24 +98,19 @@ std::vector<float> inlandcells(const RegionalGlobalInputs& inputs, const Regiona
             inland[cell] = nearsea[cell] != 0 ? 0.0f : 1.0f;
         return inland;
     }
-    // R8: no global sea cell within reach - 1 cells (columns wrap, rows beyond the poles do
-    // not exist), or a lake cell.
-    const int width = inputs.width, height = inputs.height;
-    for (int j = 0; j < height; j++)
-        for (int i = 0; i < width; i++)
-        {
-            bool sea = false;
-            for (int dj = -(reach - 1); dj <= reach - 1 && !sea; dj++)
-            {
-                const int row = j + dj;
-                if (row < 0 || row >= height)
-                    continue;
-                for (int di = -(reach - 1); di <= reach - 1 && !sea; di++)
-                    sea = inputs.network.sea[at(wrapcolumn(i + di, width), row, width)] != 0;
-            }
-            const std::size_t global = at(i, j, width);
-            inland[global] = sea && !lakecell(inputs, global) ? 0.0f : 1.0f;
-        }
+    // R8: no global sea cell within reach - 1 rings (R on the world's table: on lat-lon the
+    // (2 reach - 1)-wide square, columns wrapping, rows beyond the poles not existing), or a lake cell.
+    const mesh::CellGrid& grid = levelzero(inputs, "inlandcells");
+    std::vector<mesh::CellId> seas;
+    for (std::size_t global = 0; global < nearsea.size(); global++)
+        if (inputs.network.sea[global] != 0)
+            seas.push_back(static_cast<mesh::CellId>(global));
+    const std::vector<int> ring = seas.empty() ? std::vector<int>(nearsea.size(), -1) : mesh::ringdistances(grid, seas, reach - 1);
+    for (std::size_t global = 0; global < nearsea.size(); global++)
+    {
+        const bool sea = ring[global] >= 0;
+        inland[global] = sea && !lakecell(inputs, global) ? 0.0f : 1.0f;
+    }
     return inland;
 }
 
@@ -137,9 +147,8 @@ std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const RegionalW
                 if (lakeweight == nullptr)
                     gate[cell] = nearsea[global];
                 else if (!lakeside(cell))
-                    // The 3 x 3 of the lat-lon global grid around the ancestor (its column and row).
-                    gate[cell] = aroundcell(width, height, static_cast<int>(global % static_cast<std::size_t>(width)),
-                                            static_cast<int>(global / static_cast<std::size_t>(width)),
+                    // The 3 x 3 of the ancestor on the world's table.
+                    gate[cell] = aroundcell(levelzero(inputs, "seagate"), global,
                                             [&](std::size_t other) { return inputs.network.sea[other] != 0; }) ? 1 : 0;
             }
         }
@@ -344,5 +353,100 @@ void breakstraightruns(const RegionalGlobalInputs& inputs, const RegionalWindow&
                 }
             }
         }
+}
+
+namespace
+{
+// A cube window's fine cells per level-0 cell edge and its level 0 (the inputs' cube grid).
+int cubescale(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const char* name)
+{
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube ||
+        inputs.grid->facecells() < 1 || window.facecells() % inputs.grid->facecells() != 0)
+        throw std::invalid_argument(std::string(name) + ": a cube window refining the inputs' cube level 0");
+    return window.facecells() / inputs.grid->facecells();
+}
+}
+
+std::vector<float> lakecellweight(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp)
+{
+    cubescale(inputs, window, "lakecellweight");
+    const mesh::CellGrid& grid = *inputs.grid;
+    if (!warp.empty() && (warp.dx.size() != window.cellcount() || warp.dy.size() != window.cellcount()))
+        throw std::invalid_argument("lakecellweight: the warp must hold one displacement per window cell");
+    std::vector<float> mask(inputs.lakesurface_m.size());
+    for (std::size_t global = 0; global < mask.size(); global++)
+        mask[global] = lakecell(inputs, global) ? 1.0f : 0.0f;
+    const int n = grid.facecells();
+    std::vector<float> weight(window.cellcount());
+    for (mesh::CellId c = 0; c < window.cellcount(); c++)
+    {
+        const mesh::Vec3 p = warp.empty() ? window.centre(c)
+                                          : warpedpoint(window.centre(c), warp.dx[c], warp.dy[c], grid.radius_m(), n);
+        weight[c] = static_cast<float>(mesh::applystencil(mesh::cubicstencil(n, p),
+                                                          [&](mesh::LevelKey key) { return mask[grid.localofkey(key)]; }));
+    }
+    return weight;
+}
+
+std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp,
+                             const RegionalParameters& parameters, const std::vector<float>* lakeweight)
+{
+    const int k = cubescale(inputs, window, "seagate");
+    const mesh::CellGrid& grid = *inputs.grid;
+    const std::size_t count = window.cellcount();
+    if (lakeweight != nullptr && lakeweight->size() != count)
+        throw std::invalid_argument("seagate: the lake weight must hold one value per window cell");
+    if (!warp.empty() && (warp.dx.size() != count || warp.dy.size() != count))
+        throw std::invalid_argument("seagate: the warp must hold one displacement per window cell");
+    const std::vector<uint8_t> nearsea = nearseacells(inputs);
+    const auto lakeside = [&](std::size_t cell) { return lakeweight != nullptr && (*lakeweight)[cell] >= 0.5f; };
+    const auto ancestor = [&](mesh::CellId c) {
+        return static_cast<std::size_t>(grid.localofkey(parentkey(window, window.globalkey(c), k)));
+    };
+    std::vector<uint8_t> gate(count, 0);
+    const int reach = parameters.edges.smoothgate;
+    if (reach <= 0)
+    {
+        for (mesh::CellId c = 0; c < count; c++)
+        {
+            const std::size_t global = ancestor(c);
+            if (lakeweight == nullptr)
+                gate[c] = nearsea[global];
+            else if (!lakeside(c))
+                gate[c] = aroundcell(grid, global, [&](std::size_t other) { return inputs.network.sea[other] != 0; }) ? 1 : 0;
+        }
+        return gate;
+    }
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    const double fade_m = parameters.warp.fade_m;
+    const int n = grid.facecells();
+    const std::vector<float> lapsebase =
+        !warp.empty() && fade_m > 0.0 ? upsample(inputs.elevation_m, grid, window) : std::vector<float>{};
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const std::size_t global = ancestor(c);
+        if (lakeside(c))
+            continue;
+        if (nearsea[global] != 0)
+        {
+            gate[c] = 1;
+            continue;
+        }
+        if (lakeweight == nullptr && lakecell(inputs, global))
+            continue;
+        mesh::Vec3 p = window.centre(c);
+        if (!warp.empty())
+        {
+            double fade = 1.0;
+            if (fade_m > 0.0)
+                fade = std::clamp(1.0 - std::fabs(static_cast<double>(lapsebase[c]) - sealevel) / fade_m, 0.0, 1.0);
+            p = warpedpoint(p, fade * warp.dx[c], fade * warp.dy[c], grid.radius_m(), n);
+        }
+        bool sea = false;
+        for (const mesh::LevelKey key : mesh::cubefootprint(n, p, reach))
+            sea = sea || inputs.network.sea[grid.localofkey(key)] != 0;
+        gate[c] = sea ? 1 : 0;
+    }
+    return gate;
 }
 }

@@ -221,6 +221,27 @@ KeyStencil cubicstencil(std::int64_t facecells, const Vec3& p, GhostRule rule)
     return cubicstencil(facecells, position.face, position.a, position.b, rule);
 }
 
+std::vector<LevelKey> cubefootprint(std::int64_t facecells, const Vec3& p, int reach)
+{
+    std::vector<LevelKey> keys;
+    if (reach < 1)
+        return keys;
+    const std::int64_t n = facecells;
+    const FacePosition position = cubeposition(p);
+    const std::int64_t i0 = static_cast<std::int64_t>(std::floor(columnindex(n, position.a)));
+    const std::int64_t j0 = static_cast<std::int64_t>(std::floor(rowindex(n, position.b)));
+    for (std::int64_t j = j0 - reach + 1; j <= j0 + reach; j++)
+        for (std::int64_t i = i0 - reach + 1; i <= i0 + reach; i++)
+        {
+            const LevelKey key = cubechartkey(n, position.face, i, j);
+            if (key != nokey)
+                keys.push_back(key);
+        }
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    return keys;
+}
+
 KeyStencil cubicstencilnode(std::int64_t facecells, const Vec3& p, int column, int row, GhostRule rule)
 {
     if (column < 0 || column > 3 || row < 0 || row > 3)
