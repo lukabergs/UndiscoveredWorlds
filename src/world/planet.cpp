@@ -836,7 +836,7 @@ void planet::shiftterrain(int offset)
         geosphere_.cratercentreslist[i].x = geosphere_.cratercentreslist[i].x - offset;
 
         if (geosphere_.cratercentreslist[i].x < 0)
-            geosphere_.cratercentreslist[i].x = geosphere_.cratercentreslist[i].x + body_.itswidth;
+            geosphere_.cratercentreslist[i].x = geosphere_.cratercentreslist[i].x + body_.itswidth + 1; // columns 0..itswidth
 
         if (geosphere_.cratercentreslist[i].cell != mesh::nocell)
             geosphere_.cratercentreslist[i].cell = grid_->cellof(geosphere_.cratercentreslist[i].x, geosphere_.cratercentreslist[i].y);

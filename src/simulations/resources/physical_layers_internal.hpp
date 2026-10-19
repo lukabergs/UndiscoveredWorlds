@@ -28,32 +28,6 @@ inline int clampscore(float value)
     return static_cast<int>(std::round(std::clamp(value, 0.0f, 100.0f)));
 }
 
-// The (x, y) forms hydrology's drainage_basins.cpp reads until its W2-H port (which no
-// longer includes this header): coordinates use the planet's inclusive bounds; longitude
-// wraps and latitude never wraps. The resource layers use physical_layers::cellqueries.
-constexpr std::array<std::array<int, 2>, 8> drainageoffsets =
-{ {
-    { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
-    { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }
-} };
-
-inline twointegers wrappeddestination(const planet& world, int x, int y, int dir)
-{
-    twointegers destination = getdestination(x, y, dir);
-    destination.x = wrap(destination.x, world.width());
-    destination.y = std::clamp(destination.y, 0, world.height());
-    return destination;
-}
-
-inline bool islakecell(const planet& world, int x, int y)
-{
-    return world.truelake(x, y) != 0 || world.riftlakesurfacefloat(x, y) != 0;
-}
-
-inline bool isdeltacell(const planet& world, int x, int y)
-{
-    return world.deltadir(x, y) != 0 || world.deltajan(x, y) != 0 || world.deltajul(x, y) != 0;
-}
 }
 
 // The same queries on the world's cell grid (docs/architecture/sphere-mesh.md sections 3
@@ -61,7 +35,7 @@ inline bool isdeltacell(const planet& world, int x, int y)
 // own frame, -1 where none exists), a direction code is a slot of its cell. On the lat-lon
 // grid every query reads the cells the (x, y) loops read (x wrapped, y clipped at the poles).
 // The planet-field queries and the box walk are the shared ones of world/cell_queries.hpp;
-// a namespace of its own because physical_layers::detail keeps same-named (x, y) forms.
+// a namespace of its own, read by the resource files and terrain's surface_potentials.cpp.
 namespace physical_layers::cellqueries
 {
 using mesh::CellId;

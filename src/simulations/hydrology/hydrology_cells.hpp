@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/mesh/cell_grid.hpp"
+#include "world/cell_queries.hpp"
 #include "world/planet.hpp"
 
 namespace hydrologycells
@@ -68,14 +69,15 @@ inline std::vector<mesh::CellId> visitorder(const mesh::CellGrid& grid)
     return cells;
 }
 
+// The shared planet-field queries (world/cell_queries.hpp) under the hydrology files' names.
 inline bool islake(const planet& world, mesh::CellId c)
 {
-    return world.truelake(c) != 0 || world.riftlakesurfacefloat(c) != 0;
+    return worldcells::islakecell(world, c);
 }
 
 inline bool isdelta(const planet& world, mesh::CellId c)
 {
-    return world.deltadir(c) != 0 || world.deltajan(c) != 0 || world.deltajul(c) != 0;
+    return worldcells::isdeltacell(world, c);
 }
 
 // Open water as planet::seawrap reads it: the base at or below the sea level and no lake surface.

@@ -11,7 +11,6 @@ using namespace detail;
 // The shared per-cell queries (world/cell_queries.hpp); clampunit and clampscore are detail's.
 using worldcells::annualrainfall;
 using worldcells::averageriverflow;
-using worldcells::hasfeatureinradius;
 using worldcells::isdeltacell;
 using worldcells::islakecell;
 using worldcells::issaltfeature;
@@ -143,15 +142,16 @@ void generate_surface_potentials(planet& world)
             const float rainfallnorm = clampunit(static_cast<float>(annualrainfall(world, c)) / 1000.0f);
             const float flownorm = std::log1p(static_cast<float>(averageriverflow(world, c))) / std::log1p(static_cast<float>(maximumflow));
             const float inflownorm = clampunit(static_cast<float>(inflowcount(world, c)) / 4.0f);
-            const bool majorrivernear = hasfeatureinradius(world, c, 2, [&](mesh::CellId n)
+            // Discs of one and two legacy pixels (cellqueries::anywithinpixels), as the resources read.
+            const bool majorrivernear = cellqueries::anywithinpixels(world, c, 2, [&](mesh::CellId n)
             {
                 return averageriverflow(world, n) >= majorriverthreshold || isdeltacell(world, n);
             });
-            const bool wetlandnear = hasfeatureinradius(world, c, 1, [&](mesh::CellId n)
+            const bool wetlandnear = cellqueries::anywithinpixels(world, c, 1, [&](mesh::CellId n)
             {
                 return iswetlandcell(world, n);
             });
-            const bool lakemargin = islakecell(world, c) || hasfeatureinradius(world, c, 1, [&](mesh::CellId n)
+            const bool lakemargin = islakecell(world, c) || cellqueries::anywithinpixels(world, c, 1, [&](mesh::CellId n)
             {
                 return islakecell(world, n) || issaltfeature(world, n);
             });

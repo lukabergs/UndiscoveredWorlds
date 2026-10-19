@@ -986,9 +986,13 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
     case GenerationStageId::mountain_bases:
     {
         // The imported mountains (context.okmountains, still a legacy-slot array of the import
-        // screen and the CLI, core/grid_shapes.hpp legacyslot) as one flag per cell.
+        // screen and the CLI, core/grid_shapes.hpp legacyslot) as one flag per cell; read only
+        // when one is set (a procedural world has none).
         vector<std::uint8_t> mountainsok(world.cellcount(), 0);
-        if (context.okmountains != nullptr)
+        const bool anyimported = context.okmountains != nullptr &&
+            any_of(context.okmountains->begin(), context.okmountains->end(),
+                   [](const vector<bool>& column) { return find(column.begin(), column.end(), true) != column.end(); });
+        if (anyimported)
         {
             for (mesh::CellId c = 0; c < cellcount(world); c++)
             {

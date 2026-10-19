@@ -22,8 +22,8 @@ constexpr int routingseedsalt = 0x7207;
 
 landscape::SphereMetric worldmetric(const planet& world)
 {
-    // A view of the world's grid, which the world keeps: the metric does not own it.
-    return landscape::SphereMetric(std::shared_ptr<const mesh::CellGrid>(&world.grid(), [](const mesh::CellGrid*) {}));
+    // The world's grid, shared with the world and its copies.
+    return landscape::SphereMetric(world.sharedgrid());
 }
 
 Inputs gatherinputs(const planet& world)
