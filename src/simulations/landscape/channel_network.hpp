@@ -254,6 +254,23 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                                const std::vector<float>& start_m = {}, const std::vector<uint8_t>& finesea = {},
                                const std::vector<float>& relief_m = {});
 
+// The cube form (T8 W2-W2e; sphere-mesh.md section 8: channels hashed by level-0 keys, shared edges
+// named by their key pair, legs within their block, the transit block the common cardinal neighbour;
+// lat-lon windows take the form above): `levelzero` the world's whole cube grid (the network one
+// value per cell, its directions the world's slot codes), `window` a cube window refining it, every
+// fine vector one value per window cell in its local order. The rules above with: a level-0 cell's
+// block on its face (legs drawn in its face-index coordinates, the same slot offsets as lat-lon), the
+// junction a hash of the level-0 key, a cardinal link's edge offset a hash of (the edge, the smaller
+// key, the larger) measured along the smaller key's block edge, a step across a block edge the fine
+// table's neighbour in the leaving block's slot (the net rotation across a face edge), a diagonal's
+// transit among the cardinal neighbours of the upstream cell in the slots beside the diagonal that are
+// also cardinal neighbours of the receiver; the drawn links those of the level-0 cells within
+// linkreach rings of the window's blocks; `kept` (null: every cell) for the counters.
+FineChannels rasterisechannels(const mesh::CellGrid& levelzero, const mesh::CellGrid& window, const GlobalNetwork& network,
+                               const ChannelParameters& parameters, float sealevel, const std::vector<float>& start_m = {},
+                               const std::vector<uint8_t>& finesea = {}, const std::vector<float>& relief_m = {},
+                               const std::vector<uint8_t>* kept = nullptr);
+
 // The junction of global cell (i, j), 0 <= i < worldwidth and 0 <= j < worldheight, at
 // the window's scale: its absolute fine column k i + x and row k j + y, with x and y in
 // 0 .. k - 1 drawn from a hash of the cell and the seed within junctionjitter x k of the

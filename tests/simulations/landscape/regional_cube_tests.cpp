@@ -9,6 +9,7 @@
 #include "core/mesh/cell_grid.hpp"
 #include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/window_grid.hpp"
+#include "simulations/landscape/channel_network.hpp"
 #include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/regional_coast.hpp"
 #include "simulations/landscape/regional_edges.hpp"
@@ -299,6 +300,160 @@ TEST_F(Landscape, RegionalCubeWaterAndFormsOverlap)
     EXPECT_EQ(elevations, 0);
     EXPECT_EQ(lakes, 0);
     EXPECT_EQ(ices, 0);
+}
+
+namespace
+{
+// The cube world's drainage network: steepest descent on the world's table (slot codes) to a strictly
+// lower neighbour, the sea and sinks without a direction, the areas accumulated downstream.
+landscape::GlobalNetwork cubenetwork(const RegionalGlobalInputs& inputs)
+{
+    const mesh::CellGrid& grid = *inputs.grid;
+    const std::size_t size = grid.cellcount();
+    landscape::GlobalNetwork network;
+    network.direction.assign(size, 0);
+    network.sea = inputs.network.sea;
+    network.filledelevation_m = inputs.elevation_m;
+    network.drainagearea_km2.assign(size, 0.0f);
+    network.discharge_m3s.assign(size, 0.0f);
+    network.januaryflow.assign(size, 0);
+    network.julyflow.assign(size, 0);
+    std::vector<std::size_t> receiver(size, size);
+    for (mesh::CellId c = 0; c < size; c++)
+    {
+        if (network.sea[c] != 0)
+            continue;
+        double steepest = 0.0;
+        for (int slot = 1; slot <= mesh::slotcount; slot++)
+        {
+            const std::int32_t other = grid.neighbour(c, slot);
+            if (other < 0)
+                continue;
+            const double drop = (static_cast<double>(inputs.elevation_m[c]) - inputs.elevation_m[static_cast<std::size_t>(other)]) /
+                                grid.distance_m(c, slot);
+            if (drop > steepest)
+            {
+                steepest = drop;
+                network.direction[c] = static_cast<uint8_t>(slot);
+                receiver[c] = static_cast<std::size_t>(other);
+            }
+        }
+    }
+    // Areas in order of decreasing elevation (receivers are strictly lower).
+    std::vector<std::size_t> order(size);
+    for (std::size_t c = 0; c < size; c++)
+        order[c] = c;
+    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        return inputs.elevation_m[a] > inputs.elevation_m[b] || (inputs.elevation_m[a] == inputs.elevation_m[b] && a < b);
+    });
+    std::vector<double> area(size, 0.0);
+    for (const std::size_t c : order)
+    {
+        area[c] += grid.area_m2(static_cast<mesh::CellId>(c)) / 1.0e6;
+        if (receiver[c] < size)
+            area[receiver[c]] += area[c];
+    }
+    for (std::size_t c = 0; c < size; c++)
+    {
+        network.drainagearea_km2[c] = static_cast<float>(area[c]);
+        network.discharge_m3s[c] = static_cast<float>(0.01 * area[c]);
+        network.januaryflow[c] = static_cast<int32_t>(0.01 * area[c]);
+        network.julyflow[c] = static_cast<int32_t>(0.005 * area[c]);
+    }
+    return network;
+}
+}
+
+TEST_F(Landscape, RegionalCubeChannelsOverlap)
+{
+    // rasterisechannels on two cube windows of 7 rings around cells 4 apart across a face edge (k 8,
+    // the R3 geometry with roughness, transits and springs, ending at the fine coast, beds on the start
+    // surface): on the cells of the level-0 cells within 3 rings of both centres every channel field is
+    // bit-identical, and every painted cell's direction steps to a neighbour on the fine table.
+    // Two worlds: the coast world (short links into many seas) and a funnel (one sea cell at the
+    // centre of face 4, the land rising with the angle from it, so long rivers share their outlet and
+    // diagonal links take transit blocks).
+    constexpr int k = 8;
+    for (const bool funnel : { false, true })
+    {
+    RegionalGlobalInputs inputs = cubeworld();
+    if (funnel)
+    {
+        // The outlet about 50 degrees north-east of the windows, so the links there run diagonally.
+        const mesh::CellId leftcell = static_cast<mesh::CellId>(mesh::cubekey(cuben, 0, cuben - 3, 20));
+        const mesh::Vec3 towards = mesh::normalise(inputs.grid->centre(leftcell) +
+                                                   0.8 * (inputs.grid->east(leftcell) + inputs.grid->north(leftcell)));
+        const mesh::CellId outletcell = inputs.grid->locate(towards);
+        const mesh::Vec3 focus = inputs.grid->centre(outletcell);
+        for (mesh::CellId c = 0; c < inputs.grid->cellcount(); c++)
+        {
+            const mesh::Vec3 p = inputs.grid->centre(c);
+            inputs.elevation_m[c] = static_cast<float>(3000.0 * std::acos(std::clamp(mesh::dot(p, focus), -1.0, 1.0)) +
+                                                       40.0 * std::sin(17.0 * p.x + 11.0 * p.y));
+            inputs.network.sea[c] = c == outletcell ? 1 : 0;
+        }
+        inputs.elevation_m[outletcell] = -10.0f;
+    }
+    inputs.network = cubenetwork(inputs);
+    landscape::ChannelParameters parameters;
+    parameters.pinarea_km2 = 20000.0;
+    parameters.seed = 77;
+    parameters.meanderamplitude = 0.2;
+    parameters.junctionjitter = 0.25;
+    parameters.edgemargin = 0.1875;
+    parameters.springspercell = 2;
+    parameters.diagonaltransit = 1;
+    parameters.meanderroughness = 0.08;
+    const mesh::LevelKey left = mesh::cubekey(cuben, 0, cuben - 3, 20), right = mesh::cubekey(cuben, 0, cuben - 1, 22);
+    struct Result
+    {
+        std::shared_ptr<const mesh::CellGrid> window;
+        landscape::FineChannels channels;
+    };
+    const auto run = [&](mesh::LevelKey centre) {
+        Result result;
+        result.window = windowof(disc(centre, 7), k);
+        const std::vector<float> start = landscape::upsample(inputs.elevation_m, *inputs.grid, *result.window);
+        std::vector<uint8_t> sea(start.size());
+        for (std::size_t cell = 0; cell < sea.size(); cell++)
+            sea[cell] = start[cell] < 0.0f ? 1 : 0;
+        result.channels = landscape::rasterisechannels(*inputs.grid, *result.window, inputs.network, parameters, 0.0f, start, sea);
+        return result;
+    };
+    const Result a = run(left), b = run(right);
+    const std::vector<mesh::LevelKey> innera = disc(left, 3), innerb = disc(right, 3);
+    int shared = 0, channel = 0, differ = 0, badsteps = 0;
+    for (mesh::CellId c = 0; c < a.window->cellcount(); c++)
+    {
+        const landscape::FineChannels& ca = a.channels;
+        if (ca.channel[c] != 0 && ca.direction[c] != 0 && a.window->neighbour(c, ca.direction[c]) >= 0 &&
+            ca.channel[static_cast<std::size_t>(a.window->neighbour(c, ca.direction[c]))] == 0)
+            badsteps++;
+        const mesh::LevelKey key = a.window->globalkey(c);
+        const mesh::LevelKey parent = mesh::cubeparentkey(cuben * k, k, key);
+        if (!std::binary_search(innera.begin(), innera.end(), parent) || !std::binary_search(innerb.begin(), innerb.end(), parent))
+            continue;
+        const mesh::CellId o = b.window->localofkey(key);
+        ASSERT_NE(o, mesh::nocell);
+        const landscape::FineChannels& cb = b.channels;
+        shared++;
+        channel += ca.channel[c];
+        differ += ca.channel[c] != cb.channel[o] || ca.direction[c] != cb.direction[o] ||
+                          floatbits(ca.bed_m[c]) != floatbits(cb.bed_m[o]) || ca.discharge_m3s[c] != cb.discharge_m3s[o] ||
+                          ca.globalcell[c] != cb.globalcell[o]
+                      ? 1 : 0;
+    }
+    std::printf("[cube channels] %d shared cells, %d channel cells, %d differ; diagonal links %d (%d through the corner), "
+                "merged %d, dry tails %d, steps onto unpainted cells %d\n",
+                shared, channel, differ, a.channels.diagonallinks, a.channels.cornerlinks, a.channels.mergedpieces,
+                a.channels.drytails, badsteps);
+    EXPECT_GT(shared, 0);
+    EXPECT_GT(channel, 0);
+    EXPECT_EQ(differ, 0);
+    EXPECT_EQ(badsteps, 0);
+    if (funnel)
+        EXPECT_LT(a.channels.cornerlinks, a.channels.diagonallinks);
+    }
 }
 
 TEST_F(Landscape, RegionalCubeRefinedCoastKeepsTheParentShares)

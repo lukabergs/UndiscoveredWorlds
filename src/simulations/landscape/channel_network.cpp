@@ -23,6 +23,9 @@
 #include <vector>
 
 #include "core/deterministic_random.hpp"
+#include "core/mesh/cube_geometry.hpp"
+#include "core/mesh/window_grid.hpp"
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/regional_tributaries.hpp"
@@ -1193,6 +1196,719 @@ FineChannels rasterisechannels(const RegionalWindow& window, const GlobalNetwork
                 if (x >= x0 && x < x0 + window.finewidth() && y >= y0 && y < y0 + window.fineheight())
                     out.sinkjunctions++;
             }
+    return out;
+}
+
+
+// --- The cube form of rasterisechannels (T8 W2-W2e; sphere-mesh.md section 8: channels hashed by
+// level-0 keys, shared edges named by their key pair, legs within their block, the transit block the
+// common cardinal neighbour). A level-0 cell's block lies on one face (the per-face quadtree), so a
+// leg is drawn in its block's face-index coordinates exactly as on lat-lon (the slot offsets are the
+// same in a face's index space); its cells become fine keys from the block's origin. A step across a
+// block's edge is the fine table's neighbour in the slot of the block it leaves, which carries the
+// net rotation across a face edge. ---
+
+namespace
+{
+// A level-0 cell's block on the cube: its face and the fine column and row of its first child.
+struct CubeOrigin
+{
+    int face = 0;
+    std::int64_t column = 0, row = 0;
+};
+
+CubeOrigin cubeorigin(std::int64_t n0, int k, mesh::LevelKey cell)
+{
+    const mesh::CubeCell parent = mesh::cubecell(n0, cell);
+    return { parent.face, parent.column * k, parent.row * k };
+}
+
+mesh::LevelKey cubefinekey(std::int64_t nl, const CubeOrigin& origin, const FineCell& local)
+{
+    return mesh::cubekey(nl, origin.face, origin.column + local.x, origin.row + local.y);
+}
+
+// A fine key's coordinates in a block (it must lie in it).
+FineCell cubelocal(std::int64_t nl, const CubeOrigin& origin, mesh::LevelKey key)
+{
+    const mesh::CubeCell cell = mesh::cubecell(nl, key);
+    if (cell.face != origin.face)
+        throw std::logic_error("rasterisechannels: an edge step left the block's face");
+    return { cell.column - origin.column, cell.row - origin.row };
+}
+
+// The block-local cell on a block's edge facing a cardinal slot at an offset along the edge (the
+// edge's cells in increasing face index).
+FineCell edgecell(int k, int slot, std::int64_t offset)
+{
+    const std::int64_t last = k - 1;
+    switch (slot)
+    {
+    case 1: return { offset, 0 };
+    case 3: return { last, offset };
+    case 5: return { offset, last };
+    default: return { 0, offset };
+    }
+}
+
+// The block-local corner cell facing a diagonal slot.
+FineCell cornercell(int k, int slot)
+{
+    const std::int64_t last = k - 1;
+    return { mesh::slotcolumnoffset(slot) > 0 ? last : 0, mesh::slotrowoffset(slot) > 0 ? last : 0 };
+}
+
+Point slotvector(int slot)
+{
+    return unitvector({ static_cast<double>(mesh::slotcolumnoffset(slot)), static_cast<double>(mesh::slotrowoffset(slot)) });
+}
+
+int opposite(int slot) { return (slot + 3) % mesh::slotcount + 1; }
+
+// The slot of a cell's table toward another cell, 0 when they are not neighbours.
+int slottoward(const mesh::CellGrid& grid, std::size_t from, std::size_t to)
+{
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
+        if (grid.neighbour(static_cast<mesh::CellId>(from), slot) == static_cast<std::int32_t>(to))
+            return slot;
+    return 0;
+}
+
+// The cube network: the level-0 table, the receivers and outlets on it.
+struct CubeNetwork
+{
+    const mesh::CellGrid& grid;
+    const GlobalNetwork& network;
+    std::size_t receiver(std::size_t cell) const
+    {
+        const int direction = network.direction[cell];
+        if (network.sea[cell] != 0 || direction < 1 || direction > directioncount)
+            return cell;
+        const std::int32_t next = grid.neighbour(static_cast<mesh::CellId>(cell), direction);
+        return next < 0 ? cell : static_cast<std::size_t>(next);
+    }
+    std::size_t outletof(std::size_t cell, std::vector<std::size_t>& outlet) const
+    {
+        std::vector<std::size_t> pending;
+        std::size_t current = cell;
+        while (outlet[current] == nocell)
+        {
+            const std::size_t next = receiver(current);
+            if (next == current)
+            {
+                outlet[current] = current;
+                break;
+            }
+            pending.push_back(current);
+            if (pending.size() > outlet.size())
+                throw std::invalid_argument("rasterisechannels: the global receivers form a loop");
+            current = next;
+        }
+        for (const std::size_t waiting : pending)
+            outlet[waiting] = outlet[current];
+        return outlet[cell];
+    }
+    int32_t distanceof(std::size_t cell, std::vector<int32_t>& distance) const
+    {
+        std::vector<std::size_t> pending;
+        std::size_t current = cell;
+        while (distance[current] < 0)
+        {
+            const std::size_t next = receiver(current);
+            if (next == current)
+            {
+                distance[current] = 0;
+                break;
+            }
+            pending.push_back(current);
+            if (pending.size() > distance.size())
+                throw std::invalid_argument("rasterisechannels: the global receivers form a loop");
+            current = next;
+        }
+        int32_t value = distance[current];
+        for (auto it = pending.rbegin(); it != pending.rend(); ++it)
+            distance[*it] = ++value;
+        return distance[cell];
+    }
+    bool drawn(std::size_t cell, double pinarea_km2, std::size_t& to) const
+    {
+        to = receiver(cell);
+        return to != cell && network.drainagearea_km2[cell] >= pinarea_km2;
+    }
+};
+
+// The transit block of a diagonal link u -> c (slot d of u; transitside's rule): the cardinal
+// neighbours of u in slots d - 1 and d + 1 that are also cardinal neighbours of c, ranked as on
+// lat-lon (the miss of the filled elevation, the outlet, the hairpins), a tie by a hash of the link;
+// returns the transit cell and its slot from u (0: the corner).
+std::pair<std::size_t, int> cubetransit(const CubeNetwork& net, std::size_t upstream, std::size_t receiver, int d,
+                                        const ChannelParameters& parameters, std::vector<std::size_t>& outlet)
+{
+    if (parameters.diagonaltransit == 0)
+        return { nocell, 0 };
+    const GlobalNetwork& network = net.network;
+    const std::size_t target = net.outletof(receiver, outlet);
+    const float top = network.filledelevation_m[upstream];
+    const float bottom = network.filledelevation_m[receiver];
+    const double infinity = std::numeric_limits<double>::infinity();
+    const auto candidate = [&](int slot) -> std::size_t {
+        const std::int32_t n = net.grid.neighbour(static_cast<mesh::CellId>(upstream), slot);
+        if (n < 0)
+            return nocell;
+        for (const int other : { 1, 3, 5, 7 })
+            if (net.grid.neighbour(static_cast<mesh::CellId>(receiver), other) == n)
+                return static_cast<std::size_t>(n);
+        return nocell;
+    };
+    const auto miss = [&](std::size_t neighbour) {
+        if (neighbour == nocell || neighbour == upstream || neighbour == receiver || network.sea[neighbour] != 0 ||
+            net.receiver(receiver) == neighbour || net.receiver(neighbour) == upstream || net.outletof(neighbour, outlet) != target)
+            return infinity;
+        const double filled = network.filledelevation_m[neighbour];
+        const double value = std::max({ 0.0, static_cast<double>(bottom) - filled, filled - static_cast<double>(top) });
+        return std::isnan(value) ? infinity : value;
+    };
+    // The horizontal slot first (lat-lon's transit 1), then the vertical one.
+    const int horizontal = (d - 1 == 3 || d - 1 == 7) ? d - 1 : d % mesh::slotcount + 1;
+    const int vertical = horizontal == d - 1 ? d % mesh::slotcount + 1 : d - 1;
+    const std::size_t one = candidate(horizontal), two = candidate(vertical);
+    const double first = miss(one), second = miss(two);
+    const double limit = std::min(first, second) > 0.0 ? parameters.transittolerance_m : 0.0;
+    const bool firstok = first <= limit, secondok = second <= limit;
+    int pick = 0;
+    if (firstok && secondok && first == second)
+        pick = (deterministiccombine(parameters.seed, transitsalt, static_cast<std::int64_t>(upstream),
+                                     static_cast<std::int64_t>(receiver)) & 1u) != 0 ? 2 : 1;
+    else if (firstok && (!secondok || first < second))
+        pick = 1;
+    else if (secondok)
+        pick = 2;
+    if (pick == 0)
+        return { nocell, 0 };
+    return pick == 1 ? std::make_pair(one, horizontal) : std::make_pair(two, vertical);
+}
+
+// A link's ends on the cube, each in its own block's coordinates, and the flows (unit tangents) in
+// each block's frame.
+struct CubeEnds
+{
+    FineCell exit, entry, transitentry, transitexit;
+    std::size_t transit = nocell;
+    Point flowout, flowin, flowtransit;
+};
+
+CubeEnds cubeends(const CubeNetwork& net, int k, std::int64_t nl, std::size_t upstream, std::size_t receiver,
+                  const ChannelParameters& parameters, std::vector<std::size_t>& outlet)
+{
+    const std::int64_t n0 = net.grid.facecells();
+    const int d = net.network.direction[upstream];
+    const CubeOrigin uo = cubeorigin(n0, k, upstream), co = cubeorigin(n0, k, receiver);
+    const int r = net.grid.reverse(static_cast<mesh::CellId>(upstream), d);  // c's slot toward u
+    CubeEnds ends;
+    ends.flowout = slotvector(d);
+    ends.flowin = slotvector(opposite(r));
+    const auto across = [&](const CubeOrigin& from, const FineCell& cell, int slot, const CubeOrigin& to) {
+        const mesh::LevelKey key = mesh::cubekeyneighbour(nl, cubefinekey(nl, from, cell), slot);
+        if (key == mesh::nokey)
+            throw std::logic_error("rasterisechannels: an edge step has no fine neighbour");
+        return cubelocal(nl, to, key);
+    };
+    if (d % 2 == 0)
+    {
+        const auto [transit, slot] = cubetransit(net, upstream, receiver, d, parameters, outlet);
+        if (transit == nocell)
+        {
+            ends.exit = cornercell(k, d);
+            ends.entry = across(uo, ends.exit, d, co);
+            return ends;
+        }
+        ends.transit = transit;
+        const CubeOrigin to = cubeorigin(n0, k, transit);
+        const int second = slottoward(net.grid, transit, receiver);
+        const std::int64_t firstoffset = edgeoffset(
+            k, deterministiccombine(parameters.seed, edgesalt, transitfirstedge, static_cast<std::int64_t>(upstream),
+                                    static_cast<std::int64_t>(receiver)), parameters);
+        const std::int64_t secondoffset = edgeoffset(
+            k, deterministiccombine(parameters.seed, edgesalt, transitsecondedge, static_cast<std::int64_t>(upstream),
+                                    static_cast<std::int64_t>(receiver)), parameters);
+        ends.exit = edgecell(k, slot, firstoffset);
+        ends.transitentry = across(uo, ends.exit, slot, to);
+        ends.transitexit = edgecell(k, second, secondoffset);
+        ends.entry = across(to, ends.transitexit, second, co);
+        const int intransit = net.grid.reverse(static_cast<mesh::CellId>(upstream), slot);  // n's slot toward u
+        // The link's (diagonal) direction in the transit block's frame: from u's side towards c's.
+        ends.flowtransit = unitvector({ static_cast<double>(mesh::slotcolumnoffset(second) - mesh::slotcolumnoffset(intransit)),
+                                        static_cast<double>(mesh::slotrowoffset(second) - mesh::slotrowoffset(intransit)) });
+        return ends;
+    }
+    // A cardinal link: the edge named by its key pair, the offset along it in the smaller key's block.
+    const std::size_t smaller = std::min(upstream, receiver);
+    const std::int64_t offset = edgeoffset(
+        k, deterministiccombine(parameters.seed, edgesalt, std::int64_t{ 4 }, static_cast<std::int64_t>(smaller),
+                                static_cast<std::int64_t>(std::max(upstream, receiver))), parameters);
+    if (smaller == upstream)
+    {
+        ends.exit = edgecell(k, d, offset);
+        ends.entry = across(uo, ends.exit, d, co);
+    }
+    else
+    {
+        ends.entry = edgecell(k, r, offset);
+        ends.exit = across(co, ends.entry, r, uo);
+    }
+    return ends;
+}
+
+struct CubeGeometry
+{
+    FineCell junction;
+    std::size_t mainupstream = nocell;
+    Point tangent;
+};
+
+CubeGeometry cubegeometry(const CubeNetwork& net, int k, std::int64_t nl, std::size_t cell,
+                          const ChannelParameters& parameters, std::vector<std::size_t>& outlet)
+{
+    CubeGeometry geometry;
+    geometry.junction = junctionoffset(k, cell, parameters);
+    float best = 0.0f;
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
+    {
+        const std::int32_t next = net.grid.neighbour(static_cast<mesh::CellId>(cell), slot);
+        if (next < 0)
+            continue;
+        const std::size_t neighbour = static_cast<std::size_t>(next);
+        std::size_t to = nocell;
+        if (!net.drawn(neighbour, parameters.pinarea_km2, to) || to != cell)
+            continue;
+        const float area = net.network.drainagearea_km2[neighbour];
+        if (geometry.mainupstream == nocell || area > best || (area == best && neighbour < geometry.mainupstream))
+        {
+            best = area;
+            geometry.mainupstream = neighbour;
+        }
+    }
+    const Point junction = middle(geometry.junction);
+    bool hasexit = false, hasentry = false;
+    Point exit, entry;
+    const std::size_t receiver = net.receiver(cell);
+    if (receiver != cell)
+    {
+        exit = middle(cubeends(net, k, nl, cell, receiver, parameters, outlet).exit);
+        hasexit = true;
+    }
+    if (geometry.mainupstream != nocell)
+    {
+        entry = middle(cubeends(net, k, nl, geometry.mainupstream, cell, parameters, outlet).entry);
+        hasentry = true;
+    }
+    Point direction;
+    if (hasexit && hasentry)
+        direction = { exit.x - entry.x, exit.y - entry.y };
+    if (length(direction) < 0.5)
+    {
+        if (hasexit)
+            direction = { exit.x - junction.x, exit.y - junction.y };
+        else if (hasentry)
+            direction = { junction.x - entry.x, junction.y - entry.y };
+    }
+    geometry.tangent = unitvector(direction);
+    return geometry;
+}
+}
+
+FineChannels rasterisechannels(const mesh::CellGrid& levelzero, const mesh::CellGrid& window, const GlobalNetwork& network,
+                               const ChannelParameters& parameters, float sealevel, const std::vector<float>& start_m,
+                               const std::vector<uint8_t>& finesea, const std::vector<float>& relief_m,
+                               const std::vector<uint8_t>* kept)
+{
+    if (levelzero.kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube || levelzero.issubgrid() ||
+        window.facecells() % levelzero.facecells() != 0)
+        throw std::invalid_argument("rasterisechannels: a cube window refining the whole cube level 0");
+    const std::int64_t n0 = levelzero.facecells(), nl = window.facecells();
+    const int k = static_cast<int>(nl / n0);
+    const std::size_t cells = levelzero.cellcount();
+    requiresize(network.direction.size(), cells, "direction");
+    requiresize(network.sea.size(), cells, "sea");
+    requiresize(network.drainagearea_km2.size(), cells, "drainagearea_km2");
+    requiresize(network.discharge_m3s.size(), cells, "discharge_m3s");
+    requiresize(network.filledelevation_m.size(), cells, "filledelevation_m");
+    requiresize(network.januaryflow.size(), cells, "januaryflow");
+    requiresize(network.julyflow.size(), cells, "julyflow");
+    if (!std::isfinite(sealevel) || parameters.springspercell < 0 ||
+        (parameters.diagonaltransit != 0 && parameters.diagonaltransit != 1))
+        throw std::invalid_argument("rasterisechannels: a finite sea level, springs and a transit switch in range");
+    const std::size_t finecells = window.cellcount();
+    if ((!start_m.empty() && start_m.size() != finecells) || (!finesea.empty() && finesea.size() != finecells) ||
+        (!relief_m.empty() && relief_m.size() != cells) || (kept != nullptr && kept->size() != finecells))
+        throw std::invalid_argument("rasterisechannels: the start surface, the fine sea and the kept flags per window "
+                                    "cell, the relief per level-0 cell");
+    const CubeNetwork net{ levelzero, network };
+    auto roughnessof = [&](std::size_t upstream) {
+        if (parameters.meanderroughness == 0.0 || relief_m.empty())
+            return parameters.meanderroughness;
+        const double relief = relief_m[upstream];
+        const double share =
+            std::isfinite(relief) && relief > 0.0 ? std::min(1.0, relief / parameters.meanderroughnessrelief_m) : 0.0;
+        return parameters.meanderroughness * (1.0 + parameters.meanderroughnessreliefgain * share);
+    };
+    const bool usestart = !start_m.empty();
+    const bool usesea = !finesea.empty();
+    const float abovesea = std::nextafter(sealevel, std::numeric_limits<float>::infinity());
+    FineChannels out;
+    out.channel.assign(finecells, 0);
+    out.direction.assign(finecells, 0);
+    out.bed_m.assign(finecells, 0.0f);
+    out.discharge_m3s.assign(finecells, 0.0f);
+    out.januaryflow.assign(finecells, 0);
+    out.julyflow.assign(finecells, 0);
+    out.globalcell.assign(finecells, -1);
+    std::vector<int32_t> distance(cells, -1);
+    std::vector<std::size_t> outlet(cells, nocell);
+
+    const auto domainindex = [&](mesh::LevelKey key, std::size_t& index) {
+        const mesh::CellId local = window.localofkey(key);
+        if (local == mesh::nocell)
+            return false;
+        index = local;
+        return true;
+    };
+    const auto inseablock = [&](mesh::LevelKey key) { return network.sea[mesh::cubeparentkey(nl, k, key)] != 0; };
+    const auto cutatsea = [&](std::vector<mesh::LevelKey>& path) {
+        const auto insea = std::find_if(path.begin(), path.end(), [&](mesh::LevelKey key) {
+            std::size_t index = 0;
+            if (usesea && domainindex(key, index))
+                return finesea[index] != 0;
+            return inseablock(key);
+        });
+        if (insea == path.end())
+            return false;
+        path.erase(insea + 1, path.end());
+        return true;
+    };
+    const auto junctionkey = [&](std::size_t cell) {
+        return cubefinekey(nl, cubeorigin(n0, k, cell), junctionoffset(k, cell, parameters));
+    };
+    const auto junctionbed = [&](std::size_t cell) {
+        const float filled = network.filledelevation_m[cell];
+        if (!usestart)
+            return filled;
+        std::size_t index = 0;
+        if (!domainindex(junctionkey(cell), index) || std::isnan(start_m[index]))
+            return filled;
+        const std::size_t receiver = net.receiver(cell);
+        float base = -std::numeric_limits<float>::infinity();
+        if (receiver != cell)
+            base = network.sea[receiver] != 0 ? sealevel : network.filledelevation_m[receiver];
+        if (!std::isfinite(base))
+            base = -std::numeric_limits<float>::infinity();
+        const float lo = std::max(base, std::min(filled, abovesea));
+        return std::max(lo, std::min(filled, start_m[index]));
+    };
+    struct Piece
+    {
+        std::vector<std::size_t> index, slot;
+        std::vector<uint8_t> direction;
+        std::vector<float> bed;
+        std::size_t upstream = 0;
+        int32_t rank = 0, number = 0;
+        bool kept = false;
+        std::size_t end = 0;
+        bool lost = false;
+        std::size_t suffix = nocell;
+    };
+    std::vector<Piece> pieces;
+    std::unordered_map<mesh::LevelKey, std::size_t> outsideslots;
+    const auto startpiece = [&](const std::vector<mesh::LevelKey>& path, std::size_t upstream, int32_t rank, int32_t number,
+                                bool keptpiece) -> Piece& {
+        Piece& piece = pieces.emplace_back();
+        piece.index.assign(path.size(), nocell);
+        piece.slot.assign(path.size(), nocell);
+        piece.direction.assign(path.size(), 0);
+        piece.bed.assign(path.size(), 0.0f);
+        for (std::size_t m = 0; m < path.size(); m++)
+        {
+            std::size_t index = 0;
+            if (domainindex(path[m], index))
+                piece.index[m] = piece.slot[m] = index;
+            else
+                piece.slot[m] = outsideslots.try_emplace(path[m], finecells + outsideslots.size()).first->second;
+            if (m + 1 < path.size())
+                for (int slot = 1; slot <= mesh::slotcount; slot++)
+                    if (mesh::cubekeyneighbour(nl, path[m], slot) == path[m + 1])
+                    {
+                        piece.direction[m] = static_cast<uint8_t>(slot);
+                        break;
+                    }
+        }
+        piece.upstream = upstream;
+        piece.rank = rank;
+        piece.number = number;
+        piece.kept = keptpiece;
+        piece.end = path.size() - 1;
+        return piece;
+    };
+    const auto paint = [&](std::size_t index, uint8_t direction, float bed, std::size_t upstream) {
+        out.channel[index] = 1;
+        out.direction[index] = direction;
+        out.bed_m[index] = bed;
+        out.discharge_m3s[index] = network.discharge_m3s[upstream];
+        out.januaryflow[index] = network.januaryflow[upstream];
+        out.julyflow[index] = network.julyflow[upstream];
+        out.globalcell[index] = static_cast<int32_t>(upstream);
+    };
+    // The window's level-0 cells (its blocks) and those within linkreach rings of them.
+    const WindowBlocks blocks = windowblocks(window, k);
+    const auto keptcell = [&](std::size_t cell) {
+        const auto found = std::lower_bound(blocks.parents.begin(), blocks.parents.end(), static_cast<mesh::LevelKey>(cell));
+        if (found == blocks.parents.end() || *found != cell)
+            return false;
+        return kept == nullptr || (*kept)[blocks.childrenof(static_cast<std::size_t>(found - blocks.parents.begin()))[0]] != 0;
+    };
+    const std::vector<mesh::LevelKey> upstreams = mesh::dilatekeys(n0, blocks.parents, linkreach);
+    const auto tofine = [&](const CubeOrigin& origin, const std::vector<FineCell>& local, std::vector<mesh::LevelKey>& path) {
+        for (const FineCell& cell : local)
+            path.push_back(cubefinekey(nl, origin, cell));
+    };
+
+    for (const mesh::LevelKey upstreamkey : upstreams)
+    {
+        const std::size_t upstream = static_cast<std::size_t>(upstreamkey);
+        std::size_t receiver = nocell;
+        if (!net.drawn(upstream, parameters.pinarea_km2, receiver))
+            continue;
+        const CubeGeometry from = cubegeometry(net, k, nl, upstream, parameters, outlet);
+        const CubeGeometry to = cubegeometry(net, k, nl, receiver, parameters, outlet);
+        const CubeEnds ends = cubeends(net, k, nl, upstream, receiver, parameters, outlet);
+        if (network.direction[upstream] % 2 == 0 && keptcell(upstream))
+        {
+            out.diagonallinks++;
+            out.cornerlinks += ends.transit == nocell ? 1 : 0;
+        }
+        const double displacement = meanderdisplacement(parameters, k, network.discharge_m3s[upstream]);
+        const std::uint64_t outhash = deterministiccombine(parameters.seed, legsalt, static_cast<std::int64_t>(upstream),
+                                                           static_cast<std::int64_t>(receiver), 0);
+        const std::uint64_t inhash = deterministiccombine(parameters.seed, legsalt, static_cast<std::int64_t>(upstream),
+                                                          static_cast<std::int64_t>(receiver), 1);
+        const double roughness = roughnessof(upstream);
+        const double persistence = parameters.meanderroughnesspersistence;
+        std::vector<mesh::LevelKey> path;
+        tofine(cubeorigin(n0, k, upstream),
+               legpath(k, from.junction, ends.exit, displacement, outhash, from.tangent, ends.flowout, roughness, persistence),
+               path);
+        if (ends.transit != nocell)
+        {
+            const std::uint64_t transithash = deterministiccombine(parameters.seed, legsalt, static_cast<std::int64_t>(upstream),
+                                                                   static_cast<std::int64_t>(receiver), 2);
+            tofine(cubeorigin(n0, k, ends.transit),
+                   legpath(k, ends.transitentry, ends.transitexit, displacement, transithash, ends.flowtransit, ends.flowtransit,
+                           roughness, persistence),
+                   path);
+        }
+        tofine(cubeorigin(n0, k, receiver),
+               legpath(k, ends.entry, to.junction, displacement, inhash, ends.flowin,
+                       to.mainupstream == upstream ? to.tangent : Point{}, roughness, persistence),
+               path);
+        const bool cut = cutatsea(path);
+        const bool intosea = cut || network.sea[receiver] != 0;
+        const float filled = network.filledelevation_m[upstream];
+        const float receiverend = network.sea[receiver] != 0 ? sealevel : network.filledelevation_m[receiver];
+        if (!std::isfinite(filled) || !std::isfinite(receiverend))
+            throw std::invalid_argument("rasterisechannels: a drawn link's filled elevation is not finite (cell " +
+                                        std::to_string(upstream) + ")");
+        if (receiverend > filled || (intosea && sealevel > filled))
+            throw std::invalid_argument("rasterisechannels: a receiver (or the sea level, for a link that ends in the sea) "
+                                        "stands above its upstream cell's filled elevation (cell " + std::to_string(upstream) + ")");
+        const float top = junctionbed(upstream);
+        const float end = intosea ? sealevel : junctionbed(receiver);
+        Piece& piece = startpiece(path, upstream, net.distanceof(upstream, distance), 0, keptcell(upstream));
+        std::vector<double> along(path.size(), 0.0);
+        for (std::size_t m = 1; m < path.size(); m++)
+            along[m] = along[m - 1] + (piece.direction[m - 1] % 2 == 0 ? std::sqrt(2.0) : 1.0);
+        const double total = along.back();
+        const float bedfloor = std::max(end, std::min(top, abovesea));
+        float running = top;
+        for (std::size_t m = 0; m < path.size(); m++)
+        {
+            const std::size_t index = piece.index[m];
+            if (usestart && index != nocell)
+                running = std::min(running, start_m[index]);
+            const bool lastcell = m + 1 == path.size();
+            float bed = 0.0f;
+            if (lastcell)
+                bed = end;
+            else if (m == 0)
+                bed = top;
+            else if (usestart)
+                bed = std::max(running, bedfloor);
+            else
+                bed = static_cast<float>(top + (static_cast<double>(end) - top) * along[m] / total);
+            piece.bed[m] = bed;
+        }
+    }
+
+    if (parameters.springspercell > 0)
+        for (const mesh::LevelKey cellkey : upstreams)
+        {
+            const std::size_t cell = static_cast<std::size_t>(cellkey);
+            std::size_t receiver = nocell;
+            if (!net.drawn(cell, parameters.pinarea_km2, receiver))
+                continue;
+            const CubeGeometry geometry = cubegeometry(net, k, nl, cell, parameters, outlet);
+            if (geometry.mainupstream != nocell)
+                continue;
+            const int32_t rank = net.distanceof(cell, distance);
+            const float junction = junctionbed(cell);
+            const double displacement = meanderdisplacement(parameters, k, network.discharge_m3s[cell]);
+            Point upstreamward{ -geometry.tangent.x, -geometry.tangent.y };
+            if (iszero(upstreamward))
+            {
+                const Point flow = slotvector(network.direction[cell]);
+                upstreamward = { -flow.x, -flow.y };
+            }
+            const double heading = std::atan2(upstreamward.y, upstreamward.x);
+            const Point centre = middle(geometry.junction);
+            const double margin = std::min(0.5 * k, std::max(0.5, parameters.edgemargin * k));
+            const CubeOrigin origin = cubeorigin(n0, k, cell);
+            for (int spring = 1; spring <= parameters.springspercell; spring++)
+            {
+                const std::uint64_t hash = deterministiccombine(parameters.seed, springsalt, static_cast<std::int64_t>(cell), spring);
+                const double angle = heading + springspread * signedunit(hash);
+                const std::uint64_t radiushash = deterministicmix64(hash);
+                const double radius = k * (springnear + (springfar - springnear) * unitinterval(radiushash));
+                const FineCell start{ blockindex(std::clamp(centre.x + radius * std::cos(angle), margin, k - margin), k),
+                                      blockindex(std::clamp(centre.y + radius * std::sin(angle), margin, k - margin), k) };
+                std::vector<mesh::LevelKey> path;
+                tofine(origin,
+                       legpath(k, start, geometry.junction, displacement, deterministicmix64(radiushash), Point{}, Point{},
+                               roughnessof(cell), parameters.meanderroughnesspersistence),
+                       path);
+                if (path.size() < 2)
+                    continue;
+                const bool cut = cutatsea(path);
+                const float end = cut ? sealevel : junction;
+                float top = junction;
+                if (usestart)
+                    for (const mesh::LevelKey key : path)
+                    {
+                        std::size_t index = 0;
+                        if (domainindex(key, index) && std::isfinite(start_m[index]))
+                            top = std::max(top, start_m[index]);
+                    }
+                const float bedfloor = std::max(end, std::min(top, abovesea));
+                float running = top;
+                Piece& piece = startpiece(path, cell, rank, spring, keptcell(cell));
+                for (std::size_t m = 0; m < path.size(); m++)
+                {
+                    const std::size_t index = piece.index[m];
+                    if (usestart && index != nocell)
+                        running = std::min(running, start_m[index]);
+                    const bool lastcell = m + 1 == path.size();
+                    piece.bed[m] = lastcell ? end : (usestart ? std::max(running, bedfloor) : top);
+                }
+            }
+        }
+
+    // Ownership, the confluences, the closure and the counters: rasterisechannels' rules on the slots.
+    const std::size_t slots = finecells + outsideslots.size();
+    const auto beats = [&](const Piece& a, std::size_t ma, const Piece& b, std::size_t mb) {
+        if (a.bed[ma] != b.bed[mb])
+            return a.bed[ma] < b.bed[mb];
+        if (a.rank != b.rank)
+            return a.rank < b.rank;
+        if (a.upstream != b.upstream)
+            return a.upstream < b.upstream;
+        return a.number < b.number;
+    };
+    std::vector<int32_t> owner(slots, -1);
+    std::vector<std::uint32_t> ownerat(slots, 0);
+    for (std::size_t p = 0; p < pieces.size(); p++)
+        for (std::size_t m = 0; m < pieces[p].slot.size(); m++)
+        {
+            const std::size_t slot = pieces[p].slot[m];
+            if (owner[slot] < 0 || beats(pieces[p], m, pieces[static_cast<std::size_t>(owner[slot])], ownerat[slot]))
+            {
+                owner[slot] = static_cast<int32_t>(p);
+                ownerat[slot] = static_cast<std::uint32_t>(m);
+            }
+        }
+    for (std::size_t p = 0; p < pieces.size(); p++)
+    {
+        Piece& piece = pieces[p];
+        piece.end = piece.slot.size() - 1;
+        piece.lost = false;
+        for (std::size_t m = 0; m < piece.slot.size(); m++)
+            if (owner[piece.slot[m]] != static_cast<int32_t>(p))
+            {
+                piece.end = m;
+                piece.lost = true;
+                break;
+            }
+    }
+    for (const Piece& piece : pieces)
+        if (piece.lost)
+        {
+            const std::size_t slot = piece.slot[piece.end];
+            Piece& taker = pieces[static_cast<std::size_t>(owner[slot])];
+            if (taker.lost && ownerat[slot] > taker.end)
+                taker.suffix = std::min<std::size_t>(taker.suffix, ownerat[slot]);
+        }
+    std::vector<uint8_t> painted(slots, 0);
+    for (const Piece& piece : pieces)
+    {
+        for (std::size_t m = 0; m <= piece.end; m++)
+            painted[piece.slot[m]] = 1;
+        for (std::size_t m = piece.suffix; m < piece.slot.size(); m++)
+            painted[piece.slot[m]] = 1;
+    }
+    for (std::size_t slot = 0; slot < slots; slot++)
+    {
+        if (painted[slot] == 0)
+            continue;
+        for (std::size_t at = slot;;)
+        {
+            const Piece& piece = pieces[static_cast<std::size_t>(owner[at])];
+            const std::size_t m = ownerat[at];
+            if (m + 1 >= piece.slot.size() || painted[piece.slot[m + 1]] != 0)
+                break;
+            at = piece.slot[m + 1];
+            painted[at] = 1;
+        }
+    }
+    for (std::size_t index = 0; index < finecells; index++)
+    {
+        if (owner[index] < 0 || painted[index] == 0)
+            continue;
+        const Piece& piece = pieces[static_cast<std::size_t>(owner[index])];
+        const std::size_t m = ownerat[index];
+        paint(index, piece.direction[m], piece.bed[m], piece.upstream);
+    }
+    for (std::size_t p = 0; p < pieces.size(); p++)
+    {
+        const Piece& piece = pieces[p];
+        if (!piece.kept)
+            continue;
+        out.mergedpieces += piece.end + 1 < piece.slot.size() ? 1 : 0;
+        for (std::size_t m = 0; m + 1 < piece.slot.size(); m++)
+            if (painted[piece.slot[m]] != 0 && owner[piece.slot[m]] == static_cast<int32_t>(p) && painted[piece.slot[m + 1]] == 0)
+            {
+                out.drytails++;
+                break;
+            }
+    }
+    if (parameters.pinsinks != 0)
+        for (const mesh::LevelKey cellkey : blocks.parents)
+        {
+            const std::size_t cell = static_cast<std::size_t>(cellkey);
+            if (network.sea[cell] != 0 || net.receiver(cell) != cell || !std::isfinite(network.filledelevation_m[cell]))
+                continue;
+            std::size_t index = 0;
+            if (!domainindex(junctionkey(cell), index) || out.channel[index] != 0 || (usesea && finesea[index] != 0))
+                continue;
+            paint(index, 0, junctionbed(cell), cell);
+            if (kept == nullptr || (*kept)[index] != 0)
+                out.sinkjunctions++;
+        }
     return out;
 }
 
