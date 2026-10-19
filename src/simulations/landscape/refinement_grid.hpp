@@ -357,6 +357,9 @@ std::vector<mesh::LevelKey> dilatecells(const mesh::CellGrid& base, const std::v
 // - level l = level - 1 .. 1: the kept box is the child's domain dilated by
 //   ceil(reach / factor^l) rings (reach level-l cells snapped outwards to whole level-0
 //   cells: 1 ring while reach < factor^l), the domain that dilated by levelhalorings(l);
+//   on the cube the kept box also holds the level-0 cells of every key a level-l G stencil
+//   of a point of the child's domain reads (mesh::cubicnodekeys of the nodes beyond a face
+//   edge: near a cube corner the true-position ghosts lie farther than the ring; T8 W2-W3c);
 // - level 0: the child's domain dilated by reach rings; its domain is its kept box.
 // On lat-lon this is halochain's chain cell for cell (rings of the 8-connected table are
 // the rectangles widened by whole cells, columns wrapping, rows stopping at the poles).

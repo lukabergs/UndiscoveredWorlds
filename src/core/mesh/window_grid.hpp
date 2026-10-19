@@ -88,6 +88,10 @@ enum class GhostRule
 KeyStencil cubicstencil(std::int64_t facecells, int face, double a, double b, GhostRule rule = GhostRule::trueposition);
 // The same on p's own face (cubeposition).
 KeyStencil cubicstencil(std::int64_t facecells, const Vec3& p, GhostRule rule = GhostRule::trueposition);
+// The keys one node of G (true-position ghosts) reads, at extended indices (column, row) of a face: the cell
+// itself on the face, beyond an edge its ghost's expansion; ascending and unique (T8 W2-W3c). A point inside
+// cell (i, j) reads the nodes i - 2 .. i + 2 by j - 2 .. j + 2 of its face, so their keys bound its stencil.
+std::vector<LevelKey> cubicnodekeys(std::int64_t facecells, int face, std::int64_t column, std::int64_t row);
 
 // G (true-position ghosts) of level `facecells` at every cell centre of a cube grid, without building a
 // KeyStencil per call (T8 W2-W3b): a cell whose 4 x 4 nodes lie on its face is computed in place from

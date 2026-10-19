@@ -232,6 +232,9 @@ struct Prolongation
     // and the largest |change| (0 without the limit).
     int clamped = 0;
     double maxclamp_m = 0.0;
+    // Cube windows: the stencil reads of a node outside the parent's kept cells (the nearest-parent rule;
+    // none on the halo chain's levels since T8 W2-W3c).
+    std::int64_t outsidenodes = 0;
 };
 Prolongation prolong(const LevelWindow& parent, const std::vector<float>& parentfield, const LevelWindow& level, bool limit);
 

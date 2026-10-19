@@ -311,10 +311,12 @@ Prolongation prolong(const mesh::CellGrid& parent, const std::vector<float>& par
     // the smallest key (sphere-mesh.md section 8's rule for stencil nodes beyond a domain; T8 W2-W3b: the
     // true-position ghosts of a level-1 cell beside a cube corner spread beyond the chain's ring).
     std::unique_ptr<NearestDomainKey> nearest;
+    std::int64_t outsidenodes = 0;
     const auto value = [&](mesh::LevelKey key) {
         const mesh::CellId cell = parent.localofkey(key);
         if (cell != mesh::nocell)
             return parentfield[cell];
+        outsidenodes++;
         if (!nearest)
         {
             std::vector<mesh::LevelKey> keys(parent.cellcount());
@@ -362,6 +364,7 @@ Prolongation prolong(const mesh::CellGrid& parent, const std::vector<float>& par
             result.maxclamp_m = std::max(result.maxclamp_m, move);
         }
     }
+    result.outsidenodes = outsidenodes;
     return result;
 }
 

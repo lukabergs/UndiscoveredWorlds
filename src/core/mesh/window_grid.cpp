@@ -468,6 +468,19 @@ bool CentreStencils::interior(CellId c, Interior& nodes) const
     return slot_[c] == onface;
 }
 
+std::vector<LevelKey> cubicnodekeys(std::int64_t facecells, int face, std::int64_t column, std::int64_t row)
+{
+    std::vector<ChainTerm> terms;
+    std::vector<double> chain;
+    addnodechain(terms, facecells, face, column, row, chain, 0);
+    std::vector<LevelKey> keys;
+    for (const ChainTerm& term : terms)
+        keys.push_back(term.key);
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    return keys;
+}
+
 PointStencil::PointStencil(std::int64_t facecells, const Vec3& p) : facecells_(facecells)
 {
     const FacePosition position = cubeposition(p);

@@ -7,8 +7,10 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 
 // The accessors are inline in the header (step S0.4); the window construction, the
 // snapping and the halo chain are step S2.1 (docs/architecture/multiscale-plan.md).
@@ -344,6 +346,44 @@ std::vector<mesh::LevelKey> dilatecells(const mesh::CellGrid& base, const std::v
     return result;
 }
 
+namespace
+{
+// The level-0 cells of the keys a level-l G stencil of any point of the level-0 cells `domain` reads,
+// beyond what the cells and their nodes on the face hold: the ghost nodes' keys of the level-l cells
+// within two cells of a face edge (the 5 x 5 nodes around a cell; T8 W2-W3c).
+std::vector<mesh::LevelKey> ghostreach(std::int64_t basecells, std::int64_t scale, const std::vector<mesh::LevelKey>& domain)
+{
+    const std::int64_t n = basecells * scale;
+    std::vector<std::tuple<int, std::int64_t, std::int64_t>> nodes;
+    for (const mesh::LevelKey key : domain)
+    {
+        const mesh::CubeCell cell = mesh::cubecell(basecells, key);
+        if (cell.column > 0 && cell.row > 0 && cell.column + 1 < basecells && cell.row + 1 < basecells && scale > 2)
+            continue;
+        for (std::int64_t dj = 0; dj < scale; dj++)
+            for (std::int64_t di = 0; di < scale; di++)
+            {
+                const std::int64_t i = cell.column * scale + di, j = cell.row * scale + dj;
+                if (i >= 2 && j >= 2 && i + 2 < n && j + 2 < n)
+                    continue;
+                for (std::int64_t y = j - 2; y <= j + 2; y++)
+                    for (std::int64_t x = i - 2; x <= i + 2; x++)
+                        if (x < 0 || y < 0 || x >= n || y >= n)
+                            nodes.emplace_back(cell.face, x, y);
+            }
+    }
+    std::sort(nodes.begin(), nodes.end());
+    nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+    std::vector<mesh::LevelKey> result;
+    for (const auto& [face, x, y] : nodes)
+        for (const mesh::LevelKey key : mesh::cubicnodekeys(n, face, x, y))
+            result.push_back(mesh::cubeparentkey(n, static_cast<int>(scale), key));
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
+}
+}
+
 std::vector<KeyLevelWindow> keyhalochain(const mesh::CellGrid& base, int factor, int level, const std::vector<mesh::LevelKey>& kept0,
                                          int targethalo, int reach, int solvemargin)
 {
@@ -378,6 +418,14 @@ std::vector<KeyLevelWindow> keyhalochain(const mesh::CellGrid& base, int factor,
             const std::int64_t scale = levelscale(factor, l);
             const int rings = l == 0 ? reach : static_cast<int>((reach + scale - 1) / scale);
             window.keptglobal = dilatecells(base, child.domainglobal, rings);
+            if (!latlon && l >= 1)
+            {
+                const std::vector<mesh::LevelKey> ghosts = ghostreach(window.basecells, scale, child.domainglobal);
+                std::vector<mesh::LevelKey> merged;
+                std::set_union(window.keptglobal.begin(), window.keptglobal.end(), ghosts.begin(), ghosts.end(),
+                               std::back_inserter(merged));
+                window.keptglobal = std::move(merged);
+            }
             // halochain's kept box starts `rings` cells west of the child's domain, also when it spans every column.
             window.keptwest = latlon ? westcolumn(window.keptglobal, window.basecells, full) : 0;
             if (full)

@@ -715,3 +715,31 @@ TEST_F(Landscape, RegionalCubeSinglePassOverlap)
     tributaries.tributaries.enabled = 1;
     EXPECT_THROW(landscape::runcuberegionalpass(inputs, disc(left, 1), 5, halo, tributaries), std::invalid_argument);
 }
+
+TEST_F(Landscape, RegionalCubeChainHoldsEveryProlongNode)
+{
+    // T8 W2-W3c: on the world grid of the cube windows (N 32, the CLI's halo of 31 rings), the halo chain of the
+    // interior and corner boxes of W2-W3b to level 3 keeps every node the prolongation of each level's parent reads:
+    // the nearest-parent fallback (prolong's outsidenodes) never fires. Before W2-W3c the interior box's level-2
+    // domain read level-1 ghosts beside the corner (3, 4) outside the parent's kept cells.
+    const std::shared_ptr<const mesh::CellGrid> base = mesh::makecubegrid(cuben, radius_m);
+    for (const auto& box : { std::vector<int>{ 56, 26, 63, 31 }, std::vector<int>{ 76, 16, 83, 21 } })
+    {
+        const std::vector<mesh::LevelKey> kept0 = landscape::cellsinpixelbox(*base, 4 * cuben, box[0], box[1], box[2], box[3]);
+        const std::vector<landscape::KeyLevelWindow> chain =
+            landscape::keyhalochain(*base, 4, 3, kept0, 31, landscape::prolongationreach, landscape::solvemarginglobalcells);
+        for (int l = 1; l < 3; l++)
+        {
+            const landscape::KeyLevelWindow& parentwindow = chain[static_cast<std::size_t>(l)];
+            const auto parent = mesh::cubewindowgrid(static_cast<int>(parentwindow.levelcells()), radius_m, parentwindow.keptkeys(), true);
+            const auto level = landscape::keywindowgrid(chain[static_cast<std::size_t>(l) + 1], radius_m, true);
+            std::vector<float> field(parent->cellcount());
+            for (mesh::CellId c = 0; c < parent->cellcount(); c++)
+                field[c] = static_cast<float>(1000.0 * parent->centre(c).z);
+            const landscape::Prolongation prolonged = landscape::prolong(*parent, field, *level, 4, true);
+            std::printf("[cube chain] box %d,%d level %d: %zu parent cells, %zu level cells, %lld nodes outside\n", box[0], box[1],
+                        l + 1, parent->cellcount(), level->cellcount(), static_cast<long long>(prolonged.outsidenodes));
+            EXPECT_EQ(prolonged.outsidenodes, 0) << "box " << box[0] << "," << box[1] << " level " << l + 1;
+        }
+    }
+}
