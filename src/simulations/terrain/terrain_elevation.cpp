@@ -132,6 +132,11 @@ terrain::SphereFractal terrain::archipelagofractal()
     return { sn::archipelagoWavelengthKm, sn::archipelagoPersistence, sn::archipelagoMean, sn::archipelagoDeviation };
 }
 
+terrain::SphereFractal terrain::craterdensityfractal()
+{
+    return { sn::craterDensityWavelengthKm, sn::craterDensityPersistence, sn::craterDensityMean, sn::craterDensityDeviation };
+}
+
 double terrain::legacycellkm(const planet& world)
 {
     const double pi = 3.14159265358979323846;

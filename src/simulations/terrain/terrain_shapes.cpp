@@ -12,6 +12,8 @@
 #include "core/deterministic_random.hpp"
 #include "core/grid_shapes.hpp"
 #include "core/mesh/cell_grid.hpp"
+#include "core/mesh/mesh_geometry.hpp"
+#include "simulations/terrain/terrain_coasts.hpp"
 #include "simulations/terrain/terrain_elevation.hpp"
 #include "simulations/terrain/terrain_shapes.hpp"
 #include "simulations/terrain/terrain_volcanoes.hpp"
@@ -25,13 +27,54 @@ namespace
 // Salt of the archipelagos' sphere noise (it replaces a fractal drawn from the stage's stream).
 constexpr int archipelagosalt = 0x5304;
 
-void drawshape(planet& world, int shapenumber, int centrex, int centrey, bool land, int baseheight, int conheight, boolshapetemplate shape[]);
-void drawplateaushape(planet& world, int shapenumber, int centrex, int centrey, int baseheight, int platheight, std::vector<std::vector<int>>& plateaumap, boolshapetemplate chainland[]);
+// The side of the mountain range templates' arrays (legacy pixels; the 2048-column world's rows).
+constexpr int rangetemplatesize = ARRAYHEIGHT;
+
+// The point east_px legacy pixels east and south_px south of p, through p's tangent frame.
+mesh::Vec3 pixelpoint(const planet& world, const mesh::Vec3& p, double east_px, double south_px)
+{
+    if (east_px == 0.0 && south_px == 0.0)
+        return p;
+    const double pixelkm = terrain::legacycellkm(world);
+    return mesh::fromtangent(mesh::tangentframe(p, world.grid().radius_m()), east_px * pixelkm, -south_px * pixelkm);
 }
 
-// This function creates chains of mountains, with associated land where appropriate.
+// A template's ridge direction (1 north, clockwise to 8 north-west) as a slot of the cell: the
+// code itself on lat-lon, elsewhere the slot whose bearing is nearest the direction's.
+int ridgeslot(const mesh::CellGrid& grid, mesh::CellId c, int dir)
+{
+    if (dir < 1 || dir > 8 || grid.kind() == mesh::GridKind::latlon)
+        return dir;
+    const double pi = 3.14159265358979323846;
+    const double target = static_cast<double>(dir - 1) * pi / 4.0;
+    int best = dir;
+    double bestdifference = 10.0;
+    for (int slot = 1; slot <= mesh::slotcount; slot++)
+    {
+        if (grid.neighbour(c, slot) < 0)
+            continue;
+        double difference = fabs(grid.bearing_rad(c, slot) - target);
+        difference = min(difference, 2.0 * pi - difference);
+        if (difference < bestdifference)
+        {
+            bestdifference = difference;
+            best = slot;
+        }
+    }
+    return best;
+}
 
-void createchains(planet& world, int baseheight, int conheight, vector<vector<int>>& fractal, vector<vector<int>>& plateaumap, boolshapetemplate landshape[], boolshapetemplate chainland[], twointegers focuspoints[], int focustotal, int focaldistance, int mode)
+void drawshape(planet& world, int shapenumber, const mesh::Vec3& centre, bool land, int baseheight, int conheight, boolshapetemplate shape[]);
+void drawplateaushape(planet& world, int shapenumber, const mesh::Vec3& centre, int platheight, std::vector<int>& plateaumap, boolshapetemplate chainland[]);
+}
+
+// This function creates chains of mountains, with associated land where appropriate. On the
+// cell grid (T8 W2-T3): positions are points on the sphere, moved in legacy pixels
+// (terrain.sphere_noise.legacy_columns) through their tangent frame; a template pixel lies
+// one legacy pixel from the next, so a cell wider than a pixel takes the first pixel of a range
+// that reaches it.
+
+void createchains(planet& world, int baseheight, int conheight, const vector<int>& fractal, vector<int>& plateaumap, boolshapetemplate landshape[], boolshapetemplate chainland[], const vector<mesh::CellId>& focuspoints, int focaldistance, int mode)
 {
     // mode=0: continental chains (with associated land).
     // mode=1: smaller mountains (no associated land, can form peninsulas).
@@ -40,6 +83,8 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
     // mode=5: like mode 2, but fewer.
     // mode=6: like 3, but fewer.
     // mode=7: hills.
+
+    (void)landshape;
 
     bool lower = 0;
 
@@ -63,11 +108,13 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
         fewer = 1;
     }
 
+    const int focustotal = static_cast<int>(focuspoints.size());
+
     std::uint64_t chainseed = deterministiccontextseed(world.seed(), 0x4102);
     chainseed = deterministiccombine(chainseed, baseheight, conheight, focustotal, focaldistance, mode, lower ? 1 : 0, fewer ? 1 : 0);
 
-    for (int n = 0; n < focustotal; n++)
-        chainseed = deterministiccombine(chainseed, focuspoints[n].x, focuspoints[n].y);
+    for (const mesh::CellId focus : focuspoints)
+        chainseed = deterministiccombine(chainseed, static_cast<std::int64_t>(focus));
 
     fast_srand(deterministicfastseed(chainseed));
 
@@ -85,13 +132,19 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
     int maxplatreduce = 95; // Range of percentages to reduce the height of the plateau with each step
     int mode1landmin = 30; // Minimum distance to land from the starting point of a mode 1 chain.
 
-    int width = world.width();
-    int height = world.height();
     int maxelev = world.maxelevation();
     int sealevel = world.sealevel();
 
-    vector<vector<unsigned char>> rangeheighttemplate(height + 1, vector<unsigned char>(height + 1, 0));
-    vector<vector<unsigned char>> rangeridgetemplate(height + 1, vector<unsigned char>(height + 1, 0)); // These will hold the range we're currently putting on.
+    const mesh::CellGrid& grid = world.grid();
+    const double pixelkm = terrain::legacycellkm(world);
+
+    vector<vector<unsigned char>> rangeheighttemplate(rangetemplatesize, vector<unsigned char>(rangetemplatesize, 0));
+    vector<vector<unsigned char>> rangeridgetemplate(rangetemplatesize, vector<unsigned char>(rangetemplatesize, 0)); // These will hold the range we're currently putting on.
+
+    auto intemplate = [&](int i, int j) { return i >= 0 && i < rangetemplatesize && j >= 0 && j < rangetemplatesize; };
+
+    vector<int> rangestamp(world.cellcount(), 0); // The range that set a cell's mountain (0: none).
+    int rangeid = 0;
 
     int chainno = 0;
     int minchainlength = 0;
@@ -140,15 +193,11 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
     for (int chain = 1; chain <= chainno; chain++)
     {
-        int oldx = random(0, width);
-        int oldy = random(0, height);
+        mesh::Vec3 oldp = grid.centre(terrain::randomcellbyarea(world)); // The point of the current blob.
 
-        if (mode == 0 || mode == 3) // Continental ranges should begin near the continental focus points, if possible. Islands should begin near their focus points too.
+        if ((mode == 0 || mode == 3) && focustotal > 0) // Continental ranges should begin near the continental focus points, if possible. Islands should begin near their focus points too.
         {
-            int thisfocus = random(0, focustotal);
-
-            oldx = focuspoints[thisfocus].x;
-            oldy = focuspoints[thisfocus].y; // Coordinates of the current blob.
+            int thisfocus = random(0, focustotal - 1);
 
             float xdiff = (float)random(1, 100);
             float ydiff = (float)random(1, 100);
@@ -162,17 +211,10 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
             xdiff = xdiff * (float)focaldistance;
             ydiff = ydiff * (float)focaldistance;
 
-            oldx = oldx + (int)randomsign(xdiff);
-            oldy = oldy + (int)randomsign(ydiff);
+            const int movex = (int)randomsign(xdiff);
+            const int movey = (int)randomsign(ydiff);
 
-            if (oldy < 0)
-                oldy = 0;
-
-            if (oldy > height)
-                oldy = height;
-
-            if (oldx<0 || oldx>width)
-                oldx = wrap(oldx, width);
+            oldp = pixelpoint(world, grid.centre(focuspoints[static_cast<size_t>(thisfocus)]), movex, movey);
         }
 
         int chaindir = random(1, 8); // Chaindir is the direction of the chain, from 1-8 (sort of on the diagonals!).
@@ -182,7 +224,7 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
         int tempno = -1;
 
-        if (!(mode == 2 && world.seawrap(oldx, oldy) == 1)) // If we're placing land-only mountains and we're in the sea, just skip the whole thing.
+        if (!(mode == 2 && world.sea(grid.locate(oldp)) == 1)) // If we're placing land-only mountains and we're in the sea, just skip the whole thing.
         {
             do
             {
@@ -271,7 +313,7 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
                     {
                         for (int j = 0; j <= span; j++)
                         {
-                            if (rangeridgetemplate[i][j] != 0)
+                            if (intemplate(i, j) && rangeridgetemplate[i][j] != 0)
                             {
                                 startx = i;
                                 starty = j;
@@ -289,7 +331,7 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
                     {
                         for (int i = 0; i <= span; i++)
                         {
-                            if (rangeridgetemplate[i][j] != 0)
+                            if (intemplate(i, j) && rangeridgetemplate[i][j] != 0)
                             {
                                 startx = i;
                                 starty = j;
@@ -307,7 +349,7 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
                     {
                         for (int j = 0; j <= span; j++)
                         {
-                            if (i >= 0 && i <= height && j >= 0 && j <= height && rangeridgetemplate[i][j] != 0)
+                            if (intemplate(i, j) && rangeridgetemplate[i][j] != 0)
                             {
                                 startx = i;
                                 starty = j;
@@ -325,7 +367,7 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
                     {
                         for (int i = 0; i <= span; i++)
                         {
-                            if (rangeridgetemplate[i][j] != 0)
+                            if (intemplate(i, j) && rangeridgetemplate[i][j] != 0)
                             {
                                 startx = i;
                                 starty = j;
@@ -337,90 +379,86 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
                     }
                 }
 
+                int movex = 0;
+                int movey = 0;
+
                 if (chaindir == 1 || chaindir == 2)
                 {
-                    oldx = oldx + random(0, rangestartvar);
-                    oldy = oldy + randomsign(random(0, rangestartvar));
+                    movex = random(0, rangestartvar);
+                    movey = randomsign(random(0, rangestartvar));
                 }
 
                 if (chaindir == 3 || chaindir == 4)
                 {
-                    oldx = oldx + randomsign(random(0, rangestartvar));
-                    oldy = oldy + random(0, rangestartvar);
+                    movex = randomsign(random(0, rangestartvar));
+                    movey = random(0, rangestartvar);
                 }
 
                 if (chaindir == 5 || chaindir == 6)
                 {
-                    oldx = oldx - random(0, rangestartvar);
-                    oldy = oldy + randomsign(random(0, rangestartvar));
+                    movex = 0 - random(0, rangestartvar);
+                    movey = randomsign(random(0, rangestartvar));
                 }
 
                 if (chaindir == 7 || chaindir == 8)
                 {
-                    oldx = oldx + randomsign(random(0, rangestartvar));
-                    oldy = oldy - random(0, rangestartvar);
+                    movex = randomsign(random(0, rangestartvar));
+                    movey = 0 - random(0, rangestartvar);
                 }
 
-                // oldx and oldy are now the point where we want the new range to start.
+                oldp = pixelpoint(world, oldp, movex, movey);
 
-                int x = oldx - startx;
-                int y = oldy - starty;
+                // oldp is now the point where we want the new range to start: template pixel
+                // (i, j) lies i - startx pixels east and j - starty south of it.
 
-                if (x <= 0 || x > width)
-                    x = wrap(x, width);
+                const mesh::CellId oldcell = grid.locate(oldp);
+                const mesh::TangentFrame frame = mesh::tangentframe(oldp, grid.radius_m());
 
-                if (mode == 1 && oldx >= 0 && oldx <= width && oldy >= 0 && oldy <= height) // Peninsular mountains have to start within a certain distance of land.
+                auto pixelofrange = [&](int i, int j)
                 {
-                    if (world.sea(oldx, oldy) == 1)
+                    return mesh::fromtangent(frame, static_cast<double>(i - startx) * pixelkm, -static_cast<double>(j - starty) * pixelkm);
+                };
+
+                if (mode == 1 && world.sea(oldcell) == 1) // Peninsular mountains have to start within a certain distance of land.
+                {
+                    bool foundone = 0;
+
+                    for (const mesh::CellId n : terrain::cellswithinkm(world, oldcell, (mode1landmin + 0.5) * pixelkm))
                     {
-                        bool foundone = 0;
-
-                        for (int i = oldx - mode1landmin; i <= oldx + mode1landmin; i++)
+                        if (world.sea(n) == 0)
                         {
-                            for (int j = oldy - mode1landmin; j <= oldy + mode1landmin; j++)
-                            {
-                                if (world.seawrap(i, j) == 0)
-                                {
-                                    foundone = 1;
-
-                                    i = oldx + mode1landmin;
-                                    j = oldy + mode1landmin;
-                                }
-                            }
+                            foundone = 1;
+                            break;
                         }
-
-                        if (foundone == 0)
-                            goahead = 0;
                     }
+
+                    if (foundone == 0)
+                        goahead = 0;
                 }
 
                 if (mode == 2) // Non-continental, non-peninsular mountains can't start in the sea.
                 {
-                    if (world.seawrap(oldx, oldy) == 1)
+                    if (world.sea(oldcell) == 1)
                         goahead = 0;
                 }
 
                 if (mode == 3) // Island chains can't start on the land.
                 {
-                    if (oldx<0 || oldx>width || oldy<0 || oldy>height)
+                    if (world.sea(oldcell) == 0)
                         goahead = 0;
-                    else
-                    {
-                        if (world.sea(oldx, oldy) == 0)
-                            goahead = 0;
-                    }
                 }
 
-                // x and y are now the coordinates of the top left of the new range template.
                 // Now we need to see whether there is a clear area to paste it.
 
                 if (mode != 2)
                 {
-                    for (int i = x; i <= x + span; i++)
+                    for (int i = 0; i <= span && goahead == 1; i++)
                     {
-                        for (int j = y; j <= y + span; j++)
+                        for (int j = 0; j <= span && goahead == 1; j++)
                         {
-                            if (world.mountainheightwrap(i, j) != 0)
+                            const mesh::CellId c = grid.locate(pixelofrange(i, j));
+
+                            if (c != mesh::nocell && world.mountainheightfloat(c) != 0)
                                 goahead = 0;
                         }
                     }
@@ -430,198 +468,198 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
                 if (goahead == 1) // If the area is clear
                 {
+                    rangeid++;
+
                     for (int i = 0; i <= span; i++)
                     {
-                        int ii = x + i;
-                        if (ii<0 || ii>width)
-                            ii = wrap(ii, width);
-
                         for (int j = 0; j <= span; j++)
                         {
-                            int jj = y + j;
+                            const bool templatepixel = intemplate(i, j) && rangeheighttemplate[i][j] != 0;
 
-                            if (jj >= 0 && jj <= height)
+                            if (templatepixel == false && goahead == 0) // Nothing more to learn from this pixel.
+                                continue;
+
+                            const mesh::Vec3 p = pixelofrange(i, j);
+                            const mesh::CellId c = grid.locate(p);
+
+                            if (c == mesh::nocell || rangestamp[c] == rangeid) // This range has already set this cell.
+                                continue;
+
+                            if (world.mountainheightfloat(c) == 0)
                             {
-                                if (world.mountainheightfloat(ii, jj) == 0)
+                                if (templatepixel)
                                 {
-                                    if (i >= 0 && i <= height && j >= 0 && j <= height && rangeheighttemplate[i][j] != 0)
+                                    int h = rangeheighttemplate[i][j] * rangeinc;
+                                    h = h + randomsign(rangelittleinc * random(0, 100));
+
+                                    if (mode == 3)
+                                        h = h + hislandadd;
+
+                                    float frac = (float)fractal[c];
+                                    frac = frac / (float)maxelev;
+                                    const float scaled = (float)h * frac;
+                                    const int ridge = ridgeslot(grid, c, rangeridgetemplate[i][j]);
+
+                                    if (mode == 0 || mode == 1)
                                     {
-                                        int h = rangeheighttemplate[i][j] * rangeinc;
-                                        h = h + randomsign(rangelittleinc * random(0, 100));
+                                        world.setmountainheight(c, scaled);
+                                        world.setmountainridge(c, ridge);
+                                        world.setnomfloat(c, conheight);
+                                    }
 
-                                        if (mode == 3)
-                                            h = h + hislandadd;
-
-                                        float frac = (float)fractal[ii][jj];
-                                        frac = frac / (float)maxelev;
-                                        const float scaled = (float)h * frac;
-
-                                        if (mode == 0 || mode == 1)
+                                    if (mode == 2) // Mountains of this kind cannot create their own land, so must stop at the sea.
+                                    {
+                                        if (world.mapfloat(c) >= conheight)
                                         {
-                                            world.setmountainheight(ii, jj, scaled);
-                                            world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
-                                            world.setnomfloat(ii, jj, conheight);
+                                            world.setmountainheight(c, scaled);
+                                            world.setmountainridge(c, ridge);
+
+                                            if (fewer == 0)
+                                                world.setnomfloat(c, conheight);
                                         }
+                                    }
 
-                                        if (mode == 2) // Mountains of this kind cannot create their own land, so must stop at the sea.
+                                    if (mode == 3) // Islands are just strange and different.
+                                    {
+                                        if (scaled > (float)sealevel)
                                         {
-                                            if (world.mapfloat(ii, jj) >= conheight)
-                                            {
-                                                world.setmountainheight(ii, jj, scaled);
-                                                world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
+                                            world.setmountainheight(c, scaled - (float)sealevel);
+                                            world.setmountainridge(c, ridge);
+                                            world.setnomfloat(c, conheight);
+                                        }
+                                    }
 
-                                                if (fewer == 0)
-                                                    world.setnomfloat(ii, jj, conheight);
+                                    if (world.mountainheightfloat(c) != 0)
+                                        rangestamp[c] = rangeid;
+
+                                    if (mode == 0) // Only create substantial land if these are continental mountains.
+                                    {
+                                        if (random(1, landchance) == 1) // See if we'll paste a chunk of land nearby
+                                        {
+                                            int dist = random(minlanddist, maxlanddist);
+
+                                            int landmovex = 0;
+                                            int landmovey = 0;
+
+                                            switch (chaindir)
+                                            {
+                                            case 1:
+                                                landmovex = 0 - dist / 2;
+                                                landmovey = 0 - dist;
+                                                break;
+
+                                            case 2:
+                                                landmovex = dist / 2;
+                                                landmovey = 0 - dist;
+                                                break;
+
+                                            case 3:
+                                                landmovex = dist;
+                                                landmovey = 0 - dist / 2;
+                                                break;
+
+                                            case 4:
+                                                landmovex = dist;
+                                                landmovey = dist / 2;
+                                                break;
+
+                                            case 5:
+                                                landmovex = dist / 2;
+                                                landmovey = dist;
+                                                break;
+
+                                            case 6:
+                                                landmovex = 0 - dist / 2;
+                                                landmovey = dist;
+                                                break;
+
+                                            case 7:
+                                                landmovex = 0 - dist;
+                                                landmovey = dist / 2;
+                                                break;
+
+                                            case 8:
+                                                landmovex = 0 - dist;
+                                                landmovey = 0 - dist / 2;
+                                                break;
                                             }
-                                        }
 
-                                        if (mode == 3) // Islands are just strange and different.
-                                        {
-                                            if (scaled > (float)sealevel)
+                                            mesh::Vec3 landp = p;
+
+                                            int max = rangeno;
+                                            int max2 = maxranges - rangeno;
+
+                                            if (max2 < max)
+                                                max = max2;
+
+                                            int mult = 4;
+
+                                            max = max * mult;
+
+                                            if (max > stringmax)
+                                                max = stringmax;
+
+                                            int totallumps = random((max / 4) * 3, max);
+
+                                            for (int lump = 1; lump <= totallumps; lump++) // Now we will paste a string of land lumps leading away from the mountain.
                                             {
-                                                world.setmountainheight(ii, jj, scaled - (float)sealevel);
-                                                world.setmountainridge(ii, jj, rangeridgetemplate[i][j]);
-                                                world.setnomfloat(ii, jj, conheight);
-                                            }
-                                        }
+                                                const int jitterx = randomsign(random(0, landvar));
+                                                const int jittery = randomsign(random(0, landvar));
 
-                                        if (mode == 0) // Only create substantial land if these are continental mountains.
-                                        {
-                                            if (random(1, landchance) == 1) // See if we'll paste a chunk of land nearby
-                                            {
-                                                int dist = random(minlanddist, maxlanddist);
+                                                landp = pixelpoint(world, landp, landmovex + jitterx, landmovey + jittery);
 
-                                                int movex = 0;
-                                                int movey = 0;
+                                                int shapenumber = random(0, 1);
+                                                drawshape(world, shapenumber, landp, 1, baseheight, conheight, chainland);
 
-                                                switch (chaindir)
+                                                if (plateau == 1) // Draw a bit of plateau, and reduce the height for the next pass.
                                                 {
-                                                case 1:
-                                                    movex = 0 - dist / 2;
-                                                    movey = 0 - dist;
-                                                    break;
+                                                    drawplateaushape(world, shapenumber, landp, platheight, plateaumap, chainland);
 
-                                                case 2:
-                                                    movex = dist / 2;
-                                                    movey = 0 - dist;
-                                                    break;
-
-                                                case 3:
-                                                    movex = dist;
-                                                    movey = 0 - dist / 2;
-                                                    break;
-
-                                                case 4:
-                                                    movex = dist;
-                                                    movey = dist / 2;
-                                                    break;
-
-                                                case 5:
-                                                    movex = dist / 2;
-                                                    movey = dist;
-                                                    break;
-
-                                                case 6:
-                                                    movex = 0 - dist / 2;
-                                                    movey = dist;
-                                                    break;
-
-                                                case 7:
-                                                    movex = 0 - dist;
-                                                    movey = dist / 2;
-                                                    break;
-
-                                                case 8:
-                                                    movex = 0 - dist;
-                                                    movey = 0 - dist / 2;
-                                                    break;
+                                                    float platreduce = (float)random(minplatreduce, maxplatreduce);
+                                                    platreduce = platreduce / 100.0f;
+                                                    platheight = (int)((float)platheight * platreduce);
                                                 }
-
-                                                int landx = ii;
-                                                int landy = jj;
-
-                                                int max = rangeno;
-                                                int max2 = maxranges - rangeno;
-
-                                                if (max2 < max)
-                                                    max = max2;
-
-                                                int mult = 4;
-
-                                                max = max * mult;
-
-                                                if (max > stringmax)
-                                                    max = stringmax;
-
-                                                int totallumps = random((max / 4) * 3, max);
-
-                                                for (int lump = 1; lump <= totallumps; lump++) // Now we will paste a string of land lumps leading away from the mountain.
-                                                {
-                                                    landx = landx + movex;
-                                                    landy = landy + movey;
-
-                                                    landx = landx + randomsign(random(0, landvar));
-                                                    landy = landy + randomsign(random(0, landvar));
-
-                                                    if (landx<0 || landx>width)
-                                                        landx = wrap(landx, width);
-
-                                                    int shapenumber = random(0, 1);
-                                                    drawshape(world, shapenumber, landx, landy, 1, baseheight, conheight, chainland);
-
-                                                    if (plateau == 1) // Draw a bit of plateau, and reduce the height for the next pass.
-                                                    {
-                                                        drawplateaushape(world, shapenumber, landx, landy, baseheight, platheight, plateaumap, chainland);
-
-                                                        float platreduce = (float)random(minplatreduce, maxplatreduce);
-                                                        platreduce = platreduce / 100.0f;
-                                                        platheight = (int)((float)platheight * platreduce);
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (mode == 1) // Mountains of this kind can create land just immediately around themselves.
-                                        {
-                                            if (world.nomfloat(ii, jj) < conheight)
-                                                world.setnomfloat(ii, jj, conheight);
-                                        }
-
-                                        if (mode == 3) // Island mountains can create land just immediately around themselves.
-                                        {
-                                            if (h > sealevel)
-                                            {
-                                                if (world.nomfloat(ii, jj) < conheight)
-                                                    world.setnomfloat(ii, jj, conheight);
                                             }
                                         }
                                     }
-                                }
-                                else // If this range goes off the map, and the chain.
-                                    goahead = 0;
 
+                                    if (mode == 1) // Mountains of this kind can create land just immediately around themselves.
+                                    {
+                                        if (world.nomfloat(c) < conheight)
+                                            world.setnomfloat(c, conheight);
+                                    }
+
+                                    if (mode == 3) // Island mountains can create land just immediately around themselves.
+                                    {
+                                        if (h > sealevel)
+                                        {
+                                            if (world.nomfloat(c) < conheight)
+                                                world.setnomfloat(c, conheight);
+                                        }
+                                    }
+                                }
                             }
+                            else // If this range runs into other mountains, end the chain.
+                                goahead = 0;
                         }
                     }
 
-                    // Now we need to find the new oldx and oldy.
+                    // Now we need to find the new starting point.
+
+                    int endx = -1;
+                    int endy = -1;
 
                     if (chaindir == 1 || chaindir == 2)
                     {
-                        for (int i = span; i >= 0; i--)
+                        for (int i = span; i >= 0 && endx < 0; i--)
                         {
                             for (int j = 0; j <= span; j++)
                             {
-                                if (i >= 0 && i <= height && j >= 0 && j <= height && rangeheighttemplate[i][j] != 0)
+                                if (intemplate(i, j) && rangeheighttemplate[i][j] != 0)
                                 {
-                                    oldx = x + i;
-                                    oldy = y + j;
-
-                                    if (oldx<0 || oldx>width)
-                                        oldx = wrap(oldx, width);
-
-                                    i = 0;
-                                    j = span;
+                                    endx = i;
+                                    endy = j;
+                                    break;
                                 }
                             }
                         }
@@ -629,20 +667,15 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
                     if (chaindir == 3 || chaindir == 4)
                     {
-                        for (int j = span; j >= 0; j--)
+                        for (int j = span; j >= 0 && endx < 0; j--)
                         {
                             for (int i = 0; i <= span; i++)
                             {
-                                if (rangeheighttemplate[i][j] != 0)
+                                if (intemplate(i, j) && rangeheighttemplate[i][j] != 0)
                                 {
-                                    oldx = x + i;
-                                    oldy = y + j;
-
-                                    if (oldx<0 || oldx>width)
-                                        oldx = wrap(oldx, width);
-
-                                    j = 0;
-                                    i = span;
+                                    endx = i;
+                                    endy = j;
+                                    break;
                                 }
                             }
                         }
@@ -650,20 +683,15 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
                     if (chaindir == 5 || chaindir == 6)
                     {
-                        for (int i = 0; i <= span; i++)
+                        for (int i = 0; i <= span && endx < 0; i++)
                         {
                             for (int j = 0; j <= span; j++)
                             {
-                                if (rangeheighttemplate[i][j] != 0)
+                                if (intemplate(i, j) && rangeheighttemplate[i][j] != 0)
                                 {
-                                    oldx = x + i;
-                                    oldy = y + j;
-
-                                    if (oldx<0 || oldx>width)
-                                        oldx = wrap(oldx, width);
-
-                                    i = span;
-                                    j = span;
+                                    endx = i;
+                                    endy = j;
+                                    break;
                                 }
                             }
                         }
@@ -671,24 +699,22 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
                     if (chaindir == 7 || chaindir == 8)
                     {
-                        for (int j = 0; j <= span; j++)
+                        for (int j = 0; j <= span && endx < 0; j++)
                         {
                             for (int i = 0; i <= span; i++)
                             {
-                                if (rangeheighttemplate[i][j] != 0)
+                                if (intemplate(i, j) && rangeheighttemplate[i][j] != 0)
                                 {
-                                    oldx = x + i;
-                                    oldy = y + j;
-
-                                    if (oldx<0 || oldx>width)
-                                        oldx = wrap(oldx, width);
-
-                                    j = span;
-                                    i = span;
+                                    endx = i;
+                                    endy = j;
+                                    break;
                                 }
                             }
                         }
                     }
+
+                    if (endx >= 0)
+                        oldp = pixelofrange(endx, endy);
 
                     // Now change direction, possibly.
 
@@ -716,74 +742,23 @@ void createchains(planet& world, int baseheight, int conheight, vector<vector<in
 
 namespace
 {
-// Draws a shape from an image onto the map.
+// Draws a shape from an image onto the map, centred at a point, one legacy pixel per pixel
+// (terrain::coastgrid::stamptemplate), mirrored at random.
 
-void drawshape(planet& world, int shapenumber, int centrex, int centrey, bool land, int baseheight, int conheight, boolshapetemplate shape[])
+void drawshape(planet& world, int shapenumber, const mesh::Vec3& centre, bool land, int baseheight, int conheight, boolshapetemplate shape[])
 {
-    int width = world.width();
-    int height = world.height();
+    const bool leftr = random(0, 1) == 1; // If it's 1 then we reverse it left-right
+    const bool downr = random(0, 1) == 1; // If it's 1 then we reverse it top-bottom
 
-    int imheight = shape[shapenumber].ysize() - 1;
-    int imwidth = shape[shapenumber].xsize() - 1;
-
-    int x = centrex - imwidth / 2; // Coordinates of the top left corner.
-    int y = centrey - imheight / 2;
-
-    if (x<0 || x>width)
-        x = wrap(x, width);
-
-    int leftr = random(0, 1); // If it's 1 then we reverse it left-right
-    int downr = random(0, 1); // If it's 1 then we reverse it top-bottom
-
-    int istart = 0, desti = imwidth + 1, istep = 1;
-    int jstart = 0, destj = imheight + 1, jstep = 1;
-
-    if (leftr == 1)
+    for (const mesh::CellId c : terrain::coastgrid::stamptemplate(world, centre, shape[shapenumber], leftr, downr))
     {
-        istart = imwidth;
-        desti = -1;
-        istep = -1;
-    }
-
-    if (downr == 1)
-    {
-        jstart = imwidth;
-        destj = -1;
-        jstep = -1;
-    }
-
-    int imap = -1;
-    int jmap = -1;
-
-    for (int i = istart; i != desti; i = i + istep)
-    {
-        imap++;
-        jmap = -1;
-
-        for (int j = jstart; j != destj; j = j + jstep)
+        if (land == 1)
+            world.setnomfloat(c, conheight);
+        else
         {
-            jmap++;
-
-            if (shape[shapenumber].point(i, j) == 1)
-            {
-                int xx = x + imap;
-                int yy = y + jmap;
-
-                if (yy >= 0 && yy <= height)
-                {
-                    if (xx<0 || xx>width)
-                        xx = wrap(xx, width);
-
-                    if (land == 1)
-                        world.setnomfloat(xx, yy, conheight);
-                    else
-                    {
-                        world.setnomfloat(xx, yy, baseheight);
-                        world.setmountainheight(xx, yy, 0);
-                        world.setmountainridge(xx, yy, 0);
-                    }
-                }
-            }
+            world.setnomfloat(c, baseheight);
+            world.setmountainheight(c, 0);
+            world.setmountainridge(c, 0);
         }
     }
 }
@@ -791,120 +766,74 @@ void drawshape(planet& world, int shapenumber, int centrex, int centrey, bool la
 
 namespace
 {
-// Draws a shape from an image onto the plateau map.
+// Draws a shape from an image onto the plateau map. As in the legacy function, every set pixel
+// of the shape writes the one cell a pixel east and south of the shape's top-left corner (its
+// mirror draws are made but do not matter).
 
-void drawplateaushape(planet& world, int shapenumber, int centrex, int centrey, int baseheight, int platheight, vector<vector<int>>& plateaumap, boolshapetemplate chainland[])
+void drawplateaushape(planet& world, int shapenumber, const mesh::Vec3& centre, int platheight, vector<int>& plateaumap, boolshapetemplate chainland[])
 {
+    const boolshapetemplate& shape = chainland[shapenumber];
 
-    int width = world.width();
-    int height = world.height();
+    int imheight = shape.ysize() - 1;
+    int imwidth = shape.xsize() - 1;
 
-    int imheight = chainland[shapenumber].ysize() - 1;
-    int imwidth = chainland[shapenumber].xsize() - 1;
+    (void)random(0, 1); // The legacy left-right and top-bottom mirror draws.
+    (void)random(0, 1);
 
-    int x = centrex - imwidth / 2; // Coordinates of the top left corner.
-    int y = centrey - imheight / 2;
+    bool anypixel = false;
 
-    if (x<0 || x>width)
-        x = wrap(x, width);
-
-    int leftr = random(0, 1); // If it's 1 then we reverse it left-right
-    int downr = random(0, 1); // If it's 1 then we reverse it top-bottom
-
-    int istart = 0, desti = imwidth + 1, istep = 1;
-    int jstart = 0, destj = imheight + 1, jstep = 1;
-
-    if (leftr == 1)
+    for (int i = 0; i <= imwidth && !anypixel; i++)
     {
-        istart = imwidth;
-        desti = -1;
-        istep = -1;
+        for (int j = 0; j <= imheight && !anypixel; j++)
+            anypixel = shape.point(i, j) == 1;
     }
 
-    if (downr == 1)
-    {
-        jstart = imwidth;
-        destj = -1;
-        jstep = -1;
-    }
+    if (!anypixel)
+        return;
 
-    for (int i = istart; i != desti; i = i + istep)
-    {
-        for (int j = jstart; j != destj; j = j + jstep)
-        {
-            if (chainland[shapenumber].point(i, j) == 1)
-            {
-                int xx = x + 1;
-                int yy = y + 1;
+    const mesh::CellId c = world.grid().locate(pixelpoint(world, centre, 1 - imwidth / 2, 1 - imheight / 2));
 
-                if (yy >= 0 && yy <= height)
-                {
-                    if (xx<0 || xx>width)
-                        xx = wrap(xx, width);
-
-                    if (world.sea(xx, yy) == 0)
-                        plateaumap[xx][yy] = platheight;
-                }
-            }
-        }
-    }
+    if (c != mesh::nocell && world.sea(c) == 0)
+        plateaumap[c] = platheight;
 }
 }
 
 // This function does something similar, but adds the fractal map onto the land map.
 
-void fractaladdland(planet& world, vector<vector<int>>& fractal)
+void fractaladdland(planet& world, const vector<int>& fractal, const vector<int>& divfield)
 {
     int div = 300; //150; // The higher this number, the more highlands there will be.
     int maxamount = 25; // The higher this is, the flatter the flat areas will be.
     int minamount = 10; // The lower this is, the higher the high areas will be.
 
-    int width = world.width();
-    int height = world.height();
     int sealevel = world.sealevel();
     int maxelev = world.maxelevation();
 
-    // First we create a template map, which we will use to vary divamount.
+    // divfield (a second field of the fractal's values: the legacy flipped and shifted copy of
+    // it) varies the divisor, to create highlands and lowlands.
 
-    vector<vector<int>> templ(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    for (int i = 0; i <= width; i++)
+    for (const mesh::CellId c : columnmajorcells(world.grid()))
     {
-        for (int j = 0; j <= height; j++)
-            templ[i][j] = fractal[i][j];
-    }
-
-    flip(templ, width, height, 1, 1);
-    int offset = random(1, width);
-    shift(templ, width, height, offset);
-
-    // Now we use that template to apply the fractal to the map, to create highlands and lowlands.
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
+        if (!world.basebelowsea(c))
         {
-            if (!world.basebelowsea(i, j))
-            {
-                int valtoadd = fractal[i][j] - sealevel;
+            int valtoadd = fractal[c] - sealevel;
 
-                int divamount = templ[i][j];
-                divamount = divamount / div;
-                if (divamount > maxamount)
-                    divamount = maxamount;
-                if (divamount < minamount)
-                    divamount = minamount;
+            int divamount = divfield[c];
+            divamount = divamount / div;
+            if (divamount > maxamount)
+                divamount = maxamount;
+            if (divamount < minamount)
+                divamount = minamount;
 
-                valtoadd = valtoadd / divamount;
+            valtoadd = valtoadd / divamount;
 
-                float newval = world.nomfloat(i, j) + static_cast<float>(valtoadd);
+            float newval = world.nomfloat(c) + static_cast<float>(valtoadd);
 
-                if (newval > static_cast<float>(maxelev))
-                    newval = static_cast<float>(maxelev);
+            if (newval > static_cast<float>(maxelev))
+                newval = static_cast<float>(maxelev);
 
-                if (newval > world.nomfloat(i, j))
-                    world.setnomfloat(i, j, newval);
-            }
+            if (newval > world.nomfloat(c))
+                world.setnomfloat(c, newval);
         }
     }
 }

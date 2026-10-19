@@ -89,6 +89,10 @@ inline float warpVaryWavelengthKm = 10000.0f;
 inline float warpVaryPersistence = 0.5f;
 inline float warpVaryMean = 0.335f;
 inline float warpVaryDeviation = 0.109f;
+inline float craterDensityWavelengthKm = 20000.0f;
+inline float craterDensityPersistence = 0.5f;
+inline float craterDensityMean = 0.5f;
+inline float craterDensityDeviation = 0.25f;
 }
 
 namespace subgrid
@@ -181,6 +185,10 @@ inline const std::vector<parameters::Entry>& parameterentries()
         { "terrain.sphere_noise.warp_vary_persistence", &sphere_noise::warpVaryPersistence },
         { "terrain.sphere_noise.warp_vary_mean", &sphere_noise::warpVaryMean },
         { "terrain.sphere_noise.warp_vary_deviation", &sphere_noise::warpVaryDeviation },
+        { "terrain.sphere_noise.crater_density_wavelength_km", &sphere_noise::craterDensityWavelengthKm },
+        { "terrain.sphere_noise.crater_density_persistence", &sphere_noise::craterDensityPersistence },
+        { "terrain.sphere_noise.crater_density_mean", &sphere_noise::craterDensityMean },
+        { "terrain.sphere_noise.crater_density_deviation", &sphere_noise::craterDensityDeviation },
         { "terrain.subgrid.spacing_coefficient", &subgrid::spacingCoefficient },
         { "terrain.subgrid.reference_d_over_k", &subgrid::referenceDOverK },
         { "terrain.subgrid.reference_m", &subgrid::referenceM },

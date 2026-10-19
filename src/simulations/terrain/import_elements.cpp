@@ -1,8 +1,7 @@
 #include "simulations/terrain/import_elements.hpp"
 
-// On the cell grid since T8 W2-T2: sphere noise (terrain::spherefractal) replaces the legacy
-// fractals; the functions that still take legacy arrays get their values in the legacy slots
-// (legacyslot, core/grid_shapes.hpp).
+// On the cell grid since T8 W2-T2 (the chains, land elevation and craters since W2-T3): sphere
+// noise (terrain::spherefractal) replaces the legacy fractals; values are per cell.
 
 #include "core/deterministic_random.hpp"
 #include "core/grid_shapes.hpp"
@@ -20,20 +19,6 @@ vector<int> legacyvalues(const vector<float>& values)
     for (size_t c = 0; c < values.size(); c++)
         whole[c] = static_cast<int>(values[c]);
     return whole;
-}
-
-// Per-cell values in a legacy ARRAYWIDTH x ARRAYHEIGHT array, at the cells' legacy slots.
-vector<vector<int>> legacyarray(const planet& world, const vector<int>& values)
-{
-    vector<vector<int>> array(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-    const mesh::CellGrid& grid = world.grid();
-    for (CellId c = 0; c < grid.cellcount(); c++)
-    {
-        int x = 0, y = 0;
-        legacyslot(grid, c, x, y);
-        array[static_cast<size_t>(x)][static_cast<size_t>(y)] = values[c];
-    }
-    return array;
 }
 }
 
@@ -110,16 +95,20 @@ void generateimportedlandelevation(planet& world)
 
     int fractaladd = sealevel - 2500;
 
-    // First, make a fractal map (a sphere noise for the legacy warped fractal).
+    // First, make a fractal map (a sphere noise for the legacy warped fractal), and a second
+    // one of the same values for the divisor (the legacy flipped and shifted copy of the first).
 
-    vector<int> values = legacyvalues(terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0x1a4d0001), terrain::terrainfractal(), 12750.0f));
-    for (int& value : values)
+    const std::uint64_t seed = deterministiccontextseed(world.seed(), 0x1a4d0001);
+    vector<int> fractal = legacyvalues(terrain::spherefractal(world, seed, terrain::terrainfractal(), 12750.0f));
+    vector<int> divfield = legacyvalues(terrain::spherefractal(world, deterministiccombine(seed, 1), terrain::terrainfractal(), 12750.0f));
+    for (int& value : fractal)
         value += fractaladd;
-    vector<vector<int>> fractal = legacyarray(world, values);
+    for (int& value : divfield)
+        value += fractaladd;
 
     // Now use it to change the land heights.
 
-    fractaladdland(world, fractal);
+    fractaladdland(world, fractal, divfield);
 
     // Also, create extra elevation.
 
@@ -135,20 +124,17 @@ void generateimportedmountainchains(planet& world, boolshapetemplate landshape[]
         baseheight = 1;
     int conheight = sealevel + 50;
 
-    vector<vector<int>> plateaumap(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    vector<int> plateaumap(world.cellcount(), 0);
 
     int fractaladd = sealevel - 2500;
 
     // First, make a fractal map.
 
-    vector<int> values = legacyvalues(terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0xc4a10001), terrain::terrainfractal(), 12750.0f));
-    for (int& value : values)
+    vector<int> fractal = legacyvalues(terrain::spherefractal(world, deterministiccontextseed(world.seed(), 0xc4a10001), terrain::terrainfractal(), 12750.0f));
+    for (int& value : fractal)
         value += fractaladd;
-    vector<vector<int>> fractal = legacyarray(world, values);
 
-    twointegers dummy[1];
-
-    createchains(world, baseheight, conheight, fractal, plateaumap, landshape, chainland, dummy, 0, 0, 5);
+    createchains(world, baseheight, conheight, fractal, plateaumap, landshape, chainland, {}, 0, 5);
 }
 
 void generateimportedcraters(planet& world, std::vector<int>& squareroot)

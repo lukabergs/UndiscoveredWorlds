@@ -239,36 +239,6 @@ void warp(vector<vector<int>>& map, int width, int height, int maxelev, int warp
     }
 }
 
-// A "monstrous" warp - http://thingonitsown.blogspot.com/2018/11/monstrous-terrain.html
-void monstrouswarp(vector<vector<int>>& map, int width, int height, int maxelev, int warpfactor)
-{
-    vector<vector<int>> dest(width + 1, vector<int>(height + 1, 0));
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            float point = (float)map[i][j];
-
-            point = point / (float)maxelev; // Makes it into a value from 0.0 to 1.0
-
-            point = point * (float)warpfactor;
-
-            int val = map[(int)point][(int)point];
- 
-            dest[i][j] = val;
-        }
-    }
-
-    for (int i = 0; i <= width; i++)
-    {
-        for (int j = 0; j <= height; j++)
-        {
-            map[i][j] = dest[i][j];
-        }
-    }
-}
-
 // Shifts everything in a vector to the left by a given number of pixels.
 void shift(vector<vector<int>>& map, int width, int height, int offset)
 {
@@ -306,38 +276,6 @@ void shift(vector<vector<int>>& map, int width, int height, int offset)
     for (int j = 0; j <= height; j++) // Make the line the average of its neighbours to left and right.
     {
         map[i][j] = (map[iminus][j] + map[iplus][j]) / 2;
-    }
-}
-
-// Flips an array vertically and/or horizontally.
-void flip(vector<vector<int>>& arr, int awidth, int aheight, bool vert, bool horiz)
-{
-    vector<vector<int>> dummy(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
-
-    for (int i = 0; i <= awidth; i++)
-    {
-        for (int j = 0; j <= aheight; j++)
-            dummy[i][j] = arr[i][j];
-    }
-
-    for (int i = 0; i <= awidth; i++)
-    {
-        for (int j = 0; j <= aheight; j++)
-        {
-            int ii, jj;
-
-            if (horiz == 0)
-                ii = 1;
-            else
-                ii = awidth - i;
-
-            if (vert == 0)
-                jj = j;
-            else
-                jj = aheight - j;
-
-            arr[i][j] = dummy[ii][jj];
-        }
     }
 }
 

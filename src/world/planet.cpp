@@ -745,12 +745,7 @@ void planet::clear()
     climate_.horselats.fill(0);
 
     for (int i = 0; i < MAXCRATERS; i++)
-    {
-        geosphere_.cratercentreslist[i].w = 0;
-        geosphere_.cratercentreslist[i].x = 0;
-        geosphere_.cratercentreslist[i].y = 0;
-        geosphere_.cratercentreslist[i].z = 0;
-    }
+        geosphere_.cratercentreslist[i] = CraterRecord{};
 
     clearsocialstate();
 }
@@ -842,6 +837,9 @@ void planet::shiftterrain(int offset)
 
         if (geosphere_.cratercentreslist[i].x < 0)
             geosphere_.cratercentreslist[i].x = geosphere_.cratercentreslist[i].x + body_.itswidth;
+
+        if (geosphere_.cratercentreslist[i].cell != mesh::nocell)
+            geosphere_.cratercentreslist[i].cell = grid_->cellof(geosphere_.cratercentreslist[i].x, geosphere_.cratercentreslist[i].y);
     }
 
     for (Settlement& settlement : anthroposphere_.settlementlist)
@@ -2028,6 +2026,9 @@ bool planet::loadworld(string filename)
         readvariable(infile, geosphere_.cratercentreslist[i].x);
         readvariable(infile, geosphere_.cratercentreslist[i].y);
         readvariable(infile, geosphere_.cratercentreslist[i].z);
+        // A record with a radius is a crater; the file keeps its pixel, the lat-lon cell.
+        geosphere_.cratercentreslist[i].cell = geosphere_.cratercentreslist[i].z > 0
+            ? grid_->cellof(geosphere_.cratercentreslist[i].x, geosphere_.cratercentreslist[i].y) : mesh::nocell;
     }
 
     if (fileversion >= 15)

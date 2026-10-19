@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/classes.hpp"
+#include "core/mesh/cell_grid.hpp"
 #include "simulations/climate/climate_biomes.hpp"
 #include "simulations/geology/mineral_systems/mineral_deposit.hpp"
 #include "simulations/society/social_generation.hpp"
@@ -19,6 +20,19 @@
 #define ARRAYHEIGHT 1024
 
 #define MAXCRATERS 100000
+
+// One crater in drawing order: w its central peak's height, x and y its export pixel (column
+// and row on lat-lon; on a cube the 4 N x 2 N lat-lon pixel of its centre), z its radius in
+// legacy pixels (terrain.sphere_noise.legacy_columns), cell its centre cell (T8 W2-T3; nocell
+// for an empty record). The .uww file keeps w, x, y, z; a lat-lon load sets the cell from x, y.
+struct CraterRecord
+{
+    short w = 0;
+    short x = 0;
+    short y = 0;
+    short z = 0;
+    mesh::CellId cell = mesh::nocell;
+};
 
 constexpr int CLIMATEMAPSEACOLOURCOUNT = 3;
 constexpr int CLIMATEMAPCOLOURCOUNT = 32;
@@ -246,7 +260,7 @@ struct geospherestate
     worldgrid<short> oceanridgeanglemap;
     worldgrid<float> volcanomap;
     worldgrid<bool> stratomap;
-    fourshorts cratercentreslist[MAXCRATERS]; // This duplicates the information in the cratercentres array, but it tells us the order in which to draw the craters, and their radius, which is also important.
+    CraterRecord cratercentreslist[MAXCRATERS]; // This duplicates the information in the cratercentres array, but it tells us the order in which to draw the craters, and their radius, which is also important.
     std::vector<TectonicBoundarySegment> tectonicboundarysegmentlist;
     std::vector<TectonicDeformingRegion> tectonicdeformingregionlist;
     std::vector<mineralsystems::Deposit> mineraldepositlist;

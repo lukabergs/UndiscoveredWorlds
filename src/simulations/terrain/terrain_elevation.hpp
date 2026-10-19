@@ -31,6 +31,7 @@ SphereFractal smoothingfractal();
 SphereFractal canyonbasefractal();
 SphereFractal canyonmaskfractal();
 SphereFractal archipelagofractal();
+SphereFractal craterdensityfractal();
 
 // One legacy pixel in km: 2 pi R / terrain.sphere_noise.legacy_columns.
 double legacycellkm(const planet& world);

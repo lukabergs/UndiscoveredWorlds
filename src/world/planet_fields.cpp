@@ -276,13 +276,24 @@ struct planetfieldaccess
             out << world.geosphere_.tectonicsnapshotrecord;
             break;
         case TableId::craters:
-            out << "w,x,y,z\n";
+        {
+            // x, y: the export pixel; a cube bundle adds the centre cell (empty for an empty record).
+            const bool cube = world.grid().kind() == mesh::GridKind::cube;
+            out << "w,x,y,z" << (cube ? ",cell\n" : "\n");
             for (int index = 0; index < world.geosphere_.itscraterno && index < MAXCRATERS; index++)
             {
-                const fourshorts& crater = world.geosphere_.cratercentreslist[index];
-                out << crater.w << ',' << crater.x << ',' << crater.y << ',' << crater.z << '\n';
+                const CraterRecord& crater = world.geosphere_.cratercentreslist[index];
+                out << crater.w << ',' << crater.x << ',' << crater.y << ',' << crater.z;
+                if (cube)
+                {
+                    out << ',';
+                    if (crater.cell != mesh::nocell)
+                        out << crater.cell;
+                }
+                out << '\n';
             }
             break;
+        }
         case TableId::settlements:
         {
             // x, y: the lat-lon (export) position; a cube bundle adds the cell id.

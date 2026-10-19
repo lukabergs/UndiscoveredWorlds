@@ -29,7 +29,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
           "Continues the initializer's engine; re-creates it deterministically when the run carries none.",
           { nullptr, nullptr, "configs/tectonics-baseline.json (evolution_duration_myr, delta_time_myr); the run sets them "
                               "with --duration and --delta-time-myr; checkpoints fall on whole steps" } },
-        { S::terraforming, "terrain.terraforming", K::editor, false, {}, {}, {}, {}, "" },
+        { S::terraforming, "terrain.terraforming", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::inland_seas, "terrain.inland_sea_policy", K::editor, false, {}, {}, {}, {}, "" },
         { S::archipelagos, "terrain.archipelagos", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::ocean_cleanup, "terrain.ocean_cleanup", K::editor, false, {}, {}, {}, {}, "", {}, true },

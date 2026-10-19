@@ -1005,8 +1005,11 @@ public:
     int craterelev(int n) const; // crater peak elevation
     void setcraterelev(int n, int amount);
 
-    int craterradius(int n) const; // crater radius
+    int craterradius(int n) const; // crater radius (legacy pixels)
     void setcraterradius(int n, int amount);
+
+    mesh::CellId cratercell(int n) const; // crater centre cell (nocell: none)
+    void setcratercell(int n, mesh::CellId c);
 
     int tide(int x, int y) const;    // tidal strength
     int tide(mesh::CellId c) const;
@@ -2948,6 +2951,23 @@ inline void planet::setcraterradius(int n, int amount)
         return;
 
     geosphere_.cratercentreslist[n].z=short(amount);
+}
+
+inline mesh::CellId planet::cratercell(int n) const
+{
+    UW_TABLE_READ(craters);
+    if (n < 0 || n >= MAXCRATERS)
+        return mesh::nocell;
+
+    return geosphere_.cratercentreslist[n].cell;
+}
+
+inline void planet::setcratercell(int n, mesh::CellId c)
+{
+    if (n < 0 || n >= MAXCRATERS)
+        return;
+
+    geosphere_.cratercentreslist[n].cell = c;
 }
 
 inline int planet::tide(mesh::CellId c) const

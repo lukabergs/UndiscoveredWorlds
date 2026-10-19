@@ -1,30 +1,68 @@
 // Crater placement and impact relief used by editing tools.
-// Algorithms by Jonathan Hill, extracted from globalterrain.cpp.
+// Algorithms by Jonathan Hill, extracted from globalterrain.cpp. On the cell grid since T8
+// W2-T3 (docs/architecture/sphere-mesh.md sections 3, 11 and 12): centres drawn by area, radii
+// in legacy pixels (terrain.sphere_noise.legacy_columns) as km, the density a sphere noise
+// (terrain.sphere_noise.crater_density_*); the neighbour-scale tests (slope, the blur's ring)
+// read the neighbour table.
 
 #include "simulations/terrain/terrain_internal.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <queue>
+#include <vector>
 
 #include "core/classes.hpp"
+#include "core/deterministic_random.hpp"
+#include "core/mesh/cell_grid.hpp"
+#include "simulations/terrain/terrain_elevation.hpp"
+#include "world/cell_queries.hpp"
 #include "world/functions.hpp"
 #include "world/planet.hpp"
 
 using namespace std;
+using mesh::CellId;
 
 namespace
 {
-void makecrater(planet& world, std::vector <int> &squareroot, int thiscraterno, int centrex, int centrey, int size);
+// Salt of the craters' density noise (it replaces a fractal drawn from the ambient stream;
+// combined with the number of earlier craters, so each press of the button draws another).
+constexpr int cratersalt = 0x43a7;
+
+void makecrater(planet& world, vector<int>& squareroot, vector<uint8_t>& placed, int thiscraterno, CellId centre, int size);
+
+// The squared distance between two cell centres in legacy pixels, rounded to a whole number
+// (the legacy loops' i * i + j * j).
+int pixeldistancesquared(const planet& world, CellId a, CellId b, double pixelkm)
+{
+    const double d = terrain::distancekm(world, a, b) / pixelkm;
+    return static_cast<int>(lround(d * d));
+}
+
+// The export pixel of a cell: its column and row on lat-lon; elsewhere the pixel of its centre
+// on the 4 N x 2 N lat-lon export.
+void exportpixel(const mesh::CellGrid& grid, CellId c, int& x, int& y)
+{
+    if (grid.kind() == mesh::GridKind::latlon)
+    {
+        x = grid.column(c);
+        y = grid.row(c);
+        return;
+    }
+
+    const double pi = 3.14159265358979323846;
+    const int columns = 4 * grid.facecells();
+    const int rows = columns / 2;
+    x = clamp(static_cast<int>(floor((grid.longitude_rad(c) + pi) / (2.0 * pi) * columns)), 0, columns - 1);
+    y = clamp(static_cast<int>(floor((0.5 * pi - grid.latitude_rad(c)) / pi * rows)), 0, rows - 1);
+}
 }
 
 // This function creates craters.
 
 void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bool custom)
 {
-    int width = world.width();
-    int height = world.height();
+    const CellId count = static_cast<CellId>(world.cellcount());
     int maxelev = world.maxelevation();
 
     if (world.size() == 0)
@@ -61,54 +99,56 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
 
     int totalsea = 0;
 
-    for (int i = 0; i <= width; i++)
+    for (CellId c = 0; c < count; c++)
     {
-        for (int j = 0; j <= height; j++)
-        {
-            if (world.sea(i, j))
-                totalsea++;
-        }
+        if (world.sea(c))
+            totalsea++;
     }
 
     float lowestelev = static_cast<float>(maxelev);
     float highestelev = 0.0f;
 
-    for (int i = 0; i <= width; i++)
+    for (CellId c = 0; c < count; c++)
     {
-        for (int j = 0; j <= height; j++)
-        {
-            float thiselev = world.nomfloat(i, j);
+        float thiselev = world.nomfloat(c);
 
-            if (thiselev < lowestelev)
-                lowestelev = thiselev;
+        if (thiselev < lowestelev)
+            lowestelev = thiselev;
 
-            if (thiselev > highestelev)
-                highestelev = thiselev;
-        }
+        if (thiselev > highestelev)
+            highestelev = thiselev;
     }
 
     int boundary = random(wholemetres(lowestelev), wholemetres(highestelev));
 
-    // Create a broad fractal, to vary the density of craters.
+    // A broad fractal, to vary the density of craters (a sphere noise for the legacy grain-2 fractal).
 
-    int grain = 2; // Level of detail on this fractal map.
-    float valuemod = 0.002f;
-    float valuemod2 = 0.002f;
+    const vector<float> broad = terrain::spherefractal(world, deterministiccombine(deterministiccontextseed(world.seed(), cratersalt), oldcraterno),
+        terrain::craterdensityfractal(), static_cast<float>(maxelev));
 
-    vector<vector<int>> broad(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, 0));
+    // The centres of the earlier craters: two craters never share one.
 
-    createfractal(broad, width, height, grain, valuemod, valuemod2, 1, maxelev, 1, 0);
+    vector<uint8_t> centred(count, 0);
+
+    for (int n = 0; n < oldcraterno; n++)
+    {
+        const CellId c = world.cratercell(n);
+
+        if (c < count)
+            centred[c] = 1;
+    }
+
+    vector<uint8_t> placed(count, 0);
 
     for (int craterno = oldcraterno; craterno < cratertotal; craterno++)
     {
-        int thisx = random(1, width);
-        int thisy = random(1, height);
+        const CellId c = terrain::randomcellbyarea(world);
 
-        if (random(1, maxelev) < broad[thisx][thisy])
+        if (random(1, maxelev) < broad[c])
         {
             bool makethiscrater = 0;
 
-            float thiselev = world.nomfloat(thisx, thisy);
+            float thiselev = world.nomfloat(c);
 
             if (checktype == 0)
                 makethiscrater = 1;
@@ -117,24 +157,11 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
             {
                 float slope = 0.0f;
 
-                for (int i = thisx - 1; i <= thisx + 1; i++)
+                worldcells::anyinbox(world, c, 1, [&](CellId n)
                 {
-                    int ii = i;
-
-                    if (ii<0 || ii>width)
-                        ii = wrap(ii, width);
-
-                    for (int j = thisy - 1; j <= thisy + 1; j++)
-                    {
-                        if (j >= 0 && j <= height)
-                        {
-                            float thisslope = thiselev - world.nomfloat(ii, j);
-
-                            if (thisslope > slope)
-                                slope = thisslope;
-                        }
-                    }
-                }
+                    slope = max(slope, thiselev - world.nomfloat(n));
+                    return false;
+                });
 
                 if (random(1, 60) < slope) // The steeper it is here, the more likely there are to be craters.
                     makethiscrater = 1;
@@ -152,11 +179,8 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
                     makethiscrater = 1;
             }
 
-            for (int n = 0; n <= craterno; n++) // Don't allow two craters with precisely the same centre.
-            {
-                if (world.craterx(n) == thisx && world.cratery(n) == thisy)
-                    makethiscrater = 0;
-            }
+            if (centred[c]) // Don't allow two craters with precisely the same centre.
+                makethiscrater = 0;
 
             if (makethiscrater)
             {
@@ -187,7 +211,8 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
                 if (thissize < 1.0f)
                     thissize = 1.0f;
 
-                makecrater(world, squareroot, craterno, thisx, thisy, (int)thissize);
+                makecrater(world, squareroot, placed, craterno, c, (int)thissize);
+                centred[c] = 1;
             }
         }
     }
@@ -198,11 +223,10 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
     {
         int newtotalsea = 0;
 
-        for (int i = 0; i <= width; i++)
+        for (CellId c = 0; c < count; c++)
         {
-            for (int j = 0; j <= height; j++)
-                if (world.sea(i, j))
-                    newtotalsea++;
+            if (world.sea(c))
+                newtotalsea++;
         }
 
         if (newtotalsea > 100)
@@ -211,13 +235,10 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
             {
                 float lowest = static_cast<float>(maxelev);
 
-                for (int i = 0; i <= width; i++)
+                for (CellId c = 0; c < count; c++)
                 {
-                    for (int j = 0; j <= height; j++)
-                    {
-                        if (world.nomfloat(i, j) < lowest)
-                            lowest = world.nomfloat(i, j);
-                    }
+                    if (world.nomfloat(c) < lowest)
+                        lowest = world.nomfloat(c);
                 }
 
                 int sealevel = wholemetres(lowest) - random(10, 500);
@@ -233,13 +254,14 @@ void createcratermap(planet& world, int cratertotal, vector<int>& squareroot, bo
 
 namespace
 {
-// This function creates a crater on the world map.
+// This function creates a crater on the world map: a floor over the cells within size legacy
+// pixels of the centre cell, a rim on its outer pixel, a central peak and a blurred edge.
+// placed (one flag per cell, all clear) marks the floor while the crater is drawn.
 
-void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int centrex, int centrey, int size)
+void makecrater(planet& world, vector<int>& squareroot, vector<uint8_t>& placed, int thiscraterno, CellId centre, int size)
 {
-    int width = world.width();
-    int height = world.height();
-    int maxelev = world.maxelevation();
+    const mesh::CellGrid& grid = world.grid();
+    const double pixelkm = terrain::legacycellkm(world);
 
     int centreelev = size * 20;
     float rimelev = (float)(size * 250);
@@ -252,19 +274,24 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
 
     rimelev = rimelev * var;
 
+    int centrex = 0;
+    int centrey = 0;
+    exportpixel(grid, centre, centrex, centrey);
+
     world.setcraterx(thiscraterno, centrex);
     world.setcratery(thiscraterno, centrey);
     world.setcraterelev(thiscraterno, centreelev);
     world.setcraterradius(thiscraterno, size);
+    world.setcratercell(thiscraterno, centre);
 
     int sizecheck = size * size + size;
     int sizechecksmall = (size - 1) * (size - 1) + size - 1;
 
-    vector<vector<bool>> placed(width + 1, vector<bool>(height + 1, 0)); // This notes where the crater has been placed.
+    vector<CellId> placedcells; // The cells of the floor, to clear placed afterwards.
 
     // First, find the base elevation for this crater.
 
-    float baseelev = world.nomfloat(centrex,centrey);
+    float baseelev = world.nomfloat(centre);
 
     // Now make a circular depression, with a rim.
 
@@ -275,61 +302,47 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
     if (deepestelev < 1.0f)
         deepestelev = 1.0f;
 
-    float aveelev = deepestelev + (baseelev - deepestelev) / 2.0f; // Roughly average elevation of the crater floor.
-
-    for (int i = 0 - size; i <= size; i++)
+    for (const CellId c : terrain::cellswithinkm(world, centre, sqrt(sizecheck + 0.5) * pixelkm))
     {
-        int ii = centrex + i;
+        int thischeck = pixeldistancesquared(world, centre, c, pixelkm);
 
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-        
-        for (int j = 0 - size; j <= size; j++)
+        if (thischeck <= sizecheck)
         {
-            int jj = centrey + j;
+            // Work out how deep the crater should be at this point.
 
-            if (jj >= 0 && jj <= height)
+            int depth = squareroot[sizecheck - thischeck];
+
+            depth = depth * depthmult;
+
+            float thiselev = baseelev - depth;
+
+            if (thiselev < 1.0f)
+                thiselev = 1.0f;
+
+            float oldelev = world.nomfloat(c);
+
+            if (oldelev >= deepestelev)
             {
-                int thischeck = i * i + j * j;
-                
-                if (thischeck <= sizecheck)
+                placed[c] = 1;
+                placedcells.push_back(c);
+
+                world.setnomfloat(c, thiselev); // This is the flat crater floor.
+
+                world.setmountainheight(c, 0); // Problem here.
+                world.setmountainridge(c, 0);
+                world.setvolcano(c, 0);
+                world.setcraterrim(c, 0);
+                world.setcratercentre(c, 0);
+
+                if (thischeck <= sizecheck && thischeck >= sizechecksmall)
                 {
-                    // Work out how deep the crater should be at this point.
-
-                    int depth = squareroot[sizecheck - thischeck];
-
-                    depth = depth * depthmult;
-
-                    float thiselev = baseelev - depth;
-
-                    if (thiselev < 1.0f)
-                        thiselev = 1.0f;
-
-                    float oldelev = world.nomfloat(ii, jj);
-
-                    if (oldelev >= deepestelev)
-                    {                     
-                        placed[ii][jj] = 1;
-
-                        world.setnomfloat(ii, jj, thiselev); // This is the flat crater floor.
-
-                        world.setmountainheight(ii, jj, 0); // Problem here.
-                        world.setmountainridge(ii, jj, 0);
-                        world.setvolcano(ii, jj, 0);
-                        world.setcraterrim(ii, jj, 0);
-                        world.setcratercentre(ii, jj, 0);
-
-                        if (thischeck <= sizecheck && thischeck >= sizechecksmall)
-                        {
-                            world.setcraterrim(ii, jj, rimelev); // This is the ring of mountains around the rim.
-                        }
-                    }
+                    world.setcraterrim(c, rimelev); // This is the ring of mountains around the rim.
                 }
             }
         }
     }
 
-    world.setcratercentre(centrex, centrey, centreelev); // Do this only now, as we wiped any that the crater covers when making the crater floor just now.
+    world.setcratercentre(centre, centreelev); // Do this only now, as we wiped any that the crater covers when making the crater floor just now.
 
     // Now raise the middle a bit around the central peak.
 
@@ -341,117 +354,64 @@ void makecrater(planet& world, vector <int> &squareroot, int thiscraterno, int c
     int peakradcheck = peakrad * peakrad + peakrad;
     float peakbaseelev = (float)centreelev / 10.0f;
 
-    for (int i = 0 - peakrad; i <= peakrad; i++)
+    for (const CellId c : terrain::cellswithinkm(world, centre, sqrt(peakradcheck + 0.5) * pixelkm))
     {
-        int ii = centrex + i;
+        int thischeck = pixeldistancesquared(world, centre, c, pixelkm);
 
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
-
-        for (int j = 0 - peakrad; j <= peakrad; j++)
+        if (thischeck <= peakradcheck)
         {
-            int jj = centrey + j;
+            // Work out how much elevation to add at this point.
 
-            if (jj >= 0 && jj <= height)
-            {
-                int thischeck = i * i + j * j;
+            float dist = 1.0f;
 
-                if (thischeck <= peakradcheck)
-                {
-                    // Work out how much elevation to add at this point.
+            if (thischeck > 1)
+                dist = (float)squareroot[thischeck];
 
-                    float dist = 1.0f;
+            dist = (float)peakrad - dist;
 
-                    if (thischeck > 1)
-                        dist = (float)squareroot[thischeck];
+            if (dist < 0.0f)
+                dist = 0.0f;
 
-                    dist = (float)peakrad - dist;
+            float mult = dist / (float)peakrad;
 
-                    if (dist < 0.0f)
-                        dist = 0.0f;
+            int newelev = (int)(peakbaseelev * mult);
 
-                    float mult = dist / (float)peakrad;
+            float thiselev = world.nomfloat(c) + static_cast<float>(newelev);
 
-                    int newelev = (int)(peakbaseelev * mult);
-
-                    float thiselev = world.nomfloat(ii, jj) + static_cast<float>(newelev);
-
-                    world.setnomfloat(ii, jj, thiselev);
-                }
-            }
+            world.setnomfloat(c, thiselev);
         }
     }
 
-    // Now blur around the edges a little.
+    // Now blur around the edges a little: the cells within two pixels of the floor that are
+    // next to it (the 3 x 3 and 5 x 5 neighbour boxes of the legacy loops).
 
     int largesize = size + 2;
 
-    for (int i = 0 - largesize; i <= largesize; i++)
+    for (const CellId c : terrain::cellswithinkm(world, centre, (largesize + 0.5) * pixelkm))
     {
-        int ii = centrex + i;
+        if (placed[c] == 1)
+            continue;
 
-        if (ii<0 || ii>width)
-            ii = wrap(ii, width);
+        const bool nexttocrater = worldcells::anyinbox(world, c, 1, [&](CellId n) { return placed[n] == 1; });
 
-        for (int j = 0 - largesize; j <= largesize; j++)
+        if (nexttocrater)
         {
-            int jj = centrey + j;
+            float highestcrater = 0.0f;
 
-            if (jj >= 0 && jj <= height)
-            {                
-                if (placed[ii][jj] == 0)
-                {
-                    bool nexttocrater = 0;
-                    
-                    for (int k = ii - 1; k <= ii + 1; k++)
-                    {
-                        int kk = k;
+            worldcells::anyinbox(world, c, 2, [&](CellId n)
+            {
+                if (placed[n] == 1 && world.nomfloat(n) > highestcrater)
+                    highestcrater = world.nomfloat(n);
+                return false;
+            });
 
-                        if (kk<0 || kk>width)
-                            kk = wrap(kk, width);
+            float newelev = (world.nomfloat(c) + highestcrater) / 2.0f;
 
-                        for (int l = jj - 1; l <= jj + 1; l++)
-                        {
-                            if (l >= 0 && l <= height)
-                            {
-                                if (placed[kk][l] == 1)
-                                {
-                                    nexttocrater = 1;
-                                    k = ii + 1;
-                                    l = jj + 1;
-                                }
-                            }
-                        }
-                    }
-
-                    if (nexttocrater)
-                    {
-                        float highestcrater = 0.0f;
-
-                        for (int k = ii - 2; k <= ii + 2; k++)
-                        {
-                            int kk = k;
-
-                            if (kk<0 || kk>width)
-                                kk = wrap(kk, width);
-
-                            for (int l = jj - 2; l <= jj + 2; l++)
-                            {
-                                if (l >= 0 && l <= height)
-                                {
-                                    if (placed[kk][l] == 1 && world.nomfloat(kk,l)>highestcrater)
-                                        highestcrater = world.nomfloat(kk, l);
-                                }
-                            }
-                        }
-
-                        float newelev = (world.nomfloat(ii, jj) + highestcrater) / 2.0f;
-
-                        world.setnomfloat(ii, jj, newelev);
-                    }
-                }
-            }
+            world.setnomfloat(c, newelev);
         }
     }
+
+    for (const CellId c : placedcells)
+        placed[c] = 0;
 }
 }

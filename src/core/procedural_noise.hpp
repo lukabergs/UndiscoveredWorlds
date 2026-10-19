@@ -24,6 +24,4 @@ float tilt(float a, float b, int percentage);
 void createfractal(std::vector<std::vector<int>>& arr, int awidth, int aheight, int grain, float valuemod, float valuemod2,
     int min, int max, bool extreme, bool wrapped);
 void warp(std::vector<std::vector<int>>& map, int width, int height, int maxelev, int warpfactor, bool vary);
-void monstrouswarp(std::vector<std::vector<int>>& map, int width, int height, int maxelev, int warpfactor);
 void shift(std::vector<std::vector<int>>& map, int width, int height, int offset);
-void flip(std::vector<std::vector<int>>& arr, int awidth, int aheight, bool vert, bool horiz);

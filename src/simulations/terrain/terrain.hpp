@@ -12,9 +12,15 @@ class twointegers;
 
 // Fractal fields shared by terrain, climate, and the editor.
 
-// Template mountain chains and land shapes used by editing tools.
-void createchains(planet& world, int baseheight, int conheight, std::vector<std::vector<int>>& fractal, std::vector<std::vector<int>>& plateaumap, boolshapetemplate landshape[], boolshapetemplate chainland[], twointegers focuspoints[], int focustotal, int focaldistance, int mode);
-void fractaladdland(planet& world, std::vector<std::vector<int>>& fractal);
+// Template mountain chains and land shapes used by editing tools, on the cell grid (T8 W2-T3):
+// fractal and plateaumap hold one value per cell; a chain starts at a cell drawn by area or
+// near a focus cell; positions move and templates are pasted in legacy pixels
+// (terrain.sphere_noise.legacy_columns) through the tangent frame, so a chain has the same
+// size in km at every resolution.
+void createchains(planet& world, int baseheight, int conheight, const std::vector<int>& fractal, std::vector<int>& plateaumap, boolshapetemplate landshape[], boolshapetemplate chainland[], const std::vector<mesh::CellId>& focuspoints, int focaldistance, int mode);
+// Adds the fractal (one value per cell) to the land; divfield, a second field of the same
+// values (the legacy flipped and shifted copy of the fractal), varies the divisor.
+void fractaladdland(planet& world, const std::vector<int>& fractal, const std::vector<int>& divfield);
 
 // Sea connectivity, coastal elevation, and island cleanup.
 void removesmallseas(planet& world, int minseasize, int level);
