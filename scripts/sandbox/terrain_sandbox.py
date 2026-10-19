@@ -272,12 +272,14 @@ class Domain:
         return self._points
 
     def frame(self):
-        """Local unit east and north tangents (3, rows, columns)."""
-        latitude, longitude = np.radians(self.latitude_deg)[:, None], np.radians(self.longitude_deg)[None, :]
-        so, co, sl, cl = np.sin(longitude), np.cos(longitude), np.sin(latitude), np.cos(latitude)
-        east = np.stack([-so * np.ones_like(sl), co * np.ones_like(sl), np.zeros((self.rows, self.columns))])
-        north = np.stack([-sl * co, -sl * so, cl * np.ones_like(co)])
-        return east, north
+        """Local unit east and north tangents (3, rows, columns); computed once (callers do not write to them)."""
+        if getattr(self, '_frame', None) is None:
+            latitude, longitude = np.radians(self.latitude_deg)[:, None], np.radians(self.longitude_deg)[None, :]
+            so, co, sl, cl = np.sin(longitude), np.cos(longitude), np.sin(latitude), np.cos(latitude)
+            east = np.stack([-so * np.ones_like(sl), co * np.ones_like(sl), np.zeros((self.rows, self.columns))])
+            north = np.stack([-sl * co, -sl * so, cl * np.ones_like(co)])
+            self._frame = (east, north)
+        return self._frame
 
     def abs_latitude(self):
         return np.abs(self.latitude_deg)[:, None]
@@ -926,24 +928,46 @@ def band_weight(wavelength_km, spec):
 cell_hash3 = erosion_filter.cell_hash3  # three values in [-1, 1) per 3-D lattice cell
 
 
+NOISE_CHUNK = 1 << 16  # points per block of gradient_noise3 (the block's temporaries stay in the cache)
+
+
 def gradient_noise3(u, seed):
-    """3-D gradient noise at lattice positions u (3, ...) with a quintic fade; standard deviation NOISE_STD3."""
-    cells = np.floor(u)
-    f = (u - cells).astype(np.float32)
-    cells = cells.astype(np.int64)
-    fade = f * f * f * (f * (f * 6 - 15) + 10)
-    corners = {}
-    for cx in (0, 1):
-        for cy in (0, 1):
-            for cz in (0, 1):
-                gx, gy, gz = cell_hash3(cells[0] + cx, cells[1] + cy, cells[2] + cz, seed)
-                corners[cx, cy, cz] = gx * (f[0] - cx) + gy * (f[1] - cy) + gz * (f[2] - cz)
+    """3-D gradient noise at lattice positions u (3, ...) with a quintic fade; standard deviation NOISE_STD3.
+    float32 from the fractional positions on (fade, gradients, dot products, interpolation); the lattice cells and
+    positions in float64 and int64. Evaluated in blocks of NOISE_CHUNK points; per block the lattice words x A, y B,
+    z C of both cells along each axis are formed once ((x + 1) A = x A + A in uint32) and the two mixes run in place,
+    the same bits as cell_hash3 per corner."""
+    u = np.asarray(u, dtype=np.float64)
+    shape = u.shape[1:]
+    flat = u.reshape(3, -1)
+    count = flat.shape[1]
+    out = np.empty(count, dtype=np.float32)
+    seed_word = erosion_filter.seed_term(seed)
     lerp = lambda a, b, t: a + t * (b - a)  # noqa: E731
-    x00 = lerp(corners[0, 0, 0], corners[1, 0, 0], fade[0])
-    x10 = lerp(corners[0, 1, 0], corners[1, 1, 0], fade[0])
-    x01 = lerp(corners[0, 0, 1], corners[1, 0, 1], fade[0])
-    x11 = lerp(corners[0, 1, 1], corners[1, 1, 1], fade[0])
-    return lerp(lerp(x00, x10, fade[1]), lerp(x01, x11, fade[1]), fade[2])
+    for start in range(0, count, NOISE_CHUNK):
+        part = flat[:, start:start + NOISE_CHUNK]
+        cells = np.floor(part)
+        f = (part - cells).astype(np.float32)
+        cells = cells.astype(np.int64)
+        fade = f * f * f * (f * (f * 6 - 15) + 10)
+        words = []
+        for axis, factor in enumerate((erosion_filter.HASH_X, erosion_filter.HASH_Y, erosion_filter.HASH_Z)):
+            low = erosion_filter.as_word(cells[axis]) * factor
+            words.append((low, low + factor))
+        h, second, scratch = (np.empty(part.shape[1], dtype=np.uint32) for _ in range(3))
+        corners = {}
+        for cx in (0, 1):
+            for cy in (0, 1):
+                for cz in (0, 1):
+                    erosion_filter.hash_words(words[0][cx], words[1][cy], words[2][cz], seed_word, h, second, scratch)
+                    gx, gy, gz = erosion_filter.hash_values(h, second)
+                    corners[cx, cy, cz] = gx * (f[0] - cx) + gy * (f[1] - cy) + gz * (f[2] - cz)
+        x00 = lerp(corners[0, 0, 0], corners[1, 0, 0], fade[0])
+        x10 = lerp(corners[0, 1, 0], corners[1, 1, 0], fade[0])
+        x01 = lerp(corners[0, 0, 1], corners[1, 0, 1], fade[0])
+        x11 = lerp(corners[0, 1, 1], corners[1, 1, 1], fade[0])
+        out[start:start + part.shape[1]] = lerp(lerp(x00, x10, fade[1]), lerp(x01, x11, fade[1]), fade[2])
+    return out.reshape(shape)
 
 
 def octave_rotation(octave):
@@ -1044,9 +1068,40 @@ def axis_tangent(domain, theta):
 
 
 def domain_normals(domain):
-    """The cells' outward unit normals (3, ...)."""
-    points = domain.points()
-    return points / np.sqrt((points * points).sum(0))
+    """The cells' outward unit normals (3, ...), computed once per domain."""
+    if getattr(domain, '_normals', None) is None:
+        points = domain.points()
+        domain._normals = points / np.sqrt((points * points).sum(0))
+    return domain._normals
+
+
+CANDIDATE_CHUNK = 1 << 15  # cells per block of member_candidates' products
+
+
+def member_candidates(direction, normal, axes, sharpness, cells):
+    """For each bank axis, the flat indices (ascending) among `cells` where member_weight may exceed 1e-3: a superset
+    by a margin, selected from chunked products of the normals and the directions with all the axes (the selection
+    only; the weights there are member_weight's own). member_weight > 1e-3 needs its taper above 0 (|t| > 0.6, so
+    (a . n)^2 < 0.64) and (2 cos^2 delta - 1)^sharpness above 1e-3, i.e. (a . s)^2 > (1 + 1e-3^(1/sharpness)) / 2
+    (1 - (a . n)^2); the test keeps 0.1 % and 0.0001 of slack for the products' rounding."""
+    axes = np.asarray(axes, dtype=np.float64)
+    direction, normal = direction.reshape(3, -1), normal.reshape(3, -1)
+    bound = 0.999 * (1.0 + 1e-3 ** (1.0 / sharpness)) / 2.0
+    found = [[] for _ in range(len(axes))]
+    for start in range(0, cells.size, CANDIDATE_CHUNK):
+        block = cells[start:start + CANDIDATE_CHUNK]
+        radial = normal[:, block].T @ axes.T          # (cells, members)
+        along = direction[:, block].T @ axes.T
+        radial *= radial
+        keep = (along * along >= bound * (1.0 - radial)) & (radial <= 0.6401)
+        member_ids, cell_ids = np.nonzero(keep.T)     # member-major, cells ascending within a member
+        if member_ids.size == 0:
+            continue
+        splits = np.searchsorted(member_ids, np.arange(1, len(axes)))
+        for member, chosen in enumerate(np.split(cell_ids, splits)):
+            if chosen.size:
+                found[member].append(block[chosen])
+    return [np.concatenate(parts) if parts else np.zeros(0, dtype=np.int64) for parts in found]
 
 
 def oriented_fbm(points, theta, alignment, spec, seed, domain):
@@ -1055,26 +1110,34 @@ def oriented_fbm(points, theta, alignment, spec, seed, domain):
     squeezed about it (squeezed: stretched by spec['stretch'] along the axis's tangent projection, the same
     anisotropy wherever it acts), weight member_weight (the 2-D bank's max(0, cos 2(theta - phi_b))^sharpness with
     the projection's direction, faded where the axis leaves the tangent plane); `alignment` 0..1 mixes the isotropic
-    sum into the bank's. theta: the shortening axis (radians from east toward south)."""
+    sum into the bank's. theta: the shortening axis (radians from east toward south). Each member is evaluated only
+    on its cells (member_candidates, then its weight above 1e-3)."""
     isotropic = fbm(points, spec, seed, domain)
     count = spec.get('orientations', 6)
     if count == 0 or not np.any(alignment > 0):
         return isotropic
     points = np.asarray(points, dtype=np.float64)
-    strike = strike_tangent(domain, theta)
-    normal = domain_normals(domain)
-    bank = np.zeros(points.shape[1:])
-    weights = np.zeros(points.shape[1:])
-    aligned = alignment > 0
-    for b, a in enumerate(bank_axes(count, spec.get('bank_axis_factor', 0.75))):
-        w, _ = member_weight(strike, normal, a, spec.get('sharpness', 4.0) * spec.get('bank_sharpness_factor', 1.0))
-        active = aligned & (w > 1e-3)  # evaluated only where the member carries weight
-        if not np.any(active):
+    shape = points.shape[1:]
+    flat_points = points.reshape(3, -1)
+    strike = strike_tangent(domain, theta).reshape(3, -1)
+    normal = domain_normals(domain).reshape(3, -1)
+    bank = np.zeros(flat_points.shape[1])
+    weights = np.zeros(flat_points.shape[1])
+    sharpness = spec.get('sharpness', 4.0) * spec.get('bank_sharpness_factor', 1.0)
+    axes = bank_axes(count, spec.get('bank_axis_factor', 0.75))
+    candidates = member_candidates(strike, normal, axes, sharpness, np.flatnonzero(np.asarray(alignment).reshape(-1) > 0))
+    for b, (a, cells) in enumerate(zip(axes, candidates)):
+        if cells.size == 0:
             continue
-        moved = squeezed(points[:, active], a, spec.get('stretch', 4.0))
-        bank[active] += w[active] * fbm(moved, spec, seed * 7 + 101 + b, domain)
-        weights[active] += w[active] ** 2
-    bank = bank / np.sqrt(np.maximum(weights, 1e-12))
+        w, _ = member_weight(strike[:, cells], normal[:, cells], a, sharpness)
+        keep = w > 1e-3  # evaluated only where the member carries weight
+        if not np.any(keep):
+            continue
+        active, w = cells[keep], w[keep]
+        moved = squeezed(flat_points[:, active], a, spec.get('stretch', 4.0))
+        bank[active] += w * fbm(moved, spec, seed * 7 + 101 + b, domain)
+        weights[active] += w ** 2
+    bank = (bank / np.sqrt(np.maximum(weights, 1e-12))).reshape(shape)
     a = np.clip(alignment, 0.0, 1.0)
     return ((1 - a) * isotropic + a * bank) / np.sqrt((1 - a) ** 2 + a ** 2)
 
@@ -1684,14 +1747,24 @@ def segment_shift(domain, points, theta, oceanic, spec, seed):
                                                  fbm(points, warp, seed + 131, domain) * north)
     else:
         moved = points
-    spreading = axis_tangent(domain, theta)
+    spreading = axis_tangent(domain, theta).reshape(3, -1)
+    normal = normal.reshape(3, -1)
+    moved = moved.reshape(3, -1)
+    shift = shift.reshape(3, -1)
+    trough, weights = trough.reshape(-1), weights.reshape(-1)
     radius = domain.radius_km
     count = max(1, int(round(2.0 * math.pi * radius / spec['segment_km'])))
-    for b, d in enumerate(bank_axes(spec['orientations'], spec.get('bank_axis_factor', 0.75))):
-        w, tangent = member_weight(spreading, normal, d, spec['sharpness'] * spec.get('bank_sharpness_factor', 1.0))
-        active = (oceanic > 0.01) & (w > 1e-3)
-        if not np.any(active):
+    sharpness = spec['sharpness'] * spec.get('bank_sharpness_factor', 1.0)
+    axes = bank_axes(spec['orientations'], spec.get('bank_axis_factor', 0.75))
+    candidates = member_candidates(spreading, normal, axes, sharpness, np.flatnonzero(np.asarray(oceanic).reshape(-1) > 0.01))
+    for b, (d, cells) in enumerate(zip(axes, candidates)):
+        if cells.size == 0:
             continue
+        w, tangent = member_weight(spreading[:, cells], normal[:, cells], d, sharpness)
+        keep = w > 1e-3
+        if not np.any(keep):
+            continue
+        active, wa, tangent = cells[keep], w[keep], tangent[keep]
         first, second = axis_frame(d)
         pa = moved[:, active]
         x1 = first[0] * pa[0] + first[1] * pa[1] + first[2] * pa[2]
@@ -1706,10 +1779,9 @@ def segment_shift(domain, points, theta, oceanic, spec, seed):
         segment = np.mod(np.floor(along_ridge).astype(np.int64), count)
         bank = np.full_like(segment, b)
         offset = spec['offset_km'] * erosion_filter.cell_hash(segment, bank, seed + 120)[0]
-        wa = w[active]
-        direction = d[:, None] - (d[0] * normal[0][active] + d[1] * normal[1][active] +
-                                  d[2] * normal[2][active]) * normal[:, active]
-        direction = direction / np.maximum(tangent[active], 1e-12)
+        na = normal[:, active]
+        direction = d[:, None] - (d[0] * na[0] + d[1] * na[1] + d[2] * na[2]) * na
+        direction = direction / np.maximum(tangent, 1e-12)
         for axis in range(3):
             shift[axis][active] += wa * offset * direction[axis]
         # A fracture zone's trough scales with its transform's offset: the jump between the two segments it
@@ -1722,6 +1794,7 @@ def segment_shift(domain, points, theta, oceanic, spec, seed):
             np.sqrt(rho * rho + (d[0] * pa[0] + d[1] * pa[1] + d[2] * pa[2]) ** 2)
         trough[active] += wa * jump * np.exp(-(edge / spec['fracture_width_km']) ** 2)
         weights[active] += wa
+    shift, trough, weights = shift.reshape((3,) + shape), trough.reshape(shape), weights.reshape(shape)
     weights = np.maximum(weights, 1e-12)
     trough = trough / weights
     if spec.get('fracture_patch'):
@@ -1759,22 +1832,51 @@ def seamounts(points, spec, seed, radius_km):
     return out
 
 
+class CellView:
+    """A domain restricted to some of its cells (flat indices, ascending): the points, frames and normals there and
+    the scalars the position functions read (fine_km, radius_km, kind)."""
+
+    def __init__(self, domain, cells):
+        self.domain, self.cells = domain, cells
+        self.kind, self.fine_km, self.radius_km, self.k = domain.kind, domain.fine_km, domain.radius_km, domain.k
+        self.whole = domain.whole
+        self._points = domain.points().reshape(3, -1)[:, cells]
+        east, north = domain.frame()
+        self._frame = (east.reshape(3, -1)[:, cells], north.reshape(3, -1)[:, cells])
+        self._normals = domain_normals(domain).reshape(3, -1)[:, cells]
+
+    def points(self):
+        return self._points
+
+    def frame(self):
+        return self._frame
+
+
 def seafloor(domain, world, ocean, base, sampler, spec, seed):
     """The sea floor on oceanic crust (the user's 2026-10-13 request): depth from the crust age (GDH1),
     with the age read through ridge-transform segments (segment_shift: the ridge steps at each transform and
     the age step carries on across the plate as a fracture zone), an axial valley on the youngest crust,
     fracture-zone troughs, abyssal hills elongated along the ridge (fading with age as sediment buries them)
     and trenches on the ocean side of convergent boundaries. Blended into the base where the crust is
-    oceanic and the base is deeper than shallow_m. Returns (the new base, the age read, the spreading axis)."""
+    oceanic and the base is deeper than shallow_m. Returns (the new base, the age read, the spreading axis).
+    With the ridge distance (half_rate_km_myr) the floor is evaluated only on the cells it blends into (blend
+    weight above 0: elsewhere base + 0 x (floor - base) is the base), the age read NaN elsewhere."""
     points = domain.points()
+    shape = points.shape[1:]
     oceanic = np.clip(sampler(ocean['oceanic']), 0.0, 1.0)
     doubled = sampler(ocean['doubled'].real) + 1j * sampler(ocean['doubled'].imag)
     theta = 0.5 * np.angle(doubled)  # the spreading axis
-    shifted, trough = segment_shift(domain, points, theta, oceanic, spec, seed)
+    weight = oceanic * smoothstep(-base, spec['shallow_m'], 2.0 * spec['shallow_m']) * spec['blend']
+    ridge = 'ridge_distance' in ocean
+    cells = np.flatnonzero(weight.reshape(-1) > 0.0) if ridge else np.arange(weight.size)
+    view = CellView(domain, cells) if ridge else domain
+    pick = (lambda values: np.asarray(values).reshape(-1)[cells]) if ridge else (lambda values: values)  # noqa: E731
+    at = view.points()
+    shifted, trough = segment_shift(view, at, pick(theta), pick(oceanic), spec, seed)
     age = np.maximum(sample_at(world['crust_age'], world, shifted), 0.0)
-    if 'ridge_distance' in ocean:
+    if ridge:
         # sea-v4: the age as the distance to the spreading axis over an Earth-like half rate, where younger.
-        distance = sample_fine(ocean, domain, points)
+        distance = pick(sample_fine(ocean, domain, points))
         age = np.minimum(age, distance / spec['half_rate_km_myr'])
     else:
         # The world's age is per 156 km cell, so near a ridge its minimum is a broad smooth trough that never
@@ -1789,20 +1891,27 @@ def seafloor(domain, world, ocean, base, sampler, spec, seed):
     depth = depth + spec['fracture_trough_m'] * trough * np.exp(-age / spec['fracture_age_myr'])
     # The hills are stretched along the ridge only where the spreading direction is coherent (sea-v6: where
     # the bank's orientation turned fast, the stretched noise drew swirls and fingerprints).
-    coherence = np.ones(points.shape[1:])
+    coherence = np.ones(shape)
     if spec.get('hills_coherence', False):
         coherence = np.clip(np.abs(doubled) / np.maximum(sampler(ocean['strength']), 1e-9), 0.0, 1.0)
-    hills = oriented_fbm(shifted, theta, coherence, {**spec['hills'], **bank_options(spec)},
-                         seed + 121, domain)
+    hills = oriented_fbm(shifted, pick(theta), pick(coherence), {**spec['hills'], **bank_options(spec)},
+                         seed + 121, view)
     amplitude = spec['hills']['amplitude_m'] * (spec['hills']['old_fraction'] + (1.0 - spec['hills']['old_fraction'])
                                                 * np.exp(-age / spec['hills']['age_scale_myr']))
     if spec['hills'].get('patch'):
-        amplitude = amplitude * np.clip(0.7 + 0.5 * fbm(points, spec['hills']['patch'], seed + 122, domain), 0.15, 1.6)
+        amplitude = amplitude * np.clip(0.7 + 0.5 * fbm(at, spec['hills']['patch'], seed + 122, view), 0.15, 1.6)
     floor = -depth + amplitude * hills
     if spec.get('seamounts', {}).get('enabled', False):
-        floor = floor + seamounts(points, spec['seamounts'], seed, domain.radius_km)
-    weight = oceanic * smoothstep(-base, spec['shallow_m'], 2.0 * spec['shallow_m']) * spec['blend']
-    out = base + weight * (floor - base)
+        floor = floor + seamounts(at, spec['seamounts'], seed, domain.radius_km)
+    if ridge:
+        out = np.array(base, dtype=np.float64).reshape(-1)
+        out[cells] = out[cells] + weight.reshape(-1)[cells] * (floor - out[cells])
+        out = out.reshape(shape)
+        read = np.full(weight.size, np.nan)
+        read[cells] = age
+        age = read.reshape(shape)
+    else:
+        out = base + weight * (floor - base)
     # The trench: a V along the crest of the smoothed indicator (its value over its local maximum within a
     # world cell), so it is even along the boundary, not the whole smoothed band (sea-v1: beaded troughs
     # hundreds of km wide); trench_crest's lower end sets its width.

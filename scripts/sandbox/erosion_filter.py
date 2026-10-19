@@ -30,26 +30,62 @@ def cell_hash(ix, iy, seed):
     return hx, hy
 
 
+HASH_X, HASH_Y, HASH_Z = np.uint32(0x9E3779B1), np.uint32(0x85EBCA77), np.uint32(0xC2B2AE3D)
+HASH_SECOND = np.uint32(0x68E31DA4)
+_MIX1, _MIX2 = np.uint32(0x7FEB352D), np.uint32(0x846CA68B)
+_SHIFT15, _SHIFT16 = np.uint32(15), np.uint32(16)
+_LOW16 = np.uint32(0xFFFF)
+_SCALE, _ONE = np.float32(1.0 / 32768.0), np.float32(1.0)
+
+
+def seed_term(seed):
+    """cell_hash3's seed word."""
+    return np.uint32((seed * 0x27D4EB2F + 0x165667B1) & 0xFFFFFFFF)
+
+
+def as_word(values):
+    """Integer lattice coordinates as their low 32 bits (uint32)."""
+    return (np.asarray(values) & 0xFFFFFFFF).astype(np.uint32)
+
+
+def mix_in_place(h, scratch):
+    """The lowbias32 finaliser on uint32 h, in place (scratch: a uint32 array of h's shape)."""
+    np.right_shift(h, _SHIFT16, out=scratch)
+    np.bitwise_xor(h, scratch, out=h)
+    np.multiply(h, _MIX1, out=h)
+    np.right_shift(h, _SHIFT15, out=scratch)
+    np.bitwise_xor(h, scratch, out=h)
+    np.multiply(h, _MIX2, out=h)
+    np.right_shift(h, _SHIFT16, out=scratch)
+    np.bitwise_xor(h, scratch, out=h)
+
+
+def hash_values(h, second):
+    """The three values in [-1, 1) of a mixed word and its second mix."""
+    return ((h & _LOW16).astype(np.float32) * _SCALE - _ONE, (h >> _SHIFT16).astype(np.float32) * _SCALE - _ONE,
+            (second & _LOW16).astype(np.float32) * _SCALE - _ONE)
+
+
+def hash_words(xa, yb, zc, seed_word, h, second, scratch):
+    """h and second (in place) of the products x A, y B, z C of a cell: h = mix(x A ^ y B ^ z C ^ seed), second =
+    mix(h ^ HASH_SECOND)."""
+    np.bitwise_xor(xa, yb, out=h)
+    np.bitwise_xor(h, zc, out=h)
+    np.bitwise_xor(h, seed_word, out=h)
+    mix_in_place(h, scratch)
+    np.bitwise_xor(h, HASH_SECOND, out=second)
+    mix_in_place(second, scratch)
+
+
 def cell_hash3(ix, iy, iz, seed):
     """Three values in [-1, 1) per integer cell (ix, iy, iz), 16 bits each: two lowbias32 mixes of the cell and the seed."""
-    x = (np.asarray(ix) & 0xFFFFFFFF).astype(np.uint32)
-    y = (np.asarray(iy) & 0xFFFFFFFF).astype(np.uint32)
-    z = (np.asarray(iz) & 0xFFFFFFFF).astype(np.uint32)
-
-    def mix(h):
-        h ^= h >> np.uint32(16)
-        h *= np.uint32(0x7FEB352D)
-        h ^= h >> np.uint32(15)
-        h *= np.uint32(0x846CA68B)
-        h ^= h >> np.uint32(16)
-        return h
-    h = mix(x * np.uint32(0x9E3779B1) ^ y * np.uint32(0x85EBCA77) ^ z * np.uint32(0xC2B2AE3D) ^
-            np.uint32((seed * 0x27D4EB2F + 0x165667B1) & 0xFFFFFFFF))
-    second = mix(h ^ np.uint32(0x68E31DA4))
-    scale = np.float32(1.0 / 32768.0)
-    return ((h & np.uint32(0xFFFF)).astype(np.float32) * scale - np.float32(1.0),
-            (h >> np.uint32(16)).astype(np.float32) * scale - np.float32(1.0),
-            (second & np.uint32(0xFFFF)).astype(np.float32) * scale - np.float32(1.0))
+    xa = as_word(ix) * HASH_X
+    yb = as_word(iy) * HASH_Y
+    zc = as_word(iz) * HASH_Z
+    xa, yb, zc = np.broadcast_arrays(xa, yb, zc)
+    h, second, scratch = (np.empty(xa.shape, dtype=np.uint32) for _ in range(3))
+    hash_words(xa, yb, zc, seed_term(seed), h, second, scratch)
+    return hash_values(h, second)
 
 
 def phacelle_noise3(p, direction, normal, freq, offset, normalization, seed):
