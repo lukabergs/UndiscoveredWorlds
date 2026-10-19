@@ -496,7 +496,6 @@ std::shared_ptr<const CellGrid> cubewindowgrid(int facecells, double radius_m, c
     }
     const double r2 = radius_m * radius_m;
     double total = 0.0;
-    double minimum = std::numeric_limits<double>::infinity();
     for (CellId local = 0; local < count; local++)
     {
         const LevelKey key = g.keys_[local];
@@ -519,18 +518,15 @@ std::shared_ptr<const CellGrid> cubewindowgrid(int facecells, double radius_m, c
                 g.neighbour_[s] = static_cast<std::int32_t>(otherlocal);
                 g.reverse_[s] = static_cast<std::int8_t>(cubekeyreverse(facecells, key, k));
             }
-            const double distance = cubekeydistance_m(facecells, key, k, radius_m);
-            if (k % 2 == 1 && other != nokey)
-                minimum = std::min(minimum, distance);
             if (compact)
                 continue;
-            g.distance_[s] = distance;
+            g.distance_[s] = cubekeydistance_m(facecells, key, k, radius_m);
             g.facelength_[s] = cubekeyfacelength_m(facecells, key, k, radius_m);
             g.bearing_[s] = cubekeybearing_rad(facecells, key, k);
         }
     }
     g.totalarea_m2_ = total;
-    g.minimumspacing_m_ = count == 0 ? 0.0 : minimum;  // over the window's cells
+    g.minimumspacing_m_ = cubeminimumspacing_m(facecells, radius_m);  // the level's own (makecubegrid's)
     return grid;
 }
 
@@ -585,7 +581,13 @@ std::shared_ptr<const CellGrid> latlonwindowgrid(int levelcolumns, double radius
     for (double area : g.rowarea_)
         total += area * box.columns;
     g.totalarea_m2_ = total;
-    g.minimumspacing_m_ = std::min(g.dy_m_, *std::min_element(g.rowdx_.begin(), g.rowdx_.end()));
+    // The level's own spacing (makelatlongrid's min over the rows: the polar rows').
+    const auto rowdx = [&](int j) {
+        const double north = pi / 2.0 - pi * j / height;
+        const double south = pi / 2.0 - pi * (j + 1) / height;
+        return radius * dlambda * std::cos(0.5 * (north + south));
+    };
+    g.minimumspacing_m_ = std::min(g.dy_m_, std::min(rowdx(0), rowdx(height - 1)));
     return grid;
 }
 }

@@ -114,6 +114,9 @@ int cubekeyreverse(std::int64_t facecells, LevelKey key, int slot);
 double cubekeydistance_m(std::int64_t facecells, LevelKey key, int slot, double radius_m);
 double cubekeyfacelength_m(std::int64_t facecells, LevelKey key, int slot, double radius_m);
 double cubekeybearing_rad(std::int64_t facecells, LevelKey key, int slot);
+// The level's smallest cardinal centre spacing (makecubegrid's minimumspacing_m): the
+// cells along a face edge next to its middle, along the edge.
+double cubeminimumspacing_m(std::int64_t facecells, double radius_m);
 
 // The per-face quadtree of the refinement levels: the parent at N_L / factor of
 // a key at N_L (N_L a multiple of factor), and the factor^2 children at

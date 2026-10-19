@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <stdexcept>
 #include <vector>
 #include <gtest/gtest.h>
 
@@ -78,6 +79,7 @@ void expectsamegrid(const mesh::CellGrid& a, const mesh::CellGrid& b)
 {
     ASSERT_EQ(a.cellcount(), b.cellcount());
     EXPECT_EQ(bits(a.totalarea_m2()), bits(b.totalarea_m2()));
+    EXPECT_EQ(bits(a.minimumspacing_m()), bits(b.minimumspacing_m()));
     for (mesh::CellId c = 0; c < a.cellcount(); c++)
     {
         EXPECT_EQ(a.globalkey(c), b.globalkey(c));
@@ -102,7 +104,7 @@ double smoothfield(const mesh::Vec3& p) { return std::sin(2.0 * p.x + 0.5) * std
 
 TEST(MeshWindow, KeysEqualCubeGridIds)
 {
-    for (int n : { 4, 16 })
+    for (int n : { 4, 16, 64 })
     {
         const auto grid = mesh::makecubegrid(n, radius);
         for (mesh::CellId c = 0; c < grid->cellcount(); c++)
@@ -131,9 +133,15 @@ TEST(MeshWindow, KeysEqualCubeGridIds)
     }
 }
 
+TEST(MeshWindow, LevelSpacingIsTheCubeGridsMinimum)
+{
+    for (int n = 1; n <= 64; n++)
+        EXPECT_EQ(bits(mesh::cubeminimumspacing_m(n, radius)), bits(mesh::makecubegrid(n, radius)->minimumspacing_m())) << "N " << n;
+}
+
 TEST(MeshWindow, RandomSubsetsEqualSubgrid)
 {
-    for (int n : { 4, 16 })
+    for (int n : { 4, 16, 64 })
     {
         const auto base = mesh::makecubegrid(n, radius);
         for (std::uint64_t trial = 0; trial < 3; trial++)
@@ -228,6 +236,10 @@ TEST(MeshWindow, ChildrenAreasSumToTheParent)
         EXPECT_NEAR(total, 4.0 * pi, 1e-12) << "N " << n;
     }
     std::cout << "children over parent: worst relative difference " << worst << "\n";
+    EXPECT_THROW(mesh::cubechildkeys(mesh::maxlevelfacecells, factor, 0), std::invalid_argument);
+    EXPECT_THROW(mesh::cubechildkeys(mesh::maxlevelfacecells / 2, factor, 0), std::invalid_argument);
+    EXPECT_NO_THROW(mesh::cubechildkeys(mesh::maxlevelfacecells / factor, factor, 0));
+    EXPECT_THROW(mesh::cubeparentkey(6, factor, 0), std::invalid_argument);
 }
 
 TEST(MeshWindow, LocateCentreRoundTripAtLevel30)
@@ -337,6 +349,7 @@ TEST(MeshWindow, LatLonWindowEqualsPatchMetric)
         box.rows = window.domainrows * scale;
         const auto grid = mesh::latlonwindowgrid(levelcolumns, radius, box);
         ASSERT_EQ(grid->cellcount(), patch.size()) << b.name;
+        EXPECT_EQ(bits(grid->minimumspacing_m()), bits(full->minimumspacing_m())) << b.name;
         EXPECT_EQ(grid->kind(), mesh::GridKind::latlon);
         for (mesh::CellId c = 0; c < grid->cellcount(); c++)
         {
@@ -393,6 +406,7 @@ struct GhostMeasure
     double nearjump = 0.0;   // the same within 3 cells of a corner
     double cornerjump = 0.0; // largest difference between the three faces' stencils at a cube corner
     double weightsum = 0.0;  // largest |sum of weights - 1|
+    double constant = 0.0;   // largest |error| of a constant field (exact by applystencil's relative sum)
 };
 
 double stencilvalue(std::int64_t n, int face, double a, double b, mesh::GhostRule rule, GhostMeasure& measure)
@@ -402,6 +416,7 @@ double stencilvalue(std::int64_t n, int face, double a, double b, mesh::GhostRul
     for (double w : stencil.weight)
         sum += w;
     measure.weightsum = std::max(measure.weightsum, std::fabs(sum - 1.0));
+    measure.constant = std::max(measure.constant, std::fabs(mesh::applystencil(stencil, [](mesh::LevelKey) { return 7.25; }) - 7.25));
     return mesh::applystencil(stencil, [n](mesh::LevelKey key) { return smoothfield(mesh::cubekeycentre(n, key)); });
 }
 
@@ -478,6 +493,8 @@ TEST(MeshWindow, CubicStencilGhostsAtTruePositions)
         print("index unfolded:", unfolded);
         EXPECT_LT(truth.weightsum, 1e-12);
         EXPECT_LT(unfolded.weightsum, 1e-12);
+        EXPECT_EQ(truth.constant, 0.0);
+        EXPECT_EQ(unfolded.constant, 0.0);
         EXPECT_EQ(truth.interior, unfolded.interior);  // no ghost reaches the interior
         // Along an edge the true-position ghosts keep the interior's accuracy and the
         // two faces agree to better than it (fourth order); the index-unfolded ones
@@ -497,5 +514,6 @@ TEST(MeshWindow, CubicStencilGhostsAtTruePositions)
             EXPECT_LT(truth.cornerband, 0.2 * previous.cornerband);
         }
         previous = truth;
+        std::cout << std::defaultfloat;
     }
 }

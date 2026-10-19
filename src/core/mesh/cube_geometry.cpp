@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 namespace mesh
 {
@@ -365,14 +367,37 @@ double cubekeybearing_rad(std::int64_t facecells, LevelKey key, int slot)
     return wrapbearing(std::atan2(dot(q, e), dot(q, nn)));
 }
 
+double cubeminimumspacing_m(std::int64_t facecells, double radius_m)
+{
+    // The metric along a face edge is smallest at the edge's middle (1 / sqrt 2 of the
+    // face centre's), so the closest centres are the edge cells' around the middle row or
+    // column, along the edge; every face and both sides, as makecubegrid's scan meets them.
+    const std::int64_t n = facecells;
+    const std::int64_t low = std::max<std::int64_t>(0, (n - 1) / 2 - 1), high = std::min<std::int64_t>(n - 1, n / 2 + 1);
+    double minimum = std::numeric_limits<double>::infinity();
+    for (int face = 0; face < cubefacecount; face++)
+        for (std::int64_t side : { std::int64_t{ 0 }, n - 1 })
+            for (std::int64_t t = low; t <= high; t++)
+                for (int slot = 1; slot <= slotcount; slot += 2)
+                {
+                    minimum = std::min(minimum, cubekeydistance_m(n, cubekey(n, face, side, t), slot, radius_m));
+                    minimum = std::min(minimum, cubekeydistance_m(n, cubekey(n, face, t, side), slot, radius_m));
+                }
+    return minimum;
+}
+
 LevelKey cubeparentkey(std::int64_t facecells, int factor, LevelKey key)
 {
+    if (factor < 1 || facecells % factor != 0)
+        throw std::invalid_argument("cubeparentkey: the level's face cells must be a multiple of the factor");
     const CubeCell cell = cubecell(facecells, key);
     return cubekey(facecells / factor, cell.face, cell.column / factor, cell.row / factor);
 }
 
 std::vector<LevelKey> cubechildkeys(std::int64_t facecells, int factor, LevelKey key)
 {
+    if (factor < 1 || facecells > maxlevelfacecells / factor)
+        throw std::invalid_argument("cubechildkeys: the children's level exceeds 2^30 face cells");
     const CubeCell cell = cubecell(facecells, key);
     const std::int64_t fine = facecells * factor;
     std::vector<LevelKey> children;

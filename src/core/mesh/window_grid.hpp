@@ -41,10 +41,14 @@ struct KeyStencil
 template <typename Value>
 double applystencil(const KeyStencil& stencil, Value&& value)
 {
+    // Relative to the first value (as samplebilinear), so a constant field comes back exactly.
+    if (stencil.key.empty())
+        return 0.0;
+    const double first = static_cast<double>(value(stencil.key[0]));
     double sum = 0.0;
-    for (std::size_t n = 0; n < stencil.key.size(); n++)
-        sum += stencil.weight[n] * static_cast<double>(value(stencil.key[n]));
-    return sum;
+    for (std::size_t n = 1; n < stencil.key.size(); n++)
+        sum += stencil.weight[n] * (static_cast<double>(value(stencil.key[n])) - first);
+    return first + sum;
 }
 
 // samplebilinear's cube rule on keys: bilinear in (a, b) between the four
