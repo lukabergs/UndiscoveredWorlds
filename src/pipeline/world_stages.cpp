@@ -32,21 +32,6 @@ using namespace std;
 
 namespace
 {
-vector<vector<int>> makeintgrid(int value = 0)
-{
-    return vector<vector<int>>(ARRAYWIDTH, vector<int>(ARRAYHEIGHT, value));
-}
-
-vector<vector<bool>> makeboolgrid(bool value = false)
-{
-    return vector<vector<bool>>(ARRAYWIDTH, vector<bool>(ARRAYHEIGHT, value));
-}
-
-vector<vector<std::uint8_t>> makefeaturegrid(std::uint8_t value = 0)
-{
-    return vector<vector<std::uint8_t>>(ARRAYWIDTH, vector<std::uint8_t>(ARRAYHEIGHT, value));
-}
-
 void reseedterrainpass(planet& world, int salt)
 {
     fast_srand(deterministicfastseed(deterministiccontextseed(world.seed(), salt)));
@@ -101,50 +86,27 @@ float sampleheightcdf(const vector<float>& values, float normalizedheight)
 
 void clearfeaturemask(GenerationScratch& scratch)
 {
-    scratch.stageFeatureMask = makefeaturegrid(0);
+    scratch.stageFeatureMask.clear();
     scratch.stageFeatureCellCount = 0;
 }
 
-void markfeaturecell(GenerationScratch& scratch, int x, int y)
+// The scratch's per-cell vectors are sized to the world's cells when first written.
+void markfeaturecell(GenerationScratch& scratch, const planet& world, mesh::CellId c)
 {
-    if (x < 0 || x >= ARRAYWIDTH || y < 0 || y >= ARRAYHEIGHT)
+    if (scratch.stageFeatureMask.size() != world.cellcount())
+        scratch.stageFeatureMask.assign(world.cellcount(), 0);
+
+    if (scratch.stageFeatureMask[c] != 0)
         return;
 
-    if (scratch.stageFeatureMask.empty())
-        clearfeaturemask(scratch);
-
-    if (scratch.stageFeatureMask[x][y] != 0)
-        return;
-
-    scratch.stageFeatureMask[x][y] = 1;
+    scratch.stageFeatureMask[c] = 1;
     scratch.stageFeatureCellCount++;
 }
 
-// The scratch's [x][y] arrays hold a cell at its legacy slot (core/grid_shapes.hpp).
-void markfeaturecell(GenerationScratch& scratch, const planet& world, mesh::CellId c)
+// A cell's inland-sea component (0 before detectinlandseas has run).
+int componentat(const std::vector<int>& componentids, mesh::CellId c)
 {
-    int x = 0;
-    int y = 0;
-    legacyslot(world.grid(), c, x, y);
-    markfeaturecell(scratch, x, y);
-}
-
-template <typename T>
-T& scratchcell(std::vector<std::vector<T>>& grid, const planet& world, mesh::CellId c)
-{
-    int x = 0;
-    int y = 0;
-    legacyslot(world.grid(), c, x, y);
-    return grid[x][y];
-}
-
-template <typename T>
-T scratchcell(const std::vector<std::vector<T>>& grid, const planet& world, mesh::CellId c)
-{
-    int x = 0;
-    int y = 0;
-    legacyslot(world.grid(), c, x, y);
-    return grid[x][y];
+    return c < componentids.size() ? componentids[c] : 0;
 }
 
 mesh::CellId cellcount(const planet& world)
@@ -645,7 +607,7 @@ void metadatavolcanoes(planet& world, GenerationScratch& scratch)
     }
 }
 
-vector<mesh::CellId> findcomponentdrainpath(planet& world, const vector<vector<int>>& componentids, int componentid)
+vector<mesh::CellId> findcomponentdrainpath(planet& world, const vector<int>& componentids, int componentid)
 {
     const mesh::CellGrid& grid = world.grid();
     const mesh::CellId count = cellcount(world);
@@ -656,7 +618,7 @@ vector<mesh::CellId> findcomponentdrainpath(planet& world, const vector<vector<i
 
     for (mesh::CellId c = 0; c < count; c++)
     {
-        if (scratchcell(componentids, world, c) == componentid)
+        if (componentat(componentids, c) == componentid)
         {
             frontier.push(c);
             visited[c] = 1;
@@ -679,7 +641,7 @@ vector<mesh::CellId> findcomponentdrainpath(planet& world, const vector<vector<i
             visited[next] = 1;
             parent[next] = current;
 
-            if (world.sea(next) == 1 && scratchcell(componentids, world, next) == 0)
+            if (world.sea(next) == 1 && componentat(componentids, next) == 0)
             {
                 endpoint = next;
                 break;
@@ -721,7 +683,7 @@ void applyinlandseapolicies(planet& world, GenerationScratch& scratch)
         {
             for (mesh::CellId c = 0; c < cellcount(world); c++)
             {
-                if (scratchcell(scratch.inlandSeaComponentIds, world, c) == component.id)
+                if (componentat(scratch.inlandSeaComponentIds, c) == component.id)
                     world.setnomfloat(c, max(static_cast<float>(world.sealevel() + 1), world.nomfloat(c)));
             }
         }
@@ -848,7 +810,7 @@ void detectinlandseas(planet& world, GenerationScratch& scratch)
 {
     const mesh::CellGrid& grid = world.grid();
     const mesh::CellId count = cellcount(world);
-    scratch.inlandSeaComponentIds = makeintgrid(0);
+    scratch.inlandSeaComponentIds.assign(count, 0);
     scratch.inlandSeaComponents.clear();
 
     vector<std::uint8_t> visited(count, 0);
@@ -899,12 +861,12 @@ void detectinlandseas(planet& world, GenerationScratch& scratch)
 
         GenerationWaterComponent component;
         component.id = static_cast<int>(scratch.inlandSeaComponents.size() + 1);
-        legacyslot(grid, components[componentindex].front(), component.seedX, component.seedY);
+        component.seedCell = components[componentindex].front();
         component.cellCount = static_cast<int>(components[componentindex].size());
         scratch.inlandSeaComponents.push_back(component);
 
         for (const mesh::CellId cell : components[componentindex])
-            scratchcell(scratch.inlandSeaComponentIds, world, cell) = component.id;
+            scratch.inlandSeaComponentIds[cell] = component.id;
     }
 }
 
@@ -1023,8 +985,21 @@ bool executegenerationstage(GenerationStageId stageId, planet& world, Generation
 
     case GenerationStageId::mountain_bases:
     {
-        vector<vector<bool>> defaultmountains = makeboolgrid(false);
-        vector<vector<bool>>& mountainsok = context.okmountains != nullptr ? *context.okmountains : defaultmountains;
+        // The imported mountains (context.okmountains, still a legacy-slot array of the import
+        // screen and the CLI, core/grid_shapes.hpp legacyslot) as one flag per cell.
+        vector<std::uint8_t> mountainsok(world.cellcount(), 0);
+        if (context.okmountains != nullptr)
+        {
+            for (mesh::CellId c = 0; c < cellcount(world); c++)
+            {
+                int x = 0;
+                int y = 0;
+                legacyslot(world.grid(), c, x, y);
+                mountainsok[c] = (*context.okmountains)[x][y] ? 1 : 0;
+            }
+        }
+        if (scratch.mountaindrainage.size() != world.cellcount())
+            scratch.mountaindrainage.assign(world.cellcount(), 0);
         raisemountainbases(world, scratch.mountaindrainage, mountainsok);
         return true;
     }
@@ -1184,13 +1159,13 @@ void rebuildheightdistribution(const planet& world, GenerationScratch& scratch)
 
 void initializegenerationscratch(GenerationScratch& scratch)
 {
-    scratch.mountaindrainage = makeintgrid();
+    scratch.mountaindrainage.clear();
     scratch.squareroot.assign((MAXCRATERRADIUS * MAXCRATERRADIUS + MAXCRATERRADIUS + 1) * 24, 0);
 
     for (size_t index = 1; index < scratch.squareroot.size(); index++)
         scratch.squareroot[index] = static_cast<int>(sqrt(static_cast<float>(index)));
 
-    scratch.inlandSeaComponentIds = makeintgrid(0);
+    scratch.inlandSeaComponentIds.clear();
     scratch.heightHistogram.assign(kHeightHistogramBins, 0);
     scratch.heightCdf.assign(kHeightHistogramBins, 0.0f);
     scratch.inlandSeaComponents.clear();

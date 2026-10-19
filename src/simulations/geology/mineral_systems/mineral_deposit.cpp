@@ -204,7 +204,11 @@ void writedepositscsv(std::ostream& out, const std::vector<Deposit>& deposits, b
             << d.formationDepthM << ',' << d.verticalExtentM << ',' << d.exhumationM << ',' << d.topDepthM() << ','
             << d.erodedFraction << ',' << d.recentLiberatedGoldT;
         if (cells)
-            out << ',' << d.surface.cell;
+        {
+            out << ',';
+            if (d.surface.cell != mesh::nocell)  // empty for a deposit without a world cell (one never evaluated)
+                out << d.surface.cell;
+        }
         out << '\n';
     }
     out.precision(precision);

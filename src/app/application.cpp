@@ -550,7 +550,8 @@ void Application::styleworkbenchgloballayer(mapviewenum view, planet& renderworl
                         {
                             const int wrappedx = wrap(worldx, renderworld.width());
                             const int clampedy = std::clamp(worldy, 0, renderworld.height());
-                            const int componentid = visiblescratch.inlandSeaComponentIds.empty() ? 0 : visiblescratch.inlandSeaComponentIds[wrappedx][clampedy];
+                            const mesh::CellId cell = renderworld.grid().cellof(wrappedx, clampedy);
+                            const int componentid = cell < visiblescratch.inlandSeaComponentIds.size() ? visiblescratch.inlandSeaComponentIds[cell] : 0;
                             if (componentid <= 0)
                                 continue;
 
@@ -591,7 +592,8 @@ void Application::styleworkbenchgloballayer(mapviewenum view, planet& renderworl
                         {
                             const int wrappedx = wrap(worldx, renderworld.width());
                             const int clampedy = std::clamp(worldy, 0, renderworld.height());
-                            if (!visiblescratch.stageFeatureMask.empty() && visiblescratch.stageFeatureMask[wrappedx][clampedy] != 0)
+                            const mesh::CellId cell = renderworld.grid().cellof(wrappedx, clampedy);
+                            if (cell < visiblescratch.stageFeatureMask.size() && visiblescratch.stageFeatureMask[cell] != 0)
                             {
                                 overlayvisible = true;
                                 break;

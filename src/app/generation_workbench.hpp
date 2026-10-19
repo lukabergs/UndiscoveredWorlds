@@ -104,7 +104,8 @@ mapviewenum preferredworkbenchmapview(GenerationStageId stageId);
 bool previewcurrentgenerationstage(GenerationSessionState& session, const planet& committedworld, const GenerationExecutionContext& context, std::string* errormessage = nullptr);
 bool applycurrentgenerationstage(GenerationSessionState& session, planet& committedworld, const GenerationExecutionContext& context, std::string* errormessage = nullptr);
 void skipcurrentgenerationstage(GenerationSessionState& session, const planet& committedworld);
-bool cycleinlandseacomponentpolicyat(GenerationSessionState& session, int x, int y);
+// The inland-sea component of a cell (nocell or a cell outside the components: false).
+bool cycleinlandseacomponentpolicyat(GenerationSessionState& session, mesh::CellId cell);
 bool runcurrentgenerationstagewithoutpreview(GenerationSessionState& session, planet& committedworld, const GenerationExecutionContext& context, std::string* errormessage = nullptr);
 // Stage parameters edited in the workbench (samples the hypsometric curve).
 WorldStageParameters makestageparameters(const GenerationWorkbenchUiState& ui);

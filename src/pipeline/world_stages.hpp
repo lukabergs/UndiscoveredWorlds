@@ -32,8 +32,7 @@ enum class GenerationComponentPolicy
 struct GenerationWaterComponent
 {
     int id = 0;
-    int seedX = 0;
-    int seedY = 0;
+    mesh::CellId seedCell = mesh::nocell;   // the component's first cell in id order
     int cellCount = 0;
     bool touchesEdge = false;
     GenerationComponentPolicy policy = GenerationComponentPolicy::keep;
@@ -41,15 +40,17 @@ struct GenerationWaterComponent
 
 // State carried between stages outside the world. Migration step 5 turns the
 // physical parts into world fields; the component lists hold editor policies.
+// The per-cell vectors are indexed by cell id (T8 W2-T3) and sized to the world's cell
+// count by the stage that writes them; empty until then (read as zeros).
 struct GenerationScratch
 {
-    std::vector<std::vector<int>> mountaindrainage;
+    std::vector<int> mountaindrainage;                          // per cell: the mountain bases' extra height
     std::vector<int> squareroot;
-    std::vector<std::vector<int>> inlandSeaComponentIds;
+    std::vector<int> inlandSeaComponentIds;                     // per cell: 0, or the component's id
     std::vector<GenerationWaterComponent> inlandSeaComponents;
     std::vector<int> heightHistogram;
     std::vector<float> heightCdf;
-    std::vector<std::vector<std::uint8_t>> stageFeatureMask;   // overlay of cells changed by the last stage
+    std::vector<std::uint8_t> stageFeatureMask;                 // per cell: overlay of cells changed by the last stage
     int stageFeatureCellCount = 0;
     transientstate<GeologySolverState> geologySolver;           // initializer -> tectonics, this run only
     ClimateShadow climateShadow;                                // climate's lat-lon world on a cube world (climate_adapter.hpp)

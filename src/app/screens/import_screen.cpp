@@ -64,7 +64,7 @@ void Application::updateimportscreen()
 
                 if (clickedx >= 0 && clickedx <= displayedworkbenchworld.width() && clickedy >= 0 && clickedy <= displayedworkbenchworld.height())
                 {
-                    if (cycleinlandseacomponentpolicyat(generationworkbench, clickedx, clickedy))
+                    if (cycleinlandseacomponentpolicyat(generationworkbench, displayedworkbenchworld.grid().cellof(clickedx, clickedy)))
                         refreshworkbenchdisplay();
                 }
             }

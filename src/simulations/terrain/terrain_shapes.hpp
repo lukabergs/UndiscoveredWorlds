@@ -1,7 +1,6 @@
 #pragma once
 
-// Land shapes on the cell grid (docs/architecture/sphere-mesh.md sections 3, 11 and 12): the
-// (x, y) form of makearchipelagos in terrain.hpp forwards here.
+// Land shapes on the cell grid (docs/architecture/sphere-mesh.md sections 3, 11 and 12).
 
 #include <cstdint>
 #include <vector>

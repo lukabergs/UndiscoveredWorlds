@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
+#include "core/mesh/cell_grid.hpp"
 #include "core/world/world_grid.hpp"
 
 class planet;
@@ -13,7 +15,6 @@ class twointegers;
 // Template mountain chains and land shapes used by editing tools.
 void createchains(planet& world, int baseheight, int conheight, std::vector<std::vector<int>>& fractal, std::vector<std::vector<int>>& plateaumap, boolshapetemplate landshape[], boolshapetemplate chainland[], twointegers focuspoints[], int focustotal, int focaldistance, int mode);
 void fractaladdland(planet& world, std::vector<std::vector<int>>& fractal);
-void makearchipelagos(planet& world, std::vector<std::vector<bool>>& removedland, boolshapetemplate landshape[]);
 
 // Sea connectivity, coastal elevation, and island cleanup.
 void removesmallseas(planet& world, int minseasize, int level);
@@ -32,7 +33,8 @@ int getridge(std::vector<std::vector<int>>& arr, int x, int y, int dir);
 int getoceanridge(planet& world, int x, int y, int dir);
 void deleteridge(planet& world, int x, int y, int dir);
 void deleteridge(planet& world, std::vector<std::vector<int>>& ridgesarr, std::vector<std::vector<int>>& heightsarr, int x, int y, int dir);
-void raisemountainbases(planet& world, std::vector<std::vector<int>>& mountaindrainage, std::vector<std::vector<bool>>& OKmountains);
+// mountaindrainage and OKmountains (imported mountains keep their heights) hold one value per cell.
+void raisemountainbases(planet& world, std::vector<int>& mountaindrainage, const std::vector<std::uint8_t>& OKmountains);
 
 // Elevation smoothing, relief noise, and depression filling.
 void smoothland(planet& world, int amount);

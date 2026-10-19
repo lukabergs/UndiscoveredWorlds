@@ -876,7 +876,7 @@ void skipcurrentgenerationstage(GenerationSessionState& session, const planet& c
     pushworkbenchsnapshot(session, committedworld);
 }
 
-bool cycleinlandseacomponentpolicyat(GenerationSessionState& session, int x, int y)
+bool cycleinlandseacomponentpolicyat(GenerationSessionState& session, mesh::CellId cell)
 {
     if (session.active == false || workbenchfinished(session) || getcurrentgenerationstage(session).id != GenerationStageId::inland_seas)
         return false;
@@ -885,10 +885,10 @@ bool cycleinlandseacomponentpolicyat(GenerationSessionState& session, int x, int
 
     const GenerationScratch& visible = (session.previewAvailable && session.ui.previewEnabled) ? session.previewScratch : session.committedScratch;
 
-    if (x < 0 || y < 0 || x >= static_cast<int>(visible.inlandSeaComponentIds.size()) || y >= static_cast<int>(visible.inlandSeaComponentIds[x].size()))
+    if (cell >= visible.inlandSeaComponentIds.size())
         return false;
 
-    const int componentid = visible.inlandSeaComponentIds[x][y];
+    const int componentid = visible.inlandSeaComponentIds[cell];
     if (componentid <= 0)
         return false;
 

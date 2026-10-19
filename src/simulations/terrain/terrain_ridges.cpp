@@ -315,7 +315,7 @@ int getdestinationland(const planet& world, mesh::CellId c, int dir)
 
 // This function raises the land beneath mountains.
 
-void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, vector<vector<bool>>& OKmountains)
+void raisemountainbases(planet& world, vector<int>& mountaindrainage, const vector<std::uint8_t>& OKmountains)
 {
     int sealevel = world.sealevel();
     int maxelev = world.maxelevation();
@@ -380,18 +380,13 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
             mountainheightfactor = 0.2f;
     }
 
-    // The scratch arrays hold a cell at its legacy slot (core/grid_shapes.hpp).
+    // mountaindrainage and OKmountains hold one value per cell.
     const mesh::CellGrid& grid = world.grid();
     const vector<mesh::CellId> cells = columnmajorcells(grid);
-    auto slot = [&](mesh::CellId c, int& x, int& y) { legacyslot(grid, c, x, y); };
 
     for (const mesh::CellId c : cells)
     {
-        int x = 0;
-        int y = 0;
-        slot(c, x, y);
-
-        if (OKmountains[x][y] == 0) // Don't change the heights of any mountains that the user has imported.
+        if (OKmountains[c] == 0) // Don't change the heights of any mountains that the user has imported.
         {
             float thismountain = world.mountainheightfloat(c);
 
@@ -484,12 +479,8 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
                 for (int r = 1; r < ring; r++)
                     height = height * heightreduce;
 
-                int x = 0;
-                int y = 0;
-                slot(n, x, y);
-
-                if (mountaindrainage[x][y] < height)
-                    mountaindrainage[x][y] = (int)height;
+                if (mountaindrainage[n] < height)
+                    mountaindrainage[n] = (int)height;
             }
         }
     }
@@ -498,11 +489,7 @@ void raisemountainbases(planet& world, vector<vector<int>>& mountaindrainage, ve
 
     for (const mesh::CellId c : cells)
     {
-        int x = 0;
-        int y = 0;
-        slot(c, x, y);
-
         if (world.sea(c) == 0)
-            world.setnomfloat(c, world.nomfloat(c) + mountaindrainage[x][y]);
+            world.setnomfloat(c, world.nomfloat(c) + mountaindrainage[c]);
     }
 }

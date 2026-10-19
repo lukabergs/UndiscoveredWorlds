@@ -11,6 +11,7 @@
 #include "core/mesh/cell_grid.hpp"
 #include "core/parallel_rows.hpp"
 #include "simulations/terrain/terrain_coasts.hpp"
+#include "world/cell_queries.hpp"
 #include "world/planet.hpp"
 
 // Shared planet-grid queries for derived physical layers.
@@ -58,11 +59,18 @@ inline bool isdeltacell(const planet& world, int x, int y)
 // and 4): cells are ids, neighbours come from the neighbour table (slots 1..8 in the cell's
 // own frame, -1 where none exists), a direction code is a slot of its cell. On the lat-lon
 // grid every query reads the cells the (x, y) loops read (x wrapped, y clipped at the poles).
-// A namespace of its own: terrain's surface_potentials.cpp declares same-named cell queries
-// and reads physical_layers::detail.
+// The planet-field queries and the box walk are the shared ones of world/cell_queries.hpp;
+// a namespace of its own because physical_layers::detail keeps same-named (x, y) forms.
 namespace physical_layers::cellqueries
 {
 using mesh::CellId;
+using worldcells::annualrainfall;
+using worldcells::anyinbox;
+using worldcells::averageriverflow;
+using worldcells::hasfeatureinradius;
+using worldcells::isdeltacell;
+using worldcells::islakecell;
+using worldcells::issaltfeature;
 
 // Cells per worker of the parallel loops over cells.
 constexpr int cellsperworker = 4096;
@@ -77,34 +85,6 @@ inline void parallelforcells(const planet& world, Fn&& fn)
     }, cellsperworker);
 }
 
-inline bool islakecell(const planet& world, CellId c)
-{
-    return world.truelake(c) != 0 || world.riftlakesurfacefloat(c) != 0;
-}
-
-inline bool issaltfeature(const planet& world, CellId c)
-{
-    const int special = world.special(c);
-    return special == 100 || special == 110;
-}
-
-inline bool isdeltacell(const planet& world, CellId c)
-{
-    return world.deltadir(c) != 0 || world.deltajan(c) != 0 || world.deltajul(c) != 0;
-}
-
-inline float annualrainfall(const planet& world, CellId c)
-{
-    return (world.summerrainfloat(c) + world.winterrainfloat(c)) / 2.0f;
-}
-
-inline int averageriverflow(const planet& world, CellId c)
-{
-    const int riverflow = world.riveraveflow(c);
-    const int deltaflow = (std::abs(world.deltajan(c)) + std::abs(world.deltajul(c))) / 2;
-    return std::max(riverflow, deltaflow);
-}
-
 // planet::outline and planet::coast on any grid (terrain's cell-grid forms). On lat-lon
 // they differ from the planet's only in the first and last columns, whose west and east
 // neighbours planet::wrapx takes one column short (it wraps by W - 1).
@@ -116,41 +96,6 @@ inline bool isoutline(const planet& world, CellId c)
 inline bool iscoast(const planet& world, CellId c)
 {
     return terrain::coastgrid::coast(world, c);
-}
-
-// f(cell) for every cell within one (radius 1) or two (radius 2) neighbour steps of c,
-// c included: the 3 x 3 and 5 x 5 boxes of the legacy grid (rows beyond a pole left out).
-// A cell may be visited more than once, so f must be idempotent (a maximum, an any).
-// A callback that returns bool stops the walk when it returns true.
-template <typename F>
-inline bool anyinbox(const planet& world, CellId c, int radius, F&& f)
-{
-    const mesh::CellGrid& grid = world.grid();
-    for (const int first : boxslots)
-    {
-        const std::int32_t inner = first == 0 ? static_cast<std::int32_t>(c) : grid.neighbour(c, first);
-        if (inner < 0)
-            continue;
-        if (radius < 2)
-        {
-            if (f(static_cast<CellId>(inner)))
-                return true;
-            continue;
-        }
-        for (const int second : boxslots)
-        {
-            const std::int32_t outer = second == 0 ? inner : grid.neighbour(static_cast<CellId>(inner), second);
-            if (outer >= 0 && f(static_cast<CellId>(outer)))
-                return true;
-        }
-    }
-    return false;
-}
-
-template <typename Predicate>
-inline bool hasfeatureinradius(const planet& world, CellId c, int radius, Predicate predicate)
-{
-    return anyinbox(world, c, radius, [&](CellId n) { return static_cast<bool>(predicate(n)); });
 }
 
 // Downstream cell of each land or delta cell, by cell id; -1 where no neighbour exists

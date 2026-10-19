@@ -152,7 +152,7 @@ std::string describedeposit(const Deposit& deposit, const std::vector<Deposit>* 
 
 // One row per deposit: enum codes, positions as world fractions, provenance,
 // quantities and depths. Placer sources are omitted. cells adds the world cell of
-// each deposit (a cube bundle; sphere-mesh.md section 4).
+// each deposit (a cube bundle; sphere-mesh.md section 4), empty where it has none.
 void writedepositscsv(std::ostream& out, const std::vector<Deposit>& deposits, bool cells = false);
 std::string mineralbudgetjson(const MineralBudget& budget);
 }

@@ -41,12 +41,13 @@ int faceof(mesh::CellId c)
 // single-cell seas per face; a mild climate; erosion potential on land; a volcano and
 // a convergent boundary on one cell of each face; primary deposits at points uniform
 // on the sphere (u by longitude, v by latitude as the world fractions), each with
-// liberated gold for the placers.
-std::unique_ptr<planet> resourcecube()
+// liberated gold for the placers. On lat-lon (64 x 32) the same rules, i and j read from
+// the id as if it were a cube cell.
+std::unique_ptr<planet> resourcecube(mesh::GridKind kind = mesh::GridKind::cube)
 {
     auto world = std::make_unique<planet>();
     world->setseed(1);
-    world->setgrid(mesh::GridKind::cube, 4 * facecells);
+    world->setgrid(kind, 4 * facecells);
     world->setsealevel(0);
     const mesh::CellGrid& grid = world->grid();
 
@@ -193,4 +194,63 @@ TEST(ResourcesCube, DrainageCrossesFaceEdges)
         crossing += faceof(static_cast<mesh::CellId>(receiver[c])) != faceof(c) ? 1 : 0;
     }
     EXPECT_GT(crossing, 0);
+}
+
+TEST(ResourcesCube, PlacerCellIsTheTrappingCell)
+{
+    // A placer lies in the cell where the routing trapped its gold: the cell of its point is
+    // its surface cell, and that cell is downstream (drainagereceivers) of every primary
+    // deposit it names as a source. On the cube and on lat-lon (a uniform point of the cell).
+    for (const mesh::GridKind kind : { mesh::GridKind::cube, mesh::GridKind::latlon })
+    {
+        const std::unique_ptr<planet> world = resourcecube(kind);
+        physical_layers::generate_gold_deposits(*world);
+        const mesh::CellGrid& grid = world->grid();
+        const std::vector<std::int32_t> receiver = physical_layers::cellqueries::drainagereceivers(*world);
+
+        std::vector<mesh::CellId> primarycell(depositcount + 1, mesh::nocell);
+        for (const mineralsystems::Deposit& d : world->mineraldeposits())
+            if (d.system != mineralsystems::DepositSystem::placer_gold && d.id <= static_cast<std::uint32_t>(depositcount))
+                primarycell[d.id] = d.surface.cell;
+
+        int placers = 0;
+        int checkedsources = 0;
+        for (const mineralsystems::Deposit& d : world->mineraldeposits())
+        {
+            if (d.system != mineralsystems::DepositSystem::placer_gold)
+                continue;
+            ++placers;
+            ASSERT_LT(d.surface.cell, world->cellcount());
+            const double latitude = kPi * (0.5 - d.v);
+            const double longitude = kPi * (2.0 * d.u - 1.0);
+            EXPECT_EQ(d.surface.cell, grid.locate(mesh::unitvector(latitude, longitude))) << "placer " << d.id;
+            if (kind == mesh::GridKind::latlon)
+            {
+                EXPECT_EQ(d.surface.worldX, grid.column(d.surface.cell));
+                EXPECT_EQ(d.surface.worldY, grid.row(d.surface.cell));
+            }
+
+            EXPECT_FALSE(d.sources.empty()) << "placer " << d.id;
+            for (const mineralsystems::SourceShare& share : d.sources)
+            {
+                ASSERT_LE(share.depositId, static_cast<std::uint32_t>(depositcount));
+                std::int32_t c = static_cast<std::int32_t>(primarycell[share.depositId]);
+                ASSERT_GE(c, 0);
+                bool reached = false;
+                for (std::size_t steps = 0; c >= 0 && steps <= world->cellcount(); ++steps)
+                {
+                    if (static_cast<mesh::CellId>(c) == d.surface.cell)
+                    {
+                        reached = true;
+                        break;
+                    }
+                    c = receiver[static_cast<std::size_t>(c)];
+                }
+                EXPECT_TRUE(reached) << "placer " << d.id << " source " << share.depositId;
+                ++checkedsources;
+            }
+        }
+        EXPECT_GT(placers, 0);
+        EXPECT_GT(checkedsources, 0);
+    }
 }

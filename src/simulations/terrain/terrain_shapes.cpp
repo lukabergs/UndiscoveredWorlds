@@ -911,18 +911,6 @@ void fractaladdland(planet& world, vector<vector<int>>& fractal)
 
 // This scatters islands across areas where land has been removed.
 
-void makearchipelagos(planet& world, vector<vector<bool>>& removedland, boolshapetemplate landshape[])
-{
-    const mesh::CellGrid& grid = world.grid();
-    vector<std::uint8_t> removed(world.cellcount(), 0);
-    if (grid.kind() == mesh::GridKind::latlon)
-    {
-        for (mesh::CellId c = 0; c < world.cellcount(); c++)
-            removed[c] = removedland[grid.column(c)][grid.row(c)] ? 1 : 0;
-    }
-    terrain::makearchipelagos(world, removed, landshape);
-}
-
 void terrain::makearchipelagos(planet& world, const vector<std::uint8_t>& removedland, boolshapetemplate landshape[])
 {
     int maxelev = world.maxelevation();

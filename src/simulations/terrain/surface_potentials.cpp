@@ -3,75 +3,22 @@
 #include "core/mesh/cell_grid.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
 #include "simulations/resources/physical_layers_internal.hpp"
+#include "world/cell_queries.hpp"
 
 namespace physical_layers
 {
 using namespace detail;
+// The shared per-cell queries (world/cell_queries.hpp); clampunit and clampscore are detail's.
+using worldcells::annualrainfall;
+using worldcells::averageriverflow;
+using worldcells::hasfeatureinradius;
+using worldcells::isdeltacell;
+using worldcells::islakecell;
+using worldcells::issaltfeature;
+using worldcells::iswetlandcell;
 
 namespace
 {
-// The per-cell queries of physical_layers::detail on the cell grid.
-bool iswetlandcell(const planet& world, mesh::CellId c)
-{
-    const int special = world.special(c);
-    return special >= 130 && special < 140;
-}
-
-bool islakecell(const planet& world, mesh::CellId c)
-{
-    return world.truelake(c) != 0 || world.riftlakesurfacefloat(c) != 0;
-}
-
-bool issaltfeature(const planet& world, mesh::CellId c)
-{
-    const int special = world.special(c);
-    return special == 100 || special == 110;
-}
-
-bool isdeltacell(const planet& world, mesh::CellId c)
-{
-    return world.deltadir(c) != 0 || world.deltajan(c) != 0 || world.deltajul(c) != 0;
-}
-
-float annualrainfall(const planet& world, mesh::CellId c)
-{
-    return (world.summerrainfloat(c) + world.winterrainfloat(c)) / 2.0f;
-}
-
-int averageriverflow(const planet& world, mesh::CellId c)
-{
-    const int riverflow = world.riveraveflow(c);
-    const int deltaflow = (std::abs(world.deltajan(c)) + std::abs(world.deltajul(c))) / 2;
-    return std::max(riverflow, deltaflow);
-}
-
-// Whether a cell within one (radius 1) or two (radius 2) neighbour steps satisfies the
-// predicate: the 3 x 3 and 5 x 5 boxes of the legacy grid.
-template <typename Predicate>
-bool hasfeatureinradius(const planet& world, mesh::CellId c, int radius, Predicate predicate)
-{
-    const mesh::CellGrid& grid = world.grid();
-    for (const int first : boxslots)
-    {
-        const std::int32_t inner = first == 0 ? static_cast<std::int32_t>(c) : grid.neighbour(c, first);
-        if (inner < 0)
-            continue;
-        if (radius < 2)
-        {
-            if (predicate(static_cast<mesh::CellId>(inner)))
-                return true;
-            continue;
-        }
-        for (const int second : boxslots)
-        {
-            const std::int32_t outer = second == 0 ? inner : grid.neighbour(static_cast<mesh::CellId>(inner), second);
-            if (outer >= 0 && predicate(static_cast<mesh::CellId>(outer)))
-                return true;
-        }
-    }
-    return false;
-}
-
 float averagetemperature(const planet& world, mesh::CellId c)
 {
     return (world.mintempfloat(c) + world.maxtempfloat(c)) / 2.0f;
