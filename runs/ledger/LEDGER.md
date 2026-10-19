@@ -106,6 +106,8 @@ Generated from `runs/ledger/*.jsonl` by `scripts/uwtools/ledger.py`; do not edit
 - `tectonics-0016`: the margin rule alone (W1, W2: interiors grow past 60 km without bound, 3000+ 3.5-7 %)
 - `tectonics-0016`: creep 20000 below a 65 km onset (W4: no mountains)
 - `tectonics-0017`: a single legacy override on the new baseline without its paired key (validation refuses it)
+- `tectonics-0019`: a whole-level subgrid for windows (6.3 M cells at level 2 for N 64)
+- `tectonics-0019`: fixed 3-D axis noise banks without tangent-plane weighting (loses the warp directionality)
 - `world-0003`: Re-enabling terrain.fastlem_mountains as it is: it does not terminate at seed 1, 256 columns.
 - `world-0007`: Regenerating the access file from 256-column runs only: it drops writes that occur at the default size.
 - `world-0035`: rewriting `accessor(...) > sealevel` without excluding an offset after sealevel or arithmetic before the accessor
@@ -443,6 +445,7 @@ Lessons:
 | `tectonics-0016` | 2026-10-17 | agent measurement against the round's gate (passed by W3 at 400 Myr); the user's look pending | keep | terrain roadmap T4.12, fifth round: collapse into margins and creep below the onset (the area source kept, the interiors thickening) |
 | `tectonics-0017` | 2026-10-18 | the user's approval (2026-10-18) and the identity check; review pass with notes | keep | terrain roadmap T4.12: the baseline switch to the Earth-like W3 set at 400 Myr (approved by the user, 2026-10-18) |
 | `tectonics-0018` | 2026-10-18 | design only; the user decides | keep | terrain roadmap T8 steps 1-2: the spherical world model, survey and design (no code; awaiting the user's yes) |
+| `tectonics-0019` | 2026-10-19 | interim; W2 in progress | keep | terrain roadmap T8 option (c): W0 design, W1 foundation, W2 parallel wave (interim) |
 
 Lessons:
 
@@ -475,6 +478,10 @@ Lessons:
 - `tectonics-0016`: A matched control run with the new exe (W0) turns a guessed cause into a measured one: compare budget terms, not end states.
 - `tectonics-0017`: Refresh a stale step-check reference on the unchanged tree before the step, so the step's own changes are attributable.
 - `tectonics-0018`: The torus is confined to the engine: a spherical engine needs only one sampler at the hand-off, so the bundle format and the windows need not change.
+- `tectonics-0019`: Porting onto a generic table with a lat-lon builder first separates "the port is right" (parity) from "the cube changes the world".
+- `tectonics-0019`: Two-point flux weights need a non-orthogonal correction on the cube (7-16 % errors at face edges and corners otherwise).
+- `tectonics-0019`: A per-plate coverage normalisation makes the cube splat transport keep rigid plates uniform.
+- `tectonics-0019`: Usage limits stop every agent at once: keep state in the roadmap table and resume each agent by message.
 
 ## world
 
