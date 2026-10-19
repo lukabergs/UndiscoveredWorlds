@@ -59,8 +59,8 @@ private:
 
 // A lat-lon planet of columns x columns/2 with every field of the world (a copy
 // on a lat-lon world of the same columns). Direction fields are recomputed by the
-// callback, or 0 without one. Settlements move to the export's cell of their
-// cell's centre (x, y its column and row); the other records keep their x, y. The
+// callback, or 0 without one. Settlements and deposits move to the export's cell of
+// their cell's centre (x, y its column and row); polities and routes have no positions. The
 // planet is returned on the heap: it holds the crater list inline and has no move
 // constructor.
 std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const LatlonDirectionRecompute& recompute = {});

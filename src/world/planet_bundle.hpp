@@ -19,8 +19,8 @@ class planet;
 struct PlanetBundleExport
 {
     // Recomputes the `recomputed` fields on the export (the routing's directions and
-    // accumulated fluxes); their exports are the recomputed values and the direction
-    // fields among them are marked recomputed. Without it direction fields are exported as 0.
+    // accumulated fluxes); their exports are the recomputed values, marked recomputed.
+    // Without it direction fields are exported as 0.
     LatlonDirectionRecompute recompute;
     std::vector<worldmodel::FieldId> recomputed;
     // The climate adapter's lat-lon shadow (of the export's grid) and the fields it owns.

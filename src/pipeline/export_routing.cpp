@@ -1,7 +1,6 @@
 #include "pipeline/export_routing.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
@@ -9,11 +8,7 @@
 #include "core/mesh/cell_grid.hpp"
 #include "pipeline/climate_adapter.hpp"
 #include "simulations/hydrology/flow_routing.hpp"
-#include "simulations/landscape/depressions.hpp"
-#include "simulations/landscape/distributaries.hpp"
-#include "simulations/landscape/flow_graph.hpp"
-#include "simulations/landscape/landscape_parameters.hpp"
-#include "simulations/landscape/sphere_metric.hpp"
+#include "simulations/hydrology/rivers.hpp"
 #include "world/planet.hpp"
 #include "world/planet_export.hpp"
 #include "world/planet_fields.hpp"
@@ -22,11 +17,6 @@ using worldmodel::FieldId;
 
 namespace
 {
-constexpr double secondsperyear = 365.25 * 86400.0;
-constexpr double pi = 3.14159265358979323846;
-// hydrology.rivers' legacy flow law (rivers.cpp): 0.012 m/yr is 1 mm/month.
-constexpr double metresperyearpermmpermonth = 0.012;
-
 template<typename T>
 bool anynonzero(const worldgrid<T>& grid)
 {
@@ -52,6 +42,7 @@ const std::vector<FieldId>& exportroutingfields()
 {
     static const std::vector<FieldId> fields = {
         FieldId::flow_direction, FieldId::drainage_area, FieldId::discharge, FieldId::filled_elevation,
+        FieldId::depression_id, FieldId::runoff,
         FieldId::river_direction, FieldId::river_flow_january, FieldId::river_flow_july,
         FieldId::delta_direction, FieldId::delta_flow_january, FieldId::delta_flow_july,
     };
@@ -67,148 +58,20 @@ void recomputeexportrouting(planet& latlon)
     // A world that was never routed has nothing to recompute.
     if (!anynonzero(view.drainagearea()))
         return;
-
-    const int columns = grid.columns(), rows = grid.rows();
-    const double radius = static_cast<double>(view.radius());
-    const landscape::SphereMetric metric(columns, rows, radius);
-    const std::size_t size = metric.size();
-    const float sealevel = static_cast<float>(view.sealevel());
-
-    // The exported filled surface (never below the exported terrain) and runoff (mm/yr to m/yr).
-    std::vector<float> surface(size), runoff(size);
-    const worldgrid<float>& filled = view.filledelevation();
-    const worldgrid<float>& runoffmm = view.runoff();
-    for (std::size_t cell = 0; cell < size; cell++)
-    {
-        const mesh::CellId c = static_cast<mesh::CellId>(cell);
-        surface[cell] = std::max(filled[c], view.nomfloat(c));
-        runoff[cell] = std::max(0.0f, runoffmm[c]) / 1000.0f;
-    }
-    const std::vector<std::uint8_t> sea = flowrouting::oceancells(view);
-    const landscape::Depressions depressions =
-        landscape::filldepressions(metric, surface, sea, tuning::landscape::depressions::minimumDepthM);
-    landscape::RoutingOptions options;
-    options.resolveflats = tuning::landscape::routing::resolveFlats;
-    landscape::FlowGraph graph = landscape::buildflowgraph(metric, surface, sea, sealevel, depressions, options);
-    landscape::accumulateflow(metric, runoff, graph);
-
-    // The native rivers' seasonal ratio, read before the routing fields are replaced.
     const bool rivers = anyriverflow(view);
-    std::vector<double> weight(size, 0.0), januaryweight(size, 0.0), julyweight(size, 0.0);
+
+    // hydrology.flow_routing on the exported filled surface (never below the exported terrain).
+    const flowrouting::Inputs inputs = flowrouting::gatherinputs(view);
+    std::vector<float> surface(inputs.elevation.size());
+    const worldgrid<float>& filled = view.filledelevation();
+    for (std::size_t cell = 0; cell < surface.size(); cell++)
+        surface[cell] = std::max(filled[static_cast<mesh::CellId>(cell)], inputs.elevation[cell]);
+    const flowrouting::Routing routing = flowrouting::route(inputs, &surface, &inputs.sea);
+    flowrouting::writeroutingfields(latlon, inputs, routing);
+
+    // hydrology.rivers on the recomputed routing, where the world has rivers.
     if (rivers)
-    {
-        for (std::size_t cell = 0; cell < size; cell++)
-        {
-            if (sea[cell] != 0)
-                continue;
-            const mesh::CellId c = static_cast<mesh::CellId>(cell);
-            const double january = view.riverjan(c), july = view.riverjul(c);
-            const double w = static_cast<double>(runoff[cell]) * metric.area_m2(cell);
-            weight[cell] = w;
-            januaryweight[cell] = w * (january + july > 0.0 ? 2.0 * january / (january + july) : 1.0);
-            julyweight[cell] = w * (january + july > 0.0 ? 2.0 * july / (january + july) : 1.0);
-        }
-        for (std::size_t index = graph.order.size(); index-- > 0;)
-        {
-            const std::size_t cell = static_cast<std::size_t>(graph.order[index]);
-            const std::size_t next = static_cast<std::size_t>(graph.receiver[cell]);
-            if (next == cell || sea[next] != 0)
-                continue;
-            weight[next] += weight[cell];
-            januaryweight[next] += januaryweight[cell];
-            julyweight[next] += julyweight[cell];
-        }
-    }
-
-    worldgrid<std::uint8_t>& direction = latlon.flowdirection();
-    worldgrid<float>& area = latlon.drainagearea();
-    worldgrid<float>& discharge = latlon.discharge();
-    worldgrid<float>& filledout = latlon.filledelevation();
-    for (std::size_t cell = 0; cell < size; cell++)
-    {
-        const mesh::CellId c = static_cast<mesh::CellId>(cell);
-        direction[c] = graph.direction[cell];
-        area[c] = static_cast<float>(graph.area_m2[cell] / 1.0e6);
-        discharge[c] = static_cast<float>(graph.discharge_m3_yr[cell] / secondsperyear);
-        filledout[c] = depressions.filledelevation[cell];
-    }
-    if (!rivers)
-        return;
-
-    // hydrology.rivers' legacy units: a mean-sized cell under 1 mm/month at the runoff coefficient, over river_factor.
-    const double meanarea = 4.0 * pi * radius * radius / (static_cast<double>(columns) * static_cast<double>(rows));
-    const double unitdischarge = tuning::landscape::runoff::coefficient * metresperyearpermmpermonth *
-        static_cast<double>(view.riverfactor()) * meanarea;
-    const double minimumflow = static_cast<double>(tuning::landscape::rivers::minimumFlow);
-    for (std::size_t cell = 0; cell < size; cell++)
-    {
-        const mesh::CellId c = static_cast<mesh::CellId>(cell);
-        int code = 0, january = 0, july = 0;
-        if (sea[cell] == 0)
-        {
-            code = graph.direction[cell];
-            const double flow = graph.discharge_m3_yr[cell] / unitdischarge;
-            if (flow >= minimumflow)
-            {
-                const double januaryshare = weight[cell] > 0.0 ? januaryweight[cell] / weight[cell] : 1.0;
-                const double julyshare = weight[cell] > 0.0 ? julyweight[cell] / weight[cell] : 1.0;
-                january = static_cast<int>(std::lround(flow * januaryshare));
-                july = static_cast<int>(std::lround(flow * julyshare));
-            }
-        }
-        latlon.setriverdir(c, code);
-        latlon.setriverjan(c, january);
-        latlon.setriverjul(c, july);
-    }
-
-    // River mouths as hydrology.rivers writes them: the sea cell an outlet drains into takes
-    // its direction (the largest outlet's) and the sum of the outlets' flows.
-    std::vector<int> mouthbest(size, -1);
-    for (std::size_t cell = 0; cell < size; cell++)
-    {
-        const int code = graph.direction[cell];
-        if (sea[cell] != 0 || code < 1 || code > landscape::directioncount)
-            continue;
-        const std::size_t mouth = metric.neighbour(cell, code);
-        if (mouth == cell || sea[mouth] == 0)
-            continue;
-        const mesh::CellId c = static_cast<mesh::CellId>(cell), m = static_cast<mesh::CellId>(mouth);
-        const int january = view.riverjan(c), july = view.riverjul(c);
-        if (january == 0 && july == 0)
-            continue;
-        if (january + july > mouthbest[mouth])
-        {
-            mouthbest[mouth] = january + july;
-            latlon.setriverdir(m, code);
-        }
-        latlon.setriverjan(m, view.riverjan(m) + january);
-        latlon.setriverjul(m, view.riverjul(m) + july);
-    }
-
-    if (view.erosionduration() > 0.0f)
-    {
-        std::vector<std::uint8_t> prograded(size), codes(size);
-        std::vector<std::int32_t> january(size), july(size);
-        const worldgrid<std::uint8_t>& progradedgrid = view.prograded();
-        for (std::size_t cell = 0; cell < size; cell++)
-        {
-            const mesh::CellId c = static_cast<mesh::CellId>(cell);
-            prograded[cell] = progradedgrid[c];
-            codes[cell] = graph.direction[cell];
-            january[cell] = view.riverjan(c);
-            july[cell] = view.riverjul(c);
-        }
-        const landscape::Distributaries split = landscape::splitdistributaries(metric, sea, prograded,
-            depressions.filledelevation, static_cast<double>(view.sealevel()), codes, january, july, minimumflow);
-        for (std::size_t cell = 0; cell < size; cell++)
-        {
-            const mesh::CellId c = static_cast<mesh::CellId>(cell);
-            latlon.setdeltadir(c, split.direction[cell]);
-            latlon.setdeltajan(c, split.january[cell]);
-            latlon.setdeltajul(c, split.july[cell]);
-        }
-    }
-    latlon.setmaxriverflow();
+        applyriverstage(latlon);
 }
 
 std::unique_ptr<planet> exportworld(const planet& world, const ClimateShadow* shadow)
@@ -227,6 +90,39 @@ std::unique_ptr<planet> exportworld(const planet& world, const ClimateShadow* sh
         const worldmodel::FieldData data = readplanetfield(climate, id);
         if (!data.bytes.empty())
             loadplanetfield(*latlon, data);   // false for what a planet does not store (the solver's grids, levels, diagnostics)
+    }
+    return latlon;
+}
+
+std::unique_ptr<planet> exportbundleworld(const planet& world, const PlanetBundleSource& source)
+{
+    std::unique_ptr<planet> latlon = exportworld(world);
+    if (world.grid().kind() != mesh::GridKind::cube || source.reader == nullptr)
+        return latlon;
+    const runbundle::Reader& reader = *source.reader;
+    const std::vector<std::size_t> profileshape = { 6, static_cast<std::size_t>(latlon->grid().columns()) };
+    const auto load = [&](const runbundle::ManifestEntry& entry, FieldId id)
+    {
+        PlanetFieldData data;
+        data.id = id;
+        data.shape = entry.shape;
+        data.bytes = reader.fielddata(entry);
+        loadplanetfield(*latlon, data);   // false for what a planet does not store
+    };
+    // The climate shadow's fields on the export's grid are the bundle's exports of them.
+    for (const runbundle::ManifestEntry& entry : reader.exports())
+    {
+        FieldId id{};
+        if (worldmodel::findfield(entry.id, id) && climateshadowowned(id))
+            load(entry, id);
+    }
+    // Zonal profiles are stored in their lat-lon shape.
+    for (const runbundle::ManifestEntry& entry : reader.fields())
+    {
+        FieldId id{};
+        if (worldmodel::findfield(entry.id, id) && worldmodel::fieldspec(id).layout == worldmodel::Layout::zonalprofile &&
+            entry.shape == profileshape)
+            load(entry, id);
     }
     return latlon;
 }

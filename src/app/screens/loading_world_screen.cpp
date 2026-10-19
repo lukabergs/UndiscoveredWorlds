@@ -6,18 +6,20 @@
 bool Application::loadworldfile(const std::string& filename)
 {
     const std::filesystem::path path(filename);
-    if (path.extension() != ".json")
-        return world->loadworld(filename);
-
     try
     {
+        // A file the loader cannot parse (a .uww written before byte grids were numbers) fails cleanly.
+        if (path.extension() != ".json")
+            return world->loadworld(filename);
+
         initialiseworld(*world);
         initialisemapcolours(*world);
         world->clear();
-        loadplanetbundle(*world, path.parent_path());
-        // The desktop runs lat-lon worlds: a cube bundle's world is replaced by its export.
+        const PlanetBundleSource source = loadplanetbundle(*world, path.parent_path());
+        // The desktop runs lat-lon worlds: a cube bundle's world is replaced by its export, with
+        // the climate shadow's fields from the bundle (the legacy regional map reads the rain directions).
         if (world->grid().kind() == mesh::GridKind::cube)
-            *world = *exportworld(*world);
+            *world = *exportbundleworld(*world, source);
         return true;
     }
     catch (const std::exception& error)

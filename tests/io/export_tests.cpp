@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include "core/climate_seasons.hpp"
 #include "core/mesh/cell_grid.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 #include "io/run_bundle.hpp"
@@ -34,7 +35,6 @@ constexpr int facecells = 16;
 constexpr int columns = 4 * facecells;
 constexpr double secondsperyear = 365.25 * 86400.0;
 constexpr double pi = 3.14159265358979323846;
-constexpr float runoffmm = 500.0f;
 
 std::filesystem::path freshpath(const std::string& name)
 {
@@ -45,8 +45,9 @@ std::filesystem::path freshpath(const std::string& name)
 }
 
 // A cube N 16 world: a tilted plane of land over a sea, with a 600 m cone-shaped pit at
-// (60 N, 0 E) that the routing has not filled, runoff everywhere, a drainage area on land
-// (the world was routed) and river flows with a January to July ratio of 3.
+// (60 N, 0 E) that the routing has not filled, a wet and warm climate (no transmission
+// losses: precipitation exceeds the open-water evaporation), wetter in January than in
+// July, a drainage area on land (the world was routed) and river flows.
 std::unique_ptr<planet> syntheticcubeworld()
 {
     auto world = std::make_unique<planet>();
@@ -67,7 +68,11 @@ std::unique_ptr<planet> syntheticcubeworld()
             height -= 600.0 * (1.0 - distance / 500.0e3);
         world->setnomfloat(c, static_cast<float>(height));
         world->filledelevation()[c] = static_cast<float>(height);
-        world->runoff()[c] = runoffmm;
+        for (int season = 0; season < CLIMATESEASONCOUNT; season++)
+        {
+            world->setseasonaltempfloat(season, c, 15.0f);
+            world->setseasonalrainfloat(season, c, season == seasonjanuary ? 300.0f : season == seasonjuly ? 100.0f : 200.0f);
+        }
         const bool land = height > 0.0;
         world->drainagearea()[c] = land ? 1.0f : 0.0f;
         world->setriverjan(c, land ? 300 : 0);
@@ -126,7 +131,7 @@ TEST(ExportCube, DischargeIsRecomputedAndGrowsDownstream)
         if (view.basebelowsea(c))
             continue;
         landarea += grid.area_m2(c);
-        runofftotal += runoffmm / 1000.0 * grid.area_m2(c) / secondsperyear;
+        runofftotal += view.runoff()[c] / 1000.0 * grid.area_m2(c) / secondsperyear;
         const mesh::CellId r = static_cast<mesh::CellId>(grid.neighbour(c, view.flowdirection()[c]));
         if (view.basebelowsea(r))
         {
@@ -143,13 +148,13 @@ TEST(ExportCube, DischargeIsRecomputedAndGrowsDownstream)
     EXPECT_NEAR(outlettotal / runofftotal, 1.0, 1.0e-4);
     EXPECT_NEAR(outletarea / landarea, 1.0, 1.0e-4);
 
-    // The legacy river flows keep the native January to July ratio of 3.
+    // hydrology.rivers' legacy flows: the wetter January carries more.
     const int january = view.riverjan(largest), july = view.riverjul(largest);
-    ASSERT_GT(july, 0);
-    EXPECT_NEAR(static_cast<double>(january) / july, 3.0, 0.05);
+    EXPECT_GT(july, 0);
+    EXPECT_GT(january, july);
 }
 
-TEST(ExportCube, SettlementsMoveToTheExportCellOfTheirCentre)
+TEST(ExportCube, SettlementsAndDepositsMoveToTheExportCellOfTheirCentre)
 {
     auto world = syntheticcubeworld();
     const mesh::CellGrid& cube = world->grid();
@@ -159,6 +164,10 @@ TEST(ExportCube, SettlementsMoveToTheExportCellOfTheirCentre)
         settlement.id = static_cast<int>(world->settlements().size());
         settlement.cell = c;
         world->settlements().push_back(settlement);
+        mineralsystems::Deposit deposit;
+        deposit.id = static_cast<std::uint32_t>(world->mineraldeposits().size());
+        deposit.surface.cell = c;
+        world->mineraldeposits().push_back(deposit);
     }
     const auto exported = exportlatlon(*world, columns);
     const mesh::CellGrid& latlon = exported->grid();
@@ -172,6 +181,10 @@ TEST(ExportCube, SettlementsMoveToTheExportCellOfTheirCentre)
         EXPECT_EQ(moved.x, latlon.column(moved.cell));
         EXPECT_EQ(moved.y, latlon.row(moved.cell));
         EXPECT_LT(mesh::greatcircle_m(cube.centre(original.cell), latlon.centre(moved.cell), latlon.radius_m()), diagonal);
+        const mineralsystems::SurfaceState& deposit = exported->mineraldeposits()[index].surface;
+        EXPECT_EQ(deposit.cell, moved.cell);
+        EXPECT_EQ(deposit.worldX, moved.x);
+        EXPECT_EQ(deposit.worldY, moved.y);
     }
 }
 
@@ -210,8 +223,7 @@ TEST(ExportCube, BundleExportsTheRecomputedAndTheShadowFields)
     {
         const runbundle::ManifestEntry* entry = findentry(reader.exports(), id);
         ASSERT_NE(entry, nullptr) << worldmodel::qualifiedname(id);
-        if (worldmodel::fieldspec(id).rule == worldmodel::RemapRule::direction)
-            EXPECT_TRUE(entry->recomputed) << worldmodel::qualifiedname(id);
+        EXPECT_TRUE(entry->recomputed) << worldmodel::qualifiedname(id);
         EXPECT_EQ(reader.fielddata(*entry), readplanetfield(*expected, id).bytes) << worldmodel::qualifiedname(id);
     }
     const runbundle::ManifestEntry* ridges = findentry(reader.exports(), FieldId::mountain_ridges);
@@ -235,6 +247,14 @@ TEST(ExportCube, BundleExportsTheRecomputedAndTheShadowFields)
     EXPECT_EQ(loaded->grid().kind(), mesh::GridKind::cube);
     EXPECT_NE(std::find(source.carriedfields.begin(), source.carriedfields.end(), FieldId::subtropical_high_latitudes),
         source.carriedfields.end());
+
+    // The desktop's world of the bundle: its export with the shadow's rain directions and profile.
+    const auto desktop = exportbundleworld(*loaded, source);
+    ASSERT_EQ(desktop->grid().kind(), mesh::GridKind::latlon);
+    for (mesh::CellId c = 0; c < desktop->cellcount(); c++)
+        ASSERT_EQ(desktop->janmountainraindir(c), shadow->janmountainraindir(c)) << "cell " << c;
+    for (int x = 0; x < columns; x++)
+        ASSERT_EQ(desktop->horse(x, 2), x % 7) << "column " << x;
 }
 
 TEST(ExportCube, UwwOfACubeWorldIsItsExport)

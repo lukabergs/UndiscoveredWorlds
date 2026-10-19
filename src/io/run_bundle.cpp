@@ -246,7 +246,8 @@ void Writer::finish(const Metadata& metadata)
             out << (index ? ",\n" : "\n") << "    {\"id\": " << jsonstring(written.entry.id) << ", \"dtype\": " << jsonstring(written.entry.dtype)
                 << ", \"shape\": " << shapetext(written.entry.shape, true) << ", \"file\": " << jsonstring(written.file)
                 << ", \"hash\": " << jsonstring(hexhash(written.hash)) << ", \"rule\": " << jsonstring(written.rule);
-            if (written.rule == "direction")
+            // Every direction field records whether it was recomputed; another field only when it was.
+            if (written.rule == "direction" || written.recomputed)
                 out << ", \"recomputed\": " << (written.recomputed ? "true" : "false");
             out << "}";
         }

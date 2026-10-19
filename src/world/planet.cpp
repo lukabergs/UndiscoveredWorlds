@@ -899,6 +899,9 @@ void planet::saveworld(string filename)
 #ifdef ENABLE_PROFILER
     highres_timer_t timer("Save World"); // 26.5s => 10.9s
 #endif
+    // A .uww holds a lat-lon world: a cube world saves its export (saveworldfile, export_routing.hpp).
+    if (grid_->kind() != mesh::GridKind::latlon)
+        throw std::logic_error("A .uww holds a lat-lon world: save a cube world's lat-lon export");
     ofstream outfile;
     outfile.open(filename, ios::out);
 

@@ -160,16 +160,21 @@ std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const Lat
         // False for what a planet does not load (the climate solver's levels and diagnostics).
         loadplanetfield(*latlon, worldmodel::fieldspec(id).rule == RemapRule::direction ? remap.zeros(data) : remap.remap(data));
     }
-    // Records on cells move to the export's cell of their cell's centre; x, y are its column and row.
+    // Records on cells (settlements, deposits) move to the export's cell of their cell's centre;
+    // their x, y are its column and row. Polities and routes have no positions.
     const mesh::CellGrid& destination = latlon->grid();
-    for (Settlement& settlement : latlon->settlements())
+    const auto relocate = [&](mesh::CellId& cell, int& x, int& y)
     {
-        if (settlement.cell == mesh::nocell || settlement.cell >= source.cellcount())
-            continue;
-        settlement.cell = destination.locate(source.centre(settlement.cell));
-        settlement.x = destination.column(settlement.cell);
-        settlement.y = destination.row(settlement.cell);
-    }
+        if (cell == mesh::nocell || cell >= source.cellcount())
+            return;
+        cell = destination.locate(source.centre(cell));
+        x = destination.column(cell);
+        y = destination.row(cell);
+    };
+    for (Settlement& settlement : latlon->settlements())
+        relocate(settlement.cell, settlement.x, settlement.y);
+    for (mineralsystems::Deposit& deposit : latlon->mineraldeposits())
+        relocate(deposit.surface.cell, deposit.surface.worldX, deposit.surface.worldY);
     if (recompute)
         recompute(*latlon);
     return latlon;

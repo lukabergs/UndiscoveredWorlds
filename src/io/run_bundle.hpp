@@ -97,8 +97,8 @@ public:
     // Refuses an existing non-empty directory so earlier evidence is kept.
     explicit Writer(std::filesystem::path directory);
     void addfield(const FieldEntry& field);
-    // A field's lat-lon export (latlon/<component>/<name>.npy) by its remap rule; a
-    // direction field records whether it was recomputed on the export.
+    // A field's lat-lon export (latlon/<component>/<name>.npy) by its remap rule; a direction
+    // field records whether it was recomputed on the export, any other field only when it was.
     void addexport(const FieldEntry& field, const std::string& rule, bool recomputed);
     // One array of the cell table (grid/<id>.npy); cube kinds only.
     void addcells(const ArrayEntry& cells);
@@ -131,7 +131,7 @@ struct ManifestEntry
     std::string file;         // relative to the bundle directory
     std::string writtenby;
     std::string rule;         // exports only
-    bool recomputed = false;  // exports of direction fields
+    bool recomputed = false;  // exports: direction fields, and any field the export recomputed
 };
 
 // Reads a bundle's manifest; field data and table text are read on request.
