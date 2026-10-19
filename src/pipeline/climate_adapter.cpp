@@ -140,6 +140,16 @@ std::vector<std::uint8_t> reachedcells(RemapRule rule, const std::vector<std::ui
 }
 }
 
+// The shadow-only fields, of the direction-coded ones only climate's own (the atmosphere's:
+// the orographic rain directions); the routing's and the ridges' are not climate's.
+bool climateshadowowned(FieldId id)
+{
+    if (!shadowonly(id))
+        return false;
+    const worldmodel::FieldSpec& spec = worldmodel::fieldspec(id);
+    return spec.rule != RemapRule::direction || spec.component == worldmodel::Component::atmosphere;
+}
+
 ClimateShadow::ClimateShadow() = default;
 ClimateShadow::~ClimateShadow() = default;
 ClimateShadow::ClimateShadow(ClimateShadow&&) noexcept = default;

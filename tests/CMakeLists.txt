@@ -104,6 +104,14 @@ if(TARGET world_pipeline)
     target_link_libraries(bundle_v2_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
     target_include_directories(bundle_v2_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     gtest_discover_tests(bundle_v2_tests)
+
+    # The lat-lon export of a cube world for its consumers (sphere-mesh.md sections 6, 7 and 9; W2-IO).
+    add_executable(export_tests
+        io/export_tests.cpp
+    )
+    target_link_libraries(export_tests PRIVATE uw_headless GTest::gtest GTest::gtest_main)
+    target_include_directories(export_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    gtest_discover_tests(export_tests)
     # The terrain processes on a cube world (sphere-mesh.md sections 3, 11 and 12; T8 W2-T1).
     add_executable(terrain_cube_tests
         simulations/terrain/terrain_cube_tests.cpp

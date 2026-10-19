@@ -1,6 +1,7 @@
 #include "app/application.hpp"
+#include "pipeline/export_routing.hpp"
 
-// A .uww save, or a run bundle chosen by its manifest.json. A bundle carries the world's fields:
+// A .uww save, or a run bundle chosen by its manifest.json (a cube bundle gives its lat-lon export). A bundle carries the world's fields:
 // appearance settings are the defaults, and the tables (settlements, polities, routes, deposits) are not loaded.
 bool Application::loadworldfile(const std::string& filename)
 {
@@ -14,6 +15,9 @@ bool Application::loadworldfile(const std::string& filename)
         initialisemapcolours(*world);
         world->clear();
         loadplanetbundle(*world, path.parent_path());
+        // The desktop runs lat-lon worlds: a cube bundle's world is replaced by its export.
+        if (world->grid().kind() == mesh::GridKind::cube)
+            *world = *exportworld(*world);
         return true;
     }
     catch (const std::exception& error)

@@ -9,7 +9,6 @@
 
 namespace
 {
-    constexpr int cudaplanetstride = 1025;
     constexpr int cudaregionalstride = 1000;
     constexpr int displaywidth = 1024;
     constexpr int displayheight = 512;
@@ -155,9 +154,11 @@ namespace
         return cudacheck(cudaMemcpy(output.data(), devicebuffer.data(), count, cudaMemcpyDeviceToHost));
     }
 
-    __device__ int inputindex(int x, int y)
+    // The planet maps are in the world grid's id order: row-major, north row first,
+    // width + 1 columns (width is the largest x).
+    __device__ int inputindex(int width, int x, int y)
     {
-        return x * cudaplanetstride + y;
+        return y * (width + 1) + x;
     }
 
     __device__ int regionalinputindex(int x, int y)
@@ -251,7 +252,7 @@ namespace
 
     __device__ int computemap(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
         const int thisvolcano = abs(static_cast<int>(inputs.volcanomap[index]));
 
         if (inputs.mapnom[index] <= inputs.sealevel)
@@ -265,7 +266,7 @@ namespace
 
     __device__ bool computesea(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
 
         if (inputs.mapnom[index] <= inputs.sealevel && inputs.lakemap[index] == 0)
             return true;
@@ -293,7 +294,7 @@ namespace
 
     __device__ int computeaprtemp(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
         float summertemp = static_cast<float>(inputs.jultempmap[index]);
         float wintertemp = static_cast<float>(inputs.jantempmap[index]);
 
@@ -321,7 +322,7 @@ namespace
 
     __device__ int computewinterrain(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
 
         if (inputs.jantempmap[index] < inputs.jultempmap[index])
             return static_cast<int>(inputs.janrainmap[index]);
@@ -331,7 +332,7 @@ namespace
 
     __device__ int computesummerrain(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
 
         if (inputs.jantempmap[index] >= inputs.jultempmap[index])
             return static_cast<int>(inputs.janrainmap[index]);
@@ -341,19 +342,19 @@ namespace
 
     __device__ bool computetruelake(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
         return inputs.lakemap[index] != 0 && inputs.specials[index] < 110;
     }
 
     __device__ int computeavetemp(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
         return (static_cast<int>(inputs.jantempmap[index]) + static_cast<int>(inputs.jultempmap[index])) / 2;
     }
 
     __device__ int computemintemp(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
         const int jantemp = static_cast<int>(inputs.jantempmap[index]);
         const int jultemp = static_cast<int>(inputs.jultempmap[index]);
         return jantemp < jultemp ? jantemp : jultemp;
@@ -361,7 +362,7 @@ namespace
 
     __device__ bool isseaicevisible(const GlobalCudaDeviceInputs& inputs, int x, int y)
     {
-        const int seaice = static_cast<int>(inputs.seaicemap[inputindex(x, y)]);
+        const int seaice = static_cast<int>(inputs.seaicemap[inputindex(inputs.width, x, y)]);
         return (seaice == 2 && (inputs.relief.seaiceappearance == 1 || inputs.relief.seaiceappearance == 3))
             || (seaice == 1 && inputs.relief.seaiceappearance == 3);
     }
@@ -590,7 +591,7 @@ namespace
 
         if (!computeoutline(inputs, x, y))
         {
-            const int index = inputindex(x, y);
+            const int index = inputindex(inputs.width, x, y);
             int temperature = (static_cast<int>(inputs.jantempmap[index]) + computeaprtemp(inputs, x, y) + static_cast<int>(inputs.jultempmap[index]) + computeaprtemp(inputs, x, y)) / 4;
             temperature += 10;
 
@@ -688,7 +689,7 @@ namespace
 
         if (computesea(inputs, x, y))
         {
-            const int seaice = static_cast<int>(inputs.seaicemap[inputindex(x, y)]);
+            const int seaice = static_cast<int>(inputs.seaicemap[inputindex(inputs.width, x, y)]);
 
             if (seaice == 2)
             {
@@ -711,7 +712,7 @@ namespace
         }
         else
         {
-            climatecolour(inputs.climatemap[inputindex(x, y)], colour1, colour2, colour3);
+            climatecolour(inputs.climatemap[inputindex(inputs.width, x, y)], colour1, colour2, colour3);
         }
 
         writepixel(output, outputwidth, x, y, colour1, colour2, colour3);
@@ -725,7 +726,7 @@ namespace
         if (x > inputs.width || y > inputs.height)
             return;
 
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
         const bool sea = computesea(inputs, x, y);
         int colour1 = 255;
         int colour2 = 255;
@@ -812,7 +813,7 @@ namespace
         if (x > inputs.width || y > inputs.height)
             return;
 
-        const int index = inputindex(x, y);
+        const int index = inputindex(inputs.width, x, y);
         const int mapvalue = computemap(inputs, x, y);
         const bool sea = computesea(inputs, x, y);
         const int special = static_cast<int>(inputs.specials[index]);
@@ -1205,7 +1206,7 @@ namespace
 
                             for (int l = y - 3; l <= y + 3; l++)
                             {
-                                if (l >= 0 && l <= inputs.height && inputs.oceanriftmap[inputindex(kk, l)] != 0)
+                                if (l >= 0 && l <= inputs.height && inputs.oceanriftmap[inputindex(inputs.width, kk, l)] != 0)
                                 {
                                     ignore = true;
                                     break;
@@ -1221,7 +1222,7 @@ namespace
 
                                 for (int l = y - 1; l <= y + 1; l++)
                                 {
-                                    if (l >= 0 && l <= inputs.height && inputs.oceanridgemap[inputindex(kk, l)] != 0)
+                                    if (l >= 0 && l <= inputs.height && inputs.oceanridgemap[inputindex(inputs.width, kk, l)] != 0)
                                     {
                                         found = true;
                                         break;
@@ -2698,7 +2699,7 @@ bool renderglobalnonreliefmapscuda(const GlobalCudaRendererInputs& inputs, Globa
     if (!cudaglobalrenderersavailable())
         return false;
 
-    const size_t cellcount = static_cast<size_t>(inputs.width + 1) * cudaplanetstride;
+    const size_t cellcount = static_cast<size_t>(inputs.width + 1) * static_cast<size_t>(inputs.height + 1);
 
     GlobalCudaDeviceBuffers buffers;
 
@@ -2730,7 +2731,7 @@ bool renderglobalreliefmapcuda(const GlobalCudaRendererInputs& inputs, std::vect
     if (!cudaglobalrenderersavailable())
         return false;
 
-    const size_t cellcount = static_cast<size_t>(inputs.width + 1) * cudaplanetstride;
+    const size_t cellcount = static_cast<size_t>(inputs.width + 1) * static_cast<size_t>(inputs.height + 1);
     GlobalCudaDeviceBuffers buffers;
 
     if (!uploadglobaldevicebuffers(inputs, cellcount, buffers))

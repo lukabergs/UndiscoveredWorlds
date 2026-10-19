@@ -2,6 +2,7 @@
 add_library(uw_pipeline STATIC
     climate_adapter.cpp
     climate_stages.cpp
+    export_routing.cpp
     generation_progress.cpp
     generation_stage_registry.cpp
     physical_layers.cpp

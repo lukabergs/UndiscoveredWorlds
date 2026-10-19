@@ -27,6 +27,7 @@
 #include <memory>
 #include <vector>
 
+#include "core/world/world_fields.hpp"
 #include "pipeline/generation_stage_registry.hpp"
 
 class planet;
@@ -75,6 +76,11 @@ private:
     std::shared_ptr<const mesh::RemapWeights> importweights_;   // shadow -> cube, for the reach of changed cells
     ClimateShadowSync last_;
 };
+
+// Climate-owned state that stays authoritative on the shadow (above; of the direction
+// fields only the atmosphere's): what a cube world's exports and bundles take from
+// the shadow (export_routing.hpp).
+bool climateshadowowned(worldmodel::FieldId id);
 
 // Runs one climate process on the world. On a lat-lon world `body` runs on the
 // world itself. On a cube world it runs on the shadow, between the export of the

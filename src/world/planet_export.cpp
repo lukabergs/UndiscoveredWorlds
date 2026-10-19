@@ -160,6 +160,16 @@ std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const Lat
         // False for what a planet does not load (the climate solver's levels and diagnostics).
         loadplanetfield(*latlon, worldmodel::fieldspec(id).rule == RemapRule::direction ? remap.zeros(data) : remap.remap(data));
     }
+    // Records on cells move to the export's cell of their cell's centre; x, y are its column and row.
+    const mesh::CellGrid& destination = latlon->grid();
+    for (Settlement& settlement : latlon->settlements())
+    {
+        if (settlement.cell == mesh::nocell || settlement.cell >= source.cellcount())
+            continue;
+        settlement.cell = destination.locate(source.centre(settlement.cell));
+        settlement.x = destination.column(settlement.cell);
+        settlement.y = destination.row(settlement.cell);
+    }
     if (recompute)
         recompute(*latlon);
     return latlon;

@@ -19,6 +19,7 @@
 #include "world/functions.hpp"
 #include "pipeline/recipe_parameters.hpp"
 #include "pipeline/world_stages.hpp"
+#include "pipeline/export_routing.hpp"
 #include "io/map_imports.hpp"
 #include "io/raster_imports.hpp"
 #include "pipeline/physical_layers.hpp"
@@ -711,6 +712,13 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     if (options.grid == mesh::GridKind::cube)
     {
+        // Map imports fill a lat-lon grid; imports on a cube are a W3 item (terrain-roadmap.md, T8).
+        if (importedworld)
+        {
+            cerr << "--grid cube cannot import maps yet (--import-land, --import-sea or an imported recipe): "
+                    "imported terrain needs --grid latlon.\n";
+            return 1;
+        }
         // A bundle fixes the grid kind (sphere-mesh.md section 7): a cube world comes from a cube bundle.
         if (frombundle)
         {
@@ -851,6 +859,9 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
                  << "recipe " << recipe.name << " do" << (runoptions.selectSteps ? "" : "es") << " not run it.\n";
     }
 
+    // The procedural run's scratch: its climate shadow feeds a cube world's exports and saves.
+    GenerationScratch scratch;
+
     // Every bundle of the run, final or checkpoint, is written the same way.
     const auto writebundle = [&](const filesystem::path& directory, const RecipeRunResult& result,
         const vector<pair<string, string>>& properties)
@@ -881,7 +892,8 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
             writtentables.insert(writtentables.end(), process.tablewrites.begin(), process.tablewrites.end());
             writtentables.insert(writtentables.end(), step.tablewrites.begin(), step.tablewrites.end());
         }
-        writeplanetbundle(*world, directory, metadata, result.provenance, frombundle ? &source : nullptr, writtenfields, writtentables);
+        writeplanetbundle(*world, directory, metadata, result.provenance, frombundle ? &source : nullptr, writtenfields, writtentables,
+            bundleexport(&scratch.climateShadow));
     };
 
     vector<size_t> checkpointsteps;
@@ -1039,7 +1051,6 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
     }
     else
     {
-        GenerationScratch scratch;
         initializegenerationscratch(scratch);
 
         WorldStageParameters parameters;
@@ -1095,7 +1106,8 @@ int runcommandlineworldgeneration(const CommandLineGenerationOptions& options)
 
     if (options.hasSavePath)
     {
-        world->saveworld(options.savePath);
+        // A cube world saves its lat-lon export (sphere-mesh.md section 9).
+        saveworldfile(*world, options.savePath, &scratch.climateShadow);
         updatereport("Saved world: " + options.savePath);
     }
 

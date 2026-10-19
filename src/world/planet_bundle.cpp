@@ -122,7 +122,10 @@ PlanetBundleSource loadplanetbundle(planet& world, const std::filesystem::path& 
         if (cube)
             encoding::cubeworldshape(data.shape, facecells);   // [layer,] 6, N, N -> [layer,] cells
         data.bytes = reader.fielddata(entry);
-        if (loadplanetfield(world, data))
+        // A cube bundle's zonal profiles are climate's lat-lon ones (its shadow's): carried.
+        if (cube && fieldspec(data.id).layout == Layout::zonalprofile)
+            source.carriedfields.push_back(data.id);
+        else if (loadplanetfield(world, data))
         {
             source.loadedfields.push_back(data.id);
             // The radius is the grid's too: its areas and distances follow it.
@@ -144,7 +147,7 @@ PlanetBundleSource loadplanetbundle(planet& world, const std::filesystem::path& 
 void writeplanetbundle(const planet& world, const std::filesystem::path& directory,
     const runbundle::Metadata& metadata, const BundleProvenance& provenance,
     const PlanetBundleSource* source, const std::vector<worldmodel::FieldId>& writtenfields,
-    const std::vector<worldmodel::TableId>& writtentables)
+    const std::vector<worldmodel::TableId>& writtentables, const PlanetBundleExport& exports)
 {
     using namespace worldmodel;
     runbundle::Writer writer(directory);
@@ -160,14 +163,27 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
     manifest.columns = cube ? 4 * grid.facecells() : grid.columns();
     manifest.rows = manifest.columns / 2;
 
-    // A cube bundle carries the lat-lon export of every field on the world grid (section 6).
+    // A cube bundle carries the lat-lon export of every field on the world grid (section 6):
+    // the recomputed fields from the world's export, the climate shadow's own from the shadow.
     std::shared_ptr<const mesh::CellGrid> exportgrid;
     std::unique_ptr<FieldRemap> exporter;
+    std::unique_ptr<planet> exported;
+    const planet* shadow = nullptr;
+    std::unique_ptr<FieldRemap> shadowshape;   // an identity on the shadow's grid: checks a field is on it
     if (cube)
     {
         exportgrid = mesh::makelatlongrid(manifest.columns, grid.radius_m());
         exporter = std::make_unique<FieldRemap>(grid, *exportgrid);
         writecelltable(writer, grid);
+        if (exports.recompute)
+            exported = exportlatlon(world, manifest.columns, exports.recompute);
+        if (exports.climateshadow != nullptr && exports.shadowowned)
+        {
+            shadow = exports.climateshadow;
+            if (shadow->grid().kind() != mesh::GridKind::latlon || shadow->grid().columns() != manifest.columns)
+                throw std::logic_error("writeplanetbundle: the climate shadow is not on the export's grid");
+            shadowshape = std::make_unique<FieldRemap>(shadow->grid(), shadow->grid());
+        }
     }
 
     for (std::size_t index = 0; index < kFieldCount; index++)
@@ -183,47 +199,87 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
         entry.dtype = elementname(spec.element);
         if (const auto found = provenance.fields.find(id); found != provenance.fields.end())
             entry.writtenby = found->second;
+        const bool carried = source != nullptr && contains(source->carriedfields, id) && !contains(writtenfields, id);
+
+        // A field the climate shadow owns (and the source does not carry) is the shadow's:
+        // exported from it on its grid, else stored from it in its lat-lon shape.
+        PlanetFieldData shadowdata;
+        bool fromshadow = false, shadowexport = false;
+        if (shadow != nullptr && !carried && exports.shadowowned(id))
+        {
+            shadowdata = readplanetfield(*shadow, id);
+            fromshadow = !(shadowdata.shape.empty() && shadowdata.bytes.empty());
+            shadowexport = fromshadow && shadowshape->ongrid(shadowdata);
+        }
 
         // data.shape is the bundle's, nativeshape the planet's encoding ([layer,] cells on the cube).
         PlanetFieldData data;
         std::vector<std::size_t> nativeshape;
-        if (source != nullptr && contains(source->carriedfields, id) && !contains(writtenfields, id))
+        bool native = true;
+        if (carried)
         {
-            const runbundle::ManifestEntry& carried = *findentry(source->reader->fields(), entry.id);
+            const runbundle::ManifestEntry& carriedentry = *findentry(source->reader->fields(), entry.id);
             data.id = id;
-            data.shape = carried.shape;
-            data.bytes = source->reader->fielddata(carried);
+            data.shape = carriedentry.shape;
+            data.bytes = source->reader->fielddata(carriedentry);
             nativeshape = data.shape;
             if (cube)
                 encoding::cubeworldshape(nativeshape, facecells);
         }
+        else if (fromshadow && !shadowexport)
+        {
+            data = std::move(shadowdata);
+            nativeshape = data.shape;
+        }
         else
         {
             data = readplanetfield(world, id);
-            if (data.shape.empty() && data.bytes.empty())
-                continue;   // absent (a diagnostic the world has not recorded)
+            native = !(data.shape.empty() && data.bytes.empty());   // absent: a diagnostic the world has not recorded
+            if (!native && !shadowexport)
+                continue;
             nativeshape = data.shape;
-            if (cube)
+            if (cube && native)
                 encoding::cubebundleshape(data.shape, facecells);
         }
 
-        if (exporter)
+        if (exporter && !(fromshadow && !shadowexport))
         {
-            std::vector<std::size_t> bundleshape = data.shape;
-            data.shape = nativeshape;
-            if (exporter->ongrid(data))
+            runbundle::FieldEntry exportentry = entry;
+            if (shadowexport)
             {
-                const PlanetFieldData exported = spec.rule == RemapRule::direction ? exporter->zeros(data) : exporter->remap(data);
-                runbundle::FieldEntry exportentry = entry;
-                exportentry.shape = exported.shape;
-                exportentry.data = exported.bytes.data();
-                exportentry.bytes = exported.bytes.size();
-                // Without the routing's callback (W2-IO) a direction field is exported as 0.
-                writer.addexport(exportentry, remaprulename(spec.rule), false);
+                // Climate's own values on the export's grid; its direction codes are lat-lon codes.
+                exportentry.shape = shadowdata.shape;
+                exportentry.data = shadowdata.bytes.data();
+                exportentry.bytes = shadowdata.bytes.size();
+                writer.addexport(exportentry, remaprulename(spec.rule), spec.rule == RemapRule::direction);
             }
-            data.shape = std::move(bundleshape);
+            else
+            {
+                std::vector<std::size_t> bundleshape = data.shape;
+                data.shape = nativeshape;
+                if (exporter->ongrid(data))
+                {
+                    PlanetFieldData out;
+                    bool recomputed = false;
+                    if (exported != nullptr && !carried && contains(exports.recomputed, id))
+                    {
+                        out = readplanetfield(*exported, id);
+                        recomputed = true;
+                    }
+                    else
+                        out = spec.rule == RemapRule::direction ? exporter->zeros(data) : exporter->remap(data);
+                    exportentry.shape = out.shape;
+                    exportentry.data = out.bytes.data();
+                    exportentry.bytes = out.bytes.size();
+                    // Without the routing's callback a direction field is exported as 0.
+                    writer.addexport(exportentry, remaprulename(spec.rule), recomputed);
+                }
+                data.shape = std::move(bundleshape);
+            }
         }
 
+        if (!native)
+            continue;
         entry.shape = data.shape;
         entry.data = data.bytes.data();
         entry.bytes = data.bytes.size();
@@ -238,7 +294,9 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
         entry.id = qualifiedname(id);
         entry.component = componentname(spec.component);
         entry.description = spec.description;
-        entry.text = planettabletext(world, id, &entry.extension);
+        // The climate tables describe the shadow's levels and weather on a cube world.
+        const bool climatetable = id == TableId::atmosphere_levels || id == TableId::weather_state;
+        entry.text = planettabletext(shadow != nullptr && climatetable ? *shadow : world, id, &entry.extension);
         if (source != nullptr && contains(source->carriedtables, id) && !contains(writtentables, id))
             entry.text = source->reader->tabletext(*findentry(source->reader->tables(), entry.id));
         if (const auto found = provenance.tables.find(id); found != provenance.tables.end())
