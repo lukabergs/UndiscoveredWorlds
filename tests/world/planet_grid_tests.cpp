@@ -1,6 +1,6 @@
 // The world's cell grid (docs/architecture/sphere-mesh.md section 4, T8 W1b):
 // fields by cell id on a cube planet, (x, y) and cell id agreeing on lat-lon,
-// and a cube world refusing a process that is not cube-ready.
+// and every process cube-ready (since T8 W2-FE).
 
 #include <memory>
 #include <string>
@@ -114,19 +114,12 @@ TEST(PlanetGrid, LatLonXYEqualsByCell)
     EXPECT_EQ(values[3 * 32 + 5], world->nomfloat(5, 3));
 }
 
-TEST(PlanetGrid, CubeWorldRefusesANonReadyProcess)
+// terrain.fluvial_erosion was the last process ported (T8 W2-FE): a cube world now refuses none,
+// so the refusal in executegenerationstage has no process left to test it with.
+TEST(PlanetGrid, EveryProcessIsCubeReady)
 {
-    const std::unique_ptr<planet> world = cubeplanet(8);
-    const WorldProcessDefinition& process = getworldprocess(GenerationStageId::fluvial_erosion);
-    ASSERT_FALSE(process.cubeready);
-
-    GenerationScratch scratch;
-    WorldStageParameters parameters;
-    GenerationExecutionContext context;
-    std::string error;
-    EXPECT_FALSE(executegenerationstage(GenerationStageId::fluvial_erosion, *world, scratch, parameters, context, &error));
-    EXPECT_NE(error.find(process.id), std::string::npos) << error;
-    EXPECT_NE(error.find("cube"), std::string::npos) << error;
+    for (const WorldProcessDefinition& process : getworldprocesses())
+        EXPECT_TRUE(process.cubeready) << process.id;
 }
 
 TEST(PlanetGrid, MaxRiverFlowReadsEveryCubeCell)
