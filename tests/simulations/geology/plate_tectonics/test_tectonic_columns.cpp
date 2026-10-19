@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -1127,27 +1128,27 @@ double bumpspread(const std::shared_ptr<const TectonicGrid>& grid, const Metric&
 }
 } // namespace
 
-TEST(TectonicColumnsCube, DiffusionOfABumpAtAFaceCentreEdgeAndCorner) {
-    const auto grid = TectonicGrid::cube(64, earth_km);
-    const Metric metric(grid.get(), 0, 0, 0);
+TEST(TectonicColumnsCube, DiffusionOfABumpIsEqualAtAFaceCentreEdgeAndCorner) {
     constexpr double quarter = 0.78539816339744830962;
-    // Each centre a cell vertex (N even): four cells at the face centre and the edge, three at the corner.
-    const double centre = bumpspread(grid, metric, mesh::cubepoint(0, 0, 0));
-    const double edge = bumpspread(grid, metric, mesh::cubepoint(0, quarter, 0));
-    const double corner = bumpspread(grid, metric, mesh::cubepoint(0, quarter, quarter));
-    RecordProperty("diffusion_face_centre", std::to_string(centre));
-    RecordProperty("diffusion_face_edge", std::to_string(edge));
-    RecordProperty("diffusion_cube_corner", std::to_string(corner));
-    RecordProperty("reference_area_over_mean", std::to_string(metric.reference_area_m2()
-        / (grid->totalarea_m2() / static_cast<double>(grid->cellcount()))));
-    EXPECT_NEAR(centre, 1, .02);
-    // The two-point weights (length / distance) are inconsistent where the cube's grid lines
-    // are not orthogonal: the spread is 7 % fast over a face edge and 11 % slow over a corner,
-    // at N 32, 64 and 128 alike (not a resolution error). The brief's 2 % needs a
-    // non-orthogonal correction (an open question of the plan, E2B report); these bounds
-    // hold the measured inconsistency so a regression shows.
-    EXPECT_NEAR(edge / centre, 1.08, .02);
-    EXPECT_NEAR(corner / centre, .90, .02);
+    for (const int n : {32, 64}) {
+        const auto grid = TectonicGrid::cube(n, earth_km);
+        const Metric metric(grid.get(), 0, 0, 0);
+        // Each centre a cell vertex (N even): four cells at the face centre and the edge, three at the corner.
+        const double centre = bumpspread(grid, metric, mesh::cubepoint(0, 0, 0));
+        const double edge = bumpspread(grid, metric, mesh::cubepoint(0, quarter, 0));
+        const double corner = bumpspread(grid, metric, mesh::cubepoint(0, quarter, quarter));
+        const std::string suffix = "_n" + std::to_string(n);
+        RecordProperty("diffusion_face_centre" + suffix, std::to_string(centre));
+        RecordProperty("diffusion_face_edge" + suffix, std::to_string(edge));
+        RecordProperty("diffusion_cube_corner" + suffix, std::to_string(corner));
+        RecordProperty("reference_area_over_mean" + suffix, std::to_string(metric.reference_area_m2()
+            / (grid->totalarea_m2() / static_cast<double>(grid->cellcount()))));
+        // With the non-orthogonal correction (without it the two-point weights spread 7 % fast
+        // over a face edge and 11 % slow over a corner).
+        EXPECT_NEAR(centre, 1, .02) << n;
+        EXPECT_NEAR(edge / centre, 1, .02) << n;
+        EXPECT_NEAR(corner / centre, 1, .02) << n;
+    }
 }
 
 TEST(TectonicColumnsCube, CollapseAndRootFlowConserveVolumeAcrossFaceEdgesAndCorners) {
@@ -1216,22 +1217,22 @@ TEST(TectonicColumnsCube, PlumeBasaltConservesItsVolumeOnTheSphere) {
 
 TEST(TectonicColumnsCube, InitialTerrainRunsOnTheCube) {
     const auto grid = TectonicGrid::cube(16, earth_km);
-    const Metric metric(grid.get(), 0, 0, 0);
     const auto& mesh = *grid->mesh();
     const size_t count = grid->cellcount();
     std::vector<double> elevations(count), ages(count, 50);
     std::vector<uint32_t> owners(count);
-    std::vector<Displacement> velocity(count);
+    std::vector<mesh::Vec3> velocity(count);
     const mesh::Vec3 pole{0, 0, 1};
     for (tectonics::grid::CellId c = 0; c < count; ++c) {
         const mesh::Vec3 r = mesh.centre(c);
         owners[c] = r.x > 0 ? 1 : 0;
         elevations[c] = r.y > .3 ? 400 : -4000;
         // Each plate turns about the pole, the two apart (spreading along x = 0).
-        const mesh::Vec3 v = (owners[c] ? 20000.0 : -20000.0) * mesh::cross(pole, r);
-        velocity[c] = metric.local(c, v);
+        velocity[c] = (owners[c] ? 20000.0 : -20000.0) * mesh::cross(pole, r);
     }
-    const auto cells = tectonics::initialization::terrain(0, 0, 0, 1, elevations, ages, owners, velocity, 1, 0, 1, 0, 0, 0, grid.get());
+    const auto cells = tectonics::initialization::terrain(*grid, 1, elevations, ages, owners, velocity, 1, 0, 1);
+    EXPECT_THROW(tectonics::initialization::terrain(0, 0, 0, 1, elevations, ages, owners,
+        std::vector<Displacement>(count), 1, 0, 1, 0, 0, 0, grid.get()), std::invalid_argument);
     ASSERT_EQ(cells.size(), count);
     for (const auto& c : cells) EXPECT_TRUE(std::isfinite(elevation_m(c)));
 }

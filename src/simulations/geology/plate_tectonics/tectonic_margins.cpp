@@ -8,6 +8,7 @@
 #include <queue>
 #include <stdexcept>
 #include <tuple>
+#include <type_traits>
 
 namespace tectonics::margins {
 void validate(const Parameters& p) {
@@ -57,9 +58,14 @@ void validate(const Parameters& p) {
         || p.subduction_erosion_ratio>0 || p.continental_growth_control))
         throw std::runtime_error("Continental growth processes require active margins");
 }
-Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
+namespace {
+bool finite(const transport::Displacement& d) { return std::isfinite(d.x) && std::isfinite(d.y); }
+bool finite(const mesh::Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+
+template <class V>
+Forcing forcingon(uint32_t w,uint32_t h,double cell_m,double dt,
         const std::vector<uint32_t>& owners,const std::vector<columns::Cell>& cells,
-        const std::vector<transport::Displacement>& rigid,const Parameters& p,Polarity* polarity,long seed,double time_myr,
+        const std::vector<V>& rigid,const Parameters& p,Polarity* polarity,long seed,double time_myr,
         const grid::TectonicGrid* grid) {
     validate(p);
     const bool planar=!grid || grid->kind()==grid::TectonicGrid::Kind::planar;
@@ -71,6 +77,7 @@ Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
     Forcing result{std::vector<double>(count,-1),std::vector<double>(count),std::vector<uint32_t>(count,none),owners,{},{},{}};
     if (!p.enabled) return result;
     const columns::Metric metric(grid,w,h,cell_m);
+    metric.requiredisplacement(std::is_same_v<V,mesh::Vec3>,"margins");
     const auto extent=metric.extent_km();
     const auto factor=[&](size_t i,uint32_t channel) {
         const auto position=metric.unitposition(static_cast<grid::CellId>(i));
@@ -90,7 +97,7 @@ Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
     std::vector<Source> overlap(count);
     const auto ocean_age=[&](size_t i) { return cells[i].ocean>0?cells[i].oceanic_age_volume/cells[i].ocean:0; };
     for (size_t i=0;i<count;++i)
-        if (!std::isfinite(rigid[i].x) || !std::isfinite(rigid[i].y))
+        if (!finite(rigid[i]))
             throw std::runtime_error("Invalid margin velocity");
     // The arc walk's reach: planar ceil(arc distance / cell) cells; on the cube the steps
     // continue while the distance walked is below the arc distance.
@@ -181,5 +188,19 @@ Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
     for (size_t i=0;i<count;++i) if (overlap[i].receiver!=none)
         result.arc_receiver[i]=overlap[i].receiver;
     return result;
+}
+} // namespace
+
+Forcing forcing(uint32_t w,uint32_t h,double cell_m,double dt,
+        const std::vector<uint32_t>& owners,const std::vector<columns::Cell>& cells,
+        const std::vector<transport::Displacement>& rigid,const Parameters& p,Polarity* polarity,long seed,double time_myr,
+        const grid::TectonicGrid* grid) {
+    return forcingon(w,h,cell_m,dt,owners,cells,rigid,p,polarity,seed,time_myr,grid);
+}
+
+Forcing forcing(const grid::TectonicGrid& grid,double dt,const std::vector<uint32_t>& owners,
+        const std::vector<columns::Cell>& cells,const std::vector<mesh::Vec3>& rigid_m,const Parameters& p,
+        Polarity* polarity,long seed,double time_myr) {
+    return forcingon(0,0,0,dt,owners,cells,rigid_m,p,polarity,seed,time_myr,&grid);
 }
 }

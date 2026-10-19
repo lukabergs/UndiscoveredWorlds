@@ -115,11 +115,10 @@ TEST(TectonicDeformationCube, ContactCorrectionsKeepTheirDirectionAcrossAFaceEdg
     constexpr double earth_km = 6371.0;
     const auto grid = tectonics::grid::TectonicGrid::cube(n, earth_km);
     const auto& mesh = *grid->mesh();
-    const tectonics::columns::Metric metric(grid.get(), 0, 0, 0);
     const size_t count = grid->cellcount();
     std::vector<uint32_t> owners(count, 1);
     std::vector<double> continent(count, 1);
-    std::vector<tectonics::transport::Displacement> rigid(count);
+    std::vector<mesh::Vec3> rigid(count);
     const mesh::Vec3 right = mesh::cubeface(0).right;
     const auto along = [&](CellId c) { const mesh::Vec3 r = mesh.centre(c); return mesh::normalise(right - mesh::dot(right, r) * r); };
     for (CellId c = 0; c < count; ++c) {
@@ -127,19 +126,20 @@ TEST(TectonicDeformationCube, ContactCorrectionsKeepTheirDirectionAcrossAFaceEdg
         mesh::cubeindices(n, c, face, column, row);
         if (face != 0 || column >= n - 1) continue;
         owners[c] = 0; continent[c] = 0;
-        rigid[c] = metric.local(c, 30000.0 * along(c));
+        rigid[c] = 30000.0 * along(c);
     }
     tectonics::deformation::Parameters p;
     p.peak_distance_km = 500;
     p.distance_variation = 0;
-    const auto result = tectonics::deformation::distribute(0, 0, 0, owners, continent, rigid, 1, p, grid.get());
+    const auto result = tectonics::deformation::distribute(*grid, owners, continent, rigid, 1, p);
     int east_face = 0, east_column = 0, east_row = 0;
     mesh::cubeindices(n, grid->neighbour(mesh::cubeid(n, 0, n - 1, n / 2), tectonics::grid::east), east_face, east_column, east_row);
     int crossed = 0;
     for (CellId c = 0; c < count; ++c) {
-        ASSERT_TRUE(std::isfinite(result[c].x) && std::isfinite(result[c].y));
+        ASSERT_TRUE(std::isfinite(result[c].x) && std::isfinite(result[c].y) && std::isfinite(result[c].z));
         if (owners[c] != 1) continue;
-        const mesh::Vec3 change = metric.vector(c, {result[c].x - rigid[c].x, result[c].y - rigid[c].y});
+        const mesh::Vec3 change = result[c] - rigid[c];
+        EXPECT_NEAR(mesh::dot(result[c], mesh.centre(c)), 0, 1e-6 * (1 + mesh::length(result[c])));
         if (mesh::length(change) == 0) continue;
         int face = 0, column = 0, row = 0;
         mesh::cubeindices(n, c, face, column, row);

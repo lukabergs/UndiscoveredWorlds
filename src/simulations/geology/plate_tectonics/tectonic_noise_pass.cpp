@@ -65,7 +65,9 @@ double apply(uint32_t w,uint32_t h,double cell_m,std::vector<columns::Cell>& cel
             // Do not move a rock component across its support boundary.
             if (cells[a].*member<=0 || cells[b].*member<=0) continue;
             if (p.coast_taper_m>0 && land[a]!=land[b]) continue;
-            const double q=.125*(potential[b]-potential[a])*mantle_density/(mantle_density-density)
+            // The potential's difference, with the cube's non-orthogonal correction.
+            const double rise=metric->planar()?potential[b]-potential[a]:-metric->difference(e,potential);
+            const double q=.125*rise*mantle_density/(mantle_density-density)
                 *std::min(coast_weight[a],coast_weight[b])*metric->weight(e);
             const auto from=q>0?a:b,to=q>0?b:a;
             const double from_scale=metric->scale(static_cast<grid::CellId>(from));

@@ -997,11 +997,10 @@ TEST(TectonicMarginsCube, ArcWalkCrossesAFaceEdgeStraightOn) {
     constexpr double earth_km = 6371.0;
     const auto grid = tectonics::grid::TectonicGrid::cube(n, earth_km);
     const auto& mesh = *grid->mesh();
-    const tectonics::columns::Metric metric(grid.get(), 0, 0, 0);
     const size_t count = grid->cellcount();
     std::vector<uint32_t> owners(count, 1);
     std::vector<tectonics::columns::Cell> cells(count, tectonics::columns::seed(500, true, 100));
-    std::vector<tectonics::transport::Displacement> rigid(count);
+    std::vector<mesh::Vec3> rigid(count);
     const mesh::Vec3 right = mesh::cubeface(0).right;
     for (CellId c = 0; c < count; ++c) {
         int face = 0, column = 0, row = 0;
@@ -1011,12 +1010,12 @@ TEST(TectonicMarginsCube, ArcWalkCrossesAFaceEdgeStraightOn) {
         cells[c] = tectonics::columns::seed(-4000, false, 60);
         // 30 km per update toward the face's east edge.
         const mesh::Vec3 r = mesh.centre(c);
-        rigid[c] = metric.local(c, 30000.0 * mesh::normalise(right - mesh::dot(right, r) * r));
+        rigid[c] = 30000.0 * mesh::normalise(right - mesh::dot(right, r) * r);
     }
     tectonics::margins::Parameters p;
     p.enabled = true;
     p.arc_distance_km = 700;
-    const auto forcing = tectonics::margins::forcing(0, 0, 0, 1, owners, cells, rigid, p, nullptr, 1, 0, grid.get());
+    const auto forcing = tectonics::margins::forcing(*grid, 1, owners, cells, rigid, p, nullptr, 1, 0);
     const CellId lower = mesh::cubeid(n, 0, n - 3, n / 2), upper = mesh::cubeid(n, 0, n - 2, n / 2);
     const CellId receiver = forcing.arc_receiver[lower];
     ASSERT_NE(receiver, std::numeric_limits<uint32_t>::max());

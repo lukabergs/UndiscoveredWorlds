@@ -1,6 +1,7 @@
 #ifndef TECTONIC_DEFORMATION_HPP
 #define TECTONIC_DEFORMATION_HPP
 #include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
+#include "core/mesh/cell_grid.hpp"
 #include <cstdint>
 #include <vector>
 
@@ -19,5 +20,9 @@ std::vector<transport::Displacement> distribute(uint32_t width, uint32_t height,
     const std::vector<uint32_t>& owners, const std::vector<double>& continental_fraction,
     const std::vector<transport::Displacement>& rigid, long seed, const Parameters& parameters,
     const grid::TectonicGrid* grid = nullptr);
+// The cube (W2-E): displacements per update as 3-D tangent vectors in metres (the result too).
+std::vector<mesh::Vec3> distribute(const grid::TectonicGrid& grid, const std::vector<uint32_t>& owners,
+    const std::vector<double>& continental_fraction, const std::vector<mesh::Vec3>& rigid_m, long seed,
+    const Parameters& parameters);
 }
 #endif

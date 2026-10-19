@@ -1,4 +1,5 @@
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
+#include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <sstream>
+#include <string>
 #include <iomanip>
 #include <numeric>
 #include <limits>
@@ -121,6 +123,7 @@ Metric::Metric(const grid::TectonicGrid* grid, uint32_t width, uint32_t height, 
         south_[c] = mesh::normalise(down - mesh::dot(down, east_[c]) * east_[c] - mesh::dot(down, r) * r);
     }
     for (grid::CellId c = 0; c < count; ++c) scale_[c] = reference_area_m2_ / area_[c];
+    buildcorrection();
 }
 
 size_t Metric::edge(grid::CellId c, uint8_t k) const {
@@ -154,25 +157,93 @@ std::array<Metric::Neighbour, 8> Metric::eight(grid::CellId c) const {
     return result;
 }
 
-mesh::Vec3 Metric::vector(grid::CellId c, const Displacement& d) const {
-    if (planar_) return {d.x, d.y, 0.0};
-    return d.x * east_[c] + d.y * south_[c];
-}
-
-Displacement Metric::local(grid::CellId c, const mesh::Vec3& v) const {
-    if (planar_) return {v.x, v.y};
-    return {mesh::dot(v, east_[c]), mesh::dot(v, south_[c])};
-}
-
-Displacement Metric::inframe(grid::CellId to, grid::CellId from, const Displacement& d) const {
-    if (planar_ || to == from) return d;
-    return local(to, vector(from, d));
+mesh::Vec3 Metric::inframe(grid::CellId to, const mesh::Vec3& v) const {
+    const mesh::Vec3 r = grid_->mesh()->centre(to);
+    return v - mesh::dot(v, r) * r;
 }
 
 double Metric::closing(size_t e, const Displacement& a, const Displacement& b) const {
+    return grid_->edges()[e].axis == 0 ? a.x - b.x : a.y - b.y;
+}
+
+double Metric::closing(size_t e, const mesh::Vec3& a, const mesh::Vec3& b) const {
+    return mesh::dot(a - b, grid_->edges()[e].normal);
+}
+
+void Metric::requiredisplacement(bool tangent, const char* module) const {
+    if (tangent == planar_)
+        throw std::invalid_argument(std::string(module) + (planar_
+            ? ": the planar scaffold reads displacements in cells (2-D)"
+            : ": displacements on the cube are 3-D tangent vectors in metres"));
+}
+
+double Metric::difference(size_t e, const std::vector<double>& phi) const {
     const auto& edge = grid_->edges()[e];
-    if (planar_) return edge.axis == 0 ? a.x - b.x : a.y - b.y;
-    return mesh::dot(vector(edge.a, a) - vector(edge.b, b), edge.normal);
+    const double plain = phi[edge.a] - phi[edge.b];
+    if (planar_) return plain;
+    const Correction& k = correction_[e];
+    double result = k.orthogonal * plain;
+    for (uint8_t d = 0; d < grid::directioncount; ++d) {
+        result += k.a[d] * (phi[grid_->neighbour(edge.a, d)] - phi[edge.a]);
+        result += k.b[d] * (phi[grid_->neighbour(edge.b, d)] - phi[edge.b]);
+    }
+    return result;
+}
+
+void Metric::buildcorrection() {
+    // Least-squares gradient weights per cell: grad phi = sum_k g_k (phi_k - phi_c), g_k from
+    // the four tangent offsets r_k (centre distance along the tangent toward the neighbour).
+    const mesh::CellGrid& mesh = *grid_->mesh();
+    const int n = mesh.facecells();
+    const size_t count = grid_->cellcount();
+    std::vector<std::array<mesh::Vec3, 4>> gradient(count);
+    for (grid::CellId c = 0; c < count; ++c) {
+        const mesh::Vec3 r = mesh.centre(c);
+        double m00 = 0, m01 = 0, m11 = 0;
+        std::array<std::array<double, 2>, 4> offset{};
+        for (uint8_t k = 0; k < grid::directioncount; ++k) {
+            const grid::CellId nb = grid_->neighbour(c, k);
+            const mesh::Vec3 step = mesh.distance_m(c, k == grid::west ? 7 : k == grid::east ? 3 : k == grid::north ? 1 : 5)
+                * tangent(mesh.centre(nb) - r, r);
+            offset[k] = {mesh::dot(step, east_[c]), mesh::dot(step, south_[c])};
+            m00 += offset[k][0] * offset[k][0]; m01 += offset[k][0] * offset[k][1]; m11 += offset[k][1] * offset[k][1];
+        }
+        const double determinant = m00 * m11 - m01 * m01;
+        for (uint8_t k = 0; k < grid::directioncount; ++k) {
+            const double gx = (m11 * offset[k][0] - m01 * offset[k][1]) / determinant;
+            const double gy = (m00 * offset[k][1] - m01 * offset[k][0]) / determinant;
+            gradient[c][k] = gx * east_[c] + gy * south_[c];
+        }
+    }
+    const auto& table = grid_->edges();
+    correction_.resize(table.size());
+    for (size_t e = 0; e < table.size(); ++e) {
+        const auto& edge = table[e];
+        // The shared edge's corners, in the face coordinates of cell a.
+        int face = 0, column = 0, row = 0;
+        mesh::cubeindices(n, edge.a, face, column, row);
+        mesh::Vec3 p0, p1;
+        if (edge.direction == grid::east || edge.direction == grid::west) {
+            const double a = mesh::cubeedgea(n, edge.direction == grid::east ? column + 1 : column);
+            p0 = mesh::cubepoint(face, a, mesh::cubeedgeb(n, row));
+            p1 = mesh::cubepoint(face, a, mesh::cubeedgeb(n, row + 1));
+        } else {
+            const double b = mesh::cubeedgeb(n, edge.direction == grid::south ? row + 1 : row);
+            p0 = mesh::cubepoint(face, mesh::cubeedgea(n, column), b);
+            p1 = mesh::cubepoint(face, mesh::cubeedgea(n, column + 1), b);
+        }
+        const mesh::Vec3 middle = mesh::normalise(mesh.centre(edge.a) + mesh.centre(edge.b));
+        mesh::Vec3 normal = tangent(mesh::cross(p1 - p0, middle), middle);
+        if (mesh::dot(normal, edge.normal) < 0) normal = -1.0 * normal;
+        const double orthogonal = mesh::dot(normal, edge.normal);
+        const mesh::Vec3 skew = normal - orthogonal * edge.normal;
+        Correction& k = correction_[e];
+        k.orthogonal = orthogonal;
+        for (uint8_t d = 0; d < grid::directioncount; ++d) {
+            k.a[d] = -.5 * edge.distance_m * mesh::dot(skew, gradient[edge.a][d]);
+            k.b[d] = -.5 * edge.distance_m * mesh::dot(skew, gradient[edge.b][d]);
+        }
+    }
 }
 
 std::array<double, 2> Metric::unitposition(grid::CellId c) const {
@@ -471,7 +542,7 @@ void spread_roots(const Metric& metric, std::vector<Cell>& cells, double dt, con
     if (cells.size() != metric.cellcount()) throw std::runtime_error("Root flow cell count mismatch");
     const auto& table = metric.grid().edges();
     const double reference_area = metric.reference_area_m2();
-    struct Face { size_t a, b; double mobility; };
+    struct Face { size_t from, to; double drop, mobility; };
     std::vector<Face> faces;
     faces.reserve(table.size());
     std::vector<double> rates(cells.size()), z(cells.size()), channel(cells.size());
@@ -496,11 +567,14 @@ void spread_roots(const Metric& metric, std::vector<Cell>& cells, double dt, con
             if (ka == 0 || kb == 0) continue;
             const double small = std::min(ka, kb), large = std::max(ka, kb);
             const double harmonic = 2 * small / (1 + small / large);
+            // The elevation difference with the cube's non-orthogonal correction (planar z_a - z_b).
+            const double difference = metric.difference(e, z);
+            const double drop = std::abs(difference);
             const double pressure_gradient = continental_density * 9.80665
-                * std::abs(z[a] - z[b]) / metric.distance_m(e);
+                * drop / metric.distance_m(e);
             const double mobility = mobility_factor * .6 * harmonic
                 * std::pow(pressure_gradient / (2 * reference_stress_pa), 2) * metric.weight(e) / reference_area;
-            faces.push_back({a, b, mobility});
+            faces.push_back({difference > 0 ? a : b, difference > 0 ? b : a, drop, mobility});
             // Cubic flux has three times its secant slope. Thickness also
             // changes mobility; a factor two safety margin covers that here.
             rates[a] += 6 * mobility * metric.scale(static_cast<grid::CellId>(a));
@@ -510,14 +584,13 @@ void spread_roots(const Metric& metric, std::vector<Cell>& cells, double dt, con
         const double max_rate = *std::max_element(rates.begin(), rates.end()) * sensitivity;
         const double sub_dt = max_rate > 0 ? std::min(remaining, .4 / max_rate) : remaining;
         for (const auto& face : faces) {
-            const size_t from = z[face.a] > z[face.b] ? face.a : face.b;
-            const size_t to = from == face.a ? face.b : face.a;
+            const size_t from = face.from, to = face.to;
             const double from_scale = metric.scale(static_cast<grid::CellId>(from));
             const double to_scale = metric.scale(static_cast<grid::CellId>(to));
             // The quarter-volume bound keeps all four outgoing faces positive;
             // it limits flux, never elevation, and preserves the transferred mass.
             const double volume = std::min(.25 * mobile[from] / from_scale,
-                face.mobility * std::abs(z[from] - z[to]) * sub_dt);
+                face.mobility * face.drop * sub_dt);
             const double sediment=sediment_feedback?volume*(cells[from].sediment*cells[from].continental_area/mobile[from]):0;
             const double continent=volume-sediment;
             const double age = cells[from].continent > 0
@@ -572,22 +645,29 @@ void collapse_orogens(const Metric& metric, std::vector<Cell>& cells, double dt,
     const double kappa=diffusivity*dt/reference_area/steps;
     const double kappa_low=low_diffusivity*dt/reference_area/steps;
     const auto& table=metric.grid().edges();
-    std::vector<double> outgoing(cells.size()),incoming(cells.size()),incoming_age(cells.size());
+    std::vector<double> outgoing(cells.size()),incoming(cells.size()),incoming_age(cells.size()),continent(cells.size());
     for (int step=0;step<static_cast<int>(steps);++step) {
         for (auto* buffer : {&outgoing,&incoming,&incoming_age}) std::fill(buffer->begin(),buffer->end(),0);
+        for (size_t i=0;i<cells.size();++i) continent[i]=cells[i].continent;
         for (size_t e=0;e<table.size();++e) {
             const size_t a=table[e].a,b=table[e].b;
             const double ca=cells[a].continent,cb=cells[b].continent;
+            // On the cube the receiver's thickness is the source's less the corrected
+            // difference (the non-orthogonal correction); planar the receiver's own.
+            const double difference=metric.planar()?ca-cb:metric.difference(e,continent);
+            const auto receiving=[&](size_t from) {
+                return metric.planar()?cells[from==a?b:a].continent:cells[from].continent-std::abs(difference);
+            };
             size_t from=cells.size();
             double volume=0;
             if (!two_regimes) {
-                from=ca>std::max(cb,h_max)?a:cb>std::max(ca,h_max)?b:cells.size();
-                if (from==cells.size()) continue;
-                volume=kappa*metric.weight(e)*(cells[from].continent-std::max(cells[(from==a?b:a)].continent,h_max));
+                from=difference>0?a:b;
+                if (!(cells[from].continent>std::max(receiving(from),h_max))) continue;
+                volume=kappa*metric.weight(e)*(cells[from].continent-std::max(receiving(from),h_max));
             } else {
-                if (ca==cb) continue;
-                from=ca>cb?a:b;
-                const double c_from=cells[from].continent,c_to=cells[from==a?b:a].continent;
+                if (difference==0) continue;
+                from=difference>0?a:b;
+                const double c_from=cells[from].continent,c_to=receiving(from);
                 if (margin_cap && cells[from==a?b:a].oceanic_area>upper_cap_residual_area)
                     volume=kappa*std::max(0.0,c_from-std::max(c_to,cap));
                 else
@@ -625,12 +705,21 @@ void diffuse_surface(const Metric& metric, std::vector<Cell>& cells, const std::
         throw std::runtime_error("Surface diffusion cell count mismatch");
     const auto& grid = metric.grid();
     std::vector<double> deposits(cells.size(), 0);
+    // The cube's corrected differences per edge (the non-orthogonal correction).
+    std::vector<double> differences;
+    if (!metric.planar()) {
+        differences.resize(grid.edges().size());
+        for (size_t e = 0; e < differences.size(); ++e) differences[e] = metric.difference(e, elevation);
+    }
     for (grid::CellId i = 0; i < cells.size(); ++i) {
         const auto neighbors = grid.neighbours(i);
         double weighted[grid::directioncount];
         double drop_sum = 0;
         for (uint8_t k = 0; k < grid::directioncount; ++k) {
-            weighted[k] = metric.weight(metric.edge(i, k)) * std::max(0.0, elevation[i] - elevation[neighbors[k]]);
+            const size_t e = metric.edge(i, k);
+            const double drop = metric.planar() ? elevation[i] - elevation[neighbors[k]]
+                : grid.edges()[e].a == i ? differences[e] : -differences[e];
+            weighted[k] = metric.weight(e) * std::max(0.0, drop);
             drop_sum += weighted[k];
         }
         if (drop_sum == 0 || diffusion == 0) continue;
@@ -888,25 +977,26 @@ void Model::advance(const std::vector<Displacement>& velocity, double dt,
     };
     // Strain of this update on the rock before it moves (strain()): rotate the tensor by
     // the local spin, add sym(grad u); derivatives by one-sided differences within the plate,
-    // the neighbour's displacement on the cell's frame over the edge's centre distance
+    // each displacement on the cell's stencil axes over the edge's centre distance
     // (planar: cells per cell, the identity).
     const auto& grid = metric_.grid();
     const auto same_plate = [&](size_t a, size_t b) { return !forcing || forcing->owners[a] == forcing->owners[b]; };
-    const auto derivative = [&](grid::CellId i, uint8_t back_k, uint8_t ahead_k, double Displacement::* component) {
+    const auto derivative = [&](grid::CellId i, uint8_t back_k, uint8_t ahead_k, uint8_t axis) {
         const grid::CellId behind = grid.neighbour(i, back_k), ahead = grid.neighbour(i, ahead_k);
         const bool back = same_plate(i, behind), front = same_plate(i, ahead);
-        const double db = (velocity[i].*component - metric_.inframe(i, behind, velocity[behind]).*component)
+        const double own = metric_.component(i, velocity[i], axis);
+        const double db = (own - metric_.component(i, velocity[behind], axis))
             / metric_.displacementdistance(metric_.edge(i, back_k));
-        const double df = (metric_.inframe(i, ahead, velocity[ahead]).*component - velocity[i].*component)
+        const double df = (metric_.component(i, velocity[ahead], axis) - own)
             / metric_.displacementdistance(metric_.edge(i, ahead_k));
         if (back && front) return std::abs(db) < std::abs(df) ? db : std::abs(df) < std::abs(db) ? df : (db + df) / 2;
         return back ? db : front ? df : 0.0;
     };
     for (grid::CellId i = 0; i < cells_.size(); ++i) {
-        const double dux_dx = derivative(i, grid::west, grid::east, &Displacement::x);
-        const double duy_dx = derivative(i, grid::west, grid::east, &Displacement::y);
-        const double dux_dy = derivative(i, grid::north, grid::south, &Displacement::x);
-        const double duy_dy = derivative(i, grid::north, grid::south, &Displacement::y);
+        const double dux_dx = derivative(i, grid::west, grid::east, 0);
+        const double duy_dx = derivative(i, grid::west, grid::east, 1);
+        const double dux_dy = derivative(i, grid::north, grid::south, 0);
+        const double duy_dy = derivative(i, grid::north, grid::south, 1);
         const double spin = (duy_dx - dux_dy) / 2, c = std::cos(spin), s = std::sin(spin);
         const Strain old = strain_[i];
         strain_[i].xx = c * c * old.xx - 2 * c * s * old.xy + s * s * old.yy + dux_dx;

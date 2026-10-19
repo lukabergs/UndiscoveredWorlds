@@ -7,11 +7,17 @@
 #include <queue>
 #include <stdexcept>
 #include <tuple>
+#include <type_traits>
 
 namespace tectonics::initialization {
-std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt,
+namespace {
+bool finite(const transport::Displacement& d) { return std::isfinite(d.x) && std::isfinite(d.y); }
+bool finite(const mesh::Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+
+template <class V>
+std::vector<columns::Cell> terrainon(uint32_t w,uint32_t h,double cell_m,double dt,
         const std::vector<double>& elevations,const std::vector<double>& ages,
-        const std::vector<uint32_t>& owners,const std::vector<transport::Displacement>& velocity,
+        const std::vector<uint32_t>& owners,const std::vector<V>& velocity,
         double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3,
         double root_max_thickness_m, double root_delamination_width_m, const grid::TectonicGrid* grid) {
     using namespace columns;
@@ -27,11 +33,12 @@ std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt
         !valid_root_delamination_width(root_max_thickness_m,root_delamination_width_m))
         throw std::runtime_error("Invalid initial terrain grid");
     for (size_t i=0;i<count;++i) if (!std::isfinite(elevations[i]) || !std::isfinite(ages[i]) || ages[i]<0 ||
-        !std::isfinite(velocity[i].x) || !std::isfinite(velocity[i].y))
+        !finite(velocity[i]))
         throw std::runtime_error("Invalid initial terrain cell");
     // The cell table (W2-E): openings on its edges through the displacement adapter, the
     // spreading distance by Dijkstra in metres.
     const Metric metric(grid,w,h,cell_m);
+    metric.requiredisplacement(std::is_same_v<V,mesh::Vec3>,"initialization");
     const auto& table=metric.grid().edges();
     constexpr uint32_t none=std::numeric_limits<uint32_t>::max();
     std::vector<double> distance(count,std::numeric_limits<double>::infinity()),rate(count);
@@ -139,5 +146,24 @@ std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt
         }
     }
     return result;
+}
+} // namespace
+
+std::vector<columns::Cell> terrain(uint32_t w,uint32_t h,double cell_m,double dt,
+        const std::vector<double>& elevations,const std::vector<double>& ages,
+        const std::vector<uint32_t>& owners,const std::vector<transport::Displacement>& velocity,
+        double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3,
+        double root_max_thickness_m, double root_delamination_width_m, const grid::TectonicGrid* grid) {
+    return terrainon(w,h,cell_m,dt,elevations,ages,owners,velocity,thermal_strength,margin_width_m,
+        boundary_influence,root_kg_m3,root_max_thickness_m,root_delamination_width_m,grid);
+}
+
+std::vector<columns::Cell> terrain(const grid::TectonicGrid& grid,double dt,
+        const std::vector<double>& elevations,const std::vector<double>& ages,
+        const std::vector<uint32_t>& owners,const std::vector<mesh::Vec3>& velocity_m,
+        double thermal_strength, double margin_width_m, double boundary_influence, double root_kg_m3,
+        double root_max_thickness_m, double root_delamination_width_m) {
+    return terrainon(0,0,0,dt,elevations,ages,owners,velocity_m,thermal_strength,margin_width_m,
+        boundary_influence,root_kg_m3,root_max_thickness_m,root_delamination_width_m,&grid);
 }
 }

@@ -55,20 +55,35 @@ public:
     // (mesh slots 8, 1, 2, 7, 3, 6, 5, 4); nocell for the diagonal at a cube corner.
     std::array<Neighbour, 8> eight(grid::CellId c) const;
 
-    // The displacement adapter (identity in E3): a cell's displacement per update as a 3-D
-    // tangent vector in displacement units. Planar: (x, y, 0) in cells along +x and +y
-    // (unit cell_m). Cube: metres (unit 1) on the cell's frame, x along the unit tangent
-    // toward the east neighbour (the face's u), y orthogonal to it toward the south one.
+    // The displacement adapter. Planar: today's cells per update (x along +x, y along +y,
+    // unit cell_m). Cube: metres per update as 3-D tangent vectors (E2D's convention, unit 1),
+    // projected onto the stencil directions: the edge normals (closing) and the cell's two
+    // stencil axes (axis 0 the unit tangent toward the east neighbour, axis 1 orthogonal to
+    // it toward the south one).
     double displacementunit_m() const { return planar_ ? cell_m_ : 1.0; }
     // An edge's centre distance in displacement units (planar 1).
     double displacementdistance(size_t e) const { return planar_ ? 1.0 : grid_->edges()[e].distance_m; }
-    mesh::Vec3 vector(grid::CellId c, const Displacement& d) const;
-    Displacement local(grid::CellId c, const mesh::Vec3& v) const;
-    // A displacement of `from` on the frame of `to` (planar: unchanged).
-    Displacement inframe(grid::CellId to, grid::CellId from, const Displacement& d) const;
+    double component(grid::CellId, const Displacement& d, uint8_t axis) const { return axis == 0 ? d.x : d.y; }
+    double component(grid::CellId c, const mesh::Vec3& v, uint8_t axis) const {
+        return mesh::dot(v, axis == 0 ? east_[c] : south_[c]);
+    }
+    mesh::Vec3 axis(grid::CellId c, uint8_t axis) const { return axis == 0 ? east_[c] : south_[c]; } // cube
+    // A displacement of another cell on the tangent plane of `to` (planar: unchanged).
+    const Displacement& inframe(grid::CellId, const Displacement& d) const { return d; }
+    mesh::Vec3 inframe(grid::CellId to, const mesh::Vec3& v) const;
     // The closing motion across edge e, displacement units: (d_a - d_b) along the normal from
     // a to b (planar: the axis component's difference).
     double closing(size_t e, const Displacement& a, const Displacement& b) const;
+    double closing(size_t e, const mesh::Vec3& a, const mesh::Vec3& b) const;
+    // Throws unless the displacement type matches the grid (2-D planar, 3-D on the cube).
+    void requiredisplacement(bool tangent, const char* module) const;
+
+    // The difference phi_a - phi_b across edge e as the two-point flux reads it. Cube: with the
+    // non-orthogonal correction (minimum correction from least-squares cell gradients), so
+    // the flux (length / distance) x difference is consistent where the grid lines are skew:
+    // (n . t)(phi_a - phi_b) - distance k . (grad_a + grad_b) / 2, n the face normal, t the
+    // centre line, k = n - (n . t) t. Planar: phi_a - phi_b (the grid is orthogonal).
+    double difference(size_t e, const std::vector<double>& phi) const;
 
     // Position of a cell for position-placed variation, in [0, 1)²: planar the cell centre's
     // fraction of the torus; cube a lat-lon proxy ((longitude + pi) / 2 pi, (pi / 2 -
@@ -78,6 +93,7 @@ public:
     std::array<double, 2> extent_km() const;
 
 private:
+    void buildcorrection();
     std::shared_ptr<const grid::TectonicGrid> owned_;
     const grid::TectonicGrid* grid_ = nullptr;
     bool planar_ = true;
@@ -85,7 +101,9 @@ private:
     double cell_m_ = 0, cell_area_m2_ = 0, reference_area_m2_ = 0;
     std::vector<double> area_, scale_, width_, weight_;
     std::vector<uint32_t> edges_;          // 4 per cell (cube)
-    std::vector<mesh::Vec3> east_, south_; // the displacement frame (cube)
+    std::vector<mesh::Vec3> east_, south_; // the stencil axes (cube)
+    struct Correction { double orthogonal = 1; std::array<double, 4> a{}, b{}; }; // per edge (cube)
+    std::vector<Correction> correction_;
 };
 
 inline constexpr double mantle_density = 3300;

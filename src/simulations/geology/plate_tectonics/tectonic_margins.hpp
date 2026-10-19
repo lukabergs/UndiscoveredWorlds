@@ -1,6 +1,7 @@
 #ifndef TECTONIC_MARGINS_HPP
 #define TECTONIC_MARGINS_HPP
 #include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
+#include "core/mesh/cell_grid.hpp"
 #include <cstdint>
 #include <vector>
 #include <map>
@@ -97,12 +98,16 @@ struct Forcing {
 void validate(const Parameters& p);
 using Polarity = std::map<std::pair<uint32_t,uint32_t>,uint32_t>; // Stable plate pair -> descending plate.
 // Over the cell table (W2-E): closing motion along the edge normals of the displacement
-// adapter (columns::Metric), the arc walk straight on by the table's ahead, flexure and
+// adapter (columns::Metric; 2-D cells on the planar scaffold, the overload below on the cube), the arc walk straight on by the table's ahead, flexure and
 // ridge heat by Dijkstra in metres. On the cube width, height and cell_m are ignored and the
 // process variation reads a lat-lon proxy position (columns::Metric::unitposition).
 Forcing forcing(uint32_t w, uint32_t h, double cell_m, double dt_myr,
     const std::vector<uint32_t>& owners, const std::vector<columns::Cell>& cells,
     const std::vector<transport::Displacement>& rigid, const Parameters& p, Polarity* polarity = nullptr,
     long seed = 0, double time_myr = 0, const grid::TectonicGrid* grid = nullptr);
+// The cube: displacements per update as 3-D tangent vectors in metres.
+Forcing forcing(const grid::TectonicGrid& grid, double dt_myr, const std::vector<uint32_t>& owners,
+    const std::vector<columns::Cell>& cells, const std::vector<mesh::Vec3>& rigid_m, const Parameters& p,
+    Polarity* polarity = nullptr, long seed = 0, double time_myr = 0);
 }
 #endif
