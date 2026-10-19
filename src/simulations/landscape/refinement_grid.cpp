@@ -250,6 +250,29 @@ int levelhalorings(int targethalo, int factor, int level, int solvemargin)
 
 namespace
 {
+// The west column of a lat-lon set's columns as a wrapped interval (the column after the
+// widest gap); full when the set holds every column (the west column is then 0).
+std::int64_t westcolumn(const std::vector<mesh::LevelKey>& keys, int width, bool& full)
+{
+    std::vector<std::int64_t> columns;
+    for (mesh::LevelKey key : keys)
+        columns.push_back(static_cast<std::int64_t>(key % static_cast<mesh::LevelKey>(width)));
+    std::sort(columns.begin(), columns.end());
+    columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
+    full = static_cast<std::int64_t>(columns.size()) == width;
+    if (columns.empty() || full)
+        return 0;
+    std::size_t start = 0;
+    std::int64_t widest = columns.front() + width - columns.back() - 1;
+    for (std::size_t k = 1; k < columns.size(); k++)
+        if (columns[k] - columns[k - 1] - 1 > widest)
+        {
+            widest = columns[k] - columns[k - 1] - 1;
+            start = k;
+        }
+    return columns[start];
+}
+
 std::vector<mesh::LevelKey> descendants(const KeyLevelWindow& window, const std::vector<mesh::LevelKey>& global)
 {
     const std::int64_t s = window.scale(), n = window.basecells, fine = window.levelcells();
@@ -342,16 +365,28 @@ std::vector<KeyLevelWindow> keyhalochain(const mesh::CellGrid& base, int factor,
         window.level = l;
         window.halo = levelhalo(targethalo, factor, l, solvemargin);
         window.halorings = levelhalorings(targethalo, factor, l, solvemargin);
+        const bool latlon = base.kind() == mesh::GridKind::latlon;
+        bool full = false;
         if (l == level)
+        {
             window.keptglobal = kept;
+            window.keptwest = latlon ? westcolumn(kept, window.basecells, full) : 0;
+        }
         else
         {
-            const std::vector<mesh::LevelKey>& child = chain[static_cast<std::size_t>(l) + 1].domainglobal;
+            const KeyLevelWindow& child = chain[static_cast<std::size_t>(l) + 1];
             const std::int64_t scale = levelscale(factor, l);
             const int rings = l == 0 ? reach : static_cast<int>((reach + scale - 1) / scale);
-            window.keptglobal = dilatecells(base, child, rings);
+            window.keptglobal = dilatecells(base, child.domainglobal, rings);
+            // halochain's kept box starts `rings` cells west of the child's domain, also when it spans every column.
+            window.keptwest = latlon ? westcolumn(window.keptglobal, window.basecells, full) : 0;
+            if (full)
+                window.keptwest = wraplevel(child.domainwest - rings, window.basecells);
         }
         window.domainglobal = l == 0 ? window.keptglobal : dilatecells(base, window.keptglobal, window.halorings);
+        window.domainwest = latlon ? westcolumn(window.domainglobal, window.basecells, full) : 0;
+        if (latlon && full)
+            window.domainwest = l == 0 ? window.keptwest : wraplevel(window.keptwest - window.halorings, window.basecells);
     }
     return chain;
 }
@@ -388,7 +423,8 @@ std::shared_ptr<const mesh::CellGrid> keywindowgrid(const KeyLevelWindow& window
         throw std::invalid_argument("keywindowgrid: a lat-lon domain that is not a box");
     const std::int64_t s = window.scale();
     mesh::LatLonWindowBox box;
-    box.column0 = static_cast<std::int64_t>(columns[start]) * s;
+    // A domain over every column starts where the chain's west edge put it (halochain's domaincolumn0).
+    box.column0 = (static_cast<int>(count) == width ? window.domainwest : static_cast<std::int64_t>(columns[start])) * s;
     box.columns = static_cast<int>(static_cast<std::int64_t>(count) * s);
     box.row0 = static_cast<int>(rows.front() * s);
     box.rows = static_cast<int>(static_cast<std::int64_t>(rows.size()) * s);

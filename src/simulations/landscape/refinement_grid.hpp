@@ -316,6 +316,11 @@ struct KeyLevelWindow
     int halorings = 0;  // the same in level-0 rings (8-connected hops on the level-0 table)
     std::vector<mesh::LevelKey> keptglobal;    // ascending level-0 keys
     std::vector<mesh::LevelKey> domainglobal;  // ascending level-0 keys, a superset of keptglobal
+    // Lat-lon: the level-0 column where the kept box and the domain start eastwards
+    // (halochain's column0 and domaincolumn0 / s_L), also for a set over every column,
+    // whose start only the chain knows (keyhalochain; a full-width target box starts at 0).
+    std::int64_t keptwest = 0;
+    std::int64_t domainwest = 0;
 
     std::int64_t scale() const { return levelscale(factor, level); }
     // The level's cells per face edge (cube) or columns (lat-lon).

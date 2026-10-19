@@ -620,8 +620,10 @@ TEST_F(Landscape, RefinementGridKeyChainEqualsTheHaloChainOnLatLon)
         landscape::regionalwindow(64, 1, 3, -20.0, -90.0, 20.0, -75.0),
         landscape::regionalwindow(64, 1, 5, 170.0, -10.0, -170.0, 10.0),
         handtarget(256, 16, 164, 20, 48, 16),
-        handtarget(128, 31, 102, 8, 4, 6)};  // --pixels 102,4,109,9 with the default halo
-    const int reach = 2;
+        handtarget(128, 31, 102, 8, 4, 6),  // --pixels 102,4,109,9 with the default halo
+        handtarget(16, 4, 3, 4, 2, 3),      // level 0 over every column (reach 2)
+        handtarget(16, 6, 3, 4, 2, 3)};     // level 1 over every column (reach 0)
+    int fullwidth = 0;  // windows whose domain spans every column
     for (const landscape::RegionalWindow& target : targets)
     {
         const auto base = mesh::makelatlongrid(target.worldwidth, keyradius);
@@ -632,10 +634,11 @@ TEST_F(Landscape, RefinementGridKeyChainEqualsTheHaloChainOnLatLon)
         for (int factor : {2, 4})
             for (int top = 1; top <= 3; top++)
                 for (int margin : {landscape::solvemarginglobalcells, landscape::unboundedsolvemarginglobalcells})
+                for (int reach : {2, 0})
                 {
                     SCOPED_TRACE(testing::Message() << "width " << target.worldwidth << ", column0 " << target.column0 << ", row0 "
                                                     << target.row0 << ", halo " << target.halo << ", factor " << factor
-                                                    << ", level " << top << ", margin " << margin);
+                                                    << ", level " << top << ", margin " << margin << ", reach " << reach);
                     std::vector<landscape::LevelWindow> chain;
                     try
                     {
@@ -661,6 +664,9 @@ TEST_F(Landscape, RefinementGridKeyChainEqualsTheHaloChainOnLatLon)
                         EXPECT_EQ(keyed.domainglobal, globalcellsof(window, true)) << "level " << l;
                         EXPECT_EQ(keyed.keptsize(), window.keptsize());
                         EXPECT_EQ(keyed.domainsize(), window.domainsize());
+                        EXPECT_EQ(keyed.keptwest, window.column0 / window.scale()) << "level " << l;
+                        EXPECT_EQ(keyed.domainwest, window.domaincolumn0 / window.scale()) << "level " << l;
+                        fullwidth += window.domaincolumns == window.levelwidth() ? 1 : 0;
                         if (window.domainsize() > 300000)
                             continue;
                         // The domain grid in the window's own row-major order.
@@ -672,6 +678,7 @@ TEST_F(Landscape, RefinementGridKeyChainEqualsTheHaloChainOnLatLon)
                     }
                 }
     }
+    EXPECT_GT(fullwidth, 0);  // the start of a domain over every column is halochain's too
 }
 
 // On the cube the chain nests: each level's kept box holds its domain's parents widened by
