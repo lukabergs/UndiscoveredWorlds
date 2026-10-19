@@ -48,7 +48,7 @@ def elevation_m(height, sea_level):
 
 
 # 6 carried an always-zero cycle counter; 7 removed it. Field files are identical.
-SUPPORTED_SCHEMAS = {6, 7}
+SUPPORTED_SCHEMAS = {6, 7, 8}
 
 
 def read_field(source, name, shape, run_bundle):

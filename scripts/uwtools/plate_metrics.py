@@ -7,8 +7,12 @@ planetbody.radius; on a cube bundle the cell table's area_m2 and latitude_deg (t
 Plates are the native geosphere.plate_id field ((rows, columns) or (6, N, N)).
 
 Speeds: the bundle has no plate-velocity grid; the per-plate record is the tectonic snapshot's plates list
-(tables/geosphere/tectonic_snapshot.json: linear_velocity in engine cells per update, x east, y south;
-angular_velocity). An engine cell is uwtools.grid.cell_km: run_scenario.world_width_km / width km while the
+(tables/geosphere/tectonic_snapshot.json). Contract schema 8 (the cube engine) gives each plate's rotation vector
+rotation_rad_s (rad/s, the planet's axes: +X at 0 N 0 E, +Y at 0 N 90 E, +Z north), its centroid
+centroid_lon_lat_deg and the centroid's velocity_east_north_cm_yr: the speed of every cell is then |omega x R p|
+at its own centre p (rotation included), and rms_cm_yr_sphere is its area-weighted RMS; per plate the centroid
+speed and the speed's area RMS are reported. Records before schema 8 (the torus engine) give linear_velocity in
+engine cells per update, x east, y south, and angular_velocity, read as follows. An engine cell is uwtools.grid.cell_km: run_scenario.world_width_km / width km while the
 scenario records it (the torus engine), else 2 pi R / width; an update is delta_time_myr, so the
 engine's speed is |v| * that / dt in km/Myr (= mm/yr; motion_diagnostics.max_speed_cm_yr is the largest).
 Two RMS speeds, weighted by true cell area: 'engine' in the engine's flat metric (a column and a row the same
@@ -38,6 +42,59 @@ from uwtools.bundle import Bundle  # noqa: E402
 
 def area_weighted_rms(speed, area):
     return float(np.sqrt(np.sum(area * speed * speed) / np.sum(area)))
+
+
+SECONDS_PER_MYR = 3.15576e13  # tectonics::dynamics::kSecondsPerMyr
+CM_YR_PER_M_S = 100.0 * SECONDS_PER_MYR / 1.0e6
+
+
+def cell_unit_vectors(bundle, shape):
+    """Each cell centre of the bundle's native grid as a unit vector, shape + (3,)."""
+    if bundle.grid_kind == 'cube':
+        cells = bundle.cells()
+        lat = np.radians(np.asarray(cells['latitude_deg'], dtype=np.float64)).reshape(shape)
+        lon = np.radians(np.asarray(cells['longitude_deg'], dtype=np.float64)).reshape(shape)
+    else:
+        rows, columns = shape
+        lat, lon = np.meshgrid(np.radians(grid.latitudes(rows)), np.radians(grid.longitudes(columns)), indexing='ij')
+    return np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], axis=-1)
+
+
+def rotation_speeds(bundle, snapshot, plate, area, radius_km, plates, ids):
+    """Contract schema 8: the speed |omega x R p| of every cell from its plate's rotation, in cm/yr."""
+    omega = np.zeros(plate.shape + (3,))
+    known = {i: p for i, p in enumerate(snapshot['plates'])}
+    for i, p in known.items():
+        omega[plate == i] = p['rotation_rad_s']
+    p = cell_unit_vectors(bundle, plate.shape)
+    speed = np.linalg.norm(np.cross(omega, radius_km * 1000.0 * p), axis=-1) * CM_YR_PER_M_S
+    for entry in plates:
+        v = known.get(entry['plate_id'])
+        if v:
+            mask = plate == entry['plate_id']
+            entry['centroid_lon_lat_deg'] = v['centroid_lon_lat_deg']
+            entry['speed_cm_yr_centroid'] = round(float(np.hypot(*v['velocity_east_north_cm_yr'])), 3)
+            entry['speed_cm_yr_rms'] = round(area_weighted_rms(speed[mask], area[mask]), 3)
+    result = {
+        'source': 'tectonic_snapshot.json plates[].rotation_rad_s (contract schema 8): |omega x R p| per cell',
+        'time_myr': snapshot['time_myr'], 'delta_time_myr': snapshot['delta_time_myr'],
+        'rms_cm_yr_sphere': round(area_weighted_rms(speed, area), 3),
+        'mean_cm_yr_sphere': round(float(np.sum(area * speed) / np.sum(area)), 3),
+        'max_cm_yr_sphere': round(float(speed.max()), 3),
+        'diagnostics_max_speed_cm_yr': snapshot.get('motion_diagnostics', {}).get('max_speed_cm_yr'),
+        'per_plate_mean_cm_yr_engine': snapshot.get('motion_diagnostics', {}).get('mean_speed_cm_yr'),
+        'rotation_included': True,
+        'plates_without_velocity': [int(i) for i in ids if int(i) not in known]}
+    if 'geosphere.deformation_velocity_x' in bundle.fields:
+        # (east, north) in world cells per update: on lat-lon the equatorial cell, on a cube the mean side.
+        cells = plate.size
+        cell_km = (2.0 * math.pi * radius_km / plate.shape[-1] if bundle.grid_kind != 'cube'
+                   else math.sqrt(4.0 * math.pi * radius_km ** 2 / cells))
+        dx = bundle.load_native('geosphere.deformation_velocity_x').astype(np.float64)
+        dy = bundle.load_native('geosphere.deformation_velocity_y').astype(np.float64)
+        result['deformation_rms_cm_yr'] = round(
+            area_weighted_rms(np.hypot(dx, dy) * cell_km / snapshot['delta_time_myr'] / 10.0, area), 3)
+    return result
 
 
 def measure(directory, threshold):
@@ -74,8 +131,10 @@ def measure(directory, threshold):
         'velocity': sorted(k for k in entries if 'velocity' in k and k.startswith('geosphere.')),
         'note': 'no plate-velocity grid in the bundle; per-plate velocities from the tectonic snapshot table'}
     snapshot_path = directory / 'tables/geosphere/tectonic_snapshot.json'
-    if snapshot_path.is_file():
-        snapshot = json.loads(snapshot_path.read_text())
+    snapshot = json.loads(snapshot_path.read_text()) if snapshot_path.is_file() else None
+    if snapshot is not None and snapshot['plates'] and 'rotation_rad_s' in snapshot['plates'][0]:
+        record['speed'] = rotation_speeds(bundle, snapshot, plate, area, radius_km, plates, ids)
+    elif snapshot is not None:
         scenario = snapshot['run_scenario']
         km_per_cell = grid.cell_km(scenario, snapshot['width'], radius_km, bundle.grid_kind)
         mm_yr = km_per_cell / snapshot['delta_time_myr']  # one cell per update, in km/Myr = mm/yr

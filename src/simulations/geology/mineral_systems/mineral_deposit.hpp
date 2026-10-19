@@ -91,7 +91,8 @@ struct Deposit
     DepositFate fate = DepositFate::preserved;
     double fateTimeMyr = 0.0;
 
-    // Fractions of the native tectonic grid: u eastward, v southward, in [0, 1).
+    // Fractions of the sphere: u the longitude east from -180 degrees, v the colatitude from the
+    // north pole, each in [0, 1) (the lat-lon export's columns and rows).
     double u = 0.0;
     double v = 0.0;
 

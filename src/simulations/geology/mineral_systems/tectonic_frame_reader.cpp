@@ -3,8 +3,10 @@
 #include "simulations/geology/plate_tectonics/tectonic_api.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_contract.hpp"
 #include "simulations/geology/plate_tectonics/topography_codec.hpp"
+#include "core/mesh/mesh_remap.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace mineralsystems
 {
@@ -32,8 +34,10 @@ static_assert(matches(regimecode::convergent_arc, GeologicRegime::ConvergentArc)
 
 const TectonicFrame& TectonicFrameReader::read(void* simulation)
 {
-    frame_.width = tectonics_get_map_width(simulation);
-    frame_.height = tectonics_get_map_height(simulation);
+    grid_ = tectonics_get_cell_grid(simulation);
+    frame_.grid = grid_.get();
+    const double spacing_m = std::sqrt(grid_->totalarea_m2() / static_cast<double>(grid_->cellcount()));
+    frame_.spacingKm = spacing_m / 1000.0;
     frame_.timeMyr = tectonics_get_time_myr(simulation);
     frame_.deltaTimeMyr = tectonics_get_delta_time_myr(simulation);
     frame_.plateIndex = tectonics_get_platesmap(simulation);
@@ -64,9 +68,11 @@ const TectonicFrame& TectonicFrameReader::read(void* simulation)
     materialShift_.clear();
     if (displacement != nullptr)
     {
+        // (east, north) in cell spacings per update to a tangent vector in metres.
         materialShift_.resize(frame_.cellCount());
         for (std::size_t cell = 0; cell < materialShift_.size(); ++cell)
-            materialShift_[cell] = { displacement[cell].x, displacement[cell].y };
+            materialShift_[cell] = mesh::eastnorthtotangent(*grid_, static_cast<mesh::CellId>(cell),
+                { displacement[cell].x * spacing_m, displacement[cell].y * spacing_m });
     }
     frame_.materialShift = materialShift_.empty() ? nullptr : materialShift_.data();
 

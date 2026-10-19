@@ -24,11 +24,11 @@ std::vector<WorldProcessDefinition> buildprocesses()
     std::vector<WorldProcessDefinition> processes =
     {
         { S::geosphere_initialization, "geology.geosphere_initialization", K::initializer, true, {}, {}, {}, {},
-          "Creates the engine (starting topography from its own seeded stream) and the inherited gold provinces." },
+          "Creates the engine (starting topography from its own seeded stream) and the inherited gold provinces.", {}, true },
         { S::plate_tectonics, "geology.plate_tectonics", K::evolver, true, {}, {}, {}, {},
           "Continues the initializer's engine; re-creates it deterministically when the run carries none.",
           { nullptr, nullptr, "configs/tectonics-baseline.json (evolution_duration_myr, delta_time_myr); the run sets them "
-                              "with --duration and --delta-time-myr; checkpoints fall on whole steps" } },
+                              "with --duration and --delta-time-myr; checkpoints fall on whole steps" }, true },
         { S::terraforming, "terrain.terraforming", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::inland_seas, "terrain.inland_sea_policy", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::archipelagos, "terrain.archipelagos", K::detailer, false, {}, {}, {}, {}, "", {}, true },
@@ -83,7 +83,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
           "The sub-grid statistics the regional levels reproduce (multiscale plan S3.6): the relief amplitude "
           "and Perron's valley spacing from the erosion run's stream-power and hillslope laws, on the final terrain.", {}, true },
         { S::finalize_layers, "layers.finalize", K::diagnoser, true, {}, {}, {}, {},
-          "Physical resource layers, gold placers and optional society. In an eroded world it applies the erosion run's exhumation to the deposits, so it runs once per world." },
+          "Physical resource layers, gold placers and optional society. In an eroded world it applies the erosion run's exhumation to the deposits, so it runs once per world.", {}, true },
     };
 
     for (WorldProcessDefinition& process : processes)

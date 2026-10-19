@@ -855,23 +855,24 @@ void planet::shiftterrain(int offset)
         settlement.cell = grid_->cellof(settlement.x, settlement.y);
     }
 
-    const float worldspan = static_cast<float>(body_.itswidth + 1);
-    const float offsetf = static_cast<float>(offset);
-    const auto shiftcentroidx = [worldspan, offsetf](float x) -> float
+    // Centroid longitudes move with the columns: offset columns of 360 / W degrees, back into
+    // [-180, 180).
+    const float offsetdeg = 360.0f * static_cast<float>(offset) / static_cast<float>(body_.itswidth + 1);
+    const auto shiftcentroidx = [offsetdeg](float longitude) -> float
     {
-        float shifted = fmodf(x - offsetf, worldspan);
+        float shifted = fmodf(longitude - offsetdeg + 180.0f, 360.0f);
 
         if (shifted < 0.0f)
-            shifted += worldspan;
+            shifted += 360.0f;
 
-        return shifted;
+        return shifted - 180.0f;
     };
 
     for (TectonicBoundarySegment& segment : geosphere_.tectonicboundarysegmentlist)
-        segment.centroidX = shiftcentroidx(segment.centroidX);
+        segment.centroidLongitudeDeg = shiftcentroidx(segment.centroidLongitudeDeg);
 
     for (TectonicDeformingRegion& region : geosphere_.tectonicdeformingregionlist)
-        region.centroidX = shiftcentroidx(region.centroidX);
+        region.centroidLongitudeDeg = shiftcentroidx(region.centroidLongitudeDeg);
 }
 
 void planet::setmaxriverflow()
@@ -1280,9 +1281,9 @@ void planet::saveworld(string filename)
         writevariable(outfile, segment.rightPlateId);
         writevariable(outfile, segment.cellCount);
         writevariable(outfile, segment.persistenceSteps);
-        writevariable(outfile, segment.centroidX);
-        writevariable(outfile, segment.centroidY);
-        writevariable(outfile, segment.lengthCells);
+        writevariable(outfile, segment.centroidLongitudeDeg);
+        writevariable(outfile, segment.centroidLatitudeDeg);
+        writevariable(outfile, segment.lengthKm);
         writevariable(outfile, segment.averageNormalMotion);
         writevariable(outfile, segment.averageShearMotion);
         writevariable(outfile, segment.averageConvergenceScore);
@@ -1305,8 +1306,8 @@ void planet::saveworld(string filename)
         writevariable(outfile, region.secondaryPlateId);
         writevariable(outfile, region.cellCount);
         writevariable(outfile, region.persistenceSteps);
-        writevariable(outfile, region.centroidX);
-        writevariable(outfile, region.centroidY);
+        writevariable(outfile, region.centroidLongitudeDeg);
+        writevariable(outfile, region.centroidLatitudeDeg);
         writevariable(outfile, region.averageDeformationRate);
         writevariable(outfile, region.averageInterpolatedVelocityX);
         writevariable(outfile, region.averageInterpolatedVelocityY);
@@ -2066,9 +2067,9 @@ bool planet::loadworld(string filename)
                 readvariable(infile, segment.rightPlateId);
                 readvariable(infile, segment.cellCount);
                 readvariable(infile, segment.persistenceSteps);
-                readvariable(infile, segment.centroidX);
-                readvariable(infile, segment.centroidY);
-                readvariable(infile, segment.lengthCells);
+                readvariable(infile, segment.centroidLongitudeDeg);
+                readvariable(infile, segment.centroidLatitudeDeg);
+                readvariable(infile, segment.lengthKm);
                 readvariable(infile, segment.averageNormalMotion);
                 readvariable(infile, segment.averageShearMotion);
                 readvariable(infile, segment.averageConvergenceScore);
@@ -2104,8 +2105,8 @@ bool planet::loadworld(string filename)
                 readvariable(infile, region.secondaryPlateId);
                 readvariable(infile, region.cellCount);
                 readvariable(infile, region.persistenceSteps);
-                readvariable(infile, region.centroidX);
-                readvariable(infile, region.centroidY);
+                readvariable(infile, region.centroidLongitudeDeg);
+                readvariable(infile, region.centroidLatitudeDeg);
                 readvariable(infile, region.averageDeformationRate);
                 readvariable(infile, region.averageInterpolatedVelocityX);
                 readvariable(infile, region.averageInterpolatedVelocityY);

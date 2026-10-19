@@ -7,6 +7,6 @@ add_library(uw_mineral_systems STATIC
     placer_routing.cpp
     plate_markers.cpp
 )
-target_link_libraries(uw_mineral_systems PUBLIC uw_includes PRIVATE uw_core)
+target_link_libraries(uw_mineral_systems PUBLIC uw_includes uw_core)
 add_library(uw_mineral_tectonics STATIC tectonic_frame_reader.cpp)
 target_link_libraries(uw_mineral_tectonics PUBLIC uw_mineral_systems uw_tectonics)

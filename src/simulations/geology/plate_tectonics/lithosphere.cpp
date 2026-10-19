@@ -778,21 +778,20 @@ void lithosphere::updateTectonicProvenance() {
         tectonics::PlateState& state = plates[plate_index];
         state.centroid = centroids[plate_index];
         state.stable_id = plate_index < stable_ids.size() ? stable_ids[plate_index] : plate_index;
-        // Until contract schema 8 (E5): the velocity at the centroid (east, north) in cell
-        // spacings per update, the spin about it in radians per update, the centroid as
-        // longitude and latitude in degrees.
+        // Contract schema 8: omega in rad/s, the centroid as longitude and latitude in degrees,
+        // the velocity omega x R c at the centroid (east, north) in cm/yr.
         tectonics::contract::PlateKinematics& kinematics = plate_kinematics[plate_index];
-        const auto velocity = tectonics::boundary_cube::velocity(*grid_, plate_rotation_update.data(), plate_index,
-            num_plates, state.centroid);
-        const float speed = std::hypot(velocity[0], velocity[1]);
-        kinematics.unit_velocity_x = speed > 0 ? velocity[0] / speed : 1.0f;
-        kinematics.unit_velocity_y = speed > 0 ? velocity[1] / speed : 0.0f;
-        kinematics.linear_velocity_x = velocity[0];
-        kinematics.linear_velocity_y = velocity[1];
-        kinematics.angular_velocity = static_cast<float>(mesh::dot(plate_rotation_update[plate_index], state.centroid));
+        kinematics.rotation_rad_s[0] = state.rotation_rad_s.x;
+        kinematics.rotation_rad_s[1] = state.rotation_rad_s.y;
+        kinematics.rotation_rad_s[2] = state.rotation_rad_s.z;
         const auto centre = tectonics::boundary_cube::encodecentroid(state.centroid);
-        kinematics.mass_center_x = centre[0];
-        kinematics.mass_center_y = centre[1];
+        kinematics.centroid_longitude_deg = centre[0];
+        kinematics.centroid_latitude_deg = centre[1];
+        const mesh::Vec3 velocity_m_s = mesh::cross(state.rotation_rad_s, grid_->radius_m() * state.centroid);
+        const auto velocity = tectonics::boundary_cube::eastnorth(state.centroid, velocity_m_s);
+        const double cm_yr = 100.0 * tectonics::dynamics::kSecondsPerMyr / 1.0e6;
+        kinematics.velocity_east_cm_yr = static_cast<float>(velocity[0] * cm_yr);
+        kinematics.velocity_north_cm_yr = static_cast<float>(velocity[1] * cm_yr);
     }
 
     // Velocities in cell spacings per update to cm/yr: cellspacing_m / dt.

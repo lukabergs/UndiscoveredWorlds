@@ -289,8 +289,10 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
 bool parsetectonicoption(tectonics::scenario::Scenario& scenario, const std::string& argument, const std::string& value)
 {
     // The seed belongs to the run (--seed), not to the scenario. On the world grid (the
-    // tectonics recipe) the run also sets the cube (N = W / 4) and every run the radius (the
-    // world's body); --sphere-face-cells and --radius-km act on the engine's own grid only.
+    // tectonics recipe) the run also sets the cube (a cube world's own N, N = W / 4 on a lat-lon
+    // world) and every run the radius (the world's body); --sphere-face-cells and --radius-km act
+    // on the engine's own grid only, and the hand-off remaps it to the world's (identity when
+    // the world is the same cube).
     if (argument == "--seed")
         return false;
     return parse_scenario_arg(scenario, argument, value.c_str());

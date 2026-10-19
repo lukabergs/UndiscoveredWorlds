@@ -86,9 +86,9 @@ void drawboundarysegmentsummary(const char* label, int requestedid, const Tecton
     ImGui::Text("%s: id %d | type %s | plates %d/%d | cells %d | age %.2f Myr",
         label, segment->id, boundarytypelabel(segment->boundaryType), segment->leftPlateId, segment->rightPlateId,
         segment->cellCount, static_cast<float>(segment->ageMyr));
-    ImGui::Text("  centroid(%.1f, %.1f) | normal %.3f | shear %.3f | len %.1f | regime %s",
-        segment->centroidX, segment->centroidY, segment->averageNormalMotion, segment->averageShearMotion,
-        segment->lengthCells, geologicregimelabel(segment->geologicRegime));
+    ImGui::Text("  centroid(%.1f E, %.1f N) | normal %.3f | shear %.3f | len %.0f km | regime %s",
+        segment->centroidLongitudeDeg, segment->centroidLatitudeDeg, segment->averageNormalMotion, segment->averageShearMotion,
+        segment->lengthKm, geologicregimelabel(segment->geologicRegime));
 }
 
 void drawdeformingregionsummary(const char* label, int requestedid, const TectonicDeformingRegion* region)
@@ -105,8 +105,8 @@ void drawdeformingregionsummary(const char* label, int requestedid, const Tecton
     ImGui::Text("%s: id %d | type %s | plates %d/%d | cells %d | age %.2f Myr",
         label, region->id, deformingregiontypelabel(region->type), region->primaryPlateId, region->secondaryPlateId,
         region->cellCount, static_cast<float>(region->ageMyr));
-    ImGui::Text("  centroid(%.1f, %.1f) | rate %.3f | vel(%.3f, %.3f) | normal %.3f | shear %.3f",
-        region->centroidX, region->centroidY, region->averageDeformationRate,
+    ImGui::Text("  centroid(%.1f E, %.1f N) | rate %.3f | vel(%.3f E, %.3f N) | normal %.3f | shear %.3f",
+        region->centroidLongitudeDeg, region->centroidLatitudeDeg, region->averageDeformationRate,
         region->averageInterpolatedVelocityX, region->averageInterpolatedVelocityY,
         region->averageNormalMotion, region->averageShearMotion);
 }

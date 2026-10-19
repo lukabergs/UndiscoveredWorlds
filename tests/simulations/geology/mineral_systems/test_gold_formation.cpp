@@ -10,8 +10,6 @@ using namespace mineralsystems;
 
 namespace
 {
-constexpr double kCircumferenceKm = 40030.0;
-
 BoundarySummary maturecollision()
 {
     BoundarySummary boundary;
@@ -29,16 +27,15 @@ BoundarySummary maturecollision()
 FrameFixture boxworld(std::uint32_t width, BoundarySummary boundary, bool collision = true)
 {
     FrameFixture fixture(width, width / 2);
-    fixture.frame.worldWidthKm = kCircumferenceKm;
     boundary.leftPlate = 0;
     boundary.rightPlate = 1;
     fixture.frame.boundaries = { BoundarySummary{}, boundary };
     const std::uint32_t west = width / 4;
     const std::uint32_t east = width / 2;
     const std::uint32_t start = collision ? west - width / 8 : west;
-    for (std::uint32_t y = 0; y < fixture.frame.height; ++y)
+    for (std::uint32_t y = 0; y < fixture.height(); ++y)
     {
-        const bool band = y >= fixture.frame.height * 3 / 8 && y < fixture.frame.height * 5 / 8;
+        const bool band = y >= fixture.height() * 3 / 8 && y < fixture.height() * 5 / 8;
         for (std::uint32_t x = 0; x < width; ++x)
         {
             const std::size_t cell = fixture.cell(x, y);
@@ -69,8 +66,8 @@ TEST(GoldFormation, SettingKernelsUsePhysicalDistance)
     FrameFixture fixture = boxworld(256, maturecollision());
     FormationParameters parameters;
     const SettingField field(fixture.view(), parameters);
-    const double cellKm = fixture.frame.cellKm();
-    const std::uint32_t y = fixture.frame.height / 2;
+    const double cellKm = fixture.frame.spacingKm;
+    const std::uint32_t y = fixture.height() / 2;
     const std::uint32_t west = 64;
 
     // Mature with saturated activity: the kernel is evaluated at cell centres,
@@ -97,9 +94,9 @@ TEST(GoldFormation, SubductionMarginsHostArcsAwayFromTheTrench)
     FrameFixture fixture = boxworld(512, margin, false);
     FormationParameters parameters;
     const SettingField field(fixture.view(), parameters);
-    const std::uint32_t y = fixture.frame.height / 2;
+    const std::uint32_t y = fixture.height() / 2;
     const std::uint32_t west = 128;
-    const auto peak = static_cast<std::uint32_t>(std::lround(parameters.arcPeakKm / fixture.frame.cellKm() - 0.5));
+    const auto peak = static_cast<std::uint32_t>(std::lround(parameters.arcPeakKm / fixture.frame.spacingKm - 0.5));
     ASSERT_GT(peak, 0u);
 
     EXPECT_GT(field.at(fixture.cell(west + peak, y)).arc, 0.85f);
@@ -204,8 +201,9 @@ TEST(GoldFormation, FixedSeedsReproduceDeposits)
     ASSERT_EQ(first.deposits.size(), second.deposits.size());
     for (std::size_t i = 0; i < first.deposits.size(); ++i)
     {
-        EXPECT_EQ(first.deposits[i].x, second.deposits[i].x);
-        EXPECT_EQ(first.deposits[i].y, second.deposits[i].y);
+        EXPECT_EQ(first.deposits[i].position.x, second.deposits[i].position.x);
+        EXPECT_EQ(first.deposits[i].position.y, second.deposits[i].position.y);
+        EXPECT_EQ(first.deposits[i].position.z, second.deposits[i].position.z);
         EXPECT_EQ(first.deposits[i].deposit.oreMt, second.deposits[i].deposit.oreMt);
         EXPECT_EQ(first.deposits[i].deposit.goldGradeGt, second.deposits[i].deposit.goldGradeGt);
         EXPECT_EQ(first.deposits[i].deposit.formation.timeMyr, second.deposits[i].deposit.formation.timeMyr);
@@ -255,7 +253,7 @@ TEST(GoldFormation, InheritedProvincesLieOnContinentalCrust)
     ASSERT_FALSE(deposits.empty());
     for (const NewDeposit& item : deposits)
     {
-        const auto cell = fixture.cell(static_cast<std::uint32_t>(item.x), static_cast<std::uint32_t>(item.y));
+        const auto cell = fixture.grid->locate(item.position);
         EXPECT_EQ(fixture.crust[cell], crustcode::continental);
         EXPECT_EQ(item.deposit.origin, DepositOrigin::inherited);
         EXPECT_GE(item.deposit.formation.provinceId, 1u);

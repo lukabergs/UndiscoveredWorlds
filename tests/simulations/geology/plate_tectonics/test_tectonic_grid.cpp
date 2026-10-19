@@ -6,6 +6,7 @@
 #include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 #include "simulations/geology/plate_tectonics/lithosphere.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_recipe.hpp"
 
@@ -198,8 +199,16 @@ TEST(TectonicGrid, LithosphereKeepsPlateStateOnTheCube) {
         const auto& published = world.getPlateKinematics()[p];
         EXPECT_NEAR(mesh::length(state.centroid), 1.0, 1e-12);
         const auto centre = tectonics::boundary_cube::encodecentroid(state.centroid);
-        EXPECT_EQ(published.mass_center_x, centre[0]);
-        EXPECT_EQ(published.mass_center_y, centre[1]);
+        EXPECT_EQ(published.centroid_longitude_deg, centre[0]);
+        EXPECT_EQ(published.centroid_latitude_deg, centre[1]);
+        EXPECT_EQ(published.rotation_rad_s[0], state.rotation_rad_s.x);
+        EXPECT_EQ(published.rotation_rad_s[1], state.rotation_rad_s.y);
+        EXPECT_EQ(published.rotation_rad_s[2], state.rotation_rad_s.z);
+        // The centroid's velocity omega x R c in cm/yr.
+        const mesh::Vec3 v = mesh::cross(state.rotation_rad_s, grid.radius_m() * state.centroid);
+        const double cm_yr = 100.0 * tectonics::dynamics::kSecondsPerMyr / 1.0e6;
+        EXPECT_NEAR(std::hypot(published.velocity_east_cm_yr, published.velocity_north_cm_yr),
+                    mesh::length(v) * cm_yr, 1e-5 * (1.0 + mesh::length(v) * cm_yr));
         EXPECT_EQ(state.stable_id, world.getTopologyDiagnostics().stable_ids[p]);
         EXPECT_GE(state.continental_share, 0.0f);
         EXPECT_LE(state.continental_share, 1.0f);

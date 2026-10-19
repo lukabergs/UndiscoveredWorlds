@@ -1,7 +1,7 @@
 {
-  "version": 4,
-  "name": "earth-like-w3-400myr-256",
-  "notes": "Earth-like set W3 of terrain roadmap T4.12 round 5 (tectonics-0016; the user approved the switch on 2026-10-18): 40 % continental crust, 15-34 km continental thickness with root cap and delamination, orogenic collapse above a 65 km onset and creep below it. 400 Myr because the analytic mantle forcing has a 600 Myr clock (T4.10) and the crust thickens after about 500 Myr; the duration stays a run parameter (--duration). The engine's struct defaults keep the earlier legacy values.",
+  "version": 5,
+  "name": "earth-like-w3-400myr-n64",
+  "notes": "Earth-like set W3 of terrain roadmap T4.12 round 5 (tectonics-0016; the user approved the switch on 2026-10-18): 40 % continental crust, 15-34 km continental thickness with root cap and delamination, orogenic collapse above a 65 km onset and creep below it. 400 Myr because the analytic mantle forcing has a 600 Myr clock (T4.10) and the crust thickens after about 500 Myr; the duration stays a run parameter (--duration). The engine's struct defaults keep the earlier legacy values. Version 5 (T8 W2-E, E5): the cube engine at N 64 (sphere_face_cells; the 256-column equivalent) on the body's radius, the world's hand-off by cached remap and output contract schema 8; the W3 values are not yet re-tuned on the sphere (E6).",
   "seed": 1,
   "sphere_face_cells": 64,
   "checkpoint_every_updates": 10,

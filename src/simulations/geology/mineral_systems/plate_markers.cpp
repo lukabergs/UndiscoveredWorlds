@@ -9,29 +9,6 @@ namespace mineralsystems
 {
 namespace
 {
-// Snapped markers stay this far inside the target cell, in cells.
-constexpr double kSnapMargin = 0.25;
-
-double wrapcoordinate(double value, std::uint32_t period)
-{
-    const double size = static_cast<double>(period);
-    double wrapped = std::fmod(value, size);
-    if (wrapped < 0.0)
-        wrapped += size;
-    return wrapped >= size ? 0.0 : wrapped;
-}
-
-double wrappedoffset(double point, double centre, std::uint32_t period)
-{
-    const double size = static_cast<double>(period);
-    double delta = std::fmod(point - centre, size);
-    if (delta > 0.5 * size)
-        delta -= size;
-    else if (delta < -0.5 * size)
-        delta += size;
-    return delta;
-}
-
 std::vector<std::pair<std::uint64_t, std::uint32_t>> uidindex(const TectonicFrame& frame)
 {
     std::vector<std::pair<std::uint64_t, std::uint32_t>> index;
@@ -54,45 +31,33 @@ bool continentalcell(const TectonicFrame& frame, std::size_t cell)
     return crust == crustcode::continental || crust == crustcode::transitional;
 }
 
-// Moves a continental-hosted marker to the nearest neighbouring cell where its
-// host owns continental or transitional crust.
+// Moves a continental-hosted marker to the centre of the nearest neighbouring cell (of the
+// eight slots) where its host owns continental or transitional crust.
 bool snaptohost(Marker& marker, const TectonicFrame& frame, std::uint32_t host)
 {
-    const double cellx = std::floor(marker.x);
-    const double celly = std::floor(marker.y);
-    double bestdistance = std::numeric_limits<double>::max();
-    double bestx = 0.0;
-    double besty = 0.0;
-
-    for (int dy = -1; dy <= 1; ++dy)
+    const mesh::CellGrid& grid = *frame.grid;
+    const mesh::CellId here = grid.locate(marker.position);
+    double nearest = -std::numeric_limits<double>::infinity();
+    mesh::CellId best = mesh::nocell;
+    for (int k = 1; k <= mesh::slotcount; ++k)
     {
-        for (int dx = -1; dx <= 1; ++dx)
+        const std::int32_t neighbour = grid.neighbour(here, k);
+        if (neighbour < 0)
+            continue;
+        const auto cell = static_cast<mesh::CellId>(neighbour);
+        if (frame.plateIndex[cell] != host || !continentalcell(frame, cell))
+            continue;
+        // The largest cosine is the nearest centre (ties to the lower slot).
+        const double along = mesh::dot(grid.centre(cell), marker.position);
+        if (along > nearest)
         {
-            if (dx == 0 && dy == 0)
-                continue;
-            const double left = cellx + dx;
-            const double top = celly + dy;
-            const auto nx = static_cast<std::uint32_t>(wrapcoordinate(left, frame.width));
-            const auto ny = static_cast<std::uint32_t>(wrapcoordinate(top, frame.height));
-            const std::size_t cell = frame.cellIndex(nx, ny);
-            if (frame.plateIndex[cell] != host || !continentalcell(frame, cell))
-                continue;
-            const double px = std::clamp(marker.x, left + kSnapMargin, left + 1.0 - kSnapMargin);
-            const double py = std::clamp(marker.y, top + kSnapMargin, top + 1.0 - kSnapMargin);
-            const double distance = (px - marker.x) * (px - marker.x) + (py - marker.y) * (py - marker.y);
-            if (distance < bestdistance)
-            {
-                bestdistance = distance;
-                bestx = px;
-                besty = py;
-            }
+            nearest = along;
+            best = cell;
         }
     }
-
-    if (bestdistance == std::numeric_limits<double>::max())
+    if (best == mesh::nocell)
         return false;
-    marker.x = wrapcoordinate(bestx, frame.width);
-    marker.y = wrapcoordinate(besty, frame.height);
+    marker.position = grid.centre(best);
     return true;
 }
 
@@ -109,24 +74,33 @@ std::vector<std::uint64_t> sorteduids(const TectonicFrame& frame)
 
 std::size_t markercell(const Marker& marker, const TectonicFrame& frame)
 {
-    const auto x = std::min(frame.width - 1, static_cast<std::uint32_t>(wrapcoordinate(marker.x, frame.width)));
-    const auto y = std::min(frame.height - 1, static_cast<std::uint32_t>(wrapcoordinate(marker.y, frame.height)));
-    return frame.cellIndex(x, y);
+    return frame.grid->locate(marker.position);
+}
+
+mesh::Vec3 movealong(const mesh::Vec3& position, const mesh::Vec3& displacement, double radius_m)
+{
+    // The displacement's part in the tangent plane at the position, then the great circle.
+    const mesh::Vec3 tangent = displacement - mesh::dot(displacement, position) * position;
+    const double distance = mesh::length(tangent);
+    if (!(distance > 0.0))
+        return position;
+    const double angle = distance / radius_m;
+    return mesh::normalise(std::cos(angle) * position + (std::sin(angle) / distance) * tangent);
 }
 
 void applymaterialshift(Marker& marker, const TectonicFrame& frame)
 {
     // Approximate point tracers of the column displacement. Conservative
     // subcell mixing and root/sediment redistribution are not marker transport.
-    constexpr double kMaximumSubstepCells = 0.25;
-    const CellShift start = frame.materialShift[markercell(marker, frame)];
-    const double largest = std::max(std::abs(start.x), std::abs(start.y));
-    const int steps = std::max(1, static_cast<int>(std::ceil(largest / kMaximumSubstepCells)));
+    constexpr double kMaximumSubstepSpacings = 0.25;
+    const double radius_m = frame.grid->radius_m();
+    const double spacing_m = frame.spacingKm * 1000.0;
+    const double largest = mesh::length(frame.materialShift[markercell(marker, frame)]);
+    const int steps = std::max(1, static_cast<int>(std::ceil(largest / (kMaximumSubstepSpacings * spacing_m))));
     for (int step = 0; step < steps; ++step)
     {
-        const CellShift shift = frame.materialShift[markercell(marker, frame)];
-        marker.x = wrapcoordinate(marker.x + shift.x / steps, frame.width);
-        marker.y = wrapcoordinate(marker.y + shift.y / steps, frame.height);
+        const mesh::Vec3 shift = frame.materialShift[markercell(marker, frame)];
+        marker.position = movealong(marker.position, (1.0 / steps) * shift, radius_m);
     }
 }
 

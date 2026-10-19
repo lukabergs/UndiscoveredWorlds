@@ -82,7 +82,7 @@ def read_bundle(path):
     """A tectonic snapshot: a run bundle of world_pipeline or a former snapshot bundle."""
     manifest = snapshot_manifest(path)
     # Contract 6 carried an always-zero cycle counter that 7 removed; the fields are the same.
-    if manifest.get("schema") != "tectonic-snapshot-bundle/v1" or manifest.get("contract_schema_version") not in (6, 7):
+    if manifest.get("schema") != "tectonic-snapshot-bundle/v1" or manifest.get("contract_schema_version") not in (6, 7, 8):
         raise ValueError(f"Unsupported native bundle contract: {path}")
     files = bundle_files(path)
     native = is_run_bundle(path)

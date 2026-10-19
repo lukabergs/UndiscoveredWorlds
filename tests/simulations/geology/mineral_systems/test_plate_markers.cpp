@@ -3,15 +3,16 @@
 #include "frame_fixture.hpp"
 #include "simulations/geology/mineral_systems/plate_markers.hpp"
 
+#include <cmath>
+
 using namespace mineralsystems;
 
 namespace
 {
-Marker markerat(double x, double y)
+Marker markerat(const FrameFixture& fixture, double x, double y)
 {
     Marker marker;
-    marker.x = x;
-    marker.y = y;
+    marker.position = fixture.at(x, y);
     return marker;
 }
 
@@ -19,30 +20,39 @@ Marker markerat(double x, double y)
 void splitplates(FrameFixture& fixture, std::uint32_t split, std::uint64_t leftuid, std::uint64_t rightuid)
 {
     fixture.frame.plates = { { leftuid }, { rightuid } };
-    for (std::uint32_t y = 0; y < fixture.frame.height; ++y)
-        for (std::uint32_t x = 0; x < fixture.frame.width; ++x)
+    for (std::uint32_t y = 0; y < fixture.height(); ++y)
+        for (std::uint32_t x = 0; x < fixture.width(); ++x)
             fixture.plate[fixture.cell(x, y)] = x < split ? 0u : 1u;
 }
 }
 
-TEST(PlateMarkers, TranslationFollowsTheRecordedShiftAndWraps)
+TEST(PlateMarkers, TranslationFollowsTheRecordedShiftAndCrossesTheDateLine)
 {
     FrameFixture fixture(16, 8);
     fixture.frame.plates = { { 11 } };
     MarkerTracker tracker;
     tracker.begin(fixture.view());
-    std::vector<Marker> markers{ markerat(3.5, 4.5), markerat(15.5, 0.1) };
+    // Near the equator, so (east, north) cells move a marker by about as many columns and rows.
+    std::vector<Marker> markers{ markerat(fixture, 3.5, 4.25), markerat(fixture, 15.5, 4.25) };
+    const mesh::Vec3 start = markers[0].position;
     ASSERT_TRUE(tracker.attach(markers[0], fixture.view()));
     ASSERT_TRUE(tracker.attach(markers[1], fixture.view()));
 
-    fixture.motion(1.5f, -0.25f);
+    fixture.motion(1.5, 0.25);
     const MarkerStepSummary summary = tracker.advance(markers, fixture.view());
 
     EXPECT_EQ(summary.moved, 2u);
-    EXPECT_NEAR(markers[0].x, 5.0, 1e-12);
-    EXPECT_NEAR(markers[0].y, 4.25, 1e-12);
-    EXPECT_NEAR(markers[1].x, 1.0, 1e-12);
-    EXPECT_NEAR(markers[1].y, 7.85, 1e-12);
+    // The marker travels the shift's length along the sphere (to the projection of each
+    // cell's tangent onto the marker's), and stays a unit vector.
+    const double travelled = std::acos(std::min(1.0, mesh::dot(start, markers[0].position))) * FrameFixture::kRadiusKm;
+    EXPECT_NEAR(travelled / (std::hypot(1.5, 0.25) * fixture.cellkm()), 1.0, 0.02);
+    EXPECT_NEAR(mesh::length(markers[0].position), 1.0, 1e-12);
+    const auto a = fixture.coordinates(markers[0].position);
+    const auto b = fixture.coordinates(markers[1].position);
+    EXPECT_NEAR(a[0], 5.0, 0.1);
+    EXPECT_NEAR(a[1], 4.0, 0.1);
+    EXPECT_NEAR(b[0], 1.0, 0.1);  // across the date line
+    EXPECT_NEAR(b[1], 4.0, 0.1);
 }
 
 TEST(PlateMarkers, ContinentalMarkerTransfersWithCollidingCrust)
@@ -51,11 +61,11 @@ TEST(PlateMarkers, ContinentalMarkerTransfersWithCollidingCrust)
     splitplates(fixture, 4, 1, 2);
     MarkerTracker tracker;
     tracker.begin(fixture.view());
-    std::vector<Marker> markers{ markerat(3.5, 1.5) };
+    std::vector<Marker> markers{ markerat(fixture, 3.5, 1.5) };
     ASSERT_TRUE(tracker.attach(markers[0], fixture.view()));
     EXPECT_TRUE(markers[0].continentalHost);
 
-    fixture.motion(1.0f);
+    fixture.motion(1.0);
     const MarkerStepSummary summary = tracker.advance(markers, fixture.view());
 
     EXPECT_EQ(summary.rehomed, 1u);
@@ -63,7 +73,7 @@ TEST(PlateMarkers, ContinentalMarkerTransfersWithCollidingCrust)
     EXPECT_EQ(markers[0].state, MarkerState::attached);
 }
 
-TEST(PlateMarkers, ContinentalMarkerReturnsFromAnOceanicRasterSeam)
+TEST(PlateMarkers, ContinentalMarkerReturnsFromOceanicCrustToItsHost)
 {
     FrameFixture fixture(8, 4);
     splitplates(fixture, 4, 1, 2);
@@ -72,16 +82,18 @@ TEST(PlateMarkers, ContinentalMarkerReturnsFromAnOceanicRasterSeam)
             fixture.crust[fixture.cell(x, y)] = crustcode::oceanic;
     MarkerTracker tracker;
     tracker.begin(fixture.view());
-    std::vector<Marker> markers{ markerat(3.9, 1.5) };
+    std::vector<Marker> markers{ markerat(fixture, 3.9, 1.5) };
     ASSERT_TRUE(tracker.attach(markers[0], fixture.view()));
 
-    fixture.motion(0.3f);
+    fixture.motion(0.3);
     const MarkerStepSummary summary = tracker.advance(markers, fixture.view());
 
+    // Back to the centre of the nearest host cell with continental crust: (3, 1).
     EXPECT_EQ(summary.snapped, 1u);
     EXPECT_EQ(markers[0].hostUid, 1u);
-    EXPECT_DOUBLE_EQ(markers[0].x, 3.75);
-    EXPECT_DOUBLE_EQ(markers[0].y, 1.5);
+    const auto snapped = fixture.coordinates(markers[0].position);
+    EXPECT_NEAR(snapped[0], 3.5, 1e-9);
+    EXPECT_NEAR(snapped[1], 1.5, 1e-9);
 }
 
 TEST(PlateMarkers, OceanicMarkerIsSubductedUnderOlderCrustOfAnExistingPlate)
@@ -96,13 +108,13 @@ TEST(PlateMarkers, OceanicMarkerIsSubductedUnderOlderCrustOfAnExistingPlate)
     }
     MarkerTracker tracker(3.0);
     tracker.begin(fixture.view());
-    std::vector<Marker> markers{ markerat(3.5, 1.5) };
+    std::vector<Marker> markers{ markerat(fixture, 3.5, 1.5) };
     ASSERT_TRUE(tracker.attach(markers[0], fixture.view()));
     EXPECT_FALSE(markers[0].continentalHost);
     EXPECT_DOUBLE_EQ(markers[0].hostCrustBirthMyr, 90.0);
 
     fixture.frame.timeMyr = 101.0;
-    fixture.motion(1.0f);
+    fixture.motion(1.0);
     const MarkerStepSummary summary = tracker.advance(markers, fixture.view());
 
     EXPECT_EQ(summary.subducted, 1u);
@@ -122,7 +134,7 @@ TEST(PlateMarkers, RelabelledOceanicCrustKeepsItsMarker)
     }
     MarkerTracker tracker(3.0);
     tracker.begin(fixture.view());
-    std::vector<Marker> markers{ markerat(3.5, 1.5) };
+    std::vector<Marker> markers{ markerat(fixture, 3.5, 1.5) };
     ASSERT_TRUE(tracker.attach(markers[0], fixture.view()));
 
     // The region changes owner with its crust; ages advance with time.
@@ -147,7 +159,7 @@ TEST(PlateMarkers, NewbornPlateInheritsMarkersWithoutSubduction)
     }
     MarkerTracker tracker(3.0);
     tracker.begin(fixture.view());
-    std::vector<Marker> markers{ markerat(1.5, 1.5) };
+    std::vector<Marker> markers{ markerat(fixture, 1.5, 1.5) };
     ASSERT_TRUE(tracker.attach(markers[0], fixture.view()));
 
     fixture.frame.plates.push_back({ 3 });
@@ -166,6 +178,6 @@ TEST(PlateMarkers, UncoveredCellsCannotBeAttached)
     fixture.plate[fixture.cell(1, 1)] = 0xFFFFFFFFu;
     MarkerTracker tracker;
     tracker.begin(fixture.view());
-    Marker marker = markerat(1.5, 1.5);
+    Marker marker = markerat(fixture, 1.5, 1.5);
     EXPECT_FALSE(tracker.attach(marker, fixture.view()));
 }

@@ -1,12 +1,14 @@
 #pragma once
 
+#include "core/mesh/cell_grid.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
 // Engine-neutral, read-only view of the native tectonic state after an update.
-// Codes use the tectonic contract enums. Arrays are row-major, width x height,
-// on the native planar torus; the frame does not own them.
+// Codes use the tectonic contract enums. Arrays are per cell of the engine's grid (the cube,
+// mesh::CellGrid, in its id order); cells have their true areas. The frame does not own them.
 namespace mineralsystems
 {
 // Codes from tectonics::contract; tectonic_frame_reader.cpp checks that they match.
@@ -26,12 +28,6 @@ inline constexpr std::uint8_t stable = 0, convergent_arc = 1, continent_collisio
 
 inline constexpr std::uint32_t kNoPlate = 0xffffffffu;
 
-struct CellShift
-{
-    double x = 0.0; // Cells per update.
-    double y = 0.0;
-};
-
 struct PlateIdentity
 {
     std::uint64_t uid = 0; // Stable topology identity; array indices can change.
@@ -50,12 +46,13 @@ struct BoundarySummary
 
 struct TectonicFrame
 {
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
+    // The engine's cells; every array below has grid->cellcount() values in its id order.
+    const mesh::CellGrid* grid = nullptr;
     double timeMyr = 0.0;
     double deltaTimeMyr = 1.0;
-    // Physical width of the native planar domain in kilometres.
-    double worldWidthKm = 40000.0;
+    // The engine's cell spacing in kilometres (the mean cell side): the unit of
+    // boundaryDistance.
+    double spacingKm = 0.0;
 
     const std::uint32_t* plateIndex = nullptr; // >= plates.size(): no owner.
     const std::uint8_t* crustClass = nullptr;
@@ -63,22 +60,17 @@ struct TectonicFrame
     const float* elevationM = nullptr;          // Relative to sea level.
     // Continental crust of the isostatic columns: volume per cell area, metres.
     const float* continentalCrustM = nullptr;
-    const std::uint16_t* boundaryDistance = nullptr; // Native cells.
+    const std::uint16_t* boundaryDistance = nullptr; // Engine cell spacings.
     const std::uint32_t* nearestBoundaryId = nullptr;
     const std::uint8_t* geologicRegime = nullptr;
-    // Per-cell material displacement applied by the column solver.
-    const CellShift* materialShift = nullptr;
+    // Per-cell material displacement applied by the column solver: a 3-D tangent vector at
+    // the cell's centre, metres per update.
+    const mesh::Vec3* materialShift = nullptr;
 
     std::vector<PlateIdentity> plates;         // Indexed by plate index.
     std::vector<BoundarySummary> boundaries; // Indexed by boundary segment id.
 
-    std::size_t cellCount() const { return static_cast<std::size_t>(width) * height; }
-    std::size_t cellIndex(std::uint32_t x, std::uint32_t y) const
-    {
-        return static_cast<std::size_t>(y) * width + x;
-    }
-    // Native cell spacing along the torus axes.
-    double cellKm() const { return width > 0 ? worldWidthKm / width : 0.0; }
-    double cellAreaKm2() const { return cellKm() * cellKm(); }
+    std::size_t cellCount() const { return grid != nullptr ? grid->cellcount() : 0; }
+    double cellAreaKm2(std::size_t cell) const { return grid->area_m2(static_cast<mesh::CellId>(cell)) * 1.0e-6; }
 };
 }

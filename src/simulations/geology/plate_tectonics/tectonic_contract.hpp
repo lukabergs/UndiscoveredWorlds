@@ -20,7 +20,7 @@ struct Displacement { double x = 0, y = 0; };
 
 namespace tectonics::contract {
 
-inline constexpr uint32_t kSchemaVersion = 7;
+inline constexpr uint32_t kSchemaVersion = 8;
 inline constexpr float kConvergentBoundaryThreshold = 0.18f;
 inline constexpr uint32_t kNoBoundaryId = 0;
 inline constexpr uint32_t kNoDeformingRegionId = 0;
@@ -74,18 +74,17 @@ enum class JunctionStability : uint8_t {
     Indeterminate = 4,
 };
 
-// A plate's motion as published until contract schema 8 (E5) names the sphere's quantities:
-// the velocity at the plate's centroid (east, north) in cell spacings per update and its unit
-// direction, the spin about the centroid (omega . centroid) in radians per update, and the
-// centroid as longitude and latitude in degrees.
+// A plate's motion (schema 8): the rotation vector omega in rad/s in the planet's axes
+// (uw-cube-1: +X at latitude 0, longitude 0; +Y at latitude 0, longitude 90 E; +Z the north
+// pole), so the plate moves omega x R p at the unit vector p; the centroid (the area-weighted
+// mean unit vector of its cells) as longitude and latitude in degrees; and the velocity
+// omega x R c at the centroid as (east, north) in cm/yr.
 struct PlateKinematics {
-    float unit_velocity_x = 0.0f;
-    float unit_velocity_y = 0.0f;
-    float linear_velocity_x = 0.0f;
-    float linear_velocity_y = 0.0f;
-    float angular_velocity = 0.0f;
-    float mass_center_x = 0.0f;
-    float mass_center_y = 0.0f;
+    double rotation_rad_s[3] = {0.0, 0.0, 0.0};
+    float centroid_longitude_deg = 0.0f;
+    float centroid_latitude_deg = 0.0f;
+    float velocity_east_cm_yr = 0.0f;
+    float velocity_north_cm_yr = 0.0f;
 };
 
 struct BoundarySegment {

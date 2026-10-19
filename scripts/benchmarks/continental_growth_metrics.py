@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 
@@ -119,9 +120,17 @@ def measure(directory: Path, interior_cells: int) -> dict:
         row["mean_speed_cm_yr"] = data.get("motion_diagnostics", {}).get("mean_speed_cm_yr")
         row["plates"] = len(data.get("plates", []))
         # Cumulative area terms and what their rates need (removed again by series).
-        width_m = float(data.get("run_scenario", {}).get("world_width_km", 0)) * 1000
+        # The engine's surface: the sphere of run_scenario.radius_km (the cube engine, contract
+        # schema 8), or the torus of world_width_km in records before it.
+        scenario = data.get("run_scenario", {})
+        width_m = float(scenario.get("world_width_km", 0)) * 1000
         cells_wide, cells_high = data.get("width", 0), data.get("height", 0)
-        row["_surface_m2"] = width_m * width_m * cells_high / cells_wide if width_m > 0 and cells_wide else None
+        if width_m > 0 and cells_wide:
+            row["_surface_m2"] = width_m * width_m * cells_high / cells_wide
+        elif scenario.get("radius_km"):
+            row["_surface_m2"] = 4.0 * math.pi * (float(scenario["radius_km"]) * 1000) ** 2
+        else:
+            row["_surface_m2"] = None
         row["_engine_time_myr"] = data.get("time_myr")
         for name, (added, subtracted) in AREA_TERMS.items():
             if all(key in budget for key in added + subtracted):

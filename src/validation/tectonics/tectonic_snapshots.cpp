@@ -665,14 +665,14 @@ void write_snapshot_record(std::ostream& output, const tectonics::contract::Snap
     for (size_t i = 0; i < snapshot.plates.size(); ++i) {
         const auto& plate = snapshot.plates[i];
         output << "    {\n";
+        // Contract schema 8 (tectonic_contract.hpp, PlateKinematics).
         output << "      \"plate_id\": " << i << ",\n";
-        output << "      \"unit_velocity\": [" << plate.unit_velocity_x << ", "
-               << plate.unit_velocity_y << "],\n";
-        output << "      \"linear_velocity\": [" << plate.linear_velocity_x << ", "
-               << plate.linear_velocity_y << "],\n";
-        output << "      \"angular_velocity\": " << plate.angular_velocity << ",\n";
-        output << "      \"mass_center\": [" << plate.mass_center_x << ", "
-               << plate.mass_center_y << "]\n";
+        output << "      \"rotation_rad_s\": [" << plate.rotation_rad_s[0] << ", "
+               << plate.rotation_rad_s[1] << ", " << plate.rotation_rad_s[2] << "],\n";
+        output << "      \"centroid_lon_lat_deg\": [" << plate.centroid_longitude_deg << ", "
+               << plate.centroid_latitude_deg << "],\n";
+        output << "      \"velocity_east_north_cm_yr\": [" << plate.velocity_east_cm_yr << ", "
+               << plate.velocity_north_cm_yr << "]\n";
         output << "    }" << (i + 1 < snapshot.plates.size() ? "," : "") << "\n";
     }
     output << "  ]\n";
@@ -778,6 +778,62 @@ double parse_json_double(const std::string& text, size_t pos) {
     return value;
 }
 
+// A JSON array of exactly `count` numbers starting at pos.
+std::vector<double> parse_json_doubles(const std::string& text, size_t pos, size_t count) {
+    skip_json_whitespace(text, pos);
+    if (pos >= text.size() || text[pos] != '[') {
+        fail("expected array in manifest");
+    }
+    ++pos;
+    std::vector<double> values;
+    while (values.size() < count) {
+        values.push_back(parse_json_double(text, pos));
+        const size_t next = text.find_first_of(",]", pos);
+        if (next == std::string::npos) {
+            fail("unterminated array in manifest");
+        }
+        pos = next + 1;
+        if (text[next] == ']') {
+            break;
+        }
+    }
+    if (values.size() != count) {
+        fail("array of the wrong length in manifest");
+    }
+    return values;
+}
+
+// The plates list of a schema 8 record (PlateKinematics), in plate index order.
+std::vector<tectonics::contract::PlateKinematics> parse_plates(const std::string& manifest) {
+    std::vector<tectonics::contract::PlateKinematics> plates;
+    const size_t key = manifest.rfind("\"plates\"");
+    if (key == std::string::npos) {
+        fail("missing key in manifest: plates");
+    }
+    // The record's last array, so its closing bracket is the record's last one.
+    const size_t start = manifest.find('[', key), end = manifest.rfind(']');
+    size_t pos = manifest.find('{', start);
+    while (pos != std::string::npos && pos < end) {
+        const size_t finish = manifest.find('}', pos);
+        if (finish == std::string::npos) {
+            fail("invalid plate in manifest");
+        }
+        const std::string object = manifest.substr(pos, finish - pos + 1);
+        tectonics::contract::PlateKinematics plate;
+        const auto rotation = parse_json_doubles(object, find_key(object, "rotation_rad_s"), 3);
+        const auto centroid = parse_json_doubles(object, find_key(object, "centroid_lon_lat_deg"), 2);
+        const auto velocity = parse_json_doubles(object, find_key(object, "velocity_east_north_cm_yr"), 2);
+        for (int k = 0; k < 3; ++k) plate.rotation_rad_s[k] = rotation[k];
+        plate.centroid_longitude_deg = static_cast<float>(centroid[0]);
+        plate.centroid_latitude_deg = static_cast<float>(centroid[1]);
+        plate.velocity_east_cm_yr = static_cast<float>(velocity[0]);
+        plate.velocity_north_cm_yr = static_cast<float>(velocity[1]);
+        plates.push_back(plate);
+        pos = manifest.find('{', finish + 1);
+    }
+    return plates;
+}
+
 uint32_t parse_json_u32(const std::string& text, size_t pos) {
     skip_json_whitespace(text, pos);
     char* end = nullptr;
@@ -873,8 +929,12 @@ LoadedSnapshotBundle load_snapshot_bundle(const fs::path& input_dir) {
             parse_json_u32(manifest, junction_count_pos);
     }
 
+    if (bundle.snapshot.schema_version >= 8) {
+        bundle.snapshot.plates = parse_plates(manifest);
+    }
+
     const size_t cell_count = bundle.snapshot.cell_count();
-    const auto topology_start = find_optional_key_after(manifest, "topology_diagnostics", 0);
+    const auto topology_start =find_optional_key_after(manifest, "topology_diagnostics", 0);
     if (topology_start != std::string::npos) {
         auto& topology = bundle.snapshot.topology_diagnostics;
         topology.enabled = true;

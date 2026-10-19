@@ -4574,9 +4574,9 @@ inline void planet::settectonicboundarysegments(const std::vector<SegmentT>& seg
         dst.rightPlateId = static_cast<int>(src.right_plate_id);
         dst.cellCount = static_cast<int>(src.cell_count);
         dst.persistenceSteps = static_cast<int>(src.persistence_steps);
-        dst.centroidX = src.centroid_x;
-        dst.centroidY = src.centroid_y;
-        dst.lengthCells = src.length_cells;
+        dst.centroidLongitudeDeg = src.centroid_x;
+        dst.centroidLatitudeDeg = src.centroid_y;
+        dst.lengthKm = src.length_cells;
         dst.averageNormalMotion = src.average_normal_motion;
         dst.averageShearMotion = src.average_shear_motion;
         dst.averageConvergenceScore = static_cast<int>(src.average_convergence_score);
@@ -4608,8 +4608,8 @@ inline void planet::settectonicdeformingregions(const std::vector<RegionT>& regi
         dst.secondaryPlateId = static_cast<int>(src.secondary_plate_id);
         dst.cellCount = static_cast<int>(src.cell_count);
         dst.persistenceSteps = static_cast<int>(src.persistence_steps);
-        dst.centroidX = src.centroid_x;
-        dst.centroidY = src.centroid_y;
+        dst.centroidLongitudeDeg = src.centroid_x;
+        dst.centroidLatitudeDeg = src.centroid_y;
         dst.averageDeformationRate = src.average_deformation_rate;
         dst.averageInterpolatedVelocityX = src.average_interpolated_velocity_x;
         dst.averageInterpolatedVelocityY = src.average_interpolated_velocity_y;

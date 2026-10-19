@@ -1,6 +1,7 @@
 #include "simulations/geology/mineral_systems/gold_formation.hpp"
 
 #include "simulations/geology/mineral_systems/mineral_random.hpp"
+#include "core/mesh/mesh_geometry.hpp"
 
 #include <algorithm>
 #include <array>
@@ -110,13 +111,14 @@ double lognormal(detail::Random& random, const LognormalRange& range)
     return range.median * std::exp(range.sigmaLn * z);
 }
 
-double wrapcoordinate(double value, std::uint32_t period)
+// A point about a cell from two uniform numbers: its centre moved by (u - 1/2, v - 1/2) of
+// the cell's side (the square root of its area) toward local east and north, gnomonic.
+mesh::Vec3 pointincell(const TectonicFrame& frame, std::size_t cell, double u, double v)
 {
-    const double size = static_cast<double>(period);
-    double wrapped = std::fmod(value, size);
-    if (wrapped < 0.0)
-        wrapped += size;
-    return wrapped >= size ? 0.0 : wrapped;
+    const mesh::CellGrid& grid = *frame.grid;
+    const auto c = static_cast<mesh::CellId>(cell);
+    const double side = std::sqrt(grid.area_m2(c)) / grid.radius_m();
+    return mesh::normalise(grid.centre(c) + ((u - 0.5) * side) * grid.east(c) + ((v - 0.5) * side) * grid.north(c));
 }
 
 // Cells weighted for area-proportional sampling.
@@ -145,7 +147,7 @@ private:
 SettingField::SettingField(const TectonicFrame& frame, const FormationParameters& parameters)
     : frame_(frame), minimumHostElevationM_(parameters.minimumHostElevationM)
 {
-    const double cellKm = frame.cellKm();
+    const double cellKm = frame.spacingKm;
     orogenicKernel_ = gaussiankernel(cellKm, 0.0, parameters.orogenicWidthKm);
     arcKernel_ = gaussiankernel(cellKm, parameters.arcPeakKm, parameters.arcWidthKm);
     boundaries_.assign(frame.boundaries.size(), BoundarySetting{});
@@ -224,24 +226,20 @@ FormationSample sampleformation(const TectonicFrame& frame, const FormationParam
     const SettingField field(frame, parameters);
     WeightedCells orogenic;
     WeightedCells arc;
-    for (std::uint32_t y = 0; y < frame.height; ++y)
+    for (std::size_t cell = 0; cell < frame.cellCount(); ++cell)
     {
-        const double area = frame.cellAreaKm2();
-        for (std::uint32_t x = 0; x < frame.width; ++x)
-        {
-            const std::size_t cell = frame.cellIndex(x, y);
-            const SettingIntensity setting = field.at(cell);
-            if (setting.orogenic > 0.0f)
-                orogenic.add(cell, area * setting.orogenic);
-            if (setting.arc > 0.0f)
-                arc.add(cell, area * setting.arc);
-        }
+        const double area = frame.cellAreaKm2(cell);
+        const SettingIntensity setting = field.at(cell);
+        if (setting.orogenic > 0.0f)
+            orogenic.add(cell, area * setting.orogenic);
+        if (setting.arc > 0.0f)
+            arc.add(cell, area * setting.arc);
     }
     sample.orogenicAreaKm2 = orogenic.total();
     sample.arcAreaKm2 = arc.total();
 
     detail::Random random(seed);
-    const double cellKm = frame.cellKm();
+    const double cellKm = frame.spacingKm;
     const auto form = [&](DepositSystem system, const SystemParameters& systemparameters, const WeightedCells& cells)
     {
         const double expected = systemparameters.ratePerMkm2Myr * 1.0e-6 * cells.total() * dtMyr;
@@ -250,8 +248,9 @@ FormationSample sampleformation(const TectonicFrame& frame, const FormationParam
         {
             const std::size_t cell = cells.pick(random.uniform());
             NewDeposit item;
-            item.x = static_cast<double>(cell % frame.width) + random.uniform();
-            item.y = static_cast<double>(cell / frame.width) + random.uniform();
+            const double u = random.uniform();
+            const double v = random.uniform();
+            item.position = pointincell(frame, cell, u, v);
 
             Deposit& deposit = item.deposit;
             deposit.system = system;
@@ -285,18 +284,10 @@ std::vector<NewDeposit> sampleinheritedprovinces(const TectonicFrame& frame, con
     std::vector<NewDeposit> deposits;
     provinceCount = 0;
     WeightedCells hosts;
-    for (std::uint32_t y = 0; y < frame.height; ++y)
-    {
-        const double area = frame.cellAreaKm2();
-        for (std::uint32_t x = 0; x < frame.width; ++x)
-        {
-            const std::size_t cell = frame.cellIndex(x, y);
-            if (hostcell(frame, cell, parameters.minimumHostElevationM))
-                hosts.add(cell, area);
-        }
-    }
-    const double cellKm = frame.cellKm();
-    if (hosts.total() <= 0.0 || cellKm <= 0.0)
+    for (std::size_t cell = 0; cell < frame.cellCount(); ++cell)
+        if (hostcell(frame, cell, parameters.minimumHostElevationM))
+            hosts.add(cell, frame.cellAreaKm2(cell));
+    if (hosts.total() <= 0.0 || frame.grid == nullptr)
         return deposits;
 
     detail::Random random(seed);
@@ -304,11 +295,13 @@ std::vector<NewDeposit> sampleinheritedprovinces(const TectonicFrame& frame, con
     for (std::uint64_t province = 0; province < provinces; ++province)
     {
         const std::size_t centre = hosts.pick(random.uniform());
-        const double centrex = static_cast<double>(centre % frame.width) + random.uniform();
-        const double centrey = static_cast<double>(centre / frame.width) + random.uniform();
+        const double u = random.uniform();
+        const double v = random.uniform();
+        // The province's ellipse in km in the tangent plane at its centre (gnomonic).
+        const mesh::TangentFrame plane = mesh::tangentframe(pointincell(frame, centre, u, v), frame.grid->radius_m());
         const double angle = random.uniform(0.0, kPi);
-        const double halflength = random.uniform(parameters.provinceHalfLengthKm.minimum, parameters.provinceHalfLengthKm.maximum) / cellKm;
-        const double halfwidth = random.uniform(parameters.provinceHalfWidthKm.minimum, parameters.provinceHalfWidthKm.maximum) / cellKm;
+        const double halflength = random.uniform(parameters.provinceHalfLengthKm.minimum, parameters.provinceHalfLengthKm.maximum);
+        const double halfwidth = random.uniform(parameters.provinceHalfWidthKm.minimum, parameters.provinceHalfWidthKm.maximum);
         const std::uint64_t count = random.poisson(parameters.depositsPerProvince);
         ++provinceCount;
 
@@ -320,16 +313,14 @@ std::vector<NewDeposit> sampleinheritedprovinces(const TectonicFrame& frame, con
                 const double phi = 2.0 * kPi * random.uniform();
                 const double along = halflength * radius * std::cos(phi);
                 const double across = halfwidth * radius * std::sin(phi);
-                const double x = wrapcoordinate(centrex + along * std::cos(angle) - across * std::sin(angle), frame.width);
-                const double y = wrapcoordinate(centrey + along * std::sin(angle) + across * std::cos(angle), frame.height);
-                const std::size_t cell = frame.cellIndex(std::min(frame.width - 1, static_cast<std::uint32_t>(x)),
-                    std::min(frame.height - 1, static_cast<std::uint32_t>(y)));
+                const mesh::Vec3 point = mesh::fromtangent(plane, along * std::cos(angle) - across * std::sin(angle),
+                    along * std::sin(angle) + across * std::cos(angle));
+                const std::size_t cell = frame.grid->locate(point);
                 if (!hostcell(frame, cell, parameters.minimumHostElevationM))
                     continue;
 
                 NewDeposit item;
-                item.x = x;
-                item.y = y;
+                item.position = point;
                 Deposit& deposit = item.deposit;
                 deposit.system = DepositSystem::orogenic_gold;
                 deposit.origin = DepositOrigin::inherited;

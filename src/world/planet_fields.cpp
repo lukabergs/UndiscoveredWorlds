@@ -246,21 +246,21 @@ struct planetfieldaccess
         switch (id)
         {
         case TableId::tectonic_boundary_segments:
-            out << "id,left_plate,right_plate,cells,persistence_steps,centroid_x,centroid_y,length_cells,normal_motion,shear_motion,"
+            out << "id,left_plate,right_plate,cells,persistence_steps,centroid_lon_deg,centroid_lat_deg,length_km,normal_motion,shear_motion,"
                    "convergence_score,divergence_score,shear_score,boundary_type,geologic_regime,age_myr\n";
             for (const TectonicBoundarySegment& s : world.geosphere_.tectonicboundarysegmentlist)
                 out << s.id << ',' << s.leftPlateId << ',' << s.rightPlateId << ',' << s.cellCount << ',' << s.persistenceSteps << ','
-                    << s.centroidX << ',' << s.centroidY << ',' << s.lengthCells << ',' << s.averageNormalMotion << ','
+                    << s.centroidLongitudeDeg << ',' << s.centroidLatitudeDeg << ',' << s.lengthKm << ',' << s.averageNormalMotion << ','
                     << s.averageShearMotion << ',' << s.averageConvergenceScore << ',' << s.averageDivergenceScore << ','
                     << s.averageShearScore << ',' << static_cast<int>(s.boundaryType) << ',' << static_cast<int>(s.geologicRegime) << ','
                     << s.ageMyr << '\n';
             break;
         case TableId::tectonic_deforming_regions:
-            out << "id,boundary_segment,primary_plate,secondary_plate,cells,persistence_steps,centroid_x,centroid_y,deformation_rate,"
-                   "velocity_x,velocity_y,normal_motion,shear_motion,type,age_myr\n";
+            out << "id,boundary_segment,primary_plate,secondary_plate,cells,persistence_steps,centroid_lon_deg,centroid_lat_deg,deformation_rate,"
+                   "velocity_east,velocity_north,normal_motion,shear_motion,type,age_myr\n";
             for (const TectonicDeformingRegion& r : world.geosphere_.tectonicdeformingregionlist)
                 out << r.id << ',' << r.boundarySegmentId << ',' << r.primaryPlateId << ',' << r.secondaryPlateId << ',' << r.cellCount << ','
-                    << r.persistenceSteps << ',' << r.centroidX << ',' << r.centroidY << ',' << r.averageDeformationRate << ','
+                    << r.persistenceSteps << ',' << r.centroidLongitudeDeg << ',' << r.centroidLatitudeDeg << ',' << r.averageDeformationRate << ','
                     << r.averageInterpolatedVelocityX << ',' << r.averageInterpolatedVelocityY << ',' << r.averageNormalMotion << ','
                     << r.averageShearMotion << ',' << static_cast<int>(r.type) << ',' << r.ageMyr << '\n';
             break;

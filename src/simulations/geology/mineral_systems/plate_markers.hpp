@@ -6,9 +6,10 @@
 #include <cstdint>
 #include <vector>
 
-// Approximate point tracers of the native column displacement on the torus.
-// A marker occupies cell (floor(x), floor(y)). They do not reproduce the
-// solver's conservative subcell mixing or track individual parcels of rock.
+// Approximate point tracers of the native column displacement on the sphere.
+// A marker is a unit vector and occupies the engine cell that contains it. They
+// do not reproduce the solver's conservative subcell mixing or track individual
+// parcels of rock.
 namespace mineralsystems
 {
 enum class MarkerState : std::uint8_t
@@ -19,8 +20,7 @@ enum class MarkerState : std::uint8_t
 
 struct Marker
 {
-    double x = 0.0;
-    double y = 0.0;
+    mesh::Vec3 position{ 1.0, 0.0, 0.0 }; // Unit vector.
     std::uint64_t hostUid = 0;
     // Continental and transitional crust is not subducted by the engine; an
     // oceanic host is identified by the time its crust formed.
@@ -34,7 +34,7 @@ struct MarkerStepSummary
 {
     std::size_t moved = 0;
     std::size_t rehomed = 0;   // Ownership passed to another plate with the crust.
-    std::size_t snapped = 0;   // Moved back onto host crust across a raster seam.
+    std::size_t snapped = 0;   // Moved back onto host crust from a neighbouring cell.
     std::size_t orphaned = 0;  // Host plate removed; no motion this update.
     std::size_t subducted = 0;
 };
@@ -59,4 +59,7 @@ private:
 std::size_t markercell(const Marker& marker, const TectonicFrame& frame);
 // Moves the marker through the frame's piecewise-constant material displacement.
 void applymaterialshift(Marker& marker, const TectonicFrame& frame);
+// A unit vector moved along the great circle of a displacement (metres; its part in the
+// tangent plane at the position) on a sphere of the radius.
+mesh::Vec3 movealong(const mesh::Vec3& position, const mesh::Vec3& displacement, double radius_m);
 }

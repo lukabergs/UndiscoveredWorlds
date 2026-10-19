@@ -184,6 +184,18 @@ TEST(Phase7Tooling, SnapshotBundleRoundTripsCoreRasterFields) {
     EXPECT_EQ(loaded.declared_boundary_segment_count, snapshot.boundary_segments.size());
     EXPECT_EQ(loaded.declared_deforming_region_count, snapshot.deforming_regions.size());
     EXPECT_EQ(loaded.declared_tectonic_junction_count, snapshot.tectonic_junctions.size());
+    // Contract schema 8: the plates' omega, centroid and velocity read back exactly.
+    ASSERT_FALSE(snapshot.plates.empty());
+    ASSERT_EQ(loaded.snapshot.plates.size(), snapshot.plates.size());
+    for (size_t i = 0; i < snapshot.plates.size(); ++i) {
+        const auto& a = snapshot.plates[i];
+        const auto& b = loaded.snapshot.plates[i];
+        for (int k = 0; k < 3; ++k) EXPECT_EQ(b.rotation_rad_s[k], a.rotation_rad_s[k]) << i;
+        EXPECT_EQ(b.centroid_longitude_deg, a.centroid_longitude_deg) << i;
+        EXPECT_EQ(b.centroid_latitude_deg, a.centroid_latitude_deg) << i;
+        EXPECT_EQ(b.velocity_east_cm_yr, a.velocity_east_cm_yr) << i;
+        EXPECT_EQ(b.velocity_north_cm_yr, a.velocity_north_cm_yr) << i;
+    }
 
     fs::remove_all(output_dir, ec);
 }

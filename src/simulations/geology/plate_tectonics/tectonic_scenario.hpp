@@ -11,7 +11,7 @@
 
 namespace tectonics::scenario {
 
-inline constexpr uint32_t kScenarioVersion = 4;
+inline constexpr uint32_t kScenarioVersion = 5;
 inline constexpr double kDefaultDeltaTimeMyr = 1.0;
 inline constexpr float kDefaultGravityMps2 = 9.80665f;
 inline constexpr int32_t kAutoCrustTypeBoundaryMeters = -1;

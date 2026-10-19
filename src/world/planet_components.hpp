@@ -125,6 +125,10 @@ enum class BasinClass : std::uint8_t
     coastal = 3
 };
 
+// The engine's boundary and deforming-region records on the world (world_tectonics.cpp's
+// hand-off, W2-E E5): centroids in degrees, lengths in km, cell counts in world cells by true
+// area, motions and velocities (east, north) in world cells per update (on lat-lon the
+// equatorial cell 2 pi R / W, on a cube the mean cell side).
 struct TectonicBoundarySegment
 {
     int id = 0;
@@ -132,9 +136,9 @@ struct TectonicBoundarySegment
     int rightPlateId = 0;
     int cellCount = 0;
     int persistenceSteps = 0;
-    float centroidX = 0.0f;
-    float centroidY = 0.0f;
-    float lengthCells = 0.0f;
+    float centroidLongitudeDeg = 0.0f;
+    float centroidLatitudeDeg = 0.0f;
+    float lengthKm = 0.0f;
     float averageNormalMotion = 0.0f;
     float averageShearMotion = 0.0f;
     int averageConvergenceScore = 0;
@@ -153,8 +157,8 @@ struct TectonicDeformingRegion
     int secondaryPlateId = 0;
     int cellCount = 0;
     int persistenceSteps = 0;
-    float centroidX = 0.0f;
-    float centroidY = 0.0f;
+    float centroidLongitudeDeg = 0.0f;
+    float centroidLatitudeDeg = 0.0f;
     float averageDeformationRate = 0.0f;
     float averageInterpolatedVelocityX = 0.0f;
     float averageInterpolatedVelocityY = 0.0f;

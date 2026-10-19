@@ -120,8 +120,7 @@ private:
 struct NewDeposit
 {
     Deposit deposit;
-    double x = 0.0; // Native cell coordinates.
-    double y = 0.0;
+    mesh::Vec3 position{ 1.0, 0.0, 0.0 }; // Unit vector, inside an engine cell.
 };
 
 struct FormationSample

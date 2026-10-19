@@ -24,6 +24,8 @@
 #include "simulations/geology/plate_tectonics/tectonic_scenario.hpp"
 #include "simulations/geology/plate_tectonics/topography_codec.hpp"
 #include "simulations/geology/plate_tectonics/utils.hpp"
+#include "core/mesh/cell_grid.hpp"
+#include <memory>
 #include <string.h> // For size_t.
 
 void* tectonics_create_from_scenario(const tectonics::scenario::Scenario* scenario);
@@ -77,16 +79,14 @@ uint16_t tectonics_get_sea_level_m(void*);
 uint32_t tectonics_get_plate_count(void*);
 uint8_t tectonics_is_oceanic_plate(void*, uint32_t plate_index);
 
-// The published plate kinematics (contract::PlateKinematics): the velocity at the plate's
-// centroid (east, north) in cell spacings per update and its unit direction, the spin about
-// the centroid in radians per update, the centroid's longitude and latitude in degrees.
-float tectonics_velocity_unity_vector_x(void*, uint32_t plate_index);
-float tectonics_velocity_unity_vector_y(void*, uint32_t plate_index);
-float tectonics_velocity_vector_x(void*, uint32_t plate_index);
-float tectonics_velocity_vector_y(void*, uint32_t plate_index);
-float tectonics_angular_velocity(void*, uint32_t plate_index);
-float tectonics_mass_center_x(void*, uint32_t plate_index);
-float tectonics_mass_center_y(void*, uint32_t plate_index);
+// The published plate kinematics (contract::PlateKinematics, schema 8: omega in rad/s, the
+// centroid's longitude and latitude in degrees, its velocity (east, north) in cm/yr), one per
+// plate index below tectonics_get_plate_kinematics_count; null when there are none.
+uint32_t tectonics_get_plate_kinematics_count(void*);
+const tectonics::contract::PlateKinematics* tectonics_get_plate_kinematics(void*);
+// The engine's cube: the mesh::CellGrid of its cells (uw-cube-1, N = sphere_face_cells, the
+// scenario's radius), shared so a hand-off can cache weights against it.
+std::shared_ptr<const mesh::CellGrid> tectonics_get_cell_grid(void*);
 // Deterministic topology identity survives index changes after plate removal.
 uint64_t tectonics_get_plate_uid(void*, uint32_t plate_index);
 // Per-cell material displacement of the latest isostatic-column update, (east, north) in cell

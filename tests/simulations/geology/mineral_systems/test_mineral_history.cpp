@@ -10,13 +10,10 @@ using namespace mineralsystems;
 
 namespace
 {
-constexpr double kCircumferenceKm = 40030.0;
-
 // Two continental plates meeting at a stationary collision belt.
 FrameFixture beltworld(std::uint32_t width)
 {
     FrameFixture fixture(width, width / 2);
-    fixture.frame.worldWidthKm = kCircumferenceKm;
     BoundarySummary belt;
     belt.boundaryType = boundarycode::convergent;
     belt.geologicRegime = regimecode::continent_collision;
@@ -26,7 +23,7 @@ FrameFixture beltworld(std::uint32_t width)
     belt.rightPlate = 1;
     fixture.frame.boundaries = { BoundarySummary{}, belt };
     fixture.frame.plates = { { 1 }, { 2 } };
-    for (std::uint32_t y = 0; y < fixture.frame.height; ++y)
+    for (std::uint32_t y = 0; y < fixture.height(); ++y)
     {
         for (std::uint32_t x = 0; x < width; ++x)
         {
@@ -81,8 +78,16 @@ TEST(MineralHistory, DepositsPersistAndTravelAfterTheirBoundaryDies)
         EXPECT_EQ(deposit.fate, DepositFate::preserved);
         EXPECT_EQ(deposit.formation.geologicRegime, regimecode::continent_collision);
         EXPECT_LE(deposit.formation.timeMyr, 20.0);
-        const double moved = std::fmod(history.markers()[i].x - formedmarkers[i].x + 128.0, 128.0);
-        EXPECT_NEAR(moved, 25.0, 1e-9);
+        // 25 equatorial cells east along the marker's parallel (to the drift of local-east
+        // steps toward the equator), where the parallel is short of a circuit.
+        const auto before = fixture.coordinates(formedmarkers[i].position);
+        const auto after = fixture.coordinates(history.markers()[i].position);
+        const double latitude = FrameFixture::kPi * (0.5 - before[1] / fixture.height());
+        if (std::fabs(latitude) > FrameFixture::kPi / 4)
+            continue;
+        const double moved = std::fmod(after[0] - before[0] + 128.0, 128.0) * std::cos(latitude);
+        EXPECT_NEAR(moved / 25.0, 1.0, 0.03) << i;
+        EXPECT_NEAR(after[1], before[1], 0.25) << i;  // the drift is about 0.15 rows at 45 degrees
     }
 }
 
@@ -143,7 +148,7 @@ TEST(MineralHistory, GoldBudgetBalancesThroughFormationAndErosion)
 {
     FrameFixture fixture = beltworld(128);
     // High ground over the belt exhumes deposits within the run.
-    for (std::uint32_t y = 0; y < fixture.frame.height; ++y)
+    for (std::uint32_t y = 0; y < fixture.height(); ++y)
         for (std::uint32_t x = 56; x < 72; ++x)
             fixture.elevation[fixture.cell(x, y)] = 3000.0f;
     MineralParameters parameters;

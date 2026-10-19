@@ -56,91 +56,86 @@ float nativeheightmetres(float value, uint16_t sealevelmeters)
     return TopographyCodec::internal_to_meters_exact(value, sealevelmeters);
 }
 
-// The minimal hand-off of the engine's cube to the world's latitude-longitude raster (W2-E,
-// E3; E5 replaces it with the cached remap of the full contract): heights and rates sampled
-// bilinearly at each world cell's centre, codes, ids and scores from the engine cell there.
+// The hand-off of the engine's cube to the world's grid (W2-E, E5; sphere-mesh.md section 5),
+// built once per solver state and cached: the identity on a cube world of the engine's N and
+// radius; otherwise remapmean weights from the engine's cells to the world's for heights and
+// rates (intensive), and per world cell the engine cell at its centre (remapnearest) for
+// codes, ids, scores and the values whose pairs must stay one cell's. Vectors stay (east,
+// north) at their cell on both grids, so a nearest copy moves them unchanged.
 struct HandOff
 {
-    std::shared_ptr<const mesh::CellGrid> cube;     // the engine's cube (same N and radius)
-    int width = 0, height = 0;                      // the world raster, (width + 1) x (height + 1) cells
-    std::vector<mesh::BilinearStencil> stencils;    // per world cell, x-major rows (y (width + 1) + x)
+    std::shared_ptr<const mesh::CellGrid> engine;   // the engine's cube
+    std::shared_ptr<const mesh::CellGrid> world;    // the world's grid
+    bool identity = false;
+    mesh::RemapWeights weights;                     // engine to world (empty on the identity)
     std::vector<mesh::CellId> nearest;              // per world cell, the engine cell at its centre
-    double scale = 1;                               // world cells per engine cell spacing (at the equator)
+    // Cell-counted lengths and velocities: engine spacings to the world's cells (on lat-lon the
+    // equatorial cell 2 pi R / W, on a cube the mean cell side), kilometres per engine spacing,
+    // and engine cells to world cells by true area (the mean cell areas).
+    double cellscale = 1;
+    double spacing_km = 0;
+    double areascale = 1;
 
-    HandOff(const planet& world, int facecells, double radius_m)
+    HandOff(const planet& planet, std::shared_ptr<const mesh::CellGrid> enginegrid)
+        : engine(std::move(enginegrid)), world(planet.sharedgrid())
     {
-        if (world.grid().kind() != mesh::GridKind::latlon)
-            throw std::runtime_error("World tectonics: the hand-off to a cube world is E5's");
-        cube = mesh::makecubegrid(facecells, radius_m);
-        width = world.width();
-        height = world.height();
-        const mesh::CellGrid& raster = world.grid();
-        const std::size_t count = static_cast<std::size_t>(width + 1) * static_cast<std::size_t>(height + 1);
-        stencils.resize(count);
-        nearest.resize(count);
-        for (int y = 0; y <= height; y++)
-            for (int x = 0; x <= width; x++)
-            {
-                const mesh::Vec3 p = raster.centre(raster.cellof(x, y));
-                const std::size_t w = index(x, y);
-                stencils[w] = mesh::bilinearstencil(*cube, p);
-                nearest[w] = cube->locate(p);
-            }
-        const double spacing = std::sqrt(cube->totalarea_m2() / static_cast<double>(cube->cellcount()));
-        scale = spacing / (2.0 * 3.14159265358979323846 * radius_m / (width + 1));
+        const double radius_m = world->radius_m();
+        identity = world->kind() == mesh::GridKind::cube && world->facecells() == engine->facecells() &&
+            std::fabs(world->radius_m() - engine->radius_m()) <= 1e-9 * engine->radius_m();
+        nearest.resize(world->cellcount());
+        if (identity)
+            for (mesh::CellId c = 0; c < world->cellcount(); c++)
+                nearest[c] = c;
+        else
+        {
+            weights = mesh::makeremap(*engine, *world);
+            for (mesh::CellId c = 0; c < world->cellcount(); c++)
+                nearest[c] = engine->locate(world->centre(c));
+        }
+        const double enginespacing_m = std::sqrt(engine->totalarea_m2() / static_cast<double>(engine->cellcount()));
+        const double worldcell_m = world->kind() == mesh::GridKind::latlon
+            ? 2.0 * 3.14159265358979323846 * radius_m / world->columns()
+            : std::sqrt(world->totalarea_m2() / static_cast<double>(world->cellcount()));
+        cellscale = identity ? 1.0 : enginespacing_m / worldcell_m;
+        spacing_km = enginespacing_m / 1000.0;
+        areascale = identity ? 1.0 : (engine->totalarea_m2() / static_cast<double>(engine->cellcount())) /
+            (world->totalarea_m2() / static_cast<double>(world->cellcount()));
     }
-    std::size_t index(int x, int y) const { return static_cast<std::size_t>(y) * (width + 1) + x; }
-    // samplebilinear with the cached stencil (relative to the first value).
-    float bilinear(const float* field, int x, int y) const
+    std::size_t cellcount() const { return world->cellcount(); }
+    mesh::CellId cell(mesh::CellId c) const { return nearest[c]; }
+    // An intensive field (heights, rates) on the world's cells.
+    std::vector<float> mean(const float* field) const
     {
-        const mesh::BilinearStencil& stencil = stencils[index(x, y)];
-        if (stencil.count == 0)
-            return 0.0f;
-        const double first = field[stencil.cell[0]];
-        double sum = 0.0;
-        for (int n = 1; n < stencil.count; n++)
-            sum += stencil.weight[n] * (static_cast<double>(field[stencil.cell[n]]) - first);
-        return static_cast<float>(first + sum);
-    }
-    std::size_t cell(int x, int y) const { return nearest[index(x, y)]; }
-    // A centroid (longitude, latitude in degrees) as world raster coordinates (cell centres at
-    // whole numbers, y south).
-    std::pair<float, float> worldposition(float longitude, float latitude) const
-    {
-        return { static_cast<float>((longitude + 180.0) / 360.0 * (width + 1) - 0.5),
-                 static_cast<float>((90.0 - latitude) / 180.0 * (height + 1) - 0.5) };
+        std::vector<float> values(field, field + engine->cellcount());
+        if (identity)
+            return values;
+        return mesh::remapmean(weights, *engine, *world, values);
     }
 };
 
-void applynativeheightmap(planet& world, worldgrid<bool>& shelves, const float* outputheightmap, std::size_t cellcount,
+void applynativeheightmap(planet& world, worldgrid<bool>& shelves, const float* outputheightmap,
     const HandOff& handoff, uint16_t sealevelmeters)
 {
-    if (outputheightmap == nullptr || cellcount == 0)
+    if (outputheightmap == nullptr)
         return;
 
-    const int width = world.width();
-    const int height = world.height();
     const int sealevel = sealevelmeters;
     const int maxelevation = int(TopographyCodec::kMaxHeightMeters) + 1;
 
     world.setsealevel(sealevel);
     world.setmaxelevation(maxelevation);
 
-    // Metres per engine cell, then sampled at the world's centres.
-    std::vector<float> metres(cellcount);
-    for (std::size_t c = 0; c < cellcount; c++)
+    // Metres per engine cell, then the area-weighted mean over each world cell.
+    const std::size_t enginecells = handoff.engine->cellcount();
+    std::vector<float> metres(enginecells);
+    for (std::size_t c = 0; c < enginecells; c++)
         metres[c] = nativeheightmetres(outputheightmap[c], sealevelmeters);
-    parallelforrows(0, height, [&](int startrow, int endrow)
+    const std::vector<float> heights = handoff.mean(metres.data());
+    for (mesh::CellId c = 0; c < handoff.cellcount(); c++)
     {
-        for (int y = startrow; y <= endrow; y++)
-        {
-            for (int x = 0; x <= width; x++)
-            {
-                world.setnomfloat(x, y, handoff.bilinear(metres.data(), x, y));
-                shelves[x][y] = false;
-            }
-        }
-    });
+        world.setnomfloat(c, heights[c]);
+        shelves[c] = false;
+    }
 
     getlandandseatotals(world);
 }
@@ -239,17 +234,9 @@ float normalizeboundaryhistory(const tectonics::contract::BoundarySegment* segme
 
 }
 
-// The mineral frame's width of the id-order view (N columns): N cell spacings, so its cell
-// size is the cube's spacing.
-double frameviewwidthkm(const tectonics::scenario::Scenario& scenario)
-{
-    return scenario.radius_km * std::sqrt(2.0 * 3.14159265358979323846 / 3.0);
-}
-
 struct GeologySolverState
 {
-    explicit GeologySolverState(const tectonics::scenario::Scenario& created)
-        : scenario(created), mineralframes(frameviewwidthkm(created)) {}
+    explicit GeologySolverState(const tectonics::scenario::Scenario& created) : scenario(created) {}
     GeologySolverState(const GeologySolverState&) = delete;
     GeologySolverState& operator=(const GeologySolverState&) = delete;
 
@@ -261,22 +248,31 @@ struct GeologySolverState
     // What the state was made for; evolvegeosphere re-creates it on any mismatch.
     long seed = 0;
     float gravity = 0.0f;
-    int width = 0;
-    int height = 0;
     WorldTectonicsOptions options;
     std::uint32_t updates = 0;   // engine updates since the starting state
 };
 
 namespace
 {
+// The world's grid as the hand-off sees it: kind, size and radius.
+bool samegrid(const mesh::CellGrid& a, const mesh::CellGrid& b)
+{
+    return a.kind() == b.kind() && a.facecells() == b.facecells() && a.columns() == b.columns() &&
+        a.radius_m() == b.radius_m();
+}
+
 std::shared_ptr<GeologySolverState> createsolverstate(const planet& world, const WorldTectonicsOptions& options)
 {
     auto scenario = options.scenario ? *options.scenario : tectonics::scenario::baseline();
     scenario.seed = world.seed();
-    // The engine's cube on the world's sphere: N = W / 4 on the world grid (an equatorial cell
-    // of the world's size), the body's radius.
+    // The engine's cube on the world's sphere: on the world grid N is the cube world's own, or
+    // W / 4 on a lat-lon world (an equatorial cell of the world's size); the body's radius.
     if (options.worldGrid)
-        scenario.sphere_face_cells = static_cast<uint32_t>(std::max(2, (world.width() + 1) / 4));
+    {
+        const mesh::CellGrid& grid = world.grid();
+        const int facecells = grid.kind() == mesh::GridKind::cube ? grid.facecells() : grid.columns() / 4;
+        scenario.sphere_face_cells = static_cast<uint32_t>(std::max(2, facecells));
+    }
     scenario.radius_km = world.radius() / 1000.0;
     if (options.durationMyr > 0) scenario.evolution_duration_myr = options.durationMyr;
     if (options.plateCount > 0) scenario.plate_count = static_cast<uint32_t>(options.plateCount);
@@ -289,10 +285,8 @@ std::shared_ptr<GeologySolverState> createsolverstate(const planet& world, const
         return nullptr;
     state->seed = world.seed();
     state->gravity = world.gravity();
-    state->width = world.width();
-    state->height = world.height();
     state->options = options;
-    state->handoff.emplace(world, static_cast<int>(scenario.sphere_face_cells), scenario.radius_km * 1000.0);
+    state->handoff.emplace(world, tectonics_get_cell_grid(state->simulation.pointer));
 
     if (options.mineralHistory)
     {
@@ -304,8 +298,8 @@ std::shared_ptr<GeologySolverState> createsolverstate(const planet& world, const
 
 bool madefor(const GeologySolverState& state, const planet& world, const WorldTectonicsOptions& options)
 {
-    return state.seed == world.seed() && state.gravity == world.gravity() && state.width == world.width() &&
-        state.height == world.height() && state.options.durationMyr == options.durationMyr &&
+    return state.seed == world.seed() && state.gravity == world.gravity() &&
+        samegrid(*state.handoff->world, world.grid()) && state.options.durationMyr == options.durationMyr &&
         state.options.plateCount == options.plateCount && state.options.deltaTimeMyr == options.deltaTimeMyr &&
         state.options.mineralHistory == options.mineralHistory && state.options.scenario == options.scenario &&
         state.options.worldGrid == options.worldGrid;
@@ -317,18 +311,18 @@ bool madefor(const GeologySolverState& state, const planet& world, const WorldTe
 void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState& state, const std::string& label)
 {
     PlateTectonicsHandle& simulation = state.simulation;
-    const int width = world.width(), height = world.height();
     const HandOff& handoff = *state.handoff;
-    const std::size_t cellcount = handoff.cube->cellcount();
-    const auto scale = static_cast<float>(handoff.scale);
+    const std::size_t enginecells = handoff.engine->cellcount();
+    const auto cellscale = static_cast<float>(handoff.cellscale);
+    const auto spacingkm = static_cast<float>(handoff.spacing_km);
+    const double areascale = handoff.areascale;
 
     float* outputheightmap = tectonics_get_heightmap(simulation.pointer);
 
     if (outputheightmap == nullptr)
         return;
 
-    applynativeheightmap(world, shelves, outputheightmap, cellcount, handoff,
-        tectonics_get_sea_level_m(simulation.pointer));
+    applynativeheightmap(world, shelves, outputheightmap, handoff, tectonics_get_sea_level_m(simulation.pointer));
 
     const std::uint8_t* convergencemap = tectonics_get_convergence_map(simulation.pointer);
     const std::uint8_t* divergencemap = tectonics_get_divergence_map(simulation.pointer);
@@ -369,6 +363,8 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
     world.settectonicplatecount(static_cast<int>(tectonics_get_plate_count(simulation.pointer)));
     world.settectonicsealevelm(static_cast<int>(tectonics_get_sea_level_m(simulation.pointer)));
 
+    // The tables: centroids stay longitude and latitude in degrees; lengths become km;
+    // motions and velocities (east, north) world cells per update; counts world cells by area.
     const std::uint32_t boundarysegmentcount = tectonics_get_boundary_segment_count(simulation.pointer);
     const tectonics::contract::BoundarySegment* boundarysegments = tectonics_get_boundary_segments(simulation.pointer);
     std::vector<tectonics::contract::BoundarySegment> boundarysegmentobjects;
@@ -376,13 +372,10 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
         boundarysegmentobjects.assign(boundarysegments, boundarysegments + boundarysegmentcount);
     for (auto& segment : boundarysegmentobjects)
     {
-        const auto position = handoff.worldposition(segment.centroid_x, segment.centroid_y);
-        segment.centroid_x = position.first;
-        segment.centroid_y = position.second;
-        segment.length_cells *= scale;
-        segment.average_normal_motion *= scale;
-        segment.average_shear_motion *= scale;
-        segment.cell_count = static_cast<std::uint32_t>(std::lround(segment.cell_count * scale * scale));
+        segment.length_cells *= spacingkm;   // km from here on (TectonicBoundarySegment::lengthKm)
+        segment.average_normal_motion *= cellscale;
+        segment.average_shear_motion *= cellscale;
+        segment.cell_count = static_cast<std::uint32_t>(std::llround(segment.cell_count * areascale));
     }
     world.settectonicboundarysegments(std::move(boundarysegmentobjects));
 
@@ -393,15 +386,11 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
         deformingregionobjects.assign(deformingregions, deformingregions + deformingregioncount);
     for (auto& region : deformingregionobjects)
     {
-        const auto position = handoff.worldposition(region.centroid_x, region.centroid_y);
-        region.centroid_x = position.first;
-        region.centroid_y = position.second;
-        // (east, north) to the world's (x east, y south).
-        region.average_interpolated_velocity_x *= scale;
-        region.average_interpolated_velocity_y *= -scale;
-        region.average_normal_motion *= scale;
-        region.average_shear_motion *= scale;
-        region.cell_count = static_cast<std::uint32_t>(std::lround(region.cell_count * scale * scale));
+        region.average_interpolated_velocity_x *= cellscale;
+        region.average_interpolated_velocity_y *= cellscale;
+        region.average_normal_motion *= cellscale;
+        region.average_shear_motion *= cellscale;
+        region.cell_count = static_cast<std::uint32_t>(std::llround(region.cell_count * areascale));
     }
     world.settectonicdeformingregions(std::move(deformingregionobjects));
 
@@ -417,69 +406,66 @@ void writegeosphere(planet& world, worldgrid<bool>& shelves, GeologySolverState&
             boundarysegmentlookup[boundarysegments[i].id] = &boundarysegments[i];
     }
 
-    for (int y = 0; y <= height; y++)
+    // Rates of elevation change: the area-weighted mean, as the heights (no length scale).
+    const std::vector<float> rockupliftrate = handoff.mean(rockupliftratemap);
+    for (mesh::CellId c = 0; c < handoff.cellcount(); c++)
     {
-        for (int x = 0; x <= width; x++)
-        {
-            const std::size_t index = handoff.cell(x, y);
-            const int convergencescore = static_cast<int>(convergencemap[index]);
-            const int divergencescore = static_cast<int>(divergencemap[index]);
-            const int shearscore = static_cast<int>(shearmap[index]);
-            const CrustClass crustclass = translatecrustclass(crustclassmap[index]);
-            const BoundaryType boundarytype = translateboundarytype(boundarytypemap[index]);
-            const DeformingRegionType regiontype = translatedeformingregiontype(deformingregiontypemap[index]);
-            const std::uint32_t nearestboundaryid = nearestboundaryidmap[index];
-            const tectonics::contract::BoundarySegment* boundarysegment =
-                nearestboundaryid < boundarysegmentlookup.size() ? boundarysegmentlookup[nearestboundaryid] : nullptr;
-            // This history score is app-derived for presentation/stylization, not native contract data.
-            const float boundaryhistory = normalizeboundaryhistory(boundarysegment);
+        const std::size_t index = handoff.cell(c);
+        const int convergencescore = static_cast<int>(convergencemap[index]);
+        const int divergencescore = static_cast<int>(divergencemap[index]);
+        const int shearscore = static_cast<int>(shearmap[index]);
+        const CrustClass crustclass = translatecrustclass(crustclassmap[index]);
+        const BoundaryType boundarytype = translateboundarytype(boundarytypemap[index]);
+        const DeformingRegionType regiontype = translatedeformingregiontype(deformingregiontypemap[index]);
+        const std::uint32_t nearestboundaryid = nearestboundaryidmap[index];
+        const tectonics::contract::BoundarySegment* boundarysegment =
+            nearestboundaryid < boundarysegmentlookup.size() ? boundarysegmentlookup[nearestboundaryid] : nullptr;
+        // This history score is app-derived for presentation/stylization, not native contract data.
+        const float boundaryhistory = normalizeboundaryhistory(boundarysegment);
 
-            world.settectonicconvergence(x, y, convergencescore);
-            world.settectonicdivergence(x, y, divergencescore);
-            world.settectonicshear(x, y, shearscore);
-            world.setgeologicregime(x, y, translategeologicregime(regimemap[index]));
-            world.settectoniccrustagemyr(x, y, crustagemyrmap[index]);
-            world.settectoniccrustthickness(x, y, crustthicknessmap[index]);
-            world.settectoniccrustclass(x, y, crustclass);
-            world.settectonicuplifttendency(x, y, uplifttendencymap[index]);
-            // A rate of elevation change: sampled bilinearly as the heights are, no length scale.
-            world.settectonicrockupliftrate(x, y, handoff.bilinear(rockupliftratemap, x, y));
-            // An axis wraps at pi, so the nearest engine cell, never a bilinear mean; the
-            // shortening with it, so the pair stays one cell's.
-            world.settectonicshortening(x, y, shorteningmap[index]);
-            world.settectonicshorteningdirection(x, y, shorteningdirectionmap[index]);
-            world.settectonicsubsidencetendency(x, y, subsidencetendencymap[index]);
-            world.settectonicaccumulatedstrain(x, y, accumulatedstrainmap[index]);
-            world.settectonicboundarytype(x, y, boundarytype);
-            world.settectonicboundarydistance(x, y, static_cast<int>(std::lround(boundarydistancemap[index] * scale)));
-            world.settectonicboundarysegmentid(x, y, static_cast<int>(boundarysegmentidmap[index]));
-            world.settectonicnearestboundaryid(x, y, static_cast<int>(nearestboundaryid));
-            world.settectonicboundaryhistory(x, y, boundaryhistory);
-            world.settectonicdeformingregionid(x, y, static_cast<int>(deformingregionidmap[index]));
-            world.settectonicdeformingregiontype(x, y, regiontype);
-            world.settectonicdeformationrate(x, y, deformationratemap[index]);
-            // (east, north) to the world's (x east, y south).
-            world.settectonicdeformationvelocityx(x, y, deformationvelocityxmap[index] * scale);
-            world.settectonicdeformationvelocityy(x, y, -deformationvelocityymap[index] * scale);
-        }
+        world.settectonicconvergence(c, convergencescore);
+        world.settectonicdivergence(c, divergencescore);
+        world.settectonicshear(c, shearscore);
+        world.setgeologicregime(c, translategeologicregime(regimemap[index]));
+        world.settectoniccrustagemyr(c, crustagemyrmap[index]);
+        world.settectoniccrustthickness(c, crustthicknessmap[index]);
+        world.settectoniccrustclass(c, crustclass);
+        world.settectonicuplifttendency(c, uplifttendencymap[index]);
+        world.settectonicrockupliftrate(c, rockupliftrate[c]);
+        // An axis wraps at pi, so the nearest engine cell, never a mean; the shortening with
+        // it, so the pair stays one cell's. Both grids measure the axis from the cell's own east
+        // toward its south, so the copy needs no rotation.
+        world.settectonicshortening(c, shorteningmap[index]);
+        world.settectonicshorteningdirection(c, shorteningdirectionmap[index]);
+        world.settectonicsubsidencetendency(c, subsidencetendencymap[index]);
+        world.settectonicaccumulatedstrain(c, accumulatedstrainmap[index]);
+        world.settectonicboundarytype(c, boundarytype);
+        // Engine spacings to world cells (the cell count the consumers' thresholds use).
+        world.settectonicboundarydistance(c, static_cast<int>(std::lround(boundarydistancemap[index] * cellscale)));
+        world.settectonicboundarysegmentid(c, static_cast<int>(boundarysegmentidmap[index]));
+        world.settectonicnearestboundaryid(c, static_cast<int>(nearestboundaryid));
+        world.settectonicboundaryhistory(c, boundaryhistory);
+        world.settectonicdeformingregionid(c, static_cast<int>(deformingregionidmap[index]));
+        world.settectonicdeformingregiontype(c, regiontype);
+        world.settectonicdeformationrate(c, deformationratemap[index]);
+        // (east, north) at the cell on both grids: only the length unit changes.
+        world.settectonicdeformationvelocityx(c, deformationvelocityxmap[index] * cellscale);
+        world.settectonicdeformationvelocityy(c, deformationvelocityymap[index] * cellscale);
     }
 
     const tectonics::contract::Snapshot snapshot = tectonics_capture_snapshot(simulation.pointer);
     // Column and plume fields exist only when the engine keeps them.
-    const auto cellvalue = [cellcount](const std::vector<float>& values, std::size_t index)
+    const auto cellvalue = [enginecells](const std::vector<float>& values, std::size_t index)
     {
-        return values.size() == cellcount ? values[index] : 0.0f;
+        return values.size() == enginecells ? values[index] : 0.0f;
     };
-    for (int y = 0; y <= height; y++)
+    for (mesh::CellId c = 0; c < handoff.cellcount(); c++)
     {
-        for (int x = 0; x <= width; x++)
-        {
-            const std::size_t index = handoff.cell(x, y);
-            world.settectonicsnapshotcell(x, y, snapshot.heightmap[index], static_cast<int>(snapshot.plate_id[index]),
-                static_cast<int>(snapshot.crust_age_steps[index]), cellvalue(snapshot.continental_crust_m, index),
-                cellvalue(snapshot.continental_area, index), cellvalue(snapshot.oceanic_crust_m, index), cellvalue(snapshot.sediment_m, index),
-                cellvalue(snapshot.rift_damage, index), cellvalue(snapshot.plume_influence, index));
-        }
+        const std::size_t index = handoff.cell(c);
+        world.settectonicsnapshotcell(c, snapshot.heightmap[index], static_cast<int>(snapshot.plate_id[index]),
+            static_cast<int>(snapshot.crust_age_steps[index]), cellvalue(snapshot.continental_crust_m, index),
+            cellvalue(snapshot.continental_area, index), cellvalue(snapshot.oceanic_crust_m, index), cellvalue(snapshot.sediment_m, index),
+            cellvalue(snapshot.rift_damage, index), cellvalue(snapshot.plume_influence, index));
     }
 
     tectonics::tooling::SnapshotBundleOptions record;
@@ -539,7 +525,6 @@ void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectoni
     PlateTectonicsHandle& simulation = state->simulation;
     mineralsystems::TectonicFrameReader& mineralframes = state->mineralframes;
     std::optional<mineralsystems::MineralHistory>& minerals = state->minerals;
-    const std::size_t cellcount = state->handoff->cube->cellcount();
 
     const double deltatimemyr = tectonics_get_delta_time_myr(simulation.pointer);
     const std::uint32_t checkpointevery = options.checkpointEveryMyr > 0.0 ?
@@ -574,7 +559,7 @@ void evolvegeosphere(planet& world, worldgrid<bool>& shelves, const WorldTectoni
 
         if (previewheightmap != nullptr)
         {
-            applynativeheightmap(world, shelves, previewheightmap, cellcount, *state->handoff,
+            applynativeheightmap(world, shelves, previewheightmap, *state->handoff,
                 tectonics_get_sea_level_m(simulation.pointer));
             requestworldgenvisualization();
         }

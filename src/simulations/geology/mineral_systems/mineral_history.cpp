@@ -16,14 +16,18 @@ enum class Stream : int
     formation = 2,
 };
 
-double wrapfraction(double value, std::uint32_t period)
+constexpr double kPi = 3.14159265358979323846;
+
+// A longitude fraction, wrapped into [0, 1).
+double wrappedfraction(double value)
 {
-    const double size = static_cast<double>(period);
-    double wrapped = std::fmod(value, size);
-    if (wrapped < 0.0)
-        wrapped += size;
-    const double fraction = wrapped / size;
-    return fraction >= 1.0 ? 0.0 : fraction;
+    return value >= 1.0 ? 0.0 : std::max(0.0, value);
+}
+
+// A colatitude fraction, clamped into [0, 1) (the south pole to the last row).
+double clampedfraction(double value)
+{
+    return std::clamp(value, 0.0, std::nextafter(1.0, 0.0));
 }
 }
 
@@ -63,8 +67,7 @@ MineralHistory::MineralHistory(const MineralParameters& parameters, std::uint64_
 bool MineralHistory::add(NewDeposit item, const TectonicFrame& frame)
 {
     Marker marker;
-    marker.x = item.x;
-    marker.y = item.y;
+    marker.position = item.position;
     if (!tracker_.attach(marker, frame))
         return false;
 
@@ -158,10 +161,14 @@ void MineralHistory::step(const TectonicFrame& frame)
 
 void MineralHistory::finish(const TectonicFrame& frame)
 {
+    (void)frame;
     for (std::size_t i = 0; i < deposits_.size(); ++i)
     {
-        deposits_[i].u = wrapfraction(markers_[i].x, frame.width);
-        deposits_[i].v = wrapfraction(markers_[i].y, frame.height);
+        // The marker's longitude and latitude as fractions of the world (u east from -180,
+        // v south from the north pole), on any world grid.
+        const mesh::Vec3& p = markers_[i].position;
+        deposits_[i].u = wrappedfraction((mesh::longitudeof(p) + kPi) / (2.0 * kPi));
+        deposits_[i].v = clampedfraction((0.5 * kPi - mesh::latitudeof(p)) / kPi);
     }
 }
 }

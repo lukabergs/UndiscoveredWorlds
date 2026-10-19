@@ -291,41 +291,17 @@ tectonics::contract::Snapshot tectonics_capture_snapshot(void* pointer) {
     return tectonics::contract::capture_snapshot(*static_cast<const lithosphere*>(pointer));
 }
 
-namespace {
-// The published kinematics of a plate (tectonic_contract.hpp, PlateKinematics).
-const tectonics::contract::PlateKinematics& kinematics(void* pointer, uint32_t plate_index) {
-    const lithosphere* litho = static_cast<lithosphere*>(pointer);
-    if (plate_index >= litho->getProvenancePlateCount()) throw std::out_of_range("invalid plate index");
-    return litho->getPlateKinematics()[plate_index];
-}
-} // namespace
-
-float tectonics_velocity_unity_vector_x(void* pointer, uint32_t plate_index) {
-    return kinematics(pointer, plate_index).unit_velocity_x;
+uint32_t tectonics_get_plate_kinematics_count(void* pointer) {
+    return static_cast<const lithosphere*>(pointer)->getProvenancePlateCount();
 }
 
-float tectonics_velocity_unity_vector_y(void* pointer, uint32_t plate_index) {
-    return kinematics(pointer, plate_index).unit_velocity_y;
+const tectonics::contract::PlateKinematics* tectonics_get_plate_kinematics(void* pointer) {
+    const lithosphere* litho = static_cast<const lithosphere*>(pointer);
+    return litho->getProvenancePlateCount() == 0 ? nullptr : litho->getPlateKinematics();
 }
 
-float tectonics_velocity_vector_x(void* pointer, uint32_t plate_index) {
-    return kinematics(pointer, plate_index).linear_velocity_x;
-}
-
-float tectonics_velocity_vector_y(void* pointer, uint32_t plate_index) {
-    return kinematics(pointer, plate_index).linear_velocity_y;
-}
-
-float tectonics_angular_velocity(void* pointer, uint32_t plate_index) {
-    return kinematics(pointer, plate_index).angular_velocity;
-}
-
-float tectonics_mass_center_x(void* pointer, uint32_t plate_index) {
-    return kinematics(pointer, plate_index).mass_center_x;
-}
-
-float tectonics_mass_center_y(void* pointer, uint32_t plate_index) {
-    return kinematics(pointer, plate_index).mass_center_y;
+std::shared_ptr<const mesh::CellGrid> tectonics_get_cell_grid(void* pointer) {
+    return static_cast<const lithosphere*>(pointer)->getGrid().sharedmesh();
 }
 
 uint64_t tectonics_get_plate_uid(void* pointer, uint32_t index) {
