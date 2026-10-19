@@ -1,12 +1,11 @@
 // The rock transport on the cube (W2-E, step E2D): the subcell lattice, conservation and
 // positivity under plate rotations, crossings of a face edge, a cube corner and a pole, the
-// coverage of a rigid plate, and (disabled, run once) the cost against the torus kernel.
+// coverage of a rigid plate, and (disabled, run once) its cost.
 #include "gtest/gtest.h"
 
 #include "core/mesh/cell_grid.hpp"
 #include "core/mesh/cube_geometry.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_sphere_transport.hpp"
-#include "simulations/geology/plate_tectonics/tectonic_transport.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -342,6 +341,17 @@ TEST(TectonicSphereTransport, ConvergingPlatesOverlapOnlyAlongTheirContact) {
         EXPECT_GT(gap, 0);
         EXPECT_EQ(stray, 0);
         EXPECT_LT(elsewhere, 1e-9);
+        // Plate 0's front lies inside plate 1 by the rotation's angle: its rock beyond y = 0 is
+        // the lune of the converging contact, 2 theta R^2 (rock moved by the motion of the plate
+        // it enters would stop at the contact and leave none).
+        double front = 0;
+        for (const auto& layer : layers)
+            if (layer.plate == 0)
+                for (std::size_t k = 0; k < layer.cells.size(); ++k)
+                    if (l.centre(layer.cells[k]).y > 0) front += layer.coverage[k] * l.area_m2(layer.cells[k]);
+        const double lune = 2 * 0.6 * step * radius_m * radius_m;
+        RecordProperty("front_over_lune_n" + std::to_string(n), std::to_string(front / lune));
+        EXPECT_NEAR(front / lune, 1, 0.02);
     }
 }
 
@@ -612,7 +622,7 @@ TEST(TectonicSphereTransport, AgeMomentDriftOver100Updates) {
 }
 
 // Run once: tectonics_tests --gtest_also_run_disabled_tests --gtest_filter=*Timing*
-TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
+TEST(TectonicSphereTransport, DISABLED_Timing) {
     using clock = std::chrono::steady_clock;
     const auto seconds = [](clock::duration d) { return std::chrono::duration<double>(d).count(); };
     const auto lattice = st::Lattice::make(64, 4, radius_m);
@@ -659,28 +669,12 @@ TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
         ASSERT_EQ(layers.size(), 12U);
         ASSERT_EQ(layers4.size(), 12U);
     }
-    // The torus kernel at 256 x 128 with subdivision 4 (the baseline's): 1024 x 512 subcells.
-    const std::uint32_t w = 1024, h = 512;
-    std::vector<double> torus(static_cast<std::size_t>(w) * h);
-    std::vector<tectonics::transport::Displacement> v(torus.size());
-    for (std::size_t i = 0; i < torus.size(); ++i) {
-        torus[i] = 1000 + 30000 * random.uniform();
-        v[i] = {0.9 * (2 * random.uniform() - 1), 0.9 * (2 * random.uniform() - 1)};
-    }
-    double kernel = 1e30;
-    for (int repeat = 0; repeat < 3; ++repeat) {
-        auto t0 = clock::now();
-        const auto moved = tectonics::transport::remap(w, h, torus, v);
-        kernel = std::min(kernel, seconds(clock::now() - t0));
-        ASSERT_EQ(moved.size(), torus.size());
-    }
     const double nsphere = 1e9 * sphere / l.subcellcount(), nbuild = 1e9 * build / l.subcellcount();
-    const double ntorus = 1e9 * kernel / torus.size();
     const double none = 1e9 * one / l.subcellcount(), nfour = 1e9 * four / l.subcellcount();
     std::printf("cube N 64 s 4 (%zu subcells, 12 plates, %u substeps): stencil with the rigid references %.1f ns per "
                 "subcell; raw remap %.1f ns per subcell and substep; per-plate transport, one field (and the coverage) "
-                "%.1f, four fields %.1f per field, ns per subcell and substep; torus 1024 x 512: remap %.1f ns per "
-                "subcell and substep\n", l.subcellcount(), substeps, nbuild, nsphere, none, nfour, ntorus);
+                "%.1f, four fields %.1f per field, ns per subcell and substep\n", l.subcellcount(), substeps, nbuild, nsphere,
+                none, nfour);
     std::printf("allocated: lattice %.1f MB, stencil %.1f MB (transport's working arrays: 2 x (fields + 1) x %.1f MB "
                 "and a %.1f MB mark, freed on return)\n", l.bytes() / 1e6, stencilbytes / 1e6,
                 l.subcellcount() * sizeof(double) / 1e6, l.subcellcount() / 1e6);
@@ -690,5 +684,4 @@ TEST(TectonicSphereTransport, DISABLED_TimingAgainstTheTorusKernel) {
     RecordProperty("sphere_remap_ns", std::to_string(nsphere));
     RecordProperty("sphere_transport_one_field_ns", std::to_string(none));
     RecordProperty("sphere_transport_per_field_of_four_ns", std::to_string(nfour));
-    RecordProperty("torus_remap_ns", std::to_string(ntorus));
 }

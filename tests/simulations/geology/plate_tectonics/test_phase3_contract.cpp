@@ -15,8 +15,7 @@ namespace {
 tectonics::scenario::Scenario make_phase3_scenario() {
     tectonics::scenario::Scenario scenario;
     scenario.seed = 13579;
-    scenario.width = 96;
-    scenario.height = 48;
+    scenario.sphere_face_cells = 24;  // 6 x 24^2 cells of about 417 km
     scenario.sea_level = 0.65f;
     scenario.plate_count = 4;
     scenario.delta_time_myr = 1.0;
@@ -102,7 +101,7 @@ TEST(Phase3Contract, CApiFieldStackPersistsAfterFinishedState) {
     ASSERT_NE(tectonics_get_boundary_distance_map(simulation), nullptr);
 
     const size_t cell_count =
-        static_cast<size_t>(scenario.width) * static_cast<size_t>(scenario.height);
+        6 * static_cast<size_t>(scenario.sphere_face_cells) * scenario.sphere_face_cells;
     const float* thickness = tectonics_get_crust_thickness_map(simulation);
     const float* uplift = tectonics_get_uplift_tendency_map(simulation);
     const float* subsidence = tectonics_get_subsidence_tendency_map(simulation);

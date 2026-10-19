@@ -1,4 +1,8 @@
+// The plate force balance on the sphere (W2-E, E2C; the engine's only solver since E3):
+// torques of basal drag, boundary dashpots, ridge push, slab pull and mountain loads about the
+// planet's centre, the mantle flow, the activity history, and the lithosphere driven by them.
 #include "gtest/gtest.h"
+#include "cube_fixture.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_dynamics.hpp"
 
 #include "simulations/geology/plate_tectonics/tectonic_provenance.hpp"
@@ -14,170 +18,215 @@
 #include <random>
 
 namespace {
-using tectonics::dynamics::Contact;
-using tectonics::dynamics::Plate;
-using tectonics::dynamics::solve;
+using tectonics::dynamics::MantleSample;
+using tectonics::dynamics::SphereContact;
+using tectonics::dynamics::SpherePlate;
+using tectonics::dynamics::solve_sphere;
+using Vec3 = mesh::Vec3;
+constexpr double kRadius = 6371e3;
+constexpr double kCmYr = 3.15576e9;  // cm/yr per m/s
 
-void check_budget(const tectonics::dynamics::Solution& result) {
+void check_budget(const tectonics::dynamics::SphereSolution& result) {
     EXPECT_LT(result.diagnostics.relative_force_residual, 1e-12);
     EXPECT_GE(result.diagnostics.dissipation_w, 0.0);
     EXPECT_NEAR(result.diagnostics.driving_power_w, result.diagnostics.dissipation_w,
-                std::max(1.0, result.diagnostics.dissipation_w) * 1e-12);
+                std::max(1.0, result.diagnostics.dissipation_w) * 1e-10);
 }
+
+// Two plates either side of a contact at x = +X with normal +Y (from plate 0 toward plate 1):
+// plate 0 a patch of 12 cells of 1e13 / 12 m² west of the contact (1e13 m² in all), plate 1
+// its mirror (y -> -y).
+// mantle: each plate's cells sample the solid-body mantle rotation about z of their plate
+// (a surface speed of `speed` m/s at the contact, toward +Y for plate 0, -Y for plate 1).
+struct Pair {
+    std::vector<SpherePlate> plates = std::vector<SpherePlate>(2);
+    Pair(double speed0 = 0, double speed1 = 0) {
+        const Vec3 w0{0, 0, speed0 / kRadius}, w1{0, 0, speed1 / kRadius};
+        for (int i = 0; i < 4; ++i) for (int j = 0; j < 3; ++j) {
+            const Vec3 c = mesh::normalise({1.0, -0.02 - 0.03 * i, 0.03 * (j - 1)});
+            const Vec3 m{c.x, -c.y, c.z};
+            add_sphere_cell(plates[0], c, 1e13 / 12, kRadius, {mesh::cross(w0, kRadius * c), mesh::dot(w0, c)});
+            add_sphere_cell(plates[1], m, 1e13 / 12, kRadius, {mesh::cross(w1, kRadius * m), mesh::dot(w1, m)});
+        }
+    }
+    static SphereContact contact(double closing, bool continental_a = false, bool continental_b = false,
+                                 double age_a = 0, double age_b = 0) {
+        SphereContact c;
+        c.a = 0; c.b = 1;
+        c.position = {1, 0, 0};
+        c.normal = {0, 1, 0};
+        c.length_m = 1e6;
+        c.continental_a = continental_a; c.continental_b = continental_b;
+        c.age_a_myr = age_a; c.age_b_myr = age_b;
+        c.closing_m_s = closing;
+        return c;
+    }
+};
+// A plate's velocity along the contact's normal at the contact, m/s.
+double normal_speed(const Vec3& w) { return mesh::dot(mesh::cross(w, kRadius * Vec3{1, 0, 0}), Vec3{0, 1, 0}); }
 }
 
 TEST(TectonicDynamics, BasalDragHasAnalyticalEquilibriumAndNoMinimumSpeed) {
-    const auto moving = solve({Plate{1e13, {1e-9, -2e-9}}}, {});
-    EXPECT_NEAR(moving.velocity_m_s[0].x, 1e-9, 1e-23);
-    EXPECT_NEAR(moving.velocity_m_s[0].y, -2e-9, 1e-23);
+    using namespace tectonics::dynamics;
+    // A plate over a solid-body mantle rotation moves with it; over a still mantle it stops.
+    const Vec3 rotation{1e-16, -3e-16, 2e-16};
+    SpherePlate plate;
+    for (int i = 0; i < 6; ++i) {
+        const Vec3 c = mesh::normalise({1.0, .05 * i, -.03 * i});
+        add_sphere_cell(plate, c, 4e11, kRadius, {mesh::cross(rotation, kRadius * c), mesh::dot(rotation, c)});
+    }
+    const auto moving = solve_sphere({plate}, {}, kRadius);
+    EXPECT_LT(mesh::length(moving.rotation_rad_s[0] - rotation), 1e-10 * mesh::length(rotation));
     check_budget(moving);
-    const auto stopped = solve({Plate{1e13, {0, 0}}}, {});
-    EXPECT_DOUBLE_EQ(stopped.velocity_m_s[0].x, 0);
-    EXPECT_DOUBLE_EQ(stopped.velocity_m_s[0].y, 0);
+    SpherePlate still;
+    for (int i = 0; i < 6; ++i) add_sphere_cell(still, mesh::normalise({1.0, .05 * i, 0}), 4e11, kRadius, {});
+    const auto stopped = solve_sphere({still}, {}, kRadius);
+    EXPECT_EQ(mesh::length(stopped.rotation_rad_s[0]), 0);
     check_budget(stopped);
-    EXPECT_THROW(solve({Plate{0, {0, 0}}}, {}), std::runtime_error);
+    EXPECT_THROW(solve_sphere({SpherePlate{}}, {}, kRadius), std::runtime_error);
 }
 
 TEST(TectonicDynamics, OceanRidgeSpreadsWithBalancedOpposingForces) {
-    const std::vector<Plate> plates = {{1e13, {}}, {1e13, {}}};
-    const Contact ridge{0, 1, {1, 0}, 1e6, false, false, 0, 0, -1e-9};
-    const auto result = solve(plates, {ridge});
-    const double expected_speed = 2e12 * 1e6 /
-        (tectonics::dynamics::kBasalDrag * 1e13 + 2 * tectonics::dynamics::kOceanBoundaryDrag * 1e6);
-    EXPECT_NEAR(result.velocity_m_s[0].x, -expected_speed, 1e-23);
-    EXPECT_NEAR(result.velocity_m_s[1].x, expected_speed, 1e-23);
+    Pair pair;
+    const auto result = solve_sphere(pair.plates, {Pair::contact(-1e-9)}, kRadius);
+    EXPECT_LT(normal_speed(result.rotation_rad_s[0]), 0);
+    EXPECT_GT(normal_speed(result.rotation_rad_s[1]), 0);
+    EXPECT_NEAR(normal_speed(result.rotation_rad_s[0]), -normal_speed(result.rotation_rad_s[1]),
+                1e-12 * std::abs(normal_speed(result.rotation_rad_s[0])));
     EXPECT_DOUBLE_EQ(result.diagnostics.ridge_length_km, 1000);
     check_budget(result);
-    auto split = ridge;
+    auto split = Pair::contact(-1e-9);
     split.length_m /= 2;
-    const auto refined = solve(plates, {split, split});
-    EXPECT_NEAR(refined.velocity_m_s[0].x, result.velocity_m_s[0].x, 1e-23);
+    const auto refined = solve_sphere(pair.plates, {split, split}, kRadius);
+    EXPECT_LT(mesh::length(refined.rotation_rad_s[0] - result.rotation_rad_s[0]), 1e-12 * mesh::length(result.rotation_rad_s[0]));
 }
 
 TEST(TectonicDynamics, OldOceanSlabPullsTowardTrenchWithoutPullingContinentalMaterialDown) {
-    const std::vector<Plate> plates = {{1e13, {}}, {1e13, {}}};
-    Contact trench{0, 1, {1, 0}, 1e6, false, true, 80, 200, 1e-9};
-    const auto old = solve(plates, {trench});
-    EXPECT_GT(old.velocity_m_s[0].x, old.velocity_m_s[1].x);
-    EXPECT_GT(old.velocity_m_s[1].x, 0); // Coupled by boundary drag, not slab buoyancy.
+    Pair pair;
+    auto trench = Pair::contact(1e-9, false, true, 80, 200);
+    const auto old = solve_sphere(pair.plates, {trench}, kRadius);
+    EXPECT_GT(normal_speed(old.rotation_rad_s[0]), normal_speed(old.rotation_rad_s[1]));
+    EXPECT_GT(normal_speed(old.rotation_rad_s[1]), 0); // Coupled by boundary drag, not slab buoyancy.
     trench.age_a_myr = 5;
-    const auto young = solve(plates, {trench});
-    EXPECT_GT(old.velocity_m_s[0].x, young.velocity_m_s[0].x);
+    const auto young = solve_sphere(pair.plates, {trench}, kRadius);
+    EXPECT_GT(normal_speed(old.rotation_rad_s[0]), normal_speed(young.rotation_rad_s[0]));
     trench.continental_a = true;
-    const auto continent = solve(plates, {trench});
-    EXPECT_DOUBLE_EQ(continent.velocity_m_s[0].x, 0);
+    const auto continent = solve_sphere(pair.plates, {trench}, kRadius);
+    EXPECT_EQ(mesh::length(continent.rotation_rad_s[0]), 0);
     EXPECT_DOUBLE_EQ(continent.diagnostics.subduction_length_km, 0);
     check_budget(old);
 }
 
 TEST(TectonicDynamics, ContinentalResistanceSlowsConvergenceAndDissipatesWork) {
-    const std::vector<Plate> plates = {{1e13, {1e-9, 0}}, {1e13, {-1e-9, 0}}};
-    const Contact collision{0, 1, {1, 0}, 1e6, true, true, 200, 200, 1e-9};
-    const auto free = solve(plates, {}), resisted = solve(plates, {collision});
-    EXPECT_GT(resisted.velocity_m_s[0].x, 0);
-    EXPECT_LT(resisted.velocity_m_s[0].x, free.velocity_m_s[0].x);
-    EXPECT_NEAR(resisted.velocity_m_s[0].x, -resisted.velocity_m_s[1].x, 1e-23);
+    Pair pair(1e-9, -1e-9);
+    const auto collision = Pair::contact(1e-9, true, true, 200, 200);
+    const auto free = solve_sphere(pair.plates, {}, kRadius), resisted = solve_sphere(pair.plates, {collision}, kRadius);
+    EXPECT_GT(normal_speed(resisted.rotation_rad_s[0]), 0);
+    EXPECT_LT(normal_speed(resisted.rotation_rad_s[0]), normal_speed(free.rotation_rad_s[0]));
+    EXPECT_NEAR(normal_speed(resisted.rotation_rad_s[0]), -normal_speed(resisted.rotation_rad_s[1]),
+                1e-12 * normal_speed(free.rotation_rad_s[0]));
     check_budget(resisted);
 }
 
 TEST(TectonicDynamics, ThermalBuoyancyScalingPreservesForceAndPowerBalance) {
-    const std::vector<Plate> plates={{1e13,{}},{1e13,{}}};
-    Contact trench{0,1,{1,0},1e6,false,true,80,200,1e-9};
-    const auto full=solve(plates,{trench});
-    trench.slab_pull_scale=.5;
-    const auto half=solve(plates,{trench});
-    EXPECT_NEAR(half.velocity_m_s[0].x,.5*full.velocity_m_s[0].x,1e-23);
+    Pair pair;
+    auto trench = Pair::contact(1e-9, false, true, 80, 200);
+    const auto full = solve_sphere(pair.plates, {trench}, kRadius);
+    trench.slab_pull_scale = .5;
+    const auto half = solve_sphere(pair.plates, {trench}, kRadius);
+    EXPECT_LT(mesh::length(half.rotation_rad_s[0] - .5 * full.rotation_rad_s[0]), 1e-12 * mesh::length(full.rotation_rad_s[0]));
     check_budget(half);
-    trench.slab_pull_scale=0;
-    const auto hot=solve(plates,{trench});
-    EXPECT_DOUBLE_EQ(hot.velocity_m_s[0].x,0);
-    EXPECT_DOUBLE_EQ(hot.velocity_m_s[1].x,0);
-    trench.slab_pull_scale=-1;
-    EXPECT_THROW(solve(plates,{trench}),std::runtime_error);
+    trench.slab_pull_scale = 0;
+    const auto hot = solve_sphere(pair.plates, {trench}, kRadius);
+    EXPECT_EQ(mesh::length(hot.rotation_rad_s[0]), 0);
+    EXPECT_EQ(mesh::length(hot.rotation_rad_s[1]), 0);
+    trench.slab_pull_scale = -1;
+    EXPECT_THROW(solve_sphere(pair.plates, {trench}, kRadius), std::runtime_error);
 }
 
 TEST(TectonicDynamics, MountainLoadOpposesConvergenceAndCanDriveSpreadingWithoutAHeightCap) {
-    const std::vector<Plate> plates = {{1e13, {1e-9, 0}}, {1e13, {-1e-9, 0}}};
-    Contact collision{0,1,{1,0},1e6,true,true,200,200,1e-9};
-    const auto flat = solve(plates,{collision});
+    Pair pair(1e-9, -1e-9);
+    auto collision = Pair::contact(1e-9, true, true, 200, 200);
+    const auto flat = solve_sphere(pair.plates, {collision}, kRadius);
     collision.mountain_force_n_m = 3e12;
-    const auto mountain = solve(plates,{collision});
-    EXPECT_GT(mountain.velocity_m_s[0].x,0);
-    EXPECT_LT(mountain.velocity_m_s[0].x,flat.velocity_m_s[0].x);
-    EXPECT_NEAR(mountain.velocity_m_s[0].x,-mountain.velocity_m_s[1].x,1e-23);
+    const auto mountain = solve_sphere(pair.plates, {collision}, kRadius);
+    EXPECT_GT(normal_speed(mountain.rotation_rad_s[0]), 0);
+    EXPECT_LT(normal_speed(mountain.rotation_rad_s[0]), normal_speed(flat.rotation_rad_s[0]));
     collision.mountain_force_n_m = 8e12;
-    const auto spreading = solve(plates,{collision});
-    EXPECT_LT(spreading.velocity_m_s[0].x,0);
-    EXPECT_DOUBLE_EQ(spreading.diagnostics.mountain_boundary_force_n,8e18);
+    const auto spreading = solve_sphere(pair.plates, {collision}, kRadius);
+    EXPECT_LT(normal_speed(spreading.rotation_rad_s[0]), 0);
+    EXPECT_DOUBLE_EQ(spreading.diagnostics.mountain_boundary_force_n, 8e18);
     check_budget(mountain); check_budget(spreading);
 }
 
+// The coastal root's force adds linearly to the flat solution (the response to the force
+// pair alone), and the contact read from the other side (a and b swapped, the normal flipped)
+// gives the same motion.
 TEST(TectonicDynamics, CoastalMountainRootResistsShorteningWithoutChangingNetExternalForce) {
-    const std::vector<Plate> plates={{1e13,{1e-9,0}},{1e13,{-1e-9,0}}};
-    Contact margin{0,1,{1,0},1e6,false,true,80,200,1e-9};
-    const auto flat=solve(plates,{margin});
-    margin.mountain_force_n_m=3e12;
-    const auto loaded=solve(plates,{margin});
-    EXPECT_LT(loaded.velocity_m_s[0].x-loaded.velocity_m_s[1].x,
-              flat.velocity_m_s[0].x-flat.velocity_m_s[1].x);
-    const double delta=3e18/(tectonics::dynamics::kBasalDrag*1e13+2*tectonics::dynamics::kOceanBoundaryDrag*1e6);
-    EXPECT_NEAR(loaded.velocity_m_s[0].x,flat.velocity_m_s[0].x-delta,1e-23);
-    EXPECT_NEAR(loaded.velocity_m_s[1].x,flat.velocity_m_s[1].x+delta,1e-23);
-    EXPECT_DOUBLE_EQ(loaded.diagnostics.mountain_boundary_force_n,3e18);
-    margin.a=1;margin.b=0;margin.normal.x=-1;
-    margin.continental_a=true;margin.continental_b=false;
-    std::swap(margin.age_a_myr,margin.age_b_myr);
-    const auto reversed=solve(plates,{margin});
-    EXPECT_NEAR(reversed.velocity_m_s[0].x,loaded.velocity_m_s[0].x,1e-23);
-    check_budget(loaded);check_budget(reversed);
-}
-
-TEST(TectonicDynamics, PrescribedMantleFlowIsSeededPeriodicAndSmoothInPhysicalTime) {
-    using tectonics::dynamics::mantle_flow;
-    const auto a = mantle_flow(.2, .7, 50, 1, 4);
-    const auto same = mantle_flow(1.2, -.3, 650, 1, 4);
-    const auto next = mantle_flow(.2, .7, 50.001, 1, 4);
-    const auto other = mantle_flow(.2, .7, 50, 2, 4);
-    EXPECT_NEAR(a.x, same.x, 1e-23);
-    EXPECT_NEAR(a.y, same.y, 1e-23);
-    EXPECT_LT(std::hypot(a.x - next.x, a.y - next.y), 1e-13);
-    EXPECT_GT(std::hypot(a.x - other.x, a.y - other.y), 1e-13);
+    Pair pair(1e-9, -1e-9);
+    auto margin = Pair::contact(1e-9, false, true, 80, 200);
+    const auto flat = solve_sphere(pair.plates, {margin}, kRadius);
+    margin.mountain_force_n_m = 3e12;
+    const auto loaded = solve_sphere(pair.plates, {margin}, kRadius);
+    EXPECT_LT(normal_speed(loaded.rotation_rad_s[0]) - normal_speed(loaded.rotation_rad_s[1]),
+              normal_speed(flat.rotation_rad_s[0]) - normal_speed(flat.rotation_rad_s[1]));
+    // The force pair alone: the same contact without a mantle and without slab pull.
+    Pair still;
+    auto alone = margin;
+    alone.slab_pull_scale = 0;
+    const auto response = solve_sphere(still.plates, {alone}, kRadius);
+    for (int p = 0; p < 2; ++p)
+        EXPECT_LT(mesh::length(loaded.rotation_rad_s[p] - flat.rotation_rad_s[p] - response.rotation_rad_s[p]),
+                  1e-9 * mesh::length(flat.rotation_rad_s[p]));
+    EXPECT_DOUBLE_EQ(loaded.diagnostics.mountain_boundary_force_n, 3e18);
+    auto reversed = margin;
+    reversed.a = 1; reversed.b = 0; reversed.normal = {0, -1, 0};
+    reversed.continental_a = true; reversed.continental_b = false;
+    std::swap(reversed.age_a_myr, reversed.age_b_myr);
+    const auto turned = solve_sphere(pair.plates, {reversed}, kRadius);
+    EXPECT_LT(mesh::length(turned.rotation_rad_s[0] - loaded.rotation_rad_s[0]), 1e-12 * mesh::length(loaded.rotation_rad_s[0]));
+    check_budget(loaded); check_budget(turned);
 }
 
 TEST(TectonicDynamics, RidgeAndSlabForcesVanishContinuouslyAsNormalMotionStops) {
-    using namespace tectonics::dynamics;
-    std::vector<Plate> plates(2, {1e12, {0, 0}});
-    Contact edge{0, 1, {1, 0}, 1e6, false, false, 80, 10};
-    edge.activation_speed_m_s = .1 / 3.15576e9;
+    Pair pair;
+    auto edge = Pair::contact(0, false, false, 80, 10);
+    edge.activation_speed_m_s = .1 / kCmYr;
     for (double sign : {-1., 1.}) {
         edge.closing_m_s = sign * edge.activation_speed_m_s * 1e-3;
-        const auto first = solve(plates, {edge});
+        const auto first = solve_sphere(pair.plates, {edge}, kRadius);
         edge.closing_m_s *= .1;
-        const auto smaller = solve(plates, {edge});
+        const auto smaller = solve_sphere(pair.plates, {edge}, kRadius);
         EXPECT_NEAR(smaller.diagnostics.max_speed_cm_yr / first.diagnostics.max_speed_cm_yr, .1, 1e-6);
         EXPECT_LT(smaller.diagnostics.relative_force_residual, 1e-12);
         EXPECT_NEAR(smaller.diagnostics.driving_power_w, smaller.diagnostics.dissipation_w, 1e-6);
     }
     edge.closing_m_s = 0;
-    EXPECT_DOUBLE_EQ(solve(plates, {edge}).diagnostics.max_speed_cm_yr, 0);
+    EXPECT_DOUBLE_EQ(solve_sphere(pair.plates, {edge}, kRadius).diagnostics.max_speed_cm_yr, 0);
     edge.activation_speed_m_s = -1;
-    EXPECT_THROW(solve(plates, {edge}), std::runtime_error);
+    EXPECT_THROW(solve_sphere(pair.plates, {edge}, kRadius), std::runtime_error);
 }
 
+// Boundary activity scores read physical speed: two plates closing at 1 cm/yr at the equator
+// score 20 (of 0..100 over 0..5 cm/yr); a quarter of the speed at four times the conversion
+// gives the same scores.
 TEST(TectonicDynamics, BoundaryActivityUsesPhysicalSpeedIndependentOfTimestep) {
-    std::vector<float> height(8, 1.1f);
-    std::vector<uint32_t> owners = {0, 0, 1, 1, 0, 0, 1, 1};
-    std::vector<tectonics::contract::PlateKinematics> plates(2);
-    plates[0].linear_velocity_x = .02f;
-    plates[1].linear_velocity_x = -.02f;
-    tectonics::provenance::Inputs inputs{4, 2, height.data(), owners.data(), plates.data(), 2, nullptr, 25.0};
-    std::vector<uint8_t> convergence(8), divergence(8), shear(8), regime(8);
+    const auto grid = cubefixture::cube(4);
+    std::vector<float> height(grid->cellcount(), 1.1f);
+    const auto owners = cubefixture::hemispheres(*grid);
+    // velocity_to_cm_yr 25: one cell spacing per update is 25 cm/yr; each plate 0.02 spacing
+    // per update at the equator.
+    const double w = .02 * grid->cellspacing_m() / grid->radius_m();
+    std::vector<Vec3> rotation{{0, 0, w}, {0, 0, -w}};
+    tectonics::provenance::Inputs inputs{height.data(), owners.data(), 2, nullptr, 25.0, grid.get(), rotation.data()};
+    std::vector<uint8_t> convergence(owners.size()), divergence(owners.size()), shear(owners.size()), regime(owners.size());
     tectonics::provenance::compute_maps(inputs, convergence.data(), divergence.data(), shear.data(), regime.data());
-    EXPECT_EQ(convergence[1], 20U); // Relative convergence = 1 cm/year.
-    EXPECT_EQ(regime[1], static_cast<uint8_t>(tectonics::contract::GeologicRegime::ContinentCollision));
+    const cubefixture::Band band(4);
+    const auto west = band.cell(5, 1);
+    EXPECT_NEAR(convergence[west], 20U, 1); // Relative convergence about 1 cm/year (cos of the row's latitude).
+    EXPECT_EQ(regime[west], static_cast<uint8_t>(tectonics::contract::GeologicRegime::ContinentCollision));
     const auto before = convergence;
-    plates[0].linear_velocity_x *= .25f;
-    plates[1].linear_velocity_x *= .25f;
+    for (auto& r : rotation) r = .25 * r;
     inputs.velocity_to_cm_yr *= 4;
     tectonics::provenance::compute_maps(inputs, convergence.data(), divergence.data(), shear.data(), regime.data());
     EXPECT_EQ(before, convergence);
@@ -185,15 +234,16 @@ TEST(TectonicDynamics, BoundaryActivityUsesPhysicalSpeedIndependentOfTimestep) {
 
 TEST(TectonicDynamics, ContinuousStationaryWorldPreservesCrustUntilDurationEnds) {
     tectonics::scenario::Scenario s;
-    s.seed = 1; s.width = 32; s.height = 16; s.plate_count = 1;
-    s.evolution_duration_myr = 6; 
+    s.seed = 1; s.sphere_face_cells = 8; s.plate_count = 1;
+    s.evolution_duration_myr = 6;
     s.mantle_flow_speed_cm_yr = 0; s.thermal_subsidence_strength = 0;
     s.delta_time_myr = .5; s.erosion_strength = 0; lithosphere world(s);
     const auto datum = world.getSeaLevelMeters();
-    std::vector<uint16_t> terrain(32 * 16, datum + 1500);
+    const size_t cells = world.getGrid().cellcount();
+    std::vector<uint16_t> terrain(cells, datum + 1500);
     world.importMetricHeightMap(terrain.data(), datum);
-    const std::vector<float> initial(world.getTopography(), world.getTopography() + terrain.size());
-    const std::vector<float> age(world.getCrustAgeMyrMap(), world.getCrustAgeMyrMap() + terrain.size());
+    const std::vector<float> initial(world.getTopography(), world.getTopography() + cells);
+    const std::vector<float> age(world.getCrustAgeMyrMap(), world.getCrustAgeMyrMap() + cells);
     int calls = 0;
     while (!world.isFinished() && calls < 20) { world.update(); ++calls; }
     ASSERT_EQ(calls, 12);
@@ -206,8 +256,8 @@ TEST(TectonicDynamics, ContinuousStationaryWorldPreservesCrustUntilDurationEnds)
 
 TEST(TectonicDynamics, ContinuousDrivenWorldReplaysAndRetainsMotionAt200Myr) {
     tectonics::scenario::Scenario s;
-    s.seed = 1; s.width = 64; s.height = 32; s.plate_count = 8;
-    s.evolution_duration_myr = 200; 
+    s.seed = 1; s.sphere_face_cells = 16; s.plate_count = 8;
+    s.evolution_duration_myr = 200;
     lithosphere a(s), b(s);
     for (int i = 0; i < 200; ++i) {
         ASSERT_FALSE(a.isFinished()) << i;
@@ -217,74 +267,86 @@ TEST(TectonicDynamics, ContinuousDrivenWorldReplaysAndRetainsMotionAt200Myr) {
     EXPECT_TRUE(a.isFinished());
     EXPECT_DOUBLE_EQ(a.getTimeMyr(), 200);
     EXPECT_GT(a.getMotionDiagnostics().mean_speed_cm_yr, .01);
-    EXPECT_EQ(std::memcmp(a.getTopography(), b.getTopography(), 64 * 32 * sizeof(float)), 0);
-    EXPECT_EQ(std::memcmp(a.getAgeMap(), b.getAgeMap(), 64 * 32 * sizeof(uint32_t)), 0);
+    EXPECT_GT(a.getMotionDiagnostics().rms_speed_cm_yr, .01);
+    const size_t cells = a.getGrid().cellcount();
+    EXPECT_EQ(std::memcmp(a.getTopography(), b.getTopography(), cells * sizeof(float)), 0);
+    EXPECT_EQ(std::memcmp(a.getAgeMap(), b.getAgeMap(), cells * sizeof(uint32_t)), 0);
 }
 
+// A small planet (4000 km round) of 8 plates on a flat plateau: the driven mantle raises
+// collision belts above the plateau, a still mantle leaves it.
 TEST(TectonicDynamics, DrivenContinentalCollisionRaisesInitiallyFlatTerrain) {
     tectonics::scenario::Scenario s;
-    s.seed = 1; s.width = 64; s.height = 32; s.plate_count = 8;
-    s.evolution_duration_myr = 30; 
-    s.world_width_km = 4000; s.delta_time_myr = .25;
+    s.seed = 1; s.sphere_face_cells = 16; s.plate_count = 8;
+    s.evolution_duration_myr = 30;
+    s.radius_km = 4000 / (2 * cubefixture::pi); s.mantle_flow_wavelength_km = s.radius_km; s.delta_time_myr = .25;
     s.erosion_strength = 0; auto disabled = s; disabled.mantle_flow_speed_cm_yr = 0; lithosphere active(s), control(disabled);
     const auto datum = active.getSeaLevelMeters();
-    std::vector<uint16_t> plateau(64 * 32, datum + 1500);
+    const size_t cells = active.getGrid().cellcount();
+    std::vector<uint16_t> plateau(cells, datum + 1500);
     active.importMetricHeightMap(plateau.data(), datum);
     control.importMetricHeightMap(plateau.data(), datum);
     while (!active.isFinished()) { active.update(); control.update(); }
-    const auto peak = [datum](const lithosphere& world) {
+    const auto peak = [datum, cells](const lithosphere& world) {
         return static_cast<int>(TopographyCodec::internal_to_meters(
-            *std::max_element(world.getTopography(), world.getTopography() + 64 * 32), datum)) - datum;
+            *std::max_element(world.getTopography(), world.getTopography() + cells), datum)) - datum;
     };
+    RecordProperty("active_peak_m", peak(active));
     EXPECT_GT(peak(active), 1600);
     EXPECT_LE(peak(control), 1501);
 }
 
-TEST(TectonicDynamics, InlandPressureTransmitsRootsButStopsAtOtherPlates) {
-    using tectonics::dynamics::inland_pressure;
-    constexpr uint32_t w=8,h=4;
-    std::vector<uint32_t> owners(w*h,0);
-    std::vector<double> pressure(w*h,2e12);
-    EXPECT_NEAR(inland_pressure(w,h,100000,owners,pressure,3,0,-1,500000),2e12,1e-3);
-    pressure[3]=0;pressure[1]=1e13;
-    EXPECT_DOUBLE_EQ(inland_pressure(w,h,100000,owners,pressure,3,0,-1,0),0);
-    EXPECT_GT(inland_pressure(w,h,100000,owners,pressure,3,0,-1,500000),2e12);
-    owners[2]=1;
-    EXPECT_DOUBLE_EQ(inland_pressure(w,h,100000,owners,pressure,3,0,-1,500000),0);
-    owners.assign(w*h,0);pressure.assign(w*h,0);pressure[7]=1e13;
-    EXPECT_GT(inland_pressure(w,h,100000,owners,pressure,0,0,-1,300000),0);
-    EXPECT_THROW(inland_pressure(w,h,100000,owners,pressure,0,0,0,300000),std::runtime_error);
-}
-
+// The consistent-motion iteration returns the motion that its own activity history reproduces,
+// and a reversed surface velocity does not instantaneously detach an old slab.
 TEST(TectonicDynamics, BoundaryHistoryBalancesItsReturnedVelocity) {
     using namespace tectonics::dynamics;
-    std::vector<Plate> plates{{2e13,{1e-9,0}},{3e13,{-1e-9,0}}};
-    Contact contact{0,1,{1,0},2e6,false,false,80,20};
-    contact.activation_speed_m_s=.1/3.15576e9;
-    contact.descending_side=0;
-    contact.ridge_activity=.2;contact.slab_activity=.8;contact.activity_response=1./31;
-    const auto solution=solve_consistent(plates,{contact},{{0,0},{0,0}});
-    contact.closing_m_s=solution.velocity_m_s[0].x-solution.velocity_m_s[1].x;
-    const auto check=solve(plates,{contact});
-    EXPECT_LT(solution.diagnostics.velocity_consistency_cm_yr,1e-4);
-    for (size_t p=0;p<plates.size();++p) {
-        EXPECT_NEAR(check.velocity_m_s[p].x,solution.velocity_m_s[p].x,1e-4/3.15576e9);
-        EXPECT_NEAR(check.velocity_m_s[p].y,solution.velocity_m_s[p].y,1e-4/3.15576e9);
-    }
+    Pair pair(1e-9, -1e-9);
+    auto contact = Pair::contact(0, false, false, 80, 20);
+    contact.activation_speed_m_s = .1 / kCmYr;
+    contact.descending_side = 0;
+    contact.ridge_activity = .2; contact.slab_activity = .8; contact.activity_response = 1. / 31;
+    const auto solution = solve_sphere_consistent(pair.plates, {contact}, std::vector<Vec3>(2), kRadius);
+    contact.closing_m_s = sphere_closing_m_s(contact, solution.rotation_rad_s[0], solution.rotation_rad_s[1], kRadius);
+    const auto check = solve_sphere(pair.plates, {contact}, kRadius);
+    EXPECT_LT(solution.diagnostics.velocity_consistency_cm_yr, 1e-4);
+    for (size_t p = 0; p < pair.plates.size(); ++p)
+        EXPECT_LT(mesh::length(check.rotation_rad_s[p] - solution.rotation_rad_s[p]) * kRadius * kCmYr, 1e-3);
     // A reversed surface velocity does not instantaneously detach an old slab.
-    contact.closing_m_s=-1e-9;
-    EXPECT_GT(solve(plates,{contact}).diagnostics.subduction_length_km,0);
+    contact.closing_m_s = -1e-9;
+    EXPECT_GT(solve_sphere(pair.plates, {contact}, kRadius).diagnostics.subduction_length_km, 0);
 }
 
-// ---- The sphere (W2-E, step E2C) ----
+// The measures of a solution: the area-RMS speed over the plates (a rotation's whole surface,
+// not its centroid), the net rotation of the lithosphere, the condition number and the spin
+// shares.
+TEST(TectonicDynamics, SphereMeasuresOfASolution) {
+    using namespace tectonics::dynamics;
+    const auto grid = cubefixture::cube(8);
+    const std::vector<uint32_t> owners(grid->cellcount(), 0);
+    const Vec3 rotation{0, 0, 1e-15};
+    std::vector<MantleSample> mantle(grid->cellcount());
+    for (cubefixture::CellId c = 0; c < grid->cellcount(); ++c) {
+        const Vec3 p = grid->position(c);
+        mantle[c] = {mesh::cross(rotation, kRadius * p), mesh::dot(rotation, p)};
+    }
+    const auto plates = sphere_plates(*grid, owners, 1, mantle);
+    const auto solution = solve_sphere(plates, {}, kRadius);
+    Diagnostics d;
+    sphere_measures(plates, {}, solution.rotation_rad_s, kRadius, d);
+    // One plate turning as a whole: its RMS speed is that of a solid rotation, sqrt(2/3) w R,
+    // and its net rotation the rotation itself; the centroid speed reads a whole-sphere
+    // plate as almost still.
+    EXPECT_NEAR(d.rms_speed_cm_yr / (std::sqrt(2.0 / 3) * 1e-15 * kRadius * kCmYr), 1, 1e-2);
+    EXPECT_NEAR(d.net_rotation_cm_yr / (1e-15 * kRadius * kCmYr), 1, 1e-2);
+    EXPECT_GT(d.condition_number, 0);
+    EXPECT_LE(d.spin_share_max, 1);
+    EXPECT_GE(d.spin_share_mean, 0);
+}
+
+// ---- Partitions of the cube ----
 namespace {
-using tectonics::dynamics::MantleSample;
-using tectonics::dynamics::SphereContact;
-using tectonics::dynamics::SpherePlate;
 using tectonics::grid::TectonicGrid;
-using Vec3 = mesh::Vec3;
 constexpr double kEarthRadiusKm = 6371.0;
-constexpr double kCmYr = 3.15576e9;  // cm/yr per m/s
 
 // A random partition: count distinct source cells from mt19937(seed), each cell to its
 // nearest source over the edge graph.
@@ -302,7 +364,7 @@ std::vector<SphereContact> plate_contacts(const TectonicGrid& grid, const std::v
     std::vector<SphereContact> contacts;
     for (const auto& edge : grid.edges())
         if (owners[edge.a] != owners[edge.b])
-            contacts.push_back(tectonics::dynamics::sphere_contact(grid, edge, owners[edge.a], owners[edge.b]));
+            contacts.push_back(tectonics::dynamics::sphere_contact(grid, edge, owners));
     return contacts;
 }
 
@@ -368,6 +430,7 @@ TEST(TectonicDynamics, SphereSolidBodyMantleRotationGivesThatRotationForEveryPla
     EXPECT_NEAR(solution.diagnostics.driving_power_w, solution.diagnostics.dissipation_w,
                 solution.diagnostics.dissipation_w * 1e-10);
 }
+
 
 TEST(TectonicDynamics, SphereSymmetricPlatePairGetsEqualAndOppositeTorques) {
     using namespace tectonics::dynamics;
@@ -452,7 +515,8 @@ TEST(TectonicDynamics, SphereMantleFlowIsTangentContinuousSeededPeriodicAndSmoot
     EXPECT_LT(mesh::length(a.velocity_m_s - flow.at(p, 50.001, radius).velocity_m_s), speed * 1e-3);
     EXPECT_GT(mesh::length(a.velocity_m_s - other.at(p, 50, radius).velocity_m_s), speed * 1e-2);
     EXPECT_GT(mesh::length(a.velocity_m_s - flow.at(p, 350, radius).velocity_m_s), speed * 1e-2);
-    // Tangent, and the torus field's RMS speed, over the cube's cells and the 600 Myr cycle.
+    // Tangent, with an RMS speed of sqrt(0.6225) times the speed, over the cube's cells and the
+    // 600 Myr cycle.
     const auto grid = TectonicGrid::cube(16, kEarthRadiusKm);
     double square = 0, area = 0;
     for (int t = 0; t < 6; ++t) for (tectonics::grid::CellId c = 0; c < grid->cellcount(); ++c) {
@@ -463,7 +527,7 @@ TEST(TectonicDynamics, SphereMantleFlowIsTangentContinuousSeededPeriodicAndSmoot
         area += grid->area_m2(c);
     }
     const double rms = std::sqrt(square / area) / (std::sqrt(.6225) * speed);
-    std::cout << "mantle flow RMS / torus RMS on the N 16 cube: " << rms << "\n";
+    std::cout << "mantle flow RMS / sqrt(0.6225) speed on the N 16 cube: " << rms << "\n";
     EXPECT_NEAR(rms, 1, .05);
     // Continuous across face edges and corners: points a hair apart on different faces.
     const double hair = 1e-7;
@@ -573,7 +637,4 @@ TEST(TectonicDynamics, SphereInlandPressureWalksAcrossFaceEdgesAndStopsAtOtherPl
     owners[beyond.cell] = 1;
     EXPECT_DOUBLE_EQ(inland_pressure(*grid, owners, pressure, cell, east, 3e6), 0);
     EXPECT_THROW(inland_pressure(*grid, owners, pressure, cell, 4, 3e6), std::runtime_error);
-    const auto torus = TectonicGrid::planar(8, 4, 800);
-    EXPECT_THROW(inland_pressure(*torus, std::vector<uint32_t>(32), std::vector<double>(32), 0, east, 3e6),
-                 std::runtime_error);
 }

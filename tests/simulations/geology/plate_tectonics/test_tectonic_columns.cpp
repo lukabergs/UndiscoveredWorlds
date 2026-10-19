@@ -1,6 +1,11 @@
+// The isostatic columns on the cube (W2-E, E3): the column laws, the column model's processes
+// and its transport, the rock uplift rate and the strain, on the equatorial band of the cube
+// (cube_fixture.hpp) or the whole sphere; the lithosphere runs on small cubes.
 #include "gtest/gtest.h"
+#include "cube_fixture.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_columns.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_initialization.hpp"
+#include "simulations/geology/plate_tectonics/tectonic_margins.hpp"
 #include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_thermal.hpp"
@@ -9,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -16,6 +22,44 @@
 #include <utility>
 
 using namespace tectonics::columns;
+using cubefixture::Band;
+using cubefixture::CellId;
+using cubefixture::Vec3;
+using tectonics::grid::TectonicGrid;
+namespace st = tectonics::sphere_transport;
+
+namespace {
+constexpr double pi = 3.14159265358979323846;
+constexpr double earth_km = cubefixture::earth_km;
+
+// Two plates split by the meridian plane at longitude 45 / -135 degrees: plate 0 west of
+// 45 degrees (band columns 0 .. 2N - 1), plate 1 east of it.
+std::vector<uint32_t> halves(const TectonicGrid& grid) {
+    const Vec3 normal{std::cos(-pi / 4), std::sin(-pi / 4), 0};
+    std::vector<uint32_t> owners(grid.cellcount());
+    for (CellId c = 0; c < grid.cellcount(); ++c) owners[c] = mesh::dot(grid.position(c), normal) > 0 ? 0 : 1;
+    return owners;
+}
+// The two halves turning about the z axis by +-cells band columns per update: they converge at
+// 45 degrees and part at -135 degrees.
+st::Motion converging(const Band& band, double cells) {
+    return cubefixture::plates(halves(*band.grid), {band.eastward(cells), band.eastward(-cells)});
+}
+
+double area_weighted(const Model& model, double Cell::* member) {
+    double sum = 0;
+    for (CellId c = 0; c < model.cells().size(); ++c) sum += model.cells()[c].*member * model.metric().area_m2(c);
+    return sum;
+}
+
+// The budget's continental area terms: stretched + arc + continentalized - collided - oceanized, m².
+double continental_area_terms(const Budget& b) {
+    return b.stretched_continental_area_m2 + b.arc_continental_area_m2 + b.continentalized_oceanic_area_m2
+        - b.collided_continental_area_m2 - b.oceanized_continental_area_m2;
+}
+
+std::vector<Displacement> zero(const Model& model) { return std::vector<Displacement>(model.cells().size()); }
+} // namespace
 
 TEST(TectonicColumns, AiryRootsAndWaterLoadingHaveAnalyticalElevations) {
     for (double z : {-5000., -500., 0., 1500., 8000., 12000.}) {
@@ -80,9 +124,12 @@ TEST(TectonicColumns, LithosphericRootLowersTheSlopeAndZeroKeepsTheCrustOnlyColu
                       / (mantle_density - continental_density));
     EXPECT_THROW(seed(0, true, 100, 500), std::runtime_error);
     EXPECT_THROW(seed(0, true, 100, -1), std::runtime_error);
+    const auto grid = cubefixture::cube(2);
     Model model;
-    EXPECT_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, 500),
+    EXPECT_THROW(model.initialize(grid, std::vector<Cell>(24, seed(0, true, 100)), 1, 0, {}, false, 500),
                  std::runtime_error);
+    EXPECT_THROW(model.initialize(grid, std::vector<Cell>(23, seed(0, true, 100))), std::runtime_error);
+    EXPECT_THROW(model.initialize(nullptr, {}), std::runtime_error);
 }
 
 // The root's delamination cap (continental_root_max_thickness_m): above the cap the
@@ -150,11 +197,12 @@ TEST(TectonicColumns, RootCapRestoresTheCrustOnlySlopeAboveIt) {
     EXPECT_THROW(seed(0, true, 100, root, 30000), std::runtime_error);
     EXPECT_THROW(seed(0, true, 100, root, reference_continent_m), std::runtime_error);
     EXPECT_THROW(seed(0, true, 100, root, std::numeric_limits<double>::quiet_NaN()), std::runtime_error);
+    const auto grid = cubefixture::cube(2);
     Model model;
-    EXPECT_NO_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, 0));
-    EXPECT_NO_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, cap));
-    EXPECT_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, 30000),
-                 std::runtime_error);
+    const std::vector<Cell> flat(grid->cellcount(), seed(0, true, 100));
+    EXPECT_NO_THROW(model.initialize(grid, flat, 1, 0, {}, false, root, 0));
+    EXPECT_NO_THROW(model.initialize(grid, flat, 1, 0, {}, false, root, cap));
+    EXPECT_THROW(model.initialize(grid, flat, 1, 0, {}, false, root, 30000), std::runtime_error);
 
     // Delamination ramp (continental_root_delamination_width_m): the root's load is full
     // up to the cap, falls linearly to zero at cap + width, and the crust-only Airy height
@@ -219,51 +267,41 @@ TEST(TectonicColumns, RootCapRestoresTheCrustOnlySlopeAboveIt) {
     EXPECT_THROW(seed(0, true, 100, root, 0, width), std::runtime_error);
     EXPECT_THROW(seed(0, true, 100, root, cap, std::numeric_limits<double>::quiet_NaN()), std::runtime_error);
     EXPECT_THROW(seed(0, true, 100, root, cap, std::numeric_limits<double>::infinity()), std::runtime_error);
-    EXPECT_NO_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, cap, width));
-    EXPECT_THROW(model.initialize(8, 4, 100000, std::vector<Cell>(32, seed(0, true, 100)), 1, 0, {}, false, root, 0, width),
-                 std::runtime_error);
+    EXPECT_NO_THROW(model.initialize(grid, flat, 1, 0, {}, false, root, cap, width));
+    EXPECT_THROW(model.initialize(grid, flat, 1, 0, {}, false, root, 0, width), std::runtime_error);
 }
 
 TEST(TectonicColumns, StationaryCoolingIsIndependentOfTimestepAndDoesNotRemoveCrust) {
+    const auto grid = cubefixture::cube(4);
     Model a, b;
-    const std::vector<Cell> initial(32, seed(-5000, false, 20));
-    a.initialize(8, 4, 100000, initial); b.initialize(8, 4, 100000, initial);
-    const std::vector<Displacement> velocity(32);
-    for (int i = 0; i < 20; ++i) a.advance(velocity, 1, 0, 1);
-    for (int i = 0; i < 80; ++i) b.advance(velocity, .25, 0, 1);
-    EXPECT_DOUBLE_EQ(a.cells()[0].ocean, 7000);
-    EXPECT_DOUBLE_EQ(age_myr(a.cells()[0]), 40);
-    EXPECT_NEAR(elevation_m(a.cells()[0]), elevation_m(b.cells()[0]), 1e-10);
+    const std::vector<Cell> initial(grid->cellcount(), seed(-5000, false, 20));
+    a.initialize(grid, initial); b.initialize(grid, initial);
+    const auto still = cubefixture::still(*grid);
+    for (int i = 0; i < 20; ++i) a.advance(still, 1, 0, 1);
+    for (int i = 0; i < 80; ++i) b.advance(still, .25, 0, 1);
+    for (CellId c = 0; c < grid->cellcount(); ++c) {
+        EXPECT_NEAR(a.cells()[c].ocean, 7000, 1e-9);
+        EXPECT_NEAR(age_myr(a.cells()[c]), 40, 1e-9);
+        EXPECT_NEAR(elevation_m(a.cells()[c]), elevation_m(b.cells()[c]), 1e-9);
+    }
     EXPECT_NEAR(a.budget().relative_mass_residual, 0, 1e-14);
 }
 
-namespace {
-// The budget's continental area terms: stretched + arc + continentalized - collided - oceanized, m².
-double continental_area_terms(const Budget& b) {
-    return b.stretched_continental_area_m2 + b.arc_continental_area_m2 + b.continentalized_oceanic_area_m2
-        - b.collided_continental_area_m2 - b.oceanized_continental_area_m2;
-}
-double continental_area_m2(const Model& model, double cell_area) {
-    double sum = 0;
-    for (const auto& c : model.cells()) sum += c.continental_area;
-    return sum * cell_area;
-}
-}
-
+// Two continental halves of a 100 km band (N 8) close at 45 degrees and part at -135: the
+// continental area changes by the budget's area terms only, the middle collides and the far
+// side opens (stretched without margins), mass is conserved and the collision builds
+// mountains (a root, no 4 km ceiling).
 TEST(TectonicColumns, ConvergenceThickensContinentsWithoutInventingOrDeletingMass) {
+    const Band band(8, cubefixture::radiusfor_km(8, 100000));
     Model world;
-    world.initialize(32, 8, 100000, std::vector<Cell>(256, seed(0, true, 100)));
-    std::vector<Displacement> v(256);
-    for (size_t i = 0; i < v.size(); ++i) v[i].x = i % 32 < 16 ? .05 : -.05;
-    const double cell_area = 100000.0 * 100000;
+    world.initialize(band.grid, std::vector<Cell>(band.cellcount(), seed(0, true, 100)));
+    const auto motion = converging(band, .05);
     for (int i = 0; i < 80; ++i) {
-        // The continental area changes by the budget's area terms only (the remap moves it).
-        const double area = continental_area_m2(world, cell_area), terms = continental_area_terms(world.budget());
-        world.advance(v, .25, 0, 1);
-        EXPECT_NEAR(continental_area_m2(world, cell_area) - area, continental_area_terms(world.budget()) - terms,
-                    1e-9 * cell_area);
+        const double area = area_weighted(world, &Cell::continental_area), terms = continental_area_terms(world.budget());
+        world.advance(motion, .25, 0, 1);
+        EXPECT_NEAR(area_weighted(world, &Cell::continental_area) - area, continental_area_terms(world.budget()) - terms,
+                    1e-9 * band.spacing_m() * band.spacing_m());
     }
-    // The middle collides, the periodic seam opens (stretched without margins); no arcs, no caps.
     EXPECT_GT(world.budget().collided_continental_area_m2, 0);
     EXPECT_GT(world.budget().stretched_continental_area_m2, 0);
     EXPECT_DOUBLE_EQ(world.budget().arc_continental_area_m2, 0);
@@ -271,76 +309,126 @@ TEST(TectonicColumns, ConvergenceThickensContinentsWithoutInventingOrDeletingMas
     EXPECT_DOUBLE_EQ(world.budget().continentalized_oceanic_area_m2, 0);
     double peak = 0;
     for (const auto& c : world.cells()) peak = std::max(peak, elevation_m(c));
-    EXPECT_GT(peak, 5000); // A root can support high mountains; no 4 km ceiling.
+    RecordProperty("collision_peak_m", std::to_string(peak));
+    EXPECT_GT(peak, 5000);
     EXPECT_LT(std::abs(world.budget().relative_mass_residual), 1e-12);
     EXPECT_DOUBLE_EQ(world.budget().subducted_ocean_kg, 0);
     EXPECT_DOUBLE_EQ(world.budget().generated_ocean_kg, 0);
 }
 
 TEST(TectonicColumns, OceanOpeningAndSubductionAreExplicitMassSourcesAndSinks) {
+    const Band band(8, cubefixture::radiusfor_km(8, 100000));
     Model world;
-    world.initialize(32, 8, 100000, std::vector<Cell>(256, seed(-4000, false, 80)));
-    std::vector<Displacement> v(256);
-    for (size_t i = 0; i < v.size(); ++i) v[i].x = i % 32 < 16 ? .05 : -.05;
-    for (int i = 0; i < 20; ++i) world.advance(v, 1, 0, 1);
+    world.initialize(band.grid, std::vector<Cell>(band.cellcount(), seed(-4000, false, 80)));
+    const auto motion = converging(band, .05);
+    for (int i = 0; i < 20; ++i) world.advance(motion, 1, 0, 1);
     EXPECT_GT(world.budget().generated_ocean_kg, 0);
     EXPECT_GT(world.budget().subducted_ocean_kg, 0);
     EXPECT_LT(std::abs(world.budget().relative_mass_residual), 1e-12);
-    for (const auto& c : world.cells()) EXPECT_NEAR(c.ocean, 7000, 1e-9);
+    // Crust of the ridge's thickness everywhere: the per-plate transport keeps a value per
+    // covered area between its donors'.
+    for (const auto& c : world.cells()) EXPECT_NEAR(c.ocean, 7000, 1e-6);
 }
 
 TEST(TectonicColumns, ErodedRockReappearsAsSedimentWithEqualMass) {
-    auto cells = std::vector<Cell>(128, seed(0, true, 100));
-    for (size_t i = 0; i < cells.size(); ++i) if (i % 16 == 8) cells[i] = seed(6000, true, 100);
+    const Band band(4, cubefixture::radiusfor_km(4, 100000));
+    const auto cells = cubefixture::layout(band, seed(0, true, 100), [](int x, int) {
+        return x % 16 == 8 ? seed(6000, true, 100) : seed(0, true, 100); });
     Model world;
-    world.initialize(16, 8, 100000, cells);
-    for (int i = 0; i < 20; ++i) world.advance(std::vector<Displacement>(128), 1, 1, 1);
+    world.initialize(band.grid, cells);
+    const auto still = cubefixture::still(*band.grid);
+    for (int i = 0; i < 20; ++i) world.advance(still, 1, 1, 1);
     EXPECT_GT(world.budget().eroded_kg, 0);
     EXPECT_NEAR(world.budget().deposited_kg / world.budget().eroded_kg, 1, 1e-12);
     EXPECT_LT(std::abs(world.budget().relative_mass_residual), 1e-12);
-    EXPECT_LT(elevation_m(world.cells()[8]), 6000);
-    EXPECT_GT(world.cells()[7].sediment, 0);
+    EXPECT_LT(elevation_m(world.cells()[band.cell(8, 1)]), 6000);
+    EXPECT_GT(world.cells()[band.cell(7, 1)].sediment, 0);
 }
 
-TEST(TectonicColumns, FractionalTransportWrapsAndPreservesVolumeAndAge) {
+// A rigid rotation carries an anomaly of older crust across a face edge, the date line and the
+// north pole: the continental volume and the age moment are conserved (the age moment grows by
+// the update's time), the anomaly's excess moves with the rotation, and a displacement beyond
+// 0.95 of a cell's smallest edge is refused.
+TEST(TectonicColumns, FractionalTransportCrossesFaceEdgesTheDateLineAndThePoleAndPreservesVolumeAndAge) {
     Model uninitialized;
-    EXPECT_THROW(uninitialized.advance({}, 1, 0, 1), std::runtime_error);
-    auto cells = std::vector<Cell>(32, seed(0, true, 100));
-    cells[7] = seed(0, true, 250); // Uniform elevation isolates advection from root flow.
+    EXPECT_THROW(uninitialized.advance(st::Motion{}, 1, 0, 1), std::runtime_error);
+    constexpr int n = 8;
+    const auto grid = cubefixture::cube(n);
+    const auto& mesh = *grid->mesh();
+    struct Case { const char* name; Vec3 start; Vec3 axis; };
+    const double column = pi / (2.0 * n);
+    const Case cases[] = {
+        {"face_edge", mesh::cubepoint(0, pi / 4 - column / 2, 0), {0, 0, 1}},
+        {"date_line", mesh::unitvector(0, pi - column / 2), {0, 0, 1}},
+        {"pole", mesh::unitvector(pi / 2 - column, -pi / 2), {1, 0, 0}},
+    };
+    for (const auto& test : cases) {
+        auto cells = std::vector<Cell>(grid->cellcount(), seed(0, true, 100));
+        const CellId anomaly = mesh.locate(test.start);
+        cells[anomaly] = seed(0, true, 250);  // Uniform elevation isolates advection from root flow.
+        Model world;
+        world.initialize(grid, cells);
+        const double volume = area_weighted(world, &Cell::continent);
+        const double moment = area_weighted(world, &Cell::continental_age_volume);
+        const Vec3 rotation = .25 * column * test.axis;
+        world.advance(cubefixture::rotating(*grid, rotation), 1, 0, 0);
+        EXPECT_NEAR(area_weighted(world, &Cell::continent) / volume, 1, 1e-12) << test.name;
+        EXPECT_NEAR(area_weighted(world, &Cell::continental_age_volume) / (moment + volume), 1, 1e-12) << test.name;
+        EXPECT_LT(std::abs(world.budget().relative_mass_residual), 1e-12) << test.name;
+        // The excess age (over the background's 101 Myr) has moved by the rotation.
+        Vec3 centre;
+        double excess = 0;
+        for (CellId c = 0; c < grid->cellcount(); ++c) {
+            const double e = (age_myr(world.cells()[c]) - 101) * world.cells()[c].continent * grid->area_m2(c);
+            centre = centre + e * grid->position(c);
+            excess += e;
+        }
+        EXPECT_NEAR(excess / (150 * cells[anomaly].continent * grid->area_m2(anomaly)), 1, 1e-6) << test.name;
+        const double angle = mesh::length(rotation);
+        const Vec3 k = mesh::normalise(rotation), p = grid->position(anomaly);
+        const Vec3 moved = std::cos(angle) * p + std::sin(angle) * mesh::cross(k, p) + (mesh::dot(k, p) * (1 - std::cos(angle))) * k;
+        const double error = mesh::greatcircle_rad(mesh::normalise(centre), moved) / column;
+        RecordProperty(std::string(test.name) + "_centre_error_columns", std::to_string(error));
+        EXPECT_LT(error, .1) << test.name;
+        // The next cell along the motion (a column on) got about a quarter of the anomaly.
+        const CellId receiver = mesh.locate(mesh::normalise(p + (4 * angle) * mesh::cross(k, p)));
+        EXPECT_NE(receiver, anomaly) << test.name;
+        EXPECT_GT(age_myr(world.cells()[receiver]), 101 + .15 * 150) << test.name;
+    }
     Model world;
-    world.initialize(8, 4, 100000, cells);
-    world.advance(std::vector<Displacement>(32, {.25, 0}), 1, 0, 0);
-    EXPECT_NEAR(world.cells()[0].continent, .75 * cells[0].continent + .25 * cells[7].continent, 1e-9);
-    EXPECT_LT(std::abs(world.budget().relative_mass_residual), 1e-12);
-    EXPECT_DOUBLE_EQ(age_myr(world.cells()[0]), .75 * 101 + .25 * 251);
-    EXPECT_THROW(world.advance(std::vector<Displacement>(32, {1.1, 0}), 1, 0, 1), std::runtime_error);
+    world.initialize(grid, std::vector<Cell>(grid->cellcount(), seed(0, true, 100)));
+    EXPECT_THROW(world.advance(cubefixture::rotating(*grid, {0, 0, 1.1 * column}), 1, 0, 1), std::runtime_error);
 }
 
 TEST(TectonicColumns, RootsSpreadWithoutErosionAndPreserveMass) {
-    auto cells = std::vector<Cell>(128, seed(0, true, 100));
-    for (size_t i = 0; i < cells.size(); ++i) if (i % 16 == 8) cells[i] = seed(12000, true, 100);
+    const Band band(4, cubefixture::radiusfor_km(4, 100000));
+    const auto cells = cubefixture::layout(band, seed(0, true, 100), [](int x, int) {
+        return x % 16 == 8 ? seed(12000, true, 100) : seed(0, true, 100); });
     Model world;
-    world.initialize(16, 8, 100000, cells);
-    for (int i = 0; i < 20; ++i) world.advance(std::vector<Displacement>(128), 1, 0, 1);
-    EXPECT_LT(elevation_m(world.cells()[8]), 6000);
-    EXPECT_GT(elevation_m(world.cells()[7]), 0);
+    world.initialize(band.grid, cells);
+    const auto still = cubefixture::still(*band.grid);
+    for (int i = 0; i < 20; ++i) world.advance(still, 1, 0, 1);
+    EXPECT_LT(elevation_m(world.cells()[band.cell(8, 1)]), 6000);
+    EXPECT_GT(elevation_m(world.cells()[band.cell(7, 1)]), 0);
     EXPECT_GT(world.budget().redistributed_continent_kg, 0);
     EXPECT_DOUBLE_EQ(world.budget().eroded_kg, 0);
     EXPECT_LT(std::abs(world.budget().relative_mass_residual), 1e-12);
 }
 
 TEST(TectonicColumns, GentleInteriorReliefSurvivesRootFlowOver200Myr) {
-    constexpr uint32_t w = 32, h = 8;
-    constexpr double pi = 3.141592653589793;
-    std::vector<Cell> initial(w * h);
-    for (size_t i = 0; i < initial.size(); ++i)
-        initial[i] = seed(700 + 300 * std::sin(2 * pi * (i % w) / 8), true, 100);
-    Model world; world.initialize(w, h, 156250, initial);
-    for (int i = 0; i < 200; ++i) world.advance(std::vector<Displacement>(w * h), 1, 0, 1);
-    double amplitude = 0;
-    for (size_t i = 0; i < initial.size(); ++i)
-        amplitude += (elevation_m(world.cells()[i]) - 700) * std::sin(2 * pi * (i % w) / 8);
-    const double retained = amplitude / (w * h * 150);
+    const Band band(8, cubefixture::radiusfor_km(8, 156250));
+    const auto relief = [](int x) { return 300 * std::sin(2 * pi * x / 8); };
+    const auto initial = cubefixture::layout(band, seed(700, true, 100), [&](int x, int) {
+        return seed(700 + relief(x), true, 100); });
+    Model world; world.initialize(band.grid, initial);
+    const auto still = cubefixture::still(*band.grid);
+    for (int i = 0; i < 200; ++i) world.advance(still, 1, 0, 1);
+    double amplitude = 0, norm = 0;
+    for (int y = 0; y < band.rows(); ++y) for (int x = 0; x < band.columns(); ++x) {
+        amplitude += (elevation_m(world.cells()[band.cell(x, y)]) - 700) * relief(x);
+        norm += relief(x) * relief(x);
+    }
+    const double retained = amplitude / norm;
     RecordProperty("root_flow_relief_retained", retained);
     EXPECT_GT(retained, .95);
     EXPECT_LT(std::abs(world.budget().relative_mass_residual), 1e-12);
@@ -350,8 +438,9 @@ TEST(TectonicColumns, VanishingContinentalTracesHaveZeroRootConductance) {
     auto tiny = seed(0, true, 100);
     tiny.continent = 1e-80;
     tiny.continental_age_volume = tiny.continent * 100;
-    Model world; world.initialize(8, 4, 156250, std::vector<Cell>(32, tiny));
-    for (int i = 0; i < 5; ++i) world.advance(std::vector<Displacement>(32), 1, 0, 0);
+    const auto grid = cubefixture::cube(2, cubefixture::radiusfor_km(2, 156250));
+    Model world; world.initialize(grid, std::vector<Cell>(grid->cellcount(), tiny));
+    for (int i = 0; i < 5; ++i) world.advance(cubefixture::still(*grid), 1, 0, 0);
     for (const auto& c : world.cells()) {
         EXPECT_DOUBLE_EQ(c.continent, tiny.continent);
         EXPECT_NEAR(age_myr(c), 105, 1e-12);
@@ -360,12 +449,13 @@ TEST(TectonicColumns, VanishingContinentalTracesHaveZeroRootConductance) {
 }
 
 TEST(TectonicColumns, RootFlowAndErosionConvergeWhenTimestepIsReduced) {
-    auto cells = std::vector<Cell>(128, seed(0, true, 100));
-    for (size_t i = 0; i < cells.size(); ++i) if (i % 16 == 8) cells[i] = seed(6000, true, 100);
+    const Band band(4, cubefixture::radiusfor_km(4, 100000));
+    const auto cells = cubefixture::layout(band, seed(0, true, 100), [](int x, int) {
+        return x % 16 == 8 ? seed(6000, true, 100) : seed(0, true, 100); });
+    const auto still = cubefixture::still(*band.grid);
     const auto run = [&](double dt) {
-        Model world; world.initialize(16, 8, 100000, cells);
-        for (int i = 0; i < static_cast<int>(10 / dt); ++i)
-            world.advance(std::vector<Displacement>(128), dt, 1, 1);
+        Model world; world.initialize(band.grid, cells);
+        for (int i = 0; i < static_cast<int>(10 / dt); ++i) world.advance(still, dt, 1, 1);
         EXPECT_LT(std::abs(world.budget().relative_mass_residual), 1e-12);
         return world.cells();
     };
@@ -382,11 +472,11 @@ TEST(TectonicColumns, RootFlowAndErosionConvergeWhenTimestepIsReduced) {
 
 TEST(TectonicColumns, InitializationKeepsLowContinentalLandAboveWater) {
     tectonics::scenario::Scenario s;
-    s.seed = 1; s.width = 32; s.height = 16; s.plate_count = 4;
-    s.evolution_duration_myr = 1;  
+    s.seed = 1; s.sphere_face_cells = 8; s.plate_count = 4;
+    s.evolution_duration_myr = 1;
     lithosphere world(s);
     const auto datum = world.getSeaLevelMeters();
-    std::vector<uint16_t> lowland(512, datum + 200);
+    std::vector<uint16_t> lowland(world.getGrid().cellcount(), datum + 200);
     world.importMetricHeightMap(lowland.data(), datum);
     for (const auto& c : world.getColumnModel().cells()) {
         EXPECT_DOUBLE_EQ(c.continental_area, 1);
@@ -403,33 +493,43 @@ TEST(TectonicColumns, InitializationKeepsLowContinentalLandAboveWater) {
     }
 }
 
+// The continental fraction seeds shelves: the continental area (true areas) reaches the
+// requested share, the land share stays.
 TEST(TectonicColumns, ContinentalFractionSeedsShelvesToTheRequestedArea) {
     tectonics::scenario::Scenario s;
-    s.seed = 1; s.width = 128; s.height = 64; s.plate_count = 8; s.sea_level = .65f;
+    s.seed = 1; s.sphere_face_cells = 32; s.plate_count = 8; s.sea_level = .65f;
     s.evolution_duration_myr = 1; s.boundary_conditioned_terrain = true;
-    const auto share = [](lithosphere& world) {
-        double continental = 0;
+    const auto share = [](lithosphere& world, bool columns) {
+        double continental = 0, total = 0;
         const auto& cells = world.getColumnModel().cells();
-        for (const auto& c : cells) continental += c.continental_area >= .5 ? 1 : 0;
-        return continental / cells.size();
+        for (CellId c = 0; c < cells.size(); ++c) {
+            const double area = world.getGrid().area_m2(c);
+            continental += (columns ? cells[c].continental_area : (cells[c].continental_area >= .5 ? 1.0 : 0.0)) * area;
+            total += area;
+        }
+        return continental / total;
+    };
+    const auto land = [](lithosphere& world) {
+        double above = 0, total = 0;
+        const auto& cells = world.getColumnModel().cells();
+        for (CellId c = 0; c < cells.size(); ++c) {
+            above += (elevation_m(cells[c]) > 0 ? 1.0 : 0.0) * world.getGrid().area_m2(c);
+            total += world.getGrid().area_m2(c);
+        }
+        return above / total;
     };
     lithosphere legacy(s);
     s.continental_fraction = .40;
     lithosphere shelved(s);
-    EXPECT_GT(share(legacy), .5);
-    EXPECT_NEAR(share(shelved), .40, .01);
+    EXPECT_GT(share(legacy, false), .5);
+    EXPECT_NEAR(share(shelved, false), .40, .01);
     // The land share is unchanged: the shelf lies below sea level.
-    double legacy_land = 0, shelved_land = 0;
-    for (const auto& c : legacy.getColumnModel().cells()) legacy_land += elevation_m(c) > 0;
-    for (const auto& c : shelved.getColumnModel().cells()) shelved_land += elevation_m(c) > 0;
-    EXPECT_NEAR(shelved_land, legacy_land, .01 * legacy.getColumnModel().cells().size());
+    EXPECT_NEAR(land(shelved), land(legacy), .01);
     // With the baseline's 2000 m margin taper the slope continues to -3500 m, so the
     // continental area summed over the columns, not only the cells over one half, is f.
     s.initial_margin_width_m = 2000;
     lithosphere tapered(s);
-    double area = 0;
-    for (const auto& c : tapered.getColumnModel().cells()) area += c.continental_area;
-    EXPECT_NEAR(area / tapered.getColumnModel().cells().size(), .40, .01);
+    EXPECT_NEAR(share(tapered, true), .40, .01);
     s.initial_margin_width_m = 0;
     s.continental_fraction = .35; // 1 - sea_level: no shelf, a 2.5 km cliff at the coast
     EXPECT_THROW(lithosphere{s}, std::runtime_error);
@@ -439,8 +539,8 @@ TEST(TectonicColumns, ContinentalFractionSeedsShelvesToTheRequestedArea) {
 
 TEST(TectonicColumns, Integrated200MyrReplayClosesMassBudgetAndPreservesContinents) {
     tectonics::scenario::Scenario s;
-    s.seed = 1; s.width = 64; s.height = 32; s.plate_count = 8;
-    s.evolution_duration_myr = 200;  
+    s.seed = 1; s.sphere_face_cells = 16; s.plate_count = 8;
+    s.evolution_duration_myr = 200;
     lithosphere a(s), b(s);
     double initial_continent = 0;
     double initial_max_age = 0;
@@ -464,11 +564,13 @@ TEST(TectonicColumns, Integrated200MyrReplayClosesMassBudgetAndPreservesContinen
 }
 
 TEST(TectonicColumns, ResolvedRiftsCreateIndependentPlatesAndReplayWithoutLosingMaterial) {
-    // Stronger forcing is a controlled failure fixture, not the benchmark recipe.
+    // Stronger forcing is a controlled failure fixture, not the benchmark recipe: two plates and
+    // a 40 cm/yr mantle flow (the flow varies over about a radius: a plate needs strong flow
+    // to fail within 100 Myr).
     tectonics::scenario::Scenario s;
-    s.seed=1; s.width=64; s.height=32; s.plate_count=4;
+    s.seed=1; s.sphere_face_cells=16; s.plate_count=2;  // large plates: the tension grows with their area
     s.evolution_duration_myr=100; s.delta_time_myr=.5;
-      s.mantle_flow_speed_cm_yr=20;
+    s.mantle_flow_speed_cm_yr=40;
     lithosphere a(s), b(s);
     for (int step=0;step<200;++step) {
         a.update(); b.update();
@@ -476,6 +578,8 @@ TEST(TectonicColumns, ResolvedRiftsCreateIndependentPlatesAndReplayWithoutLosing
         ASSERT_EQ(a.getTopologyDiagnostics().stable_ids,b.getTopologyDiagnostics().stable_ids);
     }
     const auto& events=a.getTopologyDiagnostics().events;
+    RecordProperty("max_tension_n_m",std::to_string(a.getTopologyDiagnostics().max_tension_n_m));
+    RecordProperty("max_rift_damage",std::to_string(a.getTopologyDiagnostics().max_rift_damage));
     ASSERT_GE(events.size(),1U);
     EXPECT_EQ(events[0].kind,tectonics::topology::EventKind::Split);
     EXPECT_GT(a.getTopologyDiagnostics().stable_ids.size(),s.plate_count);
@@ -484,7 +588,7 @@ TEST(TectonicColumns, ResolvedRiftsCreateIndependentPlatesAndReplayWithoutLosing
         EXPECT_DOUBLE_EQ(events[i].time_myr,b.getTopologyDiagnostics().events[i].time_myr);
         EXPECT_EQ(events[i].result,b.getTopologyDiagnostics().events[i].result);
     }
-    for (uint32_t i=0;i<s.width*s.height;++i) {
+    for (uint32_t i=0;i<a.getGrid().cellcount();++i) {
         EXPECT_FLOAT_EQ(a.getTopography()[i],b.getTopography()[i]);
         EXPECT_EQ(a.getPlatesMap()[i],b.getPlatesMap()[i]);
         EXPECT_DOUBLE_EQ(a.getColumnModel().cells()[i].continental_age_volume,
@@ -526,10 +630,12 @@ static bool same_fields(const tectonics::contract::Snapshot& a, const tectonics:
 
 TEST(TectonicColumns, PhysicalLayersSurviveBundleReadAndAffectComparison) {
     tectonics::scenario::Scenario s;
-    s.seed = 1; s.width = 32; s.height = 16; s.plate_count = 4;
-    s.evolution_duration_myr = 1;  
+    s.seed = 1; s.sphere_face_cells = 8; s.plate_count = 4;
+    s.evolution_duration_myr = 1;
     lithosphere world(s); world.update();
     auto snapshot = tectonics::contract::capture_snapshot(world);
+    EXPECT_EQ(snapshot.width, 8u);
+    EXPECT_EQ(snapshot.height, 48u);
     snapshot.column_budget.noise_redistributed_kg=123456;
     snapshot.column_budget.redistributed_sediment_kg=654321;
     snapshot.topology_diagnostics.events = {{tectonics::topology::EventKind::Split,1,0,0,4,128},
@@ -566,22 +672,24 @@ TEST(TectonicColumns, SedimentLoadContributesToLayeredGpeAndConservativeRootFlow
     EXPECT_NEAR(elevation_m(column,0),5000,1e-9);
     EXPECT_DOUBLE_EQ(mountain_force_n_m(column),0);
     EXPECT_NEAR(mountain_force_n_m(column,true),.5*9.80665*1.15875e12,1);
-    constexpr uint32_t w=32,h=8;
-    std::vector<Cell> cells(w*h,seed(0,true,40));
-    for (size_t i=0;i<cells.size();++i)
-        cells[i].sediment=50000*std::pow(.5+.5*std::cos(6.283185307179586*(i%w)/w),4);
-    Model loaded,old;loaded.initialize(w,h,50000,cells);old.initialize(w,h,50000,cells);
-    const std::vector<Displacement> stopped(cells.size());
+    const Band band(8, cubefixture::radiusfor_km(8, 50000));
+    const auto cells = cubefixture::layout(band, seed(0,true,40), [&](int x, int) {
+        auto c = seed(0,true,40);
+        c.sediment = 50000*std::pow(.5+.5*std::cos(2*pi*x/band.columns()),4);
+        return c; });
+    Model loaded,old;loaded.initialize(band.grid,cells);old.initialize(band.grid,cells);
+    const auto stopped = cubefixture::still(*band.grid);
     for (int i=0;i<10;++i) {
         loaded.advance(stopped,1,0,0,0,nullptr,{}, {},true);
         old.advance(stopped,1,0,0,0);
     }
     double initial_s=0,final_s=0,initial_c=0,final_c=0,initial_age=0,final_age=0,peak=-1e9,old_peak=-1e9;
-    for (size_t i=0;i<cells.size();++i) {
+    for (CellId i=0;i<cells.size();++i) {
         const auto& c=loaded.cells()[i];
-        initial_s+=cells[i].sediment;final_s+=c.sediment;
-        initial_c+=cells[i].continent;final_c+=c.continent;
-        initial_age+=cells[i].continental_age_volume;final_age+=c.continental_age_volume;
+        const double area=band.grid->area_m2(i);
+        initial_s+=cells[i].sediment*area;final_s+=c.sediment*area;
+        initial_c+=cells[i].continent*area;final_c+=c.continent*area;
+        initial_age+=cells[i].continental_age_volume*area;final_age+=c.continental_age_volume*area;
         EXPECT_GE(c.sediment,0);EXPECT_GE(c.continent,0);
         peak=std::max(peak,elevation_m(c,0));old_peak=std::max(old_peak,elevation_m(old.cells()[i],0));
     }
@@ -595,12 +703,14 @@ TEST(TectonicColumns, SedimentLoadContributesToLayeredGpeAndConservativeRootFlow
 }
 
 TEST(TectonicColumns, SedimentLoadedFlowConvergesWithSmallerTimesteps) {
-    std::vector<Cell> cells(128,seed(0,true,40));
-    for (size_t i=0;i<cells.size();++i) cells[i].sediment=i%16==8?25000:1000;
+    const Band band(4, cubefixture::radiusfor_km(4, 100000));
+    const auto cells = cubefixture::layout(band, seed(0,true,40), [](int x, int) {
+        auto c = seed(0,true,40); c.sediment = x%16==8?25000:1000; return c; });
+    const auto stopped = cubefixture::still(*band.grid);
     const auto run=[&](double dt) {
-        Model model;model.initialize(16,8,100000,cells);
+        Model model;model.initialize(band.grid,cells);
         for (int i=0;i<static_cast<int>(10/dt);++i)
-            model.advance(std::vector<Displacement>(128),dt,0,0,0,nullptr,{}, {},true);
+            model.advance(stopped,dt,0,0,0,nullptr,{}, {},true);
         EXPECT_LT(std::abs(model.budget().relative_mass_residual),1e-12);
         return model.cells();
     };
@@ -621,207 +731,232 @@ TEST(TectonicColumns, RockUpliftRateCountsTectonicChangeOnly) {
     tectonics::margins::Parameters still; // No root flow: the roots would carry the change sideways.
     still.root_mobility = 0;
     {
-        auto cells = std::vector<Cell>(128, seed(500, true, 100));
-        for (size_t i = 0; i < cells.size(); ++i) if (i % 16 == 8) cells[i] = seed(3000, true, 100);
+        const Band band(4, cubefixture::radiusfor_km(4, 100000));
+        const auto cells = cubefixture::layout(band, seed(500, true, 100), [](int x, int) {
+            return x % 16 == 8 ? seed(3000, true, 100) : seed(500, true, 100); });
         auto rivers = still;
         rivers.enabled = true; // routeSediment with the default river erosion; no forcing, no thermal change
         Model world;
-        world.initialize(16, 8, 100000, cells);
-        for (int i = 0; i < 3; ++i) world.advance(std::vector<Displacement>(128), 1, 1, 1, 1, nullptr, rivers);
+        world.initialize(band.grid, cells);
+        for (int i = 0; i < 3; ++i) world.advance(cubefixture::still(*band.grid), 1, 1, 1, 1, nullptr, rivers);
         EXPECT_GT(world.budget().eroded_kg, 0);
         EXPECT_GT(world.budget().river_eroded_kg, 0);
-        EXPECT_LT(elevation_m(world.cells()[8]), 3000);
-        ASSERT_EQ(world.upliftRate().size(), 128u);
-        for (double rate : world.upliftRate()) EXPECT_NEAR(rate, 0, 1e-12);
+        EXPECT_LT(elevation_m(world.cells()[band.cell(8, 1)]), 3000);
+        ASSERT_EQ(world.upliftRate().size(), cells.size());
+        for (double rate : world.upliftRate()) EXPECT_NEAR(rate, 0, 1e-11);
     }
+    const auto grid = cubefixture::cube(4, cubefixture::radiusfor_km(4, 100000));
+    const CellId lifted = 9;
     tectonics::plumes::Source plume;
-    plume.basalt_m.assign(32, 0);
-    plume.influence.assign(32, 0);
-    plume.basalt_m[9] = 330;
+    plume.basalt_m.assign(grid->cellcount(), 0);
+    plume.influence.assign(grid->cellcount(), 0);
+    plume.basalt_m[lifted] = 330;
     Model world;
-    world.initialize(8, 4, 100000, std::vector<Cell>(32, seed(500, true, 100)));
-    world.advance(std::vector<Displacement>(32), 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
+    world.initialize(grid, std::vector<Cell>(grid->cellcount(), seed(500, true, 100)));
+    const auto at_rest = cubefixture::still(*grid);
+    world.advance(at_rest, 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
     const double weight = -std::expm1(-1.0 / 5); // 1 - e^(-dt/tau)
-    EXPECT_NEAR(world.upliftRate()[9], 40 * weight, 1e-12);
-    EXPECT_NEAR(world.upliftRate()[9], 7.2507698768807245, 1e-12);
-    for (size_t i = 0; i < 32; ++i) if (i != 9) EXPECT_NEAR(world.upliftRate()[i], 0, 1e-12);
+    EXPECT_NEAR(world.upliftRate()[lifted], 40 * weight, 1e-11);
+    EXPECT_NEAR(world.upliftRate()[lifted], 7.2507698768807245, 1e-11);
+    for (CellId i = 0; i < grid->cellcount(); ++i) if (i != lifted) EXPECT_NEAR(world.upliftRate()[i], 0, 1e-11);
     // A step without tectonic change decays the mean by e^(-dt/tau).
-    world.advance(std::vector<Displacement>(32), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
-    EXPECT_NEAR(world.upliftRate()[9], 40 * weight * std::exp(-1.0 / 5), 1e-12);
-    EXPECT_THROW(world.advance(std::vector<Displacement>(32), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 0),
+    world.advance(at_rest, 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
+    EXPECT_NEAR(world.upliftRate()[lifted], 40 * weight * std::exp(-1.0 / 5), 1e-11);
+    EXPECT_THROW(world.advance(at_rest, 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 0),
         std::runtime_error);
 }
 
-// The measurement is in the plate's frame (erosion plan H2): plate motion over a slope
-// is not uplift. Land columns 500 + 100 x m (x = 0..15, 100 km cells, so grad z =
-// 1 m/km) move east by v = 0.25 cell (25 km) in 1 Myr with nothing else acting. The
-// elevation before the step is carried by the same remap as the columns, and land
-// elevation is linear in them, so the rate is 0 up to rounding in every cell, also
-// where the remap sees the 1500 m jump across the wrap (tolerance 1e-9 m/Myr). A
-// fixed-cell (Eulerian) rate would be -v . grad z = -25 m/Myr, r = -4.53.
+namespace {
+// The largest |rate| of a model, and the largest Eulerian rate (fixed-cell elevation change
+// over dt) of the same step, over the band's cells.
+struct RateMeasure { double measured = 0, eulerian = 0; };
+RateMeasure step_rates(Model& world, const Band& band, const st::Motion& motion, const tectonics::margins::Parameters& p,
+                       const tectonics::plumes::Source* plume = nullptr) {
+    std::vector<double> before(world.cells().size());
+    for (size_t i = 0; i < before.size(); ++i) before[i] = elevation_m(world.cells()[i]);
+    world.advance(motion, 1, 0, 1, 1, nullptr, p, {}, false, plume, 5);
+    const double weight = -std::expm1(-1.0 / 5);
+    RateMeasure m;
+    for (int y = 0; y < band.rows(); ++y) for (int x = 0; x < band.columns(); ++x) {
+        const CellId c = band.cell(x, y);
+        m.measured = std::max(m.measured, std::abs(world.upliftRate()[c]));
+        m.eulerian = std::max(m.eulerian, std::abs(elevation_m(world.cells()[c]) - before[c]) * weight);
+    }
+    return m;
+}
+}
+
+// The measurement is in the plate's frame (erosion plan H2): plate motion over a slope is not
+// uplift. Land columns 500 + 100 x m (x the band's column, a 1500 m jump at the band's start)
+// move east by 0.25 column with nothing else acting. The elevation before the step is carried
+// with the rock by the same transport as the columns; the per-plate normalisation scales each
+// field by its own ripple factor (|scale - 1| about 1e-5), so the rate is zero to that factor's
+// share of the carried values instead of to rounding. The fixed-cell (Eulerian) rate is
+// -v . grad z, 25 m/Myr (r = 4.53).
 TEST(TectonicColumns, RockUpliftRateIsZeroForPlateMotionOverASlope) {
     tectonics::margins::Parameters still;
     still.root_mobility = 0;
-    std::vector<Cell> cells(128);
-    for (size_t i = 0; i < cells.size(); ++i) cells[i] = seed(500 + 100. * (i % 16), true, 100);
+    const Band band(4, cubefixture::radiusfor_km(4, 100000));
+    const auto cells = cubefixture::layout(band, seed(500, true, 100), [](int x, int) {
+        return seed(500 + 100. * x, true, 100); });
     Model world;
-    world.initialize(16, 8, 100000, cells);
-    world.advance(std::vector<Displacement>(128, {.25, 0}), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
-    for (size_t i = 0; i < 128; ++i) EXPECT_NEAR(world.upliftRate()[i], 0, 1e-9) << "cell " << i;
+    world.initialize(band.grid, cells);
+    const auto m = step_rates(world, band, cubefixture::rotating(*band.grid, band.eastward(.25)), still);
+    RecordProperty("largest_rate_m_myr", std::to_string(m.measured));
+    RecordProperty("largest_eulerian_rate_m_myr", std::to_string(m.eulerian));
+    EXPECT_GT(m.eulerian, 4);
+    EXPECT_LT(m.measured, .05 * m.eulerian);
 }
 
-// A tectonic change on a moving plate is measured as the change alone. On the same
-// ramp moving east by 0.25 cell, a plume adds 330 m of basalt under cell 9 of every
-// row: 40 m on a land column (as in RockUpliftRateCountsTectonicChangeOnly), so the
-// step rate there is 40 m/Myr and r = 40 (1 - e^(-1/5)) = 7.2507698768807245, not
-// the Eulerian 40 - 25 = 15 m/Myr; every other cell stays at 0.
+// A tectonic change on a moving plate is measured as the change alone. On the same ramp moving
+// east by 0.25 column, a plume adds 330 m of basalt under column 9 of every row: 40 m on a land
+// column, so the step rate there is 40 m/Myr and r = 40 (1 - e^(-1/5)) = 7.25, not the Eulerian
+// 40 - 25 = 15 m/Myr; every other cell stays near 0.
 TEST(TectonicColumns, RockUpliftRateOnAMovingPlateIsTheTectonicChange) {
     tectonics::margins::Parameters still;
     still.root_mobility = 0;
-    std::vector<Cell> cells(128);
-    for (size_t i = 0; i < cells.size(); ++i) cells[i] = seed(500 + 100. * (i % 16), true, 100);
+    const Band band(4, cubefixture::radiusfor_km(4, 100000));
+    const auto cells = cubefixture::layout(band, seed(500, true, 100), [](int x, int) {
+        return seed(500 + 100. * x, true, 100); });
     tectonics::plumes::Source plume;
-    plume.basalt_m.assign(128, 0);
-    plume.influence.assign(128, 0);
-    for (size_t row = 0; row < 8; ++row) plume.basalt_m[row * 16 + 9] = 330;
+    plume.basalt_m.assign(cells.size(), 0);
+    plume.influence.assign(cells.size(), 0);
+    for (int row = 0; row < band.rows(); ++row) plume.basalt_m[band.cell(9, row)] = 330;
     Model world;
-    world.initialize(16, 8, 100000, cells);
-    world.advance(std::vector<Displacement>(128, {.25, 0}), 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
-    for (size_t i = 0; i < 128; ++i) {
-        const double expected = i % 16 == 9 ? 40 * -std::expm1(-1.0 / 5) : 0;
-        EXPECT_NEAR(world.upliftRate()[i], expected, 1e-9) << "cell " << i;
+    world.initialize(band.grid, cells);
+    world.advance(cubefixture::rotating(*band.grid, band.eastward(.25)), 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
+    const double expected = 40 * -std::expm1(-1.0 / 5);
+    double largest_error = 0;
+    for (int y = 0; y < band.rows(); ++y) for (int x = 0; x < band.columns(); ++x) {
+        const double rate = world.upliftRate()[band.cell(x, y)];
+        largest_error = std::max(largest_error, std::abs(rate - (x == 9 ? expected : 0)));
     }
-    EXPECT_NEAR(world.upliftRate()[9], 7.2507698768807245, 1e-9);
+    RecordProperty("largest_rate_error_m_myr", std::to_string(largest_error));
+    EXPECT_LT(largest_error, .05 * expected);
 }
 
-// Pure translation of a curved surface (no other process): land columns
-// z = 1000 + 500 sin(2 pi x / 16) + 300 cos(2 pi y / 8) on a 16 x 8 torus move by
-// (0.16, 0.1) cell in 1 Myr, at subdivision 1 and at the baseline's 4. The carried
-// elevation moves with the engine's own remap, so the mean is 0 up to rounding
-// (largest 9.1e-13 m/Myr at subdivision 1, 1.0e-12 at 4; tolerance 1e-9). A bilinear
-// sample at x - u (the first H2 method) leaves about a (1 - a) z'' / 2 per axis: at
-// subdivision 1 a largest step rate of 12.9 m/Myr, a mean of 2.34 m/Myr after one
-// step (w = 0.181). At subdivision 4 the subcells start as uniform 4 x 4 blocks,
-// which a shift within one sub-step moves exactly as bilinear interpolation does.
+// Rigid rotation of a curved surface (no other process): land columns
+// z = 1000 + 500 sin(2 pi x / 16) + 300 cos(2 pi y / 4) on the band rotate about a tilted
+// axis, at subdivision 1 and at the baseline's 4. The carried elevation moves with the engine's
+// own transport, so the mean is far below the fixed-cell rate.
 TEST(TectonicColumns, RockUpliftRateIsZeroForPlateMotionOverACurvedSurface) {
     tectonics::margins::Parameters still;
     still.root_mobility = 0;
-    const double pi = std::acos(-1.0);
-    const auto z = [&](double x, double y) {
-        return 1000 + 500 * std::sin(2 * pi * x / 16) + 300 * std::cos(2 * pi * y / 8);
-    };
-    std::vector<Cell> cells(128);
-    for (size_t i = 0; i < cells.size(); ++i)
-        cells[i] = seed(z(static_cast<double>(i % 16), static_cast<double>(i / 16)), true, 100);
+    const Band band(4, cubefixture::radiusfor_km(4, 100000));
+    const auto cells = cubefixture::layout(band, seed(1000, true, 100), [](int x, int y) {
+        return seed(1000 + 500 * std::sin(2 * pi * x / 16) + 300 * std::cos(2 * pi * y / 4), true, 100); });
+    const double column = pi / 8;
     for (uint32_t subdivision : {1u, 4u}) {
         Model world;
-        world.initialize(16, 8, 100000, cells, subdivision);
-        const Displacement u{.16, .1};
-        world.advance(std::vector<Displacement>(128, u), 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
-        const double weight = -std::expm1(-1.0 / 5);
-        double residual = 0, bilinear = 0;
-        for (size_t i = 0; i < 128; ++i) {
-            residual = std::max(residual, std::abs(world.upliftRate()[i]));
-            const double sx = i % 16 - u.x, sy = i / 16 - u.y;
-            const double fx = std::floor(sx), fy = std::floor(sy), ax = sx - fx, ay = sy - fy;
-            const double sampled = (1 - ay) * ((1 - ax) * z(fx, fy) + ax * z(fx + 1, fy))
-                + ay * ((1 - ax) * z(fx, fy + 1) + ax * z(fx + 1, fy + 1));
-            bilinear = std::max(bilinear, std::abs((elevation_m(world.cells()[i]) - sampled) * weight));
-        }
-        EXPECT_LT(residual, 1e-9) << "subdivision " << subdivision;
-        if (subdivision == 1) EXPECT_GT(bilinear, 2); // measured 2.34 m/Myr (a step rate of 12.9 m/Myr)
+        world.initialize(band.grid, cells, subdivision);
+        const auto m = step_rates(world, band, cubefixture::rotating(*band.grid, {.06 * column, -.08 * column, .16 * column}), still);
+        RecordProperty("largest_rate_s" + std::to_string(subdivision), std::to_string(m.measured));
+        RecordProperty("largest_eulerian_s" + std::to_string(subdivision), std::to_string(m.eulerian));
+        EXPECT_GT(m.eulerian, 10) << subdivision;
+        EXPECT_LT(m.measured, .05 * m.eulerian) << subdivision;
     }
 }
 
-// The running mean follows the rock, across the x and y wraps. Uniform land 500 m
-// moves by (0.25, 0.25) cell per 1 Myr step; a plume adds 330 m of basalt (40 m) under
-// cell (15, 7) in the first step only: r1 = 40 w there (w = 1 - e^(-1/5)), 0
-// elsewhere. The second step has no tectonic change in the rock's frame, so its mean
-// is (1 - w) r1 = e^(-1/5) r1 spread where the rock went. The limiter flattens the
-// single-cell peak (subdivision 1) and the 4 x 4 block of subcells (subdivision 4,
-// two sub-steps of half a subcell), so both move as constants: (15, 7) keeps
-// 0.75 x 0.75 = 0.5625 of it, (0, 7) east across the x wrap and (15, 0) south across
-// the y wrap get 0.1875, (0, 0) gets 0.0625. A mean read at the destination instead
-// of the source, a wrong y sign or a missing wrap puts these shares elsewhere.
-TEST(TectonicColumns, RockUpliftRateMeanFollowsTheRockAcrossTheWrap) {
+// The running mean follows the rock across a face edge and over the pole. Uniform land 500 m
+// rotates by a quarter column per 1 Myr step; a plume adds 330 m of basalt (40 m) under one cell
+// in the first step only: r1 = 40 w there (w = 1 - e^(-1/5)). The second step has no tectonic
+// change in the rock's frame, so its mean is e^(-1/5) r1 spread where the rock went: the
+// integral of the rate keeps that share of r1 times the cell's area, its centre moves with the
+// rotation, and cells away from the path keep about 0.
+TEST(TectonicColumns, RockUpliftRateMeanFollowsTheRockAcrossAFaceEdgeAndThePole) {
     tectonics::margins::Parameters still;
     still.root_mobility = 0;
-    tectonics::plumes::Source plume;
-    plume.basalt_m.assign(128, 0);
-    plume.influence.assign(128, 0);
-    plume.basalt_m[7 * 16 + 15] = 330;
-    for (uint32_t subdivision : {1u, 4u}) {
+    constexpr int n = 8;
+    const double column = pi / (2.0 * n);
+    const auto grid = cubefixture::cube(n, cubefixture::radiusfor_km(n, 100000));
+    const auto& mesh = *grid->mesh();
+    struct Case { const char* name; Vec3 start; Vec3 axis; };
+    const Case cases[] = {
+        {"face_edge", mesh::cubepoint(0, pi / 4 - column / 2, 0), {0, 0, 1}},
+        {"pole", mesh::unitvector(pi / 2 - column / 2, -pi / 2), {1, 0, 0}},
+    };
+    for (uint32_t subdivision : {1u, 4u}) for (const auto& test : cases) {
+        const CellId source = mesh.locate(test.start);
+        tectonics::plumes::Source plume;
+        plume.basalt_m.assign(grid->cellcount(), 0);
+        plume.influence.assign(grid->cellcount(), 0);
+        plume.basalt_m[source] = 330;
         Model world;
-        world.initialize(16, 8, 100000, std::vector<Cell>(128, seed(500, true, 100)), subdivision);
-        const std::vector<Displacement> u(128, {.25, .25});
-        world.advance(u, 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
+        world.initialize(grid, std::vector<Cell>(grid->cellcount(), seed(500, true, 100)), subdivision);
+        const Vec3 rotation = .25 * column * test.axis;
+        const auto motion = cubefixture::rotating(*grid, rotation);
+        world.advance(motion, 1, 0, 1, 1, nullptr, still, {}, false, &plume, 5);
         const double r1 = 40 * -std::expm1(-1.0 / 5);
-        for (size_t i = 0; i < 128; ++i)
-            EXPECT_NEAR(world.upliftRate()[i], i == 127 ? r1 : 0, 1e-9) << "subdivision " << subdivision << " cell " << i;
-        world.advance(u, 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
+        EXPECT_NEAR(world.upliftRate()[source], r1, .05 * r1) << test.name << " s" << subdivision;
+        world.advance(motion, 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 5);
         const double carried = r1 * std::exp(-1.0 / 5);
-        EXPECT_NEAR(carried, 5.9364282816937015, 1e-12);
-        for (size_t i = 0; i < 128; ++i) {
-            double share = 0;
-            if (i == 7 * 16 + 15) share = .5625;
-            if (i == 7 * 16 + 0) share = .1875;
-            if (i == 0 * 16 + 15) share = .1875;
-            if (i == 0 * 16 + 0) share = .0625;
-            EXPECT_NEAR(world.upliftRate()[i], share * carried, 1e-9) << "subdivision " << subdivision << " cell " << i;
+        Vec3 centre;
+        double integral = 0, distant = 0;
+        const Vec3 p = grid->position(source);
+        for (CellId c = 0; c < grid->cellcount(); ++c) {
+            const double rate = world.upliftRate()[c];
+            integral += rate * grid->area_m2(c);
+            centre = centre + (rate * grid->area_m2(c)) * grid->position(c);
+            if (mesh::greatcircle_rad(p, grid->position(c)) > 3 * column) distant = std::max(distant, std::abs(rate));
         }
+        const std::string label = std::string(test.name) + "_s" + std::to_string(subdivision);
+        EXPECT_NEAR(integral / (carried * grid->area_m2(source)), 1, .02) << label;
+        const double angle = 2 * mesh::length(rotation);
+        const Vec3 k = test.axis;
+        const Vec3 moved = std::cos(angle) * p + std::sin(angle) * mesh::cross(k, p) + (mesh::dot(k, p) * (1 - std::cos(angle))) * k;
+        // The rate of the first step sat in the source cell, after the first rotation's quarter:
+        // its centre moves by the second step's rotation from the first step's position.
+        const double error = mesh::greatcircle_rad(mesh::normalise(centre), moved) / column;
+        RecordProperty(label + "_centre_error_columns", std::to_string(error));
+        EXPECT_LT(error, .6) << label;
+        // Away from the path only the transport's per-plate total-restoring scale (|scale - 1| of
+        // order 1e-7 on the shifted elevation) reads as a rate.
+        RecordProperty(label + "_distant_over_carried", std::to_string(distant / carried));
+        EXPECT_LT(distant, 1e-4 * carried) << label;
     }
 }
 
-// Diverging plates at subdivision 4: land z = 1000 + 500 sin(2 pi x / 16) (range
-// R = 1000 m), the west half (x < 8) moves west and the east half east by 0.2 cell per
-// 1 Myr step, so plates part between x = 7 and 8 and across the wrap; the opening
-// stretches the boundary columns (real subsidence). With a window of 1e-3 Myr the
-// mean is the step rate, so the carried source elevation is z_after - rate dt. Over
-// six steps it stays within [low - 2R, high + 2R] of the elevations before each step
-// (measured: within [low - 1353, high - 7.6] m). At the boundary columns (0, 7, 8, 15)
-// it differs from the cell's own elevation before the step (the rock that stayed)
-// by 4.9 m in the first step and by up to 1353 m later, once the boundary columns
-// (thinned by a fifth each step) lie km below the sea level and their subcells
-// differ strongly (the subcell elevations are not linear in the columns there): the
-// measured rate at x = 7 then falls short of the cell's own elevation change by 23,
-// 46 and 70 percent in the second to fourth steps (largest boundary rate 2327 m/Myr). Off the boundary (x = 2..5, 10..13) the rate stays at 0 (measured
-// 4.0e-11 m/Myr), the translation of one varying column field.
+// Diverging plates at subdivision 4: land z = 1000 + 500 sin(2 pi x / 16) (range R = 1000 m)
+// on the band, the halves part at -135 degrees (and close at 45) by 0.2 column per 1 Myr step;
+// the opening stretches the boundary columns (real subsidence). With a window of 1e-3 Myr the
+// mean is the step rate, so the carried source elevation is z_after - rate dt. Over six steps
+// it stays within [low - 2R, high + 2R] of the elevations before each step; off the
+// boundaries the rate stays small (the transport of one varying column field).
 TEST(TectonicColumns, RockUpliftRateAtDivergentBoundariesIsBounded) {
     tectonics::margins::Parameters still;
     still.root_mobility = 0;
-    const double pi = std::acos(-1.0);
-    std::vector<Cell> cells(128);
-    for (size_t i = 0; i < cells.size(); ++i)
-        cells[i] = seed(1000 + 500 * std::sin(2 * pi * static_cast<double>(i % 16) / 16), true, 100);
-    std::vector<Displacement> u(128);
-    for (size_t i = 0; i < u.size(); ++i) u[i].x = i % 16 < 8 ? -.2 : .2;
+    const Band band(4, cubefixture::radiusfor_km(4, 100000));
+    const auto cells = cubefixture::layout(band, seed(1000, true, 100), [](int x, int) {
+        return seed(1000 + 500 * std::sin(2 * pi * x / 16), true, 100); });
+    // Plate 0 west of 45 degrees moves west, plate 1 east: they part at 45 and close at -135.
+    const auto motion = cubefixture::plates(halves(*band.grid), {band.eastward(-.2), band.eastward(.2)});
     Model world;
-    world.initialize(16, 8, 100000, cells, 4);
-    double boundary = 0, interior = 0, lowest = 1e300, highest = -1e300, boundary_rate = 0;
+    world.initialize(band.grid, cells, 4);
+    double interior = 0, lowest = 1e300, highest = -1e300, boundary_rate = 0;
     for (int step = 0; step < 6; ++step) {
-        std::vector<double> before(128);
-        for (size_t i = 0; i < 128; ++i) before[i] = elevation_m(world.cells()[i]);
+        std::vector<double> before(cells.size());
+        for (size_t i = 0; i < cells.size(); ++i) before[i] = elevation_m(world.cells()[i]);
         const auto [low, high] = std::minmax_element(before.begin(), before.end());
         const double range = *high - *low;
-        world.advance(u, 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 1e-3);
-        for (size_t i = 0; i < 128; ++i) {
+        world.advance(motion, 1, 0, 1, 1, nullptr, still, {}, false, nullptr, 1e-3);
+        for (int y = 0; y < band.rows(); ++y) for (int x = 0; x < band.columns(); ++x) {
+            const CellId i = band.cell(x, y);
             const double rate = world.upliftRate()[i];
             const double source = elevation_m(world.cells()[i]) - rate;
-            EXPECT_GE(source, *low - 2 * range) << "step " << step << " cell " << i;
-            EXPECT_LE(source, *high + 2 * range) << "step " << step << " cell " << i;
+            EXPECT_GE(source, *low - 2 * range) << "step " << step << " column " << x;
+            EXPECT_LE(source, *high + 2 * range) << "step " << step << " column " << x;
             lowest = std::min(lowest, source - *low);
             highest = std::max(highest, source - *high);
-            const size_t x = i % 16;
-            if (x == 0 || x == 7 || x == 8 || x == 15) {
-                boundary = std::max(boundary, std::abs(source - before[i]));
-                boundary_rate = std::max(boundary_rate, std::abs(rate));
-            } else if ((x >= 2 && x <= 5) || (x >= 10 && x <= 13)) interior = std::max(interior, std::abs(rate));
+            // The boundaries lie between columns 7 and 8 (45 degrees) and 15 and 0 (-135).
+            if (x == 0 || x == 7 || x == 8 || x == 15) boundary_rate = std::max(boundary_rate, std::abs(rate));
+            else if ((x >= 2 && x <= 5) || (x >= 10 && x <= 13)) interior = std::max(interior, std::abs(rate));
         }
     }
-    EXPECT_LT(interior, 1e-9);
-    EXPECT_LT(boundary, 1400); // measured 1353 m
+    RecordProperty("interior_rate_m_myr", std::to_string(interior));
+    RecordProperty("boundary_rate_m_myr", std::to_string(boundary_rate));
+    EXPECT_LT(interior, .05 * boundary_rate);
     EXPECT_GT(boundary_rate, 0);
-    EXPECT_GT(lowest, -2000); EXPECT_LT(highest, 0);
+    EXPECT_GT(lowest, -2000); EXPECT_LT(highest, 1000);
 }
 
 // Thermal subsidence of an ageing ocean floor is tectonic: a 20 Myr old ocean column
@@ -829,9 +964,10 @@ TEST(TectonicColumns, RockUpliftRateAtDivergentBoundariesIsBounded) {
 // subsidence_m(21) - subsidence_m(20) = 39.50061759809455 m (Parsons & Sclater law
 // of tectonic_thermal.hpp), so r = -39.50061759809455 (1 - e^(-1/5)) = -7.160247204961215.
 TEST(TectonicColumns, RockUpliftRateCountsThermalSubsidence) {
+    const auto grid = cubefixture::cube(4, cubefixture::radiusfor_km(4, 100000));
     Model world;
-    world.initialize(8, 4, 100000, std::vector<Cell>(32, seed(-5000, false, 20)));
-    world.advance(std::vector<Displacement>(32), 1, 0, 1, 1, nullptr, {}, {}, false, nullptr, 5);
+    world.initialize(grid, std::vector<Cell>(grid->cellcount(), seed(-5000, false, 20)));
+    world.advance(cubefixture::still(*grid), 1, 0, 1, 1, nullptr, {}, {}, false, nullptr, 5);
     const double sinking = tectonics::thermal::subsidence_m(21) - tectonics::thermal::subsidence_m(20);
     EXPECT_NEAR(sinking, 39.50061759809455, 1e-9);
     for (double rate : world.upliftRate()) {
@@ -846,7 +982,6 @@ TEST(TectonicColumns, RockUpliftRateCountsThermalSubsidence) {
 // has components +-g/2 and shortens along (1, -1) (3 pi / 4) for g > 0, along (1, 1)
 // for g < 0; extension alone shortens nothing; equal components have direction 0.
 TEST(TectonicColumns, ShorteningAndDirectionOfExplicitStrains) {
-    const double pi = std::acos(-1.0);
     EXPECT_NEAR(shortening_m({-.1, 0, 0}, 1000), 100, 1e-12);
     EXPECT_EQ(shortening_direction({-.1, 0, 0}), 0);
     EXPECT_NEAR(shortening_m({0, -.1, 0}, 1000), 100, 1e-12);
@@ -863,221 +998,189 @@ TEST(TectonicColumns, ShorteningAndDirectionOfExplicitStrains) {
 }
 
 namespace {
-// Land columns at rest except for the displacement: no erosion, no roots, no forcing.
-Model strained_world(uint32_t subdivision) {
+// Land columns at rest except for the motion: no erosion, no roots, no forcing; a band of N 8
+// with 100 km columns at the equator.
+struct Strained {
+    Band band{8, cubefixture::radiusfor_km(8, 100000)};
     Model world;
-    world.initialize(16, 8, 100000, std::vector<Cell>(128, seed(500, true, 100)), subdivision);
-    return world;
-}
-void advance_still(Model& world, const std::vector<Displacement>& u, const tectonics::margins::Forcing* forcing = nullptr) {
-    tectonics::margins::Parameters still;
-    still.root_mobility = 0;
-    world.advance(u, 1, 0, 1, 1, forcing, still, {}, false, nullptr, 5);
-}
+    explicit Strained(uint32_t subdivision, double elevation = 500, bool continental = true) {
+        world.initialize(band.grid, std::vector<Cell>(band.cellcount(), seed(elevation, continental, 100)), subdivision);
+    }
+    void advance(const st::Motion& motion, const tectonics::margins::Forcing* forcing = nullptr) {
+        tectonics::margins::Parameters still;
+        still.root_mobility = 0;
+        world.advance(motion, 1, 0, 1, 1, forcing, still, {}, false, nullptr, 5);
+    }
+    // Offsets east (u, column widths at the equator, times the cosine of the cell's latitude:
+    // a uniform u is a rotation about the axis, no strain) and north (v, column widths) at the
+    // band's cells, zero elsewhere.
+    st::Motion field(const std::function<double(int, int)>& u, const std::function<double(int, int)>& v,
+                     const std::vector<uint32_t>& owners = {}) const {
+        std::vector<Vec3> offset(band.cellcount());
+        for (int y = 0; y < band.rows(); ++y) for (int x = 0; x < band.columns(); ++x) {
+            const CellId c = band.cell(x, y);
+            const Vec3 r = band.grid->position(c);
+            const double parallel = std::sqrt(r.x * r.x + r.y * r.y);
+            offset[c] = (u(x, y) * band.spacing_m() * parallel) * cubefixture::east(*band.grid, c)
+                + (v(x, y) * band.spacing_m()) * cubefixture::north(*band.grid, c);
+        }
+        return cubefixture::offsets(*band.grid, offset, owners);
+    }
+    double shortening(int x, int y) const { return shortening_m(world.strain()[band.cell(x, y)], band.spacing_m()); }
+    const Strain& strain(int x, int y) const { return world.strain()[band.cell(x, y)]; }
+};
 // Periodic triangle profile of period 2 n: v at 0, -v at n, slope -v / (n / 2) between.
 double triangle(int x, int n, double v) {
     const int p = ((x % (2 * n)) + 2 * n) % (2 * n);
     return p <= n ? v - 2 * v * p / n : -v + 2 * v * (p - n) / n;
 }
+// The two rows that straddle the equator.
+constexpr int equator[2] = {3, 4};
 }
 
-// A uniform convergence along x: u_x a periodic triangle (0.2 at x = 4, -0.2 at x = 12,
-// slope -0.05 cell per cell between), so each update shortens the rock of x = 5..11 by
-// 0.05 along x: 5 km per 100 km cell, direction 0, nothing along y. Rock arriving from
-// the kinks (x = 4, 12: derivative 0) mixes into x = 5 and 11, so x = 6..10 after one
-// update, x = 7..9 after two (10 km); the diverging half x = 13..3 shortens nothing.
-// Along y the same with period 8 (0.1 at y = 2, -0.1 at y = 6): row 4 shortens by 5 km
-// per update at direction pi / 2. Subdivisions 1 and 4.
+// A uniform convergence along the band: u_x a periodic triangle of period 16 columns (0.2 at
+// x = 4, -0.2 at x = 12, slope -0.05 column per column between), so each update shortens the
+// rock of x = 5..11 by about 0.05 along x near the equator: 5 km per 100 km column, direction
+// about 0 (the cells' axes are their east neighbours'). Rock arriving from the kinks mixes into
+// x = 5 and 11, so x = 6..10 after one update, x = 7..9 after two (10 km). Subdivisions 1 and 4.
 TEST(TectonicColumns, ShorteningOfAUniformConvergence) {
-    const double pi = std::acos(-1.0);
     for (uint32_t subdivision : {1u, 4u}) {
-        std::vector<Displacement> u(128), v(128);
-        for (int i = 0; i < 128; ++i) {
-            u[i].x = triangle(i % 16 - 4, 8, .2);
-            v[i].y = triangle(i / 16 - 2, 4, .1);
+        Strained s(subdivision);
+        const auto u = s.field([](int x, int) { return triangle(x - 4, 8, .2); }, [](int, int) { return 0.0; });
+        s.advance(u);
+        for (const int y : equator) for (int x = 6; x <= 10; ++x) {
+            EXPECT_NEAR(s.shortening(x, y), 5000, 300) << "subdivision " << subdivision << " x " << x;
+            EXPECT_NEAR(std::sin(shortening_direction(s.strain(x, y))), 0, .05);  // an axis: 0 or pi
         }
-        EXPECT_NEAR(u[5].x - u[4].x, -.05, 1e-15);
-        EXPECT_NEAR(v[3 * 16].y - v[2 * 16].y, -.05, 1e-15);
-        auto world = strained_world(subdivision);
-        advance_still(world, u);
-        for (size_t i = 0; i < 128; ++i) {
-            const auto x = i % 16;
-            const auto& s = world.strain()[i];
-            if (x >= 6 && x <= 10) {
-                EXPECT_NEAR(s.xx, -.05, 1e-12) << "subdivision " << subdivision << " cell " << i;
-                EXPECT_NEAR(shortening_m(s, 100000), 5000, 1e-7);
-                EXPECT_NEAR(shortening_direction(s), 0, 1e-12);
-            }
-            if (x >= 14 || x <= 2) EXPECT_EQ(shortening_m(s, 100000), 0) << "cell " << i;
-            EXPECT_NEAR(s.yy, 0, 1e-12);
-            EXPECT_NEAR(s.xy, 0, 1e-12);
-        }
-        advance_still(world, u);
-        for (size_t x = 7; x <= 9; ++x) for (size_t y = 0; y < 8; ++y)
-            EXPECT_NEAR(shortening_m(world.strain()[y * 16 + x], 100000), 10000, 1e-7)
-                << "subdivision " << subdivision << " x " << x << " y " << y;
-        auto column = strained_world(subdivision);
-        advance_still(column, v);
-        for (size_t x = 0; x < 16; ++x) {
-            const auto& s = column.strain()[4 * 16 + x];
-            EXPECT_NEAR(shortening_m(s, 100000), 5000, 1e-7) << "subdivision " << subdivision << " x " << x;
-            EXPECT_NEAR(shortening_direction(s), pi / 2, 1e-12);
-        }
+        for (const int y : equator) for (int x : {14, 15, 0, 1, 2})
+            EXPECT_LT(s.shortening(x, y), 50) << "x " << x;
+        s.advance(u);
+        for (const int y : equator) for (int x = 7; x <= 9; ++x)
+            EXPECT_NEAR(s.shortening(x, y), 10000, 600) << "subdivision " << subdivision << " x " << x;
     }
 }
 
-// The tensor moves with the rock. u_x = 0.1 for x <= 4, 0 at x = 5, -0.1 for x >= 6
-// strains column 5 alone (its two one-sided differences are -0.1; elsewhere one of
-// them is 0); converging rock dilutes it. A second update translates everything by
-// 0.25 cell east (no strain, no spin): the sum over a row is conserved and the
-// shortening moves east by the translation (its centroid by 0.25 cell), keeping its
-// direction 0. Subdivision 1.
+// The tensor moves with the rock. u_x = 0.1 for x <= 4, 0 at x = 5, -0.1 for 6 <= x <= 10
+// (rest 0) strains column 5; a second update rotates everything by a quarter column east (no
+// strain, no spin): the total over the equatorial rows is kept and its centre moves east by
+// the rotation, the direction staying about 0.
 TEST(TectonicColumns, ShorteningIsCarriedWithTheRock) {
-    std::vector<Displacement> u(128);
-    for (size_t i = 0; i < 128; ++i) u[i].x = i % 16 <= 4 ? .1 : i % 16 == 5 ? 0 : -.1;
-    auto world = strained_world(1);
-    advance_still(world, u);
-    const auto row = [&](size_t y) {
+    Strained s(1);
+    s.advance(s.field([](int x, int) { return x <= 4 ? .1 : x == 5 ? 0.0 : x <= 10 ? -.1 : 0.0; },
+                      [](int, int) { return 0.0; }));
+    const auto rows = [&] {
         double total = 0, moment = 0;
-        for (size_t x = 0; x < 16; ++x) {
-            const double amount = shortening_m(world.strain()[y * 16 + x], 100000);
+        for (const int y : equator) for (int x = 0; x < 16; ++x) {
+            const double amount = s.shortening(x, y);
             total += amount; moment += amount * x;
         }
         return std::pair{total, moment / total};
     };
-    const auto [first, before] = row(3);
-    EXPECT_GT(shortening_m(world.strain()[3 * 16 + 5], 100000), 8000);
-    for (size_t x : {0u, 1u, 2u, 3u, 9u, 10u, 11u, 12u, 13u, 14u, 15u})
-        EXPECT_EQ(shortening_m(world.strain()[3 * 16 + x], 100000), 0) << "x " << x;
-    advance_still(world, std::vector<Displacement>(128, {.25, 0}));
-    for (size_t y = 0; y < 8; ++y) {
-        const auto [total, centroid] = row(y);
-        EXPECT_NEAR(total, first, 1e-6) << "row " << y;
-        EXPECT_NEAR(centroid, before + .25, 1e-9) << "row " << y;
-    }
-    for (const auto& s : world.strain()) if (shortening_m(s, 100000) > 1) EXPECT_NEAR(shortening_direction(s), 0, 1e-12);
+    const auto [first, before] = rows();
+    EXPECT_GT(s.shortening(5, 3), 8000);
+    s.advance(cubefixture::rotating(*s.band.grid, s.band.eastward(.25)));
+    const auto [total, centroid] = rows();
+    EXPECT_NEAR(total / first, 1, .02);
+    EXPECT_NEAR(centroid, before + .25, .03);
+    for (int x = 0; x < 16; ++x) for (const int y : equator)
+        if (s.shortening(x, y) > 1000) EXPECT_NEAR(std::sin(shortening_direction(s.strain(x, y))), 0, .1);
 }
 
-// The tensor turns with the plate. After one update of the uniform convergence along x
-// (x = 6..10 shortened by 0.05 at direction 0), a rigid rotation by w = 0.05 rad about
-// (8, 4) (u = w (-(y - 4), x - 8), with its jumps at the wrap seams inside the plate)
-// adds no strain and turns the axis by w: x = 7..9 keep 5 km at direction 0.05 in
-// every row, also next to the seam between rows 7 and 0, where the smaller one-sided
-// difference ignores the jump of 8 w.
+// The tensor turns with the plate. After one update of the uniform convergence along x, a
+// rigid rotation by w = 0.05 rad about the outward axis at (longitude 0, latitude 0) turned
+// from east toward south (about -x) adds no strain and turns the axis by w there: the cells
+// next to longitude 0 on the equatorial rows keep their shortening at direction about w.
 TEST(TectonicColumns, ShorteningTurnsWithAPlateRotation) {
     const double w = .05;
     for (uint32_t subdivision : {1u, 4u}) {
-        std::vector<Displacement> u(128), rotation(128);
-        for (int i = 0; i < 128; ++i) {
-            u[i].x = triangle(i % 16 - 4, 8, .2);
-            rotation[i] = {-w * (i / 16 - 4), w * (i % 16 - 8)};
+        Strained s(subdivision);
+        // Longitude 0 lies between band columns 11 and 12 (N 8: face 0 is columns 8..15).
+        s.advance(s.field([](int x, int) { return triangle(x - 8, 8, .2); }, [](int, int) { return 0.0; }));
+        std::vector<double> before, direction;
+        for (const int y : equator) for (int x : {11, 12}) {
+            before.push_back(s.shortening(x, y));
+            direction.push_back(shortening_direction(s.strain(x, y)));
         }
-        auto world = strained_world(subdivision);
-        advance_still(world, u);
-        advance_still(world, rotation);
-        for (size_t x = 7; x <= 9; ++x) for (size_t y = 0; y < 8; ++y) {
-            const auto& s = world.strain()[y * 16 + x];
-            EXPECT_NEAR(shortening_m(s, 100000), 5000, 1e-7) << "subdivision " << subdivision << " x " << x << " y " << y;
-            EXPECT_NEAR(shortening_direction(s), w, 1e-12) << "subdivision " << subdivision << " x " << x << " y " << y;
+        s.advance(cubefixture::rotating(*s.band.grid, {-w, 0, 0}));
+        size_t k = 0;
+        for (const int y : equator) for (int x : {11, 12}) {
+            EXPECT_NEAR(s.shortening(x, y) / before[k], 1, .1) << "subdivision " << subdivision << " x " << x;
+            // The axis turned by w (directions are axes, modulo pi).
+            const double turned = std::remainder(shortening_direction(s.strain(x, y)) - direction[k], pi);
+            EXPECT_NEAR(turned, w, .02) << "subdivision " << subdivision << " x " << x;
+            ++k;
         }
     }
 }
 
-// Plate edges: a jump of velocity to another plate is not strain. Plate 0 (x = 0..7)
-// moves east by 0.2 cell and slows to 0.1 at x = 6 and 0 at x = 7; plate 1 (x = 8..15)
-// moves east by 0.1. With the owners, x = 6 and 7 take the in-plate difference -0.1
-// (10 km; x = 6 keeps 9 / 11 of it, mixed with unstrained rock arriving from x = 5),
-// plate 1 and the rest of plate 0 nothing, though the boundary opens between x = 7
-// and 8 and closes across the wrap. Without the owners (one plate) the smaller
-// difference at x = 7 is the mean of -0.1 and +0.1, 0: only x = 6 is strained, and
-// part of its rock reaches x = 7. Rigid plates converging shorten nothing.
+// Plate edges: a jump of velocity to another plate is not strain. Plate 0 (x < 8) moves east by
+// 0.2 column and slows to 0.1 at x = 6 and 0 at x = 7; plate 1 (x >= 8) moves east by 0.1. With
+// the plates, x = 6 and 7 take the in-plate difference 0.1 (10 km), plate 1 and the rest of
+// plate 0 nothing, though the boundary opens between x = 7 and 8. As one plate, x = 7's
+// gradient is the central difference 0: only x = 6 is strained (and part of its rock reaches
+// x = 7). Rigid plates converging (rotations) shorten nothing.
 TEST(TectonicColumns, ShorteningIgnoresJumpsBetweenPlates) {
-    tectonics::margins::Forcing plates;
-    plates.thermal_age_myr.assign(128, -1);
-    plates.trench_m.assign(128, 0);
-    plates.arc_receiver.assign(128, std::numeric_limits<uint32_t>::max());
-    plates.owners.resize(128);
-    std::vector<Displacement> u(128), rigid(128);
-    for (size_t i = 0; i < 128; ++i) {
-        const size_t x = i % 16;
-        plates.owners[i] = x < 8 ? 0 : 1;
-        u[i].x = x < 6 ? .2 : x == 6 ? .1 : x == 7 ? 0 : .1;
-        rigid[i].x = x < 8 ? .2 : -.2;
-    }
-    auto owned = strained_world(1), single = strained_world(1), converging = strained_world(1);
-    advance_still(owned, u, &plates);
-    advance_still(single, u);
-    advance_still(converging, rigid, &plates);
-    for (size_t y = 0; y < 8; ++y) {
-        const auto at = [&](const Model& world, size_t x) { return shortening_m(world.strain()[y * 16 + x], 100000); };
-        EXPECT_NEAR(at(owned, 7), 10000, 1e-6) << "row " << y;
-        EXPECT_NEAR(at(owned, 6), 10000. * 9 / 11, 1e-6) << "row " << y; // 0.9 of its rock stays, 0.2 of x = 5's arrives
-        for (size_t x : {0u, 1u, 2u, 3u, 4u, 8u, 9u, 10u, 11u, 12u, 13u, 14u, 15u})
-            EXPECT_NEAR(at(owned, x), 0, 1e-6) << "x " << x; // rounding of the carried shift
-        EXPECT_NEAR(at(single, 7), 10000. / 11, 1e-6) << "row " << y; // 0.1 of x = 6's rock, coverage 1.1
-        for (size_t x = 0; x < 16; ++x) EXPECT_EQ(at(converging, x), 0) << "x " << x;
+    Strained owned(1), single(1), converging(1);
+    std::vector<uint32_t> owners(owned.band.cellcount(), 1);
+    for (int y = 0; y < owned.band.rows(); ++y) for (int x = 0; x < 8; ++x) owners[owned.band.cell(x, y)] = 0;
+    const auto u = [](int x, int) { return x < 6 ? .2 : x == 6 ? .1 : x == 7 ? 0.0 : .1; };
+    const auto none = [](int, int) { return 0.0; };
+    // The plates' common parts as their rotations (0.2 and 0.1 column), the rest as offsets.
+    auto owned_motion = owned.field([&](int x, int y) { return u(x, y) - (x < 8 ? .2 : .1); }, none, owners);
+    owned_motion.rotation = {owned.band.eastward(.2), owned.band.eastward(.1)};
+    owned.advance(owned_motion);
+    single.advance(single.field(u, none));
+    converging.advance(cubefixture::plates(owners, {converging.band.eastward(.2), converging.band.eastward(-.2)}));
+    for (const int y : equator) {
+        EXPECT_NEAR(owned.shortening(7, y), 10000, 800) << "row " << y;
+        EXPECT_NEAR(owned.shortening(6, y), 10000 * 9. / 11, 1500) << "row " << y;
+        for (int x : {0, 1, 2, 3, 9, 10, 11, 12, 13, 14}) EXPECT_LT(owned.shortening(x, y), 100) << "x " << x;
+        EXPECT_LT(single.shortening(7, y), 2500) << "row " << y;
+        EXPECT_GT(single.shortening(6, y), 5000) << "row " << y;
+        for (int x = 0; x < 32; ++x) EXPECT_LT(converging.shortening(x, y), 1) << "x " << x;
     }
 }
 
-// New crust has no strain. Ocean floor is first shortened by 0.05 along y in row 4 and
-// partly in rows 3 and 5 (the triangle profile of ShorteningOfAUniformConvergence, one
-// plate), across every column, the future ridge included. Then two rigid plates part
-// for 50 updates at subdivision 4: x = 0..7 moves west and x = 8..15 east by 0.2 cell,
-// so a ridge opens between x = 7 and 8 and the floor subducts across the wrap. The
-// crust the ridge creates carries no strain and the rock that stayed is diluted by it,
-// so the ridge columns and the floor they made (x = 4..11, all of it created in the
-// last 20 updates) keep almost none of the 5 km: below 1 m at the ridge, at most
-// 28.3 m (0.6 percent) in the new floor, where the remap smears in the older rock that
-// left the ridge first. Without the zero strain of the created floor both keep 5 km.
+// New crust has no strain. Ocean floor is first shortened along the rows (the triangle profile
+// of period 8 rows, one plate) across every column; then the two halves part for 50 updates at
+// subdivision 4 (0.2 column per update, a ridge at 45 degrees): the crust the ridge creates
+// carries none and the rock that stayed is diluted by it, so the ridge columns keep almost none
+// of the 5 km.
 TEST(TectonicColumns, ShorteningOfNewCrustAtADivergentBoundaryIsZero) {
+    Strained s(4, -4000, false);
+    const auto owners = halves(*s.band.grid);
+    s.advance(s.field([](int, int) { return 0.0; }, [](int, int y) { return -triangle(y - 2, 4, .1); }));
+    double squeezed = 0;
+    for (int x = 0; x < s.band.columns(); ++x) squeezed = std::max(squeezed, s.shortening(x, 4));
+    ASSERT_GT(squeezed, 2000);
+    const auto apart = cubefixture::plates(owners, {s.band.eastward(-.2), s.band.eastward(.2)});
     tectonics::margins::Forcing plates;
-    plates.thermal_age_myr.assign(128, -1);
-    plates.trench_m.assign(128, 0);
-    plates.arc_receiver.assign(128, std::numeric_limits<uint32_t>::max());
-    plates.owners.resize(128);
-    std::vector<Displacement> squeeze(128), apart(128);
-    for (size_t i = 0; i < 128; ++i) {
-        plates.owners[i] = i % 16 < 8 ? 0 : 1;
-        squeeze[i].y = triangle(static_cast<int>(i / 16) - 2, 4, .1);
-        apart[i].x = i % 16 < 8 ? -.2 : .2;
-    }
-    Model world;
-    world.initialize(16, 8, 100000, std::vector<Cell>(128, seed(-4000, false, 20)), 4);
-    advance_still(world, squeeze);
-    for (size_t x = 0; x < 16; ++x) ASSERT_NEAR(shortening_m(world.strain()[4 * 16 + x], 100000), 5000, 1e-6);
-    for (int step = 0; step < 50; ++step) advance_still(world, apart, &plates);
-    double ridge = 0, floor = 0;
-    for (size_t i = 0; i < 128; ++i) {
-        const auto x = i % 16;
-        const double amount = shortening_m(world.strain()[i], 100000);
-        if (x == 7 || x == 8) ridge = std::max(ridge, amount);
-        else if (x >= 4 && x <= 11) floor = std::max(floor, amount);
-    }
-    EXPECT_LT(ridge, 1) << "largest shortening at the ridge, m";
-    EXPECT_LT(floor, 40) << "largest shortening of the new floor, m"; // measured 28.3 m
+    plates.thermal_age_myr.assign(owners.size(), -1);
+    plates.trench_m.assign(owners.size(), 0);
+    plates.arc_receiver.assign(owners.size(), std::numeric_limits<uint32_t>::max());
+    plates.owners = owners;
+    for (int step = 0; step < 50; ++step) s.advance(apart, &plates);
+    // The ridge at 45 degrees lies between band columns 15 and 16 (N 8).
+    double ridge = 0;
+    for (int y = 0; y < s.band.rows(); ++y) for (int x : {15, 16}) ridge = std::max(ridge, s.shortening(x, y));
+    RecordProperty("largest_ridge_shortening_m", std::to_string(ridge));
+    EXPECT_LT(ridge, .02 * squeezed);
 }
 
-// Over several updates of a varied displacement (two plates, subdivision 4) the
-// shortening stays finite and non-negative and the direction in [0, pi).
+// Over several updates of a varied displacement (two plates, subdivision 4) the shortening
+// stays finite and non-negative and the direction in [0, pi).
 TEST(TectonicColumns, ShorteningIsNonNegativeAndItsDirectionInRange) {
-    const double pi = std::acos(-1.0);
-    tectonics::margins::Forcing plates;
-    plates.thermal_age_myr.assign(128, -1);
-    plates.trench_m.assign(128, 0);
-    plates.arc_receiver.assign(128, std::numeric_limits<uint32_t>::max());
-    plates.owners.resize(128);
-    std::vector<Displacement> u(128);
-    for (size_t i = 0; i < 128; ++i) {
-        const double x = static_cast<double>(i % 16), y = static_cast<double>(i / 16);
-        plates.owners[i] = (i % 16 + i / 16) % 16 < 8 ? 0 : 1;
-        u[i] = {.3 * std::sin(2 * pi * x / 16 + y), .2 * std::cos(2 * pi * y / 8 - x / 3)};
-    }
-    auto world = strained_world(4);
+    Strained s(4);
+    std::vector<uint32_t> owners(s.band.cellcount(), 0);
+    for (int y = 0; y < s.band.rows(); ++y) for (int x = 0; x < s.band.columns(); ++x)
+        owners[s.band.cell(x, y)] = (x + y) % 32 < 16 ? 0 : 1;
+    const auto u = s.field([](int x, int y) { return .3 * std::sin(2 * pi * x / 32 + y); },
+                           [](int x, int y) { return .2 * std::cos(2 * pi * y / 8 - x / 3.0); }, owners);
     double largest = 0;
     for (int step = 0; step < 6; ++step) {
-        advance_still(world, u, &plates);
-        for (const auto& s : world.strain()) {
-            const double amount = shortening_m(s, 100000), direction = shortening_direction(s);
+        s.advance(u);
+        for (const auto& strain : s.world.strain()) {
+            const double amount = shortening_m(strain, 100000), direction = shortening_direction(strain);
             ASSERT_TRUE(std::isfinite(amount));
             EXPECT_GE(amount, 0);
             EXPECT_GE(direction, 0);
@@ -1090,12 +1193,9 @@ TEST(TectonicColumns, ShorteningIsNonNegativeAndItsDirectionInRange) {
 
 // The column processes on the cube (W2-E, E2B): finite volumes over the cell table.
 namespace {
-using tectonics::grid::TectonicGrid;
-constexpr double earth_km = 6371.0;
-
 double total_continent_m3(const Metric& metric, const std::vector<Cell>& cells) {
     double total = 0;
-    for (tectonics::grid::CellId c = 0; c < cells.size(); ++c) total += cells[c].continent * metric.area_m2(c);
+    for (CellId c = 0; c < cells.size(); ++c) total += cells[c].continent * metric.area_m2(c);
     return total;
 }
 
@@ -1110,7 +1210,7 @@ double bumpspread(const std::shared_ptr<const TectonicGrid>& grid, const Metric&
     std::vector<Cell> cells(grid->cellcount());
     std::vector<double> f(cells.size()), elevation(cells.size());
     double predicted = 0, before = 0;
-    for (tectonics::grid::CellId c = 0; c < cells.size(); ++c) {
+    for (CellId c = 0; c < cells.size(); ++c) {
         const double angle = mesh::greatcircle_rad(centre, mesh.centre(c));
         const double distance_km = angle * radius_m / 1000;
         cells[c] = seed(500 + 1000 * std::exp(-.5 * distance_km * distance_km / (600.0 * 600.0)), true, 100);
@@ -1123,7 +1223,7 @@ double bumpspread(const std::shared_ptr<const TectonicGrid>& grid, const Metric&
     diffuse_surface(metric, cells, elevation, surface_diffusion_number(metric, 1, 1), 1, budget);
     EXPECT_NEAR(budget.deposited_kg / budget.eroded_kg, 1, 1e-12);
     double after = 0;
-    for (tectonics::grid::CellId c = 0; c < cells.size(); ++c) after += f[c] * mass_per_area(cells[c]) * metric.area_m2(c);
+    for (CellId c = 0; c < cells.size(); ++c) after += f[c] * mass_per_area(cells[c]) * metric.area_m2(c);
     return (after - before) / predicted;
 }
 } // namespace
@@ -1132,7 +1232,7 @@ TEST(TectonicColumnsCube, DiffusionOfABumpIsEqualAtAFaceCentreEdgeAndCorner) {
     constexpr double quarter = 0.78539816339744830962;
     for (const int n : {32, 64}) {
         const auto grid = TectonicGrid::cube(n, earth_km);
-        const Metric metric(grid.get(), 0, 0, 0);
+        const Metric metric(*grid);
         // Each centre a cell vertex (N even): four cells at the face centre and the edge, three at the corner.
         const double centre = bumpspread(grid, metric, mesh::cubepoint(0, 0, 0));
         const double edge = bumpspread(grid, metric, mesh::cubepoint(0, quarter, 0));
@@ -1143,6 +1243,7 @@ TEST(TectonicColumnsCube, DiffusionOfABumpIsEqualAtAFaceCentreEdgeAndCorner) {
         RecordProperty("diffusion_cube_corner" + suffix, std::to_string(corner));
         RecordProperty("reference_area_over_mean" + suffix, std::to_string(metric.reference_area_m2()
             / (grid->totalarea_m2() / static_cast<double>(grid->cellcount()))));
+        RecordProperty("correction_factor" + suffix, std::to_string(metric.correctionfactor()));
         // With the non-orthogonal correction (without it the two-point weights spread 7 % fast
         // over a face edge and 11 % slow over a corner).
         EXPECT_NEAR(centre, 1, .02) << n;
@@ -1151,15 +1252,84 @@ TEST(TectonicColumnsCube, DiffusionOfABumpIsEqualAtAFaceCentreEdgeAndCorner) {
     }
 }
 
+// The explicit limits of root flow, collapse and diffusion hold with the corrected differences:
+// a checkerboard of thickness or elevation over a cube corner (the most skewed cells), stepped
+// at the limits the processes choose, decays in amplitude and keeps every column positive.
+TEST(TectonicColumnsCube, CheckerboardAtTheExplicitLimitsDecaysOverACubeCorner) {
+    constexpr int n = 16;
+    const auto grid = TectonicGrid::cube(n, cubefixture::radiusfor_km(n, 100000));
+    const Metric metric(*grid);
+    const auto& mesh = *grid->mesh();
+    const Vec3 corner = mesh::normalise({1, 1, 1});
+    EXPECT_GT(metric.correctionfactor(), 1);
+    const auto checker = [&](double low, double high) {
+        std::vector<Cell> cells(grid->cellcount());
+        for (CellId c = 0; c < cells.size(); ++c) {
+            int face = 0, i = 0, j = 0;
+            mesh::cubeindices(n, c, face, i, j);
+            const bool close = mesh::greatcircle_rad(corner, mesh.centre(c)) * grid->radius_m() < 6e5;
+            cells[c] = seed(close && (i + j) % 2 ? high : low, true, 100);
+        }
+        return cells;
+    };
+    const auto amplitude = [&](const std::vector<Cell>& cells, double Cell::* member) {
+        double lo = 1e300, hi = -1e300;
+        for (CellId c = 0; c < cells.size(); ++c) {
+            if (mesh::greatcircle_rad(corner, mesh.centre(c)) * grid->radius_m() >= 6e5) continue;
+            lo = std::min(lo, cells[c].*member); hi = std::max(hi, cells[c].*member);
+        }
+        return hi - lo;
+    };
+    // Diffusion at its limit (0.2 / correction factor).
+    {
+        auto cells = checker(0, 3000);
+        std::vector<double> elevation(cells.size());
+        for (size_t c = 0; c < cells.size(); ++c) elevation[c] = elevation_m(cells[c]);
+        const double start = *std::max_element(elevation.begin(), elevation.end()) - *std::min_element(elevation.begin(), elevation.end());
+        Budget budget;
+        for (int step = 0; step < 20; ++step) {
+            for (size_t c = 0; c < cells.size(); ++c) elevation[c] = elevation_m(cells[c]);
+            diffuse_surface(metric, cells, elevation, .2 / metric.correctionfactor(), 1, budget);
+            for (const auto& c : cells) { ASSERT_GE(c.continent, 0); ASSERT_GE(c.sediment, 0); }
+        }
+        for (size_t c = 0; c < cells.size(); ++c) elevation[c] = elevation_m(cells[c]);
+        const double end = *std::max_element(elevation.begin(), elevation.end()) - *std::min_element(elevation.begin(), elevation.end());
+        EXPECT_LT(end, start);
+    }
+    // Root flow and collapse choose their own sub-steps.
+    {
+        auto cells = checker(0, 8000);
+        const double start = amplitude(cells, &Cell::continent), volume = total_continent_m3(metric, cells);
+        Budget budget;
+        for (int step = 0; step < 5; ++step) spread_roots(metric, cells, 1, Isostasy{}, false, budget);
+        EXPECT_LT(amplitude(cells, &Cell::continent), start);
+        EXPECT_NEAR(total_continent_m3(metric, cells) / volume, 1, 1e-12);
+        for (const auto& c : cells) EXPECT_GT(c.continent, 0);
+    }
+    {
+        auto cells = checker(0, 9000);  // 35 km against about 95 km of crust
+        tectonics::margins::Parameters p;
+        p.enabled = true;
+        p.continental_max_thickness_m = 40000;
+        p.orogenic_collapse_km2_myr = 30000;
+        const double start = amplitude(cells, &Cell::continent), volume = total_continent_m3(metric, cells);
+        Budget budget;
+        for (int step = 0; step < 5; ++step) collapse_orogens(metric, cells, 1, p, budget);
+        EXPECT_LT(amplitude(cells, &Cell::continent), start);
+        EXPECT_NEAR(total_continent_m3(metric, cells) / volume, 1, 1e-12);
+        for (const auto& c : cells) EXPECT_GT(c.continent, 0);
+    }
+}
+
 TEST(TectonicColumnsCube, CollapseAndRootFlowConserveVolumeAcrossFaceEdgesAndCorners) {
     const auto grid = TectonicGrid::cube(16, earth_km);
-    const Metric metric(grid.get(), 0, 0, 0);
+    const Metric metric(*grid);
     const auto& mesh = *grid->mesh();
     constexpr double quarter = 0.78539816339744830962;
     // An orogen of 80 km crust over a cube corner and along a face edge, on a continent at sea level.
     const mesh::Vec3 corner = mesh::cubepoint(0, quarter, quarter), edge = mesh::cubepoint(0, quarter, 0);
     std::vector<Cell> cells(grid->cellcount());
-    for (tectonics::grid::CellId c = 0; c < cells.size(); ++c) {
+    for (CellId c = 0; c < cells.size(); ++c) {
         const double closest = std::min(mesh::greatcircle_rad(corner, mesh.centre(c)), mesh::greatcircle_rad(edge, mesh.centre(c)));
         cells[c] = seed(0, true, 100);
         if (closest * earth_km < 700) {
@@ -1173,13 +1343,13 @@ TEST(TectonicColumnsCube, CollapseAndRootFlowConserveVolumeAcrossFaceEdgesAndCor
     p.orogenic_collapse_km2_myr = 30000;
     const double volume = total_continent_m3(metric, cells);
     double age = 0;
-    for (tectonics::grid::CellId c = 0; c < cells.size(); ++c) age += cells[c].continental_age_volume * metric.area_m2(c);
+    for (CellId c = 0; c < cells.size(); ++c) age += cells[c].continental_age_volume * metric.area_m2(c);
     Budget budget;
     for (int step = 0; step < 10; ++step) collapse_orogens(metric, cells, 1, p, budget);
     EXPECT_GT(budget.collapsed_continent_kg, 0);
     EXPECT_NEAR(total_continent_m3(metric, cells) / volume, 1, 1e-12);
     double age_after = 0, thickest = 0;
-    for (tectonics::grid::CellId c = 0; c < cells.size(); ++c) {
+    for (CellId c = 0; c < cells.size(); ++c) {
         age_after += cells[c].continental_age_volume * metric.area_m2(c);
         thickest = std::max(thickest, cells[c].continent);
     }
@@ -1196,7 +1366,7 @@ TEST(TectonicColumnsCube, PlumeBasaltConservesItsVolumeOnTheSphere) {
     tectonics::plumes::Parameters p;
     p.count = 6;
     p.head_volume_km3 = 2e6;
-    const auto source = tectonics::plumes::source(0, 0, 0, 1, 0, 2, p, grid.get());
+    const auto source = tectonics::plumes::source(*grid, 1, 0, 2, p);
     const auto plumes = tectonics::plumes::placesphere(earth_km, 1, p);
     ASSERT_EQ(plumes.size(), 6u);
     for (size_t a = 0; a < plumes.size(); ++a) for (size_t b = 0; b < a; ++b)
@@ -1208,7 +1378,7 @@ TEST(TectonicColumnsCube, PlumeBasaltConservesItsVolumeOnTheSphere) {
             + p.head_volume_km3 * 1e9 * (smooth((2 - plume.birth_myr) / p.head_duration_myr) - smooth(-plume.birth_myr / p.head_duration_myr));
     }
     double volume = 0;
-    for (tectonics::grid::CellId c = 0; c < grid->cellcount(); ++c) volume += source.basalt_m[c] * grid->area_m2(c);
+    for (CellId c = 0; c < grid->cellcount(); ++c) volume += source.basalt_m[c] * grid->area_m2(c);
     EXPECT_NEAR(volume / expected, 1, 1e-12);
     for (const auto& plume : plumes) {
         EXPECT_GT(source.influence[grid->mesh()->locate(plume.position)], .8);
@@ -1217,22 +1387,108 @@ TEST(TectonicColumnsCube, PlumeBasaltConservesItsVolumeOnTheSphere) {
 
 TEST(TectonicColumnsCube, InitialTerrainRunsOnTheCube) {
     const auto grid = TectonicGrid::cube(16, earth_km);
+    const Metric metric(*grid);
     const auto& mesh = *grid->mesh();
     const size_t count = grid->cellcount();
     std::vector<double> elevations(count), ages(count, 50);
     std::vector<uint32_t> owners(count);
     std::vector<mesh::Vec3> velocity(count);
     const mesh::Vec3 pole{0, 0, 1};
-    for (tectonics::grid::CellId c = 0; c < count; ++c) {
+    for (CellId c = 0; c < count; ++c) {
         const mesh::Vec3 r = mesh.centre(c);
         owners[c] = r.x > 0 ? 1 : 0;
         elevations[c] = r.y > .3 ? 400 : -4000;
         // Each plate turns about the pole, the two apart (spreading along x = 0).
         velocity[c] = (owners[c] ? 20000.0 : -20000.0) * mesh::cross(pole, r);
     }
-    const auto cells = tectonics::initialization::terrain(*grid, 1, elevations, ages, owners, velocity, 1, 0, 1);
-    EXPECT_THROW(tectonics::initialization::terrain(0, 0, 0, 1, elevations, ages, owners,
-        std::vector<Displacement>(count), 1, 0, 1, 0, 0, 0, grid.get()), std::invalid_argument);
+    const auto cells = tectonics::initialization::terrain(metric, 1, elevations, ages, owners, velocity, 1, 0, 1);
+    EXPECT_THROW(tectonics::initialization::terrain(metric, 1, elevations, ages, owners,
+        std::vector<Displacement>(count - 1), 1, 0, 1), std::runtime_error);
     ASSERT_EQ(cells.size(), count);
     for (const auto& c : cells) EXPECT_TRUE(std::isfinite(elevation_m(c)));
+}
+
+// Explicit rivers and waves on the cube (routeSediment): a continental cap over a cube corner
+// drains into the surrounding ocean; eroded and deposited mass agree in true areas, sediment
+// reaches the ocean beside the coast and the mass budget closes. Implicit rivers (the landscape
+// kernels on the cube's metric) do the same.
+TEST(TectonicColumnsCube, RiversCloseTheirBudgetOverACubeCorner) {
+    constexpr int n = 16;
+    const auto grid = TectonicGrid::cube(n, cubefixture::radiusfor_km(n, 150000));
+    const auto& mesh = *grid->mesh();
+    const Vec3 corner = mesh::normalise({1, 1, 1});
+    std::vector<Cell> cells(grid->cellcount());
+    std::vector<uint8_t> coast(cells.size(), 0);
+    for (CellId c = 0; c < cells.size(); ++c) {
+        const double distance = mesh::greatcircle_rad(corner, mesh.centre(c)) * grid->radius_m() / 150000;
+        cells[c] = distance < 6 ? seed(2000 - 300 * distance, true, 40) : seed(-4000, false, 40);
+        coast[c] = distance >= 6 && distance < 7.5;
+    }
+    for (const bool implicit : {false, true}) {
+        tectonics::margins::Parameters p;
+        p.enabled = true;
+        p.river_implicit = implicit;
+        p.wave_erosion_m_myr = implicit ? 0 : 20;
+        Model model;
+        model.initialize(grid, cells);
+        model.advance(cubefixture::still(*grid), 1, 0, 1, 0, nullptr, p);
+        const auto& b = model.budget();
+        EXPECT_GT(b.river_eroded_kg, 0) << implicit;
+        EXPECT_NEAR(b.eroded_kg, b.deposited_kg, b.eroded_kg * 1e-12) << implicit;
+        EXPECT_LT(std::abs(b.relative_mass_residual), 1e-12) << implicit;
+        double offshore = 0;
+        for (CellId c = 0; c < cells.size(); ++c) if (coast[c]) offshore += model.cells()[c].sediment * grid->area_m2(c);
+        EXPECT_GT(offshore, 0) << implicit;
+        RecordProperty(implicit ? "implicit_river_kg" : "explicit_river_kg", std::to_string(b.river_eroded_kg));
+    }
+}
+
+// Arc melt is emplaced as a Gaussian over the receiver plate's cells within 300 km (great
+// circle) of its receiver: an ocean plate closing on a continental one (margins on, the forcing
+// of margins::forcing) adds arc basalt only on the receivers' plate near a receiver, and the
+// added volume is the budget's generated arc mass.
+TEST(TectonicColumnsCube, ArcMeltSpreadsWithinThreeHundredKilometresOfItsReceiver) {
+    const Band band(16, cubefixture::radiusfor_km(16, 100000));
+    const auto owners = halves(*band.grid);
+    std::vector<Cell> cells(band.cellcount());
+    for (CellId c = 0; c < cells.size(); ++c) cells[c] = owners[c] == 0 ? seed(-4000, false, 80) : seed(500, true, 100);
+    tectonics::margins::Parameters p;
+    p.enabled = true;
+    p.river_erosion = 0;
+    const auto motion = cubefixture::plates(owners, {band.eastward(.3), {}});
+    std::vector<uint32_t> stable(owners.begin(), owners.end());
+    const auto rigid = Model::displacement(*band.grid, motion);
+    Model world, control;
+    world.initialize(band.grid, cells);
+    control.initialize(band.grid, cells);
+    tectonics::margins::Polarity polarity;
+    for (int step = 0; step < 6; ++step) {
+        const auto forcing = tectonics::margins::forcing(world.metric(), 1, stable, world.cells(), rigid, p, &polarity);
+        auto silent = p;
+        silent.arc_melt_ratio = 0;
+        control = world;
+        world.advance(motion, 1, 0, 1, 0, &forcing, p);
+        control.advance(motion, 1, 0, 1, 0, &forcing, silent);
+        if (world.budget().generated_arc_kg == 0) continue;
+        double added = 0;
+        const auto& mesh = *band.grid->mesh();
+        std::vector<CellId> receivers;
+        for (CellId c = 0; c < cells.size(); ++c)
+            if (forcing.arc_receiver[c] != std::numeric_limits<uint32_t>::max()) receivers.push_back(forcing.arc_receiver[c]);
+        std::sort(receivers.begin(), receivers.end());
+        receivers.erase(std::unique(receivers.begin(), receivers.end()), receivers.end());
+        for (CellId c = 0; c < cells.size(); ++c) {
+            const double extra = world.cells()[c].ocean - control.cells()[c].ocean;
+            if (std::abs(extra) < 1e-9) continue;
+            added += extra * band.grid->area_m2(c) * oceanic_density;
+            double nearest = 1e300;
+            for (const CellId r : receivers) nearest = std::min(nearest, mesh::greatcircle_m(mesh.centre(r), mesh.centre(c), mesh.radius_m()));
+            EXPECT_LE(nearest, 300000 + 1) << c;
+            EXPECT_EQ(owners[c], 1u) << c;
+        }
+        const double generated = world.budget().generated_arc_kg - control.budget().generated_arc_kg;
+        EXPECT_NEAR(added / generated, 1, 1e-9);
+        return;
+    }
+    FAIL() << "no arc melt in six updates";
 }

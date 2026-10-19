@@ -38,8 +38,7 @@ tectonics::scenario::Scenario without_earth_set() {
 // then the scenario options of the command line (--key value), on a small grid.
 void start(const std::vector<std::string>& options,
            tectonics::scenario::Scenario scenario = tectonics::scenario::baseline()) {
-    scenario.width = 32;
-    scenario.height = 16;
+    scenario.sphere_face_cells = 8;
     for (size_t i = 0; i + 1 < options.size(); i += 2) {
         if (!parsetectonicoption(scenario, options[i], options[i + 1])) {
             throw std::runtime_error("not a scenario option: " + options[i]);
@@ -98,7 +97,10 @@ TEST(TectonicOptions, InvalidScenarioValuesAreRejected) {
         {"--evolution-duration-myr", "nan"},
         {"--evolution-duration-myr", "-1"},
         {"--evolution-duration-myr", "1e20"},
-        {"--world-width-km", "0"},
+        {"--radius-km", "0"},
+        {"--sphere-face-cells", "1"},
+        {"--mantle-flow-octaves", "0"},
+        {"--mantle-flow-wavelength-km", "0"},
         {"--mantle-flow-speed-cm-yr", "-1"},
         {"--coastal-gpe-strength", "1.01"},
         {"--boundary-force-ramp-cm-yr", "-1"},

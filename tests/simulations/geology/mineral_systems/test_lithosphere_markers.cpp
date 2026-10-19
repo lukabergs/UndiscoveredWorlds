@@ -12,11 +12,14 @@ TEST(TectonicMineralIntegration, ReadsColumnDisplacementAndDeterministicTopology
 {
     auto scenario = tectonics::scenario::baseline();
     scenario.seed = 1;
-    scenario.width = 64;
-    scenario.height = 32;
+    scenario.sphere_face_cells = 16;  // the frame is the id-order view of the cube, N x 6N
     scenario.evolution_duration_myr = 12;
     lithosphere a(scenario), b(scenario);
-    TectonicFrameReader reader(scenario.world_width_km);
+    // The frame's width in km: N mean cell sides (world_tectonics.cpp's choice until W2-R).
+    const double pi = 3.14159265358979323846;
+    TectonicFrameReader reader(scenario.radius_km * std::sqrt(2 * pi / 3));
+    const double meanarea = 4 * pi * scenario.radius_km * scenario.radius_km /
+                            (6.0 * scenario.sphere_face_cells * scenario.sphere_face_cells);
     MineralHistory minerals({}, 1);
     minerals.begin(reader.read(&a));
     EXPECT_EQ(reader.read(&a).materialShift, nullptr);
@@ -26,7 +29,7 @@ TEST(TectonicMineralIntegration, ReadsColumnDisplacementAndDeterministicTopology
         const auto& frame = reader.read(&a);
         ASSERT_NE(frame.materialShift, nullptr);
         EXPECT_DOUBLE_EQ(frame.timeMyr, a.getTimeMyr());
-        EXPECT_DOUBLE_EQ(frame.cellAreaKm2(), 625.0 * 625.0);
+        EXPECT_NEAR(frame.cellAreaKm2(), meanarea, meanarea * 1e-12);
         ASSERT_EQ(frame.plates.size(), a.getTopologyDiagnostics().stable_ids.size());
         for (std::uint32_t p = 0; p < frame.plates.size(); ++p)
         {

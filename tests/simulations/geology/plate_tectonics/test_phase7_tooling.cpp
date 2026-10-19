@@ -20,8 +20,7 @@ namespace {
 tectonics::scenario::Scenario make_phase7_scenario(long seed) {
     tectonics::scenario::Scenario scenario;
     scenario.seed = seed;
-    scenario.width = 96;
-    scenario.height = 48;
+    scenario.sphere_face_cells = 24;  // 6 x 24^2 cells of about 417 km
     scenario.sea_level = 0.65f;
     scenario.plate_count = 4;
     scenario.delta_time_myr = 1.0;
@@ -75,8 +74,6 @@ tectonics::contract::Snapshot make_snapshot_with_junction() {
     snapshot.height = 2;
     snapshot.sea_level_m = 1000;
     snapshot.run_scenario = make_phase7_scenario(4242);
-    snapshot.run_scenario.width = snapshot.width;
-    snapshot.run_scenario.height = snapshot.height;
     snapshot.run_scenario.plate_count = 3;
 
     const size_t cell_count = snapshot.cell_count();

@@ -19,8 +19,7 @@ namespace {
 tectonics::scenario::Scenario make_phase5_scenario(long seed) {
     tectonics::scenario::Scenario scenario;
     scenario.seed = seed;
-    scenario.width = 96;
-    scenario.height = 48;
+    scenario.sphere_face_cells = 24;  // 6 x 24^2 cells of about 417 km
     scenario.sea_level = 0.65f;
     scenario.plate_count = 4;
     scenario.delta_time_myr = 1.0;
@@ -180,7 +179,7 @@ TEST(Phase5Contract, CApiDeformingRegionsPersistAfterFinishedState) {
     }
 
     const size_t cell_count =
-        static_cast<size_t>(scenario.width) * static_cast<size_t>(scenario.height);
+        6 * static_cast<size_t>(scenario.sphere_face_cells) * scenario.sphere_face_cells;
     size_t active_cells = 0U;
     for (size_t i = 0; i < cell_count; ++i) {
         EXPECT_GE(deformation_rate[i], 0.0f);

@@ -1,5 +1,4 @@
 add_executable(tectonics_tests
-    test_world_grid.cpp
     test_tectonic_grid.cpp
     test_boundary_motion.cpp
     test_phase3_contract.cpp
@@ -11,7 +10,6 @@ add_executable(tectonics_tests
     test_randomness.cpp
     test_tectonic_dynamics.cpp
     test_tectonic_columns.cpp
-    test_tectonic_transport.cpp
     test_tectonic_sphere_transport.cpp
     test_tectonic_events.cpp
     test_tectonic_deformation.cpp

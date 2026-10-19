@@ -1,7 +1,9 @@
-// The engine's cell table (W2-E, step E1): the planar scaffold that reproduces the torus,
-// the cube over mesh::CellGrid, and the plate state the lithosphere keeps on it.
+// The engine's cell table on the cube (W2-E): steps across face edges, the edge table, rings,
+// discs, Dijkstra, quantiles, centroids and the plate state the lithosphere keeps on it; the
+// disabled run probe of the per-update measures and timing (E3 checklist item 9).
 #include "gtest/gtest.h"
 
+#include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_geometry.hpp"
 #include "simulations/geology/plate_tectonics/lithosphere.hpp"
 #include "simulations/geology/plate_tectonics/tectonic_grid.hpp"
@@ -22,8 +24,6 @@ using namespace tectonics::grid;
 
 namespace {
 
-CellId planarid(const TectonicGrid& grid, std::uint32_t x, std::uint32_t y) { return y * grid.width() + x; }
-
 std::string environment(const char* name) {
 #ifdef _MSC_VER
     char* value = nullptr;
@@ -39,101 +39,6 @@ std::string environment(const char* name) {
 }
 
 } // namespace
-
-TEST(TectonicGrid, PlanarNeighboursWrapBothSeams) {
-    const auto grid = TectonicGrid::planar(10, 6, 2000.0);
-    EXPECT_EQ(grid->cellcount(), 60u);
-    EXPECT_DOUBLE_EQ(grid->cell_m(), 2000.0 * 1000.0 / 10);
-    // Across the x seam (the torus' wrapped rectangles of old).
-    EXPECT_EQ(grid->neighbour(planarid(*grid, 0, 3), west), planarid(*grid, 9, 3));
-    EXPECT_EQ(grid->neighbour(planarid(*grid, 9, 3), east), planarid(*grid, 0, 3));
-    // Across the y seam.
-    EXPECT_EQ(grid->neighbour(planarid(*grid, 4, 0), north), planarid(*grid, 4, 5));
-    EXPECT_EQ(grid->neighbour(planarid(*grid, 4, 5), south), planarid(*grid, 4, 0));
-    for (CellId c = 0; c < grid->cellcount(); ++c)
-        for (std::uint8_t k = 0; k < directioncount; ++k) {
-            const Step step = grid->ahead(c, k);
-            EXPECT_EQ(step.cell, grid->neighbour(c, k));
-            EXPECT_EQ(step.direction, k);
-            EXPECT_EQ(grid->neighbour(step.cell, opposite(k)), c);
-        }
-}
-
-TEST(TectonicGrid, PlanarEdgesAreTheTorusFaces) {
-    const auto grid = TectonicGrid::planar(8, 4, 800.0);
-    const auto& edges = grid->edges();
-    ASSERT_EQ(edges.size(), 2 * grid->cellcount());
-    for (CellId c = 0; c < grid->cellcount(); ++c) {
-        const Edge& x = edges[2 * c];
-        const Edge& y = edges[2 * c + 1];
-        EXPECT_EQ(x.a, c);
-        EXPECT_EQ(x.b, grid->neighbour(c, east));
-        EXPECT_EQ(x.axis, 0);
-        EXPECT_EQ(x.normal.x, 1.0);
-        EXPECT_EQ(x.normal.y, 0.0);
-        EXPECT_EQ(y.b, grid->neighbour(c, south));
-        EXPECT_EQ(y.axis, 1);
-        EXPECT_EQ(y.normal.y, 1.0);
-        EXPECT_EQ(x.length_m, grid->cell_m());
-        EXPECT_EQ(y.distance_m, grid->cell_m());
-    }
-    EXPECT_EQ(grid->area_m2(5), grid->cell_m() * grid->cell_m());
-}
-
-TEST(TectonicGrid, PlanarCentroidWrapsTheSeam) {
-    // A plate across the x seam (columns 9, 0, 1) and across the y seam (rows 5, 0).
-    const auto grid = TectonicGrid::planar(10, 6, 1000.0);
-    std::vector<std::uint32_t> owners(grid->cellcount(), 1);
-    for (std::uint32_t y : {5u, 0u})
-        for (std::uint32_t x : {9u, 0u, 1u}) owners[planarid(*grid, x, y)] = 0;
-    const auto centroids = grid->centroids(owners, 2);
-    const double dx = std::remainder(centroids[0].x - 0.0, 10.0);
-    const double dy = std::remainder(centroids[0].y - 5.5, 6.0);
-    EXPECT_NEAR(dx, 0.0, 1e-9);
-    EXPECT_NEAR(dy, 0.0, 1e-9);
-    const auto offset = grid->tangentoffset_m(centroids[0], planarid(*grid, 9, 5));
-    EXPECT_NEAR(offset[0], -grid->cell_m(), 1e-6);
-    EXPECT_NEAR(offset[1], -0.5 * grid->cell_m(), 1e-6);
-}
-
-TEST(TectonicGrid, PlanarQuantileIsTheSortedIndex) {
-    const auto grid = TectonicGrid::planar(5, 5, 100.0);
-    std::vector<float> values(25);
-    for (std::size_t i = 0; i < values.size(); ++i) values[i] = static_cast<float>((i * 7) % 25);
-    for (const float q : {0.0f, 0.1f, 0.37f, 0.5f, 0.99f, 1.0f}) {
-        std::vector<float> sorted = values;
-        std::sort(sorted.begin(), sorted.end());
-        const auto index = static_cast<std::size_t>(std::floor(q * static_cast<float>(sorted.size() - 1)));
-        EXPECT_EQ(grid->quantile(values, q), sorted[index]) << q;
-    }
-}
-
-TEST(TectonicGrid, PlanarRingsWithinKmAndDijkstra) {
-    const auto grid = TectonicGrid::planar(12, 8, 1200.0);  // 100 km cells
-    const CellId c = planarid(*grid, 0, 0);
-    const auto rings = grid->rings(c, 2);
-    ASSERT_EQ(rings.size(), 3u);
-    EXPECT_EQ(rings[0].size(), 1u);
-    EXPECT_EQ(rings[1].size(), 4u);
-    EXPECT_EQ(rings[2].size(), 8u);
-    EXPECT_TRUE(std::is_sorted(rings[2].begin(), rings[2].end()));
-    // Centres within 150 km: the cell, its four cardinal and four diagonal neighbours (141 km).
-    EXPECT_EQ(grid->withinkm(c, 150.0).size(), 9u);
-    EXPECT_EQ(grid->withinkm(c, 99.0).size(), 1u);
-    const Distances distances = grid->dijkstra({c, planarid(*grid, 6, 4)});
-    EXPECT_EQ(distances.distance_m[planarid(*grid, 11, 7)], 2 * grid->cell_m());
-    EXPECT_EQ(distances.source[planarid(*grid, 11, 7)], 0u);
-    EXPECT_EQ(distances.source[planarid(*grid, 6, 5)], 1u);
-    // A mask stops paths; a limit stops them too.
-    std::vector<std::uint8_t> passable(grid->cellcount(), 1);
-    passable[grid->neighbour(c, east)] = 0;
-    const Distances masked = grid->dijkstra({c}, passable);
-    EXPECT_TRUE(std::isinf(masked.distance_m[grid->neighbour(c, east)]));
-    EXPECT_EQ(masked.distance_m[planarid(*grid, 2, 0)], 4 * grid->cell_m());  // round the masked cell
-    const Distances limited = grid->dijkstra({c}, passable, 3 * grid->cell_m());
-    EXPECT_TRUE(std::isinf(limited.distance_m[planarid(*grid, 2, 0)]));
-    EXPECT_EQ(limited.distance_m[planarid(*grid, 1, 1)], 2 * grid->cell_m());
-}
 
 TEST(TectonicGrid, CubeStepsAreReciprocalAcrossFaceEdges) {
     const auto grid = TectonicGrid::cube(6, 6371.0);
@@ -164,27 +69,46 @@ TEST(TectonicGrid, CubeStraightWalksCloseGreatCircles) {
         }
 }
 
-TEST(TectonicGrid, CubeEdgeTableHasEveryPairOnce) {
-    const auto grid = TectonicGrid::cube(4, 6371.0);
+// Every adjacent pair once; the normal is the shared edge's perpendicular (the normalised cross
+// product of its two vertices, tangent at the edge's midpoint, from a toward b), the centre
+// line the tangent of the line between the centres; both agree within 30 degrees and exactly
+// on the axes of a face.
+TEST(TectonicGrid, CubeEdgeTableHasEveryPairOnceWithTheSharedEdgesPerpendicular) {
+    const int n = 4;
+    const auto grid = TectonicGrid::cube(n, 6371.0);
     const auto& edges = grid->edges();
     ASSERT_EQ(edges.size(), 2 * grid->cellcount());
     std::set<std::pair<CellId, CellId>> pairs;
     std::vector<int> degree(grid->cellcount(), 0);
+    double worst = 1;
     for (const Edge& edge : edges) {
         EXPECT_LT(edge.a, edge.b);
         EXPECT_TRUE(pairs.insert({edge.a, edge.b}).second);
         EXPECT_EQ(grid->neighbour(edge.a, edge.direction), edge.b);
+        EXPECT_EQ(grid->edges()[grid->edge(edge.a, edge.direction)].b, edge.b);
         ++degree[edge.a];
         ++degree[edge.b];
         const mesh::Vec3 pa = grid->position(edge.a), pb = grid->position(edge.b);
-        const mesh::Vec3 middle = mesh::normalise(pa + pb);
         EXPECT_NEAR(mesh::length(edge.normal), 1.0, 1e-12);
-        EXPECT_NEAR(mesh::dot(edge.normal, middle), 0.0, 1e-12);
+        EXPECT_NEAR(mesh::length(edge.midpoint), 1.0, 1e-12);
+        EXPECT_NEAR(mesh::dot(edge.normal, edge.midpoint), 0.0, 1e-12);
+        EXPECT_NEAR(mesh::dot(edge.centreline, mesh::normalise(pa + pb)), 0.0, 1e-12);
         EXPECT_GT(mesh::dot(edge.normal, pb - pa), 0.0);
+        worst = std::min(worst, mesh::dot(edge.normal, edge.centreline));
+        // The midpoint lies between the two centres.
+        EXPECT_LT(mesh::greatcircle_rad(edge.midpoint, pa), mesh::greatcircle_rad(pa, pb));
+        EXPECT_LT(mesh::greatcircle_rad(edge.midpoint, pb), mesh::greatcircle_rad(pa, pb));
         EXPECT_GT(edge.length_m, 0.0);
         EXPECT_GT(edge.distance_m, 0.0);
+        EXPECT_GE(edge.length_m, grid->smallestedge_m(edge.a) - 1e-6);
     }
     for (int d : degree) EXPECT_EQ(d, 4);
+    RecordProperty("worst_normal_centreline_cosine", std::to_string(worst));
+    EXPECT_GT(worst, std::cos(30.0 * 3.14159265358979323846 / 180.0));
+    // On a face's central row (odd N) normal and centre line agree.
+    const auto odd = TectonicGrid::cube(5, 6371.0);
+    const Edge& middle = odd->edges()[odd->edge(12, east)];
+    EXPECT_NEAR(mesh::dot(middle.normal, middle.centreline), 1.0, 1e-12);
 }
 
 TEST(TectonicGrid, CubeQuantileCentroidOffsetsAndDistances) {
@@ -219,81 +143,192 @@ TEST(TectonicGrid, CubeQuantileCentroidOffsetsAndDistances) {
     for (CellId other = 0; other < grid->cellcount(); ++other)
         EXPECT_GE(distances.distance_m[other] + 1e-6,
                   mesh::greatcircle_m(grid->position(c), grid->position(other), 6371000.0));
+    // Rings of cardinal steps, ascending ids; a mask and a limit stop Dijkstra.
+    const auto rings = grid->rings(c, 2);
+    ASSERT_EQ(rings.size(), 3u);
+    EXPECT_EQ(rings[1].size(), 4u);
+    EXPECT_EQ(rings[2].size(), 8u);
+    EXPECT_TRUE(std::is_sorted(rings[2].begin(), rings[2].end()));
+    std::vector<std::uint8_t> passable(grid->cellcount(), 1);
+    passable[grid->neighbour(c, east)] = 0;
+    const Distances masked = grid->dijkstra({c}, passable);
+    EXPECT_TRUE(std::isinf(masked.distance_m[grid->neighbour(c, east)]));
+    const Distances limited = grid->dijkstra({c}, {}, 1.0);
+    EXPECT_TRUE(std::isinf(limited.distance_m[grid->neighbour(c, east)]));
 }
 
-TEST(TectonicGrid, LithosphereKeepsPlateStateOnTheScaffold) {
+// A plate around a great circle (the equatorial band of cells) has a vanishing centre sum: its
+// centroid falls back to its member cell nearest the sum, a unit vector of the plate.
+TEST(TectonicGrid, CentroidOfAnEquatorialRingFallsBackToAMemberCell) {
+    const int n = 8;
+    const auto grid = TectonicGrid::cube(n, 6371.0);
+    std::vector<std::uint32_t> owners(grid->cellcount(), 1);
+    std::vector<mesh::Vec3> members;
+    for (CellId c = 0; c < grid->cellcount(); ++c) {
+        const mesh::Vec3 p = grid->position(c);
+        if (std::abs(p.z) < .1) { owners[c] = 0; members.push_back(p); }
+    }
+    ASSERT_GT(members.size(), 0u);
+    const auto centroids = grid->centroids(owners, 2);
+    EXPECT_NEAR(mesh::length(centroids[0]), 1.0, 1e-12);
+    EXPECT_TRUE(std::any_of(members.begin(), members.end(), [&](const mesh::Vec3& m) {
+        return mesh::length(m - centroids[0]) < 1e-12; }));
+    // The rest of the sphere, symmetric about the equator, keeps its sum's direction rule.
+    EXPECT_NEAR(mesh::length(centroids[1]), 1.0, 1e-12);
+    // The helper itself: an exactly zero sum takes the first member.
+    EXPECT_EQ(tectonics::boundary_cube::meandirection({}, 4.0, members).x, members.front().x);
+    EXPECT_EQ(mesh::length(tectonics::boundary_cube::meandirection({}, 0.0, {})), 0.0);
+}
+
+// The temporary lat-lon proxy (E4 removes it): 4N x 2N cells of 2 pi R / 4N, positions in
+// [0, 1) from the longitude and latitude.
+TEST(TectonicGrid, LatLonProxyReadsLongitudeAndLatitude) {
+    const auto grid = TectonicGrid::cube(8, 6371.0);
+    const LatLonProxy proxy(*grid);
+    EXPECT_EQ(proxy.width(), 32u);
+    EXPECT_EQ(proxy.height(), 16u);
+    EXPECT_NEAR(proxy.extent_km()[0], 2 * 3.14159265358979323846 * 6371.0, 1e-9);
+    EXPECT_NEAR(proxy.extent_km()[1], 3.14159265358979323846 * 6371.0, 1e-9);
+    for (CellId c = 0; c < grid->cellcount(); ++c) {
+        const auto u = proxy.unitposition(c);
+        EXPECT_GE(u[0], 0); EXPECT_LT(u[0], 1);
+        EXPECT_GE(u[1], 0); EXPECT_LT(u[1], 1);
+        const mesh::Vec3 p = grid->position(c);
+        EXPECT_NEAR(u[1], .5 - mesh::latitudeof(p) / 3.14159265358979323846, 1e-12);
+    }
+}
+
+TEST(TectonicGrid, LithosphereKeepsPlateStateOnTheCube) {
     tectonics::scenario::Scenario scenario;
     scenario.seed = 1;
-    scenario.width = 48;
-    scenario.height = 24;
+    scenario.sphere_face_cells = 8;
     scenario.plate_count = 5;
     scenario.delta_time_myr = 1.0;
     lithosphere world(scenario);
     for (int i = 0; i < 3 && !world.isFinished(); ++i) world.update();
     const TectonicGrid& grid = world.getGrid();
-    EXPECT_EQ(grid.kind(), TectonicGrid::Kind::planar);
-    EXPECT_EQ(grid.width(), 48u);
+    EXPECT_EQ(grid.facecells(), 8);
+    EXPECT_EQ(world.getWidth(), 8u);
+    EXPECT_EQ(world.getHeight(), 48u);
     double area = 0;
     for (std::uint32_t p = 0; p < world.getPlateCount(); ++p) {
         const tectonics::PlateState& state = world.getPlate(p);
         const auto& published = world.getPlateKinematics()[p];
-        EXPECT_EQ(published.linear_velocity_x, state.velocityX());
-        EXPECT_EQ(published.unit_velocity_y, state.direction_y);
-        EXPECT_EQ(published.angular_velocity, 0.0f);
-        EXPECT_EQ(published.mass_center_x, static_cast<float>(state.centroid.x));
+        EXPECT_NEAR(mesh::length(state.centroid), 1.0, 1e-12);
+        const auto centre = tectonics::boundary_cube::encodecentroid(state.centroid);
+        EXPECT_EQ(published.mass_center_x, centre[0]);
+        EXPECT_EQ(published.mass_center_y, centre[1]);
         EXPECT_EQ(state.stable_id, world.getTopologyDiagnostics().stable_ids[p]);
         EXPECT_GE(state.continental_share, 0.0f);
         EXPECT_LE(state.continental_share, 1.0f);
+        EXPECT_TRUE(std::isfinite(state.rotation_rad_s.x));
         area += state.area_m2;
     }
     EXPECT_NEAR(area, grid.totalarea_m2(), 1e-6 * grid.totalarea_m2());
 }
 
-// The engine's per-phase wall time on one run (UW_TECTONICS_TIMING: the JSON path;
-// UW_TECTONICS_TIMING_WIDTH, default 256; UW_TECTONICS_TIMING_MYR, default 100). Seed 1, baseline.
-TEST(TectonicTiming, DISABLED_Run) {
-    const std::string path = environment("UW_TECTONICS_TIMING");
-    ASSERT_FALSE(path.empty()) << "set UW_TECTONICS_TIMING to the output path";
-    const std::string width_text = environment("UW_TECTONICS_TIMING_WIDTH");
-    const std::string myr_text = environment("UW_TECTONICS_TIMING_MYR");
+// The engine's per-update measures and wall time on one run (W2-E, E3 checklist item 9):
+// UW_TECTONICS_MEASURES the JSON path; UW_TECTONICS_N, default 64; UW_TECTONICS_MYR, default 50.
+// Seed 1, the baseline. Per update: the largest displacement over each cell's smallest edge,
+// the transport's substeps, |1 - coverage| over rigid interiors by cell class, the force
+// balance's condition, spin shares, net rotation, area-RMS and centroid speeds, the column
+// mass residual and the update's seconds; then their extremes, a histogram and the phases.
+TEST(TectonicMeasures, DISABLED_Run) {
+    const std::string path = environment("UW_TECTONICS_MEASURES");
+    ASSERT_FALSE(path.empty()) << "set UW_TECTONICS_MEASURES to the output path";
+    const std::string n_text = environment("UW_TECTONICS_N");
+    const std::string myr_text = environment("UW_TECTONICS_MYR");
     auto scenario = tectonics::scenario::baseline();
     scenario.seed = 1;
-    scenario.width = !width_text.empty() ? static_cast<std::uint32_t>(std::stoul(width_text)) : 256u;
-    scenario.height = scenario.width / 2;
-    scenario.evolution_duration_myr = !myr_text.empty() ? std::stod(myr_text) : 100.0;
+    scenario.sphere_face_cells = !n_text.empty() ? static_cast<std::uint32_t>(std::stoul(n_text)) : 64u;
+    scenario.evolution_duration_myr = !myr_text.empty() ? std::stod(myr_text) : 50.0;
     const auto start = std::chrono::steady_clock::now();
     lithosphere world(scenario);
     const auto created = std::chrono::steady_clock::now();
     const tectonics::PhaseTimings at_creation = world.getPhaseTimings();
-    while (!world.isFinished()) world.update();
-    const auto end = std::chrono::steady_clock::now();
-    const double creation = std::chrono::duration<double>(created - start).count();
-    const double updates = std::chrono::duration<double>(end - created).count();
-    const tectonics::PhaseTimings& timings = world.getPhaseTimings();
     std::ofstream out(path);
     ASSERT_TRUE(out.good()) << path;
     out.precision(6);
-    out << "{\n  \"grid\": \"planar scaffold " << scenario.width << " x " << scenario.height << "\",\n"
+    out << "{\n  \"grid\": \"cube N " << scenario.sphere_face_cells << "\",\n"
         << "  \"seed\": 1,\n  \"scenario\": \"tectonics baseline (configs/tectonics-baseline.json)\",\n"
         << "  \"duration_myr\": " << scenario.evolution_duration_myr << ",\n"
         << "  \"delta_time_myr\": " << scenario.delta_time_myr << ",\n"
-        << "  \"updates\": " << timings.updates << ",\n"
-        << "  \"plates_at_end\": " << world.getPlateCount() << ",\n"
-        << "  \"total_s\": " << creation + updates << ",\n"
-        << "  \"creation_s\": " << creation << ",\n"
-        << "  \"updates_s\": " << updates << ",\n"
-        << "  \"update_phases_s\": {\n";
-    double attributed = 0;
-    for (int phase = 0; phase < tectonics::PhaseTimings::count; ++phase) {
-        const double seconds = timings.seconds[phase] - at_creation.seconds[phase];
-        attributed += seconds;
-        out << "    \"" << tectonics::PhaseTimings::name(phase) << "\": " << seconds
-            << (phase + 1 < tectonics::PhaseTimings::count ? ",\n" : "\n");
+        << "  \"cells\": " << world.getGrid().cellcount() << ",\n"
+        << "  \"cell_spacing_km\": " << world.getGrid().cellspacing_m() / 1000 << ",\n"
+        << "  \"updates\": [\n";
+    double largest_ratio = 0, largest_residual = 0, largest_interior = 0, largest_edge = 0, largest_corner = 0;
+    double largest_condition = 0, rms_sum = 0, largest_rms = 0, largest_net = 0, update_sum = 0, mean_share_sum = 0;
+    std::array<int, 11> histogram{};
+    int updates = 0;
+    while (!world.isFinished()) {
+        const auto before = std::chrono::steady_clock::now();
+        world.update();
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - before).count();
+        const auto& t = world.getTransportDiagnostics();
+        const auto& m = world.getMotionDiagnostics();
+        const double residual = std::abs(world.getColumnModel().budget().relative_mass_residual);
+        largest_ratio = std::max(largest_ratio, t.max_displacement_edges);
+        largest_residual = std::max(largest_residual, residual);
+        largest_interior = std::max(largest_interior, t.coverage_interior_max);
+        largest_edge = std::max(largest_edge, t.coverage_edge_max);
+        largest_corner = std::max(largest_corner, t.coverage_corner_max);
+        largest_condition = std::max(largest_condition, m.condition_number);
+        largest_rms = std::max(largest_rms, m.rms_speed_cm_yr);
+        largest_net = std::max(largest_net, m.net_rotation_cm_yr);
+        rms_sum += m.rms_speed_cm_yr;
+        mean_share_sum += m.spin_share_mean;
+        update_sum += seconds;
+        ++histogram[std::min<std::size_t>(10, static_cast<std::size_t>(t.max_displacement_edges * 10))];
+        out << (updates ? ",\n" : "") << "    {\"time_myr\": " << world.getTimeMyr()
+            << ", \"plates\": " << world.getPlateCount()
+            << ", \"max_displacement_over_edge\": " << t.max_displacement_edges
+            << ", \"substeps\": " << t.substeps
+            << ", \"coverage_interior_max\": " << t.coverage_interior_max
+            << ", \"coverage_interior_mean\": " << t.coverage_interior_mean
+            << ", \"coverage_edge_max\": " << t.coverage_edge_max
+            << ", \"coverage_edge_mean\": " << t.coverage_edge_mean
+            << ", \"coverage_corner_max\": " << t.coverage_corner_max
+            << ", \"coverage_corner_mean\": " << t.coverage_corner_mean
+            << ", \"rigid_cells\": [" << t.interior_cells << ", " << t.edge_cells << ", " << t.corner_cells << "]"
+            << ", \"condition\": " << m.condition_number
+            << ", \"spin_share_mean\": " << m.spin_share_mean
+            << ", \"spin_share_max\": " << m.spin_share_max
+            << ", \"net_rotation_cm_yr\": " << m.net_rotation_cm_yr
+            << ", \"rms_speed_cm_yr\": " << m.rms_speed_cm_yr
+            << ", \"centroid_speed_mean_cm_yr\": " << m.mean_speed_cm_yr
+            << ", \"centroid_speed_max_cm_yr\": " << m.max_speed_cm_yr
+            << ", \"force_residual\": " << m.relative_force_residual
+            << ", \"mass_residual\": " << residual
+            << ", \"seconds\": " << seconds << "}";
+        ++updates;
     }
-    out << "  },\n  \"update_unattributed_s\": " << updates - attributed << ",\n"
-        << "  \"creation_phases_s\": {\n";
+    const auto end = std::chrono::steady_clock::now();
+    const double creation = std::chrono::duration<double>(created - start).count();
+    const tectonics::PhaseTimings& timings = world.getPhaseTimings();
+    out << "\n  ],\n  \"summary\": {\n"
+        << "    \"updates\": " << updates << ",\n"
+        << "    \"plates_at_end\": " << world.getPlateCount() << ",\n"
+        << "    \"max_displacement_over_edge\": " << largest_ratio << ",\n"
+        << "    \"displacement_histogram_tenths\": [";
+    for (std::size_t k = 0; k < histogram.size(); ++k) out << (k ? ", " : "") << histogram[k];
+    out << "],\n"
+        << "    \"coverage_interior_max\": " << largest_interior << ",\n"
+        << "    \"coverage_edge_max\": " << largest_edge << ",\n"
+        << "    \"coverage_corner_max\": " << largest_corner << ",\n"
+        << "    \"condition_max\": " << largest_condition << ",\n"
+        << "    \"spin_share_mean\": " << (updates ? mean_share_sum / updates : 0) << ",\n"
+        << "    \"net_rotation_max_cm_yr\": " << largest_net << ",\n"
+        << "    \"rms_speed_mean_cm_yr\": " << (updates ? rms_sum / updates : 0) << ",\n"
+        << "    \"rms_speed_max_cm_yr\": " << largest_rms << ",\n"
+        << "    \"rms_speed_earth_cm_yr\": 0.937,\n"
+        << "    \"mass_residual_max\": " << largest_residual << ",\n"
+        << "    \"creation_s\": " << creation << ",\n"
+        << "    \"updates_s\": " << std::chrono::duration<double>(end - created).count() << ",\n"
+        << "    \"seconds_per_update\": " << (updates ? update_sum / updates : 0) << "\n"
+        << "  },\n  \"update_phases_s\": {\n";
     for (int phase = 0; phase < tectonics::PhaseTimings::count; ++phase)
-        out << "    \"" << tectonics::PhaseTimings::name(phase) << "\": " << at_creation.seconds[phase]
+        out << "    \"" << tectonics::PhaseTimings::name(phase) << "\": " << timings.seconds[phase] - at_creation.seconds[phase]
             << (phase + 1 < tectonics::PhaseTimings::count ? ",\n" : "\n");
     out << "  }\n}\n";
+    EXPECT_LT(largest_residual, 1e-9);
 }
