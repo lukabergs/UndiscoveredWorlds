@@ -301,3 +301,36 @@ the 4-D simplex torus noise are deleted (`tectonic_sphere_noise.hpp`).
 - Seamounts: one per cell of a coarse cube whose cells are about the spacing wide,
   offset within its middle 60 %, the ellipse in its tangent frame by great-circle
   distance (the torus tiles in 3 x 3 neighbourhoods).
+
+## 12. Acceptance on the cube and the one re-tuning round (W2-E, E6, 2026-10-19)
+
+Seed 1, 400 Myr, `tectonics` recipe to `geology.plate_tectonics` with `--grid cube`;
+measures in `out/scratch/sphere/E6/acceptance.json` (by true cell areas; W3 the
+torus run at the same columns, its cells unweighted).
+
+- The cube engine thickens continents less than the torus did with the same W3
+  keys: at N 64 crust over 50 km covers 0.8 % of the surface (torus 2.8 %), the
+  continental-land median is 256 m (W3 409 m) and land above 2000 m 0.34 % (W3
+  1.8 %, Earth 3.2 %). Area 0.393 and thickness 37.0 km are within W3's
+  tolerances. At N 32 nothing stands above 2000 m (W3 at 128 columns 2.2 %).
+- The creep below the collapse onset is the lever: 10000 / 5000 / 2500 / 0
+  km^2/Myr give 2000-3000 m 0.22 / 1.03 / 0.94 / 2.05 % and 3000+ m 0.12 / 0.33
+  / 1.30 / 2.75 % at N 64. 2500 passes every T4.12 gate at N 64 (area 0.374,
+  38.9 km, land 0.279, median 375 m, bands within a factor of two of Earth's
+  1.7 / 1.5 %) and is the baseline from version 6. N 32 with 2500 still has too
+  few mountains (0.24 / 0.37 %) and too much thin area (0.412 at 36.0 km): the
+  engine's thickening depends on the resolution more than the torus' did.
+- The end-of-run RMS speed is one sample of a quantity that varies by about
+  +-20 % over the run (N 64 baseline: p10-p90 of the per-update area-RMS speed
+  1.01-1.45 cm/yr, mean 1.29, last 1.13); thicker orogens (creep 2500) end at 1.35.
+- The cost per update follows the transport's substep count (0.95 subcells per
+  substep over each plate's dilated reference domain, about 0.24 cell at s 4):
+  at N 64 this world needs 2 substeps in 177 of 400 updates against 7 of 50 in
+  E3's, so the same code runs 22 % slower side by side with E3's executable.
+- The process-variation waves now leave the e1-e2 plane (`variation::multiplier`,
+  third wave e1 + 2 e3): with three coplanar wave vectors the pattern was
+  mirror-symmetric about the great circle normal to e3. The deformation peak's
+  two waves stay coplanar; any two plane waves are mirror-symmetric about the
+  plane normal to both, and its product with the multiplier is not.
+- The seamount reach is 3 r / 0.75, the support of the longest semi-axis
+  (it was 3.75 r; seamounts are off in the baseline).

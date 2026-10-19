@@ -1,7 +1,7 @@
 {
-  "version": 5,
+  "version": 6,
   "name": "earth-like-w3-400myr-n64",
-  "notes": "Earth-like set W3 of terrain roadmap T4.12 round 5 (tectonics-0016; the user approved the switch on 2026-10-18): 40 % continental crust, 15-34 km continental thickness with root cap and delamination, orogenic collapse above a 65 km onset and creep below it. 400 Myr because the analytic mantle forcing has a 600 Myr clock (T4.10) and the crust thickens after about 500 Myr; the duration stays a run parameter (--duration). The engine's struct defaults keep the earlier legacy values. Version 5 (T8 W2-E, E5): the cube engine at N 64 (sphere_face_cells; the 256-column equivalent) on the body's radius, the world's hand-off by cached remap and output contract schema 8; the W3 values are not yet re-tuned on the sphere (E6).",
+  "notes": "Earth-like set W3 of terrain roadmap T4.12 round 5 (tectonics-0016; the user approved the switch on 2026-10-18): 40 % continental crust, 15-34 km continental thickness with root cap and delamination, orogenic collapse above a 65 km onset and creep below it. 400 Myr because the analytic mantle forcing has a 600 Myr clock (T4.10) and the crust thickens after about 500 Myr; the duration stays a run parameter (--duration). The engine's struct defaults keep the earlier legacy values. Version 5 (T8 W2-E, E5): the cube engine at N 64 (sphere_face_cells; the 256-column equivalent) on the body's radius, the world's hand-off by cached remap and output contract schema 8; Version 6 (T8.7, E6, the one re-tuning round on the sphere): orogenic_collapse_below_onset_km2_myr 10000 -> 2500, because the cube engine thickened less than the torus (at N 64, 400 Myr, by true area: continental land median 256 m against W3 409, land 2000-3000 m 0.22 % and 3000+ 0.12 % of the surface against Earth 1.7 / 1.5); with 2500 the area is 0.374, thickness 38.9 km, median 375 m, bands 0.94 / 1.30 % (out/scratch/sphere/E6/acceptance.json).",
   "seed": 1,
   "sphere_face_cells": 64,
   "checkpoint_every_updates": 10,
@@ -66,7 +66,7 @@
     "continental_max_thickness_m": 34000,
     "orogenic_collapse_km2_myr": 30000,
     "orogenic_collapse_onset_thickness_m": 65000,
-    "orogenic_collapse_below_onset_km2_myr": 10000,
+    "orogenic_collapse_below_onset_km2_myr": 2500,
     "continental_root_kg_m3": 246,
     "continental_root_max_thickness_m": 50000,
     "continental_root_delamination_width_m": 10000
