@@ -66,12 +66,58 @@ struct CubeLevel
 };
 
 // The level-0 ancestor's id of every cell of a window at k.
-std::vector<std::size_t> ancestors(const RegionalGlobalInputs& inputs, const mesh::CellGrid& grid, int k)
+std::vector<mesh::CellId> ancestors(const RegionalGlobalInputs& inputs, const mesh::CellGrid& grid, int k)
 {
-    std::vector<std::size_t> result(grid.cellcount());
+    std::vector<mesh::CellId> result(grid.cellcount());
     for (mesh::CellId c = 0; c < grid.cellcount(); c++)
         result[c] = inputs.grid->localofkey(parentkey(grid, grid.globalkey(c), k));
     return result;
+}
+
+// The export box of a window grid at the level's lat-lon export (4 N_L columns): the rows and the
+// shortest run of columns (wrapping at the date line) holding every cell's centre pixel (T8 W2-W3b; the
+// lat-lon window block's kept box and domain on the cube).
+struct ExportBox
+{
+    std::int64_t column0 = 0, row0 = 0;
+    int columns = 0, rows = 0;
+};
+
+ExportBox exportbox(const mesh::CellGrid& grid)
+{
+    ExportBox box;
+    const std::int64_t columns = 4 * static_cast<std::int64_t>(grid.facecells());
+    std::vector<std::uint8_t> used(static_cast<std::size_t>(columns), 0);
+    std::int64_t top = columns, bottom = -1;
+    for (mesh::CellId c = 0; c < grid.cellcount(); c++)
+    {
+        const ExportPixel pixel = exportpixel(grid.centre(c), columns);
+        used[static_cast<std::size_t>(pixel.column)] = 1;
+        top = std::min(top, pixel.row);
+        bottom = std::max(bottom, pixel.row);
+    }
+    if (bottom < 0)
+        return box;
+    // The longest run of unused columns (circular; the first such run on ties) is left out.
+    std::int64_t gapstart = 0, gaplength = 0;
+    for (std::int64_t start = 0; start < columns; start++)
+    {
+        if (used[static_cast<std::size_t>(start)] != 0 || used[static_cast<std::size_t>((start + columns - 1) % columns)] == 0)
+            continue;
+        std::int64_t length = 0;
+        while (length < columns && used[static_cast<std::size_t>((start + length) % columns)] == 0)
+            length++;
+        if (length > gaplength)
+        {
+            gaplength = length;
+            gapstart = start;
+        }
+    }
+    box.column0 = gaplength > 0 ? (gapstart + gaplength) % columns : 0;
+    box.columns = static_cast<int>(columns - gaplength);
+    box.row0 = top;
+    box.rows = static_cast<int>(bottom - top + 1);
+    return box;
 }
 
 // The descendants at k of level-0 keys (ascending).
@@ -135,6 +181,8 @@ void noisestep(const CubeLevel& c, LevelState& state)
             state.diagnostics->pocketcells = state.start.pocketcells;
             state.diagnostics->pocketsfilled = state.start.pocketsfilled;
             state.diagnostics->pocketcellsfilled = state.start.pocketcellsfilled;
+            state.diagnostics->maxblockerrorcolumn = state.start.maxblockerrorcolumn;
+            state.diagnostics->maxblockerrorrow = state.start.maxblockerrorrow;
         }
     }
     else
@@ -267,7 +315,7 @@ void solvestep(const CubeLevel& c, LevelState& state)
         relief.catchmentreach = 0;
     if (relief.catchmentreach > 0)
     {
-        const std::vector<std::size_t> global = ancestors(inputs, grid, c.k);
+        const std::vector<mesh::CellId> global = ancestors(inputs, grid, c.k);
         solveinput.globalcell.resize(count);
         solveinput.globalgrid = inputs.grid.get();
         for (std::size_t cell = 0; cell < count; cell++)
@@ -522,7 +570,7 @@ void lakesstep(const CubeLevel& c, LevelState& state)
     recordlevelstep(state, LevelStep::lakes);
 }
 
-void smoothingstep(const CubeLevel& c, LevelState& state, const std::vector<std::size_t>& global)
+void smoothingstep(const CubeLevel& c, LevelState& state, const std::vector<mesh::CellId>& global)
 {
     if (c.refinement == nullptr)
         return;
@@ -596,7 +644,7 @@ void projectionstep(const CubeLevel& c, LevelState& state)
         state.lift_m[cell] = static_cast<float>(static_cast<double>(elevation[cell]) - static_cast<double>(state.lift_m[cell]));
 }
 
-void levelsteps(const CubeLevel& c, LevelState& state, const std::vector<std::size_t>& global)
+void levelsteps(const CubeLevel& c, LevelState& state, const std::vector<mesh::CellId>& global)
 {
     noisestep(c, state);
     presmoothingstep(c, state);
@@ -616,7 +664,7 @@ void levelsteps(const CubeLevel& c, LevelState& state, const std::vector<std::si
 
 // finishregionallevel on a cube window: the ice above the ELA, the rivers and the lapse-rate climate, the
 // kept cells' fields in ascending key order.
-RegionalFields finish(const CubeLevel& c, LevelState& level, const std::vector<std::size_t>& global)
+RegionalFields finish(const CubeLevel& c, LevelState& level, const std::vector<mesh::CellId>& global)
 {
     const RegionalGlobalInputs& inputs = c.inputs;
     const mesh::CellGrid& grid = c.grid;
@@ -675,7 +723,7 @@ RegionalFields finish(const CubeLevel& c, LevelState& level, const std::vector<s
 }
 
 // The kept flags of a domain whose kept box is the descendants of sorted level-0 keys.
-std::vector<uint8_t> keptflags(const std::vector<std::size_t>& global, const RegionalGlobalInputs& inputs,
+std::vector<uint8_t> keptflags(const std::vector<mesh::CellId>& global, const RegionalGlobalInputs& inputs,
                                const std::vector<mesh::LevelKey>& keptglobal)
 {
     std::vector<uint8_t> kept(global.size(), 0);
@@ -725,7 +773,7 @@ CubeRegionResult runcuberegionalpass(const RegionalGlobalInputs& inputs, const s
     const std::vector<mesh::LevelKey> domain0 = dilatecells(base, kept, halo);
     const auto started = std::chrono::steady_clock::now();
     const std::shared_ptr<const mesh::CellGrid> grid = mesh::cubewindowgrid(n * scale, inputs.radius_m, descendants(n, scale, domain0), false);
-    const std::vector<std::size_t> global = ancestors(inputs, *grid, scale);
+    const std::vector<mesh::CellId> global = ancestors(inputs, *grid, scale);
     const std::vector<uint8_t> keptcells = keptflags(global, inputs, kept);
     const FineWarp warp = regionalwarp(*grid, n, inputs.seed, parameters);
     const GlobalIncision incision = globalincision(inputs, parameters);
@@ -807,7 +855,7 @@ CubeRegionResult runcuberefinement(const RegionalGlobalInputs& inputs, const std
     LevelState state;
     std::shared_ptr<const mesh::CellGrid> grid;
     std::vector<uint8_t> kept;
-    std::vector<std::size_t> global;
+    std::vector<mesh::CellId> global;
     FineWarp warp;
     std::vector<uint8_t> seagate, ownseaparent, lakereach;
     std::vector<float> lakeparent;
@@ -823,8 +871,17 @@ CubeRegionResult runcuberefinement(const RegionalGlobalInputs& inputs, const std
         diagnostics.window.factor = factor;
         diagnostics.window.level = l;
         diagnostics.window.halo = window.halo;
+        diagnostics.window.worldwidth = 4 * n;
+        diagnostics.window.worldheight = 2 * n;
 
         grid = keywindowgrid(window, radius, false);
+        {
+            const ExportBox box = exportbox(*grid);
+            diagnostics.window.domaincolumn0 = box.column0;
+            diagnostics.window.domaincolumns = box.columns;
+            diagnostics.window.domainrow0 = box.row0;
+            diagnostics.window.domainrows = box.rows;
+        }
         global = ancestors(inputs, *grid, k);
         kept = keptflags(global, inputs, window.keptglobal);
         warp = regionalwarp(*grid, n, inputs.seed, parameters);
@@ -845,21 +902,30 @@ CubeRegionResult runcuberefinement(const RegionalGlobalInputs& inputs, const std
         ownseaparent.assign(count, 0);
         lakereach.assign(count, 0);
         lakeparent.assign(count, 0.0f);
+        // Per parent once: the cells of a parent's row in a block are consecutive in key order (T8 W2-W3b).
+        mesh::LevelKey lastparent = mesh::nokey;
+        mesh::CellId own = mesh::nocell;
+        bool sea = false, wet = false;
         for (mesh::CellId cell = 0; cell < count; cell++)
         {
             const mesh::LevelKey parent = parentkey(*grid, grid->globalkey(cell), factor);
-            const mesh::CellId own = parentgrid->localofkey(parent);
-            if (own == mesh::nocell)
-                throw std::logic_error("runcuberefinement: a parent lies outside the parent level's kept cells");
-            bool sea = parentsea[own] != 0, wet = parentlake[own] > 0.0f;
-            for (int slot = 1; slot <= mesh::slotcount; slot++)
+            if (parent != lastparent)
             {
-                const mesh::LevelKey other = mesh::cubekeyneighbour(parentcells, parent, slot);
-                const mesh::CellId local = other == mesh::nokey ? mesh::nocell : parentgrid->localofkey(other);
-                if (local == mesh::nocell)
-                    continue;
-                sea = sea || parentsea[local] != 0;
-                wet = wet || parentlake[local] > 0.0f;
+                lastparent = parent;
+                own = parentgrid->localofkey(parent);
+                if (own == mesh::nocell)
+                    throw std::logic_error("runcuberefinement: a parent lies outside the parent level's kept cells");
+                sea = parentsea[own] != 0;
+                wet = parentlake[own] > 0.0f;
+                for (int slot = 1; slot <= mesh::slotcount; slot++)
+                {
+                    const mesh::LevelKey other = mesh::cubekeyneighbour(parentcells, parent, slot);
+                    const mesh::CellId local = other == mesh::nokey ? mesh::nocell : parentgrid->localofkey(other);
+                    if (local == mesh::nocell)
+                        continue;
+                    sea = sea || parentsea[local] != 0;
+                    wet = wet || parentlake[local] > 0.0f;
+                }
             }
             seagate[cell] = sea ? 1 : 0;
             lakereach[cell] = wet ? 1 : 0;
@@ -969,7 +1035,13 @@ CubeRegionResult runcuberefinement(const RegionalGlobalInputs& inputs, const std
                 diagnostics.landbelowsea++;
                 const double depth = static_cast<double>(inputs.sealevel) - static_cast<double>(elevation[cell]);
                 if (!belowfound || depth > diagnostics.maxlandbelowsea_m)
+                {
                     diagnostics.maxlandbelowsea_m = depth;
+                    // The cell as its pixel of the level's lat-lon export (T8 W2-W3b).
+                    const ExportPixel pixel = exportpixel(grid->centre(cell), 4 * static_cast<std::int64_t>(grid->facecells()));
+                    diagnostics.maxlandbelowseacolumn = pixel.column;
+                    diagnostics.maxlandbelowsearow = pixel.row;
+                }
                 belowfound = true;
             }
             if (!state.water.rimraise_m.empty() && state.water.rimraise_m[cell] > 0.0f)
@@ -1041,6 +1113,13 @@ CubeRegionResult runcuberefinement(const RegionalGlobalInputs& inputs, const std
         // The kept cells as the next level's parent (and the global-mean error over their level-0 blocks).
         const std::shared_ptr<const mesh::CellGrid> keptgrid =
             mesh::cubewindowgrid(static_cast<int>(window.levelcells()), radius, window.keptkeys(), l == levels);
+        {
+            const ExportBox box = exportbox(*keptgrid);
+            diagnostics.window.column0 = box.column0;
+            diagnostics.window.columns = box.columns;
+            diagnostics.window.row0 = box.row0;
+            diagnostics.window.rows = box.rows;
+        }
         std::vector<float> keptelevation(keptgrid->cellcount());
         std::vector<std::size_t> keptlocal(keptgrid->cellcount());
         for (mesh::CellId cell = 0; cell < keptgrid->cellcount(); cell++)

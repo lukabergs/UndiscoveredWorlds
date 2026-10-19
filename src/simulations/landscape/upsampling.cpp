@@ -130,8 +130,10 @@ std::vector<float> upsample(const std::vector<float>& field, const mesh::CellGri
                 throw std::invalid_argument("upsample: a stencil node lies outside the level-0 grid");
             return field[cell];
         };
+        // The stencils at the window's centres, kept with the window grid (T8 W2-W3b).
+        const mesh::CentreStencils& stencils = mesh::centrestencils(window, n);
         for (mesh::CellId c = 0; c < count; c++)
-            fine[c] = static_cast<float>(mesh::applystencil(mesh::cubicstencil(n, window.centre(c)), value));
+            fine[c] = static_cast<float>(stencils.apply(c, value));
         return fine;
     }
     const int width = levelzero.columns(), height = levelzero.rows();

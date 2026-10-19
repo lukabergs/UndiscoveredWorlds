@@ -687,6 +687,12 @@ TEST_F(Landscape, RegionalCubeRefinementOverlap)
     {
         EXPECT_LE(level.projection.maxparentmeanerror_m, 4.0 * level.meanbound_m + 1.0e-6) << "level " << level.level;
         EXPECT_LT(level.globalmeanerror_m, 0.05) << "level " << level.level;
+        // The lat-lon window block (T8 W2-W3b): the export boxes of the kept cells and the domain.
+        EXPECT_EQ(level.window.worldwidth, 4 * cuben);
+        EXPECT_GT(level.window.columns, 0) << "level " << level.level;
+        EXPECT_GT(level.window.rows, 0) << "level " << level.level;
+        EXPECT_GE(level.window.domaincolumns, level.window.columns) << "level " << level.level;
+        EXPECT_GE(level.window.domainrows, level.window.rows) << "level " << level.level;
     }
 }
 

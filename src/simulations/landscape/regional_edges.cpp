@@ -383,8 +383,7 @@ std::vector<float> lakecellweight(const RegionalGlobalInputs& inputs, const mesh
     {
         const mesh::Vec3 p = warp.empty() ? window.centre(c)
                                           : warpedpoint(window.centre(c), warp.dx[c], warp.dy[c], grid.radius_m(), n);
-        weight[c] = static_cast<float>(mesh::applystencil(mesh::cubicstencil(n, p),
-                                                          [&](mesh::LevelKey key) { return mask[grid.localofkey(key)]; }));
+        weight[c] = static_cast<float>(mesh::PointStencil(n, p).apply([&](mesh::LevelKey key) { return mask[grid.localofkey(key)]; }));
     }
     return weight;
 }

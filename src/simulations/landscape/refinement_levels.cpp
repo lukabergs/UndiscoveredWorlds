@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 
+#include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/window_grid.hpp"
 #include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/regional_surface.hpp"
@@ -306,28 +307,46 @@ Prolongation prolong(const mesh::CellGrid& parent, const std::vector<float>& par
     if (kept != nullptr && kept->size() != level.cellcount())
         throw std::invalid_argument("prolong: the kept flags must hold one value per level cell");
     const std::int64_t n = parent.facecells();
+    // A node outside the parent's kept cells takes the kept parent at the smallest ring distance, ties to
+    // the smallest key (sphere-mesh.md section 8's rule for stencil nodes beyond a domain; T8 W2-W3b: the
+    // true-position ghosts of a level-1 cell beside a cube corner spread beyond the chain's ring).
+    std::unique_ptr<NearestDomainKey> nearest;
     const auto value = [&](mesh::LevelKey key) {
         const mesh::CellId cell = parent.localofkey(key);
-        if (cell == mesh::nocell)
-            throw std::invalid_argument("prolong: a stencil node lies outside the parent's kept cells");
-        return parentfield[cell];
+        if (cell != mesh::nocell)
+            return parentfield[cell];
+        if (!nearest)
+        {
+            std::vector<mesh::LevelKey> keys(parent.cellcount());
+            for (mesh::CellId c = 0; c < parent.cellcount(); c++)
+                keys[c] = parent.globalkey(c);
+            nearest = std::make_unique<NearestDomainKey>(n, std::move(keys));
+        }
+        return parentfield[(*nearest)(key)];  // the index in ascending key order is the parent's local id
     };
     Prolongation result;
     result.values.resize(level.cellcount());
+    // The stencils at the level's centres, kept with the level's grid (T8 W2-W3b).
+    const mesh::CentreStencils& stencils = mesh::centrestencils(level, n);
+    mesh::CentreStencils::Interior nodes;
     for (mesh::CellId c = 0; c < level.cellcount(); c++)
     {
         const mesh::Vec3 p = level.centre(c);
-        const double interpolated = mesh::applystencil(mesh::cubicstencil(n, p), value);
+        const double interpolated = stencils.apply(c, value);
         float& cell = result.values[c];
         cell = static_cast<float>(interpolated);
         if (!limit)
             continue;
-        // The central 2 x 2 nodes (sphere-mesh.md section 8, decided 2026-10-19).
+        // The central 2 x 2 nodes (sphere-mesh.md section 8, decided 2026-10-19); on the face a node is its
+        // cell (applystencil of one term: the value plus 0).
+        const bool onface = stencils.interior(c, nodes);
         double lowest = 0.0, highest = 0.0;
         for (int row = 1; row <= 2; row++)
             for (int column = 1; column <= 2; column++)
             {
-                const double node = mesh::applystencil(mesh::cubicstencilnode(n, p, column, row), value);
+                const double node =
+                    onface ? static_cast<double>(value(mesh::cubekey(n, nodes.face, nodes.i0 + column, nodes.j0 + row))) + 0.0
+                           : mesh::applystencil(mesh::cubicstencilnode(n, p, column, row), value);
                 const bool first = row == 1 && column == 1;
                 lowest = first ? node : std::min(lowest, node);
                 highest = first ? node : std::max(highest, node);

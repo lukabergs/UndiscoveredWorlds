@@ -846,6 +846,14 @@ ProjectionReport projectlevel(const mesh::CellGrid& level, std::vector<float>& f
             else if (counted)
             {
                 report.forcedparents++;
+                if (std::fabs(remainder / children) > report.maxforcedmove_m)
+                {
+                    // The parent as its export pixel at the parent level (T8 W2-W3b).
+                    const ExportPixel pixel = exportpixel(mesh::cubekeycentre(parent.facecells(), blocks.parents[b]),
+                                                          4 * static_cast<std::int64_t>(parent.facecells()));
+                    report.maxforcedcolumn = pixel.column;
+                    report.maxforcedrow = pixel.row;
+                }
                 report.maxforcedmove_m = std::max(report.maxforcedmove_m, std::fabs(remainder / children));
             }
         }
@@ -884,6 +892,8 @@ ProjectionReport projectlevel(const mesh::CellGrid& level, std::vector<float>& f
         for (std::size_t n = 0; n < blocks.perparent(); n++)
             blockof[blocks.childrenof(b)[n]] = b;
     std::vector<double> steps;
+    double largeststep = -1.0;
+    std::size_t largestblock = blockcount;
     for (mesh::CellId c = 0; c < size; c++)
     {
         if (kept[c] == 0 || moved[c] == 0)
@@ -897,7 +907,20 @@ ProjectionReport projectlevel(const mesh::CellGrid& level, std::vector<float>& f
             if (kept[o] == 0 || moved[o] == 0 || blockof[o] == blockof[c])
                 continue;
             steps.push_back(std::fabs(correction[c] - correction[o]));
+            if (steps.back() > largeststep)
+            {
+                largeststep = steps.back();
+                largestblock = blockof[c];
+            }
         }
+    }
+    if (largestblock < blockcount)
+    {
+        // The first cell's parent as its export pixel at the parent level (T8 W2-W3b).
+        const ExportPixel pixel = exportpixel(mesh::cubekeycentre(parentcells, blocks.parents[largestblock]),
+                                              4 * static_cast<std::int64_t>(parentcells));
+        report.maxborderstepcolumn = pixel.column;
+        report.maxbordersteprow = pixel.row;
     }
     if (!steps.empty())
     {

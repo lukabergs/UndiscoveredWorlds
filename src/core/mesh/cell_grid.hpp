@@ -64,6 +64,18 @@ enum class GridKind
 
 struct LatLonWindowBox;
 
+// Values derived from a grid and kept with it (window_grid.cpp, T8 W2-W3b): a copy of a grid starts
+// with none.
+struct GridCaches;
+struct GridCacheSlot
+{
+    GridCacheSlot();
+    GridCacheSlot(const GridCacheSlot&);
+    GridCacheSlot& operator=(const GridCacheSlot&);
+    ~GridCacheSlot();
+    std::unique_ptr<GridCaches> caches;
+};
+
 class CellGrid
 {
 public:
@@ -123,8 +135,10 @@ private:
     friend std::shared_ptr<const CellGrid> cubewindowgrid(int, double, const std::vector<LevelKey>&, bool);
     friend std::shared_ptr<const CellGrid> latlonwindowgrid(int, double, const LatLonWindowBox&);
     friend std::shared_ptr<const CellGrid> makeplanarwindow(int, int, double);
+    friend GridCaches& gridcaches(const CellGrid&);
 
     LevelKey locatekey(const Vec3& p) const;  // the level key of the full grid's cell
+    double keywindowdistance_m(CellId c, int k) const;  // a stored cube window's distance (T8 W2-W3b)
     int analyticwidth() const { return latlonwindow_ ? windowcolumns_ : columns_; }
 
     GridKind kind_ = GridKind::latlon;
@@ -164,6 +178,16 @@ private:
     bool keywindow_ = false;
     bool compact_ = false;
     std::vector<LevelKey> keys_;
+    // A cube window's neighbours (T8 W2-W3b): a regular cell (inside its face, its 8 neighbours in the
+    // window, those of a row consecutive local ids) holds its north and south neighbours, the others
+    // derived (north +- 1, south +- 1, itself +- 1) and every reverse slot the opposite one; any other
+    // cell holds -1 in north_ and its row of the full tables (8 slots each) in south_.
+    std::vector<std::int32_t> north_;
+    std::vector<std::int32_t> south_;
+    std::vector<std::int32_t> exneighbour_;  // 8 per irregular cell
+    std::vector<std::int8_t> exreverse_;
+    std::int32_t keyneighbour(CellId c, int k) const;
+    int keyreverse(CellId c, int k) const;
 
     // A lat-lon window: a box of the level grid (columns_ x rows_), its first
     // level column and row and its size; the analytic tables are per box row
@@ -173,6 +197,8 @@ private:
     int windowrow0_ = 0;
     int windowcolumns_ = 0;
     int windowrows_ = 0;
+
+    GridCacheSlot caches_;
 };
 
 // A box of a level's lat-lon grid in level cells: columns column0 ..
@@ -198,8 +224,11 @@ std::shared_ptr<const CellGrid> subgrid(const CellGrid& grid, const std::vector<
 // over a set of level keys (sorted and deduplicated here), built in closed form
 // from the keys: local ids in ascending key order, neighbours outside the set -1,
 // distance, face length and bearing those of the full level (the cube's own
-// formulas), areas exact. Compact (about 80 bytes per cell) computes latitude,
-// longitude, distance, face length and bearing on demand, bit-identical to the
+// formulas), areas exact. The stored mode keeps the distances of slots 1 to 4
+// (a slot 5 to 8 reads its neighbour's by the reverse slot when that is 1 to 4:
+// the great-circle angle is symmetric bit for bit) and computes latitudes,
+// longitudes, face lengths and bearings on demand (T8 W2-W3b); compact (about
+// 80 bytes per cell) computes distances on demand too, bit-identical to the
 // stored mode. Throws std::invalid_argument for N_L out of range or a key >= 6 N_L^2.
 std::shared_ptr<const CellGrid> cubewindowgrid(int facecells, double radius_m, const std::vector<LevelKey>& keys,
                                                bool compact = false);

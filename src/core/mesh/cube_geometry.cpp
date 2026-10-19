@@ -107,10 +107,12 @@ double cubecentreb(std::int64_t facecells, std::int64_t row)
     return (0.5 * static_cast<double>(facecells) - static_cast<double>(row) - 0.5) * cubestep(facecells);
 }
 
-Vec3 cubepoint(int face, double a, double b)
+Vec3 cubepoint(int face, double a, double b) { return cubepointfromtangents(face, std::tan(a), std::tan(b)); }
+
+Vec3 cubepointfromtangents(int face, double tana, double tanb)
 {
     const CubeFace& f = faces[face];
-    return normalise(f.centre + std::tan(a) * f.right + std::tan(b) * f.up);
+    return normalise(f.centre + tana * f.right + tanb * f.up);
 }
 
 FacePosition cubepositiononface(int face, const Vec3& p)
@@ -248,15 +250,27 @@ double cubekeyunitarea(std::int64_t facecells, LevelKey key)
     if (facecells < exactareafacecells)
         return cubeunitarea(cubeedgea(facecells, i), cubeedgea(facecells, i + 1), cubeedgeb(facecells, j + 1),
                             cubeedgeb(facecells, j));
-    const double half = 0.5 * cubestep(facecells);
-    const double a = cubecentrea(facecells, i), b = cubecentreb(facecells, j);
     double x2[4], y2[4];
+    cubegausssquares(facecells, cubecentrea(facecells, i), x2);
+    cubegausssquares(facecells, cubecentreb(facecells, j), y2);
+    return cubegaussarea(facecells, x2, y2);
+}
+
+bool cubegaussareas(std::int64_t facecells) { return facecells >= exactareafacecells; }
+
+void cubegausssquares(std::int64_t facecells, double centre, double squares[4])
+{
+    const double half = 0.5 * cubestep(facecells);
     for (int m = 0; m < 4; m++)
     {
-        const double x = std::tan(a + half * gaussnodes[m]), y = std::tan(b + half * gaussnodes[m]);
-        x2[m] = x * x;
-        y2[m] = y * y;
+        const double x = std::tan(centre + half * gaussnodes[m]);
+        squares[m] = x * x;
     }
+}
+
+double cubegaussarea(std::int64_t facecells, const double x2[4], const double y2[4])
+{
+    const double half = 0.5 * cubestep(facecells);
     double sum = 0.0;
     for (int m = 0; m < 4; m++)
         for (int l = 0; l < 4; l++)

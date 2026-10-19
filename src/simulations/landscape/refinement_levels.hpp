@@ -256,7 +256,8 @@ void correctparentmeans(const LevelWindow& parent, const std::vector<float>& par
 // the parent level, true-position ghosts); with `limit` clamped in double to [min, max] of the
 // stencil's central 2 x 2 nodes (mesh::cubicstencilnode 1..2, ghosts at their true positions);
 // `kept` (one flag per level cell, or null for every cell) selects the cells the clamp report
-// counts. Throws std::invalid_argument when a stencil node lies outside `parent`.
+// counts; a stencil node outside `parent` takes the value of its kept cell at the smallest ring
+// distance, ties to the smallest key (section 8's rule for nodes beyond a domain; T8 W2-W3b).
 // correctparentmeans: per pass the residual of every block (its children's mean minus the parent
 // value), stored as float, gathered by gatherblocks (a node beyond the domain's parents taking the
 // nearest domain parent's residual by rings, ties to the smallest key) and subtracted.

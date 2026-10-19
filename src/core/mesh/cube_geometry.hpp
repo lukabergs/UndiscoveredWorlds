@@ -36,6 +36,8 @@ double cubecentrea(std::int64_t facecells, std::int64_t column);  // (i + 0.5 - 
 double cubecentreb(std::int64_t facecells, std::int64_t row);     // (N/2 - j - 0.5) D
 
 Vec3 cubepoint(int face, double a, double b);       // the unit vector at face coordinates a, b
+// cubepoint from tan a and tan b (cubepoint is this of std::tan(a), std::tan(b), bit for bit).
+Vec3 cubepointfromtangents(int face, double tana, double tanb);
 // The face of a unit vector (the axis of the largest |coordinate| with its sign,
 // ties to the lower face number) and its face coordinates.
 FacePosition cubeposition(const Vec3& p);
@@ -100,6 +102,12 @@ Vec3 cubekeycentre(std::int64_t facecells, LevelKey key);
 // error stays near 1e-15 at every level (the corner formula's grows as N_L^2:
 // 2e-12 at 128, 5e-10 at 4096).
 double cubekeyunitarea(std::int64_t facecells, LevelKey key);
+// The Gauss-Legendre rule in two parts, for a window's build (T8 W2-W3b): true when N_L uses it, the squared
+// tangents at a centre coordinate's four nodes (a column's a or a row's b), and the rule over a column's and a
+// row's squares; there cubekeyunitarea is cubegaussarea(N_L, squares of a, squares of b) bit for bit.
+bool cubegaussareas(std::int64_t facecells);
+void cubegausssquares(std::int64_t facecells, double centre, double squares[4]);
+double cubegaussarea(std::int64_t facecells, const double x2[4], const double y2[4]);
 // The cell `depth` cells beyond a face edge (0: the first cell across it) at
 // index `along` along the edge, on the face across: the chart of the net rotation.
 LevelKey cubeacrossedge(std::int64_t facecells, int face, int edge, std::int64_t along, std::int64_t depth);

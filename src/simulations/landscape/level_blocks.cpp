@@ -1,6 +1,7 @@
 #include "simulations/landscape/level_blocks.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 
@@ -168,51 +169,143 @@ GatherPlan gatherplan(const WindowBlocks& blocks, const mesh::CellGrid& window)
 {
     if (window.kind() != mesh::GridKind::cube || blocks.factor < 1 || window.facecells() % blocks.factor != 0)
         throw std::invalid_argument("gatherblocks: a cube window, one value per block and a whole factor");
-    const std::int64_t parentcells = window.facecells() / blocks.factor;
-    const NearestDomainKey nearest(parentcells, blocks.parents);
-    // The blocks by the parents' ascending order (NearestDomainKey's indices).
-    std::vector<std::uint32_t> order(blocks.count());
-    for (std::size_t b = 0; b < blocks.count(); b++)
-        order[b] = static_cast<std::uint32_t>(b);
-    std::sort(order.begin(), order.end(), [&](std::uint32_t x, std::uint32_t y) { return blocks.parents[x] < blocks.parents[y]; });
     GatherPlan plan;
     plan.blocks = blocks.count();
-    plan.start.assign(window.cellcount() + 1, 0);
-    for (mesh::CellId c = 0; c < window.cellcount(); c++)
+    plan.cells = window.cellcount();
+    plan.parentcells = window.facecells() / blocks.factor;
+    plan.nearest = std::make_shared<const NearestDomainKey>(plan.parentcells, blocks.parents);
+    // The blocks by the parents' ascending order (NearestDomainKey's indices).
+    plan.order.resize(blocks.count());
+    for (std::size_t b = 0; b < blocks.count(); b++)
+        plan.order[b] = static_cast<std::uint32_t>(b);
+    std::sort(plan.order.begin(), plan.order.end(),
+              [&](std::uint32_t x, std::uint32_t y) { return blocks.parents[x] < blocks.parents[y]; });
+    // Per face the bounding box of the blocks' parents, each parent cell holding its block.
+    plan.faces.resize(mesh::cubefacecount);
+    std::int64_t low[mesh::cubefacecount][2], high[mesh::cubefacecount][2];
+    for (int f = 0; f < mesh::cubefacecount; f++)
     {
-        const mesh::KeyStencil stencil = mesh::cubicstencil(parentcells, window.centre(c));
-        for (std::size_t n = 0; n < stencil.key.size(); n++)
-        {
-            plan.block.push_back(order[nearest(stencil.key[n])]);
-            plan.weight.push_back(stencil.weight[n]);
-        }
-        plan.start[c + 1] = static_cast<std::uint32_t>(plan.block.size());
+        low[f][0] = low[f][1] = plan.parentcells;
+        high[f][0] = high[f][1] = -1;
     }
+    for (const mesh::LevelKey parent : blocks.parents)
+    {
+        const mesh::CubeCell cell = mesh::cubecell(plan.parentcells, parent);
+        low[cell.face][0] = std::min(low[cell.face][0], cell.column);
+        low[cell.face][1] = std::min(low[cell.face][1], cell.row);
+        high[cell.face][0] = std::max(high[cell.face][0], cell.column);
+        high[cell.face][1] = std::max(high[cell.face][1], cell.row);
+    }
+    for (int f = 0; f < mesh::cubefacecount; f++)
+    {
+        GatherPlan::FaceTable& table = plan.faces[static_cast<std::size_t>(f)];
+        if (high[f][0] < 0)
+            continue;
+        table.column0 = low[f][0];
+        table.row0 = low[f][1];
+        table.columns = high[f][0] - low[f][0] + 1;
+        table.rows = high[f][1] - low[f][1] + 1;
+        table.block.assign(static_cast<std::size_t>(table.columns * table.rows), -1);
+    }
+    for (std::size_t b = 0; b < blocks.count(); b++)
+    {
+        const mesh::CubeCell cell = mesh::cubecell(plan.parentcells, blocks.parents[b]);
+        GatherPlan::FaceTable& table = plan.faces[static_cast<std::size_t>(cell.face)];
+        table.block[static_cast<std::size_t>((cell.row - table.row0) * table.columns + (cell.column - table.column0))] =
+            static_cast<std::int32_t>(b);
+    }
+    // The stencils at the window's centres, kept with the window grid (T8 W2-W3b).
+    plan.stencils = &mesh::centrestencils(window, plan.parentcells);
     return plan;
+}
+
+std::size_t GatherPlan::blockof(mesh::LevelKey key) const
+{
+    const mesh::CubeCell cell = mesh::cubecell(parentcells, key);
+    const FaceTable& table = faces[static_cast<std::size_t>(cell.face)];
+    const std::int64_t x = cell.column - table.column0, y = cell.row - table.row0;
+    if (x >= 0 && y >= 0 && x < table.columns && y < table.rows)
+    {
+        const std::int32_t block = table.block[static_cast<std::size_t>(y * table.columns + x)];
+        if (block >= 0)
+            return static_cast<std::size_t>(block);
+    }
+    return order[(*nearest)(key)];
 }
 
 std::vector<double> gatherblocks(const GatherPlan& plan, const std::vector<double>& values)
 {
     if (values.size() != plan.blocks)
         throw std::invalid_argument("gatherblocks: one value per block of the plan");
+    std::vector<double> gathered(plan.cells, 0.0);
+    if (plan.stencils == nullptr)
+        return gathered;
     // mesh::applystencil's arithmetic: relative to the first node.
-    const std::size_t count = plan.start.size() - 1;
-    std::vector<double> gathered(count);
-    for (std::size_t c = 0; c < count; c++)
+    mesh::CentreStencils::Interior nodes;
+    const mesh::LevelKey n = static_cast<mesh::LevelKey>(plan.parentcells);
+    for (mesh::CellId c = 0; c < plan.cells; c++)
     {
-        const std::uint32_t first = plan.start[c], last = plan.start[c + 1];
-        if (first == last)
+        bool started = false;
+        double origin = 0.0, sum = 0.0;
+        if (plan.stencils->interior(c, nodes))
         {
-            gathered[c] = 0.0;
+            // CentreStencils::visit's on-face loop, the block from the face table when the node is a parent.
+            const GatherPlan::FaceTable& table = plan.faces[static_cast<std::size_t>(nodes.face)];
+            const mesh::LevelKey base = static_cast<mesh::LevelKey>(nodes.face) * n * n;
+            for (int m = 0; m < 4; m++)
+                for (int l = 0; l < 4; l++)
+                {
+                    const double w = nodes.wx[l] * nodes.wy[m];
+                    if (w == 0.0)
+                        continue;
+                    const std::int64_t column = nodes.i0 + l, row = nodes.j0 + m;
+                    const std::int64_t x = column - table.column0, y = row - table.row0;
+                    std::int32_t block = -1;
+                    if (x >= 0 && y >= 0 && x < table.columns && y < table.rows)
+                        block = table.block[static_cast<std::size_t>(y * table.columns + x)];
+                    const double value =
+                        values[block >= 0 ? static_cast<std::size_t>(block)
+                                          : plan.order[(*plan.nearest)(base + static_cast<mesh::LevelKey>(row) * n +
+                                                                       static_cast<mesh::LevelKey>(column))]];
+                    if (!started)
+                    {
+                        origin = value;
+                        started = true;
+                        continue;
+                    }
+                    sum += w * (value - origin);
+                }
+            gathered[c] = started ? origin + sum : 0.0;
             continue;
         }
-        const double origin = values[plan.block[first]];
-        double sum = 0.0;
-        for (std::uint32_t t = first + 1; t < last; t++)
-            sum += plan.weight[t] * (values[plan.block[t]] - origin);
-        gathered[c] = origin + sum;
+        plan.stencils->visit(c, [&](mesh::LevelKey key, double weight) {
+            const double value = values[plan.blockof(key)];
+            if (!started)
+            {
+                origin = value;
+                started = true;
+                return;
+            }
+            sum += weight * (value - origin);
+        });
+        gathered[c] = started ? origin + sum : 0.0;
     }
     return gathered;
+}
+
+ExportPixel exportpixel(const mesh::Vec3& p, std::int64_t columns)
+{
+    // CellGrid::locatekey's lat-lon expressions in 64 bits.
+    const double pi = 3.14159265358979323846;
+    const std::int64_t rows = columns / 2;
+    const double latitude = std::asin(std::clamp(p.z, -1.0, 1.0)), longitude = mesh::longitudeof(p);
+    ExportPixel pixel;
+    pixel.row = std::clamp(static_cast<std::int64_t>(std::floor((0.5 * pi - latitude) / (pi / static_cast<double>(rows)))),
+                           std::int64_t{ 0 }, rows - 1);
+    std::int64_t x = static_cast<std::int64_t>(std::floor((longitude + pi) / (2.0 * pi / static_cast<double>(columns))));
+    x = std::clamp(x, std::int64_t{ 0 }, columns);
+    pixel.column = x == columns ? 0 : x;
+    return pixel;
 }
 
 std::shared_ptr<const mesh::CellGrid> levelkeygrid(const LevelWindow& window)

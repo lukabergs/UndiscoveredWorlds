@@ -603,7 +603,7 @@ std::vector<double> cubedisplaced(const std::vector<Value>& field, const mesh::C
         double dx = 0.0, dy = 0.0;
         warp.atpoint(centre.x, centre.y, centre.z, dx, dy);
         const mesh::Vec3 p = warpedpoint(centre, dx, dy, box.radius_m(), levelzerofacecells);
-        result[c] = mesh::applystencil(mesh::cubebilinearstencil(box.facecells(), p),
+        result[c] = mesh::applystencil(mesh::cubebilinearterms(box.facecells(), p),
                                        [&](mesh::LevelKey key) { return static_cast<double>(field[nearest(key)]); });
     }
     return result;

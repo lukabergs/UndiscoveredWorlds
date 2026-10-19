@@ -271,11 +271,11 @@ TEST(MeshWindow, CompactEqualsStored)
         for (mesh::CellId c = 0; c < compact->cellcount(); c++)
             EXPECT_EQ(compact->localofkey(compact->globalkey(c)), c);
     }
-    // Bytes per cell of the vectors each mode keeps (keys, centres, areas, neighbours, reverses; stored
-    // adds latitude, longitude and the three per-slot metrics).
-    const std::size_t compactbytes = sizeof(mesh::LevelKey) + sizeof(mesh::Vec3) + sizeof(double) +
-                                     mesh::slotcount * (sizeof(std::int32_t) + sizeof(std::int8_t));
-    const std::size_t storedbytes = compactbytes + 2 * sizeof(double) + 3 * mesh::slotcount * sizeof(double);
+    // Bytes per regular cell of the vectors each mode keeps (keys, centres, areas, the north and south
+    // neighbours; an irregular cell adds 8 neighbours and reverses; stored adds the distances of slots 1
+    // to 4, T8 W2-W3b).
+    const std::size_t compactbytes = sizeof(mesh::LevelKey) + sizeof(mesh::Vec3) + sizeof(double) + 2 * sizeof(std::int32_t);
+    const std::size_t storedbytes = compactbytes + 4 * sizeof(double);
     std::cout << "bytes per cell: stored " << storedbytes << ", compact " << compactbytes << "\n";
     EXPECT_LE(compactbytes, 80u);
 }
@@ -528,5 +528,92 @@ TEST(MeshWindow, CubicStencilGhostsAtTruePositions)
         }
         previous = truth;
         std::cout << std::defaultfloat;
+    }
+}
+
+TEST(MeshWindow, DenseWindowTablesEqualTheKeyFormulas)
+{
+    // T8 W2-W3b: a dense window around a cube corner (faces 0, 1, 4) and across an edge (regular cells
+    // by their north and south neighbours, the slots 5 to 8 reading the neighbour's distance): every
+    // accessor equals the closed-form key functions bit for bit, in both modes.
+    for (std::int64_t n : { std::int64_t{ 64 }, std::int64_t{ 512 } })
+    {
+        const std::vector<mesh::LevelKey> seeds = { mesh::cubekey(n, 0, n - 1, 0), mesh::cubekey(n, 2, n / 2, n - 1) };
+        const std::vector<mesh::LevelKey> keys = mesh::dilatekeys(n, seeds, 20);
+        for (bool compact : { false, true })
+        {
+            const auto window = mesh::cubewindowgrid(static_cast<int>(n), radius, keys, compact);
+            int regular = 0;
+            for (mesh::CellId c = 0; c < window->cellcount(); c++)
+            {
+                const mesh::LevelKey key = window->globalkey(c);
+                expectsamevector(window->centre(c), mesh::cubekeycentre(n, key));
+                EXPECT_EQ(bits(window->area_m2(c)), bits(radius * radius * mesh::cubekeyunitarea(n, key)));
+                bool all = true;
+                for (int k = 1; k <= mesh::slotcount; k++)
+                {
+                    const mesh::LevelKey other = mesh::cubekeyneighbour(n, key, k);
+                    const mesh::CellId local = other == mesh::nokey ? mesh::nocell : window->localofkey(other);
+                    const std::int32_t expected = local == mesh::nocell ? -1 : static_cast<std::int32_t>(local);
+                    EXPECT_EQ(window->neighbour(c, k), expected);
+                    EXPECT_EQ(window->reverse(c, k), expected < 0 ? 0 : mesh::cubekeyreverse(n, key, k));
+                    EXPECT_EQ(bits(window->distance_m(c, k)), bits(mesh::cubekeydistance_m(n, key, k, radius)));
+                    EXPECT_EQ(bits(window->facelength_m(c, k)), bits(mesh::cubekeyfacelength_m(n, key, k, radius)));
+                    EXPECT_EQ(bits(window->bearing_rad(c, k)), bits(mesh::cubekeybearing_rad(n, key, k)));
+                    all = all && expected >= 0;
+                }
+                regular += all ? 1 : 0;
+            }
+            EXPECT_GT(regular, 0);
+        }
+    }
+}
+
+TEST(MeshWindow, KeptStencilsEqualCubicStencil)
+{
+    // T8 W2-W3b: G at every centre of a window around a cube corner and across an edge, at its own level
+    // and two coarser (the on-face cells in place, the others by their kept ghost pattern), at warped
+    // points (PointStencil) and the bilinear terms: the same keys and weights as cubicstencil and
+    // cubebilinearstencil, and the same applied values, bit for bit.
+    const std::int64_t n = 128;
+    const std::vector<mesh::LevelKey> seeds = { mesh::cubekey(n, 0, n - 1, 0), mesh::cubekey(n, 2, n / 2, n - 1) };
+    const auto window = mesh::cubewindowgrid(static_cast<int>(n), radius, mesh::dilatekeys(n, seeds, 24));
+    std::mt19937_64 random(7);
+    std::uniform_real_distribution<double> jitter(-0.6, 0.6);
+    for (std::int64_t level : { n, n / 4, n / 16 })
+    {
+        const auto field = [&](mesh::LevelKey key) { return smoothfield(mesh::cubekeycentre(level, key)); };
+        const mesh::CentreStencils& stencils = mesh::centrestencils(*window, level);
+        EXPECT_EQ(&stencils, &mesh::centrestencils(*window, level));  // kept with the grid
+        int ghosts = 0;
+        for (mesh::CellId c = 0; c < window->cellcount(); c++)
+        {
+            const mesh::KeyStencil direct = mesh::cubicstencil(level, window->centre(c));
+            std::size_t index = 0;
+            bool same = true;
+            stencils.visit(c, [&](mesh::LevelKey key, double weight) {
+                same = same && index < direct.key.size() && direct.key[index] == key && bits(direct.weight[index]) == bits(weight);
+                index++;
+            });
+            EXPECT_TRUE(same && index == direct.key.size()) << "level " << level << " cell " << c;
+            EXPECT_EQ(bits(stencils.apply(c, field)), bits(mesh::applystencil(direct, field)));
+            mesh::CentreStencils::Interior nodes;
+            ghosts += stencils.interior(c, nodes) ? 0 : 1;
+            // A point beside the centre (a warped point) and the bilinear terms there.
+            const mesh::Vec3 p = window->centre(c);
+            const mesh::Vec3 q = mesh::normalise(p + (jitter(random) * 2.0e-3) * mesh::Vec3{ -p.y, p.x, 0.0 } +
+                                                 (jitter(random) * 2.0e-3) * mesh::Vec3{ 0.0, -p.z, p.y });
+            EXPECT_EQ(bits(mesh::PointStencil(level, q).apply(field)), bits(mesh::applystencil(mesh::cubicstencil(level, q), field)));
+            const mesh::KeyStencil bilinear = mesh::cubebilinearstencil(level, q);
+            const mesh::SmallStencil small = mesh::cubebilinearterms(level, q);
+            ASSERT_EQ(static_cast<std::size_t>(small.size), bilinear.key.size());
+            for (int m = 0; m < small.size; m++)
+            {
+                EXPECT_EQ(small.key[m], bilinear.key[static_cast<std::size_t>(m)]);
+                EXPECT_EQ(bits(small.weight[m]), bits(bilinear.weight[static_cast<std::size_t>(m)]));
+            }
+        }
+        std::cout << "level " << level << ": " << ghosts << " of " << window->cellcount() << " cells by ghost patterns\n";
+        EXPECT_GT(ghosts, 0);
     }
 }

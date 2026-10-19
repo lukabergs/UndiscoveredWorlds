@@ -55,7 +55,7 @@ Vec3 CellGrid::centre(CellId c) const
 
 double CellGrid::latitude_rad(CellId c) const
 {
-    if (compact_)
+    if (keywindow_)  // computed on demand on a cube window (T8 W2-W3b)
         return latitudeof(centre_[c]);
     if (stored_)
         return latitude_[c];
@@ -64,7 +64,7 @@ double CellGrid::latitude_rad(CellId c) const
 
 double CellGrid::longitude_rad(CellId c) const
 {
-    if (compact_)
+    if (keywindow_)  // computed on demand on a cube window (T8 W2-W3b)
         return longitudeof(centre_[c]);
     if (stored_)
         return longitude_[c];
@@ -82,6 +82,8 @@ std::int32_t CellGrid::neighbour(CellId c, int k) const
 {
     if (!validslot(k))
         return -1;
+    if (keywindow_)
+        return keyneighbour(c, k);
     if (stored_)
         return neighbour_[slotindex(c, k)];
     if (latlonwindow_)
@@ -104,6 +106,8 @@ int CellGrid::reverse(CellId c, int k) const
 {
     if (!validslot(k))
         return 0;
+    if (keywindow_)
+        return keyreverse(c, k);
     if (stored_)
         return reverse_[slotindex(c, k)];
     return neighbour(c, k) < 0 ? 0 : oppositeslot(k);
@@ -115,6 +119,8 @@ double CellGrid::distance_m(CellId c, int k) const
         return 0.0;
     if (compact_)
         return cubekeydistance_m(facecells_, keys_[c], k, radius_m_);
+    if (keywindow_)
+        return keywindowdistance_m(c, k);
     if (stored_)
         return distance_[slotindex(c, k)];
     // landscape::SphereMetric::distance_m, expression for expression.
@@ -129,11 +135,54 @@ double CellGrid::distance_m(CellId c, int k) const
     return std::hypot(0.5 * (rowdx_[static_cast<std::size_t>(y)] + rowdx_[static_cast<std::size_t>(other)]), dy_m_);
 }
 
+std::int32_t CellGrid::keyneighbour(CellId c, int k) const
+{
+    const std::int32_t north = north_[c];
+    if (north < 0)
+        return exneighbour_[static_cast<std::size_t>(south_[c]) * slotcount + static_cast<std::size_t>(k - 1)];
+    const std::int32_t self = static_cast<std::int32_t>(c), south = south_[c];
+    switch (k)
+    {
+    case 1: return north;
+    case 2: return north + 1;
+    case 3: return self + 1;
+    case 4: return south + 1;
+    case 5: return south;
+    case 6: return south - 1;
+    case 7: return self - 1;
+    default: return north - 1;
+    }
+}
+
+int CellGrid::keyreverse(CellId c, int k) const
+{
+    if (north_[c] >= 0)
+        return oppositeslot(k);
+    return exreverse_[static_cast<std::size_t>(south_[c]) * slotcount + static_cast<std::size_t>(k - 1)];
+}
+
+double CellGrid::keywindowdistance_m(CellId c, int k) const
+{
+    // Slots 1 to 4 stored (4 per cell); a slot 5 to 8 is its neighbour's distance back when the reverse
+    // slot is 1 to 4, else computed as cubewindowgrid stored it.
+    if (k <= 4)
+        return distance_[static_cast<std::size_t>(c) * 4 + static_cast<std::size_t>(k - 1)];
+    const std::int32_t other = keyneighbour(c, k);
+    if (other >= 0)
+    {
+        const int back = keyreverse(c, k);
+        if (back >= 1 && back <= 4)
+            return distance_[static_cast<std::size_t>(other) * 4 + static_cast<std::size_t>(back - 1)];
+        return radius_m_ * greatcircleangle(centre_[c], centre_[static_cast<std::size_t>(other)]);
+    }
+    return cubekeydistance_m(facecells_, keys_[c], k, radius_m_);
+}
+
 double CellGrid::facelength_m(CellId c, int k) const
 {
     if (!validslot(k))
         return 0.0;
-    if (compact_)
+    if (keywindow_)  // computed on demand on a cube window (T8 W2-W3b)
         return cubekeyfacelength_m(facecells_, keys_[c], k, radius_m_);
     if (stored_)
         return facelength_[slotindex(c, k)];
@@ -151,7 +200,7 @@ double CellGrid::bearing_rad(CellId c, int k) const
 {
     if (!validslot(k))
         return 0.0;
-    if (compact_)
+    if (keywindow_)  // computed on demand on a cube window (T8 W2-W3b)
         return cubekeybearing_rad(facecells_, keys_[c], k);
     if (stored_)
         return bearing_[slotindex(c, k)];
@@ -484,46 +533,126 @@ std::shared_ptr<const CellGrid> cubewindowgrid(int facecells, double radius_m, c
     const std::size_t count = g.cellcount_;
     g.centre_.resize(count);
     g.area_.resize(count);
-    g.neighbour_.assign(count * slotcount, -1);
-    g.reverse_.assign(count * slotcount, 0);
+    g.north_.assign(count, -1);
+    g.south_.assign(count, 0);
     if (!compact)
+        g.distance_.resize(count * 4);
+    // T8 W2-W3b: the tangents and Gauss squares per column and row index (cubekeycentre's and
+    // cubekeyunitarea's expressions, computed once per index), the centres before the neighbours so a
+    // neighbour's distance reads its stored centre; face lengths and bearings are computed on demand.
+    std::int64_t lowest = static_cast<std::int64_t>(facecells), highest = -1;
+    for (const LevelKey key : g.keys_)
     {
-        g.latitude_.resize(count);
-        g.longitude_.resize(count);
-        g.distance_.resize(count * slotcount);
-        g.facelength_.resize(count * slotcount);
-        g.bearing_.resize(count * slotcount);
+        const CubeCell cell = cubecell(facecells, key);
+        lowest = std::min({ lowest, cell.column, cell.row });
+        highest = std::max({ highest, cell.column, cell.row });
     }
+    const bool gauss = cubegaussareas(facecells);
+    const std::size_t span = highest >= lowest ? static_cast<std::size_t>(highest - lowest + 1) : 0;
+    const bool tabled = span <= (std::size_t{ 1 } << 22);
+    std::vector<double> tana, tanb, squaresa, squaresb;
+    std::vector<std::uint8_t> done;
+    if (tabled && span > 0)
+    {
+        tana.resize(span);
+        tanb.resize(span);
+        done.assign(span, 0);
+        if (gauss)
+        {
+            squaresa.resize(4 * span);
+            squaresb.resize(4 * span);
+        }
+    }
+    const auto index = [&](std::int64_t value) {
+        const std::size_t at = static_cast<std::size_t>(value - lowest);
+        if (done[at] == 0)
+        {
+            tana[at] = std::tan(cubecentrea(facecells, value));
+            tanb[at] = std::tan(cubecentreb(facecells, value));
+            if (gauss)
+            {
+                cubegausssquares(facecells, cubecentrea(facecells, value), &squaresa[4 * at]);
+                cubegausssquares(facecells, cubecentreb(facecells, value), &squaresb[4 * at]);
+            }
+            done[at] = 1;
+        }
+        return at;
+    };
     const double r2 = radius_m * radius_m;
     double total = 0.0;
     for (CellId local = 0; local < count; local++)
     {
         const LevelKey key = g.keys_[local];
-        const Vec3 p = cubekeycentre(facecells, key);
-        g.centre_[local] = p;
-        g.area_[local] = r2 * cubekeyunitarea(facecells, key);
-        total += g.area_[local];
-        if (!compact)
+        Vec3 p;
+        double unitarea = 0.0;
+        if (tabled)
         {
-            g.latitude_[local] = latitudeof(p);
-            g.longitude_[local] = longitudeof(p);
+            const CubeCell cell = cubecell(facecells, key);
+            const std::size_t column = index(cell.column), row = index(cell.row);
+            p = cubepointfromtangents(cell.face, tana[column], tanb[row]);
+            unitarea = gauss ? cubegaussarea(facecells, &squaresa[4 * column], &squaresb[4 * row]) : cubekeyunitarea(facecells, key);
         }
+        else
+        {
+            p = cubekeycentre(facecells, key);
+            unitarea = cubekeyunitarea(facecells, key);
+        }
+        g.centre_[local] = p;
+        g.area_[local] = r2 * unitarea;
+        total += g.area_[local];
+    }
+    for (CellId local = 0; local < count; local++)
+    {
+        const LevelKey key = g.keys_[local];
+        // A cell at least one cell inside its face has its 8 neighbours on the face, each reaching it by the
+        // opposite slot: cubekeyreverse's result without its search.
+        const CubeCell own = cubecell(facecells, key);
+        const bool inside = own.column >= 1 && own.row >= 1 && own.column + 1 < facecells && own.row + 1 < facecells;
+        std::int32_t neighbours[slotcount];
+        std::int8_t reverses[slotcount];
         for (int k = 1; k <= slotcount; k++)
         {
-            const std::size_t s = slotindex(local, k);
+            const std::size_t s = static_cast<std::size_t>(k - 1);
+            neighbours[s] = -1;
+            reverses[s] = 0;
             const LevelKey other = cubekeyneighbour(facecells, key, k);
-            const CellId otherlocal = other == nokey ? nocell : g.localofkey(other);
+            CellId otherlocal = nocell;
+            if (other != nokey)
+            {
+                // A neighbour along the row is usually the next or previous local id.
+                if (local + 1 < count && g.keys_[local + 1] == other)
+                    otherlocal = local + 1;
+                else if (local > 0 && g.keys_[local - 1] == other)
+                    otherlocal = local - 1;
+                else
+                    otherlocal = g.localofkey(other);
+            }
             if (otherlocal != nocell)
             {
-                g.neighbour_[s] = static_cast<std::int32_t>(otherlocal);
-                g.reverse_[s] = static_cast<std::int8_t>(cubekeyreverse(facecells, key, k));
+                neighbours[s] = static_cast<std::int32_t>(otherlocal);
+                reverses[s] = static_cast<std::int8_t>(inside ? oppositeslot(k) : cubekeyreverse(facecells, key, k));
             }
-            if (compact)
+            if (compact || k > 4)
                 continue;
-            g.distance_[s] = cubekeydistance_m(facecells, key, k, radius_m);
-            g.facelength_[s] = cubekeyfacelength_m(facecells, key, k, radius_m);
-            g.bearing_[s] = cubekeybearing_rad(facecells, key, k);
+            // cubekeydistance_m with the stored centres (cubekeycentre's values).
+            g.distance_[static_cast<std::size_t>(local) * 4 + static_cast<std::size_t>(k - 1)] = other == nokey ? 0.0
+                                            : radius_m * greatcircleangle(g.centre_[local], otherlocal != nocell
+                                                                                                 ? g.centre_[otherlocal]
+                                                                                                 : cubekeycentre(facecells, other));
         }
+        const std::int32_t self = static_cast<std::int32_t>(local), north = neighbours[0], south = neighbours[4];
+        const bool regular = inside && north >= 0 && south >= 0 && neighbours[1] == north + 1 && neighbours[7] == north - 1 &&
+                             neighbours[2] == self + 1 && neighbours[6] == self - 1 && neighbours[3] == south + 1 &&
+                             neighbours[5] == south - 1;
+        if (regular)
+        {
+            g.north_[local] = north;
+            g.south_[local] = south;
+            continue;
+        }
+        g.south_[local] = static_cast<std::int32_t>(g.exneighbour_.size() / slotcount);
+        g.exneighbour_.insert(g.exneighbour_.end(), neighbours, neighbours + slotcount);
+        g.exreverse_.insert(g.exreverse_.end(), reverses, reverses + slotcount);
     }
     g.totalarea_m2_ = total;
     g.minimumspacing_m_ = cubeminimumspacing_m(facecells, radius_m);  // the level's own (makecubegrid's)

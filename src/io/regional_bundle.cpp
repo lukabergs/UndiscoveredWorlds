@@ -348,7 +348,12 @@ runbundle::Metadata regionalmanifest(const landscape::RegionalFields& fields, co
                         << ", \"cellsize_km\": " << jsonnumber(level.cellsize_km)
                         << ", \"kept_columns\": " << level.window.columns << ", \"kept_rows\": " << level.window.rows
                         << ", \"domain_columns\": " << level.window.domaincolumns
-                        << ", \"domain_rows\": " << level.window.domainrows << ", \"halo\": " << level.window.halo
+                        << ", \"domain_rows\": " << level.window.domainrows
+                        // The boxes' first column and row at the level (T8 W2-W3b; on a cube window the boxes
+                        // of the kept cells' and the domain's centre pixels in the level's lat-lon export).
+                        << ", \"kept_column0\": " << level.window.column0 << ", \"kept_row0\": " << level.window.row0
+                        << ", \"domain_column0\": " << level.window.domaincolumn0
+                        << ", \"domain_row0\": " << level.window.domainrow0 << ", \"halo\": " << level.window.halo
                         << ", \"blockmeanerror_m\": " << jsonnumber(level.blockmeanerror_m)
                         << ", \"parents\": " << projection.parents
                         << ", \"maxparentmeanerror_m\": " << jsonnumber(projection.maxparentmeanerror_m)

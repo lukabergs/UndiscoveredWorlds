@@ -914,15 +914,22 @@ FineWater cubeshorewater(const RegionalGlobalInputs& inputs, const mesh::CellGri
     for (std::size_t global = 0; global < globalsize; global++)
         lakemask[global] = lakecell[global] != 0 ? 1.0f : 0.0f;
     // The fully warped points and the fields there (lakecellweight's points).
-    std::vector<mesh::Vec3> point(count);
+    // T8 W2-W3b: the points are recomputed where they are read again (the same expression), not stored.
+    const auto pointof = [&](mesh::CellId c) {
+        return warp.empty() ? window.centre(c) : warpedpoint(window.centre(c), warp.dx[c], warp.dy[c], grid.radius_m(), n0);
+    };
     std::vector<float> lakeindicator(count), lakeweight(count), iceindicator(count), ice(count);
     for (mesh::CellId c = 0; c < count; c++)
     {
-        point[c] = warp.empty() ? window.centre(c) : warpedpoint(window.centre(c), warp.dx[c], warp.dy[c], grid.radius_m(), n0);
-        lakeindicator[c] = static_cast<float>(gathered(lakemagnitude, grid, point[c]));
-        lakeweight[c] = static_cast<float>(gathered(lakemask, grid, point[c]));
-        iceindicator[c] = static_cast<float>(gathered(icemagnitude, grid, point[c]));
-        ice[c] = static_cast<float>(gathered(inputs.icethickness_m, grid, point[c]));
+        // gathered's stencil, built once for the four fields (T8 W2-W3b).
+        const mesh::PointStencil stencil(n0, pointof(c));
+        const auto at = [&](const std::vector<float>& field) {
+            return stencil.apply([&](mesh::LevelKey key) { return field[grid.localofkey(key)]; });
+        };
+        lakeindicator[c] = static_cast<float>(at(lakemagnitude));
+        lakeweight[c] = static_cast<float>(at(lakemask));
+        iceindicator[c] = static_cast<float>(at(icemagnitude));
+        ice[c] = static_cast<float>(at(inputs.icethickness_m));
     }
     const double persistence = parameters.coast.noisepersistence;
     const RegionalNoise lakenoise(4 * n0, 2 * n0, cube.k, inputs.seed, lakenoisesalt, persistence);
@@ -945,8 +952,11 @@ FineWater cubeshorewater(const RegionalGlobalInputs& inputs, const mesh::CellGri
     {
         if (sea[cell] != 0)
             continue;
+        // Without a lake cell around, cubefinezone finds none whatever the stencil (T8 W2-W3b: not built).
+        if (!regionaldetail::aroundcell(grid, cube.globalof[cell], [&](std::size_t other) { return lakecell[other] != 0; }))
+            continue;
         const std::size_t lake = cubefinezone(grid, lakecell, lakemagnitude, cube.globalof[cell],
-                                              mesh::cubicstencil(n0, point[cell]));
+                                              mesh::cubicstencil(n0, pointof(cell)));
         if (lake == none)
             continue;
         zone[cell] = lake;

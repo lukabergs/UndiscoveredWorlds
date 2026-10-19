@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 
 #include "core/deterministic_random.hpp"
@@ -316,27 +317,35 @@ public:
 
     // The same at a cube cell (T8 W2-W2c): G of level 0 (n0 cells per face edge) in place of bicubic,
     // the warped point warpedpoint(centre, fade x warp), the noises at the cell's centre.
-    CellSample samplecube(const mesh::Vec3& centre, double warpx, double warpy, int n0) const
+    CellSample samplecube(const mesh::CentreStencils& centres, mesh::CellId c, const mesh::Vec3& centre, double warpx,
+                          double warpy, int n0) const
     {
         const mesh::CellGrid& grid = *inputs_.grid;
-        // G at the centre and at the warped point, each stencil built once and applied to every field.
-        const mesh::KeyStencil atcentre = mesh::cubicstencil(n0, centre);
-        mesh::KeyStencil atwarped;
-        const auto apply = [&](const std::vector<float>& field, const mesh::KeyStencil& stencil) {
-            return mesh::applystencil(stencil, [&](mesh::LevelKey key) { return field[grid.localofkey(key)]; });
+        // G at the centre (the window grid's kept stencils, T8 W2-W3b) and at the warped point (built once),
+        // each applied to every field.
+        std::optional<mesh::PointStencil> atwarped;
+        bool warpedcentre = true;
+        const auto applycentre = [&](const std::vector<float>& field) {
+            return centres.apply(c, [&](mesh::LevelKey key) { return field[grid.localofkey(key)]; });
+        };
+        const auto applywarped = [&](const std::vector<float>& field) {
+            return warpedcentre ? applycentre(field)
+                                : atwarped->apply([&](mesh::LevelKey key) { return field[grid.localofkey(key)]; });
         };
         const double sealevel = static_cast<double>(inputs_.sealevel);
         CellSample cell;
-        cell.lapsebase = static_cast<float>(apply(inputs_.elevation_m, atcentre));
+        cell.lapsebase = static_cast<float>(applycentre(inputs_.elevation_m));
         double fade = 1.0;
         if (parameters_.warp.fade_m > 0.0)
             fade = std::clamp(1.0 - std::fabs(static_cast<double>(cell.lapsebase) - sealevel) / parameters_.warp.fade_m,
                               0.0, 1.0);
         const mesh::Vec3 warped = warpedpoint(centre, fade * warpx, fade * warpy, inputs_.radius_m, n0);
-        atwarped = fade * warpx == 0.0 && fade * warpy == 0.0 ? atcentre : mesh::cubicstencil(n0, warped);
-        cell.base = warpx == 0.0 && warpy == 0.0 ? cell.lapsebase : static_cast<float>(apply(inputs_.elevation_m, atwarped));
-        const float relief = static_cast<float>(apply(relief_, atcentre));
-        const float noiserelief = noiserelief_.empty() ? relief : static_cast<float>(apply(noiserelief_, atcentre));
+        warpedcentre = fade * warpx == 0.0 && fade * warpy == 0.0;
+        if (!warpedcentre)
+            atwarped.emplace(n0, warped);
+        cell.base = warpx == 0.0 && warpy == 0.0 ? cell.lapsebase : static_cast<float>(applywarped(inputs_.elevation_m));
+        const float relief = static_cast<float>(applycentre(relief_));
+        const float noiserelief = noiserelief_.empty() ? relief : static_cast<float>(applycentre(noiserelief_));
         float banded = cell.base;
         if (band_->resolved() > 0)
         {
@@ -351,13 +360,13 @@ public:
         cell.surface = banded;
         if (coastnoise_)
         {
-            const double weight = std::clamp(apply(coastal_, atwarped), 0.0, 1.0);
+            const double weight = std::clamp(applywarped(coastal_), 0.0, 1.0);
             double amplitude = parameters_.coast.noiseamplitude_m +
                                parameters_.coast.noiserelieffraction * std::max(0.0, static_cast<double>(relief));
             if (factors_.active)
             {
-                amplitude += std::max(0.0, apply(factors_.amplitude_m, atwarped));
-                cell.dropfactor = static_cast<float>(std::clamp(apply(factors_.dropfactor, atwarped), 0.0, 1.0));
+                amplitude += std::max(0.0, applywarped(factors_.amplitude_m));
+                cell.dropfactor = static_cast<float>(std::clamp(applywarped(factors_.dropfactor), 0.0, 1.0));
             }
             if (weight > 0.0 && amplitude > 0.0)
             {
@@ -376,7 +385,7 @@ public:
             }
         }
         if (parameters_.coast.landshare > 0.0)
-            cell.inland = static_cast<float>(std::clamp(apply(inland_, atwarped), 0.0, 1.0));
+            cell.inland = static_cast<float>(std::clamp(applywarped(inland_), 0.0, 1.0));
         return cell;
     }
 
@@ -1200,7 +1209,7 @@ std::shared_ptr<const mesh::CellGrid> widenedbox(const mesh::CellGrid& window, i
     for (const mesh::LevelKey parent : mesh::dilatekeys(n0, blocks.parents, margin))
         for (const mesh::LevelKey child : mesh::cubechildkeys(n0, k, parent))
             keys.push_back(child);
-    return mesh::cubewindowgrid(window.facecells(), window.radius_m(), keys);
+    return mesh::cubewindowgrid(window.facecells(), window.radius_m(), keys, true);  // compact (T8 W2-W3b)
 }
 
 // The per-block and per-cell maps of a cube box over level 0.
@@ -1310,9 +1319,10 @@ void cubelandsharesurface(const RegionalGlobalInputs& inputs, const mesh::CellGr
     std::vector<float> surface(count), noise(count), fullnoise(count), weight(count), amplitude(count), inland(count),
         dropfactor(count);
     std::vector<float> base(count), lapsebase(count);
+    const mesh::CentreStencils& boxcentres = mesh::centrestencils(box, n0);
     for (mesh::CellId c = 0; c < count; c++)
     {
-        const CellSample sample = surfacer.samplecube(box.centre(c), warp.empty() ? 0.0 : warp.dx[c],
+        const CellSample sample = surfacer.samplecube(boxcentres, c, box.centre(c), warp.empty() ? 0.0 : warp.dx[c],
                                                       warp.empty() ? 0.0 : warp.dy[c], n0);
         surface[c] = sample.surface;
         noise[c] = sample.noise;
@@ -1371,8 +1381,8 @@ void cubelandsharesurface(const RegionalGlobalInputs& inputs, const mesh::CellGr
     std::vector<double> termweight;
     for (mesh::CellId c = 0; c < count; c++)
     {
-        const mesh::KeyStencil stencil = mesh::cubebilinearstencil(n0, box.centre(c));
-        for (std::size_t m = 0; m < stencil.key.size(); m++)
+        const mesh::SmallStencil stencil = mesh::cubebilinearterms(n0, box.centre(c));
+        for (int m = 0; m < stencil.size; m++)
         {
             termblock.push_back(static_cast<std::uint32_t>(nearestblock(stencil.key[m])));
             termweight.push_back(stencil.weight[m]);
@@ -1621,9 +1631,10 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const mesh
             result.base_m.resize(count);
             result.lapsebase_m.resize(count);
             result.start_m.resize(count);
+            const mesh::CentreStencils& windowcentres = mesh::centrestencils(window, n0);
             for (mesh::CellId c = 0; c < count; c++)
             {
-                const CellSample sample = surfacer.samplecube(window.centre(c), warp.empty() ? 0.0 : warp.dx[c],
+                const CellSample sample = surfacer.samplecube(windowcentres, c, window.centre(c), warp.empty() ? 0.0 : warp.dx[c],
                                                               warp.empty() ? 0.0 : warp.dy[c], n0);
                 result.base_m[c] = sample.base;
                 result.lapsebase_m[c] = sample.lapsebase;
@@ -1643,6 +1654,13 @@ StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const mesh
             continue;
         const double error = std::fabs(blockmean(blocks, b, result.start_m) -
                                        static_cast<double>(inputs.elevation_m[levelzero.localofkey(blocks.parents[b])]));
+        if (error > largest)
+        {
+            // Its level-0 cell as the pixel of the world's lat-lon export holding its centre (T8 W2-W3b).
+            const ExportPixel pixel = exportpixel(mesh::cubekeycentre(n0, blocks.parents[b]), 4 * static_cast<std::int64_t>(n0));
+            result.maxblockerrorcolumn = static_cast<int>(pixel.column);
+            result.maxblockerrorrow = static_cast<int>(pixel.row);
+        }
         largest = std::max(largest, error);
     }
     result.blockmeanerror_m = largest;

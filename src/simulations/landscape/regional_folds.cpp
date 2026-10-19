@@ -880,11 +880,11 @@ bool cubefoldson(const RegionalGlobalInputs& inputs, const RegionalParameters& p
 bool cubephaseat(const FoldPhaseField& field, const mesh::Vec3& p, double& phase, mesh::Vec3* wavenumber)
 {
     const mesh::CellGrid& grid = *field.grid;
-    const mesh::KeyStencil stencil = mesh::cubebilinearstencil(grid.facecells(), p);
+    const mesh::SmallStencil stencil = mesh::cubebilinearterms(grid.facecells(), p);
     const double radius_km = grid.radius_m() / 1000.0;
     double sum = 0.0;
     mesh::Vec3 k{ 0.0, 0.0, 0.0 };
-    for (std::size_t n = 0; n < stencil.key.size(); n++)
+    for (int n = 0; n < stencil.size; n++)
     {
         const std::size_t cell = static_cast<std::size_t>(stencil.key[n]);
         if (field.state[cell] == 0)
@@ -896,7 +896,7 @@ bool cubephaseat(const FoldPhaseField& field, const mesh::Vec3& p, double& phase
     phase = sum;
     if (wavenumber != nullptr)
         *wavenumber = k;
-    return !stencil.key.empty();
+    return stencil.size > 0;
 }
 }
 
@@ -1179,6 +1179,11 @@ void addfoldfabric(const RegionalGlobalInputs& inputs, const mesh::CellGrid& win
     if (!(cell_km > 0.0) || !(globalcell_km > 0.0))
         return;
     const double parentcell_km = parentscale > 0 ? globalcell_km / static_cast<double>(parentscale) : 0.0;
+    // A level that draws no wavelength the clamp allows changes no cell (T8 W2-W3b: the per-cell test below
+    // fails for every cell), so it skips the phase field and the gathers.
+    if (!(cell_km <= 0.25 * std::max(folds.wavelengthmin_km, folds.wavelengthmax_km)) ||
+        (parentscale > 0 && !(parentcell_km > 0.25 * std::min(folds.wavelengthmin_km, folds.wavelengthmax_km))))
+        return;
     const FoldPhaseField phasefield = cubefoldphasefield(inputs, folds);
     if (phasefield.maskcells == 0)
         return;

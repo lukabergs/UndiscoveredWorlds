@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "core/mesh/cell_grid.hpp"
+#include "core/mesh/window_grid.hpp"
 
 namespace landscape
 {
@@ -77,15 +78,26 @@ private:
 // window or a size mismatch.
 std::vector<double> gatherblocks(const WindowBlocks& blocks, const std::vector<double>& values, const mesh::CellGrid& window);
 
-// gatherblocks' stencils precomputed for repeated passes over one window (T8 W2-W2f): per cell its
-// terms (the block whose value a node takes, the node's weight) in the stencil's key order, applied
-// with gatherblocks' arithmetic, so a planned gather is bit-identical to gatherblocks.
+// gatherblocks prepared for repeated passes over one window (T8 W2-W2f; T8 W2-W3b without per-term
+// storage): the window grid's kept centre stencils at the parent level (mesh::centrestencils) and the
+// block each node takes (a parent's own block from a per-face table of the blocks' parents, a node
+// beyond them its nearest parent's), applied with gatherblocks' arithmetic, so a planned gather is
+// bit-identical to gatherblocks.
 struct GatherPlan
 {
+    struct FaceTable
+    {
+        std::int64_t column0 = 0, row0 = 0, columns = 0, rows = 0;
+        std::vector<std::int32_t> block;  // per parent cell of the box: its block, -1 when none
+    };
     std::size_t blocks = 0;
-    std::vector<std::uint32_t> start;  // cellcount + 1 offsets into block and weight
-    std::vector<std::uint32_t> block;
-    std::vector<double> weight;
+    std::size_t cells = 0;
+    std::int64_t parentcells = 0;
+    const mesh::CentreStencils* stencils = nullptr;
+    std::shared_ptr<const NearestDomainKey> nearest;
+    std::vector<std::uint32_t> order;  // the blocks by their parents' ascending order
+    std::vector<FaceTable> faces;
+    std::size_t blockof(mesh::LevelKey key) const;
 };
 GatherPlan gatherplan(const WindowBlocks& blocks, const mesh::CellGrid& window);
 std::vector<double> gatherblocks(const GatherPlan& plan, const std::vector<double>& values);
@@ -94,4 +106,13 @@ std::vector<double> gatherblocks(const GatherPlan& plan, const std::vector<doubl
 // levelwidth() columns over the domain box, local id the domain's row-major index): the blocks and
 // the parents' local ids read its keys only, so its radius is nominal (1 m).
 std::shared_ptr<const mesh::CellGrid> levelkeygrid(const LevelWindow& window);
+
+// The pixel of a lat-lon export of `columns` x columns / 2 cells (rows from the north, columns east from
+// -180 degrees) that holds a unit vector, by makelatlongrid's locate rule (T8 W2-W3b: the positions of
+// a cube window's diagnostics).
+struct ExportPixel
+{
+    std::int64_t column = -1, row = -1;
+};
+ExportPixel exportpixel(const mesh::Vec3& p, std::int64_t columns);
 }
