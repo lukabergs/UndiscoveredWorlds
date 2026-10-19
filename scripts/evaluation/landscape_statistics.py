@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from uwtools import grid  # noqa: E402
 from uwtools.tectonics_earth_reference import reference_inputs  # noqa: E402
+from uwtools.paths import DATA_ROOT  # noqa: E402
 
 OCEAN_BANDS_KM = (0.0, 0.2, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, np.inf)
 DRAINAGE_FIELDS = ('hydrosphere.flow_direction', 'geosphere.base_elevation', 'geosphere.sea_level')
@@ -59,7 +60,7 @@ def depth_shares(depth_m, weights):
 
 def earth_ocean_depths(width):
     """Earth's ocean depth bands from the hypsometry reference's heightmap and non-ocean mask."""
-    heightmap, mask, *_ = reference_inputs(ROOT, width)
+    heightmap, mask, *_ = reference_inputs(DATA_ROOT, width)
     with Image.open(heightmap) as image:
         elevation = np.array(image, dtype=float)
     with Image.open(mask) as image:

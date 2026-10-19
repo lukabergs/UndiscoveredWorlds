@@ -34,3 +34,12 @@ def main_root(root=ROOT):
     if not common.is_absolute():
         common = Path(root) / common
     return common.resolve().parent
+
+
+def data_root(root=ROOT):
+    """The tree whose refs/ scripts read: root when it has refs/, else the main tree (a git worktree)."""
+    return Path(root) if (Path(root) / 'refs').is_dir() else main_root(root)
+
+
+# refs/ is read from here (relative paths of reference files are recorded against it).
+DATA_ROOT = data_root()

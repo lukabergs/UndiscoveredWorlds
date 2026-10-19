@@ -164,7 +164,8 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
     manifest.rows = manifest.columns / 2;
 
     // A cube bundle carries the lat-lon export of every field on the world grid (section 6):
-    // the recomputed fields from the world's export, the climate shadow's own from the shadow.
+    // the recomputed fields and those moved by class from the world's export (exportlatlon), the
+    // climate shadow's own from the shadow.
     std::shared_ptr<const mesh::CellGrid> exportgrid;
     std::unique_ptr<FieldRemap> exporter;
     std::unique_ptr<planet> exported;
@@ -175,8 +176,8 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
         exportgrid = mesh::makelatlongrid(manifest.columns, grid.radius_m());
         exporter = std::make_unique<FieldRemap>(grid, *exportgrid);
         writecelltable(writer, grid);
-        if (exports.recompute)
-            exported = exportlatlon(world, manifest.columns, exports.recompute);
+        // The world's export: the recomputed fields and the fields moved by class (exportedbyclass).
+        exported = exportlatlon(world, manifest.columns, exports.recompute);
         if (exports.climateshadow != nullptr && exports.shadowowned)
         {
             shadow = exports.climateshadow;
@@ -261,11 +262,13 @@ void writeplanetbundle(const planet& world, const std::filesystem::path& directo
                 {
                     PlanetFieldData out;
                     bool recomputed = false;
-                    if (exported != nullptr && !carried && contains(exports.recomputed, id))
+                    if (exported != nullptr && !carried && exports.recompute && contains(exports.recomputed, id))
                     {
                         out = readplanetfield(*exported, id);
                         recomputed = true;
                     }
+                    else if (exported != nullptr && !carried && exportedbyclass(id))
+                        out = readplanetfield(*exported, id);
                     else
                         out = spec.rule == RemapRule::direction ? exporter->zeros(data) : exporter->remap(data);
                     exportentry.shape = out.shape;

@@ -49,9 +49,10 @@ from checks import DIRECTION_OFFSETS, whole_metres
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from uwtools import grid  # noqa: E402
+from uwtools.paths import DATA_ROOT  # noqa: E402
 
 KINDS = ('upstream_area', 'basins', 'internal_drainage', 'discharge')
-REFERENCE_DIRECTORY = ROOT / 'refs' / 'processed' / 'physical' / 'fields' / 'hydrology'
+REFERENCE_DIRECTORY = DATA_ROOT / 'refs' / 'processed' / 'physical' / 'fields' / 'hydrology'
 MISSING_BELOW = -9000.0
 MAJOR_RIVER_KM2 = 1e5
 CLOSED_LAKE_MARGIN_M = np.float32(0.01)  # closedlakemarginm of drainage_basins.cpp

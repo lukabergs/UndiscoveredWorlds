@@ -22,7 +22,8 @@ from typing import NamedTuple
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-PROCESSED = ROOT / 'refs/processed'
+from .paths import DATA_ROOT  # noqa: E402
+PROCESSED = DATA_ROOT / 'refs/processed'
 SCHEMA = 'uw-reference/v1'
 DTYPE = '<f4'
 # Every processed field is prepared on this grid width (rows = width / 2).

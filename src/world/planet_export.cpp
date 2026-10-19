@@ -42,8 +42,8 @@ void byelement(ElementType element, const Apply& apply)
 // The source cell at p; if it is of the other class, the closest cell of p's class
 // among it and its neighbours two rings out (by the neighbour table); the cell at p
 // when none is.
-mesh::CellId nearestofclass(const mesh::CellGrid& source, const mesh::Vec3& p, const std::vector<std::uint8_t>& sourcesea,
-    std::uint8_t sea)
+template <typename K>
+mesh::CellId nearestofclass(const mesh::CellGrid& source, const mesh::Vec3& p, const std::vector<K>& sourcesea, K sea)
 {
     const mesh::CellId located = source.locate(p);
     if (located == mesh::nocell || sourcesea[located] == sea)
@@ -118,6 +118,75 @@ std::vector<T> remapclass(const mesh::RemapWeights& weights, const mesh::CellGri
     }
     return result;
 }
+
+// remapmean restricted to the overlapping sources of the destination cell's own class (the same
+// sums in the same order as remapmean where every overlapping source is of it); a row without
+// overlap is remapmean's bilinear sample; where none of its class overlaps, the nearest source of
+// its class (nearestofclass).
+template <typename T>
+std::vector<T> remapmeanclass(const mesh::RemapWeights& weights, const mesh::CellGrid& source, const mesh::CellGrid& destination,
+    const std::vector<T>& values, const std::vector<float>& sourceclass, const std::vector<float>& destinationclass)
+{
+    std::vector<T> result(weights.destinationcount);
+    for (std::size_t d = 0; d < weights.destinationcount; d++)
+    {
+        const std::size_t begin = weights.rowstart[d], end = weights.rowstart[d + 1];
+        const mesh::Vec3 centre = destination.centre(static_cast<mesh::CellId>(d));
+        if (begin == end)
+        {
+            result[d] = mesh::samplebilinear(source, values, centre);
+            continue;
+        }
+        bool found = false;
+        double first = 0.0, weighted = 0.0, total = 0.0;
+        for (std::size_t e = begin; e < end; e++)
+        {
+            const mesh::CellId s = weights.source[e];
+            if (sourceclass[s] != destinationclass[d])
+                continue;
+            const double value = static_cast<double>(values[s]);
+            if (!found)
+            {
+                first = value;
+                found = true;
+            }
+            weighted += weights.area_m2[e] * (value - first);
+            total += weights.area_m2[e];
+        }
+        if (found)
+        {
+            result[d] = static_cast<T>(first + weighted / total);
+            continue;
+        }
+        const mesh::CellId s = nearestofclass(source, centre, sourceclass, destinationclass[d]);
+        result[d] = s == mesh::nocell ? T{} : values[s];
+    }
+    return result;
+}
+
+// Mean fields that hold on land or at sea, moved by class against the sea masks: the glacial fields.
+bool seaclassmeanfield(FieldId id)
+{
+    return id == FieldId::glacial_denudation || id == FieldId::glaciation || id == FieldId::ice_thickness;
+}
+
+std::vector<float> asclass(const std::vector<std::uint8_t>& mask)
+{
+    return std::vector<float>(mask.begin(), mask.end());
+}
+
+std::vector<float> lakeclass(const planet& world)
+{
+    std::vector<float> lake(world.cellcount());
+    for (mesh::CellId c = 0; c < world.cellcount(); c++)
+        lake[c] = world.lakesurfacefloat(c);
+    return lake;
+}
+}
+
+bool exportedbyclass(FieldId id)
+{
+    return landawarefield(id) || seaclassmeanfield(id) || id == FieldId::base_elevation;
 }
 
 bool landawarefield(FieldId id)
@@ -296,6 +365,37 @@ FieldData FieldRemap::remapbyclass(const FieldData& data, const std::vector<std:
     return out;
 }
 
+FieldData FieldRemap::remapmeanbyclass(const FieldData& data, const std::vector<float>& sourceclass,
+    const std::vector<float>& destinationclass) const
+{
+    if (!ongrid(data))
+        throw std::logic_error("Field is not on the remap's source grid: " + worldmodel::qualifiedname(data.id));
+    const worldmodel::FieldSpec& spec = worldmodel::fieldspec(data.id);
+    if (spec.element != ElementType::f32 || spec.rule != RemapRule::mean)
+        throw std::logic_error("remapmeanbyclass moves float fields of the mean rule: " + worldmodel::qualifiedname(data.id));
+    FieldData out;
+    out.id = data.id;
+    out.shape = destinationshape(data);
+    if (identity_)
+    {
+        out.bytes = data.bytes;
+        return out;
+    }
+    const std::size_t sourcecells = source_.cellcount(), destinationcells = destination_.cellcount();
+    if (sourceclass.size() != sourcecells || destinationclass.size() != destinationcells)
+        throw std::invalid_argument("remapmeanbyclass: a class does not match its grid");
+    const std::size_t layercount = layers(data);
+    out.bytes.resize(layercount * destinationcells * sizeof(float));
+    std::vector<float> values(sourcecells);
+    for (std::size_t layer = 0; layer < layercount; layer++)
+    {
+        std::memcpy(values.data(), data.bytes.data() + layer * sourcecells * sizeof(float), sourcecells * sizeof(float));
+        const std::vector<float> result = remapmeanclass(weights(), source_, destination_, values, sourceclass, destinationclass);
+        std::memcpy(out.bytes.data() + layer * destinationcells * sizeof(float), result.data(), destinationcells * sizeof(float));
+    }
+    return out;
+}
+
 std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const LatlonDirectionRecompute& recompute)
 {
     auto latlon = std::make_unique<planet>(world);
@@ -318,16 +418,24 @@ std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const Lat
         // False for what a planet does not load (the climate solver's levels and diagnostics).
         loadplanetfield(*latlon, worldmodel::fieldspec(id).rule == RemapRule::direction ? remap.zeros(data) : remap.remap(data));
     }
-    // The land-aware codes against the export's own sea mask, from its exported terrain.
+    // The base elevation by lake (the lake surface, moved by nearest): a lake cell's terrain is
+    // the mean over the sources of its own lake, never over its banks; a cell outside lakes the mean
+    // over the sources outside lakes. Without lakes this is the mean rule.
+    if (const FieldData base = readplanetfield(world, FieldId::base_elevation); remap.ongrid(base))
+        loadplanetfield(*latlon, remap.remapmeanbyclass(base, lakeclass(world), lakeclass(*latlon)));
+    // The land-aware codes and the glacial fields against the export's own sea mask, from its exported terrain.
     const std::vector<std::uint8_t> sourcesea = seamask(world), destinationsea = seamask(*latlon);
+    const std::vector<float> sourceclass = asclass(sourcesea), destinationclass = asclass(destinationsea);
     for (std::size_t index = 0; index < worldmodel::kFieldCount; index++)
     {
         const FieldId id = static_cast<FieldId>(index);
-        if (!landawarefield(id))
+        if (!landawarefield(id) && !seaclassmeanfield(id))
             continue;
         const FieldData data = readplanetfield(world, id);
-        if (remap.ongrid(data))
-            loadplanetfield(*latlon, remap.remapbyclass(data, sourcesea, destinationsea));
+        if (!remap.ongrid(data))
+            continue;
+        loadplanetfield(*latlon, landawarefield(id) ? remap.remapbyclass(data, sourcesea, destinationsea)
+                                                    : remap.remapmeanbyclass(data, sourceclass, destinationclass));
     }
     // Records on cells (settlements, deposits) move to the export's cell of their cell's centre;
     // their x, y are its column and row. Polities and routes have no positions.

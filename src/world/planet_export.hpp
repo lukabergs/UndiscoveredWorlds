@@ -51,6 +51,12 @@ public:
     // centre where none overlaps, else that cell. A copy between equal grids.
     worldmodel::FieldData remapbyclass(const worldmodel::FieldData& data, const std::vector<std::uint8_t>& sourcesea,
         const std::vector<std::uint8_t>& destinationsea) const;
+    // A float field of the mean rule by class: each destination cell the area mean over the
+    // overlapping source cells of its own class (any value, compared exactly: a sea mask, a lake
+    // surface), as remap where every overlapping source is of its class; the closest source of its
+    // class within two neighbour rings where none overlaps. A copy between equal grids.
+    worldmodel::FieldData remapmeanbyclass(const worldmodel::FieldData& data, const std::vector<float>& sourceclass,
+        const std::vector<float>& destinationclass) const;
     // Zeros of the field's type in the destination shape.
     worldmodel::FieldData zeros(const worldmodel::FieldData& data) const;
 
@@ -68,8 +74,11 @@ private:
 
 // A lat-lon planet of columns x columns/2 with every field of the world (a copy
 // on a lat-lon world of the same columns). Direction fields are recomputed by the
-// callback, or 0 without one; land-aware codes are moved after the terrain, against
-// the export's own sea mask. Settlements and deposits move to the export's cell of
+// callback, or 0 without one; the base elevation is the mean by lake (FieldRemap::
+// remapmeanbyclass on the lake surface, itself moved by nearest), so an exported lake
+// lies on the beds of its own source cells; land-aware codes and the glacial fields
+// (glacial denudation, glaciation, ice thickness: means by sea class) are moved after the
+// terrain, against the export's own sea mask. Settlements and deposits move to the export's cell of
 // their cell's centre (x, y its column and row); polities and routes have no positions. The
 // planet is returned on the heap: it holds the crater list inline and has no move
 // constructor.
@@ -80,6 +89,10 @@ std::unique_ptr<planet> exportlatlon(const planet& world, int columns, const Lat
 // island, mountain_island, basin_class, prograded, owner_settlement, owner_polity; at
 // sea sea_ice, continental_shelf. Continuous fields and other codes move by their rule.
 bool landawarefield(worldmodel::FieldId id);
+// The fields exportlatlon moves otherwise than FieldRemap::remap: the land-aware codes, the
+// base elevation (by lake) and the glacial fields (by sea class). A cube bundle takes their
+// exports from exportlatlon, so they agree with its other exports.
+bool exportedbyclass(worldmodel::FieldId id);
 // The sea mask of a world by cell id (1 where surfacebelowsea).
 std::vector<std::uint8_t> seamask(const planet& world);
 

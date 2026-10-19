@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from uwtools.cell_grid import conservative_remap  # noqa: E402
 from uwtools import references as reference_files  # noqa: E402
 from uwtools.hashing import sha256  # noqa: E402
+from uwtools.paths import DATA_ROOT  # noqa: E402
 
 # Mean month lengths used by the climate report for day-weighted quarters and mm/day.
 MONTH_DAYS = np.array([31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
@@ -53,7 +54,7 @@ class References:
         if key not in self.cache:
             path = self.path(name, annual)
             if not path.is_file():
-                raise FileNotFoundError(f'Missing reference {path.relative_to(ROOT)}; see refs/README.md')
+                raise FileNotFoundError(f'Missing reference {path.relative_to(DATA_ROOT)}; see refs/README.md')
             _, values = read_field(path)
             if annual and values.shape[0] != 1:
                 raise ValueError(f'{path}: annual reference has {values.shape[0]} layers')
@@ -63,7 +64,7 @@ class References:
                 if name in PER_DAY:
                     values = values / MONTH_DAYS[:, None, None]
             self.cache[key] = values
-            self.files[path.relative_to(ROOT).as_posix()] = None
+            self.files[path.relative_to(DATA_ROOT).as_posix()] = None
         return self.cache[key]
 
     def season(self, name, rule, season, width):
@@ -91,5 +92,5 @@ class References:
         """sha256 of every reference file read so far."""
         for relative in self.files:
             if self.files[relative] is None:
-                self.files[relative] = sha256(ROOT / relative)
+                self.files[relative] = sha256(DATA_ROOT / relative)
         return dict(sorted(self.files.items()))

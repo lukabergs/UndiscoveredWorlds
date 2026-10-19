@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from uwtools import grid, regions  # noqa: E402
 from uwtools.hashing import sha256  # noqa: E402
+from uwtools.paths import DATA_ROOT  # noqa: E402
 
 SELECTOR = re.compile(r'^([a-z]+\.[a-z0-9_]+)(?:\[(\d+|@[A-Za-z0-9_.-]+)\])?$')
 
@@ -192,7 +193,7 @@ class RegionalTable:
                            'the cells whose centre lies in the box; AR6 regions weight cells by their overlap fraction with '
                            'the rasterised mask. Regions without valid cells are omitted.'),
                 'config': regions.PATH.relative_to(ROOT).as_posix(), 'config_sha256': sha256(regions.PATH),
-                'ar6_mask': mask.relative_to(ROOT).as_posix(), 'ar6_mask_sha256': sha256(mask),
+                'ar6_mask': mask.relative_to(DATA_ROOT).as_posix(), 'ar6_mask_sha256': sha256(mask),
                 'sets': {'project': {box['id']: box['name'] for box in sets['project']['regions']},
                          'ar6': {item['acronym']: item['name'] for item in sets['ar6']['regions']}},
                 'fields': self.fields}
@@ -225,7 +226,7 @@ def compare_maps(bundle, spec, references, baseline=None, regional=None):
 
 def compare_hypsometry(bundle, spec, baseline=None):
     from uwtools.tectonics_earth_reference import compare_to_earth, load_earth_reference, measure_earth
-    reference = load_earth_reference(ROOT, spec.get('reference_width', 2048))
+    reference = load_earth_reference(DATA_ROOT, spec.get('reference_width', 2048))
     result = {'reference': reference['title'], 'reference_cache': reference['cache']}
     for key, source in (('run', bundle), ('baseline', baseline)):
         if source is None:

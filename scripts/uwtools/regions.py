@@ -12,7 +12,7 @@ import json
 import numpy as np
 
 from .grid import latitudes, longitudes, remap_area_mean
-from .paths import ROOT
+from .paths import DATA_ROOT, ROOT
 
 PATH = ROOT / 'configs/regions.json'
 SCHEMA = 'uw-regions/v1'
@@ -51,7 +51,7 @@ def ar6(config=None):
 
 
 def ar6_mask_path(config=None):
-    return ROOT / (config or load())['sets']['ar6']['mask']
+    return DATA_ROOT / (config or load())['sets']['ar6']['mask']
 
 
 def ar6_labels(config=None):

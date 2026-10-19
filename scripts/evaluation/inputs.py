@@ -13,6 +13,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 DERIVED = ROOT / 'out/inputs'
+from uwtools.paths import DATA_ROOT  # noqa: E402
 
 
 def drag_contrast(source, width):
@@ -47,6 +48,7 @@ DERIVATIONS = {'drag-contrast': drag_contrast}
 
 def resolve(spec, width):
     """(environment variable, file) of one declared input for a grid of the given width."""
-    source = ROOT / spec['source']
+    # Declared inputs under refs/ are read from the main tree in a git worktree.
+    source = (DATA_ROOT if spec['source'].startswith('refs/') else ROOT) / spec['source']
     path = DERIVATIONS[spec['derive']](source, width) if spec.get('derive') else source
     return spec['environment'], path

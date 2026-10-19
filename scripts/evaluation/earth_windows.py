@@ -44,7 +44,8 @@ from maps import RELIEF_AZIMUTH, RELIEF_EXAGGERATION, hillshade, legend, pixel_s
 ROOT = Path(__file__).resolve().parents[2]
 CATALOGUE = 'configs/evaluation/earth-windows.json'
 CATALOGUE_SCHEMA = 'uw-earth-windows/v1'
-CACHE = ROOT / 'refs/processed/earth-windows'
+from uwtools.paths import DATA_ROOT  # noqa: E402
+CACHE = DATA_ROOT / 'refs/processed/earth-windows'
 WINDOW_SCHEMA = 'uw-earth-window/v1'
 # Bump when the processing of a cached window (the grid, the box average) changes: older caches are recomputed.
 CACHE_VERSION = 1
