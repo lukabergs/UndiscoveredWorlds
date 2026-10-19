@@ -48,7 +48,7 @@ bool areneighbours(const mesh::CellGrid& grid, mesh::CellId a, mesh::CellId b)
 int faceof(const mesh::CellGrid& grid, mesh::CellId c)
 {
     const int n = grid.facecells();
-    return static_cast<int>(grid.globalid(c) / static_cast<mesh::CellId>(n * n));
+    return static_cast<int>(grid.globalkey(c) / (static_cast<mesh::LevelKey>(n) * static_cast<mesh::LevelKey>(n)));
 }
 }
 
@@ -522,11 +522,11 @@ TEST(Mesh, SubgridKeepsInsideNeighboursOnly)
         ASSERT_TRUE(window->issubgrid());
         ASSERT_EQ(window->cellcount(), ids.size() - 1);
         for (mesh::CellId local = 1; local < window->cellcount(); local++)
-            EXPECT_LT(window->globalid(local - 1), window->globalid(local));
+            EXPECT_LT(window->globalkey(local - 1), window->globalkey(local));
         double total = 0.0;
         for (mesh::CellId local = 0; local < window->cellcount(); local++)
         {
-            const mesh::CellId global = window->globalid(local);
+            const mesh::CellId global = static_cast<mesh::CellId>(window->globalkey(local));
             total += window->area_m2(local);
             EXPECT_EQ(window->locate(window->centre(local)), local);
             for (int k = 1; k <= mesh::slotcount; k++)

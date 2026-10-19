@@ -131,15 +131,15 @@ double nativearea(const NativeCell& cell, double x0, double x1, double y0, doubl
 
 NativeCell nativecell(const CellGrid& grid, CellId local)
 {
-    const CellId global = grid.globalid(local);
+    const LevelKey global = grid.globalkey(local);
     NativeCell cell;
     if (grid.kind() == GridKind::cube)
     {
         const int n = grid.facecells();
-        int face = 0, i = 0, j = 0;
-        cubeindices(n, global, face, i, j);
+        const CubeCell indices = cubecell(n, global);
+        const std::int64_t i = indices.column, j = indices.row;
         cell.cube = true;
-        cell.face = face;
+        cell.face = indices.face;
         cell.x0 = cubeedgea(n, i);
         cell.x1 = cubeedgea(n, i + 1);
         cell.y0 = cubeedgeb(n, j + 1);
@@ -147,7 +147,7 @@ NativeCell nativecell(const CellGrid& grid, CellId local)
         return cell;
     }
     const int w = grid.columns(), h = grid.rows();
-    const int x = static_cast<int>(global % static_cast<CellId>(w)), y = static_cast<int>(global / static_cast<CellId>(w));
+    const int x = static_cast<int>(global % static_cast<LevelKey>(w)), y = static_cast<int>(global / static_cast<LevelKey>(w));
     const double dlambda = 2.0 * pi / w;
     cell.x0 = -pi + x * dlambda;
     cell.x1 = -pi + (x + 1) * dlambda;

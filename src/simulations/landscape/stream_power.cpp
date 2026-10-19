@@ -99,8 +99,9 @@ struct FaceCorrection
 FaceCorrection cubefacecorrection(const mesh::CellGrid& grid, std::size_t cell, int slot, std::size_t other)
 {
     const int n = grid.facecells();
-    int face = 0, column = 0, row = 0;
-    mesh::cubeindices(n, grid.globalid(static_cast<mesh::CellId>(cell)), face, column, row);
+    const mesh::CubeCell indices = mesh::cubecell(n, grid.globalkey(static_cast<mesh::CellId>(cell)));
+    const int face = indices.face;
+    const std::int64_t column = indices.column, row = indices.row;
     mesh::Vec3 from, to;  // the shared edge, as in makecubegrid
     if (slot == northdirection || slot == southdirection)
     {
