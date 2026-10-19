@@ -17,8 +17,8 @@ using S = GenerationStageId;
 // flag come from world_process_access.inc (measured, see world_processes.hpp);
 // the flags set here cover generators the analysis cannot see (the tectonics
 // engine's own stream, society and mineral streams). A process runs on a cube world
-// (cubeready) when the W2 port of docs/architecture/sphere-mesh.md that moved it to
-// the cell grid flags it in the list below.
+// when the W2 port of docs/architecture/sphere-mesh.md that moved it to the cell grid
+// sets its last member, cubeready, to true (the trailing "{}, true" of its entry).
 std::vector<WorldProcessDefinition> buildprocesses()
 {
     std::vector<WorldProcessDefinition> processes =
@@ -32,8 +32,8 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::terraforming, "terrain.terraforming", K::editor, false, {}, {}, {}, {}, "" },
         { S::inland_seas, "terrain.inland_sea_policy", K::editor, false, {}, {}, {}, {}, "" },
         { S::archipelagos, "terrain.archipelagos", K::detailer, false, {}, {}, {}, {}, "", {}, true },
-        { S::ocean_cleanup, "terrain.ocean_cleanup", K::editor, false, {}, {}, {}, {}, "" },
-        { S::coastline_refinement, "terrain.coastline_refinement", K::detailer, false, {}, {}, {}, {}, "" },
+        { S::ocean_cleanup, "terrain.ocean_cleanup", K::editor, false, {}, {}, {}, {}, "", {}, true },
+        { S::coastline_refinement, "terrain.coastline_refinement", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::ocean_depth_refinement, "terrain.ocean_depth_refinement", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::tectonic_trenches, "terrain.tectonic_trenches", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::tectonic_volcanoes, "terrain.tectonic_volcanoes", K::detailer, false, {}, {}, {}, {}, "" },
@@ -43,11 +43,11 @@ std::vector<WorldProcessDefinition> buildprocesses()
         { S::canyon_uplift, "terrain.canyon_uplift", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::depression_fill, "terrain.depression_fill", K::editor, false, {}, {}, {}, {},
           "Adds land noise between two depression fills.", {}, true },
-        { S::coastline_adjustment, "terrain.coastline_adjustment", K::editor, false, {}, {}, {}, {}, "" },
+        { S::coastline_adjustment, "terrain.coastline_adjustment", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::sea_level, "terrain.sea_level", K::editor, false, {}, {}, {}, {},
           "Places the sea level at world.ocean.land_fraction on the finished coast when "
           "world.ocean.land_fraction_after_coast; does nothing at land_fraction 0." },
-        { S::island_check, "terrain.island_check", K::editor, false, {}, {}, {}, {}, "" },
+        { S::island_check, "terrain.island_check", K::editor, false, {}, {}, {}, {}, "", {}, true },
         { S::terrain_roughness, "terrain.roughness", K::detailer, false, {}, {}, {}, {},
           "Pure seeded noise; climate does not read it.", {}, true },
         { S::global_temperature, "climate.temperature", K::evolver, false, {}, {}, {}, {},
@@ -76,7 +76,7 @@ std::vector<WorldProcessDefinition> buildprocesses()
           "Lake levels by water balance in the routing's depressions; salt lakes and pans where closed (erosion plan B2)." },
         { S::mountain_temperature_lapse, "climate.mountain_lapse", K::diagnoser, false, {}, {}, {}, {}, "", {}, true },
         { S::climates_and_biomes, "climate.classification", K::diagnoser, false, {}, {}, {}, {}, "Writes biomes as well as climate classes.", {}, true },
-        { S::arid_features, "terrain.arid_features", K::detailer, false, {}, {}, {}, {}, "" },
+        { S::arid_features, "terrain.arid_features", K::detailer, false, {}, {}, {}, {}, "", {}, true },
         { S::deltas_wetlands_and_roughness, "hydrology.deltas_and_wetlands", K::detailer, false, {}, {}, {}, {},
           "Also recomputes climate classes and biomes and writes the climate diagnostics. In an eroded world it clears the distributaries of hydrology.rivers when deltas are turned off (erosion plan C5b)." },
         { S::subgrid_statistics, "terrain.subgrid_statistics", K::diagnoser, false, {}, {}, {}, {},
@@ -86,19 +86,8 @@ std::vector<WorldProcessDefinition> buildprocesses()
           "Physical resource layers, gold placers and optional society. In an eroded world it applies the erosion run's exhumation to the deposits, so it runs once per world." },
     };
 
-    // The processes ported to the cell grid (sphere-mesh.md section 4), by W2 step.
-    const std::vector<GenerationStageId> cubeready =
-    {
-        // W2-T2: coasts, shelves and arid landforms.
-        S::ocean_cleanup, S::coastline_refinement, S::coastline_adjustment, S::island_check, S::arid_features,
-    };
-
     for (WorldProcessDefinition& process : processes)
-    {
         applymeasuredaccess(process);
-        if (std::find(cubeready.begin(), cubeready.end(), process.stage) != cubeready.end())
-            process.cubeready = true;
-    }
     return processes;
 }
 }
