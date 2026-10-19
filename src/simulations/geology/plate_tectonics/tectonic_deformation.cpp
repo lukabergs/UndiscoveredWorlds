@@ -24,6 +24,28 @@ void adddifference(mesh::Vec3& to, double k, const mesh::Vec3& a, const mesh::Ve
     to.x += k*(a.x-b.x); to.y += k*(a.y-b.y); to.z += k*(a.z-b.z);
 }
 void divide(mesh::Vec3& v, uint32_t n) { v.x/=n; v.y/=n; v.z/=n; }
+// The displacement less its area-weighted least-squares rotation w x r R (the plates' common
+// rotation): sum A (I - r r^T) w = sum A r x d / R. The corrections read relative motion only,
+// so a rotation of the whole sphere changes the result by itself alone.
+std::vector<mesh::Vec3> withoutcommonrotation(const grid::TectonicGrid& grid, const std::vector<mesh::Vec3>& d) {
+    const double radius=grid.radius_m();
+    mesh::Vec3 column[3], torque;
+    for (grid::CellId c=0;c<d.size();++c) {
+        const double area=grid.area_m2(c);
+        const mesh::Vec3 r=grid.position(c);
+        column[0]=column[0]+area*(mesh::Vec3{1,0,0}-r.x*r);
+        column[1]=column[1]+area*(mesh::Vec3{0,1,0}-r.y*r);
+        column[2]=column[2]+area*(mesh::Vec3{0,0,1}-r.z*r);
+        torque=torque+(area/radius)*mesh::cross(r,d[c]);
+    }
+    const auto det=[](const mesh::Vec3& a,const mesh::Vec3& b,const mesh::Vec3& c) { return mesh::dot(a,mesh::cross(b,c)); };
+    const double whole=det(column[0],column[1],column[2]);
+    const mesh::Vec3 w{det(torque,column[1],column[2])/whole,det(column[0],torque,column[2])/whole,
+                       det(column[0],column[1],torque)/whole};
+    std::vector<mesh::Vec3> relative(d.size());
+    for (grid::CellId c=0;c<d.size();++c) relative[c]=d[c]-radius*mesh::cross(w,grid.position(c));
+    return relative;
+}
 } // namespace
 
 std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vector<uint32_t>& owners,
@@ -45,6 +67,7 @@ std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vec
     // The cell table (W2-E): contacts on its edges, displacements through the adapter
     // (a neighbour's on the cell's own frame), distances in metres.
     const auto& table=metric.grid().edges();
+    const auto relative=withoutcommonrotation(metric.grid(),rigid);
     std::vector<V> correction(size);
     std::vector<uint32_t> counts(size,0), source(size,std::numeric_limits<uint32_t>::max());
     std::vector<double> distance(size,std::numeric_limits<double>::infinity()), peak(size,0);
@@ -54,7 +77,7 @@ std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vec
     for (size_t e=0;e<table.size();++e) {
         const auto a=table[e].a,b=table[e].b;
         if (owners[a]==owners[b]) continue;
-        const double closing=metric.closing(e,rigid[a],rigid[b]);
+        const double closing=metric.closing(e,relative[a],relative[b]);
         if (closing<=0) continue;
         for (const auto pair : {std::pair<uint32_t,uint32_t>{a,b},{b,a}}) {
             const auto i=pair.first,j=pair.second;
@@ -62,7 +85,7 @@ std::vector<mesh::Vec3> distribute(const columns::Metric& metric, const std::vec
             const double coupling=continent[i]>=.5
                 ? (continent[j]>=.5?.5:p.subduction_coupling) : 1-p.subduction_coupling;
             if (coupling==0) continue;
-            adddifference(correction[i],coupling,metric.inframe(i,rigid[j]),rigid[i]);
+            adddifference(correction[i],coupling,metric.inframe(i,relative[j]),relative[i]);
             ++counts[i];
         }
     }

@@ -68,7 +68,8 @@ TEST(TectonicOceanRelief, ReliefIsMaterialAndDoesNotRegenerateOrDependOnUpdateCo
         signal+=std::pow(expected-7000,2);
     }
     RecordProperty("relative_error",std::to_string(error/signal));
-    EXPECT_LT(error/signal,.15);
+    // Measured 0.074 (N 16): the remap's smoothing of the proxy pattern over five columns.
+    EXPECT_LT(error/signal,.1);
     EXPECT_LT(std::abs(a.budget().relative_mass_residual),1e-12);
 }
 

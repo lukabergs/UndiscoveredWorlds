@@ -224,8 +224,8 @@ TEST(TectonicEvents, RiftFailureIsAboutUnchangedWhenThePlateCrossesAFaceCornerOr
         RecordProperty(std::string(names[k]) + "_daughter_share", std::to_string(shares[k]));
     }
     for (int k = 1; k < 3; ++k) {
-        // The failure time goes as 1 / (tension / yield - 1): a few per cent of tension (the
-        // island's cells at a corner) shift it by up to a fifth.
+        // The failure time goes as 1 / (tension / yield - 1): measured 40 Myr at the face
+        // centre and the pole, 46 at the corner (tension 3.31e12 against 3.52e12 N/m).
         EXPECT_NEAR(times[k], times[0], .2 * times[0]) << names[k];
         EXPECT_NEAR(shares[k], shares[0], .15) << names[k];
     }

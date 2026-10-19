@@ -258,3 +258,15 @@ Found while porting its tests; each is fixed in E3:
 - The per-plate transport's total-restoring scale (|scale - 1| near 1e-7 per
   update) reads as an uplift rate of about 1e-5 of a carried rate away from the
   rock's path, and moves held cells by rounding; tests compare within that.
+- Distributed deformation reads the displacement less its area-weighted least-squares
+  rotation (the plates' common rotation), so a rotation of the whole sphere changes its
+  result by itself alone; the corrections' vector differences, moved between cells, had
+  differed by about 2e-3 of a spacing (E3 review).
+- One boundary segment id per cell can drop a junction at a cube corner: where three
+  sectors meet at a corner whose three cells each border both other plates, a cell keeps
+  only one pair's id, and an arm may go unrepresented within the probe radius
+  (`TectonicJunctions.FindsAThreePlateJunctionAtACubeCorner` asserts the corner at
+  (1, 1, 1) only; the opposite one is lost).
+- E3 made no imported-world run: that recipe starts at the mountain bases and has no
+  tectonics stage, and E3 changed no code it runs (Earth-climate checked instead).
+

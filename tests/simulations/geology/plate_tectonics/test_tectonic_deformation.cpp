@@ -75,9 +75,8 @@ TEST(TectonicDeformation, SeededWidthIsRepeatableAndDoesNotChangeWithACommonMoti
     double along_strike = 0, largest = 0;
     for (size_t i = 0; i < v.size(); ++i) {
         EXPECT_EQ(mesh::length(a[i] - b[i]), 0);
-        // The corrections are the same up to the common rotation's own difference between
-        // neighbours (|common| R times a spacing, 6e-3 of a spacing here) times the coupling.
-        EXPECT_LT(mesh::length((moved[i] - offset[i]) - (a[i] - v[i])), 5e-3 * band.spacing_m());
+        // The corrections are the same: they read the motion less its common rotation.
+        EXPECT_LT(mesh::length((moved[i] - offset[i]) - (a[i] - v[i])), 2e-3 * band.spacing_m());
         largest = std::max(largest, mesh::length(a[i] - v[i]));
     }
     // Along the boundary the shortening varies with the seeded width.

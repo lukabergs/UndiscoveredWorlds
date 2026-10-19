@@ -901,14 +901,14 @@ TEST(TectonicColumns, RockUpliftRateMeanFollowsTheRockAcrossAFaceEdgeAndThePole)
         }
         const std::string label = std::string(test.name) + "_s" + std::to_string(subdivision);
         EXPECT_NEAR(integral / (carried * grid->area_m2(source)), 1, .02) << label;
-        const double angle = 2 * mesh::length(rotation);
+        const double angle = mesh::length(rotation);
         const Vec3 k = test.axis;
         const Vec3 moved = std::cos(angle) * p + std::sin(angle) * mesh::cross(k, p) + (mesh::dot(k, p) * (1 - std::cos(angle))) * k;
-        // The rate of the first step sat in the source cell, after the first rotation's quarter:
-        // its centre moves by the second step's rotation from the first step's position.
+        // The rate of the first step sat in the source cell (measured where the rock is at the
+        // step's end): the second step's rotation moves it from the source cell's centre.
         const double error = mesh::greatcircle_rad(mesh::normalise(centre), moved) / column;
         RecordProperty(label + "_centre_error_columns", std::to_string(error));
-        EXPECT_LT(error, .6) << label;
+        EXPECT_LT(error, .1) << label;
         // Away from the path only the transport's per-plate total-restoring scale (|scale - 1| of
         // order 1e-7 on the shifted elevation) reads as a rate.
         RecordProperty(label + "_distant_over_carried", std::to_string(distant / carried));

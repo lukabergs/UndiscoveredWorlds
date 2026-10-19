@@ -215,8 +215,9 @@ TEST(TectonicMargins, ImplicitAndExplicitRiversAgreeOnASmallStep) {
     EXPECT_GT(explicit_kg,0);
     RecordProperty("implicit_over_explicit",std::to_string(implicit_kg/explicit_kg));
     // The implicit step divides each drop by 1 + K sqrt(A) dt / L; the routes agree on the
-    // band's meridian columns (D8 against the explicit eight neighbours by steepest slope).
-    EXPECT_NEAR(implicit_kg/explicit_kg,1,2e-2);
+    // band's meridian columns. Measured on the cube (N 16, 150 km): 0.999923.
+    EXPECT_LT(implicit_kg,explicit_kg);
+    EXPECT_NEAR(implicit_kg/explicit_kg,1,1e-4);
 }
 
 TEST(TectonicMargins, ImplicitRiversKeepTheExplicitWavePass) {
@@ -828,6 +829,9 @@ TEST(TectonicMargins, OrogenicCollapseStartsAtItsOnsetThickness) {
         Model a,b;
         run(a,strip(70000),slow_onset,1);run(b,strip(70000),slow,1);
         ASSERT_GT(b.budget().collapsed_continent_kg,0);
+        // Measured 0.3437: the corrected differences on the cube's face read the strip's
+        // neighbours across rows too (3 per cent).
+        RecordProperty("onset_over_legacy",std::to_string(inner_loss(f,a,70000)/inner_loss(f,b,70000)));
         EXPECT_NEAR(inner_loss(f,a,70000)/inner_loss(f,b,70000),1./3,2e-2);
         Model spread;
         for (int step=0;step<50;++step) {
