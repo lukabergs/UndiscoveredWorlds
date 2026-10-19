@@ -334,11 +334,14 @@ void append_scenario_json(std::ostream& output, const tectonics::scenario::Scena
     output << indent << "  \"transport_subdivision\": " << scenario.transport_subdivision << ",\n";
     output << indent << "  \"deformation_peak_km\": " << scenario.deformation_peak_km << ",\n";
     output << indent << "  \"deformation_variation\": " << scenario.deformation_variation << ",\n";
+    output << indent << "  \"deformation_variation_wavelength_km\": " << scenario.deformation_variation_wavelength_km << ",\n";
     output << indent << "  \"subduction_coupling\": " << scenario.subduction_coupling << ",\n";
     output << indent << "  \"coastal_gpe_strength\": " << scenario.coastal_gpe_strength << ",\n";
     output << indent << "  \"boundary_force_ramp_cm_yr\": " << scenario.boundary_force_ramp_cm_yr << ",\n";
     output << indent << "  \"mountain_force_range_km\": " << scenario.mountain_force_range_km << ",\n";
     output << indent << "  \"initial_margin_width_m\": " << scenario.initial_margin_width_m << ",\n";
+    output << indent << "  \"initial_noise_wavelength_km\": " << scenario.initial_noise_wavelength_km << ",\n";
+    output << indent << "  \"initial_noise_warp_km\": " << scenario.initial_noise_warp_km << ",\n";
     output << indent << "  \"initial_boundary_influence\": " << scenario.initial_boundary_influence << ",\n";
     output << indent << "  \"consistent_motion\": " << (scenario.consistent_motion?"true":"false") << ",\n";
     output << indent << "  \"boundary_memory_myr\": " << scenario.boundary_memory_myr << ",\n";

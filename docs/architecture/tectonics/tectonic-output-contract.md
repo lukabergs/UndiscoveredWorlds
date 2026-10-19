@@ -168,7 +168,10 @@ contract 8; 4 introduced the cube's keys) and reports `force-balance` / `isostat
 with explicit parameters: the grid as `sphere_face_cells` and `radius_km` (no width,
 height or world width), and the mantle flow's shape as `mantle_flow_wavelength_km`,
 `mantle_flow_octaves`, `mantle_flow_wobble`, `mantle_flow_drift` and
-`mantle_flow_shear_ratio`. Deprecated scenario knobs and old snapshot generators
+`mantle_flow_shear_ratio`, and the noise on the sphere (E4) as
+`initial_noise_wavelength_km`, `initial_noise_warp_km` and
+`deformation_variation_wavelength_km` (each also a `--key` option of
+`world_pipeline`). Deprecated scenario knobs and old snapshot generators
 are removed. Previously archived bundles remain evidence and readable comparison
 inputs, not a source of defaults for new worlds.
 

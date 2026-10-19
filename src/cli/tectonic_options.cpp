@@ -115,6 +115,8 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.deformation_peak_km = parse_double("--deformation-peak-km", value);
     } else if (arg == "--deformation-variation") {
         scenario.deformation_variation = parse_double("--deformation-variation", value);
+    } else if (arg == "--deformation-variation-wavelength-km") {
+        scenario.deformation_variation_wavelength_km = parse_double(arg.c_str(), value);
     } else if (arg == "--subduction-coupling") {
         scenario.subduction_coupling = parse_double("--subduction-coupling", value);
     } else if (arg == "--coastal-gpe-strength") {
@@ -182,6 +184,10 @@ bool parse_scenario_arg(tectonics::scenario::Scenario& scenario, const std::stri
         scenario.sediment_load_feedback=mode=="on";
     } else if (arg == "--initial-margin-width-m") {
         scenario.initial_margin_width_m=parse_double(arg.c_str(),value);
+    } else if (arg == "--initial-noise-wavelength-km") {
+        scenario.initial_noise_wavelength_km=parse_double(arg.c_str(),value);
+    } else if (arg == "--initial-noise-warp-km") {
+        scenario.initial_noise_warp_km=parse_double(arg.c_str(),value);
     } else if (arg == "--margin-processes") {
         const std::string mode(value);
         if (mode!="on" && mode!="off") fail("--margin-processes requires on or off");
@@ -321,6 +327,7 @@ void printtectonicoptionsusage(std::ostream& out)
         "--transport-subdivision",
         "--deformation-peak-km",
         "--deformation-variation",
+        "--deformation-variation-wavelength-km",
         "--subduction-coupling",
         "--coastal-gpe-strength",
         "--boundary-force-ramp-cm-yr",
@@ -352,6 +359,8 @@ void printtectonicoptionsusage(std::ostream& out)
         "--plume-min-spacing-km",
         "--sediment-load-feedback",
         "--initial-margin-width-m",
+        "--initial-noise-wavelength-km",
+        "--initial-noise-warp-km",
         "--margin-processes",
         "--trench-load-n-m",
         "--flexural-length-km",
