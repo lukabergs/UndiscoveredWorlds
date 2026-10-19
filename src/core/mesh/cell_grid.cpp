@@ -590,4 +590,32 @@ std::shared_ptr<const CellGrid> latlonwindowgrid(int levelcolumns, double radius
     g.minimumspacing_m_ = std::min(g.dy_m_, std::min(rowdx(0), rowdx(height - 1)));
     return grid;
 }
+
+std::shared_ptr<const CellGrid> makeplanarwindow(int columns, int rows, double cell_m)
+{
+    if (columns < 1 || rows < 1 || !(cell_m > 0.0) || !std::isfinite(cell_m))
+        throw std::invalid_argument("makeplanarwindow needs at least one cell and a positive cell side");
+    const std::size_t count = static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
+    if (count >= static_cast<std::size_t>(nocell))
+        throw std::invalid_argument("makeplanarwindow: too many cells for 32-bit local ids");
+    auto grid = std::make_shared<CellGrid>();
+    CellGrid& g = *grid;
+    g.kind_ = GridKind::latlon;
+    g.columns_ = columns;
+    g.rows_ = rows;
+    g.cellcount_ = count;
+    g.radius_m_ = 6.371e6;  // nominal: nothing reads it on a planar patch
+    g.subgrid_ = true;
+    g.latlonwindow_ = true;
+    g.windowcolumns_ = columns;
+    g.windowrows_ = rows;
+    g.dy_m_ = cell_m;
+    g.rowarea_.assign(static_cast<std::size_t>(rows), cell_m * cell_m);
+    g.rowdx_.assign(static_cast<std::size_t>(rows), cell_m);
+    g.rowlatitude_.assign(static_cast<std::size_t>(rows), 0.0);
+    g.columnlongitude_.assign(static_cast<std::size_t>(columns), 0.0);
+    g.totalarea_m2_ = cell_m * cell_m * static_cast<double>(count);
+    g.minimumspacing_m_ = cell_m;
+    return grid;
+}
 }

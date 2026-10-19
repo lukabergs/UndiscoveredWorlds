@@ -608,8 +608,8 @@ void addfoldfabric(const RegionalGlobalInputs& inputs, const RegionalWindow& win
     const int globalwidth = inputs.width, globalheight = inputs.height;
     const std::size_t globalsize = static_cast<std::size_t>(globalwidth) * static_cast<std::size_t>(globalheight);
     const int k = window.scale;
-    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
-    const double cell_km = metric.dy_m / 1000.0;
+    const std::shared_ptr<const mesh::CellGrid> grid = regionalwindowgrid(window, inputs.radius_m);
+    const double cell_km = northsouthspacing_m(*grid) / 1000.0;
     // The global north-south cell on the ground and the octave band of the level (addlevelnoise's).
     const double globalcell_km = pi * inputs.radius_m / static_cast<double>(globalheight) / 1000.0;
     if (!(cell_km > 0.0) || !(globalcell_km > 0.0))
@@ -649,8 +649,7 @@ void addfoldfabric(const RegionalGlobalInputs& inputs, const RegionalWindow& win
     // Every cell reads the elevation before the fabric only at itself, so the order does not matter.
     for (int y = 0; y < height; y++)
     {
-        const double ratio = eastwestratio(metric, y);
-        const int globalrow = window.globalrow(y);
+        const double ratio = eastwestratio(*grid, at(0, y, width));  // the row's first cell
         const double v = (static_cast<double>(window.absolutefinerow(y)) + 0.5) / static_cast<double>(k);
         for (int x = 0; x < width; x++)
         {
@@ -667,7 +666,7 @@ void addfoldfabric(const RegionalGlobalInputs& inputs, const RegionalWindow& win
                 continue;
             if (withlakes)
             {
-                const std::size_t global = at(window.globalcolumn(x), globalrow, globalwidth);
+                const std::size_t global = window.globalcell(x, y);
                 if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
                     continue;
             }

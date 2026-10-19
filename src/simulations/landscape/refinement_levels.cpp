@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -462,7 +463,8 @@ RefinementResult runrefinement(const RegionalGlobalInputs& inputs, const LevelTa
 
         // The level's steps from the noise to the projection (regional_pass.hpp's hook
         // interface): the projection onto the parent level (level 1: the global elevation).
-        const LevelContext context{inputs, window, parameters, warp, incision, details, l, factor, &refinement, &level,
+        const std::shared_ptr<const mesh::CellGrid> grid = regionalwindowgrid(window, inputs.radius_m);
+        const LevelContext context{inputs, window, *grid, parameters, warp, incision, details, l, factor, &refinement, &level,
                                    &parent, l == 1 ? &levelzero : &parentfields.elevation_m,
                                    l >= 2 ? &parentfields : nullptr};
         regionallevelsteps(context, state);

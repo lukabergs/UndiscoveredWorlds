@@ -8,6 +8,7 @@
 #include <limits>
 #include <map>
 #include <queue>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -37,30 +38,59 @@ struct Routing
     std::vector<int32_t> order;      // every cell once, each after its receiver
 };
 
+// The neighbour of a cell in a slot 1..8 on the patch's table, -1 beyond the patch.
+std::int32_t neighbourof(const mesh::CellGrid& grid, std::size_t cell, int direction)
+{
+    return grid.neighbour(static_cast<mesh::CellId>(cell), direction);
+}
+
 // The direction code from a cell to one of its neighbours, the lowest on a tie; 0 when none.
-uint8_t directionto(const PatchMetric& metric, std::size_t cell, std::size_t target)
+uint8_t directionto(const mesh::CellGrid& grid, std::size_t cell, std::size_t target)
 {
     for (int direction = 1; direction <= directioncount; direction++)
     {
-        const std::size_t next = metric.neighbour(cell, direction);
-        if (next != cell && next == target)
+        const std::int32_t next = neighbourof(grid, cell, direction);
+        if (next >= 0 && static_cast<std::size_t>(next) == target)
             return static_cast<uint8_t>(direction);
     }
     return 0;
 }
 
 // A diagonal step whose two corner cells (the cells orthogonally adjacent to both
-// ends) are pinned passes between two cells of an 8-connected pinned line: refused,
-// so that catchments stay on their side of the channel network.
-bool crossespinnedcorner(const PatchMetric& metric, const std::vector<uint8_t>& pinned, std::size_t cell,
+// ends: the slots either side of the diagonal's, k - 1 and k + 1 modulo 8) are pinned
+// passes between two cells of an 8-connected pinned line: refused, so that catchments
+// stay on their side of the channel network.
+bool crossespinnedcorner(const mesh::CellGrid& grid, const std::vector<uint8_t>& pinned, std::size_t cell,
                          int direction)
 {
-    const int ox = directionoffsetx(direction), oy = directionoffsety(direction);
-    if (ox == 0 || oy == 0)
-        return false;
-    const int x = static_cast<int>(cell % static_cast<std::size_t>(metric.width));
-    const int y = static_cast<int>(cell / static_cast<std::size_t>(metric.width));
-    return pinned[metric.index(x + ox, y)] != 0 && pinned[metric.index(x, y + oy)] != 0;
+    if (direction % 2 != 0)
+        return false;  // a cardinal slot (1 N, 3 E, 5 S, 7 W)
+    const std::int32_t before = neighbourof(grid, cell, direction - 1);
+    const std::int32_t after = neighbourof(grid, cell, direction % directioncount + 1);
+    return before >= 0 && after >= 0 && pinned[static_cast<std::size_t>(before)] != 0 &&
+           pinned[static_cast<std::size_t>(after)] != 0;
+}
+
+// R: the level-0 cells within `rings` 8-connected hops of a cell on the grid's table, the cell
+// first, then ring by ring (each once).
+std::vector<mesh::CellId> cellswithinrings(const mesh::CellGrid& grid, mesh::CellId seed, int rings)
+{
+    std::vector<mesh::CellId> cells{ seed };
+    std::set<mesh::CellId> seen{ seed };
+    std::size_t ringstart = 0;
+    for (int ring = 0; ring < rings; ring++)
+    {
+        const std::size_t ringend = cells.size();
+        for (std::size_t index = ringstart; index < ringend; index++)
+            for (int slot = 1; slot <= mesh::slotcount; slot++)
+            {
+                const std::int32_t next = grid.neighbour(cells[index], slot);
+                if (next >= 0 && seen.insert(static_cast<mesh::CellId>(next)).second)
+                    cells.push_back(static_cast<mesh::CellId>(next));
+            }
+        ringstart = ringend;
+    }
+    return cells;
 }
 
 // S3.9's bounded catchments (AnalyticalReliefParameters::catchmentreach >= 1): per cell its
@@ -84,28 +114,27 @@ std::uint64_t hashedkey(std::uint64_t value)
 
 // The labels (header, AnalyticalReliefParameters::catchmentreach r): one Priority-Flood per global
 // cell g of the patch, seeded at the pinned cells inside g's block, over the unpinned cells whose
-// global cell lies within r of g (Chebyshev, columns wrapped), as route's flood (levels, pit queue,
+// global cell lies within r rings of g (cellswithinrings on the level-0 grid), as route's flood (levels, pit queue,
 // the corner rule) with the hashed tie key; it gives each cell it reaches a filled level, the seed it
 // came from and its parent. Each unpinned cell takes the seed with the smallest (filled level, hashed
 // key of the seed) over the floods reaching it, so its label is a function of the cells within 2r
 // global cells. A labelled cell whose parent chain in its winning flood leaves its label (a catchment
 // cut into pieces by the floods' boxes), and a cell no flood reaches, is pinned at its start.
-Catchments labelcatchments(const PatchMetric& metric, const std::vector<float>& surface, const AnalyticalReliefInput& input,
+Catchments labelcatchments(const mesh::CellGrid& grid, const std::vector<float>& surface, const AnalyticalReliefInput& input,
                            int reach)
 {
-    const std::size_t count = metric.size();
+    const std::size_t count = grid.cellcount();
     const std::vector<uint8_t>& pinned = input.pinned;
-    const int width = input.globalwidth;
     const auto keyof = [&](std::size_t cell) {
         return hashedkey(input.key.empty() ? static_cast<std::uint64_t>(cell) : input.key[cell]);
     };
-    // The global cells (row, column) of the patch, each with its cells, in a canonical order.
-    std::map<std::pair<int, int>, std::size_t> groupof;
+    // The global cells (level-0 ids) of the patch, each with its cells, in a canonical order.
+    std::map<mesh::CellId, std::size_t> groupof;
     std::vector<std::vector<int32_t>> groups;
-    std::vector<std::pair<int, int>> coordinates;
+    std::vector<mesh::CellId> coordinates;
     for (std::size_t cell = 0; cell < count; cell++)
     {
-        const std::pair<int, int> coordinate{ input.globalrow[cell], input.globalcolumn[cell] };
+        const mesh::CellId coordinate = input.globalcell[cell];
         const auto found = groupof.emplace(coordinate, groups.size());
         if (found.second)
         {
@@ -136,24 +165,22 @@ Catchments labelcatchments(const PatchMetric& metric, const std::vector<float>& 
             seeded = seeded || pinned[static_cast<std::size_t>(cell)] != 0;
         if (!seeded)
             continue;
-        // The box: the global cells within the reach, each once (columns wrap).
+        // The box: the global cells within the reach's rings, each once.
         std::vector<int32_t> box;
         std::vector<std::size_t> members;
-        for (int dr = -reach; dr <= reach; dr++)
-            for (int dc = -reach; dc <= reach; dc++)
+        for (const mesh::CellId around : cellswithinrings(*input.globalgrid, coordinates[g], reach))
+        {
+            const auto found = groupof.find(around);
+            if (found == groupof.end() || boxgroup[found->second] != 0)
+                continue;
+            boxgroup[found->second] = 1;
+            members.push_back(found->second);
+            for (int32_t cell : groups[found->second])
             {
-                const int column = ((coordinates[g].second + dc) % width + width) % width;
-                const auto found = groupof.find({ coordinates[g].first + dr, column });
-                if (found == groupof.end() || boxgroup[found->second] != 0)
-                    continue;
-                boxgroup[found->second] = 1;
-                members.push_back(found->second);
-                for (int32_t cell : groups[found->second])
-                {
-                    localof[static_cast<std::size_t>(cell)] = static_cast<int32_t>(box.size());
-                    box.push_back(cell);
-                }
+                localof[static_cast<std::size_t>(cell)] = static_cast<int32_t>(box.size());
+                box.push_back(cell);
             }
+        }
         const std::size_t size = box.size();
         std::vector<float> filled(size);
         std::vector<uint8_t> closed(size, 0);
@@ -187,11 +214,14 @@ Catchments labelcatchments(const PatchMetric& metric, const std::vector<float>& 
             const std::size_t cell = static_cast<std::size_t>(box[local]);
             for (int direction = 1; direction <= directioncount; direction++)
             {
-                const std::size_t next = metric.neighbour(cell, direction);
-                if (next == cell || pinned[next] != 0 || localof[next] < 0)
+                const std::int32_t neighbour = neighbourof(grid, cell, direction);
+                if (neighbour < 0)
+                    continue;
+                const std::size_t next = static_cast<std::size_t>(neighbour);
+                if (pinned[next] != 0 || localof[next] < 0)
                     continue;
                 const std::size_t nextlocal = static_cast<std::size_t>(localof[next]);
-                if (closed[nextlocal] != 0 || crossespinnedcorner(metric, pinned, cell, direction))
+                if (closed[nextlocal] != 0 || crossespinnedcorner(grid, pinned, cell, direction))
                     continue;
                 closed[nextlocal] = 1;
                 seed[nextlocal] = seed[local];
@@ -308,40 +338,29 @@ Catchments labelcatchments(const PatchMetric& metric, const std::vector<float>& 
 // stays at L inside the flat until it meets a low edge). The resolution reads the flat and the cells
 // next to it, which the flood's sub-basin or label holds, so the seam property is unchanged. Returns
 // whether a receiver changed.
-bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, const std::vector<float>& filled,
+bool resolveflats(const mesh::CellGrid& grid, const std::vector<float>& surface, const std::vector<float>& filled,
                   const std::vector<uint8_t>& inputpinned, const std::vector<std::uint64_t>& key,
                   const Catchments* catchments, const std::vector<uint8_t>& flooded, Routing& routing)
 {
-    const std::size_t count = metric.size();
-    const int width = metric.width, height = metric.height;
+    const std::size_t count = grid.cellcount();
     const auto tieof = [&](std::size_t cell) {
         return hashedkey(key.empty() ? static_cast<std::uint64_t>(cell) : key[cell]);
     };
-    // The neighbour offsets and, per row, the steps' distances (PatchMetric::distance_m's values).
-    std::ptrdiff_t offset[directioncount + 1] = {};
-    for (int direction = 1; direction <= directioncount; direction++)
-        offset[direction] = directionoffsetx(direction)
-                            + static_cast<std::ptrdiff_t>(directionoffsety(direction)) * static_cast<std::ptrdiff_t>(width);
-    std::vector<double> step(static_cast<std::size_t>(height) * (directioncount + 1), 0.0);
-    for (int y = 0; y < height; y++)
-        for (int direction = 1; direction <= directioncount; direction++)
-        {
-            const int x = directionoffsetx(direction) < 0 ? width - 1 : 0;  // a column with the neighbour inside
-            step[static_cast<std::size_t>(y) * (directioncount + 1) + static_cast<std::size_t>(direction)]
-                = metric.distance_m(metric.index(x, y), direction);
-        }
-    const auto distance = [&](std::size_t cell, int direction) {
-        return step[(cell / static_cast<std::size_t>(width)) * (directioncount + 1) + static_cast<std::size_t>(direction)];
-    };
-    const auto neighbourof = [&](std::size_t cell, int direction) {
-        return static_cast<std::size_t>(static_cast<std::ptrdiff_t>(cell) + offset[direction]);
+    // A member's neighbour inside the patch in a direction of its inside mask.
+    const auto neighbourinside = [&](std::size_t cell, int direction) {
+        return static_cast<std::size_t>(neighbourof(grid, cell, direction));
     };
 
     // The flats: their cells (members) contiguous, flat by flat; per member the flat, the directions
-    // whose neighbour lies inside the patch and those of an allowed step.
+    // whose neighbour lies inside the patch and those of an allowed step, and the steps' distances
+    // (the grid's distance_m, per member and direction).
     std::vector<int32_t> slot(count, -1);
     std::vector<int32_t> members, flatof, flatstart;
     std::vector<uint8_t> insidemask, allowedmask;
+    std::vector<double> step;
+    const auto distance = [&](std::size_t member, int direction) {
+        return step[member * directioncount + static_cast<std::size_t>(direction - 1)];
+    };
     for (std::size_t seed = 0; seed < count; seed++)
     {
         if (flooded[seed] == 0 || slot[seed] >= 0)
@@ -353,20 +372,21 @@ bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, 
         for (std::size_t head = static_cast<std::size_t>(flatstart.back()); head < members.size(); head++)
         {
             const std::size_t cell = static_cast<std::size_t>(members[head]);
-            const int x = static_cast<int>(cell % static_cast<std::size_t>(width));
-            const int y = static_cast<int>(cell / static_cast<std::size_t>(width));
             uint8_t inside = 0, allowed = 0;
             for (int direction = 1; direction <= directioncount; direction++)
+                step.push_back(0.0);
+            for (int direction = 1; direction <= directioncount; direction++)
             {
-                const int ox = directionoffsetx(direction), oy = directionoffsety(direction);
-                if (x + ox < 0 || x + ox >= width || y + oy < 0 || y + oy >= height)
+                const std::int32_t neighbour = neighbourof(grid, cell, direction);
+                if (neighbour < 0)
                     continue;
                 const uint8_t bit = static_cast<uint8_t>(1u << (direction - 1));
                 inside |= bit;
-                const std::size_t next = neighbourof(cell, direction);
+                step[head * directioncount + static_cast<std::size_t>(direction - 1)] =
+                    grid.distance_m(static_cast<mesh::CellId>(cell), direction);
+                const std::size_t next = static_cast<std::size_t>(neighbour);
                 // crossespinnedcorner and the label, as route's steps
-                if (ox != 0 && oy != 0 && inputpinned[cell + static_cast<std::size_t>(static_cast<std::ptrdiff_t>(ox))] != 0
-                    && inputpinned[static_cast<std::size_t>(static_cast<std::ptrdiff_t>(cell) + offset[oy < 0 ? 1 : 5])] != 0)
+                if (crossespinnedcorner(grid, inputpinned, cell, direction))
                     continue;
                 if (catchments != nullptr && catchments->label[next] != catchments->label[cell])
                     continue;
@@ -410,11 +430,11 @@ bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, 
             {
                 if ((allowedmask[member] & (1u << (direction - 1))) == 0)
                     continue;
-                const std::size_t next = neighbourof(cell, direction);
+                const std::size_t next = neighbourinside(cell, direction);
                 if (!inflat(next, id))
                     continue;
                 const std::size_t other = static_cast<std::size_t>(slot[next]);
-                const double candidate = at + distance(cell, direction);
+                const double candidate = at + distance(member, direction);
                 if (candidate < reached[other])
                 {
                     reached[other] = candidate;
@@ -440,9 +460,9 @@ bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, 
             {
                 if ((allowedmask[member] & (1u << (direction - 1))) == 0)
                     continue;
-                const std::size_t next = neighbourof(cell, direction);
+                const std::size_t next = neighbourinside(cell, direction);
                 if (lowedge(cell, next))
-                    towards[member] = std::min(towards[member], distance(cell, direction));
+                    towards[member] = std::min(towards[member], distance(member, direction));
             }
             if (towards[member] < infinity)
                 heap.push_back(Entry{ towards[member], tieof(cell), static_cast<int32_t>(member) });
@@ -458,7 +478,7 @@ bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, 
                 const unsigned bit = 1u << (direction - 1);
                 if ((insidemask[member] & bit) == 0)
                     continue;
-                const std::size_t next = neighbourof(cell, direction);
+                const std::size_t next = neighbourinside(cell, direction);
                 if (inflat(next, id))
                     continue;
                 const float level = (allowedmask[member] & bit) != 0 ? filled[next] : surface[next];
@@ -494,7 +514,7 @@ bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, 
             {
                 if ((allowedmask[member] & (1u << (direction - 1))) == 0)
                     continue;
-                const std::size_t next = neighbourof(cell, direction);
+                const std::size_t next = neighbourinside(cell, direction);
                 double value;
                 if (inflat(next, id))
                     value = increment[static_cast<std::size_t>(slot[next])];  // infinite where unreached
@@ -504,7 +524,7 @@ bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, 
                     continue;
                 if (!(value < own))
                     continue;
-                const double gradient = (own - value) / distance(cell, direction);
+                const double gradient = (own - value) / distance(member, direction);
                 const std::uint64_t tie = tieof(next);
                 if (gradient > steepest || (best != 0 && gradient == steepest && tie < besttie))
                 {
@@ -515,7 +535,7 @@ bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, 
             }
             if (best == 0)
                 continue;
-            const int32_t receiver = static_cast<int32_t>(neighbourof(cell, best));
+            const int32_t receiver = static_cast<int32_t>(neighbourinside(cell, best));
             changed = changed || routing.receiver[cell] != receiver;
             routing.receiver[cell] = receiver;
             routing.direction[cell] = static_cast<uint8_t>(best);
@@ -550,10 +570,10 @@ bool resolveflats(const PatchMetric& metric, const std::vector<float>& surface, 
 // With `catchments` (S3.9, fixed labels from labelcatchments): the flood steps only into cells of
 // the seed's label and ties by the hashed key; the steepest descent takes only a neighbour of the
 // cell's own label.
-Routing route(const PatchMetric& metric, const std::vector<float>& surface, const std::vector<uint8_t>& inputpinned,
+Routing route(const mesh::CellGrid& grid, const std::vector<float>& surface, const std::vector<uint8_t>& inputpinned,
               const std::vector<std::uint64_t>& key, const Catchments* catchments)
 {
-    const std::size_t count = metric.size();
+    const std::size_t count = grid.cellcount();
     Routing routing;
     routing.receiver.assign(count, -1);
     routing.direction.assign(count, 0);
@@ -594,8 +614,11 @@ Routing route(const PatchMetric& metric, const std::vector<float>& surface, cons
         routing.order.push_back(static_cast<int32_t>(cell));
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t next = metric.neighbour(cell, direction);
-            if (next == cell || closed[next] != 0 || crossespinnedcorner(metric, inputpinned, cell, direction))
+            const std::int32_t neighbour = neighbourof(grid, cell, direction);
+            if (neighbour < 0)
+                continue;
+            const std::size_t next = static_cast<std::size_t>(neighbour);
+            if (closed[next] != 0 || crossespinnedcorner(grid, inputpinned, cell, direction))
                 continue;
             if (catchments != nullptr && catchments->label[next] != catchments->label[cell])
                 continue;
@@ -619,14 +642,17 @@ Routing route(const PatchMetric& metric, const std::vector<float>& surface, cons
         double steepest = 0.0;
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t next = metric.neighbour(cell, direction);
-            if (next == cell || !(surface[next] < surface[cell]) || !(filled[next] < filled[cell])
-                || crossespinnedcorner(metric, inputpinned, cell, direction))
+            const std::int32_t neighbour = neighbourof(grid, cell, direction);
+            if (neighbour < 0)
+                continue;
+            const std::size_t next = static_cast<std::size_t>(neighbour);
+            if (!(surface[next] < surface[cell]) || !(filled[next] < filled[cell])
+                || crossespinnedcorner(grid, inputpinned, cell, direction))
                 continue;
             if (catchments != nullptr && catchments->label[next] != catchments->label[cell])
                 continue;
             const double gradient = (static_cast<double>(surface[cell]) - static_cast<double>(surface[next]))
-                                    / metric.distance_m(cell, direction);
+                                    / grid.distance_m(static_cast<mesh::CellId>(cell), direction);
             if (gradient > steepest)
             {
                 steepest = gradient;
@@ -635,17 +661,17 @@ Routing route(const PatchMetric& metric, const std::vector<float>& surface, cons
         }
         if (best != 0)
         {
-            routing.receiver[cell] = static_cast<int32_t>(metric.neighbour(cell, best));
+            routing.receiver[cell] = neighbourof(grid, cell, best);
             routing.direction[cell] = static_cast<uint8_t>(best);
         }
         else
         {
             routing.receiver[cell] = floodreceiver[cell];
-            routing.direction[cell] = directionto(metric, cell, static_cast<std::size_t>(floodreceiver[cell]));
+            routing.direction[cell] = directionto(grid, cell, static_cast<std::size_t>(floodreceiver[cell]));
             flooded[cell] = 1;
         }
     }
-    if (!resolveflats(metric, surface, filled, inputpinned, key, catchments, flooded, routing))
+    if (!resolveflats(grid, surface, filled, inputpinned, key, catchments, flooded, routing))
         return routing;
     // The order on the final receivers: the pinned cells, then breadth-first each listed cell's
     // donors (in increasing index, from a count of donors per cell); every cell is listed, since
@@ -682,13 +708,12 @@ Routing route(const PatchMetric& metric, const std::vector<float>& surface, cons
 // The solution on fixed receivers: discharge, response time, the start surface
 // advected up the flow paths, then the threshold slope. `pinned` is the input's, with S3.9's
 // unreached cells added; `outlet` receives each cell's pinned cell.
-std::vector<float> solve(const PatchMetric& metric, const AnalyticalReliefInput& input, const std::vector<uint8_t>& pinned,
+std::vector<float> solve(const mesh::CellGrid& grid, const AnalyticalReliefInput& input, const std::vector<uint8_t>& pinned,
                          const AnalyticalReliefParameters& parameters, const Routing& routing,
                          std::vector<double>& discharge, std::vector<int32_t>& outlet)
 {
-    const std::size_t count = metric.size();
+    const std::size_t count = grid.cellcount();
     const std::vector<float>& start = input.start_m;
-    const std::size_t width = static_cast<std::size_t>(metric.width);
 
     // Discharge: runoff x cell area, summed over each unpinned catchment, donors last
     // first; a cell adds its donors in direction-code order (a canonical sum).
@@ -698,12 +723,12 @@ std::vector<float> solve(const PatchMetric& metric, const AnalyticalReliefInput&
         const std::size_t cell = static_cast<std::size_t>(routing.order[k]);
         if (pinned[cell] != 0)
             continue;
-        double water = static_cast<double>(input.runoff_m_yr[cell]) * metric.rowarea_m2[cell / width];
+        double water = static_cast<double>(input.runoff_m_yr[cell]) * grid.area_m2(static_cast<mesh::CellId>(cell));
         for (int direction = 1; direction <= directioncount; direction++)
         {
-            const std::size_t next = metric.neighbour(cell, direction);
-            if (next != cell && routing.receiver[next] == static_cast<int32_t>(cell))
-                water += discharge[next];
+            const std::int32_t next = neighbourof(grid, cell, direction);
+            if (next >= 0 && routing.receiver[static_cast<std::size_t>(next)] == static_cast<int32_t>(cell))
+                water += discharge[static_cast<std::size_t>(next)];
         }
         discharge[cell] = water;
     }
@@ -723,7 +748,7 @@ std::vector<float> solve(const PatchMetric& metric, const AnalyticalReliefInput&
             continue;
         }
         const std::size_t receiver = static_cast<std::size_t>(routing.receiver[cell]);
-        const double length = metric.distance_m(cell, routing.direction[cell]);
+        const double length = grid.distance_m(static_cast<mesh::CellId>(cell), routing.direction[cell]);
         const double water = std::max(0.0, discharge[cell]) / cubicmetrespercubickilometre;
         const double speed = parameters.erodibility * std::pow(water, parameters.areaexponent);
         tau[cell] = tau[receiver] + (speed > 0.0 ? length / speed : infinity);
@@ -794,7 +819,7 @@ std::vector<float> solve(const PatchMetric& metric, const AnalyticalReliefInput&
         }
         const std::size_t receiver = static_cast<std::size_t>(routing.receiver[cell]);
         const double limit = static_cast<double>(elevation[receiver])
-                             + parameters.thresholdslope * metric.distance_m(cell, routing.direction[cell]);
+                             + parameters.thresholdslope * grid.distance_m(static_cast<mesh::CellId>(cell), routing.direction[cell]);
         const double value = std::min(advected[cell], limit);
         float stored = static_cast<float>(value);
         if (static_cast<double>(stored) > limit)
@@ -805,18 +830,19 @@ std::vector<float> solve(const PatchMetric& metric, const AnalyticalReliefInput&
 }
 }
 
-AnalyticalReliefResult solveanalyticalrelief(const PatchMetric& metric, const AnalyticalReliefInput& input,
+AnalyticalReliefResult solveanalyticalrelief(const mesh::CellGrid& grid, const AnalyticalReliefInput& input,
                                              const AnalyticalReliefParameters& parameters)
 {
-    const std::size_t count = metric.size();
-    const std::size_t rows = static_cast<std::size_t>(metric.height < 0 ? 0 : metric.height);
-    if (metric.width < 0 || metric.height < 0 || metric.rowdx_m.size() != rows || metric.rowarea_m2.size() != rows
-        || input.start_m.size() != count || input.pinned.size() != count || input.runoff_m_yr.size() != count
+    const std::size_t count = grid.cellcount();
+    if (input.start_m.size() != count || input.pinned.size() != count || input.runoff_m_yr.size() != count
         || (!input.key.empty() && input.key.size() != count)
         || (!input.uplift_m_myr.empty() && input.uplift_m_myr.size() != count)
-        || (parameters.catchmentreach > 0
-            && (input.globalcolumn.size() != count || input.globalrow.size() != count || input.globalwidth < 1)))
-        throw std::invalid_argument("solveanalyticalrelief: input sizes differ from the metric's");
+        || (parameters.catchmentreach > 0 && (input.globalcell.size() != count || input.globalgrid == nullptr)))
+        throw std::invalid_argument("solveanalyticalrelief: input sizes differ from the grid's");
+    if (parameters.catchmentreach > 0)
+        for (const mesh::CellId global : input.globalcell)
+            if (global >= input.globalgrid->cellcount())
+                throw std::invalid_argument("solveanalyticalrelief: a global cell lies outside the level-0 grid");
     if (!(parameters.erodibility > 0.0) || !(parameters.areaexponent >= 0.0) || !(parameters.elapsed_myr >= 0.0)
         || !std::isfinite(parameters.elapsed_myr) || !(parameters.thresholdslope > 0.0) || parameters.maxiterations < 1
         || !(parameters.damping > 0.0) || !(parameters.damping <= 1.0) || parameters.catchmentreach < 0)
@@ -850,13 +876,13 @@ AnalyticalReliefResult solveanalyticalrelief(const PatchMetric& metric, const An
     const Catchments* bounded = nullptr;
     if (parameters.catchmentreach > 0)
     {
-        catchments = labelcatchments(metric, input.start_m, input, parameters.catchmentreach);
+        catchments = labelcatchments(grid, input.start_m, input, parameters.catchmentreach);
         bounded = &catchments;
     }
     Routing previous;
     for (int pass = 1; pass <= parameters.maxiterations; pass++)
     {
-        Routing routing = route(metric, routed, input.pinned, input.key, bounded);
+        Routing routing = route(grid, routed, input.pinned, input.key, bounded);
         result.iterations = pass;
         result.converged = pass > 1 && routing.receiver == previous.receiver;
         result.changedreceivers = 0;
@@ -864,7 +890,7 @@ AnalyticalReliefResult solveanalyticalrelief(const PatchMetric& metric, const An
             for (std::size_t cell = 0; cell < count; cell++)
                 result.changedreceivers += routing.receiver[cell] != previous.receiver[cell] ? 1 : 0;
         // Every pass solves from the start surface on the receivers of the damped surface.
-        result.elevation_m = solve(metric, input, bounded != nullptr ? catchments.pinned : input.pinned, parameters,
+        result.elevation_m = solve(grid, input, bounded != nullptr ? catchments.pinned : input.pinned, parameters,
                                    routing, result.discharge_m3_yr, result.outlet);
         result.direction = routing.direction;
         previous = std::move(routing);

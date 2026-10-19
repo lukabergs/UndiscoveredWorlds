@@ -69,7 +69,7 @@ TEST_F(Landscape, RegionalGlacialFieldsAreTheUpsampledGlobalOnes)
         for (int x = x0; x < x0 + k; x++)
             mean += glacial.runela_m[at(x, y, domainwidth)];
     mean /= static_cast<double>(k * k);
-    const float global = inputs.equilibriumline_m[at(window.globalcolumn(x0), window.globalrow(y0), inputs.width)];
+    const float global = inputs.equilibriumline_m[window.globalcell(x0, y0)];
     EXPECT_NEAR(mean, global, 30.0);
 
     std::fill(inputs.equilibriumline_m.begin(), inputs.equilibriumline_m.end(), 1500.0f);

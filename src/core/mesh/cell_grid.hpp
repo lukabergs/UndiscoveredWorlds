@@ -122,6 +122,7 @@ private:
     friend std::shared_ptr<const CellGrid> subgrid(const CellGrid&, const std::vector<CellId>&);
     friend std::shared_ptr<const CellGrid> cubewindowgrid(int, double, const std::vector<LevelKey>&, bool);
     friend std::shared_ptr<const CellGrid> latlonwindowgrid(int, double, const LatLonWindowBox&);
+    friend std::shared_ptr<const CellGrid> makeplanarwindow(int, int, double);
 
     LevelKey locatekey(const Vec3& p) const;  // the level key of the full grid's cell
     int analyticwidth() const { return latlonwindow_ ? windowcolumns_ : columns_; }
@@ -208,4 +209,10 @@ std::shared_ptr<const CellGrid> cubewindowgrid(int facecells, double radius_m, c
 // diagonal with the cell's own row beyond the box edge), longitudes as
 // makelatlongrid's. Throws std::invalid_argument for an empty or oversized box.
 std::shared_ptr<const CellGrid> latlonwindowgrid(int levelcolumns, double radius_m, const LatLonWindowBox& box);
+// A planar patch of columns x rows square cells of side cell_m for hand-built benches
+// (the analytical relief's tests): a lat-lon window's tables (local id y columns + x,
+// nothing wrapping, -1 beyond the edge, globalkey the local id) with every row's
+// spacing cell_m, area cell_m^2 and latitude 0 (diagonals hypot(cell_m, cell_m)).
+// Throws std::invalid_argument for an empty patch or a cell side that is not positive.
+std::shared_ptr<const CellGrid> makeplanarwindow(int columns, int rows, double cell_m);
 }

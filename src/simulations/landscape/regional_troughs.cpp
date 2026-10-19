@@ -32,8 +32,8 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
         return;
     const int k = window.scale;
     const double reference = troughs.reference_km2 > 0.0 ? troughs.reference_km2 : 1.0;
-    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
-    const double cell_m = metric.dy_m;
+    const std::shared_ptr<const mesh::CellGrid> grid = regionalwindowgrid(window, inputs.radius_m);
+    const double cell_m = northsouthspacing_m(*grid);
     if (!(cell_m > 0.0))
         return;
     const bool loop = bandupper > 0.0;
@@ -75,7 +75,7 @@ void carvetroughs(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
                 continue;
             // S3.5: in the loop the distance on the ground, the column offsets scaled by the axis row's
             // east-west over north-south cell size; the single pass keeps R9's cells.
-            const double ratio = loop ? eastwestratio(metric, y) : 1.0;
+            const double ratio = loop ? eastwestratio(*grid, cell) : 1.0;
             const int columns = loop ? columnextent(halfwidth, ratio, k) : extent;
             for (int dy = -extent; dy <= extent; dy++)
             {

@@ -197,7 +197,8 @@ TEST_F(Landscape, RegionalTributariesOffLeaveTheChannelsUnchanged)
     const landscape::FineWarp warp = landscape::regionalwarp(window, inputs.seed, parameters);
     const landscape::GlobalIncision incision = landscape::globalincision(inputs, parameters);
     const landscape::RegionalDetails details{};
-    const landscape::LevelContext context{inputs, window, parameters, warp, incision, details};
+    const auto contextgrid = landscape::regionalwindowgrid(window, inputs.radius_m);
+    const landscape::LevelContext context{inputs, window, *contextgrid, parameters, warp, incision, details};
     landscape::LevelState state;
     runtochannels(context, state);
     ASSERT_GT(std::count(state.channels.channel.begin(), state.channels.channel.end(), uint8_t{1}), 0);
@@ -233,7 +234,8 @@ TEST_F(Landscape, RegionalTributariesGrowInsideTheirParentCell)
     const landscape::FineWarp warp = landscape::regionalwarp(window, inputs.seed, parameters);
     const landscape::GlobalIncision incision = landscape::globalincision(inputs, parameters);
     const landscape::RegionalDetails details{};
-    const landscape::LevelContext context{inputs, window, parameters, warp, incision, details, 1, 4};
+    const auto contextgrid = landscape::regionalwindowgrid(window, inputs.radius_m);
+    const landscape::LevelContext context{inputs, window, *contextgrid, parameters, warp, incision, details, 1, 4};
     landscape::LevelState state;
     runtochannels(context, state);
     const landscape::FineChannels links = state.channels;
@@ -351,7 +353,8 @@ TEST_F(Landscape, RegionalTributariesInheritedAtLevelTwo)
     const landscape::RegionalDetails details{};
     const RegionalWindow parentwindow = landscape::regionalwindow(256, 4, loophalo + 3, 170.0, -5.0, 180.0, 5.0);
     const landscape::FineWarp parentwarp = landscape::regionalwarp(parentwindow, inputs.seed, parameters);
-    const landscape::LevelContext parentcontext{inputs, parentwindow, parameters, parentwarp, incision, details, 1, 4};
+    const auto parentcontextgrid = landscape::regionalwindowgrid(parentwindow, inputs.radius_m);
+    const landscape::LevelContext parentcontext{inputs, parentwindow, *parentcontextgrid, parameters, parentwarp, incision, details, 1, 4};
     landscape::LevelState parentstate;
     runtochannels(parentcontext, parentstate);
     landscape::growtributaries(parentcontext, parentstate);
@@ -364,11 +367,13 @@ TEST_F(Landscape, RegionalTributariesInheritedAtLevelTwo)
 
     const RegionalWindow window = windowpsmall(16);
     const landscape::FineWarp warp = landscape::regionalwarp(window, inputs.seed, parameters);
-    const landscape::LevelContext start{inputs, window, parameters, warp, incision, details};
+    const auto startgrid = landscape::regionalwindowgrid(window, inputs.radius_m);
+    const landscape::LevelContext start{inputs, window, *startgrid, parameters, warp, incision, details};
     landscape::LevelState state;
     runtochannels(start, state);
     const landscape::FineChannels links = state.channels;
-    const landscape::LevelContext context{inputs, window, parameters, warp, incision, details, 2, 4,
+    const auto contextgrid = landscape::regionalwindowgrid(window, inputs.radius_m);
+    const landscape::LevelContext context{inputs, window, *contextgrid, parameters, warp, incision, details, 2, 4,
                                           nullptr, nullptr, nullptr, nullptr, &parent};
     const landscape::TributaryReport report = landscape::growtributaries(context, state);
     std::printf("[tributaries] level 2 of P': %d parent tributary cells (%d not drawn), %d inherited cells, %d ends; "

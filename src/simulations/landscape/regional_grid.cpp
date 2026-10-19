@@ -56,9 +56,12 @@ double RegionalWindow::finelongitude_rad(int x) const
     return 2.0 * pi * (static_cast<double>(absolutefinecolumn(x)) + 0.5) / finewidth;
 }
 
-int RegionalWindow::globalcolumn(int x) const { return static_cast<int>(absolutefinecolumn(x) / scale); }
-
-int RegionalWindow::globalrow(int y) const { return static_cast<int>(absolutefinerow(y) / scale); }
+std::size_t RegionalWindow::globalcell(int x, int y) const
+{
+    const std::size_t column = static_cast<std::size_t>(absolutefinecolumn(x) / scale);
+    const std::size_t row = static_cast<std::size_t>(absolutefinerow(y) / scale);
+    return row * static_cast<std::size_t>(worldwidth) + column;
+}
 
 RegionalWindow regionalwindow(int worldwidth, int scale, int halo, double west_deg, double south_deg, double east_deg,
                               double north_deg)
@@ -120,6 +123,22 @@ RegionalWindow regionalwindow(int worldwidth, int scale, int halo, double west_d
     window.domainrow0 = std::max(0, row0 - halo);
     window.domainrows = std::min(height, rowend + halo) - window.domainrow0;
     return window;
+}
+
+std::shared_ptr<const mesh::CellGrid> regionalwindowgrid(const RegionalWindow& window, double radius_m)
+{
+    mesh::LatLonWindowBox box;
+    box.column0 = window.absolutefinecolumn(0);
+    box.columns = window.domainfinewidth();
+    box.row0 = static_cast<int>(window.absolutefinerow(0));
+    box.rows = window.domainfineheight();
+    return mesh::latlonwindowgrid(window.worldwidth * window.scale, radius_m, box);
+}
+
+double northsouthspacing_m(const mesh::CellGrid& grid)
+{
+    // The north slot's distance: the row spacing on every lat-lon cell (also beyond the edge).
+    return grid.cellcount() > 0 ? grid.distance_m(0, 1) : 0.0;
 }
 
 std::size_t PatchMetric::neighbour(std::size_t cell, int direction) const

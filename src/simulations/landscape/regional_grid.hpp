@@ -13,7 +13,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
+
+#include "core/mesh/cell_grid.hpp"
 
 namespace landscape
 {
@@ -59,9 +62,10 @@ struct RegionalWindow
     // relief_roughness.cpp for global cells).
     double finelatitude_rad(int y) const;
     double finelongitude_rad(int x) const;
-    // The global cell holding a domain fine cell: column wrapped to 0 .. W - 1.
-    int globalcolumn(int x) const;
-    int globalrow(int y) const;
+    // The level-0 ancestor of domain fine cell (x, y): the id on the world's grid
+    // (RegionalGlobalInputs::grid; on lat-lon J W + I, the global column I wrapped to
+    // 0 .. W - 1) of the global cell holding it.
+    std::size_t globalcell(int x, int y) const;
 };
 
 // The window that covers a box in degrees, snapped outwards to whole global cells.
@@ -75,7 +79,20 @@ struct RegionalWindow
 RegionalWindow regionalwindow(int worldwidth, int scale, int halo, double west_deg, double south_deg, double east_deg,
                               double north_deg);
 
-// The metric of a domain's fine grid on a sphere of radius R: a patch, not the whole
+// The domain's fine grid as a table-driven cell grid (sphere-mesh.md section 8, "Window
+// grids"): on lat-lon mesh::latlonwindowgrid of the kW x kH planet-wide fine grid over the
+// domain box, local id y domainfinewidth() + x (the domain's row-major order), nothing
+// wrapping inside it (no neighbour beyond its edge: -1), latitudes, spacings, areas and
+// distances those of finepatchmetric bit for bit (MeshWindow.LatLonWindowEqualsPatchMetric),
+// globalkey(c) the absolute fine index I + J kW. Throws as latlonwindowgrid.
+std::shared_ptr<const mesh::CellGrid> regionalwindowgrid(const RegionalWindow& window, double radius_m);
+
+// The north-south spacing of a window grid's cells, which the units take as the level's
+// cell size (on lat-lon pi R / (k H), finepatchmetric's dy_m: the north slot's distance).
+double northsouthspacing_m(const mesh::CellGrid& grid);
+
+// The metric of a domain's fine grid on a sphere of radius R, the reference that
+// regionalwindowgrid reproduces (the pass reads the window grid; T8 W2-W2a): a patch, not the whole
 // sphere, so nothing wraps (its edges are the domain's boundary). Row y's centre
 // latitude, east-west spacing R dlambda cos(phi) with dlambda = 2 pi / (k W), the
 // north-south spacing pi R / (k H) and the cell area as SphereMetric computes them

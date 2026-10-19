@@ -10,6 +10,7 @@
 // (2 x meanpasses + 3, regionalhalo): a test with other parameters builds its windows with the
 // halo they need.
 
+#include "core/mesh/cell_grid.hpp"
 #include "simulations/landscape/regional_grid.hpp"
 #include "simulations/landscape/regional_pass.hpp"
 #include "simulations/landscape/sphere_metric.hpp"
@@ -63,6 +64,7 @@ RegionalGlobalInputs syntheticworld(int width, double relief = 1.0)
     const int height = width / 2;
     const std::size_t size = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
     RegionalGlobalInputs inputs;
+    inputs.grid = mesh::makelatlongrid(width, radius_m);  // the world's level-0 grid
     inputs.width = width;
     inputs.height = height;
     inputs.radius_m = radius_m;

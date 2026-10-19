@@ -100,7 +100,7 @@ TEST_F(Landscape, RegionalEdgesGateIsTheThreeByThreeRuleByDefault)
     for (int y = 0; y < domainheight; y++)
         for (int x = 0; x < domainwidth; x++)
         {
-            const uint8_t expected = nearsea[at(window.globalcolumn(x), window.globalrow(y), inputs.width)];
+            const uint8_t expected = nearsea[window.globalcell(x, y)];
             if (gate[at(x, y, domainwidth)] != expected)
                 mismatches++;
             gated += gate[at(x, y, domainwidth)] != 0 ? 1 : 0;
@@ -137,7 +137,7 @@ TEST_F(Landscape, RegionalEdgesSmoothGateCoversItsReach)
         for (int y = 0; y < domainheight; y++)
             for (int x = 0; x < domainwidth; x++)
             {
-                const std::size_t global = at(window.globalcolumn(x), window.globalrow(y), world.width);
+                const std::size_t global = window.globalcell(x, y);
                 const uint8_t value = gate[at(x, y, domainwidth)];
                 if (nearsea[global] != 0)
                 {
@@ -175,7 +175,7 @@ TEST_F(Landscape, RegionalEdgesSmoothGateCoversItsReach)
     int warpedmissing = 0;
     for (int y = 0; y < domainheight; y++)
         for (int x = 0; x < domainwidth; x++)
-            if (nearsea[at(window.globalcolumn(x), window.globalrow(y), world.width)] != 0 && warpedgate[at(x, y, domainwidth)] == 0)
+            if (nearsea[window.globalcell(x, y)] != 0 && warpedgate[at(x, y, domainwidth)] == 0)
                 warpedmissing++;
     EXPECT_EQ(warpedmissing, 0);
 }
@@ -243,7 +243,7 @@ TEST_F(Landscape, RegionalEdgesSmoothGateExcludesLakeCells)
         int inlake = 0, cells = 0;
         for (int y = 0; y < window.domainfineheight(); y++)
             for (int x = 0; x < window.domainfinewidth(); x++)
-                if (window.globalcolumn(x) == lakei && window.globalrow(y) == lakej)
+                if (ancestorcolumn(window, x) == lakei && ancestorrow(window, y) == lakej)
                 {
                     cells++;
                     inlake += gate[at(x, y, window.domainfinewidth())] != 0 ? 1 : 0;

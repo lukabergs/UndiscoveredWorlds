@@ -130,15 +130,16 @@ std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const RegionalW
     {
         for (int y = 0; y < domainheight; y++)
         {
-            const int row = box.globalrow(y);
             for (int x = 0; x < domainwidth; x++)
             {
                 const std::size_t cell = at(x, y, domainwidth);
-                const int column = box.globalcolumn(x);
+                const std::size_t global = box.globalcell(x, y);
                 if (lakeweight == nullptr)
-                    gate[cell] = nearsea[at(column, row, inputs.width)];
+                    gate[cell] = nearsea[global];
                 else if (!lakeside(cell))
-                    gate[cell] = aroundcell(width, height, column, row,
+                    // The 3 x 3 of the lat-lon global grid around the ancestor (its column and row).
+                    gate[cell] = aroundcell(width, height, static_cast<int>(global % static_cast<std::size_t>(width)),
+                                            static_cast<int>(global / static_cast<std::size_t>(width)),
                                             [&](std::size_t other) { return inputs.network.sea[other] != 0; }) ? 1 : 0;
             }
         }
@@ -157,12 +158,11 @@ std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const RegionalW
     const double fade_m = parameters.warp.fade_m;
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = box.globalrow(y);
         const double gy = globalunits(box.absolutefinerow(y), k);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
-            const std::size_t global = at(box.globalcolumn(x), row, width);
+            const std::size_t global = box.globalcell(x, y);
             if (lakeside(cell))
                 continue;
             if (nearsea[global] != 0)

@@ -150,7 +150,7 @@ TEST_F(Landscape, RegionalSurfaceWarpedUpsample)
         {
             largest = std::max(largest, std::fabs(static_cast<double>(shifted[at(x, y, domainwidth)]) -
                                                   plain[at(x + window.scale, y, domainwidth)]));
-            if (window.globalcolumn(x) == 31)
+            if (ancestorcolumn(window, x) == 31)
                 crossings++;
         }
     EXPECT_GT(crossings, 0);

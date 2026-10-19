@@ -61,8 +61,8 @@ TEST_F(Landscape, RegionalGridCrossesTheDateLine)
     EXPECT_EQ(window.absolutefinecolumn(1), 31);
     EXPECT_EQ(window.absolutefinecolumn(2), 0);
     EXPECT_EQ(window.absolutefinecolumn(3), 1);
-    EXPECT_EQ(window.globalcolumn(1), 15);
-    EXPECT_EQ(window.globalcolumn(2), 0);
+    EXPECT_EQ(ancestorcolumn(window, 1), 15);
+    EXPECT_EQ(ancestorcolumn(window, 2), 0);
 
     // With a halo of 3 the domain starts at column 12 and the kept box 3 columns in.
     const landscape::RegionalWindow haloed = landscape::regionalwindow(16, 2, 3, 170.0, -10.0, -170.0, 10.0);
@@ -71,7 +71,7 @@ TEST_F(Landscape, RegionalGridCrossesTheDateLine)
     EXPECT_EQ(haloed.keptfinecolumnoffset(), 6);
     EXPECT_EQ(haloed.absolutefinecolumn(0), 24);
     EXPECT_EQ(haloed.absolutefinecolumn(haloed.domainfinewidth() - 1), 7);
-    EXPECT_EQ(haloed.globalcolumn(haloed.domainfinewidth() - 1), 3);
+    EXPECT_EQ(ancestorcolumn(haloed, haloed.domainfinewidth() - 1), 3);
 }
 
 TEST_F(Landscape, RegionalGridLongitudesWrapWithinATurn)
@@ -112,7 +112,7 @@ TEST_F(Landscape, RegionalGridClipsTheHaloAtThePoles)
     EXPECT_EQ(south.domainrows, 3);
     EXPECT_EQ(south.keptfinerowoffset(), 6);
     EXPECT_EQ(south.absolutefinerow(south.domainfineheight() - 1), 23);
-    EXPECT_EQ(south.globalrow(south.domainfineheight() - 1), 7);
+    EXPECT_EQ(ancestorrow(south, south.domainfineheight() - 1), 7);
 
     // Columns are never clipped.
     EXPECT_EQ(north.domaincolumns, north.columns + 4);
@@ -133,7 +133,7 @@ TEST_F(Landscape, RegionalGridFineCentresAverageToTheGlobalCentre)
         double latitude = 0.0;
         for (int y = dr * k; y < (dr + 1) * k; y++)
         {
-            EXPECT_EQ(window.globalrow(y), j);
+            EXPECT_EQ(ancestorrow(window, y), j);
             latitude += window.finelatitude_rad(y);
         }
         const double north = pi / 2.0 - pi * j / 8.0, south = pi / 2.0 - pi * (j + 1) / 8.0;
@@ -145,7 +145,7 @@ TEST_F(Landscape, RegionalGridFineCentresAverageToTheGlobalCentre)
         double longitude = 0.0;
         for (int x = dc * k; x < (dc + 1) * k; x++)
         {
-            EXPECT_EQ(window.globalcolumn(x), i);
+            EXPECT_EQ(ancestorcolumn(window, x), i);
             longitude += window.finelongitude_rad(x);
         }
         EXPECT_NEAR(longitude / k, 2.0 * pi * (i + 0.5) / 16.0, 1e-12) << "column " << i;

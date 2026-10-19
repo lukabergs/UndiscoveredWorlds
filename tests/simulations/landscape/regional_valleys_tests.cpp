@@ -441,16 +441,20 @@ TEST_F(Landscape, RegionalValleysRoundFloorInTheLoop)
     // square in cells. w = 3.5 cells (Q at the reference), no sides; at the domain's middle row and
     // at a row where r <= 0.8.
     const RegionalGlobalInputs inputs = syntheticworld(32);
-    const landscape::PatchMetric metric = landscape::finepatchmetric(windowa(4), inputs.radius_m);
+    const landscape::RegionalWindow axiswindow = windowa(4);
+    const auto grid = landscape::regionalwindowgrid(axiswindow, inputs.radius_m);
+    const auto rowratio = [&](int y) {
+        return landscape::eastwestratio(*grid, static_cast<std::size_t>(y) * static_cast<std::size_t>(axiswindow.domainfinewidth()));
+    };
     int northern = -1;
-    for (int y = 6; y < metric.height - 6 && northern < 0; y++)
-        if (landscape::eastwestratio(metric, y) <= 0.8 && landscape::eastwestratio(metric, y) > 0.6)
+    for (int y = 6; y < axiswindow.domainfineheight() - 6 && northern < 0; y++)
+        if (rowratio(y) <= 0.8 && rowratio(y) > 0.6)
             northern = y;
     ASSERT_GE(northern, 0);
     for (const int row : { -1, northern })
     {
         PointChannel point = pointchannel(inputs, 4, row);
-        const double ratio = landscape::eastwestratio(metric, point.y);
+        const double ratio = rowratio(point.y);
         SCOPED_TRACE("row " + std::to_string(point.y) + ", ratio " + std::to_string(ratio));
         RegionalParameters parameters;
         parameters.valleys.floor_km = 3.5 * point.dy / 1000.0;

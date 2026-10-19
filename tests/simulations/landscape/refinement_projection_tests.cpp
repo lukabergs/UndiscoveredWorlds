@@ -254,8 +254,8 @@ void checkexactness(int f)
             for (int y = 0; y < s; y++)
                 for (int x = 0; x < s; x++)
                     sum += field[fine.index(fine.keptcolumnoffset() + gi * s + x, fine.keptrowoffset() + gj * s + y)];
-            const int column = fine.globalcolumn(fine.keptcolumnoffset() + gi * s);
-            const int row = fine.globalrow(fine.keptrowoffset() + gj * s);
+            const int column = ancestorcolumn(fine, fine.keptcolumnoffset() + gi * s);
+            const int row = ancestorrow(fine, fine.keptrowoffset() + gj * s);
             const double global = chain.global[static_cast<std::size_t>(row) * 32u + static_cast<std::size_t>(column)];
             largest = std::max(largest, std::fabs(sum / (static_cast<double>(s) * s) - global));
         }
@@ -306,8 +306,8 @@ TEST_F(Landscape, RefinementProjectionHandBuiltWindowsFindTheirParents)
             EXPECT_GE(py, parent.keptrowoffset());
             EXPECT_LT(py, parent.keptrowoffset() + parent.rows);
             EXPECT_EQ(parentfield[parent.index(px, py)], static_cast<float>(landscape::levelkey(column, row, 32)));
-            EXPECT_EQ(child.globalcolumn(x), parent.globalcolumn(px));
-            EXPECT_EQ(child.globalrow(y), parent.globalrow(py));
+            EXPECT_EQ(ancestorcolumn(child, x), ancestorcolumn(parent, px));
+            EXPECT_EQ(ancestorrow(child, y), ancestorrow(parent, py));
             children[{column, row}]++;
         }
     // Six parent columns (29 .. 31 and 0 .. 2) by four rows, each with factor^2 children.

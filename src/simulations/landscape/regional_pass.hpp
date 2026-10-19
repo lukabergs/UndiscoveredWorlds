@@ -172,6 +172,9 @@ struct LevelContext
 {
     const RegionalGlobalInputs& inputs;
     const RegionalWindow& window;        // the level's window as the units take it (scale k_l; the single pass's)
+    // The window's domain as a cell grid (regionalwindowgrid(window, inputs.radius_m); sphere-mesh.md
+    // section 8, "Window grids"): local id y domainfinewidth() + x, globalkey the absolute fine index.
+    const mesh::CellGrid& grid;
     const RegionalParameters& parameters;
     const FineWarp& warp;                // regionalwarp's for `window`
     const GlobalIncision& incision;      // globalincision's, computed once per pass

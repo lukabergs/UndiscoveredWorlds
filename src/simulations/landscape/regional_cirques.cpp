@@ -41,8 +41,8 @@ void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
 
     // The bowl's radius in fine cells: kilometres on the ground over the fine north-south
     // spacing, at most k (the halo rule); under one cell the centre alone.
-    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
-    const double cell_m = metric.dy_m;
+    const std::shared_ptr<const mesh::CellGrid> grid = regionalwindowgrid(window, inputs.radius_m);
+    const double cell_m = northsouthspacing_m(*grid);
     const bool loop = bandupper > 0.0;
     const double radius = std::min(static_cast<double>(k), cirques.radius_km * 1000.0 / cell_m);
     if (!(radius > 0.0))
@@ -97,7 +97,7 @@ void carvecirques(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
                 any = true;
                 // S3.5: in the loop the distance on the ground, the column offsets scaled by the
                 // centre row's east-west over north-south cell size; the single pass keeps R9's cells.
-                const double ratio = loop ? eastwestratio(metric, y) : 1.0;
+                const double ratio = loop ? eastwestratio(*grid, centre) : 1.0;
                 const int columns = loop ? columnextent(radius, ratio, k) : extent;
                 for (int dy = -extent; dy <= extent; dy++)
                 {

@@ -9,19 +9,27 @@
 // Planet-free: the planet adapter is src/simulations/regional/regional_inputs.hpp.
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
+#include "core/mesh/cell_grid.hpp"
 #include "simulations/landscape/analytical_relief.hpp"
 #include "simulations/landscape/channel_network.hpp"
 
 namespace landscape
 {
-// The global fields the pass reads, W x H row-major, north row first, float getters
-// only (no whole-metre values).
+// The global fields the pass reads, one value per cell of the world's level-0 grid, indexed
+// by its cell id (on the lat-lon grid y W + x: W x H row-major, north row first), float
+// getters only (no whole-metre values). network.direction holds the world's slot codes
+// (1..8, 0 none): a cell's receiver is grid->neighbour(c, direction) (sphere-mesh.md
+// section 8, "global inputs by cell id from the world's grid").
 struct RegionalGlobalInputs
 {
-    int width = 0;
-    int height = 0;
+    // The world's level-0 grid (planet::sharedgrid(); a makelatlongrid of W in the tests).
+    // The bounded catchments' rings (AnalyticalReliefInput::globalgrid) read it.
+    std::shared_ptr<const mesh::CellGrid> grid;
+    int width = 0;                       // lat-lon W (the grid's columns)
+    int height = 0;                      // lat-lon H = W / 2
     double radius_m = 0.0;               // planetbody.radius
     float sealevel = 0.0f;               // geosphere.sea_level, m above datum
     std::uint64_t seed = 0;              // the world seed

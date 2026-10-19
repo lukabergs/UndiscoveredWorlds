@@ -691,8 +691,7 @@ void smoothinglevel(const LevelContext& context, LevelState& state)
     for (int y = 0; y < level.domainrows; y++)
         for (int x = 0; x < level.domaincolumns; x++)
         {
-            const std::size_t global = static_cast<std::size_t>(level.globalrow(y)) * static_cast<std::size_t>(inputs.width) +
-                                       static_cast<std::size_t>(level.globalcolumn(x));
+            const std::size_t global = level.globalcell(x, y);
             if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
                 ownlake[level.index(x, y)] = inputs.lakesurface_m[global];
         }

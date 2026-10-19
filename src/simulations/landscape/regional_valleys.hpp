@@ -118,10 +118,11 @@ void channelcellmeans(const RegionalWindow& window, const FineChannels& channels
                       double cap_m, const std::vector<float>& before, std::vector<float>& elevation_m);
 
 // Distances on the ground for the forms in the loop (S3.5): the east-west over the north-south
-// fine cell size of domain row y (metric.rowdx_m / dy_m, the cosine of the row's latitude: a pure
-// function of the absolute row; 1 outside the metric), by which a form scales its column offsets,
-// and the column extent of a form of `radius` fine cells (north-south) at that ratio, at most k.
-double eastwestratio(const PatchMetric& metric, int y);
+// fine cell size at a cell of the window grid (its east slot's distance over its north slot's; on
+// lat-lon the cosine of the row's latitude: a pure function of the absolute row; 1 outside the
+// grid), by which a form scales its column offsets, and the column extent of a form of `radius`
+// fine cells (north-south) at that ratio, at most k.
+double eastwestratio(const mesh::CellGrid& grid, std::size_t cell);
 int columnextent(double radius, double ratio, int k);
 
 struct LevelContext;  // regional_pass.hpp (the hook interface, multiscale plan S3.0)

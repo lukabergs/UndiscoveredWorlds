@@ -1,6 +1,9 @@
 #include "simulations/regional/regional_inputs.hpp"
 
+#include <memory>
+
 #include "core/deterministic_random.hpp"
+#include "core/mesh/cell_grid.hpp"
 #include "simulations/landscape/landscape_parameters.hpp"
 #include "world/planet.hpp"
 
@@ -12,10 +15,14 @@ constexpr int channelseedsalt = 0x7e91;
 
 landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
 {
+    // Every field by cell id of the world's grid (sphere-mesh.md section 8): on the lat-lon grid
+    // the id is y W + x, the row-major index of the (x, y) getters.
+    const std::shared_ptr<const mesh::CellGrid> grid = world.sharedgrid();
     const int columns = world.width() + 1;
     const int rows = world.height() + 1;
-    const std::size_t size = static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
+    const std::size_t size = grid->cellcount();
     landscape::RegionalGlobalInputs inputs;
+    inputs.grid = grid;
     inputs.width = columns;
     inputs.height = rows;
     inputs.radius_m = static_cast<double>(world.radius());
@@ -71,35 +78,34 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
     const worldgrid<float>& filled = world.filledelevation();
     const worldgrid<float>& runoff = world.runoff();
     const worldgrid<float>& ice = world.icethickness();
-    for (int y = 0; y < rows; y++)
+    // The routing's directions are the world's slot codes: a cell's receiver is
+    // grid->neighbour(c, direction).
+    for (mesh::CellId c = 0; c < static_cast<mesh::CellId>(size); c++)
     {
-        for (int x = 0; x < columns; x++)
-        {
-            const std::size_t cell = static_cast<std::size_t>(y) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(x);
-            inputs.elevation_m[cell] = world.nomfloat(x, y);
-            network.direction[cell] = direction[x][y];
-            network.sea[cell] = direction[x][y] == 0 && world.basebelowsea(x, y) ? 1 : 0;
-            network.drainagearea_km2[cell] = area[x][y];
-            network.discharge_m3s[cell] = discharge[x][y];
-            network.filledelevation_m[cell] = filled[x][y];
-            // Flows stay in the legacy units the world stores (plan section 6, B1).
-            network.januaryflow[cell] = world.riverjan(x, y);
-            network.julyflow[cell] = world.riverjul(x, y);
-            inputs.runoff_mm_yr[cell] = runoff[x][y];
-            inputs.lakesurface_m[cell] = world.lakesurfacefloat(x, y);
-            inputs.januarytemperature_c[cell] = world.jantempfloat(x, y);
-            inputs.julytemperature_c[cell] = world.jultempfloat(x, y);
-            inputs.januaryprecipitation_mm[cell] = world.janrainfloat(x, y);
-            inputs.julyprecipitation_mm[cell] = world.julrainfloat(x, y);
-            inputs.icethickness_m[cell] = ice[x][y];
-            inputs.climate[cell] = static_cast<int16_t>(world.climate(x, y));
-            inputs.upliftrate_m_myr[cell] = world.tectonicrockupliftrate(x, y);
-            inputs.glaciation[cell] = glaciation[x][y];
-            inputs.denudation_m[cell] = denudation[x][y];
-            inputs.island[cell] = world.island(x, y) ? 1 : 0;
-            inputs.mountainisland[cell] = world.mountainisland(x, y) ? 1 : 0;
-            inputs.equilibriumline_m[cell] = equilibriumline[x][y];
-        }
+        const std::size_t cell = c;
+        inputs.elevation_m[cell] = world.nomfloat(c);
+        network.direction[cell] = direction.at(c);
+        network.sea[cell] = direction.at(c) == 0 && world.basebelowsea(c) ? 1 : 0;
+        network.drainagearea_km2[cell] = area.at(c);
+        network.discharge_m3s[cell] = discharge.at(c);
+        network.filledelevation_m[cell] = filled.at(c);
+        // Flows stay in the legacy units the world stores (plan section 6, B1).
+        network.januaryflow[cell] = world.riverjan(c);
+        network.julyflow[cell] = world.riverjul(c);
+        inputs.runoff_mm_yr[cell] = runoff.at(c);
+        inputs.lakesurface_m[cell] = world.lakesurfacefloat(c);
+        inputs.januarytemperature_c[cell] = world.jantempfloat(c);
+        inputs.julytemperature_c[cell] = world.jultempfloat(c);
+        inputs.januaryprecipitation_mm[cell] = world.janrainfloat(c);
+        inputs.julyprecipitation_mm[cell] = world.julrainfloat(c);
+        inputs.icethickness_m[cell] = ice.at(c);
+        inputs.climate[cell] = static_cast<int16_t>(world.climate(c));
+        inputs.upliftrate_m_myr[cell] = world.tectonicrockupliftrate(c);
+        inputs.glaciation[cell] = glaciation.at(c);
+        inputs.denudation_m[cell] = denudation.at(c);
+        inputs.island[cell] = world.island(c) ? 1 : 0;
+        inputs.mountainisland[cell] = world.mountainisland(c) ? 1 : 0;
+        inputs.equilibriumline_m[cell] = equilibriumline.at(c);
     }
     // A world without the glacial term (landscape.glacial.enabled false, or no erosion
     // stage) carries an ELA field of zeros: passed as present it would ice every land
@@ -121,16 +127,13 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
     inputs.valleyspacing_km.resize(size);
     bool anyrelief = false;
     bool anyspacing = false;
-    for (int y = 0; y < rows; y++)
+    for (mesh::CellId c = 0; c < static_cast<mesh::CellId>(size); c++)
     {
-        for (int x = 0; x < columns; x++)
-        {
-            const std::size_t cell = static_cast<std::size_t>(y) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(x);
-            inputs.reliefamplitude_m[cell] = relief[x][y];
-            inputs.valleyspacing_km[cell] = spacing[x][y];
-            anyrelief = anyrelief || relief[x][y] != 0.0f;
-            anyspacing = anyspacing || spacing[x][y] != 0.0f;
-        }
+        const std::size_t cell = c;
+        inputs.reliefamplitude_m[cell] = relief.at(c);
+        inputs.valleyspacing_km[cell] = spacing.at(c);
+        anyrelief = anyrelief || relief.at(c) != 0.0f;
+        anyspacing = anyspacing || spacing.at(c) != 0.0f;
     }
     if (!anyrelief)
         inputs.reliefamplitude_m.clear();
@@ -148,20 +151,17 @@ landscape::RegionalGlobalInputs gatherregionalinputs(const planet& world)
     bool anystrain = false;
     bool anydirection = false;
     bool anysediment = false;
-    for (int y = 0; y < rows; y++)
+    for (mesh::CellId c = 0; c < static_cast<mesh::CellId>(size); c++)
     {
-        for (int x = 0; x < columns; x++)
-        {
-            const std::size_t cell = static_cast<std::size_t>(y) * static_cast<std::size_t>(columns) + static_cast<std::size_t>(x);
-            const float shortening = world.tectonicshortening(x, y);
-            inputs.foldstrain[cell] =
-                cellwidth_m > 0.0 ? static_cast<float>(static_cast<double>(shortening) / cellwidth_m) : 0.0f;
-            inputs.folddirection_rad[cell] = world.tectonicshorteningdirection(x, y);
-            inputs.sediment_m[cell] = world.tectonicsediment(x, y);
-            anystrain = anystrain || inputs.foldstrain[cell] != 0.0f;
-            anydirection = anydirection || inputs.folddirection_rad[cell] != 0.0f;
-            anysediment = anysediment || inputs.sediment_m[cell] != 0.0f;
-        }
+        const std::size_t cell = c;
+        const float shortening = world.tectonicshortening(c);
+        inputs.foldstrain[cell] =
+            cellwidth_m > 0.0 ? static_cast<float>(static_cast<double>(shortening) / cellwidth_m) : 0.0f;
+        inputs.folddirection_rad[cell] = world.tectonicshorteningdirection(c);
+        inputs.sediment_m[cell] = world.tectonicsediment(c);
+        anystrain = anystrain || inputs.foldstrain[cell] != 0.0f;
+        anydirection = anydirection || inputs.folddirection_rad[cell] != 0.0f;
+        anysediment = anysediment || inputs.sediment_m[cell] != 0.0f;
     }
     if (!anystrain)
         inputs.foldstrain.clear();

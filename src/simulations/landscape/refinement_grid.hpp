@@ -199,9 +199,13 @@ struct LevelWindow
     int domainparentcolumns() const { return domaincolumns / factor; }
     int domainparentrows() const { return domainrows / factor; }
 
-    // The global (level 0) cell holding domain cell (x, y).
-    int globalcolumn(int x) const { return static_cast<int>(absolutecolumn(x) / scale()); }
-    int globalrow(int y) const { return static_cast<int>(absoluterow(y) / scale()); }
+    // The level-0 ancestor of domain cell (x, y): the id on the world's grid (on lat-lon
+    // J W + I) of the global cell holding it.
+    std::size_t globalcell(int x, int y) const
+    {
+        return static_cast<std::size_t>(absoluterow(y) / scale()) * static_cast<std::size_t>(worldwidth) +
+               static_cast<std::size_t>(absolutecolumn(x) / scale());
+    }
 };
 
 // --- Declared in S0.4, implemented in S2.1 (they throw std::logic_error until then). ---

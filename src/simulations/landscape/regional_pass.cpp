@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -126,7 +127,8 @@ RegionalFields runregionalpass(const RegionalGlobalInputs& inputs, const Regiona
     const FineWarp warp = regionalwarp(window, inputs.seed, parameters);
     const GlobalIncision incision = globalincision(inputs, parameters);
     const RegionalDetails details{};
-    const LevelContext context{inputs, window, parameters, warp, incision, details};
+    const std::shared_ptr<const mesh::CellGrid> grid = regionalwindowgrid(window, inputs.radius_m);
+    const LevelContext context{inputs, window, *grid, parameters, warp, incision, details};
     LevelState level;
     regionallevelsteps(context, level);
     return finishregionallevel(inputs, window, parameters, level);
@@ -192,11 +194,10 @@ RegionalFields finishregionallevel(const RegionalGlobalInputs& inputs, const Reg
     std::vector<int16_t> climate(count);
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
-            const std::size_t global = at(window.globalcolumn(x), row, width);
+            const std::size_t global = window.globalcell(x, y);
             if (channels.channel[cell] != 0)
             {
                 riverdirection[cell] = channels.direction[cell];

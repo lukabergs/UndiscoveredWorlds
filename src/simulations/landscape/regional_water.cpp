@@ -120,11 +120,10 @@ FineWater phaseewater(const RegionalGlobalInputs& inputs, const RegionalWindow& 
     water.icethickness_m.assign(count, 0.0f);
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
-            const std::size_t global = at(window.globalcolumn(x), row, width);
+            const std::size_t global = window.globalcell(x, y);
             // R1: a channel cell carries the lake's water where its bed is at or below
             // the higher of the lake surface and the global cell's filled elevation,
             // and its elevation is lowered to at most the surface. Beds are pinned at
@@ -168,11 +167,14 @@ void catmullromweights(double t, double weights[4])
 // R4's zone of a fine cell: the lake cell among its global cell and the 8 neighbours whose
 // term in the bicubic indicator at the warped position (gx, gy), the stencil weight times
 // the cell's magnitude, is the most negative; ties by the smaller global index (an absolute
-// one). none: no lake cell around. A pure function of the fine cell's position.
+// one). none: no lake cell around. A pure function of the fine cell's position. `global` is the
+// fine cell's level-0 ancestor (RegionalWindow::globalcell), here its lat-lon column and row.
 std::size_t finezone(const RegionalGlobalInputs& inputs, const std::vector<uint8_t>& lakecell,
-                     const std::vector<float>& magnitude, int i, int j, double gx, double gy)
+                     const std::vector<float>& magnitude, std::size_t global, double gx, double gy)
 {
     const int width = inputs.width, height = inputs.height;
+    const int i = static_cast<int>(global % static_cast<std::size_t>(width));
+    const int j = static_cast<int>(global / static_cast<std::size_t>(width));
     const double u = gx - 0.5, v = gy - 0.5;
     const double fu = std::floor(u), fv = std::floor(v);
     double wx[4], wy[4];
@@ -275,7 +277,6 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
     std::vector<uint8_t> wet(count, 0);
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         const std::int64_t finerow = window.absolutefinerow(y);
         const double gy = (static_cast<double>(finerow) + 0.5) / k;
         for (int x = 0; x < domainwidth; x++)
@@ -285,7 +286,7 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
                 continue;
             const std::int64_t finecolumn = window.absolutefinecolumn(x);
             const double gx = (static_cast<double>(finecolumn) + 0.5) / k;
-            const std::size_t lake = finezone(inputs, lakecell, lakemagnitude, window.globalcolumn(x), row,
+            const std::size_t lake = finezone(inputs, lakecell, lakemagnitude, window.globalcell(x, y),
                                               gx + (warp.empty() ? 0.0 : warp.dx[cell]),
                                               gy + (warp.empty() ? 0.0 : warp.dy[cell]));
             if (lake == none)
@@ -318,7 +319,7 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
             return value < surface[cell] || (value == surface[cell] && lakecell[global] != 0);
         };
         const auto passable = [&](std::size_t cell, int x, int y) {
-            const std::size_t global = at(window.globalcolumn(x), window.globalrow(y), width);
+            const std::size_t global = window.globalcell(x, y);
             if (sea[cell] != 0 || zone[cell] == none || !atorbelow(elevation_m[cell], cell, global))
                 return false;
             if (inheritance.startsurface_m != nullptr && !atorbelow((*inheritance.startsurface_m)[cell], cell, global))
@@ -339,7 +340,7 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
                 const bool core = inherited ? sea[cell] == 0 && zone[cell] != none &&
                                                   (*inheritance.parentsurface_m)[cell] == surface[cell] &&
                                                   atorbelow(elevation_m[cell], cell,
-                                                            at(window.globalcolumn(x), window.globalrow(y), width))
+                                                            window.globalcell(x, y))
                                             : wet[cell] != 0;
                 if (core)
                 {
@@ -415,11 +416,10 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
     std::vector<uint8_t> water3 = water2;
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
-            const std::size_t global = at(window.globalcolumn(x), row, width);
+            const std::size_t global = window.globalcell(x, y);
             if (water2[cell] != 0 || sea[cell] != 0 || channels.channel[cell] == 0)
                 continue;
             if (zone[cell] != none && lakecell[global] != 0)
@@ -556,13 +556,12 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
     std::vector<uint8_t> raise(count, 0);
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
             if (water.lakesurface_m[cell] > 0.0f || sea[cell] != 0 || channels.channel[cell] != 0)
                 continue;
-            const std::size_t global = at(window.globalcolumn(x), row, width);
+            const std::size_t global = window.globalcell(x, y);
             float level = below, beside = below;
             if (lakecell[global] != 0)
                 level = inputs.lakesurface_m[global];
@@ -602,12 +601,11 @@ FineWater shorewater(const RegionalGlobalInputs& inputs, const RegionalWindow& w
     // front).
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         const std::int64_t finerow = window.absolutefinerow(y);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
-            const std::size_t global = at(window.globalcolumn(x), row, width);
+            const std::size_t global = window.globalcell(x, y);
             if (nearice[global] == 0 || (sea[cell] != 0 && !(inputs.network.sea[global] != 0 && icecell[global] != 0)))
                 continue;
             const double sum = static_cast<double>(iceindicator[cell]) +
@@ -656,7 +654,6 @@ std::vector<float> channellakelevels(const RegionalGlobalInputs& inputs, const R
     };
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
@@ -667,7 +664,7 @@ std::vector<float> channellakelevels(const RegionalGlobalInputs& inputs, const R
             const std::size_t next = globalreceiver(inputs.network, upstream);
             if (next != none && lake(next))
                 level[cell] = inputs.lakesurface_m[next];
-            else if (lake(upstream) && at(window.globalcolumn(x), row, inputs.width) == upstream)
+            else if (lake(upstream) && window.globalcell(x, y) == upstream)
                 level[cell] = inputs.lakesurface_m[upstream];
         }
     }
@@ -687,7 +684,6 @@ std::vector<std::size_t> channelmeansafterlakes(const RegionalGlobalInputs& inpu
         return dried;
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
@@ -696,7 +692,7 @@ std::vector<std::size_t> channelmeansafterlakes(const RegionalGlobalInputs& inpu
             const float surface = water.lakesurface_m[cell];
             if (surface > 0.0f)
             {
-                const std::size_t global = at(window.globalcolumn(x), row, inputs.width);
+                const std::size_t global = window.globalcell(x, y);
                 if (inputs.lakesurface_m[global] > 0.0f && inputs.network.sea[global] == 0)
                     continue;  // a lake bed of its own lake cell's block
             }

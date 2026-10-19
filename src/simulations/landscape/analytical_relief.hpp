@@ -26,11 +26,14 @@
 // two windows that both hold a sub-basin and its border give it bit-identical
 // results. Sub-basins are unbounded (a forest of pinned lines does not cut the plane);
 // with AnalyticalReliefParameters::catchmentreach r (S3.9) each cell's result reads only the
-// cells within 4r global cells (the bound is stated there). Planet-free.
+// cells within 4r global cells (the bound is stated there). Table-driven (T8 W2-W2a): the
+// patch is a mesh::CellGrid (regionalwindowgrid's window, or a hand-built planar patch), its
+// neighbour slots the D8 codes, -1 beyond the patch. Planet-free.
 
 #include <cstdint>
 #include <vector>
 
+#include "core/mesh/cell_grid.hpp"
 #include "simulations/landscape/regional_grid.hpp"
 
 namespace landscape
@@ -51,9 +54,10 @@ struct AnalyticalReliefParameters
     double damping = 0.5;
     // Multiscale plan S3.9 (§3, "Seamless solve: a bounded catchment", with the review's local
     // labelling; regional.catchment_reach_global_cells): r >= 1 bounds every catchment. Labels, once,
-    // on the start surface: one Priority-Flood per global cell g (AnalyticalReliefInput::globalcolumn,
-    // globalrow), seeded at the pinned cells inside g's block and confined to the unpinned cells whose
-    // global cell lies within r of g (Chebyshev, columns wrapped modulo globalwidth); each unpinned cell
+    // on the start surface: one Priority-Flood per global cell g (AnalyticalReliefInput::globalcell),
+    // seeded at the pinned cells inside g's block and confined to the unpinned cells whose global cell
+    // lies within r rings of g (R: 8-connected hops on the level-0 grid's table, AnalyticalReliefInput::
+    // globalgrid; on lat-lon the Chebyshev square, columns wrapped, rows stopping at the poles); each unpinned cell
     // takes the seed with the smallest (filled level, hashed absolute key of the seed) over the floods
     // reaching it: its catchment's outlet. Every pass routes inside the label only: steepest descent to
     // a neighbour of the same label (or to the outlet), else the receiver of a flood that steps only
@@ -72,8 +76,9 @@ struct AnalyticalReliefInput
     std::vector<float> start_m;          // starting surface (the upsampled terrain with noise)
     std::vector<uint8_t> pinned;         // 1: elevation fixed (channels, sea, the patch's outer ring)
     std::vector<float> runoff_m_yr;      // per cell; discharge = sum of runoff x area over the catchment
-    // The absolute fine index of each cell (I + J x kW, regional_grid.hpp), supplied by
-    // the regional pass, distinct per cell (else a throw); empty: the local index. Every tie of the
+    // The absolute key of each cell (the window grid's globalkey: on lat-lon the fine index
+    // I + J x kW, regional_grid.hpp), supplied by the regional pass, distinct per cell (else a
+    // throw); empty: the local index. Every tie of the
     // flood's order (equal levels) is broken by it, never by the local index, so two
     // windows that cross the date line differently order the same cells the same way;
     // the flat resolution's ties (S3.12) go by a hash of it, the other ties (steepest
@@ -92,11 +97,10 @@ struct AnalyticalReliefInput
     // not as a lift of the land. The threshold slope applies after it as before.
     std::vector<float> uplift_m_myr;
     // S3.9 (AnalyticalReliefParameters::catchmentreach >= 1 only, read nowhere else): the global
-    // cell of each cell, its column (0 .. globalwidth - 1) and row on the world grid, and the
-    // world's width in global cells, at least 1 (columns wrap modulo it).
-    std::vector<std::int32_t> globalcolumn;
-    std::vector<std::int32_t> globalrow;
-    int globalwidth = 0;
+    // cell of each cell, its level-0 ancestor (an id of globalgrid, RegionalWindow::globalcell),
+    // and the level-0 grid whose table counts the reach's rings (not null).
+    std::vector<mesh::CellId> globalcell;
+    const mesh::CellGrid* globalgrid = nullptr;
 };
 
 struct AnalyticalReliefResult
@@ -122,9 +126,9 @@ struct AnalyticalReliefResult
     int unreachedcells = 0;
 };
 
-// Throws std::invalid_argument when the input sizes differ from the metric's (key and
-// uplift_m_myr: empty or one per cell; with catchmentreach >= 1 globalcolumn and globalrow one per
-// cell and globalwidth >= 1), two keys are equal, a parameter is out of range (K <= 0,
+// Throws std::invalid_argument when the input sizes differ from the grid's cell count (key and
+// uplift_m_myr: empty or one per cell; with catchmentreach >= 1 globalcell one per cell, each an id
+// of a non-null globalgrid), two keys are equal, a parameter is out of range (K <= 0,
 // m < 0, t < 0 or not finite, threshold slope <= 0, no iteration, damping outside
 // 0 < damping <= 1, catchmentreach < 0), or no cell of a non-empty patch is pinned. No cell ends above its start elevation: the
 // advected value is min(z0(x), the rule's value), since with no uplift the erosion
@@ -142,6 +146,6 @@ struct AnalyticalReliefResult
 // the surface is not filled. Neither rule takes a diagonal step whose two corner
 // cells (orthogonally adjacent to both ends) are pinned, so no catchment crosses an
 // 8-connected channel.
-AnalyticalReliefResult solveanalyticalrelief(const PatchMetric& metric, const AnalyticalReliefInput& input,
+AnalyticalReliefResult solveanalyticalrelief(const mesh::CellGrid& grid, const AnalyticalReliefInput& input,
                                              const AnalyticalReliefParameters& parameters);
 }

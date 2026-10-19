@@ -296,7 +296,7 @@ TEST_F(Landscape, RegionalFoldsUniformStripes)
         for (int y = 0; y < bench.height; y++)
             for (int x = 0; x < bench.width; x++)
             {
-                if (bench.inputs.foldstrain[at(bench.window.globalcolumn(x), bench.window.globalrow(y), bench.inputs.width)] <= 0.0f)
+                if (bench.inputs.foldstrain[bench.window.globalcell(x, y)] <= 0.0f)
                     continue;  // the band's edge
                 largest = std::max(largest, std::fabs(bench.fabric(x, y)));
                 double phase = 0.0;
@@ -328,7 +328,7 @@ TEST_F(Landscape, RegionalFoldsUniformStripes)
                 longrows.push_back(y);
         for (int line = 0; line < linecount; line++)
         {
-            if (!eastwest && bench.inputs.foldstrain[at(bench.window.globalcolumn(0), bench.window.globalrow(rows[static_cast<std::size_t>(line)]), bench.inputs.width)] <= 0.0f)
+            if (!eastwest && bench.inputs.foldstrain[at(ancestorcolumn(bench.window, 0), ancestorrow(bench.window, rows[static_cast<std::size_t>(line)]), bench.inputs.width)] <= 0.0f)
                 continue;
             lines++;
             for (int lag = 1; lag < static_cast<int>(correlation.size()); lag++)
@@ -863,7 +863,7 @@ TEST_F(Landscape, RegionalFoldsIceGate)
     const std::size_t size = static_cast<std::size_t>(iced.inputs.width) * static_cast<std::size_t>(iced.inputs.height);
     iced.inputs.glaciation.assign(size, 0.0f);
     const int x0 = iced.width / 2, y0 = iced.equatorialrows()[iced.equatorialrows().size() / 2];
-    const int i0 = iced.window.globalcolumn(x0), j0 = iced.window.globalrow(y0);
+    const int i0 = ancestorcolumn(iced.window, x0), j0 = ancestorrow(iced.window, y0);
     for (int dj = -1; dj <= 1; dj++)
         for (int di = -1; di <= 1; di++)
             iced.inputs.glaciation[at((i0 + di + iced.inputs.width) % iced.inputs.width, j0 + dj, iced.inputs.width)] = 1.0f;
@@ -901,7 +901,7 @@ TEST_F(Landscape, RegionalFoldsLakeGate)
     plain.fold();
     FoldBench lake(8.0, true);
     const int x0 = lake.width / 2, y0 = lake.equatorialrows()[lake.equatorialrows().size() / 2];
-    const int i0 = lake.window.globalcolumn(x0), j0 = lake.window.globalrow(y0);
+    const int i0 = ancestorcolumn(lake.window, x0), j0 = ancestorrow(lake.window, y0);
     const std::size_t global = at(i0, j0, lake.inputs.width);
     lake.inputs.lakesurface_m[global] = 500.0f;
     lake.inputs.network.sea[global] = 0;
@@ -911,7 +911,7 @@ TEST_F(Landscape, RegionalFoldsLakeGate)
         for (int x = 0; x < lake.width; x++)
         {
             const std::size_t cell = lake.cell(x, y);
-            if (lake.window.globalcolumn(x) == i0 && lake.window.globalrow(y) == j0)
+            if (ancestorcolumn(lake.window, x) == i0 && ancestorrow(lake.window, y) == j0)
             {
                 inside++;
                 changedinside += lake.elevation[cell] != 1000.0f ? 1 : 0;

@@ -669,7 +669,7 @@ BarrierPass barrierpass(const RegionalGlobalInputs& inputs, const RegionalWindow
         for (int x = 0; x < window.domainfinewidth(); x++)
         {
             const std::size_t cell = at(x, y, window.domainfinewidth());
-            if (at(window.globalcolumn(x), window.globalrow(y), inputs.width) == east && pass.weight[cell] < 0.5f &&
+            if (window.globalcell(x, y) == east && pass.weight[cell] < 0.5f &&
                 pass.sea[cell] == 0 && pass.start[cell] < barrierlakesurface)
             {
                 pass.elevation[cell] = barrierlakesurface - 300.0f;
@@ -704,7 +704,7 @@ BarrierCounts barriercounts(const RegionalGlobalInputs& inputs, const RegionalWi
         for (int x = 0; x < window.domainfinewidth(); x++)
         {
             const std::size_t cell = at(x, y, window.domainfinewidth());
-            const int i = window.globalcolumn(x), j = window.globalrow(y);
+            const int i = ancestorcolumn(window, x), j = ancestorrow(window, y);
             const bool wet = pass.water.lakesurface_m[cell] > 0.0f;
             counts.wet += wet ? 1 : 0;
             counts.pits += pass.pit[cell];
@@ -950,7 +950,7 @@ std::pair<int, int> blockorigin(const RegionalWindow& window, int i, int j)
 {
     for (int y = 0; y < window.domainfineheight(); y++)
         for (int x = 0; x < window.domainfinewidth(); x++)
-            if (window.globalcolumn(x) == i && window.globalrow(y) == j)
+            if (ancestorcolumn(window, x) == i && ancestorrow(window, y) == j)
                 return {x, y};
     return {-1, -1};
 }

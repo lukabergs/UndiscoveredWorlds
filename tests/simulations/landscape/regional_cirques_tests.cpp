@@ -188,7 +188,7 @@ TEST_F(Landscape, RegionalCirquesPlacement)
             {
                 const int x = static_cast<int>(cell % static_cast<std::size_t>(c->width()));
                 const int y = static_cast<int>(cell / static_cast<std::size_t>(c->width()));
-                const int i = c->window.globalcolumn(x), j = c->window.globalrow(y);
+                const int i = ancestorcolumn(c->window, x), j = ancestorrow(c->window, y);
                 const std::size_t global = at(i, j, c->inputs.width);
                 EXPECT_EQ(c->inputs.network.sea[global], 0);
                 if (!indomain(a.window, i, j) || !indomain(b.window, i, j))
@@ -274,8 +274,8 @@ TEST_F(Landscape, RegionalCirquesBowlProfile)
     const std::size_t centre = static_cast<std::size_t>(std::min_element(out.begin(), out.end()) - out.begin());
     const int cx = static_cast<int>(centre % static_cast<std::size_t>(c.width()));
     const int cy = static_cast<int>(centre / static_cast<std::size_t>(c.width()));
-    EXPECT_EQ(c.window.globalcolumn(cx), 2);
-    EXPECT_EQ(c.window.globalrow(cy), 8);
+    EXPECT_EQ(ancestorcolumn(c.window, cx), 2);
+    EXPECT_EQ(ancestorrow(c.window, cy), 8);
     int lowered = 0;
     for (int dy = -3; dy <= 3; dy++)
         for (int dx = -3; dx <= 3; dx++)

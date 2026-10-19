@@ -157,9 +157,9 @@ TEST_F(Landscape, RefinementGridAccessorsWrapAndKeysExceed32Bits)
     EXPECT_EQ(window.parentrow(4), 250);
     EXPECT_EQ(window.domainparentcolumns(), 6);
     EXPECT_EQ(window.domainparentrows(), 4);
-    EXPECT_EQ(window.globalcolumn(11), 255);
-    EXPECT_EQ(window.globalcolumn(12), 0);
-    EXPECT_EQ(window.globalrow(15), 0);
+    EXPECT_EQ(ancestorcolumn(window, 11), 255);
+    EXPECT_EQ(ancestorcolumn(window, 12), 0);
+    EXPECT_EQ(ancestorrow(window, 15), 0);
 
     // Level and scale.
     EXPECT_EQ(landscape::levelscale(4, 0), 1);

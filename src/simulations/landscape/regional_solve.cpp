@@ -35,7 +35,9 @@ void solvelevel(const LevelContext& context, LevelState& state)
     const int width = inputs.width, height = inputs.height;
     const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
     const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
-    const std::int64_t planetfinewidth = static_cast<std::int64_t>(width) * window.scale;
+    const mesh::CellGrid& grid = context.grid;  // the window's domain, local id y domainwidth + x
+    if (grid.cellcount() != count)
+        throw std::invalid_argument("solvelevel: the context's grid must be the window's domain");
     const std::vector<uint8_t>& sea = state.sea;
     const FineChannels& channels = state.channels;
     const std::vector<float>& surface = state.surface_m;
@@ -43,7 +45,6 @@ void solvelevel(const LevelContext& context, LevelState& state)
     // 4. The analytical relief: channels, sea and the domain's outer ring pinned. A
     // sea cell enters the solve at the sea level (the base level of the rivers), so
     // the solve never lowers land below it through the sea; it keeps its own elevation.
-    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
     const std::vector<float> runoff = upsample(inputs.runoff_mm_yr, width, height, window);
     AnalyticalReliefInput solveinput;
     solveinput.start_m = surface;
@@ -59,26 +60,22 @@ void solvelevel(const LevelContext& context, LevelState& state)
             if (sea[cell] != 0)
                 solveinput.start_m[cell] = inputs.sealevel;
             solveinput.runoff_m_yr[cell] = std::max(0.0f, runoff[cell]) / 1000.0f;
-            solveinput.key[cell] = static_cast<std::uint64_t>(window.absolutefinecolumn(x) +
-                                                              window.absolutefinerow(y) * planetfinewidth);
+            solveinput.key[cell] = grid.globalkey(static_cast<mesh::CellId>(cell));
         }
     // S3.9: bounded catchments in the refinement loop only (the single pass keeps the unbounded solve);
-    // each cell's global cell from its absolute fine position.
+    // each cell's global cell its level-0 ancestor, the reach's rings on the world's grid.
     AnalyticalReliefParameters relief = context.parameters.relief;
     if (context.refinement == nullptr)
         relief.catchmentreach = 0;
     if (relief.catchmentreach > 0)
     {
-        solveinput.globalcolumn.resize(count);
-        solveinput.globalrow.resize(count);
-        solveinput.globalwidth = width;
+        if (inputs.grid == nullptr)
+            throw std::invalid_argument("solvelevel: the bounded catchments need the inputs' level-0 grid");
+        solveinput.globalcell.resize(count);
+        solveinput.globalgrid = inputs.grid.get();
         for (int y = 0; y < domainheight; y++)
             for (int x = 0; x < domainwidth; x++)
-            {
-                const std::size_t cell = at(x, y, domainwidth);
-                solveinput.globalcolumn[cell] = static_cast<std::int32_t>(window.absolutefinecolumn(x) / window.scale);
-                solveinput.globalrow[cell] = static_cast<std::int32_t>(window.absolutefinerow(y) / window.scale);
-            }
+                solveinput.globalcell[at(x, y, domainwidth)] = static_cast<mesh::CellId>(window.globalcell(x, y));
     }
     // R9: the solve's uplift term from the incision's rate (analytical_relief.hpp), only
     // with the incision active; empty otherwise (the solve without uplift exactly).
@@ -126,7 +123,7 @@ void solvelevel(const LevelContext& context, LevelState& state)
         }
     }
 
-    AnalyticalReliefResult solved = solveanalyticalrelief(metric, solveinput, relief);
+    AnalyticalReliefResult solved = solveanalyticalrelief(grid, solveinput, relief);
     state.reliefconverged = solved.converged;
     state.changedreceivers = solved.changedreceivers;
     // S3.9's unreached cells stay unpinned here: the solve returned their start (with the parent's
@@ -226,7 +223,7 @@ void solvelevel(const LevelContext& context, LevelState& state)
         // (kept in state.bed_m), h the mean height above b of its non-channel land 8-neighbours in the
         // domain (at least 0; 0 without such neighbours), c_l the level's north-south cell size. Read on
         // the field before any channel cell is written, so the order of the cells does not matter.
-        const double cap = refinement->channelcellslope * metric.dy_m;
+        const double cap = refinement->channelcellslope * northsouthspacing_m(grid);
         const std::vector<float> field = elevation;
         for (int y = 0; y < domainheight; y++)
             for (int x = 0; x < domainwidth; x++)

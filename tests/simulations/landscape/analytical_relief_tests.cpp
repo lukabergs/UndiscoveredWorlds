@@ -1,6 +1,6 @@
 // Tests of landscape/analytical_relief.hpp (erosion plan Phase E, step E2c), suite Landscape:
-// Landscape.AnalyticalRelief* on hand-built patch metrics (a chain of N x 1 cells, which
-// PatchMetric allows: a neighbour beyond the edge is the cell itself, and square grids).
+// Landscape.AnalyticalRelief* on hand-built planar patches (mesh::makeplanarwindow: a chain of
+// N x 1 cells and square grids; the solve reads the grid's table, -1 beyond the edge).
 
 #include "landscape_fixture.hpp"
 #include "simulations/landscape/analytical_relief.hpp"
@@ -14,28 +14,66 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <vector>
+
+#include "core/mesh/cell_grid.hpp"
 
 namespace
 {
 using landscape::AnalyticalReliefInput;
 using landscape::AnalyticalReliefParameters;
 using landscape::AnalyticalReliefResult;
-using landscape::PatchMetric;
-
-// A W x H patch of square cells of side cell_m (dx = dy, area cell^2).
-PatchMetric squaremetric(int width, int height, double cell_m)
+// A W x H patch of square cells of side cell_m (dx = dy, area cell^2): the planar window grid
+// the solve reads, with the tests' raster helpers.
+struct Patch
 {
-    PatchMetric metric;
-    metric.width = width;
-    metric.height = height;
-    metric.radius_m = 6.371e6;
-    metric.dy_m = cell_m;
-    metric.rowdx_m.assign(static_cast<std::size_t>(height), cell_m);
-    metric.rowarea_m2.assign(static_cast<std::size_t>(height), cell_m * cell_m);
-    metric.rowlatitude_rad.assign(static_cast<std::size_t>(height), 0.0);
-    return metric;
+    int width = 0;
+    int height = 0;
+    double dy_m = 0.0;
+    std::shared_ptr<const mesh::CellGrid> grid;
+
+    std::size_t size() const { return grid->cellcount(); }
+    std::size_t index(int x, int y) const
+    {
+        return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+    }
+    // The neighbour in a direction 1..8, the cell itself beyond the edge (callers skip it).
+    std::size_t neighbour(std::size_t cell, int direction) const
+    {
+        const std::int32_t next = grid->neighbour(static_cast<mesh::CellId>(cell), direction);
+        return next < 0 ? cell : static_cast<std::size_t>(next);
+    }
+    double distance_m(std::size_t cell, int direction) const
+    {
+        return grid->distance_m(static_cast<mesh::CellId>(cell), direction);
+    }
+    operator const mesh::CellGrid&() const { return *grid; }
+};
+
+Patch squaremetric(int width, int height, double cell_m)
+{
+    Patch patch;
+    patch.width = width;
+    patch.height = height;
+    patch.dy_m = cell_m;
+    patch.grid = mesh::makeplanarwindow(width, height, cell_m);
+    return patch;
+}
+
+// The level-0 grid of the bounded catchments' tests: 1,000 columns, so no ring wraps.
+const std::shared_ptr<const mesh::CellGrid>& levelzerogrid()
+{
+    static const std::shared_ptr<const mesh::CellGrid> grid = mesh::makelatlongrid(1000, 6.371e6);
+    return grid;
+}
+constexpr int levelzerocolumns = 1000;
+
+// A global cell's id on levelzerogrid (block column, block row).
+mesh::CellId globalcellof(int column, int row)
+{
+    return static_cast<mesh::CellId>(row * levelzerocolumns + column);
 }
 
 // A deterministic value in [0, 1) per cell.
@@ -49,7 +87,7 @@ double wobble(int x, int y)
 }
 
 // The outer ring of a patch.
-std::vector<uint8_t> ring(const PatchMetric& metric)
+std::vector<uint8_t> ring(const Patch& metric)
 {
     std::vector<uint8_t> pinned(metric.size(), 0);
     for (int y = 0; y < metric.height; y++)
@@ -61,7 +99,7 @@ std::vector<uint8_t> ring(const PatchMetric& metric)
 
 // Follows the directions from every unpinned cell; true when each reaches a pinned
 // cell within size() links (so no loop) through valid neighbours.
-bool everypathreachesapinnedcell(const PatchMetric& metric, const std::vector<uint8_t>& pinned,
+bool everypathreachesapinnedcell(const Patch& metric, const std::vector<uint8_t>& pinned,
                                  const std::vector<uint8_t>& direction)
 {
     for (std::size_t cell = 0; cell < metric.size(); cell++)
@@ -107,8 +145,8 @@ AnalyticalReliefInput chaininput(bool branch = false)
 
 // A dome without pits on a 40 x 24 patch of 500 m cells: 50 m per cell of distance
 // to the edge plus up to 3 m of wobble, the ring pinned at its start, runoff 0.5 m/yr.
-PatchMetric domemetric() { return squaremetric(40, 24, 500.0); }
-AnalyticalReliefInput domeinput(const PatchMetric& metric)
+Patch domemetric() { return squaremetric(40, 24, 500.0); }
+AnalyticalReliefInput domeinput(const Patch& metric)
 {
     AnalyticalReliefInput input;
     input.pinned = ring(metric);
@@ -124,8 +162,8 @@ AnalyticalReliefInput domeinput(const PatchMetric& metric)
 
 // A bowl on a 30 x 20 patch of 1000 m cells: the interior is one depression below
 // the pinned ring, runoff 1 m/yr.
-PatchMetric bowlmetric() { return squaremetric(30, 20, 1000.0); }
-AnalyticalReliefInput bowlinput(const PatchMetric& metric)
+Patch bowlmetric() { return squaremetric(30, 20, 1000.0); }
+AnalyticalReliefInput bowlinput(const Patch& metric)
 {
     AnalyticalReliefInput input;
     input.pinned = ring(metric);
@@ -154,7 +192,7 @@ TEST_F(Landscape, AnalyticalReliefChainFollowsTheCharacteristicSolution)
     // Row 0 is the chain; row 1, without runoff, drains north into it: its cells carry
     // no discharge, never respond (Q^m = 0) and keep their start exactly. The floats
     // near 100 m resolve 7.6e-6 m, so elevations match within 4e-6 m.
-    const PatchMetric metric = squaremetric(chainlength, 2, chainspacing);
+    const Patch metric = squaremetric(chainlength, 2, chainspacing);
     const AnalyticalReliefInput input = chaininput(true);
     AnalyticalReliefParameters parameters;
     parameters.erodibility = 750.0;
@@ -232,7 +270,7 @@ TEST_F(Landscape, AnalyticalReliefUpliftLiftsTheRespondedProfile)
     // 1.598, 2.571, 3.764 and 5.450 m, so cells 1 to 4 lie on the profile and cell 5 is
     // clamped at its start (105 m). Within the reach only: at t = 30 cells 2 to 5 (tau > t)
     // advect the start as without uplift.
-    const PatchMetric metric = squaremetric(chainlength, 1, chainspacing);
+    const Patch metric = squaremetric(chainlength, 1, chainspacing);
     const AnalyticalReliefInput plain = chaininput();
     AnalyticalReliefInput input = plain;
     constexpr double uplift = 0.04;
@@ -271,7 +309,7 @@ TEST_F(Landscape, AnalyticalReliefZeroUpliftChangesNothing)
 {
     // U = 0 everywhere gives the solution without uplift bit for bit, on the chain at
     // three times and on the dome (whose ring outlets differ in height) and the bowl.
-    const PatchMetric chain = squaremetric(chainlength, 2, chainspacing);
+    const Patch chain = squaremetric(chainlength, 2, chainspacing);
     const AnalyticalReliefInput plain = chaininput(true);
     AnalyticalReliefInput zero = plain;
     zero.uplift_m_myr.assign(plain.start_m.size(), 0.0f);
@@ -284,7 +322,7 @@ TEST_F(Landscape, AnalyticalReliefZeroUpliftChangesNothing)
                   landscape::solveanalyticalrelief(chain, plain, parameters).elevation_m)
             << "t = " << elapsed;
     }
-    for (const PatchMetric& metric : { domemetric(), bowlmetric() })
+    for (const Patch& metric : { domemetric(), bowlmetric() })
     {
         const AnalyticalReliefInput base = metric.width == 40 ? domeinput(metric) : bowlinput(metric);
         AnalyticalReliefInput lifted = base;
@@ -302,7 +340,7 @@ TEST_F(Landscape, AnalyticalReliefZeroTimeKeepsTheStartBelowTheThreshold)
 {
     // A cliff on a chain: with t = 0 only the threshold slope (0.5) acts, from the
     // outlet upwards: 1500 -> 100 + 500, 1600 -> 600 + 500.
-    const PatchMetric chain = squaremetric(4, 1, 1000.0);
+    const Patch chain = squaremetric(4, 1, 1000.0);
     AnalyticalReliefInput cliff;
     cliff.start_m = { 0.0f, 100.0f, 1500.0f, 1600.0f };
     cliff.pinned = { 1, 0, 0, 0 };
@@ -314,7 +352,7 @@ TEST_F(Landscape, AnalyticalReliefZeroTimeKeepsTheStartBelowTheThreshold)
     EXPECT_EQ(lowered.elevation_m, (std::vector<float>{ 0.0f, 100.0f, 600.0f, 1100.0f }));
 
     // A threshold steeper than every start slope: the start exactly, pits included.
-    const PatchMetric metric = squaremetric(24, 16, 500.0);
+    const Patch metric = squaremetric(24, 16, 500.0);
     AnalyticalReliefInput input;
     input.pinned = ring(metric);
     for (int y = 0; y < metric.height; y++)
@@ -333,7 +371,7 @@ TEST_F(Landscape, AnalyticalReliefKeepsPinnedCellsLowersAndRespectsTheThreshold)
 {
     // The dome: slopes up to 0.106 against a threshold of 0.08, a partial response at
     // t = 5 Myr.
-    const PatchMetric metric = domemetric();
+    const Patch metric = domemetric();
     const AnalyticalReliefInput input = domeinput(metric);
     AnalyticalReliefParameters parameters;
     parameters.elapsed_myr = 5.0;
@@ -369,7 +407,7 @@ TEST_F(Landscape, AnalyticalReliefBowlDrainsToTheRing)
 {
     // The bowl's cells drain through the flood's directions towards the ring's lowest
     // cell, at 2 Myr with the default damping.
-    const PatchMetric metric = bowlmetric();
+    const Patch metric = bowlmetric();
     const AnalyticalReliefInput input = bowlinput(metric);
     AnalyticalReliefParameters parameters;
     parameters.elapsed_myr = 2.0;
@@ -399,7 +437,7 @@ TEST_F(Landscape, AnalyticalReliefRunsEveryPassAndReportsTheLastTwo)
     // passes against those of a run with n - 1. The bowl at 2 Myr with the default
     // damping agrees at pass 11 and not at passes 10 and 12 (it does not settle: 1 or
     // 2 cells keep flipping, agreeing again at 14, 23, 26, 35, ...).
-    const PatchMetric metric = bowlmetric();
+    const Patch metric = bowlmetric();
     const AnalyticalReliefInput input = bowlinput(metric);
     AnalyticalReliefParameters parameters;
     parameters.elapsed_myr = 2.0;
@@ -433,7 +471,7 @@ TEST_F(Landscape, AnalyticalReliefNoCatchmentCrossesADiagonalChannel)
     // pinned cell), passing between the pinned corners (y, y) and (y + 1, y + 1); the
     // side below the line is one depression whose flood could leak the same way.
     const int size = 12;
-    const PatchMetric metric = squaremetric(size, size, 1000.0);
+    const Patch metric = squaremetric(size, size, 1000.0);
     AnalyticalReliefInput input;
     for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++)
@@ -478,7 +516,7 @@ TEST_F(Landscape, AnalyticalReliefSubBasinsMatchAcrossOverlappingPatches)
     // the square x = 25..31, y = 4..10 at 100 m (its surroundings 112 m and more), lies in
     // the basin above y = 14, so the flat resolution's cells are compared too.
     const int width = 60, height = 40;
-    const PatchMetric whole = squaremetric(width, height, 500.0);
+    const Patch whole = squaremetric(width, height, 500.0);
     AnalyticalReliefInput input;
     input.pinned = ring(whole);
     for (int y = 0; y < height; y++)
@@ -499,7 +537,7 @@ TEST_F(Landscape, AnalyticalReliefSubBasinsMatchAcrossOverlappingPatches)
     const AnalyticalReliefResult full = landscape::solveanalyticalrelief(whole, input, parameters);
 
     const int subwidth = 42, leftcolumn = 0, rightcolumn = 18;
-    const PatchMetric sub = squaremetric(subwidth, height, 500.0);
+    const Patch sub = squaremetric(subwidth, height, 500.0);
     const auto cut = [&](int column0) {
         AnalyticalReliefInput part;
         part.pinned = ring(sub);
@@ -584,9 +622,9 @@ TEST_F(Landscape, AnalyticalReliefNoCellRises)
     // The cases that rose before the clamp (min of the start and the advected value):
     // the bowl's depression (120 cells at 0.5 and 2 Myr, about 110 at 20 Myr) and the
     // dome at 20 Myr with thresholds 0.104 and 1 (22 and 31 cells), damped and undamped.
-    const PatchMetric bowl = bowlmetric();
+    const Patch bowl = bowlmetric();
     const AnalyticalReliefInput bowlstart = bowlinput(bowl);
-    const PatchMetric dome = domemetric();
+    const Patch dome = domemetric();
     const AnalyticalReliefInput domestart = domeinput(dome);
     for (double damping : { 1.0, 0.5 })
         for (double elapsed : { 0.5, 2.0, 20.0 })
@@ -610,7 +648,7 @@ TEST_F(Landscape, AnalyticalReliefPitDrainsThroughItsRim)
     // Chain 0 (pinned), 18, 20, 5, 30: cell 2's steepest drop is into the pit (cell 3),
     // whose flood receiver is cell 2; the pit lies in the filled surface's depression,
     // so cell 2 drains west and the pit through its rim: every direction is west.
-    const PatchMetric metric = squaremetric(5, 1, 1000.0);
+    const Patch metric = squaremetric(5, 1, 1000.0);
     AnalyticalReliefInput input;
     input.start_m = { 0.0f, 18.0f, 20.0f, 5.0f, 30.0f };
     input.pinned = { 1, 0, 0, 0, 0 };
@@ -632,7 +670,7 @@ TEST_F(Landscape, AnalyticalReliefTieTakesTheLowestCode)
 {
     // The centre of a 3 x 3 patch above a flat pinned ring: four equal cardinal drops,
     // the lowest code (1, north) wins.
-    const PatchMetric metric = squaremetric(3, 3, 1000.0);
+    const Patch metric = squaremetric(3, 3, 1000.0);
     AnalyticalReliefInput input;
     input.start_m.assign(9, 0.0f);
     input.start_m[4] = 10.0f;
@@ -645,7 +683,7 @@ TEST_F(Landscape, AnalyticalReliefTieTakesTheLowestCode)
 TEST_F(Landscape, AnalyticalReliefIsRepeatable)
 {
     // Pits everywhere: a rough surface, the ring and an interior column pinned.
-    const PatchMetric metric = squaremetric(32, 16, 750.0);
+    const Patch metric = squaremetric(32, 16, 750.0);
     AnalyticalReliefInput input;
     input.pinned = ring(metric);
     for (int y = 0; y < metric.height; y++)
@@ -675,7 +713,7 @@ TEST_F(Landscape, AnalyticalReliefKeysWithoutTiesChangeNothing)
     // kW = 64 columns: local column x is absolute column (x + 48) mod 64, so the keys
     // of columns 0..15 (absolute 48..63) exceed those of columns 16..31 (absolute
     // 0..15) in each row. With distinct elevations no tie arises: bit-identical.
-    const PatchMetric metric = squaremetric(32, 16, 750.0);
+    const Patch metric = squaremetric(32, 16, 750.0);
     AnalyticalReliefInput input;
     input.pinned = ring(metric);
     for (int y = 0; y < metric.height; y++)
@@ -720,7 +758,7 @@ TEST_F(Landscape, AnalyticalReliefFlatTiesFollowTheKey)
     // splitmix64 finaliser of hashedkey). Keys equal to the local index: h(3) < h(1), so cell 2
     // drains east (3). As a window crossing the date line (absolute columns 60, 61, 62, 63, 0 of
     // kW = 64): h(61) < h(63), so it drains west (7).
-    const PatchMetric metric = squaremetric(5, 1, 1000.0);
+    const Patch metric = squaremetric(5, 1, 1000.0);
     AnalyticalReliefInput input;
     input.start_m.assign(5, 0.0f);
     input.pinned = { 1, 0, 0, 0, 1 };
@@ -746,7 +784,7 @@ TEST_F(Landscape, AnalyticalReliefPitDrainsToItsSpillAlongShortChains)
     // cell next to them is its west tip (21, 20). Every pit cell's chain converges on the tip and
     // leaves the pit to the spill (20, 20), along a length at most 1.5 x the straight distance to it
     // (the resolution's gradient towards the spill and away from the rim).
-    const PatchMetric metric = squaremetric(48, 40, 100.0);
+    const Patch metric = squaremetric(48, 40, 100.0);
     const int cx = 30, cy = 20, radius = 9;
     const auto inpit = [&](int x, int y) { return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= radius * radius; };
     AnalyticalReliefInput input;
@@ -799,7 +837,7 @@ TEST_F(Landscape, AnalyticalReliefFlatBetweenSlopesDrainsInsideItself)
     // column 1, which drain west. Every flat cell's chain stays on the floor, never steps up and
     // reaches column 0; away from the low edges the gradient away from the hillsides (Barnes et
     // al. 2014) turns rows 5 and 6 south-west, rows 8 and 9 north-west, and row 7 runs west.
-    const PatchMetric metric = squaremetric(24, 15, 100.0);
+    const Patch metric = squaremetric(24, 15, 100.0);
     const auto onfloor = [](int x, int y) { return x >= 1 && y >= 5 && y <= 9; };
     AnalyticalReliefInput input;
     for (int y = 0; y < metric.height; y++)
@@ -852,7 +890,7 @@ TEST_F(Landscape, AnalyticalReliefSquareFlatTiesFollowTheHashedKey)
     const auto absolutekey = [](int x, int y) {
         return static_cast<std::uint64_t>(y + 200) * 1000u + static_cast<std::uint64_t>(x + 100);
     };
-    const PatchMetric metric = squaremetric(size, size, 100.0);
+    const Patch metric = squaremetric(size, size, 100.0);
     AnalyticalReliefInput input;
     input.pinned = ring(metric);
     input.start_m.assign(metric.size(), 0.0f);
@@ -860,7 +898,7 @@ TEST_F(Landscape, AnalyticalReliefSquareFlatTiesFollowTheHashedKey)
     for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++)
             input.key.push_back(absolutekey(x, y));
-    const PatchMetric big = squaremetric(bigwidth, bigheight, 100.0);
+    const Patch big = squaremetric(bigwidth, bigheight, 100.0);
     AnalyticalReliefInput shifted;
     shifted.start_m.assign(big.size(), 0.0f);
     shifted.runoff_m_yr.assign(big.size(), 1.0f);
@@ -916,7 +954,7 @@ TEST_F(Landscape, AnalyticalReliefSquareFlatTiesFollowTheHashedKey)
 
 TEST_F(Landscape, AnalyticalReliefRejectsBadInput)
 {
-    const PatchMetric metric = squaremetric(chainlength, 1, chainspacing);
+    const Patch metric = squaremetric(chainlength, 1, chainspacing);
     const AnalyticalReliefInput good = chaininput();
     const AnalyticalReliefParameters defaults;
     EXPECT_NO_THROW(landscape::solveanalyticalrelief(metric, good, defaults));
@@ -983,12 +1021,13 @@ TEST_F(Landscape, AnalyticalReliefRejectsBadInput)
     parameters.catchmentreach = 1;
     EXPECT_THROW(landscape::solveanalyticalrelief(metric, good, parameters), std::invalid_argument);
     input = good;
-    input.globalcolumn.assign(good.start_m.size(), 0);
-    input.globalrow.assign(good.start_m.size(), 0);
-    EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, parameters), std::invalid_argument);  // globalwidth 0
-    input.globalwidth = 4;
+    input.globalcell.assign(good.start_m.size(), 0);
+    EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, parameters), std::invalid_argument);  // no level-0 grid
+    input.globalgrid = levelzerogrid().get();
     EXPECT_NO_THROW(landscape::solveanalyticalrelief(metric, input, parameters));
-    input.globalrow.pop_back();
+    input.globalcell.back() = static_cast<mesh::CellId>(levelzerogrid()->cellcount());
+    EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, parameters), std::invalid_argument);  // outside it
+    input.globalcell.pop_back();
     EXPECT_THROW(landscape::solveanalyticalrelief(metric, input, parameters), std::invalid_argument);
 }
 
@@ -1004,15 +1043,15 @@ struct CutComparison
     int unreachedwhole = 0, unreachedcut = 0;
 };
 
-CutComparison comparecut(const PatchMetric& whole, const AnalyticalReliefInput& input, int subcolumn, int block,
+CutComparison comparecut(const Patch& whole, const AnalyticalReliefInput& input, int subcolumn, int block,
                          const AnalyticalReliefParameters& parameters, const std::vector<int>& distances,
                          std::vector<CutComparison>& results, AnalyticalReliefResult* wholeresult = nullptr)
 {
     const int width = whole.width, height = whole.height, subwidth = width - subcolumn;
-    const PatchMetric sub = squaremetric(subwidth, height, whole.dy_m);
+    const Patch sub = squaremetric(subwidth, height, whole.dy_m);
     AnalyticalReliefInput part;
     part.pinned = ring(sub);
-    part.globalwidth = input.globalwidth;
+    part.globalgrid = input.globalgrid;
     for (int y = 0; y < height; y++)
         for (int x = 0; x < subwidth; x++)
         {
@@ -1020,11 +1059,8 @@ CutComparison comparecut(const PatchMetric& whole, const AnalyticalReliefInput& 
             part.start_m.push_back(input.start_m[cell]);
             part.runoff_m_yr.push_back(input.runoff_m_yr[cell]);
             part.key.push_back(input.key[cell]);
-            if (!input.globalcolumn.empty())
-            {
-                part.globalcolumn.push_back(input.globalcolumn[cell]);
-                part.globalrow.push_back(input.globalrow[cell]);
-            }
+            if (!input.globalcell.empty())
+                part.globalcell.push_back(input.globalcell[cell]);
             if (input.pinned[cell] != 0)
                 part.pinned[sub.index(x, y)] = 1;
         }
@@ -1067,10 +1103,10 @@ TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsCutAWindowIndependentTrough)
     // differ; with reach 1 the cells at least 4 blocks inside (the bound, 4r) are identical, and
     // every outlet lies within one block of its cell's block.
     constexpr int block = 8, width = 96, height = 40, subcolumn = 32;
-    const PatchMetric whole = squaremetric(width, height, 1000.0);
+    const Patch whole = squaremetric(width, height, 1000.0);
     AnalyticalReliefInput input;
     input.pinned = ring(whole);
-    input.globalwidth = 1000;
+    input.globalgrid = levelzerogrid().get();
     for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
         {
@@ -1088,8 +1124,7 @@ TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsCutAWindowIndependentTrough)
             input.start_m.push_back(static_cast<float>(z));
             input.runoff_m_yr.push_back(1.0f);
             input.key.push_back(whole.index(x, y));
-            input.globalcolumn.push_back(x / block);
-            input.globalrow.push_back(y / block);
+            input.globalcell.push_back(globalcellof(x / block, y / block));
             if (y == 8 || y == 31 || (x == 4 && y == 20))
                 input.pinned[whole.index(x, y)] = 1;
         }
@@ -1123,8 +1158,12 @@ TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsCutAWindowIndependentTrough)
         for (std::size_t cell = 0; cell < whole.size(); cell++)
         {
             const std::size_t outlet = static_cast<std::size_t>(full.outlet[cell]);
-            EXPECT_LE(std::abs(input.globalcolumn[cell] - input.globalcolumn[outlet]), reach);
-            EXPECT_LE(std::abs(input.globalrow[cell] - input.globalrow[outlet]), reach);
+            const int column = static_cast<int>(input.globalcell[cell] % levelzerocolumns);
+            const int row = static_cast<int>(input.globalcell[cell] / levelzerocolumns);
+            const int outletcolumn = static_cast<int>(input.globalcell[outlet] % levelzerocolumns);
+            const int outletrow = static_cast<int>(input.globalcell[outlet] / levelzerocolumns);
+            EXPECT_LE(std::abs(column - outletcolumn), reach);
+            EXPECT_LE(std::abs(row - outletrow), reach);
         }
     }
 }
@@ -1141,10 +1180,10 @@ TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsDominoCorridor)
     // solved whole and as the sub-patch of the columns 16 .. 95 (its ring cutting the corridor), the
     // cells at least 4 blocks east of the cut (the bound, 4r) are identical.
     constexpr int block = 8, width = 96, height = 24, subcolumn = 16;
-    const PatchMetric whole = squaremetric(width, height, 1000.0);
+    const Patch whole = squaremetric(width, height, 1000.0);
     AnalyticalReliefInput input;
     input.pinned = ring(whole);
-    input.globalwidth = 1000;
+    input.globalgrid = levelzerogrid().get();
     for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
         {
@@ -1153,8 +1192,7 @@ TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsDominoCorridor)
             input.start_m.push_back(corridor ? 100.0f : (seed ? 200.0f : 1000.0f));
             input.runoff_m_yr.push_back(1.0f);
             input.key.push_back(whole.index(x, y));
-            input.globalcolumn.push_back(x / block);
-            input.globalrow.push_back(y / block);
+            input.globalcell.push_back(globalcellof(x / block, y / block));
             if (seed)
                 input.pinned[whole.index(x, y)] = 1;
         }
@@ -1174,4 +1212,59 @@ TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsDominoCorridor)
     EXPECT_EQ(bound.elevations, 0);
     EXPECT_EQ(bound.directions, 0);
     EXPECT_EQ(bound.discharges, 0);
+}
+
+TEST_F(Landscape, AnalyticalReliefBoundedCatchmentsRingsWrapTheDateLine)
+{
+    // T8 W2-W2a, R for the catchment reach: the floods' boxes are the global cells within r rings of
+    // the level-0 grid's table (8-connected hops: on lat-lon columns wrap, rows stop at the poles), as
+    // S3.9's Chebyshev boxes with wrapped columns were. A 96 x 40 patch of 1,000 m cells in blocks of
+    // 8 x 8 whose only pinned cells besides the ring are the column x = 47 (the east edge of block
+    // column 5), the land rising away from it on both sides, so blocks 4 and 6 drain into block 5; on a
+    // level-0 grid of 16 columns, its blocks at global columns 0 .. 11 and, shifted, at 10 .. 15, 0 .. 5
+    // (blocks 5 and 6 at global 15 and 0, across the date line): the same rings around every block, so
+    // the same solution bit for bit at r 1 and 2.
+    constexpr int block = 8, width = 96, height = 40, levelcolumns = 16, line = 47;
+    const Patch whole = squaremetric(width, height, 1000.0);
+    const std::shared_ptr<const mesh::CellGrid> levelzero = mesh::makelatlongrid(levelcolumns, 6.371e6);
+    const auto build = [&](int columnoffset) {
+        AnalyticalReliefInput input;
+        input.pinned = ring(whole);
+        input.globalgrid = levelzero.get();
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                const double z = 10.0 + 4.0 * std::abs(x - line) + 1.0 * std::abs(y - 20) + 3.0 * wobble(x, y);
+                input.start_m.push_back(static_cast<float>(z));
+                input.runoff_m_yr.push_back(1.0f);
+                input.key.push_back(whole.index(x, y));
+                const int column = (x / block + columnoffset) % levelcolumns;
+                input.globalcell.push_back(static_cast<mesh::CellId>((y / block) * levelcolumns + column));
+                if (x == line)
+                    input.pinned[whole.index(x, y)] = 1;
+            }
+        return input;
+    };
+    const AnalyticalReliefInput plain = build(0), shifted = build(10);
+    AnalyticalReliefParameters parameters;
+    parameters.elapsed_myr = 200.0;
+    for (int reach : { 1, 2 })
+    {
+        parameters.catchmentreach = reach;
+        const AnalyticalReliefResult a = landscape::solveanalyticalrelief(whole, plain, parameters);
+        const AnalyticalReliefResult b = landscape::solveanalyticalrelief(whole, shifted, parameters);
+        EXPECT_EQ(a.elevation_m, b.elevation_m) << "catchment reach " << reach;
+        EXPECT_EQ(a.direction, b.direction) << "catchment reach " << reach;
+        EXPECT_EQ(a.discharge_m3_yr, b.discharge_m3_yr) << "catchment reach " << reach;
+        EXPECT_EQ(a.outlet, b.outlet) << "catchment reach " << reach;
+        EXPECT_EQ(a.unreached, b.unreached) << "catchment reach " << reach;
+    }
+    // The control: on a 16 x 8 planar level-0 grid (no ring wraps) the shifted patch's blocks 5 and 6
+    // are not neighbours, block 5's floods no longer reach block 6, and the solution changes.
+    const std::shared_ptr<const mesh::CellGrid> planar = mesh::makeplanarwindow(levelcolumns, levelcolumns / 2, 1.0);
+    AnalyticalReliefInput cut = shifted;
+    cut.globalgrid = planar.get();
+    parameters.catchmentreach = 1;
+    EXPECT_NE(landscape::solveanalyticalrelief(whole, plain, parameters).elevation_m,
+              landscape::solveanalyticalrelief(whole, cut, parameters).elevation_m);
 }

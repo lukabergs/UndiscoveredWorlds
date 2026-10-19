@@ -236,8 +236,8 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
         return;
     const int k = window.scale;
     const double reference = valleys.reference_m3s > 0.0 ? valleys.reference_m3s : 1.0;
-    const PatchMetric metric = finepatchmetric(window, inputs.radius_m);
-    const double cell_m = metric.dy_m;
+    const std::shared_ptr<const mesh::CellGrid> grid = regionalwindowgrid(window, inputs.radius_m);
+    const double cell_m = northsouthspacing_m(*grid);
     // The refinement loop (bandupper > 0, multiscale plan S3.5): floors by Euclidean distance and,
     // with valleys.reach_km > 0, the sides' reach in km on the ground over the level's cell size,
     // its full width tested against the band; the single pass keeps R9's Chebyshev rule in cells.
@@ -279,7 +279,7 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
             const double bed = static_cast<double>(withbeds ? channels.bed_m[cell] : elevation_m[cell]);
             // Chebyshev in cells in the single pass (R9); in the loop Euclidean on the ground (S3.5), the
             // east-west offset scaled by the axis row's east-west over north-south cell size.
-            const double ratio = loop ? eastwestratio(metric, y) : 1.0;
+            const double ratio = loop ? eastwestratio(*grid, cell) : 1.0;
             const int columns = loop ? columnextent(fullwidth, ratio, k) : extent;
             for (int dy = -extent; dy <= extent; dy++)
             {
@@ -320,11 +320,15 @@ void carvevalleys(const RegionalGlobalInputs& inputs, const RegionalWindow& wind
     }
 }
 
-double eastwestratio(const PatchMetric& metric, int y)
+double eastwestratio(const mesh::CellGrid& grid, std::size_t cell)
 {
-    if (y < 0 || static_cast<std::size_t>(y) >= metric.rowdx_m.size() || !(metric.dy_m > 0.0))
+    if (cell >= grid.cellcount())
         return 1.0;
-    return std::max(0.0, metric.rowdx_m[static_cast<std::size_t>(y)] / metric.dy_m);
+    const mesh::CellId c = static_cast<mesh::CellId>(cell);
+    const double northsouth = grid.distance_m(c, 1);
+    if (!(northsouth > 0.0))
+        return 1.0;
+    return std::max(0.0, grid.distance_m(c, 3) / northsouth);
 }
 
 int columnextent(double radius, double ratio, int k)
@@ -448,6 +452,6 @@ double channelcellcap_m(const LevelContext& context)
 {
     if (context.refinement == nullptr || !(context.refinement->channelcellslope > 0.0))
         return 0.0;
-    return context.refinement->channelcellslope * finepatchmetric(context.window, context.inputs.radius_m).dy_m;
+    return context.refinement->channelcellslope * northsouthspacing_m(context.grid);
 }
 }

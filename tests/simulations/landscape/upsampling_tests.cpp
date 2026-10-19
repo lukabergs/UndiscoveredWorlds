@@ -230,7 +230,7 @@ TEST_F(Landscape, UpsamplingIsIdenticalInOverlappingWindows)
             const std::size_t ib = static_cast<std::size_t>(yb) * b.domainfinewidth() + static_cast<std::size_t>(xb);
             shared++;
             ASSERT_EQ(upa[ia], upb[ib]) << "upsample at fine cell " << column << ", " << row;
-            const int i = a.globalcolumn(x), j = a.globalrow(y);
+            const int i = ancestorcolumn(a, x), j = ancestorrow(a, y);
             const int distance = std::min(insidedistance(a, i, j), insidedistance(b, i, j));
             if (distance < reach)
             {

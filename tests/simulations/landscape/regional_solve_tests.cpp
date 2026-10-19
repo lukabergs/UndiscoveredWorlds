@@ -30,7 +30,8 @@ TEST_F(Landscape, RegionalSolveKeepsThePinnedCellsAndTheBeds)
     const landscape::FineWarp warp = landscape::regionalwarp(window, inputs.seed, parameters);
     const landscape::GlobalIncision incision = landscape::globalincision(inputs, parameters);
     const landscape::RegionalDetails details{};
-    const landscape::LevelContext context{inputs, window, parameters, warp, incision, details};
+    const auto contextgrid = landscape::regionalwindowgrid(window, inputs.radius_m);
+    const landscape::LevelContext context{inputs, window, *contextgrid, parameters, warp, incision, details};
     landscape::LevelState state;
     landscape::noiselevel(context, state);
     landscape::presmoothinglevel(context, state);
@@ -93,9 +94,11 @@ TEST_F(Landscape, RegionalSolveChannelCellMeans)
     const landscape::FineWarp warp = landscape::regionalwarp(window, inputs.seed, parameters);
     const landscape::GlobalIncision incision = landscape::globalincision(inputs, parameters);
     const landscape::RegionalDetails details{};
-    const landscape::LevelContext single{inputs, window, parameters, warp, incision, details};
+    const auto singlegrid = landscape::regionalwindowgrid(window, inputs.radius_m);
+    const landscape::LevelContext single{inputs, window, *singlegrid, parameters, warp, incision, details};
     landscape::RefinementParameters off;
-    const landscape::LevelContext withoff{inputs, window, parameters, warp, incision, details, 1, 4, &off};
+    const auto withoffgrid = landscape::regionalwindowgrid(window, inputs.radius_m);
+    const landscape::LevelContext withoff{inputs, window, *withoffgrid, parameters, warp, incision, details, 1, 4, &off};
     const landscape::LevelState plain = stepstothesolve(single, {});
     const landscape::LevelState zero = stepstothesolve(withoff, {});
     EXPECT_EQ(zero.elevation_m, plain.elevation_m);
@@ -105,7 +108,8 @@ TEST_F(Landscape, RegionalSolveChannelCellMeans)
     {
         landscape::RefinementParameters on;
         on.channelcellslope = theta;
-        const landscape::LevelContext withon{inputs, window, parameters, warp, incision, details, 1, 4, &on};
+        const auto withongrid = landscape::regionalwindowgrid(window, inputs.radius_m);
+        const landscape::LevelContext withon{inputs, window, *withongrid, parameters, warp, incision, details, 1, 4, &on};
         const landscape::LevelState means = stepstothesolve(withon, {});
         EXPECT_EQ(means.bed_m, plain.bed_m);
         EXPECT_EQ(means.solved_m, means.elevation_m);
@@ -185,7 +189,8 @@ TEST_F(Landscape, RegionalSolveAgainstItsParent)
     // Level 1.
     const RegionalWindow windowone = landscape::regionalwindowof(chain[1]);
     const landscape::FineWarp warpone = landscape::regionalwarp(windowone, inputs.seed, parameters);
-    const landscape::LevelContext one{inputs, windowone, parameters, warpone, incision, details, 1, 4, &refinement,
+    const auto onegrid = landscape::regionalwindowgrid(windowone, inputs.radius_m);
+    const landscape::LevelContext one{inputs, windowone, *onegrid, parameters, warpone, incision, details, 1, 4, &refinement,
                                       &chain[1], &chain[0], &levelzero, nullptr};
     landscape::LevelState first;
     landscape::regionallevelsteps(one, first);
@@ -213,7 +218,8 @@ TEST_F(Landscape, RegionalSolveAgainstItsParent)
     const auto run = [&](int mode) {
         landscape::RefinementParameters settings = refinement;
         settings.parentlift = mode;
-        const landscape::LevelContext context{inputs, windowtwo, parameters, warptwo, incision, details, 2, 4, &settings,
+        const auto contextgrid = landscape::regionalwindowgrid(windowtwo, inputs.radius_m);
+        const landscape::LevelContext context{inputs, windowtwo, *contextgrid, parameters, warptwo, incision, details, 2, 4, &settings,
                                               &level, &chain[1], &parent.elevation_m, &parent};
         landscape::LevelState state;
         state.start.start_m = landscape::prolong(chain[1], parent.elevation_m, level, false).values;

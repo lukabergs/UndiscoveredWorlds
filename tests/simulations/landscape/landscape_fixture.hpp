@@ -9,6 +9,23 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+
 class Landscape : public ::testing::Test
 {
 };
+
+// The lat-lon global column and row of a window's domain cell, from its level-0 ancestor
+// (landscape::RegionalWindow::globalcell, landscape::LevelWindow::globalcell: J W + I), for the
+// tests' raster checks.
+template <typename Window>
+int ancestorcolumn(const Window& window, int x)
+{
+    return static_cast<int>(window.globalcell(x, 0) % static_cast<std::size_t>(window.worldwidth));
+}
+
+template <typename Window>
+int ancestorrow(const Window& window, int y)
+{
+    return static_cast<int>(window.globalcell(0, y) / static_cast<std::size_t>(window.worldwidth));
+}

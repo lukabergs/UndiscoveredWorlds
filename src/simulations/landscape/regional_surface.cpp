@@ -1084,7 +1084,6 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
                                  const FineWarp& warp, const RegionalParameters& parameters,
                                  std::vector<float>& surface_m, const std::vector<uint8_t>* parentgate, bool lakegate)
 {
-    const int width = inputs.width;
     const int k = window.scale;
     const int domainwidth = window.domainfinewidth(), domainheight = window.domainfineheight();
     const std::size_t count = static_cast<std::size_t>(domainwidth) * static_cast<std::size_t>(domainheight);
@@ -1111,12 +1110,11 @@ std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const Regio
     std::vector<uint8_t> sea(count, 0);
     for (int y = 0; y < domainheight; y++)
     {
-        const int row = window.globalrow(y);
         const bool centrerow = window.absolutefinerow(y) % k == k / 2;
         for (int x = 0; x < domainwidth; x++)
         {
             const std::size_t cell = at(x, y, domainwidth);
-            const std::size_t global = at(window.globalcolumn(x), row, width);
+            const std::size_t global = window.globalcell(x, y);
             if (centrerule && centrerow && window.absolutefinecolumn(x) % k == k / 2)
             {
                 if (inputs.network.sea[global] != 0)
@@ -1279,7 +1277,7 @@ void refinedcoast(const LevelContext& context, LevelState& state)
             for (int x = 0; x < domainwidth; x++)
             {
                 const std::size_t cell = at(x, y, domainwidth);
-                core[cell] = undisplaced[cell] != 0 && inputs.network.sea[at(window.globalcolumn(x), window.globalrow(y), width)] != 0 ? 1 : 0;
+                core[cell] = undisplaced[cell] != 0 && inputs.network.sea[window.globalcell(x, y)] != 0 ? 1 : 0;
             }
         std::vector<uint8_t> filled = seapockets(inputs, window, reach, sea, core);
         // A pocket the share rule keeps in a parent sea cell is most often sea the displacement cut off:
