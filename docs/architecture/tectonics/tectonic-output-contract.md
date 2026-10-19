@@ -16,8 +16,9 @@ width N Ã— height 6 N (face f's rows are rows f N to f N + N - 1). Cells have
 unequal areas (`area_m2`); the cell spacing is the mean cell side,
 sqrt(4 pi RÂ² / 6 NÂ²). Plate motion is a rotation vector per plate; kinematics
 and vectors are (east, north) at a cell unless named otherwise, in cell spacings
-per update or in physical units where named. Array pointers expire when the
-engine updates or dies.
+per update or in physical units where named. `tectonics_get_cell_grid` returns the
+engine's `mesh::CellGrid` (shared, so a consumer can cache weights against it).
+Array pointers expire when the engine updates or dies.
 
 `time_myr` advances once per physical update by `delta_time_myr` until the finite,
 positive `evolution_duration_myr` is reached. A final partial requested timestep
@@ -51,9 +52,17 @@ elapsed time and `crust_age_myr` for consumers.
 - Tectonic junctions describe three incident plates/arms, orientation, velocity,
   geometry quality and stability, found at the cube's mesh vertices (three cells at
   a cube corner); centroids are longitude and latitude in degrees.
+- Plates (`PlateKinematics`, schema 8; `tectonics_get_plate_kinematics`, one per plate
+  index below `tectonics_get_plate_kinematics_count`): `rotation_rad_s`, the rotation
+  vector omega in rad/s in the planet's axes (uw-cube-1: +X at 0 N 0 E, +Y at 0 N 90 E,
+  +Z north), so the plate moves omega x R p at the unit vector p;
+  `centroid_longitude_deg` and `centroid_latitude_deg`, the area-weighted mean unit
+  vector of its cells; `velocity_east_cm_yr` and `velocity_north_cm_yr`, omega x R c at
+  the centroid. The snapshot record writes them as `rotation_rad_s`,
+  `centroid_lon_lat_deg` and `velocity_east_north_cm_yr` and reads them back.
 
 Three column measurements are runtime arrays of `tectonic_api.hpp` only, outside
-`Snapshot` and the snapshot files (the schema stays 7); the world stores them as
+`Snapshot` and the snapshot files (not part of the schema); the world stores them as
 `geosphere.rock_uplift_rate`, `geosphere.shortening` and
 `geosphere.shortening_direction`, in run bundles only (not in the `.uww`). All three
 are measurements in the plate's frame: the column model carries them with the rock
@@ -80,9 +89,12 @@ the uplift rate's mean continues the stayed rock's, the strain of new ocean floo
   0, so a divergent cell keeps the stayed rock's tensor on the rest of its area
   only. Cumulative over the run, no decay; a sum of small strains (the strain
   reaches about 1.4 at 256 columns, seed 1, 600 Myr of the legacy recipe v3), so a small-strain measure.
-  `shortening` is minus the least principal component times the cell spacing,
-  0 where no axis shortens: strain x the spacing, metres that depend on the
-  engine's resolution, so a consumer that needs the strain divides by the spacing.
+  `shortening` is minus the least principal component times the engine's cell
+  spacing (the mean cell side sqrt(4 pi R² / 6 N²), N = `sphere_face_cells`; 156 km
+  at N 64 on Earth's radius), 0 where no axis shortens: strain x the spacing,
+  metres that depend on the engine's resolution, so a consumer that needs the
+  strain divides by the spacing (the world's `geosphere.shortening` is the same
+  value, copied from the nearest engine cell).
   `shortening_direction` is that component's axis from east toward south, an axis
   rather than a vector (pi equals 0), 0 where the principal components are equal
   and meaningful only where `shortening` is positive. Both are taken from the
@@ -108,11 +120,15 @@ global budget. Motion diagnostics expose force residuals and speeds in cm/year.
 `tectonics_get_material_displacement` exposes the native per-cell displacement
 actually supplied to the latest column update ((east, north) in cell spacings per
 update); it is null before
-the first physical update. `tectonics_get_plate_uid` returns a topology stable
+the first physical update. The mineral frame reader turns it into a 3-D tangent
+vector in metres at the cell's centre. `tectonics_get_plate_uid` returns a topology stable
 identity. There are no rigid-raster movement or process-global identity hooks.
 
-`mineral_systems/tectonic_frame_reader` consumes these fields. Its point tracers
-approximate movement through the displacement field; conservative subcell mixing,
+`mineral_systems/tectonic_frame_reader` consumes these fields on the engine's cube
+(true cell areas, the cell spacing as the unit of `boundary_distance`). Its point
+tracers are unit vectors moved along great circles by the displacement field and
+located on the cube; deposits leave the run as fractions of longitude and
+colatitude; conservative subcell mixing,
 root flow and sediment redistribution are not exact marker trajectories. The
 mineral denudation proxy reads current native elevation. Per-cell material
 erosion histories and physical climate coupling remain unfinished work.
@@ -120,22 +136,35 @@ erosion histories and physical climate coupling remain unfinished work.
 ## Application boundary
 
 `geology/world_tectonics.cpp` runs the native recipe and ingests its output into
-`planet` (N = world width / 4 unless `sphere_face_cells` is given; the radius is
-the world body's). Until E5 the hand-off is minimal: heights and rates bilinear
-from the cube at each world cell's position, categories, diagnostic fields and the
-shortening and its direction from the nearest cube cell; kinematics, lengths and
-distances convert to world-grid cells at the equator. Planet save storage is
-unchanged. Later terrain stages may alter the application's terrain independently
-of the native export.
+`planet` (on the world grid N is a cube world's own or W / 4 on a lat-lon world,
+otherwise `sphere_face_cells`; the radius is the world body's). The hand-off
+(`docs/architecture/sphere-mesh.md` section 5) is built once per engine and cached:
+the identity on a cube world of the engine's N and radius; otherwise `makeremap`
+weights from the engine's cells to the world's, with `remapmean` for heights and
+the rock uplift rate, and per world cell the engine cell at its centre
+(`remapnearest`) for codes, ids, scores, the other diagnostic fields, the snapshot's
+cell fields and the shortening with its axis (a pair kept one cell's). Vectors are
+(east, north) at their cell on both grids, so a nearest copy needs no rotation, and
+the shortening axis is measured from the cell's east toward its south on both. In
+the world's records centroids stay longitude and latitude in degrees, a segment's
+length is in km, cell counts are world cells by true area, and motions, velocities
+and `boundary_distance` are in world cells (per update): on lat-lon the equatorial
+cell 2 pi R / W, on a cube the mean cell side (both the engine's own spacing on the
+identity). Planet save storage keeps its layout; the records' centroid and length
+fields now hold degrees and km. Later terrain stages may alter the application's
+terrain independently of the native export.
 
 ## Serialization and checks
 
-The current numeric field schema is 7 (6 carried an always-zero cycle counter);
-optional fields (`rift_damage`, `plume_influence`) do not change it. The existing serialized `phase6` name is
+The current numeric field schema is 8 (the plates' rotation vector, centroid in
+degrees and centroid velocity in cm/yr; 7 published a planar velocity in cell
+spacings per update, a spin and a mass centre; 6 carried an always-zero cycle
+counter); optional fields (`rift_damage`, `plume_influence`) do not change it. The existing serialized `phase6` name is
 a format identifier, not a selectable implementation. Snapshot and batch JSON use
 their existing `tectonic-*/v1` container schemas; snapshot statistics and comparisons
 are computed in Python from run bundles. New
-scenario metadata is version 4 and reports `force-balance` / `isostatic-columns`
+scenario metadata is version 5 (the cube engine with the remap hand-off and
+contract 8; 4 introduced the cube's keys) and reports `force-balance` / `isostatic-columns`
 with explicit parameters: the grid as `sphere_face_cells` and `radius_km` (no width,
 height or world width), and the mantle flow's shape as `mantle_flow_wavelength_km`,
 `mantle_flow_octaves`, `mantle_flow_wobble`, `mantle_flow_drift` and

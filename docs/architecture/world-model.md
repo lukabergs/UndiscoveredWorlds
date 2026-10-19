@@ -274,6 +274,19 @@ inherited provinces (`MineralHistory::begin`) and writes the starting elevation.
 world fields (sketch or continuation initializers) needs an engine entry point
 that builds plates and columns from fields; the engine has none yet.
 
+The engine runs on its own cube (`sphere_face_cells`, the body's radius) and hands
+its state to the world's grid in `geology/world_tectonics.cpp` by a remap built
+once and cached (`docs/architecture/sphere-mesh.md` section 5): the identity on a
+cube world of the same N, otherwise area-weighted means for heights and rates and
+the nearest engine cell for codes, ids, scores and the remaining fields. Vectors
+are (east, north) at their cell on every grid; the boundary and deforming-region
+records keep centroids in degrees, lengths in km and counts in world cells by true
+area (`docs/architecture/tectonics/tectonic-output-contract.md`, contract schema 8).
+Both geology processes and `layers.finalize` are cube-ready. The mineral history
+reads the engine's cube directly (true cell areas, tracers as unit vectors moved by
+tangent displacements), and its deposits leave the run as fractions of longitude
+and colatitude, which every world grid locates.
+
 Deposits split by how they form. Magmatic and hydrothermal deposits (porphyry,
 epithermal and orogenic gold; later plume-related types) need the tectonic
 setting at the moment they form and are recorded during tectonics. Surface
