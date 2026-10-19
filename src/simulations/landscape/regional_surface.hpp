@@ -36,6 +36,8 @@ public:
     RegionalNoise(int worldwidth, int worldheight, int scale, std::uint64_t seed, std::uint64_t salt, double persistence);
     // At the fine cell (I, J) of the kW x kH grid (I taken modulo kW, 0 <= J < kH).
     double at(std::int64_t finecolumn, std::int64_t finerow) const;
+    // At a unit vector (a cube cell's centre; at() is this at the lat-lon centre).
+    double atpoint(double px, double py, double pz) const;
     bool active() const { return field_.has_value(); }
 
 private:
@@ -238,6 +240,35 @@ void noiselevel(const LevelContext& context, LevelState& state);
 // sea within coast.pocketreach global cells beyond regionalsea's reach (the halo budget of
 // refinement_levels.hpp does not count them; the overlap tests hold).
 void coastlevel(const LevelContext& context, LevelState& state);
+
+// The cube forms of regionalstartsurface, regionalsea and the refined coast of coastlevel (T8 W2-W2c,
+// sphere-mesh.md section 8, "Coast rules"; lat-lon windows take the forms above): one value per cell
+// of a cube window refining inputs.grid (a cube level 0 of N cells per face edge), in its local order.
+// The level-0 north-south spacing is the arc pi R / (2 N) (the noises' wavelengths, the warp); every
+// global field is gathered by G (upsampling.hpp) at the cell's centre or its warped point; the land-
+// share rule runs on the window widened by its margin in rings of level-0 cells, its offset bilinear
+// over level 0 (a node beyond the box taking the nearest block by rings), the tent weights in face
+// indices, the pinch squares of a cell's own E, S and SE neighbours, the cube forms of the gate, the
+// island sink, the straight-run breaker, the pockets and the signed block means. `kept` (one flag per
+// window cell, or null for every cell) selects the cells the pockets and the block-mean error count.
+// regionalsea's centre rule takes each block's child at face-index offset (k / 2, k / 2).
+// refinedcoast: S3.15 at level >= 2 on a cube level (factor cells per parent edge) with the parent's sea
+// and elevation on `parent` (a cube window of the parent level holding the level's parents): the
+// displaced band and the parent-share guard per block, the pockets with the undo around a parent and
+// its 8 neighbours at the parent level; returns the sea and fills the pocket counts when given.
+StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp,
+                                  const RegionalParameters& parameters, bool lakegate,
+                                  const std::vector<uint8_t>* kept = nullptr);
+std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp,
+                                 const RegionalParameters& parameters, std::vector<float>& surface_m,
+                                 const std::vector<uint8_t>* parentgate, bool lakegate);
+struct PocketCount;  // regional_coast.hpp
+std::vector<uint8_t> refinedcoast(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, int factor,
+                                  const mesh::CellGrid& parent, const std::vector<uint8_t>& parentsea,
+                                  const std::vector<float>& parentelevation, const FineWarp& warp,
+                                  const RegionalParameters& parameters, const std::vector<uint8_t>* parentseagate,
+                                  std::vector<float>& surface, const std::vector<uint8_t>* kept = nullptr,
+                                  PocketCount* filled = nullptr, PocketCount* left = nullptr);
 
 // The land-share rule's signed block-mean correction on a cube window (T8 W2-W2b, sphere-mesh.md
 // section 8), one pass: the residual of every block over level 0 (the global base elevation minus

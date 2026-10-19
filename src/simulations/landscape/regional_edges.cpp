@@ -7,6 +7,7 @@
 #include <string>
 
 #include "core/deterministic_random.hpp"
+#include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/window_grid.hpp"
 #include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/regional_helpers.hpp"
@@ -448,5 +449,143 @@ std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const mesh::Cel
         gate[c] = sea ? 1 : 0;
     }
     return gate;
+}
+
+void breakstraightruns(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, const RegionalParameters& parameters,
+                       const std::vector<uint8_t>& gate, std::vector<uint8_t>& mask)
+{
+    const int straightmax = parameters.edges.straightmax;
+    if (straightmax <= 0)
+        return;
+    const int k = cubescale(inputs, box, "breakstraightruns");
+    const mesh::CellGrid& grid = *inputs.grid;
+    if (gate.size() != box.cellcount() || mask.size() != box.cellcount())
+        throw std::invalid_argument("breakstraightruns: the gate and the mask must cover the box");
+    const int chunkmin = std::max(1, std::min(parameters.edges.chunkmin, parameters.edges.chunkmax));
+    const int chunkmax = std::max(chunkmin, parameters.edges.chunkmax);
+    const int blockcells = k * k;
+    const double share = parameters.coast.landshare;
+    const int mostland = share > 0.0 ? static_cast<int>(std::floor((1.0 - share) * blockcells + 1.0e-9)) : blockcells;
+    const std::int64_t n = box.facecells();
+    const WindowBlocks blocks = windowblocks(box, k);
+    const std::vector<uint8_t> source = mask;
+    // Lines along the block's face rows and columns (the "Coast rules"); a cell beyond the block from
+    // the face's chart (cubechartkey), -1 beyond the box or where the chart has no cell.
+    const int sidex[4] = {0, 0, -1, 1};
+    const int sidey[4] = {-1, 1, 0, 0};
+    for (std::size_t b = 0; b < blocks.count(); b++)
+    {
+        const std::size_t global = grid.localofkey(blocks.parents[b]);
+        if (lakecell(inputs, global))
+            continue;
+        const bool seablock = inputs.network.sea[global] != 0;
+        const mesh::CellId* children = blocks.childrenof(b);
+        const mesh::CubeCell origin = mesh::cubecell(n, box.globalkey(children[0]));
+        const auto keyat = [&](int x, int y) {
+            return mesh::cubechartkey(n, origin.face, origin.column + x, origin.row + y);
+        };
+        const auto kind = [&](int x, int y) -> int {
+            const mesh::LevelKey key = keyat(x, y);
+            if (key == mesh::nokey)
+                return -1;
+            const mesh::CellId cell = box.localofkey(key);
+            if (cell == mesh::nocell)
+                return -1;
+            return source[cell] != 0 ? 1 : 0;
+        };
+        const auto inblock = [&](int x, int y) { return x >= 0 && x < k && y >= 0 && y < k; };
+        const auto cellof = [&](int x, int y) { return static_cast<std::size_t>(children[y * k + x]); };
+        int land = 0;
+        for (int m = 0; m < blockcells; m++)
+            land += mask[children[m]] == 0 ? 1 : 0;
+        const auto flip = [&](int x, int y, bool toland) {
+            if (!inblock(x, y))
+                return;
+            const std::size_t cell = cellof(x, y);
+            if (toland)
+            {
+                if (mask[cell] != 0)
+                {
+                    mask[cell] = 0;
+                    land++;
+                }
+            }
+            else if (mask[cell] == 0 && gate[cell] != 0)
+            {
+                mask[cell] = 1;
+                land--;
+            }
+        };
+        for (int side = 0; side < 4; side++)
+        {
+            const bool alongx = side < 2;
+            const int sx = sidex[side], sy = sidey[side];
+            for (int line = 0; line < k; line++)
+            {
+                const auto cellx = [&](int t) { return alongx ? t : line; };
+                const auto celly = [&](int t) { return alongx ? line : t; };
+                const auto runcell = [&](int t) {
+                    const int x = cellx(t), y = celly(t);
+                    return kind(x, y) == 1 && kind(x + sx, y + sy) == 0;
+                };
+                int t = 0;
+                while (t < k)
+                {
+                    if (!runcell(t))
+                    {
+                        t++;
+                        continue;
+                    }
+                    int end = t;
+                    while (end + 1 < k && runcell(end + 1))
+                        end++;
+                    int p = t;
+                    while (end - p + 1 > straightmax)
+                    {
+                        const int remaining = end - p + 1;
+                        // The hashes of the lat-lon breaker with the cell's key in place of its column and row.
+                        const std::uint64_t gaphash = deterministiccombine(
+                            inputs.seed, straightsalt, static_cast<std::int64_t>(keyat(cellx(p), celly(p))), std::int64_t{ -1 }, side, 0);
+                        const int gap = 1 + static_cast<int>(gaphash % static_cast<std::uint64_t>(std::min(straightmax, remaining - 1)));
+                        const int start = p + gap;
+                        const std::uint64_t hash = deterministiccombine(
+                            inputs.seed, straightsalt, static_cast<std::int64_t>(keyat(cellx(start), celly(start))), std::int64_t{ -1 }, side, 1);
+                        const int size = chunkmin + static_cast<int>((hash >> 20) % static_cast<std::uint64_t>(chunkmax - chunkmin + 1));
+                        const int second = size / 3;
+                        const int first = std::min(size - second, end - start + 1);
+                        const int secondoffset = std::max(0, (first - second) / 2);
+                        const int secondcount = std::min(second, first - secondoffset);
+                        bool toland = !seablock || ((hash >> 40) & 1u) == 0;
+                        if (toland && seablock && land + first + secondcount > mostland)
+                            toland = false;
+                        if (!toland)
+                        {
+                            bool possible = false;
+                            for (int o = 0; o < first && !possible; o++)
+                            {
+                                const int x = cellx(start + o) + sx, y = celly(start + o) + sy;
+                                possible = inblock(x, y) && gate[cellof(x, y)] != 0;
+                            }
+                            if (!possible)
+                                toland = !seablock || land + first + secondcount <= mostland;
+                            if (!possible && !toland)
+                            {
+                                p = start + first;
+                                continue;
+                            }
+                        }
+                        const int firstrow = toland ? 0 : 1, secondrow = toland ? -1 : 2;
+                        for (int o = 0; o < first; o++)
+                            flip(cellx(start + o) + firstrow * sx, celly(start + o) + firstrow * sy, toland);
+                        for (int o = 0; o < secondcount; o++)
+                            flip(cellx(start + secondoffset + o) + secondrow * sx,
+                                 celly(start + secondoffset + o) + secondrow * sy, toland);
+                        p = start + first;
+                    }
+                    t = end + 1;
+                }
+            }
+        }
+    }
 }
 }

@@ -117,4 +117,10 @@ std::vector<uint8_t> seagate(const RegionalGlobalInputs& inputs, const mesh::Cel
 // pinch and hole passes after it and counts the land shares on the result.
 void breakstraightruns(const RegionalGlobalInputs& inputs, const RegionalWindow& box, const RegionalParameters& parameters,
                        const std::vector<uint8_t>& gate, std::vector<uint8_t>& mask);
+// The cube form (sphere-mesh.md section 8, "Coast rules"): the runs along each block's face rows and
+// columns (blocks never straddle a face), the cell beyond the block from the face's chart
+// (mesh::cubechartkey; beyond the box or without a chart cell never land), the hashes of the seed
+// and the cell's level key; one value per cell of a cube box refining inputs.grid.
+void breakstraightruns(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, const RegionalParameters& parameters,
+                       const std::vector<uint8_t>& gate, std::vector<uint8_t>& mask);
 }

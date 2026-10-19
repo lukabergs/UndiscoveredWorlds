@@ -6,9 +6,14 @@
 #include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
+#include <string>
 
 #include "core/deterministic_random.hpp"
+#include "core/mesh/cube_geometry.hpp"
+#include "core/mesh/window_grid.hpp"
+#include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/regional_helpers.hpp"
+#include "simulations/landscape/regional_surface.hpp"
 
 // Erosion plan Phase R2: R6 wrote the contract and coastfactors' formula, R7 the island
 // sink and the values (configs/parameters/landscape.json, the note of the R7 keys).
@@ -126,6 +131,14 @@ void ShorelineWarp::at(std::int64_t finecolumn, std::int64_t finerow, double& dx
         return;
     double px = 0.0, py = 0.0, pz = 0.0;
     unitvector(finelatitude(finerow, fineheight_), finelongitude(finecolumn, finewidth_), px, py, pz);
+    atpoint(px, py, pz, dx, dy);
+}
+
+void ShorelineWarp::atpoint(double px, double py, double pz, double& dx, double& dy) const
+{
+    dx = dy = 0.0;
+    if (!active_)
+        return;
     // Normalised by the field's own one-octave deviation (the Perlin or the OpenSimplex2S one), so the
     // displacement's scale does not depend on landscape.noise.kernel (the noise inventory of 2026-10-11).
     const double u = amplitude_ * x_->sum(px, py, pz) / x_->deviation();
@@ -187,7 +200,8 @@ struct GlobalLakes
 GlobalLakes globallakes(const RegionalGlobalInputs& inputs)
 {
     GlobalLakes lakes;
-    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    const std::size_t size = inputs.grid != nullptr ? inputs.grid->cellcount()
+                                                    : static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
     if (inputs.lakesurface_m.size() != size)
         return lakes;
     // The 8 neighbours on the world's table (sphere-mesh.md section 8; T8 W2-W2c).
@@ -424,7 +438,8 @@ PocketCount countpockets(const std::vector<uint8_t>& filled, int domainwidth, in
 CoastFactors coastfactors(const RegionalGlobalInputs& inputs, const RegionalParameters& parameters)
 {
     const CoastParameters& coast = parameters.coast;
-    const std::size_t size = static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
+    const std::size_t size = inputs.grid != nullptr ? inputs.grid->cellcount()
+                                                    : static_cast<std::size_t>(inputs.width) * static_cast<std::size_t>(inputs.height);
     const bool glacial = (coast.glacialamplitude_m > 0.0 || coast.glacialdropfraction > 0.0) && inputs.glaciation.size() == size;
     const bool denudation =
         coast.denudationamplitude_m > 0.0 && coast.denudationreference_m > 0.0 && inputs.denudation_m.size() == size;
@@ -528,5 +543,311 @@ void sinksmallislands(const RegionalGlobalInputs& inputs, const RegionalWindow& 
                         mask[cell] = 1;
                 }
         }
+}
+
+// --- The cube forms (T8 W2-W2c, sphere-mesh.md section 8, "Coast rules"). ---
+
+namespace
+{
+// A cube box: its level 0, its scale k and its blocks over level 0, each box cell's block and each
+// block's level-0 id.
+struct CubeBox
+{
+    const mesh::CellGrid* levelzero = nullptr;
+    int k = 1;
+    WindowBlocks blocks;
+    std::vector<std::uint32_t> blockof;
+    std::vector<mesh::CellId> parentid;
+};
+
+CubeBox cubebox(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, const char* name)
+{
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || box.kind() != mesh::GridKind::cube ||
+        inputs.grid->facecells() < 1 || box.facecells() % inputs.grid->facecells() != 0)
+        throw std::invalid_argument(std::string(name) + ": a cube box refining the inputs' cube level 0");
+    CubeBox result;
+    result.levelzero = inputs.grid.get();
+    result.k = box.facecells() / inputs.grid->facecells();
+    result.blocks = windowblocks(box, result.k);
+    result.blockof.assign(box.cellcount(), 0);
+    result.parentid.resize(result.blocks.count());
+    for (std::size_t b = 0; b < result.blocks.count(); b++)
+    {
+        result.parentid[b] = inputs.grid->localofkey(result.blocks.parents[b]);
+        for (std::size_t n = 0; n < result.blocks.perparent(); n++)
+            result.blockof[result.blocks.childrenof(b)[n]] = static_cast<std::uint32_t>(b);
+    }
+    return result;
+}
+
+template<typename Value>
+std::vector<double> cubedisplaced(const std::vector<Value>& field, const mesh::CellGrid& box, const ShorelineWarp& warp,
+                                  int levelzerofacecells)
+{
+    if (box.kind() != mesh::GridKind::cube || field.size() != box.cellcount())
+        throw std::invalid_argument("displacedsample: a cube box and one value per box cell");
+    std::vector<double> result(box.cellcount());
+    if (!warp.active())
+    {
+        for (std::size_t cell = 0; cell < result.size(); cell++)
+            result[cell] = static_cast<double>(field[cell]);
+        return result;
+    }
+    std::vector<mesh::LevelKey> keys(box.cellcount());
+    for (mesh::CellId c = 0; c < box.cellcount(); c++)
+        keys[c] = box.globalkey(c);
+    const NearestDomainKey nearest(box.facecells(), keys);  // indices are the box's local ids (ascending keys)
+    for (mesh::CellId c = 0; c < box.cellcount(); c++)
+    {
+        const mesh::Vec3 centre = box.centre(c);
+        double dx = 0.0, dy = 0.0;
+        warp.atpoint(centre.x, centre.y, centre.z, dx, dy);
+        const mesh::Vec3 p = warpedpoint(centre, dx, dy, box.radius_m(), levelzerofacecells);
+        result[c] = mesh::applystencil(mesh::cubebilinearstencil(box.facecells(), p),
+                                       [&](mesh::LevelKey key) { return static_cast<double>(field[nearest(key)]); });
+    }
+    return result;
+}
+
+// The cells reached from `queue` (marked `id`) through the cardinal neighbours on the box's table that
+// `pass` admits and whose block lies in `region` (sorted level-0 keys).
+template<typename Pass>
+void cubespread(const mesh::CellGrid& box, const CubeBox& cube, std::vector<std::size_t>& queue, std::vector<int>& mark,
+                int id, const std::vector<mesh::LevelKey>& region, Pass pass)
+{
+    for (std::size_t next = 0; next < queue.size(); next++)
+        for (const int slot : { 1, 3, 5, 7 })
+        {
+            const std::int32_t other = box.neighbour(static_cast<mesh::CellId>(queue[next]), slot);
+            if (other < 0)
+                continue;
+            const std::size_t cell = static_cast<std::size_t>(other);
+            if (mark[cell] == id || !pass(cell) ||
+                !std::binary_search(region.begin(), region.end(), cube.blocks.parents[cube.blockof[cell]]))
+                continue;
+            mark[cell] = id;
+            queue.push_back(cell);
+        }
+}
+}
+
+std::vector<double> displacedsample(const std::vector<double>& field, const mesh::CellGrid& box, const ShorelineWarp& warp,
+                                    int levelzerofacecells)
+{
+    return cubedisplaced(field, box, warp, levelzerofacecells);
+}
+
+std::vector<double> displacedsample(const std::vector<float>& field, const mesh::CellGrid& box, const ShorelineWarp& warp,
+                                    int levelzerofacecells)
+{
+    return cubedisplaced(field, box, warp, levelzerofacecells);
+}
+
+void sinksmallislands(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, const RegionalParameters& parameters,
+                      const std::vector<uint8_t>& gate, std::vector<uint8_t>& mask)
+{
+    if (parameters.coast.islandmargin <= 0.0)
+        return;
+    const CubeBox cube = cubebox(inputs, box, "sinksmallislands");
+    if (gate.size() != box.cellcount() || mask.size() != box.cellcount())
+        throw std::invalid_argument("sinksmallislands: the gate and the mask must cover the box");
+    const int margin = std::max(1, static_cast<int>(std::lround(parameters.coast.islandmargin * cube.k)));
+    const std::size_t size = cube.levelzero->cellcount();
+    const bool islands = inputs.island.size() == size, mountainislands = inputs.mountainisland.size() == size;
+    const std::int64_t n = box.facecells();
+    std::vector<uint8_t> sink(cube.blocks.count(), 0);
+    for (std::size_t b = 0; b < cube.blocks.count(); b++)
+    {
+        const std::size_t global = cube.parentid[b];
+        if (inputs.network.sea[global] == 0)
+            continue;
+        const mesh::CellId* children = cube.blocks.childrenof(b);
+        bool land = false;
+        for (std::size_t m = 0; m < cube.blocks.perparent() && !land; m++)
+            land = mask[children[m]] == 0 && gate[children[m]] != 0;
+        if (!land)
+            continue;
+        if (regionaldetail::aroundcell(*cube.levelzero, global, [&](std::size_t cell) {
+                return (islands && inputs.island[cell] != 0) || (mountainislands && inputs.mountainisland[cell] != 0);
+            }))
+            continue;
+        // The ring at exactly `margin` rings from the block, ring by ring on the level's neighbours.
+        std::vector<mesh::LevelKey> visited, ring;
+        for (std::size_t m = 0; m < cube.blocks.perparent(); m++)
+            visited.push_back(box.globalkey(children[m]));
+        std::sort(visited.begin(), visited.end());
+        ring = visited;
+        for (int step = 0; step < margin; step++)
+        {
+            std::vector<mesh::LevelKey> next;
+            for (const mesh::LevelKey key : ring)
+                for (int slot = 1; slot <= mesh::slotcount; slot++)
+                {
+                    const mesh::LevelKey other = mesh::cubekeyneighbour(n, key, slot);
+                    if (other != mesh::nokey && !std::binary_search(visited.begin(), visited.end(), other))
+                        next.push_back(other);
+                }
+            std::sort(next.begin(), next.end());
+            next.erase(std::unique(next.begin(), next.end()), next.end());
+            visited.insert(visited.end(), next.begin(), next.end());
+            std::sort(visited.begin(), visited.end());
+            ring.swap(next);
+        }
+        bool clear = true;
+        for (const mesh::LevelKey key : ring)
+        {
+            const mesh::CellId cell = box.localofkey(key);
+            clear = clear && cell != mesh::nocell && mask[cell] != 0;
+        }
+        if (clear)
+            sink[b] = 1;
+    }
+    for (std::size_t b = 0; b < cube.blocks.count(); b++)
+        if (sink[b] != 0)
+            for (std::size_t m = 0; m < cube.blocks.perparent(); m++)
+            {
+                const mesh::CellId cell = cube.blocks.childrenof(b)[m];
+                if (gate[cell] != 0)
+                    mask[cell] = 1;
+            }
+}
+
+std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, int reach,
+                                const std::vector<uint8_t>& sea, const std::vector<uint8_t>& core)
+{
+    const CubeBox cube = cubebox(inputs, box, "seapockets");
+    const std::size_t count = box.cellcount();
+    if (sea.size() != count || (!core.empty() && core.size() != count))
+        throw std::invalid_argument("seapockets: the sea and the core must cover the box");
+    std::vector<uint8_t> filled(count, 0);
+    if (reach <= 0)
+        return filled;
+    const GlobalLakes lakes = globallakes(inputs);
+    const auto lakecell = [&](std::size_t cell) {
+        return !lakes.empty() && lakes.own[cube.parentid[cube.blockof[cell]]] != 0;
+    };
+    const auto iscore = [&](std::size_t cell) {
+        return sea[cell] != 0 && (core.empty() ? inputs.network.sea[cube.parentid[cube.blockof[cell]]] != 0 : core[cell] != 0);
+    };
+    const std::int64_t n0 = cube.levelzero->facecells();
+    std::vector<int> mark(count, -1);
+    std::vector<std::size_t> queue;
+    for (std::size_t b = 0; b < cube.blocks.count(); b++)
+    {
+        const mesh::CellId* children = cube.blocks.childrenof(b);
+        if (lakes.empty() ? false : lakes.own[cube.parentid[b]] != 0)
+            continue;
+        bool any = false;
+        for (std::size_t m = 0; m < cube.blocks.perparent() && !any; m++)
+            any = sea[children[m]] != 0 && !iscore(children[m]);
+        if (!any)
+            continue;
+        const int id = static_cast<int>(b);
+        const std::vector<mesh::LevelKey> region = mesh::dilatekeys(n0, { cube.blocks.parents[b] }, reach);
+        queue.clear();
+        for (const mesh::LevelKey parent : region)
+        {
+            const auto found = std::lower_bound(cube.blocks.parents.begin(), cube.blocks.parents.end(), parent);
+            // On a cube box the blocks' order (their first children's) is their parents' ascending keys.
+            if (found == cube.blocks.parents.end() || *found != parent)
+                continue;
+            const std::size_t other = static_cast<std::size_t>(found - cube.blocks.parents.begin());
+            for (std::size_t m = 0; m < cube.blocks.perparent(); m++)
+            {
+                const std::size_t cell = cube.blocks.childrenof(other)[m];
+                if (mark[cell] != id && iscore(cell))
+                {
+                    mark[cell] = id;
+                    queue.push_back(cell);
+                }
+            }
+        }
+        cubespread(box, cube, queue, mark, id, region, [&](std::size_t cell) { return sea[cell] != 0 && !lakecell(cell); });
+        for (std::size_t m = 0; m < cube.blocks.perparent(); m++)
+        {
+            const std::size_t cell = children[m];
+            if (sea[cell] != 0 && mark[cell] != id)
+                filled[cell] = 1;
+        }
+    }
+    return filled;
+}
+
+std::vector<uint8_t> pocketbasins(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, int reach,
+                                  const std::vector<uint8_t>& sea, const std::vector<uint8_t>& filled,
+                                  const std::vector<float>& surface, float level)
+{
+    const CubeBox cube = cubebox(inputs, box, "pocketbasins");
+    const std::size_t count = box.cellcount();
+    if (sea.size() != count || filled.size() != count || surface.size() != count)
+        throw std::invalid_argument("pocketbasins: the sea, the filled cells and the surface must cover the box");
+    std::vector<uint8_t> basin(count, 0);
+    if (reach <= 0)
+        return basin;
+    const GlobalLakes lakes = globallakes(inputs);
+    const auto lakebed = [&](std::size_t cell) {
+        if (lakes.empty())
+            return false;
+        const std::size_t global = cube.parentid[cube.blockof[cell]];
+        return lakes.own[global] != 0 || surface[cell] < lakes.surface[global];
+    };
+    const std::int64_t n0 = cube.levelzero->facecells();
+    std::vector<int> mark(count, -1);
+    std::vector<std::size_t> queue;
+    for (std::size_t b = 0; b < cube.blocks.count(); b++)
+    {
+        const int id = static_cast<int>(b);
+        queue.clear();
+        for (std::size_t m = 0; m < cube.blocks.perparent(); m++)
+        {
+            const std::size_t cell = cube.blocks.childrenof(b)[m];
+            if (filled[cell] != 0)
+            {
+                mark[cell] = id;
+                queue.push_back(cell);
+            }
+        }
+        if (queue.empty())
+            continue;
+        const std::vector<mesh::LevelKey> region = mesh::dilatekeys(n0, { cube.blocks.parents[b] }, reach);
+        cubespread(box, cube, queue, mark, id, region, [&](std::size_t cell) {
+            return sea[cell] == 0 && (filled[cell] != 0 || (surface[cell] < level && !lakebed(cell)));
+        });
+        for (const std::size_t cell : queue)
+            basin[cell] = 1;
+    }
+    return basin;
+}
+
+PocketCount countpockets(const mesh::CellGrid& grid, const std::vector<uint8_t>& filled, const std::vector<uint8_t>* kept)
+{
+    PocketCount result;
+    const std::size_t count = grid.cellcount();
+    if (filled.size() != count || (kept != nullptr && kept->size() != count))
+        throw std::invalid_argument("countpockets: the filled cells and the kept flags must cover the grid");
+    const auto isfilled = [&](std::size_t cell) { return filled[cell] != 0 && (kept == nullptr || (*kept)[cell] != 0); };
+    std::vector<uint8_t> seen(count, 0);
+    std::vector<std::size_t> queue;
+    for (std::size_t start = 0; start < count; start++)
+    {
+        if (!isfilled(start))
+            continue;
+        result.pocketcells++;
+        if (seen[start] != 0)
+            continue;
+        result.pockets++;
+        queue.assign(1, start);
+        seen[start] = 1;
+        for (std::size_t next = 0; next < queue.size(); next++)
+            for (const int slot : { 1, 3, 5, 7 })
+            {
+                const std::int32_t other = grid.neighbour(static_cast<mesh::CellId>(queue[next]), slot);
+                if (other < 0 || seen[static_cast<std::size_t>(other)] != 0 || !isfilled(static_cast<std::size_t>(other)))
+                    continue;
+                seen[static_cast<std::size_t>(other)] = 1;
+                queue.push_back(static_cast<std::size_t>(other));
+            }
+    }
+    return result;
 }
 }

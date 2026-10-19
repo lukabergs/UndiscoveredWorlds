@@ -72,6 +72,8 @@ public:
     double bound() const { return bound_; }
     // At the fine cell (I, J) of the kW x kH grid (I taken modulo kW).
     void at(std::int64_t finecolumn, std::int64_t finerow, double& dx, double& dy) const;
+    // The same at a unit vector (a cube cell's centre; at() is this at the lat-lon centre), in level-0 cells.
+    void atpoint(double px, double py, double pz, double& dx, double& dy) const;
     // The fine cells beyond its own that a displaced sample reads: ceil(bound() x scale) + 1
     // (the bilinear stencil); 0 when inactive.
     int reachcells() const;
@@ -129,5 +131,35 @@ struct PocketCount
     int pocketcells = 0;
 };
 PocketCount countpockets(const std::vector<uint8_t>& filled, int domainwidth, int x0, int y0, int width, int height);
+
+// --- The cube forms (T8 W2-W2c, sphere-mesh.md section 8, "Coast rules"; lat-lon boxes take the
+// forms above). `box` is a cube window grid refining inputs.grid (a cube level 0; k = its face
+// cells over level 0's), whole level-0 blocks (level_blocks.hpp); every per-cell vector holds one
+// value per box cell in its local order. ---
+
+// The field sampled bilinearly (mesh::cubebilinearstencil of the box's level) at each cell's
+// centre displaced by the warp (warpedpoint, the displacement in level-0 cells), a node outside
+// the box taking the box cell at the smallest ring distance (ties to the smallest key).
+std::vector<double> displacedsample(const std::vector<double>& field, const mesh::CellGrid& box, const ShorelineWarp& warp,
+                                    int levelzerofacecells);
+std::vector<double> displacedsample(const std::vector<float>& field, const mesh::CellGrid& box, const ShorelineWarp& warp,
+                                    int levelzerofacecells);
+// sinksmallislands: a global sea cell's block whose gated land the mask holds is sunk unless a
+// one-cell or mountain island of the world lies in its 3 x 3 (the world's table), when every cell
+// at exactly `margin` rings from the block (the box level's closed-form neighbours) is sea; a ring
+// cell missing from the box counts as land.
+void sinksmallislands(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, const RegionalParameters& parameters,
+                      const std::vector<uint8_t>& gate, std::vector<uint8_t>& mask);
+// seapockets and pocketbasins: as above with the region of a block the blocks whose level-0 cells
+// lie within `reach` rings of its own, the searches spreading through the cardinal neighbours
+// (slots 1, 3, 5, 7) on the box's table.
+std::vector<uint8_t> seapockets(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, int reach,
+                                const std::vector<uint8_t>& sea, const std::vector<uint8_t>& core = {});
+std::vector<uint8_t> pocketbasins(const RegionalGlobalInputs& inputs, const mesh::CellGrid& box, int reach,
+                                  const std::vector<uint8_t>& sea, const std::vector<uint8_t>& filled,
+                                  const std::vector<float>& surface, float level);
+// countpockets: the 4-connected components (cardinal neighbours on the grid's table) of the filled
+// cells among those `kept` flags (null: every cell).
+PocketCount countpockets(const mesh::CellGrid& grid, const std::vector<uint8_t>& filled, const std::vector<uint8_t>* kept);
 
 }

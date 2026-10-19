@@ -8,7 +8,9 @@
 #include <stdexcept>
 
 #include "core/deterministic_random.hpp"
+#include "core/mesh/cube_geometry.hpp"
 #include "core/mesh/mesh_geometry.hpp"
+#include "core/mesh/window_grid.hpp"
 #include "simulations/landscape/level_blocks.hpp"
 #include "simulations/landscape/refinement_levels.hpp"
 #include "simulations/landscape/regional_coast.hpp"
@@ -200,20 +202,28 @@ class Surfacer
 {
 public:
     Surfacer(const RegionalGlobalInputs& inputs, int scale, const RegionalParameters& parameters)
+        : Surfacer(inputs, scale, parameters, inputs.width, inputs.height)
+    {
+    }
+
+    // worldwidth x worldheight: the world's lat-lon size, or on the cube 4 N x 2 N (the level-0 arc
+    // pi R / (2 N) as the north-south spacing).
+    Surfacer(const RegionalGlobalInputs& inputs, int scale, const RegionalParameters& parameters, int worldwidth,
+             int worldheight)
         : inputs_(inputs), parameters_(parameters), scale_(scale),
           relief_(localrelief(inputs.elevation_m, levelzero(inputs))),
           noiserelief_(relieffield(inputs, parameters) ? inputs.reliefamplitude_m : std::vector<float>{}),
           coastal_(coastalcells(inputs.network.sea, levelzero(inputs))),
           inland_(inlandcells(inputs, parameters)),
           factors_(coastfactors(inputs, parameters)),
-          coast_(inputs.width, inputs.height, scale, inputs.seed, coastsalt, parameters.coast.noisepersistence)
+          coast_(worldwidth, worldheight, scale, inputs.seed, coastsalt, parameters.coast.noisepersistence)
     {
         // Phase E's noise (erosion plan E3): the band from twice the global north-south
         // spacing (exclusive) down to twice the fine one.
         FractalNoise noise;
         noise.seed = deterministiccombine(inputs.seed, noisesalt);
         noise.radius_km = inputs.radius_m / 1000.0;
-        noise.longest_km = 2.0 * pi * inputs.radius_m / inputs.height / 1000.0;
+        noise.longest_km = 2.0 * pi * inputs.radius_m / worldheight / 1000.0;
         noise.wavelength_km = noise.longest_km;
         // Twice the fine north-south spacing, written as longest / k so that the octave
         // whose wavelength equals it (k a power of two) is not lost to rounding.
@@ -301,6 +311,69 @@ public:
         {
             cell.inland = static_cast<float>(std::clamp(bicubic(inland_, width, height, wx, wy), 0.0, 1.0));
         }
+        return cell;
+    }
+
+    // The same at a cube cell (T8 W2-W2c): G of level 0 (n0 cells per face edge) in place of bicubic,
+    // the warped point warpedpoint(centre, fade x warp), the noises at the cell's centre.
+    CellSample samplecube(const mesh::Vec3& centre, double warpx, double warpy, int n0) const
+    {
+        const mesh::CellGrid& grid = *inputs_.grid;
+        const auto gather = [&](const std::vector<float>& field, const mesh::Vec3& p) {
+            return mesh::applystencil(mesh::cubicstencil(n0, p),
+                                      [&](mesh::LevelKey key) { return field[grid.localofkey(key)]; });
+        };
+        const double sealevel = static_cast<double>(inputs_.sealevel);
+        CellSample cell;
+        cell.lapsebase = static_cast<float>(gather(inputs_.elevation_m, centre));
+        double fade = 1.0;
+        if (parameters_.warp.fade_m > 0.0)
+            fade = std::clamp(1.0 - std::fabs(static_cast<double>(cell.lapsebase) - sealevel) / parameters_.warp.fade_m,
+                              0.0, 1.0);
+        const mesh::Vec3 warped = warpedpoint(centre, fade * warpx, fade * warpy, inputs_.radius_m, n0);
+        cell.base = warpx == 0.0 && warpy == 0.0 ? cell.lapsebase : static_cast<float>(gather(inputs_.elevation_m, warped));
+        const float relief = static_cast<float>(gather(relief_, centre));
+        const float noiserelief = noiserelief_.empty() ? relief : static_cast<float>(gather(noiserelief_, centre));
+        float banded = cell.base;
+        if (band_->resolved() > 0)
+        {
+            const double amplitude =
+                parameters_.noiseamplitude_m + parameters_.noiserelieffraction * std::max(0.0, static_cast<double>(noiserelief));
+            const double height_m = std::fabs(static_cast<double>(cell.base) - sealevel);
+            const double band = parameters_.coastband_m + amplitude;
+            const double taper = band > 0.0 ? std::clamp(height_m / band, 0.0, 1.0) : 1.0;
+            banded = static_cast<float>(static_cast<double>(cell.base) +
+                                        taper * amplitude * band_->sum(centre.x, centre.y, centre.z) / band_->normalisation());
+        }
+        cell.surface = banded;
+        if (coastnoise_)
+        {
+            const double weight = std::clamp(gather(coastal_, warped), 0.0, 1.0);
+            double amplitude = parameters_.coast.noiseamplitude_m +
+                               parameters_.coast.noiserelieffraction * std::max(0.0, static_cast<double>(relief));
+            if (factors_.active)
+            {
+                amplitude += std::max(0.0, gather(factors_.amplitude_m, warped));
+                cell.dropfactor = static_cast<float>(std::clamp(gather(factors_.dropfactor, warped), 0.0, 1.0));
+            }
+            if (weight > 0.0 && amplitude > 0.0)
+            {
+                const double inlandamplitude = std::max(
+                    0.0, parameters_.noiseamplitude_m + parameters_.noiserelieffraction * std::max(0.0, static_cast<double>(noiserelief)));
+                const double height_m = std::fabs(static_cast<double>(cell.base) - sealevel);
+                const double band = parameters_.coastband_m + inlandamplitude;
+                const double inlandtaper = band > 0.0 ? std::clamp(height_m / band, 0.0, 1.0) : 1.0;
+                const double elevationamplitude = std::min(amplitude, inlandtaper * inlandamplitude);
+                const double full = weight * amplitude * coast_.atpoint(centre.x, centre.y, centre.z);
+                cell.fullnoise = static_cast<float>(full);
+                cell.noise = parameters_.coast.landshare > 0.0 ? 0.0f : static_cast<float>((elevationamplitude / amplitude) * full);
+                cell.weight = static_cast<float>(weight);
+                cell.amplitude = static_cast<float>(amplitude);
+                cell.surface = static_cast<float>(static_cast<double>(banded) + static_cast<double>(cell.noise));
+            }
+        }
+        if (parameters_.coast.landshare > 0.0)
+            cell.inland = static_cast<float>(std::clamp(gather(inland_, warped), 0.0, 1.0));
         return cell;
     }
 
@@ -885,6 +958,13 @@ double RegionalNoise::at(std::int64_t finecolumn, std::int64_t finerow) const
     return field_->sum(px, py, pz) / field_->normalisation();
 }
 
+double RegionalNoise::atpoint(double px, double py, double pz) const
+{
+    if (!field_)
+        return 0.0;
+    return field_->sum(px, py, pz) / field_->normalisation();
+}
+
 FineWarp regionalwarp(const RegionalWindow& window, std::uint64_t seed, const RegionalParameters& parameters)
 {
     const WarpField field(window.worldwidth, window.worldheight, window.scale, seed, parameters.warp);
@@ -1077,6 +1157,663 @@ void correctsignedblockmeans(const RegionalGlobalInputs& inputs, const mesh::Cel
     const double sealevel = static_cast<double>(inputs.sealevel);
     for (std::size_t cell = 0; cell < fine.size(); cell++)
         fine[cell] = signedmove(fine[cell], correction[cell], sealevel);
+}
+
+// --- The cube forms of the start surface, the sea and the refined coast (T8 W2-W2c, sphere-mesh.md
+// section 8, "Coast rules"). ---
+
+namespace
+{
+// A cube window's level 0 (the inputs' cube grid) and its scale k.
+int cubescale(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const char* name)
+{
+    if (inputs.grid == nullptr || inputs.grid->kind() != mesh::GridKind::cube || window.kind() != mesh::GridKind::cube ||
+        inputs.grid->facecells() < 1 || window.facecells() % inputs.grid->facecells() != 0 ||
+        inputs.elevation_m.size() != inputs.grid->cellcount())
+        throw std::invalid_argument(std::string(name) + ": a cube window refining the inputs' cube level 0");
+    return window.facecells() / inputs.grid->facecells();
+}
+
+// The window widened by `margin` rings of level-0 cells (its blocks' parents dilated, their children).
+std::shared_ptr<const mesh::CellGrid> widenedbox(const mesh::CellGrid& window, int k, int n0, int margin)
+{
+    const WindowBlocks blocks = windowblocks(window, k);
+    std::vector<mesh::LevelKey> keys;
+    for (const mesh::LevelKey parent : mesh::dilatekeys(n0, blocks.parents, margin))
+        for (const mesh::LevelKey child : mesh::cubechildkeys(n0, k, parent))
+            keys.push_back(child);
+    return mesh::cubewindowgrid(window.facecells(), window.radius_m(), keys);
+}
+
+// The per-block and per-cell maps of a cube box over level 0.
+struct CubeBlocks
+{
+    WindowBlocks blocks;
+    std::vector<std::size_t> parentid;  // per block its level-0 id
+    std::vector<std::uint32_t> blockof;  // per box cell its block
+};
+
+CubeBlocks cubeblocks(const mesh::CellGrid& levelzero, const mesh::CellGrid& box, int k)
+{
+    CubeBlocks result;
+    result.blocks = windowblocks(box, k);
+    result.parentid.resize(result.blocks.count());
+    result.blockof.assign(box.cellcount(), 0);
+    for (std::size_t b = 0; b < result.blocks.count(); b++)
+    {
+        result.parentid[b] = levelzero.localofkey(result.blocks.parents[b]);
+        for (std::size_t n = 0; n < result.blocks.perparent(); n++)
+            result.blockof[result.blocks.childrenof(b)[n]] = static_cast<std::uint32_t>(b);
+    }
+    return result;
+}
+
+// The diagonal pinches and the one-cell holes of a cube mask (landsharesurface's cleanmask): a square
+// of a cell and its own E, S and SE neighbours (slots 3, 5, 4; none where SE is missing at a cube
+// corner) whose land and sea touch only diagonally loses its sea; then a sea cell whose cardinal
+// neighbours on the table are all land (a missing one does not count) becomes land. raw -> mask.
+void cleancubemask(const mesh::CellGrid& box, std::vector<uint8_t>& raw, std::vector<uint8_t>& mask)
+{
+    const std::size_t count = box.cellcount();
+    std::fill(mask.begin(), mask.end(), 0);
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const std::int32_t east = box.neighbour(c, 3), south = box.neighbour(c, 5), southeast = box.neighbour(c, 4);
+        if (east < 0 || south < 0 || southeast < 0)
+            continue;
+        const uint8_t a = raw[c], b = raw[static_cast<std::size_t>(east)];
+        const uint8_t s = raw[static_cast<std::size_t>(south)], d = raw[static_cast<std::size_t>(southeast)];
+        if (a == d && b == s && a != b)
+        {
+            mask[a != 0 ? c : static_cast<std::size_t>(east)] = 1;
+            mask[a != 0 ? static_cast<std::size_t>(southeast) : static_cast<std::size_t>(south)] = 1;
+        }
+    }
+    for (std::size_t cell = 0; cell < count; cell++)
+        if (mask[cell] != 0)
+            raw[cell] = 0;
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        if (raw[c] == 0)
+        {
+            mask[c] = 0;
+            continue;
+        }
+        bool hole = true;
+        for (const int slot : { 1, 3, 5, 7 })
+        {
+            const std::int32_t other = box.neighbour(c, slot);
+            if (other >= 0 && raw[static_cast<std::size_t>(other)] != 0)
+                hole = false;
+        }
+        mask[c] = hole ? 0 : 1;
+    }
+}
+
+// The land-share start surface on a cube window (landsharesurface's steps on the widened box).
+void cubelandsharesurface(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const RegionalParameters& parameters,
+                          const Surfacer& surfacer, StartSurface& start, bool lakegate, const std::vector<uint8_t>* kept)
+{
+    const mesh::CellGrid& levelzero = *inputs.grid;
+    const int n0 = levelzero.facecells();
+    const int k = window.facecells() / n0;
+    const int sharecount = std::max(0, parameters.coast.sharepasses);
+    const int signedcount = std::max(0, parameters.coast.signedpasses);
+    const int hookreach = std::max(parameters.coast.islandmargin > 0.0 ? std::max(1, static_cast<int>(std::lround(parameters.coast.islandmargin * k))) : 0,
+                                   parameters.edges.straightmax > 0 ? 1 : 0);
+    const int sharereach = hookreach > 0 ? 1 + (std::max(0, k + hookreach + 2 - k / 2) + k - 1) / k : (k <= 2 ? 2 : 1);
+    const ShorelineWarp shorewarp(4 * n0, 2 * n0, k, 1, inputs.seed, parameters.coast);
+    const int warpreach = (shorewarp.reachcells() + k - 1) / k;
+    const int pocketreach = std::max(0, parameters.coast.pocketreach);
+    const int margin = sharereach * sharecount + 2 + 2 * signedcount + warpreach + pocketreach;
+    const double sealevel = static_cast<double>(inputs.sealevel);
+
+    const std::shared_ptr<const mesh::CellGrid> boxgrid = widenedbox(window, k, n0, margin);
+    const mesh::CellGrid& box = *boxgrid;
+    const CubeBlocks cube = cubeblocks(levelzero, box, k);
+    const WindowBlocks& blocks = cube.blocks;
+    const std::size_t count = box.cellcount();
+    const auto globalof = [&](std::size_t cell) { return cube.parentid[cube.blockof[cell]]; };
+    // The window's cells in the box, and its blocks (the domain's, for the share misses).
+    std::vector<mesh::CellId> boxof(window.cellcount());
+    for (mesh::CellId c = 0; c < window.cellcount(); c++)
+        boxof[c] = box.localofkey(window.globalkey(c));
+    const WindowBlocks windowparents = windowblocks(window, k);
+
+    const FineWarp warp = regionalwarp(box, n0, inputs.seed, parameters);
+    const std::vector<float> lakeweight = lakegate ? lakecellweight(inputs, box, warp) : std::vector<float>{};
+    const std::vector<uint8_t> gate = seagate(inputs, box, warp, parameters, lakegate ? &lakeweight : nullptr);
+    std::vector<uint8_t> blockgate(blocks.count(), 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+        if (gate[cell] != 0)
+            blockgate[cube.blockof[cell]] = 1;
+    const bool onesided = parameters.coast.onesided != 0;
+    const bool maskhooks = parameters.coast.islandmargin > 0.0 || parameters.edges.straightmax > 0;
+    std::vector<float> surface(count), noise(count), fullnoise(count), weight(count), amplitude(count), inland(count),
+        dropfactor(count);
+    std::vector<float> base(count), lapsebase(count);
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const CellSample sample = surfacer.samplecube(box.centre(c), warp.empty() ? 0.0 : warp.dx[c],
+                                                      warp.empty() ? 0.0 : warp.dy[c], n0);
+        surface[c] = sample.surface;
+        noise[c] = sample.noise;
+        fullnoise[c] = sample.fullnoise;
+        weight[c] = sample.weight;
+        amplitude[c] = sample.amplitude;
+        inland[c] = sample.inland;
+        dropfactor[c] = sample.dropfactor;
+        base[c] = sample.base;
+        lapsebase[c] = sample.lapsebase;
+    }
+    start.base_m.resize(window.cellcount());
+    start.lapsebase_m.resize(window.cellcount());
+    for (mesh::CellId c = 0; c < window.cellcount(); c++)
+    {
+        start.base_m[c] = base[boxof[c]];
+        start.lapsebase_m[c] = lapsebase[boxof[c]];
+    }
+    correctblockmeans(inputs.elevation_m, levelzero, box, parameters.meanpasses, surface);
+
+    // The decision surface (landsharesurface's expression).
+    std::vector<double> decision(count);
+    std::vector<uint8_t> core(pocketreach > 0 ? count : 0, 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        const double value = static_cast<double>(surface[cell]);
+        const double h = value - static_cast<double>(noise[cell]) - sealevel;
+        const double local = static_cast<double>(amplitude[cell]);
+        double push = h < 0.0 && local > 0.0
+                          ? parameters.coast.seadrop_m * static_cast<double>(weight[cell]) * std::min(1.0, -h / local)
+                          : 0.0;
+        if (dropfactor[cell] != 1.0f)
+            push *= static_cast<double>(dropfactor[cell]);
+        decision[cell] = value - static_cast<double>(noise[cell]) + static_cast<double>(fullnoise[cell]) - push +
+                         parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
+        const bool seacell = inputs.network.sea[globalof(cell)] != 0;
+        if (onesided && seacell)
+        {
+            const double nonoise = value - static_cast<double>(noise[cell]) - push + parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
+            if (nonoise <= sealevel && decision[cell] > sealevel)
+                decision[cell] = nonoise;
+        }
+        if (!core.empty() && seacell)
+        {
+            const double nonoise = value - static_cast<double>(noise[cell]) - push + parameters.coast.seadrop_m * static_cast<double>(inland[cell]);
+            core[cell] = nonoise <= sealevel ? 1 : 0;
+        }
+    }
+    if (shorewarp.active())
+        decision = displacedsample(decision, box, shorewarp, n0);
+
+    // The offset: one value per block, bilinear over level 0 at the cell's centre (the blocks' parents,
+    // a node outside the box taking the block at the smallest ring distance), as stencil terms per cell.
+    const NearestDomainKey nearestblock(n0, blocks.parents);  // blocks.parents ascend on a cube box
+    std::vector<std::uint32_t> termstart(count + 1, 0), termblock;
+    std::vector<double> termweight;
+    for (mesh::CellId c = 0; c < count; c++)
+    {
+        const mesh::KeyStencil stencil = mesh::cubebilinearstencil(n0, box.centre(c));
+        for (std::size_t m = 0; m < stencil.key.size(); m++)
+        {
+            termblock.push_back(static_cast<std::uint32_t>(nearestblock(stencil.key[m])));
+            termweight.push_back(stencil.weight[m]);
+        }
+        termstart[c + 1] = static_cast<std::uint32_t>(termblock.size());
+    }
+    std::vector<double> offset(blocks.count(), 0.0), field(count, 0.0);
+    const auto interpolate = [&]() {
+        for (std::size_t cell = 0; cell < count; cell++)
+        {
+            const std::uint32_t first = termstart[cell], last = termstart[cell + 1];
+            const double origin = offset[termblock[first]];
+            double sum = 0.0;
+            for (std::uint32_t t = first + 1; t < last; t++)
+                sum += termweight[t] * (offset[termblock[t]] - origin);
+            field[cell] = origin + sum;
+        }
+    };
+    std::vector<uint8_t> raw(count, 0), mask(count, 0);
+    const auto makemask = [&]() {
+        interpolate();
+        for (std::size_t cell = 0; cell < count; cell++)
+            raw[cell] = gate[cell] != 0 && decision[cell] + field[cell] <= sealevel ? 1 : 0;
+        cleancubemask(box, raw, mask);
+        if (maskhooks)
+        {
+            sinksmallislands(inputs, box, parameters, gate, mask);
+            breakstraightruns(inputs, box, parameters, gate, mask);
+            raw = mask;
+            cleancubemask(box, raw, mask);
+        }
+    };
+    const int blockcells = k * k;
+    const double share = parameters.coast.landshare;
+    const int leastland = static_cast<int>(std::ceil(share * blockcells - 1.0e-9));
+    const int mostland = static_cast<int>(std::floor((1.0 - share) * blockcells + 1.0e-9));
+    std::vector<double> increment(offset.size(), 0.0), keys;
+    keys.reserve(static_cast<std::size_t>(blockcells));
+    for (int pass = 0;; pass++)
+    {
+        makemask();
+        std::fill(increment.begin(), increment.end(), 0.0);
+        int misses = 0, domainmisses = 0;
+        for (std::size_t b = 0; b < blocks.count(); b++)
+        {
+            if (blockgate[b] == 0)
+                continue;
+            const bool seacell = inputs.network.sea[cube.parentid[b]] != 0;
+            const mesh::CellId* children = blocks.childrenof(b);
+            int land = 0;
+            for (int m = 0; m < blockcells; m++)
+                land += mask[children[m]] == 0 ? 1 : 0;
+            const int missing = seacell ? land - mostland : leastland - land;
+            if (missing <= 0)
+                continue;
+            misses++;
+            if (std::binary_search(windowparents.parents.begin(), windowparents.parents.end(), blocks.parents[b]))
+                domainmisses++;
+            // The cheapest cells, the cost by the block's own tent weight (face-index offsets in the block).
+            keys.clear();
+            for (int m = 0; m < blockcells; m++)
+            {
+                const int ox = m % k, oy = m / k;
+                const double wy = 1.0 - std::fabs((oy + 0.5) / k - 0.5);
+                const double wx = 1.0 - std::fabs((ox + 0.5) / k - 0.5);
+                const std::size_t cell = children[m];
+                const double value = decision[cell] + field[cell] - sealevel;
+                if (seacell ? value > 0.0 : mask[cell] != 0)
+                    keys.push_back(std::fabs(value) / (wx * wy));
+            }
+            if (keys.empty())
+                continue;
+            const std::size_t pick = std::min(keys.size(), static_cast<std::size_t>(missing) + 1) - 1;
+            std::nth_element(keys.begin(), keys.begin() + static_cast<std::ptrdiff_t>(pick), keys.end());
+            const double needed = keys[pick] * 1.001 + 0.001;
+            increment[b] = seacell ? -needed : needed;
+        }
+        if (domainmisses == 0 && start.sharepasses < 0)
+            start.sharepasses = pass;
+        start.sharemisses = domainmisses;
+        if (misses == 0 || pass == sharecount)
+            break;
+        for (std::size_t b = 0; b < offset.size(); b++)
+            offset[b] += increment[b];
+    }
+
+    // The sea pockets (landsharesurface's rule), counted over the window's kept cells.
+    std::vector<uint8_t> basin;
+    if (pocketreach > 0)
+    {
+        std::vector<uint8_t> filled = seapockets(inputs, box, pocketreach, mask, core);
+        for (std::size_t b = 0; b < blocks.count(); b++)
+        {
+            if (inputs.network.sea[cube.parentid[b]] == 0)
+                continue;
+            const mesh::CellId* children = blocks.childrenof(b);
+            int land = 0, fill = 0;
+            for (int m = 0; m < blockcells; m++)
+            {
+                land += mask[children[m]] == 0 ? 1 : 0;
+                fill += filled[children[m]] != 0 ? 1 : 0;
+            }
+            if (fill > 0 && land + fill > mostland)
+                for (int m = 0; m < blockcells; m++)
+                    filled[children[m]] = 0;
+        }
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (filled[cell] != 0)
+                mask[cell] = 0;
+        std::vector<uint8_t> keptbox(count, 0);
+        for (mesh::CellId c = 0; c < window.cellcount(); c++)
+            keptbox[boxof[c]] = kept == nullptr || (*kept)[c] != 0 ? 1 : 0;
+        const PocketCount done = countpockets(box, filled, &keptbox);
+        const PocketCount left = countpockets(box, seapockets(inputs, box, pocketreach, mask, core), &keptbox);
+        start.pocketsfilled = done.pockets;
+        start.pocketcellsfilled = done.pocketcells;
+        start.pockets = left.pockets;
+        start.pocketcells = left.pocketcells;
+        basin = pocketbasins(inputs, box, pocketreach, mask, filled, surface,
+                             std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity()));
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (inputs.network.sea[globalof(cell)] != 0)
+                basin[cell] = 0;
+    }
+
+    // The shore, the clamp to the mask and the sign-keeping passes (landsharesurface's).
+    std::vector<float> shoredepth(count, 0.0f), shoreheight(count, 0.0f), shorefloor(count, 0.0f);
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        const std::size_t global = globalof(cell);
+        if (!basin.empty() && basin[cell] != 0 && mask[cell] == 0)
+        {
+            shoreheight[cell] = static_cast<float>(std::max(
+                0.0, std::min(parameters.coast.shorefloor_m, std::fabs(static_cast<double>(inputs.elevation_m[global]) - sealevel))));
+            continue;
+        }
+        if (gate[cell] == 0)
+            continue;
+        const double value = decision[cell] + field[cell] - sealevel;
+        const double floor = std::max(
+            0.0, std::min(parameters.coast.shorefloor_m, std::fabs(static_cast<double>(inputs.elevation_m[global]) - sealevel)));
+        shorefloor[cell] = static_cast<float>(floor);
+        const double reach = std::fabs(value);
+        const double band = floor > 0.0 ? std::clamp(2.0 - reach / floor, 0.0, 1.0) : 0.0;
+        const bool crossed = mask[cell] != 0 ? surface[cell] > inputs.sealevel : surface[cell] <= inputs.sealevel;
+        const double fade = crossed ? 1.0 : band;
+        if (mask[cell] != 0)
+            shoredepth[cell] = static_cast<float>(fade * (value > 0.0 ? floor : std::max(0.0, std::min(-value, floor))));
+        else
+            shoreheight[cell] = static_cast<float>(fade * std::max(0.0, std::min(value, floor)));
+    }
+    const float abovesea = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    const auto keepshore = [&]() {
+        for (std::size_t cell = 0; cell < count; cell++)
+        {
+            if (mask[cell] != 0 && shoredepth[cell] > 0.0f)
+                surface[cell] = std::min(surface[cell], static_cast<float>(sealevel - static_cast<double>(shoredepth[cell])));
+            else if (mask[cell] == 0 && shoreheight[cell] > 0.0f)
+                surface[cell] = std::max(surface[cell], static_cast<float>(sealevel + static_cast<double>(shoreheight[cell])));
+            if (gate[cell] == 0)
+                continue;
+            if (mask[cell] != 0)
+                surface[cell] = std::min(surface[cell], inputs.sealevel);
+            else if (surface[cell] <= inputs.sealevel)
+                surface[cell] = abovesea;
+        }
+    };
+    keepshore();
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        const double h = static_cast<double>(surface[cell]) - sealevel;
+        const double keep = std::min(std::fabs(h), static_cast<double>(shorefloor[cell]));
+        if (mask[cell] != 0)
+            shoredepth[cell] = std::max(shoredepth[cell], static_cast<float>(keep));
+        else if (h > 0.0)
+            shoreheight[cell] = std::max(shoreheight[cell], static_cast<float>(keep));
+    }
+    for (int pass = 0; pass < signedcount; pass++)
+    {
+        correctsignedblockmeans(inputs, box, surface);
+        keepshore();
+    }
+    start.start_m.resize(window.cellcount());
+    for (mesh::CellId c = 0; c < window.cellcount(); c++)
+        start.start_m[c] = surface[boxof[c]];
+}
+}
+
+StartSurface regionalstartsurface(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp,
+                                  const RegionalParameters& parameters, bool lakegate, const std::vector<uint8_t>* kept)
+{
+    const int k = cubescale(inputs, window, "regionalstartsurface");
+    const mesh::CellGrid& levelzero = *inputs.grid;
+    const int n0 = levelzero.facecells();
+    const std::size_t count = window.cellcount();
+    if (kept != nullptr && kept->size() != count)
+        throw std::invalid_argument("regionalstartsurface: the kept flags must hold one value per window cell");
+    if (!warp.empty() && (warp.dx.size() != count || warp.dy.size() != count))
+        throw std::invalid_argument("regionalstartsurface: the warp must hold one displacement per window cell");
+    const bool coastnoise = parameters.coast.noiseamplitude_m > 0.0;
+    const bool landshare = parameters.coast.landshare > 0.0;
+    StartSurface result;
+    if (warp.empty() && !coastnoise && !landshare)
+    {
+        // Phase E: G of the base elevation, the band noise at the cell's centre, the block means.
+        const double sealevel = static_cast<double>(inputs.sealevel);
+        result.base_m = upsample(inputs.elevation_m, levelzero, window);
+        result.lapsebase_m = result.base_m;
+        const std::vector<float> relief = upsample(noiserelief(inputs, parameters), levelzero, window);
+        FractalNoise noise;
+        noise.seed = deterministiccombine(inputs.seed, noisesalt);
+        noise.radius_km = inputs.radius_m / 1000.0;
+        noise.longest_km = 2.0 * pi * inputs.radius_m / (2.0 * n0) / 1000.0;
+        noise.wavelength_km = noise.longest_km;
+        noise.shortest_km = noise.longest_km / k;
+        noise.octaves = 1;
+        while ((1 << noise.octaves) <= k)
+            noise.octaves++;
+        noise.persistence = parameters.noisepersistence;
+        const FractalNoiseField field(noise);
+        result.start_m = result.base_m;
+        if (field.resolved() > 0)
+            for (mesh::CellId c = 0; c < count; c++)
+            {
+                const mesh::Vec3 p = window.centre(c);
+                const double amplitude =
+                    parameters.noiseamplitude_m + parameters.noiserelieffraction * std::max(0.0, static_cast<double>(relief[c]));
+                const double height_m = std::fabs(static_cast<double>(result.base_m[c]) - sealevel);
+                const double band = parameters.coastband_m + amplitude;
+                const double taper = band > 0.0 ? std::clamp(height_m / band, 0.0, 1.0) : 1.0;
+                result.start_m[c] = static_cast<float>(static_cast<double>(result.base_m[c]) +
+                                                       taper * amplitude * field.sum(p.x, p.y, p.z) / field.normalisation());
+            }
+        correctblockmeans(inputs.elevation_m, levelzero, window, parameters.meanpasses, result.start_m);
+    }
+    else
+    {
+        const Surfacer surfacer(inputs, k, parameters, 4 * n0, 2 * n0);
+        if (!landshare)
+        {
+            result.base_m.resize(count);
+            result.lapsebase_m.resize(count);
+            result.start_m.resize(count);
+            for (mesh::CellId c = 0; c < count; c++)
+            {
+                const CellSample sample = surfacer.samplecube(window.centre(c), warp.empty() ? 0.0 : warp.dx[c],
+                                                              warp.empty() ? 0.0 : warp.dy[c], n0);
+                result.base_m[c] = sample.base;
+                result.lapsebase_m[c] = sample.lapsebase;
+                result.start_m[c] = sample.surface;
+            }
+            correctblockmeans(inputs.elevation_m, levelzero, window, parameters.meanpasses, result.start_m);
+        }
+        else
+            cubelandsharesurface(inputs, window, parameters, surfacer, result, lakegate, kept);
+    }
+    // The largest block-mean error over the kept blocks (a block is kept with its first child).
+    const WindowBlocks blocks = windowblocks(window, k);
+    double largest = 0.0;
+    for (std::size_t b = 0; b < blocks.count(); b++)
+    {
+        if (kept != nullptr && (*kept)[blocks.childrenof(b)[0]] == 0)
+            continue;
+        const double error = std::fabs(blockmean(blocks, b, result.start_m) -
+                                       static_cast<double>(inputs.elevation_m[levelzero.localofkey(blocks.parents[b])]));
+        largest = std::max(largest, error);
+    }
+    result.blockmeanerror_m = largest;
+    return result;
+}
+
+std::vector<uint8_t> regionalsea(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, const FineWarp& warp,
+                                 const RegionalParameters& parameters, std::vector<float>& surface_m,
+                                 const std::vector<uint8_t>* parentgate, bool lakegate)
+{
+    const int k = cubescale(inputs, window, "regionalsea");
+    const std::size_t count = window.cellcount();
+    if (surface_m.size() != count || (parentgate != nullptr && parentgate->size() != count))
+        throw std::invalid_argument("regionalsea: the surface and the parent gate must hold one value per window cell");
+    const bool centrerule = !(parameters.coast.landshare > 0.0);
+    const std::vector<float> lakeweight = lakegate ? lakecellweight(inputs, window, warp) : std::vector<float>{};
+    const std::vector<uint8_t> gate = seagate(inputs, window, warp, parameters, lakegate ? &lakeweight : nullptr);
+    const float abovesea = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    if (centrerule)
+    {
+        // The centre rule: each block's centre child (face-index offset (k / 2, k / 2)) follows the global mask.
+        const WindowBlocks blocks = windowblocks(window, k);
+        for (std::size_t b = 0; b < blocks.count(); b++)
+        {
+            const std::size_t cell = blocks.childrenof(b)[(k / 2) * k + k / 2];
+            if (inputs.network.sea[inputs.grid->localofkey(blocks.parents[b])] != 0)
+                surface_m[cell] = std::min(surface_m[cell], inputs.sealevel);
+            else if (surface_m[cell] <= inputs.sealevel && gate[cell] != 0)
+                surface_m[cell] = abovesea;
+        }
+    }
+    std::vector<uint8_t> sea(count, 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+    {
+        const bool open = gate[cell] != 0 && (parentgate == nullptr || (*parentgate)[cell] != 0);
+        sea[cell] = surface_m[cell] <= inputs.sealevel && open ? 1 : 0;
+    }
+    return sea;
+}
+
+std::vector<uint8_t> refinedcoast(const RegionalGlobalInputs& inputs, const mesh::CellGrid& window, int factor,
+                                  const mesh::CellGrid& parent, const std::vector<uint8_t>& parentsea,
+                                  const std::vector<float>& parentelevation, const FineWarp& warp,
+                                  const RegionalParameters& parameters, const std::vector<uint8_t>* parentseagate,
+                                  std::vector<float>& surface, const std::vector<uint8_t>* kept, PocketCount* filledcount,
+                                  PocketCount* leftcount)
+{
+    const int k = cubescale(inputs, window, "refinedcoast");
+    const mesh::CellGrid& levelzero = *inputs.grid;
+    const int n0 = levelzero.facecells();
+    const std::size_t count = window.cellcount();
+    if (factor < 2 || parent.kind() != mesh::GridKind::cube || parent.facecells() * factor != window.facecells() ||
+        parentsea.size() != parent.cellcount() || parentelevation.size() != parent.cellcount() || surface.size() != count ||
+        (kept != nullptr && kept->size() != count))
+        throw std::invalid_argument("refinedcoast: a cube level, its parent's fields and one surface value per cell");
+    const double sealevel = static_cast<double>(inputs.sealevel);
+    const float abovesea = std::nextafter(inputs.sealevel, std::numeric_limits<float>::infinity());
+    std::vector<float> below(count, std::nextafter(inputs.sealevel, -std::numeric_limits<float>::infinity()));
+    const std::vector<uint8_t> open = regionalsea(inputs, window, warp, parameters, below, parentseagate, true);
+    std::vector<uint8_t> sea(count, 0);
+    for (std::size_t cell = 0; cell < count; cell++)
+        sea[cell] = surface[cell] <= inputs.sealevel && open[cell] != 0 ? 1 : 0;
+
+    // The parent's sea and floor per block of the level (its parents).
+    const WindowBlocks blocks = windowblocks(window, factor);
+    std::vector<uint8_t> seaparent(blocks.count()), floorparent(blocks.count());
+    float floorlevel = inputs.sealevel;
+    for (int step = 0; step < 4; step++)
+        floorlevel = std::nextafter(floorlevel, std::numeric_limits<float>::infinity());
+    for (std::size_t b = 0; b < blocks.count(); b++)
+    {
+        const mesh::CellId index = parent.localofkey(blocks.parents[b]);
+        if (index == mesh::nocell)
+            throw std::invalid_argument("refinedcoast: a parent of the level lies outside the parent's cells");
+        seaparent[b] = parentsea[index];
+        floorparent[b] = parentsea[index] == 0 && parentelevation[index] <= floorlevel ? 1 : 0;
+    }
+    const int children = factor * factor;
+    const double share = parameters.coast.landshare;
+    const int leastland = static_cast<int>(std::ceil(share * children - 1.0e-9));
+    const int mostland = static_cast<int>(std::floor((1.0 - share) * children + 1.0e-9));
+    const std::vector<uint8_t> undisplaced = sea;
+    const std::vector<float> original = surface;
+    const ShorelineWarp shorewarp(4 * n0, 2 * n0, k, k / factor, inputs.seed, parameters.coast);
+    if (shorewarp.active())
+    {
+        const std::vector<double> displaced = displacedsample(surface, window, shorewarp, n0);
+        std::vector<uint8_t> moved(static_cast<std::size_t>(children));
+        for (std::size_t b = 0; b < blocks.count(); b++)
+        {
+            const mesh::CellId* members = blocks.childrenof(b);
+            int land = 0, seabefore = 0;
+            for (int m = 0; m < children; m++)
+            {
+                const std::size_t cell = members[m];
+                moved[static_cast<std::size_t>(m)] = open[cell] != 0 && displaced[cell] <= sealevel ? 1 : 0;
+                land += moved[static_cast<std::size_t>(m)] == 0 ? 1 : 0;
+                seabefore += sea[cell] != 0 ? 1 : 0;
+            }
+            if (seaparent[b] != 0 ? land > mostland : land < leastland || (floorparent[b] != 0 && seabefore > 0 && land == children))
+                continue;
+            for (int m = 0; m < children; m++)
+            {
+                const std::size_t cell = members[m];
+                const uint8_t value = moved[static_cast<std::size_t>(m)];
+                if (value == sea[cell])
+                    continue;
+                surface[cell] = value != 0 ? std::min(inputs.sealevel, static_cast<float>(displaced[cell]))
+                                           : std::max(abovesea, static_cast<float>(displaced[cell]));
+                sea[cell] = value;
+            }
+        }
+    }
+    if (parameters.coast.pocketreach > 0)
+    {
+        const int reach = parameters.coast.pocketreach;
+        std::vector<uint8_t> core(count, 0);
+        for (mesh::CellId c = 0; c < count; c++)
+        {
+            const mesh::LevelKey ancestor = parentkey(window, window.globalkey(c), k);
+            core[c] = undisplaced[c] != 0 && inputs.network.sea[levelzero.localofkey(ancestor)] != 0 ? 1 : 0;
+        }
+        std::vector<uint8_t> filled = seapockets(inputs, window, reach, sea, core);
+        const auto countof = [&](std::size_t b, int& land, int& fill) {
+            land = fill = 0;
+            for (int m = 0; m < children; m++)
+            {
+                const std::size_t cell = blocks.childrenof(b)[m];
+                land += sea[cell] == 0 ? 1 : 0;
+                fill += filled[cell] != 0 ? 1 : 0;
+            }
+        };
+        if (shorewarp.active())
+        {
+            std::vector<uint8_t> undo(blocks.count(), 0);
+            bool any = false;
+            const std::int64_t np = parent.facecells();
+            for (std::size_t b = 0; b < blocks.count(); b++)
+            {
+                if (seaparent[b] == 0)
+                    continue;
+                int land = 0, fill = 0;
+                countof(b, land, fill);
+                if (fill == 0 || land + fill <= mostland)
+                    continue;
+                any = true;
+                undo[b] = 1;
+                // The parent and its 8 neighbours at the parent level, where the level holds them.
+                for (int slot = 1; slot <= mesh::slotcount; slot++)
+                {
+                    const mesh::LevelKey other = mesh::cubekeyneighbour(np, blocks.parents[b], slot);
+                    const auto found = std::lower_bound(blocks.parents.begin(), blocks.parents.end(), other);
+                    if (other != mesh::nokey && found != blocks.parents.end() && *found == other)
+                        undo[static_cast<std::size_t>(found - blocks.parents.begin())] = 1;
+                }
+            }
+            if (any)
+            {
+                for (std::size_t b = 0; b < blocks.count(); b++)
+                    if (undo[b] != 0)
+                        for (int m = 0; m < children; m++)
+                        {
+                            const std::size_t cell = blocks.childrenof(b)[m];
+                            sea[cell] = undisplaced[cell];
+                            surface[cell] = original[cell];
+                        }
+                filled = seapockets(inputs, window, reach, sea, core);
+            }
+        }
+        for (std::size_t b = 0; b < blocks.count(); b++)
+        {
+            int land = 0, fill = 0;
+            countof(b, land, fill);
+            const bool keep = fill > 0 && (seaparent[b] != 0 ? land + fill > mostland : floorparent[b] != 0 && land + fill == children);
+            for (int m = 0; m < children; m++)
+            {
+                const std::size_t cell = blocks.childrenof(b)[m];
+                if (keep)
+                    filled[cell] = 0;
+                else if (filled[cell] != 0)
+                    sea[cell] = 0;
+            }
+        }
+        const float raised = std::max(abovesea, static_cast<float>(sealevel + parameters.coast.shorefloor_m));
+        const std::vector<uint8_t> basin = pocketbasins(inputs, window, reach, sea, filled, surface, abovesea);
+        for (std::size_t cell = 0; cell < count; cell++)
+            if (basin[cell] != 0)
+                surface[cell] = std::max(surface[cell], raised);
+        if (filledcount != nullptr)
+            *filledcount = countpockets(window, filled, kept);
+        if (leftcount != nullptr)
+            *leftcount = countpockets(window, seapockets(inputs, window, reach, sea, core), kept);
+    }
+    return sea;
 }
 
 double levelnoiseshare(int scale, int parentscale, double persistence)
