@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>T8 acceptance</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1f2328;--muted:#5d6670;--line:#d9d6cf;--panel:#f2f0ea;--fail:#b3261e;--pass:#1e6b3a;--warn:#8a5a00;--accent:#2f5d8a}
+@media (prefers-color-scheme: dark){:root{--bg:#16181c;--fg:#e8e6e1;--muted:#a3a9b1;--line:#363a40;--panel:#1e2126;--fail:#ff8a80;--pass:#7fd49b;--warn:#f0c36b;--accent:#8ab4e0}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:1400px;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+a{color:var(--accent)}
+h1{margin:0 0 4px;font-size:1.5rem}h2{margin:28px 0 8px;font-size:1.15rem;border-bottom:1px solid var(--line);padding-bottom:4px}
+h3{margin:14px 0 4px;font-size:1rem;font-weight:600}
+table{border-collapse:collapse;width:100%;margin:4px 0 12px}td,th{border-bottom:1px solid var(--line);padding:3px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+.fail{color:var(--fail);font-weight:600}.pass{color:var(--pass)}.accepted,.missing,.placeholder,.partial{color:var(--warn)}
+.muted,figcaption{color:var(--muted)}
+.verdict{display:flex;flex-wrap:wrap;gap:8px 20px;padding:8px 12px;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.maps{display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:12px}
+figure{margin:0}img{width:100%;image-rendering:pixelated;border:1px solid var(--line);display:block}
+details{margin:2px 0}summary{cursor:pointer;color:var(--muted)}
+@media (max-width:760px){.maps{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main id="page"></main>
+<script type="application/json" id="page-data">__PAGE_DATA__</script>
+<script>
+'use strict';
+const D = JSON.parse(document.getElementById('page-data').textContent);
+const page = document.getElementById('page');
+function h(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'class') node.className = value; else node.setAttribute(key, value);
+  }
+  for (const child of children.flat(Infinity)) if (child !== null && child !== undefined) node.append(child instanceof Node ? child : String(child));
+  return node;
+}
+function fmt(v, digits = 4) {
+  if (v === null || v === undefined) return '–';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(digits)));
+  return String(v);
+}
+function result(row) {
+  const label = row.gated || !['pass', 'fail'].includes(row.result) ? row.result : `${row.result} (not gated)`;
+  return h('td', {class: row.gated || row.result !== 'fail' ? row.result : 'muted'}, label);
+}
+function counts(c) {
+  return [h('span', {class: 'pass'}, `${c.pass} pass`), ', ', h('span', {class: c.fail ? 'fail' : ''}, `${c.fail} fail`), ', ',
+    h('span', {class: c.accepted ? 'accepted' : ''}, `${c.accepted} accepted`),
+    h('span', {class: 'muted'}, ` · ${c.not_gated} not gated · ${c.recorded} recorded · ${c.missing} missing`)];
+}
+function source(path, href) { return h('a', {href, title: path}, path.split(/[\\/]/).slice(-2).join('/')); }
+
+document.title = 'T8 acceptance';
+page.append(h('h1', {}, 'T8 acceptance · the spherical world model'));
+page.append(h('p', {class: 'muted'}, `${D.plan}. Code ${D.code || '–'}; generated ${D.generated}; evidence from ${D.scratch}; `,
+  h('a', {href: D.json.href}, 'the JSON'), '.'));
+const S = D.summary;
+page.append(h('div', {class: 'verdict'}, h('span', {}, 'Gates: ', counts(S)),
+  S.placeholders.length ? h('span', {class: 'placeholder'}, `placeholders: ${S.placeholders.join(', ')}`) : null));
+if (S.failing.length) page.append(h('details', {}, h('summary', {}, `${S.failing.length} failing gates`), h('ul', {}, S.failing.map(x => h('li', {}, x)))));
+page.append(h('p', {class: 'muted'}, 'Results: pass and fail against the limit; accepted: over the original limit, accepted by an amendment of section 3; recorded: no gate; missing: the input is absent; "not gated": the limit\'s result, shown but not counted.'));
+page.append(h('ul', {}, D.sections.map(s => h('li', {}, h('a', {href: '#' + s.id}, s.title), ' ', h('span', {class: s.status}, s.status)))));
+
+for (const s of D.sections) {
+  page.append(h('h2', {id: s.id}, s.title, ' ', h('span', {class: s.status}, `· ${s.status}`)));
+  if (s.note) page.append(h('p', {class: 'muted'}, s.note));
+  if (s.status === 'placeholder') {
+    page.append(h('p', {class: 'placeholder'}, 'Placeholder: no evidence yet.', s.missing.length ? ` Missing: ${s.missing.join('; ')}` : ''));
+    continue;
+  }
+  page.append(h('p', {}, 'Gates: ', counts(s.counts)));
+  if (s.missing.length) page.append(h('p', {class: 'missing'}, `Missing: ${s.missing.join('; ')}`));
+  const groups = [];
+  for (const row of s.gates) {
+    const key = row.group || '';
+    if (!groups.length || groups[groups.length - 1].key !== key) groups.push({key, rows: []});
+    groups[groups.length - 1].rows.push(row);
+  }
+  for (const g of groups) {
+    if (g.key) page.append(h('h3', {}, g.key));
+    page.append(h('div', {class: 'scroll'}, h('table', {}, h('thead', {}, h('tr', {}, ['Gate', 'Value', 'Limit', 'Result', 'Source'].map(x => h('th', {}, x)))),
+      h('tbody', {}, g.rows.map(row => h('tr', {}, h('td', {}, row.label, row.note ? h('div', {class: 'muted'}, row.note) : null),
+        h('td', {class: 'num'}, fmt(row.value)), h('td', {}, fmt(row.limit)), result(row),
+        h('td', {}, row.href ? source(row.source, row.href) : '–')))))));
+  }
+  if (s.maps.length) page.append(h('div', {class: 'maps'}, s.maps.map(m => h('figure', {}, h('a', {href: m.path}, h('img', {src: m.path, alt: m.title, loading: 'lazy'})), h('figcaption', {}, m.title)))));
+  if (s.sources.length) page.append(h('details', {}, h('summary', {}, `${s.sources.length} sources`), h('ul', {}, s.sources.map(x => h('li', {}, h('a', {href: x.href}, x.path))))));
+}
+</script>
+</body>
+</html>
